@@ -204,7 +204,7 @@ func (g *OpenAICompatibleGenerator) completeAuthoringIntent(ctx context.Context,
 		if attempt == maximumSchemaRepairAttempts {
 			break
 		}
-		diagnostic, _ := json.Marshal(map[string]string{"validationError": publicSchemaDiagnostic(err)})
+		diagnostic, _ := json.Marshal(map[string]interface{}{"validationErrors": authoringIntentRepairDiagnostics(err)})
 		messages = append(messages, map[string]string{
 			"role": "user", "content": "The semantic answer sheet was invalid. Correct only this validation error and submit a complete replacement answer sheet.\n" + string(diagnostic),
 		})
@@ -213,6 +213,20 @@ func (g *OpenAICompatibleGenerator) completeAuthoringIntent(ctx context.Context,
 		}
 	}
 	return AuthoringIntent{}, &SchemaGenerationError{RepairAttempts: maximumSchemaRepairAttempts, Diagnostic: publicSchemaDiagnostic(lastErr)}
+}
+
+// authoringIntentRepairDiagnostics is private model feedback, not a user-facing
+// error. The semantic answer contract cannot contain credentials or runtime
+// payloads, so exact schema paths and semantic contract messages are safe to
+// return to the provider that authored them. Keeping this separate from
+// publicSchemaDiagnostic prevents internal compiler failures from leaking into
+// Studio while giving bounded repair attempts enough information to converge.
+func authoringIntentRepairDiagnostics(err error) []AuthoringSchemaViolation {
+	var schemaValidation *AuthoringSchemaValidationError
+	if errors.As(err, &schemaValidation) && len(schemaValidation.Violations) > 0 {
+		return append([]AuthoringSchemaViolation(nil), schemaValidation.Violations...)
+	}
+	return []AuthoringSchemaViolation{{Path: "/", Message: strings.TrimSpace(err.Error())}}
 }
 
 func (g *OpenAICompatibleGenerator) Repair(ctx context.Context, request GenerateRequest, invalid []byte, validationErr error) ([]byte, error) {

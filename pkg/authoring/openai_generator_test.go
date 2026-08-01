@@ -196,6 +196,42 @@ func TestOpenAICompatibleIntentTransportRepairsMalformedSmallForm(t *testing.T) 
 	}
 }
 
+func TestOpenAICompatibleIntentTransportRepairsWithExactSemanticDiagnostics(t *testing.T) {
+	valid := `{"schemaVersion":"openseal.authoring-intent/v1","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately."}],"activation":"inactive"}`
+	invalid := `{"schemaVersion":"openseal.authoring-intent/v1","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately.","skills":[{"catalogId":"missing-skill","required":true}]}],"activation":"inactive"}`
+	attempts := 0
+	var repairPrompt string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		attempts++
+		var payload struct {
+			Messages []map[string]string `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		arguments := invalid
+		if attempts > 1 {
+			arguments = valid
+			repairPrompt = payload.Messages[len(payload.Messages)-1]["content"]
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+			"finish_reason": "tool_calls", "message": map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{
+				"type": "function", "function": map[string]interface{}{"name": "submit_authoring_intent", "arguments": arguments},
+			}}},
+		}}})
+	}))
+	defer server.Close()
+	generator, _ := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	intent, err := generator.GenerateIntent(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Analyst Agent"})
+	if err != nil || attempts != 2 || intent.Name != "Analyst" {
+		t.Fatalf("intent=%#v attempts=%d err=%v", intent, attempts, err)
+	}
+	if !strings.Contains(repairPrompt, `unknown or duplicate catalog Skill \"missing-skill\"`) || strings.Contains(repairPrompt, "strict JSON schema mismatch") {
+		t.Fatalf("repair prompt lacks actionable semantic diagnostics: %s", repairPrompt)
+	}
+}
+
 func TestOpenAICompatibleGeneratorSupportsPlainLocallyValidatedTransport(t *testing.T) {
 	var observed map[string]interface{}
 	content := `{"schemaVersion":"openseal.authoring-result/v1","candidate":{"agents":[]},"authoring":{"version":"openseal.authoring-form/v1"},"commitments":{}}`
