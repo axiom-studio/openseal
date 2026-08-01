@@ -212,7 +212,7 @@ func (g *OpenAICompatibleGenerator) completeAuthoringIntent(ctx context.Context,
 			invocationKey += fmt.Sprintf(":semantic-repair:%d", attempt+1)
 		}
 	}
-	return AuthoringIntent{}, &SchemaGenerationError{RepairAttempts: maximumSchemaRepairAttempts, Diagnostic: publicSchemaDiagnostic(lastErr)}
+	return AuthoringIntent{}, &SchemaGenerationError{RepairAttempts: maximumSchemaRepairAttempts, Diagnostic: authoringIntentInternalDiagnostic(lastErr)}
 }
 
 // authoringIntentRepairDiagnostics is private model feedback, not a user-facing
@@ -227,6 +227,14 @@ func authoringIntentRepairDiagnostics(err error) []AuthoringSchemaViolation {
 		return append([]AuthoringSchemaViolation(nil), schemaValidation.Violations...)
 	}
 	return []AuthoringSchemaViolation{{Path: "/", Message: strings.TrimSpace(err.Error())}}
+}
+
+func authoringIntentInternalDiagnostic(err error) string {
+	diagnostic, marshalErr := json.Marshal(authoringIntentRepairDiagnostics(err))
+	if marshalErr != nil {
+		return "semantic answer validation failed"
+	}
+	return string(diagnostic)
 }
 
 func (g *OpenAICompatibleGenerator) Repair(ctx context.Context, request GenerateRequest, invalid []byte, validationErr error) ([]byte, error) {
