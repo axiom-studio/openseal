@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/internal/domaincontract"
 	"github.com/robfig/cron/v3"
 )
 
@@ -47,6 +48,12 @@ const TriggerEvent TriggerKind = "event"
 
 const TriggerSchedule TriggerKind = "schedule"
 
+func (TriggerKind) ContractValues() []string {
+	return []string{string(TriggerEvent), string(TriggerSchedule)}
+}
+
+func (kind TriggerKind) Valid() bool { return domaincontract.Allows(string(kind), kind) }
+
 // Trigger declares how an external normalized wake enters a deterministic
 // Runbook. Transport configuration and credentials stay in provider Skills;
 // the Runbook consumes only a canonical event type and entrypoint.
@@ -71,6 +78,14 @@ const (
 	ReportingCompleted        ReportingMilestone = "completed"
 	ReportingFailed           ReportingMilestone = "failed"
 )
+
+func (ReportingMilestone) ContractValues() []string {
+	return []string{string(ReportingStarted), string(ReportingApprovalRequired), string(ReportingCompleted), string(ReportingFailed)}
+}
+
+func (milestone ReportingMilestone) Valid() bool {
+	return domaincontract.Allows(string(milestone), milestone)
+}
 
 // ReportingPolicy declares the durable owner-channel projection for Runs
 // created by this trigger. Channel is a portable logical key, not a transport
@@ -99,9 +114,7 @@ func (p *ReportingPolicy) Validate() error {
 	}
 	seen := make(map[ReportingMilestone]bool, len(p.Milestones))
 	for _, milestone := range p.Milestones {
-		switch milestone {
-		case ReportingStarted, ReportingApprovalRequired, ReportingCompleted, ReportingFailed:
-		default:
+		if !milestone.Valid() {
 			return fmt.Errorf("reporting milestone %q is unsupported", milestone)
 		}
 		if seen[milestone] {
@@ -238,6 +251,21 @@ const (
 	StepEnd        StepKind = "end"
 )
 
+func (StepKind) ContractValues() []string {
+	return []string{string(StepAction), string(StepDelegate), string(StepDecision), string(StepTransform), string(StepWait), string(StepFork), string(StepJoin), string(StepForEach), string(StepLoopReturn), string(StepEnd)}
+}
+
+func (kind StepKind) Valid() bool { return domaincontract.Allows(string(kind), kind) }
+
+// JSONPointer is the canonical scalar used for references into durable
+// Runbook context. Its structural contract is consumed by both schema
+// generation and runtime validation.
+type JSONPointer string
+
+func (JSONPointer) ContractPattern() string   { return "^/" }
+func (JSONPointer) ContractMinLength() uint64 { return 1 }
+func (pointer JSONPointer) Valid() bool       { return strings.HasPrefix(string(pointer), "/") }
+
 type Step struct {
 	Kind       StepKind        `json:"kind"`
 	Name       string          `json:"name,omitempty"`
@@ -258,7 +286,7 @@ type ActionStep struct {
 	SkillVersion string           `json:"skillVersion"`
 	Action       string           `json:"action"`
 	Arguments    map[string]Value `json:"arguments,omitempty"`
-	ResultPath   string           `json:"resultPath" jsonschema:"minLength=1,pattern=^/"`
+	ResultPath   JSONPointer      `json:"resultPath"`
 	Next         string           `json:"next"`
 }
 
@@ -270,7 +298,7 @@ type DelegateStep struct {
 	Goal       Value             `json:"goal"`
 	Context    map[string]Value  `json:"context,omitempty"`
 	Mode       DelegateMode      `json:"mode,omitempty"`
-	ResultPath string            `json:"resultPath" jsonschema:"minLength=1,pattern=^/"`
+	ResultPath JSONPointer       `json:"resultPath"`
 	Timeout    time.Duration     `json:"timeout,omitempty"`
 	Budget     *BudgetAllocation `json:"budget,omitempty"`
 	Next       string            `json:"next"`
@@ -311,6 +339,12 @@ const (
 	DelegateReason   DelegateMode = "reason"
 )
 
+func (DelegateMode) ContractValues() []string {
+	return []string{string(DelegateBehavior), string(DelegateReason)}
+}
+
+func (mode DelegateMode) Valid() bool { return domaincontract.Allows(string(mode), mode) }
+
 type DecisionStep struct {
 	Cases   []DecisionCase `json:"cases"`
 	Default string         `json:"default,omitempty"`
@@ -345,6 +379,9 @@ const (
 	JoinAny JoinMode = "any"
 )
 
+func (JoinMode) ContractValues() []string { return []string{string(JoinAll), string(JoinAny)} }
+func (mode JoinMode) Valid() bool         { return domaincontract.Allows(string(mode), mode) }
+
 type JoinStep struct {
 	Fork string   `json:"fork"`
 	Mode JoinMode `json:"mode"`
@@ -371,13 +408,13 @@ type EndStep struct {
 // runbook context. Exactly one source must be present.
 type Value struct {
 	Literal  json.RawMessage   `json:"literal,omitempty"`
-	Ref      string            `json:"ref,omitempty" jsonschema:"minLength=1,pattern=^/"`
+	Ref      JSONPointer       `json:"ref,omitempty"`
 	Template []TemplateSegment `json:"template,omitempty"`
 }
 
 type TemplateSegment struct {
-	Text string `json:"text,omitempty"`
-	Ref  string `json:"ref,omitempty" jsonschema:"minLength=1,pattern=^/"`
+	Text string      `json:"text,omitempty"`
+	Ref  JSONPointer `json:"ref,omitempty"`
 }
 
 type PredicateOperator string
@@ -396,6 +433,14 @@ const (
 	PredicateAny      PredicateOperator = "any"
 	PredicateNot      PredicateOperator = "not"
 )
+
+func (PredicateOperator) ContractValues() []string {
+	return []string{string(PredicateEqual), string(PredicateNotEqual), string(PredicateExists), string(PredicateTruthy), string(PredicateGreater), string(PredicateAtLeast), string(PredicateLess), string(PredicateAtMost), string(PredicateContains), string(PredicateAll), string(PredicateAny), string(PredicateNot)}
+}
+
+func (operator PredicateOperator) Valid() bool {
+	return domaincontract.Allows(string(operator), operator)
+}
 
 type Predicate struct {
 	Operator PredicateOperator `json:"operator"`

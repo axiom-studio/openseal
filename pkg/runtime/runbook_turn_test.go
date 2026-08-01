@@ -15,7 +15,10 @@ func runbookLiteral(value interface{}) runbook.Value {
 	encoded, _ := json.Marshal(value)
 	return runbook.Value{Literal: encoded}
 }
-func runbookRef(pointer string) *runbook.Value { value := runbook.Value{Ref: pointer}; return &value }
+func runbookRef(pointer string) *runbook.Value {
+	value := runbook.Value{Ref: runbook.JSONPointer(pointer)}
+	return &value
+}
 
 func TestRunbookTurnReportsDelegatedAgentFailureReason(t *testing.T) {
 	runner := &RunbookTurnRunner{}
