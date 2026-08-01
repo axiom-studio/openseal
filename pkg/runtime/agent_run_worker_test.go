@@ -534,12 +534,20 @@ func TestAgentRunWorkerRequeuesAgentProposalFailureWithinBoundedRecovery(t *test
 	if err != nil || arguments["target"] != "s4:e9" {
 		t.Fatalf("rejected action arguments were not retained: %#v, %v", arguments, err)
 	}
-	second, ok := checkpointGovernedAgentProposalFailure(requeued, turn, "target still requires a current observation")
+	typed, ok := checkpointGovernedAgentProposalFailure(requeued, turn, requiredActionEvidenceError{action: "camoufox-fill"}, "action requires successful camoufox-fill evidence from the same Run")
+	if !ok {
+		t.Fatal("typed evidence recovery was not accepted")
+	}
+	typedRecovery := typed[proposalRecoveryCheckpointKey].(map[string]interface{})
+	if typedRecovery["requiresActionAdvance"] != true || typedRecovery["prerequisiteAction"] != "camoufox-fill" {
+		t.Fatalf("typed evidence recovery = %#v", typedRecovery)
+	}
+	second, ok := checkpointGovernedAgentProposalFailure(requeued, turn, errors.New("target still requires a current observation"), "target still requires a current observation")
 	if !ok || fmt.Sprint(second[proposalRecoveryCheckpointKey].(map[string]interface{})["attempt"]) != "2" {
 		t.Fatalf("second proposal recovery = %#v, ok=%v", second, ok)
 	}
 	requeued.Checkpoint = second
-	if _, ok = checkpointGovernedAgentProposalFailure(requeued, turn, "target still invalid"); ok {
+	if _, ok = checkpointGovernedAgentProposalFailure(requeued, turn, errors.New("target still invalid"), "target still invalid"); ok {
 		t.Fatal("proposal recovery exceeded its bounded allowance")
 	}
 }

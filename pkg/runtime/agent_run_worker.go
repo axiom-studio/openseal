@@ -813,7 +813,7 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 		status = AgentRunStatusQueued
 		runError = ""
 		checkpoint = conversationalCheckpoint
-	} else if recoveryCheckpoint, ok := checkpointGovernedAgentProposalFailure(run, turn, safeCause); ok {
+	} else if recoveryCheckpoint, ok := checkpointGovernedAgentProposalFailure(run, turn, cause, safeCause); ok {
 		status = AgentRunStatusQueued
 		runError = ""
 		checkpoint = recoveryCheckpoint
@@ -835,7 +835,7 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	}
 }
 
-func checkpointGovernedAgentProposalFailure(run *AgentRun, turn *AgentTurn, safeCause string) (map[string]interface{}, bool) {
+func checkpointGovernedAgentProposalFailure(run *AgentRun, turn *AgentTurn, cause error, safeCause string) (map[string]interface{}, bool) {
 	if run == nil || turn == nil || run.Kind != RunKindAgentWork || len(turn.RequestedActions) != 1 || strings.TrimSpace(safeCause) == "" {
 		return nil, false
 	}
@@ -866,10 +866,24 @@ func checkpointGovernedAgentProposalFailure(run *AgentRun, turn *AgentTurn, safe
 			_ = setRunbookPointer(checkpoint, pointer, arguments)
 		}
 	}
-	checkpoint[proposalRecoveryCheckpointKey] = map[string]interface{}{
+	recovery := map[string]interface{}{
 		"attempt": attempt, "turnId": turn.ID, "capability": request.Capability,
 		"summary": strings.TrimSpace(request.Summary), "inputRef": request.InputRef, "error": safeCause,
 	}
+	if bindingID := strings.TrimSpace(request.BindingID); bindingID != "" {
+		recovery["bindingId"] = bindingID
+		recovery["bindingRevision"] = request.BindingRevision
+	}
+	var actionAdvance actionAdvanceRecoveryError
+	if errors.As(cause, &actionAdvance) {
+		if prerequisite, required := actionAdvance.actionAdvanceRecovery(); required {
+			recovery["requiresActionAdvance"] = true
+			if prerequisite = strings.TrimSpace(prerequisite); prerequisite != "" {
+				recovery["prerequisiteAction"] = prerequisite
+			}
+		}
+	}
+	checkpoint[proposalRecoveryCheckpointKey] = recovery
 	return checkpoint, true
 }
 
