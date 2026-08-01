@@ -241,6 +241,25 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if !outcomeMessage || !outcomeCard {
 		t.Fatalf("terminal channel projection missing: %#v", deliveries)
 	}
+	// The delivery intent is the durable idempotency boundary. A later pass
+	// must not attempt to recreate a canonical message whose presentation has
+	// drifted after the delivery was already accepted.
+	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{
+		Scope: endpoint.Scope, ConversationID: deliveries[0].ConversationID, Limit: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range messages {
+		if strings.HasPrefix(message.IdempotencyKey, "approval-outcome:"+approval.ID+":") {
+			store.mu.Lock()
+			store.channelMessageIDs[channelMessageStoreKey(message.Scope, message.ConversationID, message.ID)].Content = "historical presentation"
+			store.mu.Unlock()
+		}
+	}
+	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
+		t.Fatalf("delivered outcome replay = %v", err)
+	}
 }
 
 func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses(t *testing.T) {
