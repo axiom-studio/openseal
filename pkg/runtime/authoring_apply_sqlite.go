@@ -485,6 +485,12 @@ func applySQLiteWorkforceProject(ctx context.Context, tx *sql.Tx, project *Proje
 
 func applySQLiteWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, value *authoring.ChangeSet, desired []*capability.Binding) error {
 	existing := map[string]*capability.Binding{}
+	desiredIDs := make(map[string]bool, len(desired))
+	for _, binding := range desired {
+		if binding != nil {
+			desiredIDs[binding.ID] = true
+		}
+	}
 	reconciledDeployments := workforceBindingReconciliationDeployments(value)
 	if len(reconciledDeployments) > 0 {
 		rows, err := tx.QueryContext(ctx, `SELECT payload FROM skill_bindings WHERE scope_kind=? AND scope_id=?`, value.Scope.Kind, value.Scope.ID)
@@ -497,7 +503,8 @@ func applySQLiteWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, value *a
 			if err := rows.Scan(&payload); err != nil {
 				return err
 			}
-			if json.Unmarshal([]byte(payload), &binding) == nil && strings.HasPrefix(binding.ID, "workforce:") && reconciledDeployments[binding.DeploymentID] {
+			if json.Unmarshal([]byte(payload), &binding) == nil && reconciledDeployments[binding.DeploymentID] &&
+				(strings.HasPrefix(binding.ID, "workforce:") || desiredIDs[binding.ID]) {
 				existing[binding.ID] = &binding
 			}
 		}
