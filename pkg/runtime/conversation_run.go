@@ -835,7 +835,11 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	if err != nil {
 		return nil, err
 	}
-	if operation, arguments, requested := resolveExplicitConversationOperation(trigger.Content, runbookOperations); requested &&
+	automaticEntrypoints, err := r.automaticConversationOperationEntrypoints(ctx, conversation)
+	if err != nil {
+		return nil, err
+	}
+	if operation, arguments, requested := resolveExplicitConversationOperation(trigger.Content, runbookOperations, automaticEntrypoints); requested &&
 		!activeConversationOperationExists(activeRuns, operation.Entrypoint) {
 		return &TurnOutcome{
 			NextRunStatus: AgentRunStatusRunning,
@@ -897,6 +901,39 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	outcome.RunOutput["messageId"] = message.ID
 	outcome.RunOutput["replayed"] = replayed
 	return outcome, nil
+}
+
+// automaticConversationOperationEntrypoints projects durable schedule and
+// event ownership into command resolution. A generic "run the workflow"
+// request should prefer the one reviewed on-demand interface instead of
+// falling through to model inference merely because the same definition also
+// exposes schedule/event entrypoints. Retired activations remain relevant here:
+// they still describe the entrypoint's authored invocation role.
+func (r *ConversationRunTurnRunner) automaticConversationOperationEntrypoints(ctx context.Context, conversation *Conversation) (map[string]bool, error) {
+	result := make(map[string]bool)
+	if r == nil || r.runbooks == nil || conversation == nil {
+		return result, nil
+	}
+	objectiveID := ""
+	if conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceObjective {
+		objectiveID = conversation.Origin.ID
+	}
+	activations, err := r.runbooks.ListRunbookActivations(ctx, RunbookActivationFilter{
+		Scope: conversation.Scope, Owner: &conversation.Owner, ObjectiveID: objectiveID, Limit: 100,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, activation := range activations {
+		if activation == nil {
+			continue
+		}
+		entrypoint := strings.TrimSpace(activation.Trigger.Entrypoint)
+		if entrypoint != "" {
+			result[entrypoint] = true
+		}
+	}
+	return result, nil
 }
 
 type agentConversationPromptMessage struct {
@@ -1091,7 +1128,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 // and either name an offered operation or unambiguously refer to the sole
 // operation. Empty input is accepted only when the reviewed interface schema
 // accepts it; otherwise the normal hosted Turn gathers the required arguments.
-func resolveExplicitConversationOperation(content string, operations []HostedRunbookOperation) (HostedRunbookOperation, map[string]interface{}, bool) {
+func resolveExplicitConversationOperation(content string, operations []HostedRunbookOperation, automaticEntrypoints map[string]bool) (HostedRunbookOperation, map[string]interface{}, bool) {
 	words := strings.FieldsFunc(strings.ToLower(content), func(value rune) bool {
 		return value < 'a' || value > 'z'
 	})
@@ -1111,9 +1148,18 @@ func resolveExplicitConversationOperation(content string, operations []HostedRun
 			matches = append(matches, operation)
 		}
 	}
-	if len(matches) == 0 && len(operations) == 1 &&
-		(wordSet["it"] || wordSet["operation"] || wordSet["workflow"] || wordSet["runbook"] || wordSet["now"]) {
-		matches = append(matches, operations[0])
+	if len(matches) == 0 && (wordSet["it"] || wordSet["operation"] || wordSet["workflow"] || wordSet["runbook"] || wordSet["now"]) {
+		manual := make([]HostedRunbookOperation, 0, len(operations))
+		for _, operation := range operations {
+			if !automaticEntrypoints[strings.TrimSpace(operation.Entrypoint)] {
+				manual = append(manual, operation)
+			}
+		}
+		if len(manual) == 1 {
+			matches = append(matches, manual[0])
+		} else if len(operations) == 1 {
+			matches = append(matches, operations[0])
+		}
 	}
 	if len(matches) != 1 {
 		return HostedRunbookOperation{}, nil, false

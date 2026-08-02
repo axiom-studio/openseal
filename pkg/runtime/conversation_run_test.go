@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *testing.T) {
@@ -641,26 +642,31 @@ func TestExplicitConversationOperationIgnoresTerminalNarrativeHistory(t *testing
 		"run it now",
 		"Please execute ondemand-engage.",
 	} {
-		selected, arguments, ok := resolveExplicitConversationOperation(command, []HostedRunbookOperation{operation})
+		selected, arguments, ok := resolveExplicitConversationOperation(command, []HostedRunbookOperation{operation}, nil)
 		if !ok || selected.Entrypoint != operation.Entrypoint || len(arguments) != 0 {
 			t.Fatalf("command %q resolved to %#v, %#v, %v", command, selected, arguments, ok)
 		}
 	}
-	if _, _, ok := resolveExplicitConversationOperation("What did the last run do?", []HostedRunbookOperation{operation}); ok {
+	if _, _, ok := resolveExplicitConversationOperation("What did the last run do?", []HostedRunbookOperation{operation}, nil); ok {
 		t.Fatal("historical Run question was treated as an invocation")
 	}
-	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{operation, {
+	scheduled := HostedRunbookOperation{
 		Entrypoint: "publish-report", Name: "Publish report",
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
-	}}); ok {
+	}
+	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{operation, scheduled}, nil); ok {
 		t.Fatal("ambiguous operation command was accepted")
+	}
+	selected, _, ok := resolveExplicitConversationOperation("run the workflow", []HostedRunbookOperation{operation, scheduled}, map[string]bool{scheduled.Entrypoint: true})
+	if !ok || selected.Entrypoint != operation.Entrypoint {
+		t.Fatalf("generic command did not prefer sole on-demand operation: %#v, %v", selected, ok)
 	}
 	requiresInput := operation
 	requiresInput.InputSchema = map[string]interface{}{
 		"type": "object", "required": []interface{}{"community"},
 		"properties": map[string]interface{}{"community": map[string]interface{}{"type": "string"}},
 	}
-	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{requiresInput}); ok {
+	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{requiresInput}, nil); ok {
 		t.Fatal("operation with missing required input was started deterministically")
 	}
 	if activeConversationOperationExists([]agentConversationActiveRun{{Entrypoint: operation.Entrypoint, Status: AgentRunStatusRunning}}, operation.Entrypoint) != true {
@@ -676,9 +682,28 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "repeatable-operation"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Community engagement", Goal: "Engage with relevant communities", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+		Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: "reddit-operations", DefinitionVersion: "1", TriggerID: "scheduled",
+		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "scheduled-engage", Schedule: &runbook.Schedule{
+			Cron: "0 0 * * * *", Timezone: "UTC",
+		}},
+		Status: RunbookActivationActive, IdempotencyKey: "scheduled-engagement",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	service := NewConversationService(store)
 	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: owner, Title: "Agent control", IdempotencyKey: "repeatable-operation-channel",
+		Scope: scope, Owner: owner, Title: objective.Title,
+		Origin:         &ConversationReference{Kind: ConversationReferenceObjective, ID: objective.ID, Version: objective.Revision},
+		IdempotencyKey: "repeatable-operation-channel",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -690,7 +715,7 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 		t.Fatal(err)
 	}
 	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion,
-		"Run the on-demand engagement operation now. I will review external actions in Slack.", "repeat-operation")
+		"run the workflow", "repeat-operation")
 	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -700,10 +725,14 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 		Entrypoint: "ondemand-engage", Name: "On-demand engagement",
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
 	}
+	scheduledOperation := HostedRunbookOperation{
+		Entrypoint: "scheduled-engage", Name: "Scheduled engagement",
+		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
+	}
 	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return &TurnRunnerBinding{
 			DeploymentID: owner.ID, DefinitionID: "reddit-agent", DefinitionVersion: "1",
-			RunbookOperations: []HostedRunbookOperation{operation},
+			RunbookOperations: []HostedRunbookOperation{operation, scheduledOperation},
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 				modelCalls++
 				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Refused stale duplicate"}, nil
