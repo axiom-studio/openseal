@@ -1804,6 +1804,7 @@ const (
 	ConversationAudienceRoles        = runtime.ConversationAudienceRoles
 
 	ConversationReferenceObjective      = runtime.ConversationReferenceObjective
+	ConversationReferenceAgentControl   = runtime.ConversationReferenceAgentControl
 	ConversationReferenceProject        = runtime.ConversationReferenceProject
 	ConversationReferenceRun            = runtime.ConversationReferenceRun
 	ConversationReferenceRequest        = runtime.ConversationReferenceRequest
@@ -4651,15 +4652,56 @@ func (e *Engine) ListAgentDefinitionVersions(ctx context.Context, id string) ([]
 }
 
 func (e *Engine) CreateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
-	return e.agents.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+	created, activation, err := e.agents.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, ensureErr := e.ensureAgentControlConversation(ctx, created); ensureErr != nil {
+		return created, activation, ensureErr
+	}
+	return created, activation, nil
 }
 
 func (e *Engine) GetAgentDeployment(ctx context.Context, scope skill.ScopeReference, deploymentID string) (*kernelagent.AgentDeployment, error) {
-	return e.agents.GetDeployment(ctx, scope, deploymentID)
+	deployment, err := e.agents.GetDeployment(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	if _, ensureErr := e.ensureAgentControlConversation(ctx, deployment); ensureErr != nil {
+		return nil, ensureErr
+	}
+	return deployment, nil
 }
 
 func (e *Engine) ListAgentDeployments(ctx context.Context, scope skill.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
-	return e.agents.ListDeployments(ctx, scope)
+	deployments, err := e.agents.ListDeployments(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	for _, deployment := range deployments {
+		if _, ensureErr := e.ensureAgentControlConversation(ctx, deployment); ensureErr != nil {
+			return nil, ensureErr
+		}
+	}
+	return deployments, nil
+}
+
+func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*runtime.Conversation, error) {
+	if e == nil || e.conversations == nil || deployment == nil {
+		return nil, errors.New("Agent control conversation service is unavailable")
+	}
+	scope := runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}
+	conversation, _, err := e.conversations.CreateConversation(ctx, runtime.CreateConversationRequest{
+		Scope:          scope,
+		Owner:          runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deployment.ID},
+		Title:          "Agent control",
+		Origin:         &runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentControl, ID: deployment.ID},
+		IdempotencyKey: "agent-control:" + deployment.ID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ensure Agent control channel for %s: %w", deployment.ID, err)
+	}
+	return conversation, nil
 }
 
 func (e *Engine) UpdateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
