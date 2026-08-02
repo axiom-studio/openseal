@@ -896,11 +896,13 @@ type agentConversationOperation struct {
 }
 
 type agentConversationActiveRun struct {
-	ID        string         `json:"id"`
-	RootRunID string         `json:"rootRunId"`
-	Status    AgentRunStatus `json:"status"`
-	Goal      string         `json:"goal"`
-	Source    RunSource      `json:"source"`
+	ID                string         `json:"id"`
+	RootRunID         string         `json:"rootRunId"`
+	Status            AgentRunStatus `json:"status"`
+	Goal              string         `json:"goal"`
+	Source            RunSource      `json:"source"`
+	Revision          int64          `json:"revision"`
+	AvailableControls []string       `json:"availableControls,omitempty"`
 }
 
 func (r *ConversationRunTurnRunner) agentConversationGoal(ctx context.Context, conversation *Conversation, trigger *ChannelMessage, recent []*ChannelMessage, operations []HostedRunbookOperation) (string, error) {
@@ -1029,6 +1031,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 		}
 		active = append(active, agentConversationActiveRun{
 			ID: run.ID, RootRunID: run.RootRunID, Status: run.Status, Goal: run.Goal, Source: run.Source,
+			Revision: run.Revision, AvailableControls: applicableAgentRunCommands(run),
 		})
 	}
 	return active, nil
@@ -1174,6 +1177,30 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 			References: []ConversationReference{{Kind: ConversationReferenceRun, ID: runID}},
 		}, true
 	}
+	if resourceType == runResourceType {
+		controlledRun := conversationResultMap(result["run"])
+		id := conversationResultString(controlledRun, "id")
+		if !validOpaqueIdentifier(id, 256) {
+			return nil, false
+		}
+		operation := strings.TrimSpace(fmt.Sprint(result["operation"]))
+		status := conversationResultString(controlledRun, "status")
+		content := "Run " + id + " was " + operation + "d successfully."
+		if operation == RunActionPause {
+			content = "Run " + id + " was paused successfully."
+		} else if operation == RunActionResume {
+			content = "Run " + id + " was resumed successfully."
+		} else if operation == RunActionCancel {
+			content = "Run " + id + " was canceled successfully."
+		}
+		if status != "" {
+			content = strings.TrimSuffix(content, ".") + " and is now " + strings.ReplaceAll(status, "_", " ") + "."
+		}
+		return &governedConversationCompletion{
+			Content: content, ResourceType: resourceType, ResourceID: id,
+			References: []ConversationReference{{Kind: ConversationReferenceRun, ID: id}},
+		}, true
+	}
 	if resourceType == agentBehaviorResourceType {
 		deployment := conversationResultMap(result["deployment"])
 		id := conversationResultString(deployment, "id")
@@ -1279,12 +1306,15 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		resourceType, label, kind, idField = "objective", "Objective", ConversationReferenceObjective, "objectiveId"
 	case ProjectManagementSkillID:
 		resourceType, label, kind, idField = "project", "Project", ConversationReferenceProject, "projectId"
+	case RunManagementSkillID:
+		resourceType, label, kind, idField = runResourceType, "Run", ConversationReferenceRun, "runId"
 	default:
 		return nil, false
 	}
 	operation := strings.TrimSpace(fmt.Sprint(last["action"]))
 	if operation != ObjectiveActionCreate && operation != ObjectiveActionUpdate && operation != ObjectiveActionPause &&
-		operation != AgentActionAmendBehavior && operation != AgentActionConfigureChannel && operation != RunbookActionStart && operation != RunbookActionReplaceSchedule {
+		operation != AgentActionAmendBehavior && operation != AgentActionConfigureChannel && operation != RunbookActionStart && operation != RunbookActionReplaceSchedule &&
+		operation != RunActionPause && operation != RunActionResume && operation != RunActionCancel {
 		return nil, false
 	}
 	actionDescription := label + " " + strings.ReplaceAll(operation, "_", " ")
@@ -1356,12 +1386,15 @@ func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTur
 		version = ObjectiveManagementSkillVersion
 	case ProjectManagementSkillID:
 		version = ProjectManagementSkillVersion
+	case RunManagementSkillID:
+		version = RunManagementSkillVersion
 	default:
 		return nil, false
 	}
 	if action != ObjectiveActionCreate && action != ObjectiveActionUpdate && action != ObjectiveActionPause &&
 		action != AgentActionAmendBehavior && action != AgentActionConfigureChannel &&
-		action != RunbookActionStart && action != RunbookActionReplaceSchedule {
+		action != RunbookActionStart && action != RunbookActionReplaceSchedule &&
+		action != RunActionPause && action != RunActionResume && action != RunActionCancel {
 		return nil, false
 	}
 	arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, requested.InputRef)
