@@ -558,7 +558,7 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 		}
 		identity := workforceSkillRuntimeIdentity(value, definition.ID, requirement.SkillID, skillCapability.Version)
 		binding := &capability.Binding{
-			ID: "workforce:" + deploymentID + ":" + requirement.SkillID, Scope: value.Scope, DeploymentID: deploymentID,
+			ID: workforceSkillBindingID(deploymentID, identity.ID, identity.Version), Scope: value.Scope, DeploymentID: deploymentID,
 			SkillID: identity.ID, SkillVersion: identity.Version, SourceIdentity: identity.SourceIdentity, AllowedActions: allowed,
 			Disabled: !activate, EnablePrompt: requirement.PromptRequired, MaximumRisk: maximumRisk, Credentials: credentials,
 			Config: cloneMap(value.Placement.BindingConfigs[definition.ID][requirement.SkillID]), Revision: 1,
@@ -569,6 +569,30 @@ func materializeWorkforceSkillBindings(value *authoring.ChangeSet, definition *a
 		bindings = append(bindings, binding)
 	}
 	return bindings, nil
+}
+
+// workforceSkillBindingID preserves the single canonical binding identity for
+// kernel-owned management capabilities. These capabilities are reconciled for
+// every deployment by the embedding host; authoring may request their actions,
+// but must update that same binding rather than materialize a parallel
+// workforce binding with indistinguishable model actions.
+func workforceSkillBindingID(deploymentID, skillID, version string) string {
+	switch strings.TrimSpace(skillID) {
+	case AgentManagementSkillID:
+		return "bundled:agents"
+	case ObjectiveManagementSkillID:
+		return "bundled:objectives"
+	case ProjectManagementSkillID:
+		return "bundled:projects"
+	case RunbookManagementSkillID:
+		return "bundled:runbooks"
+	case RunManagementSkillID:
+		return "bundled:runs"
+	case SkillManagementSkillID:
+		return "bundled:skills@" + strings.TrimSpace(version)
+	default:
+		return "workforce:" + deploymentID + ":" + skillID
+	}
 }
 
 type workforceTeamBindingAggregate struct {

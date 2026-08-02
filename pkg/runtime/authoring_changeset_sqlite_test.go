@@ -521,6 +521,112 @@ func TestWorkforceAuthoringRejectsSkillRequirementsWithoutAuthorityBeforeApply(t
 	}
 }
 
+func TestWorkforceAuthoringReusesCanonicalManagementBindingIdentity(t *testing.T) {
+	value := testApplicableWorkforceChangeSet()
+	definition := value.Result.Candidate.Agents[0]
+	definition.SkillRequirements = []agent.SkillRequirement{{
+		SkillID: AgentManagementSkillID, VersionConstraint: AgentManagementSkillVersion,
+		RequiredActions: []string{AgentActionAmendBehavior},
+	}}
+	definition.Authority.AllowedSkillIDs = []string{AgentManagementSkillID}
+	definition.Authority.MaximumRisk = capability.RiskLevelWrite
+	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		AgentManagementSkillID: {
+			ID: AgentManagementSkillID, Version: AgentManagementSkillVersion,
+			Actions: []string{AgentActionAmendBehavior}, MaximumRisk: capability.RiskLevelWrite,
+		},
+	}}
+
+	bindings, err := materializeWorkforceSkillBindings(value, definition, "agent-live", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].ID != "bundled:agents" {
+		t.Fatalf("management bindings = %#v", bindings)
+	}
+}
+
+func TestWorkforceApplyConvergesDuplicateManagementBindings(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	catalog := skill.NewCatalogWithStore(store)
+	if err := catalog.Register(context.Background(), AgentManagementSkill()); err != nil {
+		t.Fatal(err)
+	}
+
+	created := testApplicableWorkforceChangeSet()
+	if _, _, err := store.CreateChangeSet(context.Background(), created, "create", "create"); err != nil {
+		t.Fatal(err)
+	}
+	first := cloneRuntimeChangeSet(created)
+	first.Status, first.Revision = authoring.ChangeSetApplied, 3
+	first.ApplyReceipt = &authoring.ChangeSetApplyReceipt{
+		ID: "receipt-create", IdempotencyKey: "apply-create", CandidateDigest: created.CandidateDigest,
+		Actor: created.Actor, AppliedAt: created.UpdatedAt.Add(time.Minute),
+	}
+	first.UpdatedAt = first.ApplyReceipt.AppliedAt
+	if _, err := store.ApplyChangeSet(context.Background(), first, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	value := testApplicableWorkforceChangeSet()
+	value.ID, value.ParentID, value.Mode, value.CandidateDigest = "amend-management", created.ID, authoring.ModeAmend, "candidate-management"
+	value.Result.Candidate.Agents[0].Version = "2"
+	value.Result.Candidate.Team.Version = "2"
+	value.Placement.AgentExpectedRevisions = map[string]int64{"agent": 1}
+	value.Placement.TeamExpectedRevision = 1
+	for key, placement := range value.Placement.Objectives {
+		placement.ExpectedRevision = 1
+		value.Placement.Objectives[key] = placement
+	}
+	value.UpdatedAt = first.UpdatedAt.Add(time.Minute)
+	definition := value.Result.Candidate.Agents[0]
+	definition.SkillRequirements = []agent.SkillRequirement{{
+		SkillID: AgentManagementSkillID, VersionConstraint: AgentManagementSkillVersion,
+		RequiredActions: []string{AgentActionAmendBehavior},
+	}}
+	definition.Authority.AllowedSkillIDs = []string{AgentManagementSkillID}
+	definition.Authority.MaximumRisk = capability.RiskLevelWrite
+	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		AgentManagementSkillID: {
+			ID: AgentManagementSkillID, Version: AgentManagementSkillVersion,
+			Actions: []string{AgentActionAmendBehavior}, MaximumRisk: capability.RiskLevelWrite,
+		},
+	}}
+	for _, id := range []string{"bundled:agents", "workforce:agent-live:" + AgentManagementSkillID} {
+		if err := catalog.Bind(context.Background(), &skill.Binding{
+			ID: id, Scope: value.Scope, DeploymentID: "agent-live",
+			SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
+			AllowedActions: []string{AgentActionAmendBehavior}, MaximumRisk: capability.RiskLevelWrite, Revision: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := store.CreateChangeSet(context.Background(), value, "amend", "amend"); err != nil {
+		t.Fatal(err)
+	}
+	applied := cloneRuntimeChangeSet(value)
+	applied.Status, applied.Revision = authoring.ChangeSetApplied, 3
+	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{
+		ID: "receipt-amend", IdempotencyKey: "apply-amend", CandidateDigest: value.CandidateDigest,
+		Actor: value.Actor, AppliedAt: value.UpdatedAt.Add(time.Minute),
+	}
+	applied.UpdatedAt = applied.ApplyReceipt.AppliedAt
+	if _, err := store.ApplyChangeSet(context.Background(), applied, 2); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := store.ListSkillBindings(context.Background(), value.Scope, "agent-live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].ID != "bundled:agents" || bindings[0].Revision != 2 {
+		t.Fatalf("converged bindings = %#v", bindings)
+	}
+}
+
 func TestInactiveWorkforceBindingDefersExactExecutionCredentialUntilActivation(t *testing.T) {
 	value := testApplicableWorkforceChangeSet()
 	value.Result.Candidate.Activation = authoring.WorkforceActivationInactive
