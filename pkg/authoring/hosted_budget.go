@@ -11,16 +11,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-const (
-	// DefaultHostedRunMaxTurns and DefaultHostedRunMaxActions give cognitive
-	// hosted work enough room to recover from ordinary navigation and tool-use
-	// mistakes without requiring every authoring provider to guess an execution
-	// envelope. Activated definitions still snapshot these finite limits, and a
-	// host may impose stricter policy before activation.
-	DefaultHostedRunMaxTurns   int64 = 100
-	DefaultHostedRunMaxActions int64 = 100
-)
-
 // HostedSkillModelInputTokenCeiling returns a credential-free conservative
 // ceiling for one activated binding of definition. Hosts publish only this
 // scalar in authoring catalogs; private prompt instructions remain outside the
@@ -37,10 +27,9 @@ func validateHostedRunbookBudgets(candidate *WorkforceCandidate, catalog Capabil
 	if candidate == nil || catalog.HostedExecution == nil {
 		return nil
 	}
-	// Provider-authored budgets are planning hints, not trusted execution
-	// limits. Raise them deterministically to the smallest envelope that can
-	// execute the exact reviewed catalog; the resulting values remain visible
-	// in the proposal before activation.
+	// Omitted budgets remain unbounded. Explicit provider-authored budgets are
+	// planning hints, not trusted execution limits, and are raised
+	// deterministically when they cannot execute the reviewed catalog.
 	normalizeHostedRunbookBudgets(candidate, catalog)
 	agents := make(map[string]*agent.AgentDefinition, len(candidate.Agents))
 	for _, definition := range candidate.Agents {
@@ -104,11 +93,9 @@ func normalizeHostedRunbookBudgets(candidate *WorkforceCandidate, catalog Capabi
 				continue
 			}
 			if step.Delegate.Budget == nil {
-				step.Delegate.Budget = &runbook.BudgetAllocation{}
+				continue
 			}
 			required, _ := validateHostedBudget("", target, step.Delegate, catalog)
-			required.MaxTurns = maximumInt64(required.MaxTurns, DefaultHostedRunMaxTurns)
-			required.MaxActions = maximumInt64(required.MaxActions, DefaultHostedRunMaxActions)
 			// Each model Turn consumes one attempt, and every materialized action
 			// wakes the Run for a separate continuation attempt.
 			required.MaxAttempts = maximumInt64(required.MaxAttempts,
@@ -120,7 +107,7 @@ func normalizeHostedRunbookBudgets(candidate *WorkforceCandidate, catalog Capabi
 					continue
 				}
 				if trigger.Budget == nil {
-					trigger.Budget = &runbook.BudgetAllocation{}
+					continue
 				}
 				raiseHostedBudget(trigger.Budget, *step.Delegate.Budget, 2)
 				owner.Runbook.Triggers[triggerID] = trigger

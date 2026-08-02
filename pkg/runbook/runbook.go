@@ -355,13 +355,11 @@ type BudgetAllocation struct {
 	WarningPermille int64 `json:"warningPermille,omitempty"`
 }
 
-const DefaultRunTotalTokenBudget int64 = 1_000_000
-
-// DefaultBudgetAllocation returns the portable token ceiling used when work
-// has no explicitly reviewed budget. Individual token dimensions remain
-// unset so providers can use the total flexibly across input and output.
+// DefaultBudgetAllocation leaves generated work unbounded. Hosts and users may
+// attach an explicit reviewed ceiling later; absence of a budget is a durable,
+// portable statement that the Run is not limited by OpenSeal.
 func DefaultBudgetAllocation() *BudgetAllocation {
-	return &BudgetAllocation{MaxTotalTokens: DefaultRunTotalTokenBudget}
+	return nil
 }
 
 func (b BudgetAllocation) Validate() error {

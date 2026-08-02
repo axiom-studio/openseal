@@ -91,11 +91,11 @@ func TestCompileAuthoringIntentOwnsScheduledRunbookStructure(t *testing.T) {
 		definition.Runbook.Steps["hourly-research"].Delegate == nil || definition.Runbook.Steps["hourly-research"].Delegate.ResultPath != "/results/hourly-research" {
 		t.Fatalf("compiler-owned Runbook = %#v", definition.Runbook)
 	}
-	if budget := definition.Runbook.Steps["hourly-research"].Delegate.Budget; budget == nil || budget.MaxTotalTokens != runbook.DefaultRunTotalTokenBudget {
-		t.Fatalf("delegate default budget = %#v", budget)
+	if budget := definition.Runbook.Steps["hourly-research"].Delegate.Budget; budget != nil {
+		t.Fatalf("delegate default budget must be unbounded, got %#v", budget)
 	}
-	if budget := definition.Runbook.Triggers["hourly-research"].Budget; budget == nil || budget.MaxTotalTokens != runbook.DefaultRunTotalTokenBudget {
-		t.Fatalf("trigger default budget = %#v", budget)
+	if budget := definition.Runbook.Triggers["hourly-research"].Budget; budget != nil {
+		t.Fatalf("trigger default budget must be unbounded, got %#v", budget)
 	}
 	if definition.Authority.MaximumRisk != capability.RiskLevelExternal || len(definition.Authority.StandingGrants) != 0 {
 		t.Fatalf("compiled authority = %#v", definition.Authority)

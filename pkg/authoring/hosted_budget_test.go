@@ -24,7 +24,7 @@ func TestHostedRunbookBudgetRaisesBrowserCatalogToExecutableEnvelope(t *testing.
 		hostedAgentDefinitionTokens(target, delegate) + hostedBrowserBudgetCatalog().Skills["skill-browser"].HostedModelInputTokens
 	wantInput := (perTurnInput*capability.HostedMaximumProviderAttempts + capability.HostedRepairInputReserveTokens) * 4
 	wantOutput := capability.HostedMinimumChildOutputTokens * 4
-	if budget.MaxAttempts != 200 || budget.MaxTurns != 100 || budget.MaxActions != 100 || budget.MaxInputTokens != wantInput || budget.MaxOutputTokens != wantOutput ||
+	if budget.MaxAttempts != 7 || budget.MaxTurns != 4 || budget.MaxActions != 3 || budget.MaxInputTokens != wantInput || budget.MaxOutputTokens != wantOutput ||
 		budget.MaxTotalTokens != wantInput+wantOutput {
 		t.Fatalf("Browser budget was not normalized: %#v", budget)
 	}
@@ -58,7 +58,7 @@ func TestHostedRunbookBudgetRejectsTriggerThatCannotFundDelegatedExecution(t *te
 				t.Fatalf("normalized parent budget issues = %#v", issues)
 			}
 			budget := definition.Triggers["operate"].Budget
-			if budget.MaxAttempts != 202 || budget.MaxTurns != 102 || budget.MaxActions != 100 || budget.MaxInputTokens < 100000 || budget.MaxOutputTokens < capability.HostedMinimumChildOutputTokens || budget.MaxTotalTokens < 116384 {
+			if budget.MaxAttempts != 9 || budget.MaxTurns != 6 || budget.MaxActions != 3 || budget.MaxInputTokens < 100000 || budget.MaxOutputTokens < capability.HostedMinimumChildOutputTokens || budget.MaxTotalTokens < 116384 {
 				t.Fatalf("parent budget was not normalized: %#v", budget)
 			}
 		})
