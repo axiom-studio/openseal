@@ -578,6 +578,49 @@ func TestAgentConversationRejectsUnverifiedApprovalClaims(t *testing.T) {
 	}
 }
 
+func TestAgentConversationGoalProjectsActiveWorkFromTheSameChannel(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "active-channel"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: owner, Title: "Agent work", IdempotencyKey: "active-agent-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	portfolio := NewPortfolioService(store)
+	root, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: owner.ID,
+		Goal: "Respond to an Agent channel message", Source: RunSourceChat,
+		Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindAgentWork, ParentRunID: root.ID, Owner: owner, AssignedAgentID: owner.ID,
+		Goal: "Run the on-demand engagement operation", Source: RunSourceFork,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal, err := runner.agentConversationGoal(ctx, conversation, &ChannelMessage{ID: "trigger"}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(goal, `"activeRuns":[`) || !strings.Contains(goal, `"id":"`+child.ID+`"`) ||
+		!strings.Contains(goal, `"goal":"Run the on-demand engagement operation"`) ||
+		!strings.Contains(goal, "report its real status instead of claiming that no Run exists") {
+		t.Fatalf("active Run truth was not projected into Agent conversation goal: %s", goal)
+	}
+}
+
 func TestConversationRunTurnRunnerProjectsGovernedAgentResultWithoutModelRenarration(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()

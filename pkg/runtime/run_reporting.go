@@ -112,6 +112,53 @@ func projectRunReportingStart(
 	return err
 }
 
+// projectConversationRunbookStart acknowledges an on-demand operation as soon
+// as its durable child Run exists. The conversation parent may remain blocked
+// on work or approval for hours; users must not need to send the command again
+// merely to learn whether it started.
+func projectConversationRunbookStart(
+	ctx context.Context,
+	store ConversationStore,
+	source *AgentRun,
+	proposal *TurnRunbookProposal,
+	child *AgentRun,
+) error {
+	if store == nil || source == nil || proposal == nil || child == nil || source.Kind != RunKindConversation {
+		return nil
+	}
+	conversationID, _ := source.Context[conversationRunContextConversationID].(string)
+	triggerID, _ := source.Context[conversationRunContextTriggerID].(string)
+	conversationID, triggerID = strings.TrimSpace(conversationID), strings.TrimSpace(triggerID)
+	if conversationID == "" || triggerID == "" {
+		return nil
+	}
+	service := NewConversationService(store)
+	channel, err := service.GetConversation(ctx, source.Scope, conversationID)
+	if err != nil {
+		return err
+	}
+	post := func(current *Conversation) error {
+		_, postErr := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+			Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
+			Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: source.AssignedAgentID},
+			SenderDisplayName: "Agent", Intent: MessageIntentUpdate,
+			Content:  "Started: " + strings.TrimSpace(proposal.Summary),
+			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID,
+			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: child.ID}},
+			IdempotencyKey: "conversation-runbook-start:" + source.ID,
+		})
+		return postErr
+	}
+	if err = post(channel); errors.Is(err, ErrRevisionConflict) {
+		channel, err = service.GetConversation(ctx, source.Scope, conversationID)
+		if err != nil {
+			return err
+		}
+		err = post(channel)
+	}
+	return err
+}
+
 func projectTerminalRunReporting(ctx context.Context, store ConversationStore, run *AgentRun) error {
 	if store == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
 		return nil
