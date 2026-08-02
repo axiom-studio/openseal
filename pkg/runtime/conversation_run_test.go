@@ -630,6 +630,101 @@ func TestAgentConversationGoalProjectsActiveWorkFromTheSameChannel(t *testing.T)
 	}
 }
 
+func TestExplicitConversationOperationIgnoresTerminalNarrativeHistory(t *testing.T) {
+	operation := HostedRunbookOperation{
+		Entrypoint: "ondemand-engage", Name: "On-demand engagement",
+		Description: "Run one reviewed engagement cycle",
+		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
+	}
+	for _, command := range []string{
+		"Run the on-demand engagement operation now.",
+		"run it now",
+		"Please execute ondemand-engage.",
+	} {
+		selected, arguments, ok := resolveExplicitConversationOperation(command, []HostedRunbookOperation{operation})
+		if !ok || selected.Entrypoint != operation.Entrypoint || len(arguments) != 0 {
+			t.Fatalf("command %q resolved to %#v, %#v, %v", command, selected, arguments, ok)
+		}
+	}
+	if _, _, ok := resolveExplicitConversationOperation("What did the last run do?", []HostedRunbookOperation{operation}); ok {
+		t.Fatal("historical Run question was treated as an invocation")
+	}
+	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{operation, {
+		Entrypoint: "publish-report", Name: "Publish report",
+		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
+	}}); ok {
+		t.Fatal("ambiguous operation command was accepted")
+	}
+	requiresInput := operation
+	requiresInput.InputSchema = map[string]interface{}{
+		"type": "object", "required": []interface{}{"community"},
+		"properties": map[string]interface{}{"community": map[string]interface{}{"type": "string"}},
+	}
+	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{requiresInput}); ok {
+		t.Fatal("operation with missing required input was started deterministically")
+	}
+	if activeConversationOperationExists([]agentConversationActiveRun{{Entrypoint: operation.Entrypoint, Status: AgentRunStatusRunning}}, operation.Entrypoint) != true {
+		t.Fatal("active matching operation was not detected")
+	}
+	if activeConversationOperationExists([]agentConversationActiveRun{{Entrypoint: "publish-report", Status: AgentRunStatusRunning}}, operation.Entrypoint) {
+		t.Fatal("unrelated active operation blocked the requested operation")
+	}
+}
+
+func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "repeatable-operation"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: owner, Title: "Agent control", IdempotencyKey: "repeatable-operation-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	postConversationRunTestMessage(t, service, conversation, ConversationParticipantAgent, MessageIntentAnswer,
+		"The on-demand engagement operation already ran to completion in run historical-1.", "historical-completion")
+	conversation, err = service.GetConversation(ctx, scope, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion,
+		"Run the on-demand engagement operation now. I will review external actions in Slack.", "repeat-operation")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelCalls := 0
+	operation := HostedRunbookOperation{
+		Entrypoint: "ondemand-engage", Name: "On-demand engagement",
+		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
+	}
+	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{
+			DeploymentID: owner.ID, DefinitionID: "reddit-agent", DefinitionVersion: "1",
+			RunbookOperations: []HostedRunbookOperation{operation},
+			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				modelCalls++
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Refused stale duplicate"}, nil
+			}),
+		}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
+	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusRunning || outcome.ProposedRunbook == nil ||
+		outcome.ProposedRunbook.Entrypoint != operation.Entrypoint || modelCalls != 0 {
+		t.Fatalf("repeatable operation outcome = %#v, modelCalls=%d, err=%v", outcome, modelCalls, err)
+	}
+}
+
 func TestConversationRunTurnRunnerProjectsGovernedAgentResultWithoutModelRenarration(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
