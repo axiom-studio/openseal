@@ -147,6 +147,23 @@ func TestScheduleIntentWindowRequiresExactTimezoneAndCompilesPortableCron(t *tes
 	}
 }
 
+func TestParseScheduleIntentPreservesAutomaticCadenceAlongsideOnDemandOperation(t *testing.T) {
+	parsed := parseScheduleIntent("Keep an on-demand operation and also run every 3 hours between 08:00 and 20:00 Asia/Kolkata.")
+	if parsed.kind != scheduleIntentExact {
+		t.Fatalf("kind = %v, want exact", parsed.kind)
+	}
+	if parsed.cronExpression != "0 00 8-20/3 * * *" || parsed.timezone != "Asia/Kolkata" {
+		t.Fatalf("parsed schedule = %#v", parsed)
+	}
+}
+
+func TestParseScheduleIntentExplicitNegationOverridesCadenceText(t *testing.T) {
+	parsed := parseScheduleIntent("Do not schedule this; the old definition said every 3 hours.")
+	if parsed.kind != scheduleIntentManual {
+		t.Fatalf("kind = %v, want manual", parsed.kind)
+	}
+}
+
 func TestSemanticIntentAmbiguousScheduleBecomesGuidedQuestion(t *testing.T) {
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
