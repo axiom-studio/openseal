@@ -471,9 +471,6 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 		if run.Kind != RunKindAgentWork || run.AssignedAgentID != "agent-42" {
 			t.Fatalf("hosted Agent projection = %#v", run)
 		}
-		if callable, present := run.Context[conversationCallableActivationKey].(bool); !present || callable {
-			t.Fatalf("conversation callable activation projection = %#v", run.Context)
-		}
 		return &TurnRunnerBinding{
 			DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "7", ModelProvider: "host", Model: "agent-model",
 			ModelActions:      []capability.ModelAction{{Name: "openseal.objectives.create", SkillID: "openseal.objectives", Version: "1.0.0", Action: "create", BindingID: "bundled:objectives", BindingRevision: 1}},

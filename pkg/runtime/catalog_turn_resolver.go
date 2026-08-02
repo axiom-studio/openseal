@@ -144,7 +144,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		contextRefs = append(contextRefs, teamContextRefs...)
 	}
 	runbookOperations := projectCallableRunbookOperations(definition.Runbook)
-	if callableActivation, known := run.Context[conversationCallableActivationKey].(bool); known && !callableActivation && len(runbookOperations) > 0 {
+	if len(runbookOperations) > 0 {
 		actions = withoutRunbookActivationStart(actions)
 	}
 	base := TurnRunnerBinding{
