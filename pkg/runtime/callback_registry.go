@@ -228,6 +228,7 @@ type CallbackRegistrationStore interface {
 
 type CallbackAdapterResolver interface {
 	ResolveCallbackAdapter(context.Context, skill.ScopeReference, string, string, string, string, ...skill.BindingReference) (*skill.BoundCallbackAdapter, error)
+	ResolveCallbackAdapterBinding(context.Context, skill.ScopeReference, string, string, string) (*skill.BoundCallbackAdapter, error)
 }
 
 type CallbackRegistry struct {
@@ -349,12 +350,11 @@ func (r *CallbackRegistry) Update(ctx context.Context, scope Scope, id string, r
 
 func (r *CallbackRegistry) resolve(ctx context.Context, value *CallbackRegistration) error {
 	ref := value.Adapter
-	bound, err := r.resolver.ResolveCallbackAdapter(
+	bound, err := r.resolver.ResolveCallbackAdapterBinding(
 		ctx, skill.ScopeReference{Kind: value.Scope.Kind, ID: value.Scope.ID}, value.DeploymentID,
-		ref.SkillID, ref.SkillVersion, ref.AdapterID,
-		skill.BindingReference{ID: ref.BindingID, Revision: ref.BindingRevision},
+		ref.BindingID, ref.AdapterID,
 	)
-	if err != nil || bound == nil || bound.Binding == nil || bound.Binding.SourceIdentity != ref.SourceIdentity ||
+	if err != nil || bound == nil || bound.Binding == nil ||
 		bound.Adapter.Provider != value.Provider || strings.TrimSpace(bound.Adapter.Transport.IngressEndpoint) == "" {
 		return fmt.Errorf("%w: exact callback Skill adapter is unavailable or stale", ErrInvalidCallbackRegistration)
 	}

@@ -546,6 +546,22 @@ func (c *Catalog) ResolveConversationAdapter(ctx context.Context, scope ScopeRef
 	return nil, errors.New("bound conversation adapter not found")
 }
 
+// ResolveConversationAdapterBinding resolves the current immutable Skill
+// identity behind one durable binding. Live endpoints own only this binding
+// reference; the resolved Skill identity is captured on each immutable inbox,
+// delivery, Run, and ActionCall instead of being duplicated as mutable desired
+// state on every endpoint.
+func (c *Catalog) ResolveConversationAdapterBinding(ctx context.Context, scope ScopeReference, deploymentID, bindingID, adapterID string) (*BoundConversationAdapter, error) {
+	binding, err := c.currentBindingWithoutDefinition(ctx, scope, deploymentID, bindingID)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil || binding.Disabled {
+		return nil, ErrBindingUnavailable
+	}
+	return c.ResolveConversationAdapter(ctx, scope, deploymentID, binding.SkillID, binding.SkillVersion, adapterID, BindingReference{ID: binding.ID, Revision: binding.Revision})
+}
+
 // ResolveCallbackAdapter resolves one exact Skill-owned inbound callback
 // verifier. The result contains only immutable metadata and opaque credential
 // references; the trusted host resolves values out of band.
@@ -597,6 +613,20 @@ func (c *Catalog) ResolveCallbackAdapter(ctx context.Context, scope ScopeReferen
 		return nil, fmt.Errorf("%w: selected callback adapter binding is unavailable or stale", ErrBindingUnavailable)
 	}
 	return nil, errors.New("bound callback adapter not found")
+}
+
+// ResolveCallbackAdapterBinding is the callback equivalent of
+// ResolveConversationAdapterBinding. A binding upgrade therefore changes one
+// authoritative reference while every dependent live callback follows it.
+func (c *Catalog) ResolveCallbackAdapterBinding(ctx context.Context, scope ScopeReference, deploymentID, bindingID, adapterID string) (*BoundCallbackAdapter, error) {
+	binding, err := c.currentBindingWithoutDefinition(ctx, scope, deploymentID, bindingID)
+	if err != nil {
+		return nil, err
+	}
+	if binding == nil || binding.Disabled {
+		return nil, ErrBindingUnavailable
+	}
+	return c.ResolveCallbackAdapter(ctx, scope, deploymentID, binding.SkillID, binding.SkillVersion, adapterID, BindingReference{ID: binding.ID, Revision: binding.Revision})
 }
 
 // NeedsActionAdapter reports whether an imported OpenClaw instruction module
