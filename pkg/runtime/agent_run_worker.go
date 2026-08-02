@@ -405,6 +405,21 @@ func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerI
 	if !authorized {
 		return nil, fmt.Errorf("requested runbook entrypoint %q is not authorized", proposal.Entrypoint)
 	}
+	// A callable Runbook is an already reviewed operation. Its execution budget
+	// is therefore owned by the kernel and the invoking Run, not selected by the
+	// conversational model. An unbounded invoking Run starts an unbounded
+	// operation; an explicitly bounded invoking Run contributes all remaining
+	// capacity. Keeping the model-proposed slice here previously created tiny
+	// child ceilings (commonly three attempts), which then stranded a valid
+	// delegated step before its hosted minimum could be admitted.
+	var operationBudget *BudgetPolicy
+	if run.Budget != nil {
+		var budgetErr error
+		operationBudget, budgetErr = completeChildBudgetAllocation(run, &BudgetPolicy{})
+		if budgetErr != nil {
+			return nil, fmt.Errorf("resolve callable Runbook budget: %w", budgetErr)
+		}
+	}
 	result, err := p.forks.Create(ctx, CreateRunForkRequest{
 		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: workerID,
 		ForkID: "runbook-" + proposal.Entrypoint,
@@ -412,7 +427,7 @@ func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerI
 		Branches: []RunForkBranch{{
 			ID: "operation", Goal: proposal.Summary, AssignedAgentID: run.AssignedAgentID,
 			Entrypoint: proposal.Entrypoint, Context: cloneMap(proposal.Arguments), Checkpoint: map[string]interface{}{},
-			Budget: cloneBudgetPolicy(proposal.Budget),
+			Budget: operationBudget,
 		}},
 		ContinuationCheckpoint: turn.ContinuationCheckpoint,
 		Actor:                  ActivityActor{Type: "worker", ID: workerID},

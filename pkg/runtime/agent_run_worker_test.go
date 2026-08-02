@@ -1025,6 +1025,47 @@ func TestAgentRunWorkerCompletesPartialBoundedDelegationBudget(t *testing.T) {
 	}
 }
 
+func TestAgentRunWorkerDoesNotLetModelBoundReviewedRunbookOperation(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "runbook-operation-budget"}
+	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
+		Goal: "start reviewed operation", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{
+		Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute,
+	})
+	if err != nil || claimed == nil || claimed.ID != source.ID {
+		t.Fatalf("claimed source = %#v, %v", claimed, err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, nil
+	}), nil, AgentRunWorkerConfig{Scope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := &TurnRunbookProposal{
+		Entrypoint: "engage-now", Summary: "Start the reviewed engagement operation",
+		Budget: &BudgetPolicy{MaxAttempts: 3},
+	}
+	waiting, err := pool.materializeTurnRunbook(t.Context(), "worker", claimed, &AgentTurn{ID: "turn", RequestedRunbook: proposal}, &TurnRunnerBinding{
+		RunbookOperations: []HostedRunbookOperation{{Entrypoint: "engage-now"}},
+	})
+	if err != nil || waiting.Status != AgentRunStatusWaitingForDependency {
+		t.Fatalf("materialized Runbook = %#v, %v", waiting, err)
+	}
+	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(children) != 1 {
+		t.Fatalf("children = %#v, %v", children, err)
+	}
+	if children[0].Budget != nil {
+		t.Fatalf("model-created Runbook ceiling leaked into child: %#v", children[0].Budget)
+	}
+}
+
 func TestAgentRunWorkerCapsRunbookDelegationAtRemainingRunBudget(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "runbook-delegation-budget"}
