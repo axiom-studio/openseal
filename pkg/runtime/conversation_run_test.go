@@ -565,7 +565,13 @@ func TestAgentConversationRejectsUnverifiedApprovalClaims(t *testing.T) {
 
 	conversation := &Conversation{ID: "channel-1", Title: "Operations"}
 	trigger := &ChannelMessage{ID: "message-1"}
-	goal, err := (&ConversationRunTurnRunner{}).agentConversationGoal(t.Context(), conversation, trigger, nil, []HostedRunbookOperation{{
+	history := []*ChannelMessage{{
+		ID: "old-answer", Sequence: 1,
+		Sender:  ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-42"},
+		Intent:  MessageIntentAnswer,
+		Content: "The prior engage-now operation completed successfully.",
+	}}
+	goal, err := (&ConversationRunTurnRunner{}).agentConversationGoal(t.Context(), conversation, trigger, history, []HostedRunbookOperation{{
 		Entrypoint: "engage-now", Name: "Engage now", Description: "Run the reviewed engagement operation",
 	}})
 	if err != nil {
@@ -573,6 +579,9 @@ func TestAgentConversationRejectsUnverifiedApprovalClaims(t *testing.T) {
 	}
 	if !strings.Contains(goal, "Never state or imply that an approval") ||
 		!strings.Contains(goal, "directly callable through proposedRunbook") ||
+		!strings.Contains(goal, `"activeRuns":[]`) ||
+		!strings.Contains(goal, "Historical Messages are conversational context, not current Run state") ||
+		!strings.Contains(goal, "historical completed, failed, or canceled Run never prevents a new invocation") ||
 		!strings.Contains(goal, `"entrypoint":"engage-now"`) {
 		t.Fatalf("Agent conversation truthfulness contract missing from goal: %s", goal)
 	}
@@ -616,7 +625,7 @@ func TestAgentConversationGoalProjectsActiveWorkFromTheSameChannel(t *testing.T)
 	}
 	if !strings.Contains(goal, `"activeRuns":[`) || !strings.Contains(goal, `"id":"`+child.ID+`"`) ||
 		!strings.Contains(goal, `"goal":"Run the on-demand engagement operation"`) ||
-		!strings.Contains(goal, "report its real status instead of claiming that no Run exists") {
+		!strings.Contains(goal, "Only if matching work appears in ActiveRuns") {
 		t.Fatalf("active Run truth was not projected into Agent conversation goal: %s", goal)
 	}
 }
