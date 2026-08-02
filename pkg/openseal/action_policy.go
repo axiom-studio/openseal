@@ -28,6 +28,12 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	if input.Bound.Definition.ID == runtime.RunbookManagementSkillID && input.Bound.Action.Name == runtime.RunbookActionStart {
 		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "start reviewed Runbook activation"}, nil
 	}
+	// Conversation Run controls are validated against the durable owner and
+	// current revision before policy evaluation. They narrow or restore already
+	// reviewed work and never grant a new Skill, credential, or external scope.
+	if input.Bound.Definition.ID == runtime.RunManagementSkillID {
+		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "control owner-scoped Run"}, nil
+	}
 
 	deploymentID := strings.TrimSpace(input.Run.AssignedAgentID)
 	if deploymentID == "" && input.Run.Owner.Type == runtime.OwnerTypeAgent {

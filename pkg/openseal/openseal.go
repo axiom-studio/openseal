@@ -676,6 +676,8 @@ type (
 	ToolActionDispatcher               = runtime.ToolActionDispatcher
 	AgentBehaviorActionValidator       = runtime.AgentBehaviorActionValidator
 	AgentBehaviorActionDispatcher      = runtime.AgentBehaviorActionDispatcher
+	RunActionValidator                 = runtime.RunActionValidator
+	RunActionDispatcher                = runtime.RunActionDispatcher
 	RunbookActionValidator             = runtime.RunbookActionValidator
 	RunbookActionDispatcher            = runtime.RunbookActionDispatcher
 	TeamRoleActionValidator            = runtime.TeamRoleActionValidator
@@ -1288,8 +1290,11 @@ var (
 	NewProjectActionValidator              = runtime.NewProjectActionValidator
 	NewProjectActionDispatcher             = runtime.NewProjectActionDispatcher
 	AgentManagementSkill                   = runtime.AgentManagementSkill
+	RunManagementSkill                     = runtime.RunManagementSkill
 	NewAgentBehaviorActionValidator        = runtime.NewAgentBehaviorActionValidator
 	NewAgentBehaviorActionDispatcher       = runtime.NewAgentBehaviorActionDispatcher
+	NewRunActionValidator                  = runtime.NewRunActionValidator
+	NewRunActionDispatcher                 = runtime.NewRunActionDispatcher
 	RunbookManagementSkill                 = runtime.RunbookManagementSkill
 	NewRunbookActionValidator              = runtime.NewRunbookActionValidator
 	NewRunbookActionDispatcher             = runtime.NewRunbookActionDispatcher
@@ -1608,6 +1613,11 @@ const (
 	ProjectActionPause              = runtime.ProjectActionPause
 	AgentManagementSkillID          = runtime.AgentManagementSkillID
 	AgentManagementSkillVersion     = runtime.AgentManagementSkillVersion
+	RunManagementSkillID            = runtime.RunManagementSkillID
+	RunManagementSkillVersion       = runtime.RunManagementSkillVersion
+	RunActionPause                  = runtime.RunActionPause
+	RunActionResume                 = runtime.RunActionResume
+	RunActionCancel                 = runtime.RunActionCancel
 	AgentActionAmendBehavior        = runtime.AgentActionAmendBehavior
 	AgentActionListChannels         = runtime.AgentActionListChannels
 	AgentActionConfigureChannel     = runtime.AgentActionConfigureChannel
@@ -2170,6 +2180,7 @@ type Engine struct {
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
 	runbookManagementActions      bool
+	runManagementActions          bool
 	teamManagementActions         bool
 	skillManagementActions        bool
 	skillDiscovery                skill.DiscoveryProvider
@@ -2347,6 +2358,9 @@ func New(opts ...Option) (*Engine, error) {
 	}
 	if err := e.configureRunbookManagementActions(); err != nil {
 		return nil, fmt.Errorf("Runbook management action configuration: %w", err)
+	}
+	if err := e.configureRunManagementActions(); err != nil {
+		return nil, fmt.Errorf("Run management action configuration: %w", err)
 	}
 	if err := e.configureTeamManagementActions(); err != nil {
 		return nil, fmt.Errorf("Team management action configuration: %w", err)
@@ -2955,6 +2969,15 @@ func WithRunbookManagementActions() Option {
 	}
 }
 
+// WithRunManagementActions enables owner-scoped lifecycle controls for Runs
+// referenced by Agent and Team conversations.
+func WithRunManagementActions() Option {
+	return func(e *Engine) error {
+		e.runManagementActions = true
+		return nil
+	}
+}
+
 // WithTeamManagementActions enables the portable, governed Team action layer.
 // The Engine owns its Team registry, so embedding hosts never need to import
 // internal registry implementations or duplicate dispatcher composition.
@@ -3077,6 +3100,35 @@ func (e *Engine) configureRunbookManagementActions() error {
 	}
 	for index := range e.actionSupervisorSpecs {
 		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionSupervisorSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionSupervisorSpecs[index].dispatcher = dispatcher
+	}
+	return nil
+}
+
+func (e *Engine) configureRunManagementActions() error {
+	if !e.runManagementActions {
+		return nil
+	}
+	if err := e.skills.Register(context.Background(), runtime.RunManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+		return err
+	}
+	validator, err := runtime.NewRunActionValidator(e.store)
+	if err != nil {
+		return err
+	}
+	e.actionValidators = append(e.actionValidators, validator)
+	for index := range e.actionPoolSpecs {
+		dispatcher, dispatchErr := runtime.NewRunActionDispatcher(e.store, e.actionPoolSpecs[index].dispatcher)
+		if dispatchErr != nil {
+			return dispatchErr
+		}
+		e.actionPoolSpecs[index].dispatcher = dispatcher
+	}
+	for index := range e.actionSupervisorSpecs {
+		dispatcher, dispatchErr := runtime.NewRunActionDispatcher(e.store, e.actionSupervisorSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
