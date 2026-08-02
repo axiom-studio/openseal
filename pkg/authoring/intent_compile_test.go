@@ -105,6 +105,37 @@ func TestCompileAuthoringIntentOwnsScheduledRunbookStructure(t *testing.T) {
 	}
 }
 
+func TestCompileAuthoringIntentUsesAuditedScheduleInsteadOfProviderParaphrase(t *testing.T) {
+	intent := AuthoringIntent{
+		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
+		Name: "Scout", Purpose: "Scout communities",
+		Agents: []AuthoringAgentIntent{{
+			Key: "scout", Name: "Scout", Purpose: "Scout communities", Behavior: "Find useful discussions.",
+			Objectives: []AuthoringObjectiveIntent{{Key: "engagement", Title: "Community engagement", Outcome: "Engage usefully", Priority: 1}},
+			Operations: []AuthoringOperationIntent{{
+				Key: "scheduled-scout", Name: "Scheduled scout", Goal: "Scout every three hours",
+				ObjectiveKey: "engagement", Wake: AuthoringWakeSchedule,
+				Schedule: "every 3 hours between 08:00 and 20:00 local time", Approval: AuthoringApprovalByPolicy,
+			}},
+		}},
+	}
+
+	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
+		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
+		Value: RefinementProviderAnswerValue{Text: "every 3 hours between 08:00 and 20:00 UTC"},
+	}}}
+	generated, err := CompileAuthoringIntent(intent, GenerateRequest{
+		Mode: ModeCreate, Prompt: "Scout every three hours", Refinement: refinement,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := generated.Candidate.Agents[0].Runbook.Triggers["scheduled-scout"]
+	if trigger.Schedule == nil || trigger.Schedule.Cron != "0 00 8-20/3 * * *" || trigger.Schedule.Timezone != "UTC" {
+		t.Fatalf("compiled trigger = %#v", trigger)
+	}
+}
+
 func TestCompileAuthoringIntentBuildsTeamRolesAndAssignments(t *testing.T) {
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceTeam,
