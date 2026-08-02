@@ -526,6 +526,15 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 		if agentBinding == nil || agentBinding.Runner == nil {
 			return nil, ErrConversationCoordinationUnavailable
 		}
+		conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+		conversation, err := r.conversations.GetConversation(ctx, run.Scope, conversationID)
+		if err != nil {
+			return nil, err
+		}
+		activeRuns, err := r.activeConversationRuns(ctx, conversation)
+		if err != nil {
+			return nil, err
+		}
 		boundAgentRunner := agentBinding.Runner
 		return &TurnRunnerBinding{
 			Runner: TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
@@ -546,7 +555,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 			DeploymentID: agentBinding.DeploymentID,
 			DefinitionID: agentBinding.DefinitionID, DefinitionVersion: agentBinding.DefinitionVersion,
 			ModelProvider: agentBinding.ModelProvider, Model: agentBinding.Model,
-			ModelActions:      append([]capability.ModelAction(nil), agentBinding.ModelActions...),
+			ModelActions:      constrainConversationRunActions(agentBinding.ModelActions, activeRuns),
 			RunbookOperations: cloneHostedRunbookOperations(agentBinding.RunbookOperations),
 			PreparedRuntimes:  append([]PreparedSkillRuntime(nil), agentBinding.PreparedRuntimes...),
 			InputContextRefs:  append([]string(nil), agentBinding.InputContextRefs...),
@@ -805,6 +814,22 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 			},
 		}, nil
 	}
+	if completion, ok, completionErr := r.governedConversationOperationOutcome(ctx, input.Run); completionErr != nil {
+		return nil, completionErr
+	} else if ok {
+		message, replayed, postErr := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References, false)
+		if postErr != nil {
+			return nil, postErr
+		}
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Governed Agent operation resolved",
+			RunOutput: map[string]interface{}{
+				"conversationId": conversation.ID, "triggerMessageId": trigger.ID,
+				"messageId": message.ID, "replayed": replayed,
+				"resourceType": completion.ResourceType, "resourceId": completion.ResourceID,
+			},
+		}, nil
+	}
 	hostedRun := cloneAgentRun(input.Run)
 	hostedRun.Kind = RunKindAgentWork
 	hostedRun.AssignedAgentID = participantID
@@ -1016,7 +1041,7 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 	}
 	relevantRoots := make(map[string]bool)
 	for _, run := range runs {
-		if run == nil || run.Kind != RunKindConversation || isTerminalAgentRunStatus(run.Status) {
+		if run == nil || run.Kind != RunKindConversation {
 			continue
 		}
 		conversationID, _ := run.Context[conversationRunContextConversationID].(string)
@@ -1035,6 +1060,71 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 		})
 	}
 	return active, nil
+}
+
+// constrainConversationRunActions turns the current durable Run snapshot into
+// the model-facing run-control form. The model may select only an exact Run ID
+// that the kernel has just observed and for which that command is currently
+// valid; opaque IDs are never free-form text.
+func constrainConversationRunActions(actions []capability.ModelAction, active []agentConversationActiveRun) []capability.ModelAction {
+	result := make([]capability.ModelAction, 0, len(actions))
+	for _, action := range actions {
+		if action.SkillID != RunManagementSkillID {
+			result = append(result, action)
+			continue
+		}
+		ids := make([]interface{}, 0, len(active))
+		for _, run := range active {
+			if slicesContainsRunCommand(run.AvailableControls, action.Action) {
+				ids = append(ids, run.ID)
+			}
+		}
+		if len(ids) == 0 {
+			continue
+		}
+		projected := action
+		projected.InputSchema = deepCloneCheckpointMap(action.InputSchema)
+		properties, _ := projected.InputSchema["properties"].(map[string]interface{})
+		runID, _ := properties["runId"].(map[string]interface{})
+		runID["enum"] = ids
+		runID["description"] = "Select one exact current Run from the trusted ActiveRuns snapshot."
+		result = append(result, projected)
+	}
+	return result
+}
+
+// governedConversationOperationOutcome owns the terminal reply for an
+// operation started by this conversation Run. The child Run is the durable
+// receipt; a second model turn must not reinterpret a completed invocation as
+// a duplicate that was never started.
+func (r *ConversationRunTurnRunner) governedConversationOperationOutcome(ctx context.Context, run *AgentRun) (*governedConversationCompletion, bool, error) {
+	if r == nil || r.portfolio == nil || run == nil || run.Kind != RunKindConversation || run.LastAppliedTurn < 1 {
+		return nil, false, nil
+	}
+	children, err := r.portfolio.ListAgentRuns(ctx, AgentRunFilter{
+		Scope: run.Scope, Owner: &run.Owner, ParentRunID: run.ID, Order: AgentRunOrderCreatedDesc, Limit: 20,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	for _, child := range children {
+		if child == nil || strings.TrimSpace(child.Entrypoint) == "" || !isTerminalAgentRunStatus(child.Status) {
+			continue
+		}
+		label := "Operation “" + child.Entrypoint + "”"
+		content := label + " completed successfully."
+		switch child.Status {
+		case AgentRunStatusFailed:
+			content = label + " failed. Review the Run for the exact failed step and retry when ready."
+		case AgentRunStatusCanceled:
+			content = label + " was canceled."
+		}
+		return &governedConversationCompletion{
+			Content: content, ResourceType: runResourceType, ResourceID: child.ID,
+			References: []ConversationReference{{Kind: ConversationReferenceRun, ID: child.ID}},
+		}, true, nil
+	}
+	return nil, false, nil
 }
 
 func agentConversationResponseContent(outcome *TurnOutcome) string {
