@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 const (
@@ -830,6 +831,23 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 			},
 		}, nil
 	}
+	activeRuns, err := r.activeConversationRuns(ctx, conversation)
+	if err != nil {
+		return nil, err
+	}
+	if operation, arguments, requested := resolveExplicitConversationOperation(trigger.Content, runbookOperations); requested &&
+		!activeConversationOperationExists(activeRuns, operation.Entrypoint) {
+		return &TurnOutcome{
+			NextRunStatus: AgentRunStatusRunning,
+			OutputSummary: "Started: " + operation.Name,
+			ProposedRunbook: &TurnRunbookProposal{
+				Entrypoint: operation.Entrypoint,
+				Summary:    "Run " + operation.Name + " from the Agent channel request",
+				Arguments:  arguments,
+			},
+			RunOutput: map[string]interface{}{"summary": "Started: " + operation.Name},
+		}, nil
+	}
 	hostedRun := cloneAgentRun(input.Run)
 	hostedRun.Kind = RunKindAgentWork
 	hostedRun.AssignedAgentID = participantID
@@ -923,6 +941,7 @@ type agentConversationOperation struct {
 type agentConversationActiveRun struct {
 	ID                string         `json:"id"`
 	RootRunID         string         `json:"rootRunId"`
+	Entrypoint        string         `json:"entrypoint,omitempty"`
 	Status            AgentRunStatus `json:"status"`
 	Goal              string         `json:"goal"`
 	Source            RunSource      `json:"source"`
@@ -1059,11 +1078,61 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 			continue
 		}
 		active = append(active, agentConversationActiveRun{
-			ID: run.ID, RootRunID: run.RootRunID, Status: run.Status, Goal: run.Goal, Source: run.Source,
+			ID: run.ID, RootRunID: run.RootRunID, Entrypoint: run.Entrypoint, Status: run.Status, Goal: run.Goal, Source: run.Source,
 			Revision: run.Revision, AvailableControls: applicableAgentRunCommands(run),
 		})
 	}
 	return active, nil
+}
+
+// resolveExplicitConversationOperation recognizes a small, product-neutral
+// command grammar for reviewed operations. It does not infer an operation from
+// historical prose: the current user message must contain an invocation verb
+// and either name an offered operation or unambiguously refer to the sole
+// operation. Empty input is accepted only when the reviewed interface schema
+// accepts it; otherwise the normal hosted Turn gathers the required arguments.
+func resolveExplicitConversationOperation(content string, operations []HostedRunbookOperation) (HostedRunbookOperation, map[string]interface{}, bool) {
+	words := strings.FieldsFunc(strings.ToLower(content), func(value rune) bool {
+		return value < 'a' || value > 'z'
+	})
+	wordSet := make(map[string]bool, len(words))
+	for _, word := range words {
+		wordSet[word] = true
+	}
+	if !wordSet["run"] && !wordSet["start"] && !wordSet["execute"] && !wordSet["invoke"] && !wordSet["trigger"] {
+		return HostedRunbookOperation{}, nil, false
+	}
+	normalized := strings.Join(words, " ")
+	matches := make([]HostedRunbookOperation, 0, 1)
+	for _, operation := range operations {
+		entrypoint := strings.Join(strings.FieldsFunc(strings.ToLower(operation.Entrypoint), func(value rune) bool { return value < 'a' || value > 'z' }), " ")
+		name := strings.Join(strings.FieldsFunc(strings.ToLower(operation.Name), func(value rune) bool { return value < 'a' || value > 'z' }), " ")
+		if entrypoint != "" && strings.Contains(normalized, entrypoint) || name != "" && strings.Contains(normalized, name) {
+			matches = append(matches, operation)
+		}
+	}
+	if len(matches) == 0 && len(operations) == 1 &&
+		(wordSet["it"] || wordSet["operation"] || wordSet["workflow"] || wordSet["runbook"] || wordSet["now"]) {
+		matches = append(matches, operations[0])
+	}
+	if len(matches) != 1 {
+		return HostedRunbookOperation{}, nil, false
+	}
+	arguments := map[string]interface{}{}
+	if err := runbook.ValidateInterfaceInput(matches[0].InputSchema, arguments); err != nil {
+		return HostedRunbookOperation{}, nil, false
+	}
+	return matches[0], arguments, true
+}
+
+func activeConversationOperationExists(runs []agentConversationActiveRun, entrypoint string) bool {
+	entrypoint = strings.TrimSpace(entrypoint)
+	for _, run := range runs {
+		if strings.TrimSpace(run.Entrypoint) == entrypoint {
+			return true
+		}
+	}
+	return false
 }
 
 // constrainConversationRunActions turns the current durable Run snapshot into
