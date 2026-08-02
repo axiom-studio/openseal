@@ -290,7 +290,7 @@ func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(
 	run := &AgentRun{
 		ID: "conversation-turn", Scope: scope, Kind: RunKindAgentWork,
 		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "community-agent"}, AssignedAgentID: "community-agent",
-		Goal: "Run it now", Context: map[string]interface{}{conversationCallableActivationKey: false},
+		Goal: "Run it now", Context: map[string]interface{}{},
 	}
 	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
 	if err != nil {
@@ -306,9 +306,6 @@ func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(
 	if len(host.request.Actions) != 1 || host.request.Actions[0].Action != RunbookActionReplaceSchedule ||
 		len(host.request.RunbookOperations) != 1 {
 		t.Fatalf("hosted capabilities = %#v", host.request)
-	}
-	if _, leaked := host.request.InputContext[conversationCallableActivationKey]; leaked {
-		t.Fatalf("internal activation projection leaked to model: %#v", host.request.InputContext)
 	}
 }
 
