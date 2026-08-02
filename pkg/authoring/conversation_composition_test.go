@@ -20,6 +20,14 @@ type compositionCaptureGenerator struct {
 	payload []byte
 }
 
+func TestCanonicalRuntimeCompositionAdvertisesImplementedTriggerKinds(t *testing.T) {
+	capability := CanonicalRuntimeCompositionCapability()
+	if capability == nil || !containsRunbookTriggerKind(capability.Runbook.TriggerKinds, runbook.TriggerEvent) ||
+		!containsRunbookTriggerKind(capability.Runbook.TriggerKinds, runbook.TriggerSchedule) {
+		t.Fatalf("canonical Runbook trigger kinds = %#v", capability)
+	}
+}
+
 func (g *compositionCaptureGenerator) Generate(_ context.Context, request GenerateRequest) ([]byte, error) {
 	g.request = request
 	return g.payload, nil

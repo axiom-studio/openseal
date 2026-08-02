@@ -26,6 +26,7 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 	if err := validateAuthoringIntent(intent, request.Catalog); err != nil {
 		return GenerationResponse{}, err
 	}
+	intent = applyAuthoringScheduleAuthority(intent, request)
 	result := GenerationResponse{
 		SchemaVersion: AuthoringResultSchemaVersion,
 		Candidate:     WorkforceCandidate{Activation: deterministicAuthoringActivation(request)},
@@ -76,6 +77,67 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 	}
 	result.UnresolvedQuestions = questions
 	return result, nil
+}
+
+// applyAuthoringScheduleAuthority keeps the semantic form and the canonical
+// Runbook in one authority domain. In particular, an audited "on demand"
+// answer must remove provider-authored scheduled operations and schedule prose;
+// otherwise Studio can truthfully show no Trigger while the Agent definition
+// continues to claim that automatic work exists.
+func applyAuthoringScheduleAuthority(intent AuthoringIntent, request GenerateRequest) AuthoringIntent {
+	if parseScheduleIntent(scheduleIntentAuthorityText(request)).kind != scheduleIntentManual {
+		return intent
+	}
+	for index := range intent.Agents {
+		agentIntent := &intent.Agents[index]
+		operations := make([]AuthoringOperationIntent, 0, len(agentIntent.Operations))
+		for _, operation := range agentIntent.Operations {
+			if operation.Wake != AuthoringWakeSchedule {
+				operations = append(operations, operation)
+			}
+		}
+		agentIntent.Operations = operations
+		agentIntent.Behavior = removeAuthoringScheduleClaims(agentIntent.Behavior)
+		principles := make([]string, 0, len(agentIntent.OperatingPrinciples)+1)
+		for _, principle := range agentIntent.OperatingPrinciples {
+			if !looksLikeAuthoringScheduleClaim(principle) {
+				principles = append(principles, principle)
+			}
+		}
+		agentIntent.OperatingPrinciples = normalized(append(principles, "Operate only on demand; no automatic schedule is active."))
+	}
+	return intent
+}
+
+func removeAuthoringScheduleClaims(value string) string {
+	parts := strings.FieldsFunc(value, func(r rune) bool { return r == '.' || r == '\n' })
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		if looksLikeAuthoringScheduleClaim(trimmed) {
+			continue
+		}
+		kept = append(kept, trimmed)
+	}
+	return strings.Join(kept, ". ")
+}
+
+func looksLikeAuthoringScheduleClaim(value string) bool {
+	parsed := parseScheduleIntent(value)
+	if parsed.kind == scheduleIntentExact || parsed.kind == scheduleIntentAmbiguous {
+		return true
+	}
+	lower := strings.ToLower(value)
+	if containsAnyScheduleWord(lower, "schedule", "scheduled", "recurring", "hourly", "daily", "weekly", "cadence") {
+		return true
+	}
+	if !containsWord(lower, "every") && !containsWord(lower, "each") {
+		return false
+	}
+	return containsAnyScheduleWord(lower, "second", "seconds", "minute", "minutes", "hour", "hours", "day", "days", "week", "weeks")
 }
 
 // ProjectAuthoringIntent is the struct-to-form half of the semantic codec. It
