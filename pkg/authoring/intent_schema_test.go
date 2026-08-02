@@ -42,7 +42,7 @@ func TestAuthoringIntentSchemaConstrainsSemanticVocabularies(t *testing.T) {
 	}
 	payload, _ := json.Marshal(schema)
 	text := string(payload)
-	for _, expected := range []string{`"agent"`, `"team"`, `"workforce"`, `"on_demand"`, `"schedule"`, `"event"`, `"by_policy"`, `"conversation"`, `"approvals"`} {
+	for _, expected := range []string{`"agent"`, `"team"`, `"workforce"`, `"on_demand"`, `"schedule"`, `"event"`, `"by_policy"`, `"platform"`, `"channels"`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("semantic schema is missing %s", expected)
 		}
@@ -50,14 +50,14 @@ func TestAuthoringIntentSchemaConstrainsSemanticVocabularies(t *testing.T) {
 }
 
 func TestAuthoringIntentSchemaRejectsProseConversationPurpose(t *testing.T) {
-	payload := []byte(`{"schemaVersion":"openseal.authoring-intent/v3","kind":"agent","name":"Scout","purpose":"Scout communities","agents":[{"key":"scout","name":"Scout","purpose":"Scout communities","behavior":"Find useful discussions."}],"conversations":[{"key":"approvals","name":"Approval channel","ownerKey":"scout","provider":"slack","purposes":["Post proposed actions for human approval"],"replyInThread":true}]}`)
+	payload := []byte(`{"schemaVersion":"openseal.authoring-intent/v4","kind":"agent","name":"Scout","purpose":"Scout communities","agents":[{"key":"scout","name":"Scout","purpose":"Scout communities","behavior":"Find useful discussions."}],"conversations":[{"key":"approvals","name":"Approval channel","ownerKey":"scout","provider":"slack","purposes":["Post proposed actions for human approval"],"receiveMessages":false,"replyInThread":true}]}`)
 	if _, err := decodeAuthoringIntent(payload); err == nil {
 		t.Fatal("prose conversation purpose passed the typed provider form")
 	}
 }
 
 func TestAuthoringIntentSchemaRejectsBlankRequiredAgentAnswers(t *testing.T) {
-	payload := []byte(`{"schemaVersion":"openseal.authoring-intent/v3","kind":"agent","name":"Scout","purpose":"Scout communities","agents":[{"key":"scout","name":"Scout","purpose":"Scout communities","behavior":"   "}]}`)
+	payload := []byte(`{"schemaVersion":"openseal.authoring-intent/v4","kind":"agent","name":"Scout","purpose":"Scout communities","agents":[{"key":"scout","name":"Scout","purpose":"Scout communities","behavior":"   "}]}`)
 	if _, err := decodeAuthoringIntent(payload); err == nil {
 		t.Fatal("blank required Agent behavior passed the typed provider form")
 	}

@@ -22,6 +22,8 @@ Use a short stable lowercase key for each answer subject and reference only keys
 
 Objectives are durable outcomes. Operations are reusable ways to work toward one Objective. Use on_demand for callable work, schedule only when the user requested recurring work, and event only for a concrete requested event. Preserve the user's schedule wording in the schedule answer; OpenSeal compiles it or asks the user for missing timing details.
 
+For every operation, choose exactly where approval work is reviewed. Use approvalDelivery=platform with no approvalChannelKeys for the built-in product approval surface. Use approvalDelivery=channels and reference the exact declared conversation keys when the user asks for approval through Slack or another authorized conversation provider. Conversation receiveMessages controls ordinary inbound chat only; do not use it as a substitute for approval routing.
+
 Create a Team only when the user requested one or distinct collaborating roles require it. Every role must name its participating Agent keys. Keep a standalone Agent standalone.
 
 Clarifications contain only the natural question, why it blocks a sound proposal, and optional human-readable choices. OpenSeal owns the canonical question category, answer type, blocking scope, provenance, and validation.`
