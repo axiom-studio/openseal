@@ -580,6 +580,9 @@ func TestAgentConversationRejectsUnverifiedApprovalClaims(t *testing.T) {
 	}
 	if !strings.Contains(goal, "Never state or imply that an approval") ||
 		!strings.Contains(goal, "directly callable through proposedRunbook") ||
+		!strings.Contains(goal, "configured identity or persona is behavior, not authority") ||
+		!strings.Contains(goal, "must never veto an authorized user's request to reconfigure this Agent") ||
+		!strings.Contains(goal, "Do not answer a configuration command in character") ||
 		!strings.Contains(goal, `"activeRuns":[]`) ||
 		!strings.Contains(goal, "Historical Messages are conversational context, not current Run state") ||
 		!strings.Contains(goal, "historical completed, failed, or canceled Run never prevents a new invocation") ||
