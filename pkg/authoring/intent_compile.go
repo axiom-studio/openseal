@@ -64,6 +64,9 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 		return GenerationResponse{}, err
 	}
 	result.Candidate.ConversationEndpoints = endpoints
+	if err := compileAuthoringApprovalRouting(intent, agents, &result.Candidate, &formValues); err != nil {
+		return GenerationResponse{}, err
+	}
 	if len(formValues) > 0 {
 		result.Authoring.Values = formValues
 	}
@@ -117,6 +120,7 @@ func ProjectAuthoringIntent(candidate *WorkforceCandidate) *AuthoringIntent {
 				operation := AuthoringOperationIntent{
 					Key: authoringPortableKey(key), Name: contract.Description, Goal: contract.Description,
 					Wake: AuthoringWakeOnDemand, Approval: AuthoringApprovalByPolicy,
+					ApprovalDelivery: AuthoringApprovalDeliveryPlatform,
 				}
 				if step := definition.Runbook.Steps[start]; strings.TrimSpace(step.Name) != "" {
 					operation.Name = step.Name
@@ -143,6 +147,12 @@ func ProjectAuthoringIntent(candidate *WorkforceCandidate) *AuthoringIntent {
 				}
 				if definition.Authority.RequireApprovalAt != "" {
 					operation.Approval = AuthoringApprovalRequired
+				}
+				for _, destination := range definition.Authority.ApprovalDestinations {
+					operation.ApprovalChannelKeys = append(operation.ApprovalChannelKeys, destination.EndpointID)
+				}
+				if len(operation.ApprovalChannelKeys) > 0 {
+					operation.ApprovalDelivery = AuthoringApprovalDeliveryChannels
 				}
 				answer.Operations = append(answer.Operations, operation)
 			}
@@ -184,7 +194,7 @@ func ProjectAuthoringIntent(candidate *WorkforceCandidate) *AuthoringIntent {
 		}
 		result.Conversations = append(result.Conversations, AuthoringChannelIntent{
 			Key: endpoint.ID, Name: endpoint.Name, OwnerKey: ownerKey, Provider: endpointProvider(candidate, endpoint), Destination: endpoint.Address,
-			Purposes: authoringChannelPurposes(endpoint.Purposes), ReplyInThread: endpoint.Policy.ReplyMode == ConversationReplyThread,
+			ReceiveMessages: hasConversationEndpointPurpose(endpoint.Purposes, ConversationEndpointPurposeConversation), ReplyInThread: endpoint.Policy.ReplyMode == ConversationReplyThread,
 		})
 	}
 	return result
@@ -234,8 +244,18 @@ func validateAuthoringIntent(intent AuthoringIntent, catalog CapabilityCatalog) 
 		}
 		seenOperations := map[string]bool{}
 		for _, operation := range answer.Operations {
-			if !validAuthoringIntentKey(operation.Key) || seenOperations[operation.Key] || strings.TrimSpace(operation.Name) == "" || strings.TrimSpace(operation.Goal) == "" || !operation.Wake.Valid() || !operation.Approval.Valid() || !seenObjectives[operation.ObjectiveKey] {
+			delivery := operation.ApprovalDelivery
+			if delivery == "" {
+				delivery = AuthoringApprovalDeliveryPlatform
+			}
+			if !validAuthoringIntentKey(operation.Key) || seenOperations[operation.Key] || strings.TrimSpace(operation.Name) == "" || strings.TrimSpace(operation.Goal) == "" || !operation.Wake.Valid() || !operation.Approval.Valid() || !delivery.Valid() || !seenObjectives[operation.ObjectiveKey] {
 				return fmt.Errorf("Agent %s has an invalid operation answer %q", answer.Key, operation.Key)
+			}
+			if delivery == AuthoringApprovalDeliveryPlatform && len(operation.ApprovalChannelKeys) != 0 {
+				return fmt.Errorf("operation %s uses platform approval delivery and cannot reference approval channels", operation.Key)
+			}
+			if delivery == AuthoringApprovalDeliveryChannels && len(operation.ApprovalChannelKeys) == 0 {
+				return fmt.Errorf("operation %s uses channel approval delivery and requires at least one conversation key", operation.Key)
 			}
 			seenOperations[operation.Key] = true
 			for _, skillID := range operation.SkillCatalogIDs {
@@ -529,21 +549,11 @@ func compileAuthoringConversations(intent AuthoringIntent, agents map[string]*ag
 		} else {
 			return nil, nil, fmt.Errorf("conversation %s references unknown owner %q", answer.Key, answer.OwnerKey)
 		}
-		purposes := make([]ConversationEndpointPurpose, 0, len(answer.Purposes))
-		optionIDs := make([]string, 0, len(answer.Purposes))
-		for _, selectedPurpose := range answer.Purposes {
-			if !selectedPurpose.Valid() {
-				return nil, nil, fmt.Errorf("conversation %s has unsupported purpose %q", answer.Key, selectedPurpose)
-			}
-			purpose := ConversationEndpointPurpose(selectedPurpose)
-			if !hasConversationEndpointPurpose(purposes, purpose) {
-				purposes = append(purposes, purpose)
-				optionIDs = append(optionIDs, string(purpose))
-			}
-		}
-		if len(purposes) == 0 {
-			purposes = []ConversationEndpointPurpose{ConversationEndpointPurposeConversation}
-			optionIDs = []string{string(ConversationEndpointPurposeConversation)}
+		purposes := make([]ConversationEndpointPurpose, 0, 2)
+		optionIDs := make([]string, 0, 2)
+		if answer.ReceiveMessages {
+			purposes = append(purposes, ConversationEndpointPurposeConversation)
+			optionIDs = append(optionIDs, string(ConversationEndpointPurposeConversation))
 		}
 		replyMode := ConversationReplyChannel
 		if answer.ReplyInThread && containsConversationFeature(selection.adapter.Features, capability.ConversationFeatureThreads) {
@@ -564,12 +574,65 @@ func compileAuthoringConversations(intent AuthoringIntent, agents map[string]*ag
 	return endpoints, formValues, nil
 }
 
-func authoringChannelPurposes(values []ConversationEndpointPurpose) []AuthoringChannelPurpose {
-	result := make([]AuthoringChannelPurpose, 0, len(values))
-	for _, value := range values {
-		result = append(result, AuthoringChannelPurpose(value))
+// compileAuthoringApprovalRouting is the single semantic-reference to runtime-
+// authority boundary. Providers never author endpoint purposes and Agent
+// approval destinations independently, so those representations cannot drift.
+func compileAuthoringApprovalRouting(intent AuthoringIntent, agents map[string]*agent.AgentDefinition, candidate *WorkforceCandidate, formValues *[]AuthoringFormValue) error {
+	if candidate == nil {
+		return errors.New("approval routing requires a candidate")
 	}
-	return result
+	endpointByKey := make(map[string]*ConversationEndpointBlueprint, len(candidate.ConversationEndpoints))
+	for index := range candidate.ConversationEndpoints {
+		endpointByKey[candidate.ConversationEndpoints[index].ID] = &candidate.ConversationEndpoints[index]
+	}
+	selected := map[string]map[string]bool{}
+	for _, answer := range intent.Agents {
+		definition := agents[answer.Key]
+		if definition == nil {
+			return fmt.Errorf("approval routing references unknown Agent %q", answer.Key)
+		}
+		for _, operation := range answer.Operations {
+			if operation.ApprovalDelivery != AuthoringApprovalDeliveryChannels {
+				continue
+			}
+			for _, key := range operation.ApprovalChannelKeys {
+				key = strings.TrimSpace(key)
+				endpoint := endpointByKey[key]
+				if endpoint == nil || endpoint.Owner.Type != ConversationEndpointOwnerAgent || endpoint.Owner.ID != definition.ID {
+					return fmt.Errorf("operation %s approval channel %q does not belong to Agent %s", operation.Key, key, answer.Key)
+				}
+				if selected[definition.ID] == nil {
+					selected[definition.ID] = map[string]bool{}
+				}
+				selected[definition.ID][key] = true
+			}
+		}
+	}
+	for index := range candidate.ConversationEndpoints {
+		endpoint := &candidate.ConversationEndpoints[index]
+		if !selected[endpoint.Owner.ID][endpoint.ID] {
+			continue
+		}
+		if !hasConversationEndpointPurpose(endpoint.Purposes, ConversationEndpointPurposeApprovals) {
+			endpoint.Purposes = append(endpoint.Purposes, ConversationEndpointPurposeApprovals)
+		}
+	}
+	for _, definition := range candidate.Agents {
+		definition.Authority.ApprovalDestinations = nil
+		for _, endpoint := range candidate.ConversationEndpoints {
+			if endpoint.Owner.Type == ConversationEndpointOwnerAgent && endpoint.Owner.ID == definition.ID && selected[definition.ID][endpoint.ID] {
+				definition.Authority.ApprovalDestinations = append(definition.Authority.ApprovalDestinations, agent.ApprovalDestination{EndpointID: endpoint.ID})
+			}
+		}
+	}
+	for index := range *formValues {
+		value := &(*formValues)[index]
+		endpoint := endpointByKey[value.SubjectID]
+		if endpoint != nil && hasConversationEndpointPurpose(endpoint.Purposes, ConversationEndpointPurposeApprovals) && !containsExactString(value.OptionIDs, string(ConversationEndpointPurposeApprovals)) {
+			value.OptionIDs = append(value.OptionIDs, string(ConversationEndpointPurposeApprovals))
+		}
+	}
+	return nil
 }
 
 func selectedSkillRisk(skill SkillCapability, actions []string) capability.RiskLevel {

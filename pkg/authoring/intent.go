@@ -2,7 +2,7 @@ package authoring
 
 import "github.com/axiom-studio/openseal/internal/domaincontract"
 
-const AuthoringIntentSchemaVersion = "openseal.authoring-intent/v3"
+const AuthoringIntentSchemaVersion = "openseal.authoring-intent/v4"
 
 // AuthoringResourceKind is the product resource shape requested by the user.
 // It is intentionally semantic: the compiler, not the model, constructs the
@@ -112,16 +112,36 @@ type AuthoringObjectiveIntent struct {
 }
 
 type AuthoringOperationIntent struct {
-	Key             string                  `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
-	Name            string                  `json:"name" jsonschema:"minLength=1,pattern=\\S"`
-	Goal            string                  `json:"goal" jsonschema:"minLength=1,pattern=\\S"`
-	ObjectiveKey    string                  `json:"objectiveKey" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
-	Wake            AuthoringOperationWake  `json:"wake"`
-	Schedule        string                  `json:"schedule,omitempty"`
-	EventType       string                  `json:"eventType,omitempty"`
-	SkillCatalogIDs []string                `json:"skillCatalogIds,omitempty"`
-	Approval        AuthoringApprovalIntent `json:"approval"`
-	ReportProgress  bool                    `json:"reportProgress"`
+	Key                 string                    `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Name                string                    `json:"name" jsonschema:"minLength=1,pattern=\\S"`
+	Goal                string                    `json:"goal" jsonschema:"minLength=1,pattern=\\S"`
+	ObjectiveKey        string                    `json:"objectiveKey" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Wake                AuthoringOperationWake    `json:"wake"`
+	Schedule            string                    `json:"schedule,omitempty"`
+	EventType           string                    `json:"eventType,omitempty"`
+	SkillCatalogIDs     []string                  `json:"skillCatalogIds,omitempty"`
+	Approval            AuthoringApprovalIntent   `json:"approval"`
+	ApprovalDelivery    AuthoringApprovalDelivery `json:"approvalDelivery"`
+	ApprovalChannelKeys []string                  `json:"approvalChannelKeys,omitempty"`
+	ReportProgress      bool                      `json:"reportProgress"`
+}
+
+// AuthoringApprovalDelivery makes the reviewed approval surface explicit.
+// Channel keys are semantic references which the compiler resolves into the
+// one canonical endpoint-purpose and Agent-authority relationship.
+type AuthoringApprovalDelivery string
+
+const (
+	AuthoringApprovalDeliveryPlatform AuthoringApprovalDelivery = "platform"
+	AuthoringApprovalDeliveryChannels AuthoringApprovalDelivery = "channels"
+)
+
+func (AuthoringApprovalDelivery) ContractValues() []string {
+	return []string{string(AuthoringApprovalDeliveryPlatform), string(AuthoringApprovalDeliveryChannels)}
+}
+
+func (delivery AuthoringApprovalDelivery) Valid() bool {
+	return domaincontract.Allows(string(delivery), delivery)
 }
 
 type AuthoringTeamIntent struct {
@@ -143,31 +163,13 @@ type AuthoringRoleIntent struct {
 }
 
 type AuthoringChannelIntent struct {
-	Key           string                    `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
-	Name          string                    `json:"name" jsonschema:"minLength=1,pattern=\\S"`
-	OwnerKey      string                    `json:"ownerKey" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
-	Provider      string                    `json:"provider" jsonschema:"minLength=1,pattern=\\S"`
-	Destination   string                    `json:"destination,omitempty"`
-	Purposes      []AuthoringChannelPurpose `json:"purposes"`
-	ReplyInThread bool                      `json:"replyInThread"`
-}
-
-// AuthoringChannelPurpose is the small semantic form control for why a
-// conversation endpoint exists. Natural descriptions belong in Name; the
-// provider chooses only these compiler-supported behaviors.
-type AuthoringChannelPurpose string
-
-const (
-	AuthoringChannelConversation AuthoringChannelPurpose = "conversation"
-	AuthoringChannelApprovals    AuthoringChannelPurpose = "approvals"
-)
-
-func (AuthoringChannelPurpose) ContractValues() []string {
-	return []string{string(AuthoringChannelConversation), string(AuthoringChannelApprovals)}
-}
-
-func (purpose AuthoringChannelPurpose) Valid() bool {
-	return domaincontract.Allows(string(purpose), purpose)
+	Key             string `json:"key" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Name            string `json:"name" jsonschema:"minLength=1,pattern=\\S"`
+	OwnerKey        string `json:"ownerKey" jsonschema:"pattern=^[a-z][a-z0-9-]{0\\,63}$"`
+	Provider        string `json:"provider" jsonschema:"minLength=1,pattern=\\S"`
+	Destination     string `json:"destination,omitempty"`
+	ReceiveMessages bool   `json:"receiveMessages"`
+	ReplyInThread   bool   `json:"replyInThread"`
 }
 
 // AuthoringClarification is deliberately prose-level. OpenSeal maps it to a
