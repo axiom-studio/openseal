@@ -12,14 +12,56 @@ import (
 )
 
 type callbackHostStub struct {
-	result *CallbackHostResult
-	err    error
-	calls  int
+	result  *CallbackHostResult
+	err     error
+	calls   int
+	request CallbackHostRequest
 }
 
-func (h *callbackHostStub) NormalizeCallback(_ context.Context, _ CallbackHostRequest) (*CallbackHostResult, error) {
+func (h *callbackHostStub) NormalizeCallback(_ context.Context, request CallbackHostRequest) (*CallbackHostResult, error) {
 	h.calls++
+	h.request = request
 	return h.result, h.err
+}
+
+func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog := newCallbackCatalog(t, ctx, store)
+	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
+
+	current, err := catalog.GetDefinition(ctx, "skill-slack", "2.2.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := *current
+	definition.Version = "2.2.1"
+	if err := catalog.Register(ctx, &definition); err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.Bind(ctx, &skill.Binding{
+		ID: "slack", Scope: skill.ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "agent-one",
+		SkillID: definition.ID, SkillVersion: definition.Version, EnabledCallbackAdapters: []string{"interactions"},
+		MaximumRisk: skill.RiskLevelRead, Revision: 2,
+		Credentials: map[string]skill.CredentialReference{
+			"signing_secret": {Kind: "slack_signing_secret", ID: "vault-signing-secret"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	host := &callbackHostStub{result: &CallbackHostResult{StatusCode: http.StatusOK}}
+	service := NewCallbackIngressService(store, catalog, nil)
+	if _, err := service.Receive(ctx, CallbackPublicRequest{
+		Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("signed-upgrade"),
+	}, host); err != nil {
+		t.Fatal(err)
+	}
+	if host.request.Adapter == nil || host.request.Adapter.Binding == nil || host.request.Adapter.Binding.SkillVersion != "2.2.1" {
+		t.Fatalf("resolved callback adapter = %#v", host.request.Adapter)
+	}
+	if registration.Adapter.SkillVersion != "2.2.0" {
+		t.Fatalf("test requires an unchanged durable registration, got %#v", registration.Adapter)
+	}
 }
 
 func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) {
