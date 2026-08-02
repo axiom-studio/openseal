@@ -267,6 +267,7 @@ type ExternalConversationEndpointStore interface {
 
 type ExternalConversationAdapterResolver interface {
 	ResolveConversationAdapter(context.Context, skill.ScopeReference, string, string, string, string, ...skill.BindingReference) (*skill.BoundConversationAdapter, error)
+	ResolveConversationAdapterBinding(context.Context, skill.ScopeReference, string, string, string) (*skill.BoundConversationAdapter, error)
 }
 
 type ExternalConversationEndpointService struct {
@@ -413,15 +414,14 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 
 func (s *ExternalConversationEndpointService) resolveAdapter(ctx context.Context, endpoint *ExternalConversationEndpoint) (*skill.BoundConversationAdapter, error) {
 	ref := endpoint.Adapter
-	resolved, err := s.resolver.ResolveConversationAdapter(
+	resolved, err := s.resolver.ResolveConversationAdapterBinding(
 		ctx, skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID,
-		ref.SkillID, ref.SkillVersion, ref.AdapterID, skill.BindingReference{ID: ref.BindingID, Revision: ref.BindingRevision},
+		ref.BindingID, ref.AdapterID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("%w: resolve exact Skill adapter: %v", ErrInvalidExternalConversation, err)
 	}
-	if resolved.Binding.SourceIdentity != ref.SourceIdentity ||
-		(endpoint.Provider != "" && resolved.Adapter.Provider != endpoint.Provider) ||
+	if (endpoint.Provider != "" && resolved.Adapter.Provider != endpoint.Provider) ||
 		!containsConversationEndpointMode(resolved.Adapter.EndpointModes, endpoint.Mode) {
 		return nil, fmt.Errorf("%w: exact Skill adapter does not match endpoint", ErrInvalidExternalConversation)
 	}

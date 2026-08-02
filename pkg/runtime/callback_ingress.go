@@ -213,12 +213,11 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 		return nil, fmt.Errorf("%w: callback is not active", ErrCallbackRegistrationConflict)
 	}
 	ref := registration.Adapter
-	adapter, err := s.resolver.ResolveCallbackAdapter(
+	adapter, err := s.resolver.ResolveCallbackAdapterBinding(
 		ctx, skill.ScopeReference{Kind: registration.Scope.Kind, ID: registration.Scope.ID}, registration.DeploymentID,
-		ref.SkillID, ref.SkillVersion, ref.AdapterID,
-		skill.BindingReference{ID: ref.BindingID, Revision: ref.BindingRevision},
+		ref.BindingID, ref.AdapterID,
 	)
-	if err != nil || adapter == nil || adapter.Binding == nil || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
+	if err != nil || adapter == nil || adapter.Binding == nil ||
 		adapter.Adapter.Provider != registration.Provider {
 		return nil, fmt.Errorf("%w: exact callback Skill adapter is unavailable or stale", ErrCallbackRegistrationConflict)
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func TestExternalConversationEndpointPinsExactSkillOwnedAdapter(t *testing.T) {
+func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	service := NewExternalConversationEndpointService(store, catalog)
@@ -73,7 +73,7 @@ func TestExternalConversationEndpointPinsExactSkillOwnedAdapter(t *testing.T) {
 		t.Fatalf("upgraded endpoint = %#v, %v", upgraded, err)
 	}
 
-	_, err = service.Create(ctx, CreateExternalConversationEndpointRequest{
+	following, err := service.Create(ctx, CreateExternalConversationEndpointRequest{
 		ID: "stale", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Stale", Adapter: ExternalConversationAdapterReference{
 			SkillID: "slack", SkillVersion: "1.0.0", BindingID: "slack", BindingRevision: 2, AdapterID: "conversations",
@@ -86,8 +86,8 @@ func TestExternalConversationEndpointPinsExactSkillOwnedAdapter(t *testing.T) {
 			IgnoreBots:       true,
 		},
 	})
-	if !errors.Is(err, ErrInvalidExternalConversation) {
-		t.Fatalf("stale binding error = %v", err)
+	if err != nil || following.Adapter.BindingID != nextBinding.ID {
+		t.Fatalf("binding-following endpoint = %#v, %v", following, err)
 	}
 
 	_, err = service.Create(ctx, CreateExternalConversationEndpointRequest{
