@@ -99,8 +99,11 @@ func scheduleIntentAuthorityText(request GenerateRequest) string {
 
 func parseScheduleIntent(value string) scheduleIntent {
 	lower := strings.ToLower(value)
+	// Explicit schedule negation owns the whole request. Phrases such as "on
+	// demand" do not: a workforce may legitimately expose one manual operation
+	// and a separate recurring operation, so those softer modality phrases are
+	// considered only after every exact recurring form below.
 	if containsAnySchedulePhrase(lower,
-		"manual objective", "manual execution", "run manually", "only manually", "on demand", "when asked",
 		"do not schedule", "don't schedule", "no schedule", "without a schedule", "not recurring",
 		"no recurring", "without recurring", "non recurring",
 	) {
@@ -196,6 +199,12 @@ func parseScheduleIntent(value string) scheduleIntent {
 			}
 		}
 		return scheduleIntent{kind: scheduleIntentAmbiguous}
+	}
+
+	if containsAnySchedulePhrase(lower,
+		"manual objective", "manual execution", "run manually", "only manually", "on demand", "when asked",
+	) {
+		return scheduleIntent{kind: scheduleIntentManual}
 	}
 
 	if containsAnyScheduleWord(lower, "recurring", "recurrently", "regularly", "periodically", "scheduled", "schedule", "cadence", "continuously", "continuous") {
