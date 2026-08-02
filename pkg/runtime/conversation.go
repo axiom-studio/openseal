@@ -223,6 +223,10 @@ const (
 	ConversationReferenceArtifact       ConversationReferenceKind = "artifact"
 	ConversationReferenceActivity       ConversationReferenceKind = "activity"
 	ConversationReferenceExternalSource ConversationReferenceKind = "external_source"
+	// ConversationReferenceAgentControl identifies the one kernel-owned control
+	// channel attached to an Agent deployment. It is a durable command and audit
+	// surface, not an Objective or an implementation-specific settings page.
+	ConversationReferenceAgentControl ConversationReferenceKind = "agent_control"
 )
 
 type ConversationReference struct {
@@ -235,7 +239,7 @@ func (r ConversationReference) Validate() error {
 	switch r.Kind {
 	case ConversationReferenceObjective, ConversationReferenceProject, ConversationReferenceRun, ConversationReferenceRequest,
 		ConversationReferenceApproval, ConversationReferenceArtifact, ConversationReferenceActivity,
-		ConversationReferenceExternalSource:
+		ConversationReferenceExternalSource, ConversationReferenceAgentControl:
 	default:
 		return fmt.Errorf("%w: invalid reference kind %q", ErrInvalidConversation, r.Kind)
 	}

@@ -35,6 +35,23 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	controlChannels, err := engine.ListConversations(ctx, ConversationFilter{
+		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID},
+	})
+	if err != nil || len(controlChannels) != 1 || controlChannels[0].Title != "Agent control" ||
+		controlChannels[0].Origin == nil || controlChannels[0].Origin.Kind != ConversationReferenceAgentControl ||
+		controlChannels[0].Origin.ID != deployment.ID {
+		t.Fatalf("Agent control channel = %#v, %v", controlChannels, err)
+	}
+	if _, err := engine.GetAgentDeployment(ctx, scope, deployment.ID); err != nil {
+		t.Fatal(err)
+	}
+	reconciledChannels, err := engine.ListConversations(ctx, ConversationFilter{
+		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID},
+	})
+	if err != nil || len(reconciledChannels) != 1 {
+		t.Fatalf("Agent control channel reconciliation duplicated channels: %#v, %v", reconciledChannels, err)
+	}
 	deployed, activation, err := engine.ActivateAgentDefinition(ctx, scope, deployment.ID, "1.1.0", deployment.Revision, "user", "admin", "evaluation passed")
 	if err != nil || deployed.ActiveVersion != "1.1.0" || activation.FromVersion != "1.0.0" {
 		t.Fatalf("public rollout = %#v %#v, %v", deployed, activation, err)
