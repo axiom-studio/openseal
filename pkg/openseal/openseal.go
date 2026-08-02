@@ -5,6 +5,8 @@ package openseal
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -4695,13 +4697,18 @@ func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment 
 		Scope:          scope,
 		Owner:          runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deployment.ID},
 		Title:          "Agent control",
-		Origin:         &runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentControl, ID: deployment.ID},
+		Origin:         &runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentControl, ID: agentControlReferenceID(deployment.ID)},
 		IdempotencyKey: "agent-control:" + deployment.ID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ensure Agent control channel for %s: %w", deployment.ID, err)
 	}
 	return conversation, nil
+}
+
+func agentControlReferenceID(deploymentID string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(deploymentID)))
+	return "agent-" + hex.EncodeToString(digest[:16])
 }
 
 func (e *Engine) UpdateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
