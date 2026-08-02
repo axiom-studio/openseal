@@ -2,6 +2,7 @@ package authoring
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
@@ -133,6 +134,50 @@ func TestCompileAuthoringIntentUsesAuditedScheduleInsteadOfProviderParaphrase(t 
 	trigger := generated.Candidate.Agents[0].Runbook.Triggers["scheduled-scout"]
 	if trigger.Schedule == nil || trigger.Schedule.Cron != "0 00 8-20/3 * * *" || trigger.Schedule.Timezone != "UTC" {
 		t.Fatalf("compiled trigger = %#v", trigger)
+	}
+}
+
+func TestCompileAuthoringIntentOnDemandAnswerRemovesScheduledOperationAndClaims(t *testing.T) {
+	intent := AuthoringIntent{
+		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
+		Name: "Scout", Purpose: "Scout communities",
+		Agents: []AuthoringAgentIntent{{
+			Key: "scout", Name: "Scout", Purpose: "Scout communities",
+			Behavior:            "Find useful discussions. Run every three hours between 08:00 and 20:00 UTC.",
+			OperatingPrinciples: []string{"Be accurate", "Run every three hours between 08:00 and 20:00 UTC"},
+			Objectives:          []AuthoringObjectiveIntent{{Key: "engagement", Title: "Community engagement", Outcome: "Engage usefully", Priority: 1}},
+			Operations: []AuthoringOperationIntent{
+				{Key: "engage", Name: "Engage now", Goal: "Engage on demand", ObjectiveKey: "engagement", Wake: AuthoringWakeOnDemand, Approval: AuthoringApprovalByPolicy},
+				{Key: "scheduled-scout", Name: "Scheduled scout", Goal: "Scout every three hours", ObjectiveKey: "engagement", Wake: AuthoringWakeSchedule, Schedule: "every 3 hours between 08:00 and 20:00 UTC", Approval: AuthoringApprovalByPolicy},
+			},
+		}},
+	}
+	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
+		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
+		Value: RefinementProviderAnswerValue{Text: "on demand"},
+	}}}
+	request := GenerateRequest{Mode: ModeCreate, Prompt: "Create a community scout", Refinement: refinement}
+	if parsed := parseScheduleIntent(scheduleIntentAuthorityText(request)); parsed.kind != scheduleIntentManual {
+		t.Fatalf("schedule authority = %#v", parsed)
+	}
+	if got := removeAuthoringScheduleClaims(intent.Agents[0].Behavior); strings.Contains(strings.ToLower(got), "every three hours") {
+		t.Fatalf("filtered behavior = %q", got)
+	}
+	generated, err := CompileAuthoringIntent(intent, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := generated.Candidate.Agents[0]
+	if definition.Runbook == nil || len(definition.Runbook.Entrypoints) != 1 || definition.Runbook.Entrypoints["engage"] == "" || len(definition.Runbook.Triggers) != 0 {
+		t.Fatalf("manual Runbook = %#v", definition.Runbook)
+	}
+	if strings.Contains(strings.ToLower(definition.SystemPrompt), "every three hours") {
+		t.Fatalf("manual system prompt retains schedule claim: %q", definition.SystemPrompt)
+	}
+	for _, principle := range definition.OperatingPrinciples {
+		if strings.Contains(strings.ToLower(principle), "every three hours") {
+			t.Fatalf("manual operating principles retain schedule claim: %#v", definition.OperatingPrinciples)
+		}
 	}
 }
 

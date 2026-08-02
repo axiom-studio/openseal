@@ -111,7 +111,7 @@ func CanonicalRuntimeCompositionCapability() *RuntimeCompositionCapability {
 			CanonicalReply: true,
 		},
 		Runbook: RunbookRuntimeCapability{
-			TriggerKinds: []runbook.TriggerKind{runbook.TriggerEvent},
+			TriggerKinds: []runbook.TriggerKind{runbook.TriggerEvent, runbook.TriggerSchedule},
 			StepKinds: []runbook.StepKind{
 				runbook.StepAction, runbook.StepDecision, runbook.StepDelegate, runbook.StepEnd,
 				runbook.StepForEach, runbook.StepFork, runbook.StepJoin, runbook.StepLoopReturn,
@@ -602,7 +602,7 @@ func uniqueRunbookTriggerKinds(values []runbook.TriggerKind) bool {
 	for index, value := range values {
 		stringsValue[index] = string(value)
 	}
-	return uniqueEnumStrings(stringsValue, []string{string(runbook.TriggerEvent)})
+	return uniqueEnumStrings(stringsValue, []string{string(runbook.TriggerEvent), string(runbook.TriggerSchedule)})
 }
 
 func uniqueRunbookStepKinds(values []runbook.StepKind) bool {
