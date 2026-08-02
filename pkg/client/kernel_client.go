@@ -102,6 +102,7 @@ type KernelClient interface {
 // connected to an older or deliberately minimal kernel remain valid.
 type RunbookExecutionAuditClient interface {
 	GetRunbookExecutionAudit(context.Context, runtime.Scope, string) (*runtime.RunbookExecutionAudit, error)
+	GetRunExecutionAudit(context.Context, runtime.Scope, string) (*runtime.RunExecutionAudit, error)
 }
 
 var _ RunbookExecutionAuditClient = (*KernelHTTPClient)(nil)
@@ -1246,6 +1247,16 @@ func (c *KernelHTTPClient) GetRunbookExecutionAudit(ctx context.Context, scope r
 	query := scopeQuery(scope)
 	var value runtime.RunbookExecutionAudit
 	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "/runbook-audit?" + query.Encode()
+	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
+func (c *KernelHTTPClient) GetRunExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunExecutionAudit, error) {
+	query := scopeQuery(scope)
+	var value runtime.RunExecutionAudit
+	path := "/api/v1/agent-runs/" + url.PathEscape(strings.TrimSpace(runID)) + "/execution-audit?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
 		return nil, err
 	}
