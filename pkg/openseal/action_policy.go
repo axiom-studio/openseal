@@ -42,11 +42,6 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	if deploymentID == "" {
 		return e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
 	}
-	// Team-owned bindings are governed by Team role grants and approval policy;
-	// an assigned Agent's personal standing grants cannot widen that authority.
-	if bindingOwner := strings.TrimSpace(input.Bound.Binding.DeploymentID); bindingOwner != "" && bindingOwner != deploymentID {
-		return e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
-	}
 	scope := capability.ScopeReference{Kind: input.Run.Scope.Kind, ID: input.Run.Scope.ID}
 	deployment, err := e.agents.GetDeployment(ctx, scope, deploymentID)
 	if err != nil || deployment == nil {
@@ -55,6 +50,15 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	definition, err := e.agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if err != nil || definition == nil {
 		return e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
+	}
+	// A shared or Team-owned binding must not inherit an assigned Agent's
+	// standing grants. It does, however, still use that Agent's reviewed
+	// approval delivery and timeout policy. Returning the default decision here
+	// used to discard those destinations and strand otherwise valid approvals
+	// inside the platform with no configured delivery edge.
+	bindingOwnedByAgent := true
+	if bindingOwner := strings.TrimSpace(input.Bound.Binding.DeploymentID); bindingOwner != "" && bindingOwner != deploymentID {
+		bindingOwnedByAgent = false
 	}
 
 	// Agent behavior amendments are proposals about the durable worker itself.
@@ -65,7 +69,7 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	// what the Agent may change on its own.
 	requiresBehaviorReview := input.Bound.Definition.ID == runtime.AgentManagementSkillID &&
 		(input.Bound.Action.Name == runtime.AgentActionAmendBehavior || input.Bound.Action.Name == runtime.AgentActionConfigureChannel)
-	if !requiresBehaviorReview {
+	if !requiresBehaviorReview && bindingOwnedByAgent {
 		if grant := matchingStandingGrant(definition.Authority.StandingGrants, input); grant != nil {
 			return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "standing authority " + grant.ID}, nil
 		}

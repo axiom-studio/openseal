@@ -3,6 +3,8 @@ package openseal
 import (
 	"context"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/agent"
 )
 
 func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
@@ -143,6 +145,52 @@ func TestAgentStandingAuthorityAllowsOnlyExactReviewedActionScope(t *testing.T) 
 	})
 	if err != nil || wrongOperation.Disposition != ActionDispositionRequireApproval {
 		t.Fatalf("wrong operation = %#v, %v", wrongOperation, err)
+	}
+}
+
+func TestAgentApprovalDeliverySurvivesSharedSkillBinding(t *testing.T) {
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
+		ID: "reviewer", Version: "1.0.0", DisplayName: "Reviewer", Purpose: "Review governed work", SystemPrompt: "Review carefully.",
+		SkillRequirements: []AgentSkillRequirement{{SkillID: "shared-publisher", RequiredActions: []string{"publish"}}},
+		Authority: AgentAuthorityPolicy{
+			MaximumRisk: SkillRiskExternal, AllowedSkillIDs: []string{"shared-publisher"}, MaxConcurrentRuns: 1,
+			ApprovalDestinations: []agent.ApprovalDestination{{EndpointID: "conversation-endpoint:slack-approvals"}},
+			StandingGrants:       []AgentStandingActionGrant{{ID: "publish", SkillID: "shared-publisher", Action: "publish"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = engine.CreateAgentDeployment(ctx, &AgentDeployment{
+		ID: "reviewer", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: AgentRolloutActive, Environment: "test", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "reviewed approval delivery")
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{ID: "run-one", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reviewer"}, AssignedAgentID: "reviewer"}
+	decision, err := engine.evaluateAgentActionAuthority(ctx, ActionPolicyInput{
+		Run: run,
+		Bound: &BoundSkillAction{
+			Definition: &SkillDefinition{ID: "shared-publisher", Version: "1.0.0"},
+			Action:     SkillAction{Name: "publish", Risk: SkillRiskExternal, SideEffect: SkillSideEffectExternal},
+			Binding:    &SkillBinding{ID: "shared-binding", DeploymentID: "team:shared", SkillID: "shared-publisher", SkillVersion: "1.0.0"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Disposition != ActionDispositionRequireApproval {
+		t.Fatalf("shared binding disposition = %s, want require_approval", decision.Disposition)
+	}
+	if len(decision.ApprovalDestinations) != 1 || decision.ApprovalDestinations[0].EndpointID != "conversation-endpoint:slack-approvals" {
+		t.Fatalf("approval destinations = %#v", decision.ApprovalDestinations)
 	}
 }
 
