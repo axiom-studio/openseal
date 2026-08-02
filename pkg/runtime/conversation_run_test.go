@@ -471,13 +471,18 @@ func TestConversationRunTurnRunnerExecutesAgentOwnedChannelThroughBoundAgent(t *
 		if run.Kind != RunKindAgentWork || run.AssignedAgentID != "agent-42" {
 			t.Fatalf("hosted Agent projection = %#v", run)
 		}
+		if callable, present := run.Context[conversationCallableActivationKey].(bool); !present || callable {
+			t.Fatalf("conversation callable activation projection = %#v", run.Context)
+		}
 		return &TurnRunnerBinding{
 			DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "7", ModelProvider: "host", Model: "agent-model",
-			ModelActions:     []capability.ModelAction{{Name: "openseal.objectives.create", SkillID: "openseal.objectives", Version: "1.0.0", Action: "create", BindingID: "bundled:objectives", BindingRevision: 1}},
-			InputContextRefs: []string{"skill:summarize@1"}, BudgetReservation: BudgetUsage{Turns: 1},
+			ModelActions:      []capability.ModelAction{{Name: "openseal.objectives.create", SkillID: "openseal.objectives", Version: "1.0.0", Action: "create", BindingID: "bundled:objectives", BindingRevision: 1}},
+			RunbookOperations: []HostedRunbookOperation{{Entrypoint: "release-now", Name: "Release now", Description: "Run the release operation"}},
+			InputContextRefs:  []string{"skill:summarize@1"}, BudgetReservation: BudgetUsage{Turns: 1},
 			Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
 				if input.Run.Kind != RunKindAgentWork || input.Run.AssignedAgentID != run.AssignedAgentID ||
-					!strings.Contains(input.Run.Goal, "Summarize the release evidence") {
+					!strings.Contains(input.Run.Goal, "Summarize the release evidence") ||
+					!strings.Contains(input.Run.Goal, `"entrypoint":"release-now"`) {
 					t.Fatalf("bound Agent runner input = %#v", input.Run)
 				}
 				return &TurnOutcome{
@@ -563,12 +568,15 @@ func TestAgentConversationRejectsUnverifiedApprovalClaims(t *testing.T) {
 
 	conversation := &Conversation{ID: "channel-1", Title: "Operations"}
 	trigger := &ChannelMessage{ID: "message-1"}
-	goal, err := (&ConversationRunTurnRunner{}).agentConversationGoal(t.Context(), conversation, trigger, nil)
+	goal, err := (&ConversationRunTurnRunner{}).agentConversationGoal(t.Context(), conversation, trigger, nil, []HostedRunbookOperation{{
+		Entrypoint: "engage-now", Name: "Engage now", Description: "Run the reviewed engagement operation",
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(goal, "Never state or imply that an approval") ||
-		!strings.Contains(goal, "proposes the corresponding governed action through proposedActions") {
+		!strings.Contains(goal, "directly callable through proposedRunbook") ||
+		!strings.Contains(goal, `"entrypoint":"engage-now"`) {
 		t.Fatalf("Agent conversation truthfulness contract missing from goal: %s", goal)
 	}
 }

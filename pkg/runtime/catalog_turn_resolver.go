@@ -143,10 +143,14 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		prepared = append(prepared, teamPrepared...)
 		contextRefs = append(contextRefs, teamContextRefs...)
 	}
+	runbookOperations := projectCallableRunbookOperations(definition.Runbook)
+	if callableActivation, known := run.Context[conversationCallableActivationKey].(bool); known && !callableActivation && len(runbookOperations) > 0 {
+		actions = withoutRunbookActivationStart(actions)
+	}
 	base := TurnRunnerBinding{
 		DeploymentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		ModelActions: actions, PreparedRuntimes: prepared, InputContextRefs: contextRefs,
-		RunbookOperations: projectCallableRunbookOperations(definition.Runbook),
+		RunbookOperations: runbookOperations,
 		BudgetReservation: BudgetUsage{Turns: 1},
 	}
 	if delegatedFromCurrentRunbook(run, definition.Runbook) {
@@ -217,6 +221,17 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		base.Runner = &acceptedAgentRequestExecutionTurnRunner{inner: runner}
 	}
 	return &base, nil
+}
+
+func withoutRunbookActivationStart(actions []capability.ModelAction) []capability.ModelAction {
+	filtered := make([]capability.ModelAction, 0, len(actions))
+	for _, action := range actions {
+		if action.SkillID == RunbookManagementSkillID && action.Action == RunbookActionStart {
+			continue
+		}
+		filtered = append(filtered, action)
+	}
+	return filtered
 }
 
 func validatePinnedRunbookPlan(definition *runbook.Definition, run *AgentRun) error {
