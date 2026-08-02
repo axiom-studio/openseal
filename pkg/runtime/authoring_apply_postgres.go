@@ -463,6 +463,12 @@ func applyPostgresWorkforceProject(ctx context.Context, tx *sql.Tx, table string
 
 func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindingTable, definitionTable string, value *authoring.ChangeSet, desired []*capability.Binding) error {
 	existing := map[string]*capability.Binding{}
+	desiredIDs := make(map[string]bool, len(desired))
+	for _, binding := range desired {
+		if binding != nil {
+			desiredIDs[binding.ID] = true
+		}
+	}
 	reconciledDeployments := workforceBindingReconciliationDeployments(value)
 	if len(reconciledDeployments) > 0 {
 		rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+bindingTable+` WHERE scope_kind=$1 AND scope_id=$2 FOR UPDATE`, value.Scope.Kind, value.Scope.ID)
@@ -475,7 +481,8 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindin
 			if err := rows.Scan(&payload); err != nil {
 				return err
 			}
-			if json.Unmarshal([]byte(payload), &binding) == nil && strings.HasPrefix(binding.ID, "workforce:") && reconciledDeployments[binding.DeploymentID] {
+			if json.Unmarshal([]byte(payload), &binding) == nil && reconciledDeployments[binding.DeploymentID] &&
+				(strings.HasPrefix(binding.ID, "workforce:") || desiredIDs[binding.ID]) {
 				existing[binding.ID] = &binding
 			}
 		}
