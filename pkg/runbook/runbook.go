@@ -355,6 +355,15 @@ type BudgetAllocation struct {
 	WarningPermille int64 `json:"warningPermille,omitempty"`
 }
 
+const DefaultRunTotalTokenBudget int64 = 1_000_000
+
+// DefaultBudgetAllocation returns the portable token ceiling used when work
+// has no explicitly reviewed budget. Individual token dimensions remain
+// unset so providers can use the total flexibly across input and output.
+func DefaultBudgetAllocation() *BudgetAllocation {
+	return &BudgetAllocation{MaxTotalTokens: DefaultRunTotalTokenBudget}
+}
+
 func (b BudgetAllocation) Validate() error {
 	if b.MaxAttempts < 0 || b.MaxTurns < 0 || b.MaxInputTokens < 0 || b.MaxOutputTokens < 0 || b.MaxTotalTokens < 0 || b.MaxCostMicros < 0 || b.MaxDurationMS < 0 || b.MaxActions < 0 {
 		return errors.New("budget allocation limits cannot be negative")
