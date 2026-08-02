@@ -345,6 +345,7 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 		Name: answer.Name + " operations", Description: "Compiler-owned execution methods for " + answer.Purpose,
 		Entrypoints: map[string]string{}, Interfaces: map[string]runbook.Interface{}, Triggers: map[string]runbook.Trigger{}, Steps: map[string]runbook.Step{},
 	}
+	authorizedSchedule := parseScheduleIntent(scheduleIntentAuthorityText(request))
 	for _, operation := range answer.Operations {
 		stepID, endID := operation.Key, operation.Key+"-done"
 		result.Entrypoints[operation.Key] = stepID
@@ -376,6 +377,13 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 		switch operation.Wake {
 		case AuthoringWakeSchedule:
 			parsed := parseScheduleIntent(operation.Schedule)
+			// The provider identifies which semantic operation is scheduled; the
+			// audited user answer owns the cadence. Compile from that authority
+			// when available so harmless provider paraphrasing cannot silently
+			// erase an already reviewed automatic trigger.
+			if authorizedSchedule.kind == scheduleIntentExact {
+				parsed = authorizedSchedule
+			}
 			if parsed.kind == scheduleIntentExact {
 				schedule, err := scheduleForIntent(parsed)
 				if err != nil {
