@@ -29,7 +29,7 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	}
 	scope := SkillScope{Kind: "tenant", ID: "one"}
 	deployment, _, err := engine.CreateAgentDeployment(ctx, &AgentDeployment{
-		ID: "marketing-prod", Scope: scope, DefinitionID: "marketer", ActiveVersion: "1.0.0",
+		ID: "marketing-prod:live", Scope: scope, DefinitionID: "marketer", ActiveVersion: "1.0.0",
 		RolloutStatus: AgentRolloutActive, Environment: "production", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 2},
 	}, "user", "admin", "initial")
 	if err != nil {
@@ -40,7 +40,7 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	})
 	if err != nil || len(controlChannels) != 1 || controlChannels[0].Title != "Agent control" ||
 		controlChannels[0].Origin == nil || controlChannels[0].Origin.Kind != ConversationReferenceAgentControl ||
-		controlChannels[0].Origin.ID != deployment.ID {
+		controlChannels[0].Origin.ID != agentControlReferenceID(deployment.ID) {
 		t.Fatalf("Agent control channel = %#v, %v", controlChannels, err)
 	}
 	if _, err := engine.GetAgentDeployment(ctx, scope, deployment.ID); err != nil {
