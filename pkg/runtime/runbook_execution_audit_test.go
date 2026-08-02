@@ -168,6 +168,45 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	}
 }
 
+func TestRunExecutionAuditProjectsConversationalRunAsOneGraph(t *testing.T) {
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "conversation-audit"}
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	store := NewMemoryStore()
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"},
+		AssignedAgentID: "assistant", Goal: "Respond to an Agent channel message", Source: RunSourceRequest,
+		Context: map[string]interface{}{"conversationId": "conversation-one"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.turns[portfolioKey(scope, run.ID)] = map[string]*AgentTurn{
+		"turn-one": {
+			ID: "turn-one", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusFailed,
+			Error: "capability binding unavailable", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
+		},
+	}
+	store.actions[portfolioKey(scope, "action-one")] = &ActionCall{
+		ID: "action-one", Scope: scope, RunID: run.ID, TurnID: "turn-one", DeploymentID: "assistant",
+		BindingID: "bundled:agents", BindingRevision: 1, SkillID: AgentManagementSkillID,
+		SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
+		Status: ActionCallStatusFailed, Error: "binding unavailable", Attempt: 1, MaxAttempts: 1,
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	store.mu.Unlock()
+
+	audit, err := NewRunbookExecutionAuditService(store, nil).Get(ctx, scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if audit.Run.ID != run.ID || audit.Run.ActivationID != "" || audit.Runbook != nil ||
+		len(audit.Nodes) != 0 || len(audit.UnassignedTurns) != 1 || len(audit.UnassignedActions) != 1 {
+		t.Fatalf("conversation execution audit = %#v", audit)
+	}
+}
+
 func TestRunbookExecutionAuditKeepsRetryRecordsOnExactVisits(t *testing.T) {
 	now := time.Date(2026, 7, 29, 13, 0, 0, 0, time.UTC)
 	definition := &runbook.Definition{
