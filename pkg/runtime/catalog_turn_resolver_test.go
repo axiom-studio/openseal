@@ -118,6 +118,39 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	}
 }
 
+func TestProjectActivatedSkillsPrefersCanonicalKernelManagementBinding(t *testing.T) {
+	action := func(bindingID string, revision int64) capability.ModelAction {
+		return capability.ModelAction{
+			Name:      AgentManagementSkillID + "." + AgentActionAmendBehavior,
+			BindingID: bindingID, BindingRevision: revision, DeploymentID: "agent-1",
+			SkillID: AgentManagementSkillID, Version: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
+		}
+	}
+	activation := &skill.ActivationSnapshot{
+		SnapshotID: "snapshot-management", DeploymentID: "agent-1",
+		Skills: []skill.ActivatedSkill{
+			{
+				BindingID: "workforce:agent-1:" + AgentManagementSkillID, BindingRevision: 1,
+				SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
+				Actions: []capability.ModelAction{action("workforce:agent-1:"+AgentManagementSkillID, 1)},
+			},
+			{
+				BindingID: "bundled:agents", BindingRevision: 2,
+				SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
+				Actions: []capability.ModelAction{action("bundled:agents", 2)},
+			},
+		},
+	}
+
+	_, actions, prepared, refs := projectActivatedSkills(activation)
+	if len(actions) != 1 || actions[0].BindingID != "bundled:agents" || actions[0].BindingRevision != 2 {
+		t.Fatalf("management actions = %#v", actions)
+	}
+	if len(prepared) != 0 || len(refs) != 1 {
+		t.Fatalf("prepared = %#v, refs = %#v", prepared, refs)
+	}
+}
+
 func TestPinnedRunbookPlanPreventsDefinitionAndTriggerDrift(t *testing.T) {
 	definition := &runbook.Definition{
 		ID: "chat", Version: "2",

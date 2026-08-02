@@ -411,7 +411,23 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 	actions := make([]capability.ModelAction, 0)
 	prepared := make([]PreparedSkillRuntime, 0)
 	refs := []string{"skill-snapshot:" + activation.SnapshotID}
+	// Kernel management Skills have one well-known binding identity. Historical
+	// authoring versions could leave an equivalent alias beside it; never expose
+	// both aliases as indistinguishable tools while asynchronous reconciliation
+	// catches up. Non-kernel Skills retain exact-binding ambiguity because their
+	// bindings may select different credentials, configuration, or authority.
+	canonicalManagement := make(map[string]string)
 	for _, activated := range activation.Skills {
+		canonicalID := workforceSkillBindingID(activation.DeploymentID, activated.SkillID, activated.SkillVersion)
+		if !strings.HasPrefix(canonicalID, "bundled:") || activated.BindingID != canonicalID {
+			continue
+		}
+		canonicalManagement[activated.SkillID+"@"+activated.SkillVersion] = canonicalID
+	}
+	for _, activated := range activation.Skills {
+		if canonicalID := canonicalManagement[activated.SkillID+"@"+activated.SkillVersion]; canonicalID != "" && activated.BindingID != canonicalID {
+			continue
+		}
 		if activated.Prompt != nil && strings.TrimSpace(activated.Prompt.Instructions) != "" {
 			prompts = append(prompts, HostedSkillPrompt{
 				SkillID: activated.SkillID, Version: activated.SkillVersion, BindingID: activated.BindingID, BindingRevision: activated.BindingRevision,
