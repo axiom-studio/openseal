@@ -362,12 +362,16 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 		}
 		result.Steps[stepID] = runbook.Step{Kind: runbook.StepDelegate, Name: operation.Name, Delegate: &runbook.DelegateStep{
 			AgentID: runbook.Value{Literal: encodedAgent}, Goal: runbook.Value{Literal: encodedGoal}, Context: context,
-			Mode: runbook.DelegateReason, ResultPath: runbook.JSONPointer("/results/" + operation.Key), Next: endID,
+			Mode: runbook.DelegateReason, ResultPath: runbook.JSONPointer("/results/" + operation.Key),
+			Budget: runbook.DefaultBudgetAllocation(), Next: endID,
 		}}
 		result.Steps[endID] = runbook.Step{Kind: runbook.StepEnd, Name: "Complete " + operation.Name, End: &runbook.EndStep{
 			Outputs: map[string]runbook.Value{"result": {Ref: runbook.JSONPointer("/results/" + operation.Key)}},
 		}}
-		trigger := runbook.Trigger{Entrypoint: operation.Key, ObjectiveID: "agent:" + definition.ID + ":" + operation.ObjectiveKey, MaximumConcurrent: 1}
+		trigger := runbook.Trigger{
+			Entrypoint: operation.Key, ObjectiveID: "agent:" + definition.ID + ":" + operation.ObjectiveKey,
+			MaximumConcurrent: 1, Budget: runbook.DefaultBudgetAllocation(),
+		}
 		materializedTrigger := false
 		switch operation.Wake {
 		case AuthoringWakeSchedule:
