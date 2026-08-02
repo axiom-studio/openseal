@@ -249,6 +249,69 @@ func TestCatalogTurnResolverHidesOriginatingRunbookFromDelegatedAgent(t *testing
 	}
 }
 
+func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
+		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
+	}}
+	definition := &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "community-engagement", Version: "1", Name: "Community engagement",
+		Interfaces: map[string]runbook.Interface{"engage-now": {
+			Description:  "Run the reviewed engagement operation",
+			InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false},
+			OutputSchema: map[string]interface{}{"type": "object"},
+		}},
+	}
+	start := capability.ModelAction{
+		Name: "openseal.runbooks.start", SkillID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
+		Action: RunbookActionStart, BindingID: "bundled:runbooks", BindingRevision: 1,
+	}
+	replace := capability.ModelAction{
+		Name: "openseal.runbooks.replace_schedule", SkillID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
+		Action: RunbookActionReplaceSchedule, BindingID: "bundled:runbooks", BindingRevision: 1,
+	}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "community-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+			DefinitionID: "community-agent", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+		},
+		definition: &kernelagent.AgentDefinition{
+			ID: "community-agent", Version: "1", Purpose: "Engage", SystemPrompt: "Act carefully.", Runbook: definition,
+		},
+		activation: &skill.ActivationSnapshot{
+			SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "community-agent",
+			Skills: []skill.ActivatedSkill{{
+				BindingID: "bundled:runbooks", BindingRevision: 1, SkillID: RunbookManagementSkillID,
+				SkillVersion: RunbookManagementSkillVersion, Name: "Runbooks", Actions: []capability.ModelAction{start, replace},
+			}},
+		},
+	}
+	run := &AgentRun{
+		ID: "conversation-turn", Scope: scope, Kind: RunKindAgentWork,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "community-agent"}, AssignedAgentID: "community-agent",
+		Goal: "Run it now", Context: map[string]interface{}{conversationCallableActivationKey: false},
+	}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(binding.RunbookOperations) != 1 || binding.RunbookOperations[0].Entrypoint != "engage-now" ||
+		len(binding.ModelActions) != 1 || binding.ModelActions[0].Action != RunbookActionReplaceSchedule {
+		t.Fatalf("conversation capabilities = %#v", binding)
+	}
+	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.Actions) != 1 || host.request.Actions[0].Action != RunbookActionReplaceSchedule ||
+		len(host.request.RunbookOperations) != 1 {
+		t.Fatalf("hosted capabilities = %#v", host.request)
+	}
+	if _, leaked := host.request.InputContext[conversationCallableActivationKey]; leaked {
+		t.Fatalf("internal activation projection leaked to model: %#v", host.request.InputContext)
+	}
+}
+
 func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "42"}
 	host := &recordingTurnHost{response: &HostedTurnResponse{
