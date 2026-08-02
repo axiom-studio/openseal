@@ -197,6 +197,12 @@ type RunbookExecutionAudit struct {
 	UnassignedChildren  []RunbookChildRunAudit      `json:"unassignedChildren,omitempty"`
 }
 
+// RunExecutionAudit is the canonical execution graph for every durable Run.
+// Runbook and Trace are populated when the Run is backed by a deterministic
+// Runbook; conversational and delegated Runs project their turns, actions,
+// approvals, artifacts, and children through the same unassigned graph lanes.
+type RunExecutionAudit = RunbookExecutionAudit
+
 type RunbookExecutionAuditService struct {
 	store   RunbookExecutionAuditStore
 	catalog RunbookDefinitionCatalog
@@ -207,8 +213,8 @@ func NewRunbookExecutionAuditService(store RunbookExecutionAuditStore, catalog R
 }
 
 func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, runID string) (*RunbookExecutionAudit, error) {
-	if s == nil || s.store == nil || s.catalog == nil {
-		return nil, errors.New("Runbook execution audit is not configured")
+	if s == nil || s.store == nil {
+		return nil, errors.New("Run execution audit is not configured")
 	}
 	run, err := s.store.GetAgentRun(ctx, scope, strings.TrimSpace(runID))
 	if err != nil {
@@ -219,16 +225,20 @@ func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, run
 	}
 	activationID, _ := run.Context["runbookActivationId"].(string)
 	activationID = strings.TrimSpace(activationID)
-	if activationID == "" {
-		return nil, errors.New("Agent Run is not linked to a Runbook activation")
-	}
-	detail, err := ResolveRunbookDetail(ctx, s.store, s.catalog, scope, activationID)
-	if err != nil {
-		return nil, err
-	}
-	trace, err := RunbookTraceFromCheckpoint(run.Checkpoint)
-	if err != nil {
-		return nil, err
+	var detail *RunbookDetail
+	trace := &RunbookExecutionTrace{Revision: 1, NextSequence: 1}
+	if activationID != "" {
+		if s.catalog == nil {
+			return nil, errors.New("Runbook definition catalog is not configured")
+		}
+		detail, err = ResolveRunbookDetail(ctx, s.store, s.catalog, scope, activationID)
+		if err != nil {
+			return nil, err
+		}
+		trace, err = RunbookTraceFromCheckpoint(run.Checkpoint)
+		if err != nil {
+			return nil, err
+		}
 	}
 	turns, err := s.listTurns(ctx, scope, run.ID)
 	if err != nil {
@@ -259,9 +269,10 @@ func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, run
 		return nil, err
 	}
 
-	result := &RunbookExecutionAudit{
-		Run: projectRunbookAuditRun(run, activationID), Runbook: detail, Trace: trace,
-		Nodes: buildRunbookNodeAudits(detail.Definition, trace), Lineage: buildRunbookLineage(trace),
+	result := &RunbookExecutionAudit{Run: projectRunbookAuditRun(run, activationID), Runbook: detail, Trace: trace}
+	if detail != nil && detail.Definition != nil {
+		result.Nodes = buildRunbookNodeAudits(detail.Definition, trace)
+		result.Lineage = buildRunbookLineage(trace)
 	}
 	attachRunbookTurns(result, turns)
 	attachRunbookActions(result, actions, approvals)

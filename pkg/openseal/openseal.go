@@ -275,6 +275,7 @@ type (
 	RunbookActivation                  = runtime.RunbookActivation
 	RunbookDetail                      = runtime.RunbookDetail
 	RunbookExecutionAudit              = runtime.RunbookExecutionAudit
+	RunExecutionAudit                  = runtime.RunExecutionAudit
 	RunbookExecutionAuditRun           = runtime.RunbookExecutionAuditRun
 	RunbookNodeExecutionAudit          = runtime.RunbookNodeExecutionAudit
 	RunbookDataLineage                 = runtime.RunbookDataLineage
@@ -3527,6 +3528,15 @@ func (e *Engine) GetRunbookDetail(ctx context.Context, scope runtime.Scope, acti
 func (e *Engine) GetRunbookExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunbookExecutionAudit, error) {
 	if e.runbookAudits == nil {
 		return nil, errors.New("Runbook execution audit is unavailable")
+	}
+	return e.runbookAudits.Get(ctx, scope, runID)
+}
+
+// GetRunExecutionAudit projects the canonical graph for conversational,
+// delegated, and Runbook-backed Runs through one observation contract.
+func (e *Engine) GetRunExecutionAudit(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunExecutionAudit, error) {
+	if e.runbookAudits == nil {
+		return nil, errors.New("Run execution audit is unavailable")
 	}
 	return e.runbookAudits.Get(ctx, scope, runID)
 }
