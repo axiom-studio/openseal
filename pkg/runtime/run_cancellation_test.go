@@ -38,6 +38,69 @@ func TestCancelWaitingApprovalClosesActionAndRepairsOutreachProjection(t *testin
 	}
 }
 
+func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
+	ctx := t.Context()
+	store := NewMemoryStore()
+	catalog, scope := cancellationActionCatalog(t)
+	runs := NewRunCommandService(store)
+	root, err := runs.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "research-agent"},
+		AssignedAgentID: "research-agent", Goal: "coordinate reviewed work", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := runs.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, ParentRunID: root.Run.ID, Owner: root.Run.Owner,
+		AssignedAgentID: "research-agent", Goal: "perform reviewed action", Source: RunSourceHandoff,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, _, err := NewRunActivityService(store, store).TransitionRun(ctx, scope, child.Run.ID, RunTransitionRequest{
+		ExpectedRevision: child.Run.Revision, Status: AgentRunStatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{
+			Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour,
+			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
+		}, nil
+	}))
+	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: running.ID, DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
+		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "child-action",
+		Summary: "Send reviewed reply",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposal.Run.Status != AgentRunStatusWaitingForApproval {
+		t.Fatalf("child status = %s", proposal.Run.Status)
+	}
+
+	if _, err := runs.CommandAgentRun(ctx, AgentRunCommandRequest{
+		Scope: scope, RunID: root.Run.ID, ExpectedRevision: root.Run.Revision,
+		Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "operator"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resolvedChild, err := store.GetAgentRun(ctx, scope, child.Run.ID)
+	if err != nil || resolvedChild.Status != AgentRunStatusCanceled {
+		t.Fatalf("child = %#v err=%v", resolvedChild, err)
+	}
+	call, err := store.GetActionCall(ctx, scope, proposal.Call.ID)
+	if err != nil || call.Status != ActionCallStatusCanceled || call.LeaseOwner != "" {
+		t.Fatalf("call = %#v err=%v", call, err)
+	}
+	approval, err := store.GetApproval(ctx, scope, proposal.Approval.ID)
+	if err != nil || approval.Status != ApprovalStatusCanceled {
+		t.Fatalf("approval = %#v err=%v", approval, err)
+	}
+}
+
 func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 	t.Helper()
 	ctx := context.Background()
