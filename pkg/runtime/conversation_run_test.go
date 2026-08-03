@@ -1012,7 +1012,7 @@ func TestGovernedConversationAgentBehaviorDenialResolvesWithoutModelRetry(t *tes
 	}
 }
 
-func TestGovernedConversationProposalFailureProjectsLifecycleError(t *testing.T) {
+func TestGovernedConversationProposalFailureEntersBoundedRepair(t *testing.T) {
 	run := &AgentRun{
 		ID: "run-pause", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},
 		Checkpoint: map[string]interface{}{"phase": "before-pause"},
@@ -1024,20 +1024,25 @@ func TestGovernedConversationProposalFailureProjectsLifecycleError(t *testing.T)
 		BindingID: "bundled:objectives", BindingRevision: 1,
 	}}}
 	checkpoint, ok := checkpointGovernedConversationProposalFailure(run, turn, fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition))
-	if !ok || checkpoint["phase"] != nil {
+	if !ok || checkpoint["phase"] != "before-pause" {
 		t.Fatalf("proposal failure checkpoint = %#v, ok=%v", checkpoint, ok)
 	}
+	recovery, _ := checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{})
+	inputs, _ := checkpoint["actionInputs"].(map[string]interface{})
+	call, _ := inputs["call"].(map[string]interface{})
+	if fmt.Sprint(recovery["capability"]) != "openseal.objectives.pause" ||
+		fmt.Sprint(recovery["error"]) != "invalid objective transition: draft -> paused" ||
+		fmt.Sprint(call["objectiveId"]) != "objective-draft" {
+		t.Fatalf("proposal repair checkpoint = %#v", checkpoint)
+	}
 	run.Checkpoint = checkpoint
-	outcome, ok := governedConversationActionOutcome(run)
-	if !ok || outcome.Content != "Objective pause could not be proposed because the requested lifecycle change is invalid (draft → paused)." ||
-		outcome.ResourceType != "objective" || outcome.ResourceID != "objective-draft" || len(outcome.References) != 2 ||
-		outcome.References[1] != (ConversationReference{Kind: ConversationReferenceObjective, ID: "objective-draft"}) {
-		t.Fatalf("proposal failure outcome = %#v, ok=%v", outcome, ok)
+	if outcome, projected := governedConversationActionOutcome(run); projected {
+		t.Fatalf("pre-materialization failure was projected instead of repaired: %#v", outcome)
 	}
 	ordinary := cloneAgentRun(run)
 	ordinary.Kind = RunKindAgentWork
 	if _, accepted := checkpointGovernedConversationProposalFailure(ordinary, turn, errors.New("invalid")); accepted {
-		t.Fatal("ordinary Agent work materialization failure was converted into a conversational outcome")
+		t.Fatal("ordinary Agent work materialization failure entered the conversation-specific repair gate")
 	}
 }
 

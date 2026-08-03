@@ -15,6 +15,22 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
+func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
+	action := AgentManagementSkill().Actions[AgentActionAmendBehavior]
+	controlOnly := map[string]interface{}{
+		"expectedDeploymentRevision": float64(1),
+		"rationale":                  "Update the persona heritage",
+	}
+	if err := runbook.ValidateInterfaceInput(action.InputSchema, controlOnly); err == nil {
+		t.Fatal("amend_behavior accepted rationale without a changed behavior field")
+	}
+	withChange := cloneHostedTurnObjectValue(controlOnly)
+	withChange["personality"] = "Utah-native engineer with Black heritage."
+	if err := runbook.ValidateInterfaceInput(action.InputSchema, withChange); err != nil {
+		t.Fatalf("amend_behavior rejected an actual personality change: %v", err)
+	}
+}
+
 func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
