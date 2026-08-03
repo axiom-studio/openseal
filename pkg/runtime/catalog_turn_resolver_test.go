@@ -28,6 +28,33 @@ type resolverCatalog struct {
 	gotHost               skill.HostCapabilityState
 }
 
+func TestRunbookSkillAuthorityExcludesConversationDeliveryTools(t *testing.T) {
+	activation := &skill.ActivationSnapshot{SnapshotID: "snapshot", Skills: []skill.ActivatedSkill{
+		{SkillID: "skill-browser", SkillVersion: "2", Actions: []capability.ModelAction{{SkillID: "skill-browser", Action: "commit"}}},
+		{SkillID: "skill-slack", SkillVersion: "2", Actions: []capability.ModelAction{{SkillID: "skill-slack", Action: "slack-read-messages"}}},
+	}}
+	filtered, err := restrictActivatedSkillsToRun(activation, map[string]interface{}{
+		authorizedSkillCatalogIDsContextKey: []interface{}{"skill-browser"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered.Skills) != 1 || filtered.Skills[0].SkillID != "skill-browser" || len(activation.Skills) != 2 {
+		t.Fatalf("filtered activation = %#v; original = %#v", filtered.Skills, activation.Skills)
+	}
+	empty, err := restrictActivatedSkillsToRun(activation, map[string]interface{}{
+		authorizedSkillCatalogIDsContextKey: []interface{}{},
+	})
+	if err != nil || len(empty.Skills) != 0 {
+		t.Fatalf("empty authority = %#v, %v", empty, err)
+	}
+	if _, err := restrictActivatedSkillsToRun(activation, map[string]interface{}{
+		authorizedSkillCatalogIDsContextKey: "skill-browser",
+	}); err == nil {
+		t.Fatal("scalar Skill authority accepted")
+	}
+}
+
 func (c *resolverCatalog) GetTeamDeployment(context.Context, skill.ScopeReference, string) (*kernelteam.Deployment, error) {
 	return c.teamDeployment, nil
 }
