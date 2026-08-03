@@ -270,6 +270,36 @@ func TestActionCredentialLeaseContainsOnlyOpaqueReferences(t *testing.T) {
 	}
 }
 
+func TestActionCredentialLeaseAcceptsOpaqueReferencesWithSpaces(t *testing.T) {
+	now, call, run, fields := actionCredentialLeaseFixture()
+	call.CredentialRefs["reddit"] = skill.CredentialReference{Kind: "slack_bot_token", ID: "vault://007 Slack.bot_token"}
+	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
+		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000006",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lease.Credentials[0].Reference.ID; got != "vault://007 Slack.bot_token" {
+		t.Fatalf("credential reference = %q", got)
+	}
+}
+
+func TestActionCredentialLeaseRejectsNonCanonicalOpaqueReferences(t *testing.T) {
+	for _, referenceID := range []string{" vault://credential.token", "vault://credential.token ", "vault://credential\ntoken"} {
+		t.Run(referenceID, func(t *testing.T) {
+			now, call, run, fields := actionCredentialLeaseFixture()
+			call.CredentialRefs["reddit"] = skill.CredentialReference{Kind: "token", ID: referenceID}
+			if _, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
+				TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
+				Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000007",
+			}); err == nil {
+				t.Fatal("non-canonical opaque credential reference was accepted")
+			}
+		})
+	}
+}
+
 func actionCredentialLeaseFixture() (time.Time, *ActionCall, *AgentRun, map[string][]string) {
 	now := time.Date(2026, 7, 21, 12, 0, 0, 0, time.UTC)
 	expires := now.Add(2 * time.Minute)
