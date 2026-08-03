@@ -689,6 +689,20 @@ func definitionChanges(base, candidate *AgentDefinition) []DefinitionFieldChange
 	return changes
 }
 
+// ChangedDefinitionFields returns the top-level behavior fields changed by an
+// immutable Agent definition candidate. Governed host surfaces use this to
+// grant an authenticated operator authority for exactly the proposed fields,
+// instead of maintaining a second list that can drift from the registry's
+// canonical comparison semantics.
+func ChangedDefinitionFields(base, candidate *AgentDefinition) []string {
+	changes := definitionChanges(base, candidate)
+	fields := make([]string, 0, len(changes))
+	for _, change := range changes {
+		fields = append(fields, change.Field)
+	}
+	return fields
+}
+
 func definitionDigest(value *AgentDefinition) string {
 	copy := cloneDefinition(value)
 	copy.Digest = ""

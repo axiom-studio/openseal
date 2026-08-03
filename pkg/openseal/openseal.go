@@ -4731,6 +4731,12 @@ func (e *Engine) ProposeAgentDefinitionAmendment(ctx context.Context, request ke
 	return e.agents.ProposeAmendment(ctx, request)
 }
 
+// ChangedAgentDefinitionFields exposes the Agent registry's canonical
+// top-level comparison for governed host amendment surfaces.
+func ChangedAgentDefinitionFields(base, candidate *AgentDefinition) []string {
+	return kernelagent.ChangedDefinitionFields(base, candidate)
+}
+
 func (e *Engine) GetAgentDefinitionAmendment(ctx context.Context, scope skill.ScopeReference, amendmentID string) (*kernelagent.DefinitionAmendment, error) {
 	return e.agents.GetAmendment(ctx, scope, amendmentID)
 }
