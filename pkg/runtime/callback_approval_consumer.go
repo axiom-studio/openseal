@@ -73,8 +73,12 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	}
 	replay := approval.Status != ApprovalStatusPending && approval.DecisionID == event.ID
 	if approval.ActionCallID != actionCallID || call.InvocationDigest != invocationDigest ||
-		(!replay && approval.Revision != revision) || !approvalHasDestination(approval, subscription.TargetID) {
+		(!replay && approval.Revision != revision) {
 		return fmt.Errorf("%w: approval decision does not match the reviewed action", ErrInvalidCallbackRegistration)
+	}
+	destinationID, err := c.resolveReviewedDestination(ctx, registration, subscription, event, approval)
+	if err != nil {
+		return err
 	}
 	if decision == "request_changes" && strings.TrimSpace(reason) == "" {
 		reason = "Changes requested through callback"
@@ -101,9 +105,51 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	providerApproverID, _ := event.Attributes["providerUserId"].(string)
 	if err := enqueueApprovalCardUpdate(
 		ctx, c.notifications, c.transport, resolution.Approval, resolution.Call,
-		ApprovalDestination{EndpointID: subscription.TargetID}, providerApproverID,
+		ApprovalDestination{EndpointID: destinationID}, providerApproverID,
 	); err != nil {
 		return fmt.Errorf("enqueue approval card update: %w", err)
 	}
 	return nil
+}
+
+// resolveReviewedDestination binds a provider decision back to the exact
+// approval card that was durably delivered. Callback registrations can outlive
+// individual Agent definitions and endpoints, so their consumer target is not
+// authoritative for a later card. The immutable approval envelope plus the
+// provider's exact message identifier is the durable correlation boundary.
+func (c *ApprovalCallbackConsumer) resolveReviewedDestination(
+	ctx context.Context,
+	registration *CallbackRegistration,
+	subscription CallbackSubscription,
+	event EventEnvelope,
+	approval *ApprovalCheckpoint,
+) (string, error) {
+	if approvalHasDestination(approval, subscription.TargetID) {
+		return subscription.TargetID, nil
+	}
+	if c.notifications == nil {
+		return "", fmt.Errorf("%w: approval decision does not match a reviewed destination", ErrInvalidCallbackRegistration)
+	}
+	providerMessageID, _ := event.Payload["messageId"].(string)
+	providerMessageID = strings.TrimSpace(providerMessageID)
+	if providerMessageID == "" {
+		return "", fmt.Errorf("%w: approval decision does not identify the reviewed card", ErrInvalidCallbackRegistration)
+	}
+	for _, destination := range approval.Destinations {
+		endpoint, err := c.notifications.GetExternalConversationEndpoint(ctx, approval.Scope, destination.EndpointID)
+		if err != nil {
+			return "", err
+		}
+		if endpoint == nil || endpoint.Provider != registration.Provider {
+			continue
+		}
+		delivery, err := findDeliveredApprovalNotification(ctx, c.notifications, approval, destination)
+		if err != nil {
+			return "", err
+		}
+		if delivery != nil && delivery.ProviderMessageID == providerMessageID {
+			return destination.EndpointID, nil
+		}
+	}
+	return "", fmt.Errorf("%w: approval decision does not match the reviewed card", ErrInvalidCallbackRegistration)
 }
