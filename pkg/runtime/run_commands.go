@@ -137,6 +137,19 @@ func replayedRun(current *AgentRun, fingerprint string) (*AgentRunCommandResult,
 }
 
 func (s *RunCommandService) CommandAgentRun(ctx context.Context, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
+	result, err := s.commandAgentRun(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if isTerminalAgentRunStatus(result.Run.Status) {
+		if err := s.CascadeTerminalRun(ctx, result.Run); err != nil {
+			return result, fmt.Errorf("cascade terminal Run %s: %w", result.Run.ID, err)
+		}
+	}
+	return result, nil
+}
+
+func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("run command store is not configured")
 	}
@@ -172,6 +185,81 @@ func (s *RunCommandService) CommandAgentRun(ctx context.Context, req AgentRunCom
 		return nil, err
 	}
 	return &AgentRunCommandResult{Run: run, Event: event}, nil
+}
+
+// CascadeTerminalRun cancels every non-terminal Run owned beneath a terminal
+// parent. Descendants are visited leaf-first so a waiting parent never keeps a
+// child lease, approval, or capability resource alive after its owner has
+// stopped. The operation is replay-safe and is used both by direct commands
+// and terminal reconciliation after process restarts.
+func (s *RunCommandService) CascadeTerminalRun(ctx context.Context, parent *AgentRun) error {
+	if s == nil || s.store == nil {
+		return errors.New("run command store is not configured")
+	}
+	if parent == nil || !isTerminalAgentRunStatus(parent.Status) {
+		return errors.New("only terminal Runs can cascade descendant cancellation")
+	}
+	return s.cancelRunDescendants(ctx, parent, map[string]struct{}{parent.ID: {}})
+}
+
+func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *AgentRun, visited map[string]struct{}) error {
+	const pageSize = 100
+	children := make([]*AgentRun, 0)
+	for offset := 0; ; offset += pageSize {
+		page, err := s.store.ListAgentRuns(ctx, AgentRunFilter{
+			Scope: parent.Scope, ParentRunID: parent.ID, Limit: pageSize, Offset: offset,
+		})
+		if err != nil {
+			return err
+		}
+		children = append(children, page...)
+		if len(page) < pageSize {
+			break
+		}
+	}
+
+	var cascadeErrors []error
+	for _, child := range children {
+		if child == nil {
+			continue
+		}
+		if _, seen := visited[child.ID]; seen {
+			cascadeErrors = append(cascadeErrors, fmt.Errorf("Run ownership cycle includes %s", child.ID))
+			continue
+		}
+		visited[child.ID] = struct{}{}
+		if err := s.cancelRunDescendants(ctx, child, visited); err != nil {
+			cascadeErrors = append(cascadeErrors, err)
+		}
+		delete(visited, child.ID)
+
+		current, err := s.store.GetAgentRun(ctx, child.Scope, child.ID)
+		if err != nil {
+			cascadeErrors = append(cascadeErrors, err)
+			continue
+		}
+		if current == nil || isTerminalAgentRunStatus(current.Status) {
+			continue
+		}
+		actor := ActivityActor{Type: "runtime", ID: "parent-run-terminalizer"}
+		summary := fmt.Sprintf("Canceled because parent Run %s reached %s", parent.ID, parent.Status)
+		_, err = s.commandAgentRun(ctx, AgentRunCommandRequest{
+			Scope: current.Scope, RunID: current.ID, ExpectedRevision: current.Revision,
+			Kind: AgentRunCommandCancel, Actor: actor, Summary: summary,
+			Visibility: ActivityVisibilityScope,
+		})
+		if err != nil {
+			// A concurrent worker may have terminalized the child between the
+			// read and command. Treat that as successful convergence.
+			reloaded, loadErr := s.store.GetAgentRun(ctx, child.Scope, child.ID)
+			if loadErr != nil {
+				cascadeErrors = append(cascadeErrors, errors.Join(err, loadErr))
+			} else if reloaded != nil && !isTerminalAgentRunStatus(reloaded.Status) {
+				cascadeErrors = append(cascadeErrors, err)
+			}
+		}
+	}
+	return errors.Join(cascadeErrors...)
 }
 
 // cancelWaitingApprovalRun atomically closes all three authoritative facts
