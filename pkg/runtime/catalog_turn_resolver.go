@@ -106,6 +106,10 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if activation == nil || strings.TrimSpace(activation.SnapshotID) == "" {
 		return nil, errors.New("Skill activation returned no immutable snapshot")
 	}
+	activation, err = restrictActivatedSkillsToRun(activation, run.Context)
+	if err != nil {
+		return nil, fmt.Errorf("apply Runbook Skill authority: %w", err)
+	}
 	prompts, actions, prepared, contextRefs := projectActivatedSkills(activation)
 	actionDeploymentID := deployment.ID
 	if run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != "" {
@@ -115,6 +119,10 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		}
 		if teamActivation == nil || strings.TrimSpace(teamActivation.SnapshotID) == "" {
 			return nil, errors.New("Team Skill activation returned no immutable snapshot")
+		}
+		teamActivation, activateErr = restrictActivatedSkillsToRun(teamActivation, run.Context)
+		if activateErr != nil {
+			return nil, fmt.Errorf("apply Team Runbook Skill authority: %w", activateErr)
 		}
 		authorityCatalog, ok := catalog.(TeamSkillAuthorityCatalog)
 		if !ok {
@@ -221,6 +229,53 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		base.Runner = &acceptedAgentRequestExecutionTurnRunner{inner: runner}
 	}
 	return &base, nil
+}
+
+const authorizedSkillCatalogIDsContextKey = "authorizedSkillCatalogIds"
+
+// restrictActivatedSkillsToRun enforces the immutable capability envelope
+// compiled onto a delegated Runbook step. Conversation providers used for
+// approval delivery remain active for the runtime transport worker without
+// becoming model-callable message or polling tools.
+func restrictActivatedSkillsToRun(activation *skill.ActivationSnapshot, context map[string]interface{}) (*skill.ActivationSnapshot, error) {
+	if activation == nil {
+		return nil, errors.New("Skill activation is required")
+	}
+	raw, present := context[authorizedSkillCatalogIDsContextKey]
+	if !present {
+		return activation, nil
+	}
+	allowed := map[string]bool{}
+	switch values := raw.(type) {
+	case []string:
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return nil, errors.New("authorized Skill catalog IDs must be non-empty")
+			}
+			allowed[value] = true
+		}
+	case []interface{}:
+		for _, item := range values {
+			value, ok := item.(string)
+			value = strings.TrimSpace(value)
+			if !ok || value == "" {
+				return nil, errors.New("authorized Skill catalog IDs must be strings")
+			}
+			allowed[value] = true
+		}
+	default:
+		return nil, errors.New("authorized Skill catalog IDs must be an array")
+	}
+	filtered := make([]skill.ActivatedSkill, 0, len(activation.Skills))
+	for _, activated := range activation.Skills {
+		if allowed[activated.SkillID] || (strings.TrimSpace(activated.SourceIdentity) != "" && allowed[activated.SourceIdentity]) {
+			filtered = append(filtered, activated)
+		}
+	}
+	copy := *activation
+	copy.Skills = filtered
+	return &copy, nil
 }
 
 func withoutRunbookActivationStart(actions []capability.ModelAction) []capability.ModelAction {
