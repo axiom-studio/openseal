@@ -273,6 +273,7 @@ func projectCallableRunbookOperations(definition *runbook.Definition) []HostedRu
 	for _, entrypoint := range entrypoints {
 		contract := definition.Interfaces[entrypoint]
 		operations = append(operations, HostedRunbookOperation{
+			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 			Entrypoint: entrypoint, Name: definition.Name + " · " + entrypoint,
 			Description: contract.Description, InputSchema: cloneMap(contract.InputSchema), OutputSchema: cloneMap(contract.OutputSchema),
 		})
