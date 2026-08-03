@@ -136,6 +136,9 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	if audit.Run.ActivationID != activation.ID || audit.Run.PendingApprovals != 1 || audit.Run.PendingChildRuns != 1 || len(audit.Nodes) != 3 || len(audit.Lineage) != 1 {
 		t.Fatalf("audit summary=%#v lineage=%#v", audit.Run, audit.Lineage)
 	}
+	if len(audit.Children) != 1 || audit.Children[0].Run.ID != childID || audit.Children[0].Run.Status != AgentRunStatusRunning {
+		t.Fatalf("child execution audits=%#v", audit.Children)
+	}
 	nodes := map[string]RunbookNodeExecutionAudit{}
 	for _, node := range audit.Nodes {
 		nodes[node.StepID] = node
