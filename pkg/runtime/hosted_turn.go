@@ -76,8 +76,8 @@ type HostedAgentTarget struct {
 // cognitive Agent may invoke. It contains no graph internals or credentials;
 // the kernel resolves the exact active definition again at materialization.
 type HostedRunbookOperation struct {
-	DefinitionID      string                 `json:"definitionId"`
-	DefinitionVersion string                 `json:"definitionVersion"`
+	DefinitionID      string                 `json:"-"`
+	DefinitionVersion string                 `json:"-"`
 	Entrypoint        string                 `json:"entrypoint"`
 	Name              string                 `json:"name"`
 	Description       string                 `json:"description"`
