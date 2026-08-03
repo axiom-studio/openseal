@@ -176,6 +176,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 			"displayName":         "Evidence Researcher",
 			"personality":         "Calm, curious, and evidence focused",
 			"operatingPrinciples": []interface{}{"Separate facts from inference.", "Cite durable evidence."},
+			"approvalTimeout":     map[string]interface{}{"afterSeconds": float64(900), "decision": "approve"},
 			"rationale":           "Improve research quality",
 		},
 		IdempotencyKey: "message-42:improve-behavior", Summary: "Improve the researcher's evidence discipline",
@@ -193,7 +194,8 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	preview := proposal.Approval.ProposedAction
 	changes, _ := preview["changes"].(map[string]interface{})
 	if preview["resourceType"] != agentBehaviorResourceType || preview["operation"] != AgentActionAmendBehavior ||
-		preview["deploymentId"] != "researcher" || changes["personality"] != "Calm, curious, and evidence focused" {
+		preview["deploymentId"] != "researcher" || changes["personality"] != "Calm, curious, and evidence focused" ||
+		changes["authority.approvalTimeout"] == nil {
 		t.Fatalf("typed Agent diff = %#v", preview)
 	}
 	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
@@ -222,7 +224,9 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	}
 	definition, err := agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if err != nil || definition.DisplayName != "Evidence Researcher" || definition.Personality != "Calm, curious, and evidence focused" ||
-		len(definition.OperatingPrinciples) != 2 || definition.Provenance.DerivedFrom == "" {
+		len(definition.OperatingPrinciples) != 2 || definition.Provenance.DerivedFrom == "" ||
+		definition.Authority.ApprovalTimeout == nil || definition.Authority.ApprovalTimeout.AfterSeconds != 900 ||
+		definition.Authority.ApprovalTimeout.Decision != "approve" {
 		t.Fatalf("definition = %#v, %v", definition, err)
 	}
 	amendments, err := agents.ListAmendments(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deployment.ID)
