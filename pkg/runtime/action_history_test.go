@@ -212,6 +212,28 @@ func TestPreserveKernelActionHistoryRejectsModelRewrite(t *testing.T) {
 	}
 }
 
+func TestCheckpointTurnContinuityRecordsBoundedIntent(t *testing.T) {
+	checkpoint := checkpointTurnContinuity(map[string]interface{}{"model": "kept"}, &AgentTurn{
+		Sequence: 6, Status: AgentTurnStatusCompleted,
+		OutputSummary:    "Committed the reviewed change; closing the session to end this bounded run.",
+		RequestedActions: []TurnAction{{Capability: "browser.close", Summary: "Close the completed session"}},
+		NextRunStatus:    AgentRunStatusRunning,
+	})
+	continuity, ok := checkpoint[turnContinuityCheckpointKey].(map[string]interface{})
+	if !ok || continuity["sequence"] != int64(6) || continuity["nextRunStatus"] != AgentRunStatusRunning || checkpoint["model"] != "kept" {
+		t.Fatalf("turn continuity = %#v", checkpoint)
+	}
+	proposal, ok := continuity["proposal"].(map[string]interface{})
+	if !ok || proposal["kind"] != "action" || proposal["capability"] != "browser.close" || proposal["summary"] != "Close the completed session" {
+		t.Fatalf("turn continuity proposal = %#v", continuity["proposal"])
+	}
+
+	cleared := checkpointTurnContinuity(checkpoint, &AgentTurn{Status: AgentTurnStatusFailed})
+	if _, exists := cleared[turnContinuityCheckpointKey]; exists {
+		t.Fatalf("failed Turn retained continuity: %#v", cleared)
+	}
+}
+
 func TestTerminalActionSeparatesModelMediaFromTextEvidence(t *testing.T) {
 	call := &ActionCall{
 		ID: "screenshot-call", SkillID: "browser", SkillVersion: "1", Action: "snapshot",
