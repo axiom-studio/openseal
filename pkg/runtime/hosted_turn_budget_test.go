@@ -660,12 +660,10 @@ func TestHostedTurnBudgetRetryReconcilesReservationAfterIntervention(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	retryAt := intervened.Run.WakeCondition.WakeAt.Add(time.Second)
-	if _, err := NewAgentRunWakeService(store, store).WakeDueTimers(t.Context(), scope, retryAt); err != nil {
-		t.Fatal(err)
+	if intervened.Run.Status != AgentRunStatusQueued || intervened.Run.WakeCondition != nil {
+		t.Fatalf("intervention did not wake retrying run: %#v", intervened.Run)
 	}
 	scheduler := NewAgentRunScheduler(store)
-	scheduler.now = func() time.Time { return retryAt }
 	claimed, err := scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
 	if err != nil || claimed == nil {
 		t.Fatalf("retry claim = %#v, %v", claimed, err)
