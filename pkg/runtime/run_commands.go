@@ -400,8 +400,14 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 		if isTerminalAgentRunStatus(current.Status) {
 			return transition, fmt.Errorf("%w: cannot intervene on %s run", ErrInvalidRunTransition, current.Status)
 		}
-		transition.Status = current.Status
-		transition.WakeCondition = current.WakeCondition
+		if current.Status == AgentRunStatusSleeping {
+			// Operator guidance is new durable input. A sleeping run must consume it
+			// immediately instead of preserving a stale retry or schedule timer.
+			transition.Status = AgentRunStatusQueued
+		} else {
+			transition.Status = current.Status
+			transition.WakeCondition = current.WakeCondition
+		}
 		transition.EventType = "run.intervened"
 		transition.Intervention = &AgentRunIntervention{ID: uuid.NewString(), Actor: req.Actor, Instruction: instruction, CreatedAt: now}
 		transition.Payload = map[string]interface{}{"interventionId": transition.Intervention.ID, "instruction": instruction}
