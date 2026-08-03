@@ -847,7 +847,7 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 		status = AgentRunStatusQueued
 		runError = ""
 		checkpoint = conversationalCheckpoint
-	} else if recoveryCheckpoint, ok := checkpointGovernedAgentProposalFailure(run, turn, cause, safeCause); ok {
+	} else if recoveryCheckpoint, ok := checkpointGovernedProposalFailure(run, turn, cause, safeCause); ok {
 		status = AgentRunStatusQueued
 		runError = ""
 		checkpoint = recoveryCheckpoint
@@ -869,8 +869,8 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	}
 }
 
-func checkpointGovernedAgentProposalFailure(run *AgentRun, turn *AgentTurn, cause error, safeCause string) (map[string]interface{}, bool) {
-	if run == nil || turn == nil || run.Kind != RunKindAgentWork || len(turn.RequestedActions) != 1 || strings.TrimSpace(safeCause) == "" {
+func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause error, safeCause string) (map[string]interface{}, bool) {
+	if run == nil || turn == nil || (run.Kind != RunKindAgentWork && run.Kind != RunKindConversation) || len(turn.RequestedActions) != 1 || strings.TrimSpace(safeCause) == "" {
 		return nil, false
 	}
 	attempt := 1
