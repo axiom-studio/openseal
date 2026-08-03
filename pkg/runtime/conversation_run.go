@@ -1571,9 +1571,12 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 }
 
 // checkpointGovernedConversationProposalFailure preserves a safe, typed
-// failure from the deterministic mutation validator. Conversation Runs are
-// requeued once so their normal projection can resolve the user's message;
-// other Runs retain the existing fail-closed terminal behavior.
+// failure from the deterministic mutation validator and routes it through the
+// same bounded proposal-repair contract as other Agent work. A proposal that
+// never materialized is not a durable mutation outcome: the model receives the
+// exact rejected arguments and machine-readable error and must correct the
+// form before the conversation is resolved. Denial and execution failure after
+// materialization remain terminal conversation facts.
 func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTurn, cause error) (map[string]interface{}, bool) {
 	if run == nil || run.Kind != RunKindConversation || turn == nil || cause == nil || len(turn.RequestedActions) != 1 {
 		return nil, false
@@ -1585,18 +1588,12 @@ func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTur
 	}
 	action := parts[len(parts)-1]
 	skillID := strings.Join(parts[:len(parts)-1], ".")
-	version := ""
 	switch skillID {
 	case RunbookManagementSkillID:
-		version = RunbookManagementSkillVersion
 	case AgentManagementSkillID:
-		version = AgentManagementSkillVersion
 	case ObjectiveManagementSkillID:
-		version = ObjectiveManagementSkillVersion
 	case ProjectManagementSkillID:
-		version = ProjectManagementSkillVersion
 	case RunManagementSkillID:
-		version = RunManagementSkillVersion
 	default:
 		return nil, false
 	}
@@ -1606,17 +1603,7 @@ func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTur
 		action != RunActionPause && action != RunActionResume && action != RunActionCancel {
 		return nil, false
 	}
-	arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, requested.InputRef)
-	if err != nil {
-		return nil, false
-	}
-	checkpoint := preserveKernelActionHistory(run.Checkpoint, turn.ContinuationCheckpoint)
-	checkpoint["lastAction"] = map[string]interface{}{
-		"status": governedActionProposalFailedStatus, "skillId": skillID, "skillVersion": version, "action": action,
-		"bindingId": requested.BindingID, "bindingRevision": requested.BindingRevision,
-		"arguments": deepCloneCheckpointMap(arguments), "error": sanitizeActionError(cause, nil),
-	}
-	return checkpoint, true
+	return checkpointGovernedProposalFailure(run, turn, cause, sanitizeActionError(cause, nil))
 }
 
 func conversationResultMap(value interface{}) map[string]interface{} {

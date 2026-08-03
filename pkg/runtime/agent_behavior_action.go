@@ -50,7 +50,7 @@ func AgentManagementSkill() *skill.Definition {
 			},
 			AgentActionAmendBehavior: {
 				Name:        AgentActionAmendBehavior,
-				Description: "Propose changing the current Agent's purpose, system prompt, personality, or operating principles. The kernel enforces the active definition's amendment policy and immutable activation lifecycle.",
+				Description: "Propose changing the current Agent's display name, purpose, system prompt, personality, or operating principles. Supply at least one changed field and preserve unrelated current behavior. String and list values replace the corresponding field in full. The kernel resolves the target and revision, then enforces amendment policy and the immutable activation lifecycle.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
@@ -67,6 +67,13 @@ func AgentManagementSkill() *skill.Definition {
 						"rationale":           map[string]interface{}{"type": "string", "minLength": 1},
 					},
 					"required": []interface{}{"expectedDeploymentRevision", "rationale"},
+					"anyOf": []interface{}{
+						map[string]interface{}{"required": []interface{}{"displayName"}},
+						map[string]interface{}{"required": []interface{}{"purpose"}},
+						map[string]interface{}{"required": []interface{}{"systemPrompt"}},
+						map[string]interface{}{"required": []interface{}{"personality"}},
+						map[string]interface{}{"required": []interface{}{"operatingPrinciples"}},
+					},
 				},
 				OutputSchema: map[string]interface{}{
 					"type": "object", "additionalProperties": false,
