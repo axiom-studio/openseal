@@ -162,7 +162,7 @@ func (l *ActionCredentialLease) Validate() error {
 	}
 	previous := ""
 	for _, credential := range l.Credentials {
-		if !validLeaseIdentifier(credential.Name, 128) || !validLeaseIdentifier(credential.Reference.Kind, 128) || !validLeaseIdentifier(credential.Reference.ID, 512) || credential.Name <= previous || len(credential.Fields) == 0 {
+		if !validLeaseIdentifier(credential.Name, 128) || !validLeaseIdentifier(credential.Reference.Kind, 128) || !validOpaqueCredentialReference(credential.Reference.ID, 512) || credential.Name <= previous || len(credential.Fields) == 0 {
 			return fmt.Errorf("%w: credential references must be sorted, unique, and opaque", ErrActionCredentialLeaseInvalid)
 		}
 		previous = credential.Name
@@ -464,6 +464,23 @@ func validLeaseIdentifier(value string, maximum int) bool {
 	}
 	for _, character := range value {
 		if unicode.IsControl(character) || unicode.IsSpace(character) {
+			return false
+		}
+	}
+	return true
+}
+
+// validOpaqueCredentialReference validates a host-owned reference without
+// interpreting its provider-specific identifier. Vault and connection names
+// may legitimately contain spaces; signed JSON already preserves those bytes
+// without ambiguity. Leading/trailing whitespace and control characters remain
+// invalid so references retain a single canonical representation.
+func validOpaqueCredentialReference(value string, maximum int) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > maximum {
+		return false
+	}
+	for _, character := range value {
+		if unicode.IsControl(character) {
 			return false
 		}
 	}
