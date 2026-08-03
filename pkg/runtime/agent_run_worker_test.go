@@ -1075,6 +1075,10 @@ func TestAgentRunWorkerDoesNotLetModelBoundReviewedRunbookOperation(t *testing.T
 		children[0].Context["runbookEntrypoint"] != "engage-now" {
 		t.Fatalf("Runbook identity was not preserved: %#v", children[0].Context)
 	}
+	invocation, _ := children[0].Context[RunbookInvocationContextKey].(map[string]interface{})
+	if invocation["summary"] != proposal.Summary {
+		t.Fatalf("Runbook invocation intent was not preserved: %#v", invocation)
+	}
 	_, err = pool.materializeTurnRunbook(t.Context(), "worker", children[0], &AgentTurn{ID: "recursive", RequestedRunbook: proposal}, &TurnRunnerBinding{
 		RunbookOperations: []HostedRunbookOperation{{DefinitionID: "engagement", DefinitionVersion: "1.0.0", Entrypoint: "engage-now"}},
 	})
@@ -1084,6 +1088,69 @@ func TestAgentRunWorkerDoesNotLetModelBoundReviewedRunbookOperation(t *testing.T
 	grandchildren, listErr := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: children[0].ID, Limit: 10})
 	if listErr != nil || len(grandchildren) != 0 {
 		t.Fatalf("recursive invocation created children = %#v, %v", grandchildren, listErr)
+	}
+}
+
+func TestAgentRunWorkerCarriesRunbookInvocationIntentIntoDelegatedWork(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "runbook-invocation-delegation"}
+	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}, AssignedAgentID: "operator",
+		Goal: "respond to the current channel message", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{
+		Scope: scope, WorkerID: "worker", LeaseDuration: time.Minute,
+	})
+	if err != nil || claimed == nil || claimed.ID != source.ID {
+		t.Fatalf("claimed source = %#v, %v", claimed, err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, nil
+	}), nil, AgentRunWorkerConfig{Scope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := &TurnRunbookProposal{
+		Entrypoint: "engage-now", Summary: "Scout only the requested community for this invocation",
+		Arguments: map[string]interface{}{"community": "requested-community"},
+	}
+	waiting, err := pool.materializeTurnRunbook(t.Context(), "worker", claimed, &AgentTurn{
+		ID: "invoke", RequestedRunbook: proposal,
+	}, &TurnRunnerBinding{RunbookOperations: []HostedRunbookOperation{{
+		DefinitionID: "engagement", DefinitionVersion: "1.0.0", Entrypoint: "engage-now",
+	}}})
+	if err != nil || waiting.Status != AgentRunStatusWaitingForDependency {
+		t.Fatalf("materialized Runbook = %#v, %v", waiting, err)
+	}
+	operations, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
+	if err != nil || len(operations) != 1 {
+		t.Fatalf("operation children = %#v, %v", operations, err)
+	}
+	delegation := &TurnDelegationProposal{
+		StepID: "delegate", AssignedAgentID: "operator", Goal: "Perform the reviewed generic engagement step",
+		Checkpoint: map[string]interface{}{}, Mode: runbook.DelegateReason,
+	}
+	delegatedSource, err := pool.materializeTurnDelegation(t.Context(), "worker", operations[0], &AgentTurn{
+		ID: "delegate", RequestedDelegation: delegation,
+	})
+	if err != nil || delegatedSource.Status != AgentRunStatusWaitingForAgent {
+		t.Fatalf("materialized delegation = %#v, %v", delegatedSource, err)
+	}
+	reconciled, err := pool.requestInbox.Reconcile(t.Context(), scope, "operator")
+	if err != nil || reconciled.RequestsAccepted != 1 {
+		t.Fatalf("reconciled delegation = %#v, %v", reconciled, err)
+	}
+	delegated, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: operations[0].ID, Limit: 10})
+	if err != nil || len(delegated) != 1 {
+		t.Fatalf("delegated children = %#v, %v", delegated, err)
+	}
+	invocation, _ := delegated[0].Context[RunbookInvocationContextKey].(map[string]interface{})
+	arguments, _ := invocation["arguments"].(map[string]interface{})
+	if invocation["summary"] != proposal.Summary || arguments["community"] != "requested-community" {
+		t.Fatalf("delegated invocation intent = %#v", invocation)
 	}
 }
 

@@ -13,6 +13,12 @@ import (
 
 const DelegationModeContextKey = "openseal.delegationMode"
 
+// RunbookInvocationContextKey is runtime-owned context that preserves the
+// caller's intent across a callable Runbook and any Agent work it delegates.
+// Runbooks remain deterministic and keep their reviewed static goals, while
+// delegated reasoning can also honor the exact invocation that started them.
+const RunbookInvocationContextKey = "openseal.runbookInvocation"
+
 type RunForkStore interface {
 	PortfolioStore
 	RunDependencyStore
