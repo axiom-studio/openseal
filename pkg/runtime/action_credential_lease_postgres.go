@@ -196,18 +196,23 @@ func matchCurrentActionCredentialBinding(lease ActionCredentialLease, call *Acti
 		binding.SkillID != lease.SkillID || binding.SkillVersion != lease.SkillVersion ||
 		!stringSliceContains(binding.AllowedActions, lease.Action) ||
 		riskLevelRank(call.Risk) < 0 || riskLevelRank(binding.MaximumRisk) < riskLevelRank(call.Risk) ||
-		!credentialReferencesEqual(binding.Credentials, call.CredentialRefs) {
+		!credentialReferencesContainExact(binding.Credentials, call.CredentialRefs) {
 		return ErrActionCredentialLeaseMismatch
 	}
 	return nil
 }
 
-func credentialReferencesEqual(left, right map[string]skill.CredentialReference) bool {
-	if len(left) != len(right) {
+// credentialReferencesContainExact permits a binding to carry credentials for
+// other actions or adapters while requiring every credential selected by the
+// durable ActionCall to match exactly. The trusted host independently derives
+// the selected names from the immutable action contract and MatchActionCredentialLease
+// rejects any extra or missing ActionCall credential.
+func credentialReferencesContainExact(available, selected map[string]skill.CredentialReference) bool {
+	if len(selected) == 0 || len(available) < len(selected) {
 		return false
 	}
-	for name, reference := range left {
-		if right[name] != reference {
+	for name, reference := range selected {
+		if available[name] != reference {
 			return false
 		}
 	}
