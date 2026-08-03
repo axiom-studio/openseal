@@ -16,7 +16,8 @@ import (
 
 const (
 	AgentManagementSkillID        = "openseal.agents"
-	AgentManagementSkillVersion   = "1.2.0"
+	AgentManagementSkillVersion   = "1.2.1"
+	agentManagementSkillVersionV1 = "1.2.0"
 	AgentActionAmendBehavior      = "amend_behavior"
 	AgentActionListChannels       = "list_channels"
 	AgentActionConfigureChannel   = "configure_channel"
@@ -1003,8 +1004,12 @@ func agentChannelActionResult(
 
 func isAgentManagementAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == AgentManagementSkillID &&
-		bound.Definition.Version == AgentManagementSkillVersion &&
+		isSupportedAgentManagementSkillVersion(bound.Definition.Version) &&
 		(bound.Action.Name == AgentActionAmendBehavior || bound.Action.Name == AgentActionListChannels || bound.Action.Name == AgentActionConfigureChannel)
+}
+
+func isSupportedAgentManagementSkillVersion(version string) bool {
+	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV1
 }
 
 func isAgentMutationAction(bound *skill.BoundAction) bool {
@@ -1022,6 +1027,6 @@ func isAgentConfigureChannelAction(bound *skill.BoundAction) bool {
 func isAgentBehaviorAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil &&
 		bound.Definition.ID == AgentManagementSkillID &&
-		bound.Definition.Version == AgentManagementSkillVersion &&
+		isSupportedAgentManagementSkillVersion(bound.Definition.Version) &&
 		bound.Action.Name == AgentActionAmendBehavior
 }
