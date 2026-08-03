@@ -635,6 +635,10 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		request.SystemInstructions = append(request.SystemInstructions,
 			"A previously approved exact action failed. Continue from continuationCheckpoint._opensealApprovalRecovery and its approval-owned continuationCheckpoint. The prior approval authorizes only the recorded proposedAction. Reuse its durable context; any materially changed action is a new proposal and must pass policy and approval independently. Do not restart completed setup unless the recorded failure requires replacing that setup.")
 	}
+	if input.Run.Checkpoint != nil && input.Run.Checkpoint[turnContinuityCheckpointKey] != nil {
+		request.SystemInstructions = append(request.SystemInstructions,
+			"continuationCheckpoint._opensealPreviousTurn is the kernel-owned summary of the immediately preceding bounded Turn and the proposal it asked the kernel to execute. Use it with lastAction and _opensealActionHistory to continue that declared plan instead of reinterpreting the whole Run goal from scratch. One Run is one bounded execution: schedules and event triggers create later Runs. If the preceding Turn said its successful action would finish this execution and authoritative history confirms that action succeeded, complete this Run with the exact action-call evidence; do not start another cycle. Continue only when the Run goal or preceding Turn explicitly identifies unfinished work.")
+	}
 	if input.Run.Checkpoint != nil && input.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil {
 		if recovery, ok := input.Run.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{}); ok {
 			if requiresAdvance, _ := recovery["requiresActionAdvance"].(bool); requiresAdvance {

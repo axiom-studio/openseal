@@ -395,6 +395,14 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.OutputSummary = "Run paused after reaching its autonomous budget"
 		}
 	}
+	if finish.Status == AgentTurnStatusCompleted {
+		finish.ContinuationCheckpoint = checkpointTurnContinuity(finish.ContinuationCheckpoint, &AgentTurn{
+			Sequence: turn.Sequence, Status: finish.Status, OutputSummary: finish.OutputSummary,
+			RequestedActions: finish.RequestedActions, RequestedFork: finish.RequestedFork,
+			RequestedDelegation: finish.RequestedDelegation, RequestedRunbook: finish.RequestedRunbook,
+			NextRunStatus: finish.NextRunStatus,
+		})
+	}
 	turn, err = c.turns.FinishTurn(ctx, req.Scope, turn.ID, finish)
 	if err != nil {
 		return nil, err
