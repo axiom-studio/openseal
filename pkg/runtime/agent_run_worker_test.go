@@ -855,10 +855,11 @@ func TestAgentRunWorkersExecuteDurableDelegation(t *testing.T) {
 func TestDelegatedRunbookOriginPreservesImmutableIdentity(t *testing.T) {
 	origin := delegatedRunbookOrigin(map[string]interface{}{
 		"runbookDefinitionId": "hourly-scan", "runbookDefinitionVersion": "2.0.2",
-		"runbookActivationId": "activation-one", "runbookTriggerId": "hourly",
+		"runbookEntrypoint": "perform-hourly", "runbookActivationId": "activation-one", "runbookTriggerId": "hourly",
 	})
 	if origin["runbookDefinitionId"] != "hourly-scan" || origin["runbookDefinitionVersion"] != "2.0.2" ||
-		origin["runbookActivationId"] != "activation-one" || origin["runbookTriggerId"] != "hourly" {
+		origin["runbookEntrypoint"] != "perform-hourly" || origin["runbookActivationId"] != "activation-one" ||
+		origin["runbookTriggerId"] != "hourly" {
 		t.Fatalf("delegated Runbook origin = %#v", origin)
 	}
 	if delegatedRunbookOrigin(map[string]interface{}{"runbookDefinitionId": "hourly-scan"}) != nil {
@@ -939,7 +940,7 @@ func TestAgentRunWorkerPreauthorizesScheduledRunbookDelegation(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "scheduled-runbook-delegation"}
 	source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "manager"}, AssignedAgentID: "manager",
-		Goal: "execute governed schedule", Source: RunSourceSchedule,
+		Goal: "execute governed schedule", Source: RunSourceSchedule, Entrypoint: "perform-hourly",
 		Context: map[string]interface{}{
 			"runbookDefinitionId": "hourly-scan", "runbookDefinitionVersion": "2.0.2",
 			"runbookActivationId": "activation-one", "runbookTriggerId": "hourly",
@@ -976,6 +977,11 @@ func TestAgentRunWorkerPreauthorizesScheduledRunbookDelegation(t *testing.T) {
 	children, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: source.ID, Limit: 10})
 	if err != nil || len(children) != 1 || children[0].Source != RunSourceRequest || children[0].AssignedAgentID != "specialist" {
 		t.Fatalf("children = %#v, error = %v", children, err)
+	}
+	triggerInput, _ := children[0].Context["triggerInput"].(map[string]interface{})
+	if triggerInput["runbookDefinitionId"] != "hourly-scan" || triggerInput["runbookDefinitionVersion"] != "2.0.2" ||
+		triggerInput["runbookEntrypoint"] != "perform-hourly" {
+		t.Fatalf("delegated child Runbook identity = %#v", triggerInput)
 	}
 }
 
@@ -1052,7 +1058,7 @@ func TestAgentRunWorkerDoesNotLetModelBoundReviewedRunbookOperation(t *testing.T
 		Budget: &BudgetPolicy{MaxAttempts: 3},
 	}
 	waiting, err := pool.materializeTurnRunbook(t.Context(), "worker", claimed, &AgentTurn{ID: "turn", RequestedRunbook: proposal}, &TurnRunnerBinding{
-		RunbookOperations: []HostedRunbookOperation{{Entrypoint: "engage-now"}},
+		RunbookOperations: []HostedRunbookOperation{{DefinitionID: "engagement", DefinitionVersion: "1.0.0", Entrypoint: "engage-now"}},
 	})
 	if err != nil || waiting.Status != AgentRunStatusWaitingForDependency {
 		t.Fatalf("materialized Runbook = %#v, %v", waiting, err)
@@ -1063,6 +1069,21 @@ func TestAgentRunWorkerDoesNotLetModelBoundReviewedRunbookOperation(t *testing.T
 	}
 	if children[0].Budget != nil {
 		t.Fatalf("model-created Runbook ceiling leaked into child: %#v", children[0].Budget)
+	}
+	if children[0].Context["runbookDefinitionId"] != "engagement" ||
+		children[0].Context["runbookDefinitionVersion"] != "1.0.0" ||
+		children[0].Context["runbookEntrypoint"] != "engage-now" {
+		t.Fatalf("Runbook identity was not preserved: %#v", children[0].Context)
+	}
+	_, err = pool.materializeTurnRunbook(t.Context(), "worker", children[0], &AgentTurn{ID: "recursive", RequestedRunbook: proposal}, &TurnRunnerBinding{
+		RunbookOperations: []HostedRunbookOperation{{DefinitionID: "engagement", DefinitionVersion: "1.0.0", Entrypoint: "engage-now"}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "recursive Runbook invocation") {
+		t.Fatalf("recursive invocation error = %v", err)
+	}
+	grandchildren, listErr := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, ParentRunID: children[0].ID, Limit: 10})
+	if listErr != nil || len(grandchildren) != 0 {
+		t.Fatalf("recursive invocation created children = %#v, %v", grandchildren, listErr)
 	}
 }
 

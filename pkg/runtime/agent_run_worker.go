@@ -395,15 +395,19 @@ func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerI
 		return nil, errors.New("a bounded Turn must request exactly one runbook")
 	}
 	proposal := turn.RequestedRunbook
-	authorized := false
+	var authorized *HostedRunbookOperation
 	for _, operation := range binding.RunbookOperations {
 		if operation.Entrypoint == proposal.Entrypoint {
-			authorized = true
+			resolved := operation
+			authorized = &resolved
 			break
 		}
 	}
-	if !authorized {
+	if authorized == nil {
 		return nil, fmt.Errorf("requested runbook entrypoint %q is not authorized", proposal.Entrypoint)
+	}
+	if err := p.rejectRecursiveRunbookInvocation(ctx, run, *authorized); err != nil {
+		return nil, err
 	}
 	// A callable Runbook is an already reviewed operation. Its execution budget
 	// is therefore owned by the kernel and the invoking Run, not selected by the
@@ -420,13 +424,22 @@ func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerI
 			return nil, fmt.Errorf("resolve callable Runbook budget: %w", budgetErr)
 		}
 	}
+	operationContext := cloneMap(proposal.Arguments)
+	if operationContext == nil {
+		operationContext = make(map[string]interface{})
+	}
+	if strings.TrimSpace(authorized.DefinitionID) != "" && strings.TrimSpace(authorized.DefinitionVersion) != "" {
+		operationContext["runbookDefinitionId"] = strings.TrimSpace(authorized.DefinitionID)
+		operationContext["runbookDefinitionVersion"] = strings.TrimSpace(authorized.DefinitionVersion)
+		operationContext["runbookEntrypoint"] = strings.TrimSpace(authorized.Entrypoint)
+	}
 	result, err := p.forks.Create(ctx, CreateRunForkRequest{
 		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: workerID,
 		ForkID: "runbook-" + proposal.Entrypoint,
 		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
 		Branches: []RunForkBranch{{
 			ID: "operation", Goal: proposal.Summary, AssignedAgentID: run.AssignedAgentID,
-			Entrypoint: proposal.Entrypoint, Context: cloneMap(proposal.Arguments), Checkpoint: map[string]interface{}{},
+			Entrypoint: proposal.Entrypoint, Context: operationContext, Checkpoint: map[string]interface{}{},
 			Budget: operationBudget,
 		}},
 		ContinuationCheckpoint: turn.ContinuationCheckpoint,
@@ -448,6 +461,62 @@ func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerI
 		p.logger.Warnw("failed to project Runbook start into conversation", "runId", run.ID, "childRunId", result.Children[0].ID, "error", err)
 	}
 	return result.DependencyGroup.Source, nil
+}
+
+func (p *AgentRunWorkerPool) rejectRecursiveRunbookInvocation(ctx context.Context, run *AgentRun, operation HostedRunbookOperation) error {
+	if run == nil {
+		return nil
+	}
+	wantedID := strings.TrimSpace(operation.DefinitionID)
+	wantedVersion := strings.TrimSpace(operation.DefinitionVersion)
+	wantedEntrypoint := strings.TrimSpace(operation.Entrypoint)
+	visited := make(map[string]struct{})
+	current := run
+	for depth := 0; current != nil && depth < 256; depth++ {
+		if _, duplicate := visited[current.ID]; duplicate {
+			return fmt.Errorf("reject recursive Runbook invocation %q: Run ancestry contains a cycle at %s", wantedEntrypoint, current.ID)
+		}
+		visited[current.ID] = struct{}{}
+		ancestorID, ancestorVersion, ancestorEntrypoint := runbookInvocationIdentity(current)
+		exactIdentity := wantedID != "" && wantedVersion != "" &&
+			ancestorID == wantedID && ancestorVersion == wantedVersion &&
+			(ancestorEntrypoint == "" || ancestorEntrypoint == wantedEntrypoint)
+		legacyIdentity := wantedEntrypoint != "" && ancestorID == "" &&
+			strings.TrimSpace(current.Entrypoint) == wantedEntrypoint &&
+			strings.TrimSpace(current.AssignedAgentID) == strings.TrimSpace(run.AssignedAgentID)
+		if exactIdentity || legacyIdentity {
+			return fmt.Errorf("reject recursive Runbook invocation %q: the same operation is already active in ancestor Run %s", wantedEntrypoint, current.ID)
+		}
+		if strings.TrimSpace(current.ParentRunID) == "" {
+			return nil
+		}
+		parent, err := p.portfolio.GetAgentRun(ctx, current.Scope, current.ParentRunID)
+		if err != nil {
+			return fmt.Errorf("resolve Runbook invocation ancestry at %s: %w", current.ID, err)
+		}
+		current = parent
+	}
+	if current != nil {
+		return fmt.Errorf("reject Runbook invocation %q: Run ancestry exceeds the supported depth", wantedEntrypoint)
+	}
+	return nil
+}
+
+func runbookInvocationIdentity(run *AgentRun) (string, string, string) {
+	if run == nil {
+		return "", "", ""
+	}
+	contextValues := run.Context
+	if triggerInput, ok := contextValues["triggerInput"].(map[string]interface{}); ok {
+		contextValues = triggerInput
+	}
+	definitionID, _ := contextValues["runbookDefinitionId"].(string)
+	definitionVersion, _ := contextValues["runbookDefinitionVersion"].(string)
+	entrypoint, _ := contextValues["runbookEntrypoint"].(string)
+	if strings.TrimSpace(entrypoint) == "" {
+		entrypoint = run.Entrypoint
+	}
+	return strings.TrimSpace(definitionID), strings.TrimSpace(definitionVersion), strings.TrimSpace(entrypoint)
 }
 
 func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run *AgentRun) {
@@ -485,6 +554,9 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 	}
 	runbookOrigin := delegatedRunbookOrigin(run.Context)
 	if runbookOrigin != nil {
+		if entrypoint := strings.TrimSpace(run.Entrypoint); entrypoint != "" {
+			runbookOrigin["runbookEntrypoint"] = entrypoint
+		}
 		sharedContext["triggerInput"] = runbookOrigin
 	}
 	if proposal.Mode != "" {
@@ -590,6 +662,9 @@ func delegatedRunbookOrigin(contextValues map[string]interface{}) map[string]int
 	origin := map[string]interface{}{
 		"runbookDefinitionId":      strings.TrimSpace(definitionID),
 		"runbookDefinitionVersion": strings.TrimSpace(definitionVersion),
+	}
+	if value, ok := contextValues["runbookEntrypoint"].(string); ok && strings.TrimSpace(value) != "" {
+		origin["runbookEntrypoint"] = strings.TrimSpace(value)
 	}
 	for _, key := range []string{"runbookActivationId", "runbookTriggerId"} {
 		if value, ok := contextValues[key].(string); ok && strings.TrimSpace(value) != "" {
