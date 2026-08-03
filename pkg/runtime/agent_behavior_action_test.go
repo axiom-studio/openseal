@@ -31,6 +31,15 @@ func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
 	}
 }
 
+func TestAgentManagementExecutorAcceptsActivePreviousContractVersion(t *testing.T) {
+	definition := AgentManagementSkill()
+	definition.Version = agentManagementSkillVersionV1
+	action := definition.Actions[AgentActionAmendBehavior]
+	if !isAgentManagementAction(&skill.BoundAction{Definition: definition, Action: action}) {
+		t.Fatal("active 1.2.0 Agent management binding is no longer executable")
+	}
+}
+
 func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
