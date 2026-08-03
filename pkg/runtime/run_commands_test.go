@@ -115,6 +115,95 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 	}
 }
 
+func TestCancelingParentRunCascadesToAllNonTerminalDescendants(t *testing.T) {
+	for _, fixture := range []struct {
+		name  string
+		store func(*testing.T) RunCommandStore
+	}{
+		{name: "memory", store: func(*testing.T) RunCommandStore { return NewMemoryStore() }},
+		{name: "sqlite", store: func(t *testing.T) RunCommandStore {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cascade.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			return store
+		}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			ctx := t.Context()
+			store := fixture.store(t)
+			service := NewRunCommandService(store)
+			scope := Scope{Kind: "tenant", ID: "cascade"}
+			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
+			create := func(goal, parentID string) *AgentRun {
+				result, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+					Scope: scope, ParentRunID: parentID, Owner: owner, AssignedAgentID: owner.ID,
+					Goal: goal, Source: RunSourceHandoff,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return result.Run
+			}
+			root := create("root work", "")
+			child := create("delegated work", root.ID)
+			grandchild := create("nested work", child.ID)
+			completed := create("already complete", root.ID)
+			activity := NewRunActivityService(store, store)
+			running, _, err := activity.TransitionRun(ctx, scope, completed.ID, RunTransitionRequest{
+				ExpectedRevision: completed.Revision, Status: AgentRunStatusRunning,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			completed, _, err = activity.TransitionRun(ctx, scope, completed.ID, RunTransitionRequest{
+				ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted,
+			})
+
+			result, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
+				Scope: scope, RunID: root.ID, ExpectedRevision: root.Revision, Kind: AgentRunCommandCancel,
+				Actor: ActivityActor{Type: "user", ID: "operator"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Run.Status != AgentRunStatusCanceled {
+				t.Fatalf("root status = %s", result.Run.Status)
+			}
+			for _, id := range []string{child.ID, grandchild.ID} {
+				run, err := store.GetAgentRun(ctx, scope, id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if run.Status != AgentRunStatusCanceled || run.CompletedAt == nil || run.LeaseOwner != "" || run.LeaseExpiresAt != nil {
+					t.Fatalf("descendant %s was not fully canceled: %#v", id, run)
+				}
+				events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: id})
+				cancellations := 0
+				for _, event := range events {
+					if event.EventType == "run.canceled" {
+						cancellations++
+					}
+				}
+				if err != nil || cancellations != 1 {
+					t.Fatalf("descendant %s cancellation events = %d, err = %v", id, cancellations, err)
+				}
+			}
+			unchanged, err := store.GetAgentRun(ctx, scope, completed.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if unchanged.Status != AgentRunStatusCompleted || unchanged.Revision != completed.Revision {
+				t.Fatalf("completed descendant changed: %#v", unchanged)
+			}
+			if err := service.CascadeTerminalRun(ctx, result.Run); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

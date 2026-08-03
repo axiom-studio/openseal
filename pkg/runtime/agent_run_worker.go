@@ -130,6 +130,7 @@ type AgentRunWorkerPool struct {
 	actions              *ActionCoordinator
 	actionObserver       ActionProposalObserver
 	runFinalizer         RunTerminalFinalizer
+	runCommands          *RunCommandService
 	lastFinalizationScan time.Time
 	finalizationOffset   int
 	forks                *RunForkCoordinator
@@ -178,7 +179,8 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	pool := &AgentRunWorkerPool{
 		config: config, scheduler: NewAgentRunScheduler(store), portfolio: store, coordinator: NewTurnCoordinator(store, store, store),
 		wakeService: NewAgentRunWakeService(store, store), activity: NewRunActivityService(store, store),
-		resolver: resolver, logger: logger, wake: make(chan struct{}, 1),
+		runCommands: NewRunCommandService(store),
+		resolver:    resolver, logger: logger, wake: make(chan struct{}, 1),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}
 	if forkStore, ok := store.(RunForkStore); ok {
@@ -1003,11 +1005,19 @@ func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *
 }
 
 func (p *AgentRunWorkerPool) finalizeTerminalRun(ctx context.Context, run *AgentRun) {
-	if p.runFinalizer == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
+	if run == nil || !isTerminalAgentRunStatus(run.Status) {
 		return
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
+	if p.runCommands != nil {
+		if err := p.runCommands.CascadeTerminalRun(cleanupCtx, cloneAgentRun(run)); err != nil {
+			p.logger.Warnw("failed to cascade terminal Run cancellation", "runId", run.ID, "status", run.Status, "error", err)
+		}
+	}
+	if p.runFinalizer == nil {
+		return
+	}
 	if err := p.runFinalizer.FinalizeRun(cleanupCtx, cloneAgentRun(run)); err != nil {
 		p.logger.Warnw("failed to finalize terminal Run resources", "runId", run.ID, "status", run.Status, "error", err)
 	}
@@ -1070,7 +1080,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 }
 
 func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context) {
-	if p.runFinalizer == nil && p.collaboration == nil && p.requestInbox == nil {
+	if p.runCommands == nil && p.runFinalizer == nil && p.collaboration == nil && p.requestInbox == nil {
 		return
 	}
 	now := time.Now().UTC()

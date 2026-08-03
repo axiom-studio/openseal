@@ -297,3 +297,53 @@ func TestTerminalRunReconciliationResolvesCanceledDelegatedChild(t *testing.T) {
 	pool.lastFinalizationScan = time.Time{}
 	pool.reconcileTerminalRunFinalizers(ctx)
 }
+
+func TestTerminalRunReconciliationCancelsOrphanedDescendantsAfterRestart(t *testing.T) {
+	ctx := t.Context()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "terminal-cascade"}
+	service := NewRunCommandService(store)
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
+	parentResult, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Goal: "parent", Source: RunSourceSchedule,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childResult, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, ParentRunID: parentResult.Run.ID, Owner: owner, AssignedAgentID: owner.ID,
+		Goal: "child", Source: RunSourceHandoff,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity := NewRunActivityService(store, store)
+	running, _, err := activity.TransitionRun(ctx, scope, parentResult.Run.ID, RunTransitionRequest{
+		ExpectedRevision: parentResult.Run.Revision, Status: AgentRunStatusRunning,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, _, err := activity.TransitionRun(ctx, scope, running.ID, RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed, Error: "worker stopped",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A restarted worker learns about the already-terminal parent from durable
+	// state and must repair descendants without relying on the original worker.
+	pool := &AgentRunWorkerPool{
+		config: AgentRunWorkerConfig{Scope: scope}, portfolio: store,
+		runCommands: NewRunCommandService(store), logger: zap.NewNop().Sugar(),
+	}
+	pool.finalizeTerminalRun(ctx, failed)
+	child, err := store.GetAgentRun(ctx, scope, childResult.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != AgentRunStatusCanceled || child.CompletedAt == nil {
+		t.Fatalf("orphaned child was not canceled during reconciliation: %#v", child)
+	}
+	pool.finalizeTerminalRun(ctx, failed)
+}
