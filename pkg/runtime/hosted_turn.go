@@ -76,11 +76,13 @@ type HostedAgentTarget struct {
 // cognitive Agent may invoke. It contains no graph internals or credentials;
 // the kernel resolves the exact active definition again at materialization.
 type HostedRunbookOperation struct {
-	Entrypoint   string                 `json:"entrypoint"`
-	Name         string                 `json:"name"`
-	Description  string                 `json:"description"`
-	InputSchema  map[string]interface{} `json:"inputSchema"`
-	OutputSchema map[string]interface{} `json:"outputSchema,omitempty"`
+	DefinitionID      string                 `json:"definitionId"`
+	DefinitionVersion string                 `json:"definitionVersion"`
+	Entrypoint        string                 `json:"entrypoint"`
+	Name              string                 `json:"name"`
+	Description       string                 `json:"description"`
+	InputSchema       map[string]interface{} `json:"inputSchema"`
+	OutputSchema      map[string]interface{} `json:"outputSchema,omitempty"`
 }
 
 // HostedSkillPrompt is an immutable, already-authorized prompt projection. It
