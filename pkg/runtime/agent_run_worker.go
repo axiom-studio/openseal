@@ -430,6 +430,10 @@ func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerI
 	if operationContext == nil {
 		operationContext = make(map[string]interface{})
 	}
+	operationContext[RunbookInvocationContextKey] = map[string]interface{}{
+		"summary":   strings.TrimSpace(proposal.Summary),
+		"arguments": cloneMap(proposal.Arguments),
+	}
 	if strings.TrimSpace(authorized.DefinitionID) != "" && strings.TrimSpace(authorized.DefinitionVersion) != "" {
 		operationContext["runbookDefinitionId"] = strings.TrimSpace(authorized.DefinitionID)
 		operationContext["runbookDefinitionVersion"] = strings.TrimSpace(authorized.DefinitionVersion)
@@ -560,6 +564,9 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 			runbookOrigin["runbookEntrypoint"] = entrypoint
 		}
 		sharedContext["triggerInput"] = runbookOrigin
+	}
+	if invocation, ok := run.Context[RunbookInvocationContextKey].(map[string]interface{}); ok {
+		sharedContext[RunbookInvocationContextKey] = cloneMap(invocation)
 	}
 	if proposal.Mode != "" {
 		sharedContext[DelegationModeContextKey] = proposal.Mode
