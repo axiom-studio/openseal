@@ -74,6 +74,16 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 			return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "standing authority " + grant.ID}, nil
 		}
 	}
+	// RequireApprovalAt is the Agent's reviewed risk boundary. Actions below
+	// that boundary may proceed without a checkpoint; actions at or above it
+	// are still handled by the default side-effect policy below. An omitted or
+	// invalid threshold retains the fail-closed default behavior.
+	if !requiresBehaviorReview && actionRiskBelowApprovalThreshold(input.Bound.Action.Risk, definition.Authority.RequireApprovalAt) {
+		return runtime.ActionPolicyDecision{
+			Disposition: runtime.ActionDispositionAllow,
+			Reason:      fmt.Sprintf("%s risk is below the Agent approval threshold %s", input.Bound.Action.Risk, definition.Authority.RequireApprovalAt),
+		}, nil
+	}
 	decision, err := e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
 	if err != nil {
 		return runtime.ActionPolicyDecision{}, err
@@ -89,6 +99,27 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 		decision.ApprovalTimeout = runtime.ApprovalTimeoutDecision(timeout.Decision)
 	}
 	return decision, nil
+}
+
+func actionRiskBelowApprovalThreshold(action, threshold capability.RiskLevel) bool {
+	return actionRiskRank(action) >= 0 && actionRiskRank(threshold) >= 0 && actionRiskRank(action) < actionRiskRank(threshold)
+}
+
+func actionRiskRank(value capability.RiskLevel) int {
+	switch value {
+	case capability.RiskLevelRead:
+		return 0
+	case capability.RiskLevelWrite:
+		return 1
+	case capability.RiskLevelExternal:
+		return 2
+	case capability.RiskLevelProduction:
+		return 3
+	case capability.RiskLevelDestructive:
+		return 4
+	default:
+		return -1
+	}
 }
 
 func (e *Engine) defaultSideEffectPolicy() runtime.ActionPolicyEvaluator {
