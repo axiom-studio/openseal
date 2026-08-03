@@ -211,6 +211,52 @@ func TestAgentApprovalDeliverySurvivesSharedSkillBinding(t *testing.T) {
 	}
 }
 
+func TestAgentApprovalThresholdAllowsPreparationAndReviewsExternalEffects(t *testing.T) {
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
+		ID: "threshold-agent", Version: "1.0.0", DisplayName: "Threshold Agent", Purpose: "Prepare then publish", SystemPrompt: "Act within authority.",
+		SkillRequirements: []AgentSkillRequirement{{SkillID: "browser", RequiredActions: []string{"fill", "commit"}}},
+		Authority: AgentAuthorityPolicy{
+			MaximumRisk: SkillRiskExternal, AllowedSkillIDs: []string{"browser"}, MaxConcurrentRuns: 1,
+			RequireApprovalAt:    SkillRiskExternal,
+			ApprovalDestinations: []agent.ApprovalDestination{{EndpointID: "conversation-endpoint:review"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = engine.CreateAgentDeployment(ctx, &AgentDeployment{
+		ID: "threshold-agent", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: AgentRolloutActive, Environment: "test", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "reviewed threshold"); err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{ID: "run-one", Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "threshold-agent"}, AssignedAgentID: "threshold-agent"}
+	bound := func(name string, risk SkillRiskLevel, effect SkillSideEffect) *BoundSkillAction {
+		return &BoundSkillAction{
+			Definition: &SkillDefinition{ID: "browser", Version: "1"},
+			Action:     SkillAction{Name: name, Risk: risk, SideEffect: effect},
+			Binding:    &SkillBinding{ID: "browser-binding", DeploymentID: "threshold-agent", SkillID: "browser", SkillVersion: "1"},
+		}
+	}
+	prepare, err := engine.evaluateAgentActionAuthority(ctx, ActionPolicyInput{Run: run, Bound: bound("fill", SkillRiskWrite, SkillSideEffectWrite)})
+	if err != nil || prepare.Disposition != ActionDispositionAllow {
+		t.Fatalf("prepare decision = %#v, %v", prepare, err)
+	}
+	publish, err := engine.evaluateAgentActionAuthority(ctx, ActionPolicyInput{Run: run, Bound: bound("commit", SkillRiskExternal, SkillSideEffectExternal)})
+	if err != nil || publish.Disposition != ActionDispositionRequireApproval {
+		t.Fatalf("publish decision = %#v, %v", publish, err)
+	}
+	if len(publish.ApprovalDestinations) != 1 || publish.ApprovalDestinations[0].EndpointID != "conversation-endpoint:review" {
+		t.Fatalf("publish destinations = %#v", publish.ApprovalDestinations)
+	}
+}
+
 func TestAgentStandingAuthorityRejectsUndeclaredOrUnboundedGrants(t *testing.T) {
 	base := func() *AgentDefinition {
 		return &AgentDefinition{
