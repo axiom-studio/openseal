@@ -270,6 +270,31 @@ func TestActionCredentialLeaseContainsOnlyOpaqueReferences(t *testing.T) {
 	}
 }
 
+func TestActionCredentialLeaseBindingMayCarryCredentialsForOtherCapabilities(t *testing.T) {
+	_, call, _, _ := actionCredentialLeaseFixture()
+	call.Risk = skill.RiskLevelRead
+	binding := &skill.Binding{
+		ID: call.BindingID, Scope: skill.ScopeReference{Kind: call.Scope.Kind, ID: call.Scope.ID},
+		DeploymentID: call.DeploymentID, SkillID: call.SkillID, SkillVersion: call.SkillVersion,
+		Revision: call.BindingRevision, AllowedActions: []string{call.Action}, MaximumRisk: skill.RiskLevelDestructive,
+		Credentials: map[string]skill.CredentialReference{
+			"reddit":         call.CredentialRefs["reddit"],
+			"SIGNING_SECRET": {Kind: "slack_signing_secret", ID: "vault://007 Slack.signing_secret"},
+		},
+	}
+	lease := ActionCredentialLease{
+		Scope: call.Scope, SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action,
+		BindingOwnerID: call.DeploymentID, BindingID: call.BindingID, BindingRevision: call.BindingRevision,
+	}
+	if err := matchCurrentActionCredentialBinding(lease, call, binding); err != nil {
+		t.Fatalf("binding with an unrelated adapter credential was rejected: %v", err)
+	}
+	binding.Credentials["reddit"] = skill.CredentialReference{Kind: "reddit-oauth", ID: "vault://other.oauth"}
+	if err := matchCurrentActionCredentialBinding(lease, call, binding); !errors.Is(err, ErrActionCredentialLeaseMismatch) {
+		t.Fatalf("selected credential drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
+	}
+}
+
 func TestActionCredentialLeaseAcceptsOpaqueReferencesWithSpaces(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
 	call.CredentialRefs["reddit"] = skill.CredentialReference{Kind: "slack_bot_token", ID: "vault://007 Slack.bot_token"}
