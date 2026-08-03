@@ -195,6 +195,7 @@ type RunbookExecutionAudit struct {
 	UnassignedApprovals []RunbookApprovalAudit      `json:"unassignedApprovals,omitempty"`
 	UnassignedArtifacts []RunbookArtifactAudit      `json:"unassignedArtifacts,omitempty"`
 	UnassignedChildren  []RunbookChildRunAudit      `json:"unassignedChildren,omitempty"`
+	Children            []*RunbookExecutionAudit    `json:"children,omitempty"`
 }
 
 // RunExecutionAudit is the canonical execution graph for every durable Run.
@@ -213,10 +214,22 @@ func NewRunbookExecutionAuditService(store RunbookExecutionAuditStore, catalog R
 }
 
 func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, runID string) (*RunbookExecutionAudit, error) {
+	return s.get(ctx, scope, strings.TrimSpace(runID), make(map[string]struct{}), 0)
+}
+
+func (s *RunbookExecutionAuditService) get(ctx context.Context, scope Scope, runID string, ancestry map[string]struct{}, depth int) (*RunbookExecutionAudit, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("Run execution audit is not configured")
 	}
-	run, err := s.store.GetAgentRun(ctx, scope, strings.TrimSpace(runID))
+	if depth > 256 {
+		return nil, errors.New("Run execution audit ownership depth exceeds 256")
+	}
+	if _, cycle := ancestry[runID]; cycle {
+		return nil, errors.New("Run execution audit ownership cycle detected")
+	}
+	ancestry[runID] = struct{}{}
+	defer delete(ancestry, runID)
+	run, err := s.store.GetAgentRun(ctx, scope, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +300,13 @@ func (s *RunbookExecutionAuditService) Get(ctx context.Context, scope Scope, run
 	for _, child := range children {
 		if child != nil && !isTerminalAgentRunStatus(child.Status) {
 			result.Run.PendingChildRuns++
+		}
+		if child != nil {
+			childAudit, childErr := s.get(ctx, scope, child.ID, ancestry, depth+1)
+			if childErr != nil {
+				return nil, childErr
+			}
+			result.Children = append(result.Children, childAudit)
 		}
 	}
 	return result, nil
