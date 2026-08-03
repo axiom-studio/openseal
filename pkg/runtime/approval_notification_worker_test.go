@@ -149,12 +149,16 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID,
 			"invocationDigest": call.InvocationDigest, "decision": "approve", "principalType": "role", "principalId": "operator", "providerUserId": "U1"},
 	}
-	registration := &CallbackRegistration{Scope: endpoint.Scope}
-	subscription := CallbackSubscription{TargetID: endpoint.ID}
+	registration := &CallbackRegistration{Scope: endpoint.Scope, Provider: endpoint.Provider}
+	// Callback registrations are installation-scoped and may outlive the Agent
+	// endpoint that originally created them. The exact delivered card remains
+	// the authoritative correlation boundary when this target is stale.
+	subscription := CallbackSubscription{TargetID: "retired-slack-destination"}
 	callbackEvent := EventEnvelope{
 		ID: decision.ID, Scope: endpoint.Scope, Type: capability.CallbackEventApprovalDecided,
 		Source: "slack", Subject: decision.ExternalMessageID, OccurredAt: now,
-		Attributes: cloneMap(decision.Attributes), Actor: ActivityActor{Type: "callback", ID: "slack-approval"},
+		Attributes: cloneMap(decision.Attributes), Payload: map[string]interface{}{"messageId": delivered.ProviderMessageID},
+		Actor: ActivityActor{Type: "callback", ID: "slack-approval"},
 	}
 	consumer := NewApprovalCallbackConsumer(store, transport)
 	consumer.now = func() time.Time { return now }
