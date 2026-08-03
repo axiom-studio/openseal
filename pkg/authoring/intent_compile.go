@@ -27,6 +27,11 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 		return GenerationResponse{}, err
 	}
 	intent = applyAuthoringScheduleAuthority(intent, request)
+	var err error
+	intent, err = applyAuthoringApprovalDeliveryAuthority(intent, request.Catalog)
+	if err != nil {
+		return GenerationResponse{}, err
+	}
 	result := GenerationResponse{
 		SchemaVersion: AuthoringResultSchemaVersion,
 		Candidate:     WorkforceCandidate{Activation: deterministicAuthoringActivation(request)},
@@ -77,6 +82,53 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 	}
 	result.UnresolvedQuestions = questions
 	return result, nil
+}
+
+const runtimeOwnedApprovalPrinciple = "Approval checkpoints and their channel delivery are enforced by the runtime; do not send or poll approval messages with Skills."
+
+// applyAuthoringApprovalDeliveryAuthority removes conversation-provider Skills
+// from delegated work whenever the provider is selected only as a reviewed
+// approval destination. Approval delivery is a workflow edge owned by the
+// runtime, not an Agent-selected message/send/poll loop.
+func applyAuthoringApprovalDeliveryAuthority(intent AuthoringIntent, catalog CapabilityCatalog) (AuthoringIntent, error) {
+	channels := make(map[string]AuthoringChannelIntent, len(intent.Conversations))
+	for _, channel := range intent.Conversations {
+		channels[channel.Key] = channel
+	}
+	for agentIndex := range intent.Agents {
+		answer := &intent.Agents[agentIndex]
+		runtimeOwned := false
+		for operationIndex := range answer.Operations {
+			operation := &answer.Operations[operationIndex]
+			if operation.ApprovalDelivery != AuthoringApprovalDeliveryChannels {
+				continue
+			}
+			deliverySkills := map[string]bool{}
+			for _, channelKey := range operation.ApprovalChannelKeys {
+				channel, ok := channels[strings.TrimSpace(channelKey)]
+				if !ok {
+					return AuthoringIntent{}, fmt.Errorf("operation %s references unknown approval channel %q", operation.Key, channelKey)
+				}
+				selection, err := selectConversationAdapter(catalog, channel.Provider)
+				if err != nil {
+					return AuthoringIntent{}, fmt.Errorf("approval channel %s: %w", channel.Key, err)
+				}
+				deliverySkills[selection.skillID] = true
+			}
+			filtered := make([]string, 0, len(operation.SkillCatalogIDs))
+			for _, skillID := range operation.SkillCatalogIDs {
+				if !deliverySkills[skillID] {
+					filtered = append(filtered, skillID)
+				}
+			}
+			operation.SkillCatalogIDs = normalized(filtered)
+			runtimeOwned = true
+		}
+		if runtimeOwned && !containsExactString(answer.OperatingPrinciples, runtimeOwnedApprovalPrinciple) {
+			answer.OperatingPrinciples = normalized(append(answer.OperatingPrinciples, runtimeOwnedApprovalPrinciple))
+		}
+	}
+	return intent, nil
 }
 
 // applyAuthoringScheduleAuthority keeps the semantic form and the canonical
@@ -439,10 +491,8 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 		encodedAgent, _ := json.Marshal(definition.ID)
 		encodedGoal, _ := json.Marshal(strings.TrimSpace(operation.Goal))
 		context := map[string]runbook.Value{}
-		if len(operation.SkillCatalogIDs) > 0 {
-			encodedSkills, _ := json.Marshal(operation.SkillCatalogIDs)
-			context["authorizedSkillCatalogIds"] = runbook.Value{Literal: encodedSkills}
-		}
+		encodedSkills, _ := json.Marshal(normalized(operation.SkillCatalogIDs))
+		context["authorizedSkillCatalogIds"] = runbook.Value{Literal: encodedSkills}
 		result.Steps[stepID] = runbook.Step{Kind: runbook.StepDelegate, Name: operation.Name, Delegate: &runbook.DelegateStep{
 			AgentID: runbook.Value{Literal: encodedAgent}, Goal: runbook.Value{Literal: encodedGoal}, Context: context,
 			Mode: runbook.DelegateReason, ResultPath: runbook.JSONPointer("/results/" + operation.Key),
@@ -488,7 +538,12 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 			result.Triggers[operation.Key] = trigger
 		}
 		if operation.Approval == AuthoringApprovalRequired {
-			definition.Authority.RequireApprovalAt = capability.RiskLevelRead
+			// Approval gates the irreversible external-effect boundary. Read and
+			// reversible preparation remain autonomous; external, production, and
+			// destructive actions create one canonical approval checkpoint.
+			if current := definition.Authority.RequireApprovalAt; current == "" || riskRank(current) > riskRank(capability.RiskLevelExternal) {
+				definition.Authority.RequireApprovalAt = capability.RiskLevelExternal
+			}
 		}
 		if operation.Approval == AuthoringApprovalStanding {
 			// Standing authority requires exact operation and resource boundaries.
@@ -568,6 +623,27 @@ func compileAuthoringClarifications(values []AuthoringClarification) ([]Refineme
 	return result, nil
 }
 
+type conversationAdapterSelection struct {
+	skillID string
+	skill   SkillCapability
+	adapter ConversationAdapterCapability
+}
+
+func selectConversationAdapter(catalog CapabilityCatalog, provider string) (conversationAdapterSelection, error) {
+	matches := make([]conversationAdapterSelection, 0, 1)
+	for skillID, skill := range catalog.Skills {
+		for _, adapter := range skill.ConversationAdapters {
+			if strings.EqualFold(strings.TrimSpace(adapter.Provider), strings.TrimSpace(provider)) || skillID == strings.TrimSpace(provider) {
+				matches = append(matches, conversationAdapterSelection{skillID: skillID, skill: skill, adapter: adapter})
+			}
+		}
+	}
+	if len(matches) != 1 {
+		return conversationAdapterSelection{}, fmt.Errorf("requires exactly one authorized %s adapter; found %d", provider, len(matches))
+	}
+	return matches[0], nil
+}
+
 func compileAuthoringConversations(intent AuthoringIntent, agents map[string]*agent.AgentDefinition, teamDefinition *team.Definition, catalog CapabilityCatalog) ([]ConversationEndpointBlueprint, []AuthoringFormValue, error) {
 	endpoints := make([]ConversationEndpointBlueprint, 0, len(intent.Conversations))
 	formValues := make([]AuthoringFormValue, 0, len(intent.Conversations))
@@ -577,23 +653,10 @@ func compileAuthoringConversations(intent AuthoringIntent, agents map[string]*ag
 			return nil, nil, fmt.Errorf("invalid conversation answer %q", answer.Key)
 		}
 		seen[answer.Key] = true
-		type adapterSelection struct {
-			skillID string
-			skill   SkillCapability
-			adapter ConversationAdapterCapability
+		selection, err := selectConversationAdapter(catalog, answer.Provider)
+		if err != nil {
+			return nil, nil, fmt.Errorf("conversation %s %w", answer.Key, err)
 		}
-		matches := make([]adapterSelection, 0, 1)
-		for skillID, skill := range catalog.Skills {
-			for _, adapter := range skill.ConversationAdapters {
-				if strings.EqualFold(strings.TrimSpace(adapter.Provider), strings.TrimSpace(answer.Provider)) || skillID == strings.TrimSpace(answer.Provider) {
-					matches = append(matches, adapterSelection{skillID: skillID, skill: skill, adapter: adapter})
-				}
-			}
-		}
-		if len(matches) != 1 {
-			return nil, nil, fmt.Errorf("conversation %s requires exactly one authorized %s adapter; found %d", answer.Key, answer.Provider, len(matches))
-		}
-		selection := matches[0]
 		mode := capability.ConversationEndpointDirect
 		if containsConversationMode(selection.adapter.EndpointModes, capability.ConversationEndpointChannel) {
 			mode = capability.ConversationEndpointChannel
