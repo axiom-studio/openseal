@@ -232,6 +232,11 @@ func TestCompileAuthoringIntentMapsClarificationWithoutModelOwnedWireEnums(t *te
 func TestCompileAuthoringIntentBuildsConversationAndApprovalEdges(t *testing.T) {
 	catalog := slackChatbotCatalog()
 	slack := catalog.Skills["slack"]
+	slack.Actions = []string{"slack-read-messages", "slack-send-message"}
+	slack.ActionRisks = map[string]capability.RiskLevel{
+		"slack-read-messages": capability.RiskLevelRead,
+		"slack-send-message":  capability.RiskLevelExternal,
+	}
 	slack.ConversationAdapters[0].InboundEventTypes = []string{capability.ConversationEventApprovalDecided, capability.ConversationEventMessageReceived}
 	catalog.Skills["slack"] = slack
 	intent := AuthoringIntent{
@@ -239,10 +244,12 @@ func TestCompileAuthoringIntentBuildsConversationAndApprovalEdges(t *testing.T) 
 		Name: "Slack Helper", Purpose: "Help in a Slack channel",
 		Agents: []AuthoringAgentIntent{{
 			Key: "slack-helper", Name: "Slack Helper", Purpose: "Help in Slack", Behavior: "Answer channel questions accurately.",
+			Skills:     []AuthoringSkillIntent{{CatalogID: "slack", Actions: []string{"slack-read-messages", "slack-send-message"}, Required: true}},
 			Objectives: []AuthoringObjectiveIntent{{Key: "help", Title: "Help people", Outcome: "Answer questions", Priority: 1}},
 			Operations: []AuthoringOperationIntent{{
 				Key: "answer", Name: "Answer", Goal: "Answer a question", ObjectiveKey: "help", Wake: AuthoringWakeOnDemand,
-				Approval: AuthoringApprovalRequired, ApprovalDelivery: AuthoringApprovalDeliveryChannels,
+				SkillCatalogIDs: []string{"slack"},
+				Approval:        AuthoringApprovalRequired, ApprovalDelivery: AuthoringApprovalDeliveryChannels,
 				ApprovalChannelKeys: []string{"slack-help"},
 			}},
 		}},
@@ -265,6 +272,16 @@ func TestCompileAuthoringIntentBuildsConversationAndApprovalEdges(t *testing.T) 
 	endpoint := generated.Candidate.ConversationEndpoints[0]
 	if endpoint.Handler.Kind != ConversationHandlerAgent || endpoint.Policy.ReplyMode != ConversationReplyThread || len(generated.Candidate.Agents[0].Authority.ApprovalDestinations) != 1 {
 		t.Fatalf("compiled conversation = %#v authority=%#v", endpoint, generated.Candidate.Agents[0].Authority)
+	}
+	definition := generated.Candidate.Agents[0]
+	if definition.Authority.RequireApprovalAt != capability.RiskLevelExternal {
+		t.Fatalf("approval threshold = %q", definition.Authority.RequireApprovalAt)
+	}
+	if got := string(definition.Runbook.Steps["answer"].Delegate.Context["authorizedSkillCatalogIds"].Literal); got != "[]" {
+		t.Fatalf("approval delivery Skill leaked into delegated work: %s", got)
+	}
+	if !containsExactString(definition.OperatingPrinciples, runtimeOwnedApprovalPrinciple) {
+		t.Fatalf("runtime approval ownership principle missing: %#v", definition.OperatingPrinciples)
 	}
 	if issues := validateCandidate(&generated.Candidate, nil); len(issues) > 0 {
 		t.Fatalf("candidate issues = %#v", issues)
