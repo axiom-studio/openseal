@@ -479,6 +479,18 @@ func TestAmendmentsFailClosedOnPolicyEvaluationAndStaleState(t *testing.T) {
 	}
 }
 
+func TestChangedDefinitionFieldsUsesCanonicalTopLevelFields(t *testing.T) {
+	base := testDefinition("1", capability.RiskLevelRead, 1)
+	candidate := cloneDefinition(base)
+	candidate.SystemPrompt = "Use the canonical approval checkpoint."
+	candidate.Authority.RequireApprovalAt = capability.RiskLevelExternal
+
+	fields := ChangedDefinitionFields(base, candidate)
+	if got, want := strings.Join(fields, ","), "authority,systemPrompt"; got != want {
+		t.Fatalf("changed fields = %q, want %q", got, want)
+	}
+}
+
 func testDefinition(version string, risk capability.RiskLevel, concurrency int) *AgentDefinition {
 	return &AgentDefinition{
 		ID: "operator", Version: version, DisplayName: "Operator", Purpose: "Operate systems", SystemPrompt: "Keep systems healthy.",
