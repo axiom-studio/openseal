@@ -69,6 +69,41 @@ func TestHostedTurnRetriesWhenPostActionReasoningFails(t *testing.T) {
 	}
 }
 
+func TestHostedTurnProjectsPreviousBoundedTurnIntent(t *testing.T) {
+	host := &recordingTurnHost{err: errors.New("unexpected EOF")}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := checkpointTurnContinuity(nil, &AgentTurn{
+		Sequence: 3, Status: AgentTurnStatusCompleted,
+		OutputSummary:    "Close the session to end this bounded run.",
+		RequestedActions: []TurnAction{{Capability: "browser.close", Summary: "Close session"}},
+		NextRunStatus:    AgentRunStatusRunning,
+	})
+	_, err = runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run:  &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "1"}, Goal: "Perform one bounded operation", Checkpoint: checkpoint},
+		Turn: &AgentTurn{ID: "turn"},
+	})
+	if !errors.Is(err, ErrTurnHostUnavailable) {
+		t.Fatalf("host error = %v", err)
+	}
+	found := false
+	for _, instruction := range host.request.SystemInstructions {
+		if strings.Contains(instruction, turnContinuityCheckpointKey) && strings.Contains(instruction, "schedules and event triggers create later Runs") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("bounded continuity instruction = %#v", host.request.SystemInstructions)
+	}
+	modelInput, marshalErr := MarshalHostedTurnModelInput(host.request)
+	if marshalErr != nil || !strings.Contains(string(modelInput), `"_opensealPreviousTurn"`) || !strings.Contains(string(modelInput), "Close the session to end this bounded run") {
+		t.Fatalf("model input = %s err=%v", modelInput, marshalErr)
+	}
+}
+
 func TestHostedTurnPreservesTerminalHostFailure(t *testing.T) {
 	host := &recordingTurnHost{err: NewTurnHostFailure(
 		"provider_quota_exhausted",
