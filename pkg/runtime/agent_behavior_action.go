@@ -16,8 +16,9 @@ import (
 
 const (
 	AgentManagementSkillID        = "openseal.agents"
-	AgentManagementSkillVersion   = "1.2.1"
+	AgentManagementSkillVersion   = "1.2.2"
 	agentManagementSkillVersionV1 = "1.2.0"
+	agentManagementSkillVersionV2 = "1.2.1"
 	AgentActionAmendBehavior      = "amend_behavior"
 	AgentActionListChannels       = "list_channels"
 	AgentActionConfigureChannel   = "configure_channel"
@@ -51,7 +52,7 @@ func AgentManagementSkill() *skill.Definition {
 			},
 			AgentActionAmendBehavior: {
 				Name:        AgentActionAmendBehavior,
-				Description: "Propose changing the current Agent's display name, purpose, system prompt, personality, or operating principles. Supply at least one changed field and preserve unrelated current behavior. String and list values replace the corresponding field in full. The kernel resolves the target and revision, then enforces amendment policy and the immutable activation lifecycle.",
+				Description: "Propose changing the current Agent's display name, purpose, system prompt, personality, operating principles, or approval-timeout policy. Supply at least one changed field and preserve unrelated current behavior. String and list values replace the corresponding field in full. Automatic approval is opt-in and requires an explicit timeout duration and approve decision. The kernel resolves the target and revision, then enforces amendment policy and the immutable activation lifecycle.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
@@ -65,7 +66,16 @@ func AgentManagementSkill() *skill.Definition {
 						"systemPrompt":        map[string]interface{}{"type": "string", "minLength": 1},
 						"personality":         map[string]interface{}{"type": "string"},
 						"operatingPrinciples": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true},
-						"rationale":           map[string]interface{}{"type": "string", "minLength": 1},
+						"approvalTimeout": map[string]interface{}{
+							"type": "object", "additionalProperties": false,
+							"properties": map[string]interface{}{
+								"afterSeconds": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 2592000},
+								"decision":     map[string]interface{}{"type": "string", "enum": []interface{}{"expire", "approve"}},
+							},
+							"required": []interface{}{"afterSeconds", "decision"},
+						},
+						"removeApprovalTimeout": map[string]interface{}{"type": "boolean", "const": true},
+						"rationale":             map[string]interface{}{"type": "string", "minLength": 1},
 					},
 					"required": []interface{}{"expectedDeploymentRevision", "rationale"},
 					"anyOf": []interface{}{
@@ -74,6 +84,8 @@ func AgentManagementSkill() *skill.Definition {
 						map[string]interface{}{"required": []interface{}{"systemPrompt"}},
 						map[string]interface{}{"required": []interface{}{"personality"}},
 						map[string]interface{}{"required": []interface{}{"operatingPrinciples"}},
+						map[string]interface{}{"required": []interface{}{"approvalTimeout"}},
+						map[string]interface{}{"required": []interface{}{"removeApprovalTimeout"}},
 					},
 				},
 				OutputSchema: map[string]interface{}{
@@ -129,13 +141,15 @@ func AgentManagementSkill() *skill.Definition {
 }
 
 type agentBehaviorActionArguments struct {
-	ExpectedDeploymentRevision int64     `json:"expectedDeploymentRevision"`
-	DisplayName                *string   `json:"displayName,omitempty"`
-	Purpose                    *string   `json:"purpose,omitempty"`
-	SystemPrompt               *string   `json:"systemPrompt,omitempty"`
-	Personality                *string   `json:"personality,omitempty"`
-	OperatingPrinciples        *[]string `json:"operatingPrinciples,omitempty"`
-	Rationale                  string    `json:"rationale"`
+	ExpectedDeploymentRevision int64                              `json:"expectedDeploymentRevision"`
+	DisplayName                *string                            `json:"displayName,omitempty"`
+	Purpose                    *string                            `json:"purpose,omitempty"`
+	SystemPrompt               *string                            `json:"systemPrompt,omitempty"`
+	Personality                *string                            `json:"personality,omitempty"`
+	OperatingPrinciples        *[]string                          `json:"operatingPrinciples,omitempty"`
+	ApprovalTimeout            *kernelagent.ApprovalTimeoutPolicy `json:"approvalTimeout,omitempty"`
+	RemoveApprovalTimeout      bool                               `json:"removeApprovalTimeout,omitempty"`
+	Rationale                  string                             `json:"rationale"`
 }
 
 type agentChannelActionArguments struct {
@@ -320,8 +334,10 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 	if amendment == nil {
 		additionalAllowedFields := make([]string, 0, len(changes))
 		for field := range changes {
-			if !hasExactAgentActionString(definition.Amendments.AllowedFields, field) {
-				additionalAllowedFields = append(additionalAllowedFields, field)
+			definitionField := agentDefinitionAmendmentField(field)
+			if !hasExactAgentActionString(definition.Amendments.AllowedFields, definitionField) &&
+				!hasExactAgentActionString(additionalAllowedFields, definitionField) {
+				additionalAllowedFields = append(additionalAllowedFields, definitionField)
 			}
 		}
 		if len(additionalAllowedFields) > 0 {
@@ -444,10 +460,7 @@ func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, in
 	if len(definitionChanges) > 0 {
 		additionalAllowedFields := make([]string, 0, len(definitionChanges))
 		for field := range definitionChanges {
-			definitionField := field
-			if field == "authority.approvalDestinations" {
-				definitionField = "authority"
-			}
+			definitionField := agentDefinitionAmendmentField(field)
 			if !hasExactAgentActionString(definition.Amendments.AllowedFields, definitionField) && !hasExactAgentActionString(additionalAllowedFields, definitionField) {
 				additionalAllowedFields = append(additionalAllowedFields, definitionField)
 			}
@@ -505,6 +518,13 @@ func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, in
 		return nil, err
 	}
 	return agentChannelActionResult(amendment, deployment, activation, updated, false), nil
+}
+
+func agentDefinitionAmendmentField(change string) string {
+	if strings.HasPrefix(change, "authority.") {
+		return "authority"
+	}
+	return change
 }
 
 func (d *AgentBehaviorActionDispatcher) convergeChannelEndpoint(ctx context.Context, endpoint *ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (*ExternalConversationEndpoint, error) {
@@ -769,6 +789,13 @@ func applyAgentBehaviorArguments(candidate *kernelagent.AgentDefinition, args ag
 	if args.OperatingPrinciples != nil {
 		candidate.OperatingPrinciples = normalizedActionStrings(*args.OperatingPrinciples)
 	}
+	if args.ApprovalTimeout != nil {
+		value := *args.ApprovalTimeout
+		candidate.Authority.ApprovalTimeout = &value
+	}
+	if args.RemoveApprovalTimeout {
+		candidate.Authority.ApprovalTimeout = nil
+	}
 }
 
 func agentBehaviorChanges(base, candidate *kernelagent.AgentDefinition) map[string]interface{} {
@@ -788,6 +815,9 @@ func agentBehaviorChanges(base, candidate *kernelagent.AgentDefinition) map[stri
 	if !equalStrings(base.OperatingPrinciples, candidate.OperatingPrinciples) {
 		changes["operatingPrinciples"] = append([]string(nil), candidate.OperatingPrinciples...)
 	}
+	if !equalApprovalTimeoutPolicy(base.Authority.ApprovalTimeout, candidate.Authority.ApprovalTimeout) {
+		changes["authority.approvalTimeout"] = candidate.Authority.ApprovalTimeout
+	}
 	return changes
 }
 
@@ -805,9 +835,18 @@ func agentBehaviorCurrentValues(definition *kernelagent.AgentDefinition, changes
 			current[field] = definition.Personality
 		case "operatingPrinciples":
 			current[field] = append([]string(nil), definition.OperatingPrinciples...)
+		case "authority.approvalTimeout":
+			current[field] = definition.Authority.ApprovalTimeout
 		}
 	}
 	return current
+}
+
+func equalApprovalTimeoutPolicy(left, right *kernelagent.ApprovalTimeoutPolicy) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.AfterSeconds == right.AfterSeconds && left.Decision == right.Decision
 }
 
 func normalizedActionStrings(values []string) []string {
@@ -1009,7 +1048,7 @@ func isAgentManagementAction(bound *skill.BoundAction) bool {
 }
 
 func isSupportedAgentManagementSkillVersion(version string) bool {
-	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV1
+	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
 }
 
 func isAgentMutationAction(bound *skill.BoundAction) bool {
