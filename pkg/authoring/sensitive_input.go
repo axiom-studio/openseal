@@ -83,7 +83,7 @@ type sensitiveInputMatch struct {
 }
 
 var nonSecretPlaceholder = map[string]struct{}{
-	"[redacted]": {}, "redacted": {}, "required": {}, "configured": {}, "configure": {}, "vault": {},
+	"[redacted]": {}, "redacted": {}, "required": {}, "configured": {}, "configure": {},
 	"credential": {}, "credentials": {}, "secret": {}, "unknown": {}, "missing": {}, "none": {}, "true": {}, "false": {},
 }
 

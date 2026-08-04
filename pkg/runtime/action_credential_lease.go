@@ -471,7 +471,7 @@ func validLeaseIdentifier(value string, maximum int) bool {
 }
 
 // validOpaqueCredentialReference validates a host-owned reference without
-// interpreting its provider-specific identifier. Credential vault references and connection names
+// interpreting its provider-specific identifier. Credential-store and connection names
 // may legitimately contain spaces; signed JSON already preserves those bytes
 // without ambiguity. Leading/trailing whitespace and control characters remain
 // invalid so references retain a single canonical representation.
