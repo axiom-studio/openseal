@@ -1,6 +1,6 @@
 logLevel: info
 api:
-  listenAddr: :8080
+  listenAddr: 127.0.0.1:8080
 storage:
   driver: sqlite
   path: /app/data/openseal.db
