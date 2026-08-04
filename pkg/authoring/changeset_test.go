@@ -1009,8 +1009,8 @@ func TestSourceMonitorUsesAssignedAgentSkillBindingPlacement(t *testing.T) {
 	}
 	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
 		agentID: {
-			"username": {Kind: "http_basic_auth", ID: "vault://reddit-fixture.username"},
-			"password": {Kind: "http_basic_auth", ID: "vault://reddit-fixture.password"},
+			"username": {Kind: "http_basic_auth", ID: "credential://reddit-fixture.username"},
+			"password": {Kind: "http_basic_auth", ID: "credential://reddit-fixture.password"},
 		},
 	}}
 	if !skillBindingPlacementPresent(&candidate, requirement, catalog, placement) {
@@ -1776,8 +1776,8 @@ func TestReconcilePlacementToCandidatePrunesStaleInheritedOwnersAndSkills(t *tes
 		AgentDeploymentIDs:     map[string]string{"tenant/one/researcher": "agent:current", "tenant/one/": "agent:stale"},
 		AgentExpectedRevisions: map[string]int64{"tenant/one/researcher": 2, "tenant/one/": 1},
 		CredentialReferences: map[string]map[string]capability.CredentialReference{
-			"tenant/one/researcher": {"username": {Kind: "basic", ID: "vault://browser.username"}},
-			"tenant/one/":           {"password": {Kind: "basic", ID: "vault://stale.password"}},
+			"tenant/one/researcher": {"username": {Kind: "basic", ID: "credential://browser.username"}},
+			"tenant/one/":           {"password": {Kind: "basic", ID: "credential://stale.password"}},
 		},
 		SkillSourceIdentities: map[string]map[string]string{
 			"tenant/one/researcher": {"browser": "registry::browser", "removed": "registry::removed"},

@@ -94,7 +94,7 @@ func TestSkillReferenceUpgradeMovesConversationAndCallbackAdaptersAtomically(t *
 	if err := store.SaveSkillBinding(ctx, &skill.Binding{
 		ID: "slack", Scope: skillScope, DeploymentID: "agent:researcher", SkillID: "slack", SkillVersion: "1.0.0",
 		EnabledConversationAdapters: []string{"conversations"}, EnabledCallbackAdapters: []string{"interactions"},
-		Credentials: map[string]skill.CredentialReference{"token": {Kind: "api_key", ID: "vault://slack.token"}},
+		Credentials: map[string]skill.CredentialReference{"token": {Kind: "api_key", ID: "credential://slack.token"}},
 		MaximumRisk: skill.RiskLevelExternal, Revision: 3,
 	}, 0); err != nil {
 		t.Fatal(err)
