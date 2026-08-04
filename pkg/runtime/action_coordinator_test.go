@@ -236,7 +236,7 @@ func TestActionCoordinatorSuppressesExternalOperationAcrossRuns(t *testing.T) {
 	second, err := coordinator.Propose(ctx, ProposeActionRequest{
 		Scope: scope, RunID: secondRun.ID, WorkerID: "worker-two", DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
-		IdempotencyKey: "second-run", ExternalOperation: &ExternalOperationIdentity{Resource: "https://forum.example/topics/42?a=1&b=2", Operation: "COMMENT:CREATE"},
+		IdempotencyKey: "first-run", ExternalOperation: &ExternalOperationIdentity{Resource: "https://forum.example/topics/42?a=1&b=2", Operation: "COMMENT:CREATE"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +254,43 @@ func TestActionCoordinatorSuppressesExternalOperationAcrossRuns(t *testing.T) {
 	receipt, err := store.GetActionCallByExternalOperation(ctx, scope, first.Call.ExternalOperationDigest)
 	if err != nil || receipt.ID != first.Call.ID {
 		t.Fatalf("authoritative receipt = %#v, %v", receipt, err)
+	}
+}
+
+func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog, scope := governedActionCatalog(t)
+	policyEvaluations := 0
+	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		policyEvaluations++
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+	}))
+	identity := &ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
+
+	firstRun := claimedActionRun(t, store, scope, time.Now().UTC(), "worker-one")
+	first, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: firstRun.ID, WorkerID: "worker-one", DeploymentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
+		IdempotencyKey: "occurrence-one", ExternalOperation: identity,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRun := claimedActionRun(t, store, scope, time.Now().UTC().Add(time.Second), "worker-two")
+	second, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: secondRun.ID, WorkerID: "worker-two", DeploymentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
+		IdempotencyKey: "occurrence-two", ExternalOperation: identity,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Call.Status != ActionCallStatusReady || second.Call.DuplicateOfActionCallID != "" || second.Event.EventType == "action.duplicate_suppressed" {
+		t.Fatalf("separate occurrence was suppressed: %#v", second)
+	}
+	if first.Call.ExternalOperationDigest == second.Call.ExternalOperationDigest || policyEvaluations != 2 {
+		t.Fatalf("external digests or policy evaluations did not distinguish occurrences: first=%s second=%s evaluations=%d", first.Call.ExternalOperationDigest, second.Call.ExternalOperationDigest, policyEvaluations)
 	}
 }
 

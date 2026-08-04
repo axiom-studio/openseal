@@ -203,7 +203,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if externalOperationPolicy == skill.ExternalOperationForbidden && req.ExternalOperation != nil {
 		return nil, errors.New("skill action forbids an external operation identity")
 	}
-	externalOperationDigest, err := computeExternalOperationDigest(req.Scope, run.Owner, run.ObjectiveID, req.ExternalOperation)
+	externalOperationDigest, err := computeExternalOperationDigest(req.Scope, run.Owner, run.ObjectiveID, req.ExternalOperation, req.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
