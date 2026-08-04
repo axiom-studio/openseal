@@ -429,7 +429,7 @@ func TestAnsweredRefinementQuestionsRemainResolvedAcrossProviderRetries(t *testi
 	refinement := ChangeSetRefinement{Answers: []RefinementAnswerEvent{{
 		QuestionID: credential.ID,
 		Value: RefinementAnswerValue{CredentialReference: &capability.CredentialReference{
-			Kind: "http_basic_auth", ID: "vault://reddit-fixture.username",
+			Kind: "http_basic_auth", ID: "credential://reddit-fixture.username",
 		}},
 	}}}
 	if questions := unansweredRefinementQuestions([]RefinementQuestion{credential}, refinement); len(questions) != 0 {

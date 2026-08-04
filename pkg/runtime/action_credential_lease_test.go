@@ -279,7 +279,7 @@ func TestActionCredentialLeaseBindingMayCarryCredentialsForOtherCapabilities(t *
 		Revision: call.BindingRevision, AllowedActions: []string{call.Action}, MaximumRisk: skill.RiskLevelDestructive,
 		Credentials: map[string]skill.CredentialReference{
 			"reddit":         call.CredentialRefs["reddit"],
-			"SIGNING_SECRET": {Kind: "slack_signing_secret", ID: "vault://007 Slack.signing_secret"},
+			"SIGNING_SECRET": {Kind: "slack_signing_secret", ID: "credential://007 Slack.signing_secret"},
 		},
 	}
 	lease := ActionCredentialLease{
@@ -289,7 +289,7 @@ func TestActionCredentialLeaseBindingMayCarryCredentialsForOtherCapabilities(t *
 	if err := matchCurrentActionCredentialBinding(lease, call, binding); err != nil {
 		t.Fatalf("binding with an unrelated adapter credential was rejected: %v", err)
 	}
-	binding.Credentials["reddit"] = skill.CredentialReference{Kind: "reddit-oauth", ID: "vault://other.oauth"}
+	binding.Credentials["reddit"] = skill.CredentialReference{Kind: "reddit-oauth", ID: "credential://other.oauth"}
 	if err := matchCurrentActionCredentialBinding(lease, call, binding); !errors.Is(err, ErrActionCredentialLeaseMismatch) {
 		t.Fatalf("selected credential drift error = %v, want %v", err, ErrActionCredentialLeaseMismatch)
 	}
@@ -297,7 +297,7 @@ func TestActionCredentialLeaseBindingMayCarryCredentialsForOtherCapabilities(t *
 
 func TestActionCredentialLeaseAcceptsOpaqueReferencesWithSpaces(t *testing.T) {
 	now, call, run, fields := actionCredentialLeaseFixture()
-	call.CredentialRefs["reddit"] = skill.CredentialReference{Kind: "slack_bot_token", ID: "vault://007 Slack.bot_token"}
+	call.CredentialRefs["reddit"] = skill.CredentialReference{Kind: "slack_bot_token", ID: "credential://007 Slack.bot_token"}
 	lease, err := NewActionCredentialLease(CreateActionCredentialLeaseRequest{
 		TenantID: "tenant-7", Call: call, Run: run, CredentialFields: fields, Transport: testActionCredentialLeaseTransport,
 		Issuer: "control-plane", Audience: "execution-host", IssuedAt: now, ExpiresAt: now.Add(time.Minute), Nonce: "nonce-0000000000000006",
@@ -305,13 +305,13 @@ func TestActionCredentialLeaseAcceptsOpaqueReferencesWithSpaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := lease.Credentials[0].Reference.ID; got != "vault://007 Slack.bot_token" {
+	if got := lease.Credentials[0].Reference.ID; got != "credential://007 Slack.bot_token" {
 		t.Fatalf("credential reference = %q", got)
 	}
 }
 
 func TestActionCredentialLeaseRejectsNonCanonicalOpaqueReferences(t *testing.T) {
-	for _, referenceID := range []string{" vault://credential.token", "vault://credential.token ", "vault://credential\ntoken"} {
+	for _, referenceID := range []string{" credential://credential.token", "credential://credential.token ", "credential://credential\ntoken"} {
 		t.Run(referenceID, func(t *testing.T) {
 			now, call, run, fields := actionCredentialLeaseFixture()
 			call.CredentialRefs["reddit"] = skill.CredentialReference{Kind: "token", ID: referenceID}
