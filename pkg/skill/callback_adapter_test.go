@@ -20,7 +20,7 @@ func TestCallbackAdapterRequiresExactEnabledBinding(t *testing.T) {
 		SkillID: definition.ID, SkillVersion: definition.Version,
 		EnabledCallbackAdapters: []string{"interactions"}, MaximumRisk: RiskLevelRead, Revision: 1,
 		Credentials: map[string]CredentialReference{
-			"signing_secret": {Kind: "slack_signing_secret", ID: "vault-callback"},
+			"signing_secret": {Kind: "slack_signing_secret", ID: "credential-store-callback"},
 		},
 	}
 	if err := catalog.Bind(ctx, binding); err != nil {
@@ -33,7 +33,7 @@ func TestCallbackAdapterRequiresExactEnabledBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.Adapter.Provider != "slack" || resolved.Binding.Credentials["signing_secret"].ID != "vault-callback" {
+	if resolved.Adapter.Provider != "slack" || resolved.Binding.Credentials["signing_secret"].ID != "credential-store-callback" {
 		t.Fatalf("resolved callback adapter = %#v", resolved)
 	}
 	if _, err := catalog.ResolveCallbackAdapter(

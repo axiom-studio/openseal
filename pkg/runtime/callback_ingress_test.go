@@ -44,7 +44,7 @@ func TestCallbackIngressFollowsCurrentBindingWithoutRegistrationRewrite(t *testi
 		SkillID: definition.ID, SkillVersion: definition.Version, EnabledCallbackAdapters: []string{"interactions"},
 		MaximumRisk: skill.RiskLevelRead, Revision: 2,
 		Credentials: map[string]skill.CredentialReference{
-			"signing_secret": {Kind: "slack_signing_secret", ID: "vault-signing-secret"},
+			"signing_secret": {Kind: "slack_signing_secret", ID: "credential-store-signing-secret"},
 		},
 	}); err != nil {
 		t.Fatal(err)

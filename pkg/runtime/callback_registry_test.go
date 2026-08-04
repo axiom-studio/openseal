@@ -128,7 +128,7 @@ func registerCallbackFixture(t *testing.T, ctx context.Context, catalog *skill.C
 		SkillID: definition.ID, SkillVersion: definition.Version,
 		EnabledCallbackAdapters: []string{"interactions"}, MaximumRisk: skill.RiskLevelRead, Revision: 1,
 		Credentials: map[string]skill.CredentialReference{
-			"signing_secret": {Kind: "slack_signing_secret", ID: "vault-signing-secret"},
+			"signing_secret": {Kind: "slack_signing_secret", ID: "credential-store-signing-secret"},
 		},
 	}
 	if err := catalog.Bind(ctx, binding); err != nil {
