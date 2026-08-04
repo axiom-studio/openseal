@@ -14,7 +14,7 @@ import (
 )
 
 func TestLiveGeneratorCompilesRepresentativeMarketingTeam(t *testing.T) {
-	endpoint, apiKey, model := os.Getenv("OPENSEAL_LLM_BASE_URL"), os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENSEAL_LLM_MODEL")
+	endpoint, apiKey, model := os.Getenv("AUTHORING_TEST_BASE_URL"), os.Getenv("AUTHORING_TEST_API_KEY"), os.Getenv("AUTHORING_TEST_MODEL")
 	if endpoint == "" || apiKey == "" || model == "" {
 		t.Skip("OpenSeal live authoring provider is not configured")
 	}
@@ -55,7 +55,7 @@ func TestLiveGeneratorCompilesRepresentativeMarketingTeam(t *testing.T) {
 }
 
 func TestLiveGeneratorPreservesReleaseNotesCommitments(t *testing.T) {
-	endpoint, apiKey, model := os.Getenv("OPENSEAL_LLM_BASE_URL"), os.Getenv("OPENAI_API_KEY"), os.Getenv("OPENSEAL_LLM_MODEL")
+	endpoint, apiKey, model := os.Getenv("AUTHORING_TEST_BASE_URL"), os.Getenv("AUTHORING_TEST_API_KEY"), os.Getenv("AUTHORING_TEST_MODEL")
 	if endpoint == "" || apiKey == "" || model == "" {
 		t.Skip("OpenSeal live authoring provider is not configured")
 	}
