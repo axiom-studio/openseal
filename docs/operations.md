@@ -29,17 +29,10 @@ rejected instead of being silently ignored.
 
 ## Model-backed authoring
 
-Workforce authoring requires these settings as one complete group:
-
-| Variable | Meaning |
-| --- | --- |
-| `OPENSEAL_LLM_BASE_URL` | OpenAI-compatible chat completions endpoint |
-| `OPENAI_API_KEY` | Provider credential used by the authoring transport |
-| `OPENSEAL_LLM_MODEL` | Exact provider model name |
-
-If only one or two are set, daemon startup fails. If none are set, the daemon
-starts without advertising workforce authoring. Provider credentials are
-transport configuration; do not put them in Skills, prompts, ChangeSets,
+The standalone daemon has no process-global model-provider configuration. A
+host that exposes model-backed authoring supplies an explicit compiler and
+provider binding at its trusted boundary. Provider credentials and routing are
+host transport configuration; do not put them in Skills, prompts, ChangeSets,
 activity, or checked-in YAML.
 
 ## Persistence and recovery
@@ -191,12 +184,11 @@ suite by the `integration` build tag. Configure credentials in the environment,
 never in source files:
 
 ```bash
-export OPENSEAL_LLM_BASE_URL=https://provider.example/v1/chat/completions
-export OPENAI_API_KEY='replace-with-a-real-secret'
-export OPENSEAL_LLM_MODEL='provider-model-name'
+export AUTHORING_TEST_BASE_URL=https://provider.example/v1/chat/completions
+export AUTHORING_TEST_API_KEY='replace-with-a-real-secret'
+export AUTHORING_TEST_MODEL='provider-model-name'
 
-go test -tags=integration ./pkg/openseal \
-  -run TestLiveThreeAgentSnakesAndLaddersUsesBoundedModelCommentary
+go test -tags=integration ./pkg/authoring -run TestLiveGenerator
 ```
 
 The real ClawHub/model acceptance additionally requires an explicit opt-in:
