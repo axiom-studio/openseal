@@ -70,7 +70,7 @@ func TestHardenLegacySensitiveAgentDefinitionReplacesCredentialParaphrase(t *tes
 func TestValidateAuthoringPromptAllowsCredentialIntentAndPlaceholders(t *testing.T) {
 	for _, prompt := range []string{
 		"Create an Agent that asks the user to configure a Reddit credential in the authorized store.",
-		"The password is configured in Vault and must never be exposed.",
+		"The password is configured in the authorized credential store and must never be exposed.",
 		"Require token-based authentication.",
 		"Use password: [REDACTED] and select the credential later.",
 	} {
