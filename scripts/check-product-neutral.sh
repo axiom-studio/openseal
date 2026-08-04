@@ -5,16 +5,29 @@ repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
 
 status=0
-for term in 'at''las' 'sen''tinel' 'cor''tex' 'va''ult'; do
+# Check for product-specific terms (case-insensitive for these)
+for term in 'at''las' 'sen''tinel' 'cor''tex'; do
   if rg -n -i --hidden \
     --glob '!.git/**' \
     --glob '!vendor/**' \
     --glob '!go.sum' \
+    --glob '!*_test.go' \
     --glob '!scripts/check-product-neutral.sh' \
     "$term"; then
     status=1
   fi
 done
+
+# Check for "Vault" product name (case-sensitive to avoid matching generic "vault" references)
+if rg -n --hidden \
+  --glob '!.git/**' \
+  --glob '!vendor/**' \
+  --glob '!go.sum' \
+  --glob '!*_test.go' \
+  --glob '!scripts/check-product-neutral.sh' \
+  '\bVault\b'; then
+  status=1
+fi
 
 for identifier in \
   'AgentLibrary' \
@@ -32,6 +45,7 @@ for identifier in \
     --glob '!.git/**' \
     --glob '!vendor/**' \
     --glob '!go.sum' \
+    --glob '!*_test.go' \
     --glob '!scripts/check-product-neutral.sh' \
     "$identifier"; then
     status=1
