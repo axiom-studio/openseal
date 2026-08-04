@@ -200,7 +200,7 @@ func sameInstalledManifestDefinition(left, right *AgentDefinition) bool {
 	}
 	a, b := *left, *right
 	a.Digest, b.Digest = "", ""
-	a.CreatedAt, b.CreatedAt = b.CreatedAt, b.CreatedAt
+	a.CreatedAt = b.CreatedAt
 	a.Provenance, b.Provenance = DefinitionProvenance{}, DefinitionProvenance{}
 	leftJSON, _ := json.Marshal(a)
 	rightJSON, _ := json.Marshal(b)
@@ -219,7 +219,7 @@ func sameInstalledManifestDeployment(left, right *AgentDeployment) bool {
 	a.Health, b.Health = DeploymentHealth{}, DeploymentHealth{}
 	a.Activation, b.Activation = nil, nil
 	a.Revision, b.Revision = 0, 0
-	a.CreatedAt, b.CreatedAt = b.CreatedAt, b.CreatedAt
-	a.UpdatedAt, b.UpdatedAt = b.UpdatedAt, b.UpdatedAt
+	a.CreatedAt = b.CreatedAt
+	a.UpdatedAt = b.UpdatedAt
 	return reflect.DeepEqual(a, b)
 }

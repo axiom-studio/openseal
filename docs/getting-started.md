@@ -78,22 +78,20 @@ The workspace reads and mutates server state; it does not run a second kernel.
 Exiting the TUI leaves the daemon and its durable work running. See the
 [TUI guide](tui.md) for all sections and keys.
 
-## Enable prompt-first workforce authoring
+## Prompt-first workforce authoring
 
-The standalone daemon enables its workforce authoring compiler only when all
-three model settings are present:
+The standalone daemon does not read model endpoints, model names, or provider
+credentials from process-global environment variables. An embedding host that
+offers model-backed workforce authoring must bind an explicit authoring
+compiler at its trusted boundary and keep provider credentials outside prompts,
+Skill definitions, ChangeSets, activity, and checked-in configuration.
+
+Start the local operator surface with an explicitly loopback listener:
 
 ```bash
-export OPENSEAL_LLM_BASE_URL=https://provider.example/v1/chat/completions
-export OPENAI_API_KEY='replace-with-a-real-secret'
-export OPENSEAL_LLM_MODEL='provider-model-name'
 # Set api.listenAddr to 127.0.0.1:8080 in local.yaml first.
 ./openseal daemon --config ./local.yaml --standalone-operator
 ```
-
-`OPENSEAL_LLM_BASE_URL` must be an absolute HTTP or HTTPS endpoint accepted by
-the OpenAI-compatible generator. Never place the API key in a prompt, a daemon
-configuration file, a Skill definition, or a Git commit.
 
 `--standalone-operator` enables local refinement answers and generation retry
 only when the API listen address is explicitly loopback, such as
