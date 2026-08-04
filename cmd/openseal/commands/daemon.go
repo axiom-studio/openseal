@@ -72,6 +72,13 @@ Options:
 		"apiAddr", cfg.API.ListenAddr,
 	)
 
+	if !isLoopbackListenAddress(cfg.API.ListenAddr) {
+		sugar.Warnw("OpenSeal API is exposed on non-loopback interface",
+			"apiAddr", cfg.API.ListenAddr,
+			"warning", "OpenSeal has no built-in API authentication. Expose it only through an authorization-aware reverse proxy or local network boundary.",
+		)
+	}
+
 	scope, err := parseDaemonScope(*authoringScope)
 	if err != nil {
 		sugar.Fatal(err)
