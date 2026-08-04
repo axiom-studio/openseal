@@ -10,9 +10,11 @@ var ErrExternalOperationClaimed = errors.New("external operation is already clai
 
 // ExternalOperationIdentity is the stable, capability-independent identity of
 // an externally observable mutation. Resource names what is changed and
-// Operation names the intended effect. It deliberately excludes transient DOM
-// references, model wording, Skill versions, and Run IDs so a later Run can
-// reuse the original durable receipt.
+// Operation names the intended effect. The ActionCall idempotency key supplies
+// the caller-owned occurrence identity: retries of one occurrence reuse its
+// durable receipt, while a later reviewed occurrence may intentionally perform
+// the same operation against the same resource again. Transient DOM references,
+// Skill versions, and Run IDs never participate in this identity.
 type ExternalOperationIdentity struct {
 	Resource  string `json:"resource"`
 	Operation string `json:"operation"`
@@ -53,7 +55,7 @@ func canonicalExternalOperationResource(value string) (string, error) {
 	return value, nil
 }
 
-func computeExternalOperationDigest(scope Scope, owner ObjectiveOwner, objectiveID string, identity *ExternalOperationIdentity) (string, error) {
+func computeExternalOperationDigest(scope Scope, owner ObjectiveOwner, objectiveID string, identity *ExternalOperationIdentity, idempotencyKey string) (string, error) {
 	if identity == nil {
 		return "", nil
 	}
@@ -62,11 +64,12 @@ func computeExternalOperationDigest(scope Scope, owner ObjectiveOwner, objective
 	}
 	resource, _ := canonicalExternalOperationResource(identity.Resource)
 	operation := strings.ToLower(strings.TrimSpace(identity.Operation))
+	occurrence := strings.TrimSpace(idempotencyKey)
 	ownerKey := strings.TrimSpace(objectiveID)
 	if ownerKey == "" {
 		ownerKey = string(owner.Type) + "\x00" + strings.TrimSpace(owner.ID)
 	}
-	return hashString(scope.Kind + "\x00" + scope.ID + "\x00" + ownerKey + "\x00" + resource + "\x00" + operation), nil
+	return hashString(scope.Kind + "\x00" + scope.ID + "\x00" + ownerKey + "\x00" + resource + "\x00" + operation + "\x00" + occurrence), nil
 }
 
 // externalOperationLockKey is safe to bind as PostgreSQL TEXT. The canonical
