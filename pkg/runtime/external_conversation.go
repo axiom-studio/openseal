@@ -230,18 +230,20 @@ type ExternalConversationEndpointFilter struct {
 }
 
 type CreateExternalConversationEndpointRequest struct {
-	ID            string
-	Scope         Scope
-	Owner         ObjectiveOwner
-	DeploymentID  string
-	Name          string
-	Adapter       ExternalConversationAdapterReference
-	Mode          capability.ConversationEndpointMode
-	Address       string
-	Handler       ExternalConversationHandler
-	Policy        ExternalConversationPolicy
-	Configuration map[string]interface{}
-	Status        ExternalConversationEndpointStatus
+	ID             string
+	Scope          Scope
+	Owner          ObjectiveOwner
+	DeploymentID   string
+	Name           string
+	Adapter        ExternalConversationAdapterReference
+	Mode           capability.ConversationEndpointMode
+	InstallationID string
+	ApplicationID  string
+	Address        string
+	Handler        ExternalConversationHandler
+	Policy         ExternalConversationPolicy
+	Configuration  map[string]interface{}
+	Status         ExternalConversationEndpointStatus
 }
 
 type UpdateExternalConversationEndpointRequest struct {
@@ -293,7 +295,8 @@ func (s *ExternalConversationEndpointService) Create(ctx context.Context, req Cr
 	endpoint := &ExternalConversationEndpoint{
 		ID: strings.TrimSpace(req.ID), Scope: req.Scope, Owner: req.Owner, DeploymentID: strings.TrimSpace(req.DeploymentID),
 		Name: strings.TrimSpace(req.Name), Adapter: normalizeExternalConversationAdapterReference(req.Adapter),
-		Mode: req.Mode, Address: strings.TrimSpace(req.Address), Handler: normalizeExternalConversationHandler(req.Handler),
+		Mode: req.Mode, InstallationID: strings.TrimSpace(req.InstallationID), ApplicationID: strings.TrimSpace(req.ApplicationID),
+		Address: strings.TrimSpace(req.Address), Handler: normalizeExternalConversationHandler(req.Handler),
 		Policy: req.Policy, Configuration: cloneMap(req.Configuration), Status: status,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}

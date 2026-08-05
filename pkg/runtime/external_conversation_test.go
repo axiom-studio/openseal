@@ -20,7 +20,7 @@ func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T
 	endpoint, err := service.Create(ctx, CreateExternalConversationEndpointRequest{
 		ID: "slack-channel", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
 		DeploymentID: "slack-agent", Name: "Customer channel", Adapter: adapter,
-		Mode: capability.ConversationEndpointChannel, Address: "C012345",
+		Mode: capability.ConversationEndpointChannel, InstallationID: "workspace:T0123", ApplicationID: "app:A0123", Address: "C012345",
 		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
 		Policy: ExternalConversationPolicy{
 			MessageSelection: ExternalConversationSelectDirectOrMention,
@@ -33,7 +33,8 @@ func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if endpoint.Provider != "slack" || endpoint.Adapter != adapter || endpoint.Revision != 1 {
+	if endpoint.Provider != "slack" || endpoint.Adapter != adapter || endpoint.InstallationID != "workspace:T0123" ||
+		endpoint.ApplicationID != "app:A0123" || endpoint.Revision != 1 {
 		t.Fatalf("endpoint = %#v", endpoint)
 	}
 	encoded, _ := json.Marshal(endpoint)
