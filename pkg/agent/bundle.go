@@ -307,7 +307,7 @@ func PreviewBundleInstallation(bundle *Bundle, placement BundlePlacement) (*Bund
 	for _, need := range bundle.Endpoints {
 		selected, ok := placement.Endpoints[need.ID]
 		resolved := ok && strings.TrimSpace(selected.Provider) == need.Provider && selected.Adapter.Equal(need.Adapter) &&
-			strings.TrimSpace(selected.BindingID) != "" && strings.TrimSpace(selected.Address) != ""
+			strings.TrimSpace(selected.BindingID) != "" && strings.TrimSpace(selected.InstallationID) != "" && strings.TrimSpace(selected.Address) != ""
 		if resolved {
 			adapterBound := false
 			for _, skill := range placement.Skills {
