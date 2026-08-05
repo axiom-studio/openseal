@@ -26,7 +26,7 @@ func DefaultDaemonConfig() *DaemonConfig {
 			ArtifactsPath: "data/artifacts",
 		},
 		API: APIConfig{
-			ListenAddr: ":8080",
+			ListenAddr: "127.0.0.1:8080",
 		},
 	}
 }
@@ -93,7 +93,7 @@ func LoadDaemonConfig(path string) (*DaemonConfig, error) {
 		cfg.LogLevel = "info"
 	}
 	if cfg.API.ListenAddr == "" {
-		cfg.API.ListenAddr = ":8080"
+		cfg.API.ListenAddr = "127.0.0.1:8080"
 	}
 	if cfg.Storage.Driver == "" {
 		cfg.Storage.Driver = "sqlite"
