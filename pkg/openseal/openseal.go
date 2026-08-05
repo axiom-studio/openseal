@@ -85,6 +85,7 @@ type (
 	AgentBundleMetadata                       = kernelagent.BundleMetadata
 	AgentBundleDeploymentPolicy               = kernelagent.BundleDeploymentPolicy
 	AgentBundleSkillRequirement               = kernelagent.BundleSkillRequirement
+	AgentBundleSkillPolicy                    = kernelagent.BundleSkillPolicy
 	AgentBundleCredentialNeed                 = kernelagent.BundleCredentialNeed
 	AgentBundleEndpointNeed                   = kernelagent.BundleEndpointNeed
 	AgentBundleExportRequest                  = kernelagent.BundleExportRequest
