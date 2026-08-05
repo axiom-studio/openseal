@@ -108,6 +108,15 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		!strings.Contains(err.Error(), "no active provider callback") {
 		t.Fatalf("missing approval callback = %d, %v", count, err)
 	}
+	otherEndpoint := cloneExternalConversationEndpoint(endpoint)
+	otherEndpoint.ID = "other-approval-endpoint"
+	otherEndpoint.Owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent:other"}
+	otherEndpoint.DeploymentID = "agent:other"
+	registerApprovalNotificationCallback(t, ctx, store, catalog, otherEndpoint)
+	if count, err := workerWithoutCallback.ProcessScope(ctx, endpoint.Scope, 10); err == nil || count != 0 ||
+		!strings.Contains(err.Error(), "no active provider callback") {
+		t.Fatalf("other destination callback = %d, %v", count, err)
+	}
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
 	worker := NewApprovalNotificationWorker(store, transport, catalog)
 	worker.now = func() time.Time { return now }
@@ -302,8 +311,10 @@ func registerApprovalNotificationCallback(
 			},
 		}},
 	}
-	if err := catalog.Register(ctx, definition); err != nil {
-		t.Fatal(err)
+	if existing, err := catalog.GetDefinition(ctx, definition.ID, definition.Version); err != nil || existing == nil {
+		if err := catalog.Register(ctx, definition); err != nil {
+			t.Fatal(err)
+		}
 	}
 	binding := &skill.Binding{
 		ID: endpoint.Provider + "-approval-callback", Scope: skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID},

@@ -174,9 +174,9 @@ func (w *ApprovalNotificationWorker) resolveTimeout(ctx context.Context, approva
 }
 
 // requireApprovalCallback proves that an interactive approval card has a live,
-// provider-matched ingress path before it is exposed to a person. Provider
-// installations may serve several destinations, so the immutable delivered
-// message remains the exact decision correlation boundary.
+// destination-matched ingress path before it is exposed to a person. A
+// provider installation may serve several Agents and destinations, so provider
+// identity alone is never sufficient authority to render an interactive card.
 func (w *ApprovalNotificationWorker) requireApprovalCallback(ctx context.Context, endpoint *ExternalConversationEndpoint) error {
 	if w == nil || w.callbacks == nil || w.callbacks.resolver == nil || endpoint == nil {
 		return errors.New("approval callback coordination is not configured")
@@ -190,7 +190,7 @@ func (w *ApprovalNotificationWorker) requireApprovalCallback(ctx context.Context
 			return err
 		}
 		for _, registration := range registrations {
-			if !callbackRegistrationHandlesApprovals(registration) {
+			if !callbackRegistrationHandlesApprovals(registration, endpoint) {
 				continue
 			}
 			if err := w.callbacks.resolve(ctx, registration); err == nil {
@@ -204,13 +204,17 @@ func (w *ApprovalNotificationWorker) requireApprovalCallback(ctx context.Context
 	return fmt.Errorf("%w: approval destination has no active provider callback for approval decisions", ErrInvalidExternalConversation)
 }
 
-func callbackRegistrationHandlesApprovals(registration *CallbackRegistration) bool {
-	if registration == nil || registration.Status != CallbackRegistrationActive {
+func callbackRegistrationHandlesApprovals(registration *CallbackRegistration, endpoint *ExternalConversationEndpoint) bool {
+	if registration == nil || endpoint == nil || registration.Status != CallbackRegistrationActive ||
+		registration.Scope != endpoint.Scope || registration.Owner != endpoint.Owner ||
+		strings.TrimSpace(registration.DeploymentID) != strings.TrimSpace(endpoint.DeploymentID) ||
+		strings.TrimSpace(registration.Provider) != strings.TrimSpace(endpoint.Provider) {
 		return false
 	}
 	for _, subscription := range registration.Subscriptions {
 		if subscription.EventType == capability.CallbackEventApprovalDecided &&
-			subscription.Consumer == "approvals" && strings.TrimSpace(subscription.TargetID) != "" {
+			subscription.Consumer == "approvals" &&
+			strings.TrimSpace(subscription.TargetID) == strings.TrimSpace(endpoint.ID) {
 			return true
 		}
 	}
