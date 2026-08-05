@@ -125,6 +125,62 @@ func TestBundleValidationRejectsMissingMappingsAndTampering(t *testing.T) {
 	}
 }
 
+func TestBundleSeparatesRuntimeCapabilitiesFromInstallableSkills(t *testing.T) {
+	installed, err := InstallManifest(t.Context(), registryManifestInstaller{registry: NewRegistry()}, manifestInstallationFixture("1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeIdentity := capability.NewSkillIdentity("openseal.agents", "1.2.2", "")
+	installed.Definition.SkillRequirements = append(installed.Definition.SkillRequirements, SkillRequirement{
+		SkillID: runtimeIdentity.ID, VersionConstraint: "1.2.0", RequiredActions: []string{"amend_behavior"},
+	})
+	slackIdentity := capability.NewSkillIdentity("skill-slack", "2.2.12", "source::slack")
+	bundle, err := ExportBundle(BundleExportRequest{
+		Definition: installed.Definition, Deployment: installed.Deployment,
+		Metadata: BundleMetadata{ID: "rowan"}, Manifest: ManifestMetadata{ID: "rowan"},
+		Runtime: []BundleRuntimeRequirement{{RequirementID: runtimeIdentity.ID, Identity: runtimeIdentity}},
+		Skills: []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: slackIdentity, Policy: BundleSkillPolicy{
+			AllowedActions: []string{"send-approval"}, MaximumRisk: capability.RiskLevelRead,
+		}}},
+		Endpoints: []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: slackIdentity, AdapterID: "interactions"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeVersion := ""
+	for _, requirement := range bundle.Agent.Spec.SkillRequirements {
+		if requirement.SkillID == runtimeIdentity.ID {
+			runtimeVersion = requirement.VersionConstraint
+		}
+	}
+	if len(bundle.Runtime) != 1 || len(bundle.Skills) != 1 || runtimeVersion != runtimeIdentity.Version {
+		t.Fatalf("runtime capability was not preserved independently: %#v", bundle)
+	}
+	placement := BundlePlacement{
+		DeploymentID: "agent:rowan", Environment: "default",
+		Skills: map[string]BundleSkillPlacement{"skill-slack": {Identity: slackIdentity, BindingID: "binding:slack"}},
+		Endpoints: map[string]BundleEndpointPlacement{"approvals": {
+			Provider: "slack", Adapter: slackIdentity, BindingID: "binding:slack", InstallationID: "workspace:T1", Address: "channel:C1",
+		}},
+	}
+	preview, err := PreviewBundleInstallation(bundle, placement)
+	if err != nil || preview.Ready {
+		t.Fatalf("missing target runtime was accepted: %#v, %v", preview, err)
+	}
+	placement.Runtime = map[string]capability.SkillIdentity{runtimeIdentity.ID: runtimeIdentity}
+	preview, err = PreviewBundleInstallation(bundle, placement)
+	if err != nil || !preview.Ready {
+		t.Fatalf("exact target runtime was not accepted: %#v, %v", preview, err)
+	}
+	plan, err := CompileBundleInstallation(BundleInstallationRequest{
+		Bundle: bundle, Scope: capability.ScopeReference{Kind: "tenant", ID: "9"}, Placement: placement,
+		ActorType: "user", ActorID: "42", Reason: "import runtime-aware Agent", IdempotencyKey: "import-rowan-runtime-v1",
+	})
+	if err != nil || len(plan.Bindings) != 1 || plan.Bindings[0].SkillID != "skill-slack" {
+		t.Fatalf("runtime capability materialized as an installable binding: %#v, %v", plan, err)
+	}
+}
+
 func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testing.T) {
 	installed, err := InstallManifest(t.Context(), registryManifestInstaller{registry: NewRegistry()}, manifestInstallationFixture("1.0.0"))
 	if err != nil {

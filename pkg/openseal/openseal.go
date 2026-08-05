@@ -86,6 +86,7 @@ type (
 	AgentBundle                               = kernelagent.Bundle
 	AgentBundleMetadata                       = kernelagent.BundleMetadata
 	AgentBundleDeploymentPolicy               = kernelagent.BundleDeploymentPolicy
+	AgentBundleRuntimeRequirement             = kernelagent.BundleRuntimeRequirement
 	AgentBundleSkillRequirement               = kernelagent.BundleSkillRequirement
 	AgentBundleSkillPolicy                    = kernelagent.BundleSkillPolicy
 	AgentBundleCredentialNeed                 = kernelagent.BundleCredentialNeed
@@ -898,6 +899,7 @@ const (
 	AgentManifestKind                   = kernelagent.ManifestKind
 	AgentBundleAPIVersion               = kernelagent.BundleAPIVersion
 	AgentBundleKind                     = kernelagent.BundleKind
+	AgentBundleRequirementRuntime       = kernelagent.BundleRequirementRuntime
 	AgentBundleRequirementSkill         = kernelagent.BundleRequirementSkill
 	AgentBundleRequirementCredential    = kernelagent.BundleRequirementCredential
 	AgentBundleRequirementEndpoint      = kernelagent.BundleRequirementEndpoint

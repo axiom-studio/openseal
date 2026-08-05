@@ -23,16 +23,26 @@ const (
 // Manifest owns behavior; Requirements describe what an installing host must
 // resolve without carrying source-host credentials or provider identifiers.
 type Bundle struct {
-	APIVersion  string                   `json:"apiVersion" yaml:"apiVersion"`
-	Kind        string                   `json:"kind" yaml:"kind"`
-	Metadata    BundleMetadata           `json:"metadata" yaml:"metadata"`
-	Agent       *Manifest                `json:"agent" yaml:"agent"`
-	Policy      BundleDeploymentPolicy   `json:"policy,omitempty" yaml:"policy,omitempty"`
-	Skills      []BundleSkillRequirement `json:"skills,omitempty" yaml:"skills,omitempty"`
-	Credentials []BundleCredentialNeed   `json:"credentials,omitempty" yaml:"credentials,omitempty"`
-	Endpoints   []BundleEndpointNeed     `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
-	Callbacks   []BundleCallbackNeed     `json:"callbacks,omitempty" yaml:"callbacks,omitempty"`
-	Digest      string                   `json:"digest" yaml:"digest"`
+	APIVersion  string                     `json:"apiVersion" yaml:"apiVersion"`
+	Kind        string                     `json:"kind" yaml:"kind"`
+	Metadata    BundleMetadata             `json:"metadata" yaml:"metadata"`
+	Agent       *Manifest                  `json:"agent" yaml:"agent"`
+	Policy      BundleDeploymentPolicy     `json:"policy,omitempty" yaml:"policy,omitempty"`
+	Runtime     []BundleRuntimeRequirement `json:"runtime,omitempty" yaml:"runtime,omitempty"`
+	Skills      []BundleSkillRequirement   `json:"skills,omitempty" yaml:"skills,omitempty"`
+	Credentials []BundleCredentialNeed     `json:"credentials,omitempty" yaml:"credentials,omitempty"`
+	Endpoints   []BundleEndpointNeed       `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
+	Callbacks   []BundleCallbackNeed       `json:"callbacks,omitempty" yaml:"callbacks,omitempty"`
+	Digest      string                     `json:"digest" yaml:"digest"`
+}
+
+// BundleRuntimeRequirement records an exact capability supplied by the
+// OpenSeal runtime itself. It is compatibility state, not an installable Skill
+// or a target binding choice. Installing hosts resolve it from their local
+// kernel catalog and fail closed when that exact capability is unavailable.
+type BundleRuntimeRequirement struct {
+	RequirementID string                   `json:"requirementId" yaml:"requirementId"`
+	Identity      capability.SkillIdentity `json:"identity" yaml:"identity"`
 }
 
 type BundleMetadata struct {
@@ -123,6 +133,7 @@ type BundleExportRequest struct {
 	EndpointIDs map[string]string
 	Metadata    BundleMetadata
 	Manifest    ManifestMetadata
+	Runtime     []BundleRuntimeRequirement
 	Skills      []BundleSkillRequirement
 	Credentials []BundleCredentialNeed
 	Endpoints   []BundleEndpointNeed
@@ -154,6 +165,7 @@ type BundleCallbackPlacement struct {
 type BundlePlacement struct {
 	DeploymentID string                                    `json:"deploymentId"`
 	Environment  string                                    `json:"environment"`
+	Runtime      map[string]capability.SkillIdentity       `json:"runtime,omitempty"`
 	Skills       map[string]BundleSkillPlacement           `json:"skills,omitempty"`
 	Credentials  map[string]capability.CredentialReference `json:"credentials,omitempty"`
 	Endpoints    map[string]BundleEndpointPlacement        `json:"endpoints,omitempty"`
@@ -163,6 +175,7 @@ type BundlePlacement struct {
 type BundleRequirementKind string
 
 const (
+	BundleRequirementRuntime    BundleRequirementKind = "runtime"
 	BundleRequirementSkill      BundleRequirementKind = "skill"
 	BundleRequirementCredential BundleRequirementKind = "credential"
 	BundleRequirementEndpoint   BundleRequirementKind = "endpoint"
@@ -244,7 +257,10 @@ func ExportBundle(request BundleExportRequest) (*Bundle, error) {
 	// source deployment. Pin the portable manifest to those same versions so
 	// the artifact cannot retain a stale exact/range requirement that rejects
 	// its own bindings when installed on another host.
-	selectedVersions := make(map[string]string, len(request.Skills))
+	selectedVersions := make(map[string]string, len(request.Runtime)+len(request.Skills))
+	for _, selected := range request.Runtime {
+		selectedVersions[strings.TrimSpace(selected.RequirementID)] = strings.TrimSpace(selected.Identity.Version)
+	}
 	for _, selected := range request.Skills {
 		selectedVersions[strings.TrimSpace(selected.RequirementID)] = strings.TrimSpace(selected.Identity.Version)
 	}
@@ -255,8 +271,8 @@ func ExportBundle(request BundleExportRequest) (*Bundle, error) {
 	}
 	bundle := &Bundle{
 		APIVersion: BundleAPIVersion, Kind: BundleKind, Metadata: metadata, Agent: manifest,
-		Policy: BundleDeploymentPolicy{Restrictions: request.Deployment.Restrictions, Capacity: request.Deployment.Capacity},
-		Skills: request.Skills, Credentials: request.Credentials, Endpoints: request.Endpoints, Callbacks: request.Callbacks,
+		Policy:  BundleDeploymentPolicy{Restrictions: request.Deployment.Restrictions, Capacity: request.Deployment.Capacity},
+		Runtime: request.Runtime, Skills: request.Skills, Credentials: request.Credentials, Endpoints: request.Endpoints, Callbacks: request.Callbacks,
 	}
 	canonicalizeBundle(bundle)
 	bundle.Digest, err = bundleDigest(bundle)
@@ -288,6 +304,14 @@ func PreviewBundleInstallation(bundle *Bundle, placement BundlePlacement) (*Bund
 		Resolved: strings.TrimSpace(placement.DeploymentID) != "" && strings.TrimSpace(placement.Environment) != "",
 		Message:  "Choose a target Agent identity and environment.",
 	})
+	for _, need := range bundle.Runtime {
+		selected, ok := placement.Runtime[need.RequirementID]
+		appendResolution(BundleRequirementResolution{
+			Kind: BundleRequirementRuntime, ID: need.RequirementID, Required: !bundleSkillOptional(bundle.Agent, need.RequirementID),
+			Resolved: ok && selected.Equal(need.Identity),
+			Message:  "Use a compatible OpenSeal runtime that provides this exact kernel capability.",
+		})
+	}
 	for _, need := range bundle.Skills {
 		selected, ok := placement.Skills[need.RequirementID]
 		resolved := ok && selected.Identity.Equal(need.Identity) && strings.TrimSpace(selected.BindingID) != ""
@@ -514,7 +538,18 @@ func (b *Bundle) Validate() error {
 	for _, requirement := range definition.SkillRequirements {
 		declaredSkills[requirement.SkillID] = requirement
 	}
-	resolvedSkills := make(map[string]capability.SkillIdentity, len(b.Skills))
+	resolvedSkills := make(map[string]capability.SkillIdentity, len(b.Runtime)+len(b.Skills))
+	for _, requirement := range b.Runtime {
+		id := strings.TrimSpace(requirement.RequirementID)
+		identity := requirement.Identity.Normalized()
+		if _, ok := declaredSkills[id]; !ok || !identity.Valid() || resolvedSkills[id].Valid() {
+			return errors.New("agent bundle runtime capabilities must uniquely resolve declared manifest requirements")
+		}
+		if strings.TrimSpace(declaredSkills[id].VersionConstraint) != identity.Version {
+			return fmt.Errorf("agent bundle runtime capability %s exact identity does not match its manifest version", id)
+		}
+		resolvedSkills[id] = identity
+	}
 	for _, requirement := range b.Skills {
 		id := strings.TrimSpace(requirement.RequirementID)
 		identity := requirement.Identity.Normalized()
@@ -683,6 +718,7 @@ func canonicalizeBundle(bundle *Bundle) {
 		return
 	}
 	sort.Strings(bundle.Metadata.Tags)
+	sort.Slice(bundle.Runtime, func(i, j int) bool { return bundle.Runtime[i].RequirementID < bundle.Runtime[j].RequirementID })
 	sort.Slice(bundle.Skills, func(i, j int) bool { return bundle.Skills[i].RequirementID < bundle.Skills[j].RequirementID })
 	for index := range bundle.Credentials {
 		sort.Strings(bundle.Credentials[index].RequiredBy)
