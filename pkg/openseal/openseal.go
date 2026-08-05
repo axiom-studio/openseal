@@ -89,15 +89,19 @@ type (
 	AgentBundleSkillPolicy                    = kernelagent.BundleSkillPolicy
 	AgentBundleCredentialNeed                 = kernelagent.BundleCredentialNeed
 	AgentBundleEndpointNeed                   = kernelagent.BundleEndpointNeed
+	AgentBundleCallbackSubscription           = kernelagent.BundleCallbackSubscription
+	AgentBundleCallbackNeed                   = kernelagent.BundleCallbackNeed
 	AgentBundleExportRequest                  = kernelagent.BundleExportRequest
 	AgentBundlePlacement                      = kernelagent.BundlePlacement
 	AgentBundleSkillPlacement                 = kernelagent.BundleSkillPlacement
 	AgentBundleEndpointPlacement              = kernelagent.BundleEndpointPlacement
+	AgentBundleCallbackPlacement              = kernelagent.BundleCallbackPlacement
 	AgentBundleRequirementKind                = kernelagent.BundleRequirementKind
 	AgentBundleRequirementResolution          = kernelagent.BundleRequirementResolution
 	AgentBundleInstallationPreview            = kernelagent.BundleInstallationPreview
 	AgentBundleInstallationRequest            = kernelagent.BundleInstallationRequest
 	AgentBundleEndpointInstallation           = kernelagent.BundleEndpointInstallation
+	AgentBundleCallbackInstallation           = kernelagent.BundleCallbackInstallation
 	AgentBundleInstallationPlan               = kernelagent.BundleInstallationPlan
 	AgentDefinitionCompilation                = kernelagent.DefinitionCompilation
 	AgentCompilationSource                    = kernelagent.CompilationSource
@@ -896,6 +900,7 @@ const (
 	AgentBundleRequirementSkill         = kernelagent.BundleRequirementSkill
 	AgentBundleRequirementCredential    = kernelagent.BundleRequirementCredential
 	AgentBundleRequirementEndpoint      = kernelagent.BundleRequirementEndpoint
+	AgentBundleRequirementCallback      = kernelagent.BundleRequirementCallback
 	AgentBundleRequirementDeployment    = kernelagent.BundleRequirementDeployment
 	TeamManifestAPIVersion              = kernelteam.ManifestAPIVersion
 	TeamManifestKind                    = kernelteam.ManifestKind
