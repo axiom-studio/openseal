@@ -31,6 +31,7 @@ type Bundle struct {
 	Skills      []BundleSkillRequirement `json:"skills,omitempty" yaml:"skills,omitempty"`
 	Credentials []BundleCredentialNeed   `json:"credentials,omitempty" yaml:"credentials,omitempty"`
 	Endpoints   []BundleEndpointNeed     `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
+	Callbacks   []BundleCallbackNeed     `json:"callbacks,omitempty" yaml:"callbacks,omitempty"`
 	Digest      string                   `json:"digest" yaml:"digest"`
 }
 
@@ -92,6 +93,30 @@ type BundleEndpointNeed struct {
 	Enabled   bool                                `json:"enabled,omitempty" yaml:"enabled,omitempty"`
 }
 
+// BundleCallbackSubscription preserves a normalized callback event route. A
+// target endpoint is referenced by its portable bundle key rather than a
+// source-host endpoint identifier.
+type BundleCallbackSubscription struct {
+	EventType        string `json:"eventType" yaml:"eventType"`
+	Consumer         string `json:"consumer" yaml:"consumer"`
+	TargetEndpointID string `json:"targetEndpointId,omitempty" yaml:"targetEndpointId,omitempty"`
+}
+
+// BundleCallbackNeed preserves inbound provider interaction intent without
+// carrying the source registration ID, ingress URL, provider identities, or
+// principal mappings. RequiredConfiguration names the target-local,
+// credential-free fields an installer must provide.
+type BundleCallbackNeed struct {
+	ID                    string                       `json:"id" yaml:"id"`
+	Name                  string                       `json:"name" yaml:"name"`
+	Provider              string                       `json:"provider" yaml:"provider"`
+	Adapter               capability.SkillIdentity     `json:"adapter" yaml:"adapter"`
+	AdapterID             string                       `json:"adapterId" yaml:"adapterId"`
+	Subscriptions         []BundleCallbackSubscription `json:"subscriptions" yaml:"subscriptions"`
+	RequiredConfiguration []string                     `json:"requiredConfiguration,omitempty" yaml:"requiredConfiguration,omitempty"`
+	Enabled               bool                         `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+}
+
 type BundleExportRequest struct {
 	Definition  *AgentDefinition
 	Deployment  *AgentDeployment
@@ -101,6 +126,7 @@ type BundleExportRequest struct {
 	Skills      []BundleSkillRequirement
 	Credentials []BundleCredentialNeed
 	Endpoints   []BundleEndpointNeed
+	Callbacks   []BundleCallbackNeed
 }
 
 type BundleSkillPlacement struct {
@@ -117,6 +143,12 @@ type BundleEndpointPlacement struct {
 	Address        string                   `json:"address"`
 }
 
+type BundleCallbackPlacement struct {
+	Adapter       capability.SkillIdentity `json:"adapter"`
+	BindingID     string                   `json:"bindingId"`
+	Configuration map[string]interface{}   `json:"configuration,omitempty"`
+}
+
 // BundlePlacement contains only target-host choices. It is never serialized
 // into the portable artifact and may contain opaque credential references.
 type BundlePlacement struct {
@@ -125,6 +157,7 @@ type BundlePlacement struct {
 	Skills       map[string]BundleSkillPlacement           `json:"skills,omitempty"`
 	Credentials  map[string]capability.CredentialReference `json:"credentials,omitempty"`
 	Endpoints    map[string]BundleEndpointPlacement        `json:"endpoints,omitempty"`
+	Callbacks    map[string]BundleCallbackPlacement        `json:"callbacks,omitempty"`
 }
 
 type BundleRequirementKind string
@@ -133,6 +166,7 @@ const (
 	BundleRequirementSkill      BundleRequirementKind = "skill"
 	BundleRequirementCredential BundleRequirementKind = "credential"
 	BundleRequirementEndpoint   BundleRequirementKind = "endpoint"
+	BundleRequirementCallback   BundleRequirementKind = "callback"
 	BundleRequirementDeployment BundleRequirementKind = "deployment"
 )
 
@@ -168,10 +202,16 @@ type BundleEndpointInstallation struct {
 	Placement   BundleEndpointPlacement `json:"placement"`
 }
 
+type BundleCallbackInstallation struct {
+	Requirement BundleCallbackNeed      `json:"requirement"`
+	Placement   BundleCallbackPlacement `json:"placement"`
+}
+
 type BundleInstallationPlan struct {
 	Manifest  ManifestInstallationRequest  `json:"manifest"`
 	Bindings  []*capability.Binding        `json:"bindings,omitempty"`
 	Endpoints []BundleEndpointInstallation `json:"endpoints,omitempty"`
+	Callbacks []BundleCallbackInstallation `json:"callbacks,omitempty"`
 }
 
 // ExportBundle projects reviewed portable state into a deterministic artifact.
@@ -216,7 +256,7 @@ func ExportBundle(request BundleExportRequest) (*Bundle, error) {
 	bundle := &Bundle{
 		APIVersion: BundleAPIVersion, Kind: BundleKind, Metadata: metadata, Agent: manifest,
 		Policy: BundleDeploymentPolicy{Restrictions: request.Deployment.Restrictions, Capacity: request.Deployment.Capacity},
-		Skills: request.Skills, Credentials: request.Credentials, Endpoints: request.Endpoints,
+		Skills: request.Skills, Credentials: request.Credentials, Endpoints: request.Endpoints, Callbacks: request.Callbacks,
 	}
 	canonicalizeBundle(bundle)
 	bundle.Digest, err = bundleDigest(bundle)
@@ -281,6 +321,30 @@ func PreviewBundleInstallation(bundle *Bundle, placement BundlePlacement) (*Bund
 		appendResolution(BundleRequirementResolution{
 			Kind: BundleRequirementEndpoint, ID: need.ID, Required: true, Resolved: resolved,
 			Message: "Choose a destination visible to the authorized provider connection.",
+		})
+	}
+	for _, need := range bundle.Callbacks {
+		selected, ok := placement.Callbacks[need.ID]
+		resolved := ok && selected.Adapter.Equal(need.Adapter) && strings.TrimSpace(selected.BindingID) != ""
+		if resolved {
+			adapterBound := false
+			for _, skill := range placement.Skills {
+				if skill.Identity.Equal(selected.Adapter) && skill.BindingID == selected.BindingID {
+					adapterBound = true
+					break
+				}
+			}
+			resolved = adapterBound
+		}
+		for _, key := range need.RequiredConfiguration {
+			value, present := selected.Configuration[key]
+			if !present || value == nil {
+				resolved = false
+			}
+		}
+		appendResolution(BundleRequirementResolution{
+			Kind: BundleRequirementCallback, ID: need.ID, Required: true, Resolved: resolved,
+			Message: "Choose target-local callback configuration for the authorized provider connection.",
 		})
 	}
 	sort.Slice(preview.Requirements, func(i, j int) bool {
@@ -364,6 +428,9 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 	}
 	for _, need := range request.Bundle.Endpoints {
 		plan.Endpoints = append(plan.Endpoints, BundleEndpointInstallation{Requirement: need, Placement: request.Placement.Endpoints[need.ID]})
+	}
+	for _, need := range request.Bundle.Callbacks {
+		plan.Callbacks = append(plan.Callbacks, BundleCallbackInstallation{Requirement: need, Placement: request.Placement.Callbacks[need.ID]})
 	}
 	return plan, nil
 }
@@ -510,6 +577,43 @@ func (b *Bundle) Validate() error {
 			return fmt.Errorf("agent bundle is missing endpoint requirement %s", id)
 		}
 	}
+	callbackIDs := map[string]bool{}
+	for _, callback := range b.Callbacks {
+		id := strings.TrimSpace(callback.ID)
+		adapter := callback.Adapter.Normalized()
+		if id == "" || callbackIDs[id] || strings.TrimSpace(callback.Name) == "" || strings.TrimSpace(callback.Provider) == "" ||
+			!adapter.Valid() || strings.TrimSpace(callback.AdapterID) == "" || len(callback.Subscriptions) == 0 {
+			return errors.New("agent bundle callbacks require unique IDs, provider adapters, and subscriptions")
+		}
+		adapterDeclared := false
+		for _, identity := range resolvedSkills {
+			if identity.Equal(adapter) {
+				adapterDeclared = true
+				break
+			}
+		}
+		if !adapterDeclared {
+			return fmt.Errorf("agent bundle callback %s adapter is not a resolved Agent Skill", id)
+		}
+		configurationKeys := map[string]bool{}
+		for _, key := range callback.RequiredConfiguration {
+			key = strings.TrimSpace(key)
+			if key == "" || configurationKeys[key] {
+				return fmt.Errorf("agent bundle callback %s has invalid configuration requirements", id)
+			}
+			configurationKeys[key] = true
+		}
+		previous := ""
+		for _, subscription := range callback.Subscriptions {
+			key := strings.TrimSpace(subscription.EventType) + "\x00" + strings.TrimSpace(subscription.Consumer) + "\x00" + strings.TrimSpace(subscription.TargetEndpointID)
+			if strings.TrimSpace(subscription.EventType) == "" || strings.TrimSpace(subscription.Consumer) == "" ||
+				(subscription.TargetEndpointID != "" && !endpointIDs[subscription.TargetEndpointID]) || (previous != "" && key <= previous) {
+				return fmt.Errorf("agent bundle callback %s has invalid subscriptions", id)
+			}
+			previous = key
+		}
+		callbackIDs[id] = true
+	}
 	wantDigest, err := bundleDigest(b)
 	if err != nil {
 		return err
@@ -567,6 +671,15 @@ func canonicalizeBundle(bundle *Bundle) {
 	}
 	sort.Slice(bundle.Credentials, func(i, j int) bool { return bundle.Credentials[i].Name < bundle.Credentials[j].Name })
 	sort.Slice(bundle.Endpoints, func(i, j int) bool { return bundle.Endpoints[i].ID < bundle.Endpoints[j].ID })
+	for index := range bundle.Callbacks {
+		sort.Strings(bundle.Callbacks[index].RequiredConfiguration)
+		sort.Slice(bundle.Callbacks[index].Subscriptions, func(i, j int) bool {
+			left := bundle.Callbacks[index].Subscriptions[i]
+			right := bundle.Callbacks[index].Subscriptions[j]
+			return left.EventType+"\x00"+left.Consumer+"\x00"+left.TargetEndpointID < right.EventType+"\x00"+right.Consumer+"\x00"+right.TargetEndpointID
+		})
+	}
+	sort.Slice(bundle.Callbacks, func(i, j int) bool { return bundle.Callbacks[i].ID < bundle.Callbacks[j].ID })
 }
 
 func bundleDigest(bundle *Bundle) (string, error) {

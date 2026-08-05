@@ -139,6 +139,11 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 		}}},
 		Credentials: []BundleCredentialNeed{{Name: "skill-slack.slack", BindingKey: "slack", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
 		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity, AdapterID: "interactions", Enabled: true}},
+		Callbacks: []BundleCallbackNeed{{
+			ID: "approval-decisions", Name: "Approval decisions", Provider: "slack", Adapter: identity, AdapterID: "interactions", Enabled: true,
+			Subscriptions:         []BundleCallbackSubscription{{EventType: "approval.decided", Consumer: "approvals", TargetEndpointID: "approvals"}},
+			RequiredConfiguration: []string{"approvalPrincipals", "teamId"},
+		}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -147,7 +152,7 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preview.Ready || len(preview.Requirements) != 4 {
+	if preview.Ready || len(preview.Requirements) != 5 {
 		t.Fatalf("empty target preview = %#v", preview)
 	}
 	placement := BundlePlacement{
@@ -156,6 +161,11 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 		Credentials: map[string]capability.CredentialReference{"skill-slack.slack": {Kind: "slack_bot_token", ID: "vault://target/slack"}},
 		Endpoints: map[string]BundleEndpointPlacement{"approvals": {
 			Provider: "slack", Adapter: identity, BindingID: "binding:slack", InstallationID: "workspace:T1", Address: "channel:C1",
+		}},
+		Callbacks: map[string]BundleCallbackPlacement{"approval-decisions": {
+			Adapter: identity, BindingID: "binding:slack", Configuration: map[string]interface{}{
+				"teamId": "T1", "approvalPrincipals": map[string]interface{}{"U1": map[string]interface{}{"type": "role", "id": "operator"}},
+			},
 		}},
 	}
 	preview, err = PreviewBundleInstallation(bundle, placement)
@@ -169,7 +179,7 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Manifest.Deployment.ID != "agent:rowan" || len(plan.Bindings) != 1 || plan.Bindings[0].Credentials["slack"].ID != "vault://target/slack" || len(plan.Endpoints) != 1 || plan.Endpoints[0].Placement.Address != "channel:C1" {
+	if plan.Manifest.Deployment.ID != "agent:rowan" || len(plan.Bindings) != 1 || plan.Bindings[0].Credentials["slack"].ID != "vault://target/slack" || len(plan.Endpoints) != 1 || plan.Endpoints[0].Placement.Address != "channel:C1" || len(plan.Callbacks) != 1 || plan.Callbacks[0].Requirement.Subscriptions[0].TargetEndpointID != "approvals" {
 		t.Fatalf("compiled installation plan = %#v", plan)
 	}
 	if strings.Contains(plan.Manifest.Manifest.Metadata.ID, "tenant") || plan.Manifest.Deployment.DefinitionID != "" || !strings.HasPrefix(plan.Manifest.DefinitionKey, "import-") {
