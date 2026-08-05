@@ -74,6 +74,7 @@ type (
 
 	AgentDefinition                           = kernelagent.AgentDefinition
 	AgentStandingActionGrant                  = kernelagent.StandingActionGrant
+	AgentChannelRoute                         = kernelagent.ChannelRoute
 	AgentManifest                             = kernelagent.Manifest
 	AgentManifestMetadata                     = kernelagent.ManifestMetadata
 	AgentManifestSpec                         = kernelagent.ManifestSpec
