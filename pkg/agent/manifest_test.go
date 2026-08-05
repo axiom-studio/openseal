@@ -2,11 +2,76 @@ package agent
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
+
+func TestExportManifestRoundTripsPortableDefinition(t *testing.T) {
+	installed, err := InstallManifest(t.Context(), registryManifestInstaller{registry: NewRegistry()}, manifestInstallationFixture("1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	exported, err := ExportManifest(ManifestExportRequest{
+		Definition: installed.Definition, DeploymentID: installed.Deployment.ID,
+		Metadata: ManifestMetadata{ID: "rowan-greenwood", Tags: []string{"woodworking"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exported.Metadata.Version != installed.Definition.Version || exported.Metadata.DisplayName != installed.Definition.DisplayName || len(exported.Spec.Channels) != 1 {
+		t.Fatalf("exported manifest omitted portable facts: %#v", exported)
+	}
+	var delegated string
+	if err = json.Unmarshal(exported.Spec.Runbook.Steps["work"].Delegate.AgentID.Literal, &delegated); err != nil || delegated != "$self" {
+		t.Fatalf("portable delegate = %q, %v", delegated, err)
+	}
+	if objective := exported.Spec.Runbook.Triggers["daily"].ObjectiveID; objective != "agent:$self:daily-help" {
+		t.Fatalf("portable objective = %q", objective)
+	}
+	if original := installed.Definition.Runbook.Triggers["daily"].ObjectiveID; original != "agent:tenant/7/rowan:daily-help" {
+		t.Fatalf("export mutated installed definition: %q", original)
+	}
+
+	target := manifestInstallationFixture("1.0.0")
+	target.Manifest = exported
+	target.Deployment.ID = "agent:imported-rowan"
+	target.Deployment.DefinitionID = ""
+	target.Deployment.Scope.ID = "42"
+	target.IdempotencyKey = "import-rowan-elsewhere"
+	reinstalled, err := InstallManifest(t.Context(), registryManifestInstaller{registry: NewRegistry()}, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(reinstalled.Definition.Channels, installed.Definition.Channels) || reinstalled.Definition.Runbook.Triggers["daily"].ObjectiveID != "agent:tenant/42/rowan-greenwood:daily-help" {
+		t.Fatalf("reinstalled definition lost semantics: %#v", reinstalled.Definition)
+	}
+}
+
+func TestEncodeManifestYAMLRoundTripsCanonicalFieldNames(t *testing.T) {
+	manifest := manifestInstallationFixture("1.0.0").Manifest
+	encoded, err := EncodeManifestYAML(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, expected := range []string{"maxConcurrentRuns:", "objectiveTemplates:", "messageSelection:"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("encoded YAML omitted canonical field %q:\n%s", expected, text)
+		}
+	}
+	restored, err := DecodeManifestYAML(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantJSON, _ := json.Marshal(manifest)
+	gotJSON, _ := json.Marshal(restored)
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("YAML round trip changed manifest:\nwant %s\n got %s", wantJSON, gotJSON)
+	}
+}
 
 func TestCompileManifestBuildsPortableDefinitionWithSafeDefaults(t *testing.T) {
 	manifest := &Manifest{
