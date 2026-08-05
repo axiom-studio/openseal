@@ -31,6 +31,7 @@ func TestExportBundleProducesDeterministicSecretFreePortableArtifact(t *testing.
 		Credentials: []BundleCredentialNeed{{Name: "skill-slack.slack_bot_token", BindingKey: "slack_bot_token", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
 		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approval channel", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity, AdapterID: "interactions", Enabled: true}},
 	}
+	originalConstraint := installed.Definition.SkillRequirements[0].VersionConstraint
 	first, err := ExportBundle(request)
 	if err != nil {
 		t.Fatal(err)
@@ -41,6 +42,12 @@ func TestExportBundleProducesDeterministicSecretFreePortableArtifact(t *testing.
 	}
 	if first.Digest != second.Digest || !strings.HasPrefix(first.Digest, "sha256:") {
 		t.Fatalf("bundle digest is not deterministic: %q != %q", first.Digest, second.Digest)
+	}
+	if got := first.Agent.Spec.SkillRequirements[0].VersionConstraint; got != identity.Version {
+		t.Fatalf("exported manifest Skill version = %q, want reviewed identity %q", got, identity.Version)
+	}
+	if got := installed.Definition.SkillRequirements[0].VersionConstraint; got != originalConstraint {
+		t.Fatalf("export mutated source Skill constraint: got %q, want %q", got, originalConstraint)
 	}
 	encoded, err := json.Marshal(first)
 	if err != nil {
@@ -93,6 +100,19 @@ func TestBundleValidationRejectsMissingMappingsAndTampering(t *testing.T) {
 		t.Fatalf("missing endpoint error = %v", err)
 	}
 	bundle, err := ExportBundle(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.Agent.Spec.SkillRequirements[0].VersionConstraint = "2.2.11"
+	bundle.Digest, err = bundleDigest(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = bundle.Validate(); err == nil || !strings.Contains(err.Error(), "exact identity") {
+		t.Fatalf("inconsistent Skill identity error = %v", err)
+	}
+	bundle.Agent.Spec.SkillRequirements[0].VersionConstraint = identity.Version
+	bundle.Digest, err = bundleDigest(bundle)
 	if err != nil {
 		t.Fatal(err)
 	}

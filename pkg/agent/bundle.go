@@ -200,6 +200,19 @@ func ExportBundle(request BundleExportRequest) (*Bundle, error) {
 	if metadata.Description == "" {
 		metadata.Description = manifest.Metadata.Description
 	}
+	// A Bundle carries the exact reviewed Skill identities selected by the
+	// source deployment. Pin the portable manifest to those same versions so
+	// the artifact cannot retain a stale exact/range requirement that rejects
+	// its own bindings when installed on another host.
+	selectedVersions := make(map[string]string, len(request.Skills))
+	for _, selected := range request.Skills {
+		selectedVersions[strings.TrimSpace(selected.RequirementID)] = strings.TrimSpace(selected.Identity.Version)
+	}
+	for index := range manifest.Spec.SkillRequirements {
+		if version := selectedVersions[manifest.Spec.SkillRequirements[index].SkillID]; version != "" {
+			manifest.Spec.SkillRequirements[index].VersionConstraint = version
+		}
+	}
 	bundle := &Bundle{
 		APIVersion: BundleAPIVersion, Kind: BundleKind, Metadata: metadata, Agent: manifest,
 		Policy: BundleDeploymentPolicy{Restrictions: request.Deployment.Restrictions, Capacity: request.Deployment.Capacity},
@@ -416,6 +429,9 @@ func (b *Bundle) Validate() error {
 		identity := requirement.Identity.Normalized()
 		if _, ok := declaredSkills[id]; !ok || !identity.Valid() || resolvedSkills[id].Valid() {
 			return errors.New("agent bundle Skills must uniquely resolve declared manifest requirements")
+		}
+		if strings.TrimSpace(declaredSkills[id].VersionConstraint) != identity.Version {
+			return fmt.Errorf("agent bundle Skill %s exact identity does not match its manifest version", id)
 		}
 		if !validRisk(requirement.Policy.MaximumRisk) || riskRank(requirement.Policy.MaximumRisk) > riskRank(definition.Authority.MaximumRisk) {
 			return fmt.Errorf("agent bundle Skill %s policy exceeds Agent risk authority", id)
