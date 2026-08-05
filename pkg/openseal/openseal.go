@@ -80,6 +80,23 @@ type (
 	AgentManifestInstallationRequest          = kernelagent.ManifestInstallationRequest
 	AgentManifestInstallationResult           = kernelagent.ManifestInstallationResult
 	AgentManifestInstallationRegistry         = kernelagent.ManifestInstallationRegistry
+	AgentManifestExportRequest                = kernelagent.ManifestExportRequest
+	AgentBundle                               = kernelagent.Bundle
+	AgentBundleMetadata                       = kernelagent.BundleMetadata
+	AgentBundleDeploymentPolicy               = kernelagent.BundleDeploymentPolicy
+	AgentBundleSkillRequirement               = kernelagent.BundleSkillRequirement
+	AgentBundleCredentialNeed                 = kernelagent.BundleCredentialNeed
+	AgentBundleEndpointNeed                   = kernelagent.BundleEndpointNeed
+	AgentBundleExportRequest                  = kernelagent.BundleExportRequest
+	AgentBundlePlacement                      = kernelagent.BundlePlacement
+	AgentBundleSkillPlacement                 = kernelagent.BundleSkillPlacement
+	AgentBundleEndpointPlacement              = kernelagent.BundleEndpointPlacement
+	AgentBundleRequirementKind                = kernelagent.BundleRequirementKind
+	AgentBundleRequirementResolution          = kernelagent.BundleRequirementResolution
+	AgentBundleInstallationPreview            = kernelagent.BundleInstallationPreview
+	AgentBundleInstallationRequest            = kernelagent.BundleInstallationRequest
+	AgentBundleEndpointInstallation           = kernelagent.BundleEndpointInstallation
+	AgentBundleInstallationPlan               = kernelagent.BundleInstallationPlan
 	AgentDefinitionCompilation                = kernelagent.DefinitionCompilation
 	AgentCompilationSource                    = kernelagent.CompilationSource
 	AgentCompilationDiagnostic                = kernelagent.CompilationDiagnostic
@@ -872,6 +889,12 @@ type (
 const (
 	AgentManifestAPIVersion             = kernelagent.ManifestAPIVersion
 	AgentManifestKind                   = kernelagent.ManifestKind
+	AgentBundleAPIVersion               = kernelagent.BundleAPIVersion
+	AgentBundleKind                     = kernelagent.BundleKind
+	AgentBundleRequirementSkill         = kernelagent.BundleRequirementSkill
+	AgentBundleRequirementCredential    = kernelagent.BundleRequirementCredential
+	AgentBundleRequirementEndpoint      = kernelagent.BundleRequirementEndpoint
+	AgentBundleRequirementDeployment    = kernelagent.BundleRequirementDeployment
 	TeamManifestAPIVersion              = kernelteam.ManifestAPIVersion
 	TeamManifestKind                    = kernelteam.ManifestKind
 	SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
@@ -886,6 +909,34 @@ func CompileAgentManifest(manifest *AgentManifest, definitionID string, provenan
 
 func DecodeAgentManifestYAML(data []byte) (*AgentManifest, error) {
 	return kernelagent.DecodeManifestYAML(data)
+}
+
+func ExportAgentManifest(request AgentManifestExportRequest) (*AgentManifest, error) {
+	return kernelagent.ExportManifest(request)
+}
+
+func EncodeAgentManifestYAML(manifest *AgentManifest) ([]byte, error) {
+	return kernelagent.EncodeManifestYAML(manifest)
+}
+
+func ExportAgentBundle(request AgentBundleExportRequest) (*AgentBundle, error) {
+	return kernelagent.ExportBundle(request)
+}
+
+func EncodeAgentBundleYAML(bundle *AgentBundle) ([]byte, error) {
+	return kernelagent.EncodeBundleYAML(bundle)
+}
+
+func DecodeAgentBundleYAML(data []byte) (*AgentBundle, error) {
+	return kernelagent.DecodeBundleYAML(data)
+}
+
+func PreviewAgentBundleInstallation(bundle *AgentBundle, placement AgentBundlePlacement) (*AgentBundleInstallationPreview, error) {
+	return kernelagent.PreviewBundleInstallation(bundle, placement)
+}
+
+func CompileAgentBundleInstallation(request AgentBundleInstallationRequest) (*AgentBundleInstallationPlan, error) {
+	return kernelagent.CompileBundleInstallation(request)
 }
 
 func InstallAgentManifest(ctx context.Context, registry AgentManifestInstallationRegistry, request AgentManifestInstallationRequest) (*AgentManifestInstallationResult, error) {

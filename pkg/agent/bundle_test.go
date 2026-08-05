@@ -97,3 +97,58 @@ func TestBundleValidationRejectsMissingMappingsAndTampering(t *testing.T) {
 		t.Fatal("unknown bundle field was accepted")
 	}
 }
+
+func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testing.T) {
+	installed, err := InstallManifest(t.Context(), registryManifestInstaller{registry: NewRegistry()}, manifestInstallationFixture("1.0.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := capability.NewSkillIdentity("skill-slack", "2.2.12", "source::slack")
+	bundle, err := ExportBundle(BundleExportRequest{
+		Definition: installed.Definition, Deployment: installed.Deployment,
+		Metadata: BundleMetadata{ID: "rowan"}, Manifest: ManifestMetadata{ID: "rowan"},
+		Skills:      []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity}},
+		Credentials: []BundleCredentialNeed{{Name: "slack", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
+		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := PreviewBundleInstallation(bundle, BundlePlacement{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.Ready || len(preview.Requirements) != 4 {
+		t.Fatalf("empty target preview = %#v", preview)
+	}
+	placement := BundlePlacement{
+		DeploymentID: "agent:rowan", Environment: "default",
+		Skills:      map[string]BundleSkillPlacement{"skill-slack": {Identity: identity, BindingID: "binding:slack"}},
+		Credentials: map[string]capability.CredentialReference{"slack": {Kind: "slack_bot_token", ID: "vault://target/slack"}},
+		Endpoints: map[string]BundleEndpointPlacement{"approvals": {
+			Provider: "slack", Adapter: identity, BindingID: "binding:slack", InstallationID: "workspace:T1", Address: "channel:C1",
+		}},
+	}
+	preview, err = PreviewBundleInstallation(bundle, placement)
+	if err != nil || !preview.Ready {
+		t.Fatalf("resolved target preview = %#v, %v", preview, err)
+	}
+	plan, err := CompileBundleInstallation(BundleInstallationRequest{
+		Bundle: bundle, Scope: capability.ScopeReference{Kind: "tenant", ID: "9"}, Placement: placement,
+		ActorType: "user", ActorID: "42", Reason: "import elsewhere", IdempotencyKey: "import-rowan-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Manifest.Deployment.ID != "agent:rowan" || plan.Manifest.Deployment.Credentials["slack"].ID != "vault://target/slack" || len(plan.Endpoints) != 1 || plan.Endpoints[0].Placement.Address != "channel:C1" {
+		t.Fatalf("compiled installation plan = %#v", plan)
+	}
+	if strings.Contains(plan.Manifest.Manifest.Metadata.ID, "tenant") || plan.Manifest.Deployment.DefinitionID != "" {
+		t.Fatalf("compiled installation leaked source identity: %#v", plan.Manifest)
+	}
+	placement.Endpoints["approvals"] = BundleEndpointPlacement{Provider: "slack", Adapter: identity, BindingID: "different", Address: "channel:C1"}
+	preview, err = PreviewBundleInstallation(bundle, placement)
+	if err != nil || preview.Ready {
+		t.Fatalf("mismatched endpoint binding was accepted: %#v, %v", preview, err)
+	}
+}
