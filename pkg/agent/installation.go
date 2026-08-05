@@ -21,6 +21,12 @@ var ErrManifestInstallationConflict = errors.New("agent manifest installation co
 type ManifestInstallationRequest struct {
 	Manifest   *Manifest        `json:"manifest"`
 	Deployment *AgentDeployment `json:"deployment"`
+	// DefinitionKey optionally gives an embedding compiler a stable logical
+	// identity for the materialized definition. Portable bundle imports use a
+	// target-deployment-specific key because self references and channel routes
+	// become target-specific immutable behavior. Plain manifest installations
+	// continue to use Manifest.Metadata.ID when this is empty.
+	DefinitionKey string `json:"definitionKey,omitempty"`
 	// EndpointIDs maps portable logical channel keys to target-host endpoint
 	// identities. The installing host creates those endpoint resources; the
 	// kernel materializes the same exact references into immutable behavior.
@@ -68,7 +74,11 @@ func InstallManifest(ctx context.Context, registry ManifestInstallationRegistry,
 	}
 
 	desiredDeployment := cloneDeployment(request.Deployment)
-	definitionID, err := manifestDefinitionID(desiredDeployment.Scope, request.Manifest.Metadata.ID)
+	definitionKey := strings.TrimSpace(request.DefinitionKey)
+	if definitionKey == "" {
+		definitionKey = request.Manifest.Metadata.ID
+	}
+	definitionID, err := manifestDefinitionID(desiredDeployment.Scope, definitionKey)
 	if err != nil {
 		return nil, err
 	}
