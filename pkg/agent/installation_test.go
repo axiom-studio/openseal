@@ -125,6 +125,22 @@ func TestRowanExampleIsInstallableAndContainsDurableWork(t *testing.T) {
 	}
 }
 
+func TestInstallManifestMaterializesPortableEndpointReferences(t *testing.T) {
+	request := manifestInstallationFixture("1.0.0")
+	request.EndpointIDs = map[string]string{"approvals": "conversation-endpoint:target-host"}
+
+	result, err := InstallManifest(t.Context(), registryManifestInstaller{registry: NewRegistry()}, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.Definition.Channels[0].EndpointID; got != "conversation-endpoint:target-host" {
+		t.Fatalf("channel endpoint = %q", got)
+	}
+	if got := result.Definition.Authority.ApprovalDestinations[0].EndpointID; got != "conversation-endpoint:target-host" {
+		t.Fatalf("approval destination endpoint = %q", got)
+	}
+}
+
 func manifestInstallationFixture(version string) ManifestInstallationRequest {
 	self, _ := json.Marshal("$self")
 	goal, _ := json.Marshal("Help once.")

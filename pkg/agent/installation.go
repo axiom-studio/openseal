@@ -19,12 +19,16 @@ var ErrManifestInstallationConflict = errors.New("agent manifest installation co
 // Deployment may contain only opaque credential references supplied by the
 // embedding host.
 type ManifestInstallationRequest struct {
-	Manifest       *Manifest        `json:"manifest"`
-	Deployment     *AgentDeployment `json:"deployment"`
-	ActorType      string           `json:"actorType"`
-	ActorID        string           `json:"actorId"`
-	Reason         string           `json:"reason,omitempty"`
-	IdempotencyKey string           `json:"idempotencyKey"`
+	Manifest   *Manifest        `json:"manifest"`
+	Deployment *AgentDeployment `json:"deployment"`
+	// EndpointIDs maps portable logical channel keys to target-host endpoint
+	// identities. The installing host creates those endpoint resources; the
+	// kernel materializes the same exact references into immutable behavior.
+	EndpointIDs    map[string]string `json:"endpointIds,omitempty"`
+	ActorType      string            `json:"actorType"`
+	ActorID        string            `json:"actorId"`
+	Reason         string            `json:"reason,omitempty"`
+	IdempotencyKey string            `json:"idempotencyKey"`
 }
 
 type ManifestInstallationResult struct {
@@ -96,6 +100,9 @@ func InstallManifest(ctx context.Context, registry ManifestInstallationRegistry,
 	if err = materializeSelfReferences(definition, desiredDeployment.ID); err != nil {
 		return nil, err
 	}
+	if err = materializeEndpointReferences(definition, request.EndpointIDs); err != nil {
+		return nil, err
+	}
 	if err = definition.Validate(); err != nil {
 		return nil, err
 	}
@@ -154,6 +161,30 @@ func InstallManifest(ctx context.Context, registry ManifestInstallationRegistry,
 		return nil, err
 	}
 	return &ManifestInstallationResult{Definition: definition, Deployment: activated}, nil
+}
+
+func materializeEndpointReferences(definition *AgentDefinition, endpointIDs map[string]string) error {
+	if definition == nil || len(endpointIDs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for portableID, targetID := range endpointIDs {
+		if !manifestIDPattern.MatchString(strings.TrimSpace(portableID)) || strings.TrimSpace(targetID) == "" || len(targetID) > 256 || seen[targetID] {
+			return errors.New("Agent manifest installation endpoint mappings require unique portable and target ids")
+		}
+		seen[targetID] = true
+	}
+	for index := range definition.Channels {
+		if targetID := endpointIDs[definition.Channels[index].EndpointID]; targetID != "" {
+			definition.Channels[index].EndpointID = targetID
+		}
+	}
+	for index := range definition.Authority.ApprovalDestinations {
+		if targetID := endpointIDs[definition.Authority.ApprovalDestinations[index].EndpointID]; targetID != "" {
+			definition.Authority.ApprovalDestinations[index].EndpointID = targetID
+		}
+	}
+	return nil
 }
 
 func manifestDefinitionID(scope capability.ScopeReference, manifestID string) (string, error) {
