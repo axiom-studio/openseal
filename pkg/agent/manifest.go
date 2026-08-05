@@ -53,7 +53,94 @@ type ManifestSpec struct {
 	ObjectiveTemplates  []ObjectiveTemplate    `json:"objectiveTemplates,omitempty" yaml:"objectiveTemplates,omitempty"`
 	Evaluations         []EvaluationCriterion  `json:"evaluations,omitempty" yaml:"evaluations,omitempty"`
 	Runbook             *runbook.Definition    `json:"runbook,omitempty" yaml:"runbook,omitempty"`
+	Channels            []ChannelRoute         `json:"channels,omitempty" yaml:"channels,omitempty"`
 	Amendments          AmendmentPolicy        `json:"amendments,omitempty" yaml:"amendments,omitempty"`
+}
+
+// ManifestExportRequest projects one immutable deployed definition back into
+// its portable artifact. Metadata.ID is deliberately supplied by the caller:
+// definition IDs are host-scoped and must never become portable identity by
+// accident. DeploymentID is used only to restore exact self references.
+type ManifestExportRequest struct {
+	Definition   *AgentDefinition
+	DeploymentID string
+	Metadata     ManifestMetadata
+}
+
+// ExportManifest is the inverse of CompileManifest for immutable Agent
+// behavior. It strips host provenance and materialized deployment identity,
+// while preserving every portable behavior, authority, Skill, Runbook, and
+// channel-routing fact.
+func ExportManifest(request ManifestExportRequest) (*Manifest, error) {
+	if request.Definition == nil {
+		return nil, errors.New("agent definition is required")
+	}
+	definition := cloneDefinition(request.Definition)
+	if err := definition.Validate(); err != nil {
+		return nil, fmt.Errorf("export agent definition: %w", err)
+	}
+	metadata := request.Metadata
+	metadata.ID = strings.TrimSpace(metadata.ID)
+	if metadata.ID == "" || !manifestIDPattern.MatchString(metadata.ID) {
+		return nil, errors.New("agent manifest export requires a portable metadata id")
+	}
+	if metadata.Version == "" {
+		metadata.Version = definition.Version
+	}
+	if metadata.Version != definition.Version {
+		return nil, errors.New("agent manifest export version must match the immutable definition")
+	}
+	if metadata.DisplayName == "" {
+		metadata.DisplayName = definition.DisplayName
+	}
+	if metadata.Description == "" {
+		metadata.Description = definition.Purpose
+	}
+	if err := restorePortableSelfReferences(definition, strings.TrimSpace(request.DeploymentID)); err != nil {
+		return nil, err
+	}
+	manifest := &Manifest{
+		APIVersion: ManifestAPIVersion,
+		Kind:       ManifestKind,
+		Metadata:   metadata,
+		Spec: ManifestSpec{
+			SystemPrompt: definition.SystemPrompt, Personality: definition.Personality,
+			OperatingPrinciples: definition.OperatingPrinciples, DomainContext: definition.DomainContext,
+			SkillRequirements: definition.SkillRequirements, Authority: definition.Authority,
+			Memory: definition.Memory, Escalation: definition.Escalation,
+			ObjectiveTemplates: definition.ObjectiveTemplates, Evaluations: definition.Evaluations,
+			Runbook: definition.Runbook, Channels: definition.Channels, Amendments: definition.Amendments,
+		},
+	}
+	if _, err := CompileManifest(manifest, metadata.ID, DefinitionProvenance{}); err != nil {
+		return nil, fmt.Errorf("validate exported agent manifest: %w", err)
+	}
+	return manifest, nil
+}
+
+// EncodeManifestYAML emits the same strict camelCase contract accepted by
+// DecodeManifestYAML. The typed clone prevents callers from mutating the
+// artifact while it is being encoded.
+func EncodeManifestYAML(manifest *Manifest) ([]byte, error) {
+	if manifest == nil {
+		return nil, errors.New("agent manifest is required")
+	}
+	if _, err := CompileManifest(manifest, manifest.Metadata.ID, DefinitionProvenance{}); err != nil {
+		return nil, err
+	}
+	jsonDocument, err := json.Marshal(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("normalize agent manifest YAML: %w", err)
+	}
+	var document map[string]interface{}
+	if err = json.Unmarshal(jsonDocument, &document); err != nil {
+		return nil, fmt.Errorf("normalize agent manifest YAML: %w", err)
+	}
+	encoded, err := yaml.Marshal(document)
+	if err != nil {
+		return nil, fmt.Errorf("encode agent manifest YAML: %w", err)
+	}
+	return encoded, nil
 }
 
 // DecodeManifestYAML decodes the public YAML artifact through its JSON
@@ -139,11 +226,39 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance Definit
 		Memory: manifest.Spec.Memory, Escalation: manifest.Spec.Escalation,
 		ObjectiveTemplates: manifest.Spec.ObjectiveTemplates,
 		Evaluations:        manifest.Spec.Evaluations,
-		Runbook:            manifest.Spec.Runbook, Amendments: manifest.Spec.Amendments, Provenance: provenance,
+		Runbook:            manifest.Spec.Runbook, Channels: manifest.Spec.Channels,
+		Amendments: manifest.Spec.Amendments, Provenance: provenance,
 	}
 	canonicalizeDefinition(definition)
 	if err := definition.Validate(); err != nil {
 		return nil, err
 	}
 	return definition, nil
+}
+
+func restorePortableSelfReferences(definition *AgentDefinition, deploymentID string) error {
+	if definition == nil || definition.Runbook == nil {
+		return nil
+	}
+	for id, step := range definition.Runbook.Steps {
+		if step.Delegate == nil || len(step.Delegate.AgentID.Literal) == 0 {
+			continue
+		}
+		var target string
+		if err := json.Unmarshal(step.Delegate.AgentID.Literal, &target); err != nil {
+			return fmt.Errorf("decode Runbook delegate Agent identity at step %s: %w", id, err)
+		}
+		if deploymentID != "" && target == deploymentID {
+			step.Delegate.AgentID.Literal, _ = json.Marshal("$self")
+			definition.Runbook.Steps[id] = step
+		}
+	}
+	objectivePrefix := "agent:" + definition.ID + ":"
+	for id, trigger := range definition.Runbook.Triggers {
+		if strings.HasPrefix(trigger.ObjectiveID, objectivePrefix) {
+			trigger.ObjectiveID = "agent:$self:" + strings.TrimPrefix(trigger.ObjectiveID, objectivePrefix)
+			definition.Runbook.Triggers[id] = trigger
+		}
+	}
+	return nil
 }
