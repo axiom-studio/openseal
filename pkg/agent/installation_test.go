@@ -133,8 +133,11 @@ func manifestInstallationFixture(version string) ManifestInstallationRequest {
 			APIVersion: ManifestAPIVersion, Kind: ManifestKind,
 			Metadata: ManifestMetadata{ID: "rowan", Version: version, DisplayName: "Rowan", Description: "Help with woodworking."},
 			Spec: ManifestSpec{
-				SystemPrompt:       "Give factual woodworking help.",
-				Authority:          AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+				SystemPrompt: "Give factual woodworking help.",
+				Authority: AuthorityPolicy{
+					MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1,
+					ApprovalDestinations: []ApprovalDestination{{EndpointID: "approvals"}},
+				},
 				ObjectiveTemplates: []ObjectiveTemplate{{ID: "daily-help", Title: "Help daily", Goal: "Give one useful answer.", Priority: 1}},
 				Runbook: &runbook.Definition{
 					APIVersion: runbook.APIVersion, ID: "daily-help", Version: version, Name: "Daily help",
@@ -146,6 +149,7 @@ func manifestInstallationFixture(version string) ManifestInstallationRequest {
 						"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{}}},
 					},
 				},
+				Channels: []ChannelRoute{{EndpointID: "approvals", MessageSelection: "direct_or_mentions", ReplyMode: "thread", IgnoreBots: true, Purposes: []string{"approvals"}}},
 			},
 		},
 		Deployment: &AgentDeployment{
