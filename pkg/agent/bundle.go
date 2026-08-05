@@ -80,6 +80,7 @@ type BundleEndpointNeed struct {
 type BundleExportRequest struct {
 	Definition  *AgentDefinition
 	Deployment  *AgentDeployment
+	EndpointIDs map[string]string
 	Metadata    BundleMetadata
 	Manifest    ManifestMetadata
 	Skills      []BundleSkillRequirement
@@ -165,7 +166,7 @@ func ExportBundle(request BundleExportRequest) (*Bundle, error) {
 		return nil, errors.New("agent definition and deployment are required")
 	}
 	manifest, err := ExportManifest(ManifestExportRequest{
-		Definition: request.Definition, DeploymentID: request.Deployment.ID, Metadata: request.Manifest,
+		Definition: request.Definition, DeploymentID: request.Deployment.ID, EndpointIDs: request.EndpointIDs, Metadata: request.Manifest,
 	})
 	if err != nil {
 		return nil, err
