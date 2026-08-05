@@ -186,5 +186,8 @@ plan, err := openseal.CompileAgentBundleInstallation(
 Use `EncodeAgentBundleYAML` and `DecodeAgentBundleYAML` for the strict portable
 file format. Preview and compilation do not resolve secrets: the embedding host
 must present authorized opaque credential choices, validate target authority,
-and materialize `plan` through its canonical stores. Never copy a source-host
-credential reference or callback URL into `placement`.
+and materialize `plan` through its canonical stores. Callback placement maps
+the exact bound adapter and credential-free provider configuration; the host
+must generate a new ingress route when it applies the plan. Never copy a
+source-host credential reference, provider identity, or callback URL into
+`placement`.
