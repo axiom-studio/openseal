@@ -15,6 +15,7 @@ import (
 // fields or credentials cross this boundary.
 type ApprovalNotificationStore interface {
 	ExternalConversationStore
+	CallbackRegistrationStore
 	ActionStore
 	PortfolioStore
 }
@@ -23,13 +24,21 @@ type ApprovalNotificationWorker struct {
 	store         ApprovalNotificationStore
 	conversations *ConversationService
 	transport     *ExternalConversationTransportService
+	callbacks     *CallbackRegistry
 	now           func() time.Time
 }
 
 const approvalNotificationPostAttempts = 5
 
-func NewApprovalNotificationWorker(store ApprovalNotificationStore, transport *ExternalConversationTransportService) *ApprovalNotificationWorker {
-	return &ApprovalNotificationWorker{store: store, conversations: NewConversationService(store), transport: transport, now: time.Now}
+func NewApprovalNotificationWorker(
+	store ApprovalNotificationStore,
+	transport *ExternalConversationTransportService,
+	callbackResolver CallbackAdapterResolver,
+) *ApprovalNotificationWorker {
+	return &ApprovalNotificationWorker{
+		store: store, conversations: NewConversationService(store), transport: transport,
+		callbacks: NewCallbackRegistry(store, callbackResolver), now: time.Now,
+	}
 }
 
 // ProcessScope idempotently materializes pending approvals as canonical
@@ -162,6 +171,50 @@ func (w *ApprovalNotificationWorker) resolveTimeout(ctx context.Context, approva
 		}
 	}
 	return nil
+}
+
+// requireApprovalCallback proves that an interactive approval card has a live,
+// provider-matched ingress path before it is exposed to a person. Provider
+// installations may serve several destinations, so the immutable delivered
+// message remains the exact decision correlation boundary.
+func (w *ApprovalNotificationWorker) requireApprovalCallback(ctx context.Context, endpoint *ExternalConversationEndpoint) error {
+	if w == nil || w.callbacks == nil || w.callbacks.resolver == nil || endpoint == nil {
+		return errors.New("approval callback coordination is not configured")
+	}
+	for offset := 0; ; offset += 100 {
+		registrations, err := w.store.ListCallbackRegistrations(ctx, CallbackRegistrationFilter{
+			Scope: endpoint.Scope, Provider: endpoint.Provider,
+			Statuses: []CallbackRegistrationStatus{CallbackRegistrationActive}, Limit: 100, Offset: offset,
+		})
+		if err != nil {
+			return err
+		}
+		for _, registration := range registrations {
+			if !callbackRegistrationHandlesApprovals(registration) {
+				continue
+			}
+			if err := w.callbacks.resolve(ctx, registration); err == nil {
+				return nil
+			}
+		}
+		if len(registrations) < 100 {
+			break
+		}
+	}
+	return fmt.Errorf("%w: approval destination has no active provider callback for approval decisions", ErrInvalidExternalConversation)
+}
+
+func callbackRegistrationHandlesApprovals(registration *CallbackRegistration) bool {
+	if registration == nil || registration.Status != CallbackRegistrationActive {
+		return false
+	}
+	for _, subscription := range registration.Subscriptions {
+		if subscription.EventType == capability.CallbackEventApprovalDecided &&
+			subscription.Consumer == "approvals" && strings.TrimSpace(subscription.TargetID) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (w *ApprovalNotificationWorker) updateTimeoutCard(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
@@ -297,6 +350,9 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 	}
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive {
 		return fmt.Errorf("%w: approval endpoint is unavailable", ErrInvalidExternalConversation)
+	}
+	if err := w.requireApprovalCallback(ctx, endpoint); err != nil {
+		return err
 	}
 	call, err := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
 	if err != nil {

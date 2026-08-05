@@ -102,7 +102,14 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 
 	transport := NewExternalConversationTransportService(store, catalog)
 	transport.now = func() time.Time { return now }
-	worker := NewApprovalNotificationWorker(store, transport)
+	workerWithoutCallback := NewApprovalNotificationWorker(store, transport, catalog)
+	workerWithoutCallback.now = func() time.Time { return now }
+	if count, err := workerWithoutCallback.ProcessScope(ctx, endpoint.Scope, 10); err == nil || count != 0 ||
+		!strings.Contains(err.Error(), "no active provider callback") {
+		t.Fatalf("missing approval callback = %d, %v", count, err)
+	}
+	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
+	worker := NewApprovalNotificationWorker(store, transport, catalog)
 	worker.now = func() time.Time { return now }
 	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 1 {
 		t.Fatalf("notify = %d, %v", count, err)
@@ -273,6 +280,69 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 }
 
+func registerApprovalNotificationCallback(
+	t *testing.T,
+	ctx context.Context,
+	store *MemoryStore,
+	catalog *skill.Catalog,
+	endpoint *ExternalConversationEndpoint,
+) *CallbackRegistration {
+	t.Helper()
+	definition := &skill.Definition{
+		ID: endpoint.Provider + "-approval-callback", Version: "1.0.0", Name: endpoint.Provider + " approval callback",
+		Actions: map[string]skill.Action{},
+		CallbackAdapters: map[string]skill.CallbackAdapter{"interactions": {
+			ProtocolVersion: skill.CallbackAdapterProtocolV1, Name: "Approval interactions",
+			Description: "Verify signed interactive approval decisions.", Provider: endpoint.Provider,
+			EventTypes:  []string{capability.CallbackEventApprovalDecided},
+			Credentials: []capability.CredentialRequirement{{Name: "signing_secret", Kind: "callback_signing_secret"}},
+			Transport: skill.CallbackAdapterTransport{
+				Kind: "http", IngressEndpoint: "/v1/callbacks/" + endpoint.Provider,
+				IngressCredentials: []string{"signing_secret"},
+			},
+		}},
+	}
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &skill.Binding{
+		ID: endpoint.Provider + "-approval-callback", Scope: skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID},
+		DeploymentID: endpoint.DeploymentID, SkillID: definition.ID, SkillVersion: definition.Version,
+		EnabledCallbackAdapters: []string{"interactions"}, MaximumRisk: skill.RiskLevelRead, Revision: 1,
+		Credentials: map[string]skill.CredentialReference{
+			"signing_secret": {Kind: "callback_signing_secret", ID: "credential://callback-signing-secret"},
+		},
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewCallbackRegistry(store, catalog)
+	created, err := registry.Create(ctx, CreateCallbackRegistrationRequest{
+		ID: endpoint.ID + "-approval-callback", Scope: endpoint.Scope, Owner: endpoint.Owner,
+		DeploymentID: endpoint.DeploymentID, Name: endpoint.Name + " approval callback", Provider: endpoint.Provider,
+		Adapter: CallbackAdapterReference{
+			SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID,
+			BindingRevision: binding.Revision, AdapterID: "interactions",
+		},
+		Subscriptions: []CallbackSubscription{{
+			EventType: capability.CallbackEventApprovalDecided, Consumer: "approvals", TargetID: endpoint.ID,
+		}},
+		Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "enable interactive approval decisions",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := CallbackRegistrationActive
+	updated, err := registry.Update(ctx, created.Scope, created.ID, UpdateCallbackRegistrationRequest{
+		ExpectedRevision: created.Revision, Status: &active,
+		Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "activate interactive approval decisions",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return updated
+}
+
 func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses(t *testing.T) {
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
@@ -320,7 +390,8 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 
 	conflicts := &approvalNotificationConflictStore{ApprovalNotificationStore: store}
 	conflicts.remaining.Store(2)
-	worker := NewApprovalNotificationWorker(conflicts, NewExternalConversationTransportService(store, catalog))
+	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
+	worker := NewApprovalNotificationWorker(conflicts, NewExternalConversationTransportService(store, catalog), catalog)
 	worker.now = func() time.Time { return now }
 	var group sync.WaitGroup
 	errorsByPass := make(chan error, 2)
@@ -348,7 +419,8 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 func TestApprovalNotificationReusesConversationAfterEndpointRename(t *testing.T) {
 	ctx := t.Context()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-	worker := NewApprovalNotificationWorker(store, NewExternalConversationTransportService(store, catalog))
+	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
+	worker := NewApprovalNotificationWorker(store, NewExternalConversationTransportService(store, catalog), catalog)
 
 	first, err := worker.approvalConversation(ctx, endpoint.Scope, endpoint)
 	if err != nil {
@@ -421,7 +493,8 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 	}
 	transport := NewExternalConversationTransportService(store, catalog)
 	transport.now = func() time.Time { return now }
-	worker := NewApprovalNotificationWorker(store, transport)
+	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
+	worker := NewApprovalNotificationWorker(store, transport, catalog)
 	worker.now = func() time.Time { return now }
 	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 1 {
 		t.Fatalf("initial notification = %d, %v", count, err)
