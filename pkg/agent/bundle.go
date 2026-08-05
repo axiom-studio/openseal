@@ -87,6 +87,76 @@ type BundleExportRequest struct {
 	Endpoints   []BundleEndpointNeed
 }
 
+type BundleSkillPlacement struct {
+	Identity  capability.SkillIdentity `json:"identity"`
+	BindingID string                   `json:"bindingId"`
+}
+
+type BundleEndpointPlacement struct {
+	Provider       string                   `json:"provider"`
+	Adapter        capability.SkillIdentity `json:"adapter"`
+	BindingID      string                   `json:"bindingId"`
+	InstallationID string                   `json:"installationId,omitempty"`
+	ApplicationID  string                   `json:"applicationId,omitempty"`
+	Address        string                   `json:"address"`
+}
+
+// BundlePlacement contains only target-host choices. It is never serialized
+// into the portable artifact and may contain opaque credential references.
+type BundlePlacement struct {
+	DeploymentID string                                    `json:"deploymentId"`
+	Environment  string                                    `json:"environment"`
+	Skills       map[string]BundleSkillPlacement           `json:"skills,omitempty"`
+	Credentials  map[string]capability.CredentialReference `json:"credentials,omitempty"`
+	Endpoints    map[string]BundleEndpointPlacement        `json:"endpoints,omitempty"`
+}
+
+type BundleRequirementKind string
+
+const (
+	BundleRequirementSkill      BundleRequirementKind = "skill"
+	BundleRequirementCredential BundleRequirementKind = "credential"
+	BundleRequirementEndpoint   BundleRequirementKind = "endpoint"
+	BundleRequirementDeployment BundleRequirementKind = "deployment"
+)
+
+type BundleRequirementResolution struct {
+	Kind     BundleRequirementKind `json:"kind"`
+	ID       string                `json:"id"`
+	Required bool                  `json:"required"`
+	Resolved bool                  `json:"resolved"`
+	Message  string                `json:"message,omitempty"`
+}
+
+type BundleInstallationPreview struct {
+	BundleDigest string                        `json:"bundleDigest"`
+	Ready        bool                          `json:"ready"`
+	Requirements []BundleRequirementResolution `json:"requirements"`
+}
+
+type BundleInstallationRequest struct {
+	Bundle         *Bundle
+	Scope          capability.ScopeReference
+	Placement      BundlePlacement
+	ActorType      string
+	ActorID        string
+	Reason         string
+	IdempotencyKey string
+}
+
+// BundleEndpointInstallation is provider-neutral desired state for the target
+// host to materialize. Callback routes and ingress URLs are intentionally not
+// accepted from the source artifact or caller.
+type BundleEndpointInstallation struct {
+	Requirement BundleEndpointNeed      `json:"requirement"`
+	Placement   BundleEndpointPlacement `json:"placement"`
+}
+
+type BundleInstallationPlan struct {
+	Manifest  ManifestInstallationRequest  `json:"manifest"`
+	Endpoints []BundleEndpointInstallation `json:"endpoints,omitempty"`
+}
+
 // ExportBundle projects reviewed portable state into a deterministic artifact.
 // The caller supplies host-derived requirements after stripping every binding;
 // this package validates that they exactly cover the immutable definition.
@@ -127,6 +197,137 @@ func ExportBundle(request BundleExportRequest) (*Bundle, error) {
 		return nil, err
 	}
 	return bundle, nil
+}
+
+// PreviewBundleInstallation compares one portable bundle with target-host
+// choices without writing any state. Every unresolved or mismatched authority
+// boundary is returned as a typed requirement for Studio, TUI, and API clients.
+func PreviewBundleInstallation(bundle *Bundle, placement BundlePlacement) (*BundleInstallationPreview, error) {
+	if err := bundle.Validate(); err != nil {
+		return nil, err
+	}
+	preview := &BundleInstallationPreview{BundleDigest: bundle.Digest, Ready: true}
+	appendResolution := func(value BundleRequirementResolution) {
+		preview.Requirements = append(preview.Requirements, value)
+		if value.Required && !value.Resolved {
+			preview.Ready = false
+		}
+	}
+	appendResolution(BundleRequirementResolution{
+		Kind: BundleRequirementDeployment, ID: "target", Required: true,
+		Resolved: strings.TrimSpace(placement.DeploymentID) != "" && strings.TrimSpace(placement.Environment) != "",
+		Message:  "Choose a target Agent identity and environment.",
+	})
+	for _, need := range bundle.Skills {
+		selected, ok := placement.Skills[need.RequirementID]
+		resolved := ok && selected.Identity.Equal(need.Identity) && strings.TrimSpace(selected.BindingID) != ""
+		appendResolution(BundleRequirementResolution{
+			Kind: BundleRequirementSkill, ID: need.RequirementID, Required: !bundleSkillOptional(bundle.Agent, need.RequirementID), Resolved: resolved,
+			Message: "Install and bind the exact reviewed Skill source and version.",
+		})
+	}
+	for _, need := range bundle.Credentials {
+		selected, ok := placement.Credentials[need.Name]
+		resolved := ok && strings.TrimSpace(selected.Kind) == need.Kind && strings.TrimSpace(selected.ID) != ""
+		appendResolution(BundleRequirementResolution{
+			Kind: BundleRequirementCredential, ID: need.Name, Required: !need.Optional, Resolved: resolved,
+			Message: "Choose an authorized target credential; secret values never enter the bundle.",
+		})
+	}
+	for _, need := range bundle.Endpoints {
+		selected, ok := placement.Endpoints[need.ID]
+		resolved := ok && strings.TrimSpace(selected.Provider) == need.Provider && selected.Adapter.Equal(need.Adapter) &&
+			strings.TrimSpace(selected.BindingID) != "" && strings.TrimSpace(selected.Address) != ""
+		if resolved {
+			adapterBound := false
+			for _, skill := range placement.Skills {
+				if skill.Identity.Equal(selected.Adapter) && skill.BindingID == selected.BindingID {
+					adapterBound = true
+					break
+				}
+			}
+			resolved = adapterBound
+		}
+		appendResolution(BundleRequirementResolution{
+			Kind: BundleRequirementEndpoint, ID: need.ID, Required: true, Resolved: resolved,
+			Message: "Choose a destination visible to the authorized provider connection.",
+		})
+	}
+	sort.Slice(preview.Requirements, func(i, j int) bool {
+		left, right := preview.Requirements[i], preview.Requirements[j]
+		return string(left.Kind)+"\x00"+left.ID < string(right.Kind)+"\x00"+right.ID
+	})
+	return preview, nil
+}
+
+// CompileBundleInstallation turns a ready preview into one idempotent Agent
+// manifest installation and provider-neutral endpoint plan. Applying these is
+// a separate host transaction; this compiler performs no writes.
+func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstallationPlan, error) {
+	preview, err := PreviewBundleInstallation(request.Bundle, request.Placement)
+	if err != nil {
+		return nil, err
+	}
+	if !preview.Ready {
+		return nil, errors.New("agent bundle installation has unresolved target requirements")
+	}
+	if strings.TrimSpace(request.Scope.Kind) == "" || strings.TrimSpace(request.Scope.ID) == "" || strings.TrimSpace(request.ActorType) == "" || strings.TrimSpace(request.ActorID) == "" || strings.TrimSpace(request.IdempotencyKey) == "" {
+		return nil, errors.New("agent bundle installation requires scope, actor, and idempotency key")
+	}
+	definition, err := CompileManifest(request.Bundle.Agent, request.Bundle.Agent.Metadata.ID, DefinitionProvenance{})
+	if err != nil {
+		return nil, err
+	}
+	capacity := request.Bundle.Policy.Capacity
+	if capacity.MaxConcurrentRuns == 0 {
+		capacity.MaxConcurrentRuns = definition.Authority.MaxConcurrentRuns
+	}
+	bindingSet := map[string]bool{}
+	for _, selected := range request.Placement.Skills {
+		bindingSet[selected.BindingID] = true
+	}
+	bindingIDs := make([]string, 0, len(bindingSet))
+	for id := range bindingSet {
+		bindingIDs = append(bindingIDs, id)
+	}
+	sort.Strings(bindingIDs)
+	deployment := &AgentDeployment{
+		ID: request.Placement.DeploymentID, DisplayName: request.Bundle.Agent.Metadata.DisplayName,
+		Scope: request.Scope, RolloutStatus: RolloutActive, Environment: request.Placement.Environment,
+		SkillBindingIDs: bindingIDs, Credentials: cloneCredentialReferences(request.Placement.Credentials),
+		Restrictions: request.Bundle.Policy.Restrictions, Capacity: capacity,
+	}
+	plan := &BundleInstallationPlan{Manifest: ManifestInstallationRequest{
+		Manifest: request.Bundle.Agent, Deployment: deployment, ActorType: strings.TrimSpace(request.ActorType), ActorID: strings.TrimSpace(request.ActorID),
+		Reason: strings.TrimSpace(request.Reason), IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
+	}}
+	for _, need := range request.Bundle.Endpoints {
+		plan.Endpoints = append(plan.Endpoints, BundleEndpointInstallation{Requirement: need, Placement: request.Placement.Endpoints[need.ID]})
+	}
+	return plan, nil
+}
+
+func bundleSkillOptional(manifest *Manifest, id string) bool {
+	if manifest == nil {
+		return false
+	}
+	for _, requirement := range manifest.Spec.SkillRequirements {
+		if requirement.SkillID == id {
+			return requirement.Optional
+		}
+	}
+	return false
+}
+
+func cloneCredentialReferences(values map[string]capability.CredentialReference) map[string]capability.CredentialReference {
+	if values == nil {
+		return nil
+	}
+	copy := make(map[string]capability.CredentialReference, len(values))
+	for name, reference := range values {
+		copy[name] = reference
+	}
+	return copy
 }
 
 func (b *Bundle) Validate() error {
