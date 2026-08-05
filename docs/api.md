@@ -165,3 +165,26 @@ operations and do not create daemon state.
 `pkg/client` contains the thin HTTP clients used by the TUI. Embedded programs
 can avoid HTTP and use `pkg/openseal.Engine` directly. The capability document
 still defines the contract graphical and terminal clients should render.
+
+Portable Agent bundles are available through the public Go facade:
+
+```go
+bundle, err := openseal.ExportAgentBundle(exportRequest)
+preview, err := openseal.PreviewAgentBundleInstallation(bundle, placement)
+plan, err := openseal.CompileAgentBundleInstallation(
+    openseal.AgentBundleInstallationRequest{
+        Bundle: bundle,
+        Scope: targetScope,
+        Placement: placement,
+        ActorType: "user",
+        ActorID: actorID,
+        IdempotencyKey: idempotencyKey,
+    },
+)
+```
+
+Use `EncodeAgentBundleYAML` and `DecodeAgentBundleYAML` for the strict portable
+file format. Preview and compilation do not resolve secrets: the embedding host
+must present authorized opaque credential choices, validate target authority,
+and materialize `plan` through its canonical stores. Never copy a source-host
+credential reference or callback URL into `placement`.

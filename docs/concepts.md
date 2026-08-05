@@ -33,6 +33,34 @@ records.
 Definitions never contain live credential values. Deployments refer to opaque
 credential bindings resolved only at an execution boundary.
 
+### Portable Agent bundles
+
+An **Agent bundle** is a deterministic, product-neutral snapshot for moving an
+Agent between OpenSeal hosts. It combines the immutable Agent manifest with
+the reviewed deployment policy, exact Skill identities and narrowed action
+policy, logical credential needs, Objective templates, Runbook triggers and
+schedules, and logical conversation routes.
+
+The artifact never contains credential references or values, tenant and
+deployment IDs, provider installation IDs, callback URLs, Runs, approvals,
+sessions, leases, or activity history. Import therefore has two explicit
+phases:
+
+```mermaid
+flowchart LR
+    Export[Export portable bundle] --> Preview[Preview target placement]
+    Preview --> Map[Map exact Skills, credentials, and destinations]
+    Map --> Install[Idempotent install]
+    Install --> Agent[Independent Agent deployment]
+```
+
+Preview is read-only and reports every unresolved target requirement. Install
+compiles a target-owned immutable definition, restores self references and
+channel routes, creates Objectives and Runbook activations, and converges Skill
+bindings and endpoints. Repeating the same bundle, placement, and idempotency
+key returns the same resources. Exporting the installed Agent produces the
+same portable bundle and digest.
+
 ## Teams
 
 A **Team definition** describes semantic roles, coordination, delegation,
