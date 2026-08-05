@@ -172,8 +172,36 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 	if plan.Manifest.Deployment.ID != "agent:rowan" || len(plan.Bindings) != 1 || plan.Bindings[0].Credentials["slack"].ID != "vault://target/slack" || len(plan.Endpoints) != 1 || plan.Endpoints[0].Placement.Address != "channel:C1" {
 		t.Fatalf("compiled installation plan = %#v", plan)
 	}
-	if strings.Contains(plan.Manifest.Manifest.Metadata.ID, "tenant") || plan.Manifest.Deployment.DefinitionID != "" {
+	if strings.Contains(plan.Manifest.Manifest.Metadata.ID, "tenant") || plan.Manifest.Deployment.DefinitionID != "" || !strings.HasPrefix(plan.Manifest.DefinitionKey, "import-") {
 		t.Fatalf("compiled installation leaked source identity: %#v", plan.Manifest)
+	}
+	secondPlacement := placement
+	secondPlacement.DeploymentID = "agent:rowan-copy"
+	secondPlan, err := CompileBundleInstallation(BundleInstallationRequest{
+		Bundle: bundle, Scope: capability.ScopeReference{Kind: "tenant", ID: "9"}, Placement: secondPlacement,
+		ActorType: "user", ActorID: "42", Reason: "import another copy", IdempotencyKey: "import-rowan-copy-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondPlan.Manifest.DefinitionKey == plan.Manifest.DefinitionKey {
+		t.Fatal("different target deployments compiled to the same definition key")
+	}
+	registry := NewRegistry()
+	firstInstall, err := InstallManifest(t.Context(), registryManifestInstaller{registry: registry}, plan.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInstall, err := InstallManifest(t.Context(), registryManifestInstaller{registry: registry}, secondPlan.Manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstInstall.Definition.ID == secondInstall.Definition.ID {
+		t.Fatal("different bundle targets installed over the same immutable definition")
+	}
+	replay, err := InstallManifest(t.Context(), registryManifestInstaller{registry: registry}, plan.Manifest)
+	if err != nil || !replay.Replayed || replay.Deployment.ID != plan.Manifest.Deployment.ID {
+		t.Fatalf("same bundle target did not replay: %#v, %v", replay, err)
 	}
 	placement.Endpoints["approvals"] = BundleEndpointPlacement{Provider: "slack", Adapter: identity, BindingID: "different", Address: "channel:C1"}
 	preview, err = PreviewBundleInstallation(bundle, placement)

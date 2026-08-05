@@ -347,7 +347,8 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 	}
 	plan := &BundleInstallationPlan{Manifest: ManifestInstallationRequest{
 		Manifest: request.Bundle.Agent, Deployment: deployment, ActorType: strings.TrimSpace(request.ActorType), ActorID: strings.TrimSpace(request.ActorID),
-		Reason: strings.TrimSpace(request.Reason), IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
+		DefinitionKey: bundleInstallationDefinitionKey(request.Bundle.Agent.Metadata.ID, request.Placement.DeploymentID),
+		Reason:        strings.TrimSpace(request.Reason), IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
 	}}
 	for _, need := range request.Bundle.Skills {
 		selected := request.Placement.Skills[need.RequirementID]
@@ -365,6 +366,11 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 		plan.Endpoints = append(plan.Endpoints, BundleEndpointInstallation{Requirement: need, Placement: request.Placement.Endpoints[need.ID]})
 	}
 	return plan, nil
+}
+
+func bundleInstallationDefinitionKey(manifestID, deploymentID string) string {
+	digest := sha256.Sum256([]byte(strings.TrimSpace(manifestID) + "\x00" + strings.TrimSpace(deploymentID)))
+	return "import-" + hex.EncodeToString(digest[:16])
 }
 
 func bundleSkillOptional(manifest *Manifest, id string) bool {
