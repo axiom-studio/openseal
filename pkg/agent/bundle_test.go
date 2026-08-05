@@ -25,8 +25,10 @@ func TestExportBundleProducesDeterministicSecretFreePortableArtifact(t *testing.
 		EndpointIDs: map[string]string{"conversation-endpoint:source-host": "approvals"},
 		Metadata:    BundleMetadata{ID: "rowan-greenwood", Tags: []string{"woodworking", "assistant"}},
 		Manifest:    ManifestMetadata{ID: "rowan-greenwood", Tags: []string{"woodworking"}},
-		Skills:      []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity}},
-		Credentials: []BundleCredentialNeed{{Name: "slack_bot_token", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
+		Skills: []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity, Policy: BundleSkillPolicy{
+			AllowedActions: []string{"send-approval"}, MaximumRisk: capability.RiskLevelRead,
+		}}},
+		Credentials: []BundleCredentialNeed{{Name: "skill-slack.slack_bot_token", BindingKey: "slack_bot_token", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
 		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approval channel", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity}},
 	}
 	first, err := ExportBundle(request)
@@ -75,7 +77,9 @@ func TestBundleValidationRejectsMissingMappingsAndTampering(t *testing.T) {
 	base := BundleExportRequest{
 		Definition: installed.Definition, Deployment: installed.Deployment,
 		Metadata: BundleMetadata{ID: "rowan"}, Manifest: ManifestMetadata{ID: "rowan"},
-		Skills:    []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity}},
+		Skills: []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity, Policy: BundleSkillPolicy{
+			AllowedActions: []string{"send-approval"}, MaximumRisk: capability.RiskLevelRead,
+		}}},
 		Endpoints: []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity}},
 	}
 	missingSkill := base
@@ -110,8 +114,10 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 	bundle, err := ExportBundle(BundleExportRequest{
 		Definition: installed.Definition, Deployment: installed.Deployment,
 		Metadata: BundleMetadata{ID: "rowan"}, Manifest: ManifestMetadata{ID: "rowan"},
-		Skills:      []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity}},
-		Credentials: []BundleCredentialNeed{{Name: "slack", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
+		Skills: []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity, Policy: BundleSkillPolicy{
+			AllowedActions: []string{"send-approval"}, MaximumRisk: capability.RiskLevelRead,
+		}}},
+		Credentials: []BundleCredentialNeed{{Name: "skill-slack.slack", BindingKey: "slack", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
 		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity}},
 	})
 	if err != nil {
@@ -127,7 +133,7 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 	placement := BundlePlacement{
 		DeploymentID: "agent:rowan", Environment: "default",
 		Skills:      map[string]BundleSkillPlacement{"skill-slack": {Identity: identity, BindingID: "binding:slack"}},
-		Credentials: map[string]capability.CredentialReference{"slack": {Kind: "slack_bot_token", ID: "vault://target/slack"}},
+		Credentials: map[string]capability.CredentialReference{"skill-slack.slack": {Kind: "slack_bot_token", ID: "vault://target/slack"}},
 		Endpoints: map[string]BundleEndpointPlacement{"approvals": {
 			Provider: "slack", Adapter: identity, BindingID: "binding:slack", InstallationID: "workspace:T1", Address: "channel:C1",
 		}},
@@ -143,7 +149,7 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Manifest.Deployment.ID != "agent:rowan" || plan.Manifest.Deployment.Credentials["slack"].ID != "vault://target/slack" || len(plan.Endpoints) != 1 || plan.Endpoints[0].Placement.Address != "channel:C1" {
+	if plan.Manifest.Deployment.ID != "agent:rowan" || len(plan.Bindings) != 1 || plan.Bindings[0].Credentials["slack"].ID != "vault://target/slack" || len(plan.Endpoints) != 1 || plan.Endpoints[0].Placement.Address != "channel:C1" {
 		t.Fatalf("compiled installation plan = %#v", plan)
 	}
 	if strings.Contains(plan.Manifest.Manifest.Metadata.ID, "tenant") || plan.Manifest.Deployment.DefinitionID != "" {

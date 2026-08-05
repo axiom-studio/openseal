@@ -55,12 +55,24 @@ type BundleDeploymentPolicy struct {
 type BundleSkillRequirement struct {
 	RequirementID string                   `json:"requirementId" yaml:"requirementId"`
 	Identity      capability.SkillIdentity `json:"identity" yaml:"identity"`
+	Policy        BundleSkillPolicy        `json:"policy" yaml:"policy"`
+}
+
+type BundleSkillPolicy struct {
+	AllowedActions              []string                                      `json:"allowedActions" yaml:"allowedActions"`
+	EnablePrompt                bool                                          `json:"enablePrompt,omitempty" yaml:"enablePrompt,omitempty"`
+	EnabledConversationAdapters []string                                      `json:"enabledConversationAdapters,omitempty" yaml:"enabledConversationAdapters,omitempty"`
+	EnabledCallbackAdapters     []string                                      `json:"enabledCallbackAdapters,omitempty" yaml:"enabledCallbackAdapters,omitempty"`
+	MaximumRisk                 capability.RiskLevel                          `json:"maximumRisk" yaml:"maximumRisk"`
+	ArgumentRestrictions        map[string]map[string]capability.ArgumentRule `json:"argumentRestrictions,omitempty" yaml:"argumentRestrictions,omitempty"`
+	Config                      map[string]interface{}                        `json:"config,omitempty" yaml:"config,omitempty"`
 }
 
 // BundleCredentialNeed is a logical secret slot, never a credential binding.
 // RequiredBy contains Skill requirement IDs or the reserved value "model".
 type BundleCredentialNeed struct {
 	Name       string   `json:"name" yaml:"name"`
+	BindingKey string   `json:"bindingKey" yaml:"bindingKey"`
 	Kind       string   `json:"kind" yaml:"kind"`
 	Optional   bool     `json:"optional,omitempty" yaml:"optional,omitempty"`
 	RequiredBy []string `json:"requiredBy" yaml:"requiredBy"`
@@ -155,6 +167,7 @@ type BundleEndpointInstallation struct {
 
 type BundleInstallationPlan struct {
 	Manifest  ManifestInstallationRequest  `json:"manifest"`
+	Bindings  []*capability.Binding        `json:"bindings,omitempty"`
 	Endpoints []BundleEndpointInstallation `json:"endpoints,omitempty"`
 }
 
@@ -292,16 +305,46 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 		bindingIDs = append(bindingIDs, id)
 	}
 	sort.Strings(bindingIDs)
+	deploymentCredentials := map[string]capability.CredentialReference{}
+	bindingCredentials := map[string]map[string]capability.CredentialReference{}
+	for _, need := range request.Bundle.Credentials {
+		reference, resolved := request.Placement.Credentials[need.Name]
+		if !resolved {
+			continue
+		}
+		for _, consumer := range need.RequiredBy {
+			if consumer == "model" {
+				deploymentCredentials[need.BindingKey] = reference
+				continue
+			}
+			if bindingCredentials[consumer] == nil {
+				bindingCredentials[consumer] = map[string]capability.CredentialReference{}
+			}
+			bindingCredentials[consumer][need.BindingKey] = reference
+		}
+	}
 	deployment := &AgentDeployment{
 		ID: request.Placement.DeploymentID, DisplayName: request.Bundle.Agent.Metadata.DisplayName,
 		Scope: request.Scope, RolloutStatus: RolloutActive, Environment: request.Placement.Environment,
-		SkillBindingIDs: bindingIDs, Credentials: cloneCredentialReferences(request.Placement.Credentials),
+		SkillBindingIDs: bindingIDs, Credentials: deploymentCredentials,
 		Restrictions: request.Bundle.Policy.Restrictions, Capacity: capacity,
 	}
 	plan := &BundleInstallationPlan{Manifest: ManifestInstallationRequest{
 		Manifest: request.Bundle.Agent, Deployment: deployment, ActorType: strings.TrimSpace(request.ActorType), ActorID: strings.TrimSpace(request.ActorID),
 		Reason: strings.TrimSpace(request.Reason), IdempotencyKey: strings.TrimSpace(request.IdempotencyKey),
 	}}
+	for _, need := range request.Bundle.Skills {
+		selected := request.Placement.Skills[need.RequirementID]
+		plan.Bindings = append(plan.Bindings, &capability.Binding{
+			ID: selected.BindingID, Scope: request.Scope, DeploymentID: request.Placement.DeploymentID,
+			SkillID: need.Identity.ID, SkillVersion: need.Identity.Version, SourceIdentity: need.Identity.SourceIdentity,
+			AllowedActions: append([]string(nil), need.Policy.AllowedActions...), EnablePrompt: need.Policy.EnablePrompt,
+			EnabledConversationAdapters: append([]string(nil), need.Policy.EnabledConversationAdapters...),
+			EnabledCallbackAdapters:     append([]string(nil), need.Policy.EnabledCallbackAdapters...),
+			MaximumRisk:                 need.Policy.MaximumRisk, ArgumentRestrictions: need.Policy.ArgumentRestrictions,
+			Credentials: cloneCredentialReferences(bindingCredentials[need.RequirementID]), Config: need.Policy.Config,
+		})
+	}
 	for _, need := range request.Bundle.Endpoints {
 		plan.Endpoints = append(plan.Endpoints, BundleEndpointInstallation{Requirement: need, Placement: request.Placement.Endpoints[need.ID]})
 	}
@@ -371,6 +414,27 @@ func (b *Bundle) Validate() error {
 		if _, ok := declaredSkills[id]; !ok || !identity.Valid() || resolvedSkills[id].Valid() {
 			return errors.New("agent bundle Skills must uniquely resolve declared manifest requirements")
 		}
+		if !validRisk(requirement.Policy.MaximumRisk) || riskRank(requirement.Policy.MaximumRisk) > riskRank(definition.Authority.MaximumRisk) {
+			return fmt.Errorf("agent bundle Skill %s policy exceeds Agent risk authority", id)
+		}
+		allowedActions := map[string]bool{}
+		for _, action := range requirement.Policy.AllowedActions {
+			if strings.TrimSpace(action) == "" || allowedActions[action] {
+				return fmt.Errorf("agent bundle Skill %s policy has invalid or duplicate actions", id)
+			}
+			allowedActions[action] = true
+		}
+		for _, action := range declaredSkills[id].RequiredActions {
+			if !allowedActions[action] {
+				return fmt.Errorf("agent bundle Skill %s policy omits required action %s", id, action)
+			}
+		}
+		if declaredSkills[id].PromptRequired && !requirement.Policy.EnablePrompt {
+			return fmt.Errorf("agent bundle Skill %s policy omits its required prompt", id)
+		}
+		if err := validateNoSecrets(requirement.Policy.Config, "skills."+id+".policy.config"); err != nil {
+			return err
+		}
 		resolvedSkills[id] = identity
 	}
 	for id, requirement := range declaredSkills {
@@ -381,9 +445,9 @@ func (b *Bundle) Validate() error {
 
 	credentialNames := map[string]bool{}
 	for _, need := range b.Credentials {
-		name, kind := strings.TrimSpace(need.Name), strings.TrimSpace(need.Kind)
-		if name == "" || kind == "" || credentialNames[name] || len(need.RequiredBy) == 0 {
-			return errors.New("agent bundle credentials require unique names, kinds, and consumers")
+		name, bindingKey, kind := strings.TrimSpace(need.Name), strings.TrimSpace(need.BindingKey), strings.TrimSpace(need.Kind)
+		if name == "" || bindingKey == "" || kind == "" || credentialNames[name] || len(need.RequiredBy) == 0 {
+			return errors.New("agent bundle credentials require unique names, binding keys, kinds, and consumers")
 		}
 		credentialNames[name] = true
 		for _, consumer := range need.RequiredBy {
