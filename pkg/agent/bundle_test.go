@@ -29,7 +29,7 @@ func TestExportBundleProducesDeterministicSecretFreePortableArtifact(t *testing.
 			AllowedActions: []string{"send-approval"}, MaximumRisk: capability.RiskLevelRead,
 		}}},
 		Credentials: []BundleCredentialNeed{{Name: "skill-slack.slack_bot_token", BindingKey: "slack_bot_token", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
-		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approval channel", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity}},
+		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approval channel", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity, AdapterID: "interactions", Enabled: true}},
 	}
 	first, err := ExportBundle(request)
 	if err != nil {
@@ -80,7 +80,7 @@ func TestBundleValidationRejectsMissingMappingsAndTampering(t *testing.T) {
 		Skills: []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity, Policy: BundleSkillPolicy{
 			AllowedActions: []string{"send-approval"}, MaximumRisk: capability.RiskLevelRead,
 		}}},
-		Endpoints: []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity}},
+		Endpoints: []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity, AdapterID: "interactions"}},
 	}
 	missingSkill := base
 	missingSkill.Skills = nil
@@ -118,7 +118,7 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 			AllowedActions: []string{"send-approval"}, MaximumRisk: capability.RiskLevelRead,
 		}}},
 		Credentials: []BundleCredentialNeed{{Name: "skill-slack.slack", BindingKey: "slack", Kind: "slack_bot_token", RequiredBy: []string{"skill-slack"}}},
-		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity}},
+		Endpoints:   []BundleEndpointNeed{{ID: "approvals", Name: "Approvals", Provider: "slack", Mode: capability.ConversationEndpointChannel, Adapter: identity, AdapterID: "interactions", Enabled: true}},
 	})
 	if err != nil {
 		t.Fatal(err)
