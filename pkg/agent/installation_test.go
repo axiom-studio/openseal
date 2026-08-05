@@ -134,6 +134,9 @@ func manifestInstallationFixture(version string) ManifestInstallationRequest {
 			Metadata: ManifestMetadata{ID: "rowan", Version: version, DisplayName: "Rowan", Description: "Help with woodworking."},
 			Spec: ManifestSpec{
 				SystemPrompt: "Give factual woodworking help.",
+				SkillRequirements: []SkillRequirement{{
+					SkillID: "skill-slack", VersionConstraint: ">=2.0.0 <3.0.0", RequiredActions: []string{"send-approval"},
+				}},
 				Authority: AuthorityPolicy{
 					MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1,
 					ApprovalDestinations: []ApprovalDestination{{EndpointID: "approvals"}},
