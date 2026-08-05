@@ -17,9 +17,12 @@ func TestExportBundleProducesDeterministicSecretFreePortableArtifact(t *testing.
 		"slack_bot_token": {Kind: "slack_bot_token", ID: "vault://source-host/slack"},
 	}
 	installed.Deployment.SkillBindingIDs = []string{"binding:source-host-slack"}
+	installed.Definition.Channels[0].EndpointID = "conversation-endpoint:source-host"
+	installed.Definition.Authority.ApprovalDestinations[0].EndpointID = "conversation-endpoint:source-host"
 	identity := capability.NewSkillIdentity("skill-slack", "2.2.12", "https://github.com/axiom-studio/skills::skill-slack")
 	request := BundleExportRequest{
 		Definition: installed.Definition, Deployment: installed.Deployment,
+		EndpointIDs: map[string]string{"conversation-endpoint:source-host": "approvals"},
 		Metadata:    BundleMetadata{ID: "rowan-greenwood", Tags: []string{"woodworking", "assistant"}},
 		Manifest:    ManifestMetadata{ID: "rowan-greenwood", Tags: []string{"woodworking"}},
 		Skills:      []BundleSkillRequirement{{RequirementID: "skill-slack", Identity: identity}},
@@ -41,7 +44,7 @@ func TestExportBundleProducesDeterministicSecretFreePortableArtifact(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"vault://", "binding:source-host", "tenant/7", "agent:rowan\"", "ingressRoute", "callback", "approvalId", "runHistory"} {
+	for _, forbidden := range []string{"vault://", "binding:source-host", "conversation-endpoint:source-host", "tenant/7", "agent:rowan\"", "ingressRoute", "callback", "approvalId", "runHistory"} {
 		if strings.Contains(string(encoded), forbidden) {
 			t.Fatalf("portable bundle leaked host-local value %q: %s", forbidden, encoded)
 		}

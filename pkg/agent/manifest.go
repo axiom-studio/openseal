@@ -64,7 +64,10 @@ type ManifestSpec struct {
 type ManifestExportRequest struct {
 	Definition   *AgentDefinition
 	DeploymentID string
-	Metadata     ManifestMetadata
+	// EndpointIDs maps source-host materialized endpoint IDs back to portable
+	// logical keys. Unmapped IDs are preserved for already-portable manifests.
+	EndpointIDs map[string]string
+	Metadata    ManifestMetadata
 }
 
 // ExportManifest is the inverse of CompileManifest for immutable Agent
@@ -99,6 +102,9 @@ func ExportManifest(request ManifestExportRequest) (*Manifest, error) {
 	if err := restorePortableSelfReferences(definition, strings.TrimSpace(request.DeploymentID)); err != nil {
 		return nil, err
 	}
+	if err := restorePortableEndpointReferences(definition, request.EndpointIDs); err != nil {
+		return nil, err
+	}
 	manifest := &Manifest{
 		APIVersion: ManifestAPIVersion,
 		Kind:       ManifestKind,
@@ -116,6 +122,30 @@ func ExportManifest(request ManifestExportRequest) (*Manifest, error) {
 		return nil, fmt.Errorf("validate exported agent manifest: %w", err)
 	}
 	return manifest, nil
+}
+
+func restorePortableEndpointReferences(definition *AgentDefinition, endpointIDs map[string]string) error {
+	if definition == nil || len(endpointIDs) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for sourceID, portableID := range endpointIDs {
+		if strings.TrimSpace(sourceID) == "" || !manifestIDPattern.MatchString(strings.TrimSpace(portableID)) || seen[portableID] {
+			return errors.New("Agent manifest export endpoint mappings require unique portable ids")
+		}
+		seen[portableID] = true
+	}
+	for index := range definition.Channels {
+		if portableID := endpointIDs[definition.Channels[index].EndpointID]; portableID != "" {
+			definition.Channels[index].EndpointID = portableID
+		}
+	}
+	for index := range definition.Authority.ApprovalDestinations {
+		if portableID := endpointIDs[definition.Authority.ApprovalDestinations[index].EndpointID]; portableID != "" {
+			definition.Authority.ApprovalDestinations[index].EndpointID = portableID
+		}
+	}
+	return nil
 }
 
 // EncodeManifestYAML emits the same strict camelCase contract accepted by
