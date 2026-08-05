@@ -69,7 +69,8 @@ type BundleSkillPolicy struct {
 }
 
 // BundleCredentialNeed is a logical secret slot, never a credential binding.
-// RequiredBy contains Skill requirement IDs or the reserved value "model".
+// RequiredBy contains Skill requirement IDs or the reserved value "agent" for
+// an AgentDeployment credential such as its model provider.
 type BundleCredentialNeed struct {
 	Name       string   `json:"name" yaml:"name"`
 	BindingKey string   `json:"bindingKey" yaml:"bindingKey"`
@@ -313,7 +314,7 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 			continue
 		}
 		for _, consumer := range need.RequiredBy {
-			if consumer == "model" {
+			if consumer == "agent" {
 				deploymentCredentials[need.BindingKey] = reference
 				continue
 			}
@@ -451,7 +452,7 @@ func (b *Bundle) Validate() error {
 		}
 		credentialNames[name] = true
 		for _, consumer := range need.RequiredBy {
-			if consumer != "model" && declaredSkills[consumer].SkillID == "" {
+			if consumer != "agent" && declaredSkills[consumer].SkillID == "" {
 				return fmt.Errorf("agent bundle credential %s references unknown consumer %s", name, consumer)
 			}
 		}
