@@ -326,6 +326,9 @@ func PreviewBundleInstallation(bundle *Bundle, placement BundlePlacement) (*Bund
 	for _, need := range bundle.Callbacks {
 		selected, ok := placement.Callbacks[need.ID]
 		resolved := ok && selected.Adapter.Equal(need.Adapter) && strings.TrimSpace(selected.BindingID) != ""
+		if resolved && validateNoSecrets(selected.Configuration, "callbacks."+need.ID+".configuration") != nil {
+			resolved = false
+		}
 		if resolved {
 			adapterBound := false
 			for _, skill := range placement.Skills {
@@ -338,7 +341,7 @@ func PreviewBundleInstallation(bundle *Bundle, placement BundlePlacement) (*Bund
 		}
 		for _, key := range need.RequiredConfiguration {
 			value, present := selected.Configuration[key]
-			if !present || value == nil {
+			if !present || !bundleCallbackConfigurationPresent(value) {
 				resolved = false
 			}
 		}
@@ -433,6 +436,21 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 		plan.Callbacks = append(plan.Callbacks, BundleCallbackInstallation{Requirement: need, Placement: request.Placement.Callbacks[need.ID]})
 	}
 	return plan, nil
+}
+
+func bundleCallbackConfigurationPresent(value interface{}) bool {
+	switch typed := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(typed) != ""
+	case []interface{}:
+		return len(typed) > 0
+	case map[string]interface{}:
+		return len(typed) > 0
+	default:
+		return true
+	}
 }
 
 func bundleInstallationDefinitionKey(manifestID, deploymentID string) string {
