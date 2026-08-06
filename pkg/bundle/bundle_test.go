@@ -209,6 +209,25 @@ func TestWorkforceBundleInstallationRequiresCompleteUniquePlacement(t *testing.T
 	}
 }
 
+func TestWorkforceBundleInstallationEnforcesTargetTrustPolicy(t *testing.T) {
+	artifact := representativeBundle(t)
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Sign(artifact, "release-key", privateKey); err != nil {
+		t.Fatal(err)
+	}
+	request := InstallationRequest{Bundle: artifact, TrustPolicy: TrustPolicy{RequireSignature: true, TrustedKeys: map[string]ed25519.PublicKey{"other-key": publicKey}}, Scope: capability.ScopeReference{Kind: "tenant", ID: "target"}, Placement: representativePlacement(artifact), ActorType: "user", ActorID: "operator", IdempotencyKey: "trusted-import"}
+	if _, err := CompileInstallation(request); err == nil || !strings.Contains(err.Error(), "trusted key") {
+		t.Fatalf("untrusted installation was accepted: %v", err)
+	}
+	request.TrustPolicy.TrustedKeys = map[string]ed25519.PublicKey{"release-key": publicKey}
+	if _, err := CompileInstallation(request); err != nil {
+		t.Fatalf("trusted installation was rejected: %v", err)
+	}
+}
+
 func representativePlacement(value *Bundle) Placement {
 	agentPlacement := agent.BundlePlacement{DeploymentID: "agent:target-researcher", Environment: "default", Runtime: map[string]capability.SkillIdentity{}, Skills: map[string]agent.BundleSkillPlacement{}, Credentials: map[string]capability.CredentialReference{}, Endpoints: map[string]agent.BundleEndpointPlacement{}, Callbacks: map[string]agent.BundleCallbackPlacement{}}
 	for _, requirement := range value.Agents[0].Artifact.Runtime {

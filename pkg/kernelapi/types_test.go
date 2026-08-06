@@ -363,3 +363,14 @@ func TestContextualBindingConfigurationFieldsExposeTypedAuthorizedChoices(t *tes
 		t.Fatalf("binding configuration context = %s", encoded)
 	}
 }
+
+func TestWorkforceBundlesCapabilityAdvertisesOnlyWiredMutation(t *testing.T) {
+	readOnly := WorkforceBundlesCapability(false)
+	if readOnly.ID != WorkforceBundlesCapabilityID || readOnly.Version != WorkforceBundlesCapabilityVersion || !readOnly.Supports(OperationValidate) || !readOnly.Supports(OperationInspect) || !readOnly.Supports(OperationCompare) || !readOnly.Supports(OperationPreviewInstallation) || !readOnly.Supports(OperationPlanUpgrade) || readOnly.Supports(OperationInstall) {
+		t.Fatalf("unexpected read-only workforce bundle capability: %#v", readOnly)
+	}
+	mutable := WorkforceBundlesCapability(true)
+	if !mutable.Supports(OperationInstall) {
+		t.Fatalf("wired installation capability omitted install: %#v", mutable)
+	}
+}

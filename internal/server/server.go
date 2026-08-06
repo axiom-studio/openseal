@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/source"
@@ -38,6 +39,9 @@ type Server struct {
 	outreachDelivery     func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
 	agentRunCreation     func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
 	sourcePolicies       *source.LifecycleService
+	workforceBundles     kernelbundle.InstallationStore
+	workforceBundleActor string
+	workforceBundleTrust kernelbundle.TrustPolicy
 }
 
 // SetWorkforceSkillSearchProvider enables verified, paginated Skill discovery
@@ -152,6 +156,15 @@ func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, ru
 // governed source authority. Without it, routes and capabilities fail closed.
 func (s *Server) SetSourcePolicyLifecycle(service *source.LifecycleService) {
 	s.sourcePolicies = service
+}
+
+// SetWorkforceBundleInstallation enables the one-transaction installation
+// boundary. The actor is host-authenticated configuration, never client input.
+func (s *Server) SetWorkforceBundleInstallation(store kernelbundle.InstallationStore, actorID string, trust ...kernelbundle.TrustPolicy) {
+	s.workforceBundles, s.workforceBundleActor = store, actorID
+	if len(trust) > 0 {
+		s.workforceBundleTrust = trust[0]
+	}
 }
 
 // ListenAndServe starts the server on the given address.
