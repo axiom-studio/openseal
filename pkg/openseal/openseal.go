@@ -1752,17 +1752,19 @@ const (
 	OutreachMessageCanceled                        = runtime.OutreachMessageCanceled
 	OutreachInvocationContextKey                   = runtime.OutreachInvocationContextKey
 
-	RunSourceManual          = runtime.RunSourceManual
-	RunSourceChat            = runtime.RunSourceChat
-	RunSourceSchedule        = runtime.RunSourceSchedule
-	RunSourceEvent           = runtime.RunSourceEvent
-	RunSourceWebhook         = runtime.RunSourceWebhook
-	RunSourceRequest         = runtime.RunSourceRequest
-	RunSourceRequestDecision = runtime.RunSourceRequestDecision
-	RunSourceHandoff         = runtime.RunSourceHandoff
-	RunSourceObjective       = runtime.RunSourceObjective
-	RunSourceFork            = runtime.RunSourceFork
-	DelegationModeContextKey = runtime.DelegationModeContextKey
+	RunSourceManual           = runtime.RunSourceManual
+	RunSourceChat             = runtime.RunSourceChat
+	RunSourceSchedule         = runtime.RunSourceSchedule
+	RunSourceEvent            = runtime.RunSourceEvent
+	RunSourceWebhook          = runtime.RunSourceWebhook
+	RunSourceRequest          = runtime.RunSourceRequest
+	RunSourceRequestDecision  = runtime.RunSourceRequestDecision
+	RunSourceCompletionReview = runtime.RunSourceCompletionReview
+	RunSourceHandoff          = runtime.RunSourceHandoff
+	RunSourceEscalation       = runtime.RunSourceEscalation
+	RunSourceObjective        = runtime.RunSourceObjective
+	RunSourceFork             = runtime.RunSourceFork
+	DelegationModeContextKey  = runtime.DelegationModeContextKey
 
 	RunKindAgentWork          = runtime.RunKindAgentWork
 	RunKindConversation       = runtime.RunKindConversation
@@ -1826,8 +1828,9 @@ const (
 	ActivityVisibilityTeam    = runtime.ActivityVisibilityTeam
 	ActivityVisibilityScope   = runtime.ActivityVisibilityScope
 
-	AgentRequestKindRequest = runtime.AgentRequestKindRequest
-	AgentRequestKindHandoff = runtime.AgentRequestKindHandoff
+	AgentRequestKindRequest    = runtime.AgentRequestKindRequest
+	AgentRequestKindHandoff    = runtime.AgentRequestKindHandoff
+	AgentRequestKindEscalation = runtime.AgentRequestKindEscalation
 
 	AgentRequestStatusPending                = runtime.AgentRequestStatusPending
 	AgentRequestStatusClarificationRequested = runtime.AgentRequestStatusClarificationRequested
@@ -1860,6 +1863,7 @@ const (
 	MessageIntentDecision        = runtime.MessageIntentDecision
 	MessageIntentObjection       = runtime.MessageIntentObjection
 	MessageIntentHandoff         = runtime.MessageIntentHandoff
+	MessageIntentEscalation      = runtime.MessageIntentEscalation
 	MessageIntentApprovalRequest = runtime.MessageIntentApprovalRequest
 	MessageIntentAcknowledgment  = runtime.MessageIntentAcknowledgment
 	MessageIntentSystem          = runtime.MessageIntentSystem
@@ -1878,8 +1882,9 @@ const (
 	ConversationReferenceActivity       = runtime.ConversationReferenceActivity
 	ConversationReferenceExternalSource = runtime.ConversationReferenceExternalSource
 
-	ConversationPresenceTyping  = runtime.ConversationPresenceTyping
-	ConversationPresenceWorking = runtime.ConversationPresenceWorking
+	ConversationPresenceTyping   = runtime.ConversationPresenceTyping
+	ConversationPresenceThinking = runtime.ConversationPresenceThinking
+	ConversationPresenceWorking  = runtime.ConversationPresenceWorking
 
 	ParticipationSpeak    = runtime.ParticipationSpeak
 	ParticipationSilent   = runtime.ParticipationSilent

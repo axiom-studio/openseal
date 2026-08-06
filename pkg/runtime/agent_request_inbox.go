@@ -791,6 +791,11 @@ func (r *AgentRequestInboxReconciler) failDecisionReview(
 		if status == AgentRequestStatusCanceled {
 			eventType = "handoff.review_canceled"
 		}
+	} else if request.Kind == AgentRequestKindEscalation {
+		eventType = "escalation.review_failed"
+		if status == AgentRequestStatusCanceled {
+			eventType = "escalation.review_canceled"
+		}
 	}
 	summary := fmt.Sprintf("%s %s could not complete request review: %s", actor.Type, actor.ID, updated.ResolutionReason)
 	record.SourceEvent = collaborationEvent(source, updated, eventType, summary, actor, now)

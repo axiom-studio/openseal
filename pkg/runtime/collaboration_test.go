@@ -622,7 +622,7 @@ func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []AgentRequestKind{AgentRequestKindRequest, AgentRequestKindHandoff} {
+	for _, kind := range []AgentRequestKind{AgentRequestKindRequest, AgentRequestKindHandoff, AgentRequestKindEscalation} {
 		_, createErr := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
 			Scope: scope, Kind: kind, SourceRunID: terminal.ID,
 			Requester: CollaborationParty(owner), Recipient: recipient, Goal: "Start follow-up",
