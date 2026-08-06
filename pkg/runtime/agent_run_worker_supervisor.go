@@ -21,6 +21,8 @@ type DynamicAgentRunWorkerConfig struct {
 	AssignedAgentID            string
 	Concurrency                int
 	MaxActiveForAgent          int
+	MaxActiveForOwner          int
+	MaxActiveForObjective      int
 	MaxActiveForConcurrencyKey int
 	MaxTurnsPerClaim           int
 	LeaseDuration              time.Duration
@@ -44,6 +46,9 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 	}
 	if c.MaxActiveForAgent <= 0 {
 		c.MaxActiveForAgent = c.Concurrency
+	}
+	if c.MaxActiveForOwner < 0 || c.MaxActiveForObjective < 0 || c.MaxActiveForConcurrencyKey < 0 {
+		return errors.New("agent run portfolio concurrency limits cannot be negative")
 	}
 	if c.MaxTurnsPerClaim <= 0 {
 		c.MaxTurnsPerClaim = 1
@@ -246,6 +251,7 @@ func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
 		pool, err := NewAgentRunWorkerPool(s.store, s.resolver, s.logger, AgentRunWorkerConfig{
 			Scope: scope, Kind: s.config.Kind, AssignedAgentID: s.config.AssignedAgentID,
 			Concurrency: s.config.Concurrency, MaxActiveForAgent: s.config.MaxActiveForAgent,
+			MaxActiveForOwner: s.config.MaxActiveForOwner, MaxActiveForObjective: s.config.MaxActiveForObjective,
 			MaxActiveForConcurrencyKey: s.config.MaxActiveForConcurrencyKey,
 			MaxTurnsPerClaim:           s.config.MaxTurnsPerClaim, LeaseDuration: s.config.LeaseDuration,
 			TurnLeaseDuration: s.config.TurnLeaseDuration, AgingInterval: s.config.AgingInterval,

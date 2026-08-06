@@ -33,6 +33,8 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 	}
 	candidates := make([]*AgentRun, 0)
 	activeByAgent := make(map[string]int)
+	activeByOwner := make(map[string]int)
+	activeByObjective := make(map[string]int)
 	activeByConcurrencyKey := make(map[string]int)
 	for rows.Next() {
 		var payload string
@@ -50,6 +52,12 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 			if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" {
 				activeByAgent[run.AssignedAgentID]++
 			}
+			if claim.MaxActiveForOwner > 0 {
+				activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
+			}
+			if claim.MaxActiveForObjective > 0 && run.ObjectiveID != "" {
+				activeByObjective[run.ObjectiveID]++
+			}
 			if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" {
 				activeByConcurrencyKey[run.ConcurrencyKey]++
 			}
@@ -64,6 +72,12 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 			continue
 		}
 		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= claim.MaxActiveForAgent {
+			continue
+		}
+		if claim.MaxActiveForOwner > 0 && activeByOwner[agentRunOwnerSchedulingKey(run.Owner)] >= claim.MaxActiveForOwner {
+			continue
+		}
+		if claim.MaxActiveForObjective > 0 && run.ObjectiveID != "" && activeByObjective[run.ObjectiveID] >= claim.MaxActiveForObjective {
 			continue
 		}
 		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {
