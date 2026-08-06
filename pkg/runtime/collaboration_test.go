@@ -575,6 +575,84 @@ func TestCollaborationHandoffTransfersOwnership(t *testing.T) {
 	}
 }
 
+func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	database := filepath.Join(t.TempDir(), "team-offers.db")
+	store, err := NewSQLiteStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: "tenant", ID: "team-offers"}
+	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
+		Goal: "Coordinate release analysis", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamStore := activeCollaborationTeam(scope, "reviewers",
+		kernelteam.RosterAssignment{ID: "z", RoleID: "reviewer", AgentDeploymentID: "z-agent"},
+		kernelteam.RosterAssignment{ID: "a", RoleID: "reviewer", AgentDeploymentID: "a-agent"},
+		kernelteam.RosterAssignment{ID: "m", RoleID: "reviewer", AgentDeploymentID: "m-agent"})
+	service := NewCollaborationService(store)
+	service.teams = teamStore
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "coordinator"},
+		Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "reviewers"}, SemanticRole: "reviewer",
+		Goal: "Review release evidence", IdempotencyKey: "release-review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(created.Request.Candidates); got != 3 {
+		t.Fatalf("candidate count = %d, want 3: %#v", got, created.Request.Candidates)
+	}
+	bid, err := service.SubmitAgentRequestBid(ctx, SubmitAgentRequestBidRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: 1, AgentDeploymentID: "z-agent",
+		Decision: AgentRequestBidAccept, Reason: "available", IdempotencyKey: "z-accept",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, err := service.SubmitAgentRequestBid(ctx, SubmitAgentRequestBidRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: bid.Request.Revision, AgentDeploymentID: "z-agent",
+		Decision: AgentRequestBidAccept, Reason: "available", IdempotencyKey: "z-accept",
+	})
+	if err != nil || replayed.Request.Revision != bid.Request.Revision {
+		t.Fatalf("idempotent bid = %#v, %v", replayed, err)
+	}
+	bid, err = service.SubmitAgentRequestBid(ctx, SubmitAgentRequestBidRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: bid.Request.Revision, AgentDeploymentID: "a-agent",
+		Decision: AgentRequestBidAccept, Reason: "available", IdempotencyKey: "a-accept",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewSQLiteStore(database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+	restartedService := NewCollaborationService(restarted)
+	restartedService.teams = teamStore
+	accepted, err := restartedService.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: bid.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeTeam, ID: "reviewers"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Request.AssignedAgentID != "a-agent" || accepted.Request.AssignmentDecision == nil ||
+		!strings.Contains(accepted.Request.AssignmentDecision.Reason, "rank 1") || accepted.Child.AssignedAgentID != "a-agent" {
+		t.Fatalf("deterministic assignment = %#v / %#v", accepted.Request, accepted.Child)
+	}
+}
+
 func TestAgentRequestSourceLifecycleIsEnforced(t *testing.T) {
 	t.Parallel()
 	for _, test := range []struct {
