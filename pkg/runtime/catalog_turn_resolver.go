@@ -67,6 +67,27 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if err != nil || definition == nil {
 		return nil, fmt.Errorf("resolve active Agent definition: %w", err)
 	}
+	if _, requested := run.Context[AgentRequestCompletionReviewContextKey]; requested {
+		if config.Host == nil {
+			return nil, ErrTurnHostUnavailable
+		}
+		instructions := hostedAgentInstructions(definition)
+		instructions = append(instructions, agentRequestCompletionReviewSystemInstruction)
+		runner, runnerErr := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
+			AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
+			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+			SystemInstructions: instructions, ModelCredential: deploymentModelCredential(deployment),
+		})
+		if runnerErr != nil {
+			return nil, runnerErr
+		}
+		return &TurnRunnerBinding{
+			Runner: &agentRequestCompletionReviewTurnRunner{inner: runner}, DeploymentID: deployment.ID, ActionDeploymentID: deployment.ID,
+			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+			InputContextRefs:  []string{"run:" + AgentRequestCompletionReviewContextKey},
+			BudgetReservation: BudgetUsage{Turns: 1},
+		}, nil
+	}
 	if _, requested := run.Context[AgentRequestInboxContextKey]; requested {
 		if config.Host == nil {
 			return nil, ErrTurnHostUnavailable
