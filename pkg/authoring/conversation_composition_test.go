@@ -244,10 +244,7 @@ func TestApprovalEndpointFormCompilesKernelAuthorityDeterministically(t *testing
 	// the result: compilation discards it and rebuilds exact owned links.
 	candidate.Agents[0].Authority.ApprovalDestinations = []agent.ApprovalDestination{{EndpointID: "invented-endpoint"}}
 	catalog := slackChatbotCatalog()
-	catalog.Skills["slack"].ConversationAdapters[0].InboundEventTypes = []string{
-		capability.ConversationEventApprovalDecided,
-		capability.ConversationEventMessageReceived,
-	}
+	addSlackApprovalCallbackCapability(&catalog)
 	payload, err := json.Marshal(GenerationResponse{
 		Candidate: candidate,
 		Authoring: AuthoringFormSubmission{Version: AuthoringFormVersionV1, Values: []AuthoringFormValue{{
@@ -286,11 +283,25 @@ func TestApprovalEndpointFormCompilesKernelAuthorityDeterministically(t *testing
 	issues := CompileWorkforceAuthoringForm(&roundTrip, projected, AuthoringFormSubmission{
 		Version: projected.Version,
 		Values:  projected.Values,
-	})
+	}, catalog)
 	if len(issues) != 0 || len(roundTrip.Agents[0].Authority.ApprovalDestinations) != 1 ||
 		roundTrip.Agents[0].Authority.ApprovalDestinations[0].EndpointID != roundTrip.ConversationEndpoints[0].ID {
 		t.Fatalf("form round trip = %#v, issues %#v", roundTrip.Agents[0].Authority.ApprovalDestinations, issues)
 	}
+}
+
+func addSlackApprovalCallbackCapability(catalog *CapabilityCatalog) {
+	if catalog == nil {
+		return
+	}
+	slack := catalog.Skills["slack"]
+	oauth2 := slack.ConversationAdapters[0].Credentials[0].OAuth2
+	slack.CallbackAdapters = []CallbackAdapterCapability{{
+		ID: "interactions", ProtocolVersion: capability.CallbackAdapterProtocolV1,
+		Provider: "slack", EventTypes: []string{capability.CallbackEventApprovalDecided},
+		Credentials: []SkillCredential{{Name: "SLACK_CONNECTION", Kind: "slack-oauth", OAuth2: oauth2}},
+	}}
+	catalog.Skills["slack"] = slack
 }
 
 func TestConversationEndpointDeterministicallyFulfillsCapabilityNeed(t *testing.T) {

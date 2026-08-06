@@ -195,6 +195,7 @@ type (
 	WorkforceSkillActionContract              = authoring.SkillActionContract
 	WorkforceSkillCredential                  = authoring.SkillCredential
 	WorkforceConversationAdapterCapability    = authoring.ConversationAdapterCapability
+	WorkforceCallbackAdapterCapability        = authoring.CallbackAdapterCapability
 	WorkforceRuntimeCompositionCapability     = authoring.RuntimeCompositionCapability
 	WorkforceHostedExecutionCapability        = authoring.HostedExecutionCapability
 	WorkforceConversationRuntimeCapability    = authoring.ConversationRuntimeCapability

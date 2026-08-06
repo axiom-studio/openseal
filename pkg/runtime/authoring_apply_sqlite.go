@@ -225,6 +225,9 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 	if err = applySQLiteWorkforceConversationEndpoints(ctx, tx, value, application); err != nil {
 		return nil, err
 	}
+	if err = applySQLiteWorkforceCallbackRegistrations(ctx, tx, value, application); err != nil {
+		return nil, err
+	}
 	synchronizeWorkforceSkillBindingResources(application)
 	sortWorkforceApplicationResources(application)
 	value.ApplyReceipt.Resources = application.resources
@@ -434,6 +437,110 @@ func applySQLiteWorkforceConversationEndpoints(
 		})
 	}
 	return nil
+}
+
+func applySQLiteWorkforceCallbackRegistrations(
+	ctx context.Context,
+	tx *sql.Tx,
+	value *authoring.ChangeSet,
+	application *workforceApplication,
+) error {
+	desiredIDs := make(map[string]bool, len(application.callbackRegistrations))
+	for index := range application.callbackRegistrations {
+		desired := application.callbackRegistrations[index]
+		registration := desired.value
+		desiredIDs[registration.ID] = true
+		var current *CallbackRegistration
+		if desired.expectedRevision > 0 {
+			var payload string
+			if err := tx.QueryRowContext(ctx, `SELECT payload FROM callback_registrations
+				WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, value.Scope.Kind, value.Scope.ID,
+				registration.ID, desired.expectedRevision).Scan(&payload); err != nil {
+				return authoring.ErrChangeSetRevision
+			}
+			current = &CallbackRegistration{}
+			if json.Unmarshal([]byte(payload), current) != nil {
+				return authoring.ErrChangeSetRevision
+			}
+		}
+		if err := prepareWorkforceCallbackRegistration(registration, current, value.Actor, value.ApplyReceipt.AppliedAt); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(registration)
+		if desired.expectedRevision == 0 {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO callback_registrations
+				(scope_kind,scope_id,id,ingress_route,provider,status,revision,updated_at,payload)
+				VALUES(?,?,?,?,?,?,?,?,?)`, registration.Scope.Kind, registration.Scope.ID, registration.ID,
+				registration.IngressRoute, registration.Provider, registration.Status, registration.Revision,
+				registration.UpdatedAt, string(payload)); err != nil {
+				if sqliteUniqueConstraint(err) {
+					return authoring.ErrChangeSetRevision
+				}
+				return err
+			}
+		} else {
+			result, err := tx.ExecContext(ctx, `UPDATE callback_registrations SET ingress_route=?,provider=?,status=?,revision=?,updated_at=?,payload=?
+				WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, registration.IngressRoute,
+				registration.Provider, registration.Status, registration.Revision, registration.UpdatedAt, string(payload),
+				registration.Scope.Kind, registration.Scope.ID, registration.ID, desired.expectedRevision)
+			if err != nil {
+				return err
+			}
+			if count, _ := result.RowsAffected(); count != 1 {
+				return authoring.ErrChangeSetRevision
+			}
+		}
+		application.resources = append(application.resources, authoring.AppliedResourceReference{
+			Kind: "callback_registration", ID: registration.ID, Revision: registration.Revision,
+		})
+	}
+	return retireSQLiteWorkforceCallbacks(ctx, tx, value, application, desiredIDs)
+}
+
+func retireSQLiteWorkforceCallbacks(ctx context.Context, tx *sql.Tx, value *authoring.ChangeSet, application *workforceApplication, desiredIDs map[string]bool) error {
+	reconciled := workforceBindingReconciliationDeployments(value)
+	if len(reconciled) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT payload FROM callback_registrations WHERE scope_kind=? AND scope_id=?`, value.Scope.Kind, value.Scope.ID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return err
+		}
+		var registration CallbackRegistration
+		if json.Unmarshal([]byte(payload), &registration) != nil || !reconciled[registration.DeploymentID] ||
+			desiredIDs[registration.ID] || registration.Status == CallbackRegistrationRetired {
+			continue
+		}
+		expected := registration.Revision
+		now := value.ApplyReceipt.AppliedAt
+		registration.Status, registration.Revision, registration.UpdatedAt, registration.RetiredAt =
+			CallbackRegistrationRetired, expected+1, now, &now
+		registration.Lifecycle = append(registration.Lifecycle, CallbackRegistrationLifecycleEntry{
+			Revision: registration.Revision, Action: CallbackRegistrationRetiredAction,
+			Actor: ActivityActor{Type: value.Actor.Type, ID: value.Actor.ID}, Reason: "retire removed workflow callback", At: now,
+		})
+		if err := registration.Validate(); err != nil {
+			return err
+		}
+		encoded, _ := json.Marshal(&registration)
+		result, err := tx.ExecContext(ctx, `UPDATE callback_registrations SET status=?,revision=?,updated_at=?,payload=?
+			WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, registration.Status, registration.Revision,
+			registration.UpdatedAt, string(encoded), registration.Scope.Kind, registration.Scope.ID, registration.ID, expected)
+		if err != nil {
+			return err
+		}
+		if count, _ := result.RowsAffected(); count != 1 {
+			return authoring.ErrChangeSetRevision
+		}
+		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "callback_registration", ID: registration.ID, Revision: registration.Revision})
+	}
+	return rows.Err()
 }
 
 func sqliteUniqueConstraint(err error) bool {

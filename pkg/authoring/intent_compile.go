@@ -70,7 +70,7 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 		return GenerationResponse{}, err
 	}
 	result.Candidate.ConversationEndpoints = endpoints
-	if err := compileAuthoringApprovalRouting(intent, agents, &result.Candidate, &formValues); err != nil {
+	if err := compileAuthoringApprovalRouting(intent, agents, &result.Candidate, &formValues, request.Catalog); err != nil {
 		return GenerationResponse{}, err
 	}
 	if len(formValues) > 0 {
@@ -702,7 +702,7 @@ func compileAuthoringConversations(intent AuthoringIntent, agents map[string]*ag
 // compileAuthoringApprovalRouting is the single semantic-reference to runtime-
 // authority boundary. Providers never author endpoint purposes and Agent
 // approval destinations independently, so those representations cannot drift.
-func compileAuthoringApprovalRouting(intent AuthoringIntent, agents map[string]*agent.AgentDefinition, candidate *WorkforceCandidate, formValues *[]AuthoringFormValue) error {
+func compileAuthoringApprovalRouting(intent AuthoringIntent, agents map[string]*agent.AgentDefinition, candidate *WorkforceCandidate, formValues *[]AuthoringFormValue, catalog CapabilityCatalog) error {
 	if candidate == nil {
 		return errors.New("approval routing requires a candidate")
 	}
@@ -741,6 +741,11 @@ func compileAuthoringApprovalRouting(intent AuthoringIntent, agents map[string]*
 		if !hasConversationEndpointPurpose(endpoint.Purposes, ConversationEndpointPurposeApprovals) {
 			endpoint.Purposes = append(endpoint.Purposes, ConversationEndpointPurposeApprovals)
 		}
+		callbackAdapterID, err := selectApprovalCallbackAdapter(catalog, endpoint)
+		if err != nil {
+			return err
+		}
+		endpoint.CallbackAdapterID = callbackAdapterID
 	}
 	for _, definition := range candidate.Agents {
 		definition.Authority.ApprovalDestinations = nil
@@ -758,6 +763,39 @@ func compileAuthoringApprovalRouting(intent AuthoringIntent, agents map[string]*
 		}
 	}
 	return nil
+}
+
+func selectApprovalCallbackAdapter(catalog CapabilityCatalog, endpoint *ConversationEndpointBlueprint) (string, error) {
+	if endpoint == nil {
+		return "", errors.New("approval callback selection requires an endpoint")
+	}
+	skill, ok := catalog.Skills[endpoint.SkillID]
+	if !ok || skill.Version != endpoint.SkillVersion {
+		return "", fmt.Errorf("approval endpoint %s has no exact authorized Skill", endpoint.ID)
+	}
+	matches := make([]string, 0, 1)
+	provider := ""
+	for _, adapter := range skill.ConversationAdapters {
+		if adapter.ID == endpoint.AdapterID {
+			provider = adapter.Provider
+			break
+		}
+	}
+	if provider == "" {
+		return "", fmt.Errorf("approval endpoint %s has no exact conversation adapter", endpoint.ID)
+	}
+	for _, adapter := range skill.CallbackAdapters {
+		if !strings.EqualFold(strings.TrimSpace(adapter.Provider), strings.TrimSpace(provider)) {
+			continue
+		}
+		if containsExactString(adapter.EventTypes, capability.CallbackEventApprovalDecided) {
+			matches = append(matches, adapter.ID)
+		}
+	}
+	if len(matches) != 1 {
+		return "", fmt.Errorf("approval endpoint %s requires exactly one authorized callback adapter; found %d", endpoint.ID, len(matches))
+	}
+	return matches[0], nil
 }
 
 func selectedSkillRisk(skill SkillCapability, actions []string) capability.RiskLevel {

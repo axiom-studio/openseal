@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
@@ -34,6 +35,7 @@ type workforceApplication struct {
 	project                 *Project
 	projectExpectedRevision int64
 	conversationEndpoints   []workforceConversationEndpointApplication
+	callbackRegistrations   []workforceCallbackRegistrationApplication
 	resources               []authoring.AppliedResourceReference
 }
 
@@ -55,6 +57,37 @@ type workforceRunbookActivationApplication struct {
 type workforceConversationEndpointApplication struct {
 	value            *ExternalConversationEndpoint
 	expectedRevision int64
+}
+
+type workforceCallbackRegistrationApplication struct {
+	value            *CallbackRegistration
+	expectedRevision int64
+}
+
+func prepareWorkforceCallbackRegistration(
+	desired *CallbackRegistration,
+	current *CallbackRegistration,
+	actor authoring.ChangeSetActor,
+	now time.Time,
+) error {
+	if desired == nil {
+		return ErrInvalidCallbackRegistration
+	}
+	if current == nil {
+		return desired.Validate()
+	}
+	if current.Scope != desired.Scope || current.Owner != desired.Owner || current.DeploymentID != desired.DeploymentID ||
+		current.Status == CallbackRegistrationRetired || current.Revision+1 != desired.Revision {
+		return authoring.ErrChangeSetRevision
+	}
+	desired.IngressRoute = current.IngressRoute
+	desired.CreatedAt = current.CreatedAt
+	desired.Lifecycle = cloneCallbackRegistration(current).Lifecycle
+	desired.Lifecycle = append(desired.Lifecycle, CallbackRegistrationLifecycleEntry{
+		Revision: desired.Revision, Action: callbackLifecycleAction(current.Status, &desired.Status),
+		Actor: ActivityActor{Type: actor.Type, ID: actor.ID}, Reason: "apply reviewed workflow callback revision", At: now,
+	})
+	return desired.Validate()
 }
 
 // Authoring mode describes how the model produced the candidate. Persistence
@@ -364,6 +397,22 @@ func materializeConversationEndpoints(
 		if err != nil {
 			return err
 		}
+		var callbackAdapter *authoring.CallbackAdapterCapability
+		if blueprint.CallbackAdapterID != "" {
+			for index := range skillCapability.CallbackAdapters {
+				if skillCapability.CallbackAdapters[index].ID == blueprint.CallbackAdapterID {
+					callbackAdapter = &skillCapability.CallbackAdapters[index]
+					break
+				}
+			}
+			if callbackAdapter == nil || callbackAdapter.Provider != adapter.Provider ||
+				!containsExactRuntimeString(callbackAdapter.EventTypes, capability.CallbackEventApprovalDecided) {
+				return fmt.Errorf("conversation endpoint %s callback adapter is unavailable", blueprint.ID)
+			}
+			if err := enableWorkforceCallbackAdapter(value, blueprint, binding, callbackAdapter, activate); err != nil {
+				return err
+			}
+		}
 		handler := ExternalConversationHandler{}
 		switch blueprint.Handler.Kind {
 		case authoring.ConversationHandlerAgent:
@@ -422,8 +471,68 @@ func materializeConversationEndpoints(
 		application.conversationEndpoints = append(application.conversationEndpoints, workforceConversationEndpointApplication{
 			value: endpoint, expectedRevision: placement.ExpectedRevision,
 		})
+		if callbackAdapter != nil {
+			callbackStatus := CallbackRegistrationPaused
+			if activate {
+				callbackStatus = CallbackRegistrationActive
+			}
+			callbackID := strings.TrimSpace(placement.CallbackRegistrationID)
+			if callbackID == "" {
+				return fmt.Errorf("conversation endpoint %s callback has no reviewed placement", blueprint.ID)
+			}
+			callback := &CallbackRegistration{
+				ID: callbackID, IngressRoute: uuid.NewString(), Scope: endpoint.Scope,
+				Owner: endpoint.Owner, DeploymentID: endpoint.DeploymentID,
+				Name: endpoint.Name + " interactions", Provider: endpoint.Provider,
+				Adapter: CallbackAdapterReference{
+					SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
+					BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: callbackAdapter.ID,
+				},
+				Subscriptions: []CallbackSubscription{{
+					EventType: capability.CallbackEventApprovalDecided, Consumer: "approvals", TargetID: endpoint.ID,
+				}},
+				Configuration: cloneMap(placement.CallbackConfiguration), Status: callbackStatus,
+				Revision: placement.CallbackRegistrationExpectedRevision + 1, CreatedAt: now, UpdatedAt: now,
+				Lifecycle: []CallbackRegistrationLifecycleEntry{{
+					Revision: placement.CallbackRegistrationExpectedRevision + 1,
+					Action:   CallbackRegistrationCreated,
+					Actor:    ActivityActor{Type: value.ApplyReceipt.Actor.Type, ID: value.ApplyReceipt.Actor.ID},
+					Reason:   "materialize reviewed workflow callback", At: now,
+				}},
+			}
+			application.callbackRegistrations = append(application.callbackRegistrations, workforceCallbackRegistrationApplication{
+				value: callback, expectedRevision: placement.CallbackRegistrationExpectedRevision,
+			})
+		}
 	}
 	return nil
+}
+
+func enableWorkforceCallbackAdapter(
+	value *authoring.ChangeSet,
+	blueprint authoring.ConversationEndpointBlueprint,
+	binding *capability.Binding,
+	adapter *authoring.CallbackAdapterCapability,
+	activate bool,
+) error {
+	if !containsExactRuntimeString(binding.EnabledCallbackAdapters, adapter.ID) {
+		binding.EnabledCallbackAdapters = append(binding.EnabledCallbackAdapters, adapter.ID)
+		sort.Strings(binding.EnabledCallbackAdapters)
+	}
+	for _, credential := range adapter.Credentials {
+		reference := value.Placement.CredentialReferences[blueprint.Owner.ID][credential.Name]
+		if strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+			if credential.Optional || !activate {
+				continue
+			}
+			return fmt.Errorf("conversation endpoint %s callback requires opaque credential %s of kind %s", blueprint.ID, credential.Name, credential.Kind)
+		}
+		if reference.Kind != credential.Kind {
+			return fmt.Errorf("conversation endpoint %s callback credential %s must use kind %s", blueprint.ID, credential.Name, credential.Kind)
+		}
+		binding.Credentials[credential.Name] = reference
+	}
+	return skill.ValidateBindingShape(binding)
 }
 
 func materializeConversationAdapterBinding(
@@ -973,6 +1082,17 @@ func synchronizeWorkforceConversationEndpointBindings(application *workforceAppl
 		if err := endpoint.Validate(); err != nil {
 			return err
 		}
+	}
+	for index := range application.callbackRegistrations {
+		registration := application.callbackRegistrations[index].value
+		binding := bindings[registration.Adapter.BindingID]
+		if binding == nil || binding.Revision < 1 || binding.SkillID != registration.Adapter.SkillID ||
+			binding.SkillVersion != registration.Adapter.SkillVersion ||
+			binding.SourceIdentity != registration.Adapter.SourceIdentity ||
+			!containsExactRuntimeString(binding.EnabledCallbackAdapters, registration.Adapter.AdapterID) {
+			return fmt.Errorf("callback registration %s lost its exact Skill adapter binding", registration.ID)
+		}
+		registration.Adapter.BindingRevision = binding.Revision
 	}
 	return nil
 }

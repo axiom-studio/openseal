@@ -231,13 +231,13 @@ func TestCompileAuthoringIntentMapsClarificationWithoutModelOwnedWireEnums(t *te
 
 func TestCompileAuthoringIntentBuildsConversationAndApprovalEdges(t *testing.T) {
 	catalog := slackChatbotCatalog()
+	addSlackApprovalCallbackCapability(&catalog)
 	slack := catalog.Skills["slack"]
 	slack.Actions = []string{"slack-read-messages", "slack-send-message"}
 	slack.ActionRisks = map[string]capability.RiskLevel{
 		"slack-read-messages": capability.RiskLevelRead,
 		"slack-send-message":  capability.RiskLevelExternal,
 	}
-	slack.ConversationAdapters[0].InboundEventTypes = []string{capability.ConversationEventApprovalDecided, capability.ConversationEventMessageReceived}
 	catalog.Skills["slack"] = slack
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
@@ -266,11 +266,12 @@ func TestCompileAuthoringIntentBuildsConversationAndApprovalEdges(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if issues := CompileWorkforceAuthoringForm(&generated.Candidate, form, generated.Authoring); len(issues) > 0 {
+	if issues := CompileWorkforceAuthoringForm(&generated.Candidate, form, generated.Authoring, catalog); len(issues) > 0 {
 		t.Fatalf("conversation form issues = %#v", issues)
 	}
 	endpoint := generated.Candidate.ConversationEndpoints[0]
-	if endpoint.Handler.Kind != ConversationHandlerAgent || endpoint.Policy.ReplyMode != ConversationReplyThread || len(generated.Candidate.Agents[0].Authority.ApprovalDestinations) != 1 {
+	if endpoint.Handler.Kind != ConversationHandlerAgent || endpoint.Policy.ReplyMode != ConversationReplyThread ||
+		endpoint.CallbackAdapterID != "interactions" || len(generated.Candidate.Agents[0].Authority.ApprovalDestinations) != 1 {
 		t.Fatalf("compiled conversation = %#v authority=%#v", endpoint, generated.Candidate.Agents[0].Authority)
 	}
 	definition := generated.Candidate.Agents[0]
