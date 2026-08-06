@@ -76,6 +76,8 @@ type AgentRunWorkerConfig struct {
 	WorkerIDPrefix             string
 	Concurrency                int
 	MaxActiveForAgent          int
+	MaxActiveForOwner          int
+	MaxActiveForObjective      int
 	MaxActiveForConcurrencyKey int
 	MaxTurnsPerClaim           int
 	LeaseDuration              time.Duration
@@ -96,6 +98,9 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 	}
 	if c.MaxActiveForAgent <= 0 {
 		c.MaxActiveForAgent = c.Concurrency
+	}
+	if c.MaxActiveForOwner < 0 || c.MaxActiveForObjective < 0 || c.MaxActiveForConcurrencyKey < 0 {
+		return errors.New("agent run portfolio concurrency limits cannot be negative")
 	}
 	if c.MaxTurnsPerClaim <= 0 {
 		c.MaxTurnsPerClaim = 1
@@ -240,6 +245,8 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			Scope: p.config.Scope, Kind: p.config.Kind, WorkerID: workerID, AssignedAgentID: p.config.AssignedAgentID,
 			LeaseDuration: p.config.LeaseDuration, AgingInterval: p.config.AgingInterval,
 			MaxActiveForAgent:          p.config.MaxActiveForAgent,
+			MaxActiveForOwner:          p.config.MaxActiveForOwner,
+			MaxActiveForObjective:      p.config.MaxActiveForObjective,
 			MaxActiveForConcurrencyKey: p.config.MaxActiveForConcurrencyKey,
 		})
 		if err != nil && ctx.Err() == nil {
