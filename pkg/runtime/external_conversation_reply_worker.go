@@ -96,7 +96,8 @@ func (w *ExternalConversationReplyWorker) project(
 		return nil, err
 	}
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != item.EndpointRevision || endpoint.Adapter != item.Adapter {
+		endpoint.Revision != item.EndpointRevision ||
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
 		return nil, ErrExternalConversationConflict
 	}
 	message, err := w.findCanonicalReply(ctx, item, run)

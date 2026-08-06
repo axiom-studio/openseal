@@ -237,7 +237,8 @@ func (w *ExternalConversationDeliveryWorker) resolve(
 		return nil, nil, err
 	}
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != delivery.EndpointRevision || endpoint.Adapter != delivery.Adapter {
+		endpoint.Revision != delivery.EndpointRevision ||
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, delivery.Adapter) {
 		return nil, nil, ErrExternalConversationConflict
 	}
 	ref := delivery.Adapter

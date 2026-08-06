@@ -147,7 +147,8 @@ func (s *MemoryStore) ReceiveExternalConversationEvent(_ context.Context, item *
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	endpoint := s.externalEndpoints[externalConversationEndpointKey(item.Scope, item.EndpointID)]
-	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != item.EndpointRevision || endpoint.Adapter != item.Adapter {
+	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != item.EndpointRevision ||
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
 		return nil, false, ErrExternalConversationConflict
 	}
 	deduplicationKey := externalConversationInboxDeduplicationKey(item.Scope, item.EndpointID, item.Event.ID)
@@ -354,7 +355,7 @@ func (s *MemoryStore) EnqueueExternalConversationDelivery(_ context.Context, del
 	defer s.mu.Unlock()
 	endpoint := s.externalEndpoints[externalConversationEndpointKey(delivery.Scope, delivery.EndpointID)]
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != delivery.EndpointRevision ||
-		endpoint.Adapter != delivery.Adapter {
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, delivery.Adapter) {
 		return nil, false, ErrExternalConversationConflict
 	}
 	deduplicationKey := externalConversationDeliveryDeduplicationKey(delivery.Scope, delivery.EndpointID, delivery.IdempotencyKey)

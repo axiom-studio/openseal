@@ -182,7 +182,8 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *Exter
 		return err
 	}
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != item.EndpointRevision || endpoint.Adapter != item.Adapter {
+		endpoint.Revision != item.EndpointRevision ||
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
 		return ErrExternalConversationConflict
 	}
 

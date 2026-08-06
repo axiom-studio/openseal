@@ -104,8 +104,9 @@ func (s *ExternalConversationTransportService) Receive(ctx context.Context, req 
 	}
 	item := &ExternalConversationInboxItem{
 		ID:    stableExternalConversationID(req.Scope, endpoint.ID, "inbox", req.Event.ID),
-		Scope: req.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
-		Event: req.Event, Status: status, MaximumAttempts: maximumAttempts, AvailableAt: now,
+		Scope: req.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision,
+		Adapter: externalConversationResolvedAdapterReference(resolved),
+		Event:   req.Event, Status: status, MaximumAttempts: maximumAttempts, AvailableAt: now,
 		Summary: summary, Revision: 1, CreatedAt: now, UpdatedAt: now, AppliedAt: appliedAt,
 	}
 	stored, replayed, err := s.store.ReceiveExternalConversationEvent(ctx, item)
@@ -260,7 +261,8 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 	)
 	delivery := &ExternalConversationDelivery{
 		ID:    stableExternalConversationID(req.Scope, endpoint.ID, "delivery", idempotencyKey),
-		Scope: req.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
+		Scope: req.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision,
+		Adapter:   externalConversationResolvedAdapterReference(resolved),
 		Operation: req.Operation, ConversationID: message.ConversationID, ChannelMessageID: message.ID,
 		ExternalThreadID: strings.TrimSpace(req.ExternalThreadID), OrderingKey: orderingKey,
 		Parameters: cloneMap(req.Parameters), IdempotencyKey: idempotencyKey,
@@ -306,16 +308,36 @@ func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context
 		return nil, nil, ErrExternalConversationConflict
 	}
 	ref := endpoint.Adapter
-	resolved, err := s.resolver.ResolveConversationAdapter(
+	resolved, err := s.resolver.ResolveConversationAdapterBinding(
 		ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, endpoint.DeploymentID,
-		ref.SkillID, ref.SkillVersion, ref.AdapterID, skill.BindingReference{ID: ref.BindingID, Revision: ref.BindingRevision},
+		ref.BindingID, ref.AdapterID,
 	)
-	if err != nil || resolved.Binding.SourceIdentity != ref.SourceIdentity ||
+	if err != nil || resolved == nil || resolved.Binding == nil ||
 		resolved.Adapter.Provider != endpoint.Provider ||
 		!containsConversationEndpointMode(resolved.Adapter.EndpointModes, endpoint.Mode) {
-		return nil, nil, fmt.Errorf("%w: exact Skill adapter is unavailable or stale", ErrExternalConversationConflict)
+		return nil, nil, fmt.Errorf("%w: current Skill adapter binding is unavailable or incompatible", ErrExternalConversationConflict)
 	}
 	return endpoint, resolved, nil
+}
+
+// Live endpoints own the stable binding and adapter identities. Every inbox
+// item and delivery captures the exact resolved Skill identity and binding
+// revision used for that operation, so a compatible credential or policy
+// amendment does not strand the endpoint while historical work remains exact.
+func externalConversationResolvedAdapterReference(resolved *skill.BoundConversationAdapter) ExternalConversationAdapterReference {
+	if resolved == nil || resolved.Definition == nil || resolved.Binding == nil {
+		return ExternalConversationAdapterReference{}
+	}
+	return ExternalConversationAdapterReference{
+		SkillID: resolved.Definition.ID, SkillVersion: resolved.Definition.Version,
+		SourceIdentity: skill.DefinitionSourceIdentity(resolved.Definition),
+		BindingID:      resolved.Binding.ID, BindingRevision: resolved.Binding.Revision,
+		AdapterID: resolved.AdapterID,
+	}
+}
+
+func externalConversationAdapterBelongsToEndpoint(endpoint, captured ExternalConversationAdapterReference) bool {
+	return endpoint.BindingID == captured.BindingID && endpoint.AdapterID == captured.AdapterID
 }
 
 func externalConversationPolicyAccepts(policy ExternalConversationPolicy, event NormalizedExternalConversationEvent) (bool, string) {
