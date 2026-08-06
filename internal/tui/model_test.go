@@ -18,6 +18,7 @@ import (
 	"github.com/axiom-studio/openseal/internal/server"
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
@@ -141,6 +142,36 @@ type fakeKernelClient struct {
 	conversationGateways       []*runtime.ExternalConversationGatewayRegistration
 	conversationGatewayCreates []kernelapi.CreateExternalConversationGatewayRequest
 	conversationGatewayUpdates []kernelapi.UpdateExternalConversationGatewayRequest
+}
+
+type fakeWorkforceBundleKernelClient struct {
+	*fakeKernelClient
+	inspected int
+}
+
+func (f *fakeWorkforceBundleKernelClient) ValidateWorkforceBundle(context.Context, *kernelbundle.Bundle) error {
+	return nil
+}
+
+func (f *fakeWorkforceBundleKernelClient) InspectWorkforceBundle(_ context.Context, artifact *kernelbundle.Bundle) (*kernelbundle.Inspection, error) {
+	f.inspected++
+	return kernelbundle.Inspect(artifact)
+}
+
+func (f *fakeWorkforceBundleKernelClient) CompareWorkforceBundles(context.Context, *kernelbundle.Bundle, *kernelbundle.Bundle) (*kernelbundle.Diff, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeWorkforceBundleKernelClient) PreviewWorkforceBundleInstallation(context.Context, *kernelbundle.Bundle, kernelbundle.Placement) (*kernelbundle.InstallationPreview, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeWorkforceBundleKernelClient) PlanWorkforceBundleUpgrade(context.Context, *kernelbundle.Bundle, *kernelbundle.Bundle) (*kernelbundle.UpgradePlan, error) {
+	return nil, errors.New("not implemented by test client")
+}
+
+func (f *fakeWorkforceBundleKernelClient) InstallWorkforceBundle(context.Context, *kernelbundle.Bundle, capability.ScopeReference, kernelbundle.Placement, string, string) (*kernelbundle.InstallationReceipt, error) {
+	return nil, errors.New("not implemented by test client")
 }
 
 func TestMatchSearchedSkillRequiresExactSelectableIdentity(t *testing.T) {
@@ -1364,6 +1395,57 @@ func TestModelDiscoversCapabilitiesBeforeRenderingActions(t *testing.T) {
 	for _, action := range []string{"p pause", "g guide", "x stop"} {
 		if strings.Contains(view, action) {
 			t.Fatalf("unadvertised action %q was rendered:\n%s", action, view)
+		}
+	}
+}
+
+func TestTUIInspectsPortableWorkforceBundleThroughAdvertisedKernelCapability(t *testing.T) {
+	definition := &kernelagent.AgentDefinition{
+		ID: "portable/researcher", Version: "1.0.0", DisplayName: "Researcher", Purpose: "Research questions", SystemPrompt: "Research carefully.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+	}
+	deployment := &kernelagent.AgentDeployment{
+		ID: "agent:source", Scope: capability.ScopeReference{Kind: "tenant", ID: "source"}, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1,
+		CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC(),
+	}
+	agentArtifact, err := kernelagent.ExportBundle(kernelagent.BundleExportRequest{
+		Definition: definition, Deployment: deployment,
+		Metadata: kernelagent.BundleMetadata{ID: "researcher", Version: "1.0.0", DisplayName: "Researcher"},
+		Manifest: kernelagent.ManifestMetadata{ID: "researcher", Version: "1.0.0", DisplayName: "Researcher"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := kernelbundle.New(kernelbundle.Metadata{ID: "research", Version: "1.0.0", DisplayName: "Research"})
+	artifact.Agents = []kernelbundle.Agent{{Key: "researcher", Artifact: agentArtifact}}
+	if err := artifact.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := kernelbundle.EncodeYAML(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/research.yaml"
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeWorkforceBundleKernelClient{fakeKernelClient: &fakeKernelClient{
+		document: kernelapi.NewCapabilityDocument(kernelapi.WorkforceBundlesCapability(false)),
+	}}
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionBundles || !strings.Contains(model.View(), "B Bundles") {
+		t.Fatalf("bundle capability not projected: section=%v view=%s", model.section, model.View())
+	}
+	model.editor.SetValue(path)
+	applyCommand(t, model, model.submitWorkforceBundleInspection())
+	if fake.inspected != 1 || model.workforceBundleInspection == nil {
+		t.Fatalf("inspection calls=%d result=%#v", fake.inspected, model.workforceBundleInspection)
+	}
+	for _, expected := range []string{"research@1.0.0", "Agents 1", artifact.Digest[:32]} {
+		if !strings.Contains(model.View(), expected) {
+			t.Fatalf("bundle view missing %q: %s", expected, model.View())
 		}
 	}
 }
