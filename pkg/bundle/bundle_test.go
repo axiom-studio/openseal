@@ -76,6 +76,33 @@ func TestWorkforceBundleIsDeterministicSignedAndSecretFree(t *testing.T) {
 	}
 }
 
+func TestWorkforceBundleExportRemovesSourcePlacementAndRequiresClosedSelection(t *testing.T) {
+	artifact := representativeBundle(t)
+	encoded, err := EncodeYAML(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sourceIdentity := range []string{"agent:source-researcher", "team:source-research", "objective:source-research", "activation:source-daily-research"} {
+		if strings.Contains(string(encoded), sourceIdentity) {
+			t.Fatalf("source placement identity %q leaked into portable export", sourceIdentity)
+		}
+	}
+	broken := ExportRequest{
+		Metadata: Metadata{ID: "broken", Version: "1.0.0", DisplayName: "Broken"},
+		Teams: []TeamExport{{
+			Key: "team", Definition: artifact.Teams[0].Definition,
+			Deployment: &team.Deployment{
+				ID: "team:source", Scope: capability.ScopeReference{Kind: "tenant", ID: "source"}, DefinitionID: artifact.Teams[0].Definition.ID,
+				ActiveVersion: artifact.Teams[0].Definition.Version, Roster: []team.RosterAssignment{{ID: "member", RoleID: "researcher", AgentDeploymentID: "agent:not-selected"}},
+				Status: team.DeploymentActive, Revision: 1, CreatedAt: time.Unix(1, 0).UTC(), UpdatedAt: time.Unix(1, 0).UTC(),
+			},
+		}},
+	}
+	if _, err := Export(broken); err == nil || !strings.Contains(err.Error(), "outside the export") {
+		t.Fatalf("reference-incomplete export was accepted: %v", err)
+	}
+}
+
 func TestWorkforceBundleInspectDiffAndUpgradePlan(t *testing.T) {
 	current := representativeBundle(t)
 	inspection, err := Inspect(current)
@@ -289,37 +316,40 @@ func representativeBundle(t *testing.T) *Bundle {
 		ActiveVersion: definition.Version, RolloutStatus: agent.RolloutActive, Environment: "default",
 		Capacity: agent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
-	agentArtifact, err := agent.ExportBundle(agent.BundleExportRequest{
-		Definition: definition, Deployment: deployment,
-		Metadata: agent.BundleMetadata{ID: "researcher", Version: "1.0.0", DisplayName: "Researcher"},
-		Manifest: agent.ManifestMetadata{ID: "researcher", Version: "1.0.0", DisplayName: "Researcher"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	teamDefinition := &team.Definition{
 		ID: "research-team", Version: "1.0.0", DisplayName: "Research Team", Purpose: "Produce reviewed research",
 		Roles:        []team.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1, MaximumMembers: 1, ChannelParticipation: team.RoleChannelActive}},
 		Coordination: team.CoordinationPolicy{MaximumSpeakersPerRound: 1, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
 		Approvals:    team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}
-	result := New(Metadata{ID: "research-workforce", Version: "1.0.0", DisplayName: "Research Workforce"})
-	result.Compatibility.RequiredCapabilities = []CapabilityRequirement{{ID: "agent-runs", Version: 2}, {ID: "objectives", Version: 1}}
-	result.Agents = []Agent{{Key: "researcher", Artifact: agentArtifact}}
-	result.Teams = []Team{{
-		Key: "research-team", Definition: teamDefinition,
-		Deployment: TeamDeployment{Roster: []RosterAssignment{{ID: "primary", RoleID: "researcher", AgentKey: "researcher"}}},
-	}}
-	result.Objectives = []Objective{{
-		Key: "research", Owner: OwnerReference{Kind: OwnerTeam, Key: "research-team"}, Title: "Daily research", Goal: "Publish reviewed research",
-		Status: runtime.ObjectiveStatusActive, Priority: 10, ExecutionPolicy: &runtime.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
-	}}
-	result.Runbooks = []RunbookActivation{{
-		Key: "daily-research", Owner: OwnerReference{Kind: OwnerTeam, Key: "research-team"}, ObjectiveKey: "research", AssignedAgentKey: "researcher",
+	teamDeployment := &team.Deployment{
+		ID: "team:source-research", Scope: deployment.Scope, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version,
+		Roster: []team.RosterAssignment{{ID: "primary", RoleID: "researcher", AgentDeploymentID: deployment.ID}},
+		Status: team.DeploymentActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	objective := &runtime.Objective{
+		ID: "objective:source-research", Scope: runtime.Scope{Kind: deployment.Scope.Kind, ID: deployment.Scope.ID}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: teamDeployment.ID},
+		Title: "Daily research", Goal: "Publish reviewed research", Status: runtime.ObjectiveStatusActive, Priority: 10,
+		ExecutionPolicy: &runtime.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1}, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	activation := &runtime.RunbookActivation{
+		ID: "activation:source-daily-research", Scope: objective.Scope, Owner: objective.Owner, ObjectiveID: objective.ID, AssignedAgentID: deployment.ID,
 		DefinitionID: "daily-research", DefinitionVersion: "1.0.0", TriggerID: "daily", Trigger: schedule,
-		MaximumConcurrent: 1, Status: runtime.RunbookActivationActive,
-	}}
-	if err := result.Seal(); err != nil {
+		MaximumConcurrent: 1, Status: runtime.RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	result, err := Export(ExportRequest{
+		Metadata:      Metadata{ID: "research-workforce", Version: "1.0.0", DisplayName: "Research Workforce"},
+		Compatibility: Compatibility{FormatRevision: 1, RequiredCapabilities: []CapabilityRequirement{{ID: "agent-runs", Version: 2}, {ID: "objectives", Version: 1}}},
+		Agents: []AgentExport{{Key: "researcher", Request: agent.BundleExportRequest{
+			Definition: definition, Deployment: deployment,
+			Metadata: agent.BundleMetadata{ID: "researcher", Version: "1.0.0", DisplayName: "Researcher"},
+			Manifest: agent.ManifestMetadata{ID: "researcher", Version: "1.0.0", DisplayName: "Researcher"},
+		}}},
+		Teams:      []TeamExport{{Key: "research-team", Definition: teamDefinition, Deployment: teamDeployment}},
+		Objectives: []ObjectiveExport{{Key: "research", Objective: objective}},
+		Runbooks:   []RunbookExport{{Key: "daily-research", Activation: activation}},
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	return result
