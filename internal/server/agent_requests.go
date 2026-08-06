@@ -209,7 +209,7 @@ func agentRequestFilterFromQuery(r *http.Request) (runtime.AgentRequestFilter, e
 	}
 	for _, value := range queryValues(r, "kind") {
 		kind := runtime.AgentRequestKind(value)
-		if kind != runtime.AgentRequestKindRequest && kind != runtime.AgentRequestKindHandoff {
+		if kind != runtime.AgentRequestKindRequest && kind != runtime.AgentRequestKindHandoff && kind != runtime.AgentRequestKindEscalation {
 			return runtime.AgentRequestFilter{}, fmt.Errorf("invalid agent request kind %q", value)
 		}
 		filter.Kinds = append(filter.Kinds, kind)

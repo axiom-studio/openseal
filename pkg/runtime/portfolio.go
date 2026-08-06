@@ -151,6 +151,7 @@ const (
 	RunSourceRequestDecision  RunSource = "agent_request_decision"
 	RunSourceCompletionReview RunSource = "agent_request_completion_review"
 	RunSourceHandoff          RunSource = "handoff"
+	RunSourceEscalation       RunSource = "escalation"
 	RunSourceObjective        RunSource = "objective"
 	RunSourceFork             RunSource = "fork"
 )
@@ -765,7 +766,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		source = RunSourceManual
 	}
 	switch source {
-	case RunSourceManual, RunSourceChat, RunSourceSchedule, RunSourceEvent, RunSourceWebhook, RunSourceRequest, RunSourceRequestDecision, RunSourceCompletionReview, RunSourceHandoff, RunSourceObjective, RunSourceFork:
+	case RunSourceManual, RunSourceChat, RunSourceSchedule, RunSourceEvent, RunSourceWebhook, RunSourceRequest, RunSourceRequestDecision, RunSourceCompletionReview, RunSourceHandoff, RunSourceEscalation, RunSourceObjective, RunSourceFork:
 	default:
 		return nil, fmt.Errorf("%w: unsupported run source %q", ErrInvalidAgentRun, source)
 	}

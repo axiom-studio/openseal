@@ -31,8 +31,9 @@ var (
 type AgentRequestKind string
 
 const (
-	AgentRequestKindRequest AgentRequestKind = "request"
-	AgentRequestKindHandoff AgentRequestKind = "handoff"
+	AgentRequestKindRequest    AgentRequestKind = "request"
+	AgentRequestKindHandoff    AgentRequestKind = "handoff"
+	AgentRequestKindEscalation AgentRequestKind = "escalation"
 )
 
 type AgentRequestStatus string
@@ -194,8 +195,8 @@ func (r *AgentRequest) Validate() error {
 	if strings.TrimSpace(r.ID) == "" || strings.TrimSpace(r.SourceRunID) == "" || strings.TrimSpace(r.Goal) == "" {
 		return errors.New("agent request id, source run, and goal are required")
 	}
-	if r.Kind != AgentRequestKindRequest && r.Kind != AgentRequestKindHandoff {
-		return errors.New("agent request kind must be request or handoff")
+	if !validAgentRequestKind(r.Kind) {
+		return errors.New("agent request kind must be request, handoff, or escalation")
 	}
 	if err := r.Requester.Validate(); err != nil {
 		return fmt.Errorf("requester: %w", err)
@@ -549,8 +550,8 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	if req.Kind != AgentRequestKindRequest && req.Kind != AgentRequestKindHandoff {
-		return nil, errors.New("agent request kind must be request or handoff")
+	if !validAgentRequestKind(req.Kind) {
+		return nil, errors.New("agent request kind must be request, handoff, or escalation")
 	}
 	if err := req.Requester.Validate(); err != nil {
 		return nil, fmt.Errorf("requester: %w", err)
@@ -644,6 +645,9 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if request.Kind == AgentRequestKindHandoff {
 		eventType = "handoff.proposed"
 		summary = fmt.Sprintf("Proposed handoff to %s %s", request.Recipient.Type, request.Recipient.ID)
+	} else if request.Kind == AgentRequestKindEscalation {
+		eventType = "escalation.requested"
+		summary = fmt.Sprintf("Escalated work to %s %s", request.Recipient.Type, request.Recipient.ID)
 	}
 	event := collaborationEvent(source, request, eventType, summary, req.Requester, now)
 	record := AgentRequestCreateRecord{Request: request, Event: event}
@@ -719,8 +723,8 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 	seenDependencies := make(map[string]struct{}, len(req.Requests))
 	allocations := make([]*BudgetPolicy, 0, len(req.Requests))
 	for index, spec := range req.Requests {
-		if spec.Kind != AgentRequestKindRequest {
-			return nil, errors.New("grouped collaboration currently supports request fan-out; handoff transfers must remain singular")
+		if spec.Kind != AgentRequestKindRequest && spec.Kind != AgentRequestKindEscalation {
+			return nil, errors.New("grouped collaboration supports request and escalation fan-out; handoff transfers must remain singular")
 		}
 		if err := spec.Recipient.Validate(); err != nil {
 			return nil, fmt.Errorf("request %d recipient: %w", index+1, err)
@@ -930,6 +934,8 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		eventType = "collaboration.accepted"
 		if updated.Kind == AgentRequestKindHandoff {
 			eventType = "handoff.accepted"
+		} else if updated.Kind == AgentRequestKindEscalation {
+			eventType = "escalation.accepted"
 		}
 		summary = fmt.Sprintf("%s %s accepted the work", actor.Type, actor.ID)
 		record.ChildEvent = collaborationEvent(child, updated, eventType, summary, actor, now)
@@ -1129,6 +1135,11 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		if requiresReview {
 			eventType = "handoff.completion_review_requested"
 		}
+	} else if request.Kind == AgentRequestKindEscalation {
+		eventType = "escalation.completed"
+		if requiresReview {
+			eventType = "escalation.completion_review_requested"
+		}
 	}
 	summary := fmt.Sprintf("%s %s completed the work", actor.Type, actor.ID)
 	if requiresReview {
@@ -1258,6 +1269,11 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	}
 	if err != nil {
 		return nil, err
+	}
+	if request.Kind == AgentRequestKindHandoff {
+		eventType = strings.Replace(eventType, "collaboration.", "handoff.", 1)
+	} else if request.Kind == AgentRequestKindEscalation {
+		eventType = strings.Replace(eventType, "collaboration.", "escalation.", 1)
 	}
 	if updatedRequest.DependencyGroupID != "" {
 		edge, edgeErr := s.groupedRequestDependency(ctx, updatedRequest, source, true)
@@ -1403,11 +1419,15 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 	eventType := "collaboration.failed"
 	if request.Kind == AgentRequestKindHandoff {
 		eventType = "handoff.failed"
+	} else if request.Kind == AgentRequestKindEscalation {
+		eventType = "escalation.failed"
 	}
 	if child.Status == AgentRunStatusCanceled {
 		eventType = "collaboration.canceled"
 		if request.Kind == AgentRequestKindHandoff {
 			eventType = "handoff.canceled"
+		} else if request.Kind == AgentRequestKindEscalation {
+			eventType = "escalation.canceled"
 		}
 	}
 	summary := fmt.Sprintf("%s %s ended delegated work: %s", request.Recipient.Type, request.Recipient.ID, updated.ResolutionReason)
@@ -1520,6 +1540,8 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	sourceKind := RunSourceRequest
 	if request.Kind == AgentRequestKindHandoff {
 		sourceKind = RunSourceHandoff
+	} else if request.Kind == AgentRequestKindEscalation {
+		sourceKind = RunSourceEscalation
 	}
 	child := &AgentRun{
 		ID: id, Kind: normalizeRunKind(source.Kind), Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
@@ -1692,7 +1714,7 @@ func completedCollaborationChildRun(child *AgentRun, request *AgentRequest, now 
 
 func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, childOutput map[string]interface{}, now time.Time) (*AgentRun, error) {
 	updated := cloneAgentRun(source)
-	if request.Kind == AgentRequestKindRequest {
+	if request.Kind != AgentRequestKindHandoff {
 		if updated.Status != AgentRunStatusWaitingForDependency || updated.WakeCondition == nil ||
 			updated.WakeCondition.Type != "agent_request" || updated.WakeCondition.Reference != request.ID {
 			return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
@@ -1715,7 +1737,7 @@ func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, ch
 
 func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
 	updated := cloneAgentRun(source)
-	if request.Kind == AgentRequestKindRequest {
+	if request.Kind != AgentRequestKindHandoff {
 		if updated.Status != AgentRunStatusWaitingForDependency || updated.WakeCondition == nil ||
 			updated.WakeCondition.Type != "agent_request" || updated.WakeCondition.Reference != request.ID {
 			return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
@@ -2167,6 +2189,15 @@ func validAgentRequestStatus(status AgentRequestStatus) bool {
 	switch status {
 	case AgentRequestStatusPending, AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, AgentRequestStatusCompletionReview,
 		AgentRequestStatusCompleted, AgentRequestStatusFailed, AgentRequestStatusRejected, AgentRequestStatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func validAgentRequestKind(kind AgentRequestKind) bool {
+	switch kind {
+	case AgentRequestKindRequest, AgentRequestKindHandoff, AgentRequestKindEscalation:
 		return true
 	default:
 		return false
