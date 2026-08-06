@@ -1234,6 +1234,25 @@ func (c *KernelHTTPClient) ListAgentRuns(ctx context.Context, filter runtime.Age
 	return runs, nil
 }
 
+func (c *KernelHTTPClient) InspectAgentRunAdmission(ctx context.Context, request runtime.AgentRunClaimRequest) (*runtime.AgentRunAdmissionDecision, error) {
+	query := scopeQuery(request.Scope)
+	setIfPresent(query, "kind", string(request.Kind))
+	setIfPresent(query, "assignedAgentId", request.AssignedAgentID)
+	for key, value := range map[string]int{
+		"maxActiveForAgent": request.MaxActiveForAgent, "maxActiveForOwner": request.MaxActiveForOwner,
+		"maxActiveForObjective": request.MaxActiveForObjective, "maxActiveForConcurrencyKey": request.MaxActiveForConcurrencyKey,
+	} {
+		if value > 0 {
+			query.Set(key, strconv.Itoa(value))
+		}
+	}
+	var decision runtime.AgentRunAdmissionDecision
+	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-runs/admission?"+query.Encode(), nil, "", &decision); err != nil {
+		return nil, err
+	}
+	return &decision, nil
+}
+
 func (c *KernelHTTPClient) GetAgentRun(ctx context.Context, scope runtime.Scope, runID string) (*runtime.AgentRun, error) {
 	query := scopeQuery(scope)
 	var run runtime.AgentRun

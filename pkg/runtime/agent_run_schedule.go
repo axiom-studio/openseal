@@ -60,9 +60,61 @@ type AgentRunClaimRequest struct {
 	MaxActiveForConcurrencyKey int
 }
 
+type AgentRunAdmissionOutcome string
+
+const (
+	AgentRunAdmissionClaimed       AgentRunAdmissionOutcome = "claimed"
+	AgentRunAdmissionReady         AgentRunAdmissionOutcome = "ready"
+	AgentRunAdmissionIdle          AgentRunAdmissionOutcome = "idle"
+	AgentRunAdmissionNotDue        AgentRunAdmissionOutcome = "not_due"
+	AgentRunAdmissionLeaseHeld     AgentRunAdmissionOutcome = "lease_held"
+	AgentRunAdmissionBackpressured AgentRunAdmissionOutcome = "backpressured"
+	AgentRunAdmissionBudgetStopped AgentRunAdmissionOutcome = "budget_stopped"
+)
+
+type AgentRunAdmissionReason string
+
+const (
+	AgentRunAdmissionReasonNotDue                 AgentRunAdmissionReason = "not_due"
+	AgentRunAdmissionReasonLeaseHeld              AgentRunAdmissionReason = "lease_held"
+	AgentRunAdmissionReasonAgentCapacity          AgentRunAdmissionReason = "agent_capacity"
+	AgentRunAdmissionReasonOwnerCapacity          AgentRunAdmissionReason = "owner_capacity"
+	AgentRunAdmissionReasonObjectiveCapacity      AgentRunAdmissionReason = "objective_capacity"
+	AgentRunAdmissionReasonConcurrencyCapacity    AgentRunAdmissionReason = "concurrency_key_capacity"
+	AgentRunAdmissionReasonAttemptBudgetExhausted AgentRunAdmissionReason = "attempt_budget_exhausted"
+)
+
+// AgentRunAdmissionBlock is safe operator-facing evidence for why one ready
+// Run could not be admitted. It contains identifiers and counters, never Run
+// context, prompts, Skill inputs, or credentials.
+type AgentRunAdmissionBlock struct {
+	RunID           string                  `json:"runId"`
+	ObjectiveID     string                  `json:"objectiveId,omitempty"`
+	AssignedAgentID string                  `json:"assignedAgentId,omitempty"`
+	Owner           ObjectiveOwner          `json:"owner"`
+	ConcurrencyKey  string                  `json:"concurrencyKey,omitempty"`
+	Reason          AgentRunAdmissionReason `json:"reason"`
+	Active          int                     `json:"active,omitempty"`
+	Limit           int                     `json:"limit,omitempty"`
+	ReadyAt         *time.Time              `json:"readyAt,omitempty"`
+	LeaseExpiresAt  *time.Time              `json:"leaseExpiresAt,omitempty"`
+}
+
+type AgentRunAdmissionDecision struct {
+	Outcome     AgentRunAdmissionOutcome `json:"outcome"`
+	Run         *AgentRun                `json:"run,omitempty"`
+	Blocks      []AgentRunAdmissionBlock `json:"blocks,omitempty"`
+	NextWakeAt  *time.Time               `json:"nextWakeAt,omitempty"`
+	EvaluatedAt time.Time                `json:"evaluatedAt"`
+}
+
 type AgentRunScheduleStore interface {
 	ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error)
 	RenewAgentRunLease(ctx context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error)
+}
+
+type AgentRunAdmissionStore interface {
+	ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error)
 }
 
 type AgentRunScheduler struct {
@@ -75,6 +127,14 @@ func NewAgentRunScheduler(store AgentRunScheduleStore) *AgentRunScheduler {
 }
 
 func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequest) (*AgentRun, error) {
+	decision, err := s.ClaimNextDecision(ctx, req)
+	if err != nil || decision == nil {
+		return nil, err
+	}
+	return decision.Run, nil
+}
+
+func (s *AgentRunScheduler) ClaimNextDecision(ctx context.Context, req AgentRunClaimRequest) (*AgentRunAdmissionDecision, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("agent run scheduler is not configured")
 	}
@@ -90,12 +150,84 @@ func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequ
 	if req.AgingInterval <= 0 {
 		req.AgingInterval = time.Minute
 	}
-	return s.store.ClaimNextAgentRun(ctx, AgentRunClaim{
+	claim := AgentRunClaim{
 		Scope: req.Scope, Kind: req.Kind, WorkerID: req.WorkerID, AssignedAgentID: req.AssignedAgentID,
 		Now: s.now(), LeaseDuration: req.LeaseDuration, AgingInterval: req.AgingInterval,
 		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForOwner: req.MaxActiveForOwner,
 		MaxActiveForObjective: req.MaxActiveForObjective, MaxActiveForConcurrencyKey: req.MaxActiveForConcurrencyKey,
-	})
+	}
+	if store, ok := s.store.(AgentRunAdmissionStore); ok {
+		return store.ClaimNextAgentRunWithDecision(ctx, claim)
+	}
+	run, err := s.store.ClaimNextAgentRun(ctx, claim)
+	if err != nil {
+		return nil, err
+	}
+	outcome := AgentRunAdmissionIdle
+	if run != nil {
+		outcome = AgentRunAdmissionClaimed
+	}
+	return &AgentRunAdmissionDecision{Outcome: outcome, Run: run, EvaluatedAt: claim.Now}, nil
+}
+
+// Inspect returns the current portfolio admission decision without acquiring a
+// lease. It is an observational projection for operators and user interfaces;
+// only ClaimNextDecision grants execution authority.
+func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimRequest) (*AgentRunAdmissionDecision, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("agent run scheduler is not configured")
+	}
+	portfolio, ok := s.store.(PortfolioStore)
+	if !ok {
+		return nil, errors.New("agent run admission inspection is unavailable")
+	}
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	if req.AgingInterval <= 0 {
+		req.AgingInterval = time.Minute
+	}
+	claim := AgentRunClaim{
+		Scope: req.Scope, Kind: req.Kind, WorkerID: "admission-inspector", Now: s.now(), LeaseDuration: time.Second,
+		AgingInterval: req.AgingInterval, AssignedAgentID: req.AssignedAgentID,
+		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForOwner: req.MaxActiveForOwner,
+		MaxActiveForObjective: req.MaxActiveForObjective, MaxActiveForConcurrencyKey: req.MaxActiveForConcurrencyKey,
+	}
+	if err := claim.Validate(); err != nil {
+		return nil, err
+	}
+	runs := make([]*AgentRun, 0)
+	for offset := 0; ; offset += 500 {
+		page, err := portfolio.ListAgentRuns(ctx, AgentRunFilter{
+			Scope: req.Scope, Kind: req.Kind, AssignedAgentID: req.AssignedAgentID,
+			Statuses: []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusRunning}, Limit: 500, Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, page...)
+		if len(page) < 500 {
+			break
+		}
+	}
+	objectives := make(map[string]*Objective)
+	for offset := 0; ; offset += 500 {
+		page, err := portfolio.ListObjectives(ctx, ObjectiveFilter{Scope: req.Scope, IncludeRetired: true, Limit: 500, Offset: offset})
+		if err != nil {
+			return nil, err
+		}
+		for _, objective := range page {
+			objectives[objective.ID] = objective
+		}
+		if len(page) < 500 {
+			break
+		}
+	}
+	selected, decision := evaluateAgentRunAdmission(runs, objectives, claim)
+	if selected != nil {
+		decision.Run = cloneAgentRun(selected)
+	}
+	return decision, nil
 }
 
 func agentRunOwnerSchedulingKey(owner ObjectiveOwner) string {
@@ -115,6 +247,118 @@ func effectiveObjectiveConcurrencyLimit(runtimeLimit int, objective *Objective) 
 	default:
 		return runtimeLimit
 	}
+}
+
+func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objective, claim AgentRunClaim) (*AgentRun, *AgentRunAdmissionDecision) {
+	decision := &AgentRunAdmissionDecision{Outcome: AgentRunAdmissionIdle, EvaluatedAt: claim.Now}
+	activeByAgent := make(map[string]int)
+	activeByOwner := make(map[string]int)
+	activeByObjective := make(map[string]int)
+	activeByConcurrencyKey := make(map[string]int)
+	for _, run := range runs {
+		if run == nil || run.Scope != claim.Scope || run.Status != AgentRunStatusRunning || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(claim.Now) {
+			continue
+		}
+		activeByAgent[run.AssignedAgentID]++
+		activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
+		activeByObjective[run.ObjectiveID]++
+		activeByConcurrencyKey[run.ConcurrencyKey]++
+	}
+	var selected *AgentRun
+	for _, run := range runs {
+		if run == nil || run.Scope != claim.Scope || claim.Kind != "" && normalizeRunKind(run.Kind) != claim.Kind ||
+			claim.AssignedAgentID != "" && run.AssignedAgentID != claim.AssignedAgentID {
+			continue
+		}
+		base := AgentRunAdmissionBlock{RunID: run.ID, ObjectiveID: run.ObjectiveID, AssignedAgentID: run.AssignedAgentID, Owner: run.Owner, ConcurrencyKey: run.ConcurrencyKey}
+		if run.Status == AgentRunStatusQueued && run.AvailableAt.After(claim.Now) {
+			block := base
+			block.Reason, block.ReadyAt = AgentRunAdmissionReasonNotDue, cloneAdmissionTime(&run.AvailableAt)
+			decision.Blocks = append(decision.Blocks, block)
+			decision.NextWakeAt = earliestTime(decision.NextWakeAt, &run.AvailableAt)
+			continue
+		}
+		if run.Status == AgentRunStatusRunning && run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(claim.Now) {
+			block := base
+			block.Reason, block.LeaseExpiresAt = AgentRunAdmissionReasonLeaseHeld, cloneAdmissionTime(run.LeaseExpiresAt)
+			decision.Blocks = append(decision.Blocks, block)
+			decision.NextWakeAt = earliestTime(decision.NextWakeAt, run.LeaseExpiresAt)
+			continue
+		}
+		if !agentRunEligible(run, claim) {
+			continue
+		}
+		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= claim.MaxActiveForAgent {
+			block := base
+			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonAgentCapacity, activeByAgent[run.AssignedAgentID], claim.MaxActiveForAgent
+			decision.Blocks = append(decision.Blocks, block)
+			continue
+		}
+		if claim.MaxActiveForOwner > 0 && activeByOwner[agentRunOwnerSchedulingKey(run.Owner)] >= claim.MaxActiveForOwner {
+			block := base
+			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonOwnerCapacity, activeByOwner[agentRunOwnerSchedulingKey(run.Owner)], claim.MaxActiveForOwner
+			decision.Blocks = append(decision.Blocks, block)
+			continue
+		}
+		objectiveLimit := effectiveObjectiveConcurrencyLimit(claim.MaxActiveForObjective, objectives[run.ObjectiveID])
+		if objectiveLimit > 0 && run.ObjectiveID != "" && activeByObjective[run.ObjectiveID] >= objectiveLimit {
+			block := base
+			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonObjectiveCapacity, activeByObjective[run.ObjectiveID], objectiveLimit
+			decision.Blocks = append(decision.Blocks, block)
+			continue
+		}
+		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {
+			block := base
+			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonConcurrencyCapacity, activeByConcurrencyKey[run.ConcurrencyKey], claim.MaxActiveForConcurrencyKey
+			decision.Blocks = append(decision.Blocks, block)
+			continue
+		}
+		if selected == nil || agentRunSchedulesBefore(run, selected, claim.Now, claim.AgingInterval) {
+			selected = run
+		}
+	}
+	if selected != nil {
+		decision.Outcome = AgentRunAdmissionReady
+		return selected, decision
+	}
+	hasCapacity, hasNotDue, hasLease := false, false, false
+	for _, block := range decision.Blocks {
+		switch block.Reason {
+		case AgentRunAdmissionReasonAgentCapacity, AgentRunAdmissionReasonOwnerCapacity, AgentRunAdmissionReasonObjectiveCapacity, AgentRunAdmissionReasonConcurrencyCapacity:
+			hasCapacity = true
+		case AgentRunAdmissionReasonNotDue:
+			hasNotDue = true
+		case AgentRunAdmissionReasonLeaseHeld:
+			hasLease = true
+		}
+	}
+	switch {
+	case hasCapacity:
+		decision.Outcome = AgentRunAdmissionBackpressured
+	case hasNotDue:
+		decision.Outcome = AgentRunAdmissionNotDue
+	case hasLease:
+		decision.Outcome = AgentRunAdmissionLeaseHeld
+	}
+	return nil, decision
+}
+
+func earliestTime(current, candidate *time.Time) *time.Time {
+	if candidate == nil {
+		return current
+	}
+	if current == nil || candidate.Before(*current) {
+		return cloneAdmissionTime(candidate)
+	}
+	return current
+}
+
+func cloneAdmissionTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func (s *AgentRunScheduler) RenewLease(ctx context.Context, scope Scope, runID, workerID string, leaseDuration time.Duration) (*AgentRun, error) {

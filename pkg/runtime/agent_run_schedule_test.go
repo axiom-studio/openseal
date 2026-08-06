@@ -245,3 +245,76 @@ func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
 		})
 	}
 }
+
+func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		open func(*testing.T) (KernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "admission-decision.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() { _ = store.Close() }
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store, closeStore := testCase.open(t)
+			defer closeStore()
+			ctx := t.Context()
+			now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
+			scope := Scope{Kind: "tenant", ID: "admission-decision-" + testCase.name}
+			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "autonomous-agent"}
+			portfolio := NewPortfolioService(store)
+			portfolio.now = func() time.Time { return now }
+			objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Bounded", Goal: "Run serially", Status: ObjectiveStatusActive,
+				ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstRunID := ""
+			for _, suffix := range []string{"one", "two"} {
+				run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+					Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: "agent-" + suffix,
+					Goal: "Bounded work " + suffix, Source: RunSourceObjective,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if firstRunID == "" {
+					firstRunID = run.ID
+				}
+			}
+			scheduler := NewAgentRunScheduler(store)
+			scheduler.now = func() time.Time { return now }
+			inspection, err := scheduler.Inspect(ctx, AgentRunClaimRequest{Scope: scope})
+			if err != nil || inspection == nil || inspection.Outcome != AgentRunAdmissionReady || inspection.Run == nil {
+				t.Fatalf("ready inspection = %#v, %v", inspection, err)
+			}
+			stillQueued, err := portfolio.GetAgentRun(ctx, scope, firstRunID)
+			if err != nil || stillQueued.Status != AgentRunStatusQueued || stillQueued.LeaseOwner != "" {
+				t.Fatalf("inspection acquired authority: %#v, %v", stillQueued, err)
+			}
+			if run, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour}); err != nil || run == nil {
+				t.Fatalf("initial claim = %#v, %v", run, err)
+			}
+			decision, err := scheduler.ClaimNextDecision(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
+			if err != nil || decision == nil || decision.Outcome != AgentRunAdmissionBackpressured || decision.Run != nil {
+				t.Fatalf("backpressure decision = %#v, %v", decision, err)
+			}
+			found := false
+			for _, block := range decision.Blocks {
+				if block.Reason == AgentRunAdmissionReasonObjectiveCapacity && block.ObjectiveID == objective.ID && block.Active == 1 && block.Limit == 1 {
+					found = true
+				}
+			}
+			if !found || decision.NextWakeAt == nil || !decision.NextWakeAt.Equal(now.Add(time.Hour)) {
+				t.Fatalf("decision lacks capacity evidence or lease wake: %#v", decision)
+			}
+		})
+	}
+}

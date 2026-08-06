@@ -17,7 +17,7 @@ import (
 const (
 	APIVersion                                 = "agent-kernel/v1"
 	AgentRunsCapabilityID                      = "agent-runs"
-	AgentRunsCapabilityVersion                 = "1"
+	AgentRunsCapabilityVersion                 = "2"
 	ObjectivesCapabilityID                     = "objectives"
 	ObjectivesCapabilityVersion                = "1"
 	RunbooksCapabilityID                       = "runbooks"
@@ -130,6 +130,7 @@ const (
 	OperationApplyUpgrade         = "apply-upgrade"
 	OperationRefine               = "refine"
 	OperationRevoke               = "revoke"
+	OperationInspectAdmission     = "inspect-admission"
 	OperationListVersions         = "list-versions"
 )
 
@@ -451,7 +452,7 @@ func AgentRunsCapability(operations ...string) Capability {
 	if len(operations) == 0 {
 		operations = []string{
 			OperationCreate, OperationGet, OperationList, OperationPause,
-			OperationResume, OperationCancel, OperationIntervene, OperationAudit,
+			OperationResume, OperationCancel, OperationIntervene, OperationAudit, OperationInspectAdmission,
 		}
 	}
 	return Capability{

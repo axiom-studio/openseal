@@ -8,6 +8,14 @@ import (
 )
 
 func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
+	decision, err := s.ClaimNextAgentRunWithDecision(ctx, claim)
+	if err != nil || decision == nil {
+		return nil, err
+	}
+	return decision.Run, nil
+}
+
+func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -33,10 +41,6 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 	}
 	candidates := make([]*AgentRun, 0)
 	objectives := make(map[string]*Objective)
-	activeByAgent := make(map[string]int)
-	activeByOwner := make(map[string]int)
-	activeByObjective := make(map[string]int)
-	activeByConcurrencyKey := make(map[string]int)
 	for rows.Next() {
 		var payload string
 		if err := rows.Scan(&payload); err != nil {
@@ -49,20 +53,6 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 			return nil, err
 		}
 		candidates = append(candidates, run)
-		if run.Status == AgentRunStatusRunning && run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(claim.Now) {
-			if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" {
-				activeByAgent[run.AssignedAgentID]++
-			}
-			if claim.MaxActiveForOwner > 0 {
-				activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
-			}
-			if run.ObjectiveID != "" {
-				activeByObjective[run.ObjectiveID]++
-			}
-			if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" {
-				activeByConcurrencyKey[run.ConcurrencyKey]++
-			}
-		}
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -87,34 +77,13 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 	if err := objectiveRows.Close(); err != nil {
 		return nil, err
 	}
-	var selected *AgentRun
-	for _, run := range candidates {
-		if !agentRunEligible(run, claim) {
-			continue
-		}
-		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= claim.MaxActiveForAgent {
-			continue
-		}
-		if claim.MaxActiveForOwner > 0 && activeByOwner[agentRunOwnerSchedulingKey(run.Owner)] >= claim.MaxActiveForOwner {
-			continue
-		}
-		objectiveLimit := effectiveObjectiveConcurrencyLimit(claim.MaxActiveForObjective, objectives[run.ObjectiveID])
-		if objectiveLimit > 0 && run.ObjectiveID != "" && activeByObjective[run.ObjectiveID] >= objectiveLimit {
-			continue
-		}
-		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {
-			continue
-		}
-		if selected == nil || agentRunSchedulesBefore(run, selected, claim.Now, claim.AgingInterval) {
-			selected = run
-		}
-	}
+	selected, decision := evaluateAgentRunAdmission(candidates, objectives, claim)
 	if selected == nil {
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 			return nil, err
 		}
 		committed = true
-		return nil, nil
+		return decision, nil
 	}
 	previousRevision := selected.Revision
 	if err := applyAgentRunClaim(selected, claim); err != nil {
@@ -144,7 +113,16 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 		return nil, err
 	}
 	committed = true
-	return selected, nil
+	decision.Run = selected
+	decision.Outcome = AgentRunAdmissionClaimed
+	if selected.Status == AgentRunStatusPaused && selected.BudgetState == BudgetStateExhausted {
+		decision.Outcome = AgentRunAdmissionBudgetStopped
+		decision.Blocks = []AgentRunAdmissionBlock{{
+			RunID: selected.ID, ObjectiveID: selected.ObjectiveID, AssignedAgentID: selected.AssignedAgentID,
+			Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: AgentRunAdmissionReasonAttemptBudgetExhausted,
+		}}
+	}
+	return decision, nil
 }
 
 func (s *SQLiteStore) RenewAgentRunLease(ctx context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error) {
