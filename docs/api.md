@@ -166,10 +166,13 @@ operations and do not create daemon state.
 can avoid HTTP and use `pkg/openseal.Engine` directly. The capability document
 still defines the contract graphical and terminal clients should render.
 
-Portable Agent bundles are available through the public Go facade:
+Portable Agent and whole-workforce bundles are available through the public Go
+facade. Whole-workforce export closes Agent, Team, Objective, and Runbook
+references before signing:
 
 ```go
 bundle, err := openseal.ExportAgentBundle(exportRequest)
+workforce, err := openseal.ExportWorkforceBundle(workforceExportRequest)
 preview, err := openseal.PreviewAgentBundleInstallation(bundle, placement)
 plan, err := openseal.CompileAgentBundleInstallation(
     openseal.AgentBundleInstallationRequest{

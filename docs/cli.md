@@ -9,6 +9,7 @@ openseal daemon    # start the durable daemon
 openseal run       # execute one HCL workflow directly
 openseal validate  # validate an HCL workflow
 openseal workflow  # create an HCL workflow skeleton
+openseal bundle    # inspect portable workforce artifacts
 openseal version
 openseal help
 ```
@@ -16,6 +17,19 @@ openseal help
 The command line does not expose direct CRUD commands for Agents or Teams.
 Compose and operate them through the prompt-first TUI, the versioned API, or
 the public Go facade.
+
+## `openseal bundle`
+
+```text
+openseal bundle validate <path>
+openseal bundle inspect <path>
+openseal bundle diff <from-path> <to-path>
+openseal bundle plan-upgrade <current-path> <target-path>
+```
+
+These commands decode the strict YAML format and emit JSON. They never import
+resources or resolve target credentials. See [Portable workforce
+bundles](workforce-bundles.md) for trust and installation semantics.
 
 ## `openseal tui`
 
