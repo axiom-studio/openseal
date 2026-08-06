@@ -167,3 +167,81 @@ func TestPortfolioClaimLimitsOwnerAndObjectiveAcrossAssignedAgents(t *testing.T)
 		})
 	}
 }
+
+func TestObjectiveExecutionPolicyImmediatelyGovernsQueuedWork(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		open func(*testing.T) (KernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-policy.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() { _ = store.Close() }
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store, closeStore := testCase.open(t)
+			defer closeStore()
+			ctx := t.Context()
+			scope := Scope{Kind: "tenant", ID: "objective-policy-" + testCase.name}
+			owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "portfolio-team"}
+			now := time.Date(2026, 8, 7, 8, 0, 0, 0, time.UTC)
+			portfolio := NewPortfolioService(store)
+			portfolio.now = func() time.Time { return now }
+			limited, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Primary", Goal: "Ship primary work", Status: ObjectiveStatusActive,
+				ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			independent, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Independent", Goal: "Keep independent work moving", Status: ObjectiveStatusActive,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			create := func(objective *Objective, agent string, priority int) *AgentRun {
+				t.Helper()
+				run, createErr := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+					Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: agent,
+					Goal: "Work on " + objective.Title, Source: RunSourceObjective, Priority: priority,
+				})
+				if createErr != nil {
+					t.Fatal(createErr)
+				}
+				return run
+			}
+			first := create(limited, "agent-one", 10)
+			second := create(limited, "agent-two", 9)
+			other := create(independent, "agent-three", 1)
+			claim := AgentRunClaim{Scope: scope, WorkerID: "worker-one", Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute}
+			claimed, err := store.ClaimNextAgentRun(ctx, claim)
+			if err != nil || claimed == nil || claimed.ID != first.ID {
+				t.Fatalf("first claim = %#v, %v", claimed, err)
+			}
+			claim.WorkerID = "worker-two"
+			claimed, err = store.ClaimNextAgentRun(ctx, claim)
+			if err != nil || claimed == nil || claimed.ID != other.ID {
+				t.Fatalf("policy did not backpressure the second Objective Run: %#v, %v", claimed, err)
+			}
+
+			limited, err = portfolio.UpdateObjective(ctx, scope, limited.ID, UpdateObjectiveRequest{
+				ExpectedRevision: limited.Revision,
+				ExecutionPolicy:  &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 2},
+				Summary:          "Increase Objective concurrency",
+			})
+			if err != nil || limited.ExecutionPolicy.MaximumConcurrentRuns != 2 {
+				t.Fatalf("update policy = %#v, %v", limited, err)
+			}
+			claim.WorkerID = "worker-three"
+			claimed, err = store.ClaimNextAgentRun(ctx, claim)
+			if err != nil || claimed == nil || claimed.ID != second.ID {
+				t.Fatalf("amended policy did not admit existing queued work: %#v, %v", claimed, err)
+			}
+		})
+	}
+}

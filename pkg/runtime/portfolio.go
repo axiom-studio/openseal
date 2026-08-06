@@ -71,23 +71,42 @@ const (
 )
 
 type Objective struct {
-	ID                  string                  `json:"id"`
-	Scope               Scope                   `json:"scope"`
-	Owner               ObjectiveOwner          `json:"owner"`
-	Title               string                  `json:"title"`
-	Goal                string                  `json:"goal"`
-	Status              ObjectiveStatus         `json:"status"`
-	Priority            int                     `json:"priority"`
-	Budget              *BudgetPolicy           `json:"budget,omitempty"`
-	BudgetAllocations   map[string]BudgetPolicy `json:"budgetAllocations,omitempty"`
-	Constraints         map[string]interface{}  `json:"constraints,omitempty"`
-	SuccessCriteria     map[string]interface{}  `json:"successCriteria,omitempty"`
-	ProgressSummary     string                  `json:"progressSummary,omitempty"`
-	Revision            int64                   `json:"revision"`
-	CreatedAt           time.Time               `json:"createdAt"`
-	UpdatedAt           time.Time               `json:"updatedAt"`
-	IdempotencyKeyHash  string                  `json:"idempotencyKeyHash,omitempty"`
-	CreationFingerprint string                  `json:"creationFingerprint,omitempty"`
+	ID                  string                    `json:"id"`
+	Scope               Scope                     `json:"scope"`
+	Owner               ObjectiveOwner            `json:"owner"`
+	Title               string                    `json:"title"`
+	Goal                string                    `json:"goal"`
+	Status              ObjectiveStatus           `json:"status"`
+	Priority            int                       `json:"priority"`
+	ExecutionPolicy     *ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+	Budget              *BudgetPolicy             `json:"budget,omitempty"`
+	BudgetAllocations   map[string]BudgetPolicy   `json:"budgetAllocations,omitempty"`
+	Constraints         map[string]interface{}    `json:"constraints,omitempty"`
+	SuccessCriteria     map[string]interface{}    `json:"successCriteria,omitempty"`
+	ProgressSummary     string                    `json:"progressSummary,omitempty"`
+	Revision            int64                     `json:"revision"`
+	CreatedAt           time.Time                 `json:"createdAt"`
+	UpdatedAt           time.Time                 `json:"updatedAt"`
+	IdempotencyKeyHash  string                    `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint string                    `json:"creationFingerprint,omitempty"`
+}
+
+// ObjectiveExecutionPolicy is the durable admission policy for work owned by
+// an Objective. A nil policy inherits the embedding runtime's portfolio
+// defaults; an explicit zero maximum means the Objective itself is unbounded
+// while still respecting stricter owner, Agent, and runtime ceilings.
+type ObjectiveExecutionPolicy struct {
+	MaximumConcurrentRuns int `json:"maximumConcurrentRuns"`
+}
+
+func (p *ObjectiveExecutionPolicy) Validate() error {
+	if p == nil {
+		return nil
+	}
+	if p.MaximumConcurrentRuns < 0 {
+		return errors.New("objective maximum concurrent runs cannot be negative")
+	}
+	return nil
 }
 
 func (o *Objective) Validate() error {
@@ -105,6 +124,9 @@ func (o *Objective) Validate() error {
 	}
 	if o.Priority < 0 {
 		return errors.New("objective priority cannot be negative")
+	}
+	if err := o.ExecutionPolicy.Validate(); err != nil {
+		return err
 	}
 	if !validObjectiveStatus(o.Status) {
 		return errors.New("objective status is invalid")
@@ -472,6 +494,7 @@ type CreateObjectiveRequest struct {
 	Goal            string
 	Status          ObjectiveStatus
 	Priority        int
+	ExecutionPolicy *ObjectiveExecutionPolicy
 	Budget          *BudgetPolicy
 	Constraints     map[string]interface{}
 	SuccessCriteria map[string]interface{}
@@ -486,6 +509,7 @@ type UpdateObjectiveRequest struct {
 	Goal             *string
 	Status           *ObjectiveStatus
 	Priority         *int
+	ExecutionPolicy  *ObjectiveExecutionPolicy
 	Budget           *BudgetPolicy
 	Constraints      map[string]interface{}
 	SuccessCriteria  map[string]interface{}
@@ -576,7 +600,7 @@ func (s *PortfolioService) CreateObjectiveIdempotent(ctx context.Context, req Cr
 	objective := &Objective{
 		ID: objectiveID, Scope: req.Scope, Owner: req.Owner, Title: req.Title,
 		Goal: req.Goal, Status: status, Priority: req.Priority,
-		Budget: cloneBudgetPolicy(req.Budget), Constraints: req.Constraints, SuccessCriteria: req.SuccessCriteria,
+		ExecutionPolicy: cloneObjectiveExecutionPolicy(req.ExecutionPolicy), Budget: cloneBudgetPolicy(req.Budget), Constraints: req.Constraints, SuccessCriteria: req.SuccessCriteria,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, CreationFingerprint: fingerprint,
 	}
 	if key != "" {
@@ -879,6 +903,9 @@ func applyObjectiveUpdate(objective *Objective, req UpdateObjectiveRequest) {
 	if req.Priority != nil {
 		objective.Priority = *req.Priority
 	}
+	if req.ExecutionPolicy != nil {
+		objective.ExecutionPolicy = cloneObjectiveExecutionPolicy(req.ExecutionPolicy)
+	}
 	if req.Budget != nil {
 		objective.Budget = cloneBudgetPolicy(req.Budget)
 	}
@@ -914,16 +941,17 @@ func canTransitionObjective(from, to ObjectiveStatus) bool {
 
 func objectiveCreationFingerprint(req CreateObjectiveRequest) (string, error) {
 	payload := struct {
-		Scope           Scope                  `json:"scope"`
-		Owner           ObjectiveOwner         `json:"owner"`
-		Title           string                 `json:"title"`
-		Goal            string                 `json:"goal"`
-		Status          ObjectiveStatus        `json:"status"`
-		Priority        int                    `json:"priority"`
-		Budget          *BudgetPolicy          `json:"budget,omitempty"`
-		Constraints     map[string]interface{} `json:"constraints,omitempty"`
-		SuccessCriteria map[string]interface{} `json:"successCriteria,omitempty"`
-	}{req.Scope, req.Owner, req.Title, req.Goal, req.Status, req.Priority,
+		Scope           Scope                     `json:"scope"`
+		Owner           ObjectiveOwner            `json:"owner"`
+		Title           string                    `json:"title"`
+		Goal            string                    `json:"goal"`
+		Status          ObjectiveStatus           `json:"status"`
+		Priority        int                       `json:"priority"`
+		ExecutionPolicy *ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+		Budget          *BudgetPolicy             `json:"budget,omitempty"`
+		Constraints     map[string]interface{}    `json:"constraints,omitempty"`
+		SuccessCriteria map[string]interface{}    `json:"successCriteria,omitempty"`
+	}{req.Scope, req.Owner, req.Title, req.Goal, req.Status, req.Priority, req.ExecutionPolicy,
 		req.Budget, req.Constraints, req.SuccessCriteria}
 	if payload.Status == "" {
 		payload.Status = ObjectiveStatusDraft

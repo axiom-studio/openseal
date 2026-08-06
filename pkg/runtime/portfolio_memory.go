@@ -289,6 +289,14 @@ func cloneObjective(in *Objective) *Objective {
 	return &out
 }
 
+func cloneObjectiveExecutionPolicy(in *ObjectiveExecutionPolicy) *ObjectiveExecutionPolicy {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
 func cloneAgentRun(in *AgentRun) *AgentRun {
 	if in == nil {
 		return nil

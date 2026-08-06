@@ -12,7 +12,7 @@ import (
 
 func TestObjectiveManagementSkillVersionsRunbookOnlyContract(t *testing.T) {
 	definition := ObjectiveManagementSkill()
-	if definition.Version != "1.0.3" {
+	if definition.Version != "1.1.0" {
 		t.Fatalf("Objective management Skill version = %q", definition.Version)
 	}
 	for _, actionName := range []string{ObjectiveActionCreate, ObjectiveActionUpdate} {
@@ -23,6 +23,10 @@ func TestObjectiveManagementSkillVersionsRunbookOnlyContract(t *testing.T) {
 		}
 		if _, exists := properties["eventRules"]; exists {
 			t.Fatalf("%s action still exposes Objective event rules", actionName)
+		}
+		executionPolicy, ok := properties["executionPolicy"].(map[string]interface{})
+		if !ok || executionPolicy["additionalProperties"] != false {
+			t.Fatalf("%s action does not expose a strict execution policy: %#v", actionName, executionPolicy)
 		}
 	}
 }

@@ -13,7 +13,7 @@ import (
 
 const (
 	ObjectiveManagementSkillID      = "openseal.objectives"
-	ObjectiveManagementSkillVersion = "1.0.3"
+	ObjectiveManagementSkillVersion = "1.1.0"
 	ObjectiveActionCreate           = "create"
 	ObjectiveActionUpdate           = "update"
 	ObjectiveActionPause            = "pause"
@@ -70,9 +70,16 @@ func objectiveMutableSchema() map[string]interface{} {
 		"title":            map[string]interface{}{"type": "string", "minLength": 1},
 		"goal":             map[string]interface{}{"type": "string", "minLength": 1},
 		"priority":         map[string]interface{}{"type": "integer", "minimum": 0},
-		"budget":           map[string]interface{}{"type": "object"},
-		"constraints":      map[string]interface{}{"type": "object"},
-		"successCriteria":  map[string]interface{}{"type": "object"},
+		"executionPolicy": map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{
+				"maximumConcurrentRuns": map[string]interface{}{"type": "integer", "minimum": 0},
+			},
+			"required": []interface{}{"maximumConcurrentRuns"},
+		},
+		"budget":          map[string]interface{}{"type": "object"},
+		"constraints":     map[string]interface{}{"type": "object"},
+		"successCriteria": map[string]interface{}{"type": "object"},
 	}
 }
 
@@ -176,7 +183,7 @@ func (v *ObjectiveActionValidator) ValidateActionProposal(ctx context.Context, i
 	}
 	preview["objectiveId"] = objective.ID
 	preview["expectedRevision"] = expectedRevision
-	preview["current"] = map[string]interface{}{"revision": objective.Revision, "title": objective.Title, "goal": objective.Goal, "status": objective.Status, "priority": objective.Priority}
+	preview["current"] = map[string]interface{}{"revision": objective.Revision, "title": objective.Title, "goal": objective.Goal, "status": objective.Status, "priority": objective.Priority, "executionPolicy": objective.ExecutionPolicy}
 	if input.Bound.Action.Name == ObjectiveActionPause {
 		preview["changes"] = map[string]interface{}{"status": ObjectiveStatusPaused}
 	}
@@ -230,7 +237,7 @@ func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input Ac
 		}
 		result, err := service.CreateObjectiveIdempotent(ctx, CreateObjectiveRequest{
 			Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: args.Goal, Status: ObjectiveStatusDraft, Priority: args.Priority,
-			Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria,
+			ExecutionPolicy: args.ExecutionPolicy, Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria,
 			IdempotencyKey: input.Call.IdempotencyKey, Actor: actor, Visibility: ActivityVisibilityScope,
 		})
 		if err != nil {
@@ -274,33 +281,35 @@ func (d *ObjectiveActionDispatcher) DispatchAction(ctx context.Context, input Ac
 }
 
 type objectiveCreateArguments struct {
-	Title           string                 `json:"title"`
-	Goal            string                 `json:"goal"`
-	Priority        int                    `json:"priority,omitempty"`
-	Budget          *BudgetPolicy          `json:"budget,omitempty"`
-	Constraints     map[string]interface{} `json:"constraints,omitempty"`
-	SuccessCriteria map[string]interface{} `json:"successCriteria,omitempty"`
+	Title           string                    `json:"title"`
+	Goal            string                    `json:"goal"`
+	Priority        int                       `json:"priority,omitempty"`
+	ExecutionPolicy *ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+	Budget          *BudgetPolicy             `json:"budget,omitempty"`
+	Constraints     map[string]interface{}    `json:"constraints,omitempty"`
+	SuccessCriteria map[string]interface{}    `json:"successCriteria,omitempty"`
 }
 
 type objectiveUpdateArguments struct {
-	ObjectiveID      string                 `json:"objectiveId"`
-	ExpectedRevision int64                  `json:"expectedRevision"`
-	Title            *string                `json:"title,omitempty"`
-	Goal             *string                `json:"goal,omitempty"`
-	Priority         *int                   `json:"priority,omitempty"`
-	Budget           *BudgetPolicy          `json:"budget,omitempty"`
-	Constraints      map[string]interface{} `json:"constraints,omitempty"`
-	SuccessCriteria  map[string]interface{} `json:"successCriteria,omitempty"`
+	ObjectiveID      string                    `json:"objectiveId"`
+	ExpectedRevision int64                     `json:"expectedRevision"`
+	Title            *string                   `json:"title,omitempty"`
+	Goal             *string                   `json:"goal,omitempty"`
+	Priority         *int                      `json:"priority,omitempty"`
+	ExecutionPolicy  *ObjectiveExecutionPolicy `json:"executionPolicy,omitempty"`
+	Budget           *BudgetPolicy             `json:"budget,omitempty"`
+	Constraints      map[string]interface{}    `json:"constraints,omitempty"`
+	SuccessCriteria  map[string]interface{}    `json:"successCriteria,omitempty"`
 }
 
 func (a objectiveUpdateArguments) hasChanges() bool {
-	return a.Title != nil || a.Goal != nil || a.Priority != nil || a.Budget != nil || a.Constraints != nil || a.SuccessCriteria != nil
+	return a.Title != nil || a.Goal != nil || a.Priority != nil || a.ExecutionPolicy != nil || a.Budget != nil || a.Constraints != nil || a.SuccessCriteria != nil
 }
 
 func (a objectiveUpdateArguments) updateRequest(actor ActivityActor) UpdateObjectiveRequest {
 	return UpdateObjectiveRequest{
 		ExpectedRevision: a.ExpectedRevision, Title: a.Title, Goal: a.Goal, Priority: a.Priority,
-		Budget: a.Budget, Constraints: a.Constraints, SuccessCriteria: a.SuccessCriteria,
+		ExecutionPolicy: a.ExecutionPolicy, Budget: a.Budget, Constraints: a.Constraints, SuccessCriteria: a.SuccessCriteria,
 		Actor: actor, Visibility: ActivityVisibilityScope, Summary: "Objective changed through conversation",
 	}
 }
@@ -310,7 +319,7 @@ func validateObjectiveCreateArguments(arguments map[string]interface{}) error {
 	if err := decodeObjectiveArguments(arguments, &args); err != nil {
 		return err
 	}
-	probe := &Objective{Scope: Scope{Kind: "validation", ID: "validation"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "validation"}, Title: args.Title, Goal: args.Goal, Status: ObjectiveStatusDraft, Priority: args.Priority, Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria, Revision: 1}
+	probe := &Objective{Scope: Scope{Kind: "validation", ID: "validation"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "validation"}, Title: args.Title, Goal: args.Goal, Status: ObjectiveStatusDraft, Priority: args.Priority, ExecutionPolicy: args.ExecutionPolicy, Budget: args.Budget, Constraints: args.Constraints, SuccessCriteria: args.SuccessCriteria, Revision: 1}
 	return probe.Validate()
 }
 
@@ -346,7 +355,7 @@ func objectiveActionAlreadyApplied(objective *Objective, args objectiveUpdateArg
 		return objective.Status == ObjectiveStatusPaused
 	}
 	return (args.Title == nil || objective.Title == *args.Title) && (args.Goal == nil || objective.Goal == *args.Goal) &&
-		(args.Priority == nil || objective.Priority == *args.Priority) && (args.Budget == nil || reflect.DeepEqual(objective.Budget, args.Budget)) &&
+		(args.Priority == nil || objective.Priority == *args.Priority) && (args.ExecutionPolicy == nil || reflect.DeepEqual(objective.ExecutionPolicy, args.ExecutionPolicy)) && (args.Budget == nil || reflect.DeepEqual(objective.Budget, args.Budget)) &&
 		(args.Constraints == nil || reflect.DeepEqual(objective.Constraints, args.Constraints)) && (args.SuccessCriteria == nil || reflect.DeepEqual(objective.SuccessCriteria, args.SuccessCriteria))
 }
 
