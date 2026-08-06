@@ -17,6 +17,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runbook"
@@ -1057,5 +1058,51 @@ func TestKernelHTTPClientMapsClawHubLifecycleContract(t *testing.T) {
 	wantPath := "POST /api/v1/clawhub/catalog/@acme%2Fresearch/install"
 	if len(requests) != 4 || requests[0] != wantPath {
 		t.Fatalf("requests=%#v want first %q", requests, wantPath)
+	}
+}
+
+func TestKernelHTTPClientMapsWorkforceBundleContract(t *testing.T) {
+	requests := make([]string, 0, 6)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path+" key="+r.Header.Get("Idempotency-Key"))
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/workforce-bundles/validate":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"valid": true, "digest": "sha256:test"})
+		case "/api/v1/workforce-bundles/inspect":
+			_ = json.NewEncoder(w).Encode(kernelbundle.Inspection{ID: "workforce", Digest: "sha256:test", Agents: 1})
+		case "/api/v1/workforce-bundles/compare":
+			_ = json.NewEncoder(w).Encode(kernelbundle.Diff{FromDigest: "sha256:one", ToDigest: "sha256:two"})
+		case "/api/v1/workforce-bundles/installation-preview":
+			_ = json.NewEncoder(w).Encode(kernelbundle.InstallationPreview{BundleDigest: "sha256:test", Ready: true})
+		case "/api/v1/workforce-bundles/upgrade-plan":
+			_ = json.NewEncoder(w).Encode(kernelbundle.UpgradePlan{FromDigest: "sha256:one", ToDigest: "sha256:two", IdempotencyKey: "upgrade"})
+		case "/api/v1/workforce-bundles/install":
+			_ = json.NewEncoder(w).Encode(kernelbundle.InstallationReceipt{BundleID: "workforce", BundleDigest: "sha256:test", PlanDigest: "sha256:plan", IdempotencyKey: r.Header.Get("Idempotency-Key")})
+		}
+	}))
+	defer api.Close()
+	client := NewKernelHTTPClient(api.URL, api.Client())
+	ctx, artifact := context.Background(), &kernelbundle.Bundle{}
+	if err := client.ValidateWorkforceBundle(ctx, artifact); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := client.InspectWorkforceBundle(ctx, artifact); err != nil || result.Agents != 1 {
+		t.Fatalf("inspect=%#v err=%v", result, err)
+	}
+	if result, err := client.CompareWorkforceBundles(ctx, artifact, artifact); err != nil || result.ToDigest != "sha256:two" {
+		t.Fatalf("compare=%#v err=%v", result, err)
+	}
+	if result, err := client.PreviewWorkforceBundleInstallation(ctx, artifact, kernelbundle.Placement{}); err != nil || !result.Ready {
+		t.Fatalf("preview=%#v err=%v", result, err)
+	}
+	if result, err := client.PlanWorkforceBundleUpgrade(ctx, artifact, artifact); err != nil || result.IdempotencyKey != "upgrade" {
+		t.Fatalf("upgrade=%#v err=%v", result, err)
+	}
+	if result, err := client.InstallWorkforceBundle(ctx, artifact, capability.ScopeReference{Kind: "tenant", ID: "one"}, kernelbundle.Placement{}, "Import", "import-one"); err != nil || result.IdempotencyKey != "import-one" {
+		t.Fatalf("install=%#v err=%v", result, err)
+	}
+	if len(requests) != 6 || requests[5] != "POST /api/v1/workforce-bundles/install key=import-one" {
+		t.Fatalf("requests=%#v", requests)
 	}
 }

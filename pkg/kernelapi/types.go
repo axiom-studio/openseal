@@ -42,6 +42,8 @@ const (
 	WorkforceAuthoringCapabilityVersion        = "12"
 	WorkforceExecutionTargetsCapabilityID      = "workforce-execution-targets"
 	WorkforceExecutionTargetsCapabilityVersion = "1"
+	WorkforceBundlesCapabilityID               = "workforce-bundles"
+	WorkforceBundlesCapabilityVersion          = "1"
 	ClawHubLifecycleCapabilityID               = "clawhub-lifecycle"
 	ClawHubLifecycleCapabilityVersion          = clawhub.LifecycleAPIVersion
 	AgentDefinitionsCapabilityID               = "agent-definitions"
@@ -128,6 +130,11 @@ const (
 	OperationDisable              = "disable"
 	OperationPlanUpgrade          = "plan-upgrade"
 	OperationApplyUpgrade         = "apply-upgrade"
+	OperationValidate             = "validate"
+	OperationInspect              = "inspect"
+	OperationCompare              = "compare"
+	OperationPreviewInstallation  = "preview-installation"
+	OperationInstall              = "install"
 	OperationRefine               = "refine"
 	OperationRevoke               = "revoke"
 	OperationInspectAdmission     = "inspect-admission"
@@ -707,6 +714,14 @@ func WorkforceExecutionTargetsCapability(management bool) Capability {
 		ID: WorkforceExecutionTargetsCapabilityID, Version: WorkforceExecutionTargetsCapabilityVersion,
 		Available: true, Operations: operations,
 	}
+}
+
+func WorkforceBundlesCapability(installation bool) Capability {
+	operations := []string{OperationValidate, OperationInspect, OperationCompare, OperationPreviewInstallation, OperationPlanUpgrade}
+	if installation {
+		operations = append(operations, OperationInstall)
+	}
+	return Capability{ID: WorkforceBundlesCapabilityID, Version: WorkforceBundlesCapabilityVersion, Available: true, Operations: operations}
 }
 
 func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {

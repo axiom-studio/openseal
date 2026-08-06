@@ -15,6 +15,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -108,6 +109,19 @@ type RunbookExecutionAuditClient interface {
 
 var _ RunbookExecutionAuditClient = (*KernelHTTPClient)(nil)
 
+// WorkforceBundleClient is capability-gated by workforce-bundles/v1. Keeping
+// it additive lets older kernels and deliberately minimal hosts remain valid.
+type WorkforceBundleClient interface {
+	ValidateWorkforceBundle(context.Context, *kernelbundle.Bundle) error
+	InspectWorkforceBundle(context.Context, *kernelbundle.Bundle) (*kernelbundle.Inspection, error)
+	CompareWorkforceBundles(context.Context, *kernelbundle.Bundle, *kernelbundle.Bundle) (*kernelbundle.Diff, error)
+	PreviewWorkforceBundleInstallation(context.Context, *kernelbundle.Bundle, kernelbundle.Placement) (*kernelbundle.InstallationPreview, error)
+	PlanWorkforceBundleUpgrade(context.Context, *kernelbundle.Bundle, *kernelbundle.Bundle) (*kernelbundle.UpgradePlan, error)
+	InstallWorkforceBundle(context.Context, *kernelbundle.Bundle, capability.ScopeReference, kernelbundle.Placement, string, string) (*kernelbundle.InstallationReceipt, error)
+}
+
+var _ WorkforceBundleClient = (*KernelHTTPClient)(nil)
+
 // ExternalConversationGatewayClient is the narrow lifecycle surface used by
 // hosts that advertise conversation-gateways/v2. Keeping it separate from the
 // base KernelClient lets older or read-only embedding surfaces remain honest.
@@ -138,6 +152,77 @@ type ClawHubClient interface {
 	UpdateClawHubSkill(context.Context, string) (*clawhub.LifecycleResult, error)
 	UpdateAllClawHubSkills(context.Context) (*clawhub.LifecycleBatchResult, error)
 	UninstallClawHubSkill(context.Context, string) (*clawhub.LifecycleResult, error)
+}
+
+func (c *KernelHTTPClient) ValidateWorkforceBundle(ctx context.Context, bundle *kernelbundle.Bundle) error {
+	var result struct {
+		Valid bool `json:"valid"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/workforce-bundles/validate", bundle, "", &result); err != nil {
+		return err
+	}
+	if !result.Valid {
+		return errors.New("kernel did not validate workforce bundle")
+	}
+	return nil
+}
+
+func (c *KernelHTTPClient) InspectWorkforceBundle(ctx context.Context, bundle *kernelbundle.Bundle) (*kernelbundle.Inspection, error) {
+	var result kernelbundle.Inspection
+	if err := c.do(ctx, http.MethodPost, "/api/v1/workforce-bundles/inspect", bundle, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) CompareWorkforceBundles(ctx context.Context, from, to *kernelbundle.Bundle) (*kernelbundle.Diff, error) {
+	var result kernelbundle.Diff
+	payload := struct {
+		From *kernelbundle.Bundle `json:"from"`
+		To   *kernelbundle.Bundle `json:"to"`
+	}{From: from, To: to}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/workforce-bundles/compare", payload, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) PreviewWorkforceBundleInstallation(ctx context.Context, bundle *kernelbundle.Bundle, placement kernelbundle.Placement) (*kernelbundle.InstallationPreview, error) {
+	var result kernelbundle.InstallationPreview
+	payload := struct {
+		Bundle    *kernelbundle.Bundle   `json:"bundle"`
+		Placement kernelbundle.Placement `json:"placement"`
+	}{Bundle: bundle, Placement: placement}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/workforce-bundles/installation-preview", payload, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) PlanWorkforceBundleUpgrade(ctx context.Context, current, target *kernelbundle.Bundle) (*kernelbundle.UpgradePlan, error) {
+	var result kernelbundle.UpgradePlan
+	payload := struct {
+		Current *kernelbundle.Bundle `json:"current"`
+		Target  *kernelbundle.Bundle `json:"target"`
+	}{Current: current, Target: target}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/workforce-bundles/upgrade-plan", payload, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) InstallWorkforceBundle(ctx context.Context, bundle *kernelbundle.Bundle, scope capability.ScopeReference, placement kernelbundle.Placement, reason, idempotencyKey string) (*kernelbundle.InstallationReceipt, error) {
+	var result kernelbundle.InstallationReceipt
+	payload := struct {
+		Bundle    *kernelbundle.Bundle      `json:"bundle"`
+		Scope     capability.ScopeReference `json:"scope"`
+		Placement kernelbundle.Placement    `json:"placement"`
+		Reason    string                    `json:"reason"`
+	}{Bundle: bundle, Scope: scope, Placement: placement, Reason: reason}
+	if err := c.do(ctx, http.MethodPost, "/api/v1/workforce-bundles/install", payload, idempotencyKey, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // WorkforceRefinementClient lets narrower embedding surfaces depend only on
