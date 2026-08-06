@@ -48,6 +48,7 @@ type InstallationPreview struct {
 
 type InstallationRequest struct {
 	Bundle         *Bundle
+	TrustPolicy    TrustPolicy
 	Scope          capability.ScopeReference
 	Placement      Placement
 	ActorType      string
@@ -148,6 +149,9 @@ func PreviewInstallation(bundle *Bundle, placement Placement) (*InstallationPrev
 }
 
 func CompileInstallation(request InstallationRequest) (*InstallationPlan, error) {
+	if _, err := Verify(request.Bundle, request.TrustPolicy); err != nil {
+		return nil, fmt.Errorf("verify workforce bundle installation: %w", err)
+	}
 	preview, err := PreviewInstallation(request.Bundle, request.Placement)
 	if err != nil {
 		return nil, err

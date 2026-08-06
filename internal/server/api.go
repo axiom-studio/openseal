@@ -14,6 +14,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/v1/capabilities", s.handleCapabilities)
 	s.mux.HandleFunc("GET /api/v1/activity", s.handleListActivity)
+	s.mux.HandleFunc("POST /api/v1/workforce-bundles/validate", s.handleValidateWorkforceBundle)
+	s.mux.HandleFunc("POST /api/v1/workforce-bundles/inspect", s.handleInspectWorkforceBundle)
+	s.mux.HandleFunc("POST /api/v1/workforce-bundles/compare", s.handleCompareWorkforceBundles)
+	s.mux.HandleFunc("POST /api/v1/workforce-bundles/installation-preview", s.handlePreviewWorkforceBundleInstallation)
+	s.mux.HandleFunc("POST /api/v1/workforce-bundles/upgrade-plan", s.handlePlanWorkforceBundleUpgrade)
+	s.mux.HandleFunc("POST /api/v1/workforce-bundles/install", s.handleInstallWorkforceBundle)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/compile", s.handleCompileWorkforce)
 	s.mux.HandleFunc("GET /api/v1/authoring/workforce/skills", s.handleSearchWorkforceSkills)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets", s.handleCreateWorkforceChangeSet)
@@ -164,7 +170,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	if s.agentRunCreation != nil {
 		runOperations = append(runOperations, kernelapi.OperationCreate)
 	}
-	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability()}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability(), kernelapi.WorkforceBundlesCapability(s.workforceBundles != nil && s.workforceBundleActor != "")}
 	if s.sourcePolicies != nil {
 		capabilities = append(capabilities, kernelapi.SourcePoliciesCapability())
 	}

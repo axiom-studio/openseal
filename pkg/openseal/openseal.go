@@ -1369,6 +1369,10 @@ func WorkforceExecutionTargetsCapability(management bool) KernelCapability {
 	return kernelapi.WorkforceExecutionTargetsCapability(management)
 }
 
+func WorkforceBundlesCapability(installation bool) KernelCapability {
+	return kernelapi.WorkforceBundlesCapability(installation)
+}
+
 // NewKernelCapabilityDocument composes the exact capability envelope consumed
 // by OpenSeal's TUI and embedding-host user interfaces.
 func NewKernelCapabilityDocument(capabilities ...KernelCapability) KernelCapabilityDocument {
