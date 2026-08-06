@@ -32,6 +32,7 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 		return nil, err
 	}
 	candidates := make([]*AgentRun, 0)
+	objectives := make(map[string]*Objective)
 	activeByAgent := make(map[string]int)
 	activeByOwner := make(map[string]int)
 	activeByObjective := make(map[string]int)
@@ -55,7 +56,7 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 			if claim.MaxActiveForOwner > 0 {
 				activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
 			}
-			if claim.MaxActiveForObjective > 0 && run.ObjectiveID != "" {
+			if run.ObjectiveID != "" {
 				activeByObjective[run.ObjectiveID]++
 			}
 			if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" {
@@ -64,6 +65,26 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 		}
 	}
 	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	objectiveRows, err := conn.QueryContext(ctx, `SELECT id, payload FROM objectives WHERE scope_kind = ? AND scope_id = ?`, claim.Scope.Kind, claim.Scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	for objectiveRows.Next() {
+		var id, payload string
+		if err := objectiveRows.Scan(&id, &payload); err != nil {
+			objectiveRows.Close()
+			return nil, err
+		}
+		objective, err := decodeObjective(payload)
+		if err != nil {
+			objectiveRows.Close()
+			return nil, err
+		}
+		objectives[id] = objective
+	}
+	if err := objectiveRows.Close(); err != nil {
 		return nil, err
 	}
 	var selected *AgentRun
@@ -77,7 +98,8 @@ func (s *SQLiteStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 		if claim.MaxActiveForOwner > 0 && activeByOwner[agentRunOwnerSchedulingKey(run.Owner)] >= claim.MaxActiveForOwner {
 			continue
 		}
-		if claim.MaxActiveForObjective > 0 && run.ObjectiveID != "" && activeByObjective[run.ObjectiveID] >= claim.MaxActiveForObjective {
+		objectiveLimit := effectiveObjectiveConcurrencyLimit(claim.MaxActiveForObjective, objectives[run.ObjectiveID])
+		if objectiveLimit > 0 && run.ObjectiveID != "" && activeByObjective[run.ObjectiveID] >= objectiveLimit {
 			continue
 		}
 		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {

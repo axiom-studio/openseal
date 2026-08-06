@@ -299,6 +299,7 @@ type (
 	Scope                              = runtime.Scope
 	ObjectiveOwner                     = runtime.ObjectiveOwner
 	Objective                          = runtime.Objective
+	ObjectiveExecutionPolicy           = runtime.ObjectiveExecutionPolicy
 	ObjectiveStatus                    = runtime.ObjectiveStatus
 	RunbookActivation                  = runtime.RunbookActivation
 	RunbookDetail                      = runtime.RunbookDetail

@@ -372,14 +372,17 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 		return nil, err
 	}
 	defer tx.Rollback()
-	if claim.MaxActiveForAgent > 0 || claim.MaxActiveForOwner > 0 || claim.MaxActiveForObjective > 0 || claim.MaxActiveForConcurrencyKey > 0 {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:agent-claim:"+claim.Scope.Kind+":"+claim.Scope.ID); err != nil {
-			return nil, err
-		}
+	// Objective-owned admission policy can constrain any claim even when the
+	// embedding worker supplies no host ceiling. Serialize the short selection
+	// transaction per scope so concurrent replicas cannot over-admit it.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:agent-claim:"+claim.Scope.Kind+":"+claim.Scope.ID); err != nil {
+		return nil, err
 	}
 	agingSeconds := claim.AgingInterval.Seconds()
 	var payload string
 	err = tx.QueryRowContext(ctx, `SELECT candidate.payload FROM `+s.table("agent_runs")+` AS candidate
+		LEFT JOIN `+s.table("objectives")+` AS objective
+		ON objective.scope_kind = candidate.scope_kind AND objective.scope_id = candidate.scope_id AND objective.id = candidate.objective_id
 		WHERE candidate.scope_kind = $1 AND candidate.scope_id = $2
 		AND ($3 = '' OR candidate.assigned_agent_id = $3)
 		AND ($9 = '' OR COALESCE(candidate.payload->>'kind', 'agent_work') = $9)
@@ -403,12 +406,23 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 			AND active.payload->'owner' = candidate.payload->'owner'
 			AND active.status = $5 AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
 		) < $11)
-		AND ($12 = 0 OR candidate.objective_id = '' OR (
+		AND (candidate.objective_id = '' OR
+			(CASE
+				WHEN $12 > 0 AND COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0) > 0
+					THEN LEAST($12, (objective.payload->'executionPolicy'->>'maximumConcurrentRuns')::integer)
+				WHEN $12 > 0 THEN $12
+				ELSE COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0)
+			END) = 0 OR (
 			SELECT COUNT(*) FROM `+s.table("agent_runs")+` AS active
 			WHERE active.scope_kind = candidate.scope_kind AND active.scope_id = candidate.scope_id
 			AND active.objective_id = candidate.objective_id
 			AND active.status = $5 AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
-		) < $12)
+		) < (CASE
+			WHEN $12 > 0 AND COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0) > 0
+				THEN LEAST($12, (objective.payload->'executionPolicy'->>'maximumConcurrentRuns')::integer)
+			WHEN $12 > 0 THEN $12
+			ELSE COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0)
+		END))
 		ORDER BY candidate.priority + FLOOR(GREATEST(EXTRACT(EPOCH FROM ($6 - candidate.queue_entered_at)), 0) / $8) DESC,
 			candidate.deadline ASC NULLS LAST, candidate.queue_entered_at ASC, candidate.id ASC
 		FOR UPDATE OF candidate SKIP LOCKED LIMIT 1`,

@@ -15,24 +15,22 @@ func (s *MemoryStore) ClaimNextAgentRun(_ context.Context, claim AgentRunClaim) 
 	activeByOwner := make(map[string]int)
 	activeByObjective := make(map[string]int)
 	activeByConcurrencyKey := make(map[string]int)
-	if claim.MaxActiveForAgent > 0 || claim.MaxActiveForOwner > 0 || claim.MaxActiveForObjective > 0 || claim.MaxActiveForConcurrencyKey > 0 {
-		for _, run := range s.agentRuns {
-			if run.Scope != claim.Scope || run.Status != AgentRunStatusRunning ||
-				run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(claim.Now) {
-				continue
-			}
-			if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" {
-				activeByAgent[run.AssignedAgentID]++
-			}
-			if claim.MaxActiveForOwner > 0 {
-				activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
-			}
-			if claim.MaxActiveForObjective > 0 && run.ObjectiveID != "" {
-				activeByObjective[run.ObjectiveID]++
-			}
-			if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" {
-				activeByConcurrencyKey[run.ConcurrencyKey]++
-			}
+	for _, run := range s.agentRuns {
+		if run.Scope != claim.Scope || run.Status != AgentRunStatusRunning ||
+			run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(claim.Now) {
+			continue
+		}
+		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" {
+			activeByAgent[run.AssignedAgentID]++
+		}
+		if claim.MaxActiveForOwner > 0 {
+			activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
+		}
+		if run.ObjectiveID != "" {
+			activeByObjective[run.ObjectiveID]++
+		}
+		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" {
+			activeByConcurrencyKey[run.ConcurrencyKey]++
 		}
 	}
 	var selected *AgentRun
@@ -46,7 +44,8 @@ func (s *MemoryStore) ClaimNextAgentRun(_ context.Context, claim AgentRunClaim) 
 		if claim.MaxActiveForOwner > 0 && activeByOwner[agentRunOwnerSchedulingKey(run.Owner)] >= claim.MaxActiveForOwner {
 			continue
 		}
-		if claim.MaxActiveForObjective > 0 && run.ObjectiveID != "" && activeByObjective[run.ObjectiveID] >= claim.MaxActiveForObjective {
+		objectiveLimit := effectiveObjectiveConcurrencyLimit(claim.MaxActiveForObjective, s.objectives[portfolioKey(run.Scope, run.ObjectiveID)])
+		if objectiveLimit > 0 && run.ObjectiveID != "" && activeByObjective[run.ObjectiveID] >= objectiveLimit {
 			continue
 		}
 		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {
