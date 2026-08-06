@@ -166,6 +166,11 @@ type (
 	WorkforceBundleTeamInstallation           = kernelbundle.TeamInstallation
 	WorkforceBundleInstallationReceipt        = kernelbundle.InstallationReceipt
 	WorkforceBundleInstallationStore          = kernelbundle.InstallationStore
+	WorkforceBundleExportRequest              = kernelbundle.ExportRequest
+	WorkforceBundleAgentExport                = kernelbundle.AgentExport
+	WorkforceBundleTeamExport                 = kernelbundle.TeamExport
+	WorkforceBundleObjectiveExport            = kernelbundle.ObjectiveExport
+	WorkforceBundleRunbookExport              = kernelbundle.RunbookExport
 	KernelAgentDeploymentList                 = kernelapi.AgentDeploymentList
 	KernelAgentDeploymentCatalogEntry         = kernelapi.AgentDeploymentCatalogEntry
 	KernelUpdateAgentDeploymentRequest        = kernelapi.UpdateAgentDeploymentRequest
@@ -999,6 +1004,10 @@ func CompileAgentBundleInstallation(request AgentBundleInstallationRequest) (*Ag
 
 func NewWorkforceBundle(metadata WorkforceBundleMetadata) *WorkforceBundle {
 	return kernelbundle.New(metadata)
+}
+
+func ExportWorkforceBundle(request WorkforceBundleExportRequest) (*WorkforceBundle, error) {
+	return kernelbundle.Export(request)
 }
 
 func EncodeWorkforceBundleYAML(bundle *WorkforceBundle) ([]byte, error) {
