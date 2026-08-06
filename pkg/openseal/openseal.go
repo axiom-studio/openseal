@@ -1822,6 +1822,7 @@ const (
 	AgentRunAdmissionReasonAgentCapacity          = runtime.AgentRunAdmissionReasonAgentCapacity
 	AgentRunAdmissionReasonOwnerCapacity          = runtime.AgentRunAdmissionReasonOwnerCapacity
 	AgentRunAdmissionReasonObjectiveCapacity      = runtime.AgentRunAdmissionReasonObjectiveCapacity
+	AgentRunAdmissionReasonResourceCapacity       = runtime.AgentRunAdmissionReasonResourceCapacity
 	AgentRunAdmissionReasonConcurrencyCapacity    = runtime.AgentRunAdmissionReasonConcurrencyCapacity
 	AgentRunAdmissionReasonAttemptBudgetExhausted = runtime.AgentRunAdmissionReasonAttemptBudgetExhausted
 

@@ -96,7 +96,8 @@ type Objective struct {
 // defaults; an explicit zero maximum means the Objective itself is unbounded
 // while still respecting stricter owner, Agent, and runtime ceilings.
 type ObjectiveExecutionPolicy struct {
-	MaximumConcurrentRuns int `json:"maximumConcurrentRuns"`
+	MaximumConcurrentRuns int            `json:"maximumConcurrentRuns"`
+	ResourceCapacities    map[string]int `json:"resourceCapacities,omitempty"`
 }
 
 func (p *ObjectiveExecutionPolicy) Validate() error {
@@ -105,6 +106,9 @@ func (p *ObjectiveExecutionPolicy) Validate() error {
 	}
 	if p.MaximumConcurrentRuns < 0 {
 		return errors.New("objective maximum concurrent runs cannot be negative")
+	}
+	if err := validateResourceQuantities(p.ResourceCapacities, true); err != nil {
+		return fmt.Errorf("objective resource capacities: %w", err)
 	}
 	return nil
 }
@@ -244,6 +248,7 @@ type AgentRun struct {
 	AssignedAgentID      string                       `json:"assignedAgentId,omitempty"`
 	Entrypoint           string                       `json:"entrypoint,omitempty"`
 	ConcurrencyKey       string                       `json:"concurrencyKey,omitempty"`
+	ResourceRequirements map[string]int               `json:"resourceRequirements,omitempty"`
 	Goal                 string                       `json:"goal"`
 	Source               RunSource                    `json:"source"`
 	Status               AgentRunStatus               `json:"status"`
@@ -338,6 +343,9 @@ func (r *AgentRun) Validate() error {
 	}
 	if len(r.ConcurrencyKey) > 256 || strings.ContainsAny(r.ConcurrencyKey, "\r\n") {
 		return errors.New("run concurrency key cannot exceed 256 characters or contain line breaks")
+	}
+	if err := validateResourceQuantities(r.ResourceRequirements, false); err != nil {
+		return fmt.Errorf("run resource requirements: %w", err)
 	}
 	seenHumanInterventions := make(map[string]struct{}, len(r.HumanInterventions))
 	for _, request := range r.HumanInterventions {
@@ -520,28 +528,29 @@ type UpdateObjectiveRequest struct {
 }
 
 type CreateAgentRunRequest struct {
-	Scope           Scope
-	Kind            RunKind
-	ObjectiveID     string
-	ParentRunID     string
-	Owner           ObjectiveOwner
-	AssignedAgentID string
-	Entrypoint      string
-	ConcurrencyKey  string
-	Goal            string
-	Source          RunSource
-	Priority        int
-	Deadline        *time.Time
-	AvailableAt     *time.Time
-	Context         map[string]interface{}
-	Plan            map[string]interface{}
-	Checkpoint      map[string]interface{}
-	WakeCondition   *WakeCondition
-	Budget          *BudgetPolicy
-	Policy          map[string]interface{}
-	IdempotencyKey  string
-	Actor           ActivityActor
-	Visibility      ActivityVisibility
+	Scope                Scope
+	Kind                 RunKind
+	ObjectiveID          string
+	ParentRunID          string
+	Owner                ObjectiveOwner
+	AssignedAgentID      string
+	Entrypoint           string
+	ConcurrencyKey       string
+	ResourceRequirements map[string]int
+	Goal                 string
+	Source               RunSource
+	Priority             int
+	Deadline             *time.Time
+	AvailableAt          *time.Time
+	Context              map[string]interface{}
+	Plan                 map[string]interface{}
+	Checkpoint           map[string]interface{}
+	WakeCondition        *WakeCondition
+	Budget               *BudgetPolicy
+	Policy               map[string]interface{}
+	IdempotencyKey       string
+	Actor                ActivityActor
+	Visibility           ActivityVisibility
 }
 
 type PortfolioService struct {
@@ -802,7 +811,8 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		ID: runID, Kind: kind, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
 		AssignedAgentID: req.AssignedAgentID, Entrypoint: strings.TrimSpace(req.Entrypoint), ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
-		Goal: req.Goal, Source: source,
+		ResourceRequirements: cloneResourceQuantities(req.ResourceRequirements),
+		Goal:                 req.Goal, Source: source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
@@ -831,6 +841,36 @@ func validRunKind(kind RunKind) bool {
 	default:
 		return false
 	}
+}
+
+func validateResourceQuantities(values map[string]int, allowZero bool) error {
+	if len(values) > 64 {
+		return errors.New("resource quantities cannot contain more than 64 entries")
+	}
+	for name, quantity := range values {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" || trimmed != name || len(name) > 128 || strings.ContainsAny(name, "\r\n\x00") {
+			return errors.New("resource names must be trimmed, non-empty, and at most 128 characters")
+		}
+		if quantity < 0 || !allowZero && quantity == 0 {
+			return errors.New("resource quantities must be positive")
+		}
+		if quantity > 1_000_000_000 {
+			return errors.New("resource quantities cannot exceed 1000000000")
+		}
+	}
+	return nil
+}
+
+func cloneResourceQuantities(values map[string]int) map[string]int {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]int, len(values))
+	for name, quantity := range values {
+		cloned[name] = quantity
+	}
+	return cloned
 }
 
 func (s *PortfolioService) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {

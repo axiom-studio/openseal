@@ -294,6 +294,7 @@ func cloneObjectiveExecutionPolicy(in *ObjectiveExecutionPolicy) *ObjectiveExecu
 		return nil
 	}
 	out := *in
+	out.ResourceCapacities = cloneResourceQuantities(in.ResourceCapacities)
 	return &out
 }
 
