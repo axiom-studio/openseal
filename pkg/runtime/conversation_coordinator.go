@@ -305,7 +305,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				}
 				presence, presenceErr := c.conversations.SetPresence(workerCtx, SetConversationPresenceRequest{
 					Scope: req.Scope, ConversationID: conversation.ID, Participant: binding.Participant,
-					State: ConversationPresenceWorking, Summary: "Reviewing channel activity", TTL: c.config.PresenceTTL,
+					State: ConversationPresenceThinking, Summary: "Reviewing channel activity", TTL: c.config.PresenceTTL,
 				})
 				if presenceErr != nil {
 					errs[index] = fmt.Errorf("set participant %s presence: %w", binding.Participant.ID, presenceErr)

@@ -3,8 +3,10 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -13,13 +15,21 @@ import (
 
 type collaborationTeamStoreStub struct {
 	deployment *kernelteam.Deployment
+	definition *kernelteam.Definition
 }
 
 func (s collaborationTeamStoreStub) GetTeamDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
 	if s.deployment == nil || s.deployment.Scope != scope || s.deployment.ID != id {
-		return nil, errors.New("Team deployment not found")
+		return nil, kernelteam.ErrDeploymentNotFound
 	}
 	return s.deployment, nil
+}
+
+func (s collaborationTeamStoreStub) GetTeamDefinition(_ context.Context, id, version string) (*kernelteam.Definition, error) {
+	if s.definition == nil || s.definition.ID != id || s.definition.Version != version {
+		return nil, kernelteam.ErrDefinitionNotFound
+	}
+	return s.definition, nil
 }
 
 func activeCollaborationTeam(scope Scope, id string, assignments ...kernelteam.RosterAssignment) collaborationTeamStoreStub {
@@ -27,6 +37,210 @@ func activeCollaborationTeam(scope Scope, id string, assignments ...kernelteam.R
 		ID: id, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: assignments, Revision: 1,
 	}}
+}
+
+func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "acme"}
+	store := NewMemoryStore()
+	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "developer",
+		Goal: "Coordinate the release", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewCollaborationService(store)
+	service.teams = collaborationTeamStoreStub{
+		deployment: &kernelteam.Deployment{
+			ID: "delivery-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+			DefinitionID: "delivery", ActiveVersion: "3", Revision: 1,
+		},
+		definition: &kernelteam.Definition{
+			ID: "delivery", Version: "3", Delegation: kernelteam.DelegationPolicy{
+				MaximumDepth: 3, MaximumConcurrent: 2, AllowPeerDelegation: true,
+				RequireAcceptance: true, RequireCompletionReview: true,
+			},
+		},
+	}
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"}, SourceRunID: source.ID,
+		Goal: "Review the release", AcceptancePolicy: AgentRequestAcceptancePreauthorized, IdempotencyKey: "review-release",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Request.AcceptancePolicy != AgentRequestAcceptanceRecipientReview {
+		t.Fatalf("acceptance policy = %q", created.Request.AcceptancePolicy)
+	}
+	policy := created.Request.DelegationPolicy
+	if policy == nil || policy.TeamDeploymentID != "delivery-team" || policy.TeamDefinitionID != "delivery" || policy.DelegationDepth != 1 ||
+		policy.TeamDefinitionVersion != "3" || policy.MaximumDepth != 3 || policy.MaximumConcurrent != 2 ||
+		!policy.AllowPeerDelegation || !policy.RequireAcceptance || !policy.RequireCompletionReview {
+		t.Fatalf("delegation policy snapshot = %#v", policy)
+	}
+	replayed, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "developer"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"}, SourceRunID: source.ID,
+		Goal: "Review the release", AcceptancePolicy: AgentRequestAcceptancePreauthorized, IdempotencyKey: "review-release",
+	})
+	if err != nil || replayed.Request.ID != created.Request.ID {
+		t.Fatalf("policy-governed replay = %#v, %v", replayed, err)
+	}
+}
+
+func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "acme"}
+	newService := func(policy kernelteam.DelegationPolicy) (*MemoryStore, *PortfolioService, *CollaborationService) {
+		store := NewMemoryStore()
+		portfolio := NewPortfolioService(store)
+		service := NewCollaborationService(store)
+		service.teams = collaborationTeamStoreStub{
+			deployment: &kernelteam.Deployment{
+				ID: "delivery-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+				DefinitionID: "delivery", ActiveVersion: "3", Revision: 1,
+			},
+			definition: &kernelteam.Definition{ID: "delivery", Version: "3", Delegation: policy},
+		}
+		return store, portfolio, service
+	}
+	createSource := func(t *testing.T, portfolio *PortfolioService, assigned, key string, parent *AgentRun) *AgentRun {
+		t.Helper()
+		request := CreateAgentRunRequest{
+			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: assigned,
+			Goal: "Coordinate delivery", Source: RunSourceManual, IdempotencyKey: key,
+		}
+		if parent != nil {
+			request.ParentRunID = parent.ID
+			request.Context = map[string]interface{}{"collaboration": map[string]interface{}{"requestId": "request-parent"}}
+		}
+		run, err := portfolio.CreateAgentRun(ctx, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
+	request := func(source *AgentRun, recipient, key string) CreateAgentRequestRequest {
+		return CreateAgentRequestRequest{
+			Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: source.AssignedAgentID},
+			Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: recipient}, SourceRunID: source.ID,
+			Goal: "Review delivery", IdempotencyKey: key,
+		}
+	}
+
+	t.Run("peer delegation", func(t *testing.T) {
+		_, portfolio, service := newService(kernelteam.DelegationPolicy{MaximumDepth: 3, MaximumConcurrent: 3})
+		source := createSource(t, portfolio, "developer", "peer-source", nil)
+		if _, err := service.CreateAgentRequest(ctx, request(source, "reviewer", "peer-request")); !errors.Is(err, ErrAgentRequestUnauthorized) {
+			t.Fatalf("peer delegation error = %v", err)
+		}
+	})
+
+	t.Run("depth", func(t *testing.T) {
+		_, portfolio, service := newService(kernelteam.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 3, AllowPeerDelegation: true})
+		parent := createSource(t, portfolio, "lead", "depth-parent", nil)
+		child := createSource(t, portfolio, "developer", "depth-child", parent)
+		if _, err := service.CreateAgentRequest(ctx, request(child, "reviewer", "depth-request")); !errors.Is(err, ErrAgentRequestAssignment) || !strings.Contains(err.Error(), "depth 2") {
+			t.Fatalf("depth error = %v", err)
+		}
+	})
+
+	t.Run("concurrency", func(t *testing.T) {
+		_, portfolio, service := newService(kernelteam.DelegationPolicy{MaximumDepth: 3, MaximumConcurrent: 1, AllowPeerDelegation: true})
+		first := createSource(t, portfolio, "developer", "concurrent-source-1", nil)
+		if _, err := service.CreateAgentRequest(ctx, request(first, "reviewer", "concurrent-request-1")); err != nil {
+			t.Fatal(err)
+		}
+		second := createSource(t, portfolio, "developer", "concurrent-source-2", nil)
+		if _, err := service.CreateAgentRequest(ctx, request(second, "reviewer", "concurrent-request-2")); !errors.Is(err, ErrAgentRequestAssignment) || !strings.Contains(err.Error(), "reaching maximum 1") {
+			t.Fatalf("concurrency error = %v", err)
+		}
+	})
+}
+
+func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
+	t.Parallel()
+	stores := []struct {
+		name string
+		open func(*testing.T) (CollaborationKernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (CollaborationKernelStore, func()) { return NewMemoryStore(), func() {} }},
+		{name: "sqlite", open: func(t *testing.T) (CollaborationKernelStore, func()) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "delegation-capacity.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() { _ = store.Close() }
+		}},
+	}
+	for _, tc := range stores {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			store, closeStore := tc.open(t)
+			defer closeStore()
+			ctx := context.Background()
+			scope := Scope{Kind: "tenant", ID: "atomic"}
+			portfolio := NewPortfolioService(store)
+			sources := make([]*AgentRun, 2)
+			for index := range sources {
+				var err error
+				sources[index], err = portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+					Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, AssignedAgentID: "agent",
+					Goal: "Coordinate", Source: RunSourceManual, IdempotencyKey: fmt.Sprintf("source-%d", index),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			teamStore := collaborationTeamStoreStub{
+				deployment: &kernelteam.Deployment{
+					ID: "team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+					DefinitionID: "team-definition", ActiveVersion: "1", Revision: 1,
+				},
+				definition: &kernelteam.Definition{ID: "team-definition", Version: "1", Delegation: kernelteam.DelegationPolicy{
+					MaximumDepth: 2, MaximumConcurrent: 1, AllowPeerDelegation: true,
+				}},
+			}
+			start := make(chan struct{})
+			errorsByIndex := make([]error, len(sources))
+			var group sync.WaitGroup
+			for index, source := range sources {
+				group.Add(1)
+				go func(index int, source *AgentRun) {
+					defer group.Done()
+					<-start
+					service := NewCollaborationService(store)
+					service.teams = teamStore
+					_, errorsByIndex[index] = service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+						Scope: scope, Kind: AgentRequestKindRequest,
+						Requester:   CollaborationParty{Type: OwnerTypeAgent, ID: "agent"},
+						Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: fmt.Sprintf("reviewer-%d", index)},
+						SourceRunID: source.ID, Goal: "Review", IdempotencyKey: fmt.Sprintf("request-%d", index),
+					})
+				}(index, source)
+			}
+			close(start)
+			group.Wait()
+			succeeded, capacityRejected := 0, 0
+			for _, err := range errorsByIndex {
+				switch {
+				case err == nil:
+					succeeded++
+				case errors.Is(err, ErrAgentRequestAssignment) && strings.Contains(err.Error(), "reaching maximum 1"):
+					capacityRejected++
+				default:
+					t.Fatalf("unexpected concurrent creation error: %v", err)
+				}
+			}
+			if succeeded != 1 || capacityRejected != 1 {
+				t.Fatalf("concurrent results: success=%d capacity=%d errors=%v", succeeded, capacityRejected, errorsByIndex)
+			}
+		})
+	}
 }
 
 func TestCollaborationRequestLifecycleAcrossPortableStores(t *testing.T) {
