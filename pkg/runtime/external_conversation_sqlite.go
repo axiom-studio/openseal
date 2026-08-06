@@ -305,7 +305,8 @@ func (s *SQLiteStore) ReceiveExternalConversationEvent(ctx context.Context, item
 		return nil, false, err
 	}
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != item.EndpointRevision || endpoint.Adapter != item.Adapter {
+		endpoint.Revision != item.EndpointRevision ||
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
 		return nil, false, ErrExternalConversationConflict
 	}
 	existing, err := scanSQLiteExternalConversationInbox(conn.QueryRowContext(ctx,
@@ -626,7 +627,8 @@ func (s *SQLiteStore) EnqueueExternalConversationDelivery(ctx context.Context, d
 		return nil, false, err
 	}
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != delivery.EndpointRevision || endpoint.Adapter != delivery.Adapter {
+		endpoint.Revision != delivery.EndpointRevision ||
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, delivery.Adapter) {
 		return nil, false, ErrExternalConversationConflict
 	}
 	existing, err := scanSQLiteExternalConversationDelivery(conn.QueryRowContext(ctx, `SELECT payload FROM external_conversation_deliveries
