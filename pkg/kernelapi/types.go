@@ -783,6 +783,16 @@ type CompleteAgentRequestRequest struct {
 	IdempotencyKey        string                      `json:"idempotencyKey,omitempty"`
 }
 
+type ReviewAgentRequestCompletionRequest struct {
+	ExpectedRevision      int64                      `json:"expectedRevision"`
+	ExpectedChildRevision int64                      `json:"expectedChildRevision"`
+	Principal             runtime.CollaborationParty `json:"principal"`
+	Actor                 runtime.CollaborationParty `json:"actor,omitempty"`
+	Approve               bool                       `json:"approve"`
+	Summary               string                     `json:"summary"`
+	IdempotencyKey        string                     `json:"idempotencyKey,omitempty"`
+}
+
 type ResolveActionApprovalRequest struct {
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	DecisionID       string                    `json:"decisionId,omitempty"`

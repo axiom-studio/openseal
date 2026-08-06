@@ -89,6 +89,44 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	if err != nil || replayed.Request.ID != created.Request.ID {
 		t.Fatalf("policy-governed replay = %#v, %v", replayed, err)
 	}
+	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submitted, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
+		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
+		Summary: "Release review completed", CompletionKey: "completion-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submitted.Request.Status != AgentRequestStatusCompletionReview || submitted.Request.CompletionSubmittedAt == nil ||
+		submitted.Source.Status != AgentRunStatusWaitingForDependency || submitted.Child.Status != AgentRunStatusCompleted {
+		t.Fatalf("completion review checkpoint = %#v / %#v / %#v", submitted.Request, submitted.Source, submitted.Child)
+	}
+	if _, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
+		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
+		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Recipient,
+		Approve: true, Summary: "self review", IdempotencyKey: "review-self",
+	}); !errors.Is(err, ErrAgentRequestUnauthorized) {
+		t.Fatalf("recipient self-review error = %v", err)
+	}
+	reviewed, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
+		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
+		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
+		Approve: true, Summary: "Independent review passed", IdempotencyKey: "review-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewed.Request.Status != AgentRequestStatusCompleted || reviewed.Request.ReviewedAt == nil || reviewed.Request.CompletedAt == nil ||
+		reviewed.Source.Status != AgentRunStatusQueued || reviewed.Request.CompletionReviewer == nil || *reviewed.Request.CompletionReviewer != submitted.Request.Requester {
+		t.Fatalf("reviewed completion = %#v / %#v", reviewed.Request, reviewed.Source)
+	}
 }
 
 func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
@@ -240,6 +278,77 @@ func TestCollaborationReservesTeamDelegationCapacityAtomically(t *testing.T) {
 				t.Fatalf("concurrent results: success=%d capacity=%d errors=%v", succeeded, capacityRejected, errorsByIndex)
 			}
 		})
+	}
+}
+
+func TestCollaborationCompletionReviewSurvivesPortableStoreRestart(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "completion-review.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "review"}
+	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, AssignedAgentID: "author",
+		Goal: "Produce reviewed work", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamStore := collaborationTeamStoreStub{
+		deployment: &kernelteam.Deployment{
+			ID: "team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+			DefinitionID: "team", ActiveVersion: "1", Revision: 1,
+		},
+		definition: &kernelteam.Definition{ID: "team", Version: "1", Delegation: kernelteam.DelegationPolicy{
+			MaximumDepth: 2, MaximumConcurrent: 2, AllowPeerDelegation: true, RequireAcceptance: true, RequireCompletionReview: true,
+		}},
+	}
+	service := NewCollaborationService(store)
+	service.teams = teamStore
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "author"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "specialist"}, SourceRunID: source.ID,
+		Goal: "Produce result", IdempotencyKey: "portable-review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submitted, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
+		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
+		Summary: "Portable result", CompletionKey: "portable-completion",
+	})
+	if err != nil || submitted.Request.Status != AgentRequestStatusCompletionReview {
+		t.Fatalf("submitted review = %#v, %v", submitted, err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	reviewed, err := NewCollaborationService(restarted).ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
+		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
+		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
+		Approve: true, Summary: "Restarted reviewer approved", IdempotencyKey: "portable-review-decision",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewed.Request.Status != AgentRequestStatusCompleted || reviewed.Source.Status != AgentRunStatusQueued {
+		t.Fatalf("review after restart = %#v / %#v", reviewed.Request, reviewed.Source)
 	}
 }
 

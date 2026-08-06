@@ -621,6 +621,20 @@ func (f *fakeKernelClient) CompleteAgentRequest(_ context.Context, _ runtime.Sco
 	return &runtime.AgentRequestResult{Request: request}, nil
 }
 
+func (f *fakeKernelClient) ReviewAgentRequestCompletion(_ context.Context, _ runtime.Scope, id string, review kernelapi.ReviewAgentRequestCompletionRequest, _ string) (*runtime.AgentRequestResult, error) {
+	request, err := f.GetAgentRequest(context.Background(), runtime.Scope{}, id)
+	if err != nil {
+		return nil, err
+	}
+	request.Revision++
+	request.CompletionReviewSummary = review.Summary
+	request.Status = runtime.AgentRequestStatusFailed
+	if review.Approve {
+		request.Status = runtime.AgentRequestStatusCompleted
+	}
+	return &runtime.AgentRequestResult{Request: request}, nil
+}
+
 func (f *fakeKernelClient) ListActionCalls(_ context.Context, filter runtime.ActionFilter) ([]*runtime.ActionCall, error) {
 	f.actionCallFilters = append(f.actionCallFilters, filter)
 	calls := make([]*runtime.ActionCall, 0, len(f.actionCalls))

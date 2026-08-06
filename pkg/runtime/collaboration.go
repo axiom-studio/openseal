@@ -41,6 +41,7 @@ const (
 	AgentRequestStatusPending                AgentRequestStatus = "pending"
 	AgentRequestStatusClarificationRequested AgentRequestStatus = "clarification_requested"
 	AgentRequestStatusAccepted               AgentRequestStatus = "accepted"
+	AgentRequestStatusCompletionReview       AgentRequestStatus = "completion_review"
 	AgentRequestStatusCompleted              AgentRequestStatus = "completed"
 	AgentRequestStatusFailed                 AgentRequestStatus = "failed"
 	AgentRequestStatusRejected               AgentRequestStatus = "rejected"
@@ -136,23 +137,28 @@ type AgentRequest struct {
 	// by a deployed Team. Keeping the snapshot on the collaboration fact makes
 	// acceptance, depth, concurrency, and review decisions explainable after a
 	// Team definition is amended.
-	DelegationPolicy   *AgentRequestDelegationPolicy `json:"delegationPolicy,omitempty"`
-	ConversationRefs   []string                      `json:"conversationRefs,omitempty"`
-	BudgetAllocation   *BudgetPolicy                 `json:"budgetAllocation,omitempty"`
-	Clarification      string                        `json:"clarification,omitempty"`
-	Response           string                        `json:"response,omitempty"`
-	CompletionSummary  string                        `json:"completionSummary,omitempty"`
-	ResolutionReason   string                        `json:"resolutionReason,omitempty"`
-	AcceptanceEvidence map[string]interface{}        `json:"acceptanceEvidence,omitempty"`
-	Artifacts          []ArtifactReference           `json:"artifacts,omitempty"`
-	IdempotencyKey     string                        `json:"idempotencyKey,omitempty"`
-	CompletionKey      string                        `json:"completionKey,omitempty"`
-	Revision           int64                         `json:"revision"`
-	CreatedAt          time.Time                     `json:"createdAt"`
-	UpdatedAt          time.Time                     `json:"updatedAt"`
-	AcceptedAt         *time.Time                    `json:"acceptedAt,omitempty"`
-	CompletedAt        *time.Time                    `json:"completedAt,omitempty"`
-	ResolvedAt         *time.Time                    `json:"resolvedAt,omitempty"`
+	DelegationPolicy        *AgentRequestDelegationPolicy `json:"delegationPolicy,omitempty"`
+	ConversationRefs        []string                      `json:"conversationRefs,omitempty"`
+	BudgetAllocation        *BudgetPolicy                 `json:"budgetAllocation,omitempty"`
+	Clarification           string                        `json:"clarification,omitempty"`
+	Response                string                        `json:"response,omitempty"`
+	CompletionSummary       string                        `json:"completionSummary,omitempty"`
+	ResolutionReason        string                        `json:"resolutionReason,omitempty"`
+	AcceptanceEvidence      map[string]interface{}        `json:"acceptanceEvidence,omitempty"`
+	Artifacts               []ArtifactReference           `json:"artifacts,omitempty"`
+	IdempotencyKey          string                        `json:"idempotencyKey,omitempty"`
+	CompletionKey           string                        `json:"completionKey,omitempty"`
+	CompletionSubmittedAt   *time.Time                    `json:"completionSubmittedAt,omitempty"`
+	CompletionReviewer      *CollaborationParty           `json:"completionReviewer,omitempty"`
+	CompletionReviewSummary string                        `json:"completionReviewSummary,omitempty"`
+	CompletionReviewKey     string                        `json:"completionReviewKey,omitempty"`
+	Revision                int64                         `json:"revision"`
+	CreatedAt               time.Time                     `json:"createdAt"`
+	UpdatedAt               time.Time                     `json:"updatedAt"`
+	AcceptedAt              *time.Time                    `json:"acceptedAt,omitempty"`
+	ReviewedAt              *time.Time                    `json:"reviewedAt,omitempty"`
+	CompletedAt             *time.Time                    `json:"completedAt,omitempty"`
+	ResolvedAt              *time.Time                    `json:"resolvedAt,omitempty"`
 }
 
 type AgentRequestDelegationPolicy struct {
@@ -229,12 +235,24 @@ func (r *AgentRequest) Validate() error {
 	if err := validateArtifactRequirements(r.ArtifactRequirements); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 	}
-	if r.Status == AgentRequestStatusCompleted {
+	completionSubmitted := r.Status == AgentRequestStatusCompletionReview || r.Status == AgentRequestStatusCompleted || r.CompletionReviewKey != ""
+	if completionSubmitted {
 		if err := validateArtifactReferences(r.ArtifactRequirements, r.Artifacts); err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 		}
 	} else if len(r.Artifacts) > 0 || len(r.AcceptanceEvidence) > 0 || strings.TrimSpace(r.CompletionSummary) != "" {
 		return errors.New("completion output is only valid for a completed agent request")
+	}
+	if completionSubmitted && (r.CompletionSubmittedAt == nil || strings.TrimSpace(r.CompletionKey) == "") {
+		return errors.New("submitted completion requires a timestamp and idempotency key")
+	}
+	if r.Status == AgentRequestStatusCompletionReview && (r.DelegationPolicy == nil || !r.DelegationPolicy.RequireCompletionReview) {
+		return errors.New("completion review state requires snapshotted Team review policy")
+	}
+	if r.CompletionReviewKey != "" {
+		if r.CompletionReviewer == nil || r.CompletionReviewer.Validate() != nil || r.ReviewedAt == nil || strings.TrimSpace(r.CompletionReviewSummary) == "" {
+			return errors.New("completion review decision requires reviewer, summary, key, and timestamp")
+		}
 	}
 	if r.Status != AgentRequestStatusFailed && r.Status != AgentRequestStatusCanceled && strings.TrimSpace(r.ResolutionReason) != "" {
 		return errors.New("resolution reason is only valid for a failed or canceled agent request")
@@ -338,6 +356,18 @@ type CompleteAgentRequestRequest struct {
 	AcceptanceEvidence    map[string]interface{}
 	Artifacts             []ArtifactReference
 	CompletionKey         string
+}
+
+type ReviewAgentRequestCompletionRequest struct {
+	Scope                 Scope
+	RequestID             string
+	ExpectedRevision      int64
+	ExpectedChildRevision int64
+	Principal             CollaborationParty
+	Actor                 CollaborationParty
+	Approve               bool
+	Summary               string
+	IdempotencyKey        string
 }
 
 type AgentRequestResult struct {
@@ -961,8 +991,9 @@ func linkAgentRequestDecisionRun(event *ActivityEvent, decisionRunID string) {
 	event.Payload["decisionRunId"] = strings.TrimSpace(decisionRunID)
 }
 
-// CompleteAgentRequest atomically records the recipient's result, completes
-// the child run, and wakes the source run that is waiting on the request. The
+// CompleteAgentRequest atomically records the recipient's result and completes
+// the child run. It wakes the source immediately unless the snapshotted Team
+// policy requires an independent completion review. The
 // Principal is the authorized recipient; Actor is the agent or Team member
 // that actually performed the completion and is retained in the audit trail.
 func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req CompleteAgentRequestRequest) (*AgentRequestResult, error) {
@@ -986,7 +1017,7 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidArtifact, err)
 	}
-	if request.Status == AgentRequestStatusCompleted {
+	if request.Status == AgentRequestStatusCompleted || request.Status == AgentRequestStatusCompletionReview {
 		if request.CompletionKey != strings.TrimSpace(req.CompletionKey) || request.CompletionKey == "" {
 			return nil, ErrInvalidAgentRequestState
 		}
@@ -1044,21 +1075,30 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	}
 	now := s.now()
 	updatedRequest := cloneAgentRequest(request)
+	requiresReview := updatedRequest.DelegationPolicy != nil && updatedRequest.DelegationPolicy.RequireCompletionReview
 	updatedRequest.Status = AgentRequestStatusCompleted
+	if requiresReview {
+		updatedRequest.Status = AgentRequestStatusCompletionReview
+	}
 	updatedRequest.CompletionSummary = strings.TrimSpace(req.Summary)
 	updatedRequest.AcceptanceEvidence = cloneMap(req.AcceptanceEvidence)
 	updatedRequest.Artifacts = artifacts
 	updatedRequest.CompletionKey = strings.TrimSpace(req.CompletionKey)
+	updatedRequest.CompletionSubmittedAt = &now
 	updatedRequest.Revision++
 	updatedRequest.UpdatedAt = now
-	updatedRequest.CompletedAt = &now
-	updatedRequest.ResolvedAt = &now
+	if !requiresReview {
+		updatedRequest.CompletedAt = &now
+		updatedRequest.ResolvedAt = &now
+	}
 
 	sharedChildOutput := cloneMap(child.Output)
 	updatedChild := completedCollaborationChildRun(child, updatedRequest, now)
 	var updatedSource *AgentRun
 	var dependencyResolution *RunDependencyResolutionRecord
-	if updatedRequest.DependencyGroupID != "" {
+	if requiresReview {
+		updatedSource = cloneAgentRun(source)
+	} else if updatedRequest.DependencyGroupID != "" {
 		edge, edgeErr := s.groupedRequestDependency(ctx, updatedRequest, source, true)
 		if edgeErr != nil {
 			return nil, edgeErr
@@ -1081,16 +1121,28 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 		}
 	}
 	eventType := "collaboration.completed"
+	if requiresReview {
+		eventType = "collaboration.completion_review_requested"
+	}
 	if request.Kind == AgentRequestKindHandoff {
 		eventType = "handoff.completed"
+		if requiresReview {
+			eventType = "handoff.completion_review_requested"
+		}
 	}
 	summary := fmt.Sprintf("%s %s completed the work", actor.Type, actor.ID)
+	if requiresReview {
+		summary = fmt.Sprintf("%s %s submitted completed work for independent review", actor.Type, actor.ID)
+	}
 	record := AgentRequestCompletionRecord{
 		Request: updatedRequest, ExpectedRequestRevision: request.Revision,
-		SourceRun: updatedSource, ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
+		ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
 		ChildRun: updatedChild, ExpectedChildRevision: child.Revision,
 		SourceEvent: collaborationCompletionEvent(source, updatedRequest, eventType, summary, actor, now),
 		ChildEvent:  collaborationCompletionEvent(child, updatedRequest, eventType, summary, actor, now),
+	}
+	if !requiresReview {
+		record.SourceRun = updatedSource
 	}
 	events, err := s.store.CompleteAgentRequest(ctx, record)
 	if err != nil {
@@ -1105,6 +1157,143 @@ func (s *CollaborationService) CompleteAgentRequest(ctx context.Context, req Com
 	return &AgentRequestResult{
 		Request: cloneAgentRequest(updatedRequest), Source: cloneAgentRun(updatedSource), Child: cloneAgentRun(updatedChild), Events: events,
 	}, nil
+}
+
+// ReviewAgentRequestCompletion resolves the independent review checkpoint
+// required by the snapshotted Team policy. The requester reviews the result;
+// the recipient that performed the work cannot approve its own completion.
+func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context, req ReviewAgentRequestCompletionRequest) (*AgentRequestResult, error) {
+	if s == nil || s.store == nil || s.runs == nil {
+		return nil, errors.New("collaboration store is not configured")
+	}
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	request, err := s.store.GetAgentRequest(ctx, req.Scope, strings.TrimSpace(req.RequestID))
+	if err != nil {
+		return nil, err
+	}
+	if request == nil {
+		return nil, ErrAgentRequestNotFound
+	}
+	key := strings.TrimSpace(req.IdempotencyKey)
+	if request.CompletionReviewKey != "" {
+		if request.CompletionReviewKey != key || key == "" {
+			return nil, ErrInvalidAgentRequestState
+		}
+		source, sourceErr := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
+		if sourceErr != nil {
+			return nil, sourceErr
+		}
+		child, childErr := s.runs.GetAgentRun(ctx, req.Scope, request.ChildRunID)
+		if childErr != nil {
+			return nil, childErr
+		}
+		return &AgentRequestResult{Request: request, Source: source, Child: child}, nil
+	}
+	if request.Revision != req.ExpectedRevision {
+		return nil, ErrRevisionConflict
+	}
+	if request.Status != AgentRequestStatusCompletionReview || request.DelegationPolicy == nil || !request.DelegationPolicy.RequireCompletionReview {
+		return nil, ErrInvalidAgentRequestState
+	}
+	if req.Principal != request.Requester || req.Principal == request.Recipient {
+		return nil, ErrAgentRequestUnauthorized
+	}
+	actor := req.Actor
+	if strings.TrimSpace(actor.ID) == "" {
+		actor = req.Principal
+	}
+	if err := actor.Validate(); err != nil {
+		return nil, fmt.Errorf("actor: %w", err)
+	}
+	summary := strings.TrimSpace(req.Summary)
+	if summary == "" || key == "" {
+		return nil, errors.New("completion review summary and idempotency key are required")
+	}
+	source, err := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
+	if err != nil {
+		return nil, err
+	}
+	child, err := s.runs.GetAgentRun(ctx, req.Scope, request.ChildRunID)
+	if err != nil {
+		return nil, err
+	}
+	if source == nil || child == nil || child.Status != AgentRunStatusCompleted || child.ParentRunID != source.ID || req.ExpectedChildRevision != child.Revision {
+		return nil, ErrInvalidAgentRequestState
+	}
+	now := s.now()
+	updatedRequest := cloneAgentRequest(request)
+	updatedRequest.Revision++
+	updatedRequest.UpdatedAt = now
+	updatedRequest.CompletionReviewer = &actor
+	updatedRequest.CompletionReviewSummary = summary
+	updatedRequest.CompletionReviewKey = key
+	updatedRequest.ReviewedAt = &now
+	updatedRequest.ResolvedAt = &now
+	updatedChild := cloneAgentRun(child)
+	updatedChild.Revision++
+	updatedChild.UpdatedAt = now
+	var updatedSource *AgentRun
+	var dependencyResolution *RunDependencyResolutionRecord
+	eventType := "collaboration.completion_review_approved"
+	eventSummary := fmt.Sprintf("%s %s approved the completed work", actor.Type, actor.ID)
+	dependencyState := RunDependencyStateSatisfied
+	if req.Approve {
+		updatedRequest.Status = AgentRequestStatusCompleted
+		updatedRequest.CompletedAt = &now
+		updatedChild.Output = collaborationCompletionOutput(updatedChild.Output, updatedRequest, cloneMap(child.Output))
+		if updatedRequest.DependencyGroupID == "" {
+			updatedSource, err = completedCollaborationSourceRun(source, updatedRequest, cloneMap(child.Output), now)
+		}
+	} else {
+		updatedRequest.Status = AgentRequestStatusFailed
+		updatedRequest.ResolutionReason = summary
+		eventType = "collaboration.completion_review_rejected"
+		eventSummary = fmt.Sprintf("%s %s rejected the completed work", actor.Type, actor.ID)
+		dependencyState = RunDependencyStateFailed
+		if updatedRequest.DependencyGroupID == "" {
+			updatedSource, err = failedCollaborationSourceRun(source, updatedRequest, now)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if updatedRequest.DependencyGroupID != "" {
+		edge, edgeErr := s.groupedRequestDependency(ctx, updatedRequest, source, true)
+		if edgeErr != nil {
+			return nil, edgeErr
+		}
+		dependencyResolution = &RunDependencyResolutionRecord{
+			Scope: updatedRequest.Scope, GroupID: updatedRequest.DependencyGroupID, DependencyID: updatedRequest.DependencyID,
+			ExpectedDependencyRevision: edge.Revision, State: dependencyState,
+			Result: map[string]interface{}{
+				"requestId": updatedRequest.ID, "childRunId": updatedRequest.ChildRunID,
+				"summary": updatedRequest.CompletionSummary, "review": summary,
+				"acceptanceEvidence": cloneMap(updatedRequest.AcceptanceEvidence), "output": cloneMap(child.Output),
+			},
+			Error: updatedRequest.ResolutionReason, Artifacts: updatedRequest.Artifacts,
+			Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID}, Visibility: ActivityVisibilityTeam, OccurredAt: now,
+		}
+	}
+	record := AgentRequestCompletionRecord{
+		Request: updatedRequest, ExpectedRequestRevision: request.Revision,
+		SourceRun: updatedSource, ExpectedSourceRevision: source.Revision, DependencyResolution: dependencyResolution,
+		ChildRun: updatedChild, ExpectedChildRevision: child.Revision,
+		SourceEvent: collaborationCompletionEvent(source, updatedRequest, eventType, eventSummary, actor, now),
+		ChildEvent:  collaborationCompletionEvent(child, updatedRequest, eventType, eventSummary, actor, now),
+	}
+	events, err := s.store.CompleteAgentRequest(ctx, record)
+	if err != nil {
+		return nil, err
+	}
+	if dependencyResolution != nil {
+		updatedSource, err = s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &AgentRequestResult{Request: cloneAgentRequest(updatedRequest), Source: cloneAgentRun(updatedSource), Child: cloneAgentRun(updatedChild), Events: events}, nil
 }
 
 // ResolveTerminalAgentRequestChild closes the collaboration lifecycle from an
@@ -1130,7 +1319,7 @@ func (s *CollaborationService) ResolveTerminalAgentRequestChild(ctx context.Cont
 	if request.ChildRunID != child.ID {
 		return nil, ErrInvalidAgentRequestState
 	}
-	if request.Status == AgentRequestStatusCompleted || request.Status == AgentRequestStatusFailed || request.Status == AgentRequestStatusCanceled {
+	if request.Status == AgentRequestStatusCompletionReview || request.Status == AgentRequestStatusCompleted || request.Status == AgentRequestStatusFailed || request.Status == AgentRequestStatusCanceled {
 		return &AgentRequestResult{Request: request, Child: child}, nil
 	}
 	if request.Status != AgentRequestStatusAccepted {
@@ -1976,7 +2165,8 @@ func sameAgentRequestCompletion(existing *AgentRequest, req CompleteAgentRequest
 
 func validAgentRequestStatus(status AgentRequestStatus) bool {
 	switch status {
-	case AgentRequestStatusPending, AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, AgentRequestStatusCompleted, AgentRequestStatusFailed, AgentRequestStatusRejected, AgentRequestStatusCanceled:
+	case AgentRequestStatusPending, AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, AgentRequestStatusCompletionReview,
+		AgentRequestStatusCompleted, AgentRequestStatusFailed, AgentRequestStatusRejected, AgentRequestStatusCanceled:
 		return true
 	default:
 		return false
@@ -2019,6 +2209,18 @@ func cloneAgentRequest(in *AgentRequest) *AgentRequest {
 	if in.AcceptedAt != nil {
 		accepted := *in.AcceptedAt
 		out.AcceptedAt = &accepted
+	}
+	if in.CompletionSubmittedAt != nil {
+		submitted := *in.CompletionSubmittedAt
+		out.CompletionSubmittedAt = &submitted
+	}
+	if in.CompletionReviewer != nil {
+		reviewer := *in.CompletionReviewer
+		out.CompletionReviewer = &reviewer
+	}
+	if in.ReviewedAt != nil {
+		reviewed := *in.ReviewedAt
+		out.ReviewedAt = &reviewed
 	}
 	if in.CompletedAt != nil {
 		completed := *in.CompletedAt

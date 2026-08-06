@@ -493,6 +493,7 @@ type (
 	AgentRequestGroupResult            = runtime.AgentRequestGroupResult
 	RespondAgentRequestRequest         = runtime.RespondAgentRequestRequest
 	CompleteAgentRequestRequest        = runtime.CompleteAgentRequestRequest
+	ReviewAgentRequestRequest          = runtime.ReviewAgentRequestCompletionRequest
 	AgentRequestResult                 = runtime.AgentRequestResult
 	AgentTurnStore                     = runtime.AgentTurnStore
 	AgentTurn                          = runtime.AgentTurn
@@ -4418,6 +4419,13 @@ func (e *Engine) CompleteAgentRequest(ctx context.Context, request runtime.Compl
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
 	return e.collaboration.CompleteAgentRequest(ctx, request)
+}
+
+func (e *Engine) ReviewAgentRequestCompletion(ctx context.Context, request runtime.ReviewAgentRequestCompletionRequest) (*runtime.AgentRequestResult, error) {
+	if e.collaboration == nil {
+		return nil, fmt.Errorf("collaboration store is not configured")
+	}
+	return e.collaboration.ReviewAgentRequestCompletion(ctx, request)
 }
 
 func (e *Engine) GetAgentRequest(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRequest, error) {
