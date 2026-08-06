@@ -151,12 +151,15 @@ type ObjectivePlacement struct {
 // reviewed endpoint blueprint. Provider addresses and non-secret adapter
 // configuration never pass through the authoring model.
 type ConversationEndpointPlacement struct {
-	ID               string                 `json:"id"`
-	ExpectedRevision int64                  `json:"expectedRevision,omitempty"`
-	InstallationID   string                 `json:"installationId,omitempty"`
-	ApplicationID    string                 `json:"applicationId,omitempty"`
-	Address          string                 `json:"address,omitempty"`
-	Configuration    map[string]interface{} `json:"configuration,omitempty"`
+	ID                                   string                 `json:"id"`
+	ExpectedRevision                     int64                  `json:"expectedRevision,omitempty"`
+	CallbackRegistrationID               string                 `json:"callbackRegistrationId,omitempty"`
+	CallbackRegistrationExpectedRevision int64                  `json:"callbackRegistrationExpectedRevision,omitempty"`
+	CallbackConfiguration                map[string]interface{} `json:"callbackConfiguration,omitempty"`
+	InstallationID                       string                 `json:"installationId,omitempty"`
+	ApplicationID                        string                 `json:"applicationId,omitempty"`
+	Address                              string                 `json:"address,omitempty"`
+	Configuration                        map[string]interface{} `json:"configuration,omitempty"`
 }
 
 type AppliedResourceReference struct {
@@ -1407,13 +1410,16 @@ func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSet
 		for key, placed := range requested.ConversationEndpoints {
 			existing, ok := current.ConversationEndpoints[key]
 			if !ok || (placed.ID != "" && placed.ID != existing.ID) ||
-				(placed.ExpectedRevision != 0 && placed.ExpectedRevision != existing.ExpectedRevision) {
+				(placed.ExpectedRevision != 0 && placed.ExpectedRevision != existing.ExpectedRevision) ||
+				(placed.CallbackRegistrationID != "" && placed.CallbackRegistrationID != existing.CallbackRegistrationID) ||
+				(placed.CallbackRegistrationExpectedRevision != 0 && placed.CallbackRegistrationExpectedRevision != existing.CallbackRegistrationExpectedRevision) {
 				return ChangeSetPlacement{}, fmt.Errorf("activation target conversation endpoint %s is immutable", key)
 			}
 			existing.InstallationID = strings.TrimSpace(placed.InstallationID)
 			existing.ApplicationID = strings.TrimSpace(placed.ApplicationID)
 			existing.Address = strings.TrimSpace(placed.Address)
 			existing.Configuration = cloneAuthoringMap(placed.Configuration)
+			existing.CallbackConfiguration = cloneAuthoringMap(placed.CallbackConfiguration)
 			next.ConversationEndpoints[key] = existing
 		}
 	}
@@ -1709,6 +1715,12 @@ func validateApplyPlacement(value *ChangeSet) error {
 		if !ok || strings.TrimSpace(placement.ID) == "" || placement.ExpectedRevision < 0 {
 			return fmt.Errorf("conversation endpoint %s placement is invalid", endpoint.ID)
 		}
+		if endpoint.CallbackAdapterID != "" && (strings.TrimSpace(placement.CallbackRegistrationID) == "" || placement.CallbackRegistrationExpectedRevision < 0) {
+			return fmt.Errorf("conversation endpoint %s callback placement is invalid", endpoint.ID)
+		}
+		if endpoint.CallbackAdapterID == "" && (placement.CallbackRegistrationID != "" || placement.CallbackRegistrationExpectedRevision != 0 || placement.CallbackConfiguration != nil) {
+			return fmt.Errorf("conversation endpoint %s has callback placement without a reviewed callback edge", endpoint.ID)
+		}
 		for _, identity := range []string{placement.InstallationID, placement.ApplicationID, placement.Address} {
 			if len(identity) > 1024 || strings.ContainsAny(identity, "\r\n") {
 				return fmt.Errorf("conversation endpoint %s routing placement is invalid", endpoint.ID)
@@ -1964,6 +1976,25 @@ func skillBindingPlacementPresent(candidate *WorkforceCandidate, requirement Mis
 					reference := placement.CredentialReferences[endpoint.Owner.ID][credential.Name]
 					if strings.TrimSpace(reference.Kind) != credential.Kind || strings.TrimSpace(reference.ID) == "" {
 						return false
+					}
+				}
+				if endpoint.CallbackAdapterID != "" {
+					for _, callback := range skill.CallbackAdapters {
+						if callback.ID != endpoint.CallbackAdapterID {
+							continue
+						}
+						if len(callback.Credentials) > 0 {
+							hasPlacementGap = true
+						}
+						for _, credential := range callback.Credentials {
+							if credential.Optional {
+								continue
+							}
+							reference := placement.CredentialReferences[endpoint.Owner.ID][credential.Name]
+							if strings.TrimSpace(reference.Kind) != credential.Kind || strings.TrimSpace(reference.ID) == "" {
+								return false
+							}
+						}
 					}
 				}
 				return hasPlacementGap
@@ -2268,8 +2299,13 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 		current.ApplicationID = strings.TrimSpace(current.ApplicationID)
 		current.Address = strings.TrimSpace(current.Address)
 		current.Configuration = cloneAuthoringMap(current.Configuration)
+		current.CallbackRegistrationID = strings.TrimSpace(current.CallbackRegistrationID)
+		current.CallbackConfiguration = cloneAuthoringMap(current.CallbackConfiguration)
 		if current.ID == "" {
 			current.ID = "conversation-endpoint:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + endpoint.ID)[:32]
+		}
+		if endpoint.CallbackAdapterID != "" && current.CallbackRegistrationID == "" {
+			current.CallbackRegistrationID = "callback-registration:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + endpoint.ID)[:32]
 		}
 		placement.ConversationEndpoints[endpoint.ID] = current
 	}
@@ -2512,6 +2548,15 @@ func inheritParentPlacement(placement *ChangeSetPlacement, parent *ChangeSet) {
 		if current.Configuration == nil {
 			current.Configuration = cloneAuthoringMap(inherited.Configuration)
 		}
+		if current.CallbackRegistrationID == "" {
+			current.CallbackRegistrationID = inherited.CallbackRegistrationID
+		}
+		if current.CallbackRegistrationID == inherited.CallbackRegistrationID && inherited.CallbackRegistrationExpectedRevision > 0 {
+			current.CallbackRegistrationExpectedRevision = inherited.CallbackRegistrationExpectedRevision
+		}
+		if current.CallbackConfiguration == nil {
+			current.CallbackConfiguration = cloneAuthoringMap(inherited.CallbackConfiguration)
+		}
 		placement.ConversationEndpoints[key] = current
 	}
 	if placement.CredentialReferences == nil {
@@ -2609,6 +2654,12 @@ func inheritAppliedRevisions(placement *ChangeSetPlacement, parent *ChangeSet) {
 		if revision := resources["objective\x00"+objective.ID]; revision > 0 {
 			objective.ExpectedRevision = revision
 			placement.Objectives[key] = objective
+		}
+	}
+	for key, endpoint := range placement.ConversationEndpoints {
+		if revision := resources["callback_registration\x00"+endpoint.CallbackRegistrationID]; revision > 0 {
+			endpoint.CallbackRegistrationExpectedRevision = revision
+			placement.ConversationEndpoints[key] = endpoint
 		}
 	}
 	for key, endpoint := range placement.ConversationEndpoints {
@@ -3017,6 +3068,7 @@ func clonePlacement(value ChangeSetPlacement) ChangeSetPlacement {
 		copy.ConversationEndpoints = make(map[string]ConversationEndpointPlacement, len(value.ConversationEndpoints))
 		for key, placement := range value.ConversationEndpoints {
 			placement.Configuration = cloneAuthoringMap(placement.Configuration)
+			placement.CallbackConfiguration = cloneAuthoringMap(placement.CallbackConfiguration)
 			copy.ConversationEndpoints[key] = placement
 		}
 	}

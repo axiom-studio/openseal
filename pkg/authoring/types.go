@@ -45,6 +45,7 @@ type SkillCapability struct {
 	CredentialKinds        []string                        `json:"credentialKinds,omitempty"`
 	Credentials            []SkillCredential               `json:"credentials,omitempty"`
 	ConversationAdapters   []ConversationAdapterCapability `json:"conversationAdapters,omitempty"`
+	CallbackAdapters       []CallbackAdapterCapability     `json:"callbackAdapters,omitempty"`
 	BindingConfigSchema    map[string]interface{}          `json:"bindingConfigSchema,omitempty"`
 	PromptAvailable        bool                            `json:"promptAvailable,omitempty"`
 	MaximumRisk            capability.RiskLevel            `json:"maximumRisk,omitempty"`
@@ -79,6 +80,18 @@ type ConversationAdapterCapability struct {
 	DiscoverableDestinationModes []capability.ConversationEndpointMode       `json:"discoverableDestinationModes,omitempty"`
 	Delivery                     capability.ConversationDeliveryCapabilities `json:"delivery"`
 	Credentials                  []SkillCredential                           `json:"credentials,omitempty"`
+}
+
+// CallbackAdapterCapability is the credential-free authoring projection of a
+// Skill-owned callback verifier. The compiler uses it to bind interactive
+// workflow edges to one exact adapter; models never choose callback routes or
+// executable entrypoints.
+type CallbackAdapterCapability struct {
+	ID              string            `json:"id"`
+	ProtocolVersion string            `json:"protocolVersion"`
+	Provider        string            `json:"provider"`
+	EventTypes      []string          `json:"eventTypes"`
+	Credentials     []SkillCredential `json:"credentials,omitempty"`
 }
 
 type SkillReadiness string
@@ -356,12 +369,17 @@ type ConversationEndpointPolicyBlueprint struct {
 // bindings, OAuth connections, provider installation identities, and external
 // addresses are resolved later through governed placement.
 type ConversationEndpointBlueprint struct {
-	ID                 string                              `json:"id"`
-	Name               string                              `json:"name"`
-	Owner              ConversationEndpointOwner           `json:"owner"`
-	SkillID            string                              `json:"skillId"`
-	SkillVersion       string                              `json:"skillVersion"`
-	AdapterID          string                              `json:"adapterId"`
+	ID           string                    `json:"id"`
+	Name         string                    `json:"name"`
+	Owner        ConversationEndpointOwner `json:"owner"`
+	SkillID      string                    `json:"skillId"`
+	SkillVersion string                    `json:"skillVersion"`
+	AdapterID    string                    `json:"adapterId"`
+	// CallbackAdapterID is compiler-owned. It is present only when a reviewed
+	// endpoint purpose requires signed provider callbacks (for example an
+	// approval decision), and atomically materializes the internal callback
+	// registration during apply.
+	CallbackAdapterID  string                              `json:"callbackAdapterId,omitempty"`
 	Mode               capability.ConversationEndpointMode `json:"mode"`
 	Address            string                              `json:"address,omitempty"`
 	Handler            ConversationHandlerBlueprint        `json:"handler"`

@@ -210,6 +210,11 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 	); err != nil {
 		return nil, err
 	}
+	if err = applyPostgresWorkforceCallbackRegistrations(
+		ctx, tx, s.table("callback_registrations"), value, a,
+	); err != nil {
+		return nil, err
+	}
 	synchronizeWorkforceSkillBindingResources(a)
 	sortWorkforceApplicationResources(a)
 	value.ApplyReceipt.Resources = a.resources
@@ -419,6 +424,116 @@ func applyPostgresWorkforceConversationEndpoints(
 		application.resources = append(application.resources, authoring.AppliedResourceReference{
 			Kind: "conversation_endpoint", ID: endpoint.ID, Revision: endpoint.Revision,
 		})
+	}
+	return nil
+}
+
+func applyPostgresWorkforceCallbackRegistrations(
+	ctx context.Context,
+	tx *sql.Tx,
+	table string,
+	value *authoring.ChangeSet,
+	application *workforceApplication,
+) error {
+	desiredIDs := make(map[string]bool, len(application.callbackRegistrations))
+	for index := range application.callbackRegistrations {
+		desired := application.callbackRegistrations[index]
+		registration := desired.value
+		desiredIDs[registration.ID] = true
+		var current *CallbackRegistration
+		if desired.expectedRevision > 0 {
+			var payload []byte
+			if err := tx.QueryRowContext(ctx, `SELECT payload FROM `+table+`
+				WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 AND revision=$4 FOR UPDATE`, value.Scope.Kind,
+				value.Scope.ID, registration.ID, desired.expectedRevision).Scan(&payload); err != nil {
+				return authoring.ErrChangeSetRevision
+			}
+			current = &CallbackRegistration{}
+			if json.Unmarshal(payload, current) != nil {
+				return authoring.ErrChangeSetRevision
+			}
+		}
+		if err := prepareWorkforceCallbackRegistration(registration, current, value.Actor, value.ApplyReceipt.AppliedAt); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(registration)
+		if desired.expectedRevision == 0 {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO `+table+`
+				(scope_kind,scope_id,id,ingress_route,provider,status,revision,updated_at,payload)
+				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`, registration.Scope.Kind, registration.Scope.ID,
+				registration.ID, registration.IngressRoute, registration.Provider, registration.Status,
+				registration.Revision, registration.UpdatedAt, string(payload)); err != nil {
+				if postgresUniqueViolation(err) {
+					return authoring.ErrChangeSetRevision
+				}
+				return err
+			}
+		} else {
+			result, err := tx.ExecContext(ctx, `UPDATE `+table+` SET ingress_route=$1,provider=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb
+				WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, registration.IngressRoute,
+				registration.Provider, registration.Status, registration.Revision, registration.UpdatedAt, string(payload),
+				registration.Scope.Kind, registration.Scope.ID, registration.ID, desired.expectedRevision)
+			if err != nil {
+				return err
+			}
+			if count, _ := result.RowsAffected(); count != 1 {
+				return authoring.ErrChangeSetRevision
+			}
+		}
+		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "callback_registration", ID: registration.ID, Revision: registration.Revision})
+	}
+	return retirePostgresWorkforceCallbacks(ctx, tx, table, value, application, desiredIDs)
+}
+
+func retirePostgresWorkforceCallbacks(ctx context.Context, tx *sql.Tx, table string, value *authoring.ChangeSet, application *workforceApplication, desiredIDs map[string]bool) error {
+	reconciled := workforceBindingReconciliationDeployments(value)
+	if len(reconciled) == 0 {
+		return nil
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 FOR UPDATE`, value.Scope.Kind, value.Scope.ID)
+	if err != nil {
+		return err
+	}
+	current := make([]*CallbackRegistration, 0)
+	for rows.Next() {
+		var payload []byte
+		var registration CallbackRegistration
+		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
+			return err
+		}
+		if json.Unmarshal(payload, &registration) == nil && reconciled[registration.DeploymentID] &&
+			!desiredIDs[registration.ID] && registration.Status != CallbackRegistrationRetired {
+			current = append(current, &registration)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, registration := range current {
+		expected := registration.Revision
+		now := value.ApplyReceipt.AppliedAt
+		registration.Status, registration.Revision, registration.UpdatedAt, registration.RetiredAt = CallbackRegistrationRetired, expected+1, now, &now
+		registration.Lifecycle = append(registration.Lifecycle, CallbackRegistrationLifecycleEntry{
+			Revision: registration.Revision, Action: CallbackRegistrationRetiredAction,
+			Actor: ActivityActor{Type: value.Actor.Type, ID: value.Actor.ID}, Reason: "retire removed workflow callback", At: now,
+		})
+		if err := registration.Validate(); err != nil {
+			return err
+		}
+		payload, _ := json.Marshal(registration)
+		result, err := tx.ExecContext(ctx, `UPDATE `+table+` SET status=$1,revision=$2,updated_at=$3,payload=$4::jsonb
+			WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8`, registration.Status, registration.Revision,
+			registration.UpdatedAt, string(payload), registration.Scope.Kind, registration.Scope.ID, registration.ID, expected)
+		if err != nil {
+			return err
+		}
+		if count, _ := result.RowsAffected(); count != 1 {
+			return authoring.ErrChangeSetRevision
+		}
+		application.resources = append(application.resources, authoring.AppliedResourceReference{Kind: "callback_registration", ID: registration.ID, Revision: registration.Revision})
 	}
 	return nil
 }

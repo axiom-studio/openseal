@@ -962,6 +962,31 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 			}
 			adapterIDs[adapter.ID] = true
 		}
+		callbackAdapterIDs := make(map[string]bool, len(skill.CallbackAdapters))
+		for index, adapter := range skill.CallbackAdapters {
+			if adapter.ID == "" || adapter.ID != strings.TrimSpace(adapter.ID) || len(adapter.ID) > 128 || callbackAdapterIDs[adapter.ID] {
+				return fmt.Errorf("Skill %s callback adapter %d has an invalid or duplicate id", id, index)
+			}
+			credentials := make([]capability.CredentialRequirement, len(adapter.Credentials))
+			for credentialIndex, credential := range adapter.Credentials {
+				credentials[credentialIndex] = capability.CredentialRequirement{
+					Name: credential.Name, Kind: credential.Kind, OAuth2: credential.OAuth2,
+				}
+			}
+			normalized, err := capability.NormalizeCallbackAdapter(capability.CallbackAdapter{
+				ProtocolVersion: adapter.ProtocolVersion, Name: adapter.ID, Description: adapter.ID,
+				Provider: adapter.Provider, EventTypes: adapter.EventTypes, Credentials: credentials,
+				Transport: capability.CallbackAdapterTransport{
+					Kind: "authoring", IngressEndpoint: "authoring",
+					IngressCredentials: callbackCredentialNames(credentials),
+				},
+			})
+			if err != nil || normalized.Provider != adapter.Provider ||
+				!reflect.DeepEqual(normalized.EventTypes, adapter.EventTypes) || len(normalized.Credentials) != len(adapter.Credentials) {
+				return fmt.Errorf("Skill %s callback adapter %d is invalid or non-canonical", id, index)
+			}
+			callbackAdapterIDs[adapter.ID] = true
+		}
 	}
 	for bindingKey, grants := range catalog.AvailableCredentialGrants {
 		if bindingKey != strings.TrimSpace(bindingKey) || bindingKey == "" || len(bindingKey) > 128 || len(grants) > 32 {
@@ -1094,6 +1119,15 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 		seenDiagnostics[identity] = true
 	}
 	return nil
+}
+
+func callbackCredentialNames(values []capability.CredentialRequirement) []string {
+	result := make([]string, len(values))
+	for index := range values {
+		result[index] = values[index].Name
+	}
+	sort.Strings(result)
+	return result
 }
 
 func sameOAuth2Authorization(left, right *capability.OAuth2Requirement) bool {
