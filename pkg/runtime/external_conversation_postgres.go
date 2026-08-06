@@ -235,7 +235,8 @@ func (s *PostgresStore) ReceiveExternalConversationEvent(ctx context.Context, it
 		return nil, false, err
 	}
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != item.EndpointRevision || endpoint.Adapter != item.Adapter {
+		endpoint.Revision != item.EndpointRevision ||
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
 		return nil, false, ErrExternalConversationConflict
 	}
 	existing, err := scanSQLiteExternalConversationInbox(tx.QueryRowContext(ctx,
@@ -566,7 +567,8 @@ func (s *PostgresStore) EnqueueExternalConversationDelivery(ctx context.Context,
 		return nil, false, err
 	}
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != delivery.EndpointRevision || endpoint.Adapter != delivery.Adapter {
+		endpoint.Revision != delivery.EndpointRevision ||
+		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, delivery.Adapter) {
 		return nil, false, ErrExternalConversationConflict
 	}
 	existing, err := scanSQLiteExternalConversationDelivery(tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("external_conversation_deliveries")+`

@@ -413,6 +413,36 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A compatible binding amendment must not require rewriting every live
+	// endpoint. The endpoint retains its reviewed binding identity while each
+	// new operation captures the current exact binding revision.
+	if err := catalog.Bind(ctx, &skill.Binding{
+		ID: "slack", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "slack-agent",
+		SkillID: "slack", SkillVersion: "1.0.0",
+		EnabledConversationAdapters: []string{"conversations"}, MaximumRisk: skill.RiskLevelRead,
+		Credentials: map[string]skill.CredentialReference{
+			"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/one/slack"},
+		},
+		Revision: 2,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if endpoint.Adapter.BindingRevision != 1 {
+		t.Fatalf("endpoint binding revision changed without an endpoint amendment: %#v", endpoint.Adapter)
+	}
+	if endpoint.Status != ExternalConversationEndpointActive {
+		t.Fatalf("endpoint status = %q", endpoint.Status)
+	}
+	resolvedAfterAmendment, resolveErr := catalog.ResolveConversationAdapterBinding(
+		ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "slack-agent", "slack", "conversations",
+	)
+	if resolveErr != nil || resolvedAfterAmendment == nil || resolvedAfterAmendment.Binding.Revision != 2 {
+		t.Fatalf("current conversation binding = %#v, %v", resolvedAfterAmendment, resolveErr)
+	}
+	if resolvedAfterAmendment.Adapter.Provider != endpoint.Provider ||
+		!containsConversationEndpointMode(resolvedAfterAmendment.Adapter.EndpointModes, endpoint.Mode) {
+		t.Fatalf("current adapter is incompatible: provider %q/%q modes %#v/%q", resolvedAfterAmendment.Adapter.Provider, endpoint.Provider, resolvedAfterAmendment.Adapter.EndpointModes, endpoint.Mode)
+	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	transport := NewExternalConversationTransportService(store, catalog)
 	transport.now = func() time.Time { return now }
@@ -440,6 +470,9 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	})
 	if err != nil || !accepted.Accepted || accepted.Item.Status != ExternalConversationInboxPending {
 		t.Fatalf("accepted ingress = %#v, %v", accepted, err)
+	}
+	if accepted.Item.Adapter.BindingRevision != 2 {
+		t.Fatalf("inbox captured binding revision %d, want 2", accepted.Item.Adapter.BindingRevision)
 	}
 	reaction := event
 	reaction.ID, reaction.Type, reaction.Text = "event/reaction", capability.ConversationEventReactionAdded, ""
@@ -474,6 +507,9 @@ func TestExternalConversationTransportServiceFiltersIngressAndEnqueuesCanonicalR
 	})
 	if err != nil || enqueued.Replayed || enqueued.Delivery.Status != ExternalConversationDeliveryPending {
 		t.Fatalf("enqueued reply = %#v, %v", enqueued, err)
+	}
+	if enqueued.Delivery.Adapter.BindingRevision != 2 {
+		t.Fatalf("delivery captured binding revision %d, want 2", enqueued.Delivery.Adapter.BindingRevision)
 	}
 	replayedDelivery, err := transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
