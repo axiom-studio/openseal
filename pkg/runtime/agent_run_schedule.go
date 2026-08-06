@@ -17,6 +17,8 @@ type AgentRunClaim struct {
 	LeaseDuration              time.Duration
 	AgingInterval              time.Duration
 	MaxActiveForAgent          int
+	MaxActiveForOwner          int
+	MaxActiveForObjective      int
 	MaxActiveForConcurrencyKey int
 }
 
@@ -33,6 +35,12 @@ func (c AgentRunClaim) Validate() error {
 	if c.MaxActiveForAgent < 0 {
 		return errors.New("max active runs cannot be negative")
 	}
+	if c.MaxActiveForOwner < 0 {
+		return errors.New("max active runs per owner cannot be negative")
+	}
+	if c.MaxActiveForObjective < 0 {
+		return errors.New("max active runs per objective cannot be negative")
+	}
 	if c.MaxActiveForConcurrencyKey < 0 {
 		return errors.New("max active runs per concurrency key cannot be negative")
 	}
@@ -47,6 +55,8 @@ type AgentRunClaimRequest struct {
 	LeaseDuration              time.Duration
 	AgingInterval              time.Duration
 	MaxActiveForAgent          int
+	MaxActiveForOwner          int
+	MaxActiveForObjective      int
 	MaxActiveForConcurrencyKey int
 }
 
@@ -83,8 +93,13 @@ func (s *AgentRunScheduler) ClaimNext(ctx context.Context, req AgentRunClaimRequ
 	return s.store.ClaimNextAgentRun(ctx, AgentRunClaim{
 		Scope: req.Scope, Kind: req.Kind, WorkerID: req.WorkerID, AssignedAgentID: req.AssignedAgentID,
 		Now: s.now(), LeaseDuration: req.LeaseDuration, AgingInterval: req.AgingInterval,
-		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForConcurrencyKey: req.MaxActiveForConcurrencyKey,
+		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForOwner: req.MaxActiveForOwner,
+		MaxActiveForObjective: req.MaxActiveForObjective, MaxActiveForConcurrencyKey: req.MaxActiveForConcurrencyKey,
 	})
+}
+
+func agentRunOwnerSchedulingKey(owner ObjectiveOwner) string {
+	return string(owner.Type) + "\x1f" + owner.ID
 }
 
 func (s *AgentRunScheduler) RenewLease(ctx context.Context, scope Scope, runID, workerID string, leaseDuration time.Duration) (*AgentRun, error) {
