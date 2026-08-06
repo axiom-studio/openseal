@@ -717,28 +717,29 @@ func NewCapabilityDocument(capabilities ...Capability) CapabilityDocument {
 // Scope is explicit because standalone OpenSeal can host more than one local
 // workspace even though the TUI defaults to local/default.
 type CreateAgentRunRequest struct {
-	Scope           runtime.Scope              `json:"scope"`
-	Kind            runtime.RunKind            `json:"kind,omitempty"`
-	ObjectiveID     string                     `json:"objectiveId,omitempty"`
-	ParentRunID     string                     `json:"parentRunId,omitempty"`
-	Owner           runtime.ObjectiveOwner     `json:"owner"`
-	AssignedAgentID string                     `json:"assignedAgentId,omitempty"`
-	Entrypoint      string                     `json:"entrypoint,omitempty"`
-	ConcurrencyKey  string                     `json:"concurrencyKey,omitempty"`
-	Goal            string                     `json:"goal"`
-	Source          runtime.RunSource          `json:"source"`
-	Priority        int                        `json:"priority,omitempty"`
-	Deadline        *time.Time                 `json:"deadline,omitempty"`
-	AvailableAt     *time.Time                 `json:"availableAt,omitempty"`
-	Context         map[string]interface{}     `json:"context,omitempty"`
-	Plan            map[string]interface{}     `json:"plan,omitempty"`
-	Checkpoint      map[string]interface{}     `json:"checkpoint,omitempty"`
-	WakeCondition   *runtime.WakeCondition     `json:"wakeCondition,omitempty"`
-	Budget          *runtime.BudgetPolicy      `json:"budget,omitempty"`
-	Policy          map[string]interface{}     `json:"policy,omitempty"`
-	IdempotencyKey  string                     `json:"idempotencyKey,omitempty"`
-	Actor           runtime.ActivityActor      `json:"actor,omitempty"`
-	Visibility      runtime.ActivityVisibility `json:"visibility,omitempty"`
+	Scope                runtime.Scope              `json:"scope"`
+	Kind                 runtime.RunKind            `json:"kind,omitempty"`
+	ObjectiveID          string                     `json:"objectiveId,omitempty"`
+	ParentRunID          string                     `json:"parentRunId,omitempty"`
+	Owner                runtime.ObjectiveOwner     `json:"owner"`
+	AssignedAgentID      string                     `json:"assignedAgentId,omitempty"`
+	Entrypoint           string                     `json:"entrypoint,omitempty"`
+	ConcurrencyKey       string                     `json:"concurrencyKey,omitempty"`
+	ResourceRequirements map[string]int             `json:"resourceRequirements,omitempty"`
+	Goal                 string                     `json:"goal"`
+	Source               runtime.RunSource          `json:"source"`
+	Priority             int                        `json:"priority,omitempty"`
+	Deadline             *time.Time                 `json:"deadline,omitempty"`
+	AvailableAt          *time.Time                 `json:"availableAt,omitempty"`
+	Context              map[string]interface{}     `json:"context,omitempty"`
+	Plan                 map[string]interface{}     `json:"plan,omitempty"`
+	Checkpoint           map[string]interface{}     `json:"checkpoint,omitempty"`
+	WakeCondition        *runtime.WakeCondition     `json:"wakeCondition,omitempty"`
+	Budget               *runtime.BudgetPolicy      `json:"budget,omitempty"`
+	Policy               map[string]interface{}     `json:"policy,omitempty"`
+	IdempotencyKey       string                     `json:"idempotencyKey,omitempty"`
+	Actor                runtime.ActivityActor      `json:"actor,omitempty"`
+	Visibility           runtime.ActivityVisibility `json:"visibility,omitempty"`
 }
 
 // CreateAgentRequestRequest is the public request body for a durable request or

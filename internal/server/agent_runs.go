@@ -30,8 +30,9 @@ func (s *Server) handleCreateAgentRun(w http.ResponseWriter, r *http.Request) {
 	result, err := s.agentRunCreation(r.Context(), runtime.CreateAgentRunRequest{
 		Scope: payload.Scope, Kind: payload.Kind, ObjectiveID: strings.TrimSpace(payload.ObjectiveID), ParentRunID: strings.TrimSpace(payload.ParentRunID),
 		Owner: payload.Owner, AssignedAgentID: strings.TrimSpace(payload.AssignedAgentID), ConcurrencyKey: strings.TrimSpace(payload.ConcurrencyKey),
-		Goal:   strings.TrimSpace(payload.Goal),
-		Source: payload.Source, Priority: payload.Priority, Deadline: payload.Deadline, AvailableAt: payload.AvailableAt,
+		ResourceRequirements: payload.ResourceRequirements,
+		Goal:                 strings.TrimSpace(payload.Goal),
+		Source:               payload.Source, Priority: payload.Priority, Deadline: payload.Deadline, AvailableAt: payload.AvailableAt,
 		Context: payload.Context, Plan: payload.Plan, Checkpoint: payload.Checkpoint, WakeCondition: payload.WakeCondition,
 		Budget: payload.Budget, Policy: payload.Policy, IdempotencyKey: idempotencyKey, Actor: payload.Actor, Visibility: payload.Visibility,
 	})

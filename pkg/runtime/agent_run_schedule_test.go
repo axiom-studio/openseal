@@ -318,3 +318,99 @@ func TestAdmissionDecisionExplainsObjectiveBackpressureAndNextWake(t *testing.T)
 		})
 	}
 }
+
+func TestObjectiveResourceCapacityAtomicallyGovernsQueuedWork(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		open func(*testing.T) (KernelStore, func())
+	}{
+		{name: "memory", open: func(*testing.T) (KernelStore, func()) { return NewMemoryStore(), func() {} }},
+		{name: "sqlite", open: func(t *testing.T) (KernelStore, func()) {
+			store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "objective-resources.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return store, func() { _ = store.Close() }
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			store, closeStore := testCase.open(t)
+			defer closeStore()
+			ctx := t.Context()
+			now := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)
+			scope := Scope{Kind: "tenant", ID: "objective-resources-" + testCase.name}
+			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "research-agent"}
+			portfolio := NewPortfolioService(store)
+			portfolio.now = func() time.Time { return now }
+			objective, err := portfolio.CreateObjective(ctx, CreateObjectiveRequest{
+				Scope: scope, Owner: owner, Title: "Browser research", Goal: "Research without sharing sessions", Status: ObjectiveStatusActive,
+				ExecutionPolicy: &ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 1}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var runIDs []string
+			for _, agentID := range []string{"researcher-one", "researcher-two"} {
+				run, createErr := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+					Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: agentID,
+					Goal: "Browse independently", Source: RunSourceObjective, ResourceRequirements: map[string]int{"browser": 1},
+				})
+				if createErr != nil {
+					t.Fatal(createErr)
+				}
+				runIDs = append(runIDs, run.ID)
+			}
+			scheduler := NewAgentRunScheduler(store)
+			scheduler.now = func() time.Time { return now }
+			first, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-one", LeaseDuration: time.Hour})
+			if err != nil || first == nil || first.ResourceRequirements["browser"] != 1 {
+				t.Fatalf("first resource claim = %#v, %v", first, err)
+			}
+			queuedRunID := runIDs[0]
+			if first.ID == queuedRunID {
+				queuedRunID = runIDs[1]
+			}
+			decision, err := scheduler.ClaimNextDecision(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-two", LeaseDuration: time.Hour})
+			if err != nil || decision == nil || decision.Outcome != AgentRunAdmissionBackpressured || decision.Run != nil {
+				t.Fatalf("resource admission decision = %#v, %v", decision, err)
+			}
+			found := false
+			for _, block := range decision.Blocks {
+				if block.RunID == queuedRunID && block.Reason == AgentRunAdmissionReasonResourceCapacity && block.Resource == "browser" &&
+					block.Requested == 1 && block.Reserved == 1 && block.Capacity == 1 {
+					found = true
+				}
+			}
+			if !found || decision.NextWakeAt == nil || !decision.NextWakeAt.Equal(now.Add(time.Hour)) {
+				t.Fatalf("resource decision lacks evidence or wake: %#v", decision)
+			}
+			objective, err = portfolio.UpdateObjective(ctx, scope, objective.ID, UpdateObjectiveRequest{
+				ExpectedRevision: objective.Revision,
+				ExecutionPolicy:  &ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 2}},
+				Summary:          "Increase browser capacity",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-three", LeaseDuration: time.Hour})
+			if err != nil || second == nil || second.ID != queuedRunID {
+				t.Fatalf("amended resource policy did not admit queued work: %#v, %v", second, err)
+			}
+		})
+	}
+}
+
+func TestResourceQuantityValidationDistinguishesCapacityFromRequirement(t *testing.T) {
+	objective := &ObjectiveExecutionPolicy{ResourceCapacities: map[string]int{"browser": 0}}
+	if err := objective.Validate(); err != nil {
+		t.Fatalf("zero capacity should disable a resource explicitly: %v", err)
+	}
+	run := &AgentRun{
+		ID: "run", Scope: Scope{Kind: "local", ID: "test"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
+		Goal: "work", Status: AgentRunStatusQueued, Source: RunSourceManual, ResourceRequirements: map[string]int{"browser": 0},
+		Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), AvailableAt: time.Now().UTC(), QueueEnteredAt: time.Now().UTC(),
+	}
+	if err := run.Validate(); err == nil {
+		t.Fatal("zero Run resource requirement must be rejected")
+	}
+}
