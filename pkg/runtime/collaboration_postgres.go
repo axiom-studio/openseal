@@ -72,7 +72,7 @@ func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record AgentRequ
 			WHERE scope_kind = $1 AND scope_id = $2 AND status = ANY($3)
 			AND payload->'delegationPolicy'->>'teamDeploymentId' = $4`,
 			record.Request.Scope.Kind, record.Request.Scope.ID,
-			pq.Array([]string{string(AgentRequestStatusPending), string(AgentRequestStatusClarificationRequested), string(AgentRequestStatusAccepted)}),
+			pq.Array([]string{string(AgentRequestStatusPending), string(AgentRequestStatusClarificationRequested), string(AgentRequestStatusAccepted), string(AgentRequestStatusCompletionReview)}),
 			record.DelegationTeamID).Scan(&active); err != nil {
 			return nil, err
 		}
@@ -84,7 +84,7 @@ func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record AgentRequ
 		if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err
 		}
-	} else {
+	} else if record.SourceRun != nil {
 		var exists int
 		err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_runs")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`,
 			record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.SourceRunID).Scan(&exists)
@@ -337,7 +337,7 @@ func (s *PostgresStore) CompleteAgentRequest(ctx context.Context, record AgentRe
 			return nil, ErrInvalidAgentRequestState
 		}
 		dependencyEvents = dependencyResult.Events
-	} else {
+	} else if record.SourceRun != nil {
 		if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err
 		}

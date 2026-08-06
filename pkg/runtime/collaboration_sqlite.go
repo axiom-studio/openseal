@@ -56,10 +56,11 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 	if record.MaximumConcurrent > 0 {
 		var active int
 		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_requests
-			WHERE scope_kind = ? AND scope_id = ? AND status IN (?, ?, ?)
+			WHERE scope_kind = ? AND scope_id = ? AND status IN (?, ?, ?, ?)
 			AND json_extract(payload, '$.delegationPolicy.teamDeploymentId') = ?`,
 			record.Request.Scope.Kind, record.Request.Scope.ID, AgentRequestStatusPending,
-			AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, record.DelegationTeamID).Scan(&active); err != nil {
+			AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, AgentRequestStatusCompletionReview,
+			record.DelegationTeamID).Scan(&active); err != nil {
 			return nil, err
 		}
 		if active >= record.MaximumConcurrent {
@@ -70,7 +71,7 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 		if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err
 		}
-	} else {
+	} else if record.SourceRun != nil {
 		var exists int
 		if err := conn.QueryRowContext(ctx, `SELECT 1 FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
 			record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.SourceRunID).Scan(&exists); err != nil {
@@ -289,7 +290,7 @@ func (s *SQLiteStore) CompleteAgentRequest(ctx context.Context, record AgentRequ
 			return nil, ErrInvalidAgentRequestState
 		}
 		dependencyEvents = dependencyResult.Events
-	} else {
+	} else if record.SourceRun != nil {
 		if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err
 		}
