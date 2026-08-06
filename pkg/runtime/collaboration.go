@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/google/uuid"
@@ -72,6 +73,43 @@ const (
 	AgentRequestDecisionProvideClarification AgentRequestDecision = "provide_clarification"
 )
 
+// AgentRequestBidDecision is an eligible Team member's explicit response to a
+// work offer. Bids are durable facts; assignment is a separate deterministic
+// decision so a retry or another replica cannot silently choose a different
+// worker.
+type AgentRequestBidDecision string
+
+const (
+	AgentRequestBidAccept  AgentRequestBidDecision = "accept"
+	AgentRequestBidDecline AgentRequestBidDecision = "decline"
+)
+
+// AgentRequestCandidate records why one roster member was eligible when a Team
+// request was offered and how much capacity was available at that instant.
+type AgentRequestCandidate struct {
+	AgentDeploymentID  string   `json:"agentDeploymentId"`
+	RosterAssignmentID string   `json:"rosterAssignmentId"`
+	RoleID             string   `json:"roleId"`
+	RequiredSkillIDs   []string `json:"requiredSkillIds,omitempty"`
+	CapacityLimit      int      `json:"capacityLimit"`
+	ActiveRuns         int      `json:"activeRuns"`
+	AvailableSlots     int      `json:"availableSlots"`
+}
+
+type AgentRequestBid struct {
+	AgentDeploymentID string                  `json:"agentDeploymentId"`
+	Decision          AgentRequestBidDecision `json:"decision"`
+	Reason            string                  `json:"reason,omitempty"`
+	IdempotencyKey    string                  `json:"idempotencyKey"`
+	SubmittedAt       time.Time               `json:"submittedAt"`
+}
+
+type AgentRequestAssignmentDecision struct {
+	AgentDeploymentID string    `json:"agentDeploymentId"`
+	Reason            string    `json:"reason"`
+	DecidedAt         time.Time `json:"decidedAt"`
+}
+
 // CollaborationParty identifies an agent or Team without coupling OpenSeal to
 // an enterprise identity system. Semantic role labels live on the request and
 // are deliberately independent from permissions and approval authority.
@@ -113,26 +151,29 @@ type ArtifactReference struct {
 // and activity projections. It contains references and explicitly shared
 // context only; credential values and bindings are never transferable.
 type AgentRequest struct {
-	ID                   string                       `json:"id"`
-	Scope                Scope                        `json:"scope"`
-	Kind                 AgentRequestKind             `json:"kind"`
-	Status               AgentRequestStatus           `json:"status"`
-	Requester            CollaborationParty           `json:"requester"`
-	Recipient            CollaborationParty           `json:"recipient"`
-	SourceRunID          string                       `json:"sourceRunId"`
-	ChildRunID           string                       `json:"childRunId,omitempty"`
-	AssignedAgentID      string                       `json:"assignedAgentId,omitempty"`
-	DependencyGroupID    string                       `json:"dependencyGroupId,omitempty"`
-	DependencyID         string                       `json:"dependencyId,omitempty"`
-	ObjectiveID          string                       `json:"objectiveId,omitempty"`
-	Goal                 string                       `json:"goal"`
-	Instructions         string                       `json:"instructions,omitempty"`
-	SemanticRole         string                       `json:"semanticRole,omitempty"`
-	AcceptanceCriteria   map[string]interface{}       `json:"acceptanceCriteria,omitempty"`
-	ArtifactRequirements []ArtifactRequirement        `json:"artifactRequirements,omitempty"`
-	SharedContext        map[string]interface{}       `json:"sharedContext,omitempty"`
-	ChildCheckpoint      map[string]interface{}       `json:"childCheckpoint,omitempty"`
-	AcceptancePolicy     AgentRequestAcceptancePolicy `json:"acceptancePolicy"`
+	ID                   string                          `json:"id"`
+	Scope                Scope                           `json:"scope"`
+	Kind                 AgentRequestKind                `json:"kind"`
+	Status               AgentRequestStatus              `json:"status"`
+	Requester            CollaborationParty              `json:"requester"`
+	Recipient            CollaborationParty              `json:"recipient"`
+	SourceRunID          string                          `json:"sourceRunId"`
+	ChildRunID           string                          `json:"childRunId,omitempty"`
+	AssignedAgentID      string                          `json:"assignedAgentId,omitempty"`
+	Candidates           []AgentRequestCandidate         `json:"candidates,omitempty"`
+	Bids                 []AgentRequestBid               `json:"bids,omitempty"`
+	AssignmentDecision   *AgentRequestAssignmentDecision `json:"assignmentDecision,omitempty"`
+	DependencyGroupID    string                          `json:"dependencyGroupId,omitempty"`
+	DependencyID         string                          `json:"dependencyId,omitempty"`
+	ObjectiveID          string                          `json:"objectiveId,omitempty"`
+	Goal                 string                          `json:"goal"`
+	Instructions         string                          `json:"instructions,omitempty"`
+	SemanticRole         string                          `json:"semanticRole,omitempty"`
+	AcceptanceCriteria   map[string]interface{}          `json:"acceptanceCriteria,omitempty"`
+	ArtifactRequirements []ArtifactRequirement           `json:"artifactRequirements,omitempty"`
+	SharedContext        map[string]interface{}          `json:"sharedContext,omitempty"`
+	ChildCheckpoint      map[string]interface{}          `json:"childCheckpoint,omitempty"`
+	AcceptancePolicy     AgentRequestAcceptancePolicy    `json:"acceptancePolicy"`
 	// DelegationPolicy is the immutable Team policy snapshot that governed
 	// creation of this request. A nil value means the source Run was not owned
 	// by a deployed Team. Keeping the snapshot on the collaboration fact makes
@@ -213,6 +254,9 @@ func (r *AgentRequest) Validate() error {
 	if err := r.DelegationPolicy.Validate(); err != nil {
 		return err
 	}
+	if err := validateAgentRequestCoordination(r); err != nil {
+		return err
+	}
 	if r.DelegationPolicy != nil && r.DelegationPolicy.RequireAcceptance && r.AcceptancePolicy != AgentRequestAcceptanceRecipientReview {
 		return errors.New("Team delegation policy requires recipient acceptance")
 	}
@@ -260,6 +304,46 @@ func (r *AgentRequest) Validate() error {
 	}
 	if err := validateCredentialFreeContext(r.AcceptanceEvidence); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateAgentRequestCoordination(request *AgentRequest) error {
+	seenCandidates := make(map[string]struct{}, len(request.Candidates))
+	for _, candidate := range request.Candidates {
+		if strings.TrimSpace(candidate.AgentDeploymentID) == "" || strings.TrimSpace(candidate.RosterAssignmentID) == "" ||
+			strings.TrimSpace(candidate.RoleID) == "" || candidate.CapacityLimit < 1 || candidate.ActiveRuns < 0 ||
+			candidate.AvailableSlots < 0 || candidate.AvailableSlots != max(0, candidate.CapacityLimit-candidate.ActiveRuns) {
+			return errors.New("Team work offer candidate has invalid identity or capacity evidence")
+		}
+		if _, duplicate := seenCandidates[candidate.AgentDeploymentID]; duplicate {
+			return errors.New("Team work offer candidates must be unique")
+		}
+		seenCandidates[candidate.AgentDeploymentID] = struct{}{}
+	}
+	seenBids := make(map[string]struct{}, len(request.Bids))
+	for _, bid := range request.Bids {
+		if _, eligible := seenCandidates[bid.AgentDeploymentID]; !eligible || strings.TrimSpace(bid.IdempotencyKey) == "" || bid.SubmittedAt.IsZero() ||
+			bid.Decision != AgentRequestBidAccept && bid.Decision != AgentRequestBidDecline {
+			return errors.New("Team work bid must reference one eligible candidate with a valid decision")
+		}
+		if _, duplicate := seenBids[bid.AgentDeploymentID]; duplicate {
+			return errors.New("Team work bids must be unique per candidate")
+		}
+		seenBids[bid.AgentDeploymentID] = struct{}{}
+	}
+	if request.AssignmentDecision != nil {
+		decision := request.AssignmentDecision
+		if decision.AgentDeploymentID == "" || strings.TrimSpace(decision.Reason) == "" || decision.DecidedAt.IsZero() || decision.AgentDeploymentID != request.AssignedAgentID {
+			return errors.New("Team assignment decision requires the selected Agent, reason, and timestamp")
+		}
+		if _, eligible := seenCandidates[decision.AgentDeploymentID]; !eligible {
+			return errors.New("Team assignment decision must select an eligible candidate")
+		}
+	}
+	if request.Recipient.Type == OwnerTypeTeam && request.Status != AgentRequestStatusPending && request.Status != AgentRequestStatusClarificationRequested &&
+		request.Status != AgentRequestStatusRejected && request.Status != AgentRequestStatusCanceled && request.AssignmentDecision == nil {
+		return errors.New("accepted Team work requires a durable assignment decision")
 	}
 	return nil
 }
@@ -346,6 +430,16 @@ type RespondAgentRequestRequest struct {
 	DecisionRunID    string
 }
 
+type SubmitAgentRequestBidRequest struct {
+	Scope             Scope
+	RequestID         string
+	ExpectedRevision  int64
+	AgentDeploymentID string
+	Decision          AgentRequestBidDecision
+	Reason            string
+	IdempotencyKey    string
+}
+
 type CompleteAgentRequestRequest struct {
 	Scope                 Scope
 	RequestID             string
@@ -398,6 +492,12 @@ type AgentRequestResponseRecord struct {
 	DependencyResolution    *RunDependencyResolutionRecord
 }
 
+type AgentRequestCoordinationRecord struct {
+	Request                 *AgentRequest
+	ExpectedRequestRevision int64
+	Event                   *ActivityEvent
+}
+
 type AgentRequestCompletionRecord struct {
 	Request                 *AgentRequest
 	ExpectedRequestRevision int64
@@ -415,6 +515,7 @@ type CollaborationStore interface {
 	GetAgentRequest(ctx context.Context, scope Scope, requestID string) (*AgentRequest, error)
 	FindAgentRequestByIdempotencyKey(ctx context.Context, scope Scope, key string) (*AgentRequest, error)
 	ListAgentRequests(ctx context.Context, filter AgentRequestFilter) ([]*AgentRequest, error)
+	CoordinateAgentRequest(ctx context.Context, record AgentRequestCoordinationRecord) (*ActivityEvent, error)
 	RespondAgentRequest(ctx context.Context, record AgentRequestResponseRecord) ([]*ActivityEvent, error)
 	CompleteAgentRequest(ctx context.Context, record AgentRequestCompletionRecord) ([]*ActivityEvent, error)
 }
@@ -429,6 +530,11 @@ type CollaborationKernelStore interface {
 
 type collaborationTeamStore interface {
 	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
+}
+
+type collaborationAgentStore interface {
+	GetDeployment(context.Context, capability.ScopeReference, string) (*kernelagent.AgentDeployment, error)
+	GetDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
 }
 
 type CollaborationService struct {
@@ -628,6 +734,12 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		ConversationRefs: append([]string(nil), req.ConversationRefs...),
 		BudgetAllocation: cloneBudgetPolicy(req.BudgetAllocation),
 		IdempotencyKey:   strings.TrimSpace(req.IdempotencyKey), Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if request.Recipient.Type == OwnerTypeTeam {
+		request.Candidates, err = s.resolveTeamRequestCandidates(ctx, request)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := request.Validate(); err != nil {
 		return nil, err
@@ -916,6 +1028,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		updated.Status = AgentRequestStatusAccepted
 		updated.AcceptedAt = &now
 		updated.AssignedAgentID = assignedAgentID
+		if request.Recipient.Type == OwnerTypeTeam {
+			updated.AssignmentDecision = &AgentRequestAssignmentDecision{
+				AgentDeploymentID: assignedAgentID,
+				Reason:            teamAssignmentReason(request, assignedAgentID),
+				DecidedAt:         now,
+			}
+		}
 		child := buildCollaborationChildRun(source, updated, now, s.newID())
 		if err := child.Validate(); err != nil {
 			return nil, err
@@ -1557,6 +1676,181 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	return child
 }
 
+func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context, request *AgentRequest) ([]AgentRequestCandidate, error) {
+	if s.teams == nil {
+		return nil, fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
+	}
+	scope := capability.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	deployment, err := s.teams.GetTeamDeployment(ctx, scope, request.Recipient.ID)
+	if err != nil {
+		return nil, err
+	}
+	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
+		return nil, fmt.Errorf("%w: recipient Team deployment is not active", ErrAgentRequestAssignment)
+	}
+	definitions, ok := s.teams.(agentRequestTeamDefinitionStore)
+	if !ok {
+		return nil, fmt.Errorf("%w: recipient Team definition is unavailable", ErrAgentRequestAssignment)
+	}
+	definition, err := definitions.GetTeamDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil && !errors.Is(err, kernelteam.ErrDefinitionNotFound) {
+		return nil, err
+	}
+	roles := make(map[string]kernelteam.RoleSlot)
+	if definition != nil {
+		for _, role := range definition.Roles {
+			roles[role.ID] = role
+		}
+	}
+	agents, hasAgentCatalog := s.store.(collaborationAgentStore)
+	candidates := make([]AgentRequestCandidate, 0, len(deployment.Roster))
+	for _, assignment := range deployment.Roster {
+		role := roles[assignment.RoleID]
+		if role.ID == "" {
+			role = kernelteam.RoleSlot{ID: assignment.RoleID}
+		}
+		if request.SemanticRole != "" && assignment.RoleID != request.SemanticRole {
+			continue
+		}
+		limit := 1
+		if hasAgentCatalog {
+			agentDeployment, getErr := agents.GetDeployment(ctx, scope, assignment.AgentDeploymentID)
+			if getErr != nil && !errors.Is(getErr, kernelagent.ErrDeploymentNotFound) {
+				return nil, getErr
+			}
+			if agentDeployment == nil {
+				if len(role.RequiredDefinitionIDs) > 0 || len(role.RequiredSkillIDs) > 0 {
+					return nil, fmt.Errorf("%w: Agent authority catalog cannot verify role %q", ErrAgentRequestAssignment, role.ID)
+				}
+			} else if agentDeployment.RolloutStatus != kernelagent.RolloutActive {
+				continue
+			} else {
+				if len(role.RequiredDefinitionIDs) > 0 && !containsTrimmedString(role.RequiredDefinitionIDs, agentDeployment.DefinitionID) {
+					continue
+				}
+				agentDefinition, getErr := agents.GetDefinition(ctx, agentDeployment.DefinitionID, agentDeployment.ActiveVersion)
+				if getErr != nil {
+					return nil, getErr
+				}
+				if agentDefinition == nil || !agentDefinitionProvidesSkills(agentDefinition, role.RequiredSkillIDs) {
+					continue
+				}
+				limit = agentDeployment.Capacity.MaxConcurrentRuns
+				if agentDeployment.Restrictions.MaxConcurrentRuns != nil && *agentDeployment.Restrictions.MaxConcurrentRuns < limit {
+					limit = *agentDeployment.Restrictions.MaxConcurrentRuns
+				}
+			}
+		} else if len(role.RequiredDefinitionIDs) > 0 || len(role.RequiredSkillIDs) > 0 {
+			return nil, fmt.Errorf("%w: Agent authority catalog is required to evaluate role %q", ErrAgentRequestAssignment, role.ID)
+		}
+		runs, listErr := s.runs.ListAgentRuns(ctx, AgentRunFilter{Scope: request.Scope, AssignedAgentID: assignment.AgentDeploymentID, Limit: 500})
+		if listErr != nil {
+			return nil, listErr
+		}
+		active := 0
+		for _, run := range runs {
+			if !isTerminalAgentRunStatus(run.Status) {
+				active++
+			}
+		}
+		available := limit - active
+		if available < 0 {
+			available = 0
+		}
+		candidates = append(candidates, AgentRequestCandidate{
+			AgentDeploymentID: assignment.AgentDeploymentID, RosterAssignmentID: assignment.ID, RoleID: assignment.RoleID,
+			RequiredSkillIDs: append([]string(nil), role.RequiredSkillIDs...), CapacityLimit: limit, ActiveRuns: active, AvailableSlots: available,
+		})
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].AgentDeploymentID < candidates[j].AgentDeploymentID })
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("%w: recipient Team has no eligible Agent for semantic role %q", ErrAgentRequestAssignment, request.SemanticRole)
+	}
+	return candidates, nil
+}
+
+func agentDefinitionProvidesSkills(definition *kernelagent.AgentDefinition, required []string) bool {
+	if len(required) == 0 {
+		return true
+	}
+	provided := make(map[string]struct{}, len(definition.Authority.AllowedSkillIDs)+len(definition.SkillRequirements))
+	for _, id := range definition.Authority.AllowedSkillIDs {
+		provided[strings.TrimSpace(id)] = struct{}{}
+	}
+	for _, requirement := range definition.SkillRequirements {
+		provided[strings.TrimSpace(requirement.SkillID)] = struct{}{}
+	}
+	for _, id := range required {
+		if _, ok := provided[strings.TrimSpace(id)]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func containsTrimmedString(values []string, wanted string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == strings.TrimSpace(wanted) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *CollaborationService) SubmitAgentRequestBid(ctx context.Context, req SubmitAgentRequestBidRequest) (*AgentRequestResult, error) {
+	if s == nil || s.store == nil || s.runs == nil {
+		return nil, errors.New("collaboration store is not configured")
+	}
+	request, err := s.store.GetAgentRequest(ctx, req.Scope, strings.TrimSpace(req.RequestID))
+	if err != nil {
+		return nil, err
+	}
+	if request == nil {
+		return nil, ErrAgentRequestNotFound
+	}
+	if request.Revision != req.ExpectedRevision || request.Status != AgentRequestStatusPending || request.Recipient.Type != OwnerTypeTeam {
+		return nil, ErrInvalidAgentRequestState
+	}
+	agentID := strings.TrimSpace(req.AgentDeploymentID)
+	key := strings.TrimSpace(req.IdempotencyKey)
+	if agentID == "" || key == "" || req.Decision != AgentRequestBidAccept && req.Decision != AgentRequestBidDecline {
+		return nil, errors.New("Team work bid requires an eligible Agent, accept or decline decision, and idempotency key")
+	}
+	eligible := false
+	for _, candidate := range request.Candidates {
+		if candidate.AgentDeploymentID == agentID {
+			eligible = true
+			break
+		}
+	}
+	if !eligible {
+		return nil, fmt.Errorf("%w: bidding Agent is not an eligible Team member", ErrAgentRequestAssignment)
+	}
+	for _, bid := range request.Bids {
+		if bid.AgentDeploymentID == agentID {
+			if bid.IdempotencyKey == key && bid.Decision == req.Decision && bid.Reason == strings.TrimSpace(req.Reason) {
+				return &AgentRequestResult{Request: request}, nil
+			}
+			return nil, ErrAgentRequestIdempotency
+		}
+	}
+	now := s.now()
+	updated := cloneAgentRequest(request)
+	updated.Bids = append(updated.Bids, AgentRequestBid{AgentDeploymentID: agentID, Decision: req.Decision, Reason: strings.TrimSpace(req.Reason), IdempotencyKey: key, SubmittedAt: now})
+	updated.Revision++
+	updated.UpdatedAt = now
+	source, err := s.runs.GetAgentRun(ctx, req.Scope, request.SourceRunID)
+	if err != nil {
+		return nil, err
+	}
+	event := collaborationEvent(source, updated, "collaboration.work_bid_submitted", fmt.Sprintf("Agent %s %sed the Team work offer", agentID, req.Decision), CollaborationParty{Type: OwnerTypeAgent, ID: agentID}, now)
+	persisted, err := s.store.CoordinateAgentRequest(ctx, AgentRequestCoordinationRecord{Request: updated, ExpectedRequestRevision: request.Revision, Event: event})
+	if err != nil {
+		return nil, err
+	}
+	return &AgentRequestResult{Request: updated, Source: source, Events: []*ActivityEvent{persisted}}, nil
+}
+
 func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, request *AgentRequest, assignedAgentID string) (string, error) {
 	assignedAgentID = strings.TrimSpace(assignedAgentID)
 	if request.Recipient.Type == OwnerTypeAgent {
@@ -1582,13 +1876,17 @@ func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, req
 		}
 	}
 	if assignedAgentID == "" {
-		if len(eligible) == 1 {
-			return eligible[0].AgentDeploymentID, nil
-		}
 		if len(eligible) == 0 {
 			return "", fmt.Errorf("%w: recipient Team has no Agent for semantic role %q", ErrAgentRequestAssignment, request.SemanticRole)
 		}
-		return "", fmt.Errorf("%w: Team request acceptance requires an explicit assigned Agent because %d roster members are eligible", ErrAgentRequestAssignment, len(eligible))
+		accepted := acceptedTeamRequestCandidates(request)
+		if len(accepted) > 0 {
+			return accepted[0].AgentDeploymentID, nil
+		}
+		if len(eligible) == 1 {
+			return eligible[0].AgentDeploymentID, nil
+		}
+		return "", fmt.Errorf("%w: Team request acceptance requires an explicit assigned Agent or accepted bid because %d roster members are eligible", ErrAgentRequestAssignment, len(eligible))
 	}
 	for _, assignment := range eligible {
 		if assignment.AgentDeploymentID == assignedAgentID {
@@ -1596,6 +1894,44 @@ func (s *CollaborationService) resolveRequestAssignment(ctx context.Context, req
 		}
 	}
 	return "", fmt.Errorf("%w: assigned Agent is not an eligible member of the recipient Team", ErrAgentRequestAssignment)
+}
+
+func acceptedTeamRequestCandidates(request *AgentRequest) []AgentRequestCandidate {
+	accepted := make(map[string]struct{})
+	for _, bid := range request.Bids {
+		if bid.Decision == AgentRequestBidAccept {
+			accepted[bid.AgentDeploymentID] = struct{}{}
+		}
+	}
+	result := make([]AgentRequestCandidate, 0, len(accepted))
+	for _, candidate := range request.Candidates {
+		if _, ok := accepted[candidate.AgentDeploymentID]; ok && candidate.AvailableSlots > 0 {
+			result = append(result, candidate)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].AvailableSlots != result[j].AvailableSlots {
+			return result[i].AvailableSlots > result[j].AvailableSlots
+		}
+		if result[i].ActiveRuns != result[j].ActiveRuns {
+			return result[i].ActiveRuns < result[j].ActiveRuns
+		}
+		return result[i].AgentDeploymentID < result[j].AgentDeploymentID
+	})
+	return result
+}
+
+func teamAssignmentReason(request *AgentRequest, selected string) string {
+	accepted := acceptedTeamRequestCandidates(request)
+	for index, candidate := range accepted {
+		if candidate.AgentDeploymentID == selected {
+			return fmt.Sprintf("selected accepted bid rank %d by available capacity (%d slots, %d active Runs)", index+1, candidate.AvailableSlots, candidate.ActiveRuns)
+		}
+	}
+	if len(request.Candidates) == 1 {
+		return "selected the only eligible roster member under the reviewed Team role policy"
+	}
+	return "selected explicitly from the eligible roster under the reviewed Team role policy"
 }
 
 func cloneBudgetPolicy(policy *BudgetPolicy) *BudgetPolicy {
@@ -2226,6 +2562,12 @@ func cloneAgentRequest(in *AgentRequest) *AgentRequest {
 	}
 	out := *in
 	out.DelegationPolicy = cloneAgentRequestDelegationPolicy(in.DelegationPolicy)
+	out.Candidates = cloneAgentRequestCandidates(in.Candidates)
+	out.Bids = append([]AgentRequestBid(nil), in.Bids...)
+	if in.AssignmentDecision != nil {
+		decision := *in.AssignmentDecision
+		out.AssignmentDecision = &decision
+	}
 	out.AcceptanceCriteria = cloneMap(in.AcceptanceCriteria)
 	out.ArtifactRequirements = cloneArtifactRequirements(in.ArtifactRequirements)
 	out.AcceptanceEvidence = cloneMap(in.AcceptanceEvidence)
@@ -2258,6 +2600,14 @@ func cloneAgentRequest(in *AgentRequest) *AgentRequest {
 		out.CompletedAt = &completed
 	}
 	return &out
+}
+
+func cloneAgentRequestCandidates(in []AgentRequestCandidate) []AgentRequestCandidate {
+	out := append([]AgentRequestCandidate(nil), in...)
+	for index := range out {
+		out[index].RequiredSkillIDs = append([]string(nil), in[index].RequiredSkillIDs...)
+	}
+	return out
 }
 
 func cloneAgentRequestDelegationPolicy(policy *AgentRequestDelegationPolicy) *AgentRequestDelegationPolicy {
