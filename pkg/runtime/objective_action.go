@@ -13,7 +13,7 @@ import (
 
 const (
 	ObjectiveManagementSkillID      = "openseal.objectives"
-	ObjectiveManagementSkillVersion = "1.1.0"
+	ObjectiveManagementSkillVersion = "1.2.0"
 	ObjectiveActionCreate           = "create"
 	ObjectiveActionUpdate           = "update"
 	ObjectiveActionPause            = "pause"
@@ -74,6 +74,11 @@ func objectiveMutableSchema() map[string]interface{} {
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]interface{}{
 				"maximumConcurrentRuns": map[string]interface{}{"type": "integer", "minimum": 0},
+				"resourceCapacities": map[string]interface{}{
+					"type": "object", "maxProperties": 64,
+					"propertyNames":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128},
+					"additionalProperties": map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 1000000000},
+				},
 			},
 			"required": []interface{}{"maximumConcurrentRuns"},
 		},

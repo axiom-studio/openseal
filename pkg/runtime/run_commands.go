@@ -484,30 +484,32 @@ func resumedRunStatus(previous AgentRunStatus) AgentRunStatus {
 
 func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 	payload := struct {
-		Scope           Scope                  `json:"scope"`
-		Kind            RunKind                `json:"kind"`
-		ObjectiveID     string                 `json:"objectiveId,omitempty"`
-		ParentRunID     string                 `json:"parentRunId,omitempty"`
-		Owner           ObjectiveOwner         `json:"owner"`
-		AssignedAgentID string                 `json:"assignedAgentId,omitempty"`
-		Entrypoint      string                 `json:"entrypoint,omitempty"`
-		ConcurrencyKey  string                 `json:"concurrencyKey,omitempty"`
-		Goal            string                 `json:"goal"`
-		Source          RunSource              `json:"source"`
-		Priority        int                    `json:"priority"`
-		Deadline        *time.Time             `json:"deadline,omitempty"`
-		AvailableAt     *time.Time             `json:"availableAt,omitempty"`
-		Context         map[string]interface{} `json:"context,omitempty"`
-		Plan            map[string]interface{} `json:"plan,omitempty"`
-		Checkpoint      map[string]interface{} `json:"checkpoint,omitempty"`
-		WakeCondition   *WakeCondition         `json:"wakeCondition,omitempty"`
-		Budget          *BudgetPolicy          `json:"budget,omitempty"`
-		Policy          map[string]interface{} `json:"policy,omitempty"`
+		Scope                Scope                  `json:"scope"`
+		Kind                 RunKind                `json:"kind"`
+		ObjectiveID          string                 `json:"objectiveId,omitempty"`
+		ParentRunID          string                 `json:"parentRunId,omitempty"`
+		Owner                ObjectiveOwner         `json:"owner"`
+		AssignedAgentID      string                 `json:"assignedAgentId,omitempty"`
+		Entrypoint           string                 `json:"entrypoint,omitempty"`
+		ConcurrencyKey       string                 `json:"concurrencyKey,omitempty"`
+		ResourceRequirements map[string]int         `json:"resourceRequirements,omitempty"`
+		Goal                 string                 `json:"goal"`
+		Source               RunSource              `json:"source"`
+		Priority             int                    `json:"priority"`
+		Deadline             *time.Time             `json:"deadline,omitempty"`
+		AvailableAt          *time.Time             `json:"availableAt,omitempty"`
+		Context              map[string]interface{} `json:"context,omitempty"`
+		Plan                 map[string]interface{} `json:"plan,omitempty"`
+		Checkpoint           map[string]interface{} `json:"checkpoint,omitempty"`
+		WakeCondition        *WakeCondition         `json:"wakeCondition,omitempty"`
+		Budget               *BudgetPolicy          `json:"budget,omitempty"`
+		Policy               map[string]interface{} `json:"policy,omitempty"`
 	}{
 		Scope: req.Scope, Kind: normalizeRunKind(req.Kind), ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, Owner: req.Owner, AssignedAgentID: req.AssignedAgentID, Entrypoint: strings.TrimSpace(req.Entrypoint),
-		ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
-		Goal:           req.Goal, Source: req.Source, Priority: req.Priority, Deadline: req.Deadline,
+		ConcurrencyKey:       strings.TrimSpace(req.ConcurrencyKey),
+		ResourceRequirements: req.ResourceRequirements,
+		Goal:                 req.Goal, Source: req.Source, Priority: req.Priority, Deadline: req.Deadline,
 		AvailableAt: req.AvailableAt, Context: req.Context, Plan: req.Plan, Checkpoint: req.Checkpoint,
 		WakeCondition: req.WakeCondition, Budget: req.Budget, Policy: req.Policy,
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -80,6 +81,7 @@ const (
 	AgentRunAdmissionReasonAgentCapacity          AgentRunAdmissionReason = "agent_capacity"
 	AgentRunAdmissionReasonOwnerCapacity          AgentRunAdmissionReason = "owner_capacity"
 	AgentRunAdmissionReasonObjectiveCapacity      AgentRunAdmissionReason = "objective_capacity"
+	AgentRunAdmissionReasonResourceCapacity       AgentRunAdmissionReason = "resource_capacity"
 	AgentRunAdmissionReasonConcurrencyCapacity    AgentRunAdmissionReason = "concurrency_key_capacity"
 	AgentRunAdmissionReasonAttemptBudgetExhausted AgentRunAdmissionReason = "attempt_budget_exhausted"
 )
@@ -96,6 +98,10 @@ type AgentRunAdmissionBlock struct {
 	Reason          AgentRunAdmissionReason `json:"reason"`
 	Active          int                     `json:"active,omitempty"`
 	Limit           int                     `json:"limit,omitempty"`
+	Resource        string                  `json:"resource,omitempty"`
+	Requested       int                     `json:"requested,omitempty"`
+	Reserved        int                     `json:"reserved,omitempty"`
+	Capacity        int                     `json:"capacity,omitempty"`
 	ReadyAt         *time.Time              `json:"readyAt,omitempty"`
 	LeaseExpiresAt  *time.Time              `json:"leaseExpiresAt,omitempty"`
 }
@@ -255,6 +261,9 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 	activeByOwner := make(map[string]int)
 	activeByObjective := make(map[string]int)
 	activeByConcurrencyKey := make(map[string]int)
+	reservedByObjectiveResource := make(map[string]int)
+	resourceWakeByObjectiveResource := make(map[string]*time.Time)
+	objectiveWake := make(map[string]*time.Time)
 	for _, run := range runs {
 		if run == nil || run.Scope != claim.Scope || run.Status != AgentRunStatusRunning || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(claim.Now) {
 			continue
@@ -263,6 +272,12 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 		activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
 		activeByObjective[run.ObjectiveID]++
 		activeByConcurrencyKey[run.ConcurrencyKey]++
+		objectiveWake[run.ObjectiveID] = earliestTime(objectiveWake[run.ObjectiveID], run.LeaseExpiresAt)
+		for resource, quantity := range run.ResourceRequirements {
+			key := objectiveResourceSchedulingKey(run.ObjectiveID, resource)
+			reservedByObjectiveResource[key] += quantity
+			resourceWakeByObjectiveResource[key] = earliestTime(resourceWakeByObjectiveResource[key], run.LeaseExpiresAt)
+		}
 	}
 	var selected *AgentRun
 	for _, run := range runs {
@@ -305,6 +320,37 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 			block := base
 			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonObjectiveCapacity, activeByObjective[run.ObjectiveID], objectiveLimit
 			decision.Blocks = append(decision.Blocks, block)
+			decision.NextWakeAt = earliestTime(decision.NextWakeAt, objectiveWake[run.ObjectiveID])
+			continue
+		}
+		objective := objectives[run.ObjectiveID]
+		resourceNames := make([]string, 0, len(run.ResourceRequirements))
+		for resource := range run.ResourceRequirements {
+			resourceNames = append(resourceNames, resource)
+		}
+		sort.Strings(resourceNames)
+		resourceBlocked := false
+		for _, resource := range resourceNames {
+			if objective == nil || objective.ExecutionPolicy == nil {
+				continue
+			}
+			capacity, bounded := objective.ExecutionPolicy.ResourceCapacities[resource]
+			if !bounded {
+				continue
+			}
+			key := objectiveResourceSchedulingKey(run.ObjectiveID, resource)
+			requested, reserved := run.ResourceRequirements[resource], reservedByObjectiveResource[key]
+			if reserved+requested <= capacity {
+				continue
+			}
+			block := base
+			block.Reason, block.Resource = AgentRunAdmissionReasonResourceCapacity, resource
+			block.Requested, block.Reserved, block.Capacity = requested, reserved, capacity
+			decision.Blocks = append(decision.Blocks, block)
+			decision.NextWakeAt = earliestTime(decision.NextWakeAt, resourceWakeByObjectiveResource[key])
+			resourceBlocked = true
+		}
+		if resourceBlocked {
 			continue
 		}
 		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {
@@ -324,7 +370,7 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 	hasCapacity, hasNotDue, hasLease := false, false, false
 	for _, block := range decision.Blocks {
 		switch block.Reason {
-		case AgentRunAdmissionReasonAgentCapacity, AgentRunAdmissionReasonOwnerCapacity, AgentRunAdmissionReasonObjectiveCapacity, AgentRunAdmissionReasonConcurrencyCapacity:
+		case AgentRunAdmissionReasonAgentCapacity, AgentRunAdmissionReasonOwnerCapacity, AgentRunAdmissionReasonObjectiveCapacity, AgentRunAdmissionReasonResourceCapacity, AgentRunAdmissionReasonConcurrencyCapacity:
 			hasCapacity = true
 		case AgentRunAdmissionReasonNotDue:
 			hasNotDue = true
@@ -341,6 +387,10 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 		decision.Outcome = AgentRunAdmissionLeaseHeld
 	}
 	return nil, decision
+}
+
+func objectiveResourceSchedulingKey(objectiveID, resource string) string {
+	return objectiveID + "\x1f" + resource
 }
 
 func earliestTime(current, candidate *time.Time) *time.Time {

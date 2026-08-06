@@ -431,6 +431,19 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 			WHEN $12 > 0 THEN $12
 			ELSE COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0)
 		END))
+		AND NOT EXISTS (
+			SELECT 1
+			FROM jsonb_each_text(COALESCE(candidate.payload->'resourceRequirements', '{}'::jsonb)) AS requirement(resource, quantity)
+			WHERE COALESCE(objective.payload->'executionPolicy'->'resourceCapacities', '{}'::jsonb) ? requirement.resource
+			AND COALESCE((
+				SELECT SUM(COALESCE(NULLIF(active.payload->'resourceRequirements'->>requirement.resource, '')::integer, 0))
+				FROM `+s.table("agent_runs")+` AS active
+				WHERE active.scope_kind = candidate.scope_kind AND active.scope_id = candidate.scope_id
+				AND active.objective_id = candidate.objective_id
+				AND active.status = $5 AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
+			), 0) + requirement.quantity::integer >
+				COALESCE(NULLIF(objective.payload->'executionPolicy'->'resourceCapacities'->>requirement.resource, '')::integer, 0)
+		)
 		ORDER BY candidate.priority + FLOOR(GREATEST(EXTRACT(EPOCH FROM ($6 - candidate.queue_entered_at)), 0) / $8) DESC,
 			candidate.deadline ASC NULLS LAST, candidate.queue_entered_at ASC, candidate.id ASC
 		FOR UPDATE OF candidate SKIP LOCKED LIMIT 1`,
