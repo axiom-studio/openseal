@@ -17,11 +17,19 @@ const (
 	AgentRequestInboxContextKey = "agentRequestInbox"
 	// AgentRequestDecisionOutputKey is the only model output consumed as an
 	// AgentRequest lifecycle decision.
-	AgentRequestDecisionOutputKey            = "agentRequestDecision"
+	AgentRequestDecisionOutputKey = "agentRequestDecision"
+	// AgentRequestCompletionReviewContextKey is kernel-authored input for the
+	// requester-side independent review of completed delegated work.
+	AgentRequestCompletionReviewContextKey = "agentRequestCompletionReview"
+	// AgentRequestCompletionReviewOutputKey is the only model output consumed
+	// to resolve an independent completion-review checkpoint.
+	AgentRequestCompletionReviewOutputKey    = "agentRequestCompletionReviewDecision"
 	acceptedAgentRequestExecutionRecoveryKey = "_opensealAcceptedAgentRequestExecutionRecovery"
 )
 
 const agentRequestDecisionSystemInstruction = `Evaluate the incoming AgentRequest in inputContext.agentRequestInbox before doing any requested work. Decide whether the request is relevant, sufficiently clear, safe, and within your role. Do not execute Skills, delegate, fork, or perform the requested work during this review. Complete the review with runOutput.agentRequestDecision set to exactly {"decision":"accept","message":"concise reason"}, {"decision":"reject","message":"concise reason"}, or {"decision":"request_clarification","message":"one concrete question"}.`
+
+const agentRequestCompletionReviewSystemInstruction = `Independently review the completed delegated work in inputContext.agentRequestCompletionReview against its goal, acceptance criteria, required artifacts, evidence, and output. Do not execute Skills, invoke runbooks, delegate, fork, or modify the work during this review. Complete the review with runOutput.agentRequestCompletionReviewDecision set to exactly {"decision":"approve","message":"concise evidence-based reason"} or {"decision":"reject","message":"concise evidence-based reason"}.`
 
 const acceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again, and do not emit runOutput.agentRequestDecision. If continuationCheckpoint._opensealAcceptedAgentRequestExecutionRecovery is present, the previous execution turn was discarded because it repeated the already-completed intake decision; continue directly with the requested work and do not repeat that output.`
 
@@ -35,14 +43,21 @@ type AgentRequestInboxStore interface {
 }
 
 type AgentRequestInboxReconcileResult struct {
-	RequestsScanned     int `json:"requestsScanned"`
-	RequestsAccepted    int `json:"requestsAccepted"`
-	DecisionRunsCreated int `json:"decisionRunsCreated"`
-	DecisionRunsReused  int `json:"decisionRunsReused"`
-	DecisionsApplied    int `json:"decisionsApplied"`
+	RequestsScanned          int `json:"requestsScanned"`
+	RequestsAccepted         int `json:"requestsAccepted"`
+	DecisionRunsCreated      int `json:"decisionRunsCreated"`
+	DecisionRunsReused       int `json:"decisionRunsReused"`
+	DecisionsApplied         int `json:"decisionsApplied"`
+	CompletionReviewsCreated int `json:"completionReviewsCreated"`
+	CompletionReviewsReused  int `json:"completionReviewsReused"`
+	CompletionReviewsApplied int `json:"completionReviewsApplied"`
 }
 
 type agentRequestDecisionTurnRunner struct {
+	inner TurnRunner
+}
+
+type agentRequestCompletionReviewTurnRunner struct {
 	inner TurnRunner
 }
 
@@ -70,6 +85,32 @@ func (r *agentRequestDecisionTurnRunner) RunTurn(ctx context.Context, input Turn
 	}
 	if outcome.NextRunStatus == AgentRunStatusCompleted {
 		if _, _, err := parseAgentRequestDecisionOutput(outcome.RunOutput); err != nil {
+			return nil, err
+		}
+	}
+	return outcome, nil
+}
+
+func (r *agentRequestCompletionReviewTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
+	if planner, ok := r.inner.(TurnBudgetPlanner); ok {
+		return planner.PlanTurnBudget(ctx, input)
+	}
+	return BudgetUsage{}, nil
+}
+
+func (r *agentRequestCompletionReviewTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+	if r == nil || r.inner == nil {
+		return nil, errors.New("AgentRequest completion review runner is unavailable")
+	}
+	outcome, err := r.inner.RunTurn(ctx, input)
+	if err != nil || outcome == nil {
+		return outcome, err
+	}
+	if len(outcome.ProposedActions) > 0 || outcome.ProposedRunbook != nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil {
+		return nil, errors.New("AgentRequest completion review turns cannot execute actions, invoke runbooks, fork, or delegate")
+	}
+	if outcome.NextRunStatus == AgentRunStatusCompleted {
+		if _, _, err := parseAgentRequestCompletionReviewOutput(outcome.RunOutput); err != nil {
 			return nil, err
 		}
 	}
@@ -164,6 +205,12 @@ func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope Scope
 	result := &AgentRequestInboxReconcileResult{RequestsScanned: len(requests)}
 	var failures []error
 	for _, request := range requests {
+		if request.Status == AgentRequestStatusCompletionReview {
+			if err := r.reconcileCompletionReview(ctx, request, assignedAgentID, result); err != nil {
+				failures = append(failures, fmt.Errorf("completion review %s: %w", request.ID, err))
+			}
+			continue
+		}
 		assigned, requireReview, assignmentErr := r.recipientAssignment(ctx, request)
 		if assignmentErr != nil {
 			failures = append(failures, fmt.Errorf("request %s: %w", request.ID, assignmentErr))
@@ -216,7 +263,7 @@ func (r *AgentRequestInboxReconciler) pendingRequests(ctx context.Context, scope
 	result := make([]*AgentRequest, 0)
 	for offset := 0; ; offset += pageSize {
 		page, err := r.collaboration.ListAgentRequests(ctx, AgentRequestFilter{
-			Scope: scope, Statuses: []AgentRequestStatus{AgentRequestStatusPending}, Limit: pageSize, Offset: offset,
+			Scope: scope, Statuses: []AgentRequestStatus{AgentRequestStatusPending, AgentRequestStatusCompletionReview}, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
 			return nil, err
@@ -235,26 +282,74 @@ func (r *AgentRequestInboxReconciler) recipientAssignment(ctx context.Context, r
 	if request.Recipient.Type == OwnerTypeAgent {
 		return request.Recipient.ID, true, nil
 	}
-	if r.collaboration.teams == nil {
-		return "", false, fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
-	}
-	deployment, err := r.collaboration.teams.GetTeamDeployment(ctx, capability.ScopeReference{
-		Kind: request.Scope.Kind, ID: request.Scope.ID,
-	}, request.Recipient.ID)
+	assigned, definition, err := r.teamPartyAssignment(ctx, request.Scope, request.Recipient, request.SemanticRole, "", false)
 	if err != nil {
 		return "", false, err
 	}
+	return assigned, definition.Delegation.RequireAcceptance, nil
+}
+
+func (r *AgentRequestInboxReconciler) completionReviewerAssignment(ctx context.Context, request *AgentRequest) (string, error) {
+	if request == nil {
+		return "", ErrAgentRequestNotFound
+	}
+	if request.Requester.Type == OwnerTypeAgent {
+		if request.Requester.ID == request.AssignedAgentID {
+			return "", fmt.Errorf("%w: completed work cannot be reviewed by its worker", ErrAgentRequestAssignment)
+		}
+		return request.Requester.ID, nil
+	}
+	assigned, _, err := r.teamPartyAssignment(ctx, request.Scope, request.Requester, "", request.AssignedAgentID, true)
+	return assigned, err
+}
+
+func (r *AgentRequestInboxReconciler) teamPartyAssignment(
+	ctx context.Context,
+	scope Scope,
+	party CollaborationParty,
+	semanticRole string,
+	excludedAgentID string,
+	useApproverRoles bool,
+) (string, *kernelteam.Definition, error) {
+	if r.collaboration.teams == nil {
+		return "", nil, fmt.Errorf("%w: Team roster assignment is unavailable", ErrAgentRequestAssignment)
+	}
+	deployment, err := r.collaboration.teams.GetTeamDeployment(ctx, capability.ScopeReference{
+		Kind: scope.Kind, ID: scope.ID,
+	}, party.ID)
+	if err != nil {
+		return "", nil, err
+	}
 	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
-		return "", false, fmt.Errorf("%w: recipient Team deployment is not active", ErrAgentRequestAssignment)
+		return "", nil, fmt.Errorf("%w: Team deployment is not active", ErrAgentRequestAssignment)
+	}
+	definitions, ok := r.collaboration.store.(agentRequestTeamDefinitionStore)
+	if !ok {
+		return "", nil, fmt.Errorf("%w: Team delegation policy is unavailable", ErrAgentRequestAssignment)
+	}
+	definition, err := definitions.GetTeamDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil {
+		return "", nil, err
+	}
+	if definition == nil {
+		return "", nil, fmt.Errorf("%w: active Team definition is unavailable", ErrAgentRequestAssignment)
+	}
+	eligibleRoles := make(map[string]struct{})
+	if useApproverRoles {
+		for _, roleID := range definition.Approvals.ApproverRoleIDs {
+			eligibleRoles[strings.TrimSpace(roleID)] = struct{}{}
+		}
 	}
 	eligible := make([]kernelteam.RosterAssignment, 0, len(deployment.Roster))
 	for _, assignment := range deployment.Roster {
-		if request.SemanticRole == "" || assignment.RoleID == request.SemanticRole {
+		_, approvedRole := eligibleRoles[assignment.RoleID]
+		if (semanticRole == "" || assignment.RoleID == semanticRole) &&
+			(!useApproverRoles || len(eligibleRoles) == 0 || approvedRole) && assignment.AgentDeploymentID != excludedAgentID {
 			eligible = append(eligible, assignment)
 		}
 	}
 	if len(eligible) == 0 {
-		return "", false, fmt.Errorf("%w: recipient Team has no Agent for semantic role %q", ErrAgentRequestAssignment, request.SemanticRole)
+		return "", nil, fmt.Errorf("%w: Team has no independent Agent eligible for review role %q", ErrAgentRequestAssignment, semanticRole)
 	}
 	sort.Slice(eligible, func(i, j int) bool {
 		if eligible[i].AgentDeploymentID != eligible[j].AgentDeploymentID {
@@ -262,18 +357,150 @@ func (r *AgentRequestInboxReconciler) recipientAssignment(ctx context.Context, r
 		}
 		return eligible[i].ID < eligible[j].ID
 	})
-	definitions, ok := r.collaboration.store.(agentRequestTeamDefinitionStore)
-	if !ok {
-		return "", false, fmt.Errorf("%w: Team delegation policy is unavailable", ErrAgentRequestAssignment)
-	}
-	definition, err := definitions.GetTeamDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	return eligible[0].AgentDeploymentID, definition, nil
+}
+
+func (r *AgentRequestInboxReconciler) reconcileCompletionReview(
+	ctx context.Context,
+	request *AgentRequest,
+	assignedAgentFilter string,
+	result *AgentRequestInboxReconcileResult,
+) error {
+	reviewerID, err := r.completionReviewerAssignment(ctx, request)
 	if err != nil {
-		return "", false, err
+		return err
 	}
-	if definition == nil {
-		return "", false, fmt.Errorf("%w: active Team definition is unavailable", ErrAgentRequestAssignment)
+	if filter := strings.TrimSpace(assignedAgentFilter); filter != "" && filter != reviewerID {
+		return nil
 	}
-	return eligible[0].AgentDeploymentID, definition.Delegation.RequireAcceptance, nil
+	reviewRun, created, err := r.ensureCompletionReviewRun(ctx, request, reviewerID)
+	if err != nil {
+		return err
+	}
+	if created {
+		result.CompletionReviewsCreated++
+	} else {
+		result.CompletionReviewsReused++
+	}
+	if isTerminalAgentRunStatus(reviewRun.Status) {
+		applied, resolveErr := r.ResolveCompletionReviewRun(ctx, reviewRun)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if applied {
+			result.CompletionReviewsApplied++
+		}
+	}
+	return nil
+}
+
+func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
+	ctx context.Context,
+	request *AgentRequest,
+	reviewerID string,
+) (*AgentRun, bool, error) {
+	source, err := r.collaboration.runs.GetAgentRun(ctx, request.Scope, request.SourceRunID)
+	if err != nil {
+		return nil, false, err
+	}
+	child, err := r.collaboration.runs.GetAgentRun(ctx, request.Scope, request.ChildRunID)
+	if err != nil {
+		return nil, false, err
+	}
+	if source == nil || child == nil || child.Status != AgentRunStatusCompleted {
+		return nil, false, ErrInvalidAgentRequestState
+	}
+	existing, err := r.findCompletionReviewRun(ctx, request, source, reviewerID)
+	if err != nil || existing != nil {
+		return existing, false, err
+	}
+	review := map[string]interface{}{
+		"requestId": request.ID, "requestRevision": request.Revision,
+		"requester": request.Requester, "recipient": request.Recipient,
+		"workerAgentId": request.AssignedAgentID, "goal": request.Goal,
+		"instructions": request.Instructions, "acceptanceCriteria": cloneMap(request.AcceptanceCriteria),
+		"artifactRequirements": cloneArtifactRequirements(request.ArtifactRequirements),
+		"completionSummary":    request.CompletionSummary, "acceptanceEvidence": cloneMap(request.AcceptanceEvidence),
+		"artifacts": request.Artifacts, "output": cloneMap(child.Output),
+		"conversationRefs": append([]string(nil), request.ConversationRefs...),
+	}
+	contextValue := map[string]interface{}{AgentRequestCompletionReviewContextKey: review}
+	if projectID, _ := source.Context["projectId"].(string); strings.TrimSpace(projectID) != "" {
+		contextValue["projectId"] = strings.TrimSpace(projectID)
+	}
+	key := fmt.Sprintf("agent-request-completion-review:%s:%d:%s", request.ID, request.Revision, reviewerID)
+	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,
+		Owner:           ObjectiveOwner{Type: request.Requester.Type, ID: request.Requester.ID},
+		AssignedAgentID: reviewerID, ConcurrencyKey: "agent-request-completion-review:" + request.ID,
+		Goal:   "Independently review completed delegated work: " + request.Goal,
+		Source: RunSourceCompletionReview, Priority: source.Priority, Context: contextValue,
+		Budget: &BudgetPolicy{
+			MaxAttempts: 5, MaxTurns: 3, MaxInputTokens: 64000, MaxOutputTokens: 4096,
+			MaxTotalTokens: 68096, MaxDurationMS: 180000,
+		},
+		IdempotencyKey: key, Actor: ActivityActor{Type: "system", ID: "agent-request-inbox"},
+		Visibility: ActivityVisibilityTeam,
+	})
+	if err != nil {
+		if errors.Is(err, ErrRunIdempotency) {
+			existing, findErr := r.findCompletionReviewRun(ctx, request, source, reviewerID)
+			if findErr != nil {
+				return nil, false, findErr
+			}
+			if existing != nil {
+				return existing, false, nil
+			}
+		}
+		return nil, false, err
+	}
+	return created.Run, created.Event != nil, nil
+}
+
+func (r *AgentRequestInboxReconciler) findCompletionReviewRun(
+	ctx context.Context,
+	request *AgentRequest,
+	source *AgentRun,
+	reviewerID string,
+) (*AgentRun, error) {
+	const pageSize = 100
+	var matched *AgentRun
+	for offset := 0; ; offset += pageSize {
+		runs, err := r.collaboration.runs.ListAgentRuns(ctx, AgentRunFilter{
+			Scope: request.Scope, ParentRunID: source.ID, AssignedAgentID: reviewerID, Limit: pageSize, Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range runs {
+			if !completionReviewRunMatchesRequest(candidate, request, reviewerID) {
+				continue
+			}
+			if matched != nil && matched.ID != candidate.ID {
+				return nil, errors.New("AgentRequest has multiple durable completion review Runs")
+			}
+			matched = candidate
+		}
+		if len(runs) < pageSize {
+			return matched, nil
+		}
+	}
+}
+
+func completionReviewRunMatchesRequest(run *AgentRun, request *AgentRequest, reviewerID string) bool {
+	if run == nil || request == nil || run.Source != RunSourceCompletionReview ||
+		run.Scope != request.Scope || run.ParentRunID != request.SourceRunID ||
+		run.Owner != (ObjectiveOwner{Type: request.Requester.Type, ID: request.Requester.ID}) ||
+		run.AssignedAgentID != reviewerID || run.ConcurrencyKey != "agent-request-completion-review:"+request.ID {
+		return false
+	}
+	review, ok := run.Context[AgentRequestCompletionReviewContextKey].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	requestID, _ := review["requestId"].(string)
+	requestRevision, err := positiveInt64(review["requestRevision"])
+	return strings.TrimSpace(requestID) == request.ID && err == nil && requestRevision == request.Revision
 }
 
 func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, request *AgentRequest, assignedAgentID string) (*AgentRun, bool, bool, error) {
@@ -436,6 +663,57 @@ func (r *AgentRequestInboxReconciler) ResolveDecisionRun(ctx context.Context, ru
 	return err == nil, err
 }
 
+func (r *AgentRequestInboxReconciler) ResolveCompletionReviewRun(ctx context.Context, run *AgentRun) (bool, error) {
+	if r == nil || r.collaboration == nil || run == nil || run.Source != RunSourceCompletionReview || !isTerminalAgentRunStatus(run.Status) {
+		return false, nil
+	}
+	review, ok := run.Context[AgentRequestCompletionReviewContextKey].(map[string]interface{})
+	if !ok {
+		return false, errors.New("AgentRequest completion review Run has no durable review context")
+	}
+	requestID, _ := review["requestId"].(string)
+	requestID = strings.TrimSpace(requestID)
+	requestRevision, err := positiveInt64(review["requestRevision"])
+	if requestID == "" || err != nil {
+		return false, errors.New("AgentRequest completion review Run has invalid request identity")
+	}
+	request, err := r.collaboration.GetAgentRequest(ctx, run.Scope, requestID)
+	if err != nil {
+		return false, err
+	}
+	if request.Status != AgentRequestStatusCompletionReview || request.Revision != requestRevision {
+		return false, nil
+	}
+	approve := false
+	message := strings.TrimSpace(run.Error)
+	if run.Status == AgentRunStatusCompleted {
+		approve, message, err = parseAgentRequestCompletionReviewOutput(run.Output)
+		if err != nil {
+			return false, err
+		}
+	} else if message == "" {
+		message = "Independent completion review did not complete."
+	}
+	child, err := r.collaboration.runs.GetAgentRun(ctx, request.Scope, request.ChildRunID)
+	if err != nil {
+		return false, err
+	}
+	if child == nil {
+		return false, ErrRunNotFound
+	}
+	_, err = r.collaboration.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
+		Scope: run.Scope, RequestID: request.ID, ExpectedRevision: request.Revision,
+		ExpectedChildRevision: child.Revision, Principal: request.Requester,
+		Actor:   CollaborationParty{Type: OwnerTypeAgent, ID: run.AssignedAgentID},
+		Approve: approve, Summary: message,
+		IdempotencyKey: fmt.Sprintf("agent-request-completion-review:%s:%s", request.ID, run.ID),
+	})
+	if errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidAgentRequestState) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (r *AgentRequestInboxReconciler) failDecisionReview(
 	ctx context.Context,
 	request *AgentRequest,
@@ -529,6 +807,28 @@ func parseAgentRequestDecisionOutput(output map[string]interface{}) (AgentReques
 		return "", "", errors.New("AgentRequest decision output is invalid")
 	}
 	return decision, message, nil
+}
+
+func parseAgentRequestCompletionReviewOutput(output map[string]interface{}) (bool, string, error) {
+	raw, ok := output[AgentRequestCompletionReviewOutputKey].(map[string]interface{})
+	if !ok {
+		return false, "", errors.New("AgentRequest completion review output is missing")
+	}
+	decision, _ := raw["decision"].(string)
+	message, _ := raw["message"].(string)
+	decision = strings.TrimSpace(decision)
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return false, "", errors.New("AgentRequest completion review requires an evidence-based reason")
+	}
+	switch decision {
+	case "approve":
+		return true, message, nil
+	case "reject":
+		return false, message, nil
+	default:
+		return false, "", errors.New("AgentRequest completion review decision is invalid")
+	}
 }
 
 func positiveInt64(value interface{}) (int64, error) {

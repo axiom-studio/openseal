@@ -243,7 +243,8 @@ func collaborationPartyFromQuery(r *http.Request, prefix string) (*runtime.Colla
 func validAgentRequestStatus(status runtime.AgentRequestStatus) bool {
 	switch status {
 	case runtime.AgentRequestStatusPending, runtime.AgentRequestStatusClarificationRequested, runtime.AgentRequestStatusAccepted,
-		runtime.AgentRequestStatusCompleted, runtime.AgentRequestStatusFailed, runtime.AgentRequestStatusRejected, runtime.AgentRequestStatusCanceled:
+		runtime.AgentRequestStatusCompletionReview, runtime.AgentRequestStatusCompleted, runtime.AgentRequestStatusFailed,
+		runtime.AgentRequestStatusRejected, runtime.AgentRequestStatusCanceled:
 		return true
 	default:
 		return false

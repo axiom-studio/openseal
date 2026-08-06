@@ -602,6 +602,113 @@ func TestAgentRequestInboxUsesDeterministicTeamRoleAndAcceptancePolicy(t *testin
 	}
 }
 
+func TestAgentRequestInboxAutonomouslyReviewsTeamDelegationCompletion(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "inbox"}
+	store := &agentRequestInboxTeamStore{
+		MemoryStore: NewMemoryStore(),
+		deployment: &kernelteam.Deployment{
+			ID: "release-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+			DefinitionID: "release-team", ActiveVersion: "1", Status: kernelteam.DeploymentActive, Revision: 1,
+			Roster: []kernelteam.RosterAssignment{
+				{ID: "coordinator", RoleID: "coordinator", AgentDeploymentID: "coordinator-agent"},
+				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-agent"},
+				{ID: "specialist", RoleID: "specialist", AgentDeploymentID: "specialist-agent"},
+			},
+		},
+		definition: &kernelteam.Definition{
+			ID: "release-team", Version: "1",
+			Approvals: kernelteam.ApprovalPolicy{ApproverRoleIDs: []string{"reviewer"}},
+			Delegation: kernelteam.DelegationPolicy{
+				MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true,
+				RequireAcceptance: true, RequireCompletionReview: true,
+			},
+		},
+	}
+	portfolio := NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "coordinator-agent",
+		Goal: "Coordinate a reviewed release", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewCollaborationService(store)
+	created, err := service.CreateAgentRequest(t.Context(), CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindHandoff,
+		Requester:   CollaborationParty{Type: OwnerTypeTeam, ID: "release-team"},
+		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: "specialist-agent"},
+		SourceRunID: source.ID, Goal: "Prepare release evidence", SemanticRole: "specialist",
+		AcceptanceCriteria: map[string]interface{}{"evidenceRequired": true}, IdempotencyKey: "prepare-release-evidence",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := service.RespondAgentRequest(t.Context(), RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
+		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "specialist-agent"}, AssignedAgentID: "specialist-agent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := service.CompleteAgentRequest(t.Context(), CompleteAgentRequestRequest{
+		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
+		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
+		Summary: "Release evidence prepared", AcceptanceEvidence: map[string]interface{}{"checks": "passed"},
+		CompletionKey: "release-evidence-complete",
+	})
+	if err != nil || completed.Request.Status != AgentRequestStatusCompletionReview {
+		t.Fatalf("completion submission = %#v, %v", completed, err)
+	}
+	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
+		if run.Source != RunSourceCompletionReview {
+			return nil, fmt.Errorf("unexpected claimed run source %s", run.Source)
+		}
+		return &TurnRunnerBinding{DefinitionID: "reviewer", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+			return &TurnOutcome{
+				NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Independent review approved",
+				RunOutput: map[string]interface{}{AgentRequestCompletionReviewOutputKey: map[string]interface{}{
+					"decision": "approve", "message": "The submitted evidence satisfies the stated acceptance criteria.",
+				}},
+			}, nil
+		})}, nil
+	})
+	pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
+		Scope: scope, Kind: RunKindAgentWork, AssignedAgentID: "reviewer-agent",
+		Concurrency: 1, PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	pool.Start(ctx)
+	defer func() {
+		cancel()
+		pool.Stop()
+	}()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		current, getErr := service.GetAgentRequest(t.Context(), scope, created.Request.ID)
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if current.Status == AgentRequestStatusCompleted {
+			if current.CompletionReviewer == nil || current.CompletionReviewer.ID != "reviewer-agent" ||
+				current.CompletionReviewer.ID == current.AssignedAgentID {
+				t.Fatalf("completion reviewer = %#v worker=%s", current.CompletionReviewer, current.AssignedAgentID)
+			}
+			resumed, getRunErr := store.GetAgentRun(t.Context(), scope, source.ID)
+			if getRunErr != nil || (resumed.Status != AgentRunStatusQueued && resumed.Status != AgentRunStatusCompleted) || resumed.WakeCondition != nil {
+				t.Fatalf("resumed source = %#v, %v", resumed, getRunErr)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	current, _ := service.GetAgentRequest(t.Context(), scope, created.Request.ID)
+	t.Fatalf("completion review did not resolve: %#v", current)
+}
+
 func TestParseAgentRequestDecisionOutputRejectsAmbiguousOrUnsafeShape(t *testing.T) {
 	for _, output := range []map[string]interface{}{
 		nil,

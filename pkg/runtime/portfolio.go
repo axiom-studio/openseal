@@ -142,16 +142,17 @@ const (
 type RunSource string
 
 const (
-	RunSourceManual          RunSource = "manual"
-	RunSourceChat            RunSource = "chat"
-	RunSourceSchedule        RunSource = "schedule"
-	RunSourceEvent           RunSource = "event"
-	RunSourceWebhook         RunSource = "webhook"
-	RunSourceRequest         RunSource = "agent_request"
-	RunSourceRequestDecision RunSource = "agent_request_decision"
-	RunSourceHandoff         RunSource = "handoff"
-	RunSourceObjective       RunSource = "objective"
-	RunSourceFork            RunSource = "fork"
+	RunSourceManual           RunSource = "manual"
+	RunSourceChat             RunSource = "chat"
+	RunSourceSchedule         RunSource = "schedule"
+	RunSourceEvent            RunSource = "event"
+	RunSourceWebhook          RunSource = "webhook"
+	RunSourceRequest          RunSource = "agent_request"
+	RunSourceRequestDecision  RunSource = "agent_request_decision"
+	RunSourceCompletionReview RunSource = "agent_request_completion_review"
+	RunSourceHandoff          RunSource = "handoff"
+	RunSourceObjective        RunSource = "objective"
+	RunSourceFork             RunSource = "fork"
 )
 
 // RunKind identifies the execution contract a durable Run requires. Ownership
@@ -764,7 +765,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		source = RunSourceManual
 	}
 	switch source {
-	case RunSourceManual, RunSourceChat, RunSourceSchedule, RunSourceEvent, RunSourceWebhook, RunSourceRequest, RunSourceRequestDecision, RunSourceHandoff, RunSourceObjective, RunSourceFork:
+	case RunSourceManual, RunSourceChat, RunSourceSchedule, RunSourceEvent, RunSourceWebhook, RunSourceRequest, RunSourceRequestDecision, RunSourceCompletionReview, RunSourceHandoff, RunSourceObjective, RunSourceFork:
 	default:
 		return nil, fmt.Errorf("%w: unsupported run source %q", ErrInvalidAgentRun, source)
 	}
