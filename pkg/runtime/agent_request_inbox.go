@@ -42,6 +42,11 @@ type AgentRequestInboxStore interface {
 	RunCommandStore
 }
 
+type agentRequestInboxConversationStore interface {
+	AgentRequestInboxStore
+	ConversationStore
+}
+
 type AgentRequestInboxReconcileResult struct {
 	RequestsScanned          int `json:"requestsScanned"`
 	RequestsAccepted         int `json:"requestsAccepted"`
@@ -51,6 +56,7 @@ type AgentRequestInboxReconcileResult struct {
 	CompletionReviewsCreated int `json:"completionReviewsCreated"`
 	CompletionReviewsReused  int `json:"completionReviewsReused"`
 	CompletionReviewsApplied int `json:"completionReviewsApplied"`
+	ConversationProjections  int `json:"conversationProjections"`
 }
 
 type agentRequestDecisionTurnRunner struct {
@@ -179,16 +185,21 @@ func acceptedAgentRequestExecutionRecoveryAttempt(checkpoint map[string]interfac
 type AgentRequestInboxReconciler struct {
 	collaboration *CollaborationService
 	commands      *RunCommandService
+	projector     *AgentRequestConversationProjector
 }
 
 func NewAgentRequestInboxReconciler(store AgentRequestInboxStore) (*AgentRequestInboxReconciler, error) {
 	if store == nil {
 		return nil, errors.New("AgentRequest inbox store is required")
 	}
-	return &AgentRequestInboxReconciler{
+	reconciler := &AgentRequestInboxReconciler{
 		collaboration: NewCollaborationService(store),
 		commands:      NewRunCommandService(store),
-	}, nil
+	}
+	if conversationStore, ok := store.(agentRequestInboxConversationStore); ok {
+		reconciler.projector, _ = NewAgentRequestConversationProjector(conversationStore)
+	}
+	return reconciler, nil
 }
 
 func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope Scope, assignedAgentID string) (*AgentRequestInboxReconcileResult, error) {
@@ -204,6 +215,13 @@ func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope Scope
 	}
 	result := &AgentRequestInboxReconcileResult{RequestsScanned: len(requests)}
 	var failures []error
+	if r.projector != nil {
+		projected, projectionErr := r.projector.Reconcile(ctx, scope)
+		result.ConversationProjections = projected
+		if projectionErr != nil {
+			failures = append(failures, projectionErr)
+		}
+	}
 	for _, request := range requests {
 		if request.Status == AgentRequestStatusCompletionReview {
 			if err := r.reconcileCompletionReview(ctx, request, assignedAgentID, result); err != nil {
