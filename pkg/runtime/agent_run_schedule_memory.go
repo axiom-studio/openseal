@@ -5,63 +5,47 @@ import (
 	"time"
 )
 
-func (s *MemoryStore) ClaimNextAgentRun(_ context.Context, claim AgentRunClaim) (*AgentRun, error) {
+func (s *MemoryStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
+	decision, err := s.ClaimNextAgentRunWithDecision(ctx, claim)
+	if err != nil || decision == nil {
+		return nil, err
+	}
+	return decision.Run, nil
+}
+
+func (s *MemoryStore) ClaimNextAgentRunWithDecision(_ context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	activeByAgent := make(map[string]int)
-	activeByOwner := make(map[string]int)
-	activeByObjective := make(map[string]int)
-	activeByConcurrencyKey := make(map[string]int)
+	runs := make([]*AgentRun, 0, len(s.agentRuns))
 	for _, run := range s.agentRuns {
-		if run.Scope != claim.Scope || run.Status != AgentRunStatusRunning ||
-			run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(claim.Now) {
-			continue
-		}
-		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" {
-			activeByAgent[run.AssignedAgentID]++
-		}
-		if claim.MaxActiveForOwner > 0 {
-			activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
-		}
-		if run.ObjectiveID != "" {
-			activeByObjective[run.ObjectiveID]++
-		}
-		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" {
-			activeByConcurrencyKey[run.ConcurrencyKey]++
+		runs = append(runs, run)
+	}
+	objectives := make(map[string]*Objective, len(s.objectives))
+	for _, objective := range s.objectives {
+		if objective.Scope == claim.Scope {
+			objectives[objective.ID] = objective
 		}
 	}
-	var selected *AgentRun
-	for _, run := range s.agentRuns {
-		if !agentRunEligible(run, claim) {
-			continue
-		}
-		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= claim.MaxActiveForAgent {
-			continue
-		}
-		if claim.MaxActiveForOwner > 0 && activeByOwner[agentRunOwnerSchedulingKey(run.Owner)] >= claim.MaxActiveForOwner {
-			continue
-		}
-		objectiveLimit := effectiveObjectiveConcurrencyLimit(claim.MaxActiveForObjective, s.objectives[portfolioKey(run.Scope, run.ObjectiveID)])
-		if objectiveLimit > 0 && run.ObjectiveID != "" && activeByObjective[run.ObjectiveID] >= objectiveLimit {
-			continue
-		}
-		if claim.MaxActiveForConcurrencyKey > 0 && run.ConcurrencyKey != "" && activeByConcurrencyKey[run.ConcurrencyKey] >= claim.MaxActiveForConcurrencyKey {
-			continue
-		}
-		if selected == nil || agentRunSchedulesBefore(run, selected, claim.Now, claim.AgingInterval) {
-			selected = run
-		}
-	}
+	selected, decision := evaluateAgentRunAdmission(runs, objectives, claim)
 	if selected == nil {
-		return nil, nil
+		return decision, nil
 	}
 	if err := applyAgentRunClaim(selected, claim); err != nil {
 		return nil, err
 	}
-	return cloneAgentRun(selected), nil
+	decision.Run = cloneAgentRun(selected)
+	decision.Outcome = AgentRunAdmissionClaimed
+	if selected.Status == AgentRunStatusPaused && selected.BudgetState == BudgetStateExhausted {
+		decision.Outcome = AgentRunAdmissionBudgetStopped
+		decision.Blocks = []AgentRunAdmissionBlock{{
+			RunID: selected.ID, ObjectiveID: selected.ObjectiveID, AssignedAgentID: selected.AssignedAgentID,
+			Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: AgentRunAdmissionReasonAttemptBudgetExhausted,
+		}}
+	}
+	return decision, nil
 }
 
 func (s *MemoryStore) RenewAgentRunLease(_ context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error) {

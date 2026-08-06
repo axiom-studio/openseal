@@ -24,7 +24,7 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 	if !ok {
 		t.Fatal("agent run capability was not advertised")
 	}
-	for _, operation := range []string{OperationCreate, OperationList, OperationPause, OperationResume, OperationCancel, OperationIntervene} {
+	for _, operation := range []string{OperationCreate, OperationList, OperationPause, OperationResume, OperationCancel, OperationIntervene, OperationInspectAdmission} {
 		if !capability.Supports(operation) {
 			t.Fatalf("operation %q was not advertised", operation)
 		}

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -93,6 +94,51 @@ func TestAgentRunAPIUsesCanonicalCommands(t *testing.T) {
 	invalid := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/agent-runs", strings.TrimSuffix(createBody, "}")+`,"unknown":true}`, "")
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("unknown field status = %d, body = %s", invalid.Code, invalid.Body.String())
+	}
+}
+
+func TestAgentRunAdmissionAPIExplainsObjectiveBackpressureWithoutClaiming(t *testing.T) {
+	store := runtime.NewMemoryStore()
+	server := NewServer(store, zap.NewNop().Sugar())
+	ctx := t.Context()
+	scope := runtime.Scope{Kind: "tenant", ID: "admission"}
+	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "agent"}
+	portfolio := runtime.NewPortfolioService(store)
+	objective, err := portfolio.CreateObjective(ctx, runtime.CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Serial", Goal: "Run serially", Status: runtime.ObjectiveStatusActive,
+		ExecutionPolicy: &runtime.ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := portfolio.CreateAgentRun(ctx, runtime.CreateAgentRunRequest{
+			Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID,
+			Goal: "Process work", Source: runtime.RunSourceObjective,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claimed, err := store.ClaimNextAgentRun(ctx, runtime.AgentRunClaim{
+		Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil {
+		t.Fatalf("initial claim = %#v, %v", claimed, err)
+	}
+	response := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/agent-runs/admission?scopeKind=tenant&scopeId=admission", "", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("admission status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var decision runtime.AgentRunAdmissionDecision
+	if err := json.NewDecoder(response.Body).Decode(&decision); err != nil {
+		t.Fatal(err)
+	}
+	if decision.Outcome != runtime.AgentRunAdmissionBackpressured || decision.Run != nil || len(decision.Blocks) < 2 {
+		t.Fatalf("admission decision = %#v", decision)
+	}
+	loaded, err := portfolio.GetAgentRun(ctx, scope, claimed.ID)
+	if err != nil || loaded.LeaseOwner != "worker" {
+		t.Fatalf("inspection mutated claimed Run: %#v, %v", loaded, err)
 	}
 }
 

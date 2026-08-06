@@ -543,7 +543,12 @@ type (
 	AdvanceAgentRunRequest             = runtime.AdvanceAgentRunRequest
 	AdvanceAgentRunResult              = runtime.AdvanceAgentRunResult
 	AgentRunScheduleStore              = runtime.AgentRunScheduleStore
+	AgentRunAdmissionStore             = runtime.AgentRunAdmissionStore
 	AgentRunClaimRequest               = runtime.AgentRunClaimRequest
+	AgentRunAdmissionOutcome           = runtime.AgentRunAdmissionOutcome
+	AgentRunAdmissionReason            = runtime.AgentRunAdmissionReason
+	AgentRunAdmissionBlock             = runtime.AgentRunAdmissionBlock
+	AgentRunAdmissionDecision          = runtime.AgentRunAdmissionDecision
 	AgentRunWorkerConfig               = runtime.AgentRunWorkerConfig
 	DynamicAgentRunWorkerConfig        = runtime.DynamicAgentRunWorkerConfig
 	TurnRunnerBinding                  = runtime.TurnRunnerBinding
@@ -1791,20 +1796,34 @@ const (
 	AuthorityProgressionNoChange   = progression.DirectionNoChange
 	AuthorityProgressionRegress    = progression.DirectionRegress
 
-	AgentRunStatusQueued               = runtime.AgentRunStatusQueued
-	AgentRunOrderScheduler             = runtime.AgentRunOrderScheduler
-	AgentRunOrderCreatedDesc           = runtime.AgentRunOrderCreatedDesc
-	AgentRunStatusPlanning             = runtime.AgentRunStatusPlanning
-	AgentRunStatusRunning              = runtime.AgentRunStatusRunning
-	AgentRunStatusPaused               = runtime.AgentRunStatusPaused
-	AgentRunStatusSleeping             = runtime.AgentRunStatusSleeping
-	AgentRunStatusWaitingForDependency = runtime.AgentRunStatusWaitingForDependency
-	AgentRunStatusWaitingForAgent      = runtime.AgentRunStatusWaitingForAgent
-	AgentRunStatusWaitingForApproval   = runtime.AgentRunStatusWaitingForApproval
-	AgentRunStatusWaitingForEvent      = runtime.AgentRunStatusWaitingForEvent
-	AgentRunStatusCompleted            = runtime.AgentRunStatusCompleted
-	AgentRunStatusFailed               = runtime.AgentRunStatusFailed
-	AgentRunStatusCanceled             = runtime.AgentRunStatusCanceled
+	AgentRunStatusQueued                          = runtime.AgentRunStatusQueued
+	AgentRunOrderScheduler                        = runtime.AgentRunOrderScheduler
+	AgentRunOrderCreatedDesc                      = runtime.AgentRunOrderCreatedDesc
+	AgentRunStatusPlanning                        = runtime.AgentRunStatusPlanning
+	AgentRunStatusRunning                         = runtime.AgentRunStatusRunning
+	AgentRunStatusPaused                          = runtime.AgentRunStatusPaused
+	AgentRunStatusSleeping                        = runtime.AgentRunStatusSleeping
+	AgentRunStatusWaitingForDependency            = runtime.AgentRunStatusWaitingForDependency
+	AgentRunStatusWaitingForAgent                 = runtime.AgentRunStatusWaitingForAgent
+	AgentRunStatusWaitingForApproval              = runtime.AgentRunStatusWaitingForApproval
+	AgentRunStatusWaitingForEvent                 = runtime.AgentRunStatusWaitingForEvent
+	AgentRunStatusCompleted                       = runtime.AgentRunStatusCompleted
+	AgentRunStatusFailed                          = runtime.AgentRunStatusFailed
+	AgentRunStatusCanceled                        = runtime.AgentRunStatusCanceled
+	AgentRunAdmissionClaimed                      = runtime.AgentRunAdmissionClaimed
+	AgentRunAdmissionReady                        = runtime.AgentRunAdmissionReady
+	AgentRunAdmissionIdle                         = runtime.AgentRunAdmissionIdle
+	AgentRunAdmissionNotDue                       = runtime.AgentRunAdmissionNotDue
+	AgentRunAdmissionLeaseHeld                    = runtime.AgentRunAdmissionLeaseHeld
+	AgentRunAdmissionBackpressured                = runtime.AgentRunAdmissionBackpressured
+	AgentRunAdmissionBudgetStopped                = runtime.AgentRunAdmissionBudgetStopped
+	AgentRunAdmissionReasonNotDue                 = runtime.AgentRunAdmissionReasonNotDue
+	AgentRunAdmissionReasonLeaseHeld              = runtime.AgentRunAdmissionReasonLeaseHeld
+	AgentRunAdmissionReasonAgentCapacity          = runtime.AgentRunAdmissionReasonAgentCapacity
+	AgentRunAdmissionReasonOwnerCapacity          = runtime.AgentRunAdmissionReasonOwnerCapacity
+	AgentRunAdmissionReasonObjectiveCapacity      = runtime.AgentRunAdmissionReasonObjectiveCapacity
+	AgentRunAdmissionReasonConcurrencyCapacity    = runtime.AgentRunAdmissionReasonConcurrencyCapacity
+	AgentRunAdmissionReasonAttemptBudgetExhausted = runtime.AgentRunAdmissionReasonAttemptBudgetExhausted
 
 	BudgetStateActive    = runtime.BudgetStateActive
 	BudgetStateWarning   = runtime.BudgetStateWarning
@@ -4472,6 +4491,14 @@ func (e *Engine) AdvanceAgentRun(ctx context.Context, req runtime.AdvanceAgentRu
 
 func (e *Engine) ClaimNextAgentRun(ctx context.Context, req runtime.AgentRunClaimRequest) (*runtime.AgentRun, error) {
 	return e.runQueue.ClaimNext(ctx, req)
+}
+
+func (e *Engine) ClaimNextAgentRunDecision(ctx context.Context, req runtime.AgentRunClaimRequest) (*runtime.AgentRunAdmissionDecision, error) {
+	return e.runQueue.ClaimNextDecision(ctx, req)
+}
+
+func (e *Engine) InspectAgentRunAdmission(ctx context.Context, req runtime.AgentRunClaimRequest) (*runtime.AgentRunAdmissionDecision, error) {
+	return e.runQueue.Inspect(ctx, req)
 }
 
 func (e *Engine) RenewAgentRunLease(ctx context.Context, scope runtime.Scope, runID, workerID string, leaseDuration time.Duration) (*runtime.AgentRun, error) {
