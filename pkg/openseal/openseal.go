@@ -5,6 +5,7 @@ package openseal
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -16,6 +17,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/httpaction"
@@ -133,6 +135,27 @@ type (
 	SubmitAgentAmendmentEvaluationRequest     = kernelagent.SubmitAmendmentEvaluationRequest
 	ResolveAgentAmendmentRequest              = kernelagent.ResolveAmendmentRequest
 	AgentRegistryStore                        = kernelagent.Store
+	WorkforceBundle                           = kernelbundle.Bundle
+	WorkforceBundleMetadata                   = kernelbundle.Metadata
+	WorkforceBundleCompatibility              = kernelbundle.Compatibility
+	WorkforceBundleCapabilityRequirement      = kernelbundle.CapabilityRequirement
+	WorkforceBundleProvenance                 = kernelbundle.Provenance
+	WorkforceBundleOwnerKind                  = kernelbundle.OwnerKind
+	WorkforceBundleOwnerReference             = kernelbundle.OwnerReference
+	WorkforceBundleAgent                      = kernelbundle.Agent
+	WorkforceBundleRosterAssignment           = kernelbundle.RosterAssignment
+	WorkforceBundleTeamDeployment             = kernelbundle.TeamDeployment
+	WorkforceBundleTeam                       = kernelbundle.Team
+	WorkforceBundleObjective                  = kernelbundle.Objective
+	WorkforceBundleRunbookActivation          = kernelbundle.RunbookActivation
+	WorkforceBundleSignature                  = kernelbundle.Signature
+	WorkforceBundleTrustPolicy                = kernelbundle.TrustPolicy
+	WorkforceBundleVerification               = kernelbundle.Verification
+	WorkforceBundleChangeType                 = kernelbundle.ChangeType
+	WorkforceBundleChange                     = kernelbundle.Change
+	WorkforceBundleDiff                       = kernelbundle.Diff
+	WorkforceBundleUpgradePlan                = kernelbundle.UpgradePlan
+	WorkforceBundleInspection                 = kernelbundle.Inspection
 	KernelAgentDeploymentList                 = kernelapi.AgentDeploymentList
 	KernelAgentDeploymentCatalogEntry         = kernelapi.AgentDeploymentCatalogEntry
 	KernelUpdateAgentDeploymentRequest        = kernelapi.UpdateAgentDeploymentRequest
@@ -913,6 +936,13 @@ const (
 	AgentBundleRequirementEndpoint      = kernelagent.BundleRequirementEndpoint
 	AgentBundleRequirementCallback      = kernelagent.BundleRequirementCallback
 	AgentBundleRequirementDeployment    = kernelagent.BundleRequirementDeployment
+	WorkforceBundleAPIVersion           = kernelbundle.APIVersion
+	WorkforceBundleKind                 = kernelbundle.Kind
+	WorkforceBundleOwnerAgent           = kernelbundle.OwnerAgent
+	WorkforceBundleOwnerTeam            = kernelbundle.OwnerTeam
+	WorkforceBundleChangeAdded          = kernelbundle.ChangeAdded
+	WorkforceBundleChangeRemoved        = kernelbundle.ChangeRemoved
+	WorkforceBundleChangeModified       = kernelbundle.ChangeModified
 	TeamManifestAPIVersion              = kernelteam.ManifestAPIVersion
 	TeamManifestKind                    = kernelteam.ManifestKind
 	SkillSourceArtifactFormatOpenClawV1 = sourceartifact.FormatOpenClawSkillV1
@@ -955,6 +985,38 @@ func PreviewAgentBundleInstallation(bundle *AgentBundle, placement AgentBundlePl
 
 func CompileAgentBundleInstallation(request AgentBundleInstallationRequest) (*AgentBundleInstallationPlan, error) {
 	return kernelagent.CompileBundleInstallation(request)
+}
+
+func NewWorkforceBundle(metadata WorkforceBundleMetadata) *WorkforceBundle {
+	return kernelbundle.New(metadata)
+}
+
+func EncodeWorkforceBundleYAML(bundle *WorkforceBundle) ([]byte, error) {
+	return kernelbundle.EncodeYAML(bundle)
+}
+
+func DecodeWorkforceBundleYAML(data []byte) (*WorkforceBundle, error) {
+	return kernelbundle.DecodeYAML(data)
+}
+
+func SignWorkforceBundle(bundle *WorkforceBundle, keyID string, privateKey ed25519.PrivateKey) error {
+	return kernelbundle.Sign(bundle, keyID, privateKey)
+}
+
+func VerifyWorkforceBundle(bundle *WorkforceBundle, policy WorkforceBundleTrustPolicy) (*WorkforceBundleVerification, error) {
+	return kernelbundle.Verify(bundle, policy)
+}
+
+func InspectWorkforceBundle(bundle *WorkforceBundle) (*WorkforceBundleInspection, error) {
+	return kernelbundle.Inspect(bundle)
+}
+
+func CompareWorkforceBundles(from, to *WorkforceBundle) (*WorkforceBundleDiff, error) {
+	return kernelbundle.Compare(from, to)
+}
+
+func PlanWorkforceBundleUpgrade(current, target *WorkforceBundle) (*WorkforceBundleUpgradePlan, error) {
+	return kernelbundle.PlanUpgrade(current, target)
 }
 
 func InstallAgentManifest(ctx context.Context, registry AgentManifestInstallationRegistry, request AgentManifestInstallationRequest) (*AgentManifestInstallationResult, error) {
