@@ -216,7 +216,7 @@ func (s *MemoryStore) CompleteAgentRequest(_ context.Context, record AgentReques
 		}
 		s.agentRuns[sourceKey] = cloneAgentRun(result.Source)
 		dependencyEvents = result.Events
-	} else {
+	} else if record.SourceRun != nil {
 		sourceKey := portfolioKey(record.SourceRun.Scope, record.SourceRun.ID)
 		currentSource := s.agentRuns[sourceKey]
 		if currentSource == nil {
@@ -331,7 +331,8 @@ func validateAgentRequestCreateRecord(record AgentRequestCreateRecord) error {
 }
 
 func activeAgentRequest(request *AgentRequest) bool {
-	return request != nil && (request.Status == AgentRequestStatusPending || request.Status == AgentRequestStatusClarificationRequested || request.Status == AgentRequestStatusAccepted)
+	return request != nil && (request.Status == AgentRequestStatusPending || request.Status == AgentRequestStatusClarificationRequested ||
+		request.Status == AgentRequestStatusAccepted || request.Status == AgentRequestStatusCompletionReview)
 }
 
 func validateAgentRequestResponseRecord(record AgentRequestResponseRecord) error {
@@ -379,13 +380,18 @@ func validateAgentRequestCompletionRecord(record AgentRequestCompletionRecord) e
 	if record.Request == nil || record.ChildRun == nil || record.SourceEvent == nil || record.ChildEvent == nil {
 		return errors.New("agent request completion requires request, source run, child run, and both events")
 	}
-	if (record.SourceRun == nil) == (record.DependencyResolution == nil) {
+	reviewPending := record.Request != nil && record.Request.Status == AgentRequestStatusCompletionReview
+	if reviewPending {
+		if record.SourceRun != nil || record.DependencyResolution != nil {
+			return errors.New("completion awaiting review cannot wake its source")
+		}
+	} else if (record.SourceRun == nil) == (record.DependencyResolution == nil) {
 		return errors.New("agent request completion requires exactly one direct source update or dependency resolution")
 	}
 	if err := record.Request.Validate(); err != nil {
 		return err
 	}
-	if record.Request.Status != AgentRequestStatusCompleted {
+	if record.Request.Status != AgentRequestStatusCompleted && record.Request.Status != AgentRequestStatusCompletionReview && record.Request.Status != AgentRequestStatusFailed {
 		return ErrInvalidAgentRequestState
 	}
 	for _, run := range []*AgentRun{record.SourceRun, record.ChildRun} {

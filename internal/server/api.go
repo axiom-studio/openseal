@@ -77,6 +77,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/agent-requests/{id}", s.handleGetAgentRequest)
 	s.mux.HandleFunc("POST /api/v1/agent-requests/{id}/responses", s.handleRespondAgentRequest)
 	s.mux.HandleFunc("POST /api/v1/agent-requests/{id}/completions", s.handleCompleteAgentRequest)
+	s.mux.HandleFunc("POST /api/v1/agent-requests/{id}/completion-review", s.handleReviewAgentRequestCompletion)
 	s.mux.HandleFunc("GET /api/v1/action-approvals", s.handleListActionApprovals)
 	s.mux.HandleFunc("GET /api/v1/action-approvals/{id}", s.handleGetActionApproval)
 	s.mux.HandleFunc("POST /api/v1/action-approvals/{id}/decisions", s.handleResolveActionApproval)
