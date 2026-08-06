@@ -148,6 +148,127 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 	}
 }
 
+func TestConversationCoordinatorResolvesThreadedObjectionWithFinalDecision(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	service := NewConversationService(NewMemoryStore())
+	scope := Scope{Kind: "tenant", ID: "objection-decision"}
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"},
+		Title: "Release decision", IdempotencyKey: "release-decision",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	question, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"},
+		Intent: MessageIntentQuestion, Content: "Should we release now?",
+		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
+		IdempotencyKey: "release-question",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	developer := ConversationParticipant{Type: ConversationParticipantAgent, ID: "developer"}
+	reviewer := ConversationParticipant{Type: ConversationParticipantAgent, ID: "reviewer"}
+	observer := ConversationParticipant{Type: ConversationParticipantAgent, ID: "observer"}
+	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+		return []ConversationParticipantBinding{
+			{Participant: developer, SemanticRoles: []string{"developer"}},
+			{Participant: reviewer, SemanticRoles: []string{"reviewer"}},
+			{Participant: observer, SemanticRoles: []string{"observer"}},
+		}, nil
+	})
+	var proposalMessageID, objectionMessageID string
+	provider := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+		if input.Participant == observer {
+			return ParticipationProposal{WantsToSpeak: false}, nil
+		}
+		if input.Trigger.ID == question.Message.ID && input.Participant == developer {
+			return ParticipationProposal{
+				WantsToSpeak: true, Intent: MessageIntentProposal,
+				Content: "Release after the migration check passes.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+				ReplyToMessageID: question.Message.ID, ResolvesMessageID: question.Message.ID, RequiresResponse: true,
+				Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true, CoordinatesWork: true},
+			}, nil
+		}
+		if input.Trigger.ID == proposalMessageID && input.Participant == reviewer {
+			return ParticipationProposal{
+				WantsToSpeak: true, Intent: MessageIntentObjection,
+				Content: "The rollback evidence is missing.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+				ReplyToMessageID: proposalMessageID, ResolvesMessageID: proposalMessageID, RequiresResponse: true,
+				Signals: ParticipationSignals{SubstantiveObjection: true, HasNewInformation: true, RoleRelevant: true},
+			}, nil
+		}
+		if input.Trigger.ID == objectionMessageID && input.Participant == developer {
+			return ParticipationProposal{
+				WantsToSpeak: true, Intent: MessageIntentDecision,
+				Content: "Rollback evidence is now attached; release approved.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+				ReplyToMessageID: objectionMessageID, BroadcastToChannel: true, ResolvesMessageID: objectionMessageID,
+				Signals: ParticipationSignals{HasNewInformation: true, RoleRelevant: true, ResolvesOpenWork: true, CoordinatesWork: true},
+			}, nil
+		}
+		return ParticipationProposal{WantsToSpeak: false}, nil
+	})
+	coordinator, err := NewConversationCoordinator(service, participants, provider, DefaultConversationCoordinatorConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposalRound, err := coordinator.Coordinate(ctx, ConversationCoordinationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: question.Conversation.Revision,
+		TriggerMessageID: question.Message.ID, IdempotencyKey: "proposal-round",
+	})
+	if err != nil || len(proposalRound.Messages) != 1 {
+		t.Fatalf("proposal round = %#v, %v", proposalRound, err)
+	}
+	proposalMessageID = proposalRound.Messages[0].ID
+	objectionRound, err := coordinator.Coordinate(ctx, ConversationCoordinationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: proposalRound.Conversation.Revision,
+		TriggerMessageID: proposalMessageID, IdempotencyKey: "objection-round",
+	})
+	if err != nil || len(objectionRound.Messages) != 1 {
+		t.Fatalf("objection round = %#v, %v", objectionRound, err)
+	}
+	objectionMessageID = objectionRound.Messages[0].ID
+	decisionRound, err := coordinator.Coordinate(ctx, ConversationCoordinationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: objectionRound.Conversation.Revision,
+		TriggerMessageID: objectionMessageID, IdempotencyKey: "decision-round",
+	})
+	if err != nil || len(decisionRound.Messages) != 1 {
+		t.Fatalf("decision round = %#v, %v", decisionRound, err)
+	}
+	proposal, objection, decision := proposalRound.Messages[0], objectionRound.Messages[0], decisionRound.Messages[0]
+	if proposal.Intent != MessageIntentProposal || proposal.ThreadRootID != question.Message.ID || proposal.ResolvesMessageID != question.Message.ID ||
+		objection.Intent != MessageIntentObjection || objection.ThreadRootID != question.Message.ID || objection.ResolvesMessageID != proposal.ID ||
+		decision.Intent != MessageIntentDecision || decision.ThreadRootID != question.Message.ID || decision.ResolvesMessageID != objection.ID || !decision.BroadcastToChannel {
+		t.Fatalf("threaded decision = %#v / %#v / %#v", proposal, objection, decision)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if open := openConversationMessages(messages); len(open) != 0 {
+		t.Fatalf("open messages after final decision = %#v", open)
+	}
+	for _, round := range []*ParticipationRoundResult{proposalRound, objectionRound, decisionRound} {
+		if len(round.Round.Proposals) != 3 || len(round.Round.Arbitration.Decisions) != 3 {
+			t.Fatalf("incomplete auditable round = %#v", round.Round)
+		}
+		decisions := decisionsByProposal(round.Round.Arbitration.Decisions)
+		var observerProposalID string
+		for _, proposal := range round.Round.Proposals {
+			if proposal.Participant == observer {
+				observerProposalID = proposal.ID
+				break
+			}
+		}
+		if observerProposalID == "" || decisions[observerProposalID].Disposition != ParticipationSilent {
+			t.Fatalf("quiet observer decision = %#v / %#v", observerProposalID, decisions)
+		}
+	}
+}
+
 func TestConversationCoordinatorNeverExposesTargetedMessageToOtherAgents(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
