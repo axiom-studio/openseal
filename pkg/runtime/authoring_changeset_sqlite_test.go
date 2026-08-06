@@ -225,6 +225,13 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	defer store.Close()
 	const slackSourceIdentity = "https://github.com/axiom-studio/skills::skill-slack"
 	installedSlack := slackConversationSkillDefinition()
+	installedSlack.CallbackAdapters = map[string]skill.CallbackAdapter{"interactions": {
+		ProtocolVersion: skill.CallbackAdapterProtocolV1, Name: "Approval interactions",
+		Description: "Verify signed interactive approval decisions.", Provider: "slack",
+		EventTypes:  []string{capability.CallbackEventApprovalDecided},
+		Credentials: []capability.CredentialRequirement{{Name: "SLACK_CONNECTION", Kind: "slack-oauth"}},
+		Transport:   skill.CallbackAdapterTransport{Kind: "http", IngressEndpoint: "/callbacks/slack", IngressCredentials: []string{"SLACK_CONNECTION"}},
+	}}
 	installedSlack.Source = &skill.SourceProvenance{Identity: slackSourceIdentity, Format: "openseal.skill.v1"}
 	if err := skill.NewCatalogWithStore(store).Register(ctx, installedSlack); err != nil {
 		t.Fatal(err)
@@ -236,7 +243,10 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	definition := &agent.AgentDefinition{
 		ID: "slack-agent", Version: "1.0.0", DisplayName: "Slack agent",
 		Purpose: "Respond to Slack messages", SystemPrompt: "Respond helpfully.",
-		Authority:          agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+		Authority: agent.AuthorityPolicy{
+			MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1,
+			ApprovalDestinations: []agent.ApprovalDestination{{EndpointID: "channel"}},
+		},
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "respond", Title: "Respond", Goal: "Respond to permitted Slack messages", Priority: 1}},
 		Runbook: &runbook.Definition{
 			APIVersion: runbook.APIVersion, ID: "respond", Version: "1.0.0", Name: "Respond",
@@ -277,7 +287,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 			ConversationEndpoints: []authoring.ConversationEndpointBlueprint{{
 				ID: "channel", Name: "Installed Slack channel",
 				Owner:   authoring.ConversationEndpointOwner{Type: authoring.ConversationEndpointOwnerAgent, ID: definition.ID},
-				SkillID: "slack", SkillVersion: "1.0.0", AdapterID: "conversations",
+				SkillID: "slack", SkillVersion: "1.0.0", AdapterID: "conversations", CallbackAdapterID: "interactions",
 				Mode: capability.ConversationEndpointChannel,
 				Handler: authoring.ConversationHandlerBlueprint{
 					Kind: authoring.ConversationHandlerRunbook, AgentDefinitionID: definition.ID,
@@ -287,7 +297,9 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 					MessageSelection: authoring.ConversationSelectDirectOrMention,
 					ReplyMode:        authoring.ConversationReplyThread, IgnoreBots: true,
 				},
-				CanonicalReply: true, ArchitectureReason: "Use a durable event Runbook and canonical delivery.",
+				CanonicalReply: true, Purposes: []authoring.ConversationEndpointPurpose{
+					authoring.ConversationEndpointPurposeConversation, authoring.ConversationEndpointPurposeApprovals,
+				}, ArchitectureReason: "Use a durable event Runbook and canonical delivery.",
 			}},
 		}},
 		Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
@@ -309,6 +321,11 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 						Name: "SLACK_CONNECTION", Kind: "slack-oauth", OAuth2: oauth,
 					}},
 				}},
+				CallbackAdapters: []authoring.CallbackAdapterCapability{{
+					ID: "interactions", ProtocolVersion: capability.CallbackAdapterProtocolV1,
+					Provider: "slack", EventTypes: []string{capability.CallbackEventApprovalDecided},
+					Credentials: []authoring.SkillCredential{{Name: "SLACK_CONNECTION", Kind: "slack-oauth"}},
+				}},
 			},
 		}},
 		Placement: authoring.ChangeSetPlacement{
@@ -320,7 +337,10 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 				"slack-agent": {"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant/one/slack"}},
 			},
 			ConversationEndpoints: map[string]authoring.ConversationEndpointPlacement{
-				"channel": {ID: "conversation-endpoint:slack-channel", Address: "C012345"},
+				"channel": {
+					ID: "conversation-endpoint:slack-channel", Address: "C012345",
+					CallbackRegistrationID: "callback-registration:slack-channel",
+				},
 			},
 			Environment: "test",
 		},
@@ -351,6 +371,14 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 		endpoint.Handler.AssignedAgentID != "slack-agent-live" {
 		t.Fatalf("materialized endpoint=%#v err=%v", endpoint, err)
 	}
+	callback, err := store.GetCallbackRegistration(ctx, endpoint.Scope, "callback-registration:slack-channel")
+	if err != nil || callback == nil || callback.Status != CallbackRegistrationActive ||
+		callback.Adapter.BindingID != endpoint.Adapter.BindingID || callback.Adapter.BindingRevision != endpoint.Adapter.BindingRevision ||
+		callback.Adapter.AdapterID != "interactions" || len(callback.Subscriptions) != 1 ||
+		callback.Subscriptions[0].EventType != capability.CallbackEventApprovalDecided ||
+		callback.Subscriptions[0].Consumer != "approvals" || callback.Subscriptions[0].TargetID != endpoint.ID {
+		t.Fatalf("materialized callback=%#v err=%v", callback, err)
+	}
 	resolver, err := NewCatalogExternalConversationRunbookResolver(store)
 	if err != nil {
 		t.Fatal(err)
@@ -380,8 +408,9 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	bindings, err := store.ListSkillBindings(ctx, scope, "slack-agent-live")
 	if err != nil || len(bindings) != 1 || len(bindings[0].AllowedActions) != 0 ||
 		bindings[0].SourceIdentity != slackSourceIdentity ||
-		len(bindings[0].EnabledConversationAdapters) != 1 ||
+		len(bindings[0].EnabledConversationAdapters) != 1 || len(bindings[0].EnabledCallbackAdapters) != 1 ||
 		bindings[0].EnabledConversationAdapters[0] != "conversations" ||
+		bindings[0].EnabledCallbackAdapters[0] != "interactions" ||
 		bindings[0].Credentials["SLACK_CONNECTION"].ID != "connection://tenant/one/slack" {
 		t.Fatalf("adapter-only binding=%#v err=%v", bindings, err)
 	}
@@ -392,7 +421,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	if len(stored.Channels) != 1 || stored.Channels[0].EndpointID != endpoint.ID ||
 		stored.Channels[0].Trigger != "on-message" || stored.Channels[0].MessageSelection != "direct_or_mentions" ||
 		stored.Channels[0].ReplyMode != "thread" || !stored.Channels[0].IgnoreBots ||
-		len(stored.Channels[0].Purposes) != 1 || stored.Channels[0].Purposes[0] != "conversation" {
+		len(stored.Channels[0].Purposes) != 2 || stored.Channels[0].Purposes[0] != "conversation" || stored.Channels[0].Purposes[1] != "approvals" {
 		t.Fatalf("materialized Agent workflow channel=%#v", stored.Channels)
 	}
 	var delegatedDeployment string
@@ -400,7 +429,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 		delegatedDeployment != "slack-agent-live" {
 		t.Fatalf("delegated deployment=%q err=%v", delegatedDeployment, err)
 	}
-	if len(result.ApplyReceipt.Resources) != 6 {
+	if len(result.ApplyReceipt.Resources) != 7 {
 		t.Fatalf("applied resources=%#v", result.ApplyReceipt.Resources)
 	}
 
@@ -408,6 +437,7 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	amend.ID, amend.ParentID, amend.Mode, amend.CandidateDigest =
 		"slack-chatbot-remove-endpoint", value.ID, authoring.ModeAmend, "candidate-remove-endpoint"
 	amend.Result.Candidate.Agents[0].Version = "2.0.0"
+	amend.Result.Candidate.Agents[0].Authority.ApprovalDestinations = nil
 	amend.Result.Candidate.ConversationEndpoints = nil
 	amend.Placement.AgentExpectedRevisions = map[string]int64{"slack-agent": 1}
 	amend.Placement.Objectives[authoring.WorkforceObjectiveKey("agent", "slack-agent", "respond")] = authoring.ObjectivePlacement{ID: "objective:slack-respond", ExpectedRevision: 1}
@@ -433,6 +463,10 @@ func TestSQLiteAtomicWorkforceApplyMaterializesConversationEndpointAndAdapterBin
 	)
 	if err != nil || endpoint.Status != ExternalConversationEndpointRetired || endpoint.Revision != 2 {
 		t.Fatalf("retired endpoint=%#v err=%v", endpoint, err)
+	}
+	callback, err = store.GetCallbackRegistration(ctx, endpoint.Scope, "callback-registration:slack-channel")
+	if err != nil || callback.Status != CallbackRegistrationRetired || callback.Revision != 2 {
+		t.Fatalf("retired callback=%#v err=%v", callback, err)
 	}
 	bindings, err = store.ListSkillBindings(ctx, scope, "slack-agent-live")
 	if err != nil || len(bindings) != 0 {

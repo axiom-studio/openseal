@@ -187,7 +187,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	extractedCommitments := extractExplicitPromptCommitments(request.Prompt)
 	validateGenerated := func() (PromptCommitments, []ValidationIssue, []MissingRequirement) {
-		formIssues := CompileWorkforceAuthoringForm(&generated.Candidate, request.Form, generated.Authoring)
+		formIssues := CompileWorkforceAuthoringForm(&generated.Candidate, request.Form, generated.Authoring, request.Catalog)
 		materializeDefaultAgentSkillAuthority(&generated.Candidate)
 		applyAuthorityConstraint(&generated.Candidate, request.Catalog.AuthorityConstraint)
 		applyExtractedApprovalCommitments(&generated.Candidate, extractedCommitments)
@@ -845,6 +845,24 @@ func missingRequirements(candidate *WorkforceCandidate, catalog CapabilityCatalo
 				missing[key] = MissingRequirement{
 					Kind: "credential", ID: binding.Key, RequiredBy: requiredBy + "/skill:" + endpoint.SkillID,
 					OAuth2: binding.OAuth2,
+				}
+			}
+			if endpoint.CallbackAdapterID != "" {
+				for _, callback := range skillCapability.CallbackAdapters {
+					if callback.ID != endpoint.CallbackAdapterID {
+						continue
+					}
+					for _, credential := range callback.Credentials {
+						if credential.Optional {
+							continue
+						}
+						binding := skillCredentialBinding{Key: credential.Name, Kind: credential.Kind, OAuth2: credential.OAuth2}
+						if credentialRequirementAvailable(catalog, binding) {
+							continue
+						}
+						key := "credential:" + binding.Key + ":" + requiredBy
+						missing[key] = MissingRequirement{Kind: "credential", ID: binding.Key, RequiredBy: requiredBy, OAuth2: binding.OAuth2}
+					}
 				}
 			}
 		}

@@ -95,6 +95,19 @@ func RequiredCredentialBindings(candidate WorkforceCandidate, catalog Capability
 				Key: credential.Name, Kind: credential.Kind, OAuth2: credential.OAuth2,
 			}
 		}
+		if endpoint.CallbackAdapterID != "" {
+			for _, callback := range skillCapability.CallbackAdapters {
+				if callback.ID != endpoint.CallbackAdapterID {
+					continue
+				}
+				for _, credential := range callback.Credentials {
+					if credential.Optional {
+						continue
+					}
+					byKey[credential.Name] = CredentialBindingRequirement{Key: credential.Name, Kind: credential.Kind, OAuth2: credential.OAuth2}
+				}
+			}
+		}
 		result[target] = result[target][:0]
 		for _, requirement := range byKey {
 			result[target] = append(result[target], requirement)

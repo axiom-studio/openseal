@@ -320,6 +320,9 @@ func compactPromptCapabilityCatalog(catalog CapabilityCatalog) CapabilityCatalog
 		// Exact installed authority is server-owned placement input. The model
 		// sees the catalog id and declared contract, never this binding choice.
 		skill.RuntimeIdentity = nil
+		// Callback adapters are compiler-owned workflow wiring. The model chooses
+		// the semantic channel and approval intent, never a verifier or route.
+		skill.CallbackAdapters = nil
 		// Exact credential-free contracts are necessary to author executable
 		// Runbook dataflow. Keep them only for server-selected capability needs;
 		// unrelated installed Skills retain their compact name/risk projection.

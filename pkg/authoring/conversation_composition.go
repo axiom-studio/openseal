@@ -30,8 +30,8 @@ func ProjectWorkforceAuthoringForm(catalog CapabilityCatalog, candidate *Workfor
 // CompileWorkforceAuthoringForm applies one typed form submission and derives
 // compiler-owned runtime fields. It never accepts arbitrary JSON paths. This
 // is the form-to-struct half of the authoring codec.
-func CompileWorkforceAuthoringForm(candidate *WorkforceCandidate, form AuthoringForm, submission AuthoringFormSubmission) []ValidationIssue {
-	return compileConversationEndpointPurposes(candidate, form, submission)
+func CompileWorkforceAuthoringForm(candidate *WorkforceCandidate, form AuthoringForm, submission AuthoringFormSubmission, catalog CapabilityCatalog) []ValidationIssue {
+	return compileConversationEndpointPurposes(candidate, form, submission, catalog)
 }
 
 func canonicalAuthoringForm(catalog CapabilityCatalog, existing *WorkforceCandidate) AuthoringForm {
@@ -86,9 +86,9 @@ func candidateAgentRoutesApprovalTo(candidate *WorkforceCandidate, agentID, endp
 
 func catalogSupportsApprovalDecisions(catalog CapabilityCatalog) bool {
 	for _, skill := range catalog.Skills {
-		for _, adapter := range skill.ConversationAdapters {
-			for _, eventType := range adapter.InboundEventTypes {
-				if eventType == string(capability.ConversationEventApprovalDecided) {
+		for _, adapter := range skill.CallbackAdapters {
+			for _, eventType := range adapter.EventTypes {
+				if eventType == string(capability.CallbackEventApprovalDecided) {
 					return true
 				}
 			}
@@ -259,7 +259,7 @@ func validateConversationEndpointBlueprints(candidate *WorkforceCandidate) []Val
 // compileConversationEndpointPurposes is the trusted form-to-spec boundary.
 // The planner selects semantic endpoint purposes; it never authors kernel
 // authority links. Re-running this function is idempotent.
-func compileConversationEndpointPurposes(candidate *WorkforceCandidate, form AuthoringForm, submission AuthoringFormSubmission) []ValidationIssue {
+func compileConversationEndpointPurposes(candidate *WorkforceCandidate, form AuthoringForm, submission AuthoringFormSubmission, catalog CapabilityCatalog) []ValidationIssue {
 	if candidate == nil {
 		return nil
 	}
@@ -270,6 +270,7 @@ func compileConversationEndpointPurposes(candidate *WorkforceCandidate, form Aut
 	}
 	for index := range candidate.ConversationEndpoints {
 		candidate.ConversationEndpoints[index].Purposes = nil
+		candidate.ConversationEndpoints[index].CallbackAdapterID = ""
 	}
 	issues := make([]ValidationIssue, 0)
 	if len(form.Fields) == 0 {
@@ -311,10 +312,17 @@ func compileConversationEndpointPurposes(candidate *WorkforceCandidate, form Aut
 		candidate.ConversationEndpoints[endpointIndex].Purposes = purposes
 	}
 	agents := candidateAgentsByID(candidate)
-	for _, endpoint := range candidate.ConversationEndpoints {
+	for index := range candidate.ConversationEndpoints {
+		endpoint := &candidate.ConversationEndpoints[index]
 		if endpoint.Owner.Type != ConversationEndpointOwnerAgent || !hasConversationEndpointPurpose(endpoint.Purposes, ConversationEndpointPurposeApprovals) {
 			continue
 		}
+		callbackAdapterID, err := selectApprovalCallbackAdapter(catalog, endpoint)
+		if err != nil {
+			issues = append(issues, issue(fmt.Sprintf("conversationEndpoints[%d].callbackAdapterId", index), "approval_callback_adapter_missing", err.Error()))
+			continue
+		}
+		endpoint.CallbackAdapterID = callbackAdapterID
 		definition := agents[endpoint.Owner.ID]
 		if definition == nil {
 			continue
@@ -411,6 +419,21 @@ func validateConversationComposition(candidate *WorkforceCandidate, request Gene
 		if endpoint.Policy.ReplyMode == ConversationReplyThread &&
 			!containsConversationFeature(adapter.Features, capability.ConversationFeatureThreads) {
 			issues = append(issues, issue(path+".policy.replyMode", "conversation_threads_unsupported", "Selected Skill adapter does not support threaded replies"))
+		}
+		hasApprovals := hasConversationEndpointPurpose(endpoint.Purposes, ConversationEndpointPurposeApprovals)
+		var callback *CallbackAdapterCapability
+		for callbackIndex := range skillCapability.CallbackAdapters {
+			if skillCapability.CallbackAdapters[callbackIndex].ID == endpoint.CallbackAdapterID {
+				callback = &skillCapability.CallbackAdapters[callbackIndex]
+				break
+			}
+		}
+		if hasApprovals && (callback == nil || callback.Provider != adapter.Provider ||
+			!containsExactString(callback.EventTypes, capability.CallbackEventApprovalDecided)) {
+			issues = append(issues, issue(path+".callbackAdapterId", "approval_callback_adapter_missing", "Approval delivery requires one exact signed callback adapter from the selected Skill"))
+		}
+		if !hasApprovals && endpoint.CallbackAdapterID != "" {
+			issues = append(issues, issue(path+".callbackAdapterId", "unexpected_callback_adapter", "A callback adapter may be materialized only for a reviewed endpoint purpose"))
 		}
 		if endpoint.Handler.Kind == ConversationHandlerRunbook && request.Catalog.RuntimeComposition != nil {
 			definition := candidateAgentsByID(candidate)[endpoint.Handler.AgentDefinitionID]
