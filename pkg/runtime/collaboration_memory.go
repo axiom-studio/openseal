@@ -101,6 +101,24 @@ func (s *MemoryStore) ListAgentRequests(_ context.Context, filter AgentRequestFi
 	return pageAgentRequests(result, filter.Offset, filter.Limit), nil
 }
 
+func (s *MemoryStore) CoordinateAgentRequest(_ context.Context, record AgentRequestCoordinationRecord) (*ActivityEvent, error) {
+	if err := validateAgentRequestCoordinationRecord(record); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := requestStoreKey(record.Request.Scope, record.Request.ID)
+	current := s.requests[key]
+	if current == nil {
+		return nil, ErrAgentRequestNotFound
+	}
+	if current.Revision != record.ExpectedRequestRevision || record.Request.Revision != current.Revision+1 {
+		return nil, ErrRevisionConflict
+	}
+	s.requests[key] = cloneAgentRequest(record.Request)
+	return cloneActivityEvent(appendMemoryActivityLocked(s, record.Event)), nil
+}
+
 func (s *MemoryStore) RespondAgentRequest(_ context.Context, record AgentRequestResponseRecord) ([]*ActivityEvent, error) {
 	if err := validateAgentRequestResponseRecord(record); err != nil {
 		return nil, err
@@ -326,6 +344,23 @@ func validateAgentRequestCreateRecord(record AgentRequestCreateRecord) error {
 	if record.MaximumConcurrent > 0 && (record.Request.DelegationPolicy == nil || record.Request.DelegationPolicy.TeamDeploymentID != record.DelegationTeamID ||
 		record.Request.DelegationPolicy.MaximumConcurrent != record.MaximumConcurrent) {
 		return errors.New("delegation concurrency reservation must match the request policy snapshot")
+	}
+	return nil
+}
+
+func validateAgentRequestCoordinationRecord(record AgentRequestCoordinationRecord) error {
+	if record.Request == nil || record.Event == nil || record.ExpectedRequestRevision < 1 {
+		return errors.New("agent request coordination requires request, expected revision, and activity event")
+	}
+	if err := record.Request.Validate(); err != nil {
+		return err
+	}
+	if err := record.Event.Validate(); err != nil {
+		return err
+	}
+	if record.Request.Revision != record.ExpectedRequestRevision+1 || record.Event.Scope != record.Request.Scope ||
+		record.Event.RunID != record.Request.SourceRunID {
+		return ErrInvalidScope
 	}
 	return nil
 }

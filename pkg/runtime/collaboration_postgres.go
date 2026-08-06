@@ -225,6 +225,42 @@ func (s *PostgresStore) ListAgentRequests(ctx context.Context, filter AgentReque
 	return result, rows.Err()
 }
 
+func (s *PostgresStore) CoordinateAgentRequest(ctx context.Context, record AgentRequestCoordinationRecord) (*ActivityEvent, error) {
+	if err := validateAgentRequestCoordinationRecord(record); err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(record.Request)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("agent_requests")+` SET revision = $1, updated_at = $2, payload = $3::jsonb
+		WHERE scope_kind = $4 AND scope_id = $5 AND id = $6 AND revision = $7`, record.Request.Revision,
+		record.Request.UpdatedAt, string(payload), record.Request.Scope.Kind, record.Request.Scope.ID, record.Request.ID,
+		record.ExpectedRequestRevision)
+	if err != nil {
+		return nil, err
+	}
+	if affected, rowsErr := result.RowsAffected(); rowsErr != nil || affected != 1 {
+		if rowsErr != nil {
+			return nil, rowsErr
+		}
+		return nil, ErrRevisionConflict
+	}
+	persisted, err := s.insertPostgresActivityTx(ctx, tx, record.Event)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return persisted, nil
+}
+
 func (s *PostgresStore) RespondAgentRequest(ctx context.Context, record AgentRequestResponseRecord) ([]*ActivityEvent, error) {
 	if err := validateAgentRequestResponseRecord(record); err != nil {
 		return nil, err
