@@ -53,6 +53,19 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 	}
 	committed := false
 	defer rollbackSQLiteConn(conn, &committed)
+	if record.MaximumConcurrent > 0 {
+		var active int
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_requests
+			WHERE scope_kind = ? AND scope_id = ? AND status IN (?, ?, ?)
+			AND json_extract(payload, '$.delegationPolicy.teamDeploymentId') = ?`,
+			record.Request.Scope.Kind, record.Request.Scope.ID, AgentRequestStatusPending,
+			AgentRequestStatusClarificationRequested, AgentRequestStatusAccepted, record.DelegationTeamID).Scan(&active); err != nil {
+			return nil, err
+		}
+		if active >= record.MaximumConcurrent {
+			return nil, fmt.Errorf("%w: Team has %d active delegations, reaching maximum %d", ErrAgentRequestAssignment, active, record.MaximumConcurrent)
+		}
+	}
 	if record.SourceRun != nil {
 		if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err

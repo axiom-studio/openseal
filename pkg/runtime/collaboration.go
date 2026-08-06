@@ -131,22 +131,51 @@ type AgentRequest struct {
 	SharedContext        map[string]interface{}       `json:"sharedContext,omitempty"`
 	ChildCheckpoint      map[string]interface{}       `json:"childCheckpoint,omitempty"`
 	AcceptancePolicy     AgentRequestAcceptancePolicy `json:"acceptancePolicy"`
-	ConversationRefs     []string                     `json:"conversationRefs,omitempty"`
-	BudgetAllocation     *BudgetPolicy                `json:"budgetAllocation,omitempty"`
-	Clarification        string                       `json:"clarification,omitempty"`
-	Response             string                       `json:"response,omitempty"`
-	CompletionSummary    string                       `json:"completionSummary,omitempty"`
-	ResolutionReason     string                       `json:"resolutionReason,omitempty"`
-	AcceptanceEvidence   map[string]interface{}       `json:"acceptanceEvidence,omitempty"`
-	Artifacts            []ArtifactReference          `json:"artifacts,omitempty"`
-	IdempotencyKey       string                       `json:"idempotencyKey,omitempty"`
-	CompletionKey        string                       `json:"completionKey,omitempty"`
-	Revision             int64                        `json:"revision"`
-	CreatedAt            time.Time                    `json:"createdAt"`
-	UpdatedAt            time.Time                    `json:"updatedAt"`
-	AcceptedAt           *time.Time                   `json:"acceptedAt,omitempty"`
-	CompletedAt          *time.Time                   `json:"completedAt,omitempty"`
-	ResolvedAt           *time.Time                   `json:"resolvedAt,omitempty"`
+	// DelegationPolicy is the immutable Team policy snapshot that governed
+	// creation of this request. A nil value means the source Run was not owned
+	// by a deployed Team. Keeping the snapshot on the collaboration fact makes
+	// acceptance, depth, concurrency, and review decisions explainable after a
+	// Team definition is amended.
+	DelegationPolicy   *AgentRequestDelegationPolicy `json:"delegationPolicy,omitempty"`
+	ConversationRefs   []string                      `json:"conversationRefs,omitempty"`
+	BudgetAllocation   *BudgetPolicy                 `json:"budgetAllocation,omitempty"`
+	Clarification      string                        `json:"clarification,omitempty"`
+	Response           string                        `json:"response,omitempty"`
+	CompletionSummary  string                        `json:"completionSummary,omitempty"`
+	ResolutionReason   string                        `json:"resolutionReason,omitempty"`
+	AcceptanceEvidence map[string]interface{}        `json:"acceptanceEvidence,omitempty"`
+	Artifacts          []ArtifactReference           `json:"artifacts,omitempty"`
+	IdempotencyKey     string                        `json:"idempotencyKey,omitempty"`
+	CompletionKey      string                        `json:"completionKey,omitempty"`
+	Revision           int64                         `json:"revision"`
+	CreatedAt          time.Time                     `json:"createdAt"`
+	UpdatedAt          time.Time                     `json:"updatedAt"`
+	AcceptedAt         *time.Time                    `json:"acceptedAt,omitempty"`
+	CompletedAt        *time.Time                    `json:"completedAt,omitempty"`
+	ResolvedAt         *time.Time                    `json:"resolvedAt,omitempty"`
+}
+
+type AgentRequestDelegationPolicy struct {
+	TeamDeploymentID        string `json:"teamDeploymentId"`
+	TeamDefinitionID        string `json:"teamDefinitionId"`
+	TeamDefinitionVersion   string `json:"teamDefinitionVersion"`
+	DelegationDepth         int    `json:"delegationDepth"`
+	MaximumDepth            int    `json:"maximumDepth,omitempty"`
+	MaximumConcurrent       int    `json:"maximumConcurrent,omitempty"`
+	AllowPeerDelegation     bool   `json:"allowPeerDelegation,omitempty"`
+	RequireAcceptance       bool   `json:"requireAcceptance,omitempty"`
+	RequireCompletionReview bool   `json:"requireCompletionReview,omitempty"`
+}
+
+func (p *AgentRequestDelegationPolicy) Validate() error {
+	if p == nil {
+		return nil
+	}
+	if !validOpaqueIdentifier(p.TeamDeploymentID, 128) || strings.TrimSpace(p.TeamDefinitionID) == "" ||
+		strings.TrimSpace(p.TeamDefinitionVersion) == "" || p.DelegationDepth <= 0 || p.MaximumDepth < 0 || p.MaximumConcurrent < 0 {
+		return errors.New("agent request delegation policy snapshot is invalid")
+	}
+	return nil
 }
 
 func (r *AgentRequest) Validate() error {
@@ -173,6 +202,12 @@ func (r *AgentRequest) Validate() error {
 	}
 	if !validAgentRequestAcceptancePolicy(r.AcceptancePolicy) {
 		return errors.New("agent request acceptance policy is invalid")
+	}
+	if err := r.DelegationPolicy.Validate(); err != nil {
+		return err
+	}
+	if r.DelegationPolicy != nil && r.DelegationPolicy.RequireAcceptance && r.AcceptancePolicy != AgentRequestAcceptanceRecipientReview {
+		return errors.New("Team delegation policy requires recipient acceptance")
 	}
 	if (r.DependencyGroupID == "") != (r.DependencyID == "") {
 		return errors.New("agent request dependency group and edge must be set together")
@@ -316,6 +351,8 @@ type AgentRequestCreateRecord struct {
 	Request                *AgentRequest
 	SourceRun              *AgentRun
 	ExpectedSourceRevision int64
+	DelegationTeamID       string
+	MaximumConcurrent      int
 	Event                  *ActivityEvent
 }
 
@@ -377,6 +414,83 @@ func NewCollaborationService(store CollaborationKernelStore) *CollaborationServi
 	service := &CollaborationService{store: store, runs: store, artifacts: store, dependencies: NewDependencyCoordinator(store), now: time.Now, newID: uuid.NewString}
 	service.teams, _ = store.(collaborationTeamStore)
 	return service
+}
+
+func (s *CollaborationService) resolveSourceDelegationPolicy(ctx context.Context, source *AgentRun) (*AgentRequestDelegationPolicy, error) {
+	if source == nil || source.Owner.Type != OwnerTypeTeam || s.teams == nil {
+		return nil, nil
+	}
+	deployment, err := s.teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: source.Scope.Kind, ID: source.Scope.ID}, source.Owner.ID)
+	if errors.Is(err, kernelteam.ErrDeploymentNotFound) {
+		// Historical Runs may predate the Team registry. A currently deployed
+		// Team always takes the strict, snapshotted path below.
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if deployment == nil || deployment.Status != kernelteam.DeploymentActive {
+		return nil, fmt.Errorf("%w: source Team deployment is not active", ErrAgentRequestAssignment)
+	}
+	definitions, ok := s.teams.(agentRequestTeamDefinitionStore)
+	if !ok {
+		return nil, fmt.Errorf("%w: source Team delegation policy is unavailable", ErrAgentRequestAssignment)
+	}
+	definition, err := definitions.GetTeamDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil {
+		return nil, err
+	}
+	if definition == nil {
+		return nil, fmt.Errorf("%w: source Team definition is unavailable", ErrAgentRequestAssignment)
+	}
+	depth, err := s.sourceDelegationDepth(ctx, source)
+	if err != nil {
+		return nil, err
+	}
+	return &AgentRequestDelegationPolicy{
+		TeamDeploymentID: deployment.ID, TeamDefinitionID: definition.ID, TeamDefinitionVersion: definition.Version,
+		DelegationDepth: depth + 1,
+		MaximumDepth:    definition.Delegation.MaximumDepth, MaximumConcurrent: definition.Delegation.MaximumConcurrent,
+		AllowPeerDelegation: definition.Delegation.AllowPeerDelegation, RequireAcceptance: definition.Delegation.RequireAcceptance,
+		RequireCompletionReview: definition.Delegation.RequireCompletionReview,
+	}, nil
+}
+
+func (s *CollaborationService) sourceDelegationDepth(ctx context.Context, source *AgentRun) (int, error) {
+	depth := 0
+	current := source
+	for current != nil {
+		if collaboration, ok := current.Context["collaboration"].(map[string]interface{}); ok {
+			if requestID, _ := collaboration["requestId"].(string); strings.TrimSpace(requestID) != "" {
+				depth++
+			}
+		}
+		if strings.TrimSpace(current.ParentRunID) == "" {
+			break
+		}
+		parent, err := s.runs.GetAgentRun(ctx, current.Scope, current.ParentRunID)
+		if err != nil {
+			return 0, err
+		}
+		if parent == nil {
+			return 0, ErrRunNotFound
+		}
+		current = parent
+	}
+	return depth, nil
+}
+
+func (s *CollaborationService) validateSourceDelegationPolicy(ctx context.Context, req CreateAgentRequestRequest, policy *AgentRequestDelegationPolicy) error {
+	if policy == nil {
+		return nil
+	}
+	if policy.MaximumDepth > 0 && policy.DelegationDepth > policy.MaximumDepth {
+		return fmt.Errorf("%w: Team delegation depth %d exceeds maximum %d", ErrAgentRequestAssignment, policy.DelegationDepth, policy.MaximumDepth)
+	}
+	if !policy.AllowPeerDelegation && req.Requester.Type == OwnerTypeAgent && req.Recipient.Type == OwnerTypeAgent && req.Requester.ID != req.Recipient.ID {
+		return fmt.Errorf("%w: Team policy does not allow peer delegation", ErrAgentRequestUnauthorized)
+	}
+	return nil
 }
 
 // CanStartAgentRequestFromRun reports whether a Run can safely become the
@@ -448,6 +562,17 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if !requesterControlsRun(req.Requester, source) {
 		return nil, ErrAgentRequestUnauthorized
 	}
+	delegationPolicy, err := s.resolveSourceDelegationPolicy(ctx, source)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.validateSourceDelegationPolicy(ctx, req, delegationPolicy); err != nil {
+		return nil, err
+	}
+	acceptancePolicy := normalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy)
+	if delegationPolicy != nil && delegationPolicy.RequireAcceptance {
+		acceptancePolicy = AgentRequestAcceptanceRecipientReview
+	}
 	// Grouped requests are created only after their dependency coordinator has
 	// atomically moved the source into the group's wait state. Their membership
 	// is validated below; singular requests must still own the wake condition.
@@ -468,7 +593,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 		Goal: strings.TrimSpace(req.Goal), Instructions: strings.TrimSpace(req.Instructions), SemanticRole: strings.TrimSpace(req.SemanticRole),
 		AcceptanceCriteria: cloneMap(req.AcceptanceCriteria), ArtifactRequirements: cloneArtifactRequirements(req.ArtifactRequirements),
 		SharedContext: cloneMap(req.SharedContext), ChildCheckpoint: cloneMap(req.ChildCheckpoint),
-		AcceptancePolicy: normalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy),
+		AcceptancePolicy: acceptancePolicy, DelegationPolicy: cloneAgentRequestDelegationPolicy(delegationPolicy),
 		ConversationRefs: append([]string(nil), req.ConversationRefs...),
 		BudgetAllocation: cloneBudgetPolicy(req.BudgetAllocation),
 		IdempotencyKey:   strings.TrimSpace(req.IdempotencyKey), Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -492,6 +617,10 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	}
 	event := collaborationEvent(source, request, eventType, summary, req.Requester, now)
 	record := AgentRequestCreateRecord{Request: request, Event: event}
+	if delegationPolicy != nil && delegationPolicy.MaximumConcurrent > 0 {
+		record.DelegationTeamID = delegationPolicy.TeamDeploymentID
+		record.MaximumConcurrent = delegationPolicy.MaximumConcurrent
+	}
 	if request.DependencyGroupID == "" {
 		record.SourceRun, err = sourceAwaitingAgentRequestDecision(source, request, now)
 		if err != nil {
@@ -1785,10 +1914,14 @@ func validateLocalSchemaReferences(value interface{}) error {
 }
 
 func sameAgentRequestIntent(existing *AgentRequest, req CreateAgentRequestRequest) bool {
+	acceptancePolicy := normalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy)
+	if existing.DelegationPolicy != nil && existing.DelegationPolicy.RequireAcceptance {
+		acceptancePolicy = AgentRequestAcceptanceRecipientReview
+	}
 	return existing.Kind == req.Kind && existing.Requester == req.Requester && existing.Recipient == req.Recipient &&
 		existing.SourceRunID == strings.TrimSpace(req.SourceRunID) && existing.Goal == strings.TrimSpace(req.Goal) &&
 		existing.Instructions == strings.TrimSpace(req.Instructions) && existing.SemanticRole == strings.TrimSpace(req.SemanticRole) &&
-		existing.AcceptancePolicy == normalizeAgentRequestAcceptancePolicy(req.AcceptancePolicy) &&
+		existing.AcceptancePolicy == acceptancePolicy &&
 		existing.DependencyGroupID == strings.TrimSpace(req.DependencyGroupID) && existing.DependencyID == strings.TrimSpace(req.DependencyID) &&
 		sameJSONValue(existing.AcceptanceCriteria, req.AcceptanceCriteria) &&
 		sameJSONValue(existing.ArtifactRequirements, req.ArtifactRequirements) &&
@@ -1871,6 +2004,7 @@ func cloneAgentRequest(in *AgentRequest) *AgentRequest {
 		return nil
 	}
 	out := *in
+	out.DelegationPolicy = cloneAgentRequestDelegationPolicy(in.DelegationPolicy)
 	out.AcceptanceCriteria = cloneMap(in.AcceptanceCriteria)
 	out.ArtifactRequirements = cloneArtifactRequirements(in.ArtifactRequirements)
 	out.AcceptanceEvidence = cloneMap(in.AcceptanceEvidence)
@@ -1890,6 +2024,14 @@ func cloneAgentRequest(in *AgentRequest) *AgentRequest {
 		completed := *in.CompletedAt
 		out.CompletedAt = &completed
 	}
+	return &out
+}
+
+func cloneAgentRequestDelegationPolicy(policy *AgentRequestDelegationPolicy) *AgentRequestDelegationPolicy {
+	if policy == nil {
+		return nil
+	}
+	out := *policy
 	return &out
 }
 

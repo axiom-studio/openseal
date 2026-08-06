@@ -62,6 +62,24 @@ func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record AgentRequ
 		return nil, err
 	}
 	defer tx.Rollback()
+	if record.MaximumConcurrent > 0 {
+		lockKey := record.Request.Scope.Kind + ":" + record.Request.Scope.ID + ":" + record.DelegationTeamID
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+			return nil, err
+		}
+		var active int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+s.table("agent_requests")+`
+			WHERE scope_kind = $1 AND scope_id = $2 AND status = ANY($3)
+			AND payload->'delegationPolicy'->>'teamDeploymentId' = $4`,
+			record.Request.Scope.Kind, record.Request.Scope.ID,
+			pq.Array([]string{string(AgentRequestStatusPending), string(AgentRequestStatusClarificationRequested), string(AgentRequestStatusAccepted)}),
+			record.DelegationTeamID).Scan(&active); err != nil {
+			return nil, err
+		}
+		if active >= record.MaximumConcurrent {
+			return nil, fmt.Errorf("%w: Team has %d active delegations, reaching maximum %d", ErrAgentRequestAssignment, active, record.MaximumConcurrent)
+		}
+	}
 	if record.SourceRun != nil {
 		if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err

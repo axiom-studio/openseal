@@ -380,7 +380,13 @@ func (c *ConversationCursor) Validate() error {
 type ConversationPresenceState string
 
 const (
-	ConversationPresenceTyping  ConversationPresenceState = "typing"
+	// Thinking means the participant is evaluating visible channel context and
+	// deciding whether it has a relevant contribution.
+	ConversationPresenceThinking ConversationPresenceState = "thinking"
+	// Typing means a participant has selected a user-visible contribution and is
+	// actively composing or delivering it.
+	ConversationPresenceTyping ConversationPresenceState = "typing"
+	// Working is reserved for durable work linked through RunID.
 	ConversationPresenceWorking ConversationPresenceState = "working"
 )
 
@@ -413,8 +419,14 @@ func (p *ConversationPresence) Validate() error {
 		(p.RunID != "" && !validOpaqueIdentifier(p.RunID, 128)) || p.Revision <= 0 || p.UpdatedAt.IsZero() || !p.ExpiresAt.After(p.UpdatedAt) {
 		return fmt.Errorf("%w: presence identity, lease, revision, and expiry are invalid", ErrInvalidConversation)
 	}
-	if p.State != ConversationPresenceTyping && p.State != ConversationPresenceWorking {
+	if p.State != ConversationPresenceThinking && p.State != ConversationPresenceTyping && p.State != ConversationPresenceWorking {
 		return fmt.Errorf("%w: invalid presence state %q", ErrInvalidConversation, p.State)
+	}
+	if p.State == ConversationPresenceWorking && strings.TrimSpace(p.RunID) == "" {
+		return fmt.Errorf("%w: working presence requires a durable Run", ErrInvalidConversation)
+	}
+	if p.State != ConversationPresenceWorking && strings.TrimSpace(p.RunID) != "" {
+		return fmt.Errorf("%w: only working presence can reference a durable Run", ErrInvalidConversation)
 	}
 	if len(p.Summary) > 240 {
 		return fmt.Errorf("%w: presence summary cannot exceed 240 characters", ErrInvalidConversation)

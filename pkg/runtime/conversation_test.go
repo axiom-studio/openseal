@@ -48,6 +48,12 @@ func TestConversationFactsValidateStructuredChannelState(t *testing.T) {
 	if err := presence.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	thinking := *presence
+	thinking.State = ConversationPresenceThinking
+	thinking.RunID = ""
+	if err := thinking.Validate(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestConversationFactsRejectInventedOrUntruthfulState(t *testing.T) {
@@ -67,6 +73,12 @@ func TestConversationFactsRejectInventedOrUntruthfulState(t *testing.T) {
 	}
 	if err := expiredPresence.Validate(); !errors.Is(err, ErrInvalidConversation) {
 		t.Fatalf("presence error = %v", err)
+	}
+	workingWithoutRun := *expiredPresence
+	workingWithoutRun.State = ConversationPresenceWorking
+	workingWithoutRun.ExpiresAt = now.Add(time.Minute)
+	if err := workingWithoutRun.Validate(); !errors.Is(err, ErrInvalidConversation) {
+		t.Fatalf("working presence without Run error = %v", err)
 	}
 	invalidMessage := &ChannelMessage{
 		ID: "message", Scope: scope, ConversationID: "release", Sequence: 1,
