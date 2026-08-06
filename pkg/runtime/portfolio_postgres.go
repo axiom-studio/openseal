@@ -364,6 +364,14 @@ func (s *PostgresStore) SummarizeAgentRuns(ctx context.Context, scope Scope, own
 }
 
 func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim) (*AgentRun, error) {
+	decision, err := s.ClaimNextAgentRunWithDecision(ctx, claim)
+	if err != nil || decision == nil {
+		return nil, err
+	}
+	return decision.Run, nil
+}
+
+func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -430,10 +438,14 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 		claim.Now, claim.MaxActiveForAgent, agingSeconds, claim.Kind, claim.MaxActiveForConcurrencyKey,
 		claim.MaxActiveForOwner, claim.MaxActiveForObjective).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
+		decision, explainErr := s.explainPostgresAgentRunAdmission(ctx, tx, claim)
+		if explainErr != nil {
+			return nil, explainErr
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return nil, nil
+		return decision, nil
 	}
 	if err != nil {
 		return nil, err
@@ -470,7 +482,68 @@ func (s *PostgresStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunCla
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return selected, nil
+	decision := &AgentRunAdmissionDecision{Outcome: AgentRunAdmissionClaimed, Run: selected, EvaluatedAt: claim.Now}
+	if selected.Status == AgentRunStatusPaused && selected.BudgetState == BudgetStateExhausted {
+		decision.Outcome = AgentRunAdmissionBudgetStopped
+		decision.Blocks = []AgentRunAdmissionBlock{{
+			RunID: selected.ID, ObjectiveID: selected.ObjectiveID, AssignedAgentID: selected.AssignedAgentID,
+			Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: AgentRunAdmissionReasonAttemptBudgetExhausted,
+		}}
+	}
+	return decision, nil
+}
+
+func (s *PostgresStore) explainPostgresAgentRunAdmission(ctx context.Context, tx *sql.Tx, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND status IN ($3, $4)`,
+		claim.Scope.Kind, claim.Scope.ID, AgentRunStatusQueued, AgentRunStatusRunning)
+	if err != nil {
+		return nil, err
+	}
+	runs := make([]*AgentRun, 0)
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		run, err := decodeAgentRun(payload)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	objectiveRows, err := tx.QueryContext(ctx, `SELECT id, payload FROM `+s.table("objectives")+`
+		WHERE scope_kind = $1 AND scope_id = $2`, claim.Scope.Kind, claim.Scope.ID)
+	if err != nil {
+		return nil, err
+	}
+	objectives := make(map[string]*Objective)
+	for objectiveRows.Next() {
+		var id, payload string
+		if err := objectiveRows.Scan(&id, &payload); err != nil {
+			objectiveRows.Close()
+			return nil, err
+		}
+		objective, err := decodeObjective(payload)
+		if err != nil {
+			objectiveRows.Close()
+			return nil, err
+		}
+		objectives[id] = objective
+	}
+	if err := objectiveRows.Close(); err != nil {
+		return nil, err
+	}
+	selected, decision := evaluateAgentRunAdmission(runs, objectives, claim)
+	if selected != nil {
+		return nil, errors.New("agent run admission query drifted from the canonical evaluator")
+	}
+	return decision, nil
 }
 
 func (s *PostgresStore) RenewAgentRunLease(ctx context.Context, scope Scope, runID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentRun, error) {

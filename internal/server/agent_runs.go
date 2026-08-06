@@ -60,6 +60,35 @@ func (s *Server) handleListAgentRuns(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, runs)
 }
 
+func (s *Server) handleInspectAgentRunAdmission(w http.ResponseWriter, r *http.Request) {
+	scope, err := scopeFromQuery(r)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	request := runtime.AgentRunClaimRequest{
+		Scope: scope, Kind: runtime.RunKind(strings.TrimSpace(r.URL.Query().Get("kind"))),
+		AssignedAgentID: strings.TrimSpace(r.URL.Query().Get("assignedAgentId")),
+	}
+	for key, target := range map[string]*int{
+		"maxActiveForAgent": &request.MaxActiveForAgent, "maxActiveForOwner": &request.MaxActiveForOwner,
+		"maxActiveForObjective": &request.MaxActiveForObjective, "maxActiveForConcurrencyKey": &request.MaxActiveForConcurrencyKey,
+	} {
+		value, parseErr := boundedIntQuery(r, key, 0, 0, 1_000_000)
+		if parseErr != nil {
+			s.respondError(w, http.StatusBadRequest, parseErr.Error())
+			return
+		}
+		*target = value
+	}
+	decision, err := runtime.NewAgentRunScheduler(s.store).Inspect(r.Context(), request)
+	if err != nil {
+		s.respondAgentRunError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, decision)
+}
+
 func (s *Server) handleGetAgentRun(w http.ResponseWriter, r *http.Request) {
 	scope, err := scopeFromQuery(r)
 	if err != nil {

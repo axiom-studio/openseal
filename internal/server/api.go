@@ -67,6 +67,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/v1/clawhub/installed/{reference}", s.handleUninstallClawHub)
 	s.mux.HandleFunc("POST /api/v1/agent-runs", s.handleCreateAgentRun)
 	s.mux.HandleFunc("GET /api/v1/agent-runs", s.handleListAgentRuns)
+	s.mux.HandleFunc("GET /api/v1/agent-runs/admission", s.handleInspectAgentRunAdmission)
 	s.mux.HandleFunc("GET /api/v1/agent-runs/{id}", s.handleGetAgentRun)
 	s.mux.HandleFunc("GET /api/v1/agent-runs/{id}/runbook-audit", s.handleGetRunbookExecutionAudit)
 	s.mux.HandleFunc("POST /api/v1/agent-runs/{id}/commands", s.handleCommandAgentRun)
@@ -154,7 +155,7 @@ func (s *Server) registerRoutes() {
 }
 
 func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
-	runOperations := []string{kernelapi.OperationGet, kernelapi.OperationList, kernelapi.OperationPause, kernelapi.OperationResume, kernelapi.OperationCancel, kernelapi.OperationIntervene}
+	runOperations := []string{kernelapi.OperationGet, kernelapi.OperationList, kernelapi.OperationPause, kernelapi.OperationResume, kernelapi.OperationCancel, kernelapi.OperationIntervene, kernelapi.OperationInspectAdmission}
 	if _, ok := s.store.(runtime.RunbookExecutionAuditStore); ok {
 		if _, err := s.agentRegistry(); err == nil {
 			runOperations = append(runOperations, kernelapi.OperationAudit)

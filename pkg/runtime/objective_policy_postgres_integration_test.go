@@ -87,4 +87,19 @@ func TestPostgresObjectiveExecutionPolicySerializesReplicaClaims(t *testing.T) {
 	if claimedCount != 1 {
 		t.Fatalf("replica claims = %d, want exactly one", claimedCount)
 	}
+	decision, err := primary.ClaimNextAgentRunWithDecision(ctx, AgentRunClaim{
+		Scope: scope, WorkerID: "observer", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || decision == nil || decision.Outcome != AgentRunAdmissionBackpressured {
+		t.Fatalf("backpressure decision = %#v, %v", decision, err)
+	}
+	found := false
+	for _, block := range decision.Blocks {
+		if block.Reason == AgentRunAdmissionReasonObjectiveCapacity && block.ObjectiveID == limited.ID && block.Active == 1 && block.Limit == 1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("backpressure decision lacks Objective evidence: %#v", decision)
+	}
 }
