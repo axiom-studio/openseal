@@ -102,6 +102,21 @@ func agentRunOwnerSchedulingKey(owner ObjectiveOwner) string {
 	return string(owner.Type) + "\x1f" + owner.ID
 }
 
+func effectiveObjectiveConcurrencyLimit(runtimeLimit int, objective *Objective) int {
+	objectiveLimit := 0
+	if objective != nil && objective.ExecutionPolicy != nil {
+		objectiveLimit = objective.ExecutionPolicy.MaximumConcurrentRuns
+	}
+	switch {
+	case runtimeLimit > 0 && objectiveLimit > 0 && runtimeLimit < objectiveLimit:
+		return runtimeLimit
+	case objectiveLimit > 0:
+		return objectiveLimit
+	default:
+		return runtimeLimit
+	}
+}
+
 func (s *AgentRunScheduler) RenewLease(ctx context.Context, scope Scope, runID, workerID string, leaseDuration time.Duration) (*AgentRun, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("agent run scheduler is not configured")
