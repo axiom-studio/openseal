@@ -44,6 +44,8 @@ Depending on the connected server, the workspace can expose:
 - **Workforce** — describe Agents and Teams, answer sequential refinements,
   place approved credential references and binding configuration, inspect
   evaluation, resolve eligible requirements, and apply a reviewed ChangeSet
+- **Bundles** — inspect a signed portable workforce artifact through the
+  advertised kernel contract; target installation remains separately governed
 - **Readiness** — Agent deployment state, compilation history, and governed
   definition amendments, including self-proposed conversation changes and
   direct invocation of callable operations from the exact active runbook
@@ -95,6 +97,7 @@ Section shortcuts work while the list panel is focused:
 | Key | Section |
 | --- | --- |
 | `f` | Workforce authoring |
+| `B` | Portable workforce bundles |
 | `h` | Agent readiness |
 | `T` | Teams |
 | `o` | Objectives |

@@ -13,6 +13,8 @@ Use these guides in order for a first deployment:
 6. [REST API](api.md) — build capability-aware clients and integrations.
 7. [Operations](operations.md) — persistence, recovery, secrets, PostgreSQL, and
    test gates.
+8. [Portable workforce bundles](workforce-bundles.md) — signed export, trust,
+   target placement, atomic import, upgrade, and rollback.
 
 Architecture and compatibility references:
 
