@@ -1,9 +1,11 @@
 package bundle
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +133,123 @@ func TestWorkforceBundleRejectsBrokenReferenceClosure(t *testing.T) {
 	if err := bundle.Validate(); err == nil || !strings.Contains(err.Error(), "existing owner, Objective, and assigned Agent") {
 		t.Fatalf("broken Runbook reference was accepted: %v", err)
 	}
+}
+
+func TestWorkforceBundlePreviewCompileAndAtomicImportRoundTrip(t *testing.T) {
+	artifact := representativeBundle(t)
+	placement := representativePlacement(artifact)
+	preview, err := PreviewInstallation(artifact, placement)
+	if err != nil || !preview.Ready || len(preview.Requirements) != 4 {
+		t.Fatalf("preview = %#v, %v", preview, err)
+	}
+	request := InstallationRequest{
+		Bundle: artifact, Scope: capability.ScopeReference{Kind: "tenant", ID: "target"}, Placement: placement,
+		ActorType: "user", ActorID: "operator", Reason: "Import reviewed workforce", IdempotencyKey: "import-research-v1",
+	}
+	firstPlan, err := CompileInstallation(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPlan, err := CompileInstallation(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstPlan.PlanDigest != secondPlan.PlanDigest || len(firstPlan.Agents) != 1 || len(firstPlan.Teams) != 1 || len(firstPlan.Objectives) != 1 || len(firstPlan.Runbooks) != 1 {
+		t.Fatalf("installation plan is incomplete or non-deterministic: %#v", firstPlan)
+	}
+	if firstPlan.Teams[0].Deployment.Roster[0].AgentDeploymentID != "agent:target-researcher" || firstPlan.Runbooks[0].ObjectiveID != "objective:target-research" {
+		t.Fatalf("portable references were not resolved to target identities: %#v %#v", firstPlan.Teams[0], firstPlan.Runbooks[0])
+	}
+
+	store := &memoryInstallationStore{}
+	receipt, err := Install(context.Background(), store, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Install(context.Background(), store, request)
+	if err != nil || again.PlanDigest != receipt.PlanDigest || store.applies != 1 {
+		t.Fatalf("idempotent import = %#v, applies=%d, err=%v", again, store.applies, err)
+	}
+	if len(store.agents) != 1 || len(store.teams) != 1 || len(store.objectives) != 1 || len(store.runbooks) != 1 {
+		t.Fatalf("empty-store round trip omitted resources: %#v", store)
+	}
+
+	failing := &memoryInstallationStore{fail: true}
+	if _, err := Install(context.Background(), failing, request); err == nil {
+		t.Fatal("target failure was accepted")
+	}
+	if len(failing.agents)+len(failing.teams)+len(failing.objectives)+len(failing.runbooks) != 0 {
+		t.Fatalf("failed atomic import leaked partial resources: %#v", failing)
+	}
+}
+
+func TestWorkforceBundleInstallationRequiresCompleteUniquePlacement(t *testing.T) {
+	artifact := representativeBundle(t)
+	placement := representativePlacement(artifact)
+	delete(placement.Objectives, "research")
+	preview, err := PreviewInstallation(artifact, placement)
+	if err != nil || preview.Ready {
+		t.Fatalf("incomplete placement preview = %#v, %v", preview, err)
+	}
+	placement = representativePlacement(artifact)
+	placement.Runbooks["daily-research"] = placement.Objectives["research"]
+	// Identity uniqueness is per resource kind, so an Objective and Runbook may
+	// intentionally share a host-local string. Duplicate identities within the
+	// same kind remain rejected.
+	duplicate := *artifact
+	duplicate.Objectives = append([]Objective(nil), artifact.Objectives...)
+	duplicate.Objectives = append(duplicate.Objectives, duplicate.Objectives[0])
+	duplicate.Objectives[1].Key = "secondary"
+	if err := duplicate.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	placement.Objectives["secondary"] = placement.Objectives["research"]
+	if _, err := PreviewInstallation(&duplicate, placement); err == nil || !strings.Contains(err.Error(), "reuses objective identity") {
+		t.Fatalf("duplicate target identity was accepted: %v", err)
+	}
+}
+
+func representativePlacement(value *Bundle) Placement {
+	agentPlacement := agent.BundlePlacement{DeploymentID: "agent:target-researcher", Environment: "default", Runtime: map[string]capability.SkillIdentity{}, Skills: map[string]agent.BundleSkillPlacement{}, Credentials: map[string]capability.CredentialReference{}, Endpoints: map[string]agent.BundleEndpointPlacement{}, Callbacks: map[string]agent.BundleCallbackPlacement{}}
+	for _, requirement := range value.Agents[0].Artifact.Runtime {
+		agentPlacement.Runtime[requirement.RequirementID] = requirement.Identity
+	}
+	for _, requirement := range value.Agents[0].Artifact.Skills {
+		agentPlacement.Skills[requirement.RequirementID] = agent.BundleSkillPlacement{Identity: requirement.Identity, BindingID: "binding:" + requirement.RequirementID}
+	}
+	return Placement{
+		Agents: map[string]agent.BundlePlacement{"researcher": agentPlacement}, Teams: map[string]TeamPlacement{"research-team": {DeploymentID: "team:target-research"}},
+		Objectives: map[string]string{"research": "objective:target-research"}, Runbooks: map[string]string{"daily-research": "activation:target-daily-research"},
+	}
+}
+
+type memoryInstallationStore struct {
+	fail       bool
+	applies    int
+	receipt    *InstallationReceipt
+	agents     []AgentInstallation
+	teams      []TeamInstallation
+	objectives []*runtime.Objective
+	runbooks   []*runtime.RunbookActivation
+}
+
+func (s *memoryInstallationStore) ApplyWorkforceBundle(_ context.Context, plan *InstallationPlan) (*InstallationReceipt, error) {
+	if s.receipt != nil {
+		if s.receipt.IdempotencyKey != plan.IdempotencyKey || s.receipt.PlanDigest != plan.PlanDigest {
+			return nil, errors.New("idempotency conflict")
+		}
+		copy := *s.receipt
+		return &copy, nil
+	}
+	if s.fail {
+		return nil, errors.New("simulated transaction failure")
+	}
+	receipt := &InstallationReceipt{BundleID: plan.BundleID, BundleVersion: plan.BundleVersion, BundleDigest: plan.BundleDigest, PlanDigest: plan.PlanDigest, IdempotencyKey: plan.IdempotencyKey, AppliedAt: time.Unix(2, 0).UTC()}
+	// One assignment models the commit point of a transactional target store.
+	s.agents, s.teams, s.objectives, s.runbooks = append([]AgentInstallation(nil), plan.Agents...), append([]TeamInstallation(nil), plan.Teams...), append([]*runtime.Objective(nil), plan.Objectives...), append([]*runtime.RunbookActivation(nil), plan.Runbooks...)
+	s.receipt, s.applies = receipt, s.applies+1
+	copy := *receipt
+	return &copy, nil
 }
 
 func representativeBundle(t *testing.T) *Bundle {

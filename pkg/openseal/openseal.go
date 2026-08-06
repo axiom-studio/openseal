@@ -156,6 +156,16 @@ type (
 	WorkforceBundleDiff                       = kernelbundle.Diff
 	WorkforceBundleUpgradePlan                = kernelbundle.UpgradePlan
 	WorkforceBundleInspection                 = kernelbundle.Inspection
+	WorkforceBundlePlacement                  = kernelbundle.Placement
+	WorkforceBundleTeamPlacement              = kernelbundle.TeamPlacement
+	WorkforceBundleRequirement                = kernelbundle.Requirement
+	WorkforceBundleInstallationPreview        = kernelbundle.InstallationPreview
+	WorkforceBundleInstallationRequest        = kernelbundle.InstallationRequest
+	WorkforceBundleInstallationPlan           = kernelbundle.InstallationPlan
+	WorkforceBundleAgentInstallation          = kernelbundle.AgentInstallation
+	WorkforceBundleTeamInstallation           = kernelbundle.TeamInstallation
+	WorkforceBundleInstallationReceipt        = kernelbundle.InstallationReceipt
+	WorkforceBundleInstallationStore          = kernelbundle.InstallationStore
 	KernelAgentDeploymentList                 = kernelapi.AgentDeploymentList
 	KernelAgentDeploymentCatalogEntry         = kernelapi.AgentDeploymentCatalogEntry
 	KernelUpdateAgentDeploymentRequest        = kernelapi.UpdateAgentDeploymentRequest
@@ -1017,6 +1027,18 @@ func CompareWorkforceBundles(from, to *WorkforceBundle) (*WorkforceBundleDiff, e
 
 func PlanWorkforceBundleUpgrade(current, target *WorkforceBundle) (*WorkforceBundleUpgradePlan, error) {
 	return kernelbundle.PlanUpgrade(current, target)
+}
+
+func PreviewWorkforceBundleInstallation(bundle *WorkforceBundle, placement WorkforceBundlePlacement) (*WorkforceBundleInstallationPreview, error) {
+	return kernelbundle.PreviewInstallation(bundle, placement)
+}
+
+func CompileWorkforceBundleInstallation(request WorkforceBundleInstallationRequest) (*WorkforceBundleInstallationPlan, error) {
+	return kernelbundle.CompileInstallation(request)
+}
+
+func InstallWorkforceBundle(ctx context.Context, store WorkforceBundleInstallationStore, request WorkforceBundleInstallationRequest) (*WorkforceBundleInstallationReceipt, error) {
+	return kernelbundle.Install(ctx, store, request)
 }
 
 func InstallAgentManifest(ctx context.Context, registry AgentManifestInstallationRegistry, request AgentManifestInstallationRequest) (*AgentManifestInstallationResult, error) {
