@@ -28,6 +28,8 @@ func Execute(args []string) {
 		workflowCmd(args[1:])
 	case "skill":
 		skillCmd(args[1:])
+	case "bundle":
+		bundleCmd(args[1:])
 	case "version":
 		fmt.Printf("OpenSeal v%s\n", version)
 	case "help":
@@ -52,6 +54,7 @@ Commands:
   validate  Validate a workflow HCL file
   workflow  Manage workflows (create)
   skill     Export canonical bundled Skill manifests
+  bundle    Validate, inspect, diff, and plan portable workforce bundles
   version   Print version
   help      Print this help message
 
