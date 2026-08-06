@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -25,6 +26,18 @@ func (s *MemoryStore) CreateAgentRequest(_ context.Context, record AgentRequestC
 	if record.SourceRun != nil &&
 		(currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1) {
 		return nil, ErrRevisionConflict
+	}
+	if record.MaximumConcurrent > 0 {
+		active := 0
+		for _, request := range s.requests {
+			if request.Scope == record.Request.Scope && activeAgentRequest(request) && request.DelegationPolicy != nil &&
+				request.DelegationPolicy.TeamDeploymentID == record.DelegationTeamID {
+				active++
+			}
+		}
+		if active >= record.MaximumConcurrent {
+			return nil, fmt.Errorf("%w: Team has %d active delegations, reaching maximum %d", ErrAgentRequestAssignment, active, record.MaximumConcurrent)
+		}
 	}
 	requestKey := requestStoreKey(record.Request.Scope, record.Request.ID)
 	if s.requests[requestKey] != nil {
@@ -307,7 +320,18 @@ func validateAgentRequestCreateRecord(record AgentRequestCreateRecord) error {
 	if (record.Request.DependencyGroupID == "") != (record.SourceRun != nil) {
 		return errors.New("singular AgentRequest creation requires exactly one source Run wait transition")
 	}
+	if (strings.TrimSpace(record.DelegationTeamID) == "") != (record.MaximumConcurrent == 0) || record.MaximumConcurrent < 0 {
+		return errors.New("delegation concurrency reservation requires a Team and positive maximum")
+	}
+	if record.MaximumConcurrent > 0 && (record.Request.DelegationPolicy == nil || record.Request.DelegationPolicy.TeamDeploymentID != record.DelegationTeamID ||
+		record.Request.DelegationPolicy.MaximumConcurrent != record.MaximumConcurrent) {
+		return errors.New("delegation concurrency reservation must match the request policy snapshot")
+	}
 	return nil
+}
+
+func activeAgentRequest(request *AgentRequest) bool {
+	return request != nil && (request.Status == AgentRequestStatusPending || request.Status == AgentRequestStatusClarificationRequested || request.Status == AgentRequestStatusAccepted)
 }
 
 func validateAgentRequestResponseRecord(record AgentRequestResponseRecord) error {

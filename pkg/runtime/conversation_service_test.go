@@ -307,7 +307,7 @@ func TestConversationServicePersistsMonotonicReceiptsAndTruthfulPresence(t *test
 		t.Fatalf("expired presence = %#v, err = %v", active, err)
 	}
 	replacement, err := service.SetPresence(ctx, SetConversationPresenceRequest{
-		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceWorking, TTL: 30 * time.Second,
+		Scope: scope, ConversationID: conversation.ID, Participant: agent, State: ConversationPresenceThinking, TTL: 30 * time.Second,
 	})
 	if err != nil || replacement.Revision != 1 || replacement.LeaseID == presence.LeaseID {
 		t.Fatalf("replacement presence = %#v, err = %v", replacement, err)
