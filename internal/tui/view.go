@@ -97,6 +97,9 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeWorkforceAuthoring && !m.supportsWorkforceAuthoring() {
 		return m.renderUnavailableComposer(width, "Create Agents and Teams", "This server does not advertise workforce authoring.")
 	}
+	if m.mode == modeWorkforceBundleInspect && (!m.workforceBundleCapability.Supports(kernelapi.OperationInspect) || m.workforceBundleClient == nil) {
+		return m.renderUnavailableComposer(width, "Inspect workforce bundle", "This server does not advertise portable workforce bundle inspection.")
+	}
 	if m.mode == modeWorkforceRefinement && m.readyRefinement() == nil {
 		return m.renderUnavailableComposer(width, "Answer proposal question", "This exact proposal revision does not advertise refinement authority.")
 	}
@@ -154,7 +157,7 @@ func (m *Model) renderComposer(width int) string {
 	if isConversationGatewayMode(m.mode) && !m.supportsConversationGateway(mapConversationGatewayModeOperation(m.mode)) {
 		return m.renderUnavailableComposer(width, "Manage message integration", "This server does not advertise the required integration lifecycle operation.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && !isConversationGatewayMode(m.mode) && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceConversationRouting && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && !isConversationGatewayMode(m.mode) && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceBundleInspect && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceConversationRouting && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -235,6 +238,10 @@ func (m *Model) renderComposer(width int) string {
 		if m.authoringAutomationFocus == nil {
 			owner = "Governed review · authoring never activates state"
 		}
+	case modeWorkforceBundleInspect:
+		title = "Inspect portable workforce"
+		description = "Enter a local bundle path. The kernel verifies and inspects the immutable artifact; the TUI does not infer state."
+		owner = "Ctrl+S validates through workforce-bundles/v1 · no installation"
 	case modeWorkforceRefinement:
 		question := m.readyRefinement()
 		title = "One question before continuing"
@@ -409,6 +416,8 @@ func (m *Model) renderPanel(width int) string {
 	var content string
 	if m.section == sectionAuthoring {
 		content = m.renderAuthoringContent(width)
+	} else if m.section == sectionBundles {
+		content = m.renderWorkforceBundlesContent(width)
 	} else if m.section == sectionReadiness {
 		content = m.renderReadinessContent(width)
 	} else if m.section == sectionTeams {
@@ -446,6 +455,15 @@ func (m *Model) renderPanelTabs() string {
 	if m.authoringCapability.Available {
 		label := "f Workforce"
 		if m.section == sectionAuthoring {
+			label = selectedStyle.Render(label)
+		} else {
+			label = mutedStyle.Render(label)
+		}
+		tabs = append(tabs, label)
+	}
+	if m.workforceBundleCapability.Available {
+		label := "B Bundles"
+		if m.section == sectionBundles {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
@@ -579,6 +597,31 @@ func (m *Model) renderPanelTabs() string {
 		tabs = append(tabs, label)
 	}
 	return strings.Join(tabs, "  ")
+}
+
+func (m *Model) renderWorkforceBundlesContent(width int) string {
+	lines := []string{
+		headerStyle.Render("Portable workforce bundles"),
+		mutedStyle.Render("Validate signed, secret-free Agent and Team artifacts before governed installation."),
+	}
+	if m.workforceBundleInspection == nil {
+		lines = append(lines, "", mutedStyle.Render("No bundle inspected yet."), "Press Tab, enter a local YAML path, then Ctrl+S.")
+		return strings.Join(lines, "\n")
+	}
+	inspection := m.workforceBundleInspection
+	lines = append(lines, "",
+		selectedStyle.Render(inspection.ID+"@"+inspection.Version),
+		fmt.Sprintf("Agents %d  ·  Teams %d  ·  Objectives %d  ·  Runbooks %d", inspection.Agents, inspection.Teams, inspection.Objectives, inspection.Runbooks),
+		mutedStyle.Render("Digest  "+inspection.Digest),
+		mutedStyle.Render("Path    "+m.workforceBundlePath),
+	)
+	if len(inspection.Signatures) > 0 {
+		lines = append(lines, "Signatures  "+strings.Join(inspection.Signatures, ", "))
+	}
+	if len(inspection.RequiredCapabilities) > 0 {
+		lines = append(lines, "Requires    "+strings.Join(inspection.RequiredCapabilities, ", "))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderReadinessContent(width int) string {

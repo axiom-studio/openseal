@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
 	"sort"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
@@ -95,6 +97,7 @@ type panelSection int
 
 const (
 	sectionAuthoring panelSection = iota
+	sectionBundles
 	sectionReadiness
 	sectionTeams
 	sectionObjectives
@@ -116,6 +119,7 @@ type editorMode int
 const (
 	modeCreate editorMode = iota
 	modeWorkforceAuthoring
+	modeWorkforceBundleInspect
 	modeWorkforceRefinement
 	modeGuide
 	modeRunbookOperationStart
@@ -179,6 +183,7 @@ type Model struct {
 	skillBindingClient                 client.SkillBindingClient
 	sourcePolicyClient                 client.SourcePolicyLifecycleClient
 	workforceSkillSearchClient         client.WorkforceSkillSearchClient
+	workforceBundleClient              client.WorkforceBundleClient
 	config                             Config
 	editor                             textarea.Model
 	focus                              focusArea
@@ -211,6 +216,7 @@ type Model struct {
 	artifactCapability                 kernelapi.Capability
 	channelCapability                  kernelapi.Capability
 	authoringCapability                kernelapi.Capability
+	workforceBundleCapability          kernelapi.Capability
 	agentDefinitionCapability          kernelapi.Capability
 	teamDefinitionCapability           kernelapi.Capability
 	sourcePolicyCapability             kernelapi.Capability
@@ -323,6 +329,8 @@ type Model struct {
 	pendingRefinementKey               string
 	pendingRefinementIntent            string
 	activeRefinementQuestionID         string
+	workforceBundleInspection          *kernelbundle.Inspection
+	workforceBundlePath                string
 	refinementSkillQuery               string
 	refinementSkillResults             []authoring.SkillSearchCandidate
 	refinementSkillNextCursor          string
@@ -370,6 +378,12 @@ type workforceGoverned struct {
 type workforceLoaded struct {
 	changeSet *authoring.ChangeSet
 	err       error
+}
+
+type workforceBundleInspected struct {
+	path       string
+	inspection *kernelbundle.Inspection
+	err        error
 }
 
 type workforceSkillsSearched struct {
@@ -715,6 +729,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 		skillBindingClient:         skillBindingClient(kernelClient),
 		sourcePolicyClient:         sourcePolicyClient(kernelClient),
 		workforceSkillSearchClient: workforceSkillSearchClient(kernelClient),
+		workforceBundleClient:      workforceBundleClient(kernelClient),
 	}, nil
 }
 
@@ -771,6 +786,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
+		workforceBundleCapability, hasWorkforceBundles := msg.document.Find(kernelapi.WorkforceBundlesCapabilityID, kernelapi.WorkforceBundlesCapabilityVersion)
 		agentDefinitionCapability, hasAgentDefinitions := msg.document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
 		teamDefinitionCapability, hasTeamDefinitions := msg.document.Find(kernelapi.TeamDefinitionsCapabilityID, kernelapi.TeamDefinitionsCapabilityVersion)
 		sourcePolicyCapability, hasSourcePolicies := msg.document.Find(kernelapi.SourcePoliciesCapabilityID, kernelapi.SourcePoliciesCapabilityVersion)
@@ -793,6 +809,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
+		m.workforceBundleCapability = workforceBundleCapability
 		m.agentDefinitionCapability = agentDefinitionCapability
 		m.teamDefinitionCapability = teamDefinitionCapability
 		m.sourcePolicyCapability = sourcePolicyCapability
@@ -860,6 +877,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAuthoring || !authoringCapability.Available {
 			m.authoringCapability = kernelapi.Capability{}
 		}
+		if !hasWorkforceBundles || !workforceBundleCapability.Available || !workforceBundleCapability.Supports(kernelapi.OperationInspect) || m.workforceBundleClient == nil {
+			m.workforceBundleCapability = kernelapi.Capability{}
+			m.workforceBundleInspection = nil
+			m.workforceBundlePath = ""
+		}
 		if !hasAgentDefinitions || !agentDefinitionCapability.Available || m.config.Owner.Type != runtime.OwnerTypeAgent {
 			m.agentDefinitionCapability = kernelapi.Capability{}
 		}
@@ -869,7 +891,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasSourcePolicies || !sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !sourcePolicyCapability.Supports(kernelapi.OperationList) {
 			m.sourcePolicyCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.projectCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.projectCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Projects, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -885,6 +907,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.editor.Placeholder = "Describe the Agents and Team you need…"
 			}
+		} else if m.workforceBundleCapability.Available {
+			m.section = sectionBundles
+			m.mode = modeWorkforceBundleInspect
+			m.editor.Placeholder = "Path to a signed workforce bundle…"
 		} else if m.objectiveCapability.Available {
 			m.section = sectionObjectives
 			m.mode = modeObjectiveCreate
@@ -1017,6 +1043,21 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.authoringResult = nil
 		}
 		return m, m.loadCapabilities()
+	case workforceBundleInspected:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "Bundle inspection failed. The selected artifact was not changed."
+			return m, nil
+		}
+		m.err = nil
+		m.workforceBundlePath = msg.path
+		m.workforceBundleInspection = msg.inspection
+		m.status = "Portable workforce bundle validated and inspected by the kernel."
+		m.editor.Reset()
+		m.resetComposerMode()
+		m.focusPanelList()
+		return m, nil
 	case teamDeploymentsLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -1888,6 +1929,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitSourcePolicyRevoke()
 			case modeWorkforceAuthoring:
 				return m, m.submitWorkforceAuthoring()
+			case modeWorkforceBundleInspect:
+				return m, m.submitWorkforceBundleInspection()
 			case modeWorkforceRefinement:
 				return m, m.submitWorkforceRefinement()
 			case modeWorkforceApprove:
@@ -2021,6 +2064,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "f":
 			if m.authoringCapability.Available {
 				m.section = sectionAuthoring
+			}
+		case "B":
+			if m.workforceBundleCapability.Available {
+				m.section = sectionBundles
+				m.resetComposerMode()
 			}
 		case "h":
 			if m.agentDefinitionCapability.Available {
@@ -2476,6 +2524,26 @@ func (m *Model) submitWorkforceAuthoring() tea.Cmd {
 	return func() tea.Msg {
 		result, err := m.client.CompileWorkforce(m.ctx, request)
 		return workforceCompiled{result: result, mode: request.Mode, err: err}
+	}
+}
+
+func (m *Model) submitWorkforceBundleInspection() tea.Cmd {
+	path := strings.TrimSpace(m.editor.Value())
+	if path == "" || m.busy || m.workforceBundleClient == nil || !m.workforceBundleCapability.Supports(kernelapi.OperationInspect) {
+		return nil
+	}
+	m.busy = true
+	return func() tea.Msg {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return workforceBundleInspected{path: path, err: err}
+		}
+		artifact, err := kernelbundle.DecodeYAML(data)
+		if err != nil {
+			return workforceBundleInspected{path: path, err: err}
+		}
+		inspection, err := m.workforceBundleClient.InspectWorkforceBundle(m.ctx, artifact)
+		return workforceBundleInspected{path: path, inspection: inspection, err: err}
 	}
 }
 
@@ -6663,6 +6731,10 @@ func (m *Model) prepareSourcePolicyComposer(mode editorMode, template string) {
 
 func (m *Model) prepareComposerForSection() {
 	switch {
+	case m.section == sectionBundles && m.workforceBundleCapability.Supports(kernelapi.OperationInspect):
+		m.mode = modeWorkforceBundleInspect
+		m.editor.Placeholder = "Path to a signed workforce bundle…"
+		m.focusComposerEditor()
 	case m.section == sectionAuthoring && m.readyRefinement() != nil:
 		m.activateReadyRefinement()
 	case m.section == sectionReadiness && m.canProposeAgentBehaviorAmendment():
@@ -6730,6 +6802,11 @@ func (m *Model) prepareComposerForSection() {
 }
 
 func (m *Model) resetComposerMode() {
+	if m.section == sectionBundles {
+		m.mode = modeWorkforceBundleInspect
+		m.editor.Placeholder = "Path to a signed workforce bundle…"
+		return
+	}
 	if m.section == sectionReadiness {
 		m.mode = modeCreate
 		m.editor.Placeholder = "Select an Agent amendment to inspect its governed lifecycle."
@@ -6888,6 +6965,11 @@ func sourcePolicyClient(kernelClient client.KernelClient) client.SourcePolicyLif
 
 func workforceSkillSearchClient(kernelClient client.KernelClient) client.WorkforceSkillSearchClient {
 	value, _ := kernelClient.(client.WorkforceSkillSearchClient)
+	return value
+}
+
+func workforceBundleClient(kernelClient client.KernelClient) client.WorkforceBundleClient {
+	value, _ := kernelClient.(client.WorkforceBundleClient)
 	return value
 }
 
