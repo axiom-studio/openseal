@@ -77,6 +77,9 @@ func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, 
 	if request.Kind == AgentRequestKindHandoff {
 		intent = MessageIntentHandoff
 		content = "Handed off: " + request.Goal
+	} else if request.Kind == AgentRequestKindEscalation {
+		intent = MessageIntentEscalation
+		content = "Escalated: " + request.Goal
 	}
 	current, err := p.post(ctx, conversation, PostChannelMessageRequest{
 		Sender: participantForCollaborationParty(request.Requester), SenderDisplayName: displayNameForCollaborationParty(request.Requester),

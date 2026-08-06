@@ -110,6 +110,7 @@ const (
 	MessageIntentDecision        ConversationMessageIntent = "decision"
 	MessageIntentObjection       ConversationMessageIntent = "objection"
 	MessageIntentHandoff         ConversationMessageIntent = "handoff"
+	MessageIntentEscalation      ConversationMessageIntent = "escalation"
 	MessageIntentApprovalRequest ConversationMessageIntent = "approval_request"
 	MessageIntentAcknowledgment  ConversationMessageIntent = "acknowledgment"
 	MessageIntentSystem          ConversationMessageIntent = "system"
@@ -437,7 +438,7 @@ func (p *ConversationPresence) Validate() error {
 func validConversationMessageIntent(intent ConversationMessageIntent) bool {
 	switch intent {
 	case MessageIntentQuestion, MessageIntentAnswer, MessageIntentUpdate, MessageIntentProposal, MessageIntentDecision,
-		MessageIntentObjection, MessageIntentHandoff, MessageIntentApprovalRequest, MessageIntentAcknowledgment, MessageIntentSystem:
+		MessageIntentObjection, MessageIntentHandoff, MessageIntentEscalation, MessageIntentApprovalRequest, MessageIntentAcknowledgment, MessageIntentSystem:
 		return true
 	default:
 		return false

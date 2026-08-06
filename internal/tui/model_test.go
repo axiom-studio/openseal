@@ -1768,6 +1768,18 @@ func TestPromptFirstAgentRequestCreationUsesSelectedRunAndIdempotency(t *testing
 	}
 }
 
+func TestAgentRequestPromptParsesEscalation(t *testing.T) {
+	kind, recipient, goal, err := parseAgentRequestPrompt("escalation team:incident-command\nResolve the production blocker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != runtime.AgentRequestKindEscalation ||
+		recipient != (runtime.CollaborationParty{Type: runtime.OwnerTypeTeam, ID: "incident-command"}) ||
+		goal != "Resolve the production blocker" {
+		t.Fatalf("parsed escalation = %q / %#v / %q", kind, recipient, goal)
+	}
+}
+
 func TestAgentRequestComposerRejectsTerminalSourceWork(t *testing.T) {
 	fake := &fakeKernelClient{
 		document: kernelapi.NewCapabilityDocument(kernelapi.AgentRunsCapability(), kernelapi.AgentRequestsCapability()),

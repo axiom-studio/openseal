@@ -509,7 +509,7 @@ func proposalCoordinatesWork(proposal ParticipationProposal) bool {
 		return false
 	}
 	switch proposal.Intent {
-	case MessageIntentUpdate, MessageIntentProposal, MessageIntentDecision, MessageIntentHandoff, MessageIntentApprovalRequest:
+	case MessageIntentUpdate, MessageIntentProposal, MessageIntentDecision, MessageIntentHandoff, MessageIntentEscalation, MessageIntentApprovalRequest:
 		return true
 	default:
 		return false

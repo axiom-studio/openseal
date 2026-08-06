@@ -225,7 +225,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, fmt.Errorf("resolve eligible Agent delegation targets: %w", err)
 	}
 	instructions := hostedAgentInstructions(definition)
-	acceptedRequestExecution := run.Source == RunSourceRequest || run.Source == RunSourceHandoff
+	acceptedRequestExecution := run.Source == RunSourceRequest || run.Source == RunSourceHandoff || run.Source == RunSourceEscalation
 	if acceptedRequestExecution {
 		if _, ok := run.Context["collaboration"]; ok {
 			instructions = append(instructions, acceptedAgentRequestExecutionSystemInstruction)

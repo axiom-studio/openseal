@@ -128,3 +128,94 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 		t.Fatalf("open messages = %#v", open)
 	}
 }
+
+func TestAgentRequestEscalationIsDurableAndProjected(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "escalation-projection"}
+	store := NewMemoryStore()
+	conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"},
+		Title: "Incident coordination", IdempotencyKey: "incident-coordination",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coordinator"}, AssignedAgentID: "coordinator",
+		Goal: "Restore the service", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewCollaborationService(store)
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindEscalation, SourceRunID: source.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "coordinator"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "incident-commander"},
+		Goal:      "Resolve the production blocker", ConversationRefs: []string{conversation.ID},
+		IdempotencyKey: "escalate-production-blocker",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projector, err := NewAgentRequestConversationProjector(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = projector.Reconcile(ctx, scope); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Child.Source != RunSourceEscalation || accepted.Source.Status != AgentRunStatusWaitingForDependency ||
+		accepted.Source.WakeCondition == nil || accepted.Source.WakeCondition.Reference != created.Request.ID {
+		t.Fatalf("accepted escalation = %#v / %#v", accepted.Source, accepted.Child)
+	}
+	completed, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
+		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
+		Summary: "Production blocker resolved", CompletionKey: "escalation-complete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Request.Status != AgentRequestStatusCompleted || completed.Source.Status != AgentRunStatusQueued {
+		t.Fatalf("completed escalation = %#v / %#v", completed.Request, completed.Source)
+	}
+	if _, err = projector.Reconcile(ctx, scope); err != nil {
+		t.Fatal(err)
+	}
+	messages, err := NewConversationService(store).ListChannelMessages(ctx, ChannelMessageFilter{
+		Scope: scope, ConversationID: conversation.ID, Limit: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 || messages[0].Intent != MessageIntentEscalation ||
+		messages[1].Intent != MessageIntentAcknowledgment || messages[2].Intent != MessageIntentUpdate ||
+		messages[1].ThreadRootID != messages[0].ID || messages[2].ThreadRootID != messages[0].ID {
+		t.Fatalf("escalation messages = %#v", messages)
+	}
+	events, err := store.ListActivity(ctx, ActivityFilter{
+		Scope: scope, RunIDs: []string{source.ID, accepted.Child.ID},
+		EventTypes: []string{"escalation.requested", "escalation.accepted", "escalation.completed"}, Descending: true, Limit: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, event := range events {
+		seen[event.EventType] = true
+	}
+	for _, eventType := range []string{"escalation.requested", "escalation.accepted", "escalation.completed"} {
+		if !seen[eventType] {
+			t.Fatalf("missing %s in %#v", eventType, events)
+		}
+	}
+}

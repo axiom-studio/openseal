@@ -3662,12 +3662,18 @@ func parseAgentRequestPrompt(prompt string) (runtime.AgentRequestKind, runtime.C
 	}
 	directive := strings.Fields(strings.TrimSpace(lines[0]))
 	kind := runtime.AgentRequestKindRequest
-	if len(directive) == 2 && strings.EqualFold(directive[0], string(runtime.AgentRequestKindHandoff)) {
-		kind = runtime.AgentRequestKindHandoff
-		directive = directive[1:]
+	if len(directive) == 2 {
+		switch runtime.AgentRequestKind(strings.ToLower(directive[0])) {
+		case runtime.AgentRequestKindHandoff:
+			kind = runtime.AgentRequestKindHandoff
+			directive = directive[1:]
+		case runtime.AgentRequestKindEscalation:
+			kind = runtime.AgentRequestKindEscalation
+			directive = directive[1:]
+		}
 	}
 	if len(directive) != 1 {
-		return "", runtime.CollaborationParty{}, "", errors.New("Use agent:<id>, team:<id>, or handoff agent:<id> on the first line.")
+		return "", runtime.CollaborationParty{}, "", errors.New("Use agent:<id>, team:<id>, handoff agent:<id>, or escalation team:<id> on the first line.")
 	}
 	identity := strings.SplitN(strings.TrimSpace(directive[0]), ":", 2)
 	if len(identity) != 2 {
