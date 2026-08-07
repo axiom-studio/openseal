@@ -8,14 +8,17 @@ Use these guides in order for a first deployment:
    Skills, approvals, conversations, and evidence.
 3. [Callable runbooks](callable-runbooks.md) — compose exact deterministic
    operations into otherwise cognitive Agents.
-4. [Terminal UI](tui.md) — create and operate resources interactively.
-5. [CLI reference](cli.md) — inspect every implemented command and option.
-6. [REST API](api.md) — build capability-aware clients and integrations.
-7. [Operations](operations.md) — persistence, recovery, secrets, PostgreSQL, and
+4. [Runbook activation verification](runbook-verification.md) — prove graphs,
+   exact Skill bindings, authority, credentials, approval reachability, and
+   budgets before work can execute.
+5. [Terminal UI](tui.md) — create and operate resources interactively.
+6. [CLI reference](cli.md) — inspect every implemented command and option.
+7. [REST API](api.md) — build capability-aware clients and integrations.
+8. [Operations](operations.md) — persistence, recovery, secrets, PostgreSQL, and
    test gates.
-8. [Portable workforce bundles](workforce-bundles.md) — signed export, trust,
+9. [Portable workforce bundles](workforce-bundles.md) — signed export, trust,
    target placement, atomic import, upgrade, and rollback.
-9. [Team coordination](team-coordination.md) — durable work offers, role and
+10. [Team coordination](team-coordination.md) — durable work offers, role and
    capacity assignment, child Runs, review quorums, and disagreement escalation.
 
 Architecture and compatibility references:
