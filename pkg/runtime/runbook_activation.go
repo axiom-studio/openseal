@@ -22,6 +22,7 @@ var (
 	ErrRunbookActivationInactive    = errors.New("Runbook activation is not active")
 	ErrRunbookActivationRevision    = errors.New("Runbook activation revision conflict")
 	ErrRunbookActivationIdempotency = errors.New("Runbook activation idempotency key was already used with different input")
+	ErrRunbookActivationUnverified  = errors.New("Runbook activation verification failed")
 )
 
 // RunbookDetail combines an owner-scoped activation with the exact immutable
@@ -104,6 +105,41 @@ func verifyActivatedRunbook(ctx context.Context, store skill.CatalogStore, scope
 	}
 	report := runbook.Verify(definition.Runbook, workforceRunbookVerificationEnvironment(definition, bindings, definitions))
 	return &report
+}
+
+type runbookActivationVerificationStore interface {
+	RunbookActivationReader
+	RunbookDefinitionCatalog
+	skill.CatalogStore
+}
+
+func verifyRunbookActivationExecution(ctx context.Context, store interface{}, scope Scope, activationID string) error {
+	resolved, ok := store.(runbookActivationVerificationStore)
+	if !ok {
+		// Small custom stores may separate immutable Agent and Skill catalogs.
+		// Their activation boundary must call runbook.Verify explicitly; the
+		// bundled stores implement this complete proof path.
+		return nil
+	}
+	detail, err := ResolveRunbookDetail(ctx, resolved, resolved, scope, activationID)
+	if err != nil {
+		// Low-level embedders may use the scheduling kernel without installing
+		// the Agent catalog. Resolved activation verification is enforced once
+		// an activation is attached to an installed Agent definition; authoring
+		// readiness remains the mandatory gate for normal workforce activation.
+		if errors.Is(err, kernelagent.ErrDeploymentNotFound) || errors.Is(err, ErrRunbookDefinitionNotFound) {
+			return nil
+		}
+		return err
+	}
+	if detail.Verification == nil || detail.Verification.Valid {
+		return nil
+	}
+	if len(detail.Verification.Diagnostics) == 0 {
+		return ErrRunbookActivationUnverified
+	}
+	first := detail.Verification.Diagnostics[0]
+	return fmt.Errorf("%w: %s at %s", ErrRunbookActivationUnverified, first.Message, first.Path)
 }
 
 type RunbookActivationStatus string
@@ -312,6 +348,9 @@ func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope,
 	}
 	if !activation.Callable() {
 		return nil, ErrRunbookActivationInactive
+	}
+	if err := verifyRunbookActivationExecution(ctx, store, scope, activation.ID); err != nil {
+		return nil, err
 	}
 	objective, err := store.GetObjective(ctx, scope, activation.ObjectiveID)
 	if err != nil {

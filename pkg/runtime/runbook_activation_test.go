@@ -119,6 +119,66 @@ func TestResolveRunbookDetailUsesExactPinnedHistoricDefinition(t *testing.T) {
 	}
 }
 
+func TestResolvedVerificationBlocksManualAndScheduledActivation(t *testing.T) {
+	ctx := t.Context()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "verification.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	scope := Scope{Kind: "tenant", ID: "verification"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "operator"}
+	definition := sqliteAgentDefinition("1.0.0")
+	definition.SkillRequirements = []kernelagent.SkillRequirement{{SkillID: "missing", VersionConstraint: "1.0.0", RequiredActions: []string{"execute"}}}
+	definition.Authority.AllowedSkillIDs = []string{"missing"}
+	definition.Runbook = &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "verified-operation", Version: "1.0.0", Name: "Verified operation",
+		Entrypoints: map[string]string{"operate": "execute"},
+		Triggers: map[string]runbook.Trigger{"hourly": {
+			Kind: runbook.TriggerSchedule, Entrypoint: "operate", ObjectiveID: "operate",
+			Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"},
+		}},
+		Steps: map[string]runbook.Step{
+			"execute": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "missing", SkillVersion: "1.0.0", Action: "execute", ResultPath: "/result", Next: "done"}},
+			"done":    {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+		},
+	}
+	registry := kernelagent.NewRegistryWithStore(store)
+	if _, err := registry.RegisterDefinition(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: owner.ID, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "admin", "verification test"); err != nil {
+		t.Fatal(err)
+	}
+	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{
+		Scope: scope, Owner: owner, Title: "Operate", Goal: "Operate safely", Status: ObjectiveStatusActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	activation, err := NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{
+		ID: "hourly", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
+		DefinitionID: definition.Runbook.ID, DefinitionVersion: definition.Runbook.Version, TriggerID: "hourly", Trigger: definition.Runbook.Triggers["hourly"],
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StartRunbookActivation(ctx, store, scope, activation.ID, StartRunbookActivationRequest{}); !errors.Is(err, ErrRunbookActivationUnverified) {
+		t.Fatalf("manual activation error = %v", err)
+	}
+	result, err := NewRunbookScheduler(store).ReconcileScope(ctx, scope, 10)
+	if err != nil || result.Suspended != 1 || result.Examined != 1 {
+		t.Fatalf("schedule verification = %#v, %v", result, err)
+	}
+	paused, err := store.GetRunbookActivation(ctx, scope, activation.ID)
+	if err != nil || paused.Status != RunbookActivationPaused {
+		t.Fatalf("paused activation = %#v, %v", paused, err)
+	}
+}
+
 func TestRunbookActivationLivesUnderObjectiveAndOwnsSchedule(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
