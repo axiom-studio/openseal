@@ -2822,7 +2822,8 @@ func isReadinessValidationCode(code string) bool {
 	return strings.HasPrefix(code, readinessValidationCodePrefix) ||
 		strings.HasPrefix(code, "conversation_routing_") ||
 		strings.HasPrefix(code, "execution_target_") ||
-		strings.HasPrefix(code, "agent_deployment_")
+		strings.HasPrefix(code, "agent_deployment_") ||
+		strings.HasPrefix(code, "runbook_activation_")
 }
 
 func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveChangeSetApprovalRequest) (*ChangeSet, bool, error) {

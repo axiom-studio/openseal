@@ -555,6 +555,64 @@ func TestWorkforceAuthoringRejectsSkillRequirementsWithoutAuthorityBeforeApply(t
 	}
 }
 
+func TestWorkforceReadinessBlocksRunbookWithoutReachableApprovalRoute(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	const source = "https://skills.example::delivery"
+	installed := &skill.Definition{
+		ID: "delivery", Version: "1.0.0", Name: "Delivery",
+		Source:    &skill.SourceProvenance{Identity: source, Format: "openseal.skill.v1"},
+		Transport: skill.TransportReference{Kind: "builtin", Endpoint: "delivery"},
+		Actions: map[string]skill.Action{"publish": {
+			Name: "publish", Description: "Publish externally.", InputSchema: map[string]interface{}{"type": "object"},
+			Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Idempotency: skill.IdempotencyRequired,
+			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, ExternalOperationPolicy: skill.ExternalOperationRequired,
+		}},
+	}
+	if err := skill.NewCatalogWithStore(store).Register(ctx, installed); err != nil {
+		t.Fatal(err)
+	}
+	value := testApplicableWorkforceChangeSet()
+	value.Result.Candidate.Activation = authoring.WorkforceActivationActive
+	definition := value.Result.Candidate.Agents[0]
+	definition.Authority.MaximumRisk = capability.RiskLevelExternal
+	definition.Authority.RequireApprovalAt = capability.RiskLevelExternal
+	definition.SkillRequirements = []agent.SkillRequirement{{SkillID: "delivery", VersionConstraint: "1.0.0", RequiredActions: []string{"publish"}}}
+	definition.Authority.AllowedSkillIDs = []string{"delivery"}
+	definition.Runbook = &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "publish", Version: "1", Name: "Publish",
+		Entrypoints: map[string]string{"manual": "publish"},
+		Steps: map[string]runbook.Step{
+			"publish": {Kind: runbook.StepAction, Action: &runbook.ActionStep{SkillID: "delivery", SkillVersion: "1.0.0", Action: "publish", ResultPath: "/result", Next: "done"}},
+			"done":    {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+		},
+	}
+	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
+		"delivery": {ID: "delivery", Version: "1.0.0", SourceIdentity: source, Actions: []string{"publish"}, MaximumRisk: capability.RiskLevelExternal},
+	}}
+	value.Placement.SkillRuntimeIdentities = map[string]map[string]capability.SkillIdentity{
+		definition.ID: {"delivery": capability.NewSkillIdentity("delivery", "1.0.0", source)},
+	}
+
+	issues, err := store.ValidateChangeSetReadiness(ctx, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].Code != "runbook_activation_action_approval_unreachable" ||
+		issues[0].Path != "agents.agent.runbook.steps.publish.action" {
+		t.Fatalf("readiness issues = %#v", issues)
+	}
+	definition.Authority.ApprovalDestinations = []agent.ApprovalDestination{{EndpointID: "approval-channel"}}
+	issues, err = store.ValidateChangeSetReadiness(ctx, value)
+	if err != nil || len(issues) != 0 {
+		t.Fatalf("approved readiness = %#v, %v", issues, err)
+	}
+}
+
 func TestWorkforceAuthoringReusesCanonicalManagementBindingIdentity(t *testing.T) {
 	value := testApplicableWorkforceChangeSet()
 	definition := value.Result.Candidate.Agents[0]
