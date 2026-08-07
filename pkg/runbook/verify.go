@@ -240,7 +240,45 @@ func (v *staticVerifier) verifyBudgets() {
 				for branch, budget := range step.Fork.BranchBudgets {
 					v.compareChildBudget(path, "steps."+stepID+".fork.branchBudgets."+branch, *trigger.Budget, budget)
 				}
+				if join := v.definition.Steps[step.Fork.Join].Join; join != nil && join.Mode == JoinAll {
+					v.compareAggregateBranchBudget(path, "steps."+stepID+".fork.branchBudgets", *trigger.Budget, step.Fork.BranchBudgets)
+				}
 			}
+		}
+	}
+}
+
+func (v *staticVerifier) compareAggregateBranchBudget(parentPath, childPath string, parent BudgetAllocation, branches map[string]BudgetAllocation) {
+	checks := []struct {
+		name   string
+		parent int64
+		value  func(BudgetAllocation) int64
+	}{
+		{"maxAttempts", parent.MaxAttempts, func(value BudgetAllocation) int64 { return value.MaxAttempts }},
+		{"maxTurns", parent.MaxTurns, func(value BudgetAllocation) int64 { return value.MaxTurns }},
+		{"maxInputTokens", parent.MaxInputTokens, func(value BudgetAllocation) int64 { return value.MaxInputTokens }},
+		{"maxOutputTokens", parent.MaxOutputTokens, func(value BudgetAllocation) int64 { return value.MaxOutputTokens }},
+		{"maxTotalTokens", parent.MaxTotalTokens, func(value BudgetAllocation) int64 { return value.MaxTotalTokens }},
+		{"maxCostMicros", parent.MaxCostMicros, func(value BudgetAllocation) int64 { return value.MaxCostMicros }},
+		{"maxDurationMs", parent.MaxDurationMS, func(value BudgetAllocation) int64 { return value.MaxDurationMS }},
+		{"maxActions", parent.MaxActions, func(value BudgetAllocation) int64 { return value.MaxActions }},
+	}
+	for _, check := range checks {
+		if check.parent == 0 || len(branches) == 0 {
+			continue
+		}
+		var total int64
+		complete := true
+		for _, budget := range branches {
+			value := check.value(budget)
+			if value == 0 {
+				complete = false
+				break
+			}
+			total += value
+		}
+		if complete && total > check.parent {
+			v.add(childPath+"."+check.name, "budget.parallel_exceeds_parent", fmt.Sprintf("parallel branches allocate %d but trigger ceiling is %d", total, check.parent), parentPath+"."+check.name)
 		}
 	}
 }

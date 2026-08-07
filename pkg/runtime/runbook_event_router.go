@@ -127,6 +127,15 @@ func (r *RunbookEventRouter) Route(ctx context.Context, event EventEnvelope) (*E
 		if !strings.EqualFold(activation.Trigger.EventType, event.Type) {
 			continue
 		}
+		if verifyErr := verifyRunbookActivationExecution(ctx, r.store, event.Scope, activation.ID); verifyErr != nil {
+			if errors.Is(verifyErr, ErrRunbookActivationUnverified) {
+				if _, pauseErr := NewRunbookActivationService(r.store).Update(ctx, event.Scope, activation.ID, UpdateRunbookActivationRequest{ExpectedRevision: activation.Revision, Status: RunbookActivationPaused}); pauseErr != nil && !errors.Is(pauseErr, ErrRunbookActivationRevision) {
+					return nil, pauseErr
+				}
+				continue
+			}
+			return nil, verifyErr
+		}
 		objective, err := r.store.GetObjective(ctx, event.Scope, activation.ObjectiveID)
 		if err != nil {
 			return nil, err
