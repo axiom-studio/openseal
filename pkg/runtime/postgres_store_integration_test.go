@@ -733,11 +733,11 @@ func TestPostgresCanonicalStoreConformanceAndReplicaClaims(t *testing.T) {
 	approvals := NewApprovalCoordinator(replica, replica, ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil }))
 	approvalNow := proposal.Approval.CreatedAt.Add(time.Second)
 	approvals.now = func() time.Time { return approvalNow }
-	resolved, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
+	resolved, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
 	if err != nil || !resolved.Resolved || resolved.Call.Status != ActionCallStatusReady || resolved.Run.Status != AgentRunStatusWaitingForDependency {
 		t.Fatalf("resolved approval = %#v, %v", resolved, err)
 	}
-	replayed, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
+	replayed, err := approvals.Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "postgres-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "release-manager"}})
 	if err != nil || replayed.Resolved {
 		t.Fatalf("replayed approval = %#v, %v", replayed, err)
 	}

@@ -153,7 +153,7 @@ func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {
 	}
 	resolution, err := engine.ResolveApproval(ctx, ResolveApprovalRequest{
 		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-		DecisionID: "operator-decision", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "operator"},
+		DecisionID: "operator-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"},
 	})
 	if err != nil {
 		t.Fatal(err)

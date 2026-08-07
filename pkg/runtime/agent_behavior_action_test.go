@@ -115,7 +115,7 @@ func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *
 		t.Fatal(err)
 	}
 	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
-		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-routing", Approve: true,
+		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-routing", Decision: ApprovalDecisionApprove,
 		Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Approved",
 	})
 	if err != nil || resolved.Call.Status != ActionCallStatusReady {
@@ -200,7 +200,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	}
 	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
 		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-		DecisionID: "decision-42", Approve: true, Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Reviewed",
+		DecisionID: "decision-42", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "operator"}, Reason: "Reviewed",
 	})
 	if err != nil || resolved.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolve = %#v, %v", resolved, err)
@@ -291,7 +291,7 @@ func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T
 	}
 	resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
 		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-		DecisionID: "decision-rename", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Looks good",
+		DecisionID: "decision-rename", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Looks good",
 	})
 	if err != nil || resolved.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolve = %#v, %v", resolved, err)

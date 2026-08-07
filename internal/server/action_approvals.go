@@ -59,7 +59,7 @@ func (s *Server) handleResolveActionApproval(w http.ResponseWriter, r *http.Requ
 	}
 	result, err := runtime.NewApprovalCoordinator(s.store, s.store, s.actionApprovalAuth).Resolve(r.Context(), runtime.ResolveApprovalRequest{
 		Scope: scope, ApprovalID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
-		DecisionID: decisionID, Approve: payload.Approve, Principal: payload.Principal,
+		DecisionID: decisionID, Decision: payload.Decision, Principal: payload.Principal,
 		Reason: strings.TrimSpace(payload.Reason), CorrelationID: strings.TrimSpace(r.Header.Get("X-Correlation-ID")),
 	})
 	if err != nil {
