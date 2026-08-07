@@ -78,6 +78,7 @@ type fakeKernelClient struct {
 	objectives                 []*runtime.Objective
 	runbooks                   []*runtime.RunbookActivation
 	runbookDefinitions         map[string]*runbook.Definition
+	runbookVerifications       map[string]*runbook.VerificationReport
 	runbookUpdates             []runtime.UpdateRunbookActivationRequest
 	runbookStarts              []runtime.StartRunbookActivationRequest
 	runbookStartResult         *runtime.AgentRunCommandResult
@@ -899,7 +900,7 @@ func (f *fakeKernelClient) ListRunbooks(context.Context, runtime.RunbookActivati
 func (f *fakeKernelClient) GetRunbook(_ context.Context, _ runtime.Scope, id string) (*runtime.RunbookDetail, error) {
 	for _, value := range f.runbooks {
 		if value.ID == id {
-			return &runtime.RunbookDetail{Activation: value, Definition: f.runbookDefinitions[id]}, nil
+			return &runtime.RunbookDetail{Activation: value, Definition: f.runbookDefinitions[id], Verification: f.runbookVerifications[id]}, nil
 		}
 	}
 	return nil, runtime.ErrRunbookActivationNotFound
@@ -2837,8 +2838,9 @@ func TestObjectiveRunbookInspectionAndLifecycleUseExactPublicCapability(t *testi
 	fake := &fakeKernelClient{
 		document:   kernelapi.NewCapabilityDocument(kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability()),
 		objectives: []*runtime.Objective{objective}, runbooks: []*runtime.RunbookActivation{activation},
-		runbookDefinitions: map[string]*runbook.Definition{activation.ID: definition},
-		runbookStartResult: &runtime.AgentRunCommandResult{Run: &runtime.AgentRun{ID: "run:manual"}},
+		runbookDefinitions:   map[string]*runbook.Definition{activation.ID: definition},
+		runbookVerifications: map[string]*runbook.VerificationReport{activation.ID: {Valid: true}},
+		runbookStartResult:   &runtime.AgentRunCommandResult{Run: &runtime.AgentRun{ID: "run:manual"}},
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -2847,7 +2849,7 @@ func TestObjectiveRunbookInspectionAndLifecycleUseExactPublicCapability(t *testi
 	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	applyCommand(t, model, command)
 	view := model.View()
-	for _, expected := range []string{"Daily community scan · reviewed 1.0.0", "Search posts · reddit-search@1.2.0 · search", "u run now", "p pause"} {
+	for _, expected := range []string{"Daily community scan · reviewed 1.0.0", "Verified for activation", "Search posts · reddit-search@1.2.0 · search", "u run now", "p pause"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Runbook detail missing %q:\n%s", expected, view)
 		}
