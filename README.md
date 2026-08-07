@@ -90,6 +90,8 @@ fixed surface.
   approvals, conversations, evidence, and recovery
 - [Callable runbooks](docs/callable-runbooks.md) — typed deterministic
   operations that cognitive Agents invoke through durable Runs
+- [Runbook activation verification](docs/runbook-verification.md) — deterministic
+  proof of exact bindings, authority, credentials, approvals, and budgets
 - [Architecture](docs/architecture/autonomous-agent-runtime.md) — implemented
   layers, execution lifecycle, and extension boundaries
 - [Terminal UI](docs/tui.md) — workspace configuration and keyboard model
