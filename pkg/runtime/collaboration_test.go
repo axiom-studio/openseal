@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
@@ -16,6 +17,28 @@ import (
 type collaborationTeamStoreStub struct {
 	deployment *kernelteam.Deployment
 	definition *kernelteam.Definition
+}
+
+type collaborationAgentCatalogStore struct {
+	*MemoryStore
+	deployments map[string]*kernelagent.AgentDeployment
+	definitions map[string]*kernelagent.AgentDefinition
+}
+
+func (s *collaborationAgentCatalogStore) GetDeployment(_ context.Context, _ capability.ScopeReference, id string) (*kernelagent.AgentDeployment, error) {
+	deployment := s.deployments[id]
+	if deployment == nil {
+		return nil, kernelagent.ErrDeploymentNotFound
+	}
+	return deployment, nil
+}
+
+func (s *collaborationAgentCatalogStore) GetDefinition(_ context.Context, id, version string) (*kernelagent.AgentDefinition, error) {
+	definition := s.definitions[id+"@"+version]
+	if definition == nil {
+		return nil, kernelagent.ErrDefinitionNotFound
+	}
+	return definition, nil
 }
 
 func (s collaborationTeamStoreStub) GetTeamDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
@@ -725,6 +748,68 @@ func TestTeamWorkOfferBidsSelectDeterministicallyAndSurviveRestart(t *testing.T)
 	if accepted.Request.AssignedAgentID != "a-agent" || accepted.Request.AssignmentDecision == nil ||
 		!strings.Contains(accepted.Request.AssignmentDecision.Reason, "rank 1") || accepted.Child.AssignedAgentID != "a-agent" {
 		t.Fatalf("deterministic assignment = %#v / %#v", accepted.Request, accepted.Child)
+	}
+}
+
+func TestTeamWorkOfferFiltersExactRoleSkillsAndRecordsCapacity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "team-authority"}
+	memory := NewMemoryStore()
+	store := &collaborationAgentCatalogStore{
+		MemoryStore: memory,
+		deployments: map[string]*kernelagent.AgentDeployment{
+			"eligible": {ID: "eligible", DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 2}},
+			"busy":     {ID: "busy", DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}},
+			"wrong":    {ID: "wrong", DefinitionID: "writer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 4}},
+		},
+		definitions: map[string]*kernelagent.AgentDefinition{
+			"analyst@1": {ID: "analyst", Version: "1", Authority: kernelagent.AuthorityPolicy{AllowedSkillIDs: []string{"research"}}},
+			"writer@1":  {ID: "writer", Version: "1", Authority: kernelagent.AuthorityPolicy{AllowedSkillIDs: []string{"research"}}},
+		},
+	}
+	portfolio := NewPortfolioService(store)
+	source, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "lead"}, AssignedAgentID: "lead",
+		Goal: "Coordinate analysis", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, agentID := range []string{"eligible", "busy"} {
+		if _, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID}, AssignedAgentID: agentID,
+			Goal: fmt.Sprintf("existing work %d", index), Source: RunSourceManual,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := NewCollaborationService(store)
+	service.teams = collaborationTeamStoreStub{
+		deployment: &kernelteam.Deployment{
+			ID: "analysis", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analysis", ActiveVersion: "1",
+			Status: kernelteam.DeploymentActive, Revision: 1, Roster: []kernelteam.RosterAssignment{
+				{ID: "eligible", RoleID: "analyst", AgentDeploymentID: "eligible"},
+				{ID: "busy", RoleID: "analyst", AgentDeploymentID: "busy"},
+				{ID: "wrong", RoleID: "analyst", AgentDeploymentID: "wrong"},
+			},
+		},
+		definition: &kernelteam.Definition{ID: "analysis", Version: "1", Roles: []kernelteam.RoleSlot{{
+			ID: "analyst", RequiredDefinitionIDs: []string{"analyst"}, RequiredSkillIDs: []string{"research"},
+		}}},
+	}
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "lead"}, Recipient: CollaborationParty{Type: OwnerTypeTeam, ID: "analysis"},
+		SemanticRole: "analyst", Goal: "Analyze evidence",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created.Request.Candidates) != 2 || created.Request.Candidates[0].AgentDeploymentID != "busy" ||
+		created.Request.Candidates[0].AvailableSlots != 0 || created.Request.Candidates[1].AgentDeploymentID != "eligible" ||
+		created.Request.Candidates[1].AvailableSlots != 1 {
+		t.Fatalf("authority and capacity candidates = %#v", created.Request.Candidates)
 	}
 }
 
