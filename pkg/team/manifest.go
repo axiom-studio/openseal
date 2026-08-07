@@ -95,6 +95,8 @@ type ManifestDelegationPolicy struct {
 	AllowPeerDelegation     *bool `json:"allowPeerDelegation,omitempty" yaml:"allowPeerDelegation,omitempty"`
 	RequireAcceptance       *bool `json:"requireAcceptance,omitempty" yaml:"requireAcceptance,omitempty"`
 	RequireCompletionReview *bool `json:"requireCompletionReview,omitempty" yaml:"requireCompletionReview,omitempty"`
+	CompletionReviewQuorum  int   `json:"completionReviewQuorum,omitempty" yaml:"completionReviewQuorum,omitempty"`
+	EscalateOnDisagreement  *bool `json:"escalateOnDisagreement,omitempty" yaml:"escalateOnDisagreement,omitempty"`
 }
 
 type ManifestSharedContextPolicy struct {
@@ -184,6 +186,11 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance workfor
 		AllowPeerDelegation:     booleanDefault(manifest.Spec.Delegation.AllowPeerDelegation, false),
 		RequireAcceptance:       booleanDefault(manifest.Spec.Delegation.RequireAcceptance, true),
 		RequireCompletionReview: booleanDefault(manifest.Spec.Delegation.RequireCompletionReview, true),
+		CompletionReviewQuorum:  manifest.Spec.Delegation.CompletionReviewQuorum,
+		EscalateOnDisagreement:  booleanDefault(manifest.Spec.Delegation.EscalateOnDisagreement, false),
+	}
+	if delegation.RequireCompletionReview && delegation.CompletionReviewQuorum == 0 {
+		delegation.CompletionReviewQuorum = 1
 	}
 	if delegation.MaximumDepth == 0 {
 		delegation.MaximumDepth = 2
