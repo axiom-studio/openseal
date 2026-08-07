@@ -15,6 +15,8 @@ Use these guides in order for a first deployment:
    test gates.
 8. [Portable workforce bundles](workforce-bundles.md) — signed export, trust,
    target placement, atomic import, upgrade, and rollback.
+9. [Team coordination](team-coordination.md) — durable work offers, role and
+   capacity assignment, child Runs, review quorums, and disagreement escalation.
 
 Architecture and compatibility references:
 
