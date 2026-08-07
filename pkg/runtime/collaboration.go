@@ -110,6 +110,14 @@ type AgentRequestAssignmentDecision struct {
 	DecidedAt         time.Time `json:"decidedAt"`
 }
 
+type AgentRequestCompletionReviewDecision struct {
+	Reviewer       CollaborationParty `json:"reviewer"`
+	Approve        bool               `json:"approve"`
+	Summary        string             `json:"summary"`
+	IdempotencyKey string             `json:"idempotencyKey"`
+	DecidedAt      time.Time          `json:"decidedAt"`
+}
+
 // CollaborationParty identifies an agent or Team without coupling OpenSeal to
 // an enterprise identity system. Semantic role labels live on the request and
 // are deliberately independent from permissions and approval authority.
@@ -179,28 +187,30 @@ type AgentRequest struct {
 	// by a deployed Team. Keeping the snapshot on the collaboration fact makes
 	// acceptance, depth, concurrency, and review decisions explainable after a
 	// Team definition is amended.
-	DelegationPolicy        *AgentRequestDelegationPolicy `json:"delegationPolicy,omitempty"`
-	ConversationRefs        []string                      `json:"conversationRefs,omitempty"`
-	BudgetAllocation        *BudgetPolicy                 `json:"budgetAllocation,omitempty"`
-	Clarification           string                        `json:"clarification,omitempty"`
-	Response                string                        `json:"response,omitempty"`
-	CompletionSummary       string                        `json:"completionSummary,omitempty"`
-	ResolutionReason        string                        `json:"resolutionReason,omitempty"`
-	AcceptanceEvidence      map[string]interface{}        `json:"acceptanceEvidence,omitempty"`
-	Artifacts               []ArtifactReference           `json:"artifacts,omitempty"`
-	IdempotencyKey          string                        `json:"idempotencyKey,omitempty"`
-	CompletionKey           string                        `json:"completionKey,omitempty"`
-	CompletionSubmittedAt   *time.Time                    `json:"completionSubmittedAt,omitempty"`
-	CompletionReviewer      *CollaborationParty           `json:"completionReviewer,omitempty"`
-	CompletionReviewSummary string                        `json:"completionReviewSummary,omitempty"`
-	CompletionReviewKey     string                        `json:"completionReviewKey,omitempty"`
-	Revision                int64                         `json:"revision"`
-	CreatedAt               time.Time                     `json:"createdAt"`
-	UpdatedAt               time.Time                     `json:"updatedAt"`
-	AcceptedAt              *time.Time                    `json:"acceptedAt,omitempty"`
-	ReviewedAt              *time.Time                    `json:"reviewedAt,omitempty"`
-	CompletedAt             *time.Time                    `json:"completedAt,omitempty"`
-	ResolvedAt              *time.Time                    `json:"resolvedAt,omitempty"`
+	DelegationPolicy        *AgentRequestDelegationPolicy          `json:"delegationPolicy,omitempty"`
+	ConversationRefs        []string                               `json:"conversationRefs,omitempty"`
+	BudgetAllocation        *BudgetPolicy                          `json:"budgetAllocation,omitempty"`
+	Clarification           string                                 `json:"clarification,omitempty"`
+	Response                string                                 `json:"response,omitempty"`
+	CompletionSummary       string                                 `json:"completionSummary,omitempty"`
+	ResolutionReason        string                                 `json:"resolutionReason,omitempty"`
+	AcceptanceEvidence      map[string]interface{}                 `json:"acceptanceEvidence,omitempty"`
+	Artifacts               []ArtifactReference                    `json:"artifacts,omitempty"`
+	IdempotencyKey          string                                 `json:"idempotencyKey,omitempty"`
+	CompletionKey           string                                 `json:"completionKey,omitempty"`
+	CompletionSubmittedAt   *time.Time                             `json:"completionSubmittedAt,omitempty"`
+	CompletionReviewer      *CollaborationParty                    `json:"completionReviewer,omitempty"`
+	CompletionReviewSummary string                                 `json:"completionReviewSummary,omitempty"`
+	CompletionReviewKey     string                                 `json:"completionReviewKey,omitempty"`
+	CompletionReviews       []AgentRequestCompletionReviewDecision `json:"completionReviews,omitempty"`
+	ReviewDisagreement      bool                                   `json:"reviewDisagreement,omitempty"`
+	Revision                int64                                  `json:"revision"`
+	CreatedAt               time.Time                              `json:"createdAt"`
+	UpdatedAt               time.Time                              `json:"updatedAt"`
+	AcceptedAt              *time.Time                             `json:"acceptedAt,omitempty"`
+	ReviewedAt              *time.Time                             `json:"reviewedAt,omitempty"`
+	CompletedAt             *time.Time                             `json:"completedAt,omitempty"`
+	ResolvedAt              *time.Time                             `json:"resolvedAt,omitempty"`
 }
 
 type AgentRequestDelegationPolicy struct {
@@ -213,6 +223,8 @@ type AgentRequestDelegationPolicy struct {
 	AllowPeerDelegation     bool   `json:"allowPeerDelegation,omitempty"`
 	RequireAcceptance       bool   `json:"requireAcceptance,omitempty"`
 	RequireCompletionReview bool   `json:"requireCompletionReview,omitempty"`
+	CompletionReviewQuorum  int    `json:"completionReviewQuorum,omitempty"`
+	EscalateOnDisagreement  bool   `json:"escalateOnDisagreement,omitempty"`
 }
 
 func (p *AgentRequestDelegationPolicy) Validate() error {
@@ -220,8 +232,11 @@ func (p *AgentRequestDelegationPolicy) Validate() error {
 		return nil
 	}
 	if !validOpaqueIdentifier(p.TeamDeploymentID, 128) || strings.TrimSpace(p.TeamDefinitionID) == "" ||
-		strings.TrimSpace(p.TeamDefinitionVersion) == "" || p.DelegationDepth <= 0 || p.MaximumDepth < 0 || p.MaximumConcurrent < 0 {
+		strings.TrimSpace(p.TeamDefinitionVersion) == "" || p.DelegationDepth <= 0 || p.MaximumDepth < 0 || p.MaximumConcurrent < 0 || p.CompletionReviewQuorum < 0 {
 		return errors.New("agent request delegation policy snapshot is invalid")
+	}
+	if !p.RequireCompletionReview && (p.CompletionReviewQuorum > 0 || p.EscalateOnDisagreement) {
+		return errors.New("agent request review quorum and disagreement escalation require completion review")
 	}
 	return nil
 }
@@ -345,7 +360,51 @@ func validateAgentRequestCoordination(request *AgentRequest) error {
 		request.Status != AgentRequestStatusRejected && request.Status != AgentRequestStatusCanceled && request.AssignmentDecision == nil {
 		return errors.New("accepted Team work requires a durable assignment decision")
 	}
+	seenReviewers := make(map[CollaborationParty]struct{}, len(request.CompletionReviews))
+	seenReviewKeys := make(map[string]struct{}, len(request.CompletionReviews))
+	for _, decision := range request.CompletionReviews {
+		if decision.Reviewer.Validate() != nil || decision.Reviewer.Type != OwnerTypeAgent || decision.Reviewer.ID == request.AssignedAgentID ||
+			strings.TrimSpace(decision.Summary) == "" || strings.TrimSpace(decision.IdempotencyKey) == "" || decision.DecidedAt.IsZero() {
+			return errors.New("completion review decision requires an independent Agent, summary, key, and timestamp")
+		}
+		if _, duplicate := seenReviewers[decision.Reviewer]; duplicate {
+			return errors.New("completion review decisions must be unique per reviewer")
+		}
+		if _, duplicate := seenReviewKeys[decision.IdempotencyKey]; duplicate {
+			return errors.New("completion review decision keys must be unique")
+		}
+		seenReviewers[decision.Reviewer] = struct{}{}
+		seenReviewKeys[decision.IdempotencyKey] = struct{}{}
+	}
+	if request.ReviewDisagreement {
+		approvals, rejections := completionReviewCounts(request.CompletionReviews)
+		if request.Status != AgentRequestStatusCompletionReview || request.DelegationPolicy == nil ||
+			!request.DelegationPolicy.EscalateOnDisagreement || approvals == 0 || rejections == 0 {
+			return errors.New("completion review disagreement requires conflicting decisions and escalation policy")
+		}
+	}
 	return nil
+}
+
+func completionReviewQuorum(policy *AgentRequestDelegationPolicy) int {
+	if policy == nil || !policy.RequireCompletionReview {
+		return 0
+	}
+	if policy.CompletionReviewQuorum > 0 {
+		return policy.CompletionReviewQuorum
+	}
+	return 1
+}
+
+func completionReviewCounts(decisions []AgentRequestCompletionReviewDecision) (approvals, rejections int) {
+	for _, decision := range decisions {
+		if decision.Approve {
+			approvals++
+		} else {
+			rejections++
+		}
+	}
+	return approvals, rejections
 }
 
 type AgentRequestFilter struct {
@@ -461,6 +520,7 @@ type ReviewAgentRequestCompletionRequest struct {
 	Principal             CollaborationParty
 	Actor                 CollaborationParty
 	Approve               bool
+	ResolveDisagreement   bool
 	Summary               string
 	IdempotencyKey        string
 }
@@ -589,7 +649,8 @@ func (s *CollaborationService) resolveSourceDelegationPolicy(ctx context.Context
 		DelegationDepth: depth + 1,
 		MaximumDepth:    definition.Delegation.MaximumDepth, MaximumConcurrent: definition.Delegation.MaximumConcurrent,
 		AllowPeerDelegation: definition.Delegation.AllowPeerDelegation, RequireAcceptance: definition.Delegation.RequireAcceptance,
-		RequireCompletionReview: definition.Delegation.RequireCompletionReview,
+		RequireCompletionReview: definition.Delegation.RequireCompletionReview, CompletionReviewQuorum: definition.Delegation.CompletionReviewQuorum,
+		EscalateOnDisagreement: definition.Delegation.EscalateOnDisagreement,
 	}, nil
 }
 
@@ -1327,6 +1388,9 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	if request.Status != AgentRequestStatusCompletionReview || request.DelegationPolicy == nil || !request.DelegationPolicy.RequireCompletionReview {
 		return nil, ErrInvalidAgentRequestState
 	}
+	if req.ResolveDisagreement != request.ReviewDisagreement {
+		return nil, fmt.Errorf("%w: disagreement resolution must match the durable review state", ErrInvalidAgentRequestState)
+	}
 	if req.Principal != request.Requester || req.Principal == request.Recipient {
 		return nil, ErrAgentRequestUnauthorized
 	}
@@ -1336,6 +1400,20 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	}
 	if err := actor.Validate(); err != nil {
 		return nil, fmt.Errorf("actor: %w", err)
+	}
+	if actor.Type != OwnerTypeAgent || actor.ID == request.AssignedAgentID {
+		return nil, fmt.Errorf("%w: completed work requires an independent Agent reviewer", ErrAgentRequestUnauthorized)
+	}
+	for _, decision := range request.CompletionReviews {
+		if decision.IdempotencyKey == key && key != "" {
+			if decision.Reviewer == actor && decision.Approve == req.Approve && decision.Summary == strings.TrimSpace(req.Summary) {
+				return &AgentRequestResult{Request: request}, nil
+			}
+			return nil, ErrAgentRequestIdempotency
+		}
+		if decision.Reviewer == actor {
+			return nil, fmt.Errorf("%w: reviewer already submitted a completion decision", ErrInvalidAgentRequestState)
+		}
 	}
 	summary := strings.TrimSpace(req.Summary)
 	if summary == "" || key == "" {
@@ -1356,9 +1434,33 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	updatedRequest := cloneAgentRequest(request)
 	updatedRequest.Revision++
 	updatedRequest.UpdatedAt = now
+	updatedRequest.CompletionReviews = append(updatedRequest.CompletionReviews, AgentRequestCompletionReviewDecision{
+		Reviewer: actor, Approve: req.Approve, Summary: summary, IdempotencyKey: key, DecidedAt: now,
+	})
+	quorum := completionReviewQuorum(updatedRequest.DelegationPolicy)
+	approvals, rejections := completionReviewCounts(updatedRequest.CompletionReviews)
+	disagreement := approvals > 0 && rejections > 0 && updatedRequest.DelegationPolicy.EscalateOnDisagreement && !req.ResolveDisagreement
+	if disagreement || approvals < quorum && rejections < quorum {
+		updatedRequest.ReviewDisagreement = disagreement
+		eventType := "collaboration.completion_review_recorded"
+		eventSummary := fmt.Sprintf("Agent %s recorded completion review %d of %d", actor.ID, len(updatedRequest.CompletionReviews), quorum)
+		if disagreement {
+			eventType = "collaboration.completion_review_disagreement"
+			eventSummary = fmt.Sprintf("Completion reviewers disagreed after %d decisions; escalation is required", len(updatedRequest.CompletionReviews))
+		}
+		event := collaborationCompletionEvent(source, updatedRequest, eventType, eventSummary, actor, now)
+		persisted, persistErr := s.store.CoordinateAgentRequest(ctx, AgentRequestCoordinationRecord{
+			Request: updatedRequest, ExpectedRequestRevision: request.Revision, Event: event,
+		})
+		if persistErr != nil {
+			return nil, persistErr
+		}
+		return &AgentRequestResult{Request: cloneAgentRequest(updatedRequest), Source: cloneAgentRun(source), Child: cloneAgentRun(child), Events: []*ActivityEvent{persisted}}, nil
+	}
 	updatedRequest.CompletionReviewer = &actor
 	updatedRequest.CompletionReviewSummary = summary
 	updatedRequest.CompletionReviewKey = key
+	updatedRequest.ReviewDisagreement = false
 	updatedRequest.ReviewedAt = &now
 	updatedRequest.ResolvedAt = &now
 	updatedChild := cloneAgentRun(child)
@@ -1369,7 +1471,11 @@ func (s *CollaborationService) ReviewAgentRequestCompletion(ctx context.Context,
 	eventType := "collaboration.completion_review_approved"
 	eventSummary := fmt.Sprintf("%s %s approved the completed work", actor.Type, actor.ID)
 	dependencyState := RunDependencyStateSatisfied
-	if req.Approve {
+	if req.ResolveDisagreement {
+		eventType = "collaboration.completion_review_disagreement_resolved"
+		eventSummary = fmt.Sprintf("Agent %s resolved the completion review disagreement", actor.ID)
+	}
+	if approvals >= quorum {
 		updatedRequest.Status = AgentRequestStatusCompleted
 		updatedRequest.CompletedAt = &now
 		updatedChild.Output = collaborationCompletionOutput(updatedChild.Output, updatedRequest, cloneMap(child.Output))
@@ -2564,6 +2670,7 @@ func cloneAgentRequest(in *AgentRequest) *AgentRequest {
 	out.DelegationPolicy = cloneAgentRequestDelegationPolicy(in.DelegationPolicy)
 	out.Candidates = cloneAgentRequestCandidates(in.Candidates)
 	out.Bids = append([]AgentRequestBid(nil), in.Bids...)
+	out.CompletionReviews = append([]AgentRequestCompletionReviewDecision(nil), in.CompletionReviews...)
 	if in.AssignmentDecision != nil {
 		decision := *in.AssignmentDecision
 		out.AssignmentDecision = &decision

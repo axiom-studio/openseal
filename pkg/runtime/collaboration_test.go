@@ -129,6 +129,81 @@ func TestCollaborationSnapshotsTeamDelegationPolicyAndRequiresAcceptance(t *test
 	}
 }
 
+func TestTeamCompletionReviewQuorumEscalatesAndResolvesDisagreement(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "review-quorum"}
+	store := NewMemoryStore()
+	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "delivery-team"}, AssignedAgentID: "lead",
+		Goal: "Coordinate reviewed delivery", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewCollaborationService(store)
+	service.teams = collaborationTeamStoreStub{
+		deployment: &kernelteam.Deployment{
+			ID: "delivery-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+			DefinitionID: "delivery", ActiveVersion: "1", Revision: 1,
+		},
+		definition: &kernelteam.Definition{ID: "delivery", Version: "1", Delegation: kernelteam.DelegationPolicy{
+			MaximumDepth: 2, MaximumConcurrent: 2, AllowPeerDelegation: true, RequireAcceptance: true,
+			RequireCompletionReview: true, CompletionReviewQuorum: 2, EscalateOnDisagreement: true,
+		}},
+	}
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, Requester: CollaborationParty{Type: OwnerTypeTeam, ID: "delivery-team"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "worker"}, SourceRunID: source.ID, Goal: "Produce reviewed evidence",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := service.RespondAgentRequest(ctx, RespondAgentRequestRequest{
+		Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	submitted, err := service.CompleteAgentRequest(ctx, CompleteAgentRequestRequest{
+		Scope: scope, RequestID: accepted.Request.ID, ExpectedRevision: accepted.Request.Revision,
+		ExpectedChildRevision: accepted.Child.Revision, Principal: accepted.Request.Recipient,
+		Summary: "Evidence ready", CompletionKey: "reviewed-evidence-v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
+		Scope: scope, RequestID: submitted.Request.ID, ExpectedRevision: submitted.Request.Revision,
+		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
+		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer-a"}, Approve: true,
+		Summary: "Evidence is complete", IdempotencyKey: "review-a",
+	})
+	if err != nil || first.Request.Status != AgentRequestStatusCompletionReview || len(first.Request.CompletionReviews) != 1 {
+		t.Fatalf("first quorum decision = %#v, %v", first, err)
+	}
+	second, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
+		Scope: scope, RequestID: first.Request.ID, ExpectedRevision: first.Request.Revision,
+		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
+		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer-b"}, Approve: false,
+		Summary: "Evidence misses one criterion", IdempotencyKey: "review-b",
+	})
+	if err != nil || !second.Request.ReviewDisagreement || second.Request.Status != AgentRequestStatusCompletionReview {
+		t.Fatalf("disagreement = %#v, %v", second, err)
+	}
+	resolved, err := service.ReviewAgentRequestCompletion(ctx, ReviewAgentRequestCompletionRequest{
+		Scope: scope, RequestID: second.Request.ID, ExpectedRevision: second.Request.Revision,
+		ExpectedChildRevision: submitted.Child.Revision, Principal: submitted.Request.Requester,
+		Actor: CollaborationParty{Type: OwnerTypeAgent, ID: "reviewer-c"}, Approve: true, ResolveDisagreement: true,
+		Summary: "Escalation review confirms the evidence", IdempotencyKey: "review-c",
+	})
+	if err != nil || resolved.Request.Status != AgentRequestStatusCompleted || resolved.Request.ReviewDisagreement ||
+		len(resolved.Request.CompletionReviews) != 3 || resolved.Source.Status != AgentRunStatusQueued {
+		t.Fatalf("resolved disagreement = %#v, %v", resolved, err)
+	}
+}
+
 func TestCollaborationEnforcesSnapshottedTeamDelegationLimits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
