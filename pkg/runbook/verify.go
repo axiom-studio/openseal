@@ -217,7 +217,7 @@ func (v *staticVerifier) verifyActions() {
 			v.add(path, "action.approval_unreachable", "action requires approval but no reviewed approval route is reachable", bindingPath)
 		}
 		if resolved.SideEffect == capability.SideEffectDestructive && resolved.CompensationAction == "" {
-			v.warn(path, "action.compensation_absent", "destructive action has no declared compensation action", bindingPath)
+			v.add(path, "action.compensation_required", "destructive action requires a declared compensation action", bindingPath)
 		}
 	}
 }
