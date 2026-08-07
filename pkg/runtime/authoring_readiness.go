@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -71,6 +73,8 @@ func validateWorkforceChangeSetReadiness(ctx context.Context, store workforceCha
 			})
 			continue
 		}
+		resolvedDefinitions := make(map[string]*capability.Definition, len(bindings))
+		allDefinitionsResolved := true
 		for index, binding := range bindings {
 			catalogID := agentDefinition.SkillRequirements[index].SkillID
 			path := fmt.Sprintf("agents.%s.skillRequirements.%s", agentDefinition.ID, catalogID)
@@ -84,6 +88,7 @@ func validateWorkforceChangeSetReadiness(ctx context.Context, store workforceCha
 					// only after the plan is approved and reaches apply. Apply
 					// revalidates the installed runtime identity before any
 					// Agent or binding is persisted.
+					allDefinitionsResolved = false
 					continue
 				}
 				identity := binding.SkillID + "@" + binding.SkillVersion
@@ -92,6 +97,7 @@ func validateWorkforceChangeSetReadiness(ctx context.Context, store workforceCha
 				}
 				message := fmt.Sprintf("The exact immutable Skill %s is not uniquely installed; select an installed source-qualified version before review", identity)
 				issues = append(issues, authoring.ValidationIssue{Path: path, Code: "skill_binding_definition_unavailable", Message: message})
+				allDefinitionsResolved = false
 				continue
 			}
 			if binding.SourceIdentity == "" && definition.Source != nil {
@@ -99,10 +105,91 @@ func validateWorkforceChangeSetReadiness(ctx context.Context, store workforceCha
 			}
 			if issue := workforceBindingDefinitionIssue(path, agentDefinition.ID, catalogID, binding, definition); issue != nil {
 				issues = append(issues, *issue)
+				continue
+			}
+			resolvedDefinitions[binding.ID] = definition
+		}
+		if activation == authoring.WorkforceActivationActive && agentDefinition.Runbook != nil && allDefinitionsResolved {
+			report := runbook.Verify(agentDefinition.Runbook, workforceRunbookVerificationEnvironment(agentDefinition, bindings, resolvedDefinitions))
+			for _, diagnostic := range report.Diagnostics {
+				if diagnostic.Severity == runbook.DiagnosticWarning {
+					continue
+				}
+				issues = append(issues, authoring.ValidationIssue{
+					Path:    "agents." + agentDefinition.ID + ".runbook." + diagnostic.Path,
+					Code:    "runbook_activation_" + strings.ReplaceAll(diagnostic.Code, ".", "_"),
+					Message: diagnostic.Message,
+				})
 			}
 		}
 	}
 	return issues, nil
+}
+
+func workforceRunbookVerificationEnvironment(definition *agent.AgentDefinition, bindings []*capability.Binding, definitions map[string]*capability.Definition) runbook.VerificationEnvironment {
+	environment := runbook.VerificationEnvironment{}
+	if definition == nil {
+		return environment
+	}
+	approvalRoutes := len(definition.Authority.ApprovalDestinations) > 0
+	standing := make(map[string]bool, len(definition.Authority.StandingGrants))
+	for _, grant := range definition.Authority.StandingGrants {
+		// A destination-scoped external grant depends on runtime arguments and
+		// therefore cannot statically bypass approval. An unconstrained exact
+		// action grant can.
+		if strings.TrimSpace(grant.ExternalOperation) == "" && strings.TrimSpace(grant.ResourcePrefix) == "" {
+			standing[grant.SkillID+"\x00"+grant.Action] = true
+		}
+	}
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		skillDefinition := definitions[binding.ID]
+		if skillDefinition == nil {
+			continue
+		}
+		allowed := make(map[string]bool, len(binding.AllowedActions))
+		for _, action := range binding.AllowedActions {
+			allowed[action] = true
+		}
+		actionNames := make([]string, 0, len(skillDefinition.Actions))
+		for actionName := range skillDefinition.Actions {
+			actionNames = append(actionNames, actionName)
+		}
+		sort.Strings(actionNames)
+		for _, actionName := range actionNames {
+			action := skillDefinition.Actions[actionName]
+			requiresApproval := workforceActionRequiresApproval(definition, binding.SkillID, actionName, action)
+			environment.Actions = append(environment.Actions, runbook.ResolvedAction{
+				SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
+				Action: actionName, BindingID: binding.ID, BindingRevision: binding.Revision,
+				Enabled: !binding.Disabled, Allowed: allowed[actionName], MaximumRisk: binding.MaximumRisk,
+				Risk: action.Risk, SideEffect: action.SideEffect, Idempotency: action.Idempotency,
+				RequiredCredentials: append([]capability.CredentialRequirement(nil), action.Credentials...),
+				BoundCredentials:    cloneCredentialReferences(binding.Credentials), CompensationAction: action.CompensationAction,
+				FinalizerAction: action.FinalizerAction, RequiresApproval: requiresApproval,
+				ApprovalRoutePresent: !requiresApproval || approvalRoutes || standing[binding.SkillID+"\x00"+actionName],
+			})
+		}
+	}
+	return environment
+}
+
+func workforceActionRequiresApproval(definition *agent.AgentDefinition, skillID, actionName string, action capability.Action) bool {
+	if definition == nil || action.SideEffect == capability.SideEffectNone || action.SideEffect == capability.SideEffectRead {
+		return false
+	}
+	for _, grant := range definition.Authority.StandingGrants {
+		if grant.SkillID == skillID && grant.Action == actionName && strings.TrimSpace(grant.ExternalOperation) == "" && strings.TrimSpace(grant.ResourcePrefix) == "" {
+			return false
+		}
+	}
+	threshold := definition.Authority.RequireApprovalAt
+	if threshold == "" {
+		return true
+	}
+	return workforceRiskRank(action.Risk) >= workforceRiskRank(threshold)
 }
 
 func workforceBindingHasReviewedInstallation(value *authoring.ChangeSet, agentID, catalogID string, binding *capability.Binding) bool {

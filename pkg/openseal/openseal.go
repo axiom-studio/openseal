@@ -73,7 +73,16 @@ type (
 	RunbookPredicateOperator  = runbook.PredicateOperator
 	RunbookDiagnostic         = runbook.Diagnostic
 	RunbookTurnRunner         = runtime.RunbookTurnRunner
+)
 
+type (
+	RunbookDiagnosticSeverity      = runbook.DiagnosticSeverity
+	RunbookVerificationReport      = runbook.VerificationReport
+	RunbookResolvedAction          = runbook.ResolvedAction
+	RunbookVerificationEnvironment = runbook.VerificationEnvironment
+)
+
+type (
 	AgentDefinition                           = kernelagent.AgentDefinition
 	AgentStandingActionGrant                  = kernelagent.StandingActionGrant
 	AgentApprovalDestination                  = kernelagent.ApprovalDestination
@@ -1455,6 +1464,7 @@ var (
 	ErrTurnHostUnavailable                 = runtime.ErrTurnHostUnavailable
 	ErrTurnHostConfiguration               = runtime.ErrTurnHostConfiguration
 	ValidateRunbook                        = runbook.Validate
+	VerifyRunbook                          = runbook.Verify
 	ValidateRunbookInterfaceInput          = runbook.ValidateInterfaceInput
 	NewRunbookTurnRunner                   = runtime.NewRunbookTurnRunner
 	NewRunForkCoordinator                  = runtime.NewRunForkCoordinator
