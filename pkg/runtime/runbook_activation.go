@@ -12,6 +12,7 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
 
@@ -28,8 +29,9 @@ var (
 // interactive clients; neither the activation nor its definition is copied
 // into a second lifecycle.
 type RunbookDetail struct {
-	Activation *RunbookActivation  `json:"activation"`
-	Definition *runbook.Definition `json:"definition"`
+	Activation   *RunbookActivation          `json:"activation"`
+	Definition   *runbook.Definition         `json:"definition"`
+	Verification *runbook.VerificationReport `json:"verification,omitempty"`
 }
 
 type RunbookDefinitionCatalog interface {
@@ -68,10 +70,40 @@ func ResolveRunbookDetail(ctx context.Context, store RunbookActivationReader, ca
 			continue
 		}
 		if definition.Runbook.ID == activation.DefinitionID && definition.Runbook.Version == activation.DefinitionVersion {
-			return &RunbookDetail{Activation: activation, Definition: definition.Runbook}, nil
+			detail := &RunbookDetail{Activation: activation, Definition: definition.Runbook}
+			if catalogStore, ok := store.(skill.CatalogStore); ok {
+				detail.Verification = verifyActivatedRunbook(ctx, catalogStore, scope, deployment.ID, definition)
+			}
+			return detail, nil
 		}
 	}
 	return nil, fmt.Errorf("%w: %s@%s", ErrRunbookDefinitionNotFound, activation.DefinitionID, activation.DefinitionVersion)
+}
+
+func verifyActivatedRunbook(ctx context.Context, store skill.CatalogStore, scope Scope, deploymentID string, definition *kernelagent.AgentDefinition) *runbook.VerificationReport {
+	bindings, err := store.ListSkillBindings(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID)
+	if err != nil {
+		report := runbook.Verify(definition.Runbook, runbook.VerificationEnvironment{})
+		return &report
+	}
+	catalog := skill.NewCatalogWithStore(store)
+	definitions := make(map[string]*capability.Definition, len(bindings))
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		var resolved *skill.Definition
+		if strings.TrimSpace(binding.SourceIdentity) != "" {
+			resolved, err = catalog.GetDefinitionVariant(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
+		} else {
+			resolved, err = catalog.GetDefinition(ctx, binding.SkillID, binding.SkillVersion)
+		}
+		if err == nil && resolved != nil {
+			definitions[binding.ID] = resolved
+		}
+	}
+	report := runbook.Verify(definition.Runbook, workforceRunbookVerificationEnvironment(definition, bindings, definitions))
+	return &report
 }
 
 type RunbookActivationStatus string
