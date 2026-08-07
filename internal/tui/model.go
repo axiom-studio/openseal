@@ -3808,7 +3808,8 @@ func (m *Model) submitActionApproval(approve bool) tea.Cmd {
 	m.busy, m.err, m.status = true, nil, action+"…"
 	key := m.pendingApprovalKey
 	payload := kernelapi.ResolveActionApprovalRequest{
-		ExpectedRevision: approval.Revision, DecisionID: key, Approve: approve,
+		ExpectedRevision: approval.Revision, DecisionID: key,
+		Decision:  map[bool]runtime.ApprovalDecision{true: runtime.ApprovalDecisionApprove, false: runtime.ApprovalDecisionReject}[approve],
 		Principal: m.localApprovalPrincipal(), Reason: reason,
 	}
 	return func() tea.Msg {

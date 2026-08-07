@@ -72,7 +72,7 @@ func TestGovernedObjectiveCreateUsesExistingApprovalAndActionLifecycle(t *testin
 			}
 			resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
 				Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-				DecisionID: "decision-42", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Looks correct",
+				DecisionID: "decision-42", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Looks correct",
 			})
 			if err != nil || resolved.Call.Status != ActionCallStatusReady || resolved.Run.Status != AgentRunStatusWaitingForDependency {
 				t.Fatalf("resolve = %#v, %v", resolved, err)
@@ -182,7 +182,7 @@ func TestObjectivePauseRechecksOwnerAndIsReplaySafeAfterApproval(t *testing.T) {
 	if proposal.Approval.ProposedAction["changes"].(map[string]interface{})["status"] != string(ObjectiveStatusPaused) {
 		t.Fatalf("pause preview = %#v", proposal.Approval.ProposedAction)
 	}
-	_, err = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: 1, DecisionID: "approve-pause", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}})
+	_, err = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: 1, DecisionID: "approve-pause", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1531,6 +1531,9 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		actionDescription = "Agent behavior"
 	}
 	disposition := strings.TrimSpace(fmt.Sprint(last["approvalStatus"]))
+	if disposition == string(ApprovalStatusChangesRequested) {
+		return nil, false
+	}
 	content := actionDescription + " was not applied because policy denied the action."
 	if terminalStatus == governedActionProposalFailedStatus {
 		content = actionDescription + " could not be proposed."

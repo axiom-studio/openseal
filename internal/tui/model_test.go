@@ -722,8 +722,10 @@ func (f *fakeKernelClient) ResolveActionApproval(_ context.Context, _ runtime.Sc
 	approval.DecisionReason = decision.Reason
 	approval.DecisionBy = &decision.Principal
 	approval.Status = runtime.ApprovalStatusRejected
-	if decision.Approve {
+	if decision.Decision == runtime.ApprovalDecisionApprove {
 		approval.Status = runtime.ApprovalStatusApproved
+	} else if decision.Decision == runtime.ApprovalDecisionRequestChanges {
+		approval.Status = runtime.ApprovalStatusChangesRequested
 	}
 	return &runtime.ApprovalResolutionResult{Approval: approval, Resolved: true}, nil
 }
@@ -1954,7 +1956,7 @@ func TestActionApprovalResolutionRequiresAdvertisedOperationAndEligiblePrincipal
 	model.editor.SetValue("Evidence confirms the authorized release window")
 	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
 	applyCommand(t, model, command)
-	if len(fake.actionDecisions) != 1 || !fake.actionDecisions[0].Approve || fake.actionDecisions[0].ExpectedRevision != 3 || fake.actionDecisions[0].Principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) || fake.actionDecisionKeys[0] == "" || fake.actionDecisions[0].DecisionID != fake.actionDecisionKeys[0] {
+	if len(fake.actionDecisions) != 1 || fake.actionDecisions[0].Decision != runtime.ApprovalDecisionApprove || fake.actionDecisions[0].ExpectedRevision != 3 || fake.actionDecisions[0].Principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) || fake.actionDecisionKeys[0] == "" || fake.actionDecisions[0].DecisionID != fake.actionDecisionKeys[0] {
 		t.Fatalf("decision=%#v keys=%#v", fake.actionDecisions, fake.actionDecisionKeys)
 	}
 

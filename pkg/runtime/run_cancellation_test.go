@@ -178,7 +178,7 @@ func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 		t.Fatalf("approval = %#v err=%v", approval, err)
 	}
 	if _, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
-		Scope: scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision, DecisionID: "late-approval", Approve: true,
+		Scope: scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision, DecisionID: "late-approval", Decision: ApprovalDecisionApprove,
 		Principal: ApprovalPrincipal{Type: "role", ID: "reviewer"},
 	}); !errors.Is(err, ErrApprovalResolved) {
 		t.Fatalf("late approval error = %v", err)

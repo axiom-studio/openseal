@@ -101,7 +101,7 @@ func TestActionWorkerPreservesApprovedContinuationAfterTerminalFailure(t *testin
 	approvalCoordinator.now = func() time.Time { return now.Add(2 * time.Second) }
 	resolved, err := approvalCoordinator.Resolve(t.Context(), ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
-		ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-action", Approve: true,
+		ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-action", Decision: ApprovalDecisionApprove,
 		Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
 	})
 	if err != nil {

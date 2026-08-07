@@ -63,7 +63,7 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 		t.Fatalf("restored approval = %#v, %v", restored, err)
 	}
 	_, err = kernel.ResolveActionApproval(t.Context(), proposal.Approval.Scope, proposal.Approval.ID, kernelapi.ResolveActionApprovalRequest{
-		ExpectedRevision: proposal.Approval.Revision, Approve: true, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "alice"},
+		ExpectedRevision: proposal.Approval.Revision, Decision: runtime.ApprovalDecisionApprove, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "alice"},
 	}, "decision-1")
 	if !errors.As(err, &apiError) || apiError.StatusCode != 501 {
 		t.Fatalf("unconfigured resolution error = %#v", err)
@@ -84,13 +84,13 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 		t.Fatalf("governed approval capability = %#v", capability)
 	}
 	_, err = kernel.ResolveActionApproval(t.Context(), proposal.Approval.Scope, proposal.Approval.ID, kernelapi.ResolveActionApprovalRequest{
-		ExpectedRevision: proposal.Approval.Revision, Approve: true, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "mallory"},
+		ExpectedRevision: proposal.Approval.Revision, Decision: runtime.ApprovalDecisionApprove, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "mallory"},
 	}, "unauthorized-decision")
 	if !errors.As(err, &apiError) || apiError.StatusCode != 403 {
 		t.Fatalf("unauthorized decision error = %#v", err)
 	}
 	resolved, err := kernel.ResolveActionApproval(t.Context(), proposal.Approval.Scope, proposal.Approval.ID, kernelapi.ResolveActionApprovalRequest{
-		ExpectedRevision: proposal.Approval.Revision, Approve: true, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "reviewed",
+		ExpectedRevision: proposal.Approval.Revision, Decision: runtime.ApprovalDecisionApprove, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "reviewed",
 	}, "decision-1")
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +99,7 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 		t.Fatalf("resolved approval = %#v", resolved)
 	}
 	replayed, err := kernel.ResolveActionApproval(t.Context(), proposal.Approval.Scope, proposal.Approval.ID, kernelapi.ResolveActionApprovalRequest{
-		ExpectedRevision: proposal.Approval.Revision, Approve: true, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "alice"},
+		ExpectedRevision: proposal.Approval.Revision, Decision: runtime.ApprovalDecisionApprove, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "alice"},
 	}, "decision-1")
 	if err != nil || replayed.Resolved {
 		t.Fatalf("replayed decision = %#v, %v", replayed, err)

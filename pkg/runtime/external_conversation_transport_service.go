@@ -157,13 +157,10 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 		(!replay && approval.Revision != revision) || !approvalHasDestination(approval, endpoint.ID) {
 		return nil, fmt.Errorf("%w: approval decision does not match the reviewed action", ErrInvalidExternalConversation)
 	}
-	if decision == "request_changes" && strings.TrimSpace(reason) == "" {
-		reason = "Changes requested through external conversation"
-	}
 	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
 	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: endpoint.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
-		DecisionID: event.ID, Approve: decision == "approve",
+		DecisionID: event.ID, Decision: ApprovalDecision(decision),
 		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
 		CorrelationID: event.ExternalMessageID,
 	})

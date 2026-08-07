@@ -25,7 +25,7 @@ type ResolveApprovalRequest struct {
 	ApprovalID       string
 	ExpectedRevision int64
 	DecisionID       string
-	Approve          bool
+	Decision         ApprovalDecision
 	Principal        ApprovalPrincipal
 	Reason           string
 	CorrelationID    string
@@ -94,6 +94,14 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	}
 	now := c.now().UTC()
 	expired := !now.Before(approval.ExpiresAt)
+	if !timeout && !expired {
+		if err := req.Decision.Validate(); err != nil {
+			return nil, err
+		}
+		if req.Decision == ApprovalDecisionRequestChanges && strings.TrimSpace(req.Reason) == "" {
+			return nil, errors.New("reviewer guidance is required when requesting changes")
+		}
+	}
 	if timeout && !expired {
 		return nil, errors.New("approval timeout deadline has not elapsed")
 	}
@@ -126,10 +134,14 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 		if err := c.authorize.AuthorizeApproval(ctx, req.Principal, cloneApprovalCheckpoint(approval)); err != nil {
 			return nil, fmt.Errorf("authorize approval: %w", err)
 		}
-		if req.Approve {
+		switch req.Decision {
+		case ApprovalDecisionApprove:
 			status = ApprovalStatusApproved
 			eventType = "approval.approved"
 			callStatus = ActionCallStatusReady
+		case ApprovalDecisionRequestChanges:
+			status = ApprovalStatusChangesRequested
+			eventType = "approval.changes_requested"
 		}
 	}
 	updatedApproval := cloneApprovalCheckpoint(approval)
@@ -167,9 +179,12 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 			updatedRun.WakeCondition = nil
 			updatedRun.AvailableAt = now
 			updatedRun.QueueEnteredAt = now
-			updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, map[string]interface{}{
-				"approvalId": approval.ID, "approvalStatus": status,
-			})
+			metadata := map[string]interface{}{"approvalId": approval.ID, "approvalStatus": status}
+			if status == ApprovalStatusChangesRequested {
+				metadata["reviewerGuidance"] = strings.TrimSpace(req.Reason)
+				metadata["reviewedProposalRevision"] = approval.Revision
+			}
+			updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, metadata)
 		}
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
@@ -184,7 +199,7 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 		ParentRunID: run.ParentRunID, Actor: ActivityActor{Type: req.Principal.Type, ID: req.Principal.ID},
 		Summary: summary, Visibility: ActivityVisibilityScope, CorrelationID: req.CorrelationID,
 		CausationID: approval.ID, CreatedAt: now,
-		Payload: map[string]interface{}{"approvalId": approval.ID, "actionCallId": call.ID, "status": status, "decisionId": req.DecisionID},
+		Payload: map[string]interface{}{"approvalId": approval.ID, "actionCallId": call.ID, "status": status, "decisionId": req.DecisionID, "decisionReason": strings.TrimSpace(req.Reason)},
 	}
 	return c.actions.ResolveApproval(ctx, ApprovalResolutionRecord{
 		Approval: updatedApproval, ExpectedApprovalRevision: approval.Revision,

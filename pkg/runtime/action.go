@@ -174,12 +174,33 @@ func clonePreparedRuntime(value *skill.PreparedRuntime) *skill.PreparedRuntime {
 type ApprovalStatus string
 
 const (
-	ApprovalStatusPending  ApprovalStatus = "pending"
-	ApprovalStatusApproved ApprovalStatus = "approved"
-	ApprovalStatusRejected ApprovalStatus = "rejected"
-	ApprovalStatusExpired  ApprovalStatus = "expired"
-	ApprovalStatusCanceled ApprovalStatus = "canceled"
+	ApprovalStatusPending          ApprovalStatus = "pending"
+	ApprovalStatusApproved         ApprovalStatus = "approved"
+	ApprovalStatusRejected         ApprovalStatus = "rejected"
+	ApprovalStatusChangesRequested ApprovalStatus = "changes_requested"
+	ApprovalStatusExpired          ApprovalStatus = "expired"
+	ApprovalStatusCanceled         ApprovalStatus = "canceled"
 )
+
+// ApprovalDecision is the reviewer's explicit decision on one immutable
+// proposal revision. Requesting changes closes that proposal and resumes its
+// Run with reviewer guidance; a revised proposal requires a new approval.
+type ApprovalDecision string
+
+const (
+	ApprovalDecisionApprove        ApprovalDecision = "approve"
+	ApprovalDecisionReject         ApprovalDecision = "reject"
+	ApprovalDecisionRequestChanges ApprovalDecision = "request_changes"
+)
+
+func (d ApprovalDecision) Validate() error {
+	switch d {
+	case ApprovalDecisionApprove, ApprovalDecisionReject, ApprovalDecisionRequestChanges:
+		return nil
+	default:
+		return errors.New("approval decision is invalid")
+	}
+}
 
 // ApprovalTimeoutDecision is the reviewed outcome applied when an approval
 // remains pending through its deadline. The zero value is deliberately the
@@ -370,5 +391,5 @@ func validActionCallStatus(status ActionCallStatus) bool {
 
 func validApprovalStatus(status ApprovalStatus) bool {
 	return status == ApprovalStatusPending || status == ApprovalStatusApproved || status == ApprovalStatusRejected ||
-		status == ApprovalStatusExpired || status == ApprovalStatusCanceled
+		status == ApprovalStatusChangesRequested || status == ApprovalStatusExpired || status == ApprovalStatusCanceled
 }

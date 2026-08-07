@@ -51,7 +51,7 @@ const (
 	AgentRequestsCapabilityID                  = "agent-requests"
 	AgentRequestsCapabilityVersion             = "1"
 	ActionApprovalsCapabilityID                = "action-approvals"
-	ActionApprovalsCapabilityVersion           = "1"
+	ActionApprovalsCapabilityVersion           = "2"
 	ActionCallsCapabilityID                    = "action-calls"
 	ActionCallsCapabilityVersion               = "1"
 	AgentTurnsCapabilityID                     = "agent-turns"
@@ -813,7 +813,7 @@ type ReviewAgentRequestCompletionRequest struct {
 type ResolveActionApprovalRequest struct {
 	ExpectedRevision int64                     `json:"expectedRevision"`
 	DecisionID       string                    `json:"decisionId,omitempty"`
-	Approve          bool                      `json:"approve"`
+	Decision         runtime.ApprovalDecision  `json:"decision"`
 	Principal        runtime.ApprovalPrincipal `json:"principal"`
 	Reason           string                    `json:"reason,omitempty"`
 }
