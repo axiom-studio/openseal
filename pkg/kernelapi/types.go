@@ -21,7 +21,7 @@ const (
 	ObjectivesCapabilityID                     = "objectives"
 	ObjectivesCapabilityVersion                = "1"
 	RunbooksCapabilityID                       = "runbooks"
-	RunbooksCapabilityVersion                  = "2"
+	RunbooksCapabilityVersion                  = "3"
 	ProjectsCapabilityID                       = "projects"
 	ProjectsCapabilityVersion                  = "1"
 	SourceMonitorsCapabilityID                 = "source-monitors"

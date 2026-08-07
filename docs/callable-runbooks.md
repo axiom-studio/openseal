@@ -87,6 +87,10 @@ Every action step must reference a Skill and action declared by the owning
 Agent. Runbook interfaces cannot contain credentials or external schema
 references.
 
+Before activation, OpenSeal also verifies the graph against its exact installed
+Skill bindings, opaque credentials, authority, approval routes, and budget
+ceilings. See [Runbook activation verification](runbook-verification.md).
+
 ## Execution and recovery
 
 The hosted turn receives only the callable interfaces, not permission to edit
@@ -102,4 +106,3 @@ the graph. When the Agent selects an entrypoint, the kernel:
 
 The parent and child checkpoints survive process and pod restarts. A normal
 Agent turn with no selected entrypoint stays model-directed.
-
