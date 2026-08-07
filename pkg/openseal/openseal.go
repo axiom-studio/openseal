@@ -2255,6 +2255,7 @@ const (
 	ApprovalStatusRejected         = runtime.ApprovalStatusRejected
 	ApprovalStatusChangesRequested = runtime.ApprovalStatusChangesRequested
 	ApprovalStatusExpired          = runtime.ApprovalStatusExpired
+	ApprovalStatusCanceled         = runtime.ApprovalStatusCanceled
 
 	ApprovalDecisionApprove        = runtime.ApprovalDecisionApprove
 	ApprovalDecisionReject         = runtime.ApprovalDecisionReject
