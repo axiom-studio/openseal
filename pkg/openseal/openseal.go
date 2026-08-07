@@ -739,6 +739,7 @@ type (
 	ActionProposalResult                 = runtime.ActionProposalResult
 	ApprovalCheckpoint                   = runtime.ApprovalCheckpoint
 	ApprovalStatus                       = runtime.ApprovalStatus
+	ApprovalDecision                     = runtime.ApprovalDecision
 	ApprovalPrincipal                    = runtime.ApprovalPrincipal
 	ApprovalFilter                       = runtime.ApprovalFilter
 	ApprovalAuthorizer                   = runtime.ApprovalAuthorizer
@@ -2249,10 +2250,15 @@ const (
 	ActionCallStatusSucceeded       = runtime.ActionCallStatusSucceeded
 	ActionCallStatusFailed          = runtime.ActionCallStatusFailed
 
-	ApprovalStatusPending  = runtime.ApprovalStatusPending
-	ApprovalStatusApproved = runtime.ApprovalStatusApproved
-	ApprovalStatusRejected = runtime.ApprovalStatusRejected
-	ApprovalStatusExpired  = runtime.ApprovalStatusExpired
+	ApprovalStatusPending          = runtime.ApprovalStatusPending
+	ApprovalStatusApproved         = runtime.ApprovalStatusApproved
+	ApprovalStatusRejected         = runtime.ApprovalStatusRejected
+	ApprovalStatusChangesRequested = runtime.ApprovalStatusChangesRequested
+	ApprovalStatusExpired          = runtime.ApprovalStatusExpired
+
+	ApprovalDecisionApprove        = runtime.ApprovalDecisionApprove
+	ApprovalDecisionReject         = runtime.ApprovalDecisionReject
+	ApprovalDecisionRequestChanges = runtime.ApprovalDecisionRequestChanges
 
 	ApprovalTimeoutExpire  = runtime.ApprovalTimeoutExpire
 	ApprovalTimeoutApprove = runtime.ApprovalTimeoutApprove

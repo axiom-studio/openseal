@@ -49,7 +49,7 @@ func TestGovernedProjectCreateUsesApprovalActionAndIdempotencyLifecycle(t *testi
 			}
 			resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
 				Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-				DecisionID: "decision-42", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Plan is bounded",
+				DecisionID: "decision-42", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Plan is bounded",
 			})
 			if err != nil || resolved.Call.Status != ActionCallStatusReady {
 				t.Fatalf("resolve = %#v, %v", resolved, err)
@@ -187,7 +187,7 @@ func TestProjectPauseIsCASAndReplaySafe(t *testing.T) {
 	if proposal.Approval.ProposedAction["changes"].(map[string]interface{})["status"] != string(ProjectStatusPaused) {
 		t.Fatalf("pause preview = %#v", proposal.Approval.ProposedAction)
 	}
-	if _, err = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-pause", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}}); err != nil {
+	if _, err = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-pause", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}}); err != nil {
 		t.Fatal(err)
 	}
 	dispatcher, _ := NewProjectActionDispatcher(store, nil)
@@ -245,7 +245,7 @@ func TestGovernedProjectUpdateComposesMultipleObjectivesAndIsReplaySafe(t *testi
 	if proposal.Approval.ProposedAction["projectId"] != project.ID || proposal.Approval.ProposedAction["expectedRevision"] == nil || proposal.Approval.ProposedAction["current"] == nil {
 		t.Fatalf("update preview = %#v", proposal.Approval.ProposedAction)
 	}
-	if _, err = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-update", Approve: true, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}}); err != nil {
+	if _, err = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-update", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}}); err != nil {
 		t.Fatal(err)
 	}
 	dispatcher, _ := NewProjectActionDispatcher(store, nil)

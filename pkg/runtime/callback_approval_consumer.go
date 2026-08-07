@@ -80,16 +80,13 @@ func (c *ApprovalCallbackConsumer) ConsumeCallbackEvent(
 	if err != nil {
 		return err
 	}
-	if decision == "request_changes" && strings.TrimSpace(reason) == "" {
-		reason = "Changes requested through callback"
-	}
 	coordinator := NewApprovalCoordinator(c.store, c.store, EligibleApprovalAuthorizer{})
 	if c.now != nil {
 		coordinator.now = c.now
 	}
 	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: event.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
-		DecisionID: event.ID, Approve: decision == "approve",
+		DecisionID: event.ID, Decision: ApprovalDecision(decision),
 		Principal: ApprovalPrincipal{Type: principalType, ID: principalID}, Reason: reason,
 		CorrelationID: event.Subject,
 	})

@@ -40,7 +40,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 			approvalCoordinator.newID = func() string { return "approval-event" }
 			result, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-				DecisionID: "decision-1", Approve: true, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change reviewed",
+				DecisionID: "decision-1", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change reviewed",
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -50,14 +50,14 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 			}
 			retry, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-				DecisionID: "decision-1", Approve: true, Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
+				DecisionID: "decision-1", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
 			})
 			if err != nil || retry.Resolved {
 				t.Fatalf("idempotent retry = %#v, %v", retry, err)
 			}
 			_, err = approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: result.Approval.Revision,
-				DecisionID: "decision-2", Approve: false, Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
+				DecisionID: "decision-2", Decision: ApprovalDecisionReject, Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
 			})
 			if !errors.Is(err, ErrApprovalResolved) {
 				t.Fatalf("second decision error = %v", err)
@@ -88,7 +88,7 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	coordinator.now = func() time.Time { return now.Add(2 * time.Second) }
 	_, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-		DecisionID: "unauthorized", Approve: true, Principal: ApprovalPrincipal{Type: "user", ID: "mallory"},
+		DecisionID: "unauthorized", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "mallory"},
 	})
 	if err == nil || !strings.Contains(err.Error(), "RBAC denied") {
 		t.Fatalf("authorization error = %v", err)
@@ -100,7 +100,7 @@ func TestApprovalCoordinatorFailsClosedAndPersistsExpiry(t *testing.T) {
 	coordinator.now = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
 	expired, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-		DecisionID: "expiry", Approve: true, Principal: ApprovalPrincipal{Type: "system", ID: "expiry-worker"},
+		DecisionID: "expiry", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "system", ID: "expiry-worker"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +209,7 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 			coordinator.now = func() time.Time { return now.Add(2 * time.Second) }
 			result, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
 				Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-				DecisionID: "reject-release", Approve: false, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change is not authorized",
+				DecisionID: "reject-release", Decision: ApprovalDecisionReject, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "change is not authorized",
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -223,6 +223,53 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 				t.Fatalf("rejection checkpoint = %#v", result.Run.Checkpoint)
 			}
 		})
+	}
+}
+
+func TestApprovalCoordinatorResumesRunWithReviewerGuidance(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 8, 7, 9, 0, 0, 0, time.UTC)
+	proposal := createApprovalForStore(t, store, now)
+	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
+	coordinator.now = func() time.Time { return now.Add(time.Second) }
+
+	_, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
+		ExpectedRevision: proposal.Approval.Revision, DecisionID: "missing-guidance",
+		Decision: ApprovalDecisionRequestChanges, Principal: ApprovalPrincipal{Type: "user", ID: "alice"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "reviewer guidance is required") {
+		t.Fatalf("missing guidance error = %v", err)
+	}
+
+	const guidance = "Keep the draft, but use r/vibecoding instead."
+	result, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
+		ExpectedRevision: proposal.Approval.Revision, DecisionID: "request-revision",
+		Decision: ApprovalDecisionRequestChanges, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: guidance,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Approval.Status != ApprovalStatusChangesRequested || result.Approval.DecisionReason != guidance ||
+		result.Call.Status != ActionCallStatusDenied || result.Run.Status != AgentRunStatusQueued || result.Run.WakeCondition != nil {
+		t.Fatalf("change request result = %#v", result)
+	}
+	last, _ := result.Run.Checkpoint["lastAction"].(map[string]interface{})
+	if fmt.Sprint(last["reviewerGuidance"]) != guidance || fmt.Sprint(last["approvalStatus"]) != string(ApprovalStatusChangesRequested) ||
+		fmt.Sprint(last["reviewedProposalRevision"]) != "1" {
+		t.Fatalf("change request checkpoint = %#v", result.Run.Checkpoint)
+	}
+	if result.Event == nil || result.Event.EventType != "approval.changes_requested" || fmt.Sprint(result.Event.Payload["decisionReason"]) != guidance {
+		t.Fatalf("change request activity = %#v", result.Event)
+	}
+	replay, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{
+		Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID,
+		ExpectedRevision: proposal.Approval.Revision, DecisionID: "request-revision",
+		Decision: ApprovalDecisionRequestChanges, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: guidance,
+	})
+	if err != nil || replay.Resolved {
+		t.Fatalf("change request replay = %#v, %v", replay, err)
 	}
 }
 

@@ -228,7 +228,7 @@ func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testin
 	store, engine = openResearchAcceptanceEngine(t, databasePath, scope, resolver, dispatcher)
 	resolution, err := engine.ResolveApproval(ctx, ResolveApprovalRequest{
 		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-		DecisionID: "operator-approved-delivery", Approve: true,
+		DecisionID: "operator-approved-delivery", Decision: ApprovalDecisionApprove,
 		Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Evidence and recipients reviewed",
 	})
 	if err != nil || resolution.Call.Status != ActionCallStatusReady {
