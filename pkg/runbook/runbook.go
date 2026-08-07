@@ -525,9 +525,11 @@ func (Predicate) ContractObjectVariants() []domaincontract.ObjectVariant {
 }
 
 type Diagnostic struct {
-	Path    string `json:"path"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Path         string             `json:"path"`
+	Code         string             `json:"code"`
+	Message      string             `json:"message"`
+	Severity     DiagnosticSeverity `json:"severity,omitempty"`
+	RelatedPaths []string           `json:"relatedPaths,omitempty"`
 }
 
 // ValidationError preserves typed Runbook diagnostics across package
