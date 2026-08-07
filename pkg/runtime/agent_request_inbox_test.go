@@ -660,6 +660,9 @@ func TestAgentRequestInboxAutonomouslyReviewsTeamDelegationCompletion(t *testing
 	if err != nil || completed.Request.Status != AgentRequestStatusCompletionReview {
 		t.Fatalf("completion submission = %#v, %v", completed, err)
 	}
+	if completed.Source == nil || completed.Source.Status != AgentRunStatusWaitingForDependency || completed.Source.WakeCondition == nil || completed.Source.WakeCondition.Reference != created.Request.ID {
+		t.Fatalf("source did not remain waiting for completion review: %#v", completed.Source)
+	}
 	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 		if run.Source != RunSourceCompletionReview {
 			return nil, fmt.Errorf("unexpected claimed run source %s", run.Source)
@@ -698,7 +701,7 @@ func TestAgentRequestInboxAutonomouslyReviewsTeamDelegationCompletion(t *testing
 				t.Fatalf("completion reviewer = %#v worker=%s", current.CompletionReviewer, current.AssignedAgentID)
 			}
 			resumed, getRunErr := store.GetAgentRun(t.Context(), scope, source.ID)
-			if getRunErr != nil || (resumed.Status != AgentRunStatusQueued && resumed.Status != AgentRunStatusCompleted) || resumed.WakeCondition != nil {
+			if getRunErr != nil || resumed.Status != AgentRunStatusCompleted || resumed.CompletedAt == nil || resumed.WakeCondition != nil {
 				t.Fatalf("resumed source = %#v, %v", resumed, getRunErr)
 			}
 			return

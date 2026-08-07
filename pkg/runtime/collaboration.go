@@ -2128,7 +2128,8 @@ func acceptedSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (
 	updated.UpdatedAt = now
 	updated.LeaseOwner = ""
 	updated.LeaseExpiresAt = nil
-	if request.Kind == AgentRequestKindHandoff {
+	requiresCompletionReview := request.DelegationPolicy != nil && request.DelegationPolicy.RequireCompletionReview
+	if request.Kind == AgentRequestKindHandoff && !requiresCompletionReview {
 		updated.Status = AgentRunStatusCompleted
 		updated.WakeCondition = nil
 		updated.Output = map[string]interface{}{"handoffRequestId": request.ID, "childRunId": request.ChildRunID}
@@ -2156,18 +2157,20 @@ func completedCollaborationChildRun(child *AgentRun, request *AgentRequest, now 
 
 func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, childOutput map[string]interface{}, now time.Time) (*AgentRun, error) {
 	updated := cloneAgentRun(source)
-	if request.Kind != AgentRequestKindHandoff {
-		if updated.Status != AgentRunStatusWaitingForDependency || updated.WakeCondition == nil ||
-			updated.WakeCondition.Type != "agent_request" || updated.WakeCondition.Reference != request.ID {
-			return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
-		}
-		updated.Status = AgentRunStatusQueued
-		updated.AvailableAt = now
-		updated.QueueEnteredAt = now
+	if updated.Status == AgentRunStatusWaitingForDependency && updated.WakeCondition != nil &&
+		updated.WakeCondition.Type == "agent_request" && updated.WakeCondition.Reference == request.ID {
 		updated.WakeCondition = nil
 		updated.LastWakeSignalID = "agent_request:" + request.ID + ":" + fmt.Sprint(request.Revision)
+		if request.Kind == AgentRequestKindHandoff {
+			updated.Status = AgentRunStatusCompleted
+			updated.CompletedAt = &now
+		} else {
+			updated.Status = AgentRunStatusQueued
+			updated.AvailableAt = now
+			updated.QueueEnteredAt = now
+		}
 	} else if updated.Status != AgentRunStatusCompleted {
-		return nil, fmt.Errorf("%w: handoff source run is not completed", ErrInvalidAgentRequestState)
+		return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
 	}
 	updated.Revision++
 	updated.UpdatedAt = now
@@ -2179,18 +2182,15 @@ func completedCollaborationSourceRun(source *AgentRun, request *AgentRequest, ch
 
 func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now time.Time) (*AgentRun, error) {
 	updated := cloneAgentRun(source)
-	if request.Kind != AgentRequestKindHandoff {
-		if updated.Status != AgentRunStatusWaitingForDependency || updated.WakeCondition == nil ||
-			updated.WakeCondition.Type != "agent_request" || updated.WakeCondition.Reference != request.ID {
-			return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
-		}
+	if updated.Status == AgentRunStatusWaitingForDependency && updated.WakeCondition != nil &&
+		updated.WakeCondition.Type == "agent_request" && updated.WakeCondition.Reference == request.ID {
 		updated.Status = AgentRunStatusQueued
 		updated.AvailableAt = now
 		updated.QueueEnteredAt = now
 		updated.WakeCondition = nil
 		updated.LastWakeSignalID = "agent_request:" + request.ID + ":" + fmt.Sprint(request.Revision)
 	} else if updated.Status != AgentRunStatusCompleted {
-		return nil, fmt.Errorf("%w: handoff source run is not completed", ErrInvalidAgentRequestState)
+		return nil, fmt.Errorf("%w: source run is not waiting on request %s", ErrInvalidAgentRequestState, request.ID)
 	}
 	updated.Revision++
 	updated.UpdatedAt = now
