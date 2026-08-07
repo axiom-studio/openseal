@@ -1706,6 +1706,19 @@ func (m *Model) renderObjectiveRunbooks(objectiveID string, width int) []string 
 		if definition.Description != "" {
 			lines = append(lines, mutedStyle.Render(compact(definition.Description, max(width-8, 24))))
 		}
+		if report := m.runbookDetail.Verification; report != nil {
+			if report.Valid {
+				lines = append(lines, lipgloss.NewStyle().Foreground(success).Render("  Verified for activation · exact Skills, authority, credentials, and budgets"))
+			} else {
+				lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(fmt.Sprintf("  Activation blocked · %d verification issue(s)", len(report.Diagnostics))))
+				for _, diagnostic := range report.Diagnostics[:min(3, len(report.Diagnostics))] {
+					lines = append(lines, mutedStyle.Render(compact("    "+diagnostic.Path+" · "+diagnostic.Message, max(width-12, 20))))
+				}
+				if len(report.Diagnostics) > 3 {
+					lines = append(lines, mutedStyle.Render(fmt.Sprintf("    +%d more verification issues", len(report.Diagnostics)-3)))
+				}
+			}
+		}
 		stepIDs := orderedRunbookStepIDs(definition, m.runbookDetail.Activation.Trigger.Entrypoint)
 		for index, id := range stepIDs[:min(6, len(stepIDs))] {
 			step := definition.Steps[id]
