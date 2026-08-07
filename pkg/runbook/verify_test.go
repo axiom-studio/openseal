@@ -137,6 +137,11 @@ func TestVerifyMutationsFailClosedWithStableDiagnostics(t *testing.T) {
 		{name: "missing approval route", code: "action.approval_unreachable", mutate: func(_ *Definition, environment *VerificationEnvironment) {
 			environment.Actions[1].ApprovalRoutePresent = false
 		}},
+		{name: "destructive action without compensation", code: "action.compensation_required", mutate: func(_ *Definition, environment *VerificationEnvironment) {
+			environment.Actions[1].MaximumRisk = capability.RiskLevelDestructive
+			environment.Actions[1].Risk = capability.RiskLevelDestructive
+			environment.Actions[1].SideEffect = capability.SideEffectDestructive
+		}},
 		{name: "impossible action budget", code: "budget.actions_impossible", mutate: func(definition *Definition, _ *VerificationEnvironment) {
 			trigger := definition.Triggers["hourly"]
 			trigger.Budget.MaxActions = 1

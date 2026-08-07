@@ -31,12 +31,13 @@ Activation-blocking errors cover:
 - missing opaque credential bindings;
 - mutating actions without idempotency support;
 - required approvals without a reachable reviewed route;
+- destructive actions without a declared compensation action;
 - trigger budgets too small for a complete path;
 - child allocations above their parent ceiling; and
 - aggregate `join: all` branch allocations above their trigger ceiling.
 
-Destructive actions without a declared compensation action produce a warning.
-Warnings remain visible but do not make the report invalid.
+Warnings remain visible but do not make the report invalid. Safety and
+recoverability findings are errors and always block activation.
 
 ## Lifecycle enforcement
 
@@ -72,4 +73,3 @@ if !report.Valid {
 Hosts should build the environment from one immutable catalog snapshot. Never
 infer action identity from names, silently choose between multiple bindings,
 or include credential values in the environment or diagnostics.
-
