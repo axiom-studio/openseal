@@ -32,7 +32,7 @@ type validator struct {
 }
 
 func (v *validator) add(path, code, format string, args ...interface{}) {
-	v.diagnostics = append(v.diagnostics, Diagnostic{Path: path, Code: code, Message: fmt.Sprintf(format, args...)})
+	v.diagnostics = append(v.diagnostics, Diagnostic{Path: path, Code: code, Message: fmt.Sprintf(format, args...), Severity: DiagnosticError})
 }
 
 func (v *validator) validate() {
