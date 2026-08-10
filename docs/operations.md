@@ -27,13 +27,27 @@ external events are configured through Objective-owned Runbook triggers and
 event-source subscriptions. Removed `workflowsDir`, `triggers`, and `webhook` daemon keys are
 rejected instead of being silently ignored.
 
-## Model-backed authoring
+## Standalone context, local Vault, and model-backed authoring
 
-The standalone daemon has no process-global model-provider configuration. A
-host that exposes model-backed authoring supplies an explicit compiler and
-provider binding at its trusted boundary. Provider credentials and routing are
-host transport configuration; do not put them in Skills, prompts, ChangeSets,
-activity, or checked-in YAML.
+`openseal daemon --context ./context.yaml` loads the optional standalone
+context. It is the local counterpart to a host-managed Vault and model grants:
+the file contains provider routing plus opaque `kind/id` references, while each
+reference resolves from an environment variable or an owner-only file. Inline
+secret values and unknown fields are rejected. File sources must be regular and
+mode `0600` or stricter.
+
+The context may configure one OpenAI-compatible authoring provider. Its API key
+is resolved through the same opaque reference boundary used by governed Skill
+actions. The daemon advertises only secret-free credential choices to Composer.
+Values never enter Skills, prompts, ChangeSets, SQLite, activity, logs, or API
+responses. See [Standalone context and local Vault](standalone-context.md) and
+`context.example.yaml`.
+
+The legacy `OPENSEAL_LLM_BASE_URL`, `OPENSEAL_LLM_MODEL`, and `OPENAI_API_KEY`
+environment trio remains supported when no `authoring` context is present, but
+the context file is the documented standalone configuration path. Embedded and
+multi-user hosts should use Vault/KMS-backed credential resolvers or signed
+credential leases instead of the local context.
 
 ## Persistence and recovery
 

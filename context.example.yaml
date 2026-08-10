@@ -1,0 +1,30 @@
+# OpenSeal standalone context: local Vault references and model routing.
+# Copy to context.yaml. Never put a secret value in this file.
+apiVersion: openseal.dev/v1alpha1
+kind: StandaloneContext
+
+authoring:
+  baseURL: https://api.openai.com/v1
+  model: gpt-5.4
+  credential:
+    kind: api-key
+    id: authoring-model
+
+credentials:
+  - scope:
+      kind: local
+      id: default
+    kind: api-key
+    id: authoring-model
+    displayName: Authoring model
+    bindingKeys: [MODEL_PROVIDER]
+    env: OPENAI_API_KEY
+
+  # Files are resolved relative to this context file and must be mode 0600
+  # or stricter. The file contains only the secret value.
+  # - scope: {kind: local, id: default}
+  #   kind: provider-token
+  #   id: research-forum
+  #   displayName: Research forum account
+  #   bindingKeys: [FORUM_TOKEN]
+  #   file: .secrets/research-forum-token

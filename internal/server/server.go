@@ -10,6 +10,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/source"
@@ -27,6 +28,7 @@ type Server struct {
 	authoringRuns        *runtime.WorkforceAuthoringRunService
 	authoringWorker      *runtime.WorkforceAuthoringWorker
 	authoringSkillSearch authoring.SkillSearchProvider
+	authoringCredentials []capability.CredentialBindingChoice
 	authoringScope       runtime.Scope
 	authoringMu          sync.Mutex
 	workforceAuthority   WorkforceLifecycleAuthorizer
@@ -42,6 +44,17 @@ type Server struct {
 	workforceBundles     kernelbundle.InstallationStore
 	workforceBundleActor string
 	workforceBundleTrust kernelbundle.TrustPolicy
+}
+
+// SetWorkforceCredentialBindings supplies the secret-free local or host Vault
+// choices that Composer may place into a reviewed workforce. Values never
+// cross this API; workers resolve only the selected opaque reference.
+func (s *Server) SetWorkforceCredentialBindings(choices []capability.CredentialBindingChoice) {
+	s.authoringCredentials = make([]capability.CredentialBindingChoice, len(choices))
+	for index := range choices {
+		s.authoringCredentials[index] = choices[index]
+		s.authoringCredentials[index].BindingKeys = append([]string(nil), choices[index].BindingKeys...)
+	}
 }
 
 // SetWorkforceSkillSearchProvider enables verified, paginated Skill discovery

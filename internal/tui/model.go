@@ -96,7 +96,8 @@ const (
 type panelSection int
 
 const (
-	sectionAuthoring panelSection = iota
+	sectionOverview panelSection = iota
+	sectionAuthoring
 	sectionBundles
 	sectionReadiness
 	sectionTeams
@@ -194,6 +195,7 @@ type Model struct {
 	loading                            bool
 	busy                               bool
 	ready                              bool
+	showHelp                           bool
 	unavailable                        string
 	err                                error
 	status                             string
@@ -720,7 +722,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	editor.Focus()
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
-		focus: focusComposer, section: sectionAuthoring, mode: modeWorkforceAuthoring, width: 100, height: 30,
+		focus: focusComposer, section: sectionOverview, mode: modeWorkforceAuthoring, width: 100, height: 30,
 		agentLifecycleClient:       agentLifecycleClient(kernelClient),
 		agentCapabilityClient:      agentCapabilityClient(kernelClient),
 		conversationClient:         conversationClient(kernelClient),
@@ -901,6 +903,12 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = nil
 		if m.authoringCapability.Available {
 			m.section = sectionAuthoring
+			// A full standalone workspace starts on the guided Home page.
+			// Narrow embedded clients still open directly on their one useful
+			// capability, preserving focused and backwards-compatible behavior.
+			if len(m.availableSections()) >= 7 {
+				m.section = sectionOverview
+			}
 			m.mode = modeWorkforceAuthoring
 			if m.authoringResult != nil {
 				m.editor.Placeholder = "Describe what should change…"
@@ -958,6 +966,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.teamDefinitionCapability.Available {
 			m.section = sectionTeams
 			m.focusPanelList()
+		}
+		if m.authoringChangeSet == nil && len(m.availableSections()) >= 7 {
+			m.section = sectionOverview
+			m.focusPanelList()
+			m.resetComposerMode()
 		}
 		m.activateReadyRefinement()
 		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadProjects(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
@@ -1854,9 +1867,22 @@ func (m *Model) View() string {
 
 func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	if m.showHelp {
+		switch key {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "?", "esc", "enter":
+			m.showHelp = false
+			return m, nil
+		}
+		return m, nil
+	}
 	switch key {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "?":
+		m.showHelp = true
+		return m, nil
 	case "tab", "ctrl+i":
 		if m.focus == focusComposer {
 			m.focusPanelList()
@@ -1985,9 +2011,27 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitRun()
 			}
 		}
+	case "enter":
+		if m.focus == focusComposer {
+			switch m.mode {
+			case modeWorkforceAuthoring:
+				return m, m.submitWorkforceAuthoring()
+			case modeChannelPost:
+				return m, m.submitChannelMessage()
+			}
+		}
 	}
 
 	if m.focus == focusPanel {
+		if key == "enter" && m.section == sectionOverview {
+			if m.authoringCapability.Available {
+				m.section = sectionAuthoring
+				m.mode = modeWorkforceAuthoring
+				m.editor.Placeholder = "Describe what you want your workforce to accomplish…"
+				m.focusComposerEditor()
+			}
+			return m, nil
+		}
 		switch key {
 		case "up", "k":
 			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
@@ -2036,13 +2080,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadSelectedRunHistory()
 			}
 		case "left":
-			if m.section == sectionObjectives {
-				m.moveRunbookSelection(-1)
-			}
+			m.moveSection(-1)
+			m.resetComposerMode()
+			return m, m.loadPanel()
 		case "right":
-			if m.section == sectionObjectives {
-				m.moveRunbookSelection(1)
-			}
+			m.moveSection(1)
+			m.resetComposerMode()
+			return m, m.loadPanel()
 		case "w":
 			if m.runCapability.Available {
 				m.section = sectionRuns
@@ -2320,7 +2364,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			} else if m.section == sectionTeams && m.canResolveSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentApprove, "Record why this exact Team amendment is approved…")
 			}
-		case "?":
+		case "q":
 			if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionRequestClarification) {
 				m.prepareRequestComposer(modeRequestClarify, "Ask the requester for the missing information…")
 			}
@@ -4800,6 +4844,55 @@ func (m *Model) defaultOperationalSection() panelSection {
 	return sectionActivity
 }
 
+// availableSections is the single navigation model for rendering and keyboard
+// movement. Overview is always present; every other destination follows the
+// server's capability document, preserving the host authority boundary.
+func (m *Model) availableSections() []panelSection {
+	sections := []panelSection{sectionOverview}
+	for _, candidate := range []struct {
+		section   panelSection
+		available bool
+	}{
+		{sectionAuthoring, m.authoringCapability.Available},
+		{sectionReadiness, m.agentDefinitionCapability.Available},
+		{sectionTeams, m.teamDefinitionCapability.Available},
+		{sectionSkills, m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available},
+		{sectionRuns, m.runCapability.Available},
+		{sectionChannels, m.channelCapability.Available},
+		{sectionObjectives, m.objectiveCapability.Available},
+		{sectionProjects, m.projectCapability.Available},
+		{sectionRequests, m.requestCapability.Available},
+		{sectionApprovals, m.approvalCapability.Available},
+		{sectionSources, m.eventSourceCapability.Available},
+		{sectionIntegrations, m.conversationGatewayCapability.Available},
+		{sectionOutreach, m.outreachCapability.Available},
+		{sectionActivity, m.activityCapability.Available},
+		{sectionArtifacts, m.artifactCapability.Available},
+		{sectionBundles, m.workforceBundleCapability.Available},
+	} {
+		if candidate.available {
+			sections = append(sections, candidate.section)
+		}
+	}
+	return sections
+}
+
+func (m *Model) moveSection(delta int) {
+	sections := m.availableSections()
+	if len(sections) == 0 {
+		return
+	}
+	current := 0
+	for index, section := range sections {
+		if section == m.section {
+			current = index
+			break
+		}
+	}
+	m.section = sections[(current+delta+len(sections))%len(sections)]
+	m.resetEvidenceInspection()
+}
+
 func (m *Model) supportsAgentRequest(operation string) bool {
 	return m.ready && m.requestCapability.Supports(operation)
 }
@@ -6732,6 +6825,11 @@ func (m *Model) prepareSourcePolicyComposer(mode editorMode, template string) {
 
 func (m *Model) prepareComposerForSection() {
 	switch {
+	case m.section == sectionOverview && m.supportsWorkforceAuthoring():
+		m.section = sectionAuthoring
+		m.mode = modeWorkforceAuthoring
+		m.editor.Placeholder = "Describe what you want your workforce to accomplish…"
+		m.focusComposerEditor()
 	case m.section == sectionBundles && m.workforceBundleCapability.Supports(kernelapi.OperationInspect):
 		m.mode = modeWorkforceBundleInspect
 		m.editor.Placeholder = "Path to a signed workforce bundle…"
@@ -6803,6 +6901,16 @@ func (m *Model) prepareComposerForSection() {
 }
 
 func (m *Model) resetComposerMode() {
+	if m.section == sectionOverview {
+		if m.supportsWorkforceAuthoring() {
+			m.mode = modeWorkforceAuthoring
+			m.editor.Placeholder = "Describe what you want your workforce to accomplish…"
+		} else {
+			m.mode = modeCreate
+			m.editor.Placeholder = "Choose a destination to get started."
+		}
+		return
+	}
 	if m.section == sectionBundles {
 		m.mode = modeWorkforceBundleInspect
 		m.editor.Placeholder = "Path to a signed workforce bundle…"

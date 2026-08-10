@@ -67,6 +67,25 @@ Depending on the connected server, the workspace can expose:
 - **Outreach** — evidence-linked drafts and governed delivery Runs
 - **Activity / Evidence** — canonical audit projection and artifact downloads
 
+## Guided first-use experience
+
+A full standalone daemon opens on **Home** instead of presenting every kernel
+primitive at once. Home answers four questions: what exists, what is active, what needs
+attention, and what to do next. The primary destinations are Create, Agents,
+Teams, Marketplace, Work, and Channels. Goals, Projects, Inbox, Approvals,
+Sources, Integrations, Activity, Evidence, and imports remain available under a
+secondary **More** row.
+
+Use `←` and `→` to move between available pages. Press `?` anywhere for an
+in-product explanation of navigation and actions. Empty states name one next
+step instead of showing an unexplained blank list. Create starts with plain
+language and includes example outcomes; details, revisions, digests, and policy
+history remain in the inspection panel until they are needed for a decision.
+
+The Create and channel composers use chat-style behavior: `Enter` submits
+and `Shift+Enter` inserts a line break. Structured review forms continue to use
+`Ctrl+S`, which avoids accidentally submitting multiline YAML or JSON.
+
 Workforce authoring persists a reviewable ChangeSet. The TUI displays the
 server-provided lifecycle, actor, reason, policy decisions, approval
 eligibility, exact candidate digest, receipt, and created resource references.
@@ -96,18 +115,18 @@ Section shortcuts work while the list panel is focused:
 
 | Key | Section |
 | --- | --- |
-| `f` | Workforce authoring |
-| `B` | Portable workforce bundles |
-| `h` | Agent readiness |
+| `f` | Create (workforce authoring) |
+| `B` | Imports (portable workforce bundles) |
+| `h` | Agents (readiness) |
 | `T` | Teams |
-| `o` | Objectives |
+| `o` | Goals (objectives) |
 | `S` | Event sources |
 | `i` | Projects |
 | `O` | Outreach |
 | `I` | Conversation integrations |
-| `s` | Skills |
+| `s` | Marketplace (Skills) |
 | `w` | Work / Runs |
-| `R` | Agent requests |
+| `R` | Inbox (Agent requests) |
 | `A` | Action approvals |
 | `t` | Activity |
 | `c` | Channels |
@@ -118,6 +137,8 @@ Common controls:
 | Key | Result |
 | --- | --- |
 | `Tab` | Move between composer and current list |
+| `←` / `→` | Move to the previous or next available page |
+| `?` | Open or close contextual help |
 | `Ctrl+S` | Submit the current composer operation |
 | `↑` / `↓` or `k` / `j` | Select an item or current requirement |
 | `n` | Begin a supported creation or install operation; in Readiness, start the selected active runbook operation |
@@ -126,7 +147,7 @@ Common controls:
 | `p` | Pause/resume selected Run, Agent, Team, Project, or event source; pin/unpin a Skill |
 | `g` | Guide a selected active Run; in Objectives, reconcile due schedules |
 | `y` / `x` | Approve/accept or reject the selected eligible governed item |
-| `?` / `M` | Request or provide clarification for an Agent request |
+| `q` / `M` | Request or provide clarification for an Agent request |
 | `e` / `Enter` | Apply, edit, evaluate, complete, or expand according to current section |
 | `[` / `]` | Move among relevant credential, configuration, amendment, Skill, or evidence choices |
 | `{` / `}` | Move among outreach actions or grounding pages |
@@ -142,8 +163,8 @@ Common controls:
 | `Ctrl+C` | Exit without stopping server work |
 
 The footer shows only actions meaningful for the current selection and
-advertised capability. `Ctrl+S` is the consistent commit key for text entered
-in the composer.
+advertised capability. Chat-style Create and channel composers submit with
+`Enter`; structured forms commit with `Ctrl+S`.
 
 ## Safety and retry behavior
 

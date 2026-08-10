@@ -31,6 +31,7 @@ dist/
 
 # Local config
 daemon.yaml
+context.yaml
 workflow.hcl
 bad_workflow.hcl
 

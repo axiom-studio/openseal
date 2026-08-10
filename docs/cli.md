@@ -60,6 +60,7 @@ See [Terminal UI](tui.md) for interactions.
 openseal daemon [options]
 
 --config <path>       daemon YAML (default daemon.yaml)
+--context <path>      local Vault/provider context (default context.yaml)
 --scope <kind:id>     standalone authoring scope (default local:default)
 --standalone-operator enable governed generation retry on a loopback API
 --help
@@ -68,6 +69,9 @@ openseal daemon [options]
 If the configuration path does not exist, OpenSeal writes the default
 configuration before starting. `--standalone-operator` is rejected unless the
 configured API address is loopback.
+The context file is optional; when present, it maps opaque credential
+references to environment variables or private files and can configure the
+standalone authoring model. See [Standalone context](standalone-context.md).
 
 ## `openseal validate`
 
