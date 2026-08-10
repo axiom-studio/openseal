@@ -38,7 +38,7 @@ Pass a path that does not yet exist to create a default local configuration:
 ./openseal daemon --config ./local.yaml
 ```
 
-The generated file listens on `:8080`, stores kernel state in
+The generated file listens on `127.0.0.1:8080`, stores kernel state in
 `data/openseal.db`, and stores artifact bytes in `data/artifacts`. Relative
 paths are resolved from the configuration file's directory.
 
@@ -53,9 +53,8 @@ The first response is `{"status":"ok"}`. The second response is authoritative:
 it lists the capability versions and operations available in this particular
 daemon. An operation omitted from that document is not available.
 
-> The repository's checked-in `daemon.yaml` uses port `18080`. Either use the
-> generated `local.yaml` above or pass `--endpoint http://127.0.0.1:18080` to
-> clients when using the checked-in file.
+> The repository's checked-in `daemon.yaml` and a generated `local.yaml` both
+> use `127.0.0.1:8080` unless you explicitly change `api.listenAddr`.
 
 ## Open the terminal workspace
 
@@ -80,27 +79,39 @@ Exiting the TUI leaves the daemon and its durable work running. See the
 
 ## Prompt-first workforce authoring
 
-The standalone daemon does not read model endpoints, model names, or provider
-credentials from process-global environment variables. An embedding host that
-offers model-backed workforce authoring must bind an explicit authoring
-compiler at its trusted boundary and keep provider credentials outside prompts,
-Skill definitions, ChangeSets, activity, and checked-in configuration.
+Standalone authoring uses a local context file so provider routing and opaque
+credential references remain separate from durable kernel configuration. Copy
+the safe template and supply the referenced environment variable:
+
+```bash
+cp context.example.yaml context.yaml
+export OPENAI_API_KEY='...'
+```
+
+The YAML contains `baseURL`, `model`, and the opaque reference
+`api-key/authoring-model`; it does not contain the API key. Environment and
+owner-only file sources are resolved only when needed. See
+[Standalone context and local Vault](standalone-context.md).
 
 Start the local operator surface with an explicitly loopback listener:
 
 ```bash
 # Set api.listenAddr to 127.0.0.1:8080 in local.yaml first.
-./openseal daemon --config ./local.yaml --standalone-operator
+./openseal daemon \
+  --config ./local.yaml \
+  --context ./context.yaml \
+  --standalone-operator
 ```
 
-`--standalone-operator` enables local refinement answers and generation retry
+`--standalone-operator` enables trusted local ClawHub mutations, refinement
+answers, and generation retry
 only when the API listen address is explicitly loopback, such as
 `127.0.0.1:8080`. The default `:8080` wildcard is intentionally rejected. This
-mode also enables trusted local ClawHub mutations; it is not an authentication
-system. Evaluation, approval, credential placement, and Apply still require an
-embedding host with explicit lifecycle authority. Networked and multi-user
-deployments must supply identity and authorization adapters through that
-boundary.
+mode is not an authentication system. Credential placement exposes only the
+context's secret-free display names and opaque references. Evaluation,
+approval, and Apply still require an embedding host with explicit lifecycle
+authority. Networked and multi-user deployments must supply identity,
+authorization, and Vault/KMS-backed resolution through that boundary.
 
 Authoring is a review process:
 

@@ -29,7 +29,9 @@ cd openseal
 make build
 
 # A missing config is created with API port 8080 and durable SQLite paths.
-./openseal daemon --config ./local.yaml
+cp context.example.yaml context.yaml
+export OPENAI_API_KEY='...'
+./openseal daemon --config ./local.yaml --context ./context.yaml --standalone-operator
 ```
 
 In another terminal:
@@ -43,8 +45,19 @@ closing it does not stop work. The generated configuration stores kernel state
 in `data/openseal.db` and artifact content in `data/artifacts`, relative to the
 configuration file.
 
-The checked-in `daemon.yaml` intentionally uses API port `18080`. When using
-that file, connect with `./openseal tui --endpoint http://127.0.0.1:18080`.
+The TUI uses an outcome-first Agent workspace: **Home** makes the next action
+obvious; **Create**, **Agents**, **Teams**, **Marketplace**, **Work**, and
+**Channels** are the primary destinations; and `?` opens help from anywhere.
+Use the left/right arrows to change pages. Workforce and channel composers use
+Enter to submit and Shift+Enter for a new line.
+
+`context.yaml` is standalone OpenSeal's local Vault alternative. It maps opaque
+credential references to environment variables or owner-only files; secret
+values never enter prompts, durable state, capability responses, or the TUI.
+See [Standalone context and local Vault](docs/standalone-context.md).
+
+The checked-in `daemon.yaml` and generated local configuration both use the
+loopback API at `http://127.0.0.1:8080`.
 
 Docker Compose is also supported:
 
@@ -54,6 +67,24 @@ make docker-logs
 # API: http://localhost:8080/api/v1
 make docker-down
 ```
+
+## Standalone deployment boundaries
+
+Standalone OpenSeal provides the complete portable workspace while keeping
+host-managed infrastructure outside the local process:
+
+| Capability | Standalone OpenSeal | Embedding host |
+| --- | --- | --- |
+| Agents, Teams, Work, Channels, evidence | Native kernel and capability API | Same portable contracts with hosted adapters |
+| Composer and governed review | Local model provider through `context.yaml` | Host-managed model grants and lifecycle authority |
+| Skills marketplace | ClawHub discovery, verification, install, update, and bindings | Host marketplace policy and organization catalogs |
+| Credentials | Scope-isolated env/private-file references | Vault/KMS-backed grants, leases, identity, and rotation |
+| Multi-user policy and approvals | Not emulated by the local context | Host identity, authorization, policy evaluation, and audit |
+
+The TUI renders only operations advertised by the connected server. This keeps
+the standalone experience complete for its configured local authority without
+silently manufacturing identity or policy decisions owned by an embedding
+host.
 
 ## What is implemented
 
@@ -95,6 +126,8 @@ fixed surface.
 - [Architecture](docs/architecture/autonomous-agent-runtime.md) — implemented
   layers, execution lifecycle, and extension boundaries
 - [Terminal UI](docs/tui.md) — workspace configuration and keyboard model
+- [Standalone context and local Vault](docs/standalone-context.md) — local
+  model routing and execution-time secret resolution without durable values
 - [CLI reference](docs/cli.md) — every implemented command and option
 - [REST API](docs/api.md) — capability discovery, conventions, and route groups
 - [Operations](docs/operations.md) — persistence, model setup, recovery, and

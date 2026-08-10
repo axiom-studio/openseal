@@ -39,6 +39,7 @@ web/dist/
 /.env.*
 !/.env.example
 /daemon.yaml
+/context.yaml
 /workflow.hcl
 /data/*.db
 /data/*.db-*

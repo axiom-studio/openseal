@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -243,6 +244,12 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		})
 		if s.authoringChanges != nil {
 			s.composeWorkforceLifecycleCapability(r, &workforceCapability)
+		}
+		if len(s.authoringCredentials) > 0 {
+			if workforceCapability.Context == nil {
+				workforceCapability.Context = &kernelapi.CapabilityContext{}
+			}
+			workforceCapability.Context.CredentialBindings = append([]capability.CredentialBindingChoice(nil), s.authoringCredentials...)
 		}
 		capabilities = append(capabilities, workforceCapability)
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -27,6 +28,7 @@ import (
 func daemonCmd(args []string) {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	configPath := fs.String("config", "daemon.yaml", "path to daemon config file")
+	contextPath := fs.String("context", "context.yaml", "path to optional standalone Vault and provider context")
 	authoringScope := fs.String("scope", "local:default", "standalone authoring scope as kind:id")
 	standaloneOperator := fs.Bool("standalone-operator", false, "allow the loopback TUI to retry failed generation as local-operator")
 	help := fs.Bool("help", false, "print help for daemon")
@@ -39,6 +41,7 @@ Start the durable OpenSeal agent kernel and versioned API.
 
 Options:
   --config <path>   Path to daemon config file (default: daemon.yaml)
+  --context <path>  Optional local Vault/provider context (default: context.yaml)
   --scope <kind:id> Durable standalone authoring scope (default: local:default)
   --standalone-operator Allow governed generation retry when API binds to loopback
   --help            Print this help message`)
@@ -86,6 +89,10 @@ Options:
 	if *standaloneOperator && !isLoopbackListenAddress(cfg.API.ListenAddr) {
 		sugar.Fatal("--standalone-operator requires the API listen address to be loopback")
 	}
+	standaloneContext, err := daemon.LoadStandaloneContext(*contextPath)
+	if err != nil {
+		sugar.Fatalf("load standalone context: %v", err)
+	}
 
 	// One durable store backs the canonical Agent and Team kernel. Interactive
 	// clients never own authoritative state.
@@ -126,6 +133,14 @@ Options:
 	if err != nil {
 		sugar.Fatalf("resolve source-policy worker scopes: %v", err)
 	}
+	credentialScopes, err := standaloneContext.ListWorkerScopes(ctx)
+	if err != nil {
+		sugar.Fatalf("resolve standalone context worker scopes: %v", err)
+	}
+	workerScopes = mergeDaemonWorkerScopes(workerScopes, credentialScopes)
+	workerScopeSource := runtime.WorkerScopeSourceFunc(func(context.Context) ([]runtime.Scope, error) {
+		return append([]runtime.Scope(nil), workerScopes...), nil
+	})
 	var kernel *opensealkernel.Engine
 	if len(workerScopes) > 0 {
 		turnResolver := runtime.TurnRunnerResolverFunc(func(resolveCtx context.Context, run *runtime.AgentRun) (*runtime.TurnRunnerBinding, error) {
@@ -153,8 +168,8 @@ Options:
 			sugar.Fatalf("configure governed action dispatcher: %v", dispatcherErr)
 		}
 		engineOptions = append(engineOptions,
-			opensealkernel.WithDynamicAgentRunWorkers(runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindAgentWork, Concurrency: 2, MaxTurnsPerClaim: 1, WorkerIDPrefix: "standalone-agent"}, policyCatalog, turnResolver),
-			opensealkernel.WithDynamicActionWorkers(runtime.DynamicActionWorkerConfig{Concurrency: 2, WorkerIDPrefix: "standalone-action"}, policyCatalog, nil, dispatcher),
+			opensealkernel.WithDynamicAgentRunWorkers(runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindAgentWork, Concurrency: 2, MaxTurnsPerClaim: 1, WorkerIDPrefix: "standalone-agent"}, workerScopeSource, turnResolver),
+			opensealkernel.WithDynamicActionWorkers(runtime.DynamicActionWorkerConfig{Concurrency: 2, WorkerIDPrefix: "standalone-action"}, workerScopeSource, standaloneContext, dispatcher),
 		)
 	}
 	kernel, err = opensealkernel.New(engineOptions...)
@@ -169,6 +184,7 @@ Options:
 	// Versioned kernel API for the TUI and embedding integrations.
 	apiServer := server.NewServer(store, sugar)
 	apiServer.SetClawHubLifecycle(kernel, *standaloneOperator)
+	apiServer.SetWorkforceCredentialBindings(standaloneContext.CredentialChoices(scope))
 	if *standaloneOperator {
 		apiServer.SetActionApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{})
 		if len(workerScopes) > 0 {
@@ -193,6 +209,13 @@ Options:
 	endpoint := strings.TrimSpace(os.Getenv("OPENSEAL_LLM_BASE_URL"))
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	model := strings.TrimSpace(os.Getenv("OPENSEAL_LLM_MODEL"))
+	if standaloneContext.Authoring != nil {
+		endpoint, model = standaloneContext.Authoring.BaseURL, standaloneContext.Authoring.Model
+		apiKey, err = standaloneContext.ResolveReference(scope, standaloneContext.Authoring.Credential)
+		if err != nil {
+			sugar.Fatalf("resolve standalone authoring credential: %v", err)
+		}
+	}
 	configured := 0
 	for _, value := range []string{endpoint, apiKey, model} {
 		if value != "" {
@@ -236,6 +259,23 @@ Options:
 
 	kernel.Stop()
 	apiServer.Shutdown(ctx)
+}
+
+func mergeDaemonWorkerScopes(groups ...[]runtime.Scope) []runtime.Scope {
+	seen := map[string]runtime.Scope{}
+	for _, group := range groups {
+		for _, scope := range group {
+			seen[scope.Kind+"\x00"+scope.ID] = scope
+		}
+	}
+	result := make([]runtime.Scope, 0, len(seen))
+	for _, scope := range seen {
+		result = append(result, scope)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Kind+"\x00"+result[i].ID < result[j].Kind+"\x00"+result[j].ID
+	})
+	return result
 }
 
 func parseDaemonScope(value string) (runtime.Scope, error) {
