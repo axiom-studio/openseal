@@ -38,7 +38,9 @@ func (m *Model) render() string {
 	width := max(m.width-4, 36)
 	header := m.renderHeader(width)
 	var body string
-	if m.unavailable != "" {
+	if m.showHelp {
+		body = m.renderHelp(width)
+	} else if m.unavailable != "" {
 		body = panelStyle.Width(width - 4).Render(
 			headerStyle.Render("Capability unavailable") + "\n\n" +
 				m.unavailable + "\n\n" + mutedStyle.Render("The TUI will not show controls the server cannot perform."),
@@ -50,12 +52,16 @@ func (m *Model) render() string {
 		}
 		body = panelStyle.Width(width - 4).Render(message)
 	} else {
-		composer := m.renderComposer(m.composerWidth())
-		panel := m.renderPanel(m.runsWidth())
-		if m.width >= 90 {
-			body = lipgloss.JoinHorizontal(lipgloss.Top, composer, "  ", panel)
+		if m.section == sectionOverview {
+			body = m.renderPanel(width)
 		} else {
-			body = composer + "\n\n" + panel
+			composer := m.renderComposer(m.composerWidth())
+			panel := m.renderPanel(m.runsWidth())
+			if m.width >= 90 {
+				body = lipgloss.JoinHorizontal(lipgloss.Top, composer, "  ", panel)
+			} else {
+				body = composer + "\n\n" + panel
+			}
 		}
 	}
 	footer := m.renderFooter(width)
@@ -63,10 +69,35 @@ func (m *Model) render() string {
 }
 
 func (m *Model) renderHeader(width int) string {
-	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Agents, Teams, Objectives & Work")
-	connection := mutedStyle.Render(fmt.Sprintf("%s · %s/%s", m.config.Endpoint, m.config.Scope.Kind, m.config.Scope.ID))
+	title := brandStyle.Render("OpenSeal") + "  " + headerStyle.Render("Agent workspace")
+	connection := mutedStyle.Render(fmt.Sprintf("Connected · %s:%s", m.config.Scope.Kind, m.config.Scope.ID))
 	space := max(1, width-lipgloss.Width(title)-lipgloss.Width(connection))
 	return title + strings.Repeat(" ", space) + connection
+}
+
+func (m *Model) renderHelp(width int) string {
+	lines := []string{
+		headerStyle.Render("OpenSeal help"),
+		mutedStyle.Render("One Agent, Team, Marketplace, Create, and Runtime model—adapted for the terminal."),
+		"",
+		headerStyle.Render("Move around"),
+		"← / →  change page        ↑ / ↓  select an item",
+		"Tab    switch between action and details",
+		"Enter  open or continue the primary next step",
+		"",
+		headerStyle.Render("Act"),
+		"n      create something     m      message or modify",
+		"q      ask for clarification when reviewing an Inbox request",
+		"Ctrl+S submit the visible form",
+		"Esc    cancel a draft       r      refresh server state",
+		"",
+		headerStyle.Render("Workspace destinations"),
+		"Home · Create · Agents · Teams · Marketplace · Work · Channels",
+		mutedStyle.Render("Goals, Projects, Inbox, Sources, Integrations, Activity, and Evidence are available under More when supported."),
+		"",
+		mutedStyle.Render("Press ? or Esc to close help · Ctrl+C exits the TUI but does not stop Agent work"),
+	}
+	return panelStyle.Width(max(width-4, 30)).Render(strings.Join(lines, "\n"))
 }
 
 func (m *Model) renderComposer(width int) string {
@@ -400,7 +431,13 @@ func (m *Model) renderComposer(width int) string {
 	}
 	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(description) + "\n\n" + m.editor.View() + "\n\n" + mutedStyle.Render(owner)
 	if m.focus == focusComposer {
-		content += "\n" + lipgloss.NewStyle().Foreground(accentSoft).Render("Ctrl+S submit  ·  Tab inspect")
+		actionHint := "Ctrl+S submit  ·  Tab details"
+		if m.mode == modeWorkforceAuthoring {
+			actionHint = "Enter create proposal  ·  Shift+Enter new line  ·  Tab details"
+		} else if m.mode == modeChannelPost {
+			actionHint = "Enter send  ·  Shift+Enter new line  ·  Tab conversation"
+		}
+		content += "\n" + lipgloss.NewStyle().Foreground(accentSoft).Render(actionHint)
 	}
 	return panelStyle.Width(max(width-4, 30)).Render(content)
 }
@@ -414,7 +451,9 @@ func (m *Model) renderUnavailableComposer(width int, title, message string) stri
 func (m *Model) renderPanel(width int) string {
 	tabs := m.renderPanelTabs()
 	var content string
-	if m.section == sectionAuthoring {
+	if m.section == sectionOverview {
+		content = m.renderOverviewContent(width)
+	} else if m.section == sectionAuthoring {
 		content = m.renderAuthoringContent(width)
 	} else if m.section == sectionBundles {
 		content = m.renderWorkforceBundlesContent(width)
@@ -450,153 +489,137 @@ func (m *Model) renderPanel(width int) string {
 	return panelStyle.Width(max(width-4, 30)).Render(tabs + "\n\n" + content)
 }
 
+func (m *Model) renderOverviewContent(width int) string {
+	agentCount := 0
+	if m.agentDeployment != nil && m.agentDeployment.Deployment != nil {
+		agentCount = 1
+	}
+	activeRuns, attention := 0, 0
+	for _, run := range m.runs {
+		if run == nil {
+			continue
+		}
+		if !isTerminal(run.Status) {
+			activeRuns++
+		}
+		if run.Status == runtime.AgentRunStatusWaitingForApproval || run.Status == runtime.AgentRunStatusFailed {
+			attention++
+		}
+	}
+	for _, approval := range m.actionApprovals {
+		if approval != nil && approval.Status == runtime.ApprovalStatusPending {
+			attention++
+		}
+	}
+
+	lines := []string{
+		headerStyle.Render("Welcome to OpenSeal"),
+		mutedStyle.Render("Build and run autonomous Agents and Teams with a governed workflow."),
+		"",
+		fmt.Sprintf("%d Agent%s  ·  %d Team%s  ·  %d active work item%s  ·  %d need%s attention",
+			agentCount, pluralSuffix(agentCount), len(m.teamDeployments), pluralSuffix(len(m.teamDeployments)),
+			activeRuns, pluralSuffix(activeRuns), attention, map[bool]string{true: "s", false: ""}[attention == 1]),
+		"",
+		headerStyle.Render("Start here"),
+	}
+	if attention > 0 {
+		lines = append(lines,
+			lipgloss.NewStyle().Foreground(danger).Render(fmt.Sprintf("1  Review %d item%s that need your attention", attention, pluralSuffix(attention))),
+			mutedStyle.Render("   Open Approvals or Work to review the exact state and next action."),
+		)
+	} else if agentCount == 0 && len(m.teamDeployments) == 0 && m.authoringCapability.Available {
+		lines = append(lines,
+			lipgloss.NewStyle().Foreground(accentSoft).Render("1  Describe the outcome you want"),
+			"   OpenSeal will propose the right Agents, Team roles, Skills, and boundaries.",
+			"",
+			mutedStyle.Render("   Press Enter or Tab to begin · no resources are created before review"),
+		)
+	} else if m.authoringCapability.Available {
+		lines = append(lines,
+			lipgloss.NewStyle().Foreground(accentSoft).Render("1  Create or improve your workforce"),
+			"   Describe a new outcome, or open an Agent or Team to inspect current work.",
+			"",
+			mutedStyle.Render("   Press Enter to open Create"),
+		)
+	} else {
+		lines = append(lines,
+			lipgloss.NewStyle().Foreground(accentSoft).Render("1  Explore the workspace"),
+			"   Use ← / → to move through the destinations exposed by this server.",
+		)
+	}
+	lines = append(lines, "", headerStyle.Render("How it works"),
+		"Describe  →  Review the exact proposal  →  Create  →  Activate  →  Observe",
+		mutedStyle.Render("Creation and activation stay separate. OpenSeal never starts unreviewed work."),
+	)
+	return strings.Join(lines, "\n")
+}
+
 func (m *Model) renderPanelTabs() string {
-	tabs := make([]string, 0, 14)
-	if m.authoringCapability.Available {
-		label := "f Workforce"
-		if m.section == sectionAuthoring {
+	primarySet := map[panelSection]bool{
+		sectionOverview: true, sectionAuthoring: true, sectionReadiness: true,
+		sectionTeams: true, sectionSkills: true, sectionRuns: true, sectionChannels: true,
+	}
+	primary, more := make([]string, 0, 7), make([]string, 0, 9)
+	for _, section := range m.availableSections() {
+		label := sectionNavigationLabel(section)
+		if section == m.section {
 			label = selectedStyle.Render(label)
 		} else {
 			label = mutedStyle.Render(label)
 		}
-		tabs = append(tabs, label)
-	}
-	if m.workforceBundleCapability.Available {
-		label := "B Bundles"
-		if m.section == sectionBundles {
-			label = selectedStyle.Render(label)
+		if primarySet[section] {
+			primary = append(primary, label)
 		} else {
-			label = mutedStyle.Render(label)
+			more = append(more, label)
 		}
-		tabs = append(tabs, label)
 	}
-	if m.agentDefinitionCapability.Available {
-		label := "h Runtime"
-		if m.section == sectionReadiness {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
+	lines := []string{strings.Join(primary, "  ")}
+	if len(more) > 0 {
+		lines = append(lines, mutedStyle.Render("More  ")+strings.Join(more, "  "))
 	}
-	if m.teamDefinitionCapability.Available {
-		label := "T Teams"
-		if m.section == sectionTeams {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
+	lines = append(lines, mutedStyle.Render("← / → pages  ·  ? help"))
+	return strings.Join(lines, "\n")
+}
+
+func sectionNavigationLabel(section panelSection) string {
+	switch section {
+	case sectionOverview:
+		return "Home"
+	case sectionAuthoring:
+		return "f Create"
+	case sectionReadiness:
+		return "h Agents"
+	case sectionTeams:
+		return "T Teams"
+	case sectionSkills:
+		return "s Marketplace"
+	case sectionRuns:
+		return "w Work"
+	case sectionChannels:
+		return "c Channels"
+	case sectionObjectives:
+		return "o Goals"
+	case sectionProjects:
+		return "i Projects"
+	case sectionRequests:
+		return "R Inbox"
+	case sectionApprovals:
+		return "A Approvals"
+	case sectionSources:
+		return "S Sources"
+	case sectionIntegrations:
+		return "I Integrations"
+	case sectionOutreach:
+		return "O Outreach"
+	case sectionActivity:
+		return "t Activity"
+	case sectionArtifacts:
+		return "a Evidence"
+	case sectionBundles:
+		return "B Imports"
+	default:
+		return "Workspace"
 	}
-	if m.objectiveCapability.Available {
-		label := "o Objectives"
-		if m.section == sectionObjectives {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.eventSourceCapability.Available {
-		label := "S Sources"
-		if m.section == sectionSources {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.projectCapability.Available {
-		label := "i Projects"
-		if m.section == sectionProjects {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.outreachCapability.Available {
-		label := "O Outreach"
-		if m.section == sectionOutreach {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.conversationGatewayCapability.Available {
-		label := "I Integrations"
-		if m.section == sectionIntegrations {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
-		label := "s Skills"
-		if m.section == sectionSkills {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.runCapability.Available {
-		label := "w Work"
-		if m.section == sectionRuns {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.requestCapability.Available {
-		label := "R Requests"
-		if m.section == sectionRequests {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.approvalCapability.Available {
-		label := "A Approvals"
-		if m.section == sectionApprovals {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.activityCapability.Available {
-		label := "t Activity"
-		if m.section == sectionActivity {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.channelCapability.Available {
-		label := "c Channels"
-		if m.section == sectionChannels {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	if m.artifactCapability.Available {
-		label := "a Evidence"
-		if m.section == sectionArtifacts {
-			label = selectedStyle.Render(label)
-		} else {
-			label = mutedStyle.Render(label)
-		}
-		tabs = append(tabs, label)
-	}
-	return strings.Join(tabs, "  ")
 }
 
 func (m *Model) renderWorkforceBundlesContent(width int) string {
@@ -936,7 +959,18 @@ func (m *Model) renderAuthoringContent(width int) string {
 			}
 			return strings.Join(lines, "\n")
 		}
-		return title + "\n\n" + mutedStyle.Render("Describe the workforce on the left. OpenSeal will verify every generated definition, Skill gap, authority change, and role assignment.")
+		return strings.Join([]string{
+			title,
+			"",
+			"Describe the outcome—not the implementation. OpenSeal will propose the Agents, Team roles, Skills, and boundaries for review.",
+			"",
+			headerStyle.Render("Try an example"),
+			mutedStyle.Render("Research · Monitor three approved communities and deliver a cited weekly brief."),
+			mutedStyle.Render("Operations · Triage incidents, request approval before changes, and publish a handoff."),
+			mutedStyle.Render("Content · Research a topic, draft a campaign, and have a lead review every publication."),
+			"",
+			lipgloss.NewStyle().Foreground(accentSoft).Render("Type on the left and press Enter · nothing is created before review"),
+		}, "\n")
 	}
 	state := lipgloss.NewStyle().Foreground(success).Render("READY FOR REVIEW")
 	issues := len(result.UnresolvedQuestions) + len(result.Validation) + len(result.MissingRequirements)
@@ -1996,7 +2030,7 @@ func (m *Model) renderProjectsContent(width int) string {
 }
 
 func (m *Model) renderClawHubSkillsContent(width int) string {
-	title := headerStyle.Render("Skills and authorized actions")
+	title := headerStyle.Render("Skills marketplace")
 	if m.loading {
 		title += mutedStyle.Render("  refreshing…")
 	}
@@ -2004,7 +2038,19 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 	if m.config.Owner.Type == runtime.OwnerTypeTeam {
 		ownerLabel = "Team"
 	}
-	lines := []string{title, "", mutedStyle.Render(ownerLabel + " authority")}
+	lines := []string{title, mutedStyle.Render("Skills and authorized actions · install verified capabilities, then grant each Agent or Team only what it needs."), "", mutedStyle.Render(ownerLabel + " authority")}
+	if m.config.Scope.Kind == "local" {
+		credentialCount := 0
+		if m.authoringCapability.Context != nil {
+			credentialCount = len(m.authoringCapability.Context.CredentialBindings)
+		}
+		if credentialCount > 0 {
+			lines = append(lines, lipgloss.NewStyle().Foreground(success).Render(fmt.Sprintf("Local Vault · %d credential reference%s ready", credentialCount, pluralSuffix(credentialCount))))
+		} else {
+			lines = append(lines, mutedStyle.Render("Local Vault · add credential references in context.yaml; never paste secrets here"))
+		}
+		lines = append(lines, "")
+	}
 	if m.sourcePolicyCapability.Available {
 		lines = append(lines, mutedStyle.Render("Governed source access"))
 		if len(m.sourcePolicies) == 0 {
@@ -2460,7 +2506,7 @@ func (m *Model) renderAgentRequestsContent(width int) string {
 		}
 		actions := make([]string, 0, 5)
 		if m.canRespondToSelectedRequest(runtime.AgentRequestDecisionAccept) {
-			actions = append(actions, "y accept", "? clarify", "x reject")
+			actions = append(actions, "y accept", "q clarify", "x reject")
 		}
 		if m.canRespondToSelectedRequest(runtime.AgentRequestDecisionProvideClarification) {
 			actions = append(actions, "M answer clarification")
@@ -3088,13 +3134,17 @@ func (m *Model) availableActions(run *runtime.AgentRun) string {
 }
 
 func (m *Model) renderFooter(width int) string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if m.err != nil {
 		parts = append(parts, lipgloss.NewStyle().Foreground(danger).Render(compact(m.err.Error(), width)))
 	} else if m.status != "" {
 		parts = append(parts, lipgloss.NewStyle().Foreground(success).Render(compact(m.status, width)))
 	}
-	parts = append(parts, mutedStyle.Render("Ctrl+C quit"))
+	focus := "Details selected"
+	if m.focus == focusComposer {
+		focus = "Action selected"
+	}
+	parts = append(parts, mutedStyle.Render(compact(focus+"  ·  Tab switch  ·  ←/→ pages  ·  ? help  ·  Ctrl+C quit", width)))
 	return "\n" + strings.Join(parts, "\n")
 }
 

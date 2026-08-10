@@ -84,7 +84,7 @@ func TestTUIDiscoversSourcePolicyLifecycleWithoutInventingControls(t *testing.T)
 	applyCommand(t, model, model.loadCapabilities())
 	applyCommand(t, model, model.loadSourcePolicies())
 	view := model.View()
-	for _, expected := range []string{"s Skills", "Governed source access", "active", "approved-forums@2", "revoked", "retired-feed@1"} {
+	for _, expected := range []string{"s Marketplace", "Governed source access", "active", "approved-forums@2", "revoked", "retired-feed@1"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("source policy TUI missing %q:\n%s", expected, view)
 		}

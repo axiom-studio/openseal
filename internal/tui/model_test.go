@@ -1438,7 +1438,7 @@ func TestTUIInspectsPortableWorkforceBundleThroughAdvertisedKernelCapability(t *
 	}}
 	model := newModelWithClient(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	if model.section != sectionBundles || !strings.Contains(model.View(), "B Bundles") {
+	if model.section != sectionBundles || !strings.Contains(model.View(), "B Imports") {
 		t.Fatalf("bundle capability not projected: section=%v view=%s", model.section, model.View())
 	}
 	model.editor.SetValue(path)
@@ -1450,6 +1450,42 @@ func TestTUIInspectsPortableWorkforceBundleThroughAdvertisedKernelCapability(t *
 		if !strings.Contains(model.View(), expected) {
 			t.Fatalf("bundle view missing %q: %s", expected, model.View())
 		}
+	}
+}
+
+func TestFullStandaloneWorkspaceStartsAtGuidedHomeWithDiscoverableNavigationAndHelp(t *testing.T) {
+	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(
+		kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{}),
+		kernelapi.AgentDefinitionsCapability(),
+		kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
+		kernelapi.AgentRunsCapability(kernelapi.OperationList),
+		kernelapi.ObjectivesCapability(),
+		kernelapi.ProjectsCapability(),
+		kernelapi.AgentRequestsCapability(),
+	)}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	view := model.View()
+	for _, expected := range []string{"Welcome to OpenSeal", "Start here", "How it works", "Home", "f Create", "h Agents", "T Teams", "w Work", "o Goals", "i Projects", "R Inbox", "← / → pages", "? help"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Home missing %q:\n%s", expected, view)
+		}
+	}
+	if model.section != sectionOverview {
+		t.Fatalf("full workspace section = %v", model.section)
+	}
+	model.focusPanelList()
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	if !model.showHelp || !strings.Contains(model.View(), "OpenSeal help") || !strings.Contains(model.View(), "Workspace destinations") {
+		t.Fatalf("global help unavailable:\n%s", model.View())
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.showHelp {
+		t.Fatal("Escape did not close help")
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRight})
+	if model.section != sectionAuthoring {
+		t.Fatalf("right navigation section = %v", model.section)
 	}
 }
 
@@ -1819,7 +1855,7 @@ func TestAgentRequestsAreAFirstClassCapabilityGatedProjection(t *testing.T) {
 		t.Fatalf("request projection section=%v requests=%d filters=%#v", model.section, len(model.agentRequests), fake.agentRequestFilters)
 	}
 	view := model.View()
-	for _, expected := range []string{"R Requests", "Collaboration requests", "Review the cited report", "from agent:researcher", "y accept", "? clarify", "x reject"} {
+	for _, expected := range []string{"R Inbox", "Collaboration requests", "Review the cited report", "from agent:researcher", "y accept", "q clarify", "x reject"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("request view missing %q:\n%s", expected, view)
 		}
@@ -2075,7 +2111,7 @@ func TestActivityWorkspaceUsesExactTeamSelectorAndFailsClosedOnVersionMismatch(t
 	}
 	standalone := newTestModel(t, missingDeployment)
 	applyCommand(t, standalone, standalone.loadCapabilities())
-	if standalone.err != nil || standalone.agentDefinitionCapability.Available || !strings.Contains(standalone.View(), "Standalone work remains observable") || strings.Contains(standalone.View(), "h Runtime") {
+	if standalone.err != nil || standalone.agentDefinitionCapability.Available || !strings.Contains(standalone.View(), "Standalone work remains observable") || strings.Contains(standalone.View(), "h Agents") {
 		t.Fatalf("optional deployment readiness polluted standalone Activity: err=%v\n%s", standalone.err, standalone.View())
 	}
 }
@@ -2087,7 +2123,7 @@ func TestMismatchedRequestCapabilityFailsClosedWithoutHidingMatchingWork(t *test
 	)
 	model := newTestModel(t, &fakeKernelClient{document: document})
 	applyCommand(t, model, model.loadCapabilities())
-	if !model.ready || model.runCapability.Available == false || model.requestCapability.Available || strings.Contains(model.View(), "R Requests") {
+	if !model.ready || model.runCapability.Available == false || model.requestCapability.Available || strings.Contains(model.View(), "R Inbox") {
 		t.Fatalf("capability drift was not isolated:\n%s", model.View())
 	}
 }
@@ -2785,7 +2821,12 @@ func TestObjectivePortfolioCreateAndAmendUsePublicCapability(t *testing.T) {
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	if !model.objectiveCapability.Available || model.section != sectionObjectives || !strings.Contains(model.View(), "Objective portfolio") {
+	if !model.objectiveCapability.Available || model.section != sectionOverview {
+		t.Fatalf("full workspace did not start at Home:\n%s", model.View())
+	}
+	model.section = sectionObjectives
+	model.mode = modeObjectiveCreate
+	if !strings.Contains(model.View(), "Objective portfolio") {
 		t.Fatalf("objective capability was not rendered:\n%s", model.View())
 	}
 	model.mode = modeObjectiveCreate

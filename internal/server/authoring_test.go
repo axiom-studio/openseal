@@ -336,6 +336,10 @@ func TestWorkforceAuthoringAPIIsTruthfulAndNonActivating(t *testing.T) {
 		t.Fatal(err)
 	}
 	api.SetWorkforceAuthoringCompiler(compiler)
+	api.SetWorkforceCredentialBindings([]capability.CredentialBindingChoice{{
+		Reference:   capability.CredentialReference{Kind: "api-key", ID: "local-model"},
+		DisplayName: "Local model API key",
+	}})
 	capabilities := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
 	var document kernelapi.CapabilityDocument
 	if err := json.NewDecoder(capabilities.Body).Decode(&document); err != nil {
@@ -344,6 +348,10 @@ func TestWorkforceAuthoringAPIIsTruthfulAndNonActivating(t *testing.T) {
 	capability, ok := document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
 	if !ok || !capability.Supports(kernelapi.OperationCompile) || capability.Supports(kernelapi.OperationActivate) {
 		t.Fatalf("authoring capability = %#v", capability)
+	}
+	if capability.Context == nil || len(capability.Context.CredentialBindings) != 1 ||
+		capability.Context.CredentialBindings[0].Reference.ID != "local-model" {
+		t.Fatalf("secret-free credential choices = %#v", capability.Context)
 	}
 
 	compiled := performAgentRunRequest(t, api.Handler(), http.MethodPost, "/api/v1/authoring/workforce/compile", `{"mode":"create","prompt":"Create a Team","catalog":{}}`, "")
