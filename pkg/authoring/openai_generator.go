@@ -32,11 +32,12 @@ const authoringSourceIdentityPrompt = " Treat sourceIdentity as exact immutable 
 const authoringSkillOptionActionsPrompt = " A skill_selection option may include actions, but every value must be an exact action exposed by that catalog Skill. Other answer option kinds must not include actions."
 
 type OpenAICompatibleGenerator struct {
-	endpoint   string
-	apiKey     string
-	model      string
-	httpClient *http.Client
-	options    OpenAICompatibleGeneratorOptions
+	endpoint     string
+	apiKey       string
+	model        string
+	httpClient   *http.Client
+	options      OpenAICompatibleGeneratorOptions
+	responsesAPI bool
 }
 
 // OpenAICompatibleThinkingMode controls provider-native reasoning when the
@@ -132,6 +133,26 @@ func NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model string, htt
 		endpoint += "/chat/completions"
 	}
 	return &OpenAICompatibleGenerator{endpoint: endpoint, apiKey: apiKey, model: model, httpClient: httpClient, options: options}, nil
+}
+
+// NewOpenAIResponsesGeneratorWithOptions creates an OpenAI-native generator.
+// OpenAI credentials use only the Responses API; the compatible constructor
+// remains available for providers whose documented protocol is Chat Completions.
+func NewOpenAIResponsesGeneratorWithOptions(endpoint, apiKey, model string, httpClient *http.Client, options OpenAICompatibleGeneratorOptions) (*OpenAICompatibleGenerator, error) {
+	generator, err := NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, httpClient, options)
+	if err != nil {
+		return nil, err
+	}
+	endpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	if strings.HasSuffix(endpoint, "/chat/completions") {
+		endpoint = strings.TrimSuffix(endpoint, "/chat/completions")
+	}
+	if !strings.HasSuffix(endpoint, "/responses") {
+		endpoint += "/responses"
+	}
+	generator.endpoint = endpoint
+	generator.responsesAPI = true
+	return generator, nil
 }
 
 func (g *OpenAICompatibleGenerator) Generate(ctx context.Context, request GenerateRequest) ([]byte, error) {
@@ -362,6 +383,9 @@ func authoringIntentContract() authoringProviderContract {
 }
 
 func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invocationKey string, messages []map[string]string, contract authoringProviderContract) ([]byte, error) {
+	if g.responsesAPI {
+		return g.completeResponsesContract(ctx, invocationKey, messages, contract)
+	}
 	payload := map[string]interface{}{
 		"model":    g.model,
 		"messages": messages,
@@ -468,4 +492,121 @@ func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invoca
 		return nil, errors.New("authoring provider must return exactly one non-empty choice")
 	}
 	return []byte(strings.TrimSpace(choice.Message.Content)), nil
+}
+
+func (g *OpenAICompatibleGenerator) completeResponsesContract(ctx context.Context, invocationKey string, messages []map[string]string, contract authoringProviderContract) ([]byte, error) {
+	input := make([]map[string]string, 0, len(messages))
+	instructions := make([]string, 0, 1)
+	for _, message := range messages {
+		if message["role"] == "system" {
+			instructions = append(instructions, message["content"])
+			continue
+		}
+		input = append(input, message)
+	}
+	payload := map[string]interface{}{"model": g.model, "input": input}
+	if len(instructions) > 0 {
+		payload["instructions"] = strings.Join(instructions, "\n\n")
+	}
+	mode := g.options.StructuredOutputMode
+	if mode == OpenAICompatibleStructuredOutputDefault {
+		mode = OpenAICompatibleStructuredOutputTool
+	}
+	if mode == OpenAICompatibleStructuredOutputTool {
+		schema, err := contract.Schema()
+		if err != nil {
+			return nil, err
+		}
+		payload["tools"] = []interface{}{map[string]interface{}{
+			"type": "function", "name": contract.Name, "description": contract.Description,
+			"parameters": schema,
+		}}
+		payload["tool_choice"] = map[string]string{"type": "function", "name": contract.Name}
+	} else if mode == OpenAICompatibleStructuredOutputJSON {
+		payload["text"] = map[string]interface{}{"format": map[string]string{"type": "json_object"}}
+	}
+	if g.options.ThinkingMode == OpenAICompatibleThinkingDisabled {
+		payload["reasoning"] = map[string]string{"effort": "none"}
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, g.endpoint, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set("Authorization", "Bearer "+g.apiKey)
+	if invocationKey = strings.TrimSpace(invocationKey); invocationKey != "" {
+		httpRequest.Header.Set("Idempotency-Key", invocationKey)
+	}
+	response, err := g.httpClient.Do(httpRequest)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maximumGenerationBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(responseBody) > maximumGenerationBytes {
+		return nil, errors.New("authoring provider response exceeds 1 MiB")
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("authoring provider returned HTTP %d", response.StatusCode)
+	}
+	var envelope struct {
+		Status            string `json:"status"`
+		IncompleteDetails struct {
+			Reason string `json:"reason"`
+		} `json:"incomplete_details"`
+		Output []struct {
+			Type      string `json:"type"`
+			Name      string `json:"name"`
+			Arguments string `json:"arguments"`
+			Content   []struct {
+				Type    string `json:"type"`
+				Text    string `json:"text"`
+				Refusal string `json:"refusal"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if err := json.Unmarshal(responseBody, &envelope); err != nil {
+		return nil, fmt.Errorf("decode authoring provider response: %w", err)
+	}
+	if envelope.Status == "incomplete" || envelope.Status == "failed" {
+		return nil, &ProviderIncompleteError{FinishReason: envelope.IncompleteDetails.Reason}
+	}
+	for _, output := range envelope.Output {
+		for _, content := range output.Content {
+			if content.Type == "refusal" && strings.TrimSpace(content.Refusal) != "" {
+				return nil, &ProviderRefusalError{Reason: content.Refusal}
+			}
+		}
+	}
+	if mode == OpenAICompatibleStructuredOutputTool {
+		calls := make([]string, 0, 1)
+		for _, output := range envelope.Output {
+			if output.Type == "function_call" && output.Name == contract.Name && strings.TrimSpace(output.Arguments) != "" {
+				calls = append(calls, strings.TrimSpace(output.Arguments))
+			}
+		}
+		if len(calls) != 1 {
+			return nil, fmt.Errorf("authoring provider must return exactly one %s function call", contract.Name)
+		}
+		return []byte(calls[0]), nil
+	}
+	texts := make([]string, 0, 1)
+	for _, output := range envelope.Output {
+		for _, content := range output.Content {
+			if content.Type == "output_text" && strings.TrimSpace(content.Text) != "" {
+				texts = append(texts, strings.TrimSpace(content.Text))
+			}
+		}
+	}
+	if len(texts) != 1 {
+		return nil, errors.New("authoring provider must return exactly one non-empty output text")
+	}
+	return []byte(texts[0]), nil
 }
