@@ -3130,6 +3130,12 @@ func NewOpenAICompatibleWorkforceGeneratorWithOptions(endpoint, apiKey, model st
 	return authoring.NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, client, options)
 }
 
+// NewOpenAIResponsesWorkforceGeneratorWithOptions creates the OpenAI-native
+// Responses API adapter used by OpenAI Vault credentials.
+func NewOpenAIResponsesWorkforceGeneratorWithOptions(endpoint, apiKey, model string, client *http.Client, options OpenAICompatibleWorkforceGeneratorOptions) (authoring.Generator, error) {
+	return authoring.NewOpenAIResponsesGeneratorWithOptions(endpoint, apiKey, model, client, options)
+}
+
 func NewWorkforceAuthoringRunService(generator authoring.Generator, store runtime.WorkforceAuthoringRunStore) (*runtime.WorkforceAuthoringRunService, error) {
 	compiler, err := authoring.NewCompiler(generator)
 	if err != nil {
