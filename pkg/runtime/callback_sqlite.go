@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 )
 
 func migrateCallbackRegistrySQLite(db *sql.DB) error {
@@ -21,13 +22,38 @@ func migrateCallbackRegistrySQLite(db *sql.DB) error {
 		CREATE TABLE IF NOT EXISTS callback_events (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
 			registration_id TEXT NOT NULL, event_source TEXT NOT NULL, event_id TEXT NOT NULL,
-			status TEXT NOT NULL, revision INTEGER NOT NULL, updated_at DATETIME NOT NULL, payload TEXT NOT NULL,
+			status TEXT NOT NULL, available_at DATETIME NOT NULL, lease_owner TEXT NOT NULL DEFAULT '',
+			lease_expires_at DATETIME, attempts INTEGER NOT NULL DEFAULT 0,
+			revision INTEGER NOT NULL, updated_at DATETIME NOT NULL, payload TEXT NOT NULL,
 			PRIMARY KEY (scope_kind,scope_id,id),
 			UNIQUE (scope_kind,scope_id,registration_id,event_source,event_id), CHECK (revision > 0)
 		);
 		CREATE INDEX IF NOT EXISTS idx_callback_events_registration
 			ON callback_events(scope_kind,scope_id,registration_id,status,updated_at DESC);
 	`)
+	if err != nil {
+		return err
+	}
+	columns, err := sqliteTableColumns(db, "callback_events")
+	if err != nil {
+		return err
+	}
+	additions := map[string]string{
+		"available_at":     `ALTER TABLE callback_events ADD COLUMN available_at DATETIME`,
+		"lease_owner":      `ALTER TABLE callback_events ADD COLUMN lease_owner TEXT NOT NULL DEFAULT ''`,
+		"lease_expires_at": `ALTER TABLE callback_events ADD COLUMN lease_expires_at DATETIME`,
+		"attempts":         `ALTER TABLE callback_events ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`,
+	}
+	for name, statement := range additions {
+		if !columns[name] {
+			if _, err := db.Exec(statement); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = db.Exec(`UPDATE callback_events SET available_at=updated_at WHERE available_at IS NULL;
+		CREATE INDEX IF NOT EXISTS idx_callback_events_dispatch
+		ON callback_events(scope_kind,scope_id,status,available_at,lease_expires_at)`)
 	return err
 }
 
@@ -142,9 +168,10 @@ func (s *SQLiteStore) ReceiveCallbackEvent(ctx context.Context, value *CallbackE
 		return nil, false, err
 	}
 	result, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO callback_events
-		(scope_kind,scope_id,id,registration_id,event_source,event_id,status,revision,updated_at,payload) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		(scope_kind,scope_id,id,registration_id,event_source,event_id,status,available_at,lease_owner,lease_expires_at,attempts,revision,updated_at,payload) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		value.Scope.Kind, value.Scope.ID, value.ID, value.RegistrationID, value.Event.Source, value.Event.ID,
-		value.Status, value.Revision, value.UpdatedAt, string(payload))
+		value.Status, value.AvailableAt, value.LeaseOwner, nullableSQLiteTime(value.LeaseExpiresAt), value.Attempts,
+		value.Revision, value.UpdatedAt, string(payload))
 	if err != nil {
 		return nil, false, err
 	}
@@ -169,8 +196,9 @@ func (s *SQLiteStore) UpdateCallbackEvent(ctx context.Context, value *CallbackEv
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE callback_events SET status=?,revision=?,updated_at=?,payload=?
-		WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, value.Status, value.Revision, value.UpdatedAt,
+	result, err := s.db.ExecContext(ctx, `UPDATE callback_events SET status=?,available_at=?,lease_owner=?,lease_expires_at=?,attempts=?,revision=?,updated_at=?,payload=?
+		WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, value.Status, value.AvailableAt, value.LeaseOwner,
+		nullableSQLiteTime(value.LeaseExpiresAt), value.Attempts, value.Revision, value.UpdatedAt,
 		string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision)
 	if err != nil {
 		return err
@@ -180,6 +208,73 @@ func (s *SQLiteStore) UpdateCallbackEvent(ctx context.Context, value *CallbackEv
 		return err
 	}
 	if rows != 1 {
+		return ErrCallbackRegistrationConflict
+	}
+	return nil
+}
+
+func (s *SQLiteStore) ClaimCallbackEvent(ctx context.Context, scope Scope, worker string, now time.Time, leaseDuration time.Duration) (*CallbackEventReceipt, error) {
+	if scope.Validate() != nil || !validOpaqueIdentifier(strings.TrimSpace(worker), 256) || now.IsZero() || leaseDuration <= 0 {
+		return nil, ErrInvalidCallbackRegistration
+	}
+	conn, err := beginImmediateSQLite(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer rollbackSQLiteConn(conn, &committed)
+	receipt, err := scanSQLiteCallbackEvent(conn.QueryRowContext(ctx, `SELECT payload FROM callback_events
+		WHERE scope_kind=? AND scope_id=? AND available_at<=?
+		  AND (status=? OR (status=? AND lease_expires_at<=?))
+		ORDER BY available_at ASC,updated_at ASC,id ASC LIMIT 1`, scope.Kind, scope.ID, now,
+		CallbackEventPending, CallbackEventLeased, now))
+	if err != nil || receipt == nil {
+		return nil, err
+	}
+	receipt.Status, receipt.LeaseOwner = CallbackEventLeased, strings.TrimSpace(worker)
+	receipt.LeaseExpiresAt = now.Add(leaseDuration).UTC()
+	receipt.Attempts++
+	receipt.Revision++
+	receipt.UpdatedAt = now.UTC()
+	payload, err := json.Marshal(receipt)
+	if err != nil {
+		return nil, err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE callback_events
+		SET status=?,lease_owner=?,lease_expires_at=?,attempts=?,revision=?,updated_at=?,payload=?
+		WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, receipt.Status, receipt.LeaseOwner,
+		receipt.LeaseExpiresAt, receipt.Attempts, receipt.Revision, receipt.UpdatedAt, string(payload),
+		receipt.Scope.Kind, receipt.Scope.ID, receipt.ID, receipt.Revision-1)
+	if err != nil {
+		return nil, err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return nil, ErrCallbackRegistrationConflict
+	}
+	if err := commitSQLiteConn(ctx, conn, &committed); err != nil {
+		return nil, err
+	}
+	return receipt, nil
+}
+
+func (s *SQLiteStore) SaveClaimedCallbackEvent(ctx context.Context, receipt *CallbackEventReceipt, expectedRevision int64, leaseOwner string) error {
+	if err := receipt.Validate(); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE callback_events
+		SET status=?,available_at=?,lease_owner=?,lease_expires_at=?,attempts=?,revision=?,updated_at=?,payload=?
+		WHERE scope_kind=? AND scope_id=? AND id=? AND revision=? AND status=? AND lease_owner=?`, receipt.Status,
+		receipt.AvailableAt, receipt.LeaseOwner, nullableSQLiteTime(receipt.LeaseExpiresAt), receipt.Attempts,
+		receipt.Revision, receipt.UpdatedAt, string(payload), receipt.Scope.Kind, receipt.Scope.ID, receipt.ID,
+		expectedRevision, CallbackEventLeased, strings.TrimSpace(leaseOwner))
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
 		return ErrCallbackRegistrationConflict
 	}
 	return nil
@@ -210,5 +305,6 @@ func scanSQLiteCallbackEvent(scanner sqliteExternalConversationScanner) (*Callba
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, err
 	}
+	normalizeStoredCallbackReceipt(&value)
 	return &value, value.Validate()
 }

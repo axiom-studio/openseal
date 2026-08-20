@@ -913,6 +913,7 @@ type (
 	ExternalConversationRunbookDispatcher           = runtime.ExternalConversationRunbookDispatcher
 	CanonicalExternalConversationDispatcher         = runtime.CanonicalExternalConversationDispatcher
 	ExternalConversationInboxWorkerConfig           = runtime.ExternalConversationInboxWorkerConfig
+	CallbackEventWorkerConfig                       = runtime.CallbackEventWorkerConfig
 	ExternalConversationInboxWorker                 = runtime.ExternalConversationInboxWorker
 	ExternalConversationDeliveryHostRequest         = runtime.ExternalConversationDeliveryHostRequest
 	ExternalConversationAcknowledgementStatus       = runtime.ExternalConversationAcknowledgementStatus
@@ -2464,6 +2465,7 @@ type externalConversationRuntime struct {
 type callbackRuntime struct {
 	registry *runtime.CallbackRegistry
 	ingress  *runtime.CallbackIngressService
+	worker   *runtime.CallbackEventWorker
 }
 
 type actionWorkerSpec struct {
@@ -2956,6 +2958,7 @@ func (e *Engine) rebuildExternalConversations() error {
 func (e *Engine) rebuildCallbacks() error {
 	e.callbacks.registry = nil
 	e.callbacks.ingress = nil
+	e.callbacks.worker = nil
 	store, ok := e.store.(interface {
 		runtime.CallbackRegistrationStore
 		runtime.CallbackEventStore
@@ -2972,6 +2975,19 @@ func (e *Engine) rebuildCallbacks() error {
 		"approvals": runtime.NewApprovalCallbackConsumer(store, e.externalConversations.transport),
 		"runbooks":  runtime.NewRunbookEventRouter(store),
 	})
+	if e.externalConversations.supervisor != nil && e.externalConversations.config != nil {
+		callbackConfig := e.externalConversations.config.Callback
+		if strings.TrimSpace(callbackConfig.WorkerID) == "" {
+			callbackConfig.WorkerID = strings.TrimSpace(e.externalConversations.config.Inbox.WorkerID) + "-callbacks"
+		}
+		worker, err := runtime.NewCallbackEventWorker(store, e.callbacks.ingress, callbackConfig)
+		if err != nil {
+			return err
+		}
+		e.callbacks.worker = worker
+		e.externalConversations.supervisor.SetCallbackWorker(worker)
+		e.callbacks.ingress.SetDurableDispatcher(e.externalConversations.supervisor.Wake)
+	}
 	return nil
 }
 
