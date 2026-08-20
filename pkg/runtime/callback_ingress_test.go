@@ -110,6 +110,101 @@ func TestCallbackIngressVerifiesPersistsDispatchesAndDeduplicates(t *testing.T) 
 	}
 }
 
+func TestCallbackIngressAcknowledgesDurableReceiptBeforeSlowConsumer(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog := newCallbackCatalog(t, ctx, store)
+	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
+	consumed := 0
+	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
+		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
+			consumed++
+			time.Sleep(50 * time.Millisecond)
+			return nil
+		}),
+	})
+	now := time.Date(2026, 8, 20, 20, 19, 36, 0, time.UTC)
+	service.now = func() time.Time { return now }
+	wakes := 0
+	service.SetDurableDispatcher(func() { wakes++ })
+	host := &callbackHostStub{result: &CallbackHostResult{
+		StatusCode: http.StatusOK,
+		Events: []NormalizedCallbackEvent{{
+			ID: "slack-action-async", Type: "approval.decided", Source: "slack", OccurredAt: now,
+		}},
+	}}
+	request := CallbackPublicRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("signed-body")}
+
+	started := time.Now()
+	result, err := service.Receive(ctx, request, host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed >= 25*time.Millisecond {
+		t.Fatalf("durable acknowledgement waited for consumer: %s", elapsed)
+	}
+	if consumed != 0 || wakes != 1 || len(result.Receipts) != 1 || result.Receipts[0].Status != CallbackEventPending {
+		t.Fatalf("ingress result consumed=%d wakes=%d result=%#v", consumed, wakes, result)
+	}
+	replayed, err := service.Receive(ctx, request, host)
+	if err != nil || replayed.Replayed != 1 || consumed != 0 {
+		t.Fatalf("pending duplicate was not acknowledged: consumed=%d result=%#v err=%v", consumed, replayed, err)
+	}
+
+	worker, err := NewCallbackEventWorker(store, service, CallbackEventWorkerConfig{
+		WorkerID: "callback-worker", LeaseDuration: time.Minute, BaseRetry: time.Second, MaximumRetry: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.now = func() time.Time { return now.Add(time.Second) }
+	applied, err := worker.ProcessOne(ctx, registration.Scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if consumed != 1 || applied == nil || applied.Status != CallbackEventApplied || applied.Attempts != 1 {
+		t.Fatalf("worker result consumed=%d receipt=%#v", consumed, applied)
+	}
+	if next, err := worker.ProcessOne(ctx, registration.Scope); err != nil || next != nil {
+		t.Fatalf("applied callback was reclaimed: receipt=%#v err=%v", next, err)
+	}
+}
+
+func TestCallbackEventWorkerReclaimsExpiredLease(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog := newCallbackCatalog(t, ctx, store)
+	registration := createActiveCallbackRegistration(t, ctx, store, catalog)
+	consumed := 0
+	service := NewCallbackIngressService(store, catalog, map[string]CallbackEventConsumer{
+		"approvals": CallbackEventConsumerFunc(func(context.Context, *CallbackRegistration, CallbackSubscription, EventEnvelope) error {
+			consumed++
+			return nil
+		}),
+	})
+	now := time.Date(2026, 8, 20, 20, 19, 36, 0, time.UTC)
+	service.now = func() time.Time { return now }
+	service.SetDurableDispatcher(nil)
+	host := &callbackHostStub{result: &CallbackHostResult{StatusCode: http.StatusOK, Events: []NormalizedCallbackEvent{{
+		ID: "restart-event", Type: "approval.decided", Source: "slack", OccurredAt: now,
+	}}}}
+	if _, err := service.Receive(ctx, CallbackPublicRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("signed")}, host); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := store.ClaimCallbackEvent(ctx, registration.Scope, "stopped-worker", now, time.Second); err != nil || claimed == nil {
+		t.Fatalf("initial claim = %#v, %v", claimed, err)
+	}
+	worker, err := NewCallbackEventWorker(store, service, CallbackEventWorkerConfig{WorkerID: "restarted-worker", LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.now = func() time.Time { return now.Add(2 * time.Second) }
+	recovered, err := worker.ProcessOne(ctx, registration.Scope)
+	if err != nil || recovered == nil || recovered.Status != CallbackEventApplied || recovered.Attempts != 2 || consumed != 1 {
+		t.Fatalf("recovered callback = %#v consumed=%d err=%v", recovered, consumed, err)
+	}
+}
+
 func TestCallbackIngressRejectsBeforeDispatchWhenVerificationFails(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
@@ -148,12 +243,16 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 			return nil
 		}),
 	})
+	service.SetDurableDispatcher(nil)
 	host := &callbackHostStub{result: &CallbackHostResult{StatusCode: http.StatusOK, Events: []NormalizedCallbackEvent{{
 		ID: "event-after-restart", Type: "approval.decided", Source: "slack", OccurredAt: time.Now().UTC(),
 	}}}}
 	request := CallbackPublicRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte("signed")}
 	if _, err := service.Receive(ctx, request, host); err != nil {
 		t.Fatal(err)
+	}
+	if consumed != 0 {
+		t.Fatalf("durable ingress dispatched before restart: %d", consumed)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -171,6 +270,14 @@ func TestCallbackRegistryAndReceiptsSurviveSQLiteRestart(t *testing.T) {
 			return nil
 		}),
 	})
+	restarted.SetDurableDispatcher(nil)
+	worker, err := NewCallbackEventWorker(reopened, restarted, CallbackEventWorkerConfig{WorkerID: "sqlite-restart-worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := worker.ProcessOne(ctx, registration.Scope); err != nil || receipt == nil || receipt.Status != CallbackEventApplied {
+		t.Fatalf("restart dispatch = %#v, %v", receipt, err)
+	}
 	result, err := restarted.Receive(ctx, request, host)
 	if err != nil {
 		t.Fatal(err)

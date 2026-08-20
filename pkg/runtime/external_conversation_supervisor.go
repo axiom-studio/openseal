@@ -14,6 +14,7 @@ type ExternalConversationSupervisorConfig struct {
 	BatchSize int
 	Inbox     ExternalConversationInboxWorkerConfig
 	Delivery  ExternalConversationDeliveryWorkerConfig
+	Callback  CallbackEventWorkerConfig
 }
 
 func (c *ExternalConversationSupervisorConfig) applyDefaults() error {
@@ -37,6 +38,7 @@ type ExternalConversationSupervisor struct {
 	replies   *ExternalConversationReplyWorker
 	delivery  *ExternalConversationDeliveryWorker
 	approvals *ApprovalNotificationWorker
+	callbacks *CallbackEventWorker
 	scopes    WorkerScopeSource
 	config    ExternalConversationSupervisorConfig
 	logger    *zap.SugaredLogger
@@ -45,6 +47,12 @@ type ExternalConversationSupervisor struct {
 	wg        sync.WaitGroup
 	startOnce sync.Once
 	stopOnce  sync.Once
+}
+
+func (s *ExternalConversationSupervisor) SetCallbackWorker(worker *CallbackEventWorker) {
+	if s != nil {
+		s.callbacks = worker
+	}
 }
 
 func NewExternalConversationSupervisor(
@@ -104,6 +112,18 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 	}
 	var reconcileErrors []error
 	for _, scope := range normalizedConversationRunScopes(scopes) {
+		if s.callbacks != nil {
+			for range s.config.BatchSize {
+				receipt, processErr := s.callbacks.ProcessOne(ctx, scope)
+				if processErr != nil {
+					reconcileErrors = append(reconcileErrors, processErr)
+					break
+				}
+				if receipt == nil {
+					break
+				}
+			}
+		}
 		if _, err := s.approvals.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
 			reconcileErrors = append(reconcileErrors, err)
 		}
