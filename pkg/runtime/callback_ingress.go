@@ -110,7 +110,9 @@ type CallbackEventReceiptStatus string
 
 const (
 	CallbackEventPending CallbackEventReceiptStatus = "pending"
+	CallbackEventLeased  CallbackEventReceiptStatus = "leased"
 	CallbackEventApplied CallbackEventReceiptStatus = "applied"
+	CallbackEventFailed  CallbackEventReceiptStatus = "failed"
 )
 
 type CallbackEventReceipt struct {
@@ -121,6 +123,9 @@ type CallbackEventReceipt struct {
 	Event                EventEnvelope              `json:"event"`
 	Status               CallbackEventReceiptStatus `json:"status"`
 	Attempts             int                        `json:"attempts"`
+	AvailableAt          time.Time                  `json:"availableAt"`
+	LeaseOwner           string                     `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt       time.Time                  `json:"leaseExpiresAt,omitempty"`
 	LastError            string                     `json:"lastError,omitempty"`
 	Revision             int64                      `json:"revision"`
 	CreatedAt            time.Time                  `json:"createdAt"`
@@ -137,11 +142,19 @@ func (r *CallbackEventReceipt) Validate() error {
 	}
 	switch r.Status {
 	case CallbackEventPending:
-		if r.AppliedAt != nil {
+		if r.AvailableAt.IsZero() || r.LeaseOwner != "" || !r.LeaseExpiresAt.IsZero() || r.AppliedAt != nil {
+			return ErrInvalidCallbackRegistration
+		}
+	case CallbackEventLeased:
+		if r.AvailableAt.IsZero() || !validOpaqueIdentifier(r.LeaseOwner, 256) || r.LeaseExpiresAt.IsZero() || r.AppliedAt != nil {
 			return ErrInvalidCallbackRegistration
 		}
 	case CallbackEventApplied:
-		if r.AppliedAt == nil || r.AppliedAt.Before(r.CreatedAt) {
+		if r.LeaseOwner != "" || !r.LeaseExpiresAt.IsZero() || r.AppliedAt == nil || r.AppliedAt.Before(r.CreatedAt) {
+			return ErrInvalidCallbackRegistration
+		}
+	case CallbackEventFailed:
+		if r.LeaseOwner != "" || !r.LeaseExpiresAt.IsZero() || r.AppliedAt != nil || strings.TrimSpace(r.LastError) == "" {
 			return ErrInvalidCallbackRegistration
 		}
 	default:
@@ -153,6 +166,8 @@ func (r *CallbackEventReceipt) Validate() error {
 type CallbackEventStore interface {
 	ReceiveCallbackEvent(context.Context, *CallbackEventReceipt) (*CallbackEventReceipt, bool, error)
 	UpdateCallbackEvent(context.Context, *CallbackEventReceipt, int64) error
+	ClaimCallbackEvent(context.Context, Scope, string, time.Time, time.Duration) (*CallbackEventReceipt, error)
+	SaveClaimedCallbackEvent(context.Context, *CallbackEventReceipt, int64, string) error
 }
 
 type CallbackEventConsumer interface {
@@ -179,6 +194,19 @@ type CallbackIngressService struct {
 	resolver  CallbackAdapterResolver
 	consumers map[string]CallbackEventConsumer
 	now       func() time.Time
+	async     bool
+	wake      func()
+}
+
+// SetDurableDispatcher makes ingress acknowledgement stop after signature
+// verification and durable receipt persistence. The supplied wake function
+// should notify a restart-safe leased worker; it may be nil when polling alone
+// is sufficient.
+func (s *CallbackIngressService) SetDurableDispatcher(wake func()) {
+	if s == nil {
+		return
+	}
+	s.async, s.wake = true, wake
 }
 
 func NewCallbackIngressService(store interface {
@@ -246,15 +274,22 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 		receipt := &CallbackEventReceipt{
 			ID: stableCallbackReceiptID(registration.ID, event.Source, event.ID), Scope: registration.Scope,
 			RegistrationID: registration.ID, RegistrationRevision: registration.Revision, Event: event,
-			Status: CallbackEventPending, Revision: 1, CreatedAt: now, UpdatedAt: now,
+			Status: CallbackEventPending, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
 		stored, replayed, err := s.store.ReceiveCallbackEvent(ctx, receipt)
 		if err != nil {
 			return nil, err
 		}
-		if replayed && stored.Status == CallbackEventApplied {
+		if replayed && (s.async || stored.Status == CallbackEventApplied) {
 			result.Replayed++
 			result.Receipts = append(result.Receipts, stored)
+			continue
+		}
+		if s.async {
+			result.Receipts = append(result.Receipts, stored)
+			if s.wake != nil {
+				s.wake()
+			}
 			continue
 		}
 		if err := s.dispatch(ctx, registration, event); err != nil {
@@ -314,6 +349,13 @@ func boundedCallbackError(err error) string {
 	value := strings.TrimSpace(err.Error())
 	if len(value) > 2000 {
 		value = value[:2000]
+	}
+	return value
+}
+
+func normalizeStoredCallbackReceipt(value *CallbackEventReceipt) *CallbackEventReceipt {
+	if value != nil && value.AvailableAt.IsZero() {
+		value.AvailableAt = value.CreatedAt
 	}
 	return value
 }
