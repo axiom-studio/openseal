@@ -428,31 +428,57 @@ type ArgumentRule struct {
 	Enum  []interface{} `json:"enum,omitempty"`
 }
 
+type BindingArgumentSource string
+
+const (
+	// BindingArgumentLiteral fixes an action argument at binding time. The
+	// value is host-owned, credential-free configuration and is never exposed
+	// as a model-selectable input.
+	BindingArgumentLiteral BindingArgumentSource = "literal"
+	// BindingArgumentSessionID resolves the opaque durable session attached to
+	// the current Run.
+	BindingArgumentSessionID BindingArgumentSource = "session.id"
+	// BindingArgumentVerifiedClaim resolves a claim that the embedding host
+	// verified before creating the durable session. Query parameters and other
+	// caller-provided context never populate this namespace.
+	BindingArgumentVerifiedClaim BindingArgumentSource = "session.verified_claim"
+)
+
+// BindingArgumentValue binds one action input to trusted host context. Exactly
+// one source is selected. Claim is required only for verified-claim sources;
+// Literal is meaningful only for literal sources.
+type BindingArgumentValue struct {
+	Source  BindingArgumentSource `json:"source"`
+	Literal interface{}           `json:"literal,omitempty"`
+	Claim   string                `json:"claim,omitempty"`
+}
+
 type ScopeReference struct {
 	Kind string `json:"kind"`
 	ID   string `json:"id"`
 }
 
 type Binding struct {
-	ID                          string                             `json:"id"`
-	Scope                       ScopeReference                     `json:"scope"`
-	DeploymentID                string                             `json:"deploymentId"`
-	SkillID                     string                             `json:"skillId"`
-	SkillVersion                string                             `json:"skillVersion"`
-	SourceIdentity              string                             `json:"sourceIdentity,omitempty"`
-	Disabled                    bool                               `json:"disabled,omitempty"`
-	AllowedActions              []string                           `json:"allowedActions"`
-	EnablePrompt                bool                               `json:"enablePrompt,omitempty"`
-	EnabledConversationAdapters []string                           `json:"enabledConversationAdapters,omitempty"`
-	EnabledCallbackAdapters     []string                           `json:"enabledCallbackAdapters,omitempty"`
-	MaximumRisk                 RiskLevel                          `json:"maximumRisk"`
-	ArgumentRestrictions        map[string]map[string]ArgumentRule `json:"argumentRestrictions,omitempty"`
-	Credentials                 map[string]CredentialReference     `json:"credentials,omitempty"`
-	Config                      map[string]interface{}             `json:"config,omitempty"`
-	Revision                    int64                              `json:"revision"`
-	CreatedAt                   time.Time                          `json:"createdAt,omitempty"`
-	UpdatedAt                   time.Time                          `json:"updatedAt,omitempty"`
-	Lifecycle                   []BindingLifecycleEntry            `json:"lifecycle,omitempty"`
+	ID                          string                                     `json:"id"`
+	Scope                       ScopeReference                             `json:"scope"`
+	DeploymentID                string                                     `json:"deploymentId"`
+	SkillID                     string                                     `json:"skillId"`
+	SkillVersion                string                                     `json:"skillVersion"`
+	SourceIdentity              string                                     `json:"sourceIdentity,omitempty"`
+	Disabled                    bool                                       `json:"disabled,omitempty"`
+	AllowedActions              []string                                   `json:"allowedActions"`
+	EnablePrompt                bool                                       `json:"enablePrompt,omitempty"`
+	EnabledConversationAdapters []string                                   `json:"enabledConversationAdapters,omitempty"`
+	EnabledCallbackAdapters     []string                                   `json:"enabledCallbackAdapters,omitempty"`
+	MaximumRisk                 RiskLevel                                  `json:"maximumRisk"`
+	ArgumentRestrictions        map[string]map[string]ArgumentRule         `json:"argumentRestrictions,omitempty"`
+	ArgumentBindings            map[string]map[string]BindingArgumentValue `json:"argumentBindings,omitempty"`
+	Credentials                 map[string]CredentialReference             `json:"credentials,omitempty"`
+	Config                      map[string]interface{}                     `json:"config,omitempty"`
+	Revision                    int64                                      `json:"revision"`
+	CreatedAt                   time.Time                                  `json:"createdAt,omitempty"`
+	UpdatedAt                   time.Time                                  `json:"updatedAt,omitempty"`
+	Lifecycle                   []BindingLifecycleEntry                    `json:"lifecycle,omitempty"`
 }
 
 type BindingLifecycleAction string

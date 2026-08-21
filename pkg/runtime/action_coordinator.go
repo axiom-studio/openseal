@@ -113,7 +113,7 @@ type ActionCoordinator struct {
 }
 
 func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators ...ActionProposalValidator) *ActionCoordinator {
-	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
+	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, BindingActionArgumentResolver{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
 	portable = append(portable, validators...)
 	return &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: time.Now, newID: uuid.NewString}
 }
@@ -236,8 +236,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
 		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(arguments, bound.Action.InputSchema),
-		PreparedRuntime: clonePreparedRuntime(req.PreparedRuntime),
-		CredentialRefs:  boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
+		PreparedRuntime:   clonePreparedRuntime(req.PreparedRuntime),
+		CredentialRefs:    boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		ExternalOperationDigest: externalOperationDigest,
 		MaxAttempts:             max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -358,7 +359,8 @@ func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Conte
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision, SkillID: req.SkillID, SkillVersion: req.SkillVersion,
 		Action: req.Action, Status: ActionCallStatusSucceeded, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect,
 		Arguments: persistedActionArguments(arguments, bound.Action.InputSchema), PreparedRuntime: clonePreparedRuntime(req.PreparedRuntime),
-		EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
+		EvidenceRefs:      append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		ExternalOperationDigest: digest, DuplicateOfActionCallID: prior.ID,
 		Output:      map[string]interface{}{"duplicateSuppressed": true, "priorActionCallId": prior.ID, "priorRunId": prior.RunID},
 		MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now, CompletedAt: &now,
