@@ -397,6 +397,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateCallbackWorker(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateEmbedInstallations(ctx, tx); err != nil {
+		return err
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err
