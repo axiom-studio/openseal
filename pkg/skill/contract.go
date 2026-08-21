@@ -43,6 +43,8 @@ type TransportReference = capability.TransportReference
 type TransportArgument = capability.TransportArgument
 type Definition = capability.Definition
 type ArgumentRule = capability.ArgumentRule
+type BindingArgumentSource = capability.BindingArgumentSource
+type BindingArgumentValue = capability.BindingArgumentValue
 type Binding = capability.Binding
 type ScopeReference = capability.ScopeReference
 type ModelAction = capability.ModelAction
@@ -116,6 +118,10 @@ const (
 	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated
 	BindingLifecycleEnabled  = capability.BindingLifecycleEnabled
 	BindingLifecycleDisabled = capability.BindingLifecycleDisabled
+
+	BindingArgumentLiteral       = capability.BindingArgumentLiteral
+	BindingArgumentSessionID     = capability.BindingArgumentSessionID
+	BindingArgumentVerifiedClaim = capability.BindingArgumentVerifiedClaim
 
 	// SchemaExtensionKernelResolved marks an action argument that is required
 	// by the executable contract but supplied by the trusted kernel rather than
@@ -400,7 +406,7 @@ func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, de
 				Name: definition.ID + "." + name, Description: action.Description,
 				BindingID: binding.ID, BindingRevision: binding.Revision, DeploymentID: binding.DeploymentID,
 				SkillID: definition.ID, Version: definition.Version, Action: name,
-				InputSchema: modelVisibleInputSchema(action.InputSchema), SemanticArguments: cloneStringMap(action.SemanticArguments),
+				InputSchema: modelVisibleInputSchemaForBinding(action.InputSchema, binding.ArgumentBindings[name]), SemanticArguments: cloneStringMap(action.SemanticArguments),
 				Risk: action.Risk, SideEffect: action.SideEffect, ExternalOperationPolicy: action.ExternalOperationPolicy,
 			})
 		}
@@ -1391,8 +1397,68 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 				return fmt.Errorf("binding restriction references unknown field %s", field)
 			}
 		}
+		for field, argumentBinding := range binding.ArgumentBindings[name] {
+			properties, _ := action.InputSchema["properties"].(map[string]interface{})
+			property, ok := properties[field].(map[string]interface{})
+			if !ok {
+				return fmt.Errorf("binding argument references unknown field %s", field)
+			}
+			if _, restricted := binding.ArgumentRestrictions[name][field]; restricted {
+				return fmt.Errorf("binding argument %s cannot also have an argument restriction", field)
+			}
+			if err := validateBindingArgumentValue(argumentBinding, property); err != nil {
+				return fmt.Errorf("binding argument %s is invalid: %w", field, err)
+			}
+		}
 	}
 	return nil
+}
+
+func validateBindingArgumentValue(value BindingArgumentValue, property map[string]interface{}) error {
+	switch value.Source {
+	case BindingArgumentLiteral:
+		if strings.TrimSpace(value.Claim) != "" {
+			return errors.New("literal source cannot select a claim")
+		}
+		if err := validateNonSecretConfiguration(map[string]interface{}{"value": value.Literal}, ""); err != nil {
+			return err
+		}
+		compiled, err := compileSchema("binding-argument.json", property)
+		if err != nil {
+			return err
+		}
+		if err := compiled.validate(value.Literal); err != nil {
+			return fmt.Errorf("literal does not satisfy the action input schema: %w", err)
+		}
+	case BindingArgumentSessionID:
+		if value.Literal != nil || strings.TrimSpace(value.Claim) != "" {
+			return errors.New("session id source cannot contain a literal or claim")
+		}
+		if kind, _ := property["type"].(string); kind != "string" {
+			return errors.New("session id source requires a string action input")
+		}
+	case BindingArgumentVerifiedClaim:
+		claim := strings.TrimSpace(value.Claim)
+		if value.Literal != nil || claim == "" || len(claim) > 128 || strings.ContainsAny(claim, "\r\n\t") {
+			return errors.New("verified claim source requires a bounded claim name and no literal")
+		}
+		if secretLikeBindingArgumentClaim(claim) {
+			return errors.New("verified claim cannot select secret-shaped context")
+		}
+	default:
+		return fmt.Errorf("unsupported source %q", value.Source)
+	}
+	return nil
+}
+
+func secretLikeBindingArgumentClaim(key string) bool {
+	normalized := strings.ToLower(strings.NewReplacer("-", "", "_", "", ".", "").Replace(strings.TrimSpace(key)))
+	for _, fragment := range []string{"password", "passwd", "secret", "token", "apikey", "privatekey", "credential"} {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateBindingConfiguration validates host-owned, non-secret binding

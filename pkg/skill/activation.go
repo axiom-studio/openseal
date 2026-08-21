@@ -259,7 +259,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 			actions = append(actions, ModelAction{
 				Name: definition.ID + "." + name, Description: action.Description,
 				BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID,
-				Version: definition.Version, Action: name, InputSchema: modelVisibleInputSchema(action.InputSchema),
+				Version: definition.Version, Action: name, InputSchema: modelVisibleInputSchemaForBinding(action.InputSchema, binding.ArgumentBindings[name]),
 				SemanticArguments: cloneStringMap(action.SemanticArguments), Risk: action.Risk, SideEffect: action.SideEffect,
 				ExternalOperationPolicy: action.ExternalOperationPolicy,
 			})

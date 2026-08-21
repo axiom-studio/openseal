@@ -48,6 +48,7 @@ type ActionCall struct {
 	Risk                    skill.RiskLevel                      `json:"risk"`
 	SideEffect              skill.SideEffect                     `json:"sideEffect"`
 	Arguments               map[string]interface{}               `json:"arguments"`
+	ResolvedArguments       map[string]ResolvedActionArgument    `json:"resolvedArguments,omitempty"`
 	PreparedRuntime         *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`
 	CredentialRefs          map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
 	EvidenceRefs            []string                             `json:"evidenceRefs,omitempty"`
@@ -69,6 +70,14 @@ type ActionCall struct {
 	UpdatedAt               time.Time                            `json:"updatedAt"`
 	StartedAt               *time.Time                           `json:"startedAt,omitempty"`
 	CompletedAt             *time.Time                           `json:"completedAt,omitempty"`
+}
+
+// ResolvedActionArgument records why a persisted argument was not selected by
+// the model. It intentionally records provenance only; the resolved value is
+// already governed by Arguments and no claim set is copied into activity.
+type ResolvedActionArgument struct {
+	Source skill.BindingArgumentSource `json:"source"`
+	Claim  string                      `json:"claim,omitempty"`
 }
 
 func (c *ActionCall) Validate() error {
@@ -110,6 +119,26 @@ func (c *ActionCall) Validate() error {
 	if err := uniqueIDs(c.EvidenceRefs, "action evidence"); err != nil {
 		return err
 	}
+	for name, resolved := range c.ResolvedArguments {
+		if strings.TrimSpace(name) == "" {
+			return errors.New("resolved action argument name is required")
+		}
+		if _, ok := c.Arguments[name]; !ok {
+			return errors.New("resolved action argument must exist in persisted arguments")
+		}
+		switch resolved.Source {
+		case skill.BindingArgumentLiteral, skill.BindingArgumentSessionID:
+			if resolved.Claim != "" {
+				return errors.New("resolved literal and session arguments cannot name a claim")
+			}
+		case skill.BindingArgumentVerifiedClaim:
+			if strings.TrimSpace(resolved.Claim) == "" {
+				return errors.New("resolved verified claim argument requires its claim name")
+			}
+		default:
+			return errors.New("resolved action argument source is invalid")
+		}
+	}
 	return nil
 }
 
@@ -118,17 +147,18 @@ func ComputeActionInvocationDigest(call *ActionCall) string {
 		return ""
 	}
 	canonical := struct {
-		DeploymentID    string                               `json:"deploymentId"`
-		BindingID       string                               `json:"bindingId"`
-		BindingRevision int64                                `json:"bindingRevision"`
-		SkillID         string                               `json:"skillId"`
-		SkillVersion    string                               `json:"skillVersion"`
-		Action          string                               `json:"action"`
-		Arguments       map[string]interface{}               `json:"arguments,omitempty"`
-		PreparedRuntime *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`
-		CredentialRefs  map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
-		EvidenceRefs    []string                             `json:"evidenceRefs,omitempty"`
-	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.PreparedRuntime, call.CredentialRefs, call.EvidenceRefs}
+		DeploymentID      string                               `json:"deploymentId"`
+		BindingID         string                               `json:"bindingId"`
+		BindingRevision   int64                                `json:"bindingRevision"`
+		SkillID           string                               `json:"skillId"`
+		SkillVersion      string                               `json:"skillVersion"`
+		Action            string                               `json:"action"`
+		Arguments         map[string]interface{}               `json:"arguments,omitempty"`
+		ResolvedArguments map[string]ResolvedActionArgument    `json:"resolvedArguments,omitempty"`
+		PreparedRuntime   *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`
+		CredentialRefs    map[string]skill.CredentialReference `json:"credentialRefs,omitempty"`
+		EvidenceRefs      []string                             `json:"evidenceRefs,omitempty"`
+	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.ResolvedArguments, call.PreparedRuntime, call.CredentialRefs, call.EvidenceRefs}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return ""
@@ -145,15 +175,16 @@ func ComputeActionSemanticDigest(call *ActionCall) string {
 		return ""
 	}
 	canonical := struct {
-		DeploymentID    string                 `json:"deploymentId"`
-		BindingID       string                 `json:"bindingId"`
-		BindingRevision int64                  `json:"bindingRevision"`
-		SkillID         string                 `json:"skillId"`
-		SkillVersion    string                 `json:"skillVersion"`
-		Action          string                 `json:"action"`
-		Arguments       map[string]interface{} `json:"arguments,omitempty"`
-		PreparedRuntime *skill.PreparedRuntime `json:"preparedRuntime,omitempty"`
-	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.PreparedRuntime}
+		DeploymentID      string                            `json:"deploymentId"`
+		BindingID         string                            `json:"bindingId"`
+		BindingRevision   int64                             `json:"bindingRevision"`
+		SkillID           string                            `json:"skillId"`
+		SkillVersion      string                            `json:"skillVersion"`
+		Action            string                            `json:"action"`
+		Arguments         map[string]interface{}            `json:"arguments,omitempty"`
+		ResolvedArguments map[string]ResolvedActionArgument `json:"resolvedArguments,omitempty"`
+		PreparedRuntime   *skill.PreparedRuntime            `json:"preparedRuntime,omitempty"`
+	}{call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion, call.Action, call.Arguments, call.ResolvedArguments, call.PreparedRuntime}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
 		return ""
