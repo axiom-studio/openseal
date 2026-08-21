@@ -31,7 +31,9 @@ const (
 	SkillActionsCapabilityID                   = "skill-actions"
 	SkillActionsCapabilityVersion              = "1"
 	SkillBindingsCapabilityID                  = "skill-bindings"
-	SkillBindingsCapabilityVersion             = "2"
+	SkillBindingsCapabilityVersion             = "3"
+	AgentEmbedsCapabilityID                    = "agent-embeds"
+	AgentEmbedsCapabilityVersion               = "1"
 	ArtifactsCapabilityID                      = "artifacts"
 	ArtifactsCapabilityVersion                 = "1"
 	ChannelsCapabilityID                       = "channels"
@@ -614,6 +616,17 @@ func SkillBindingsCapability(management bool) Capability {
 		result.Operations = append(result.Operations, OperationUpsert, OperationDisable, OperationPlanUpgrade, OperationApplyUpgrade)
 	}
 	return result
+}
+
+// AgentEmbedsCapability describes governed publication of an Agent as a
+// capability-bound browser chat. Public session operations remain behind the
+// opaque installation route and are not tenant management authorities.
+func AgentEmbedsCapability(management bool) Capability {
+	operations := []string{OperationGet, OperationList}
+	if management {
+		operations = append(operations, OperationCreate, OperationUpdate)
+	}
+	return Capability{ID: AgentEmbedsCapabilityID, Version: AgentEmbedsCapabilityVersion, Available: true, Operations: operations}
 }
 
 // AgentRequestsCapability describes the portable collaboration lifecycle used
