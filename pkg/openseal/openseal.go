@@ -500,6 +500,20 @@ type (
 	ReleaseConversationPresenceRequest   = runtime.ReleaseConversationPresenceRequest
 	ChannelMessageCommitResult           = runtime.ChannelMessageCommitResult
 	ParticipationRoundResult             = runtime.ParticipationRoundResult
+	EmbedInstallationStatus              = runtime.EmbedInstallationStatus
+	EmbedIdentityMode                    = runtime.EmbedIdentityMode
+	EmbedIdentityPolicy                  = runtime.EmbedIdentityPolicy
+	EmbedActionGrant                     = runtime.EmbedActionGrant
+	EmbedPermissionPolicy                = runtime.EmbedPermissionPolicy
+	EmbedInstallation                    = runtime.EmbedInstallation
+	EmbedSessionStatus                   = runtime.EmbedSessionStatus
+	EmbedSession                         = runtime.EmbedSession
+	EmbedInstallationFilter              = runtime.EmbedInstallationFilter
+	EmbedStore                           = runtime.EmbedStore
+	CreateEmbedInstallationRequest       = runtime.CreateEmbedInstallationRequest
+	UpdateEmbedInstallationRequest       = runtime.UpdateEmbedInstallationRequest
+	OpenEmbedSessionRequest              = runtime.OpenEmbedSessionRequest
+	OpenEmbedSessionResult               = runtime.OpenEmbedSessionResult
 	CollaborationStore                   = runtime.CollaborationStore
 	CollaborationKernelStore             = runtime.CollaborationKernelStore
 	CollaborationParty                   = runtime.CollaborationParty
@@ -2014,8 +2028,18 @@ const (
 	ConversationAudienceParticipants = runtime.ConversationAudienceParticipants
 	ConversationAudienceRoles        = runtime.ConversationAudienceRoles
 
-	ConversationReferenceObjective      = runtime.ConversationReferenceObjective
-	ConversationReferenceAgentControl   = runtime.ConversationReferenceAgentControl
+	ConversationReferenceObjective    = runtime.ConversationReferenceObjective
+	ConversationReferenceAgentControl = runtime.ConversationReferenceAgentControl
+	ConversationReferenceEmbedSession = runtime.ConversationReferenceEmbedSession
+
+	EmbedInstallationActive             = runtime.EmbedInstallationActive
+	EmbedInstallationPaused             = runtime.EmbedInstallationPaused
+	EmbedInstallationRevoked            = runtime.EmbedInstallationRevoked
+	EmbedIdentityAnonymous              = runtime.EmbedIdentityAnonymous
+	EmbedIdentitySigned                 = runtime.EmbedIdentitySigned
+	EmbedSessionActive                  = runtime.EmbedSessionActive
+	EmbedSessionExpired                 = runtime.EmbedSessionExpired
+	EmbedSessionRevoked                 = runtime.EmbedSessionRevoked
 	ConversationReferenceProject        = runtime.ConversationReferenceProject
 	ConversationReferenceRun            = runtime.ConversationReferenceRun
 	ConversationReferenceRequest        = runtime.ConversationReferenceRequest
@@ -2380,6 +2404,7 @@ type Engine struct {
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
 	conversations                 *runtime.ConversationService
+	embeds                        *runtime.EmbedSessionService
 	conversationCoordinator       *runtime.ConversationCoordinator
 	conversationParticipants      runtime.ConversationParticipantSource
 	participationProposals        runtime.ParticipationProposalProvider
@@ -2527,6 +2552,7 @@ func New(opts ...Option) (*Engine, error) {
 		approvalAuth:             runtime.EligibleApprovalAuthorizer{},
 		logger:                   sugar,
 	}
+	e.embeds, _ = runtime.NewEmbedSessionService(store, store)
 	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills, e.teams)
 	e.progression = progression.NewService(e.agents, e.teams)
 
@@ -2712,9 +2738,15 @@ func WithStore(store runtime.KernelStore) Option {
 		if conversationStore, ok := store.(runtime.ConversationStore); ok {
 			e.conversations = runtime.NewConversationService(conversationStore)
 			e.conversationChanges, _ = runtime.NewConversationChangeService(conversationStore, store)
+			if embedStore, supported := store.(runtime.EmbedStore); supported {
+				e.embeds, _ = runtime.NewEmbedSessionService(embedStore, conversationStore)
+			} else {
+				e.embeds = nil
+			}
 		} else {
 			e.conversations = nil
 			e.conversationChanges = nil
+			e.embeds = nil
 		}
 		if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
 			e.collaboration = runtime.NewCollaborationService(collaborationStore)
@@ -2887,6 +2919,9 @@ func (e *Engine) rebuildConversationRuns() error {
 	scheduler, err := runtime.NewConversationRunScheduler(conversationStore, e.store, config.Scheduler)
 	if err != nil {
 		return err
+	}
+	if e.embeds != nil {
+		scheduler.SetSessionContextResolver(e.embeds)
 	}
 	runner, err := runtime.NewConversationRunTurnRunner(conversationStore, e.conversationCoordinator, config.Runner)
 	if err != nil {
@@ -4132,6 +4167,55 @@ func (e *Engine) ListConversations(ctx context.Context, filter runtime.Conversat
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ListConversations(ctx, filter)
+}
+
+func (e *Engine) CreateEmbedInstallation(ctx context.Context, request runtime.CreateEmbedInstallationRequest) (*runtime.EmbedInstallation, error) {
+	if e.embeds == nil {
+		return nil, fmt.Errorf("embed store is not configured")
+	}
+	return e.embeds.CreateInstallation(ctx, request)
+}
+
+func (e *Engine) GetEmbedInstallation(ctx context.Context, scope runtime.Scope, id string) (*runtime.EmbedInstallation, error) {
+	if e.embeds == nil {
+		return nil, fmt.Errorf("embed store is not configured")
+	}
+	return e.embeds.GetInstallation(ctx, scope, id)
+}
+
+func (e *Engine) ListEmbedInstallations(ctx context.Context, filter runtime.EmbedInstallationFilter) ([]*runtime.EmbedInstallation, error) {
+	if e.embeds == nil {
+		return nil, fmt.Errorf("embed store is not configured")
+	}
+	return e.embeds.ListInstallations(ctx, filter)
+}
+
+func (e *Engine) UpdateEmbedInstallation(ctx context.Context, request runtime.UpdateEmbedInstallationRequest) (*runtime.EmbedInstallation, error) {
+	if e.embeds == nil {
+		return nil, fmt.Errorf("embed store is not configured")
+	}
+	return e.embeds.UpdateInstallation(ctx, request)
+}
+
+func (e *Engine) OpenEmbedSession(ctx context.Context, request runtime.OpenEmbedSessionRequest) (*runtime.OpenEmbedSessionResult, error) {
+	if e.embeds == nil {
+		return nil, fmt.Errorf("embed store is not configured")
+	}
+	return e.embeds.OpenSession(ctx, request)
+}
+
+func (e *Engine) AuthenticateEmbedSession(ctx context.Context, route, sessionID, capability, origin string) (*runtime.EmbedInstallation, *runtime.EmbedSession, error) {
+	if e.embeds == nil {
+		return nil, nil, fmt.Errorf("embed store is not configured")
+	}
+	return e.embeds.Authenticate(ctx, route, sessionID, capability, origin)
+}
+
+func (e *Engine) ConsumeEmbedSessionMessage(ctx context.Context, installation *runtime.EmbedInstallation, session *runtime.EmbedSession) (*runtime.EmbedSession, error) {
+	if e.embeds == nil {
+		return nil, fmt.Errorf("embed store is not configured")
+	}
+	return e.embeds.ConsumeMessage(ctx, installation, session)
 }
 
 // ImportConversationArchive migrates user-visible historical collaboration

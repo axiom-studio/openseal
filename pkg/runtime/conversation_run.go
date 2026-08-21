@@ -57,9 +57,14 @@ type ConversationRunReconcileResult struct {
 // latency optimization, while ReconcileScope closes the crash gap by advancing
 // a service cursor only after each page has been scheduled idempotently.
 type ConversationRunScheduler struct {
-	conversations *ConversationService
-	runs          *RunCommandService
-	config        ConversationRunSchedulerConfig
+	conversations  *ConversationService
+	runs           *RunCommandService
+	config         ConversationRunSchedulerConfig
+	sessionContext ConversationSessionContextResolver
+}
+
+type ConversationSessionContextResolver interface {
+	ResolveConversationSessionContext(context.Context, Scope, string) (map[string]interface{}, error)
 }
 
 func NewConversationRunScheduler(
@@ -79,6 +84,12 @@ func NewConversationRunScheduler(
 		runs:          NewRunCommandService(runStore),
 		config:        normalized,
 	}, nil
+}
+
+func (s *ConversationRunScheduler) SetSessionContextResolver(resolver ConversationSessionContextResolver) {
+	if s != nil {
+		s.sessionContext = resolver
+	}
 }
 
 func (s *ConversationRunScheduler) ScheduleMessage(
@@ -101,7 +112,10 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 	if !conversationMessageStartsRun(conversation, message) {
 		return nil, false, nil
 	}
-	request := conversationAgentRunRequest(conversation, message)
+	request, err := s.conversationAgentRunRequest(ctx, conversation, message)
+	if err != nil {
+		return nil, false, err
+	}
 	current, err := s.runs.store.GetAgentRun(ctx, conversation.Scope, runIDForIdempotencyKey(conversation.Scope, request.IdempotencyKey))
 	if err != nil {
 		return nil, false, err
@@ -125,11 +139,33 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	conversation *Conversation,
 	message *ChannelMessage,
 ) (*AgentRunCommandResult, bool, error) {
-	result, err := s.runs.CreateAgentRun(ctx, conversationAgentRunRequest(conversation, message))
+	request, err := s.conversationAgentRunRequest(ctx, conversation, message)
+	if err != nil {
+		return nil, false, err
+	}
+	result, err := s.runs.CreateAgentRun(ctx, request)
 	if err != nil {
 		return nil, false, err
 	}
 	return result, result.Event == nil, nil
+}
+
+func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *Conversation, message *ChannelMessage) (CreateAgentRunRequest, error) {
+	request := conversationAgentRunRequest(conversation, message)
+	if s.sessionContext == nil {
+		return request, nil
+	}
+	session, err := s.sessionContext.ResolveConversationSessionContext(ctx, conversation.Scope, conversation.ID)
+	if err != nil {
+		return CreateAgentRunRequest{}, err
+	}
+	if session != nil {
+		if err := ValidateCredentialFreeContext(session); err != nil {
+			return CreateAgentRunRequest{}, err
+		}
+		request.Context[RunContextSessionKey] = session
+	}
+	return request, nil
 }
 
 func conversationAgentRunRequest(conversation *Conversation, message *ChannelMessage) CreateAgentRunRequest {
@@ -556,7 +592,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 			DeploymentID: agentBinding.DeploymentID,
 			DefinitionID: agentBinding.DefinitionID, DefinitionVersion: agentBinding.DefinitionVersion,
 			ModelProvider: agentBinding.ModelProvider, Model: agentBinding.Model,
-			ModelActions:      constrainConversationRunActions(agentBinding.ModelActions, activeRuns),
+			ModelActions:      constrainEmbedSessionActions(run, constrainConversationRunActions(agentBinding.ModelActions, activeRuns)),
 			RunbookOperations: cloneHostedRunbookOperations(agentBinding.RunbookOperations),
 			PreparedRuntimes:  append([]PreparedSkillRuntime(nil), agentBinding.PreparedRuntimes...),
 			InputContextRefs:  append([]string(nil), agentBinding.InputContextRefs...),
