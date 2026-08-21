@@ -99,7 +99,7 @@ func TestSourcePoliciesAdvertiseExactGovernedLifecycle(t *testing.T) {
 
 func TestSkillBindingsAdvertiseExplicitGovernedLifecycle(t *testing.T) {
 	readOnly := SkillBindingsCapability(false)
-	if readOnly.ID != SkillBindingsCapabilityID || readOnly.Version != "2" || !readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) || readOnly.Supports(OperationUpsert) {
+	if readOnly.ID != SkillBindingsCapabilityID || readOnly.Version != "3" || !readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) || readOnly.Supports(OperationUpsert) {
 		t.Fatalf("read-only binding capability = %#v", readOnly)
 	}
 	managed := SkillBindingsCapability(true)
@@ -107,6 +107,17 @@ func TestSkillBindingsAdvertiseExplicitGovernedLifecycle(t *testing.T) {
 		if !managed.Supports(operation) {
 			t.Fatalf("binding operation %q not advertised: %#v", operation, managed.Operations)
 		}
+	}
+}
+
+func TestAgentEmbedsCapabilitySeparatesReadAndManagementAuthority(t *testing.T) {
+	readOnly := AgentEmbedsCapability(false)
+	if readOnly.ID != AgentEmbedsCapabilityID || readOnly.Version != "1" || !readOnly.Supports(OperationGet) || !readOnly.Supports(OperationList) || readOnly.Supports(OperationCreate) {
+		t.Fatalf("read-only Agent embed capability = %#v", readOnly)
+	}
+	managed := AgentEmbedsCapability(true)
+	if !managed.Supports(OperationCreate) || !managed.Supports(OperationUpdate) {
+		t.Fatalf("managed Agent embed capability = %#v", managed)
 	}
 }
 

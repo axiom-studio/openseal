@@ -1176,6 +1176,8 @@ const (
 	SkillActionsCapabilityVersion           = kernelapi.SkillActionsCapabilityVersion
 	SkillBindingsCapabilityID               = kernelapi.SkillBindingsCapabilityID
 	SkillBindingsCapabilityVersion          = kernelapi.SkillBindingsCapabilityVersion
+	AgentEmbedsCapabilityID                 = kernelapi.AgentEmbedsCapabilityID
+	AgentEmbedsCapabilityVersion            = kernelapi.AgentEmbedsCapabilityVersion
 	EventRoutingCapabilityID                = kernelapi.EventRoutingCapabilityID
 	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
 	RunbooksCapabilityID                    = kernelapi.RunbooksCapabilityID
@@ -1359,6 +1361,10 @@ func SkillActionsCapability() KernelCapability {
 
 func SkillBindingsCapability(management bool) KernelCapability {
 	return kernelapi.SkillBindingsCapability(management)
+}
+
+func AgentEmbedsCapability(management bool) KernelCapability {
+	return kernelapi.AgentEmbedsCapability(management)
 }
 
 func ActivityCapability() KernelCapability {
