@@ -49,6 +49,7 @@ type EmbedIdentityPolicy struct {
 	Issuer         string            `json:"issuer,omitempty"`
 	Audience       string            `json:"audience,omitempty"`
 	KeyID          string            `json:"keyId,omitempty"`
+	PublicKey      string            `json:"publicKey,omitempty"`
 	RequiredClaims []string          `json:"requiredClaims,omitempty"`
 }
 
@@ -102,12 +103,13 @@ func (i *EmbedInstallation) Validate() error {
 func (p EmbedIdentityPolicy) Validate() error {
 	switch p.Mode {
 	case EmbedIdentityAnonymous:
-		if p.Issuer != "" || p.Audience != "" || p.KeyID != "" || len(p.RequiredClaims) != 0 {
+		if p.Issuer != "" || p.Audience != "" || p.KeyID != "" || p.PublicKey != "" || len(p.RequiredClaims) != 0 {
 			return errors.New("anonymous embed identity cannot declare signed-token settings")
 		}
 	case EmbedIdentitySigned:
-		if strings.TrimSpace(p.Issuer) == "" || strings.TrimSpace(p.Audience) == "" || strings.TrimSpace(p.KeyID) == "" {
-			return errors.New("signed embed identity requires issuer, audience, and key id")
+		decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(p.PublicKey))
+		if strings.TrimSpace(p.Issuer) == "" || strings.TrimSpace(p.Audience) == "" || strings.TrimSpace(p.KeyID) == "" || err != nil || len(decoded) != 32 {
+			return errors.New("signed embed identity requires issuer, audience, key id, and an Ed25519 public key")
 		}
 	default:
 		return errors.New("embed identity mode is invalid")

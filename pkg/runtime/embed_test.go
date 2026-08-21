@@ -1,12 +1,15 @@
 package runtime
 
 import (
+	"encoding/base64"
 	"errors"
 	"path/filepath"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
+
+func testEmbedPublicKey() string { return base64.RawURLEncoding.EncodeToString(make([]byte, 32)) }
 
 func testEmbedPermissions() EmbedPermissionPolicy {
 	return EmbedPermissionPolicy{
@@ -58,7 +61,7 @@ func TestSignedEmbedSessionProjectsOnlyVerifiedClaimsIntoActionContext(t *testin
 	service, _ := NewEmbedSessionService(store, store)
 	installation, err := service.CreateInstallation(t.Context(), CreateEmbedInstallationRequest{
 		Scope: Scope{Kind: "tenant", ID: "1"}, DeploymentID: "support-agent", Name: "Signed support", AllowedOrigins: []string{"https://app.example.com"},
-		Identity:    EmbedIdentityPolicy{Mode: EmbedIdentitySigned, Issuer: "https://identity.example.com", Audience: "support", KeyID: "support-key", RequiredClaims: []string{"userId"}},
+		Identity:    EmbedIdentityPolicy{Mode: EmbedIdentitySigned, Issuer: "https://identity.example.com", Audience: "support", KeyID: "support-key", PublicKey: testEmbedPublicKey(), RequiredClaims: []string{"userId"}},
 		Permissions: testEmbedPermissions(),
 	})
 	if err != nil {
@@ -96,7 +99,7 @@ func TestSQLiteEmbedSessionCapabilityAndClaimsSurviveRestart(t *testing.T) {
 	service, _ := NewEmbedSessionService(store, store)
 	installation, err := service.CreateInstallation(t.Context(), CreateEmbedInstallationRequest{
 		Scope: Scope{Kind: "tenant", ID: "7"}, DeploymentID: "support-agent", Name: "Support", AllowedOrigins: []string{"https://app.example.com"},
-		Identity: EmbedIdentityPolicy{Mode: EmbedIdentitySigned, Issuer: "issuer", Audience: "audience", KeyID: "key", RequiredClaims: []string{"userId"}}, Permissions: testEmbedPermissions(),
+		Identity: EmbedIdentityPolicy{Mode: EmbedIdentitySigned, Issuer: "issuer", Audience: "audience", KeyID: "key", PublicKey: testEmbedPublicKey(), RequiredClaims: []string{"userId"}}, Permissions: testEmbedPermissions(),
 	})
 	if err != nil {
 		t.Fatal(err)
