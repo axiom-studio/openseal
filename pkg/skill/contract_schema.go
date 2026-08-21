@@ -128,7 +128,28 @@ func cloneValue(value interface{}) interface{} {
 }
 
 func modelVisibleInputSchema(schema map[string]interface{}) map[string]interface{} {
+	return modelVisibleInputSchemaForBinding(schema, nil)
+}
+
+func modelVisibleInputSchemaForBinding(schema map[string]interface{}, bindings map[string]BindingArgumentValue) map[string]interface{} {
 	projected, _ := projectModelSchemaValue(cloneMap(schema)).(map[string]interface{})
+	if len(bindings) == 0 || projected == nil {
+		return projected
+	}
+	properties, _ := projected["properties"].(map[string]interface{})
+	for name := range bindings {
+		delete(properties, name)
+	}
+	if required, ok := projected["required"].([]interface{}); ok {
+		visible := make([]interface{}, 0, len(required))
+		for _, value := range required {
+			name, _ := value.(string)
+			if _, hidden := bindings[name]; !hidden {
+				visible = append(visible, value)
+			}
+		}
+		projected["required"] = visible
+	}
 	return projected
 }
 

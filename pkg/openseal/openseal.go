@@ -681,6 +681,8 @@ type (
 	SkillTransportReference              = skill.TransportReference
 	SkillTransportArgument               = skill.TransportArgument
 	SkillArgumentRule                    = skill.ArgumentRule
+	SkillBindingArgumentSource           = skill.BindingArgumentSource
+	SkillBindingArgumentValue            = skill.BindingArgumentValue
 	SkillActionRetryPolicy               = skill.ActionRetryPolicy
 	SkillRequirements                    = skill.Requirements
 	SkillInstaller                       = skill.Installer
@@ -2085,6 +2087,10 @@ const (
 	SkillRiskExternal    = skill.RiskLevelExternal
 	SkillRiskProduction  = skill.RiskLevelProduction
 	SkillRiskDestructive = skill.RiskLevelDestructive
+
+	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
+	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
+	SkillBindingArgumentVerifiedClaim = skill.BindingArgumentVerifiedClaim
 
 	OAuth2SubjectInstallation = capability.OAuth2SubjectInstallation
 	OAuth2SubjectUser         = capability.OAuth2SubjectUser

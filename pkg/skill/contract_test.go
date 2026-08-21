@@ -480,6 +480,60 @@ func TestModelActionsHideKernelResolvedArgumentsWhileExecutionSchemaStaysStrict(
 	}
 }
 
+func TestModelActionsHideBindingResolvedArgumentsWhileExecutionSchemaStaysStrict(t *testing.T) {
+	ctx := context.Background()
+	catalog := NewCatalog()
+	definition := &Definition{
+		ID: "customer-records", Version: "1", Name: "Customer records",
+		Actions: map[string]Action{"lookup": {
+			Name: "lookup", Description: "Look up records", Risk: RiskLevelRead, SideEffect: SideEffectRead,
+			Idempotency: IdempotencySupported, ExternalOperationPolicy: ExternalOperationForbidden,
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"query":  map[string]interface{}{"type": "string"},
+					"userId": map[string]interface{}{"type": "string"},
+				},
+				"required": []interface{}{"query", "userId"}, "additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{"type": "object"},
+		}},
+		Transport: TransportReference{Kind: "tool", Endpoint: "customer-records"},
+	}
+	if err := catalog.Register(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &Binding{
+		ID: "customer", Scope: ScopeReference{Kind: "tenant", ID: "1"}, DeploymentID: "support-agent",
+		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{"lookup"}, MaximumRisk: RiskLevelRead, Revision: 1,
+		ArgumentBindings: map[string]map[string]BindingArgumentValue{"lookup": {
+			"userId": {Source: BindingArgumentVerifiedClaim, Claim: "userId"},
+		}},
+	}
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	actions, err := catalog.ListModelActions(ctx, binding.Scope, binding.DeploymentID)
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("actions = %#v, %v", actions, err)
+	}
+	properties, _ := actions[0].InputSchema["properties"].(map[string]interface{})
+	if _, visible := properties["userId"]; visible {
+		t.Fatalf("binding-resolved userId leaked into model schema: %#v", actions[0].InputSchema)
+	}
+	required, _ := actions[0].InputSchema["required"].([]interface{})
+	if len(required) != 1 || required[0] != "query" {
+		t.Fatalf("model required inputs = %#v", required)
+	}
+	bound, err := catalog.Resolve(ctx, binding.Scope, binding.DeploymentID, definition.ID, definition.Version, "lookup")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := catalog.ValidateInput(ctx, bound, map[string]interface{}{"query": "open orders"}); err == nil {
+		t.Fatal("execution schema must still require the bound userId")
+	}
+}
+
 func testSkillDefinition() *Definition {
 	return &Definition{
 		ID: "release", Version: "1.0.0", Name: "Release", Description: "Release software",
