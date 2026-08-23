@@ -11,6 +11,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workforce"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
@@ -48,6 +49,9 @@ func TestDefinitionsAreImmutableAndDeploymentsRollForwardAndBack(t *testing.T) {
 	}
 	if deployment.DisplayName != "Production Operator" {
 		t.Fatalf("deployment display name was not canonicalized: %q", deployment.DisplayName)
+	}
+	if deployment.DefaultWorkspaceID != workspace.DefaultID || len(deployment.Workspaces) != 1 || deployment.Workspaces[0].Storage.Retention != workspace.StorageRetentionRetain {
+		t.Fatalf("default Workspace was not materialized: %#v", deployment.Workspaces)
 	}
 	if initial.FromVersion != "" || initial.ToVersion != "1.0.0" || deployment.Revision != 1 {
 		t.Fatalf("initial activation = %#v %#v", deployment, initial)

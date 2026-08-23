@@ -116,6 +116,7 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *AgentDeploy
 		candidate.Revision = 1
 	}
 	candidate.SkillBindingIDs = normalizedStrings(candidate.SkillBindingIDs)
+	EnsureDefaultWorkspace(candidate)
 	if err := candidate.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -179,6 +180,7 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *AgentDeployme
 	updated := cloneDeployment(proposed)
 	updated.DisplayName = strings.TrimSpace(updated.DisplayName)
 	updated.SkillBindingIDs = normalizedStrings(updated.SkillBindingIDs)
+	EnsureDefaultWorkspace(updated)
 	updated.Revision = current.Revision + 1
 	updated.UpdatedAt = r.now().UTC()
 	definition, err := r.store.GetDefinition(ctx, updated.DefinitionID, updated.ActiveVersion)
