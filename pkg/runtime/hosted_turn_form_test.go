@@ -6,7 +6,34 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
+
+func TestHostedTurnFormCompilesOnlyAuthorizedNativeWorkspaceOperations(t *testing.T) {
+	authority := &workspace.Authority{Workspace: workspace.DefaultSpec()}
+	operations := workspace.Operations(authority)
+	form := HostedTurnForm{
+		SchemaVersion: HostedTurnFormSchemaVersion, SkillSelections: []HostedSkillSelection{}, Decisions: []TurnDecision{},
+		ProposedWorkspaceOperation: &HostedWorkspaceOperationForm{Operation: workspace.OperationReadFile, Summary: "Inspect config", Arguments: map[string]interface{}{"path": "config.yaml"}},
+		ContinuationCheckpoint:     map[string]interface{}{}, NextRunStatus: AgentRunStatusRunning, RunOutput: map[string]interface{}{}, CompletionEvidenceRefs: []string{}, EvidenceClaims: []EvidenceClaim{},
+	}
+	response, err := CompileHostedTurnFormWithWorkspace(form, nil, operations)
+	if err != nil || response.ProposedWorkspaceOperation == nil || response.ProposedWorkspaceOperation.Operation != workspace.OperationReadFile {
+		t.Fatalf("response=%#v error=%v", response, err)
+	}
+	form.ProposedWorkspaceOperation.Operation = workspace.OperationRunCommand
+	if _, err := CompileHostedTurnFormWithWorkspace(form, nil, operations); err == nil {
+		t.Fatal("disabled native command operation was accepted")
+	}
+	schema, err := HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{WorkspaceOperations: operations})
+	if err != nil {
+		t.Fatal(err)
+	}
+	properties := schema["properties"].(map[string]interface{})
+	if properties["proposedWorkspaceOperation"] == nil {
+		t.Fatalf("Workspace operation schema = %#v", properties)
+	}
+}
 
 func TestHostedTurnFormCompilesAndRoundTripsExactActionArguments(t *testing.T) {
 	action := capability.ModelAction{Name: "browser.click", InputSchema: map[string]interface{}{

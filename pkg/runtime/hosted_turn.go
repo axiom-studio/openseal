@@ -49,7 +49,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v13"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v14"
 
 const maximumHostedTurnMediaBytes = 1 << 20
 
@@ -159,6 +159,7 @@ type HostedTurnRequest struct {
 	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
 	EligibleAgents         []HostedAgentTarget      `json:"eligibleAgents,omitempty"`
 	Workspace              *workspace.Authority     `json:"workspace,omitempty"`
+	WorkspaceOperations    []workspace.Operation    `json:"workspaceOperations,omitempty"`
 	RunbookOperations      []HostedRunbookOperation `json:"runbookOperations,omitempty"`
 	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
@@ -177,26 +178,27 @@ type HostedTurnRequest struct {
 }
 
 type HostedTurnResponse struct {
-	APIVersion             string                   `json:"apiVersion"`
-	InvocationID           string                   `json:"invocationId"`
-	ModelProvider          string                   `json:"modelProvider"`
-	Model                  string                   `json:"model"`
-	SkillSelections        []HostedSkillSelection   `json:"skillSelections,omitempty"`
-	Decisions              []TurnDecision           `json:"decisions,omitempty"`
-	ProposedAction         *TurnAction              `json:"proposedAction,omitempty"`
-	ProposedFork           *TurnForkProposal        `json:"proposedFork,omitempty"`
-	ProposedDelegation     *TurnDelegationProposal  `json:"proposedDelegation,omitempty"`
-	ProposedRunbook        *TurnRunbookProposal     `json:"proposedRunbook,omitempty"`
-	OutputSummary          string                   `json:"outputSummary"`
-	Usage                  TurnUsage                `json:"usage,omitempty"`
-	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
-	NextRunStatus          AgentRunStatus           `json:"nextRunStatus"`
-	WakeCondition          *WakeCondition           `json:"wakeCondition,omitempty"`
-	RunOutput              map[string]interface{}   `json:"runOutput,omitempty"`
-	RunError               string                   `json:"runError,omitempty"`
-	CompletionEvidenceRefs []string                 `json:"completionEvidenceRefs,omitempty"`
-	EvidenceClaims         []EvidenceClaim          `json:"evidenceClaims,omitempty"`
-	EvidenceGrounding      *EvidenceGroundingReview `json:"evidenceGrounding,omitempty"`
+	APIVersion                 string                        `json:"apiVersion"`
+	InvocationID               string                        `json:"invocationId"`
+	ModelProvider              string                        `json:"modelProvider"`
+	Model                      string                        `json:"model"`
+	SkillSelections            []HostedSkillSelection        `json:"skillSelections,omitempty"`
+	Decisions                  []TurnDecision                `json:"decisions,omitempty"`
+	ProposedAction             *TurnAction                   `json:"proposedAction,omitempty"`
+	ProposedWorkspaceOperation *HostedWorkspaceOperationForm `json:"proposedWorkspaceOperation,omitempty"`
+	ProposedFork               *TurnForkProposal             `json:"proposedFork,omitempty"`
+	ProposedDelegation         *TurnDelegationProposal       `json:"proposedDelegation,omitempty"`
+	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
+	OutputSummary              string                        `json:"outputSummary"`
+	Usage                      TurnUsage                     `json:"usage,omitempty"`
+	ContinuationCheckpoint     map[string]interface{}        `json:"continuationCheckpoint,omitempty"`
+	NextRunStatus              AgentRunStatus                `json:"nextRunStatus"`
+	WakeCondition              *WakeCondition                `json:"wakeCondition,omitempty"`
+	RunOutput                  map[string]interface{}        `json:"runOutput,omitempty"`
+	RunError                   string                        `json:"runError,omitempty"`
+	CompletionEvidenceRefs     []string                      `json:"completionEvidenceRefs,omitempty"`
+	EvidenceClaims             []EvidenceClaim               `json:"evidenceClaims,omitempty"`
+	EvidenceGrounding          *EvidenceGroundingReview      `json:"evidenceGrounding,omitempty"`
 }
 
 // ValidateHostedSkillSelections verifies that a host returned exactly one
@@ -336,6 +338,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
 		return nil, errors.New("turn host returned a mismatched response envelope")
+	}
+	if response.ProposedWorkspaceOperation != nil {
+		return nil, errors.New("turn host returned an unconsumed native Workspace operation")
 	}
 	response.ModelProvider, response.Model, err = normalizeModelIdentity(response.ModelProvider, response.Model)
 	if err != nil {
@@ -628,6 +633,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		Goal: input.Run.Goal, InputContext: inputContext, SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
 		EligibleAgents:         cloneHostedAgentTargets(r.config.EligibleAgents),
 		Workspace:              cloneHostedWorkspaceAuthority(r.config.Workspace),
+		WorkspaceOperations:    cloneHostedWorkspaceOperations(workspace.Operations(r.config.Workspace)),
 		RunbookOperations:      cloneHostedRunbookOperations(r.config.RunbookOperations),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		Actions:                cloneHostedModelActions(r.config.Actions),
@@ -1071,4 +1077,16 @@ func cloneHostedWorkspaceAuthority(value *workspace.Authority) *workspace.Author
 		copy.Workspace.Compute.Accelerator = &accelerator
 	}
 	return &copy
+}
+
+func cloneHostedWorkspaceOperations(values []workspace.Operation) []workspace.Operation {
+	if values == nil {
+		return nil
+	}
+	result := make([]workspace.Operation, len(values))
+	for index := range values {
+		result[index] = values[index]
+		result[index].InputSchema = cloneMap(values[index].InputSchema)
+	}
+	return result
 }

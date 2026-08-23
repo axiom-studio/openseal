@@ -142,6 +142,7 @@ type (
 	WorkspaceStorageRetention                 = workspace.StorageRetention
 	WorkspaceAccess                           = workspace.Access
 	WorkspaceAuthority                        = workspace.Authority
+	WorkspaceOperation                        = workspace.Operation
 	WorkspacePolicy                           = workspace.Policy
 	WorkspaceCommandPolicy                    = workspace.CommandPolicy
 	WorkspaceNetworkAccess                    = workspace.NetworkAccess
@@ -603,6 +604,7 @@ type (
 	HostedTurnResponse                   = runtime.HostedTurnResponse
 	HostedTurnForm                       = runtime.HostedTurnForm
 	HostedTurnFormAuthority              = runtime.HostedTurnFormAuthority
+	HostedWorkspaceOperationForm         = runtime.HostedWorkspaceOperationForm
 	HostedTurnActionForm                 = runtime.HostedTurnActionForm
 	HostedTurnModelInput                 = runtime.HostedTurnModelInput
 	HostedActionInvocationContract       = runtime.HostedActionInvocationContract
@@ -1493,6 +1495,7 @@ var (
 	MarshalHostedTurnModelInput            = runtime.MarshalHostedTurnModelInput
 	ProjectHostedActionInvocationContracts = runtime.ProjectHostedActionInvocationContracts
 	CompileHostedTurnForm                  = runtime.CompileHostedTurnForm
+	CompileHostedTurnFormWithWorkspace     = runtime.CompileHostedTurnFormWithWorkspace
 	HostedTurnFormFromResponse             = runtime.HostedTurnFormFromResponse
 	HostedTurnFormJSONSchema               = runtime.HostedTurnFormJSONSchema
 	ValidateHostedTurnCompletion           = runtime.ValidateHostedTurnCompletion
@@ -2146,6 +2149,12 @@ const (
 	WorkspaceAccessReadWrite          = workspace.AccessReadWrite
 	WorkspaceNetworkDenied            = workspace.NetworkDenied
 	WorkspaceNetworkEgress            = workspace.NetworkEgress
+	WorkspaceOperationListDirectory   = workspace.OperationListDirectory
+	WorkspaceOperationReadFile        = workspace.OperationReadFile
+	WorkspaceOperationSearchFiles     = workspace.OperationSearchFiles
+	WorkspaceOperationWriteFile       = workspace.OperationWriteFile
+	WorkspaceOperationApplyPatch      = workspace.OperationApplyPatch
+	WorkspaceOperationRunCommand      = workspace.OperationRunCommand
 	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
 	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
 	SkillBindingArgumentVerifiedClaim = skill.BindingArgumentVerifiedClaim
