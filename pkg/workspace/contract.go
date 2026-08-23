@@ -84,6 +84,7 @@ type Spec struct {
 var (
 	idPattern       = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`)
 	quantityPattern = regexp.MustCompile(`^[1-9][0-9]*(?:m|Ki|Mi|Gi|Ti|Pi|Ei)?$`)
+	bindingPattern  = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
 )
 
 func DefaultSpec() Spec {
@@ -150,8 +151,11 @@ func (s Spec) Validate() error {
 	if len(s.Policy.Commands.AllowedExecutables) != len(slices.Compact(append([]string(nil), s.Policy.Commands.AllowedExecutables...))) {
 		return errors.New("workspace allowed executables must be unique")
 	}
+	if len(s.Policy.CredentialBindings) > 16 {
+		return errors.New("workspace credential bindings must not exceed 16")
+	}
 	for _, binding := range s.Policy.CredentialBindings {
-		if strings.TrimSpace(binding) == "" || len(binding) > 128 {
+		if !bindingPattern.MatchString(binding) {
 			return errors.New("workspace credential binding is invalid")
 		}
 	}
