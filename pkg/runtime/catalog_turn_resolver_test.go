@@ -172,11 +172,11 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
 		t.Fatal(err)
 	}
-	if host.request.Workspace == nil || host.request.Workspace.Workspace.ID != workspace.DefaultID || host.request.Workspace.Access != workspace.AccessReadWrite {
+	if host.request.Workspace == nil || host.request.Workspace.Workspace.ID != workspace.DefaultID || host.request.Workspace.Workspace.Policy.Filesystem != workspace.AccessReadWrite {
 		t.Fatalf("workspace authority = %#v", host.request.Workspace)
 	}
 	encoded, err := MarshalHostedTurnModelInput(host.request)
-	if err != nil || !strings.Contains(string(encoded), `"workspace":{"id":"default","displayName":"Default","access":"read_write"}`) || strings.Contains(string(encoded), `"storage"`) {
+	if err != nil || !strings.Contains(string(encoded), `"workspace":{"id":"default","displayName":"Default","policy":{"filesystem":"read_write","commands":{"enabled":false,"network":"denied","maxDurationSeconds":0}}}`) || strings.Contains(string(encoded), `"storage"`) {
 		t.Fatalf("model input = %s, error=%v", encoded, err)
 	}
 }
