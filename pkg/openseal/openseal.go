@@ -145,6 +145,7 @@ type (
 	WorkspaceOperation                        = workspace.Operation
 	WorkspacePolicy                           = workspace.Policy
 	WorkspaceCommandPolicy                    = workspace.CommandPolicy
+	WorkspaceGitPolicy                        = workspace.GitPolicy
 	WorkspaceNetworkAccess                    = workspace.NetworkAccess
 	HostedWorkspace                           = runtime.HostedWorkspace
 	AgentDefinitionActivation                 = kernelagent.DefinitionActivation
@@ -2155,6 +2156,8 @@ const (
 	WorkspaceOperationWriteFile       = workspace.OperationWriteFile
 	WorkspaceOperationApplyPatch      = workspace.OperationApplyPatch
 	WorkspaceOperationRunCommand      = workspace.OperationRunCommand
+	WorkspaceOperationGitClone        = workspace.OperationGitClone
+	WorkspaceOperationGitPush         = workspace.OperationGitPush
 	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
 	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
 	SkillBindingArgumentVerifiedClaim = skill.BindingArgumentVerifiedClaim
