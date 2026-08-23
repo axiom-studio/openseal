@@ -143,11 +143,22 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *AgentDeploy
 }
 
 func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*AgentDeployment, error) {
-	return r.store.GetDeployment(ctx, scope, id)
+	deployment, err := r.store.GetDeployment(ctx, scope, id)
+	if err == nil {
+		EnsureDefaultWorkspace(deployment)
+	}
+	return deployment, err
 }
 
 func (r *Registry) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*AgentDeployment, error) {
-	return r.store.ListDeployments(ctx, scope)
+	deployments, err := r.store.ListDeployments(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	for _, deployment := range deployments {
+		EnsureDefaultWorkspace(deployment)
+	}
+	return deployments, nil
 }
 
 // UpdateDeployment atomically changes only an Agent's deployment-local
