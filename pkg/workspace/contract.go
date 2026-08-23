@@ -64,12 +64,13 @@ type CommandPolicy struct {
 // GitPolicy grants fixed repository operations. Credentials are projected only
 // into those operations and never into arbitrary Workspace commands.
 type GitPolicy struct {
-	Enabled            bool     `json:"enabled"`
-	PushEnabled        bool     `json:"pushEnabled"`
-	CredentialBinding  string   `json:"credentialBinding,omitempty"`
-	CredentialKind     string   `json:"credentialKind,omitempty"`
-	AllowedHosts       []string `json:"allowedHosts,omitempty"`
-	MaxDurationSeconds int      `json:"maxDurationSeconds"`
+	Enabled             bool     `json:"enabled"`
+	PushEnabled         bool     `json:"pushEnabled"`
+	CredentialBinding   string   `json:"credentialBinding,omitempty"`
+	CredentialKind      string   `json:"credentialKind,omitempty"`
+	AllowedHosts        []string `json:"allowedHosts,omitempty"`
+	AllowedRepositories []string `json:"allowedRepositories,omitempty"`
+	MaxDurationSeconds  int      `json:"maxDurationSeconds"`
 }
 
 // Policy is framework authority, not a Skill binding. The kernel projects it
@@ -99,6 +100,7 @@ var (
 	bindingPattern        = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
 	credentialKindPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
 	hostPattern           = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+	repositoryPattern     = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?/[a-z0-9._-]+(?:/[a-z0-9._-]+)*$`)
 )
 
 func DefaultSpec() Spec {
@@ -174,12 +176,13 @@ func (s Spec) Validate() error {
 		}
 	}
 	if !s.Policy.Git.Enabled {
-		if s.Policy.Git.PushEnabled || s.Policy.Git.CredentialBinding != "" || s.Policy.Git.CredentialKind != "" || len(s.Policy.Git.AllowedHosts) != 0 || s.Policy.Git.MaxDurationSeconds != 0 {
+		if s.Policy.Git.PushEnabled || s.Policy.Git.CredentialBinding != "" || s.Policy.Git.CredentialKind != "" || len(s.Policy.Git.AllowedHosts) != 0 || len(s.Policy.Git.AllowedRepositories) != 0 || s.Policy.Git.MaxDurationSeconds != 0 {
 			return errors.New("disabled workspace Git cannot grant repository authority")
 		}
 	} else {
 		if s.Policy.Filesystem != AccessReadWrite || !bindingPattern.MatchString(s.Policy.Git.CredentialBinding) || !credentialKindPattern.MatchString(s.Policy.Git.CredentialKind) ||
 			!slices.Contains(s.Policy.CredentialBindings, s.Policy.Git.CredentialBinding) || len(s.Policy.Git.AllowedHosts) == 0 || len(s.Policy.Git.AllowedHosts) > 16 ||
+			len(s.Policy.Git.AllowedRepositories) == 0 || len(s.Policy.Git.AllowedRepositories) > 64 ||
 			s.Policy.Git.MaxDurationSeconds < 1 || s.Policy.Git.MaxDurationSeconds > 900 {
 			return errors.New("workspace Git authority is invalid")
 		}
@@ -190,6 +193,18 @@ func (s Spec) Validate() error {
 		}
 		if len(s.Policy.Git.AllowedHosts) != len(slices.Compact(append([]string(nil), s.Policy.Git.AllowedHosts...))) {
 			return errors.New("workspace Git hosts must be unique")
+		}
+		for _, repository := range s.Policy.Git.AllowedRepositories {
+			if !repositoryPattern.MatchString(repository) {
+				return errors.New("workspace Git repository is invalid")
+			}
+			host, _, _ := strings.Cut(repository, "/")
+			if !slices.Contains(s.Policy.Git.AllowedHosts, host) {
+				return errors.New("workspace Git repository host is not allowed")
+			}
+		}
+		if len(s.Policy.Git.AllowedRepositories) != len(slices.Compact(append([]string(nil), s.Policy.Git.AllowedRepositories...))) {
+			return errors.New("workspace Git repositories must be unique")
 		}
 	}
 	if len(s.Policy.CredentialBindings) != len(slices.Compact(append([]string(nil), s.Policy.CredentialBindings...))) {
