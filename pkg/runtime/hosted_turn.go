@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 var (
@@ -48,7 +49,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v12"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v13"
 
 const maximumHostedTurnMediaBytes = 1 << 20
 
@@ -70,6 +71,15 @@ type HostedAgentTarget struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
 	Purpose     string `json:"purpose,omitempty"`
+}
+
+// HostedWorkspace is the small model-facing projection of framework-owned
+// Workspace authority. Native Workspace tools are supplied by the trusted
+// Agent host automatically; there is no Skill, binding, or catalog identity.
+type HostedWorkspace struct {
+	ID          string           `json:"id"`
+	DisplayName string           `json:"displayName,omitempty"`
+	Access      workspace.Access `json:"access"`
 }
 
 // HostedRunbookOperation is one immutable deterministic operation the current
@@ -148,6 +158,7 @@ type HostedTurnRequest struct {
 	InputContext           map[string]interface{}   `json:"inputContext,omitempty"`
 	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
 	EligibleAgents         []HostedAgentTarget      `json:"eligibleAgents,omitempty"`
+	Workspace              *workspace.Authority     `json:"workspace,omitempty"`
 	RunbookOperations      []HostedRunbookOperation `json:"runbookOperations,omitempty"`
 	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction `json:"actions,omitempty"`
@@ -230,6 +241,7 @@ type HostedTurnRunnerConfig struct {
 	DefinitionVersion  string
 	SystemInstructions []string
 	EligibleAgents     []HostedAgentTarget
+	Workspace          *workspace.Authority
 	RunbookOperations  []HostedRunbookOperation
 	SkillPrompts       []HostedSkillPrompt
 	Actions            []capability.ModelAction
@@ -615,6 +627,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
 		Goal: input.Run.Goal, InputContext: inputContext, SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
 		EligibleAgents:         cloneHostedAgentTargets(r.config.EligibleAgents),
+		Workspace:              cloneHostedWorkspaceAuthority(r.config.Workspace),
 		RunbookOperations:      cloneHostedRunbookOperations(r.config.RunbookOperations),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		Actions:                cloneHostedModelActions(r.config.Actions),
@@ -1046,4 +1059,16 @@ func cloneHostedAgentTargets(values []HostedAgentTarget) []HostedAgentTarget {
 		return nil
 	}
 	return append([]HostedAgentTarget(nil), values...)
+}
+
+func cloneHostedWorkspaceAuthority(value *workspace.Authority) *workspace.Authority {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	if value.Workspace.Compute.Accelerator != nil {
+		accelerator := *value.Workspace.Compute.Accelerator
+		copy.Workspace.Compute.Accelerator = &accelerator
+	}
+	return &copy
 }
