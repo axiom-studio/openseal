@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 const (
@@ -64,6 +65,7 @@ type HostedTurnModelInput struct {
 	InputContext              map[string]interface{}           `json:"inputContext,omitempty"`
 	SystemInstructions        []string                         `json:"systemInstructions,omitempty"`
 	EligibleAgents            []HostedAgentTarget              `json:"eligibleAgents,omitempty"`
+	Workspace                 *HostedWorkspace                 `json:"workspace,omitempty"`
 	RunbookOperations         []HostedRunbookOperation         `json:"runbookOperations,omitempty"`
 	SkillPrompts              []HostedSkillPrompt              `json:"skillPrompts,omitempty"`
 	Actions                   []capability.ModelAction         `json:"actions,omitempty"`
@@ -153,6 +155,7 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 	return json.Marshal(HostedTurnModelInput{
 		Goal: request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
 		EligibleAgents:            request.EligibleAgents,
+		Workspace:                 projectHostedWorkspace(request.Workspace),
 		RunbookOperations:         request.RunbookOperations,
 		SkillPrompts:              request.SkillPrompts,
 		Actions:                   request.Actions,
@@ -162,6 +165,13 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 		ContinuationCheckpoint: hostedTurnTextCheckpoint(request.ContinuationCheckpoint),
 		PendingInterventions:   request.PendingInterventions,
 	})
+}
+
+func projectHostedWorkspace(authority *workspace.Authority) *HostedWorkspace {
+	if authority == nil {
+		return nil
+	}
+	return &HostedWorkspace{ID: authority.Workspace.ID, DisplayName: authority.Workspace.DisplayName, Access: authority.Access}
 }
 
 func hostedTurnTextCheckpoint(checkpoint map[string]interface{}) map[string]interface{} {
