@@ -28,6 +28,11 @@ func TestSpecRejectsUnsafeOrUnboundedProfiles(t *testing.T) {
 			v.Policy.CredentialBindings = []string{"github token"}
 			return v
 		}(),
+		"Git without binding": func() Spec {
+			v := DefaultSpec()
+			v.Policy.Git = GitPolicy{Enabled: true, CredentialBinding: "GITHUB", AllowedHosts: []string{"github.com"}}
+			return v
+		}(),
 	}
 	for name, value := range tests {
 		t.Run(name, func(t *testing.T) {

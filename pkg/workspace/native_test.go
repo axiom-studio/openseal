@@ -17,3 +17,17 @@ func TestOperationsFollowNativeWorkspacePolicy(t *testing.T) {
 		t.Fatalf("command operations = %#v", got)
 	}
 }
+
+func TestOperationsProjectFixedGitAuthority(t *testing.T) {
+	spec := DefaultSpec()
+	spec.Policy.CredentialBindings = []string{"GITHUB"}
+	spec.Policy.Git = GitPolicy{Enabled: true, PushEnabled: true, CredentialBinding: "GITHUB", AllowedHosts: []string{"github.com"}}
+	operations := Operations(&Authority{Workspace: spec})
+	names := make(map[string]bool, len(operations))
+	for _, operation := range operations {
+		names[operation.Name] = true
+	}
+	if !names[OperationGitClone] || !names[OperationGitPush] {
+		t.Fatalf("Git operations=%#v", names)
+	}
+}
