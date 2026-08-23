@@ -52,9 +52,8 @@ const (
 	NetworkEgress NetworkAccess = "egress"
 )
 
-// CommandPolicy bounds native process execution inside a Workspace. An empty
-// executable list means the host's operator-maintained allow-list; it never
-// means arbitrary shell evaluation.
+// CommandPolicy bounds native process execution inside a Workspace. Enabled
+// command authority always names an explicit executable allow-list.
 type CommandPolicy struct {
 	Enabled            bool          `json:"enabled"`
 	Network            NetworkAccess `json:"network"`
@@ -134,8 +133,13 @@ func (s Spec) Validate() error {
 		if s.Policy.Commands.MaxDurationSeconds != 0 || len(s.Policy.Commands.AllowedExecutables) != 0 || s.Policy.Commands.Network != NetworkDenied {
 			return errors.New("disabled workspace commands cannot grant execution authority")
 		}
-	} else if s.Policy.Commands.MaxDurationSeconds < 1 || s.Policy.Commands.MaxDurationSeconds > 900 {
-		return errors.New("workspace command duration must be between 1 and 900 seconds")
+	} else {
+		if s.Policy.Commands.MaxDurationSeconds < 1 || s.Policy.Commands.MaxDurationSeconds > 900 {
+			return errors.New("workspace command duration must be between 1 and 900 seconds")
+		}
+		if len(s.Policy.Commands.AllowedExecutables) == 0 {
+			return errors.New("enabled workspace commands require an executable allow-list")
+		}
 	}
 	for _, executable := range s.Policy.Commands.AllowedExecutables {
 		if strings.TrimSpace(executable) == "" || strings.ContainsAny(executable, " \t\r\n") {
