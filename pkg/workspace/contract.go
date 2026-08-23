@@ -67,6 +67,7 @@ type GitPolicy struct {
 	Enabled            bool     `json:"enabled"`
 	PushEnabled        bool     `json:"pushEnabled"`
 	CredentialBinding  string   `json:"credentialBinding,omitempty"`
+	CredentialKind     string   `json:"credentialKind,omitempty"`
 	AllowedHosts       []string `json:"allowedHosts,omitempty"`
 	MaxDurationSeconds int      `json:"maxDurationSeconds"`
 }
@@ -93,10 +94,11 @@ type Spec struct {
 }
 
 var (
-	idPattern       = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`)
-	quantityPattern = regexp.MustCompile(`^[1-9][0-9]*(?:m|Ki|Mi|Gi|Ti|Pi|Ei)?$`)
-	bindingPattern  = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
-	hostPattern     = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+	idPattern             = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`)
+	quantityPattern       = regexp.MustCompile(`^[1-9][0-9]*(?:m|Ki|Mi|Gi|Ti|Pi|Ei)?$`)
+	bindingPattern        = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
+	credentialKindPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
+	hostPattern           = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
 func DefaultSpec() Spec {
@@ -172,11 +174,11 @@ func (s Spec) Validate() error {
 		}
 	}
 	if !s.Policy.Git.Enabled {
-		if s.Policy.Git.PushEnabled || s.Policy.Git.CredentialBinding != "" || len(s.Policy.Git.AllowedHosts) != 0 || s.Policy.Git.MaxDurationSeconds != 0 {
+		if s.Policy.Git.PushEnabled || s.Policy.Git.CredentialBinding != "" || s.Policy.Git.CredentialKind != "" || len(s.Policy.Git.AllowedHosts) != 0 || s.Policy.Git.MaxDurationSeconds != 0 {
 			return errors.New("disabled workspace Git cannot grant repository authority")
 		}
 	} else {
-		if s.Policy.Filesystem != AccessReadWrite || !bindingPattern.MatchString(s.Policy.Git.CredentialBinding) ||
+		if s.Policy.Filesystem != AccessReadWrite || !bindingPattern.MatchString(s.Policy.Git.CredentialBinding) || !credentialKindPattern.MatchString(s.Policy.Git.CredentialKind) ||
 			!slices.Contains(s.Policy.CredentialBindings, s.Policy.Git.CredentialBinding) || len(s.Policy.Git.AllowedHosts) == 0 || len(s.Policy.Git.AllowedHosts) > 16 ||
 			s.Policy.Git.MaxDurationSeconds < 1 || s.Policy.Git.MaxDurationSeconds > 900 {
 			return errors.New("workspace Git authority is invalid")
