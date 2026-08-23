@@ -7,6 +7,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/workforce"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 type RolloutStatus string
@@ -40,24 +41,26 @@ type DeploymentHealth struct {
 }
 
 type AgentDeployment struct {
-	ID              string                                    `json:"id"`
-	DisplayName     string                                    `json:"displayName,omitempty"`
-	Scope           capability.ScopeReference                 `json:"scope"`
-	DefinitionID    string                                    `json:"definitionId"`
-	ActiveVersion   string                                    `json:"activeVersion"`
-	PreviousVersion string                                    `json:"previousVersion,omitempty"`
-	RolloutStatus   RolloutStatus                             `json:"rolloutStatus"`
-	Environment     string                                    `json:"environment"`
-	Placement       map[string]string                         `json:"placement,omitempty"`
-	SkillBindingIDs []string                                  `json:"skillBindingIds,omitempty"`
-	Credentials     map[string]capability.CredentialReference `json:"credentials,omitempty"`
-	Restrictions    DeploymentRestrictions                    `json:"restrictions,omitempty"`
-	Capacity        DeploymentCapacity                        `json:"capacity"`
-	Health          DeploymentHealth                          `json:"health,omitempty"`
-	Activation      *workforce.ActivationContinuation         `json:"activation,omitempty"`
-	Revision        int64                                     `json:"revision"`
-	CreatedAt       time.Time                                 `json:"createdAt"`
-	UpdatedAt       time.Time                                 `json:"updatedAt"`
+	ID                 string                                    `json:"id"`
+	DisplayName        string                                    `json:"displayName,omitempty"`
+	Scope              capability.ScopeReference                 `json:"scope"`
+	DefinitionID       string                                    `json:"definitionId"`
+	ActiveVersion      string                                    `json:"activeVersion"`
+	PreviousVersion    string                                    `json:"previousVersion,omitempty"`
+	RolloutStatus      RolloutStatus                             `json:"rolloutStatus"`
+	Environment        string                                    `json:"environment"`
+	Placement          map[string]string                         `json:"placement,omitempty"`
+	SkillBindingIDs    []string                                  `json:"skillBindingIds,omitempty"`
+	Credentials        map[string]capability.CredentialReference `json:"credentials,omitempty"`
+	DefaultWorkspaceID string                                    `json:"defaultWorkspaceId,omitempty"`
+	Workspaces         []workspace.Spec                          `json:"workspaces,omitempty"`
+	Restrictions       DeploymentRestrictions                    `json:"restrictions,omitempty"`
+	Capacity           DeploymentCapacity                        `json:"capacity"`
+	Health             DeploymentHealth                          `json:"health,omitempty"`
+	Activation         *workforce.ActivationContinuation         `json:"activation,omitempty"`
+	Revision           int64                                     `json:"revision"`
+	CreatedAt          time.Time                                 `json:"createdAt"`
+	UpdatedAt          time.Time                                 `json:"updatedAt"`
 }
 
 type DefinitionActivation = workforce.DefinitionActivation
@@ -85,6 +88,31 @@ func (d *AgentDeployment) Validate() error {
 			return errors.New("deployment credentials must be opaque named references")
 		}
 	}
+	// Older portable deployments did not carry Workspace desired state. Hosts
+	// normalize those deployments during creation; validation remains backward
+	// compatible for stored manifests while rejecting partial Workspace state.
+	if strings.TrimSpace(d.DefaultWorkspaceID) != "" || len(d.Workspaces) != 0 {
+		if strings.TrimSpace(d.DefaultWorkspaceID) == "" || len(d.Workspaces) == 0 {
+			return errors.New("deployment workspace state is incomplete")
+		}
+		workspaceIDs := make(map[string]struct{}, len(d.Workspaces))
+		for _, candidate := range d.Workspaces {
+			if err := candidate.Validate(); err != nil {
+				return err
+			}
+			if _, duplicate := workspaceIDs[candidate.ID]; duplicate {
+				return errors.New("deployment workspace ids must be unique")
+			}
+			workspaceIDs[candidate.ID] = struct{}{}
+		}
+		if _, found := workspaceIDs[d.DefaultWorkspaceID]; !found {
+			return errors.New("deployment default workspace is not attached")
+		}
+	}
+	return validateDeploymentPlacement(d)
+}
+
+func validateDeploymentPlacement(d *AgentDeployment) error {
 	placement := make(map[string]interface{}, len(d.Placement))
 	for key, value := range d.Placement {
 		placement[key] = value
@@ -93,6 +121,17 @@ func (d *AgentDeployment) Validate() error {
 		return err
 	}
 	return nil
+}
+
+// EnsureDefaultWorkspace materializes portable defaults for a deployment that
+// predates first-class Workspaces. It does not replace explicitly configured
+// Workspace state.
+func EnsureDefaultWorkspace(d *AgentDeployment) {
+	if d == nil || len(d.Workspaces) != 0 || strings.TrimSpace(d.DefaultWorkspaceID) != "" {
+		return
+	}
+	d.DefaultWorkspaceID = workspace.DefaultID
+	d.Workspaces = []workspace.Spec{workspace.DefaultSpec()}
 }
 
 func validateNarrowing(definition *AgentDefinition, deployment *AgentDeployment) error {
