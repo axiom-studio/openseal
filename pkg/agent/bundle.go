@@ -143,6 +143,10 @@ type BundleExportRequest struct {
 type BundleSkillPlacement struct {
 	Identity  capability.SkillIdentity `json:"identity"`
 	BindingID string                   `json:"bindingId"`
+	// Config contains target-host, non-secret binding configuration. Portable
+	// bundles retain source configuration as evidence, but installation must be
+	// able to replace host-local identifiers such as Kubernetes cluster IDs.
+	Config map[string]interface{} `json:"config,omitempty"`
 }
 
 type BundleEndpointPlacement struct {
@@ -443,6 +447,10 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 	}}
 	for _, need := range request.Bundle.Skills {
 		selected := request.Placement.Skills[need.RequirementID]
+		config := need.Policy.Config
+		if selected.Config != nil {
+			config = selected.Config
+		}
 		plan.Bindings = append(plan.Bindings, &capability.Binding{
 			ID: selected.BindingID, Scope: request.Scope, DeploymentID: request.Placement.DeploymentID,
 			SkillID: need.Identity.ID, SkillVersion: need.Identity.Version, SourceIdentity: need.Identity.SourceIdentity,
@@ -450,7 +458,7 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 			EnabledConversationAdapters: append([]string(nil), need.Policy.EnabledConversationAdapters...),
 			EnabledCallbackAdapters:     append([]string(nil), need.Policy.EnabledCallbackAdapters...),
 			MaximumRisk:                 need.Policy.MaximumRisk, ArgumentRestrictions: need.Policy.ArgumentRestrictions,
-			Credentials: cloneCredentialReferences(bindingCredentials[need.RequirementID]), Config: need.Policy.Config,
+			Credentials: cloneCredentialReferences(bindingCredentials[need.RequirementID]), Config: config,
 		})
 	}
 	for _, need := range request.Bundle.Endpoints {
