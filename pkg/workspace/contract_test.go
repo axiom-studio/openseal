@@ -23,6 +23,11 @@ func TestSpecRejectsUnsafeOrUnboundedProfiles(t *testing.T) {
 			v.Compute.Accelerator = &AcceleratorProfile{Type: "nvidia.com/gpu"}
 			return v
 		}(),
+		"invalid credential binding": func() Spec {
+			v := DefaultSpec()
+			v.Policy.CredentialBindings = []string{"github token"}
+			return v
+		}(),
 	}
 	for name, value := range tests {
 		t.Run(name, func(t *testing.T) {
