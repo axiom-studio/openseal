@@ -139,7 +139,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	var workspaceAuthority *workspace.Authority
 	if workspaceSpec != nil {
-		workspaceAuthority = &workspace.Authority{Workspace: *workspaceSpec, Access: workspace.AccessReadWrite}
+		workspaceAuthority = &workspace.Authority{Workspace: *workspaceSpec}
 	}
 	actionDeploymentID := deployment.ID
 	if run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != "" {

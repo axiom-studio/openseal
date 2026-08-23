@@ -171,7 +171,7 @@ func projectHostedWorkspace(authority *workspace.Authority) *HostedWorkspace {
 	if authority == nil {
 		return nil
 	}
-	return &HostedWorkspace{ID: authority.Workspace.ID, DisplayName: authority.Workspace.DisplayName, Access: authority.Access}
+	return &HostedWorkspace{ID: authority.Workspace.ID, DisplayName: authority.Workspace.DisplayName, Policy: authority.Workspace.Policy}
 }
 
 func hostedTurnTextCheckpoint(checkpoint map[string]interface{}) map[string]interface{} {

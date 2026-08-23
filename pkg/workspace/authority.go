@@ -19,20 +19,14 @@ const (
 // a trusted Agent host. Storage handles, mount paths, cluster identities, and
 // credentials remain host-owned and are never part of this portable contract.
 type Authority struct {
-	Workspace Spec   `json:"workspace"`
-	Access    Access `json:"access"`
+	Workspace Spec `json:"workspace"`
 }
 
 func (a Authority) Validate() error {
 	if err := a.Workspace.Validate(); err != nil {
 		return err
 	}
-	switch a.Access {
-	case AccessReadOnly, AccessReadWrite:
-		return nil
-	default:
-		return errors.New("workspace authority access is invalid")
-	}
+	return nil
 }
 
 // Select returns the deployment's exact default Workspace. Callers must not

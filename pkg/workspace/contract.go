@@ -6,6 +6,7 @@ package workspace
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -44,6 +45,30 @@ type ComputeProfile struct {
 	Accelerator *AcceleratorProfile `json:"accelerator,omitempty"`
 }
 
+type NetworkAccess string
+
+const (
+	NetworkDenied NetworkAccess = "denied"
+	NetworkEgress NetworkAccess = "egress"
+)
+
+// CommandPolicy bounds native process execution inside a Workspace. An empty
+// executable list means the host's operator-maintained allow-list; it never
+// means arbitrary shell evaluation.
+type CommandPolicy struct {
+	Enabled            bool          `json:"enabled"`
+	Network            NetworkAccess `json:"network"`
+	MaxDurationSeconds int           `json:"maxDurationSeconds"`
+	AllowedExecutables []string      `json:"allowedExecutables,omitempty"`
+}
+
+// Policy is framework authority, not a Skill binding. The kernel projects it
+// into every hosted turn and the execution host must enforce it again.
+type Policy struct {
+	Filesystem Access        `json:"filesystem"`
+	Commands   CommandPolicy `json:"commands"`
+}
+
 // Spec is deliberately domain-neutral. Repositories, media tools, notebooks,
 // and deployment clients are capabilities attached to a Workspace rather than
 // properties of the Workspace itself.
@@ -52,6 +77,7 @@ type Spec struct {
 	DisplayName    string         `json:"displayName,omitempty"`
 	Storage        StorageProfile `json:"storage"`
 	Compute        ComputeProfile `json:"compute"`
+	Policy         Policy         `json:"policy"`
 	MaxConcurrency int            `json:"maxConcurrency"`
 }
 
@@ -64,7 +90,8 @@ func DefaultSpec() Spec {
 	return Spec{
 		ID: DefaultID, DisplayName: "Default",
 		Storage: StorageProfile{Capacity: DefaultStorageCapacity, Durability: StorageDurabilityPersistent, Retention: StorageRetentionRetain},
-		Compute: ComputeProfile{CPU: DefaultCPU, Memory: DefaultMemory}, MaxConcurrency: 1,
+		Compute: ComputeProfile{CPU: DefaultCPU, Memory: DefaultMemory},
+		Policy:  Policy{Filesystem: AccessReadWrite, Commands: CommandPolicy{Network: NetworkDenied}}, MaxConcurrency: 1,
 	}
 }
 
@@ -96,6 +123,27 @@ func (s Spec) Validate() error {
 	}
 	if s.Compute.Accelerator != nil && (strings.TrimSpace(s.Compute.Accelerator.Type) == "" || s.Compute.Accelerator.Count < 1 || s.Compute.Accelerator.Count > 64) {
 		return errors.New("workspace accelerator profile is invalid")
+	}
+	if s.Policy.Filesystem != AccessReadOnly && s.Policy.Filesystem != AccessReadWrite {
+		return errors.New("workspace filesystem access is invalid")
+	}
+	if s.Policy.Commands.Network != NetworkDenied && s.Policy.Commands.Network != NetworkEgress {
+		return errors.New("workspace command network access is invalid")
+	}
+	if !s.Policy.Commands.Enabled {
+		if s.Policy.Commands.MaxDurationSeconds != 0 || len(s.Policy.Commands.AllowedExecutables) != 0 || s.Policy.Commands.Network != NetworkDenied {
+			return errors.New("disabled workspace commands cannot grant execution authority")
+		}
+	} else if s.Policy.Commands.MaxDurationSeconds < 1 || s.Policy.Commands.MaxDurationSeconds > 900 {
+		return errors.New("workspace command duration must be between 1 and 900 seconds")
+	}
+	for _, executable := range s.Policy.Commands.AllowedExecutables {
+		if strings.TrimSpace(executable) == "" || strings.ContainsAny(executable, " \t\r\n") {
+			return errors.New("workspace allowed executable is invalid")
+		}
+	}
+	if len(s.Policy.Commands.AllowedExecutables) != len(slices.Compact(append([]string(nil), s.Policy.Commands.AllowedExecutables...))) {
+		return errors.New("workspace allowed executables must be unique")
 	}
 	return nil
 }
