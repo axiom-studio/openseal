@@ -138,8 +138,19 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, fmt.Errorf("resolve default Workspace for Agent %s: %w", deployment.ID, err)
 	}
 	var workspaceAuthority *workspace.Authority
+	var workspaceCredentials map[string]capability.CredentialReference
 	if workspaceSpec != nil {
 		workspaceAuthority = &workspace.Authority{Workspace: *workspaceSpec}
+		if len(workspaceSpec.Policy.CredentialBindings) > 0 {
+			workspaceCredentials = make(map[string]capability.CredentialReference, len(workspaceSpec.Policy.CredentialBindings))
+			for _, name := range workspaceSpec.Policy.CredentialBindings {
+				reference, ok := deployment.Credentials[name]
+				if !ok || strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+					return nil, fmt.Errorf("resolve default Workspace credential %s for Agent %s: binding is unavailable", name, deployment.ID)
+				}
+				workspaceCredentials[name] = reference
+			}
+		}
 	}
 	actionDeploymentID := deployment.ID
 	if run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != "" {
@@ -247,7 +258,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	runner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
 		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-		SystemInstructions: instructions, EligibleAgents: eligibleAgents, Workspace: workspaceAuthority, SkillPrompts: prompts, Actions: actions,
+		SystemInstructions: instructions, EligibleAgents: eligibleAgents, Workspace: workspaceAuthority, WorkspaceCredentials: workspaceCredentials, SkillPrompts: prompts, Actions: actions,
 		RunbookOperations: base.RunbookOperations,
 		ModelCredential:   deploymentModelCredential(deployment),
 	})
