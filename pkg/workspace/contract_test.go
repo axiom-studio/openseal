@@ -30,7 +30,7 @@ func TestSpecRejectsUnsafeOrUnboundedProfiles(t *testing.T) {
 		}(),
 		"Git without binding": func() Spec {
 			v := DefaultSpec()
-			v.Policy.Git = GitPolicy{Enabled: true, CredentialBinding: "GITHUB", AllowedHosts: []string{"github.com"}}
+			v.Policy.Git = GitPolicy{Enabled: true, CredentialBinding: "GITHUB", AllowedHosts: []string{"github.com"}, MaxDurationSeconds: 300}
 			return v
 		}(),
 	}
