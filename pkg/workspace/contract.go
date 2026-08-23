@@ -61,11 +61,21 @@ type CommandPolicy struct {
 	AllowedExecutables []string      `json:"allowedExecutables,omitempty"`
 }
 
+// GitPolicy grants fixed repository operations. Credentials are projected only
+// into those operations and never into arbitrary Workspace commands.
+type GitPolicy struct {
+	Enabled           bool     `json:"enabled"`
+	PushEnabled       bool     `json:"pushEnabled"`
+	CredentialBinding string   `json:"credentialBinding,omitempty"`
+	AllowedHosts      []string `json:"allowedHosts,omitempty"`
+}
+
 // Policy is framework authority, not a Skill binding. The kernel projects it
 // into every hosted turn and the execution host must enforce it again.
 type Policy struct {
 	Filesystem         Access        `json:"filesystem"`
 	Commands           CommandPolicy `json:"commands"`
+	Git                GitPolicy     `json:"git"`
 	CredentialBindings []string      `json:"credentialBindings,omitempty"`
 }
 
@@ -85,6 +95,7 @@ var (
 	idPattern       = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,62}[a-z0-9])?$`)
 	quantityPattern = regexp.MustCompile(`^[1-9][0-9]*(?:m|Ki|Mi|Gi|Ti|Pi|Ei)?$`)
 	bindingPattern  = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
+	hostPattern     = regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 )
 
 func DefaultSpec() Spec {
@@ -157,6 +168,24 @@ func (s Spec) Validate() error {
 	for _, binding := range s.Policy.CredentialBindings {
 		if !bindingPattern.MatchString(binding) {
 			return errors.New("workspace credential binding is invalid")
+		}
+	}
+	if !s.Policy.Git.Enabled {
+		if s.Policy.Git.PushEnabled || s.Policy.Git.CredentialBinding != "" || len(s.Policy.Git.AllowedHosts) != 0 {
+			return errors.New("disabled workspace Git cannot grant repository authority")
+		}
+	} else {
+		if s.Policy.Filesystem != AccessReadWrite || !bindingPattern.MatchString(s.Policy.Git.CredentialBinding) ||
+			!slices.Contains(s.Policy.CredentialBindings, s.Policy.Git.CredentialBinding) || len(s.Policy.Git.AllowedHosts) == 0 || len(s.Policy.Git.AllowedHosts) > 16 {
+			return errors.New("workspace Git authority is invalid")
+		}
+		for _, host := range s.Policy.Git.AllowedHosts {
+			if !hostPattern.MatchString(host) {
+				return errors.New("workspace Git host is invalid")
+			}
+		}
+		if len(s.Policy.Git.AllowedHosts) != len(slices.Compact(append([]string(nil), s.Policy.Git.AllowedHosts...))) {
+			return errors.New("workspace Git hosts must be unique")
 		}
 	}
 	if len(s.Policy.CredentialBindings) != len(slices.Compact(append([]string(nil), s.Policy.CredentialBindings...))) {

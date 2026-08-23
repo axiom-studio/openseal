@@ -7,6 +7,8 @@ const (
 	OperationWriteFile     = "workspace.write_file"
 	OperationApplyPatch    = "workspace.apply_patch"
 	OperationRunCommand    = "workspace.run_command"
+	OperationGitClone      = "workspace.git_clone"
+	OperationGitPush       = "workspace.git_push"
 )
 
 // Operation is one framework-native Workspace tool projected to a hosted
@@ -35,7 +37,29 @@ func Operations(authority *Authority) []Operation {
 	if authority.Workspace.Policy.Commands.Enabled {
 		result = append(result, Operation{Name: OperationRunCommand, Description: "Run one bounded executable with an explicit argument vector in the Workspace.", InputSchema: commandInput(authority.Workspace.Policy.Commands.MaxDurationSeconds)})
 	}
+	if authority.Workspace.Policy.Git.Enabled {
+		result = append(result, Operation{Name: OperationGitClone, Description: "Clone one repository from an explicitly allowed HTTPS host into the Workspace.", InputSchema: gitCloneInput()})
+		if authority.Workspace.Policy.Git.PushEnabled {
+			result = append(result, Operation{Name: OperationGitPush, Description: "Push the current commit to one branch on an explicitly allowed HTTPS remote.", InputSchema: gitPushInput()})
+		}
+	}
 	return result
+}
+
+func gitCloneInput() map[string]interface{} {
+	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"repositoryUrl", "path"}, "properties": map[string]interface{}{
+		"repositoryUrl": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 2048, "pattern": `^https://`},
+		"path":          relativePathProperty(),
+		"branch":        map[string]interface{}{"type": "string", "maxLength": 255, "pattern": `^[A-Za-z0-9][A-Za-z0-9._/-]*$`},
+	}}
+}
+
+func gitPushInput() map[string]interface{} {
+	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "branch"}, "properties": map[string]interface{}{
+		"path":   relativePathProperty(),
+		"remote": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128, "pattern": `^[A-Za-z0-9][A-Za-z0-9._-]*$`, "default": "origin"},
+		"branch": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 255, "pattern": `^[A-Za-z0-9][A-Za-z0-9._/-]*$`},
+	}}
 }
 
 func relativePathProperty() map[string]interface{} {
