@@ -33,6 +33,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
 )
 
@@ -133,6 +134,14 @@ type (
 	AgentDeploymentRestrictions               = kernelagent.DeploymentRestrictions
 	AgentDeploymentCapacity                   = kernelagent.DeploymentCapacity
 	AgentDeploymentHealth                     = kernelagent.DeploymentHealth
+	WorkspaceSpec                             = workspace.Spec
+	WorkspaceStorageProfile                   = workspace.StorageProfile
+	WorkspaceComputeProfile                   = workspace.ComputeProfile
+	WorkspaceAcceleratorProfile               = workspace.AcceleratorProfile
+	WorkspaceStorageDurability                = workspace.StorageDurability
+	WorkspaceStorageRetention                 = workspace.StorageRetention
+	WorkspaceClient                           = executor.WorkspaceClient
+	WorkspaceActionRequest                    = executor.WorkspaceActionRequest
 	AgentDefinitionActivation                 = kernelagent.DefinitionActivation
 	AgentRolloutStatus                        = kernelagent.RolloutStatus
 	AgentDefinitionAmendment                  = kernelagent.DefinitionAmendment
@@ -1097,6 +1106,18 @@ func DecodeTeamManifestYAML(data []byte) (*TeamManifest, error) {
 
 func NewSkillIdentity(id, version, sourceIdentity string) SkillIdentity {
 	return capability.NewSkillIdentity(id, version, sourceIdentity)
+}
+
+func DefaultWorkspaceSpec() WorkspaceSpec { return workspace.DefaultSpec() }
+
+func WorkspaceSkillDefinition() *SkillDefinition { return workspace.SkillDefinition() }
+
+func EnsureDefaultAgentWorkspace(deployment *AgentDeployment) {
+	kernelagent.EnsureDefaultWorkspace(deployment)
+}
+
+func RegisterWorkspaceExecutors(registry *Registry, client WorkspaceClient) error {
+	return executor.RegisterWorkspaceExecutors(registry, client)
 }
 
 type ProjectSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
@@ -2117,6 +2138,21 @@ const (
 	SkillRiskExternal    = skill.RiskLevelExternal
 	SkillRiskProduction  = skill.RiskLevelProduction
 	SkillRiskDestructive = skill.RiskLevelDestructive
+
+	WorkspaceDefaultID            = workspace.DefaultID
+	WorkspaceDurabilityPersistent = workspace.StorageDurabilityPersistent
+	WorkspaceDurabilityEphemeral  = workspace.StorageDurabilityEphemeral
+	WorkspaceRetentionRetain      = workspace.StorageRetentionRetain
+	WorkspaceRetentionDelete      = workspace.StorageRetentionDelete
+	WorkspaceSkillID              = workspace.SkillID
+	WorkspaceSkillVersion         = workspace.SkillVersion
+	WorkspaceBindingConfigKey     = workspace.WorkspaceConfigKey
+	WorkspaceActionListDirectory  = workspace.ListDirectory
+	WorkspaceActionReadFile       = workspace.ReadFile
+	WorkspaceActionSearchFiles    = workspace.SearchFiles
+	WorkspaceActionWriteFile      = workspace.WriteFile
+	WorkspaceActionApplyPatch     = workspace.ApplyPatch
+	WorkspaceActionRunCommand     = workspace.RunCommand
 
 	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
 	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
