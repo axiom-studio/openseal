@@ -142,6 +142,9 @@ type (
 	WorkspaceStorageRetention                 = workspace.StorageRetention
 	WorkspaceAccess                           = workspace.Access
 	WorkspaceAuthority                        = workspace.Authority
+	WorkspacePolicy                           = workspace.Policy
+	WorkspaceCommandPolicy                    = workspace.CommandPolicy
+	WorkspaceNetworkAccess                    = workspace.NetworkAccess
 	HostedWorkspace                           = runtime.HostedWorkspace
 	AgentDefinitionActivation                 = kernelagent.DefinitionActivation
 	AgentRolloutStatus                        = kernelagent.RolloutStatus
@@ -2141,6 +2144,8 @@ const (
 	WorkspaceRetentionDelete          = workspace.StorageRetentionDelete
 	WorkspaceAccessReadOnly           = workspace.AccessReadOnly
 	WorkspaceAccessReadWrite          = workspace.AccessReadWrite
+	WorkspaceNetworkDenied            = workspace.NetworkDenied
+	WorkspaceNetworkEgress            = workspace.NetworkEgress
 	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
 	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
 	SkillBindingArgumentVerifiedClaim = skill.BindingArgumentVerifiedClaim

@@ -79,7 +79,7 @@ type HostedAgentTarget struct {
 type HostedWorkspace struct {
 	ID          string           `json:"id"`
 	DisplayName string           `json:"displayName,omitempty"`
-	Access      workspace.Access `json:"access"`
+	Policy      workspace.Policy `json:"policy"`
 }
 
 // HostedRunbookOperation is one immutable deterministic operation the current
