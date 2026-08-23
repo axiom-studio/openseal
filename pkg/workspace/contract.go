@@ -64,8 +64,9 @@ type CommandPolicy struct {
 // Policy is framework authority, not a Skill binding. The kernel projects it
 // into every hosted turn and the execution host must enforce it again.
 type Policy struct {
-	Filesystem Access        `json:"filesystem"`
-	Commands   CommandPolicy `json:"commands"`
+	Filesystem         Access        `json:"filesystem"`
+	Commands           CommandPolicy `json:"commands"`
+	CredentialBindings []string      `json:"credentialBindings,omitempty"`
 }
 
 // Spec is deliberately domain-neutral. Repositories, media tools, notebooks,
@@ -148,6 +149,14 @@ func (s Spec) Validate() error {
 	}
 	if len(s.Policy.Commands.AllowedExecutables) != len(slices.Compact(append([]string(nil), s.Policy.Commands.AllowedExecutables...))) {
 		return errors.New("workspace allowed executables must be unique")
+	}
+	for _, binding := range s.Policy.CredentialBindings {
+		if strings.TrimSpace(binding) == "" || len(binding) > 128 {
+			return errors.New("workspace credential binding is invalid")
+		}
+	}
+	if len(s.Policy.CredentialBindings) != len(slices.Compact(append([]string(nil), s.Policy.CredentialBindings...))) {
+		return errors.New("workspace credential bindings must be unique")
 	}
 	return nil
 }

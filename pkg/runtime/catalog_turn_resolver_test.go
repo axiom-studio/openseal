@@ -149,6 +149,7 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "11"}
 	spec := workspace.DefaultSpec()
+	spec.Policy.CredentialBindings = []string{"GITHUB_TOKEN"}
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", ModelProvider: "test", Model: "model",
 		NextRunStatus: AgentRunStatusCompleted, OutputSummary: "done", ContinuationCheckpoint: map[string]interface{}{},
@@ -157,6 +158,7 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 		deployment: &kernelagent.AgentDeployment{
 			ID: "coding-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "coding-agent",
 			ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, DefaultWorkspaceID: spec.ID, Workspaces: []workspace.Spec{spec},
+			Credentials: map[string]capability.CredentialReference{"GITHUB_TOKEN": {Kind: "vault", ID: "vault-credential"}},
 		},
 		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories"},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "coding-agent"},
@@ -175,8 +177,11 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 	if host.request.Workspace == nil || host.request.Workspace.Workspace.ID != workspace.DefaultID || host.request.Workspace.Workspace.Policy.Filesystem != workspace.AccessReadWrite {
 		t.Fatalf("workspace authority = %#v", host.request.Workspace)
 	}
+	if host.request.WorkspaceCredentials["GITHUB_TOKEN"].ID != "vault-credential" {
+		t.Fatalf("Workspace credentials = %#v", host.request.WorkspaceCredentials)
+	}
 	encoded, err := MarshalHostedTurnModelInput(host.request)
-	if err != nil || !strings.Contains(string(encoded), `"workspace":{"id":"default","displayName":"Default","policy":{"filesystem":"read_write","commands":{"enabled":false,"network":"denied","maxDurationSeconds":0}}}`) || strings.Contains(string(encoded), `"storage"`) {
+	if err != nil || !strings.Contains(string(encoded), `"credentialBindings":["GITHUB_TOKEN"]`) || strings.Contains(string(encoded), `"storage"`) || strings.Contains(string(encoded), "vault-credential") || strings.Contains(string(encoded), "workspaceCredentials") {
 		t.Fatalf("model input = %s, error=%v", encoded, err)
 	}
 }
