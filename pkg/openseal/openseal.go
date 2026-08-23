@@ -140,8 +140,9 @@ type (
 	WorkspaceAcceleratorProfile               = workspace.AcceleratorProfile
 	WorkspaceStorageDurability                = workspace.StorageDurability
 	WorkspaceStorageRetention                 = workspace.StorageRetention
-	WorkspaceClient                           = executor.WorkspaceClient
-	WorkspaceActionRequest                    = executor.WorkspaceActionRequest
+	WorkspaceAccess                           = workspace.Access
+	WorkspaceAuthority                        = workspace.Authority
+	HostedWorkspace                           = runtime.HostedWorkspace
 	AgentDefinitionActivation                 = kernelagent.DefinitionActivation
 	AgentRolloutStatus                        = kernelagent.RolloutStatus
 	AgentDefinitionAmendment                  = kernelagent.DefinitionAmendment
@@ -1110,14 +1111,8 @@ func NewSkillIdentity(id, version, sourceIdentity string) SkillIdentity {
 
 func DefaultWorkspaceSpec() WorkspaceSpec { return workspace.DefaultSpec() }
 
-func WorkspaceSkillDefinition() *SkillDefinition { return workspace.SkillDefinition() }
-
 func EnsureDefaultAgentWorkspace(deployment *AgentDeployment) {
 	kernelagent.EnsureDefaultWorkspace(deployment)
-}
-
-func RegisterWorkspaceExecutors(registry *Registry, client WorkspaceClient) error {
-	return executor.RegisterWorkspaceExecutors(registry, client)
 }
 
 type ProjectSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
@@ -2139,21 +2134,13 @@ const (
 	SkillRiskProduction  = skill.RiskLevelProduction
 	SkillRiskDestructive = skill.RiskLevelDestructive
 
-	WorkspaceDefaultID            = workspace.DefaultID
-	WorkspaceDurabilityPersistent = workspace.StorageDurabilityPersistent
-	WorkspaceDurabilityEphemeral  = workspace.StorageDurabilityEphemeral
-	WorkspaceRetentionRetain      = workspace.StorageRetentionRetain
-	WorkspaceRetentionDelete      = workspace.StorageRetentionDelete
-	WorkspaceSkillID              = workspace.SkillID
-	WorkspaceSkillVersion         = workspace.SkillVersion
-	WorkspaceBindingConfigKey     = workspace.WorkspaceConfigKey
-	WorkspaceActionListDirectory  = workspace.ListDirectory
-	WorkspaceActionReadFile       = workspace.ReadFile
-	WorkspaceActionSearchFiles    = workspace.SearchFiles
-	WorkspaceActionWriteFile      = workspace.WriteFile
-	WorkspaceActionApplyPatch     = workspace.ApplyPatch
-	WorkspaceActionRunCommand     = workspace.RunCommand
-
+	WorkspaceDefaultID                = workspace.DefaultID
+	WorkspaceDurabilityPersistent     = workspace.StorageDurabilityPersistent
+	WorkspaceDurabilityEphemeral      = workspace.StorageDurabilityEphemeral
+	WorkspaceRetentionRetain          = workspace.StorageRetentionRetain
+	WorkspaceRetentionDelete          = workspace.StorageRetentionDelete
+	WorkspaceAccessReadOnly           = workspace.AccessReadOnly
+	WorkspaceAccessReadWrite          = workspace.AccessReadWrite
 	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
 	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
 	SkillBindingArgumentVerifiedClaim = skill.BindingArgumentVerifiedClaim
