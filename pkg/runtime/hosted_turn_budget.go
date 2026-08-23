@@ -66,6 +66,7 @@ type HostedTurnModelInput struct {
 	SystemInstructions        []string                         `json:"systemInstructions,omitempty"`
 	EligibleAgents            []HostedAgentTarget              `json:"eligibleAgents,omitempty"`
 	Workspace                 *HostedWorkspace                 `json:"workspace,omitempty"`
+	WorkspaceOperations       []workspace.Operation            `json:"workspaceOperations,omitempty"`
 	RunbookOperations         []HostedRunbookOperation         `json:"runbookOperations,omitempty"`
 	SkillPrompts              []HostedSkillPrompt              `json:"skillPrompts,omitempty"`
 	Actions                   []capability.ModelAction         `json:"actions,omitempty"`
@@ -156,6 +157,7 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 		Goal: request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
 		EligibleAgents:            request.EligibleAgents,
 		Workspace:                 projectHostedWorkspace(request.Workspace),
+		WorkspaceOperations:       request.WorkspaceOperations,
 		RunbookOperations:         request.RunbookOperations,
 		SkillPrompts:              request.SkillPrompts,
 		Actions:                   request.Actions,
