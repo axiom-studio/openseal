@@ -21,7 +21,7 @@ func TestOperationsFollowNativeWorkspacePolicy(t *testing.T) {
 func TestOperationsProjectFixedGitAuthority(t *testing.T) {
 	spec := DefaultSpec()
 	spec.Policy.CredentialBindings = []string{"GITHUB"}
-	spec.Policy.Git = GitPolicy{Enabled: true, PushEnabled: true, CredentialBinding: "GITHUB", CredentialKind: "github_token", AllowedHosts: []string{"github.com"}, MaxDurationSeconds: 300}
+	spec.Policy.Git = GitPolicy{Enabled: true, PushEnabled: true, CredentialBinding: "GITHUB", CredentialKind: "github_token", AllowedHosts: []string{"github.com"}, AllowedRepositories: []string{"github.com/axiom-studio/cortex"}, MaxDurationSeconds: 300}
 	operations := Operations(&Authority{Workspace: spec})
 	names := make(map[string]bool, len(operations))
 	for _, operation := range operations {

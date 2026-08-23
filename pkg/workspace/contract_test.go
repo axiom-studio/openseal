@@ -30,7 +30,7 @@ func TestSpecRejectsUnsafeOrUnboundedProfiles(t *testing.T) {
 		}(),
 		"Git without binding": func() Spec {
 			v := DefaultSpec()
-			v.Policy.Git = GitPolicy{Enabled: true, CredentialBinding: "GITHUB", CredentialKind: "github_token", AllowedHosts: []string{"github.com"}, MaxDurationSeconds: 300}
+			v.Policy.Git = GitPolicy{Enabled: true, CredentialBinding: "GITHUB", CredentialKind: "github_token", AllowedHosts: []string{"github.com"}, AllowedRepositories: []string{"github.com/axiom-studio/cortex"}, MaxDurationSeconds: 300}
 			return v
 		}(),
 	}
@@ -40,5 +40,14 @@ func TestSpecRejectsUnsafeOrUnboundedProfiles(t *testing.T) {
 				t.Fatal("expected validation failure")
 			}
 		})
+	}
+}
+
+func TestSpecRejectsGitRepositoryOutsideHostAuthority(t *testing.T) {
+	value := DefaultSpec()
+	value.Policy.CredentialBindings = []string{"GITHUB"}
+	value.Policy.Git = GitPolicy{Enabled: true, CredentialBinding: "GITHUB", CredentialKind: "github_token", AllowedHosts: []string{"github.com"}, AllowedRepositories: []string{"gitlab.com/axiom-studio/cortex"}, MaxDurationSeconds: 300}
+	if err := value.Validate(); err == nil {
+		t.Fatal("expected repository host outside Git authority to be rejected")
 	}
 }
