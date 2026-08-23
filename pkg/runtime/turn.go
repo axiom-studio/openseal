@@ -76,10 +76,11 @@ type TurnUsage struct {
 	ProviderDurationMS   int64   `json:"providerDurationMs,omitempty"`
 	ValidationDurationMS int64   `json:"validationDurationMs,omitempty"`
 	RepairAttempts       int     `json:"repairAttempts,omitempty"`
+	NativeOperations     int     `json:"nativeOperations,omitempty"`
 }
 
 func (u TurnUsage) Validate() error {
-	if u.InputTokens < 0 || u.OutputTokens < 0 || u.DurationMS < 0 || u.ProviderDurationMS < 0 || u.ValidationDurationMS < 0 || u.RepairAttempts < 0 || u.Cost < 0 || math.IsNaN(u.Cost) || math.IsInf(u.Cost, 0) {
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.DurationMS < 0 || u.ProviderDurationMS < 0 || u.ValidationDurationMS < 0 || u.RepairAttempts < 0 || u.NativeOperations < 0 || u.Cost < 0 || math.IsNaN(u.Cost) || math.IsInf(u.Cost, 0) {
 		return errors.New("turn usage cannot be negative, NaN, or infinite")
 	}
 	return nil

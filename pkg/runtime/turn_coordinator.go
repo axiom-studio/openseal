@@ -618,7 +618,7 @@ func budgetUsageForTurn(usage TurnUsage) BudgetUsage {
 	if usage.Cost > 0 {
 		costMicros = int64(math.Round(usage.Cost * 1_000_000))
 	}
-	return BudgetUsage{Turns: 1, InputTokens: int64(usage.InputTokens), OutputTokens: int64(usage.OutputTokens), CostMicros: costMicros, DurationMS: usage.DurationMS}
+	return BudgetUsage{Turns: 1, InputTokens: int64(usage.InputTokens), OutputTokens: int64(usage.OutputTokens), CostMicros: costMicros, DurationMS: usage.DurationMS, Actions: int64(usage.NativeOperations)}
 }
 
 func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
