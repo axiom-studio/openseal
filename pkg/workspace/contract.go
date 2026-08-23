@@ -64,10 +64,11 @@ type CommandPolicy struct {
 // GitPolicy grants fixed repository operations. Credentials are projected only
 // into those operations and never into arbitrary Workspace commands.
 type GitPolicy struct {
-	Enabled           bool     `json:"enabled"`
-	PushEnabled       bool     `json:"pushEnabled"`
-	CredentialBinding string   `json:"credentialBinding,omitempty"`
-	AllowedHosts      []string `json:"allowedHosts,omitempty"`
+	Enabled            bool     `json:"enabled"`
+	PushEnabled        bool     `json:"pushEnabled"`
+	CredentialBinding  string   `json:"credentialBinding,omitempty"`
+	AllowedHosts       []string `json:"allowedHosts,omitempty"`
+	MaxDurationSeconds int      `json:"maxDurationSeconds"`
 }
 
 // Policy is framework authority, not a Skill binding. The kernel projects it
@@ -171,12 +172,13 @@ func (s Spec) Validate() error {
 		}
 	}
 	if !s.Policy.Git.Enabled {
-		if s.Policy.Git.PushEnabled || s.Policy.Git.CredentialBinding != "" || len(s.Policy.Git.AllowedHosts) != 0 {
+		if s.Policy.Git.PushEnabled || s.Policy.Git.CredentialBinding != "" || len(s.Policy.Git.AllowedHosts) != 0 || s.Policy.Git.MaxDurationSeconds != 0 {
 			return errors.New("disabled workspace Git cannot grant repository authority")
 		}
 	} else {
 		if s.Policy.Filesystem != AccessReadWrite || !bindingPattern.MatchString(s.Policy.Git.CredentialBinding) ||
-			!slices.Contains(s.Policy.CredentialBindings, s.Policy.Git.CredentialBinding) || len(s.Policy.Git.AllowedHosts) == 0 || len(s.Policy.Git.AllowedHosts) > 16 {
+			!slices.Contains(s.Policy.CredentialBindings, s.Policy.Git.CredentialBinding) || len(s.Policy.Git.AllowedHosts) == 0 || len(s.Policy.Git.AllowedHosts) > 16 ||
+			s.Policy.Git.MaxDurationSeconds < 1 || s.Policy.Git.MaxDurationSeconds > 900 {
 			return errors.New("workspace Git authority is invalid")
 		}
 		for _, host := range s.Policy.Git.AllowedHosts {
