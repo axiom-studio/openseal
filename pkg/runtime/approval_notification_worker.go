@@ -164,7 +164,7 @@ func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Conte
 	}
 	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: scope, Owner: owner, Title: "Approvals",
-		Origin: &ConversationReference{Kind: ConversationReferenceAgentApprovals, ID: owner.ID}, IdempotencyKey: key,
+		Origin: &ConversationReference{Kind: ConversationReferenceAgentApprovals, ID: AgentApprovalsConversationReferenceID(owner)}, IdempotencyKey: key,
 	})
 	if !errors.Is(err, ErrMessageConflict) {
 		return conversation, err

@@ -358,7 +358,8 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 	}
 	conversation, err := store.FindConversationByIdempotencyKey(ctx, endpoint.Scope, agentApprovalConversationKey(endpoint.Owner))
 	if err != nil || conversation == nil || conversation.Title != "Approvals" || conversation.Owner != endpoint.Owner ||
-		conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceAgentApprovals || conversation.Origin.ID != endpoint.Owner.ID {
+		conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceAgentApprovals ||
+		conversation.Origin.ID != AgentApprovalsConversationReferenceID(endpoint.Owner) {
 		t.Fatalf("approval conversation = %#v, %v", conversation, err)
 	}
 	message, err := store.FindChannelMessageByIdempotencyKey(ctx, endpoint.Scope, conversation.ID, "approval-request:"+approval.ID)
