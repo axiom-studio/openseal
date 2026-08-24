@@ -228,7 +228,11 @@ const (
 	// channel attached to an Agent deployment. It is a durable command and audit
 	// surface, not an Objective or an implementation-specific settings page.
 	ConversationReferenceAgentControl ConversationReferenceKind = "agent_control"
-	ConversationReferenceEmbedSession ConversationReferenceKind = "embed_session"
+	// ConversationReferenceAgentApprovals identifies the kernel-owned approval
+	// inbox attached to an Agent. External approval destinations are optional;
+	// this conversation is the durable, always-present review surface.
+	ConversationReferenceAgentApprovals ConversationReferenceKind = "agent_approvals"
+	ConversationReferenceEmbedSession   ConversationReferenceKind = "embed_session"
 )
 
 type ConversationReference struct {
@@ -241,7 +245,8 @@ func (r ConversationReference) Validate() error {
 	switch r.Kind {
 	case ConversationReferenceObjective, ConversationReferenceProject, ConversationReferenceRun, ConversationReferenceRequest,
 		ConversationReferenceApproval, ConversationReferenceArtifact, ConversationReferenceActivity,
-		ConversationReferenceExternalSource, ConversationReferenceAgentControl, ConversationReferenceEmbedSession:
+		ConversationReferenceExternalSource, ConversationReferenceAgentControl, ConversationReferenceAgentApprovals,
+		ConversationReferenceEmbedSession:
 	default:
 		return fmt.Errorf("%w: invalid reference kind %q", ErrInvalidConversation, r.Kind)
 	}
