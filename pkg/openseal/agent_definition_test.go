@@ -52,7 +52,8 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 		t.Fatalf("Agent control channel = %#v", control)
 	}
 	approvals := channelsByOrigin[ConversationReferenceAgentApprovals]
-	if approvals == nil || approvals.Title != "Approvals" || approvals.Origin.ID != deployment.ID {
+	if approvals == nil || approvals.Title != "Approvals" ||
+		approvals.Origin.ID != AgentApprovalsConversationReferenceID(ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID}) {
 		t.Fatalf("Agent approvals channel = %#v", approvals)
 	}
 	if _, err := engine.GetAgentDeployment(ctx, scope, deployment.ID); err != nil {
