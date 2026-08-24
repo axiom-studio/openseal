@@ -44,7 +44,7 @@ func TestSkillDefinitionExposesVersionedArtifactAction(t *testing.T) {
 	if definition.ID != SkillID || action.EmittedArtifactTypes[0] != ArtifactType || !definition.Requirements.AlwaysAvailable {
 		t.Fatalf("definition = %#v", definition)
 	}
-	if !strings.Contains(definition.Prompt.Instructions, "progressive revisions") {
+	if !strings.Contains(definition.Prompt.Instructions, "Communicate visually") || !strings.Contains(definition.Prompt.Instructions, "streaming revisions") {
 		t.Fatalf("prompt = %q", definition.Prompt.Instructions)
 	}
 }
