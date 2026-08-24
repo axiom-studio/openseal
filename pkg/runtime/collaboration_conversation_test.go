@@ -1,11 +1,56 @@
 package runtime
 
 import (
+	"context"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
+
+type countingConversationStore struct {
+	*MemoryStore
+	conversationReads int
+}
+
+func (s *countingConversationStore) GetConversation(ctx context.Context, scope Scope, id string) (*Conversation, error) {
+	s.conversationReads++
+	return s.MemoryStore.GetConversation(ctx, scope, id)
+}
+
+func TestAgentRequestConversationProjectionTreatsDeletedConversationAsTerminal(t *testing.T) {
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "deleted-conversation-projection"}
+	store := &countingConversationStore{MemoryStore: NewMemoryStore()}
+	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "requester"}, AssignedAgentID: "requester",
+		Goal: "Coordinate work", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = NewCollaborationService(store).CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindRequest, SourceRunID: source.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "requester"},
+		Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"},
+		Goal:      "Review work", ConversationRefs: []string{"deleted-channel"}, IdempotencyKey: "deleted-channel-request",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	projector, err := NewAgentRequestConversationProjector(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projected, err := projector.Reconcile(ctx, scope); err != nil || projected != 0 {
+		t.Fatalf("first projection = %d, %v", projected, err)
+	}
+	if projected, err := projector.Reconcile(ctx, scope); err != nil || projected != 0 {
+		t.Fatalf("replayed projection = %d, %v", projected, err)
+	}
+	if store.conversationReads != 1 {
+		t.Fatalf("deleted conversation reads = %d, want 1", store.conversationReads)
+	}
+}
 
 func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "conversation-projection"}
