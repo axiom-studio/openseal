@@ -386,23 +386,22 @@ func findDeliveredApprovalNotification(
 	approval *ApprovalCheckpoint,
 	destination ApprovalDestination,
 ) (*ExternalConversationDelivery, error) {
-	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
-		Scope: approval.Scope, EndpointID: destination.EndpointID,
-		Statuses: []ExternalConversationDeliveryStatus{ExternalConversationDeliveryDelivered}, Limit: 1000,
-	})
+	if approval == nil {
+		return nil, errors.New("approval is required")
+	}
+	endpointID := strings.TrimSpace(destination.EndpointID)
+	deliveryKey := "approval-delivery:" + approval.ID + ":" + endpointID
+	deliveryID := stableExternalConversationID(approval.Scope, endpointID, "delivery", deliveryKey)
+	delivery, err := store.GetExternalConversationDelivery(ctx, approval.Scope, deliveryID)
 	if err != nil {
 		return nil, err
 	}
-	for _, delivery := range deliveries {
-		if delivery.Operation != capability.ConversationDeliveryMessageSend {
-			continue
-		}
-		projected, _ := delivery.Parameters["approval"].(map[string]interface{})
-		if projected != nil && projected["id"] == approval.ID && strings.TrimSpace(delivery.ProviderMessageID) != "" {
-			return delivery, nil
-		}
+	if delivery == nil || delivery.Status != ExternalConversationDeliveryDelivered ||
+		delivery.Operation != capability.ConversationDeliveryMessageSend ||
+		strings.TrimSpace(delivery.ProviderMessageID) == "" {
+		return nil, nil
 	}
-	return nil, nil
+	return delivery, nil
 }
 
 func approvalCardPhase(approval *ApprovalCheckpoint, call *ActionCall) string {
