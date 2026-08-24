@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 	"gopkg.in/yaml.v3"
 )
 
@@ -56,8 +57,10 @@ type BundleMetadata struct {
 // BundleDeploymentPolicy preserves portable narrowing and capacity. Scope,
 // environment, rollout status, health, and placement remain host-owned.
 type BundleDeploymentPolicy struct {
-	Restrictions DeploymentRestrictions `json:"restrictions,omitempty" yaml:"restrictions,omitempty"`
-	Capacity     DeploymentCapacity     `json:"capacity" yaml:"capacity"`
+	Restrictions       DeploymentRestrictions `json:"restrictions,omitempty" yaml:"restrictions,omitempty"`
+	Capacity           DeploymentCapacity     `json:"capacity" yaml:"capacity"`
+	DefaultWorkspaceID string                 `json:"defaultWorkspaceId,omitempty" yaml:"defaultWorkspaceId,omitempty"`
+	Workspaces         []workspace.Spec       `json:"workspaces,omitempty" yaml:"workspaces,omitempty"`
 }
 
 // BundleSkillRequirement pins the reviewed immutable Skill identity selected
@@ -143,6 +146,10 @@ type BundleExportRequest struct {
 type BundleSkillPlacement struct {
 	Identity  capability.SkillIdentity `json:"identity"`
 	BindingID string                   `json:"bindingId"`
+	// Config contains target-host, non-secret binding configuration. Portable
+	// bundles retain source configuration as evidence, but installation must be
+	// able to replace host-local identifiers such as Kubernetes cluster IDs.
+	Config map[string]interface{} `json:"config,omitempty"`
 }
 
 type BundleEndpointPlacement struct {
@@ -271,7 +278,10 @@ func ExportBundle(request BundleExportRequest) (*Bundle, error) {
 	}
 	bundle := &Bundle{
 		APIVersion: BundleAPIVersion, Kind: BundleKind, Metadata: metadata, Agent: manifest,
-		Policy:  BundleDeploymentPolicy{Restrictions: request.Deployment.Restrictions, Capacity: request.Deployment.Capacity},
+		Policy: BundleDeploymentPolicy{
+			Restrictions: request.Deployment.Restrictions, Capacity: request.Deployment.Capacity,
+			DefaultWorkspaceID: request.Deployment.DefaultWorkspaceID, Workspaces: append([]workspace.Spec(nil), request.Deployment.Workspaces...),
+		},
 		Runtime: request.Runtime, Skills: request.Skills, Credentials: request.Credentials, Endpoints: request.Endpoints, Callbacks: request.Callbacks,
 	}
 	canonicalizeBundle(bundle)
@@ -435,6 +445,7 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 		Scope: request.Scope, RolloutStatus: RolloutActive, Environment: request.Placement.Environment,
 		SkillBindingIDs: bindingIDs, Credentials: deploymentCredentials,
 		Restrictions: request.Bundle.Policy.Restrictions, Capacity: capacity,
+		DefaultWorkspaceID: request.Bundle.Policy.DefaultWorkspaceID, Workspaces: append([]workspace.Spec(nil), request.Bundle.Policy.Workspaces...),
 	}
 	plan := &BundleInstallationPlan{Manifest: ManifestInstallationRequest{
 		Manifest: request.Bundle.Agent, Deployment: deployment, ActorType: strings.TrimSpace(request.ActorType), ActorID: strings.TrimSpace(request.ActorID),
@@ -443,6 +454,10 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 	}}
 	for _, need := range request.Bundle.Skills {
 		selected := request.Placement.Skills[need.RequirementID]
+		config := need.Policy.Config
+		if selected.Config != nil {
+			config = selected.Config
+		}
 		plan.Bindings = append(plan.Bindings, &capability.Binding{
 			ID: selected.BindingID, Scope: request.Scope, DeploymentID: request.Placement.DeploymentID,
 			SkillID: need.Identity.ID, SkillVersion: need.Identity.Version, SourceIdentity: need.Identity.SourceIdentity,
@@ -450,7 +465,7 @@ func CompileBundleInstallation(request BundleInstallationRequest) (*BundleInstal
 			EnabledConversationAdapters: append([]string(nil), need.Policy.EnabledConversationAdapters...),
 			EnabledCallbackAdapters:     append([]string(nil), need.Policy.EnabledCallbackAdapters...),
 			MaximumRisk:                 need.Policy.MaximumRisk, ArgumentRestrictions: need.Policy.ArgumentRestrictions,
-			Credentials: cloneCredentialReferences(bindingCredentials[need.RequirementID]), Config: need.Policy.Config,
+			Credentials: cloneCredentialReferences(bindingCredentials[need.RequirementID]), Config: config,
 		})
 	}
 	for _, need := range request.Bundle.Endpoints {
@@ -522,7 +537,8 @@ func (b *Bundle) Validate() error {
 	deployment := &AgentDeployment{
 		ID: "portable-validation", Scope: capability.ScopeReference{Kind: "portable", ID: "validation"},
 		DefinitionID: definition.ID, ActiveVersion: definition.Version, RolloutStatus: RolloutActive,
-		Environment: "portable", Restrictions: b.Policy.Restrictions, Capacity: b.Policy.Capacity, Revision: 1,
+		Environment: "portable", Restrictions: b.Policy.Restrictions, Capacity: b.Policy.Capacity,
+		DefaultWorkspaceID: b.Policy.DefaultWorkspaceID, Workspaces: append([]workspace.Spec(nil), b.Policy.Workspaces...), Revision: 1,
 	}
 	if deployment.Capacity.MaxConcurrentRuns == 0 {
 		deployment.Capacity.MaxConcurrentRuns = definition.Authority.MaxConcurrentRuns

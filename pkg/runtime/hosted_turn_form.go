@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 	inferschema "github.com/invopop/jsonschema"
 )
 
@@ -21,21 +22,28 @@ const HostedTurnFormSchemaVersion = "openseal.hosted-turn-form/v1"
 // schema-backed form. CompileHostedTurnForm owns the kernel-specific pointer
 // and checkpoint representation; models never construct that wiring.
 type HostedTurnForm struct {
-	SchemaVersion          string                  `json:"schemaVersion"`
-	SkillSelections        []HostedSkillSelection  `json:"skillSelections"`
-	Decisions              []TurnDecision          `json:"decisions"`
-	ProposedAction         *HostedTurnActionForm   `json:"proposedAction,omitempty"`
-	ProposedFork           *TurnForkProposal       `json:"proposedFork,omitempty"`
-	ProposedDelegation     *TurnDelegationProposal `json:"proposedDelegation,omitempty"`
-	ProposedRunbook        *TurnRunbookProposal    `json:"proposedRunbook,omitempty"`
-	OutputSummary          string                  `json:"outputSummary"`
-	ContinuationCheckpoint map[string]interface{}  `json:"continuationCheckpoint"`
-	NextRunStatus          AgentRunStatus          `json:"nextRunStatus"`
-	WakeCondition          *WakeCondition          `json:"wakeCondition,omitempty"`
-	RunOutput              map[string]interface{}  `json:"runOutput"`
-	RunError               string                  `json:"runError"`
-	CompletionEvidenceRefs []string                `json:"completionEvidenceRefs"`
-	EvidenceClaims         []EvidenceClaim         `json:"evidenceClaims"`
+	SchemaVersion              string                        `json:"schemaVersion"`
+	SkillSelections            []HostedSkillSelection        `json:"skillSelections"`
+	Decisions                  []TurnDecision                `json:"decisions"`
+	ProposedAction             *HostedTurnActionForm         `json:"proposedAction,omitempty"`
+	ProposedWorkspaceOperation *HostedWorkspaceOperationForm `json:"proposedWorkspaceOperation,omitempty"`
+	ProposedFork               *TurnForkProposal             `json:"proposedFork,omitempty"`
+	ProposedDelegation         *TurnDelegationProposal       `json:"proposedDelegation,omitempty"`
+	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
+	OutputSummary              string                        `json:"outputSummary"`
+	ContinuationCheckpoint     map[string]interface{}        `json:"continuationCheckpoint"`
+	NextRunStatus              AgentRunStatus                `json:"nextRunStatus"`
+	WakeCondition              *WakeCondition                `json:"wakeCondition,omitempty"`
+	RunOutput                  map[string]interface{}        `json:"runOutput"`
+	RunError                   string                        `json:"runError"`
+	CompletionEvidenceRefs     []string                      `json:"completionEvidenceRefs"`
+	EvidenceClaims             []EvidenceClaim               `json:"evidenceClaims"`
+}
+
+type HostedWorkspaceOperationForm struct {
+	Operation string                 `json:"operation"`
+	Summary   string                 `json:"summary"`
+	Arguments map[string]interface{} `json:"arguments"`
 }
 
 type HostedTurnActionForm struct {
@@ -56,6 +64,7 @@ type HostedTurnFormAuthority struct {
 	CanDelegate           bool
 	CanInvokeRunbook      bool
 	SkillPromptReferences []string
+	WorkspaceOperations   []workspace.Operation
 }
 
 // CompileHostedTurnForm validates the selected action against the exact
@@ -64,8 +73,15 @@ type HostedTurnFormAuthority struct {
 // may be projected into an action contract that declares the same field; domain
 // arguments remain model-authored and authority is never widened.
 func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction) (*HostedTurnResponse, error) {
+	return CompileHostedTurnFormWithWorkspace(form, actions, nil)
+}
+
+func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capability.ModelAction, operations []workspace.Operation) (*HostedTurnResponse, error) {
 	if form.SchemaVersion != HostedTurnFormSchemaVersion {
 		return nil, fmt.Errorf("hosted turn form schemaVersion must be %q", HostedTurnFormSchemaVersion)
+	}
+	if form.ProposedAction != nil && form.ProposedWorkspaceOperation != nil {
+		return nil, errors.New("hosted turn form can propose only one governed action or native Workspace operation")
 	}
 	decisions := append([]TurnDecision(nil), form.Decisions...)
 	// Models can request governed actions, but they cannot mint approval IDs or
@@ -92,6 +108,23 @@ func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction
 		OutputSummary: form.OutputSummary, ContinuationCheckpoint: checkpoint, NextRunStatus: form.NextRunStatus,
 		WakeCondition: form.WakeCondition, RunOutput: form.RunOutput, RunError: form.RunError,
 		CompletionEvidenceRefs: form.CompletionEvidenceRefs, EvidenceClaims: form.EvidenceClaims,
+	}
+	if form.ProposedWorkspaceOperation != nil {
+		selected, ok := exactHostedWorkspaceOperation(operations, form.ProposedWorkspaceOperation.Operation)
+		if !ok {
+			return nil, fmt.Errorf("proposed Workspace operation %q is not authorized", form.ProposedWorkspaceOperation.Operation)
+		}
+		if strings.TrimSpace(form.ProposedWorkspaceOperation.Summary) == "" || form.ProposedWorkspaceOperation.Arguments == nil {
+			return nil, errors.New("proposed Workspace operation summary and arguments are required")
+		}
+		if err := runbook.ValidateInterfaceInput(selected.InputSchema, form.ProposedWorkspaceOperation.Arguments); err != nil {
+			return nil, fmt.Errorf("proposed Workspace operation %q input is invalid: %w", selected.Name, err)
+		}
+		copy := *form.ProposedWorkspaceOperation
+		copy.Operation = selected.Name
+		copy.Summary = strings.TrimSpace(copy.Summary)
+		copy.Arguments = cloneHostedTurnObjectValue(copy.Arguments)
+		response.ProposedWorkspaceOperation = &copy
 	}
 	if form.ProposedAction == nil {
 		return response, nil
@@ -177,6 +210,11 @@ func HostedTurnFormFromResponse(response HostedTurnResponse) (HostedTurnForm, er
 		OutputSummary: response.OutputSummary, ContinuationCheckpoint: response.ContinuationCheckpoint,
 		NextRunStatus: response.NextRunStatus, WakeCondition: response.WakeCondition, RunOutput: response.RunOutput,
 		RunError: response.RunError, CompletionEvidenceRefs: response.CompletionEvidenceRefs, EvidenceClaims: response.EvidenceClaims,
+	}
+	if response.ProposedWorkspaceOperation != nil {
+		copy := *response.ProposedWorkspaceOperation
+		copy.Arguments = cloneHostedTurnObjectValue(copy.Arguments)
+		form.ProposedWorkspaceOperation = &copy
 	}
 	if response.ProposedAction == nil {
 		return form, nil
@@ -266,6 +304,25 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 		}
 		properties["skillSelections"] = skillSelections
 	}
+	workspaceBranches := make([]interface{}, 0)
+	if len(authority) > 0 {
+		for _, operation := range authority[0].WorkspaceOperations {
+			workspaceBranches = append(workspaceBranches, map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]interface{}{
+					"operation": map[string]interface{}{"type": "string", "const": operation.Name},
+					"summary":   map[string]interface{}{"type": "string", "minLength": 1},
+					"arguments": cloneHostedTurnValue(operation.InputSchema),
+				},
+				"required": []string{"operation", "summary", "arguments"},
+			})
+		}
+	}
+	if len(workspaceBranches) == 0 {
+		delete(properties, "proposedWorkspaceOperation")
+	} else {
+		properties["proposedWorkspaceOperation"] = map[string]interface{}{"oneOf": workspaceBranches}
+	}
 	branches := make([]interface{}, 0, len(actions))
 	for _, action := range actions {
 		branchProperties := map[string]interface{}{
@@ -306,6 +363,16 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 		}
 	}
 	return schema, nil
+}
+
+func exactHostedWorkspaceOperation(operations []workspace.Operation, name string) (workspace.Operation, bool) {
+	name = strings.TrimSpace(name)
+	for _, operation := range operations {
+		if operation.Name == name {
+			return operation, true
+		}
+	}
+	return workspace.Operation{}, false
 }
 
 // ValidateHostedTurnLifecycle keeps model-authored lifecycle intent inside the

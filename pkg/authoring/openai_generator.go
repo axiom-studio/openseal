@@ -382,6 +382,24 @@ func authoringIntentContract() authoringProviderContract {
 	return authoringProviderContract{Name: "submit_authoring_intent", Description: "Submit semantic answers for OpenSeal to compile into an authoring proposal.", Schema: AuthoringIntentJSONSchema}
 }
 
+func messagesWithAuthoringContract(messages []map[string]string, contract authoringProviderContract) ([]map[string]string, error) {
+	schema, err := contract.Schema()
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return nil, fmt.Errorf("encode %s JSON schema: %w", contract.Name, err)
+	}
+	result := make([]map[string]string, 0, len(messages)+1)
+	result = append(result, map[string]string{
+		"role":    "system",
+		"content": "Return exactly one JSON object matching this authoritative JSON Schema. Do not rename fields, change constant values, or add properties.\n" + string(encoded),
+	})
+	result = append(result, messages...)
+	return result, nil
+}
+
 func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invocationKey string, messages []map[string]string, contract authoringProviderContract) ([]byte, error) {
 	if g.responsesAPI {
 		return g.completeResponsesContract(ctx, invocationKey, messages, contract)
@@ -393,6 +411,14 @@ func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invoca
 	mode := g.options.StructuredOutputMode
 	if mode == OpenAICompatibleStructuredOutputDefault {
 		mode = OpenAICompatibleStructuredOutputTool
+	}
+	if mode != OpenAICompatibleStructuredOutputTool {
+		var err error
+		messages, err = messagesWithAuthoringContract(messages, contract)
+		if err != nil {
+			return nil, err
+		}
+		payload["messages"] = messages
 	}
 	if mode == OpenAICompatibleStructuredOutputTool {
 		schema, err := contract.Schema()
@@ -443,7 +469,7 @@ func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invoca
 		return nil, errors.New("authoring provider response exceeds 1 MiB")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("authoring provider returned HTTP %d", response.StatusCode)
+		return nil, NewProviderHTTPFailure(response.StatusCode)
 	}
 	var envelope struct {
 		Choices []struct {
@@ -495,6 +521,17 @@ func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invoca
 }
 
 func (g *OpenAICompatibleGenerator) completeResponsesContract(ctx context.Context, invocationKey string, messages []map[string]string, contract authoringProviderContract) ([]byte, error) {
+	mode := g.options.StructuredOutputMode
+	if mode == OpenAICompatibleStructuredOutputDefault {
+		mode = OpenAICompatibleStructuredOutputTool
+	}
+	if mode != OpenAICompatibleStructuredOutputTool {
+		var err error
+		messages, err = messagesWithAuthoringContract(messages, contract)
+		if err != nil {
+			return nil, err
+		}
+	}
 	input := make([]map[string]string, 0, len(messages))
 	instructions := make([]string, 0, 1)
 	for _, message := range messages {
@@ -507,10 +544,6 @@ func (g *OpenAICompatibleGenerator) completeResponsesContract(ctx context.Contex
 	payload := map[string]interface{}{"model": g.model, "input": input}
 	if len(instructions) > 0 {
 		payload["instructions"] = strings.Join(instructions, "\n\n")
-	}
-	mode := g.options.StructuredOutputMode
-	if mode == OpenAICompatibleStructuredOutputDefault {
-		mode = OpenAICompatibleStructuredOutputTool
 	}
 	if mode == OpenAICompatibleStructuredOutputTool {
 		schema, err := contract.Schema()
@@ -554,7 +587,7 @@ func (g *OpenAICompatibleGenerator) completeResponsesContract(ctx context.Contex
 		return nil, errors.New("authoring provider response exceeds 1 MiB")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("authoring provider returned HTTP %d", response.StatusCode)
+		return nil, NewProviderHTTPFailure(response.StatusCode)
 	}
 	var envelope struct {
 		Status            string `json:"status"`

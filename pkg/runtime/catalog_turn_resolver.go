@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // AgentTurnCatalog is the portable, product-neutral catalog required to bind
@@ -132,6 +133,25 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, fmt.Errorf("apply Runbook Skill authority: %w", err)
 	}
 	prompts, actions, prepared, contextRefs := projectActivatedSkills(activation)
+	workspaceSpec, err := workspace.Select(deployment.DefaultWorkspaceID, deployment.Workspaces)
+	if err != nil {
+		return nil, fmt.Errorf("resolve default Workspace for Agent %s: %w", deployment.ID, err)
+	}
+	var workspaceAuthority *workspace.Authority
+	var workspaceCredentials map[string]capability.CredentialReference
+	if workspaceSpec != nil {
+		workspaceAuthority = &workspace.Authority{Workspace: *workspaceSpec}
+		if len(workspaceSpec.Policy.CredentialBindings) > 0 {
+			workspaceCredentials = make(map[string]capability.CredentialReference, len(workspaceSpec.Policy.CredentialBindings))
+			for _, name := range workspaceSpec.Policy.CredentialBindings {
+				reference, ok := deployment.Credentials[name]
+				if !ok || strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
+					return nil, fmt.Errorf("resolve default Workspace credential %s for Agent %s: binding is unavailable", name, deployment.ID)
+				}
+				workspaceCredentials[name] = reference
+			}
+		}
+	}
 	actionDeploymentID := deployment.ID
 	if run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != "" {
 		teamActivation, activateErr := catalog.ActivateSkills(ctx, scope, run.Owner.ID, skillHost)
@@ -238,7 +258,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	runner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
 		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-		SystemInstructions: instructions, EligibleAgents: eligibleAgents, SkillPrompts: prompts, Actions: actions,
+		SystemInstructions: instructions, EligibleAgents: eligibleAgents, Workspace: workspaceAuthority, WorkspaceCredentials: workspaceCredentials, SkillPrompts: prompts, Actions: actions,
 		RunbookOperations: base.RunbookOperations,
 		ModelCredential:   deploymentModelCredential(deployment),
 	})
