@@ -37,6 +37,8 @@ type ManifestMetadata struct {
 	DisplayName string   `json:"displayName" yaml:"displayName"`
 	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
+	Author      string   `json:"author,omitempty" yaml:"author,omitempty"`
+	AuthorEmail string   `json:"authorEmail,omitempty" yaml:"authorEmail,omitempty"`
 	License     string   `json:"license,omitempty" yaml:"license,omitempty"`
 	Homepage    string   `json:"homepage,omitempty" yaml:"homepage,omitempty"`
 }
