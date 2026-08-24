@@ -20,6 +20,7 @@ func NormalizeCallbackAdapter(value CallbackAdapter) (CallbackAdapter, error) {
 		connection := *value.Transport.Connection
 		connection.Kind = strings.TrimSpace(connection.Kind)
 		connection.Endpoint = strings.TrimSpace(connection.Endpoint)
+		connection.SharedByCredential = strings.TrimSpace(connection.SharedByCredential)
 		value.Transport.Connection = &connection
 	}
 	if value.ProtocolVersion != CallbackAdapterProtocolV1 {
@@ -99,6 +100,15 @@ func NormalizeCallbackAdapter(value CallbackAdapter) (CallbackAdapter, error) {
 		}
 		if len(connection.Credentials) == 0 {
 			return CallbackAdapter{}, errors.New("callback adapter connection requires credentials")
+		}
+		if connection.SharedByCredential != "" {
+			found := false
+			for _, name := range connection.Credentials {
+				found = found || name == connection.SharedByCredential
+			}
+			if !found {
+				return CallbackAdapter{}, errors.New("callback adapter shared connection credential must be projected into the connection")
+			}
 		}
 		for _, name := range connection.Credentials {
 			usedCredentials[name] = struct{}{}

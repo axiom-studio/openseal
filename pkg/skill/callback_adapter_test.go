@@ -81,7 +81,7 @@ func TestCallbackAdapterAcceptsIsolatedWebSocketConnectionCredentials(t *testing
 	}
 	adapter.Transport.Connection = &capability.CallbackAdapterConnectionTransport{
 		Kind: "websocket", Endpoint: "slack.callback.socket_mode",
-		Credentials: []string{"app_token", "signing_secret"},
+		Credentials: []string{"app_token", "signing_secret"}, SharedByCredential: "app_token",
 	}
 	definition.CallbackAdapters["interactions"] = adapter
 	catalog := NewCatalog()
@@ -106,8 +106,26 @@ func TestCallbackAdapterAcceptsIsolatedWebSocketConnectionCredentials(t *testing
 	}
 	connection := resolved.Adapter.Transport.Connection
 	if connection == nil || connection.Kind != "websocket" || connection.Endpoint != "slack.callback.socket_mode" ||
-		strings.Join(connection.Credentials, ",") != "app_token,signing_secret" {
+		strings.Join(connection.Credentials, ",") != "app_token,signing_secret" || connection.SharedByCredential != "app_token" {
 		t.Fatalf("connection transport = %#v", connection)
+	}
+}
+
+func TestCallbackAdapterRejectsUnprojectedSharedConnectionCredential(t *testing.T) {
+	definition := callbackAdapterDefinition()
+	adapter := definition.CallbackAdapters["interactions"]
+	adapter.Credentials = []capability.CredentialRequirement{
+		{Name: "app_token", Kind: "slack_app_token"},
+		{Name: "signing_secret", Kind: "slack_signing_secret"},
+	}
+	adapter.Transport.Connection = &capability.CallbackAdapterConnectionTransport{
+		Kind: "websocket", Endpoint: "slack.callback.socket_mode",
+		Credentials: []string{"signing_secret"}, SharedByCredential: "app_token",
+	}
+	definition.CallbackAdapters["interactions"] = adapter
+	err := NewCatalog().Register(context.Background(), definition)
+	if err == nil || !strings.Contains(err.Error(), "shared connection credential") {
+		t.Fatalf("shared connection credential error = %v", err)
 	}
 }
 
