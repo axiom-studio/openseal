@@ -52,6 +52,8 @@ type BundleMetadata struct {
 	DisplayName string   `json:"displayName" yaml:"displayName"`
 	Description string   `json:"description,omitempty" yaml:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
+	Author      string   `json:"author,omitempty" yaml:"author,omitempty"`
+	AuthorEmail string   `json:"authorEmail,omitempty" yaml:"authorEmail,omitempty"`
 }
 
 // BundleDeploymentPolicy preserves portable narrowing and capacity. Scope,
@@ -259,6 +261,12 @@ func ExportBundle(request BundleExportRequest) (*Bundle, error) {
 	}
 	if metadata.Description == "" {
 		metadata.Description = manifest.Metadata.Description
+	}
+	if metadata.Author == "" {
+		metadata.Author = manifest.Metadata.Author
+	}
+	if metadata.AuthorEmail == "" {
+		metadata.AuthorEmail = manifest.Metadata.AuthorEmail
 	}
 	// A Bundle carries the exact reviewed Skill identities selected by the
 	// source deployment. Pin the portable manifest to those same versions so
