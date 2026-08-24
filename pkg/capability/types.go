@@ -287,13 +287,15 @@ type CallbackAdapterTransport struct {
 // CallbackAdapterConnectionTransport declares an optional long-lived,
 // Skill-owned provider connection used to receive callback payloads when the
 // provider cannot call a public HTTP route. The host materializes the
-// connection for one exact callback registration and projects only the listed
-// credentials into that isolated runtime. Endpoint remains Skill-owned; the
-// kernel never interprets provider frames.
+// connection and projects only the listed credentials into that isolated
+// runtime. SharedByCredential optionally lets the host pool registrations that
+// bind the same opaque provider-connection reference. Endpoint remains
+// Skill-owned; the kernel never interprets provider frames.
 type CallbackAdapterConnectionTransport struct {
-	Kind        string   `json:"kind"`
-	Endpoint    string   `json:"endpoint"`
-	Credentials []string `json:"credentials"`
+	Kind               string   `json:"kind"`
+	Endpoint           string   `json:"endpoint"`
+	Credentials        []string `json:"credentials"`
+	SharedByCredential string   `json:"sharedByCredential,omitempty"`
 }
 
 // CallbackAdapter declares one provider-neutral inbound callback surface.
