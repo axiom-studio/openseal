@@ -289,6 +289,72 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 }
 
+func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T) {
+	ctx := t.Context()
+	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []skill.ConversationDeliveryOperation{
+		skill.ConversationDeliveryMessageSend,
+	})
+	now := time.Date(2026, 8, 24, 21, 0, 0, 0, time.UTC)
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: endpoint.Scope, Owner: endpoint.Owner, AssignedAgentID: endpoint.DeploymentID,
+		Goal: "review pull request", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: endpoint.Scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	call := &ActionCall{
+		ID: "call-internal", Scope: endpoint.Scope, RunID: claimed.ID, DeploymentID: endpoint.DeploymentID,
+		SkillID: "summarize", SkillVersion: "1.0.0", Action: "execute", Status: ActionCallStatusWaitingApproval,
+		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"url": "https://example.com/pr/17"},
+		ApprovalID: "approval-internal", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	call.InvocationDigest = ComputeActionInvocationDigest(call)
+	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	approval := &ApprovalCheckpoint{
+		ID: "approval-internal", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+		Risk: skill.RiskLevelExternal, Summary: "Summarize PR 17", PolicyReason: "external action",
+		ProposedAction: map[string]interface{}{"url": "https://example.com/pr/17"}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
+		ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	waiting := cloneAgentRun(claimed)
+	waiting.Status = AgentRunStatusWaitingForApproval
+	waiting.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
+	waiting.LeaseOwner, waiting.LeaseExpiresAt = "", nil
+	waiting.Revision++
+	waiting.UpdatedAt = now
+	if _, err = store.CreateActionProposal(ctx, ActionProposalRecord{
+		Call: call, Approval: approval, Run: waiting, ExpectedRunRevision: claimed.Revision,
+		Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: now},
+		Event: &ActivityEvent{ID: "approval-internal-requested", Scope: endpoint.Scope, EventType: "action.approval_requested", Severity: ActivitySeverityInfo,
+			AgentID: endpoint.DeploymentID, RunID: claimed.ID, Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary,
+			Visibility: ActivityVisibilityScope, CreatedAt: now},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	worker := NewApprovalNotificationWorker(store, NewExternalConversationTransportService(store, catalog), catalog)
+	worker.now = func() time.Time { return now }
+	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 0 {
+		t.Fatalf("internal notification = %d, %v", count, err)
+	}
+	conversation, err := store.FindConversationByIdempotencyKey(ctx, endpoint.Scope, agentApprovalConversationKey(endpoint.Owner))
+	if err != nil || conversation == nil || conversation.Title != "Approvals" || conversation.Owner != endpoint.Owner ||
+		conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceAgentApprovals || conversation.Origin.ID != endpoint.Owner.ID {
+		t.Fatalf("approval conversation = %#v, %v", conversation, err)
+	}
+	message, err := store.FindChannelMessageByIdempotencyKey(ctx, endpoint.Scope, conversation.ID, "approval-request:"+approval.ID)
+	if err != nil || message == nil || message.Intent != MessageIntentApprovalRequest || len(message.References) != 2 ||
+		message.References[0] != (ConversationReference{Kind: ConversationReferenceApproval, ID: approval.ID}) ||
+		message.References[1] != (ConversationReference{Kind: ConversationReferenceRun, ID: run.ID}) {
+		t.Fatalf("approval message = %#v, %v", message, err)
+	}
+}
+
 func registerApprovalNotificationCallback(
 	t *testing.T,
 	ctx context.Context,
