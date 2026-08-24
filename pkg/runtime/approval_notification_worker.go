@@ -73,6 +73,9 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 			if !terminalApprovalActionStatus(call.Status) {
 				continue
 			}
+			if err := w.notifyInternalOutcome(ctx, approval, call); err != nil {
+				processErrors = append(processErrors, fmt.Errorf("notify internal approval outcome %s: %w", approval.ID, err))
+			}
 			for _, destination := range approval.Destinations {
 				if err := w.notifyOutcome(ctx, approval, call, destination); err != nil {
 					processErrors = append(processErrors, fmt.Errorf("notify approval outcome %s at endpoint %s: %w", approval.ID, destination.EndpointID, err))
@@ -88,6 +91,9 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 			}
 			continue
 		}
+		if err := w.notifyInternal(ctx, approval); err != nil {
+			processErrors = append(processErrors, fmt.Errorf("notify internal approval %s: %w", approval.ID, err))
+		}
 		for _, destination := range approval.Destinations {
 			if err := w.notify(ctx, approval, destination); err != nil {
 				processErrors = append(processErrors, fmt.Errorf("notify approval %s at endpoint %s: %w", approval.ID, destination.EndpointID, err))
@@ -97,6 +103,80 @@ func (w *ApprovalNotificationWorker) ProcessScope(ctx context.Context, scope Sco
 		}
 	}
 	return processed, errors.Join(processErrors...)
+}
+
+func (w *ApprovalNotificationWorker) notifyInternal(ctx context.Context, approval *ApprovalCheckpoint) error {
+	if approval == nil {
+		return errors.New("approval is required")
+	}
+	run, err := w.store.GetAgentRun(ctx, approval.Scope, approval.RunID)
+	if err != nil {
+		return err
+	}
+	call, err := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
+	if err != nil {
+		return err
+	}
+	conversation, err := w.agentApprovalConversation(ctx, approval.Scope, run.Owner)
+	if err != nil {
+		return err
+	}
+	_, err = w.postApprovalMessage(ctx, approval, call, conversation.ID, "approval-request:"+approval.ID)
+	return err
+}
+
+func (w *ApprovalNotificationWorker) notifyInternalOutcome(ctx context.Context, approval *ApprovalCheckpoint, call *ActionCall) error {
+	if approval == nil || call == nil {
+		return errors.New("approval outcome is incomplete")
+	}
+	run, err := w.store.GetAgentRun(ctx, approval.Scope, approval.RunID)
+	if err != nil {
+		return err
+	}
+	key := agentApprovalConversationKey(run.Owner)
+	conversation, err := w.store.FindConversationByIdempotencyKey(ctx, approval.Scope, key)
+	if err != nil || conversation == nil {
+		return err
+	}
+	original, err := w.store.FindChannelMessageByIdempotencyKey(ctx, approval.Scope, conversation.ID, "approval-request:"+approval.ID)
+	if err != nil || original == nil {
+		return err
+	}
+	_, err = w.postOutcomeMessage(ctx, approval, call, conversation.ID, "approval-outcome:"+approval.ID+":"+approvalCardPhase(approval, call))
+	return err
+}
+
+func agentApprovalConversationKey(owner ObjectiveOwner) string {
+	return "agent-approvals:" + string(owner.Type) + ":" + owner.ID
+}
+
+func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Context, scope Scope, owner ObjectiveOwner) (*Conversation, error) {
+	key := agentApprovalConversationKey(owner)
+	existing, err := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.Owner != owner {
+			return nil, ErrMessageConflict
+		}
+		return existing, nil
+	}
+	conversation, _, err := w.conversations.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: owner, Title: "Approvals",
+		Origin: &ConversationReference{Kind: ConversationReferenceAgentApprovals, ID: owner.ID}, IdempotencyKey: key,
+	})
+	if !errors.Is(err, ErrMessageConflict) {
+		return conversation, err
+	}
+	existing, findErr := w.store.FindConversationByIdempotencyKey(ctx, scope, key)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if existing == nil || existing.Owner != owner {
+		return nil, err
+	}
+	return existing, nil
 }
 
 func terminalApprovalActionStatus(status ActionCallStatus) bool {
@@ -563,6 +643,7 @@ func (w *ApprovalNotificationWorker) postApprovalMessage(
 		Sender:            ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
 		SenderDisplayName: "Approval coordinator", Intent: MessageIntentApprovalRequest,
 		Content: approvalNotificationText(approval, call), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		References:       []ConversationReference{{Kind: ConversationReferenceApproval, ID: approval.ID}, {Kind: ConversationReferenceRun, ID: approval.RunID}},
 		RequiresResponse: true, IdempotencyKey: messageKey,
 	}
 	for range approvalNotificationPostAttempts {
@@ -601,6 +682,7 @@ func (w *ApprovalNotificationWorker) postOutcomeMessage(
 		Sender:            ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
 		SenderDisplayName: "Approval coordinator", Intent: MessageIntentUpdate,
 		Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		References:     []ConversationReference{{Kind: ConversationReferenceApproval, ID: approval.ID}, {Kind: ConversationReferenceRun, ID: approval.RunID}},
 		IdempotencyKey: messageKey,
 	}
 	for range approvalNotificationPostAttempts {
