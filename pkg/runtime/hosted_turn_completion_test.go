@@ -48,6 +48,18 @@ func TestHostedTurnCompletionRejectsFabricatedExternalURL(t *testing.T) {
 	}
 }
 
+func TestHostedTurnCompletionAcceptsEvidenceURLBeforeNewline(t *testing.T) {
+	request := HostedTurnRequest{Goal: "Inspect a repository", ContinuationCheckpoint: checkpointTerminalAction(nil, &ActionCall{
+		ID: "read-1", SkillID: "github", Action: "get", Status: ActionCallStatusSucceeded,
+		Output: map[string]interface{}{"url": "https://github.com/axiom-studio/openseal"},
+	}, nil)}
+	response := &HostedTurnResponse{NextRunStatus: AgentRunStatusCompleted,
+		OutputSummary: "Repository: https://github.com/axiom-studio/openseal\n3 checks completed."}
+	if err := ValidateHostedTurnCompletion(request, response); err != nil {
+		t.Fatalf("newline-delimited evidence URL = %v", err)
+	}
+}
+
 func TestHostedTurnCompletionRequiresAndAcceptsExternalReceipt(t *testing.T) {
 	checkpoint := checkpointTerminalAction(nil, &ActionCall{
 		ID: "commit-1", SkillID: "browser", Action: "commit", Status: ActionCallStatusSucceeded,
