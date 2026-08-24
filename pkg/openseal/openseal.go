@@ -5058,10 +5058,16 @@ func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment 
 		return nil, fmt.Errorf("ensure Agent control channel for %s: %w", deployment.ID, err)
 	}
 	if _, _, err = e.conversations.CreateConversation(ctx, runtime.CreateConversationRequest{
-		Scope:          scope,
-		Owner:          runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deployment.ID},
-		Title:          "Approvals",
-		Origin:         &runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentApprovals, ID: deployment.ID},
+		Scope: scope,
+		Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deployment.ID},
+		Title: "Approvals",
+		Origin: &runtime.ConversationReference{
+			Kind: runtime.ConversationReferenceAgentApprovals,
+			ID: AgentApprovalsConversationReferenceID(runtime.ObjectiveOwner{
+				Type: runtime.OwnerTypeAgent,
+				ID:   deployment.ID,
+			}),
+		},
 		IdempotencyKey: "agent-approvals:" + string(runtime.OwnerTypeAgent) + ":" + deployment.ID,
 	}); err != nil {
 		return nil, fmt.Errorf("ensure Agent approvals channel for %s: %w", deployment.ID, err)
@@ -5072,6 +5078,10 @@ func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment 
 func agentControlReferenceID(deploymentID string) string {
 	digest := sha256.Sum256([]byte(strings.TrimSpace(deploymentID)))
 	return "agent-" + hex.EncodeToString(digest[:16])
+}
+
+func AgentApprovalsConversationReferenceID(owner ObjectiveOwner) string {
+	return runtime.AgentApprovalsConversationReferenceID(owner)
 }
 
 func (e *Engine) UpdateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {

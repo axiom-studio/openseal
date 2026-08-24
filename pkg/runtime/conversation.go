@@ -1,11 +1,20 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 )
+
+// AgentApprovalsConversationReferenceID returns a portable, stable origin ID
+// for the approval inbox owned by an Agent deployment.
+func AgentApprovalsConversationReferenceID(owner ObjectiveOwner) string {
+	digest := sha256.Sum256([]byte(string(owner.Type) + "\x00" + strings.TrimSpace(owner.ID)))
+	return "agent-approvals-" + hex.EncodeToString(digest[:16])
+}
 
 var (
 	ErrConversationNotFound         = errors.New("conversation not found")
