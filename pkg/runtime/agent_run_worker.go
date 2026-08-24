@@ -235,8 +235,12 @@ func (p *AgentRunWorkerPool) Wake() {
 
 func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 	defer p.wg.Done()
-	consecutiveFailures := 0
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.wake:
+		}
 		release, acquireErr := p.limiter.acquire(ctx)
 		if acquireErr != nil {
 			return
@@ -250,20 +254,16 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			MaxActiveForConcurrencyKey: p.config.MaxActiveForConcurrencyKey,
 		})
 		if err != nil && ctx.Err() == nil {
-			consecutiveFailures++
 			p.logger.Errorw("failed to claim agent run", "workerId", workerID, "error", err)
-		} else if err == nil {
-			consecutiveFailures = 0
 		}
 		if run != nil {
+			// Hand the next claim opportunity to another worker before this one
+			// executes. This drains runnable work up to the configured concurrency
+			// without making every idle worker poll durable storage independently.
+			p.Wake()
 			p.executeClaim(ctx, workerID, run)
-			release()
-			continue
 		}
 		release()
-		if !waitForWorkerPoll(ctx, p.wake, workerPollDelay(p.config.PollInterval, consecutiveFailures, workerID)) {
-			return
-		}
 	}
 }
 
@@ -1081,7 +1081,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 		if acquireErr != nil {
 			return
 		}
-		result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, time.Now())
+		_, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, time.Now())
 		if err != nil {
 			consecutiveFailures++
 			release()
@@ -1089,9 +1089,10 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 			continue
 		}
 		consecutiveFailures = 0
-		if len(result.Runs) > 0 {
-			p.Wake()
-		}
+		// One timer per scope probes for work created by another process. Once a
+		// worker claims a Run it fans the wake token out, retaining parallelism
+		// while coalescing the idle database polling for all other workers.
+		p.Wake()
 		p.reconcileAgentRequestInbox(ctx)
 		p.reconcileForkChildren(ctx)
 		p.reconcileTerminalRunFinalizers(ctx)
