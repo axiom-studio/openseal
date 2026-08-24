@@ -443,6 +443,12 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 	if message.Historical || message.Intent == MessageIntentSystem || message.ParticipationRoundID != "" {
 		return false
 	}
+	// Approval notifications are control-plane projections for a human reviewer,
+	// not new work for the owning Agent. Scheduling them would let an approval
+	// request recursively trigger another governed action and another approval.
+	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == "approval-coordinator" {
+		return false
+	}
 	// The owning Agent's reply is the projection of the current conversation
 	// Run, never a new wake. Other Agents may still hand work into this channel.
 	if conversation.Owner.Type == OwnerTypeAgent && message.Sender.Type == ConversationParticipantAgent &&
