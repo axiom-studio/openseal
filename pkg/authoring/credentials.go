@@ -223,6 +223,7 @@ func ValidateCredentialPlacement(candidate *WorkforceCandidate, required map[str
 // requirements.
 func ValidateCredentialPlacementWithRequirements(candidate *WorkforceCandidate, required map[string][]CredentialBindingRequirement, placement ChangeSetPlacement, choices []capability.CredentialBindingChoice) error {
 	authorized := make(map[string]map[string]*capability.OAuth2GrantSummary)
+	authorizedByKind := make(map[string]map[string]*capability.OAuth2GrantSummary)
 	declaredBindings := make(map[string]bool)
 	deploymentBindings := make(map[string]bool)
 	for _, choice := range choices {
@@ -235,6 +236,10 @@ func ValidateCredentialPlacementWithRequirements(candidate *WorkforceCandidate, 
 		if err != nil || !reflect.DeepEqual(grant, choice.OAuth2) {
 			return fmt.Errorf("credential binding choice %s has an invalid or non-canonical OAuth 2 grant summary", choice.DisplayName)
 		}
+		if authorizedByKind[kind] == nil {
+			authorizedByKind[kind] = make(map[string]*capability.OAuth2GrantSummary)
+		}
+		authorizedByKind[kind][id] = grant
 		bindingKeys := append([]string(nil), choice.BindingKeys...)
 		explicitBindingKeys := len(bindingKeys) > 0
 		if len(bindingKeys) == 0 {
@@ -315,6 +320,14 @@ func ValidateCredentialPlacementWithRequirements(candidate *WorkforceCandidate, 
 				return fmt.Errorf("Agent %s credential key %s is not a required kind; expected %s", agentID, key, strings.Join(expected, ", "))
 			}
 			grant, available := authorized[key][kind+"\x00"+id]
+			// Legacy kind-only requirements used the credential kind as the
+			// placement key and did not declare the consumed field. Preserve
+			// that behavior without advertising type-name aliases in the host
+			// catalog. Typed requirements must continue to match both their
+			// exact field slot and kind through the normal lookup above.
+			if !available && requirement.Kind == "" && key == kind {
+				grant, available = authorizedByKind[kind][id]
+			}
 			if !available {
 				return fmt.Errorf("Agent %s credential reference for binding %s is unavailable or no longer authorized", agentID, key)
 			}
