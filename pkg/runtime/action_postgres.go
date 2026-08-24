@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -237,10 +236,30 @@ func (s *PostgresStore) ListApprovals(ctx context.Context, filter ApprovalFilter
 		query += ` AND r.payload->'owner'->>'type' = $3 AND r.payload->'owner'->>'id' = $4`
 		args = append(args, filter.Owner.Type, filter.Owner.ID)
 	}
+	if filter.RunID != "" {
+		args = append(args, filter.RunID)
+		query += ` AND a.run_id = $` + strconv.Itoa(len(args))
+	}
+	if len(filter.Status) > 0 {
+		statuses := make([]string, 0, len(filter.Status))
+		for _, status := range filter.Status {
+			statuses = append(statuses, string(status))
+		}
+		args = append(args, pq.Array(statuses))
+		query += ` AND a.status = ANY($` + strconv.Itoa(len(args)) + `)`
+	}
 	if filter.NewestFirst {
 		query += ` ORDER BY a.created_at DESC, a.id DESC`
 	} else {
 		query += ` ORDER BY a.created_at, a.id`
+	}
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += ` LIMIT $` + strconv.Itoa(len(args))
+	}
+	if filter.Offset > 0 {
+		args = append(args, filter.Offset)
+		query += ` OFFSET $` + strconv.Itoa(len(args))
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -257,20 +276,12 @@ func (s *PostgresStore) ListApprovals(ctx context.Context, filter ApprovalFilter
 		if err != nil {
 			return nil, err
 		}
-		if (filter.RunID == "" || approval.RunID == filter.RunID) && (len(filter.Status) == 0 || containsApprovalStatus(filter.Status, approval.Status)) {
-			result = append(result, approval)
-		}
+		result = append(result, approval)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	sort.SliceStable(result, func(i, j int) bool {
-		if filter.NewestFirst {
-			return result[i].CreatedAt.After(result[j].CreatedAt)
-		}
-		return result[i].CreatedAt.Before(result[j].CreatedAt)
-	})
-	return pageApprovals(result, filter.Offset, filter.Limit), nil
+	return result, nil
 }
 
 func (s *PostgresStore) ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error) {
