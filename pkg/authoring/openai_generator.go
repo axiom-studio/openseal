@@ -443,7 +443,7 @@ func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invoca
 		return nil, errors.New("authoring provider response exceeds 1 MiB")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("authoring provider returned HTTP %d", response.StatusCode)
+		return nil, NewProviderHTTPFailure(response.StatusCode)
 	}
 	var envelope struct {
 		Choices []struct {
@@ -554,7 +554,7 @@ func (g *OpenAICompatibleGenerator) completeResponsesContract(ctx context.Contex
 		return nil, errors.New("authoring provider response exceeds 1 MiB")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("authoring provider returned HTTP %d", response.StatusCode)
+		return nil, NewProviderHTTPFailure(response.StatusCode)
 	}
 	var envelope struct {
 		Status            string `json:"status"`
