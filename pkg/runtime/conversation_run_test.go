@@ -78,6 +78,29 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	}
 }
 
+func TestConversationMessageStartsRunSkipsApprovalCoordinatorProjections(t *testing.T) {
+	conversation := &Conversation{
+		ID: "approval-channel", Scope: Scope{Kind: "tenant", ID: "11"},
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"}, Status: ConversationStatusActive,
+	}
+	message := &ChannelMessage{
+		ID: "approval-request", Scope: conversation.Scope, ConversationID: conversation.ID,
+		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "approval-coordinator"},
+		Intent: MessageIntentApprovalRequest,
+	}
+	if conversationMessageStartsRun(conversation, message) {
+		t.Fatal("approval coordinator request recursively started an Agent Run")
+	}
+	message.Intent = MessageIntentUpdate
+	if conversationMessageStartsRun(conversation, message) {
+		t.Fatal("approval coordinator outcome recursively started an Agent Run")
+	}
+	message.Sender.ID = "release-coordinator"
+	if !conversationMessageStartsRun(conversation, message) {
+		t.Fatal("unrelated service handoff was suppressed")
+	}
+}
+
 func TestConversationRunSchedulerRecoversAfterSQLiteRestart(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "conversation-runs.db")
