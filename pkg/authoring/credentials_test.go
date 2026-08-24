@@ -78,6 +78,33 @@ func TestValidateCredentialPlacementAcceptsAuthorizedDeploymentBinding(t *testin
 	}
 }
 
+func TestValidateCredentialPlacementKeepsLegacyKindFallbackOutOfTypedSlots(t *testing.T) {
+	candidate := &WorkforceCandidate{Agents: []*agent.AgentDefinition{{ID: "reviewer"}}}
+	reference := capability.CredentialReference{Kind: "github_token", ID: "vault://github.token"}
+	choice := capability.CredentialBindingChoice{
+		Reference: reference, DisplayName: "GitHub", BindingKeys: []string{"token"},
+	}
+	placement := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
+		"reviewer": {"github_token": reference},
+	}}
+	if err := ValidateCredentialPlacement(candidate, map[string][]string{"reviewer": {"github_token"}}, placement, []capability.CredentialBindingChoice{choice}); err != nil {
+		t.Fatalf("legacy kind requirement rejected exact typed reference: %v", err)
+	}
+
+	typed := map[string][]CredentialBindingRequirement{"reviewer": {{Key: "token", Kind: "github_token"}}}
+	placement.CredentialReferences["reviewer"] = map[string]capability.CredentialReference{"token": reference}
+	if err := ValidateCredentialPlacementWithRequirements(candidate, typed, placement, []capability.CredentialBindingChoice{choice}); err != nil {
+		t.Fatalf("typed field and kind contract rejected: %v", err)
+	}
+
+	typed = map[string][]CredentialBindingRequirement{"reviewer": {{Key: "other", Kind: "github_token"}}}
+	placement.CredentialReferences["reviewer"] = map[string]capability.CredentialReference{"other": reference}
+	if err := ValidateCredentialPlacementWithRequirements(candidate, typed, placement, []capability.CredentialBindingChoice{choice}); err == nil ||
+		!strings.Contains(err.Error(), "must match credential kind") {
+		t.Fatalf("typed field mismatch error = %v", err)
+	}
+}
+
 func TestValidateCredentialPlacementRequiresOAuth2GrantCoverage(t *testing.T) {
 	requirement := CredentialBindingRequirement{
 		Key: "SLACK_CONNECTION", Kind: "slack-oauth",

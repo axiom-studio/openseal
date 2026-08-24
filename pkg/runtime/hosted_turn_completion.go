@@ -8,7 +8,11 @@ import (
 	"strings"
 )
 
-var hostedTurnURLPattern = regexp.MustCompile(`https?://[^\s<>"']+`)
+// A backslash terminates a URL as well as ordinary whitespace. Completion
+// output is JSON-encoded before inspection, so a real newline appears as the
+// two bytes `\n`; accepting the backslash would incorrectly append the next
+// line to an otherwise evidence-backed URL.
+var hostedTurnURLPattern = regexp.MustCompile(`https?://[^\s<>"'\\]+`)
 
 // ValidateHostedTurnCompletion prevents a model-authored terminal response
 // from becoming evidence. External effects must cite a succeeded, kernel-owned

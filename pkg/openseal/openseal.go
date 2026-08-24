@@ -33,6 +33,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
 )
 
@@ -133,6 +134,20 @@ type (
 	AgentDeploymentRestrictions               = kernelagent.DeploymentRestrictions
 	AgentDeploymentCapacity                   = kernelagent.DeploymentCapacity
 	AgentDeploymentHealth                     = kernelagent.DeploymentHealth
+	WorkspaceSpec                             = workspace.Spec
+	WorkspaceStorageProfile                   = workspace.StorageProfile
+	WorkspaceComputeProfile                   = workspace.ComputeProfile
+	WorkspaceAcceleratorProfile               = workspace.AcceleratorProfile
+	WorkspaceStorageDurability                = workspace.StorageDurability
+	WorkspaceStorageRetention                 = workspace.StorageRetention
+	WorkspaceAccess                           = workspace.Access
+	WorkspaceAuthority                        = workspace.Authority
+	WorkspaceOperation                        = workspace.Operation
+	WorkspacePolicy                           = workspace.Policy
+	WorkspaceCommandPolicy                    = workspace.CommandPolicy
+	WorkspaceGitPolicy                        = workspace.GitPolicy
+	WorkspaceNetworkAccess                    = workspace.NetworkAccess
+	HostedWorkspace                           = runtime.HostedWorkspace
 	AgentDefinitionActivation                 = kernelagent.DefinitionActivation
 	AgentRolloutStatus                        = kernelagent.RolloutStatus
 	AgentDefinitionAmendment                  = kernelagent.DefinitionAmendment
@@ -590,6 +605,7 @@ type (
 	HostedTurnResponse                   = runtime.HostedTurnResponse
 	HostedTurnForm                       = runtime.HostedTurnForm
 	HostedTurnFormAuthority              = runtime.HostedTurnFormAuthority
+	HostedWorkspaceOperationForm         = runtime.HostedWorkspaceOperationForm
 	HostedTurnActionForm                 = runtime.HostedTurnActionForm
 	HostedTurnModelInput                 = runtime.HostedTurnModelInput
 	HostedActionInvocationContract       = runtime.HostedActionInvocationContract
@@ -1099,6 +1115,12 @@ func NewSkillIdentity(id, version, sourceIdentity string) SkillIdentity {
 	return capability.NewSkillIdentity(id, version, sourceIdentity)
 }
 
+func DefaultWorkspaceSpec() WorkspaceSpec { return workspace.DefaultSpec() }
+
+func EnsureDefaultAgentWorkspace(deployment *AgentDeployment) {
+	kernelagent.EnsureDefaultWorkspace(deployment)
+}
+
 type ProjectSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
 type (
@@ -1474,6 +1496,7 @@ var (
 	MarshalHostedTurnModelInput            = runtime.MarshalHostedTurnModelInput
 	ProjectHostedActionInvocationContracts = runtime.ProjectHostedActionInvocationContracts
 	CompileHostedTurnForm                  = runtime.CompileHostedTurnForm
+	CompileHostedTurnFormWithWorkspace     = runtime.CompileHostedTurnFormWithWorkspace
 	HostedTurnFormFromResponse             = runtime.HostedTurnFormFromResponse
 	HostedTurnFormJSONSchema               = runtime.HostedTurnFormJSONSchema
 	ValidateHostedTurnCompletion           = runtime.ValidateHostedTurnCompletion
@@ -2119,6 +2142,23 @@ const (
 	SkillRiskProduction  = skill.RiskLevelProduction
 	SkillRiskDestructive = skill.RiskLevelDestructive
 
+	WorkspaceDefaultID                = workspace.DefaultID
+	WorkspaceDurabilityPersistent     = workspace.StorageDurabilityPersistent
+	WorkspaceDurabilityEphemeral      = workspace.StorageDurabilityEphemeral
+	WorkspaceRetentionRetain          = workspace.StorageRetentionRetain
+	WorkspaceRetentionDelete          = workspace.StorageRetentionDelete
+	WorkspaceAccessReadOnly           = workspace.AccessReadOnly
+	WorkspaceAccessReadWrite          = workspace.AccessReadWrite
+	WorkspaceNetworkDenied            = workspace.NetworkDenied
+	WorkspaceNetworkEgress            = workspace.NetworkEgress
+	WorkspaceOperationListDirectory   = workspace.OperationListDirectory
+	WorkspaceOperationReadFile        = workspace.OperationReadFile
+	WorkspaceOperationSearchFiles     = workspace.OperationSearchFiles
+	WorkspaceOperationWriteFile       = workspace.OperationWriteFile
+	WorkspaceOperationApplyPatch      = workspace.OperationApplyPatch
+	WorkspaceOperationRunCommand      = workspace.OperationRunCommand
+	WorkspaceOperationGitClone        = workspace.OperationGitClone
+	WorkspaceOperationGitPush         = workspace.OperationGitPush
 	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
 	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
 	SkillBindingArgumentVerifiedClaim = skill.BindingArgumentVerifiedClaim
@@ -4838,6 +4878,13 @@ func (e *Engine) ListSkillBindings(ctx context.Context, scope skill.ScopeReferen
 
 func (e *Engine) GetSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string) (*skill.Binding, error) {
 	return e.skills.GetBinding(ctx, scope, deploymentID, bindingID)
+}
+
+// ResolveCallbackAdapterBinding returns the exact callback adapter selected by
+// one deployment binding. Hosts use this to materialize provider connection
+// transports without learning provider-specific protocol semantics.
+func (e *Engine) ResolveCallbackAdapterBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID, adapterID string) (*skill.BoundCallbackAdapter, error) {
+	return e.skills.ResolveCallbackAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
 }
 
 func (e *Engine) UpsertSkillBinding(ctx context.Context, request skill.UpsertBindingRequest) (*skill.Binding, error) {

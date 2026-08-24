@@ -16,6 +16,13 @@ func NormalizeCallbackAdapter(value CallbackAdapter) (CallbackAdapter, error) {
 	value.Provider = strings.TrimSpace(value.Provider)
 	value.Transport.Kind = strings.TrimSpace(value.Transport.Kind)
 	value.Transport.IngressEndpoint = strings.TrimSpace(value.Transport.IngressEndpoint)
+	if value.Transport.Connection != nil {
+		connection := *value.Transport.Connection
+		connection.Kind = strings.TrimSpace(connection.Kind)
+		connection.Endpoint = strings.TrimSpace(connection.Endpoint)
+		connection.SharedByCredential = strings.TrimSpace(connection.SharedByCredential)
+		value.Transport.Connection = &connection
+	}
 	if value.ProtocolVersion != CallbackAdapterProtocolV1 {
 		return CallbackAdapter{}, errors.New("callback adapter protocol version is unsupported")
 	}
@@ -75,8 +82,40 @@ func NormalizeCallbackAdapter(value CallbackAdapter) (CallbackAdapter, error) {
 	if err != nil {
 		return CallbackAdapter{}, err
 	}
-	if len(value.Transport.IngressCredentials) != len(credentials) {
-		return CallbackAdapter{}, errors.New("callback adapter credentials must declare ingress use")
+	usedCredentials := make(map[string]struct{}, len(credentials))
+	for _, name := range value.Transport.IngressCredentials {
+		usedCredentials[name] = struct{}{}
+	}
+	if value.Transport.Connection != nil {
+		connection := value.Transport.Connection
+		if connection.Kind != "websocket" ||
+			!validConversationAdapterIdentifier(connection.Endpoint, 256) {
+			return CallbackAdapter{}, errors.New("callback adapter connection transport is invalid")
+		}
+		connection.Credentials, err = normalizeConversationCredentialSelection(
+			connection.Credentials, seenCredentials, "callback connection",
+		)
+		if err != nil {
+			return CallbackAdapter{}, err
+		}
+		if len(connection.Credentials) == 0 {
+			return CallbackAdapter{}, errors.New("callback adapter connection requires credentials")
+		}
+		if connection.SharedByCredential != "" {
+			found := false
+			for _, name := range connection.Credentials {
+				found = found || name == connection.SharedByCredential
+			}
+			if !found {
+				return CallbackAdapter{}, errors.New("callback adapter shared connection credential must be projected into the connection")
+			}
+		}
+		for _, name := range connection.Credentials {
+			usedCredentials[name] = struct{}{}
+		}
+	}
+	if len(usedCredentials) != len(credentials) {
+		return CallbackAdapter{}, errors.New("callback adapter credentials must declare ingress or connection use")
 	}
 	return value, nil
 }

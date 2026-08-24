@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 var (
@@ -48,7 +49,7 @@ func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavai
 func (e retryableTurnHostError) Unwrap() error        { return e.cause }
 func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
 
-const HostedTurnAPIVersion = "openseal.hosted-turn/v12"
+const HostedTurnAPIVersion = "openseal.hosted-turn/v14"
 
 const maximumHostedTurnMediaBytes = 1 << 20
 
@@ -70,6 +71,15 @@ type HostedAgentTarget struct {
 	ID          string `json:"id"`
 	DisplayName string `json:"displayName"`
 	Purpose     string `json:"purpose,omitempty"`
+}
+
+// HostedWorkspace is the small model-facing projection of framework-owned
+// Workspace authority. Native Workspace tools are supplied by the trusted
+// Agent host automatically; there is no Skill, binding, or catalog identity.
+type HostedWorkspace struct {
+	ID          string           `json:"id"`
+	DisplayName string           `json:"displayName,omitempty"`
+	Policy      workspace.Policy `json:"policy"`
 }
 
 // HostedRunbookOperation is one immutable deterministic operation the current
@@ -136,27 +146,30 @@ type HostedRunBudget struct {
 // OpenSeal remains authoritative for leases, Turns, actions and state changes;
 // the host performs one bounded proposal-only model invocation.
 type HostedTurnRequest struct {
-	APIVersion             string                   `json:"apiVersion"`
-	InvocationID           string                   `json:"invocationId"`
-	Scope                  Scope                    `json:"scope"`
-	RunID                  string                   `json:"runId"`
-	TurnID                 string                   `json:"turnId"`
-	AgentID                string                   `json:"agentId"`
-	DefinitionID           string                   `json:"definitionId"`
-	DefinitionVersion      string                   `json:"definitionVersion"`
-	Goal                   string                   `json:"goal"`
-	InputContext           map[string]interface{}   `json:"inputContext,omitempty"`
-	SystemInstructions     []string                 `json:"systemInstructions,omitempty"`
-	EligibleAgents         []HostedAgentTarget      `json:"eligibleAgents,omitempty"`
-	RunbookOperations      []HostedRunbookOperation `json:"runbookOperations,omitempty"`
-	SkillPrompts           []HostedSkillPrompt      `json:"skillPrompts,omitempty"`
-	Actions                []capability.ModelAction `json:"actions,omitempty"`
-	Budget                 *HostedRunBudget         `json:"budget,omitempty"`
-	DependencyResults      map[string]interface{}   `json:"dependencyResults,omitempty"`
-	CollaborationResults   map[string]interface{}   `json:"collaborationResults,omitempty"`
-	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
-	PendingInterventions   []AgentRunIntervention   `json:"pendingInterventions,omitempty"`
-	ModelMedia             []HostedTurnMedia        `json:"modelMedia,omitempty"`
+	APIVersion             string                                    `json:"apiVersion"`
+	InvocationID           string                                    `json:"invocationId"`
+	Scope                  Scope                                     `json:"scope"`
+	RunID                  string                                    `json:"runId"`
+	TurnID                 string                                    `json:"turnId"`
+	AgentID                string                                    `json:"agentId"`
+	DefinitionID           string                                    `json:"definitionId"`
+	DefinitionVersion      string                                    `json:"definitionVersion"`
+	Goal                   string                                    `json:"goal"`
+	InputContext           map[string]interface{}                    `json:"inputContext,omitempty"`
+	SystemInstructions     []string                                  `json:"systemInstructions,omitempty"`
+	EligibleAgents         []HostedAgentTarget                       `json:"eligibleAgents,omitempty"`
+	Workspace              *workspace.Authority                      `json:"workspace,omitempty"`
+	WorkspaceOperations    []workspace.Operation                     `json:"workspaceOperations,omitempty"`
+	WorkspaceCredentials   map[string]capability.CredentialReference `json:"workspaceCredentials,omitempty"`
+	RunbookOperations      []HostedRunbookOperation                  `json:"runbookOperations,omitempty"`
+	SkillPrompts           []HostedSkillPrompt                       `json:"skillPrompts,omitempty"`
+	Actions                []capability.ModelAction                  `json:"actions,omitempty"`
+	Budget                 *HostedRunBudget                          `json:"budget,omitempty"`
+	DependencyResults      map[string]interface{}                    `json:"dependencyResults,omitempty"`
+	CollaborationResults   map[string]interface{}                    `json:"collaborationResults,omitempty"`
+	ContinuationCheckpoint map[string]interface{}                    `json:"continuationCheckpoint,omitempty"`
+	PendingInterventions   []AgentRunIntervention                    `json:"pendingInterventions,omitempty"`
+	ModelMedia             []HostedTurnMedia                         `json:"modelMedia,omitempty"`
 	// ModelCredential is an opaque, host-resolved binding. It crosses only the
 	// trusted TurnHost transport boundary and is deliberately excluded from
 	// HostedTurnModelInput, durable checkpoints, and model-visible context.
@@ -166,26 +179,27 @@ type HostedTurnRequest struct {
 }
 
 type HostedTurnResponse struct {
-	APIVersion             string                   `json:"apiVersion"`
-	InvocationID           string                   `json:"invocationId"`
-	ModelProvider          string                   `json:"modelProvider"`
-	Model                  string                   `json:"model"`
-	SkillSelections        []HostedSkillSelection   `json:"skillSelections,omitempty"`
-	Decisions              []TurnDecision           `json:"decisions,omitempty"`
-	ProposedAction         *TurnAction              `json:"proposedAction,omitempty"`
-	ProposedFork           *TurnForkProposal        `json:"proposedFork,omitempty"`
-	ProposedDelegation     *TurnDelegationProposal  `json:"proposedDelegation,omitempty"`
-	ProposedRunbook        *TurnRunbookProposal     `json:"proposedRunbook,omitempty"`
-	OutputSummary          string                   `json:"outputSummary"`
-	Usage                  TurnUsage                `json:"usage,omitempty"`
-	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
-	NextRunStatus          AgentRunStatus           `json:"nextRunStatus"`
-	WakeCondition          *WakeCondition           `json:"wakeCondition,omitempty"`
-	RunOutput              map[string]interface{}   `json:"runOutput,omitempty"`
-	RunError               string                   `json:"runError,omitempty"`
-	CompletionEvidenceRefs []string                 `json:"completionEvidenceRefs,omitempty"`
-	EvidenceClaims         []EvidenceClaim          `json:"evidenceClaims,omitempty"`
-	EvidenceGrounding      *EvidenceGroundingReview `json:"evidenceGrounding,omitempty"`
+	APIVersion                 string                        `json:"apiVersion"`
+	InvocationID               string                        `json:"invocationId"`
+	ModelProvider              string                        `json:"modelProvider"`
+	Model                      string                        `json:"model"`
+	SkillSelections            []HostedSkillSelection        `json:"skillSelections,omitempty"`
+	Decisions                  []TurnDecision                `json:"decisions,omitempty"`
+	ProposedAction             *TurnAction                   `json:"proposedAction,omitempty"`
+	ProposedWorkspaceOperation *HostedWorkspaceOperationForm `json:"proposedWorkspaceOperation,omitempty"`
+	ProposedFork               *TurnForkProposal             `json:"proposedFork,omitempty"`
+	ProposedDelegation         *TurnDelegationProposal       `json:"proposedDelegation,omitempty"`
+	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
+	OutputSummary              string                        `json:"outputSummary"`
+	Usage                      TurnUsage                     `json:"usage,omitempty"`
+	ContinuationCheckpoint     map[string]interface{}        `json:"continuationCheckpoint,omitempty"`
+	NextRunStatus              AgentRunStatus                `json:"nextRunStatus"`
+	WakeCondition              *WakeCondition                `json:"wakeCondition,omitempty"`
+	RunOutput                  map[string]interface{}        `json:"runOutput,omitempty"`
+	RunError                   string                        `json:"runError,omitempty"`
+	CompletionEvidenceRefs     []string                      `json:"completionEvidenceRefs,omitempty"`
+	EvidenceClaims             []EvidenceClaim               `json:"evidenceClaims,omitempty"`
+	EvidenceGrounding          *EvidenceGroundingReview      `json:"evidenceGrounding,omitempty"`
 }
 
 // ValidateHostedSkillSelections verifies that a host returned exactly one
@@ -224,18 +238,20 @@ type TurnHost interface {
 }
 
 type HostedTurnRunnerConfig struct {
-	AgentID            string
-	ActionDeploymentID string
-	DefinitionID       string
-	DefinitionVersion  string
-	SystemInstructions []string
-	EligibleAgents     []HostedAgentTarget
-	RunbookOperations  []HostedRunbookOperation
-	SkillPrompts       []HostedSkillPrompt
-	Actions            []capability.ModelAction
-	ModelCredential    *capability.CredentialReference
-	ModelProvider      string
-	Model              string
+	AgentID              string
+	ActionDeploymentID   string
+	DefinitionID         string
+	DefinitionVersion    string
+	SystemInstructions   []string
+	EligibleAgents       []HostedAgentTarget
+	Workspace            *workspace.Authority
+	WorkspaceCredentials map[string]capability.CredentialReference
+	RunbookOperations    []HostedRunbookOperation
+	SkillPrompts         []HostedSkillPrompt
+	Actions              []capability.ModelAction
+	ModelCredential      *capability.CredentialReference
+	ModelProvider        string
+	Model                string
 }
 
 type HostedTurnRunner struct {
@@ -324,6 +340,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
 		return nil, errors.New("turn host returned a mismatched response envelope")
+	}
+	if response.ProposedWorkspaceOperation != nil {
+		return nil, errors.New("turn host returned an unconsumed native Workspace operation")
 	}
 	response.ModelProvider, response.Model, err = normalizeModelIdentity(response.ModelProvider, response.Model)
 	if err != nil {
@@ -615,6 +634,9 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
 		Goal: input.Run.Goal, InputContext: inputContext, SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
 		EligibleAgents:         cloneHostedAgentTargets(r.config.EligibleAgents),
+		Workspace:              cloneHostedWorkspaceAuthority(r.config.Workspace),
+		WorkspaceOperations:    cloneHostedWorkspaceOperations(workspace.Operations(r.config.Workspace)),
+		WorkspaceCredentials:   cloneHostedCredentialReferences(r.config.WorkspaceCredentials),
 		RunbookOperations:      cloneHostedRunbookOperations(r.config.RunbookOperations),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		Actions:                cloneHostedModelActions(r.config.Actions),
@@ -1046,4 +1068,39 @@ func cloneHostedAgentTargets(values []HostedAgentTarget) []HostedAgentTarget {
 		return nil
 	}
 	return append([]HostedAgentTarget(nil), values...)
+}
+
+func cloneHostedWorkspaceAuthority(value *workspace.Authority) *workspace.Authority {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	if value.Workspace.Compute.Accelerator != nil {
+		accelerator := *value.Workspace.Compute.Accelerator
+		copy.Workspace.Compute.Accelerator = &accelerator
+	}
+	return &copy
+}
+
+func cloneHostedWorkspaceOperations(values []workspace.Operation) []workspace.Operation {
+	if values == nil {
+		return nil
+	}
+	result := make([]workspace.Operation, len(values))
+	for index := range values {
+		result[index] = values[index]
+		result[index].InputSchema = cloneMap(values[index].InputSchema)
+	}
+	return result
+}
+
+func cloneHostedCredentialReferences(values map[string]capability.CredentialReference) map[string]capability.CredentialReference {
+	if values == nil {
+		return nil
+	}
+	result := make(map[string]capability.CredentialReference, len(values))
+	for name, reference := range values {
+		result[name] = reference
+	}
+	return result
 }

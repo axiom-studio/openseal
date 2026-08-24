@@ -91,6 +91,7 @@ func InstallManifest(ctx context.Context, registry ManifestInstallationRegistry,
 	desiredDeployment.Revision = 1
 	desiredDeployment.Health = DeploymentHealth{}
 	desiredDeployment.Activation = nil
+	EnsureDefaultWorkspace(desiredDeployment)
 	desiredDeployment.CreatedAt = desiredDeployment.CreatedAt.UTC()
 	desiredDeployment.UpdatedAt = desiredDeployment.UpdatedAt.UTC()
 	if desiredDeployment.RolloutStatus == "" {

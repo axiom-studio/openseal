@@ -72,6 +72,77 @@ func TestCallbackAdapterRequiresCanonicalEventOrdering(t *testing.T) {
 	}
 }
 
+func TestCallbackAdapterAcceptsIsolatedWebSocketConnectionCredentials(t *testing.T) {
+	definition := callbackAdapterDefinition()
+	adapter := definition.CallbackAdapters["interactions"]
+	adapter.Credentials = []capability.CredentialRequirement{
+		{Name: "app_token", Kind: "slack_app_token"},
+		{Name: "signing_secret", Kind: "slack_signing_secret"},
+	}
+	adapter.Transport.Connection = &capability.CallbackAdapterConnectionTransport{
+		Kind: "websocket", Endpoint: "slack.callback.socket_mode",
+		Credentials: []string{"app_token", "signing_secret"}, SharedByCredential: "app_token",
+	}
+	definition.CallbackAdapters["interactions"] = adapter
+	catalog := NewCatalog()
+	if err := catalog.Register(context.Background(), definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &Binding{
+		ID: "slack-callback", Scope: ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "agent-one",
+		SkillID: definition.ID, SkillVersion: definition.Version,
+		EnabledCallbackAdapters: []string{"interactions"}, MaximumRisk: RiskLevelRead, Revision: 1,
+		Credentials: map[string]CredentialReference{
+			"app_token":      {Kind: "slack_app_token", ID: "vault://slack.app_token"},
+			"signing_secret": {Kind: "slack_signing_secret", ID: "vault://slack.signing_secret"},
+		},
+	}
+	if err := catalog.Bind(context.Background(), binding); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := catalog.ResolveCallbackAdapterBinding(context.Background(), binding.Scope, binding.DeploymentID, binding.ID, "interactions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := resolved.Adapter.Transport.Connection
+	if connection == nil || connection.Kind != "websocket" || connection.Endpoint != "slack.callback.socket_mode" ||
+		strings.Join(connection.Credentials, ",") != "app_token,signing_secret" || connection.SharedByCredential != "app_token" {
+		t.Fatalf("connection transport = %#v", connection)
+	}
+}
+
+func TestCallbackAdapterRejectsUnprojectedSharedConnectionCredential(t *testing.T) {
+	definition := callbackAdapterDefinition()
+	adapter := definition.CallbackAdapters["interactions"]
+	adapter.Credentials = []capability.CredentialRequirement{
+		{Name: "app_token", Kind: "slack_app_token"},
+		{Name: "signing_secret", Kind: "slack_signing_secret"},
+	}
+	adapter.Transport.Connection = &capability.CallbackAdapterConnectionTransport{
+		Kind: "websocket", Endpoint: "slack.callback.socket_mode",
+		Credentials: []string{"signing_secret"}, SharedByCredential: "app_token",
+	}
+	definition.CallbackAdapters["interactions"] = adapter
+	err := NewCatalog().Register(context.Background(), definition)
+	if err == nil || !strings.Contains(err.Error(), "shared connection credential") {
+		t.Fatalf("shared connection credential error = %v", err)
+	}
+}
+
+func TestCallbackAdapterRejectsUnusedConnectionCredential(t *testing.T) {
+	definition := callbackAdapterDefinition()
+	adapter := definition.CallbackAdapters["interactions"]
+	adapter.Credentials = []capability.CredentialRequirement{
+		{Name: "app_token", Kind: "slack_app_token"},
+		{Name: "signing_secret", Kind: "slack_signing_secret"},
+	}
+	definition.CallbackAdapters["interactions"] = adapter
+	err := NewCatalog().Register(context.Background(), definition)
+	if err == nil || !strings.Contains(err.Error(), "ingress or connection use") {
+		t.Fatalf("unused connection credential error = %v", err)
+	}
+}
+
 func callbackAdapterDefinition() *Definition {
 	return &Definition{
 		ID: "skill-slack", Version: "2.2.0", Name: "Slack",
