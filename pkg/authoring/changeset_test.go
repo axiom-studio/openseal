@@ -494,6 +494,41 @@ func TestContractGenerationFailureClassificationIsActionable(t *testing.T) {
 	}
 }
 
+func TestProviderGenerationFailureClassificationIsActionableAndSecretFree(t *testing.T) {
+	const secret = "provider-secret-must-not-persist"
+	tests := []struct {
+		name    string
+		kind    ProviderFailureKind
+		code    string
+		message string
+	}{
+		{name: "not configured", kind: ProviderFailureNotConfigured, code: "provider_not_configured", message: "Choose a default LLM credential in Vault before generating a proposal."},
+		{name: "invalid configuration", kind: ProviderFailureConfigurationInvalid, code: "provider_configuration_invalid", message: "The default LLM credential is incomplete. Verify its endpoint, model, and API key, then try again."},
+		{name: "credentials rejected", kind: ProviderFailureCredentialsRejected, code: "provider_credentials_rejected", message: "The configured model provider rejected its credentials. Update or replace the default LLM credential, then try again."},
+		{name: "request rejected", kind: ProviderFailureRequestRejected, code: "provider_request_rejected", message: "The model provider rejected the authoring request. Verify that the endpoint and model support OpenAI-compatible chat completions."},
+		{name: "rate limited", kind: ProviderFailureRateLimited, code: "provider_rate_limited", message: "The model provider is rate limited. Wait briefly, then try again."},
+		{name: "unavailable", kind: ProviderFailureUnavailable, code: "provider_unavailable", message: "The model provider is currently unavailable. Try again when the provider has recovered."},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			code, message := classifyGenerationFailure(NewProviderFailure(test.kind, errors.New("provider failed with "+secret)))
+			if code != test.code || message != test.message || strings.Contains(message, secret) {
+				t.Fatalf("provider failure classification = %q / %q", code, message)
+			}
+		})
+	}
+}
+
+func TestProviderHTTPFailureClassification(t *testing.T) {
+	tests := map[int]string{400: "provider_request_rejected", 401: "provider_credentials_rejected", 403: "provider_credentials_rejected", 429: "provider_rate_limited", 503: "provider_unavailable"}
+	for status, expected := range tests {
+		code, _ := classifyGenerationFailure(NewProviderHTTPFailure(status))
+		if code != expected {
+			t.Fatalf("HTTP %d classified as %q", status, code)
+		}
+	}
+}
+
 func TestChangeSetRepairsGenericSkillQuestionAndPersistsCanonicalSelection(t *testing.T) {
 	candidate := marketingCandidate("1", capability.RiskLevelRead)
 	question := RefinementQuestion{
