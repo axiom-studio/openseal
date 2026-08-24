@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 )
+
+const agentRequestProjectionCacheLimit = 10000
 
 // AgentRequestConversationProjector reconciles the authoritative
 // AgentRequest lifecycle into linked channels. Messages are idempotent
@@ -13,6 +16,9 @@ import (
 type AgentRequestConversationProjector struct {
 	collaboration *CollaborationService
 	conversations *ConversationService
+	mu            sync.Mutex
+	completed     map[string]struct{}
+	completedFIFO []string
 }
 
 func NewAgentRequestConversationProjector(store interface {
@@ -25,6 +31,7 @@ func NewAgentRequestConversationProjector(store interface {
 	return &AgentRequestConversationProjector{
 		collaboration: NewCollaborationService(store),
 		conversations: NewConversationService(store),
+		completed:     make(map[string]struct{}),
 	}, nil
 }
 
@@ -52,10 +59,22 @@ func (p *AgentRequestConversationProjector) Reconcile(ctx context.Context, scope
 				if conversationID == "" {
 					continue
 				}
+				projectionKey := agentRequestConversationProjectionKey(request, conversationID)
+				if p.projectionCompleted(projectionKey) {
+					continue
+				}
 				if err := p.projectRequest(ctx, request, conversationID); err != nil {
+					// Conversations are independently owned channel projections. Once a
+					// channel is deleted, its historical AgentRequest reference can never
+					// be projected again and must not poison the durable inbox worker.
+					if errors.Is(err, ErrConversationNotFound) {
+						p.rememberProjection(projectionKey)
+						continue
+					}
 					failures = append(failures, fmt.Errorf("request %s conversation %s: %w", request.ID, conversationID, err))
 					continue
 				}
+				p.rememberProjection(projectionKey)
 				projected++
 			}
 		}
@@ -63,6 +82,40 @@ func (p *AgentRequestConversationProjector) Reconcile(ctx context.Context, scope
 			return projected, errors.Join(failures...)
 		}
 	}
+}
+
+func agentRequestConversationProjectionKey(request *AgentRequest, conversationID string) string {
+	if request == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%s", request.Scope.Kind, request.Scope.ID, request.ID, request.Revision, conversationID)
+}
+
+func (p *AgentRequestConversationProjector) projectionCompleted(key string) bool {
+	if p == nil || key == "" {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, ok := p.completed[key]
+	return ok
+}
+
+func (p *AgentRequestConversationProjector) rememberProjection(key string) {
+	if p == nil || key == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.completed[key]; ok {
+		return
+	}
+	if len(p.completedFIFO) >= agentRequestProjectionCacheLimit {
+		delete(p.completed, p.completedFIFO[0])
+		p.completedFIFO = p.completedFIFO[1:]
+	}
+	p.completed[key] = struct{}{}
+	p.completedFIFO = append(p.completedFIFO, key)
 }
 
 func (p *AgentRequestConversationProjector) projectRequest(ctx context.Context, request *AgentRequest, conversationID string) error {

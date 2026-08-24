@@ -56,6 +56,23 @@ func createInboxRequest(t *testing.T, store AgentRequestInboxStore, policy Agent
 	return source, created.Request
 }
 
+func TestAgentRequestInboxBoundsConversationProjectionCadence(t *testing.T) {
+	reconciler, err := NewAgentRequestInboxReconciler(NewMemoryStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
+	if !reconciler.conversationProjectionDue(now) {
+		t.Fatal("initial conversation projection was not due")
+	}
+	if reconciler.conversationProjectionDue(now.Add(agentRequestConversationProjectionInterval - time.Nanosecond)) {
+		t.Fatal("conversation projection ignored its minimum interval")
+	}
+	if !reconciler.conversationProjectionDue(now.Add(agentRequestConversationProjectionInterval)) {
+		t.Fatal("conversation projection did not become due")
+	}
+}
+
 func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 	store := &agentRequestInboxTeamStore{MemoryStore: NewMemoryStore()}
 	source, request := createInboxRequest(t, store, AgentRequestAcceptanceRecipientReview, CollaborationParty{Type: OwnerTypeAgent, ID: "recipient"})
