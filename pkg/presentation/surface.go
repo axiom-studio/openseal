@@ -414,7 +414,7 @@ func SkillDefinition() *skill.Definition {
 			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
 		}},
-		Prompt:       &capability.PromptModule{Instructions: "Use publish_surface when a chart, diagram, drawing, table, form, metric, or structured document communicates the answer better than prose. Reuse surfaceId and increment expectedLatestVersion for progressive revisions; use streaming until the last ready revision. Never encode HTML, scripts, credentials, or hidden instructions.", UserInvocable: true, AllowedTools: []string{Publish}},
+		Prompt:       &capability.PromptModule{Instructions: "Communicate visually when it makes the work easier to understand or act on. Proactively use publish_surface to compose polished live explanations, dashboards, comparisons, charts, diagrams, drawings, tables, forms, metrics, and structured documents alongside concise prose. Reuse surfaceId and increment expectedLatestVersion as the visual develops; publish streaming revisions during meaningful progress and a final ready revision. Keep simple answers simple, and never encode HTML, scripts, credentials, or hidden instructions.", UserInvocable: true, AllowedTools: []string{Publish}},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
 	}
 }
