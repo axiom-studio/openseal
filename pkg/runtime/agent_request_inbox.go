@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -32,6 +34,8 @@ const agentRequestDecisionSystemInstruction = `Evaluate the incoming AgentReques
 const agentRequestCompletionReviewSystemInstruction = `Independently review the completed delegated work in inputContext.agentRequestCompletionReview against its goal, acceptance criteria, required artifacts, evidence, and output. Do not execute Skills, invoke runbooks, delegate, fork, or modify the work during this review. Complete the review with runOutput.agentRequestCompletionReviewDecision set to exactly {"decision":"approve","message":"concise evidence-based reason"} or {"decision":"reject","message":"concise evidence-based reason"}.`
 
 const acceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again, and do not emit runOutput.agentRequestDecision. If continuationCheckpoint._opensealAcceptedAgentRequestExecutionRecovery is present, the previous execution turn was discarded because it repeated the already-completed intake decision; continue directly with the requested work and do not repeat that output.`
+
+const agentRequestConversationProjectionInterval = 5 * time.Second
 
 type agentRequestTeamDefinitionStore interface {
 	GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error)
@@ -183,9 +187,12 @@ func acceptedAgentRequestExecutionRecoveryAttempt(checkpoint map[string]interfac
 // idempotency makes request review recoverable across process restarts without
 // leasing Agent identity to a human caller.
 type AgentRequestInboxReconciler struct {
-	collaboration *CollaborationService
-	commands      *RunCommandService
-	projector     *AgentRequestConversationProjector
+	collaboration  *CollaborationService
+	commands       *RunCommandService
+	projector      *AgentRequestConversationProjector
+	projectionMu   sync.Mutex
+	lastProjection time.Time
+	now            func() time.Time
 }
 
 func NewAgentRequestInboxReconciler(store AgentRequestInboxStore) (*AgentRequestInboxReconciler, error) {
@@ -195,6 +202,7 @@ func NewAgentRequestInboxReconciler(store AgentRequestInboxStore) (*AgentRequest
 	reconciler := &AgentRequestInboxReconciler{
 		collaboration: NewCollaborationService(store),
 		commands:      NewRunCommandService(store),
+		now:           time.Now,
 	}
 	if conversationStore, ok := store.(agentRequestInboxConversationStore); ok {
 		reconciler.projector, _ = NewAgentRequestConversationProjector(conversationStore)
@@ -203,6 +211,24 @@ func NewAgentRequestInboxReconciler(store AgentRequestInboxStore) (*AgentRequest
 }
 
 func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope Scope, assignedAgentID string) (*AgentRequestInboxReconcileResult, error) {
+	return r.reconcile(ctx, scope, assignedAgentID, true)
+}
+
+// ReconcileWorker keeps durable request intake responsive while bounding the
+// independently idempotent conversation projection work.
+func (r *AgentRequestInboxReconciler) ReconcileWorker(ctx context.Context, scope Scope, assignedAgentID string) (*AgentRequestInboxReconcileResult, error) {
+	projectConversations := false
+	if r != nil {
+		now := time.Now
+		if r.now != nil {
+			now = r.now
+		}
+		projectConversations = r.conversationProjectionDue(now())
+	}
+	return r.reconcile(ctx, scope, assignedAgentID, projectConversations)
+}
+
+func (r *AgentRequestInboxReconciler) reconcile(ctx context.Context, scope Scope, assignedAgentID string, projectConversations bool) (*AgentRequestInboxReconcileResult, error) {
 	if r == nil || r.collaboration == nil || r.commands == nil {
 		return nil, errors.New("AgentRequest inbox reconciler is not configured")
 	}
@@ -215,7 +241,7 @@ func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope Scope
 	}
 	result := &AgentRequestInboxReconcileResult{RequestsScanned: len(requests)}
 	var failures []error
-	if r.projector != nil {
+	if projectConversations && r.projector != nil {
 		projected, projectionErr := r.projector.Reconcile(ctx, scope)
 		result.ConversationProjections = projected
 		if projectionErr != nil {
@@ -274,6 +300,19 @@ func (r *AgentRequestInboxReconciler) Reconcile(ctx context.Context, scope Scope
 		}
 	}
 	return result, errors.Join(failures...)
+}
+
+func (r *AgentRequestInboxReconciler) conversationProjectionDue(now time.Time) bool {
+	if r == nil {
+		return false
+	}
+	r.projectionMu.Lock()
+	defer r.projectionMu.Unlock()
+	if !r.lastProjection.IsZero() && now.Sub(r.lastProjection) < agentRequestConversationProjectionInterval {
+		return false
+	}
+	r.lastProjection = now
+	return true
 }
 
 func (r *AgentRequestInboxReconciler) pendingRequests(ctx context.Context, scope Scope) ([]*AgentRequest, error) {

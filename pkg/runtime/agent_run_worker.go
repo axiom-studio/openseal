@@ -1163,7 +1163,7 @@ func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) {
 	if p.requestInbox == nil || p.config.Kind != "" && p.config.Kind != RunKindAgentWork {
 		return
 	}
-	result, err := p.requestInbox.Reconcile(ctx, p.config.Scope, p.config.AssignedAgentID)
+	result, err := p.requestInbox.ReconcileWorker(ctx, p.config.Scope, p.config.AssignedAgentID)
 	if err != nil {
 		p.logger.Warnw("AgentRequest inbox reconciliation completed with failures", "error", err)
 	}
