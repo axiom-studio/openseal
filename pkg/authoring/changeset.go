@@ -1136,6 +1136,7 @@ func generationInvocationKey(changeSetID string, attempt int) string {
 func classifyGenerationFailure(err error) (string, string) {
 	var schemaError *SchemaGenerationError
 	var contractError *ContractGenerationError
+	var providerError *ProviderFailure
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "timeout", "Workforce generation timed out"
@@ -1145,6 +1146,22 @@ func classifyGenerationFailure(err error) (string, string) {
 		return "schema_failed", "We couldn't finish this proposal automatically. Your request and answers are saved; try again."
 	case errors.As(err, &contractError):
 		return "contract_failed", "We couldn't finish this proposal automatically. Your request and answers are saved; try again."
+	case errors.As(err, &providerError):
+		switch providerError.Kind {
+		case ProviderFailureNotConfigured:
+			return "provider_not_configured", "Choose a default LLM credential in Vault before generating a proposal."
+		case ProviderFailureConfigurationInvalid:
+			return "provider_configuration_invalid", "The default LLM credential is incomplete. Verify its endpoint, model, and API key, then try again."
+		case ProviderFailureCredentialsRejected:
+			return "provider_credentials_rejected", "The configured model provider rejected its credentials. Update or replace the default LLM credential, then try again."
+		case ProviderFailureRequestRejected:
+			return "provider_request_rejected", "The model provider rejected the authoring request. Verify that the endpoint and model support OpenAI-compatible chat completions."
+		case ProviderFailureRateLimited:
+			return "provider_rate_limited", "The model provider is rate limited. Wait briefly, then try again."
+		case ProviderFailureUnavailable:
+			return "provider_unavailable", "The model provider is currently unavailable. Try again when the provider has recovered."
+		}
+		return "provider_failed", "The workforce generation provider failed"
 	case strings.Contains(err.Error(), "decode workforce candidate"), strings.Contains(err.Error(), "decode repaired workforce candidate"),
 		strings.Contains(err.Error(), "generated workforce candidate must"), strings.Contains(err.Error(), "repaired workforce candidate must"):
 		return "schema_failed", "The provider returned an invalid workforce candidate"
