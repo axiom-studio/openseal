@@ -4879,6 +4879,13 @@ func (e *Engine) GetSkillBinding(ctx context.Context, scope skill.ScopeReference
 	return e.skills.GetBinding(ctx, scope, deploymentID, bindingID)
 }
 
+// ResolveCallbackAdapterBinding returns the exact callback adapter selected by
+// one deployment binding. Hosts use this to materialize provider connection
+// transports without learning provider-specific protocol semantics.
+func (e *Engine) ResolveCallbackAdapterBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID, adapterID string) (*skill.BoundCallbackAdapter, error) {
+	return e.skills.ResolveCallbackAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
+}
+
 func (e *Engine) UpsertSkillBinding(ctx context.Context, request skill.UpsertBindingRequest) (*skill.Binding, error) {
 	return e.skills.UpsertBinding(ctx, request)
 }
