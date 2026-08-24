@@ -116,6 +116,7 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *AgentDeploy
 		candidate.Revision = 1
 	}
 	candidate.SkillBindingIDs = normalizedStrings(candidate.SkillBindingIDs)
+	EnsureDefaultWorkspace(candidate)
 	if err := candidate.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -142,11 +143,22 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *AgentDeploy
 }
 
 func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*AgentDeployment, error) {
-	return r.store.GetDeployment(ctx, scope, id)
+	deployment, err := r.store.GetDeployment(ctx, scope, id)
+	if err == nil {
+		EnsureDefaultWorkspace(deployment)
+	}
+	return deployment, err
 }
 
 func (r *Registry) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*AgentDeployment, error) {
-	return r.store.ListDeployments(ctx, scope)
+	deployments, err := r.store.ListDeployments(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	for _, deployment := range deployments {
+		EnsureDefaultWorkspace(deployment)
+	}
+	return deployments, nil
 }
 
 // UpdateDeployment atomically changes only an Agent's deployment-local
@@ -179,6 +191,7 @@ func (r *Registry) UpdateDeployment(ctx context.Context, proposed *AgentDeployme
 	updated := cloneDeployment(proposed)
 	updated.DisplayName = strings.TrimSpace(updated.DisplayName)
 	updated.SkillBindingIDs = normalizedStrings(updated.SkillBindingIDs)
+	EnsureDefaultWorkspace(updated)
 	updated.Revision = current.Revision + 1
 	updated.UpdatedAt = r.now().UTC()
 	definition, err := r.store.GetDefinition(ctx, updated.DefinitionID, updated.ActiveVersion)

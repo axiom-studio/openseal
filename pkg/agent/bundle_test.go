@@ -213,7 +213,9 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 	}
 	placement := BundlePlacement{
 		DeploymentID: "agent:rowan", Environment: "default",
-		Skills:      map[string]BundleSkillPlacement{"skill-slack": {Identity: identity, BindingID: "binding:slack"}},
+		Skills: map[string]BundleSkillPlacement{"skill-slack": {
+			Identity: identity, BindingID: "binding:slack", Config: map[string]interface{}{"target": "tenant-9"},
+		}},
 		Credentials: map[string]capability.CredentialReference{"skill-slack.slack": {Kind: "slack_bot_token", ID: "vault://target/slack"}},
 		Endpoints: map[string]BundleEndpointPlacement{"approvals": {
 			Provider: "slack", Adapter: identity, BindingID: "binding:slack", InstallationID: "workspace:T1", Address: "channel:C1",
@@ -235,7 +237,7 @@ func TestBundleInstallationPreviewAndCompilerRequireExactTargetMappings(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.Manifest.Deployment.ID != "agent:rowan" || len(plan.Bindings) != 1 || plan.Bindings[0].Credentials["slack"].ID != "vault://target/slack" || len(plan.Endpoints) != 1 || plan.Endpoints[0].Placement.Address != "channel:C1" || len(plan.Callbacks) != 1 || plan.Callbacks[0].Requirement.Subscriptions[0].TargetEndpointID != "approvals" {
+	if plan.Manifest.Deployment.ID != "agent:rowan" || len(plan.Bindings) != 1 || plan.Bindings[0].Credentials["slack"].ID != "vault://target/slack" || plan.Bindings[0].Config["target"] != "tenant-9" || len(plan.Endpoints) != 1 || plan.Endpoints[0].Placement.Address != "channel:C1" || len(plan.Callbacks) != 1 || plan.Callbacks[0].Requirement.Subscriptions[0].TargetEndpointID != "approvals" {
 		t.Fatalf("compiled installation plan = %#v", plan)
 	}
 	if strings.Contains(plan.Manifest.Manifest.Metadata.ID, "tenant") || plan.Manifest.Deployment.DefinitionID != "" || !strings.HasPrefix(plan.Manifest.DefinitionKey, "import-") {

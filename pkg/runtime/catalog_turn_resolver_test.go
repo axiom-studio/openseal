@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 type resolverCatalog struct {
@@ -142,6 +143,46 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	_, err = ResolveCatalogTurnRunner(t.Context(), catalog, base, CatalogTurnResolverConfig{})
 	if !errors.Is(err, ErrTurnHostUnavailable) {
 		t.Fatalf("unhosted prompt work error = %v", err)
+	}
+}
+
+func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "11"}
+	spec := workspace.DefaultSpec()
+	spec.Policy.CredentialBindings = []string{"GITHUB_TOKEN"}
+	host := &recordingTurnHost{response: &HostedTurnResponse{
+		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", ModelProvider: "test", Model: "model",
+		NextRunStatus: AgentRunStatusCompleted, OutputSummary: "done", ContinuationCheckpoint: map[string]interface{}{},
+	}}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "coding-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "coding-agent",
+			ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, DefaultWorkspaceID: spec.ID, Workspaces: []workspace.Spec{spec},
+			Credentials: map[string]capability.CredentialReference{"GITHUB_TOKEN": {Kind: "vault", ID: "vault-credential"}},
+		},
+		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories"},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "coding-agent"},
+	}
+	run := &AgentRun{
+		ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"},
+		AssignedAgentID: "coding-agent", Goal: "Inspect the repository", Context: map[string]interface{}{},
+	}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+		t.Fatal(err)
+	}
+	if host.request.Workspace == nil || host.request.Workspace.Workspace.ID != workspace.DefaultID || host.request.Workspace.Workspace.Policy.Filesystem != workspace.AccessReadWrite {
+		t.Fatalf("workspace authority = %#v", host.request.Workspace)
+	}
+	if host.request.WorkspaceCredentials["GITHUB_TOKEN"].ID != "vault-credential" {
+		t.Fatalf("Workspace credentials = %#v", host.request.WorkspaceCredentials)
+	}
+	encoded, err := MarshalHostedTurnModelInput(host.request)
+	if err != nil || !strings.Contains(string(encoded), `"credentialBindings":["GITHUB_TOKEN"]`) || strings.Contains(string(encoded), `"storage"`) || strings.Contains(string(encoded), "vault-credential") || strings.Contains(string(encoded), "workspaceCredentials") {
+		t.Fatalf("model input = %s, error=%v", encoded, err)
 	}
 }
 

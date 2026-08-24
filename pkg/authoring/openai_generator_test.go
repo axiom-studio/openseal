@@ -38,6 +38,11 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 		if _, exists := body["thinking"]; exists {
 			t.Fatalf("default transport emitted provider-specific thinking field: %#v", body["thinking"])
 		}
+		messages := body["messages"].([]interface{})
+		contractPrompt := messages[0].(map[string]interface{})["content"].(string)
+		if !strings.Contains(contractPrompt, `"schemaVersion"`) || !strings.Contains(contractPrompt, AuthoringResultSchemaVersion) {
+			t.Fatalf("JSON transport omitted authoritative schema: %s", contractPrompt)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"candidate\":{\"agents\":[],\"assignments\":[]},\"questions\":[\"Which Team should be created?\"]}"}}]}`))
 	}))
@@ -55,6 +60,38 @@ func TestOpenAICompatibleGeneratorUsesStrictJSONTransportWithoutLeakingKey(t *te
 	}
 	if strings.Contains(requestBody, "change-set:one:0") {
 		t.Fatal("transport idempotency token should not become model-visible prompt data")
+	}
+}
+
+func TestOpenAICompatibleIntentJSONTransportIncludesExactSemanticSchema(t *testing.T) {
+	valid := `{"schemaVersion":"openseal.authoring-intent/v4","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately.","objectives":[{"key":"review","title":"Review pull requests","outcome":"Pull requests receive actionable reviews.","priority":1}]}]}`
+	var contractPrompt string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var payload struct {
+			Messages []map[string]string `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		contractPrompt = payload.Messages[0]["content"]
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+			"finish_reason": "stop", "message": map[string]interface{}{"content": valid},
+		}}})
+	}))
+	defer server.Close()
+	generator, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "model", server.Client(), OpenAICompatibleGeneratorOptions{StructuredOutputMode: OpenAICompatibleStructuredOutputJSON})
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := generator.GenerateIntent(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a reviewer"})
+	if err != nil || intent.Agents[0].Objectives[0].Title != "Review pull requests" {
+		t.Fatalf("intent=%#v err=%v", intent, err)
+	}
+	for _, required := range []string{AuthoringIntentSchemaVersion, `"title"`, `"priority"`, `"additionalProperties":false`} {
+		if !strings.Contains(contractPrompt, required) {
+			t.Fatalf("semantic JSON schema prompt omitted %q", required)
+		}
 	}
 }
 
@@ -354,7 +391,7 @@ func TestOpenAICompatibleGeneratorCompactsOnlyRedundantCatalogReceipts(t *testin
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if len(body.Messages) != 2 || json.Unmarshal([]byte(body.Messages[1]["content"]), &modelRequest) != nil {
+		if len(body.Messages) != 3 || json.Unmarshal([]byte(body.Messages[2]["content"]), &modelRequest) != nil {
 			t.Fatalf("messages = %#v", body.Messages)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -678,10 +715,10 @@ func TestOpenAICompatibleRepairSuppliesMachineReadableViolations(t *testing.T) {
 	if _, err = generator.Repair(context.Background(), GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent"}, []byte(`{"candidate":{}}`), validation); err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 3 {
+	if len(messages) != 4 {
 		t.Fatalf("messages=%#v", messages)
 	}
-	repair := messages[2]["content"]
+	repair := messages[3]["content"]
 	if !strings.Contains(repair, "schemaViolations") || !strings.Contains(repair, "/candidate/agents/0/skillRequirements/0") || !strings.Contains(repair, "Correct only the exact") {
 		t.Fatalf("repair prompt=%s", repair)
 	}
