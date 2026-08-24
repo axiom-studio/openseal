@@ -17,7 +17,7 @@ import (
 
 const (
 	SkillID      = "openseal.presentation"
-	SkillVersion = "1.0.0"
+	SkillVersion = "1.0.1"
 	Publish      = "publish_surface"
 	MediaType    = "application/vnd.openseal.surface+json"
 	ArtifactType = "interactive_surface"
