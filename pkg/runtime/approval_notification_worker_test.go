@@ -17,6 +17,16 @@ type approvalNotificationConflictStore struct {
 	remaining atomic.Int32
 }
 
+type approvalNotificationDeliveryLookupStore struct {
+	ApprovalNotificationStore
+	deliveryScans atomic.Int64
+}
+
+func (s *approvalNotificationDeliveryLookupStore) ListExternalConversationDeliveries(ctx context.Context, filter ExternalConversationDeliveryFilter) ([]*ExternalConversationDelivery, error) {
+	s.deliveryScans.Add(1)
+	return s.ApprovalNotificationStore.ListExternalConversationDeliveries(ctx, filter)
+}
+
 func (s *approvalNotificationConflictStore) CommitChannelMessage(ctx context.Context, record ChannelMessageCommitRecord) (*ChannelMessageCommitResult, error) {
 	if s.remaining.Add(-1) >= 0 {
 		return nil, ErrRevisionConflict
@@ -118,7 +128,8 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		t.Fatalf("other destination callback = %d, %v", count, err)
 	}
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
-	worker := NewApprovalNotificationWorker(store, transport, catalog)
+	lookupStore := &approvalNotificationDeliveryLookupStore{ApprovalNotificationStore: store}
+	worker := NewApprovalNotificationWorker(lookupStore, transport, catalog)
 	worker.now = func() time.Time { return now }
 	if count, err := worker.ProcessScope(ctx, endpoint.Scope, 10); err != nil || count != 1 {
 		t.Fatalf("notify = %d, %v", count, err)
@@ -248,6 +259,9 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	}
 	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
 		t.Fatalf("outcome replay = %v", err)
+	}
+	if scans := lookupStore.deliveryScans.Load(); scans != 0 {
+		t.Fatalf("approval outcome scanned endpoint delivery history %d times", scans)
 	}
 	deliveries, err = store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, EndpointID: endpoint.ID, Limit: 10})
 	if err != nil || len(deliveries) != 4 {
