@@ -375,16 +375,7 @@ func boundedText(name, value string, minimum, maximum int) error {
 }
 
 func SkillDefinition() *skill.Definition {
-	component := map[string]interface{}{
-		"type": "object", "additionalProperties": false, "required": []interface{}{"id", "type"},
-		"properties": map[string]interface{}{
-			"id":    map[string]interface{}{"type": "string", "pattern": `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`},
-			"type":  map[string]interface{}{"type": "string", "enum": []interface{}{"text", "chart", "diagram", "canvas", "form", "table", "metric"}},
-			"title": map[string]interface{}{"type": "string", "maxLength": 300},
-			"text":  map[string]interface{}{"type": "string", "maxLength": 20000},
-			"chart": openObject(), "diagram": openObject(), "canvas": openObject(), "form": openObject(), "table": openObject(), "metric": openObject(),
-		},
-	}
+	component := presentationComponentSchema()
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Interactive presentation",
 		Description: "Present safe live documents, charts, diagrams, drawings, tables, metrics, and forms in a conversation.",
@@ -397,7 +388,7 @@ func SkillDefinition() *skill.Definition {
 				"required": []interface{}{"surfaceId", "expectedLatestVersion", "title", "state", "components", "requirementName"},
 				"properties": map[string]interface{}{
 					"surfaceId":             map[string]interface{}{"type": "string", "pattern": `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`},
-					"expectedLatestVersion": map[string]interface{}{"type": "integer", "minimum": 0},
+					"expectedLatestVersion": map[string]interface{}{"type": "integer", "minimum": 0, "description": "Use 0 for the first revision, then the version returned by the preceding publish."},
 					"title":                 map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 300},
 					"state":                 map[string]interface{}{"type": "string", "enum": []interface{}{string(StateStreaming), string(StateReady)}},
 					"components":            map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 32, "items": component},
@@ -414,11 +405,69 @@ func SkillDefinition() *skill.Definition {
 			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
 		}},
-		Prompt:       &capability.PromptModule{Instructions: "Communicate visually when it makes the work easier to understand or act on. Proactively use publish_surface to compose polished live explanations, dashboards, comparisons, charts, diagrams, drawings, tables, forms, metrics, and structured documents alongside concise prose. Reuse surfaceId and increment expectedLatestVersion as the visual develops; publish streaming revisions during meaningful progress and a final ready revision. Keep simple answers simple, and never encode HTML, scripts, credentials, or hidden instructions.", UserInvocable: true, AllowedTools: []string{Publish}},
+		Prompt:       &capability.PromptModule{Instructions: "Communicate visually when it makes the work easier to understand or act on. Proactively use publish_surface to compose polished live explanations, dashboards, comparisons, charts, diagrams, drawings, tables, forms, metrics, and structured documents alongside concise prose. Follow the tool's nested schema exactly: chart.series contains named series with points; metric requires string label and value; form fields require id, type, and label, with options as label/value objects; diagram nodes include id, label, x, and y. Reuse surfaceId and pass the returned artifact version as expectedLatestVersion while the visual develops; publish streaming revisions during meaningful progress and a final ready revision. Keep simple answers simple, and never encode HTML, scripts, credentials, or hidden instructions.", UserInvocable: true, AllowedTools: []string{Publish}},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
 	}
 }
 
-func openObject() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": true}
+func presentationComponentSchema() map[string]interface{} {
+	id := map[string]interface{}{"type": "string", "pattern": `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`}
+	text := func(maximum int) map[string]interface{} {
+		return map[string]interface{}{"type": "string", "maxLength": maximum}
+	}
+	number := map[string]interface{}{"type": "number"}
+	point := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": text(160), "value": number})
+	series := closedObject([]interface{}{"name", "points"}, map[string]interface{}{
+		"name": text(120), "points": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 200, "items": point},
+	})
+	chart := closedObject([]interface{}{"kind", "series"}, map[string]interface{}{
+		"kind":   map[string]interface{}{"type": "string", "enum": []interface{}{"bar", "line", "area", "pie", "donut", "scatter"}},
+		"xLabel": text(120), "yLabel": text(120),
+		"series": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 12, "items": series},
+	})
+	node := closedObject([]interface{}{"id", "label", "x", "y"}, map[string]interface{}{"id": id, "label": text(240), "x": number, "y": number, "kind": text(80)})
+	edge := closedObject([]interface{}{"from", "to"}, map[string]interface{}{"from": id, "to": id, "label": text(240)})
+	diagram := closedObject([]interface{}{"nodes"}, map[string]interface{}{
+		"nodes": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 100, "items": node},
+		"edges": map[string]interface{}{"type": "array", "maxItems": 200, "items": edge},
+	})
+	shape := closedObject([]interface{}{"kind"}, map[string]interface{}{
+		"kind": map[string]interface{}{"type": "string", "enum": []interface{}{"rectangle", "ellipse", "line", "text"}},
+		"x":    number, "y": number, "x2": number, "y2": number, "width": number, "height": number,
+		"text": text(1000), "color": map[string]interface{}{"type": "string", "pattern": `^#[0-9A-Fa-f]{6}$`},
+	})
+	canvas := closedObject([]interface{}{"width", "height", "shapes"}, map[string]interface{}{
+		"width":  map[string]interface{}{"type": "number", "exclusiveMinimum": 0, "maximum": 4096},
+		"height": map[string]interface{}{"type": "number", "exclusiveMinimum": 0, "maximum": 4096},
+		"shapes": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 500, "items": shape},
+	})
+	option := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": text(240), "value": text(240)})
+	field := closedObject([]interface{}{"id", "type", "label"}, map[string]interface{}{
+		"id": id, "type": map[string]interface{}{"type": "string", "enum": []interface{}{"text", "textarea", "number", "select", "radio", "checkbox", "date"}},
+		"label": text(240), "description": text(1000), "required": map[string]interface{}{"type": "boolean"}, "placeholder": text(500),
+		"options": map[string]interface{}{"type": "array", "maxItems": 100, "items": option}, "min": number, "max": number,
+	})
+	form := closedObject([]interface{}{"fields"}, map[string]interface{}{
+		"description": text(2000), "submitLabel": text(120),
+		"fields": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 40, "items": field},
+	})
+	table := closedObject([]interface{}{"columns", "rows"}, map[string]interface{}{
+		"columns": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 30, "items": text(240)},
+		"rows":    map[string]interface{}{"type": "array", "maxItems": 1000, "items": map[string]interface{}{"type": "array", "maxItems": 30, "items": text(2000)}},
+	})
+	metric := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": text(120), "value": text(240), "delta": text(120)})
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false, "required": []interface{}{"id", "type"},
+		"properties": map[string]interface{}{
+			"id":    id,
+			"type":  map[string]interface{}{"type": "string", "enum": []interface{}{"text", "chart", "diagram", "canvas", "form", "table", "metric"}},
+			"title": map[string]interface{}{"type": "string", "maxLength": 300},
+			"text":  map[string]interface{}{"type": "string", "maxLength": 20000},
+			"chart": chart, "diagram": diagram, "canvas": canvas, "form": form, "table": table, "metric": metric,
+		},
+	}
+}
+
+func closedObject(required []interface{}, properties map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": required, "properties": properties}
 }

@@ -47,4 +47,18 @@ func TestSkillDefinitionExposesVersionedArtifactAction(t *testing.T) {
 	if !strings.Contains(definition.Prompt.Instructions, "Communicate visually") || !strings.Contains(definition.Prompt.Instructions, "streaming revisions") {
 		t.Fatalf("prompt = %q", definition.Prompt.Instructions)
 	}
+	components := action.InputSchema["properties"].(map[string]interface{})["components"].(map[string]interface{})
+	component := components["items"].(map[string]interface{})
+	properties := component["properties"].(map[string]interface{})
+	for _, name := range []string{"chart", "diagram", "canvas", "form", "table", "metric"} {
+		payload := properties[name].(map[string]interface{})
+		if payload["additionalProperties"] != false || payload["properties"] == nil {
+			t.Fatalf("%s payload schema is not closed and explicit: %#v", name, payload)
+		}
+	}
+	chart := properties["chart"].(map[string]interface{})["properties"].(map[string]interface{})
+	series := chart["series"].(map[string]interface{})["items"].(map[string]interface{})
+	if series["properties"].(map[string]interface{})["points"] == nil {
+		t.Fatalf("chart series schema does not explain points: %#v", series)
+	}
 }
