@@ -278,9 +278,22 @@ const CallbackEventApprovalDecided = "approval.decided"
 // normalizer for an inbound provider callback. Credential values are resolved
 // by the trusted host and never enter the callback registration or event.
 type CallbackAdapterTransport struct {
-	Kind               string   `json:"kind"`
-	IngressEndpoint    string   `json:"ingressEndpoint"`
-	IngressCredentials []string `json:"ingressCredentials,omitempty"`
+	Kind               string                              `json:"kind"`
+	IngressEndpoint    string                              `json:"ingressEndpoint"`
+	IngressCredentials []string                            `json:"ingressCredentials,omitempty"`
+	Connection         *CallbackAdapterConnectionTransport `json:"connection,omitempty"`
+}
+
+// CallbackAdapterConnectionTransport declares an optional long-lived,
+// Skill-owned provider connection used to receive callback payloads when the
+// provider cannot call a public HTTP route. The host materializes the
+// connection for one exact callback registration and projects only the listed
+// credentials into that isolated runtime. Endpoint remains Skill-owned; the
+// kernel never interprets provider frames.
+type CallbackAdapterConnectionTransport struct {
+	Kind        string   `json:"kind"`
+	Endpoint    string   `json:"endpoint"`
+	Credentials []string `json:"credentials"`
 }
 
 // CallbackAdapter declares one provider-neutral inbound callback surface.
