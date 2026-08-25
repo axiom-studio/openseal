@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -137,8 +138,18 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 		return &skill.DiscoveryPage{
 			Items: []skill.DiscoveryCandidate{{
 				ID: "reddit.reader", Version: "1.0.0", Name: "Reddit Reader", Description: "Read configured communities.",
-				Actions:             []skill.DiscoveryAction{{Name: "read", Description: "Read Reddit posts.", Risk: skill.RiskLevelRead}},
-				Credentials:         []skill.DiscoveryCredential{{Name: "reddit", Kind: "reddit-oauth", Configured: true}},
+				Actions:     []skill.DiscoveryAction{{Name: "read", Description: "Read Reddit posts.", Risk: skill.RiskLevelRead}},
+				Credentials: []skill.DiscoveryCredential{{Name: "reddit", Kind: "reddit-oauth", Configured: true}},
+				ConversationAdapters: []skill.DiscoveryConversationAdapter{{
+					ID: "conversations", ProtocolVersion: skill.ConversationAdapterProtocolV1, Provider: "slack",
+					EndpointModes:                []skill.ConversationEndpointMode{skill.ConversationEndpointChannel},
+					InboundEventTypes:            []string{skill.ConversationEventMessageReceived},
+					DiscoverableDestinationModes: []skill.ConversationEndpointMode{skill.ConversationEndpointChannel},
+					Delivery: skill.ConversationDeliveryCapabilities{
+						Operations: []skill.ConversationDeliveryOperation{skill.ConversationDeliveryMessageSend},
+						Ordering:   skill.ConversationDeliveryOrderThread, Idempotency: skill.IdempotencyRequired,
+					},
+				}},
 				BindingConfigSchema: map[string]interface{}{"type": "object", "required": []interface{}{"community"}, "properties": map[string]interface{}{"community": map[string]interface{}{"type": "string"}}},
 				MaximumRisk:         skill.RiskLevelRead, Readiness: skill.DiscoveryReadinessBindable,
 				Compatibility: []skill.DiscoveryCompatibility{{Requirement: "reddit research", Compatible: true, Evidence: "native read action"}},
@@ -186,6 +197,9 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 	}
 	if !strings.Contains(string(encoded), `"bindingConfigSchema":{"properties":{"community"`) {
 		t.Fatalf("discovery omitted reviewed binding configuration constraints: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"discoverableDestinationModes":["channel"]`) {
+		t.Fatalf("discovery omitted Slack destination discovery metadata: %s", encoded)
 	}
 }
 
@@ -318,6 +332,26 @@ func TestSkillManagementSkillMakesPromptOnlyAuthorityExplicit(t *testing.T) {
 	candidateProperties := candidates["properties"].(map[string]interface{})
 	if _, ok := candidateProperties["conversationAdapters"].(map[string]interface{}); !ok {
 		t.Fatalf("conversation adapters are absent from discovery schema: %#v", candidateProperties)
+	}
+}
+
+func TestSkillDiscoverySchemaCoversEveryConversationAdapterJSONField(t *testing.T) {
+	discover := SkillManagementSkill().Actions[SkillActionDiscoverBinding]
+	outputProperties := discover.OutputSchema["properties"].(map[string]interface{})
+	candidateSchema := outputProperties["items"].(map[string]interface{})["items"].(map[string]interface{})
+	candidateProperties := candidateSchema["properties"].(map[string]interface{})
+	adapterSchema := candidateProperties["conversationAdapters"].(map[string]interface{})["items"].(map[string]interface{})
+	adapterProperties := adapterSchema["properties"].(map[string]interface{})
+
+	adapterType := reflect.TypeOf(skill.DiscoveryConversationAdapter{})
+	for index := 0; index < adapterType.NumField(); index++ {
+		jsonName := strings.Split(adapterType.Field(index).Tag.Get("json"), ",")[0]
+		if jsonName == "" || jsonName == "-" {
+			continue
+		}
+		if _, exists := adapterProperties[jsonName]; !exists {
+			t.Errorf("serialized discovery adapter field %q is absent from the strict output schema", jsonName)
+		}
 	}
 }
 
