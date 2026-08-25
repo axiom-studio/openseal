@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
+	inferschema "github.com/invopop/jsonschema"
 )
 
 const (
@@ -135,24 +136,7 @@ func skillDiscoveryAction() skill.Action {
 		},
 		"required": []interface{}{"operations", "ordering", "idempotency"},
 	}
-	conversationAdapterSchema := map[string]interface{}{
-		"type": "object", "additionalProperties": false,
-		"properties": map[string]interface{}{
-			"id":              map[string]interface{}{"type": "string"},
-			"protocolVersion": map[string]interface{}{"type": "string", "const": skill.ConversationAdapterProtocolV1},
-			"provider":        map[string]interface{}{"type": "string"},
-			"endpointModes": map[string]interface{}{
-				"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string", "enum": []interface{}{
-					string(skill.ConversationEndpointChannel), string(skill.ConversationEndpointDirect),
-				}},
-			},
-			"inboundEventTypes": map[string]interface{}{"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"}},
-			"features":          map[string]interface{}{"type": "array", "uniqueItems": true, "items": map[string]interface{}{"type": "string"}},
-			"delivery":          conversationDeliverySchema,
-			"credentials":       map[string]interface{}{"type": "array", "items": credentialSchema},
-		},
-		"required": []interface{}{"id", "protocolVersion", "provider", "endpointModes", "inboundEventTypes", "delivery"},
-	}
+	conversationAdapterSchema := derivedDiscoveryConversationAdapterSchema(credentialSchema, conversationDeliverySchema)
 	compatibilitySchema := map[string]interface{}{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]interface{}{
@@ -201,6 +185,48 @@ func skillDiscoveryAction() skill.Action {
 			"required": []interface{}{"items"},
 		},
 	}
+}
+
+// derivedDiscoveryConversationAdapterSchema derives field presence and
+// requiredness from the serialized discovery contract. Only semantic rules
+// that Go reflection cannot express are overlaid below.
+func derivedDiscoveryConversationAdapterSchema(credentialSchema, deliverySchema map[string]interface{}) map[string]interface{} {
+	endpointModeType := reflect.TypeOf(skill.ConversationEndpointMode(""))
+	inferred := (&inferschema.Reflector{
+		Anonymous: true, ExpandedStruct: true, DoNotReference: true,
+		Mapper: func(value reflect.Type) *inferschema.Schema {
+			if value == endpointModeType {
+				return &inferschema.Schema{Type: "string", Enum: []interface{}{
+					string(skill.ConversationEndpointChannel), string(skill.ConversationEndpointDirect),
+				}}
+			}
+			return nil
+		},
+	}).Reflect(skill.DiscoveryConversationAdapter{})
+	encoded, err := json.Marshal(inferred)
+	if err != nil {
+		panic(fmt.Sprintf("derive Skill discovery conversation adapter schema: %v", err))
+	}
+	var schema map[string]interface{}
+	if err := json.Unmarshal(encoded, &schema); err != nil {
+		panic(fmt.Sprintf("decode Skill discovery conversation adapter schema: %v", err))
+	}
+	delete(schema, "$schema")
+	delete(schema, "$id")
+	delete(schema, "$defs")
+	properties, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		panic("derived Skill discovery conversation adapter schema has no properties")
+	}
+	properties["protocolVersion"] = map[string]interface{}{"type": "string", "const": skill.ConversationAdapterProtocolV1}
+	properties["delivery"] = deliverySchema
+	properties["credentials"] = map[string]interface{}{"type": "array", "items": credentialSchema}
+	for _, name := range []string{"endpointModes", "inboundEventTypes", "features", "discoverableDestinationModes"} {
+		if property, exists := properties[name].(map[string]interface{}); exists {
+			property["uniqueItems"] = true
+		}
+	}
+	return schema
 }
 
 func skillManagementAction(name, description string, properties map[string]interface{}, required []interface{}) skill.Action {
