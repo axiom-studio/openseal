@@ -129,6 +129,7 @@ type ExternalConversationInboxWorker struct {
 	store         ExternalConversationStore
 	conversations *ConversationService
 	dispatcher    ExternalConversationDispatcher
+	transport     *ExternalConversationTransportService
 	config        ExternalConversationInboxWorkerConfig
 	now           func() time.Time
 }
@@ -137,6 +138,7 @@ func NewExternalConversationInboxWorker(
 	store ExternalConversationStore,
 	dispatcher ExternalConversationDispatcher,
 	config ExternalConversationInboxWorkerConfig,
+	resolver ...ExternalConversationAdapterResolver,
 ) (*ExternalConversationInboxWorker, error) {
 	if store == nil || dispatcher == nil {
 		return nil, errors.New("external conversation store and dispatcher are required")
@@ -145,9 +147,13 @@ func NewExternalConversationInboxWorker(
 	if err != nil {
 		return nil, err
 	}
-	return &ExternalConversationInboxWorker{
+	worker := &ExternalConversationInboxWorker{
 		store: store, conversations: NewConversationService(store), dispatcher: dispatcher, config: normalized, now: time.Now,
-	}, nil
+	}
+	if len(resolver) > 0 && resolver[0] != nil {
+		worker.transport = NewExternalConversationTransportService(store, resolver[0])
+	}
+	return worker, nil
 }
 
 // ProcessOne leases and applies at most one due inbox item in a scope. A nil
@@ -219,7 +225,36 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *Exter
 	if dispatch == nil || !validOpaqueIdentifier(dispatch.RunID, 256) {
 		return errors.New("external conversation dispatcher did not return a canonical Run")
 	}
+	w.enqueueThreadStatus(ctx, endpoint, item, conversation.ID, message.ID, "Thinking…")
 	return w.complete(ctx, item, conversation.ID, message.ID, dispatch.RunID)
+}
+
+func (w *ExternalConversationInboxWorker) enqueueThreadStatus(
+	ctx context.Context,
+	endpoint *ExternalConversationEndpoint,
+	item *ExternalConversationInboxItem,
+	conversationID string,
+	messageID string,
+	status string,
+) {
+	if w.transport == nil || endpoint == nil || item == nil {
+		return
+	}
+	threadID := strings.TrimSpace(item.Event.ExternalThreadID)
+	if threadID == "" && endpoint.Policy.ReplyMode == ExternalConversationReplyThread {
+		threadID = strings.TrimSpace(item.Event.ExternalMessageID)
+	}
+	if threadID == "" {
+		return
+	}
+	_, _ = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: item.Scope, EndpointID: endpoint.ID,
+		Operation:      capability.ConversationDeliveryTypingIndicator,
+		ConversationID: conversationID, ChannelMessageID: messageID,
+		ExternalThreadID: threadID,
+		Parameters:       map[string]interface{}{"status": status},
+		IdempotencyKey:   "external-conversation-thinking:" + item.ID,
+	})
 }
 
 func (w *ExternalConversationInboxWorker) ensureConversation(
