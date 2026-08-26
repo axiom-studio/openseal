@@ -35,6 +35,18 @@ func canonicalExternalOperationResource(value string) (string, error) {
 	if value == "" || len(value) > 2048 || strings.ContainsAny(value, "\r\n") {
 		return "", errors.New("external operation resource must be between 1 and 2048 characters")
 	}
+	// Provider channel handles are stable human-facing targets, but their '#'
+	// prefix is a URL fragment marker and therefore deliberately excluded from
+	// generic opaque identifiers. Canonicalize the handle into an unambiguous
+	// opaque resource before applying the generic validation. This lets an Agent
+	// truthfully identify a Slack-style target such as #agents without treating
+	// it as a malformed URL or requiring it to know the provider's internal ID.
+	if strings.HasPrefix(value, "#") {
+		handle := strings.TrimSpace(strings.TrimPrefix(value, "#"))
+		if validOpaqueIdentifier(handle, 2040) {
+			return "channel-handle:" + strings.ToLower(handle), nil
+		}
+	}
 	parsed, err := url.Parse(value)
 	if err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) {
 		if err := validatePublicEvidenceURL(value); err != nil {
