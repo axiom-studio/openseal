@@ -3018,7 +3018,7 @@ func (e *Engine) rebuildExternalConversations() error {
 	}
 	runbookDispatcher := runtime.NewExternalConversationRunbookEventDispatcher(e.store, runbookResolver)
 	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler, runbookDispatcher)
-	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, e.externalConversations.config.Inbox)
+	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, e.externalConversations.config.Inbox, e.skills)
 	if err != nil {
 		return err
 	}

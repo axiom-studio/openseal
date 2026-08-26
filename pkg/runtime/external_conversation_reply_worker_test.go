@@ -10,7 +10,9 @@ import (
 
 func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
+	})
 	conversations := NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack thread",
@@ -94,8 +96,17 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10,
 	})
-	if err != nil || len(deliveries) != 1 {
+	if err != nil || len(deliveries) != 2 {
 		t.Fatalf("durable deliveries = %#v, %v", deliveries, err)
+	}
+	operations := map[capability.ConversationDeliveryOperation]*ExternalConversationDelivery{}
+	for _, delivery := range deliveries {
+		operations[delivery.Operation] = delivery
+	}
+	if operations[capability.ConversationDeliveryMessageSend] == nil ||
+		operations[capability.ConversationDeliveryTypingIndicator] == nil ||
+		operations[capability.ConversationDeliveryTypingIndicator].Parameters["status"] != "" {
+		t.Fatalf("durable delivery operations = %#v", operations)
 	}
 }
 

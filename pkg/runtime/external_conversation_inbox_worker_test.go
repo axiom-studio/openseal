@@ -35,7 +35,9 @@ func (d *crashAfterExternalConversationDispatch) DispatchExternalConversation(
 
 func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *testing.T) {
 	ctx := context.Background()
-	store, endpoint := activeExternalConversationTestEndpoint(t, ctx)
+	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
+	})
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	item := &ExternalConversationInboxItem{
 		ID: "external-inbox-event", Scope: endpoint.Scope, EndpointID: endpoint.ID,
@@ -62,7 +64,7 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	}
 	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
 		WorkerID: "inbox-worker", LeaseDuration: time.Minute, BaseRetry: time.Second, MaximumRetry: time.Minute,
-	})
+	}, catalog)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +104,13 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	runs, _ = store.ListAgentRuns(ctx, AgentRunFilter{Scope: endpoint.Scope, Kind: RunKindConversation, Limit: 10})
 	if len(messages) != 1 || len(runs) != 1 {
 		t.Fatalf("recovery duplicated canonical facts: messages=%d Runs=%d", len(messages), len(runs))
+	}
+	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+		Scope: endpoint.Scope, ConversationID: conversations[0].ID, Limit: 10,
+	})
+	if err != nil || len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryTypingIndicator ||
+		deliveries[0].Parameters["status"] != "Thinking…" {
+		t.Fatalf("thinking delivery = %#v, %v", deliveries, err)
 	}
 	conversationMapping, err := store.GetExternalConversationMapping(
 		ctx, endpoint.Scope, endpoint.ID, item.Event.ExternalConversationID, "",
