@@ -128,6 +128,11 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		t.Fatalf("other destination callback = %d, %v", count, err)
 	}
 	registerApprovalNotificationCallback(t, ctx, store, catalog, endpoint)
+	// Marketplace definitions may retain their portable manifest channel key
+	// after the reviewed callback has been placed onto a concrete endpoint.
+	store.mu.Lock()
+	store.approvals[portfolioKey(endpoint.Scope, approval.ID)].Destinations = []ApprovalDestination{{EndpointID: "coding-slack-channel"}}
+	store.mu.Unlock()
 	lookupStore := &approvalNotificationDeliveryLookupStore{ApprovalNotificationStore: store}
 	worker := NewApprovalNotificationWorker(lookupStore, transport, catalog)
 	worker.now = func() time.Time { return now }
@@ -177,10 +182,10 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 			"invocationDigest": call.InvocationDigest, "decision": "approve", "principalType": "role", "principalId": "operator", "providerUserId": "U1"},
 	}
 	registration := &CallbackRegistration{Scope: endpoint.Scope, Provider: endpoint.Provider}
-	// Callback registrations are installation-scoped and may outlive the Agent
-	// endpoint that originally created them. The exact delivered card remains
-	// the authoritative correlation boundary when this target is stale.
-	subscription := CallbackSubscription{TargetID: "retired-slack-destination"}
+	// The immutable approval still contains the portable key. The exact card
+	// delivered through the reviewed callback placement authorizes the provider
+	// decision without rewriting historical approval state.
+	subscription := CallbackSubscription{TargetID: endpoint.ID}
 	callbackEvent := EventEnvelope{
 		ID: decision.ID, Scope: endpoint.Scope, Type: capability.CallbackEventApprovalDecided,
 		Source: "slack", Subject: decision.ExternalMessageID, OccurredAt: now,

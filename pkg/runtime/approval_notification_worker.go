@@ -190,6 +190,10 @@ func terminalApprovalActionStatus(status ActionCallStatus) bool {
 }
 
 func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval *ApprovalCheckpoint, call *ActionCall, destination ApprovalDestination) error {
+	destination, endpoint, err := w.resolveApprovalDestination(ctx, approval, destination)
+	if err != nil {
+		return err
+	}
 	original, err := findDeliveredApprovalNotification(ctx, w.store, approval, destination)
 	if err != nil {
 		return err
@@ -210,13 +214,6 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 		return err
 	} else if exists {
 		return nil
-	}
-	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, strings.TrimSpace(destination.EndpointID))
-	if err != nil {
-		return err
-	}
-	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive {
-		return fmt.Errorf("%w: approval endpoint is unavailable", ErrInvalidExternalConversation)
 	}
 	conversation, err := w.approvalConversation(ctx, approval.Scope, endpoint)
 	if err != nil {
@@ -303,6 +300,10 @@ func callbackRegistrationHandlesApprovals(registration *CallbackRegistration, en
 
 func (w *ApprovalNotificationWorker) updateTimeoutCard(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
 	call, err := w.store.GetActionCall(ctx, approval.Scope, approval.ActionCallID)
+	if err != nil {
+		return err
+	}
+	destination, _, err = w.resolveApprovalDestination(ctx, approval, destination)
 	if err != nil {
 		return err
 	}
@@ -421,18 +422,15 @@ func approvalCardPhase(approval *ApprovalCheckpoint, call *ActionCall) string {
 }
 
 func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *ApprovalCheckpoint, destination ApprovalDestination) error {
+	destination, endpoint, err := w.resolveApprovalDestination(ctx, approval, destination)
+	if err != nil {
+		return err
+	}
 	deliveryKey := "approval-delivery:" + approval.ID + ":" + destination.EndpointID
 	if exists, err := approvalDeliveryExists(ctx, w.store, approval.Scope, destination.EndpointID, deliveryKey); err != nil {
 		return err
 	} else if exists {
 		return nil
-	}
-	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, strings.TrimSpace(destination.EndpointID))
-	if err != nil {
-		return err
-	}
-	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive {
-		return fmt.Errorf("%w: approval endpoint is unavailable", ErrInvalidExternalConversation)
 	}
 	if err := w.requireApprovalCallback(ctx, endpoint); err != nil {
 		return err
@@ -461,6 +459,74 @@ func (w *ApprovalNotificationWorker) notify(ctx context.Context, approval *Appro
 		return fmt.Errorf("enqueue approval delivery: %w", err)
 	}
 	return nil
+}
+
+// resolveApprovalDestination materializes a portable approval route through
+// the Agent's reviewed callback registration. Older marketplace installations
+// can retain a manifest-local channel key in immutable definitions even after
+// the tenant has attached a concrete provider endpoint. The active callback is
+// the authoritative one-to-one placement for interactive approval decisions;
+// ambiguous registrations fail closed instead of guessing a destination.
+func (w *ApprovalNotificationWorker) resolveApprovalDestination(
+	ctx context.Context,
+	approval *ApprovalCheckpoint,
+	destination ApprovalDestination,
+) (ApprovalDestination, *ExternalConversationEndpoint, error) {
+	if w == nil || w.store == nil || approval == nil {
+		return ApprovalDestination{}, nil, errors.New("approval destination coordination is unavailable")
+	}
+	destination.EndpointID = strings.TrimSpace(destination.EndpointID)
+	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, destination.EndpointID)
+	if err != nil {
+		return ApprovalDestination{}, nil, err
+	}
+	if endpoint != nil && endpoint.Status == ExternalConversationEndpointActive {
+		return destination, endpoint, nil
+	}
+	run, err := w.store.GetAgentRun(ctx, approval.Scope, approval.RunID)
+	if err != nil {
+		return ApprovalDestination{}, nil, err
+	}
+	candidates := make(map[string]*ExternalConversationEndpoint)
+	for offset := 0; ; offset += 100 {
+		registrations, listErr := w.store.ListCallbackRegistrations(ctx, CallbackRegistrationFilter{
+			Scope: approval.Scope, Statuses: []CallbackRegistrationStatus{CallbackRegistrationActive}, Limit: 100, Offset: offset,
+		})
+		if listErr != nil {
+			return ApprovalDestination{}, nil, listErr
+		}
+		for _, registration := range registrations {
+			if registration == nil || registration.Owner != run.Owner ||
+				strings.TrimSpace(registration.DeploymentID) != strings.TrimSpace(run.Owner.ID) {
+				continue
+			}
+			for _, subscription := range registration.Subscriptions {
+				if subscription.EventType != capability.CallbackEventApprovalDecided || subscription.Consumer != "approvals" {
+					continue
+				}
+				targetID := strings.TrimSpace(subscription.TargetID)
+				target, targetErr := w.store.GetExternalConversationEndpoint(ctx, approval.Scope, targetID)
+				if targetErr != nil {
+					return ApprovalDestination{}, nil, targetErr
+				}
+				if target != nil && target.Status == ExternalConversationEndpointActive && target.Owner == run.Owner &&
+					strings.TrimSpace(target.DeploymentID) == strings.TrimSpace(registration.DeploymentID) &&
+					strings.TrimSpace(target.Provider) == strings.TrimSpace(registration.Provider) {
+					candidates[target.ID] = target
+				}
+			}
+		}
+		if len(registrations) < 100 {
+			break
+		}
+	}
+	if len(candidates) != 1 {
+		return ApprovalDestination{}, nil, fmt.Errorf("%w: portable approval destination %q has %d active callback placements", ErrInvalidExternalConversation, destination.EndpointID, len(candidates))
+	}
+	for id, candidate := range candidates {
+		return ApprovalDestination{EndpointID: id}, candidate, nil
+	}
+	return ApprovalDestination{}, nil, fmt.Errorf("%w: approval endpoint is unavailable", ErrInvalidExternalConversation)
 }
 
 // approvalConversation returns the stable canonical conversation for an

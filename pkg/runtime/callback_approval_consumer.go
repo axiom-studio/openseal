@@ -132,6 +132,20 @@ func (c *ApprovalCallbackConsumer) resolveReviewedDestination(
 	if providerMessageID == "" {
 		return "", fmt.Errorf("%w: approval decision does not identify the reviewed card", ErrInvalidCallbackRegistration)
 	}
+	deliveries, err := c.notifications.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
+		Scope: approval.Scope, EndpointID: subscription.TargetID,
+		CorrelationKind: "approval", CorrelationID: approval.ID,
+		Statuses: []ExternalConversationDeliveryStatus{ExternalConversationDeliveryDelivered}, Limit: 100,
+	})
+	if err != nil {
+		return "", err
+	}
+	for _, delivery := range deliveries {
+		if delivery != nil && delivery.Correlation != nil && delivery.Correlation.Phase == "request" &&
+			delivery.ProviderMessageID == providerMessageID {
+			return subscription.TargetID, nil
+		}
+	}
 	for _, destination := range approval.Destinations {
 		endpoint, err := c.notifications.GetExternalConversationEndpoint(ctx, approval.Scope, destination.EndpointID)
 		if err != nil {
