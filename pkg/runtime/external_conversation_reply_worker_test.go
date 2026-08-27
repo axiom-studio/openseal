@@ -57,6 +57,18 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	current, _ := conversations.GetConversation(ctx, endpoint.Scope, conversation.ID)
+	_, err = conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID},
+		Intent: MessageIntentAcknowledgment, Content: "Working on it",
+		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: inbound.Message.ID,
+		References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: completed.ID}},
+		IdempotencyKey: "reply-worker-progress-ack",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	item := &ExternalConversationInboxItem{
 		ID: "reply-worker-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID,
@@ -89,8 +101,8 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10,
 	})
-	if err != nil || len(messages) != 2 || messages[1].Content != "Yes — I can help with that." ||
-		messages[1].ReplyToMessageID != inbound.Message.ID {
+	if err != nil || len(messages) != 3 || messages[1].Content != "Working on it" ||
+		messages[2].Content != "Yes — I can help with that." || messages[2].ReplyToMessageID != inbound.Message.ID {
 		t.Fatalf("canonical messages = %#v, %v", messages, err)
 	}
 	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
