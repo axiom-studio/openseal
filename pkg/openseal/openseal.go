@@ -961,6 +961,10 @@ type (
 	ExternalConversationDeliveryWorker              = runtime.ExternalConversationDeliveryWorker
 	ExternalConversationReplyStore                  = runtime.ExternalConversationReplyStore
 	ExternalConversationReplyWorker                 = runtime.ExternalConversationReplyWorker
+	RunProgressAcknowledgement                      = runtime.RunProgressAcknowledgement
+	RunProgressAcknowledgementStore                 = runtime.RunProgressAcknowledgementStore
+	RunProgressAcknowledgementWorkerConfig          = runtime.RunProgressAcknowledgementWorkerConfig
+	RunProgressAcknowledgementWorker                = runtime.RunProgressAcknowledgementWorker
 	ExternalConversationSupervisor                  = runtime.ExternalConversationSupervisor
 	ResolvedExternalConversationRunbook             = runtime.ResolvedExternalConversationRunbook
 	ExternalConversationRunbookResolver             = runtime.ExternalConversationRunbookResolver
@@ -1554,6 +1558,7 @@ var NewCanonicalExternalConversationDispatcher = runtime.NewCanonicalExternalCon
 var NewExternalConversationInboxWorker = runtime.NewExternalConversationInboxWorker
 var NewExternalConversationDeliveryWorker = runtime.NewExternalConversationDeliveryWorker
 var NewExternalConversationReplyWorker = runtime.NewExternalConversationReplyWorker
+var NewRunProgressAcknowledgementWorker = runtime.NewRunProgressAcknowledgementWorker
 var NewExternalConversationSupervisor = runtime.NewExternalConversationSupervisor
 var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversationRunbookEventDispatcher
 var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalConversationRunbookResolver
@@ -3026,6 +3031,16 @@ func (e *Engine) rebuildExternalConversations() error {
 	if err != nil {
 		return err
 	}
+	acknowledgementStore, ok := e.store.(runtime.RunProgressAcknowledgementStore)
+	if !ok {
+		return fmt.Errorf("persistent store does not implement Run progress acknowledgement storage")
+	}
+	acknowledgements, err := runtime.NewRunProgressAcknowledgementWorker(
+		acknowledgementStore, e.skills, e.externalConversations.config.Acknowledgements,
+	)
+	if err != nil {
+		return err
+	}
 	delivery, err := runtime.NewExternalConversationDeliveryWorker(
 		store, e.skills, e.externalConversations.host, e.externalConversations.config.Delivery,
 	)
@@ -3040,6 +3055,9 @@ func (e *Engine) rebuildExternalConversations() error {
 	e.externalConversations.supervisor, err = runtime.NewExternalConversationSupervisor(
 		inbox, replies, delivery, approvals, e.externalConversations.scopes, e.logger, *e.externalConversations.config,
 	)
+	if err == nil {
+		e.externalConversations.supervisor.SetAcknowledgementWorker(acknowledgements)
+	}
 	return err
 }
 

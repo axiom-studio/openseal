@@ -175,7 +175,7 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 	}
 	for _, message := range messages {
 		if message == nil || message.ReplyToMessageID != item.ChannelMessageID ||
-			message.Sender.Type == ConversationParticipantUser || message.Historical {
+			message.Intent != MessageIntentAnswer || message.Sender.Type == ConversationParticipantUser || message.Historical {
 			continue
 		}
 		for _, reference := range message.References {
