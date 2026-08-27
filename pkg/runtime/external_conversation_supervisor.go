@@ -10,11 +10,12 @@ import (
 )
 
 type ExternalConversationSupervisorConfig struct {
-	Interval  time.Duration
-	BatchSize int
-	Inbox     ExternalConversationInboxWorkerConfig
-	Delivery  ExternalConversationDeliveryWorkerConfig
-	Callback  CallbackEventWorkerConfig
+	Interval         time.Duration
+	BatchSize        int
+	Inbox            ExternalConversationInboxWorkerConfig
+	Delivery         ExternalConversationDeliveryWorkerConfig
+	Callback         CallbackEventWorkerConfig
+	Acknowledgements RunProgressAcknowledgementWorkerConfig
 }
 
 func (c *ExternalConversationSupervisorConfig) applyDefaults() error {
@@ -34,24 +35,31 @@ func (c *ExternalConversationSupervisorConfig) applyDefaults() error {
 // loop. Provider verification, normalization, and delivery remain in the
 // Skill-owned adapter host; this supervisor only advances canonical state.
 type ExternalConversationSupervisor struct {
-	inbox     *ExternalConversationInboxWorker
-	replies   *ExternalConversationReplyWorker
-	delivery  *ExternalConversationDeliveryWorker
-	approvals *ApprovalNotificationWorker
-	callbacks *CallbackEventWorker
-	scopes    WorkerScopeSource
-	config    ExternalConversationSupervisorConfig
-	logger    *zap.SugaredLogger
-	wake      chan struct{}
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	startOnce sync.Once
-	stopOnce  sync.Once
+	inbox            *ExternalConversationInboxWorker
+	replies          *ExternalConversationReplyWorker
+	delivery         *ExternalConversationDeliveryWorker
+	approvals        *ApprovalNotificationWorker
+	callbacks        *CallbackEventWorker
+	acknowledgements *RunProgressAcknowledgementWorker
+	scopes           WorkerScopeSource
+	config           ExternalConversationSupervisorConfig
+	logger           *zap.SugaredLogger
+	wake             chan struct{}
+	cancel           context.CancelFunc
+	wg               sync.WaitGroup
+	startOnce        sync.Once
+	stopOnce         sync.Once
 }
 
 func (s *ExternalConversationSupervisor) SetCallbackWorker(worker *CallbackEventWorker) {
 	if s != nil {
 		s.callbacks = worker
+	}
+}
+
+func (s *ExternalConversationSupervisor) SetAcknowledgementWorker(worker *RunProgressAcknowledgementWorker) {
+	if s != nil {
+		s.acknowledgements = worker
 	}
 }
 
@@ -139,6 +147,11 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 		}
 		if _, err := s.replies.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
 			reconcileErrors = append(reconcileErrors, err)
+		}
+		if s.acknowledgements != nil {
+			if _, err := s.acknowledgements.ProcessScope(ctx, scope); err != nil {
+				reconcileErrors = append(reconcileErrors, err)
+			}
 		}
 		for range s.config.BatchSize {
 			delivery, processErr := s.delivery.ProcessOne(ctx, scope)
