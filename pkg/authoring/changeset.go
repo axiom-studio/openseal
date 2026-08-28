@@ -1446,7 +1446,10 @@ func activationPlacementUpdate(current, requested ChangeSetPlacement) (ChangeSet
 // conversationRoutingValidation keeps provider routing host-owned while making
 // an activation plan truthfully actionable. Inactive resources may be created
 // before an external installation is connected; active endpoints must have the
-// exact verified installation and destination that ingress will match.
+// verified installation that ingress will match. Slack conversation ingress is
+// installation-wide: channel authority is the app's membership in Slack, not a
+// second destination allowlist in Studio. Approval-only endpoints still need a
+// concrete outbound destination.
 func conversationRoutingValidation(candidate *WorkforceCandidate, placement ChangeSetPlacement) []ValidationIssue {
 	if candidate == nil || candidate.Activation != WorkforceActivationActive {
 		return nil
@@ -1461,7 +1464,9 @@ func conversationRoutingValidation(candidate *WorkforceCandidate, placement Chan
 				Message: fmt.Sprintf("Connect the provider installation for %s before activation", endpoint.Name),
 			})
 		}
-		if strings.TrimSpace(placed.Address) == "" && strings.TrimSpace(endpoint.Address) == "" {
+		requiresAddress := endpoint.SkillID != "skill-slack" ||
+			hasConversationEndpointPurpose(endpoint.Purposes, ConversationEndpointPurposeApprovals)
+		if requiresAddress && strings.TrimSpace(placed.Address) == "" && strings.TrimSpace(endpoint.Address) == "" {
 			issues = append(issues, ValidationIssue{
 				Path: path + ".address", Code: "conversation_routing_address_required",
 				Message: fmt.Sprintf("Choose the destination for %s before activation", endpoint.Name),

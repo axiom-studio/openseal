@@ -15,6 +15,7 @@ type acknowledgementRecoveryHost struct {
 	acknowledged map[string]string
 	deliveries   int
 	lookups      int
+	address      string
 }
 
 func (h *acknowledgementRecoveryHost) LookupExternalConversationDelivery(
@@ -39,6 +40,7 @@ func (h *acknowledgementRecoveryHost) DeliverExternalConversation(
 	req ExternalConversationDeliveryHostRequest,
 ) (*ExternalConversationDeliveryHostResult, error) {
 	h.deliveries++
+	h.address = req.Endpoint.Address
 	if req.Adapter.Adapter.Provider != h.provider || req.Message.Content != "Canonical answer" ||
 		req.Adapter.Binding == nil || req.Adapter.Binding.Revision != req.Delivery.Adapter.BindingRevision {
 		return nil, errors.New("host received drifted delivery state")
@@ -48,6 +50,56 @@ func (h *acknowledgementRecoveryHost) DeliverExternalConversation(
 	// Model a provider acknowledgement followed by a lost response. The next
 	// lease must recover through lookup instead of sending a second message.
 	return nil, errors.New("connection closed after provider acknowledgement")
+}
+
+func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	previousRevision := endpoint.Revision
+	endpoint.Address = ""
+	endpoint.Revision++
+	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
+		t.Fatal(err)
+	}
+	conversations := NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack mention",
+		IdempotencyKey: "installation-wide-origin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
+		Intent: MessageIntentAnswer, Content: "Canonical answer",
+		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "answer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewExternalConversationTransportService(store, catalog).Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: endpoint.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
+		ConversationID: conversation.ID, ChannelMessageID: reply.Message.ID,
+		ExternalConversationID: "C-origin", MaximumAttempts: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &acknowledgementRecoveryHost{provider: "slack", acknowledged: map[string]string{}}
+	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, ExternalConversationDeliveryWorkerConfig{WorkerID: "origin-worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = worker.ProcessOne(ctx, endpoint.Scope)
+	if host.address != "C-origin" {
+		t.Fatalf("delivery address = %q, want originating conversation", host.address)
+	}
+	storedEndpoint, err := store.GetExternalConversationEndpoint(ctx, endpoint.Scope, endpoint.ID)
+	if err != nil || storedEndpoint.Address != "" {
+		t.Fatalf("durable endpoint was mutated: %#v, %v", storedEndpoint, err)
+	}
 }
 
 func TestExternalConversationDeliveryWorkerUsesOneHostContractAndRecoversAcknowledgement(t *testing.T) {

@@ -190,8 +190,15 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	if message == nil || message.Historical || message.Audience.Kind != ConversationAudienceChannel {
 		return fmt.Errorf("%w: canonical delivery message is unavailable", ErrInvalidExternalConversation)
 	}
+	deliveryEndpoint := cloneExternalConversationEndpoint(endpoint)
+	if strings.TrimSpace(deliveryEndpoint.Address) == "" {
+		deliveryEndpoint.Address = strings.TrimSpace(delivery.ExternalConversationID)
+		if deliveryEndpoint.Address == "" {
+			return fmt.Errorf("%w: installation-wide endpoint delivery requires the originating conversation", ErrInvalidExternalConversation)
+		}
+	}
 	request := ExternalConversationDeliveryHostRequest{
-		Endpoint: endpoint, Adapter: adapter, Delivery: cloneExternalConversationDelivery(delivery), Message: message,
+		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: cloneExternalConversationDelivery(delivery), Message: message,
 	}
 	if delivery.Attempt > 1 && adapter.Adapter.Delivery.SupportsAcknowledgementLookup {
 		acknowledgement, lookupErr := w.host.LookupExternalConversationDelivery(ctx, request)

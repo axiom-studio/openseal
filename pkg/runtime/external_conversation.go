@@ -689,32 +689,33 @@ func (c ExternalConversationDeliveryCorrelation) Validate() error {
 // is loaded from the canonical ChannelMessage at dispatch time, so this record
 // cannot drift into a second source of conversational truth.
 type ExternalConversationDelivery struct {
-	ID                string                                   `json:"id"`
-	Scope             Scope                                    `json:"scope"`
-	EndpointID        string                                   `json:"endpointId"`
-	EndpointRevision  int64                                    `json:"endpointRevision"`
-	Adapter           ExternalConversationAdapterReference     `json:"adapter"`
-	Operation         capability.ConversationDeliveryOperation `json:"operation"`
-	ConversationID    string                                   `json:"conversationId"`
-	ChannelMessageID  string                                   `json:"channelMessageId"`
-	ExternalThreadID  string                                   `json:"externalThreadId,omitempty"`
-	OrderingKey       string                                   `json:"orderingKey"`
-	Parameters        map[string]interface{}                   `json:"parameters,omitempty"`
-	Correlation       *ExternalConversationDeliveryCorrelation `json:"correlation,omitempty"`
-	IdempotencyKey    string                                   `json:"idempotencyKey"`
-	Status            ExternalConversationDeliveryStatus       `json:"status"`
-	Attempt           int                                      `json:"attempt"`
-	MaximumAttempts   int                                      `json:"maximumAttempts"`
-	AvailableAt       time.Time                                `json:"availableAt"`
-	LeaseOwner        string                                   `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt    time.Time                                `json:"leaseExpiresAt,omitempty"`
-	ProviderMessageID string                                   `json:"providerMessageId,omitempty"`
-	ErrorCode         string                                   `json:"errorCode,omitempty"`
-	Summary           string                                   `json:"summary,omitempty"`
-	Revision          int64                                    `json:"revision"`
-	CreatedAt         time.Time                                `json:"createdAt"`
-	UpdatedAt         time.Time                                `json:"updatedAt"`
-	DeliveredAt       time.Time                                `json:"deliveredAt,omitempty"`
+	ID                     string                                   `json:"id"`
+	Scope                  Scope                                    `json:"scope"`
+	EndpointID             string                                   `json:"endpointId"`
+	EndpointRevision       int64                                    `json:"endpointRevision"`
+	Adapter                ExternalConversationAdapterReference     `json:"adapter"`
+	Operation              capability.ConversationDeliveryOperation `json:"operation"`
+	ConversationID         string                                   `json:"conversationId"`
+	ChannelMessageID       string                                   `json:"channelMessageId"`
+	ExternalConversationID string                                   `json:"externalConversationId,omitempty"`
+	ExternalThreadID       string                                   `json:"externalThreadId,omitempty"`
+	OrderingKey            string                                   `json:"orderingKey"`
+	Parameters             map[string]interface{}                   `json:"parameters,omitempty"`
+	Correlation            *ExternalConversationDeliveryCorrelation `json:"correlation,omitempty"`
+	IdempotencyKey         string                                   `json:"idempotencyKey"`
+	Status                 ExternalConversationDeliveryStatus       `json:"status"`
+	Attempt                int                                      `json:"attempt"`
+	MaximumAttempts        int                                      `json:"maximumAttempts"`
+	AvailableAt            time.Time                                `json:"availableAt"`
+	LeaseOwner             string                                   `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt         time.Time                                `json:"leaseExpiresAt,omitempty"`
+	ProviderMessageID      string                                   `json:"providerMessageId,omitempty"`
+	ErrorCode              string                                   `json:"errorCode,omitempty"`
+	Summary                string                                   `json:"summary,omitempty"`
+	Revision               int64                                    `json:"revision"`
+	CreatedAt              time.Time                                `json:"createdAt"`
+	UpdatedAt              time.Time                                `json:"updatedAt"`
+	DeliveredAt            time.Time                                `json:"deliveredAt,omitempty"`
 }
 
 func (d *ExternalConversationDelivery) Validate() error {
@@ -728,7 +729,7 @@ func (d *ExternalConversationDelivery) Validate() error {
 		d.UpdatedAt.Before(d.CreatedAt) || len(d.ErrorCode) > 128 || len(d.Summary) > 1024 {
 		return ErrInvalidExternalConversation
 	}
-	for _, value := range []string{d.ExternalThreadID, d.ProviderMessageID} {
+	for _, value := range []string{d.ExternalConversationID, d.ExternalThreadID, d.ProviderMessageID} {
 		if value != "" && !validExternalConversationReference(value, 1024) {
 			return ErrInvalidExternalConversation
 		}
