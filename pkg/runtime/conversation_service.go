@@ -20,6 +20,14 @@ type CreateConversationRequest struct {
 	IdempotencyKey string
 }
 
+type UpdateConversationRequest struct {
+	Scope            Scope
+	ConversationID   string
+	ExpectedRevision int64
+	Title            *string
+	Status           *ConversationStatus
+}
+
 type ConversationFilter struct {
 	Scope    Scope
 	Owner    *ObjectiveOwner
@@ -145,6 +153,7 @@ type ConversationPresenceRecord struct {
 
 type ConversationStore interface {
 	CreateConversation(ctx context.Context, conversation *Conversation, idempotencyKey string) (*Conversation, bool, error)
+	UpdateConversation(ctx context.Context, conversation *Conversation, expectedRevision int64) (*Conversation, error)
 	GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error)
 	FindConversationByIdempotencyKey(ctx context.Context, scope Scope, key string) (*Conversation, error)
 	ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error)
@@ -222,6 +231,44 @@ func (s *ConversationService) GetConversation(ctx context.Context, scope Scope, 
 		return nil, ErrConversationNotFound
 	}
 	return conversation, nil
+}
+
+func (s *ConversationService) UpdateConversation(ctx context.Context, req UpdateConversationRequest) (*Conversation, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("conversation store is not configured")
+	}
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	if req.ExpectedRevision <= 0 {
+		return nil, fmt.Errorf("%w: expected revision must be positive", ErrInvalidConversation)
+	}
+	conversation, err := s.GetConversation(ctx, req.Scope, req.ConversationID)
+	if err != nil {
+		return nil, err
+	}
+	if conversation.Revision != req.ExpectedRevision {
+		return nil, ErrRevisionConflict
+	}
+	updated := cloneConversation(conversation)
+	if req.Title != nil {
+		updated.Title = strings.TrimSpace(*req.Title)
+	}
+	if req.Status != nil {
+		updated.Status = *req.Status
+		if updated.Status == ConversationStatusArchived {
+			archivedAt := s.now().UTC()
+			updated.ArchivedAt = &archivedAt
+		} else {
+			updated.ArchivedAt = nil
+		}
+	}
+	updated.Revision++
+	updated.UpdatedAt = s.now().UTC()
+	if err := updated.Validate(); err != nil {
+		return nil, err
+	}
+	return s.store.UpdateConversation(ctx, updated, conversation.Revision)
 }
 
 func (s *ConversationService) ListConversations(ctx context.Context, filter ConversationFilter) ([]*Conversation, error) {

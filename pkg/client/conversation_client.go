@@ -15,6 +15,7 @@ type ConversationClient interface {
 	CreateConversation(context.Context, kernelapi.CreateConversationRequest, string) (*runtime.Conversation, error)
 	ListConversations(context.Context, runtime.ConversationFilter) ([]*runtime.Conversation, error)
 	GetConversation(context.Context, runtime.Scope, string) (*runtime.Conversation, error)
+	UpdateConversation(context.Context, string, kernelapi.UpdateConversationRequest) (*runtime.Conversation, error)
 	PostChannelMessage(context.Context, string, kernelapi.PostChannelMessageRequest, string) (*runtime.ChannelMessageCommitResult, error)
 	ListChannelMessages(context.Context, runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error)
 	GetChannelMessage(context.Context, runtime.Scope, string, string) (*runtime.ChannelMessage, error)
@@ -57,6 +58,14 @@ func (c *KernelHTTPClient) GetConversation(ctx context.Context, scope runtime.Sc
 	var result runtime.Conversation
 	path := conversationPath(conversationID) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *KernelHTTPClient) UpdateConversation(ctx context.Context, conversationID string, request kernelapi.UpdateConversationRequest) (*runtime.Conversation, error) {
+	var result runtime.Conversation
+	if err := c.do(ctx, http.MethodPatch, conversationPath(conversationID), request, "", &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

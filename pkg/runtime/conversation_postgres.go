@@ -124,6 +124,24 @@ func (s *PostgresStore) CreateConversation(ctx context.Context, conversation *Co
 	return cloneConversation(conversation), false, nil
 }
 
+func (s *PostgresStore) UpdateConversation(ctx context.Context, conversation *Conversation, expectedRevision int64) (*Conversation, error) {
+	if err := conversation.Validate(); err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := s.updatePostgresConversationTx(ctx, tx, conversation, expectedRevision); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return cloneConversation(conversation), nil
+}
+
 func (s *PostgresStore) GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
