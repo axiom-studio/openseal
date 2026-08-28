@@ -217,7 +217,8 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 	}
 	enqueued, err := w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: item.Scope, EndpointID: endpoint.ID, Operation: operation,
-		ConversationID: item.ConversationID, ChannelMessageID: messageID, ExternalThreadID: threadID,
+		ConversationID: item.ConversationID, ChannelMessageID: messageID,
+		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: threadID,
 		Parameters:     parameters,
 		Correlation:    &ExternalConversationDeliveryCorrelation{Kind: runProgressAcknowledgementCorrelationKind, ID: run.ID, Phase: phase},
 		IdempotencyKey: "run-acknowledgement-delivery:" + item.ID + ":" + phase,

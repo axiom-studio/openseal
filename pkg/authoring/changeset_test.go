@@ -887,6 +887,31 @@ func TestActivationConversationRoutingIsTypedAndResourceIdentityStaysImmutable(t
 	}
 }
 
+func TestSlackConversationRoutingUsesInstallationMembershipWithoutAddress(t *testing.T) {
+	candidate := WorkforceCandidate{
+		Activation: WorkforceActivationActive,
+		ConversationEndpoints: []ConversationEndpointBlueprint{{
+			ID: "slack", Name: "Slack conversations", SkillID: "skill-slack",
+			Purposes: []ConversationEndpointPurpose{ConversationEndpointPurposeConversation},
+		}},
+	}
+	placement := ChangeSetPlacement{ConversationEndpoints: map[string]ConversationEndpointPlacement{
+		"slack": {ID: "conversation-endpoint:slack", InstallationID: "T-workspace"},
+	}}
+	if issues := conversationRoutingValidation(&candidate, placement); len(issues) != 0 {
+		t.Fatalf("installation-wide Slack routing issues = %#v", issues)
+	}
+
+	candidate.ConversationEndpoints[0].Purposes = append(
+		candidate.ConversationEndpoints[0].Purposes,
+		ConversationEndpointPurposeApprovals,
+	)
+	issues := conversationRoutingValidation(&candidate, placement)
+	if len(issues) != 1 || issues[0].Code != "conversation_routing_address_required" {
+		t.Fatalf("approval destination issues = %#v", issues)
+	}
+}
+
 func TestEffectiveChangeSetActivationIntentMigratesTypedCommitmentWithoutPromptParsing(t *testing.T) {
 	legacy := &ChangeSet{Result: CompileResult{Commitments: PromptCommitments{Activation: ActivationCommitmentInactive}}}
 	if intent, err := EffectiveChangeSetActivationIntent(legacy); err != nil || intent != WorkforceActivationInactive {

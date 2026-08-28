@@ -34,16 +34,17 @@ type ReceiveExternalConversationEventResult struct {
 }
 
 type EnqueueExternalConversationDeliveryRequest struct {
-	Scope            Scope
-	EndpointID       string
-	Operation        capability.ConversationDeliveryOperation
-	ConversationID   string
-	ChannelMessageID string
-	ExternalThreadID string
-	Parameters       map[string]interface{}
-	Correlation      *ExternalConversationDeliveryCorrelation
-	IdempotencyKey   string
-	MaximumAttempts  int
+	Scope                  Scope
+	EndpointID             string
+	Operation              capability.ConversationDeliveryOperation
+	ConversationID         string
+	ChannelMessageID       string
+	ExternalConversationID string
+	ExternalThreadID       string
+	Parameters             map[string]interface{}
+	Correlation            *ExternalConversationDeliveryCorrelation
+	IdempotencyKey         string
+	MaximumAttempts        int
 }
 
 type EnqueueExternalConversationDeliveryResult struct {
@@ -228,6 +229,9 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 	if req.Operation != capability.ConversationDeliveryMessageSend && len(req.Parameters) == 0 {
 		return nil, fmt.Errorf("%w: non-send delivery requires operation parameters", ErrInvalidExternalConversation)
 	}
+	if req.ExternalConversationID != "" && !validExternalConversationReference(strings.TrimSpace(req.ExternalConversationID), 1024) {
+		return nil, ErrInvalidExternalConversation
+	}
 	// A thread-oriented endpoint may still originate a new channel message (for
 	// example, an approval card). Only canonical replies require an existing
 	// provider thread mapping; the provider response to a root send establishes
@@ -261,7 +265,8 @@ func (s *ExternalConversationTransportService) Enqueue(ctx context.Context, req 
 		Scope: req.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision,
 		Adapter:   externalConversationResolvedAdapterReference(resolved),
 		Operation: req.Operation, ConversationID: message.ConversationID, ChannelMessageID: message.ID,
-		ExternalThreadID: strings.TrimSpace(req.ExternalThreadID), OrderingKey: orderingKey,
+		ExternalConversationID: strings.TrimSpace(req.ExternalConversationID),
+		ExternalThreadID:       strings.TrimSpace(req.ExternalThreadID), OrderingKey: orderingKey,
 		Parameters: cloneMap(req.Parameters), IdempotencyKey: idempotencyKey,
 		Correlation: cloneExternalConversationDeliveryCorrelation(req.Correlation),
 		Status:      ExternalConversationDeliveryPending, MaximumAttempts: maximumAttempts, AvailableAt: now,

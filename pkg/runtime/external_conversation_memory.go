@@ -109,7 +109,7 @@ func externalConversationEndpointMatchesVerifiedRoute(
 ) bool {
 	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
 		endpoint.Provider != route.Provider || endpoint.InstallationID != route.InstallationID ||
-		endpoint.Address != route.Address || endpoint.Adapter.SkillID != route.SkillID ||
+		(endpoint.Address != "" && endpoint.Address != route.Address) || endpoint.Adapter.SkillID != route.SkillID ||
 		endpoint.Adapter.SkillVersion != route.SkillVersion ||
 		endpoint.Adapter.SourceIdentity != route.SourceIdentity ||
 		endpoint.Adapter.AdapterID != route.AdapterID {

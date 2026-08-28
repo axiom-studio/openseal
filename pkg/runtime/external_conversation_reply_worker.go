@@ -142,8 +142,9 @@ func (w *ExternalConversationReplyWorker) project(
 		Scope: item.Scope, EndpointID: endpoint.ID,
 		Operation:      capability.ConversationDeliveryMessageSend,
 		ConversationID: item.ConversationID, ChannelMessageID: message.ID,
-		ExternalThreadID: externalThreadID,
-		IdempotencyKey:   "external-conversation-reply-delivery:" + item.ID,
+		ExternalConversationID: item.Event.ExternalConversationID,
+		ExternalThreadID:       externalThreadID,
+		IdempotencyKey:         "external-conversation-reply-delivery:" + item.ID,
 	})
 	if err != nil {
 		return nil, err
@@ -155,9 +156,10 @@ func (w *ExternalConversationReplyWorker) project(
 		Scope: item.Scope, EndpointID: endpoint.ID,
 		Operation:      capability.ConversationDeliveryTypingIndicator,
 		ConversationID: item.ConversationID, ChannelMessageID: message.ID,
-		ExternalThreadID: externalThreadID,
-		Parameters:       map[string]interface{}{"status": ""},
-		IdempotencyKey:   "external-conversation-reply-status:" + item.ID,
+		ExternalConversationID: item.Event.ExternalConversationID,
+		ExternalThreadID:       externalThreadID,
+		Parameters:             map[string]interface{}{"status": ""},
+		IdempotencyKey:         "external-conversation-reply-status:" + item.ID,
 	})
 	return result.Delivery, nil
 }
