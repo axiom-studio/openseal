@@ -191,11 +191,10 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 		return fmt.Errorf("%w: canonical delivery message is unavailable", ErrInvalidExternalConversation)
 	}
 	deliveryEndpoint := cloneExternalConversationEndpoint(endpoint)
-	if strings.TrimSpace(deliveryEndpoint.Address) == "" {
-		deliveryEndpoint.Address = strings.TrimSpace(delivery.ExternalConversationID)
-		if deliveryEndpoint.Address == "" {
-			return fmt.Errorf("%w: installation-wide endpoint delivery requires the originating conversation", ErrInvalidExternalConversation)
-		}
+	if origin := strings.TrimSpace(delivery.ExternalConversationID); origin != "" {
+		deliveryEndpoint.Address = origin
+	} else if strings.TrimSpace(deliveryEndpoint.Address) == "" {
+		return fmt.Errorf("%w: installation-wide endpoint delivery requires the originating conversation", ErrInvalidExternalConversation)
 	}
 	request := ExternalConversationDeliveryHostRequest{
 		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: cloneExternalConversationDelivery(delivery), Message: message,
