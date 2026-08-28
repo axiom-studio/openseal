@@ -35,7 +35,7 @@ func (d *crashAfterExternalConversationDispatch) DispatchExternalConversation(
 
 func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *testing.T) {
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+	store, _, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
 		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
 	})
 	now := time.Now().UTC().Truncate(time.Millisecond)
@@ -64,7 +64,7 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	}
 	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
 		WorkerID: "inbox-worker", LeaseDuration: time.Minute, BaseRetry: time.Second, MaximumRetry: time.Minute,
-	}, catalog)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,9 +108,8 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{
 		Scope: endpoint.Scope, ConversationID: conversations[0].ID, Limit: 10,
 	})
-	if err != nil || len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryTypingIndicator ||
-		deliveries[0].Parameters["status"] != "Thinking…" {
-		t.Fatalf("thinking delivery = %#v, %v", deliveries, err)
+	if err != nil || len(deliveries) != 0 {
+		t.Fatalf("inbox worker emitted presentation-specific progress = %#v, %v", deliveries, err)
 	}
 	conversationMapping, err := store.GetExternalConversationMapping(
 		ctx, endpoint.Scope, endpoint.ID, item.Event.ExternalConversationID, "",

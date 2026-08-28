@@ -961,10 +961,15 @@ type (
 	ExternalConversationDeliveryWorker              = runtime.ExternalConversationDeliveryWorker
 	ExternalConversationReplyStore                  = runtime.ExternalConversationReplyStore
 	ExternalConversationReplyWorker                 = runtime.ExternalConversationReplyWorker
+	RunProgressSnapshot                             = runtime.RunProgressSnapshot
+	RunProgressAcknowledgementRequest               = runtime.RunProgressAcknowledgementRequest
+	RunProgressAcknowledgementRenderer              = runtime.RunProgressAcknowledgementRenderer
+	RunProgressAcknowledgementRendererFunc          = runtime.RunProgressAcknowledgementRendererFunc
 	RunProgressAcknowledgement                      = runtime.RunProgressAcknowledgement
 	RunProgressAcknowledgementStore                 = runtime.RunProgressAcknowledgementStore
 	RunProgressAcknowledgementWorkerConfig          = runtime.RunProgressAcknowledgementWorkerConfig
 	RunProgressAcknowledgementWorker                = runtime.RunProgressAcknowledgementWorker
+	TurnRunnerProgressAcknowledgementRenderer       = runtime.TurnRunnerProgressAcknowledgementRenderer
 	ExternalConversationSupervisor                  = runtime.ExternalConversationSupervisor
 	ResolvedExternalConversationRunbook             = runtime.ResolvedExternalConversationRunbook
 	ExternalConversationRunbookResolver             = runtime.ExternalConversationRunbookResolver
@@ -1559,6 +1564,7 @@ var NewExternalConversationInboxWorker = runtime.NewExternalConversationInboxWor
 var NewExternalConversationDeliveryWorker = runtime.NewExternalConversationDeliveryWorker
 var NewExternalConversationReplyWorker = runtime.NewExternalConversationReplyWorker
 var NewRunProgressAcknowledgementWorker = runtime.NewRunProgressAcknowledgementWorker
+var NewTurnRunnerProgressAcknowledgementRenderer = runtime.NewTurnRunnerProgressAcknowledgementRenderer
 var NewExternalConversationSupervisor = runtime.NewExternalConversationSupervisor
 var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversationRunbookEventDispatcher
 var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalConversationRunbookResolver
@@ -3023,7 +3029,7 @@ func (e *Engine) rebuildExternalConversations() error {
 	}
 	runbookDispatcher := runtime.NewExternalConversationRunbookEventDispatcher(e.store, runbookResolver)
 	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler, runbookDispatcher)
-	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, e.externalConversations.config.Inbox, e.skills)
+	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, e.externalConversations.config.Inbox)
 	if err != nil {
 		return err
 	}
@@ -3035,8 +3041,12 @@ func (e *Engine) rebuildExternalConversations() error {
 	if !ok {
 		return fmt.Errorf("persistent store does not implement Run progress acknowledgement storage")
 	}
+	acknowledgementRenderer, err := runtime.NewTurnRunnerProgressAcknowledgementRenderer(e.conversationRunConfig.Runner.AgentTurns)
+	if err != nil {
+		return err
+	}
 	acknowledgements, err := runtime.NewRunProgressAcknowledgementWorker(
-		acknowledgementStore, e.skills, e.externalConversations.config.Acknowledgements,
+		acknowledgementStore, e.skills, acknowledgementRenderer, e.externalConversations.config.Acknowledgements,
 	)
 	if err != nil {
 		return err

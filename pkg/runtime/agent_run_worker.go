@@ -15,8 +15,9 @@ import (
 )
 
 type TurnRunnerBinding struct {
-	Runner       TurnRunner
-	DeploymentID string
+	Runner                          TurnRunner
+	ProgressAcknowledgementRenderer RunProgressAcknowledgementRenderer
+	DeploymentID                    string
 	// ActionDeploymentID is the resource whose Skill bindings authorized the
 	// projected actions. Team conversations keep the roster Agent as the Turn
 	// identity while resolving governed mutations against the owning Team.
