@@ -7,16 +7,28 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func TestRunProgressAcknowledgementWorkerProjectsOptInRunProgressExactlyOnce(t *testing.T) {
+type runProgressWorkerFixture struct {
+	store        *MemoryStore
+	catalog      *skill.Catalog
+	endpoint     *ExternalConversationEndpoint
+	conversation *Conversation
+	inbound      *ChannelMessage
+	run          *AgentRun
+	now          time.Time
+}
+
+func newRunProgressWorkerFixture(t *testing.T, provider string, operations []capability.ConversationDeliveryOperation) runProgressWorkerFixture {
+	t.Helper()
 	ctx := context.Background()
-	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "webchat")
+	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, provider, operations)
 	conversations := NewConversationService(store)
 	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
 		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Support thread",
 		Origin:         &ConversationReference{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision},
-		IdempotencyKey: "text-ack-conversation",
+		IdempotencyKey: "progress-conversation",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -24,37 +36,36 @@ func TestRunProgressAcknowledgementWorkerProjectsOptInRunProgressExactlyOnce(t *
 	inbound, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "speaker"},
-		Intent: MessageIntentQuestion, Content: "Hey Cody, can you check this?",
+		Intent: MessageIntentQuestion, Content: "Can you check this?",
 		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
-		IdempotencyKey: "text-ack-inbound",
+		IdempotencyKey: "progress-inbound",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runResult, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: endpoint.Scope, Kind: RunKindConversation, Owner: endpoint.Owner,
-		AssignedAgentID: endpoint.DeploymentID, Goal: "Respond", Source: RunSourceChat,
-		IdempotencyKey: "text-ack-run", Actor: ActivityActor{Type: "service", ID: "channel"},
+		AssignedAgentID: endpoint.DeploymentID, Goal: "Check the deployment", Source: RunSourceChat,
+		IdempotencyKey: "progress-run", Actor: ActivityActor{Type: "service", ID: "channel"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	running, _, err := NewRunActivityService(store, store).TransitionRun(ctx, endpoint.Scope, runResult.Run.ID, RunTransitionRequest{
 		ExpectedRevision: runResult.Run.Revision, Status: AgentRunStatusRunning,
-		Summary: "Run claimed", EventType: "run.claimed", Actor: ActivityActor{Type: "worker", ID: "test"},
+		Summary: "Inspecting the current deployment", EventType: "run.observed", Actor: ActivityActor{Type: "worker", ID: "test"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 	item := &ExternalConversationInboxItem{
-		ID: "text-ack-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID,
+		ID: "progress-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID,
 		EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
 		Event: NormalizedExternalConversationEvent{
-			ID: "text-event", Type: capability.ConversationEventMessageReceived,
-			ExternalConversationID: "meeting", ExternalThreadID: "speaker-turn", ExternalMessageID: "utterance-1",
-			ExternalParticipantID: "speaker", Text: "Hey Cody, can you check this?",
-			OrderingKey: "meeting:utterance-1", OccurredAt: now,
+			ID: "progress-event", Type: capability.ConversationEventMessageReceived,
+			ExternalConversationID: "conversation", ExternalThreadID: "thread", ExternalMessageID: "message",
+			ExternalParticipantID: "speaker", Text: "Can you check this?", OrderingKey: "conversation:message", OccurredAt: now,
 		},
 		Status: ExternalConversationInboxApplied, MaximumAttempts: 8, AvailableAt: now,
 		ConversationID: conversation.ID, ChannelMessageID: inbound.Message.ID, RunID: running.ID,
@@ -63,55 +74,85 @@ func TestRunProgressAcknowledgementWorkerProjectsOptInRunProgressExactlyOnce(t *
 	if _, replayed, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil || replayed {
 		t.Fatalf("store inbox replayed=%t err=%v", replayed, err)
 	}
-	worker, err := NewRunProgressAcknowledgementWorker(store, catalog, RunProgressAcknowledgementWorkerConfig{
+	return runProgressWorkerFixture{store: store, catalog: catalog, endpoint: endpoint, conversation: conversation, inbound: inbound.Message, run: running, now: now}
+}
+
+func TestRunProgressAcknowledgementWorkerUsesNativeProgressCapability(t *testing.T) {
+	fixture := newRunProgressWorkerFixture(t, "slack", []capability.ConversationDeliveryOperation{
+		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
+	})
+	var rendered RunProgressAcknowledgementRequest
+	renderer := RunProgressAcknowledgementRendererFunc(func(_ context.Context, request RunProgressAcknowledgementRequest) (string, error) {
+		rendered = request
+		return "Inspecting it, obviously.", nil
+	})
+	worker, err := NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, renderer, RunProgressAcknowledgementWorkerConfig{
 		MinimumRunAge: time.Nanosecond, MinimumInterval: time.Nanosecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return now.Add(time.Minute) }
-	first, err := worker.ProcessScope(ctx, endpoint.Scope)
-	if err != nil || len(first) != 1 || first[0].Correlation == nil ||
-		first[0].Correlation.Kind != runProgressAcknowledgementCorrelationKind ||
-		first[0].Correlation.ID != running.ID || first[0].Correlation.Phase != "starting" ||
-		first[0].ExternalThreadID != "speaker-turn" {
-		t.Fatalf("first acknowledgements = %#v, %v", first, err)
+	worker.now = func() time.Time { return fixture.now.Add(time.Minute) }
+	deliveries, err := worker.ProcessScope(context.Background(), fixture.endpoint.Scope)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryTypingIndicator ||
+		deliveries[0].Parameters["status"] != "Inspecting it, obviously." || deliveries[0].ExternalThreadID != "thread" ||
+		deliveries[0].Correlation == nil || !strings.HasPrefix(deliveries[0].Correlation.Phase, "progress-") {
+		t.Fatalf("native progress delivery = %#v, %v", deliveries, err)
 	}
-	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{
-		Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10,
+	if rendered.Snapshot.Goal != "Check the deployment" || rendered.Snapshot.ActivitySummary != "Inspecting the current deployment" ||
+		rendered.MaxSentences != 2 || rendered.MaxCharacters != 100 {
+		t.Fatalf("renderer request = %#v", rendered)
+	}
+	messages, _ := fixture.store.ListChannelMessages(context.Background(), ChannelMessageFilter{
+		Scope: fixture.endpoint.Scope, ConversationID: fixture.conversation.ID, Limit: 10,
 	})
-	if err != nil || len(messages) != 2 || messages[1].Intent != MessageIntentAcknowledgment ||
-		messages[1].Content != "Starting work" || messages[1].ResolvesMessageID != "" {
-		t.Fatalf("acknowledgement messages = %#v, %v", messages, err)
+	if len(messages) != 1 {
+		t.Fatalf("native progress created a chat message: %#v", messages)
 	}
-	second, err := worker.ProcessScope(ctx, endpoint.Scope)
+	second, err := worker.ProcessScope(context.Background(), fixture.endpoint.Scope)
 	if err != nil || len(second) != 0 {
-		t.Fatalf("duplicate acknowledgement = %#v, %v", second, err)
+		t.Fatalf("duplicate native progress = %#v, %v", second, err)
 	}
 }
 
-func TestProjectRunProgressAcknowledgementUsesBoundedEvidenceBackedPhrases(t *testing.T) {
-	run := &AgentRun{ID: "run-one", Status: AgentRunStatusRunning, Revision: 3}
-	cases := []struct {
-		name  string
-		event *ActivityEvent
-		text  string
-	}{
-		{name: "generic", text: "Working on it"},
-		{name: "tool", event: &ActivityEvent{ID: "event-tool", EventType: "action.proposed", Payload: map[string]interface{}{"skillId": "skill-github"}}, text: "Using GitHub"},
-		{name: "retry", event: &ActivityEvent{ID: "event-retry", EventType: "action.retry_scheduled"}, text: "Trying that again"},
-		{name: "approval", event: &ActivityEvent{ID: "event-approval", EventType: "action.approval_requested"}, text: "Waiting for approval"},
+func TestRunProgressAcknowledgementWorkerFallsBackToText(t *testing.T) {
+	fixture := newRunProgressWorkerFixture(t, "webchat", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
+	renderer := RunProgressAcknowledgementRendererFunc(func(context.Context, RunProgressAcknowledgementRequest) (string, error) {
+		return "I am checking now.", nil
+	})
+	worker, err := NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, renderer, RunProgressAcknowledgementWorkerConfig{
+		MinimumRunAge: time.Nanosecond, MinimumInterval: time.Nanosecond,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, test := range cases {
-		t.Run(test.name, func(t *testing.T) {
-			acknowledgement, ok := projectRunProgressAcknowledgement(run, test.event)
-			if !ok || acknowledgement.Text != test.text {
-				t.Fatalf("acknowledgement = %#v, %t", acknowledgement, ok)
-			}
-			words := len(strings.Fields(acknowledgement.Text))
-			if words < 2 || words > 3 {
-				t.Fatalf("acknowledgement has %d words: %q", words, acknowledgement.Text)
-			}
-		})
+	worker.now = func() time.Time { return fixture.now.Add(time.Minute) }
+	deliveries, err := worker.ProcessScope(context.Background(), fixture.endpoint.Scope)
+	if err != nil || len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryMessageSend {
+		t.Fatalf("text fallback delivery = %#v, %v", deliveries, err)
+	}
+	messages, _ := fixture.store.ListChannelMessages(context.Background(), ChannelMessageFilter{
+		Scope: fixture.endpoint.Scope, ConversationID: fixture.conversation.ID, Limit: 10,
+	})
+	if len(messages) != 2 || messages[1].Intent != MessageIntentAcknowledgment || messages[1].Content != "I am checking now." {
+		t.Fatalf("text fallback messages = %#v", messages)
+	}
+}
+
+func TestRenderedRunProgressAcknowledgementIsBounded(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		ok    bool
+	}{
+		{value: "Checking it now.", ok: true},
+		{value: "Checking it now. Patience, please.", ok: true},
+		{value: "One. Two. Three.", ok: false},
+		{value: strings.Repeat("a", 101), ok: false},
+		{value: "line one\nline two", ok: false},
+	} {
+		_, err := validateRenderedRunProgressAcknowledgement(test.value, 2, 100)
+		if (err == nil) != test.ok {
+			t.Fatalf("value %q: err=%v", test.value, err)
+		}
 	}
 }
