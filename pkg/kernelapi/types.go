@@ -670,7 +670,7 @@ func ArtifactCapability(contentOperations ...string) Capability {
 func ChannelsCapability(features ChannelCapabilityFeatures) Capability {
 	capability := Capability{
 		ID: ChannelsCapabilityID, Version: ChannelsCapabilityVersion, Available: true,
-		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPost, OperationRead, OperationPresence, OperationAudit},
+		Operations: []string{OperationCreate, OperationGet, OperationList, OperationUpdate, OperationPost, OperationRead, OperationPresence, OperationAudit},
 	}
 	if features.Coordination {
 		capability.Operations = append(capability.Operations, OperationCoordinate)
@@ -1031,6 +1031,13 @@ type CreateConversationRequest struct {
 	Title          string                         `json:"title"`
 	Origin         *runtime.ConversationReference `json:"origin,omitempty"`
 	IdempotencyKey string                         `json:"idempotencyKey,omitempty"`
+}
+
+type UpdateConversationRequest struct {
+	Scope            runtime.Scope               `json:"scope"`
+	ExpectedRevision int64                       `json:"expectedRevision"`
+	Title            *string                     `json:"title,omitempty"`
+	Status           *runtime.ConversationStatus `json:"status,omitempty"`
 }
 
 type PostChannelMessageRequest struct {
