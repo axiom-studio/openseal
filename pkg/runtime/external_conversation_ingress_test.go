@@ -253,7 +253,8 @@ func TestExternalConversationGatewayRoutesInstallationWideEndpointFromAnyAddress
 	previousRevision := endpoint.Revision
 	endpoint.InstallationID = "T123"
 	endpoint.ApplicationID = "A123"
-	endpoint.Address = ""
+	endpoint.Address = "C-approvals"
+	endpoint.InstallationWide = true
 	endpoint.Revision++
 	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {

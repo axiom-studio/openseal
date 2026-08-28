@@ -437,11 +437,12 @@ func materializeConversationEndpoints(
 			status = ExternalConversationEndpointActive
 		}
 		address := strings.TrimSpace(placement.Address)
-		usesSlackMembership := blueprint.SkillID == "skill-slack" && blueprint.CallbackAdapterID == ""
+		usesSlackMembership := blueprint.SkillID == "skill-slack" &&
+			authoringConversationEndpointHasPurpose(blueprint, authoring.ConversationEndpointPurposeConversation)
 		if address == "" && !usesSlackMembership {
 			address = strings.TrimSpace(blueprint.Address)
 		}
-		if usesSlackMembership {
+		if usesSlackMembership && blueprint.CallbackAdapterID == "" {
 			address = ""
 		}
 		now := value.ApplyReceipt.AppliedAt
@@ -454,7 +455,7 @@ func materializeConversationEndpoints(
 				SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
 				BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: blueprint.AdapterID,
 			},
-			Provider: adapter.Provider, Mode: blueprint.Mode,
+			Provider: adapter.Provider, Mode: blueprint.Mode, InstallationWide: usesSlackMembership,
 			InstallationID: strings.TrimSpace(placement.InstallationID),
 			ApplicationID:  strings.TrimSpace(placement.ApplicationID),
 			Address:        address, Handler: handler,
@@ -1373,6 +1374,19 @@ func portableDigest(value any) string {
 	sum := sha256.Sum256(payload)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
+
+func authoringConversationEndpointHasPurpose(
+	endpoint authoring.ConversationEndpointBlueprint,
+	wanted authoring.ConversationEndpointPurpose,
+) bool {
+	for _, purpose := range endpoint.Purposes {
+		if purpose == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func cloneJSON[T any](value *T) *T {
 	payload, _ := json.Marshal(value)
 	var result T
