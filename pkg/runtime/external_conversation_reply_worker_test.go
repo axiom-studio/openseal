@@ -120,6 +120,18 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 		operations[capability.ConversationDeliveryTypingIndicator].Parameters["status"] != "" {
 		t.Fatalf("durable delivery operations = %#v", operations)
 	}
+	retired := cloneExternalConversationEndpoint(endpoint)
+	retired.Status = ExternalConversationEndpointRetired
+	retired.Revision++
+	retired.UpdatedAt = now.Add(time.Second)
+	retired.RetiredAt = &retired.UpdatedAt
+	if err := store.UpdateExternalConversationEndpoint(ctx, retired, endpoint.Revision); err != nil {
+		t.Fatal(err)
+	}
+	afterRetirement, err := worker.ProcessScope(ctx, endpoint.Scope, 10)
+	if err != nil || len(afterRetirement) != 0 {
+		t.Fatalf("projection after endpoint retirement = %#v, %v", afterRetirement, err)
+	}
 }
 
 func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *testing.T) {

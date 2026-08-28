@@ -95,8 +95,14 @@ func (w *ExternalConversationReplyWorker) project(
 	if err != nil {
 		return nil, err
 	}
-	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != item.EndpointRevision ||
+	// Pausing or retiring an endpoint intentionally cancels any response that
+	// has not yet crossed the external delivery boundary. Applied inbox items
+	// remain immutable audit records and are revisited by this projector, so an
+	// inactive endpoint is a successful no-op rather than a permanent warning.
+	if endpoint != nil && endpoint.Status != ExternalConversationEndpointActive {
+		return nil, nil
+	}
+	if endpoint == nil || endpoint.Revision != item.EndpointRevision ||
 		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
 		return nil, ErrExternalConversationConflict
 	}
