@@ -504,6 +504,7 @@ type (
 	ConversationChangeRequest            = runtime.ConversationChangeRequest
 	ConversationChangeSet                = runtime.ConversationChangeSet
 	CreateConversationRequest            = runtime.CreateConversationRequest
+	UpdateConversationRequest            = runtime.UpdateConversationRequest
 	ConversationFilter                   = runtime.ConversationFilter
 	PostChannelMessageRequest            = runtime.PostChannelMessageRequest
 	ChannelMessageFilter                 = runtime.ChannelMessageFilter
@@ -4235,6 +4236,13 @@ func (e *Engine) GetConversation(ctx context.Context, scope runtime.Scope, conve
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.GetConversation(ctx, scope, conversationID)
+}
+
+func (e *Engine) UpdateConversation(ctx context.Context, request runtime.UpdateConversationRequest) (*runtime.Conversation, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.UpdateConversation(ctx, request)
 }
 
 func (e *Engine) ListConversations(ctx context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {

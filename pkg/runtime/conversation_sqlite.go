@@ -115,6 +115,26 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 	return cloneConversation(conversation), false, nil
 }
 
+func (s *SQLiteStore) UpdateConversation(ctx context.Context, conversation *Conversation, expectedRevision int64) (*Conversation, error) {
+	if err := conversation.Validate(); err != nil {
+		return nil, err
+	}
+	conn, err := beginImmediateSQLite(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	committed := false
+	defer rollbackSQLiteConn(conn, &committed)
+	if err := updateSQLiteConversation(ctx, conn, conversation, expectedRevision); err != nil {
+		return nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, err
+	}
+	committed = true
+	return cloneConversation(conversation), nil
+}
+
 func (s *SQLiteStore) GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err

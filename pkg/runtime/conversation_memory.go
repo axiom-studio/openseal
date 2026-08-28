@@ -52,6 +52,24 @@ func (s *MemoryStore) CreateConversation(_ context.Context, conversation *Conver
 	return cloneConversation(conversation), false, nil
 }
 
+func (s *MemoryStore) UpdateConversation(_ context.Context, conversation *Conversation, expectedRevision int64) (*Conversation, error) {
+	if err := conversation.Validate(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := conversationStoreKey(conversation.Scope, conversation.ID)
+	current := s.conversations[key]
+	if current == nil {
+		return nil, ErrConversationNotFound
+	}
+	if current.Revision != expectedRevision || conversation.Revision != expectedRevision+1 {
+		return nil, ErrRevisionConflict
+	}
+	s.conversations[key] = cloneConversation(conversation)
+	return cloneConversation(conversation), nil
+}
+
 func (s *MemoryStore) GetConversation(_ context.Context, scope Scope, conversationID string) (*Conversation, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err

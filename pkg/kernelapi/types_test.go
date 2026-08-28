@@ -240,7 +240,7 @@ func TestArtifactCapabilityDoesNotAdvertiseUnconfiguredContentResolution(t *test
 
 func TestChannelCapabilityAdvertisesOnlyConfiguredFeatures(t *testing.T) {
 	portable := ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true})
-	for _, operation := range []string{OperationCreate, OperationPost, OperationRead, OperationPresence, OperationAudit, OperationCoordinate, OperationChanges} {
+	for _, operation := range []string{OperationCreate, OperationUpdate, OperationPost, OperationRead, OperationPresence, OperationAudit, OperationCoordinate, OperationChanges} {
 		if !portable.Supports(operation) {
 			t.Fatalf("portable channel operation %q not advertised: %#v", operation, portable.Operations)
 		}

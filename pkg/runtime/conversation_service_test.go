@@ -29,6 +29,38 @@ func TestConversationServiceCreatesObjectiveScopedConversation(t *testing.T) {
 	}
 }
 
+func TestConversationServiceRenamesAndArchivesConversation(t *testing.T) {
+	t.Parallel()
+	service := NewConversationService(NewMemoryStore())
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "one"}
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, Title: "First title", IdempotencyKey: "chat-one",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title := "Renamed chat"
+	renamed, err := service.UpdateConversation(ctx, UpdateConversationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Title: &title,
+	})
+	if err != nil || renamed.Title != title || renamed.Revision != conversation.Revision+1 {
+		t.Fatalf("renamed = %#v, err = %v", renamed, err)
+	}
+	archivedStatus := ConversationStatusArchived
+	archived, err := service.UpdateConversation(ctx, UpdateConversationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: renamed.Revision, Status: &archivedStatus,
+	})
+	if err != nil || archived.Status != ConversationStatusArchived || archived.ArchivedAt == nil || archived.Revision != renamed.Revision+1 {
+		t.Fatalf("archived = %#v, err = %v", archived, err)
+	}
+	if _, err := service.UpdateConversation(ctx, UpdateConversationRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: renamed.Revision, Title: &title,
+	}); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatalf("stale update error = %v", err)
+	}
+}
+
 func TestConversationServiceCoordinatesNaturalDurableRound(t *testing.T) {
 	t.Parallel()
 	store := NewMemoryStore()
