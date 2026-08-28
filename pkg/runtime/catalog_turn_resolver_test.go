@@ -171,6 +171,18 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if binding.ProgressAcknowledgementRenderer == nil {
+		t.Fatal("progress acknowledgement renderer is unavailable")
+	}
+	progress, err := binding.ProgressAcknowledgementRenderer.RenderRunProgressAcknowledgement(t.Context(), RunProgressAcknowledgementRequest{
+		Snapshot:     RunProgressSnapshot{RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: AgentRunStatusRunning, Revision: 1},
+		MaxSentences: 2, MaxCharacters: 100,
+	})
+	if err != nil || progress != "done" || len(host.request.Actions) != 0 || len(host.request.SkillPrompts) != 0 ||
+		!containsString(host.request.SystemInstructions, "Work carefully.") ||
+		!containsString(host.request.SystemInstructions, runProgressAcknowledgementSystemInstruction) {
+		t.Fatalf("progress=%q request=%#v error=%v", progress, host.request, err)
+	}
 	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
 		t.Fatal(err)
 	}

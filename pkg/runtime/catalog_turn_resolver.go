@@ -265,7 +265,17 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if err != nil {
 		return nil, err
 	}
+	progressRunner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
+		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID,
+		DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+		SystemInstructions: append(append([]string(nil), instructions...), runProgressAcknowledgementSystemInstruction),
+		ModelCredential:    deploymentModelCredential(deployment),
+	})
+	if err != nil {
+		return nil, err
+	}
 	base.Runner = runner
+	base.ProgressAcknowledgementRenderer = &hostedTurnProgressAcknowledgementRenderer{runner: progressRunner}
 	if acceptedRequestExecution {
 		base.Runner = &acceptedAgentRequestExecutionTurnRunner{inner: runner}
 	}
