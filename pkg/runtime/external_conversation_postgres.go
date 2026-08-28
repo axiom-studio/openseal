@@ -172,7 +172,7 @@ func (s *PostgresStore) ListExternalConversationEndpointsByVerifiedRoute(
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("external_conversation_endpoints")+`
 		WHERE provider=$1 AND status=$2
 		  AND payload->>'installationId'=$3
-		  AND payload->>'address'=$4
+		  AND (COALESCE(payload->>'address','')='' OR payload->>'address'=$4)
 		  AND payload->'adapter'->>'skillId'=$5
 		  AND payload->'adapter'->>'skillVersion'=$6
 		  AND COALESCE(payload->'adapter'->>'sourceIdentity','')=$7

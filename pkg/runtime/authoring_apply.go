@@ -437,8 +437,12 @@ func materializeConversationEndpoints(
 			status = ExternalConversationEndpointActive
 		}
 		address := strings.TrimSpace(placement.Address)
-		if address == "" {
+		usesSlackMembership := blueprint.SkillID == "skill-slack" && blueprint.CallbackAdapterID == ""
+		if address == "" && !usesSlackMembership {
 			address = strings.TrimSpace(blueprint.Address)
+		}
+		if usesSlackMembership {
+			address = ""
 		}
 		now := value.ApplyReceipt.AppliedAt
 		endpoint := &ExternalConversationEndpoint{

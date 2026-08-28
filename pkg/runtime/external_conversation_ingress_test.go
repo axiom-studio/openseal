@@ -247,6 +247,39 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 	}
 }
 
+func TestExternalConversationGatewayRoutesInstallationWideEndpointFromAnyAddress(t *testing.T) {
+	ctx := context.Background()
+	store, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	previousRevision := endpoint.Revision
+	endpoint.InstallationID = "T123"
+	endpoint.ApplicationID = "A123"
+	endpoint.Address = ""
+	endpoint.Revision++
+	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
+	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, address := range []string{"C-one", "C-two", "D-direct"} {
+		matches, err := store.ListExternalConversationEndpointsByVerifiedRoute(ctx, ExternalConversationVerifiedRoute{
+			Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123", Address: address,
+			SkillID: endpoint.Adapter.SkillID, SkillVersion: endpoint.Adapter.SkillVersion,
+			SourceIdentity: endpoint.Adapter.SourceIdentity, AdapterID: endpoint.Adapter.AdapterID,
+		})
+		if err != nil || len(matches) != 1 || matches[0].ID != endpoint.ID {
+			t.Fatalf("address %q matches = %#v, %v", address, matches, err)
+		}
+	}
+	matches, err := store.ListExternalConversationEndpointsByVerifiedRoute(ctx, ExternalConversationVerifiedRoute{
+		Provider: endpoint.Provider, InstallationID: "another-workspace", ApplicationID: "A123", Address: "C-one",
+		SkillID: endpoint.Adapter.SkillID, SkillVersion: endpoint.Adapter.SkillVersion,
+		SourceIdentity: endpoint.Adapter.SourceIdentity, AdapterID: endpoint.Adapter.AdapterID,
+	})
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("foreign installation matches = %#v, %v", matches, err)
+	}
+}
+
 func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
