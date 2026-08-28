@@ -13,6 +13,34 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+type switchableConversationAdapterResolver struct {
+	ExternalConversationAdapterResolver
+	unavailable bool
+}
+
+func (r *switchableConversationAdapterResolver) ResolveConversationAdapter(
+	ctx context.Context,
+	scope skill.ScopeReference,
+	deploymentID, skillID, skillVersion, adapterID string,
+	binding ...skill.BindingReference,
+) (*skill.BoundConversationAdapter, error) {
+	if r.unavailable {
+		return nil, errors.New("adapter unavailable")
+	}
+	return r.ExternalConversationAdapterResolver.ResolveConversationAdapter(ctx, scope, deploymentID, skillID, skillVersion, adapterID, binding...)
+}
+
+func (r *switchableConversationAdapterResolver) ResolveConversationAdapterBinding(
+	ctx context.Context,
+	scope skill.ScopeReference,
+	deploymentID, bindingID, adapterID string,
+) (*skill.BoundConversationAdapter, error) {
+	if r.unavailable {
+		return nil, errors.New("adapter unavailable")
+	}
+	return r.ExternalConversationAdapterResolver.ResolveConversationAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
+}
+
 func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
@@ -105,6 +133,35 @@ func TestExternalConversationEndpointFollowsItsSingularSkillBinding(t *testing.T
 	})
 	if !errors.Is(err, ErrInvalidExternalConversation) {
 		t.Fatalf("secret configuration error = %v", err)
+	}
+}
+
+func TestExternalConversationEndpointCanRetireWhenAdapterIsUnavailable(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
+	resolver := &switchableConversationAdapterResolver{ExternalConversationAdapterResolver: catalog}
+	service := NewExternalConversationEndpointService(store, resolver)
+	endpoint, err := service.Create(ctx, CreateExternalConversationEndpointRequest{
+		ID: "slack-retire", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "slack-agent"},
+		DeploymentID: "slack-agent", Name: "Retirable endpoint", Adapter: adapter,
+		Mode: capability.ConversationEndpointChannel, Address: "C012345",
+		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: "slack-agent"},
+		Policy: ExternalConversationPolicy{
+			MessageSelection: ExternalConversationSelectDirectOrMention,
+			ReplyMode:        ExternalConversationReplyThread, IgnoreBots: true,
+		},
+		Status: ExternalConversationEndpointActive,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver.unavailable = true
+	retired := ExternalConversationEndpointRetired
+	endpoint, err = service.Update(ctx, scope, endpoint.ID, UpdateExternalConversationEndpointRequest{
+		ExpectedRevision: endpoint.Revision, Status: &retired,
+	})
+	if err != nil || endpoint.Status != ExternalConversationEndpointRetired || endpoint.RetiredAt == nil {
+		t.Fatalf("retired endpoint = %#v, %v", endpoint, err)
 	}
 }
 

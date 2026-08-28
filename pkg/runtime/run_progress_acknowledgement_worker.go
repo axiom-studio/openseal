@@ -65,7 +65,10 @@ type RunProgressAcknowledgementWorkerConfig struct {
 
 func (c RunProgressAcknowledgementWorkerConfig) normalize() (RunProgressAcknowledgementWorkerConfig, error) {
 	if c.MinimumRunAge == 0 {
-		c.MinimumRunAge = 2 * time.Second
+		// A run created from an external message may legitimately finish in less
+		// than two seconds. Schedule its first acknowledgement in the ingress
+		// reconciliation cycle so native channel progress is still observable.
+		c.MinimumRunAge = time.Nanosecond
 	}
 	if c.MinimumInterval == 0 {
 		c.MinimumInterval = 4 * time.Second
