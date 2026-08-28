@@ -18,6 +18,35 @@ type acknowledgementRecoveryHost struct {
 	address      string
 }
 
+type ephemeralRetryHost struct {
+	deliveries int
+	lookups    int
+}
+
+func (h *ephemeralRetryHost) LookupExternalConversationDelivery(
+	context.Context,
+	ExternalConversationDeliveryHostRequest,
+) (*ExternalConversationDeliveryAcknowledgement, error) {
+	h.lookups++
+	return &ExternalConversationDeliveryAcknowledgement{Status: ExternalConversationAcknowledgementUnknown}, nil
+}
+
+func (h *ephemeralRetryHost) DeliverExternalConversation(
+	_ context.Context,
+	req ExternalConversationDeliveryHostRequest,
+) (*ExternalConversationDeliveryHostResult, error) {
+	h.deliveries++
+	if req.Delivery.Operation != capability.ConversationDeliveryTypingIndicator {
+		return nil, errors.New("expected typing indicator")
+	}
+	if h.deliveries == 1 {
+		return nil, errors.New("temporary provider failure")
+	}
+	return &ExternalConversationDeliveryHostResult{
+		Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: req.Delivery.ExternalThreadID,
+	}, nil
+}
+
 func (h *acknowledgementRecoveryHost) LookupExternalConversationDelivery(
 	_ context.Context,
 	req ExternalConversationDeliveryHostRequest,
@@ -100,6 +129,57 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 	storedEndpoint, err := store.GetExternalConversationEndpoint(ctx, endpoint.Scope, endpoint.ID)
 	if err != nil || storedEndpoint.Address != "C-approvals" {
 		t.Fatalf("durable endpoint was mutated: %#v, %v", storedEndpoint, err)
+	}
+}
+
+func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *testing.T) {
+	ctx := context.Background()
+	store, catalog, endpoint := externalConversationDeliveryFixtureWithOperations(t, ctx, "slack", []capability.ConversationDeliveryOperation{
+		capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator,
+	})
+	conversations := NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+		Scope: endpoint.Scope, Owner: endpoint.Owner, Title: "Slack progress", IdempotencyKey: "typing-retry",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	message, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID},
+		Intent: MessageIntentAcknowledgment, Content: "Checking now.",
+		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "typing-status",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewExternalConversationTransportService(store, catalog).Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+		Scope: endpoint.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryTypingIndicator,
+		ConversationID: conversation.ID, ChannelMessageID: message.Message.ID, ExternalThreadID: "thread-1",
+		Parameters: map[string]interface{}{"status": "Checking now."}, MaximumAttempts: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &ephemeralRetryHost{}
+	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, ExternalConversationDeliveryWorkerConfig{
+		WorkerID: "typing-worker", BaseRetry: time.Nanosecond, MaximumRetry: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Add(time.Second)
+	worker.now = func() time.Time { return now }
+	if retry, processErr := worker.ProcessOne(ctx, endpoint.Scope); processErr == nil || retry == nil || retry.Status != ExternalConversationDeliveryRetry {
+		t.Fatalf("first typing attempt = %#v, %v", retry, processErr)
+	}
+	worker.now = func() time.Time { return now.Add(time.Second) }
+	delivered, err := worker.ProcessOne(ctx, endpoint.Scope)
+	if err != nil || delivered == nil || delivered.Status != ExternalConversationDeliveryDelivered {
+		t.Fatalf("retried typing delivery = %#v, %v", delivered, err)
+	}
+	if host.deliveries != 2 || host.lookups != 0 {
+		t.Fatalf("host calls: deliveries=%d lookups=%d", host.deliveries, host.lookups)
 	}
 }
 
