@@ -155,26 +155,27 @@ func (r ExternalConversationAdapterReference) Validate() error {
 // an opaque provider resource such as a channel, inbox, number, or web-chat
 // installation; Configuration is non-secret and interpreted only by the Skill.
 type ExternalConversationEndpoint struct {
-	ID             string                               `json:"id"`
-	IngressRoute   string                               `json:"ingressRoute"`
-	Scope          Scope                                `json:"scope"`
-	Owner          ObjectiveOwner                       `json:"owner"`
-	DeploymentID   string                               `json:"deploymentId"`
-	Name           string                               `json:"name"`
-	Adapter        ExternalConversationAdapterReference `json:"adapter"`
-	Provider       string                               `json:"provider"`
-	Mode           capability.ConversationEndpointMode  `json:"mode"`
-	InstallationID string                               `json:"installationId,omitempty"`
-	ApplicationID  string                               `json:"applicationId,omitempty"`
-	Address        string                               `json:"address,omitempty"`
-	Handler        ExternalConversationHandler          `json:"handler"`
-	Policy         ExternalConversationPolicy           `json:"policy"`
-	Configuration  map[string]interface{}               `json:"configuration,omitempty"`
-	Status         ExternalConversationEndpointStatus   `json:"status"`
-	Revision       int64                                `json:"revision"`
-	CreatedAt      time.Time                            `json:"createdAt"`
-	UpdatedAt      time.Time                            `json:"updatedAt"`
-	RetiredAt      *time.Time                           `json:"retiredAt,omitempty"`
+	ID               string                               `json:"id"`
+	IngressRoute     string                               `json:"ingressRoute"`
+	Scope            Scope                                `json:"scope"`
+	Owner            ObjectiveOwner                       `json:"owner"`
+	DeploymentID     string                               `json:"deploymentId"`
+	Name             string                               `json:"name"`
+	Adapter          ExternalConversationAdapterReference `json:"adapter"`
+	Provider         string                               `json:"provider"`
+	Mode             capability.ConversationEndpointMode  `json:"mode"`
+	InstallationID   string                               `json:"installationId,omitempty"`
+	ApplicationID    string                               `json:"applicationId,omitempty"`
+	Address          string                               `json:"address,omitempty"`
+	InstallationWide bool                                 `json:"installationWide,omitempty"`
+	Handler          ExternalConversationHandler          `json:"handler"`
+	Policy           ExternalConversationPolicy           `json:"policy"`
+	Configuration    map[string]interface{}               `json:"configuration,omitempty"`
+	Status           ExternalConversationEndpointStatus   `json:"status"`
+	Revision         int64                                `json:"revision"`
+	CreatedAt        time.Time                            `json:"createdAt"`
+	UpdatedAt        time.Time                            `json:"updatedAt"`
+	RetiredAt        *time.Time                           `json:"retiredAt,omitempty"`
 }
 
 func (e *ExternalConversationEndpoint) Validate() error {

@@ -56,7 +56,8 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 	ctx := context.Background()
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	previousRevision := endpoint.Revision
-	endpoint.Address = ""
+	endpoint.Address = "C-approvals"
+	endpoint.InstallationWide = true
 	endpoint.Revision++
 	endpoint.UpdatedAt = endpoint.UpdatedAt.Add(time.Second)
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, previousRevision); err != nil {
@@ -97,7 +98,7 @@ func TestExternalConversationDeliveryWorkerUsesOriginForInstallationWideEndpoint
 		t.Fatalf("delivery address = %q, want originating conversation", host.address)
 	}
 	storedEndpoint, err := store.GetExternalConversationEndpoint(ctx, endpoint.Scope, endpoint.ID)
-	if err != nil || storedEndpoint.Address != "" {
+	if err != nil || storedEndpoint.Address != "C-approvals" {
 		t.Fatalf("durable endpoint was mutated: %#v, %v", storedEndpoint, err)
 	}
 }
