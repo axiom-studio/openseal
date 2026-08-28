@@ -87,12 +87,12 @@ func TestRunProgressAcknowledgementWorkerUsesNativeProgressCapability(t *testing
 		return "Inspecting it, obviously.", nil
 	})
 	worker, err := NewRunProgressAcknowledgementWorker(fixture.store, fixture.catalog, renderer, RunProgressAcknowledgementWorkerConfig{
-		MinimumRunAge: time.Nanosecond, MinimumInterval: time.Nanosecond,
+		MinimumInterval: time.Nanosecond,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker.now = func() time.Time { return fixture.now.Add(time.Minute) }
+	worker.now = func() time.Time { return fixture.now.Add(time.Millisecond) }
 	deliveries, err := worker.ProcessScope(context.Background(), fixture.endpoint.Scope)
 	if err != nil || len(deliveries) != 1 || deliveries[0].Operation != capability.ConversationDeliveryTypingIndicator ||
 		deliveries[0].Parameters["status"] != "Inspecting it, obviously." || deliveries[0].ExternalThreadID != "thread" ||

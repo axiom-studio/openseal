@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -199,7 +200,12 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	request := ExternalConversationDeliveryHostRequest{
 		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: cloneExternalConversationDelivery(delivery), Message: message,
 	}
-	if delivery.Attempt > 1 && adapter.Adapter.Delivery.SupportsAcknowledgementLookup {
+	// Typing/progress indicators are ephemeral state, not durable messages.
+	// Provider message lookup cannot prove their delivery and can turn a harmless
+	// retry into a permanent endpoint conflict, so replay them directly with the
+	// same idempotency key.
+	if delivery.Attempt > 1 && adapter.Adapter.Delivery.SupportsAcknowledgementLookup &&
+		delivery.Operation != capability.ConversationDeliveryTypingIndicator {
 		acknowledgement, lookupErr := w.host.LookupExternalConversationDelivery(ctx, request)
 		if lookupErr == nil {
 			if validateErr := acknowledgement.Validate(); validateErr != nil {

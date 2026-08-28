@@ -145,13 +145,16 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 				break
 			}
 		}
-		if _, err := s.replies.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
-			reconcileErrors = append(reconcileErrors, err)
-		}
+		// Project progress immediately after ingress has created the run. Reply
+		// reconciliation can include model work and may complete a short run before
+		// a later acknowledgement pass ever observes it as active.
 		if s.acknowledgements != nil {
 			if _, err := s.acknowledgements.ProcessScope(ctx, scope); err != nil {
 				reconcileErrors = append(reconcileErrors, err)
 			}
+		}
+		if _, err := s.replies.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
+			reconcileErrors = append(reconcileErrors, err)
 		}
 		for range s.config.BatchSize {
 			delivery, processErr := s.delivery.ProcessOne(ctx, scope)

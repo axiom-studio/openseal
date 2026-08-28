@@ -400,12 +400,18 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 	}
 	next.Revision++
 	next.UpdatedAt = now
-	resolved, err := s.resolveAdapter(ctx, next)
-	if err != nil {
-		return nil, err
-	}
-	if err := next.Policy.Validate(next.Mode, resolved.Adapter.Features); err != nil {
-		return nil, err
+	// A stale or disabled adapter must never prevent an operator from shutting
+	// down an endpoint. Configuration changes and activation still require the
+	// exact reviewed binding, while a lifecycle-only pause/retirement preserves
+	// the already validated endpoint state and fails safely closed.
+	if !externalConversationEndpointSafetyShutdown(current, next, req) {
+		resolved, resolveErr := s.resolveAdapter(ctx, next)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if err := next.Policy.Validate(next.Mode, resolved.Adapter.Features); err != nil {
+			return nil, err
+		}
 	}
 	if err := next.Validate(); err != nil {
 		return nil, err
@@ -414,6 +420,17 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 		return nil, err
 	}
 	return cloneExternalConversationEndpoint(next), nil
+}
+
+func externalConversationEndpointSafetyShutdown(
+	current, next *ExternalConversationEndpoint,
+	req UpdateExternalConversationEndpointRequest,
+) bool {
+	if current == nil || next == nil || req.Status == nil ||
+		req.Adapter != nil || req.Name != nil || req.Address != nil || req.Handler != nil || req.Policy != nil || req.ReplaceConfig {
+		return false
+	}
+	return next.Status == ExternalConversationEndpointPaused || next.Status == ExternalConversationEndpointRetired
 }
 
 func (s *ExternalConversationEndpointService) resolveAdapter(ctx context.Context, endpoint *ExternalConversationEndpoint) (*skill.BoundConversationAdapter, error) {
