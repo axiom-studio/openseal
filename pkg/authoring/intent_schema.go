@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"strings"
 	"sync"
 
 	inferschema "github.com/invopop/jsonschema"
@@ -96,6 +97,11 @@ func decodeAuthoringIntent(payload []byte) (AuthoringIntent, error) {
 	} else if !errors.Is(err, io.EOF) {
 		return AuthoringIntent{}, &AuthoringSchemaValidationError{Violations: []AuthoringSchemaViolation{{Path: "", Message: err.Error()}}}
 	}
+	// Some OpenAI-compatible gateways preserve a model's JSON-encoded array as
+	// a string inside otherwise valid tool arguments. Unwrap only values that
+	// decode to the exact composite type required by the contract; arbitrary
+	// prose and scalar coercions remain schema violations.
+	normalizeJSONEncodedAuthoringIntentArrays(document)
 	if err := authoringIntentValidator.Validate(document); err != nil {
 		var validation *validateschema.ValidationError
 		if errors.As(err, &validation) {
@@ -103,11 +109,42 @@ func decodeAuthoringIntent(payload []byte) (AuthoringIntent, error) {
 		}
 		return AuthoringIntent{}, err
 	}
-	strict := json.NewDecoder(bytes.NewReader(payload))
+	normalizedPayload, err := json.Marshal(document)
+	if err != nil {
+		return AuthoringIntent{}, fmt.Errorf("encode normalized authoring intent: %w", err)
+	}
+	strict := json.NewDecoder(bytes.NewReader(normalizedPayload))
 	strict.DisallowUnknownFields()
 	var result AuthoringIntent
 	if err := strict.Decode(&result); err != nil {
 		return AuthoringIntent{}, err
 	}
 	return result, nil
+}
+
+func normalizeJSONEncodedAuthoringIntentArrays(document interface{}) {
+	object, ok := document.(map[string]interface{})
+	if !ok {
+		return
+	}
+	for _, field := range []string{"agents", "conversations", "assumptions", "clarifications"} {
+		encoded, ok := object[field].(string)
+		if !ok || strings.TrimSpace(encoded) == "" {
+			continue
+		}
+		decoder := json.NewDecoder(strings.NewReader(encoded))
+		decoder.UseNumber()
+		var decoded interface{}
+		if err := decoder.Decode(&decoded); err != nil {
+			continue
+		}
+		if _, ok := decoded.([]interface{}); !ok {
+			continue
+		}
+		var trailing interface{}
+		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+			continue
+		}
+		object[field] = decoded
+	}
 }
