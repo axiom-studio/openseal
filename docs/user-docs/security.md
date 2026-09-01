@@ -1,18 +1,18 @@
 # Security Boundaries
 
-OpenSeal's security model assumes one of two deployments: a single-operator local process reachable only over loopback, or a kernel mounted inside a host that supplies identity, authorization, policy evaluation, and audit. It does not implement those services itself.
+OpenSeal is designed for one of two deployments: a single-operator local process reachable only over loopback, or a kernel mounted inside a host that supplies identity, authorization, policy evaluation, and audit. This page describes where the boundary between kernel and deployment falls.
 
-## What OpenSeal Does Not Provide
+## The Deployment Model
 
-The following are absent from the shipped daemon. They are stated plainly because a deployment that assumes otherwise is exposed.
+Identity and authorization belong to the deployment rather than to the kernel. OpenSeal implements neither, and binds to loopback by default for that reason.
 
-| Property | Description |
+| Property | Where it lives |
 |---|---|
-| API authentication | No credential is parsed from any request. No route returns `401 Unauthorized`, because no route can distinguish an authenticated caller from an unauthenticated one |
-| Transport security | There is no TLS configuration, no certificate handling, and no TLS listener. The API server is plain HTTP |
-| Authorization | There is no role model, no permission check, and no per-scope entitlement check on any route |
+| Authentication | The embedding host, or a fronting proxy. No credential is parsed from any request, and no route returns `401 Unauthorized`, because no route distinguishes an authenticated caller from an unauthenticated one |
+| Transport security | The embedding host, or a fronting proxy. The API server is plain HTTP — there is no TLS configuration, no certificate handling, and no TLS listener |
+| Authorization | The embedding host. There is no role model, no permission check, and no per-scope entitlement check on any route |
 
-> **Any process that can reach the listen address can call every route, including every mutation route.** This is the single most important fact about deploying OpenSeal. The default bind address is loopback for exactly this reason.
+> **Plan the deployment around that boundary.** Any process that can reach the listen address can call every route, including every mutation route. The default loopback bind is what keeps the boundary closed until a deployment deliberately opens it.
 
 ## The Two Guardrails
 
@@ -46,13 +46,13 @@ Running without the flag leaves those mutations unavailable rather than silently
 
 > **Standalone mode approves as a single local principal.** Every approval recorded in a standalone deployment carries the identity `user:local`, and the workforce authorizer acts as `local-operator`, regardless of who actually made the decision. Approval records are auditable, but they do not attribute. A deployment that needs to know which person approved something needs an embedding host that authenticates people.
 
-## Scopes Are Not a Security Boundary
+## Scopes Partition, Hosts Isolate
 
 Every durable record is scoped, and a scope is the only tenancy primitive in the kernel. It is a partition key.
 
-Scope validation accepts any non-empty `kind` and `id` pair. There is no registry of known scopes, no hierarchy, and no membership check. The kernel uses the scope to partition storage and to route work to the correct worker; it does not use it to decide whether a caller is entitled to that scope.
+Scope validation accepts any non-empty `kind` and `id` pair. There is no registry of known scopes, no hierarchy, and no membership check. The kernel uses the scope to partition storage and to route work to the correct worker; deciding whether a caller is entitled to a given scope sits on the deployment side of the boundary.
 
-> **Because the API performs no authentication, any caller can supply any `scopeKind` and `scopeId` and will be served the records in that partition.** Multi-tenant isolation is the responsibility of an embedding host that authenticates the caller and constrains which scope values that caller may present. Treating scopes as tenant isolation in a directly exposed deployment provides no isolation at all.
+> **Tenant isolation is the host's half of the contract.** Since the kernel does not authenticate, any caller reaching it can supply any `scopeKind` and `scopeId` and be served the records in that partition. An embedding host provides isolation by authenticating the caller and constraining which scope values that caller may present — partitioning alone is not isolation.
 
 ## Secret Handling
 
