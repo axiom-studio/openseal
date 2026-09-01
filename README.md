@@ -114,6 +114,33 @@ fixed surface.
 
 ## Documentation
 
+User-facing documentation lives in [`docs/user-docs`](docs/user-docs/index.md).
+It covers what OpenSeal is, how to run it, and the API, CLI, and Go facade:
+
+- [Getting started](docs/user-docs/getting-started.md) — requirements, build,
+  first daemon, and the terminal client
+- [Core concepts](docs/user-docs/concepts.md) — execution model, capability
+  discovery, scopes, and owners
+- [Agents and Teams](docs/user-docs/agents-and-teams.md) — definitions,
+  deployments, activation, and amendments
+- [Objectives and Runs](docs/user-docs/objectives-and-runs.md) — the portfolio
+  and the Run lifecycle
+- [Skills and approvals](docs/user-docs/skills-and-approvals.md) — bindings,
+  action calls, approvals, and ClawHub
+- [Workforces](docs/user-docs/workforces.md) — prompt-to-workforce authoring
+  and portable bundles
+- [Configuration](docs/user-docs/configuration.md) — the daemon config, the
+  standalone context, and environment variables
+- [Security boundaries](docs/user-docs/security.md) — what OpenSeal does and
+  does not provide
+- [Operations](docs/user-docs/operations.md) — deployment, persistence, and
+  observability
+- [CLI reference](docs/user-docs/cli.md) — every command, flag, and TUI key
+- [API reference](docs/user-docs/api.md) — REST routes, runbook nodes, and the
+  Go embedding facade
+
+Contributor and internal documentation lives in `docs/dev-docs`:
+
 - [Documentation index](docs/dev-docs/README.md) — recommended reading order
 - [Getting started](docs/dev-docs/getting-started.md) — install, configure, start, and
   verify a local daemon
