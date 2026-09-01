@@ -10,7 +10,6 @@ OpenSeal runs as a single binary with a database file and an artifacts directory
 | A contained local service | Use Docker Compose, after reading the port note below |
 | A Go program that owns its own lifecycle | Embed the engine and supply a store — see [API](api.md) |
 | Multiple processes over one schema | Embed the engine with the PostgreSQL store; the daemon cannot do this |
-| Kubernetes | Not supported by the bundled chart; see below |
 
 ### Running the Binary
 
@@ -35,20 +34,6 @@ Compose mounts `docker/daemon.yaml` read-only at `/app/daemon.yaml`, keeps state
 > **The published port does not reach the API under the shipped configuration.** The mounted `docker/daemon.yaml` sets `listenAddr: 127.0.0.1:8080`, which binds the container's loopback interface only, while the `8080:8080` mapping forwards to the container's external interface where nothing is listening. The container health check still passes because it runs inside the container against `localhost`. Reaching the API from the host requires editing the mounted configuration to bind `0.0.0.0:8080`. Because OpenSeal has no built-in authentication, do that only behind an authorizing proxy or on an isolated network — see [Security](security.md).
 
 Two environment variables set by the image and Compose are read by nothing: `OPENSEAL_DB_PATH` and `OPENSEAL_LOG_LEVEL`. The database path comes from `storage.path` in the configuration file, and the log level is fixed regardless of either.
-
-### Kubernetes
-
-A Helm chart is present at `charts/openseal`. It is not aligned with the binary this documentation describes and will not run it.
-
-> **The bundled chart's probes cannot succeed.** Its liveness and readiness probes both request `/health` on a port named `health`, resolved from `healthCheck.port`, which defaults to 9090. The daemon serves `/api/v1/health` on the API listen address, defaulting to 8080, and serves nothing at `/health` or on 9090. Both probes fail, so the pod never becomes ready and is restarted indefinitely.
-
-Three further mismatches make the chart unusable without a rewrite:
-
-- **The Service exposes only the 9090 health port** — the API is unreachable in the cluster even if the probes were corrected.
-- **The ConfigMap injects variables the Go code does not read** — `CLUSTER_ID`, `NATS_SERVER_HOST`, `HEARTBEAT_INTERVAL_SECONDS`, `WORKER_COUNT`, `VERSION`, `USE_HTTP_CALLBACKS`, `PYTHON_SDK_CONFIGMAP`, and `TOOL_EXECUTION_JWT_SECRET`. There is no NATS client anywhere in the repository.
-- **The pod runs with `readOnlyRootFilesystem: true` and mounts no writable volume at `/app`** — so the daemon's default-configuration auto-create at `/app/daemon.yaml` cannot succeed when no configuration is mounted.
-
-The chart's `devMode` branch additionally hard-codes an absolute entrypoint path and absolute Go cache paths under a specific user's home directory, which will not resolve on another machine.
 
 ## Persistence
 
