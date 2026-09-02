@@ -91,7 +91,6 @@ Header names and values containing whitespace, colons, or line breaks are also r
 | Local single-operator use | Keep the default loopback bind and use `--standalone-operator` |
 | Anything reachable by another host | Put an authorization-aware reverse proxy in front, and terminate TLS there |
 | Multi-tenant use | Embed the kernel in a host that authenticates callers and constrains scope values |
-| Container deployment | Read the port-binding note in [Operations](operations.md) before changing the bind address |
 | Approvals that must identify a person | Use an embedding host; standalone approvals all record `user:local` |
 
 ## Next Steps

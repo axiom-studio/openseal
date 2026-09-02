@@ -9,7 +9,6 @@ The daemon reads a YAML file named by `--config`, defaulting to `daemon.yaml` in
 | Field | Type | Default |
 |---|---|---|
 | `api.listenAddr` | `string` | `127.0.0.1:8080` |
-| `logLevel` | `string` | `info` |
 | `storage.driver` | `string` | `sqlite` |
 | `storage.path` | `string` | `data/openseal.db` |
 | `storage.artifactsPath` | `string` | `data/artifacts` |
@@ -18,7 +17,6 @@ The daemon reads a YAML file named by `--config`, defaulting to `daemon.yaml` in
 A minimal configuration:
 
 ```yaml
-logLevel: info
 api:
   listenAddr: 127.0.0.1:8080
 storage:
@@ -32,8 +30,6 @@ storage:
 Validation enforces three rules. The storage driver must be exactly `sqlite`. Both storage paths must be non-empty. Every source policy must carry a valid scope and a valid policy, and no scope may list the same policy identifier and version twice.
 
 Relative storage paths resolve against the directory holding the configuration file, not against the shell's working directory.
-
-> **`logLevel` is accepted but has no effect.** The value is read, defaulted, validated, and written into the startup log line, but it is never applied to the logger. The daemon always emits at info level, so setting `logLevel: debug` changes nothing about what appears in the log.
 
 ## Source Policies
 

@@ -79,18 +79,6 @@ The workspace opens on **Home**. Use the left and right arrow keys to move betwe
 
 All five resolve relative to the configuration file's directory unless given as absolute paths. A missing `--context` file is not an error; it means no local credential source is configured.
 
-## Running Under Docker Compose
-
-```bash
-make docker-up
-make docker-logs
-make docker-down
-```
-
-Compose mounts `docker/daemon.yaml` read-only at `/app/daemon.yaml`, keeps state in a named volume at `/app/data`, publishes `8080:8080`, and applies CPU and memory limits.
-
-> **The published port does not reach the API under the shipped configuration.** The mounted `docker/daemon.yaml` sets `listenAddr: 127.0.0.1:8080`, which binds the container's loopback interface only, while the `8080:8080` mapping forwards to the container's external interface. The container health check still passes, because it runs inside the container. Reaching the API from the host requires editing the mounted configuration to bind `0.0.0.0:8080` — which, given that OpenSeal has no built-in authentication, should only be done behind an authorizing proxy or on an isolated network. See [Operations](operations.md).
-
 ## Next Steps
 
 - Understand the resource model and the execution lifecycle in [Concepts](concepts.md).

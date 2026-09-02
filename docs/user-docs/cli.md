@@ -131,7 +131,7 @@ Checks node identifiers for emptiness and duplication, node types against known 
 
 Self-loops and unknown configuration fields are warnings; everything else is an error. `--json` prints the machine-readable result. A parse failure or any error-level issue exits `1`.
 
-> **Run it from the repository root.** Node metadata is read from the relative path `embedded_nodes/`, resolved against the process's working directory, and the read error is discarded. From the repository root, all 28 node types are known and configuration is checked against their schemas. From anywhere else the metadata map is empty, no configuration is checked at all, and the trigger and tool types are reported as unknown node types.
+> **Run it from the repository root.** Node metadata is read from `embedded_nodes/`, resolved against the process's working directory. From the repository root all 28 node types are known and each node's configuration is checked against its schema. Run from anywhere else, the metadata is unavailable, configuration is not checked at all, and the trigger and tool types are reported as unknown node types — so the result only means what it says when the command is run from the root.
 
 ## openseal workflow create
 
@@ -143,7 +143,7 @@ Self-loops and unknown configuration fields are warnings; everything else is an 
 
 Writes a two-node scaffold: a `webhook` trigger node with a path derived from the name, an `http` node pointing at `https://example.com`, and an edge between them.
 
-> **The generated scaffold is not directly runnable.** Its first node is a `webhook` trigger, and no webhook executor is registered. Because execution starts at the first node in the file, `openseal run` fails immediately on the node the generator itself wrote. Replace the trigger with an executable node before running it. See [API](api.md) for which node types execute.
+> **The scaffold runs as written.** Its first node is a `webhook` trigger, which has no registered executor but is handled before the executor lookup — it passes its data payload to the `http` node downstream and execution continues. See [API](api.md) for which node types execute and which stop a run.
 
 ## openseal skill
 
