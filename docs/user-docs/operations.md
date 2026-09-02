@@ -7,7 +7,6 @@ OpenSeal runs as a single binary with a database file and an artifacts directory
 | Situation | What to do |
 |---|---|
 | Local single-operator use | Run the binary directly with the default loopback bind |
-| A contained local service | Use Docker Compose, after reading the port note below |
 | A Go program that owns its own lifecycle | Embed the engine and supply a store — see [API](api.md) |
 | Multiple processes over one schema | Embed the engine with the PostgreSQL store; the daemon cannot do this |
 
@@ -18,22 +17,6 @@ The daemon handles `SIGINT` and `SIGTERM`. On either it stops the kernel and the
 ```bash
 ./openseal daemon --config ./local.yaml --context ./context.yaml --standalone-operator
 ```
-
-### Docker
-
-The supplied Dockerfile builds in `golang:1.26-alpine` with `CGO_ENABLED=1` — required for SQLite — and produces an `alpine:3.21` runtime image containing only the binary and CA certificates. It exposes port 8080, declares a health check against `/api/v1/health`, and defaults to `daemon --config /app/daemon.yaml`.
-
-```bash
-make docker-up
-make docker-logs
-make docker-down
-```
-
-Compose mounts `docker/daemon.yaml` read-only at `/app/daemon.yaml`, keeps state in a named volume at `/app/data`, publishes `8080:8080`, and applies CPU and memory limits.
-
-> **The published port does not reach the API under the shipped configuration.** The mounted `docker/daemon.yaml` sets `listenAddr: 127.0.0.1:8080`, which binds the container's loopback interface only, while the `8080:8080` mapping forwards to the container's external interface where nothing is listening. The container health check still passes because it runs inside the container against `localhost`. Reaching the API from the host requires editing the mounted configuration to bind `0.0.0.0:8080`. Because OpenSeal has no built-in authentication, do that only behind an authorizing proxy or on an isolated network — see [Security](security.md).
-
-Two environment variables set by the image and Compose are read by nothing: `OPENSEAL_DB_PATH` and `OPENSEAL_LOG_LEVEL`. The database path comes from `storage.path` in the configuration file, and the log level is fixed regardless of either.
 
 ## Persistence
 
@@ -82,9 +65,7 @@ Artifact content is stored separately from kernel state, in a local content stor
 
 ## Observability and Logging
 
-The daemon emits structured JSON logs through a production logger. Startup logs the loaded configuration's log level and API address, the opened store driver and resolved path, the artifact content path, and, when authoring is enabled, the model and scope. Shutdown logs the signal received.
-
-Note that the configured `logLevel` is recorded in that startup line but never applied — the daemon always emits at info level. See [Configuration](configuration.md).
+The daemon emits structured JSON logs at info level through a production logger. Startup logs the API address, the opened store driver and resolved path, the artifact content path, and, when authoring is enabled, the model and scope. Shutdown logs the signal received.
 
 ### The Health Route
 
@@ -123,7 +104,7 @@ A migration observer callback can be installed to receive the same information a
 | Approvals cannot be decided | Whether the daemon was started with `--standalone-operator` |
 | Workforce apply is refused | The same flag, plus a complete model configuration |
 | Health is `200` but nothing progresses | The activity feed, not the health route — health does not inspect workers |
-| The container port does not respond | The `listenAddr` in the mounted configuration; the default binds container loopback |
+| The API is unreachable from another host | `api.listenAddr`; the default binds loopback only — see [Security](security.md) before widening it |
 
 ## Next Steps
 

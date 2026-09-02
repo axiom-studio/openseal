@@ -360,7 +360,7 @@ Twenty node types execute unconditionally. The `code` node registers only when a
 
 Eight further Kubernetes node types — `k8s_get`, `k8s_list`, `k8s_logs`, `k8s_events`, `k8s_restart`, `k8s_scale`, `k8s_patch`, and `k8s_delete` — have complete executors but register only when a Kubernetes client is passed to the registry constructor. `openseal run` passes none, so they are never available from the CLI.
 
-> **The trigger and tool categories are metadata-only.** They describe nodes an embedding host is expected to supply. A runbook whose first node is a trigger fails immediately under `openseal run` — which is what happens to the scaffold `openseal workflow create` generates. See [CLI](cli.md).
+> **Trigger and tool nodes both lack a registered executor, and the two do not behave alike.** A trigger node — `webhook`, `cron`, or `manual` — is handled before the executor lookup: it emits its data payload to the nodes downstream and execution continues, so a runbook whose first node is a trigger runs normally. A tool node has no such handling and stops the run with `no executor registered for step type`. Both categories describe nodes an embedding host is expected to supply. See [CLI](cli.md).
 
 ## Go Embedding
 
