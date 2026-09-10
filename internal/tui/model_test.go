@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1092,10 +1093,10 @@ func (f *fakeKernelClient) GetAgentDeployment(_ context.Context, scope capabilit
 	return nil, kernelagent.ErrDeploymentNotFound
 }
 
-func (f *fakeKernelClient) ListAgentDeployments(_ context.Context, scope capability.ScopeReference) (*kernelapi.AgentDeploymentList, error) {
+func (f *fakeKernelClient) ListAgentDeployments(_ context.Context, filter kernelagent.AgentDeploymentFilter) (*kernelapi.AgentDeploymentList, error) {
 	items := make([]kernelapi.AgentDeploymentCatalogEntry, 0, len(f.agentDeployments))
 	for _, entry := range f.agentDeployments {
-		if entry.Deployment != nil && entry.Deployment.Scope == scope {
+		if entry.Deployment != nil && entry.Deployment.Scope == filter.Scope && !slices.Contains(filter.ExcludeStatuses, entry.Deployment.RolloutStatus) {
 			items = append(items, entry)
 		}
 	}
@@ -1374,7 +1375,7 @@ func TestFakeKernelClientAgentDeploymentsRespectScope(t *testing.T) {
 	if _, err := fake.GetAgentDeployment(context.Background(), capability.ScopeReference{Kind: "tenant", ID: "other"}, "shared"); !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
 		t.Fatalf("cross-scope get error = %v, want deployment not found", err)
 	}
-	list, err := fake.ListAgentDeployments(context.Background(), tenantOne)
+	list, err := fake.ListAgentDeployments(context.Background(), kernelagent.AgentDeploymentFilter{Scope: tenantOne})
 	if err != nil || len(list.Items) != 1 || list.Items[0].Deployment.Scope != tenantOne {
 		t.Fatalf("list tenant deployments: list=%+v err=%v", list, err)
 	}

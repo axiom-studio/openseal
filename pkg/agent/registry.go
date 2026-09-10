@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -150,11 +151,17 @@ func (r *Registry) GetDeployment(ctx context.Context, scope capability.ScopeRefe
 	return deployment, err
 }
 
-func (r *Registry) ListDeployments(ctx context.Context, scope capability.ScopeReference) ([]*AgentDeployment, error) {
-	deployments, err := r.store.ListDeployments(ctx, scope)
+func (r *Registry) ListDeployments(ctx context.Context, filter AgentDeploymentFilter) ([]*AgentDeployment, error) {
+	if err := filter.Validate(); err != nil {
+		return nil, err
+	}
+	deployments, err := r.store.ListDeployments(ctx, filter.Scope)
 	if err != nil {
 		return nil, err
 	}
+	deployments = slices.DeleteFunc(deployments, func(deployment *AgentDeployment) bool {
+		return deployment != nil && slices.Contains(filter.ExcludeStatuses, deployment.RolloutStatus)
+	})
 	for _, deployment := range deployments {
 		EnsureDefaultWorkspace(deployment)
 	}
