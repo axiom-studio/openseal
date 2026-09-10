@@ -2,10 +2,59 @@ package openseal
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 )
+
+func TestEngineListAgentDeploymentsFiltersWithinScope(t *testing.T) {
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, err := engine.RegisterAgentDefinition(t.Context(), &AgentDefinition{
+		ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate safely", SystemPrompt: "Inspect before acting.",
+		Authority: AgentAuthorityPolicy{MaximumRisk: SkillRiskRead, MaxConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := SkillScope{Kind: "tenant", ID: "one"}
+	statuses := []AgentRolloutStatus{AgentRolloutPending, AgentRolloutActive, AgentRolloutDegraded, AgentRolloutPaused, AgentRolloutRetired}
+	for _, tenant := range []string{"one", "two"} {
+		for _, status := range statuses {
+			if _, _, err := engine.CreateAgentDeployment(t.Context(), &AgentDeployment{
+				ID: string(status), Scope: SkillScope{Kind: "tenant", ID: tenant}, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+				RolloutStatus: status, Environment: "production", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 1},
+			}, "user", "admin", "test"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, excluded := range [][]AgentRolloutStatus{nil, {AgentRolloutRetired}, {AgentRolloutRetired, AgentRolloutPaused}, statuses, nil} {
+		deployments, err := engine.ListAgentDeployments(t.Context(), AgentDeploymentFilter{Scope: scope, ExcludeStatuses: excluded})
+		if err != nil || len(deployments) != len(statuses)-len(excluded) {
+			t.Fatalf("exclude %v: got %d deployments, err %v", excluded, len(deployments), err)
+		}
+		for _, deployment := range deployments {
+			if deployment.Scope != scope || slices.Contains(excluded, deployment.RolloutStatus) {
+				t.Fatalf("exclude %v: unexpected deployment %#v", excluded, deployment)
+			}
+		}
+	}
+	for _, filter := range []AgentDeploymentFilter{
+		{}, {Scope: SkillScope{Kind: "tenant"}}, {Scope: SkillScope{ID: "one"}},
+		{Scope: scope, ExcludeStatuses: []AgentRolloutStatus{"deleted"}},
+	} {
+		if _, err := engine.ListAgentDeployments(t.Context(), filter); err == nil {
+			t.Fatalf("invalid filter accepted: %#v", filter)
+		}
+	}
+	if deployment, err := engine.GetAgentDeployment(t.Context(), scope, "retired"); err != nil || deployment.RolloutStatus != AgentRolloutRetired {
+		t.Fatalf("retired deployment inaccessible: %#v, %v", deployment, err)
+	}
+}
 
 func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	engine, err := New()

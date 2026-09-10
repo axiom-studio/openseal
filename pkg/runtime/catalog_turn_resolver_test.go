@@ -68,7 +68,7 @@ func (c *resolverCatalog) GetAgentDeployment(context.Context, skill.ScopeReferen
 	return c.deployment, nil
 }
 
-func (c *resolverCatalog) ListAgentDeployments(context.Context, skill.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
+func (c *resolverCatalog) ListAgentDeployments(context.Context, kernelagent.AgentDeploymentFilter) ([]*kernelagent.AgentDeployment, error) {
 	if c.deployments != nil {
 		return c.deployments, nil
 	}
@@ -160,7 +160,7 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 			ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, DefaultWorkspaceID: spec.ID, Workspaces: []workspace.Spec{spec},
 			Credentials: map[string]capability.CredentialReference{"GITHUB_TOKEN": {Kind: "vault", ID: "vault-credential"}},
 		},
-		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories"},
+		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories", SystemPrompt: "Work carefully."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "coding-agent"},
 	}
 	run := &AgentRun{
@@ -174,6 +174,7 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 	if binding.ProgressAcknowledgementRenderer == nil {
 		t.Fatal("progress acknowledgement renderer is unavailable")
 	}
+	host.response.InvocationID = "progress-ack-" + hashString(run.ID + "\x00\x00" + string(AgentRunStatusRunning))[:16]
 	progress, err := binding.ProgressAcknowledgementRenderer.RenderRunProgressAcknowledgement(t.Context(), RunProgressAcknowledgementRequest{
 		Snapshot:     RunProgressSnapshot{RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: AgentRunStatusRunning, Revision: 1},
 		MaxSentences: 2, MaxCharacters: 100,
@@ -183,6 +184,7 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 		!containsString(host.request.SystemInstructions, runProgressAcknowledgementSystemInstruction) {
 		t.Fatalf("progress=%q request=%#v error=%v", progress, host.request, err)
 	}
+	host.response.InvocationID = "turn"
 	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
 		t.Fatal(err)
 	}

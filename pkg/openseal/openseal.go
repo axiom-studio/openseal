@@ -131,6 +131,7 @@ type (
 	AgentAmendmentPolicy                      = kernelagent.AmendmentPolicy
 	AgentDefinitionProvenance                 = kernelagent.DefinitionProvenance
 	AgentDeployment                           = kernelagent.AgentDeployment
+	AgentDeploymentFilter                     = kernelagent.AgentDeploymentFilter
 	AgentDeploymentRestrictions               = kernelagent.DeploymentRestrictions
 	AgentDeploymentCapacity                   = kernelagent.DeploymentCapacity
 	AgentDeploymentHealth                     = kernelagent.DeploymentHealth
@@ -5112,8 +5113,8 @@ func (e *Engine) GetAgentDeployment(ctx context.Context, scope skill.ScopeRefere
 	return deployment, nil
 }
 
-func (e *Engine) ListAgentDeployments(ctx context.Context, scope skill.ScopeReference) ([]*kernelagent.AgentDeployment, error) {
-	deployments, err := e.agents.ListDeployments(ctx, scope)
+func (e *Engine) ListAgentDeployments(ctx context.Context, filter AgentDeploymentFilter) ([]*kernelagent.AgentDeployment, error) {
+	deployments, err := e.agents.ListDeployments(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
