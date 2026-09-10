@@ -847,6 +847,60 @@ func TestConversationRunTurnRunnerProjectsGovernedAgentResultWithoutModelRenarra
 	}
 }
 
+func TestConversationRunTurnRunnerAttachesActionArtifactsToSourceReply(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "artifact-reply"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
+		Title: "Chart assistant", IdempotencyKey: "artifact-reply-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Draw the chart.", "artifact-reply-trigger")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelCalls := 0
+	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{
+			DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "1",
+			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				modelCalls++
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Your chart is ready."}}, nil
+			}),
+		}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed := cloneAgentRun(scheduled.Run)
+	resumed.Checkpoint = map[string]interface{}{"lastAction": map[string]interface{}{
+		"status": ActionCallStatusSucceeded,
+		"result": map[string]interface{}{"state": "ready", "artifactRefs": []interface{}{
+			map[string]interface{}{"id": "market-xirr", "version": float64(1), "requirementName": "chart"},
+		}},
+	}}
+	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: resumed})
+	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || modelCalls != 1 {
+		t.Fatalf("artifact response = %#v, modelCalls=%d, err=%v", outcome, modelCalls, err)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 || messages[1].Content != "Your chart is ready." || len(messages[1].References) != 2 ||
+		messages[1].References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: scheduled.Run.ID}) ||
+		messages[1].References[1] != (ConversationReference{Kind: ConversationReferenceArtifact, ID: "market-xirr", Version: 1}) {
+		t.Fatalf("artifact source reply = %#v, err=%v", messages, err)
+	}
+}
+
 func TestConversationRunTurnRunnerProjectsGovernedAgentRejectionWithoutReproposal(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()

@@ -63,6 +63,24 @@ func TestAuthoringIntentSchemaRejectsBlankRequiredAgentAnswers(t *testing.T) {
 	}
 }
 
+func TestDecodeAuthoringIntentUnwrapsJSONEncodedTopLevelArrays(t *testing.T) {
+	payload := []byte(`{"schemaVersion":"openseal.authoring-intent/v4","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":"[{\"key\":\"analyst\",\"name\":\"Analyst\",\"purpose\":\"Analyze evidence\",\"behavior\":\"Analyze evidence accurately.\"}]","assumptions":"[\"Read-only access is available\"]","clarifications":"[]"}`)
+	intent, err := decodeAuthoringIntent(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(intent.Agents) != 1 || intent.Agents[0].Key != "analyst" || len(intent.Assumptions) != 1 || len(intent.Clarifications) != 0 {
+		t.Fatalf("normalized intent = %#v", intent)
+	}
+}
+
+func TestDecodeAuthoringIntentRejectsProseInArrayFields(t *testing.T) {
+	payload := []byte(`{"schemaVersion":"openseal.authoring-intent/v4","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":"Create one analyst","assumptions":"none","clarifications":"none"}`)
+	if _, err := decodeAuthoringIntent(payload); err == nil {
+		t.Fatal("prose array fields passed the typed provider form")
+	}
+}
+
 func TestAuthoringProviderRequestProjectsExistingStateSemantically(t *testing.T) {
 	existing := WorkforceCandidate{Agents: []*agent.AgentDefinition{{
 		ID: "tenant/example/analyst", Version: "1.0.0", DisplayName: "Analyst", Purpose: "Analyze evidence", SystemPrompt: "Analyze evidence accurately.",
