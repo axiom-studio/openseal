@@ -385,6 +385,8 @@ func (f *fakeKernelClient) AdvanceEventSourceCheckpoint(context.Context, runtime
 	return nil, errors.New("event source checkpoints are not configured in this TUI test")
 }
 
+var _ client.ConversationClient = (*fakeChannelKernelClient)(nil)
+
 type fakeChannelKernelClient struct {
 	*fakeKernelClient
 	conversations              []*runtime.Conversation
@@ -480,6 +482,10 @@ func (f *fakeChannelKernelClient) GetConversation(_ context.Context, _ runtime.S
 		}
 	}
 	return nil, runtime.ErrConversationNotFound
+}
+
+func (f *fakeChannelKernelClient) UpdateConversation(context.Context, string, kernelapi.UpdateConversationRequest) (*runtime.Conversation, error) {
+	return nil, errors.New("not implemented by test client")
 }
 
 func (f *fakeChannelKernelClient) PostChannelMessage(_ context.Context, conversationID string, request kernelapi.PostChannelMessageRequest, key string) (*runtime.ChannelMessageCommitResult, error) {
