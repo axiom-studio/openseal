@@ -84,7 +84,7 @@ type KernelClient interface {
 	ListAgentDefinitionCompilations(context.Context, capability.ScopeReference, string) ([]*kernelagent.DefinitionCompilation, error)
 	InstallAgentManifest(context.Context, kernelagent.ManifestInstallationRequest, string) (*kernelagent.ManifestInstallationResult, error)
 	GetAgentDeployment(context.Context, capability.ScopeReference, string) (*kernelapi.AgentDeploymentCatalogEntry, error)
-	ListAgentDeployments(context.Context, capability.ScopeReference) (*kernelapi.AgentDeploymentList, error)
+	ListAgentDeployments(context.Context, kernelagent.AgentDeploymentFilter) (*kernelapi.AgentDeploymentList, error)
 	UpdateAgentDeployment(context.Context, string, kernelapi.UpdateAgentDeploymentRequest) (*kernelapi.AgentDeploymentUpdateResult, error)
 	ListAgentSkillActions(context.Context, capability.ScopeReference, string, []string, capability.SideEffect) (*kernelapi.SkillActionList, error)
 	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
@@ -559,8 +559,11 @@ func (c *KernelHTTPClient) GetAgentDeployment(ctx context.Context, scope capabil
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) ListAgentDeployments(ctx context.Context, scope capability.ScopeReference) (*kernelapi.AgentDeploymentList, error) {
-	query := capabilityScopeQuery(scope)
+func (c *KernelHTTPClient) ListAgentDeployments(ctx context.Context, filter kernelagent.AgentDeploymentFilter) (*kernelapi.AgentDeploymentList, error) {
+	query := capabilityScopeQuery(filter.Scope)
+	for _, status := range filter.ExcludeStatuses {
+		query.Add("excludeStatuses", string(status))
+	}
 	var result kernelapi.AgentDeploymentList
 	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-deployments?"+query.Encode(), nil, "", &result); err != nil {
 		return nil, err
