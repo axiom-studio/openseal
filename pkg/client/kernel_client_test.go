@@ -560,9 +560,27 @@ func TestKernelHTTPClientListsAgentDefinitionCompilations(t *testing.T) {
 	if _, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{ID: "researcher", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version, RolloutStatus: kernelagent.RolloutActive, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}}, "user", "local", "test"); err != nil {
 		t.Fatal(err)
 	}
-	listed, err := client.ListAgentDeployments(ctx, scope)
+	listed, err := client.ListAgentDeployments(ctx, kernelagent.AgentDeploymentFilter{Scope: scope})
 	if err != nil || len(listed.Items) != 1 || listed.Items[0].Deployment.ID != "researcher" || listed.Items[0].Definition.DisplayName != "Researcher" {
 		t.Fatalf("Agent catalog = %#v, %v", listed, err)
+	}
+	if _, _, err := registry.CreateDeployment(ctx, &kernelagent.AgentDeployment{
+		ID: "retired", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		RolloutStatus: kernelagent.RolloutRetired, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+	}, "user", "local", "test"); err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := client.ListAgentDeployments(ctx, kernelagent.AgentDeploymentFilter{Scope: scope, ExcludeStatuses: []kernelagent.RolloutStatus{kernelagent.RolloutRetired}})
+	if err != nil || len(filtered.Items) != 1 || filtered.Items[0].Deployment.ID != "researcher" {
+		t.Fatalf("filtered Agent catalog = %#v, %v", filtered, err)
+	}
+	filtered, err = client.ListAgentDeployments(ctx, kernelagent.AgentDeploymentFilter{Scope: scope, ExcludeStatuses: []kernelagent.RolloutStatus{kernelagent.RolloutRetired, kernelagent.RolloutActive}})
+	if err != nil || len(filtered.Items) != 0 {
+		t.Fatalf("empty Agent catalog = %#v, %v", filtered, err)
+	}
+	listed, err = client.ListAgentDeployments(ctx, kernelagent.AgentDeploymentFilter{Scope: scope})
+	if err != nil || len(listed.Items) != 2 {
+		t.Fatalf("unfiltered Agent catalog = %#v, %v", listed, err)
 	}
 	detail, err := client.GetAgentDeployment(ctx, scope, "researcher")
 	if err != nil || detail.Deployment.ID != "researcher" || detail.Definition.Version != "1" {
