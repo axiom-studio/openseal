@@ -930,7 +930,9 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		content = "No approval request was created by this turn, so there is nothing to review yet. I need an authorized governed action with an approval policy before I can request that access."
 	}
 	broadcastToChannel, _ := outcome.RunOutput["broadcastToChannel"].(bool)
-	message, replayed, err := r.postAgentResponse(ctx, input.Run, conversation, trigger, content, broadcastToChannel)
+	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}}
+	references = append(references, conversationActionArtifactReferences(input.Run)...)
+	message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, content, references, broadcastToChannel)
 	if err != nil {
 		return nil, err
 	}
@@ -1296,6 +1298,53 @@ func agentConversationResponseContent(outcome *TurnOutcome) string {
 		return strings.TrimSpace(summary)
 	}
 	return strings.TrimSpace(outcome.OutputSummary)
+}
+
+// conversationActionArtifactReferences carries immutable artifacts emitted by
+// a succeeded governed action back to the conversation that initiated it. The
+// approval inbox may preview proposed presentation arguments, but the durable
+// artifact belongs on the source conversation's final response.
+func conversationActionArtifactReferences(run *AgentRun) []ConversationReference {
+	if run == nil {
+		return nil
+	}
+	last, ok := run.Checkpoint["lastAction"].(map[string]interface{})
+	if !ok || fmt.Sprint(last["status"]) != string(ActionCallStatusSucceeded) {
+		return nil
+	}
+	result, ok := last["result"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	if fmt.Sprint(result["truncated"]) == "true" {
+		result = conversationResultMap(result["value"])
+	}
+	encoded, err := json.Marshal(result["artifactRefs"])
+	if err != nil {
+		return nil
+	}
+	var artifacts []struct {
+		ID      string `json:"id"`
+		Version int64  `json:"version"`
+	}
+	if err := json.Unmarshal(encoded, &artifacts); err != nil {
+		return nil
+	}
+	references := make([]ConversationReference, 0, len(artifacts))
+	seen := make(map[string]struct{}, len(artifacts))
+	for _, artifact := range artifacts {
+		artifact.ID = strings.TrimSpace(artifact.ID)
+		key := fmt.Sprintf("%s\x00%d", artifact.ID, artifact.Version)
+		if !validOpaqueIdentifier(artifact.ID, 256) || artifact.Version < 1 {
+			continue
+		}
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		references = append(references, ConversationReference{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: artifact.Version})
+	}
+	return references
 }
 
 func unverifiedApprovalClaim(content string) bool {
