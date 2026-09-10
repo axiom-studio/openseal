@@ -80,7 +80,11 @@ func (s *Server) handleListAgentDeployments(w http.ResponseWriter, r *http.Reque
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	deployments, err := registry.ListDeployments(r.Context(), capability.ScopeReference{Kind: scope.Kind, ID: scope.ID})
+	filter := kernelagent.AgentDeploymentFilter{Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}}
+	for _, status := range queryValues(r, "excludeStatuses") {
+		filter.ExcludeStatuses = append(filter.ExcludeStatuses, kernelagent.RolloutStatus(status))
+	}
+	deployments, err := registry.ListDeployments(r.Context(), filter)
 	if err != nil {
 		s.respondAgentDeploymentError(w, err)
 		return
