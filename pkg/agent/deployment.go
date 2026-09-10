@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -11,6 +12,27 @@ import (
 )
 
 type RolloutStatus string
+
+// AgentDeploymentFilter lists deployments in Scope, including all rollout statuses
+// unless explicitly excluded.
+type AgentDeploymentFilter struct {
+	Scope           capability.ScopeReference
+	ExcludeStatuses []RolloutStatus
+}
+
+func (f AgentDeploymentFilter) Validate() error {
+	if strings.TrimSpace(f.Scope.Kind) == "" || strings.TrimSpace(f.Scope.ID) == "" {
+		return errors.New("deployment filter scope kind and id are required")
+	}
+	for _, status := range f.ExcludeStatuses {
+		switch status {
+		case RolloutPending, RolloutActive, RolloutDegraded, RolloutPaused, RolloutRetired:
+		default:
+			return fmt.Errorf("invalid excluded deployment rollout status %q", status)
+		}
+	}
+	return nil
+}
 
 const (
 	ModelProviderCredentialBinding = "MODEL_PROVIDER"

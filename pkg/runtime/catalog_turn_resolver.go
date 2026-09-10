@@ -19,7 +19,7 @@ import (
 // a durable Run to its immutable Agent definition and activated Skills.
 type AgentTurnCatalog interface {
 	GetAgentDeployment(context.Context, skill.ScopeReference, string) (*kernelagent.AgentDeployment, error)
-	ListAgentDeployments(context.Context, skill.ScopeReference) ([]*kernelagent.AgentDeployment, error)
+	ListAgentDeployments(context.Context, kernelagent.AgentDeploymentFilter) ([]*kernelagent.AgentDeployment, error)
 	GetAgentDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
 	ActivateSkills(context.Context, skill.ScopeReference, string, skill.HostCapabilityState) (*skill.ActivationSnapshot, error)
 	OutreachTurnLifecycle
@@ -430,7 +430,7 @@ func resolveHostedAgentTargets(
 	if len(allowed) == 0 {
 		return nil, nil
 	}
-	deployments, err := catalog.ListAgentDeployments(ctx, scope)
+	deployments, err := catalog.ListAgentDeployments(ctx, kernelagent.AgentDeploymentFilter{Scope: scope})
 	if err != nil {
 		return nil, err
 	}
