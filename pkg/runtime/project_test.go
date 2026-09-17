@@ -84,6 +84,31 @@ func TestProjectServiceIdempotencyAndActivity(t *testing.T) {
 	}
 }
 
+func TestProjectMayBeCreatedBeforeObjectives(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewProjectService(store, store)
+	project := projectFixture(Scope{Kind: "tenant", ID: "empty-project-tenant"})
+	project.ObjectiveRefs = nil
+	project.Milestones = nil
+	project.SourceMonitors = nil
+	project.Deliverables = nil
+	request := CreateProjectRequest{Project: project, IdempotencyKey: "create-before-objectives", Actor: ActivityActor{Type: "user", ID: "owner"}}
+	created, _, err := service.Create(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(created.ObjectiveRefs) != 0 {
+		t.Fatal("creating a project must not invent objectives")
+	}
+	replayed, event, err := service.Create(t.Context(), request)
+	if err != nil || event != nil || replayed.ID != created.ID {
+		t.Fatalf("empty-project replay: %#v %v", replayed, err)
+	}
+	if _, err = store.GetProject(t.Context(), Scope{Kind: "tenant", ID: "another-tenant"}, created.ID); err != ErrProjectNotFound {
+		t.Fatalf("cross-tenant read: %v", err)
+	}
+}
+
 func TestProjectRejectsDuplicatedStateAndSecrets(t *testing.T) {
 	i := projectFixture(Scope{Kind: "tenant", ID: "a"})
 	i.ObjectiveRefs = []string{"same", "same"}
