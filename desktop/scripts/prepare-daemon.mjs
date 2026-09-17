@@ -1,0 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const host = execFileSync('rustc', ['-vV'], { encoding: 'utf8' }).match(/^host: (.+)$/m)?.[1];
+if (!host) throw new Error('Cannot determine native Rust target');
+const suffix = process.platform === 'win32' ? '.exe' : '';
+const target = fileURLToPath(new URL(`../src-tauri/binaries/openseal-daemon-${host}${suffix}`, import.meta.url));
+mkdirSync(fileURLToPath(new URL('../src-tauri/binaries', import.meta.url)), { recursive: true });
+execFileSync('go', ['build', '-o', target, './cmd/openseal'], { cwd: root, stdio: 'inherit' });

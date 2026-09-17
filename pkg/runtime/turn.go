@@ -100,6 +100,7 @@ type AgentTurn struct {
 	ModelProvider          string                   `json:"modelProvider,omitempty"`
 	Model                  string                   `json:"model,omitempty"`
 	InputContextRefs       []string                 `json:"inputContextRefs,omitempty"`
+	InputInterventionIDs   []string                 `json:"inputInterventionIds,omitempty"`
 	PlanRevision           int64                    `json:"planRevision,omitempty"`
 	SkillSelections        []HostedSkillSelection   `json:"skillSelections,omitempty"`
 	Decisions              []TurnDecision           `json:"decisions,omitempty"`

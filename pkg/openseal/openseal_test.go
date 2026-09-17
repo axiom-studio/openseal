@@ -517,3 +517,25 @@ func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T)
 	}
 	t.Fatal("durable conversation runtime did not complete immediate and reconciled messages")
 }
+
+func TestConversationRunsRejectMismatchedParticipationPolicy(t *testing.T) {
+	for _, schedulerOptIn := range []bool{false, true} {
+		participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+			return nil, nil
+		})
+		proposals := ParticipationProposalProviderFunc(func(context.Context, ParticipationProposalContext) (ParticipationProposal, error) {
+			return ParticipationProposal{}, nil
+		})
+		_, err := New(
+			WithStore(runtime.NewMemoryStore()),
+			WithConversationCoordinator(participants, proposals, DefaultConversationCoordinatorConfig()),
+			WithDynamicConversationRuns(ConversationRunConfig{
+				Scheduler: ConversationRunSchedulerConfig{RequireParticipationOptIn: schedulerOptIn},
+				Runner:    ConversationRunTurnRunnerConfig{RequireParticipationOptIn: !schedulerOptIn},
+			}, WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "local", ID: "default"}}, nil })),
+		)
+		if err == nil || err.Error() != "conversation Run configuration: conversation scheduling and execution must use the same participation opt-in policy" {
+			t.Fatalf("mismatched policy accepted or wrong error: %v", err)
+		}
+	}
+}

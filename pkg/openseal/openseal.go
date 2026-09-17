@@ -2960,6 +2960,9 @@ func (e *Engine) rebuildConversationRuns() error {
 		return fmt.Errorf("persistent store does not implement conversation storage")
 	}
 	config := *e.conversationRunConfig
+	if config.Scheduler.RequireParticipationOptIn != config.Runner.RequireParticipationOptIn {
+		return fmt.Errorf("conversation scheduling and execution must use the same participation opt-in policy")
+	}
 	if config.Workers.Kind == "" {
 		config.Workers.Kind = runtime.RunKindConversation
 	}

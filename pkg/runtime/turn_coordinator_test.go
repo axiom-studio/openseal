@@ -471,3 +471,57 @@ func TestTurnBudgetReservationPreventsKnownOverspend(t *testing.T) {
 		t.Fatalf("rejected reservation mutated usage: run=%#v turn=%#v", result.Run, result.Turn)
 	}
 }
+
+func TestTurnCoordinatorDiscardsLateOutcomeAfterRunCancellation(t *testing.T) {
+	type testStore interface {
+		PortfolioStore
+		RunActivityStore
+		AgentTurnStore
+	}
+	for _, backend := range []string{"memory", "sqlite"} {
+		t.Run(backend, func(t *testing.T) {
+			var store testStore = NewMemoryStore()
+			if backend == "sqlite" {
+				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "cancel.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer db.Close()
+				store = db
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			scope := Scope{Kind: "local", ID: "cancel-test"}
+			run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Analyze", Source: RunSourceManual})
+			if err != nil {
+				t.Fatal(err)
+			}
+			coordinator := NewTurnCoordinator(store, store, store)
+			result, err := coordinator.Advance(ctx, AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "worker"}, TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+				current, err := store.GetAgentRun(ctx, scope, run.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _, err = NewRunActivityService(store, store).TransitionRun(ctx, scope, run.ID, RunTransitionRequest{ExpectedRevision: current.Revision, Status: AgentRunStatusCanceled, Summary: "Canceled by owner", EventType: "run.canceled"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cancel() // Also exercise lease-heartbeat cancellation of the parent context.
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"reply": "late answer"}, ProposedActions: []TurnAction{{Summary: "late action"}}, ContinuationCheckpoint: map[string]interface{}{"late": true}, Usage: TurnUsage{InputTokens: 12, OutputTokens: 8}}, nil
+			}))
+			if !errors.Is(err, ErrLeaseLost) || result == nil || result.Turn.Status != AgentTurnStatusCanceled {
+				t.Fatalf("late completion: %+v %v", result, err)
+			}
+			if len(result.Turn.RequestedActions) > 0 || len(result.Turn.RunOutput) > 0 || len(result.Turn.ContinuationCheckpoint) > 0 || result.Turn.Usage.OutputTokens != 8 {
+				t.Fatalf("unsafe canceled turn: %+v", result.Turn)
+			}
+			persisted, err := store.GetAgentRun(context.Background(), scope, run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if persisted.Status != AgentRunStatusCanceled || len(persisted.Output) > 0 {
+				t.Fatalf("run was overwritten: %+v", persisted)
+			}
+		})
+	}
+}

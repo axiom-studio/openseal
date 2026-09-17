@@ -15,6 +15,7 @@ import (
 )
 
 type TurnRunnerBinding struct {
+	OutputPublisher                 TurnOutputPublisher
 	Runner                          TurnRunner
 	ProgressAcknowledgementRenderer RunProgressAcknowledgementRenderer
 	DeploymentID                    string
@@ -323,6 +324,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			DefinitionID: binding.DefinitionID, DefinitionVersion: binding.DefinitionVersion,
 			ModelProvider: binding.ModelProvider, Model: binding.Model, InputContextRefs: binding.InputContextRefs,
 			BudgetReservation: binding.BudgetReservation,
+			OutputPublisher:   binding.OutputPublisher,
 		}, preparedRuntimeTurnRunner{binding: binding})
 		cancelAdvance()
 		heartbeatErr := <-heartbeatDone

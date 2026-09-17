@@ -141,7 +141,7 @@ func (s *Server) handleCommandAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := runtime.NewRunCommandService(s.store).CommandAgentRun(r.Context(), runtime.AgentRunCommandRequest{
 		Scope: scope, RunID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
-		Kind: payload.Kind, Actor: payload.Actor, Summary: payload.Summary, Instruction: payload.Instruction,
+		Kind: payload.Kind, Actor: payload.Actor, Summary: payload.Summary, Instruction: payload.Instruction, InterventionID: payload.InterventionID,
 		HumanInterventionID: payload.HumanInterventionID, Visibility: payload.Visibility,
 	})
 	if err != nil {
@@ -164,7 +164,16 @@ func agentRunFilterFromQuery(r *http.Request) (runtime.AgentRunFilter, error) {
 	if err != nil {
 		return runtime.AgentRunFilter{}, err
 	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(query) > 1000 {
+		return runtime.AgentRunFilter{}, fmt.Errorf("q must be at most 1000 bytes")
+	}
+	order := runtime.AgentRunOrder(strings.TrimSpace(r.URL.Query().Get("order")))
+	if order != "" && order != runtime.AgentRunOrderScheduler && order != runtime.AgentRunOrderCreatedDesc {
+		return runtime.AgentRunFilter{}, fmt.Errorf("invalid run order %q", order)
+	}
 	filter := runtime.AgentRunFilter{
+		Query: query, Order: order,
 		Scope: scope, Kind: runtime.RunKind(strings.TrimSpace(r.URL.Query().Get("kind"))), ObjectiveID: strings.TrimSpace(r.URL.Query().Get("objectiveId")), ParentRunID: strings.TrimSpace(r.URL.Query().Get("parentRunId")),
 		RootRunID: strings.TrimSpace(r.URL.Query().Get("rootRunId")), AssignedAgentID: strings.TrimSpace(r.URL.Query().Get("assignedAgentId")),
 		Limit: limit, Offset: offset,

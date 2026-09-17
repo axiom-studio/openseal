@@ -95,3 +95,25 @@ func TestOneShotRunbookRemainsAvailableOutsideDaemonRuntime(t *testing.T) {
 		t.Fatalf("node result = %#v", node)
 	}
 }
+
+func TestDesktopOperatorRequiresAuthenticatedLocalWorkspace(t *testing.T) {
+	for _, tc := range []struct {
+		name, listen, token, kind, id string
+		valid                         bool
+	}{
+		{"local", "127.0.0.1:0", "synthetic-token", "local", "default", true},
+		{"IPv6", "[::1]:0", "synthetic-token", "local", "default", true},
+		{"public", "0.0.0.0:8080", "synthetic-token", "local", "default", false},
+		{"missing token", "127.0.0.1:0", "", "local", "default", false},
+		{"blank token", "127.0.0.1:0", "  ", "local", "default", false},
+		{"tenant", "127.0.0.1:0", "synthetic-token", "tenant", "default", false},
+		{"missing workspace", "127.0.0.1:0", "synthetic-token", "local", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateDesktopOperator(tc.listen, tc.token, runtime.Scope{Kind: tc.kind, ID: tc.id})
+			if (err == nil) != tc.valid {
+				t.Fatalf("validation=%v, valid=%v", err, tc.valid)
+			}
+		})
+	}
+}

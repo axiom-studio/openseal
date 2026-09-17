@@ -31,6 +31,7 @@ type AgentRunCommandRequest struct {
 	Actor               ActivityActor
 	Summary             string
 	Instruction         string
+	InterventionID      string
 	HumanInterventionID string
 	Visibility          ActivityVisibility
 }
@@ -53,6 +54,27 @@ type RunCommandService struct {
 
 func NewRunCommandService(store RunCommandStore) *RunCommandService {
 	return &RunCommandService{store: store, now: time.Now}
+}
+
+// FindCreatedAgentRun recovers an exact accepted request without creating work.
+// Hosts may use it before checking mutable admission state on a delivery retry.
+func (s *RunCommandService) FindCreatedAgentRun(ctx context.Context, req CreateAgentRunRequest) (*AgentRunCommandResult, error) {
+	if s == nil || s.store == nil {
+		return nil, errors.New("run command store is not configured")
+	}
+	key := strings.TrimSpace(req.IdempotencyKey)
+	if key == "" || len(key) > 256 {
+		return nil, fmt.Errorf("%w: a bounded idempotency key is required", ErrInvalidAgentRun)
+	}
+	fingerprint, err := runCreationFingerprint(req)
+	if err != nil {
+		return nil, err
+	}
+	current, err := s.store.GetAgentRun(ctx, req.Scope, runIDForIdempotencyKey(req.Scope, key))
+	if err != nil || current == nil {
+		return nil, err
+	}
+	return replayedRun(current, fingerprint)
 }
 
 // CreateAgentRun creates the canonical durable run and its first audit event
@@ -168,6 +190,22 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 	}
 	if current == nil {
 		return nil, ErrRunNotFound
+	}
+	if req.InterventionID != "" {
+		if req.Kind != AgentRunCommandIntervene {
+			return nil, fmt.Errorf("%w: intervention id is only supported for guidance", ErrInvalidRunCommand)
+		}
+		if _, err := uuid.Parse(req.InterventionID); err != nil {
+			return nil, fmt.Errorf("%w: intervention id must be a UUID", ErrInvalidRunCommand)
+		}
+		for _, existing := range current.PendingInterventions {
+			if existing.ID == req.InterventionID {
+				if existing.Instruction != strings.TrimSpace(req.Instruction) || existing.Actor != req.Actor {
+					return nil, fmt.Errorf("%w: intervention id already belongs to different guidance", ErrInvalidRunCommand)
+				}
+				return &AgentRunCommandResult{Run: current}, nil
+			}
+		}
 	}
 	if current.Revision != req.ExpectedRevision {
 		return nil, ErrRevisionConflict
@@ -394,8 +432,8 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 		}
 	case AgentRunCommandIntervene:
 		instruction := strings.TrimSpace(req.Instruction)
-		if instruction == "" {
-			return transition, fmt.Errorf("%w: intervention instruction is required", ErrInvalidRunCommand)
+		if instruction == "" || len(instruction) > 16000 {
+			return transition, fmt.Errorf("%w: guidance must contain 1 to 16000 UTF-8 bytes", ErrInvalidRunCommand)
 		}
 		if isTerminalAgentRunStatus(current.Status) {
 			return transition, fmt.Errorf("%w: cannot intervene on %s run", ErrInvalidRunTransition, current.Status)
@@ -409,7 +447,11 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 			transition.WakeCondition = current.WakeCondition
 		}
 		transition.EventType = "run.intervened"
-		transition.Intervention = &AgentRunIntervention{ID: uuid.NewString(), Actor: req.Actor, Instruction: instruction, CreatedAt: now}
+		id := req.InterventionID
+		if id == "" {
+			id = uuid.NewString()
+		}
+		transition.Intervention = &AgentRunIntervention{ID: id, Actor: req.Actor, Instruction: instruction, CreatedAt: now}
 		transition.Payload = map[string]interface{}{"interventionId": transition.Intervention.ID, "instruction": instruction}
 		if transition.Summary == "" {
 			transition.Summary = "Operator steered the run"

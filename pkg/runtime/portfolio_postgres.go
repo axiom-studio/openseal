@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/lib/pq"
@@ -266,6 +267,9 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 	add := func(clause string, value interface{}) {
 		args = append(args, value)
 		query += fmt.Sprintf(clause, len(args))
+	}
+	if query := strings.TrimSpace(filter.Query); query != "" {
+		add(` AND strpos(lower(COALESCE(payload->>'goal', '') || ' ' || status), lower($%d)) > 0`, query)
 	}
 	if filter.Kind != "" {
 		add(` AND COALESCE(payload->>'kind', 'agent_work') = $%d`, filter.Kind)

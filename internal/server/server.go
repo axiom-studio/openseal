@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,30 +23,33 @@ import (
 // Server exposes the versioned OpenSeal kernel API. Interactive clients
 // discover its exact capabilities rather than depending on hidden routes.
 type Server struct {
-	store                runtime.KernelStore
-	artifactContent      runtime.ArtifactContentStore
-	artifactResolver     runtime.ArtifactContentResolver
-	authoring            *authoring.Compiler
-	authoringChanges     *authoring.ChangeSetService
-	authoringRuns        *runtime.WorkforceAuthoringRunService
-	authoringWorker      *runtime.WorkforceAuthoringWorker
-	authoringSkillSearch authoring.SkillSearchProvider
-	authoringCredentials []capability.CredentialBindingChoice
-	authoringScope       runtime.Scope
-	authoringMu          sync.Mutex
-	workforceAuthority   WorkforceLifecycleAuthorizer
-	actionApprovalAuth   runtime.ApprovalAuthorizer
-	logger               *zap.SugaredLogger
-	mux                  *http.ServeMux
-	httpServer           *http.Server
-	clawHub              *opensealkernel.Engine
-	clawHubMutations     bool
-	outreachDelivery     func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
-	agentRunCreation     func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
-	sourcePolicies       *source.LifecycleService
-	workforceBundles     kernelbundle.InstallationStore
-	workforceBundleActor string
-	workforceBundleTrust kernelbundle.TrustPolicy
+	store                    runtime.KernelStore
+	artifactContent          runtime.ArtifactContentStore
+	artifactResolver         runtime.ArtifactContentResolver
+	authoring                *authoring.Compiler
+	authoringChanges         *authoring.ChangeSetService
+	authoringRuns            *runtime.WorkforceAuthoringRunService
+	authoringWorker          *runtime.WorkforceAuthoringWorker
+	authoringSkillSearch     authoring.SkillSearchProvider
+	authoringCredentials     []capability.CredentialBindingChoice
+	authoringScope           runtime.Scope
+	authoringMu              sync.Mutex
+	workforceAuthority       WorkforceLifecycleAuthorizer
+	actionApprovalAuth       runtime.ApprovalAuthorizer
+	logger                   *zap.SugaredLogger
+	mux                      *http.ServeMux
+	httpServer               *http.Server
+	bearerToken              string
+	clawHub                  *opensealkernel.Engine
+	clawHubMutations         bool
+	outreachDelivery         func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
+	teamWorkEnabled          bool
+	desktopConversationScope *runtime.Scope
+	agentRunCreation         func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
+	sourcePolicies           *source.LifecycleService
+	workforceBundles         kernelbundle.InstallationStore
+	workforceBundleActor     string
+	workforceBundleTrust     kernelbundle.TrustPolicy
 }
 
 // SetWorkforceCredentialBindings supplies the secret-free local or host Vault
@@ -84,7 +90,33 @@ func NewServer(store runtime.KernelStore, logger *zap.SugaredLogger) *Server {
 
 // Handler returns the server's HTTP handler.
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return s.authenticatedHandler()
+}
+
+// SetBearerToken protects every API route with a bearer token. An empty token
+// preserves the existing embedding and standalone behavior.
+// Configure it before creating a handler or serving requests.
+func (s *Server) SetBearerToken(token string) {
+	s.bearerToken = strings.TrimSpace(token)
+}
+
+func (s *Server) authenticatedHandler() http.Handler {
+	token := s.bearerToken
+	if token == "" {
+		return s.mux
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scheme, provided, ok := strings.Cut(r.Header.Get("Authorization"), " ")
+		provided = strings.TrimLeft(provided, " ")
+		if !ok || !strings.EqualFold(scheme, "Bearer") || len(r.Header.Values("Authorization")) != 1 || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("WWW-Authenticate", `Bearer realm="openseal"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}` + "\n"))
+			return
+		}
+		s.mux.ServeHTTP(w, r)
+	})
 }
 
 // SetArtifactContentStore enables streamed artifact upload/download routes.
@@ -165,6 +197,9 @@ func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, ru
 	s.agentRunCreation = dispatch
 }
 
+// SetTeamWorkEnabled advertises team ownership only for a capable host.
+func (s *Server) SetTeamWorkEnabled(enabled bool) { s.teamWorkEnabled = enabled }
+
 // SetSourcePolicyLifecycle installs the host-selected persistence boundary for
 // governed source authority. Without it, routes and capabilities fail closed.
 func (s *Server) SetSourcePolicyLifecycle(service *source.LifecycleService) {
@@ -182,9 +217,19 @@ func (s *Server) SetWorkforceBundleInstallation(store kernelbundle.InstallationS
 
 // ListenAndServe starts the server on the given address.
 func (s *Server) ListenAndServe(addr string) error {
-	s.logger.Infow("starting API server", "addr", addr)
-	s.httpServer = &http.Server{Addr: addr, Handler: s.mux}
-	return s.httpServer.ListenAndServe()
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(listener)
+}
+
+// Serve starts the API on an already-bound listener. Desktop supervisors use
+// this to bind port zero safely and learn the selected loopback endpoint.
+func (s *Server) Serve(listener net.Listener) error {
+	s.logger.Infow("starting API server", "addr", listener.Addr().String())
+	s.httpServer = &http.Server{Handler: s.authenticatedHandler()}
+	return s.httpServer.Serve(listener)
 }
 
 // Shutdown gracefully shuts down the server.
@@ -216,3 +261,10 @@ func (s *Server) respondError(w http.ResponseWriter, status int, msg string) {
 
 var _ = fmt.Sprintf
 var _ = time.Now
+
+// SetDesktopConversationScope binds interactive channel creation, updates, and message
+// authorship to the authenticated operator of one local desktop workspace.
+// Configure before serving requests; standalone channel behavior is unchanged.
+func (s *Server) SetDesktopConversationScope(scope runtime.Scope) {
+	s.desktopConversationScope = &scope
+}

@@ -106,3 +106,28 @@ func TestMemoryActionProposalIsAtomicAndIdempotent(t *testing.T) {
 		t.Fatalf("missing approval error = %v, want %v", err, ErrApprovalNotFound)
 	}
 }
+
+func TestMemoryApprovalPaginationUsesIDToBreakTimestampTies(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "local", ID: "review-pagination"}
+	now := time.Now().UTC()
+	for _, id := range []string{"approval-c", "approval-a", "approval-b"} {
+		store.approvals[portfolioKey(scope, id)] = &ApprovalCheckpoint{ID: id, Scope: scope, Status: ApprovalStatusPending, CreatedAt: now}
+	}
+	for _, newest := range []bool{false, true} {
+		for i := 0; i < 20; i++ {
+			page, err := store.ListApprovals(t.Context(), ApprovalFilter{Scope: scope, Status: []ApprovalStatus{ApprovalStatusPending}, NewestFirst: newest, Limit: 1, Offset: 1})
+			if err != nil || len(page) != 1 || page[0].ID != "approval-b" {
+				t.Fatalf("unstable page = %#v, %v", page, err)
+			}
+			first, err := store.ListApprovals(t.Context(), ApprovalFilter{Scope: scope, NewestFirst: newest, Limit: 1})
+			want := "approval-a"
+			if newest {
+				want = "approval-c"
+			}
+			if err != nil || len(first) != 1 || first[0].ID != want {
+				t.Fatalf("wrong first page = %#v, %v", first, err)
+			}
+		}
+	}
+}

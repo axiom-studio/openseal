@@ -336,3 +336,24 @@ OpenSeal validates portable semantics and fails closed when a necessary adapter
 is absent. It does not pretend to provide tenant identity, a host secret service,
 remote sandbox provisioning, external network credentials, or organization
 policy in standalone defaults.
+
+### Channel participation opt-in
+
+Embedding hosts can require explicit per-channel participation by setting
+`RequireParticipationOptIn` on both the conversation scheduler and turn runner.
+The engine rejects mismatched policies. The default remains compatible with
+existing hosts; the desktop does not yet enable automatic participation.
+
+`ConversationService.UpdateConversation` accepts `ParticipationEnabled` under
+revision control. Enabling records the channel's current sequence as a boundary:
+only subsequent messages qualify. Repeated enabling preserves that boundary;
+disabling and re-enabling skips messages received before the new boundary.
+Archiving disables participation, and restoring a channel does not re-enable it.
+The opt-in survives store restart. Queued turns recheck the canonical channel
+before execution. Late Agent replies and proposed operations are discarded after
+opt-out while reported model usage remains charged. Team round publication uses
+revision checks to reject a round computed against an outdated channel.
+
+Opt-out does not undo already completed work or cancel actions already admitted
+for execution. Host authorization, participant eligibility, model budgets, and
+usage accounting remain necessary before enabling this in a desktop host.

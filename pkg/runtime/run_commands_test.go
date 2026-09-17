@@ -42,6 +42,15 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			if created.Run.Kind != RunKindAgentWork || created.Run.ConcurrencyKey != "agent-1:operations" {
 				t.Fatalf("created run = %#v", created.Run)
 			}
+			recovered, err := service.FindCreatedAgentRun(ctx, create)
+			if err != nil || recovered == nil || recovered.Run.ID != created.Run.ID || recovered.Event != nil {
+				t.Fatalf("read-only recovery = %#v, %v", recovered, err)
+			}
+			missing := create
+			missing.IdempotencyKey = "never-submitted"
+			if value, err := service.FindCreatedAgentRun(ctx, missing); err != nil || value != nil {
+				t.Fatalf("recovery created absent work: %#v, %v", value, err)
+			}
 			replayed, err := service.CreateAgentRun(ctx, create)
 			if err != nil {
 				t.Fatal(err)
@@ -51,6 +60,9 @@ func TestRunCommandsAreIdempotentAuditedAndRevisionSafe(t *testing.T) {
 			}
 			changed := create
 			changed.Goal = "Do different work"
+			if _, err := service.FindCreatedAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
+				t.Fatalf("recovery accepted changed work: %v", err)
+			}
 			if _, err := service.CreateAgentRun(ctx, changed); !errors.Is(err, ErrRunIdempotency) {
 				t.Fatalf("conflicting replay error = %v", err)
 			}

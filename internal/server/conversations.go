@@ -30,6 +30,9 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !s.authorizeDesktopChannelWrite(w, payload.Scope, nil) {
+		return
+	}
 	key := requestIdempotencyKey(r, payload.IdempotencyKey)
 	conversation, replayed, err := service.CreateConversation(r.Context(), runtime.CreateConversationRequest{
 		ID: payload.ID, Scope: payload.Scope, Owner: payload.Owner, Title: payload.Title, Origin: payload.Origin,
@@ -62,6 +65,38 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 		s.respondConversationError(w, err)
 		return
 	}
+	if r.URL.Query().Has("participantType") || r.URL.Query().Has("participantId") {
+		participant, err := participantFromQuery(r)
+		if err != nil {
+			s.respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		type readPosition struct {
+			Participant  runtime.ConversationParticipant `json:"participant"`
+			ReadSequence int64                           `json:"readSequence"`
+			Revision     int64                           `json:"revision"`
+		}
+		type conversationWithReadPosition struct {
+			*runtime.Conversation
+			ReadPosition readPosition `json:"readPosition"`
+		}
+		result := make([]conversationWithReadPosition, 0, len(values))
+		for _, value := range values {
+			cursor, err := service.GetCursor(r.Context(), filter.Scope, value.ID, participant)
+			if err != nil {
+				s.respondConversationError(w, err)
+				return
+			}
+			position := readPosition{Participant: participant}
+			if cursor != nil {
+				position.ReadSequence = cursor.ReadSequence
+				position.Revision = cursor.Revision
+			}
+			result = append(result, conversationWithReadPosition{Conversation: value, ReadPosition: position})
+		}
+		s.respondJSON(w, http.StatusOK, result)
+		return
+	}
 	s.respondJSON(w, http.StatusOK, values)
 }
 
@@ -78,6 +113,33 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	s.respondJSON(w, http.StatusOK, value)
 }
 
+func (s *Server) handleUpdateConversation(w http.ResponseWriter, r *http.Request) {
+	service, _, conversationID, ok := s.conversationRequestContextFromBodyStore(w, r)
+	if !ok {
+		return
+	}
+	var payload kernelapi.UpdateConversationRequest
+	if err := decodeStrictJSON(r, &payload); err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.authorizeDesktopChannelWrite(w, payload.Scope, nil) {
+		return
+	}
+	if payload.Title == nil && payload.Status == nil {
+		s.respondError(w, http.StatusBadRequest, "a channel title or status change is required")
+		return
+	}
+	result, err := service.UpdateConversation(r.Context(), runtime.UpdateConversationRequest{
+		Scope: payload.Scope, ConversationID: conversationID, ExpectedRevision: payload.ExpectedRevision, Title: payload.Title, Status: payload.Status,
+	})
+	if err != nil {
+		s.respondConversationError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handlePostChannelMessage(w http.ResponseWriter, r *http.Request) {
 	service, _, conversationID, ok := s.conversationRequestContextFromBodyStore(w, r)
 	if !ok {
@@ -86,6 +148,9 @@ func (s *Server) handlePostChannelMessage(w http.ResponseWriter, r *http.Request
 	var payload kernelapi.PostChannelMessageRequest
 	if err := decodeStrictJSON(r, &payload); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.authorizeDesktopChannelWrite(w, payload.Scope, &payload.Sender) {
 		return
 	}
 	key := requestIdempotencyKey(r, payload.IdempotencyKey)
@@ -123,9 +188,14 @@ func (s *Server) handleListChannelMessages(w http.ResponseWriter, r *http.Reques
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	before, err := boundedIntQuery(r, "beforeSequence", 0, 0, 1_000_000_000)
+	if err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	filter := runtime.ChannelMessageFilter{
 		Scope: scope, ConversationID: conversationID, ThreadRootID: strings.TrimSpace(r.URL.Query().Get("threadRootId")),
-		AfterSequence: int64(after), Limit: limit, Descending: strings.EqualFold(r.URL.Query().Get("order"), "desc"),
+		AfterSequence: int64(after), BeforeSequence: int64(before), Limit: limit, Descending: strings.EqualFold(r.URL.Query().Get("order"), "desc"),
 	}
 	for _, raw := range queryValues(r, "intent") {
 		intent := runtime.ConversationMessageIntent(raw)
@@ -258,6 +328,9 @@ func (s *Server) handleAdvanceConversationCursor(w http.ResponseWriter, r *http.
 	var payload kernelapi.AdvanceConversationCursorRequest
 	if err := decodeStrictJSON(r, &payload); err != nil {
 		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.authorizeDesktopChannelWrite(w, payload.Scope, &payload.Participant) {
 		return
 	}
 	cursor, replayed, err := service.AdvanceCursor(r.Context(), runtime.AdvanceConversationCursorRequest{
@@ -446,4 +519,16 @@ func (s *Server) respondConversationError(w http.ResponseWriter, err error) {
 		s.logger.Errorw("team channel API failed", "error", err)
 		s.respondError(w, http.StatusInternalServerError, "team channel operation failed")
 	}
+}
+
+func (s *Server) authorizeDesktopChannelWrite(w http.ResponseWriter, scope runtime.Scope, sender *runtime.ConversationParticipant) bool {
+	if s.desktopConversationScope == nil {
+		return true
+	}
+	if s.desktopConversationScope.Kind != "local" || scope != *s.desktopConversationScope ||
+		(sender != nil && *sender != (runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "local-operator"})) {
+		s.respondError(w, http.StatusForbidden, "desktop channel changes require the configured local workspace operator")
+		return false
+	}
+	return true
 }

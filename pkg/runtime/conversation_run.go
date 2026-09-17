@@ -28,6 +28,9 @@ const (
 type ConversationRunSchedulerConfig struct {
 	ConversationPageSize int
 	MessagePageSize      int
+	// RequireParticipationOptIn leaves unconfigured channels inert. Existing
+	// embedding hosts retain their prior scheduling policy when false.
+	RequireParticipationOptIn bool
 }
 
 func (c ConversationRunSchedulerConfig) normalize() (ConversationRunSchedulerConfig, error) {
@@ -109,7 +112,7 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 	if err != nil {
 		return nil, false, err
 	}
-	if !conversationMessageStartsRun(conversation, message) {
+	if !conversationMessageStartsRun(conversation, message) || (s.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, message)) {
 		return nil, false, nil
 	}
 	request, err := s.conversationAgentRunRequest(ctx, conversation, message)
@@ -358,7 +361,7 @@ func (s *ConversationRunScheduler) reconcileConversation(
 		}
 		for _, message := range messages {
 			result.Messages++
-			if !conversationMessageStartsRun(conversation, message) || coordinated[message.ID] {
+			if !conversationMessageStartsRun(conversation, message) || (s.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, message)) || coordinated[message.ID] {
 				result.Skipped++
 				continue
 			}
@@ -468,11 +471,12 @@ func conversationRunIdempotencyKey(scope Scope, conversationID, messageID string
 }
 
 type ConversationRunTurnRunnerConfig struct {
-	MaximumRetries     int
-	InitialRetryDelay  time.Duration
-	MaximumRetryDelay  time.Duration
-	Policy             ConversationArbitrationPolicy
-	MaximumConcurrency int
+	RequireParticipationOptIn bool
+	MaximumRetries            int
+	InitialRetryDelay         time.Duration
+	MaximumRetryDelay         time.Duration
+	Policy                    ConversationArbitrationPolicy
+	MaximumConcurrency        int
 	// AgentTurns resolves the active prompt-first Agent definition and its
 	// authorized Skills for Agent-owned channels. Team-owned channels continue
 	// through governed multi-participant arbitration.
@@ -552,6 +556,11 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	if err := validateConversationRun(run); err != nil {
 		return nil, err
 	}
+	if stopped, err := r.participationStopped(ctx, run); err != nil {
+		return nil, err
+	} else if stopped {
+		return &TurnRunnerBinding{Runner: r, DefinitionID: "openseal.conversation-coordinator", DefinitionVersion: "1", ModelProvider: "host", Model: "participation-disabled"}, nil
+	}
 	pinnedRunbook := run.Plan != nil && run.Plan["runbook"] != nil
 	if (run.Owner.Type == OwnerTypeAgent || pinnedRunbook) && r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
@@ -583,6 +592,11 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 			Runner: TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
 				if err := validateConversationRun(input.Run); err != nil {
 					return nil, err
+				}
+				if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
+					return nil, err
+				} else if stopped {
+					return participationStoppedOutcome(), nil
 				}
 				conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
 				triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
@@ -630,6 +644,11 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	if err := validateConversationRun(input.Run); err != nil {
 		return nil, err
 	}
+	if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
+		return nil, err
+	} else if stopped {
+		return participationStoppedOutcome(), nil
+	}
 	conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
 	triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
 	conversation, err := r.conversations.GetConversation(ctx, input.Run.Scope, conversationID)
@@ -638,6 +657,15 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	}
 	if conversation.Owner != input.Run.Owner {
 		return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+	}
+	if r.config.RequireParticipationOptIn {
+		trigger, err := r.conversations.GetChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID)
+		if err != nil {
+			return nil, err
+		}
+		if !conversationParticipationAllows(conversation, trigger) {
+			return participationStoppedOutcome(), nil
+		}
 	}
 	if conversation.Owner.Type == OwnerTypeAgent {
 		return r.runAgentTurn(ctx, input, conversation, triggerID, nil, nil)
@@ -686,6 +714,9 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 			if currentErr != nil {
 				return nil, currentErr
 			}
+			if r.config.RequireParticipationOptIn && !conversationParticipationAllows(current, trigger) {
+				return participationStoppedOutcome(), nil
+			}
 			fallback, fallbackErr := r.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 				Scope: input.Run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 				Sender:   ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"},
@@ -708,6 +739,11 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	}
 	proposal := selectedParticipationAction(result.Round)
 	if proposal != nil {
+		if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
+			return nil, err
+		} else if stopped {
+			return participationStoppedOutcome(), nil
+		}
 		action := *proposal.ProposedAction
 		action.EvidenceRefs = append([]string(nil), proposal.ProposedAction.EvidenceRefs...)
 		if strings.TrimSpace(action.IdempotencyKey) == "" {
@@ -822,6 +858,9 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	if err != nil {
 		return nil, err
 	}
+	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
+		return participationStoppedOutcome(), nil
+	}
 	recent, err := r.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: input.Run.Scope, ConversationID: conversation.ID, Limit: 100, Descending: true,
 	})
@@ -919,6 +958,15 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	if err != nil {
 		return nil, err
 	}
+	if outcome != nil {
+		if stopped, checkErr := r.participationStopped(ctx, input.Run); checkErr != nil {
+			return nil, checkErr
+		} else if stopped {
+			skipped := participationStoppedOutcome()
+			skipped.Usage, skipped.ModelProvider, skipped.Model = outcome.Usage, outcome.ModelProvider, outcome.Model
+			return skipped, nil
+		}
+	}
 	if outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted {
 		return outcome, nil
 	}
@@ -934,6 +982,11 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	references = append(references, conversationActionArtifactReferences(input.Run)...)
 	message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, content, references, broadcastToChannel)
 	if err != nil {
+		if errors.Is(err, errConversationParticipationStopped) {
+			skipped := participationStoppedOutcome()
+			skipped.Usage, skipped.ModelProvider, skipped.Model = outcome.Usage, outcome.ModelProvider, outcome.Model
+			return skipped, nil
+		}
 		return nil, err
 	}
 	outcome.OutputSummary = "Agent channel response completed"
@@ -1393,6 +1446,9 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		if err != nil {
 			return nil, false, err
 		}
+		if r.config.RequireParticipationOptIn && !conversationParticipationAllows(current, trigger) {
+			return nil, false, errConversationParticipationStopped
+		}
 		participantID := strings.TrimSpace(run.AssignedAgentID)
 		if participantID == "" {
 			participantID = current.Owner.ID
@@ -1799,4 +1855,37 @@ func publicConversationRetryReason(err error) string {
 	default:
 		return "participant_runtime_unavailable"
 	}
+}
+
+func conversationParticipationAllows(conversation *Conversation, message *ChannelMessage) bool {
+	return conversation != nil && message != nil && conversation.Status == ConversationStatusActive &&
+		conversation.Participation != nil && conversation.Participation.Enabled && message.Sequence > conversation.Participation.AfterSequence
+}
+
+// Recheck the canonical channel at execution, not just scheduling. A queued Run
+// must not make model calls after opt-out or after a later activation boundary.
+func (r *ConversationRunTurnRunner) participationStopped(ctx context.Context, run *AgentRun) (bool, error) {
+	if !r.config.RequireParticipationOptIn {
+		return false, nil
+	}
+	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversation, err := r.conversations.GetConversation(ctx, run.Scope, conversationID)
+	if err != nil {
+		return false, err
+	}
+	if conversation.Owner != run.Owner {
+		return false, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+	}
+	trigger, err := r.conversations.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
+	if err != nil {
+		return false, err
+	}
+	return !conversationParticipationAllows(conversation, trigger), nil
+}
+
+var errConversationParticipationStopped = errors.New("channel participation is disabled for this message")
+
+func participationStoppedOutcome() *TurnOutcome {
+	return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Channel participation is disabled for this message", RunOutput: map[string]interface{}{"participationSkipped": true, "reply": "No further participation will start for this message because it is outside the channel’s current participation opt-in. Previously started actions may still finish."}}
 }

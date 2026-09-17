@@ -55,6 +55,7 @@ func (s *Server) handleSearchWorkforceSkills(w http.ResponseWriter, r *http.Requ
 }
 
 type WorkforceLifecycleAuthorization struct {
+	PolicyDecision               *WorkforcePolicyDecision
 	Actor                        authoring.ChangeSetActor
 	EligibleApprovalRequirements []kernelapi.ApprovalRequirementReference
 	// BindingConfigurationFields are host-authorized, non-secret choices for
@@ -352,6 +353,11 @@ func (s *Server) handleEvaluateWorkforceChangeSet(w http.ResponseWriter, r *http
 		return
 	}
 	request.Actor = authorization.Actor
+	if decision := authorization.PolicyDecision; decision != nil {
+		request.Allowed = decision.Allowed
+		request.Findings = append([]authoring.ChangeSetPolicyFinding(nil), decision.Findings...)
+		request.ApprovalRequirements = append([]authoring.ChangeSetApprovalRequirement(nil), decision.ApprovalRequirements...)
+	}
 	result, replayed, err := s.authoringChanges.SubmitEvaluation(r.Context(), request)
 	s.respondWorkforceMutation(w, result, replayed, err)
 	_ = changeSet
@@ -385,6 +391,21 @@ func (s *Server) handleApproveWorkforceChangeSet(w http.ResponseWriter, r *http.
 		if reference.EvaluationID == request.EvaluationID && reference.PolicyID == request.PolicyID && reference.Role == request.Role {
 			eligible = true
 			break
+		}
+	}
+	// A completed decision disappears from available actions, but the owner
+	// must still be able to recover its exact idempotent response after a lost
+	// connection. ResolveApproval verifies the full request digest below.
+	if !eligible {
+		for _, reference := range authorization.EligibleApprovalRequirements {
+			if reference.EvaluationID != request.EvaluationID || reference.PolicyID != request.PolicyID || reference.Role != request.Role {
+				continue
+			}
+			for _, decision := range changeSet.ApprovalDecisions {
+				if decision.IdempotencyKey == request.IdempotencyKey && decision.Actor == authorization.Actor && decision.EvaluationID == reference.EvaluationID && decision.PolicyID == reference.PolicyID && decision.Role == reference.Role {
+					eligible = true
+				}
+			}
 		}
 	}
 	if !eligible {
