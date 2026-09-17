@@ -15,7 +15,9 @@ import (
 // ValidateAgentProfileImage checks content, not just caller-supplied metadata.
 // The host must independently authorize the profile mutation and artifact read
 // for its principal before calling this scoped validation.
-func ValidateAgentProfileImage(ctx context.Context, store ArtifactStore, content ArtifactContentStore, scope Scope, reference *agent.ProfileImage) error {
+func ValidateAgentProfileImage(ctx context.Context, store interface {
+	GetArtifact(context.Context, Scope, string, int64) (*Artifact, error)
+}, content ArtifactContentStore, scope Scope, reference *agent.ProfileImage) error {
 	if reference == nil {
 		return nil
 	}
