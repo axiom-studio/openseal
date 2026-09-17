@@ -1,3 +1,10 @@
+import {
+  readHomeSubmission,
+  newHomeSubmission,
+  persistHomeSubmission,
+  finishHomeSubmission,
+  type HomeSubmission,
+} from "./homeSubmission";
 import TeamBrowser from "./TeamBrowser";
 import TaskArtifacts from "./TaskArtifacts";
 import ReviewInbox from "./ReviewInbox";
@@ -238,12 +245,37 @@ export default function App() {
   const [workView, setWorkView] = useState("tasks");
   const [workRefresh, setWorkRefresh] = useState(0);
   const [hasPendingReviews, setHasPendingReviews] = useState(false);
-  const [savedDraft] = useState(readDraft);
-  const [prompt, setPrompt] = useState(savedDraft.prompt);
-  const [composerMode, setComposerMode] = useState<"agent" | "team" | "work">(
-    savedDraft.mode,
+  const [savedSubmission] = useState(readHomeSubmission);
+  const submission = useRef<HomeSubmission | null>(savedSubmission.pending);
+  const [pendingSubmission, setPendingSubmission] = useState(
+    savedSubmission.pending,
   );
-  const [agentID, setAgentID] = useState(savedDraft.agentID);
+  const [submissionError, setSubmissionError] = useState(savedSubmission.error);
+  const [recoveryError, setRecoveryError] = useState(savedSubmission.error);
+  const [forgetRequest, setForgetRequest] = useState(false);
+  const forgetTrigger = useRef<HTMLButtonElement>(null);
+  const forgetConfirm = useRef<HTMLButtonElement>(null);
+  const submissionLock = useRef(false);
+  const submissionFeedback = useRef<HTMLParagraphElement>(null);
+  const activePage = useRef(page);
+  activePage.current = page;
+  const [savedDraft] = useState(
+    () => savedSubmission.pending?.draft || readDraft(),
+  );
+  const [prompt, updatePrompt] = useState(savedDraft.prompt);
+  const [composerMode, updateComposerMode] = useState<
+    "agent" | "team" | "work"
+  >(savedDraft.mode);
+  const [agentID, updateAgentID] = useState(savedDraft.agentID);
+  const setPrompt = useCallback((value: string) => {
+    if (!submission.current) updatePrompt(value);
+  }, []);
+  const setComposerMode = useCallback((value: "agent" | "team" | "work") => {
+    if (!submission.current) updateComposerMode(value);
+  }, []);
+  const setAgentID = useCallback((value: string) => {
+    if (!submission.current) updateAgentID(value);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const activeProposal = useRef(proposal);
@@ -297,7 +329,6 @@ export default function App() {
     if (selectionKey) requestAnimationFrame(() => inspector.current?.focus());
   }, [selectionKey]);
   const inFlight = useRef(false);
-  const submission = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const canPropose = supports(caps, "workforce-authoring", "propose");
   const canRun = supports(caps, "agent-runs", "create");
@@ -503,72 +534,142 @@ export default function App() {
     };
   }, [proposalID, desktop.state, caps]);
 
+  useEffect(() => {
+    if (submissionError && page === "Home") submissionFeedback.current?.focus();
+  }, [submissionError, page]);
+  useEffect(() => {
+    if (forgetRequest) forgetConfirm.current?.focus();
+  }, [forgetRequest]);
+  function forgetSavedRequest() {
+    if (submissionLock.current) return;
+    try {
+      if (
+        submission.current &&
+        localStorage.getItem("openseal.home-submission") !==
+          JSON.stringify(submission.current)
+      )
+        throw new Error(
+          "The saved request changed. Reload before clearing recovery.",
+        );
+      localStorage.removeItem("openseal.home-submission");
+      submission.current = null;
+      setPendingSubmission(null);
+      setRecoveryError("");
+      setSubmissionError("");
+      setForgetRequest(false);
+      setNotice(
+        "Local retry record removed. Any saved proposal or work is unchanged. Your text is kept for review.",
+      );
+      requestAnimationFrame(() => composer.current?.focus());
+    } catch (e) {
+      setSubmissionError(`Could not clear local recovery. ${message(e)}`);
+    }
+  }
+  function retryRecovery() {
+    const saved = readHomeSubmission();
+    setRecoveryError(saved.error);
+    setSubmissionError(saved.error);
+    submission.current = saved.pending;
+    setPendingSubmission(saved.pending);
+    if (saved.pending) {
+      updatePrompt(saved.pending.draft.prompt);
+      updateComposerMode(saved.pending.draft.mode);
+      updateAgentID(saved.pending.draft.agentID);
+    }
+  }
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (busy) return;
-    if (composerMode !== "work" && !canPropose) {
+    if (submissionLock.current || recoveryError || desktop.state !== "ready")
+      return;
+    const saved = submission.current;
+    if (!saved && composerMode !== "work" && !canPropose) {
       navigate("Settings");
       return;
     }
     if (
-      !prompt.trim() ||
-      (composerMode === "work" && (!canRun || !assignedAgentAvailable))
+      !saved &&
+      (!prompt.trim() ||
+        (composerMode === "work" && (!canRun || !assignedAgentAvailable)))
     )
       return;
-    setBusy(true);
-    setError("");
-    const fingerprint = JSON.stringify({
-      prompt: prompt.trim(),
-      composerMode,
-      agentID,
-    });
-    if (submission.current?.fingerprint !== fingerprint)
-      submission.current = { fingerprint, key: crypto.randomUUID() };
+    const pending =
+      saved ||
+      newHomeSubmission({ version: 1, prompt, mode: composerMode, agentID });
     try {
-      if (composerMode !== "work") {
-        const p = await api<Proposal>("/authoring/workforce/change-sets", {
-          method: "POST",
-          key: submission.current.key,
-          body: {
-            scope,
-            prompt:
-              composerMode === "team"
-                ? `Create one team.\n\n${prompt.trim()}`
-                : prompt.trim(),
-            catalog: {},
-            actor: { type: "user", id: "local-operator" },
-          },
-        });
-        setProposal(p);
-        setProposalID(p.id);
-        saveLocal("openseal.proposal", p.id);
-        setNotice("Proposal saved. You can follow its progress here.");
-      } else {
-        const result = await api<{ run: Run }>("/agent-runs", {
-          method: "POST",
-          key: submission.current.key,
-          body: {
-            scope,
-            kind: "agent_work",
-            owner: { type: "agent", id: agentID },
-            assignedAgentId: agentID,
-            goal: prompt.trim(),
-            source: "manual",
-            actor: { type: "user", id: "local-operator" },
-            visibility: "scope",
-          },
-        });
-        setWorkView("tasks");
-        navigate("Work");
-        setSelection({ kind: "run", value: result.run });
-        setNotice("Work started. Progress is saved automatically.");
-      }
-      setPrompt("");
+      persistHomeSubmission(pending);
+    } catch (e) {
+      setSubmissionError(
+        `Recovery storage is unavailable. Nothing was sent. ${message(e)}`,
+      );
+      return;
+    }
+    submission.current = pending;
+    setPendingSubmission(pending);
+    submissionLock.current = true;
+    setBusy(true);
+    setSubmissionError("");
+    let confirmed = false;
+    try {
+      const result = await api<any>(pending.path, {
+        method: "POST",
+        key: pending.key,
+        body: pending.body,
+      });
+      const value = pending.draft.mode === "work" ? result?.run : result;
+      if (
+        !value ||
+        typeof value.id !== "string" ||
+        !value.id ||
+        !Number.isSafeInteger(value.revision) ||
+        value.revision < 1 ||
+        value.scope?.kind !== scope.kind ||
+        value.scope.id !== scope.id ||
+        typeof value.status !== "string" ||
+        (pending.draft.mode === "work"
+          ? value.kind !== "agent_work" ||
+            value.owner?.type !== "agent" ||
+            value.owner.id !== pending.draft.agentID ||
+            value.assignedAgentId !== pending.draft.agentID ||
+            value.goal !== pending.draft.prompt.trim()
+          : value.prompt !== pending.body.prompt)
+      )
+        throw new Error(
+          "The returned record does not match the saved request.",
+        );
+      confirmed = true;
+      finishHomeSubmission(
+        pending,
+        pending.draft.mode === "work" ? undefined : value.id,
+      );
+      setForgetRequest(false);
       submission.current = null;
+      setPendingSubmission(null);
+      updatePrompt("");
+      if (pending.draft.mode !== "work") {
+        setProposal(value);
+        setProposalID(value.id);
+        setNotice("Proposal saved. You can follow its progress in Home.");
+        if (activePage.current === "Home")
+          requestAnimationFrame(() =>
+            document.getElementById("proposal-heading")?.focus(),
+          );
+      } else {
+        if (activePage.current === "Home") {
+          setWorkView("tasks");
+          navigate("Work");
+          setSelection({ kind: "run", value });
+        }
+        setNotice("Work saved. You can follow its progress in Work.");
+      }
       await refresh(true);
     } catch (e) {
-      setError(message(e));
+      setSubmissionError(
+        confirmed
+          ? `Saved in the workspace, but local recovery could not be cleared. ${message(e)} Retry the saved request to recover the same record.`
+          : `Could not confirm the saved request. ${message(e)} Retry uses the same request identity, including after reopening, so it does not create a second record.`,
+      );
     } finally {
+      submissionLock.current = false;
       setBusy(false);
     }
   }
@@ -877,6 +978,7 @@ export default function App() {
                   >
                     <button
                       type="button"
+                      disabled={busy || !!pendingSubmission}
                       aria-pressed={composerMode === "agent"}
                       onClick={() => setComposerMode("agent")}
                     >
@@ -885,6 +987,7 @@ export default function App() {
                     </button>
                     <button
                       type="button"
+                      disabled={busy || !!pendingSubmission}
                       aria-pressed={composerMode === "team"}
                       onClick={() => setComposerMode("team")}
                     >
@@ -893,6 +996,7 @@ export default function App() {
                     </button>
                     <button
                       type="button"
+                      disabled={busy || !!pendingSubmission}
                       aria-pressed={composerMode === "work"}
                       onClick={() => setComposerMode("work")}
                     >
@@ -909,6 +1013,12 @@ export default function App() {
                   </label>
                   <textarea
                     id="prompt"
+                    readOnly={busy || !!pendingSubmission}
+                    aria-describedby={
+                      pendingSubmission || submissionError
+                        ? "home-submission-feedback"
+                        : undefined
+                    }
                     ref={composer}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
@@ -932,8 +1042,12 @@ export default function App() {
                       Assign to
                       <select
                         value={agentID}
+                        disabled={busy || !!pendingSubmission}
                         aria-describedby={
-                          agentID && !assignedAgentAvailable && !loading
+                          agentID &&
+                          !pendingSubmission &&
+                          !assignedAgentAvailable &&
+                          !loading
                             ? "draft-agent-unavailable"
                             : undefined
                         }
@@ -957,6 +1071,7 @@ export default function App() {
                   )}
                   {composerMode === "work" &&
                     !!agentID &&
+                    !pendingSubmission &&
                     !assignedAgentAvailable &&
                     !loading && (
                       <p id="draft-agent-unavailable" className="inline-help">
@@ -976,25 +1091,105 @@ export default function App() {
                       type="submit"
                       disabled={
                         busy ||
+                        recoveryError !== "" ||
                         desktop.state !== "ready" ||
-                        (!prompt.trim() && canPropose) ||
-                        (composerMode === "work" &&
-                          (!canRun ||
-                            !assignedAgentAvailable ||
-                            !prompt.trim()))
+                        (!pendingSubmission &&
+                          ((!prompt.trim() && canPropose) ||
+                            (composerMode === "work" &&
+                              (!canRun ||
+                                !assignedAgentAvailable ||
+                                !prompt.trim()))))
                       }
                     >
                       {busy ? (
                         <LoaderCircle size={16} className="spin" />
                       ) : null}
-                      {composerMode !== "work"
-                        ? canPropose
-                          ? "Create proposal"
-                          : "Check setup"
-                        : "Start work"}
+                      {busy
+                        ? "Saving request…"
+                        : pendingSubmission
+                          ? "Retry saved request"
+                          : composerMode !== "work"
+                            ? canPropose
+                              ? "Create proposal"
+                              : "Check setup"
+                            : "Start work"}
                       {!busy && <ArrowUp size={16} />}
                     </button>
                   </div>
+                  {(pendingSubmission || submissionError) && (
+                    <section
+                      className="home-recovery"
+                      aria-label="Saved request recovery"
+                    >
+                      <p
+                        id="home-submission-feedback"
+                        ref={submissionFeedback}
+                        tabIndex={-1}
+                        role={submissionError ? "alert" : "status"}
+                        className={
+                          submissionError ? "error-text" : "inline-help"
+                        }
+                      >
+                        {submissionError ||
+                          (busy
+                            ? "Saving your request. Its recovery identity is stored on this device."
+                            : "A saved request needs confirmation. The original text and destination are kept. Retry the saved request before creating another proposal or task.")}
+                      </p>
+                      {recoveryError && (
+                        <button
+                          type="button"
+                          className="button"
+                          onClick={retryRecovery}
+                        >
+                          Retry recovery
+                        </button>
+                      )}
+                      {!busy &&
+                        (pendingSubmission || recoveryError) &&
+                        (forgetRequest ? (
+                          <div>
+                            <p id="home-forget-help" className="inline-help">
+                              Forget only this device’s retry record? This does
+                              not cancel saved proposals or work. Check Home and
+                              Work first: sending the same prompt again may
+                              create another record.
+                            </p>
+                            <div className="inspector-actions">
+                              <button
+                                type="button"
+                                className="button"
+                                ref={forgetConfirm}
+                                aria-describedby="home-forget-help"
+                                onClick={forgetSavedRequest}
+                              >
+                                Forget local retry record
+                              </button>
+                              <button
+                                type="button"
+                                className="button"
+                                onClick={() => {
+                                  setForgetRequest(false);
+                                  requestAnimationFrame(() =>
+                                    forgetTrigger.current?.focus(),
+                                  );
+                                }}
+                              >
+                                Keep retry record
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="button"
+                            ref={forgetTrigger}
+                            onClick={() => setForgetRequest(true)}
+                          >
+                            Forget saved request…
+                          </button>
+                        ))}
+                    </section>
+                  )}
                   {composerMode === "team" && (
                     <p className="inline-help">
                       OpenSeal will request one team with new agents for your
@@ -1500,7 +1695,9 @@ export default function App() {
                     run={selection.value}
                     onProvider={() => navigate("Settings")}
                     onNewAttempt={
-                      canRun && selection.value.kind === "agent_work"
+                      !pendingSubmission &&
+                      canRun &&
+                      selection.value.kind === "agent_work"
                         ? () => {
                             const previous = selection.value;
                             navigate("Home");
