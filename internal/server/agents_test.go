@@ -93,6 +93,70 @@ func TestAgentDeploymentCatalogIsScopeIsolatedAndIncludesActiveDefinition(t *tes
 	}
 }
 
+func TestAgentDeploymentCatalogExcludesStatusesOnlyWhenRequested(t *testing.T) {
+	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "deployment-filters.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	registry := kernelagent.NewRegistryWithStore(store)
+	definition, err := registry.RegisterDefinition(t.Context(), &kernelagent.AgentDefinition{
+		ID: "operator", Version: "1", DisplayName: "Operator", Purpose: "Operate safely", SystemPrompt: "Inspect before acting.",
+		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tenant := range []string{"one", "two"} {
+		for _, status := range []kernelagent.RolloutStatus{kernelagent.RolloutActive, kernelagent.RolloutPaused, kernelagent.RolloutRetired} {
+			if _, _, err := registry.CreateDeployment(t.Context(), &kernelagent.AgentDeployment{
+				ID: string(status), Scope: capability.ScopeReference{Kind: "tenant", ID: tenant}, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+				RolloutStatus: status, Environment: "production", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1},
+			}, "user", "admin", "test"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	server := NewServer(store, zap.NewNop().Sugar())
+	for _, tc := range []struct {
+		name, query string
+		count, code int
+	}{
+		{"default includes retired", "", 3, http.StatusOK},
+		{"exclude retired", "&excludeStatuses=retired", 2, http.StatusOK},
+		{"exclude multiple repeated", "&excludeStatuses=retired&excludeStatuses=paused", 1, http.StatusOK},
+		{"exclude multiple comma separated", "&excludeStatuses=retired,paused", 1, http.StatusOK},
+		{"exclude all", "&excludeStatuses=retired,paused,active", 0, http.StatusOK},
+		{"invalid status", "&excludeStatuses=deleted", 0, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/agent-deployments?scopeKind=tenant&scopeId=one"+tc.query, "", "")
+			if response.Code != tc.code {
+				t.Fatalf("response = %d %s", response.Code, response.Body.String())
+			}
+			if response.Code != http.StatusOK {
+				return
+			}
+			var list kernelapi.AgentDeploymentList
+			if err := json.Unmarshal(response.Body.Bytes(), &list); err != nil {
+				t.Fatal(err)
+			}
+			if len(list.Items) != tc.count {
+				t.Fatalf("got %d deployments, want %d: %s", len(list.Items), tc.count, response.Body.String())
+			}
+			for _, entry := range list.Items {
+				if entry.Deployment.Scope.ID != "one" || (tc.query != "" && entry.Deployment.RolloutStatus == kernelagent.RolloutRetired) {
+					t.Fatalf("unexpected deployment: %#v", entry.Deployment)
+				}
+			}
+		})
+	}
+	retired := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/agent-deployments/retired?scopeKind=tenant&scopeId=one", "", "")
+	if retired.Code != http.StatusOK {
+		t.Fatalf("retired detail = %d %s", retired.Code, retired.Body.String())
+	}
+}
+
 func TestPortableAgentManifestInstallationCreatesReplaysAndRejectsDrift(t *testing.T) {
 	store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "agent-install.db"))
 	if err != nil {
