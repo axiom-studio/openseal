@@ -111,6 +111,12 @@ until an approval authorizer is configured.
 | Team lifecycle | `/team-deployments/{id}/activations` | Activate and audit Team definition versions |
 | Team amendments | `/team-deployments/{id}/amendments/...` | Propose, evaluate, decide, and activate Team changes |
 
+Agent deployment lists include retired deployments by default.
+Pass `excludeStatuses=retired` to omit them, or repeat the parameter or use commas to exclude multiple rollout statuses.
+Supported values are `pending`, `active`, `degraded`, `paused`, and `retired`; unknown values return HTTP 400.
+Filtering preserves tenant scope and leaves deployments accessible by ID.
+Embedded callers use `Engine.ListAgentDeployments(ctx, openseal.AgentDeploymentFilter{Scope: scope, ExcludeStatuses: []openseal.AgentRolloutStatus{openseal.AgentRolloutRetired}})`.
+
 Activation and amendment operations bind actor, reason, expected revision, and
 the exact reviewed definition or amendment.
 

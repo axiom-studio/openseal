@@ -77,7 +77,7 @@ Enter to submit and Shift+Enter for a new line.
 `context.yaml` is standalone OpenSeal's local Vault alternative. It maps opaque
 credential references to environment variables or owner-only files; secret
 values never enter prompts, durable state, capability responses, or the TUI.
-See [Standalone context and local Vault](docs/standalone-context.md).
+See [Standalone context and local Vault](docs/dev-docs/standalone-context.md).
 
 The checked-in `daemon.yaml` and generated local configuration both use the
 loopback API at `http://127.0.0.1:8080`.
@@ -137,25 +137,52 @@ fixed surface.
 
 ## Documentation
 
-- [Documentation index](docs/README.md) — recommended reading order
-- [Getting started](docs/getting-started.md) — install, configure, start, and
+User-facing documentation lives in [`docs/user-docs`](docs/user-docs/index.md).
+It covers what OpenSeal is, how to run it, and the API, CLI, and Go facade:
+
+- [Getting started](docs/user-docs/getting-started.md) — requirements, build,
+  first daemon, and the terminal client
+- [Core concepts](docs/user-docs/concepts.md) — execution model, capability
+  discovery, scopes, and owners
+- [Agents and Teams](docs/user-docs/agents-and-teams.md) — definitions,
+  deployments, activation, and amendments
+- [Objectives and Runs](docs/user-docs/objectives-and-runs.md) — the portfolio
+  and the Run lifecycle
+- [Skills and approvals](docs/user-docs/skills-and-approvals.md) — bindings,
+  action calls, approvals, and ClawHub
+- [Workforces](docs/user-docs/workforces.md) — prompt-to-workforce authoring
+  and portable bundles
+- [Configuration](docs/user-docs/configuration.md) — the daemon config, the
+  standalone context, and environment variables
+- [Security boundaries](docs/user-docs/security.md) — what OpenSeal does and
+  does not provide
+- [Operations](docs/user-docs/operations.md) — deployment, persistence, and
+  observability
+- [CLI reference](docs/user-docs/cli.md) — every command, flag, and TUI key
+- [API reference](docs/user-docs/api.md) — REST routes, runbook nodes, and the
+  Go embedding facade
+
+Contributor and internal documentation lives in `docs/dev-docs`:
+
+- [Documentation index](docs/dev-docs/README.md) — recommended reading order
+- [Getting started](docs/dev-docs/getting-started.md) — install, configure, start, and
   verify a local daemon
-- [Core concepts](docs/concepts.md) — Agents, Teams, objectives, Runs, Skills,
+- [Core concepts](docs/dev-docs/concepts.md) — Agents, Teams, objectives, Runs, Skills,
   approvals, conversations, evidence, and recovery
-- [Callable runbooks](docs/callable-runbooks.md) — typed deterministic
+- [Callable runbooks](docs/dev-docs/callable-runbooks.md) — typed deterministic
   operations that cognitive Agents invoke through durable Runs
-- [Runbook activation verification](docs/runbook-verification.md) — deterministic
+- [Runbook activation verification](docs/dev-docs/runbook-verification.md) — deterministic
   proof of exact bindings, authority, credentials, approvals, and budgets
-- [Architecture](docs/architecture/autonomous-agent-runtime.md) — implemented
+- [Architecture](docs/dev-docs/architecture/autonomous-agent-runtime.md) — implemented
   layers, execution lifecycle, and extension boundaries
-- [Terminal UI](docs/tui.md) — workspace configuration and keyboard model
-- [Standalone context and local Vault](docs/standalone-context.md) — local
+- [Terminal UI](docs/dev-docs/tui.md) — workspace configuration and keyboard model
+- [Standalone context and local Vault](docs/dev-docs/standalone-context.md) — local
   model routing and execution-time secret resolution without durable values
-- [CLI reference](docs/cli.md) — every implemented command and option
-- [REST API](docs/api.md) — capability discovery, conventions, and route groups
-- [Operations](docs/operations.md) — persistence, model setup, recovery, and
+- [CLI reference](docs/dev-docs/cli.md) — every implemented command and option
+- [REST API](docs/dev-docs/api.md) — capability discovery, conventions, and route groups
+- [Operations](docs/dev-docs/operations.md) — persistence, model setup, recovery, and
   production embedding
-- [OpenClaw compatibility](docs/skills/openclaw-compatibility.md) — compilation,
+- [OpenClaw compatibility](docs/dev-docs/skills/openclaw-compatibility.md) — compilation,
   lifecycle, guarantees, and security boundaries
 
 ## Library embedding
@@ -181,7 +208,7 @@ defer engine.Stop()
 An engine defaults to an in-memory store. Use an explicit persistent store for
 durable work and configure the Agent and action workers required by the
 deployment. See the
-[architecture guide](docs/architecture/autonomous-agent-runtime.md) for the
+[architecture guide](docs/dev-docs/architecture/autonomous-agent-runtime.md) for the
 adapter boundary.
 
 ## Development
@@ -191,7 +218,7 @@ make test
 make vet
 ```
 
-Optional live tests are documented in [Operations](docs/operations.md). They
+Optional live tests are documented in [Operations](docs/dev-docs/operations.md). They
 are not part of the default deterministic test suite.
 
 ## License
