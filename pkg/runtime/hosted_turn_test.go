@@ -50,6 +50,50 @@ type recordingTurnHost struct {
 	err      error
 }
 
+func TestHostedTurnArtifactMediaRequiresCompleteUnambiguousProvenance(t *testing.T) {
+	valid := HostedTurnMedia{MediaType: "image/png", DataBase64: base64.StdEncoding.EncodeToString([]byte("bytes")), SourceArtifactID: "file", SourceArtifactVersion: 1, SourceMessageID: "message"}
+	if err := validateHostedTurnMedia(valid); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func(*HostedTurnMedia){
+		func(m *HostedTurnMedia) { m.SourceArtifactVersion = 0 },
+		func(m *HostedTurnMedia) { m.SourceArtifactID = "" },
+		func(m *HostedTurnMedia) { m.SourceMessageID = "" },
+		func(m *HostedTurnMedia) { m.SourceActionCallID = "action" },
+	} {
+		invalid := valid
+		change(&invalid)
+		if validateHostedTurnMedia(invalid) == nil {
+			t.Fatal("invalid provenance accepted")
+		}
+	}
+	host := &recordingTurnHost{response: &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted, ModelProvider: "test", Model: "vision", OutputSummary: "inspected"}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Read my attachment"}
+	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}, ModelMedia: []HostedTurnMedia{valid}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(host.request.ModelMedia) != 1 || host.request.ModelMedia[0] != valid {
+		t.Fatal("attachment media lost at host boundary")
+	}
+	modelInput, err := MarshalHostedTurnModelInput(host.request)
+	if err != nil || strings.Contains(string(modelInput), valid.DataBase64) || !strings.Contains(string(modelInput), `"sourceArtifactId":"file"`) {
+		t.Fatal("model image identity missing or bytes leaked into text")
+	}
+	host.request.ModelMedia = nil // A host may remove images for a text-only provider.
+	modelInput, err = MarshalHostedTurnModelInput(host.request)
+	if err != nil || strings.Contains(string(modelInput), `"images"`) {
+		t.Fatal("text-only provider falsely told an image is attached")
+	}
+	serialized, _ := json.Marshal(run)
+	if strings.Contains(string(serialized), valid.DataBase64) || run.Checkpoint != nil {
+		t.Fatal("ephemeral media persisted on run")
+	}
+}
+
 func TestHostedTurnRetriesWhenPostActionReasoningFails(t *testing.T) {
 	host := &recordingTurnHost{err: errors.New("unexpected EOF")}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "browser", DefinitionID: "browser", DefinitionVersion: "1"})
