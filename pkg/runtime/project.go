@@ -177,9 +177,8 @@ func (i *Project) Validate() error {
 	if i.Revision < 1 {
 		return errors.New("project revision must be positive")
 	}
-	if len(i.ObjectiveRefs) == 0 {
-		return errors.New("project requires at least one objective reference")
-	}
+	// Projects may be created before their agents or objectives are attached.
+	// Scheduling remains owned by Objectives; an empty project schedules nothing.
 	if err := uniqueIDs(i.ObjectiveRefs, "objective"); err != nil {
 		return err
 	}
