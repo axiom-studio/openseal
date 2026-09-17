@@ -56,11 +56,9 @@ test("cancellation is deliberate and focused, with current revision authority", 
     .getByRole("button", { name: "Refresh workspace", exact: true })
     .click();
   await expect(
-    page
-      .getByRole("status")
-      .filter({
-        hasText: "This run changed. Review its latest state before canceling.",
-      }),
+    page.getByRole("status").filter({
+      hasText: "This run changed. Review its latest state before canceling.",
+    }),
   ).toBeFocused();
   await expect(
     page.getByRole("button", { name: "Confirm cancellation", exact: true }),
