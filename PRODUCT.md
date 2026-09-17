@@ -32,7 +32,7 @@ The user asks for a world-class, carefully detailed desktop app in the design tr
 
 ## Evidence on Hand
 
-README.md, docs/api.md, docs/tui.md, pkg/client, pkg/capability, and internal/server define the real product. desktop/crates/daemon-host implements native local API ownership. No customer proof or benchmarks have been supplied.
+README.md, docs/dev-docs/api.md, docs/dev-docs/tui.md, pkg/client, pkg/capability, and internal/server define the real product. desktop/crates/daemon-host implements native local API ownership. No customer proof or benchmarks have been supplied.
 
 ## Product Principles
 
