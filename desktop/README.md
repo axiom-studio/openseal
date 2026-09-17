@@ -76,7 +76,7 @@ requests, or approve actions.
 The desktop host restricts conversation creation/posting to its local scope and
 pinned user sender through `SetDesktopConversationScope`; these checks are not a
 general participant ACL system. Existing standalone behavior is unchanged.
-The messages API exposes `beforeSequence`; see `docs/api.md`.
+The messages API exposes `beforeSequence`; see `docs/dev-docs/api.md`.
 
 Five focused channel tests passed in 11 seconds, including real-daemon creation,
 post, reply, and reload. Go server/commands/runtime suites and targeted channel
@@ -293,7 +293,7 @@ that this client caused it. Late unmounted callbacks are ignored.
 The previously declared `PATCH /conversations/{id}` route now calls the existing
 revision-guarded core update service, rejects empty patches, and applies the
 configured desktop scope guard to updates as well as creation/posting. See
-`docs/api.md`. This is not a general participant ACL system.
+`docs/dev-docs/api.md`. This is not a general participant ACL system.
 
 All 85 browser tests passed in 2.5 minutes; nine focused tests passed in 17.5
 seconds, including real-daemon rename, archive, reload/history, restore, and post.
@@ -526,7 +526,7 @@ inspectable. Decisions are read-only unless the checkpoint is currently awaiting
 review for that run. Refreshing a saved decision describes the recorded outcome
 without prompting another decision, and repeated polling does not invent changes.
 The approval-list API validates `created_asc`/`created_desc`; memory ordering uses
-timestamp/ID tie breaks aligned with SQL. See `docs/api.md`.
+timestamp/ID tie breaks aligned with SQL. See `docs/dev-docs/api.md`.
 
 ## Review an action
 
@@ -594,7 +594,7 @@ data and may shift as new tasks arrive.
 The API accepts a validated order and a `q` query capped at 1,000 bytes. Memory and
 SQLite share scoped filtering; PostgreSQL uses parameterized literal `strpos`
 matching. SQLite already scans scoped rows; no scalability benchmark is claimed.
-See `docs/api.md` for the API contract.
+See `docs/dev-docs/api.md` for the API contract.
 
 ## Inspect collaboration and guide the lead
 
@@ -856,7 +856,7 @@ build and all 37 browser tests passed in 51.9 seconds, including nine focused
 approval cases and the real-daemon decision case. Server/commands/runtime race
 tests, final diff check, and direct token check passed; native saved-decision
 verification also passed. Existing tokens are reused without ignores. See
-`docs/api.md` for decision semantics and host authority.
+`docs/dev-docs/api.md` for decision semantics and host authority.
 
 Reviews evidence: all 40 browser tests passed in 56.8 seconds, including real-daemon
 pending review, approval, history, and reload. Linux native Reviews approval and
