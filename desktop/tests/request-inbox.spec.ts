@@ -240,7 +240,14 @@ test("task entry points select Tasks after visiting Requests", async ({
   await expect(page.getByLabel("Search work")).toBeVisible();
   await page.getByRole("button", { name: "Requests", exact: true }).click();
   await page.keyboard.press("Control+1");
-  await page.route("**/api/v1/agent-runs", (r) => r.fulfill({ json: { run } }));
+  let createdRun: any;
+  await page.route("**/api/v1/agent-runs", (r) => {
+    createdRun = { ...run, ...r.request().postDataJSON(), id: "new-task" };
+    return r.fulfill({ json: { run: createdRun } });
+  });
+  await page.route("**/api/v1/agent-runs/new-task?*", (r) =>
+    r.fulfill({ json: createdRun }),
+  );
   await page
     .getByRole("button", { name: "Start work", exact: true })
     .first()

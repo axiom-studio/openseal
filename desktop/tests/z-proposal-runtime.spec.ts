@@ -15,6 +15,21 @@ test("real daemon generation failure can be retried from its saved proposal", as
     },
   });
   expect(configured.ok()).toBe(true);
+  const creates: { key: string; body: unknown; id: string }[] = [];
+  await page.route(
+    "**/api/v1/authoring/workforce/change-sets",
+    async (route) => {
+      const response = await route.fetch();
+      const saved = await response.json();
+      creates.push({
+        key: route.request().headers()["idempotency-key"],
+        body: route.request().postDataJSON(),
+        id: saved.id,
+      });
+      if (creates.length === 1) return route.abort("failed");
+      return route.fulfill({ response });
+    },
+  );
   await page.goto("/");
   await expect(
     page.getByText("Connected locally", { exact: true }),
@@ -25,6 +40,20 @@ test("real daemon generation failure can be retried from its saved proposal", as
   await page
     .getByRole("button", { name: "Create proposal", exact: true })
     .click();
+  await expect(
+    page.getByRole("region", { name: "Saved request recovery" }),
+  ).toContainText("Could not confirm");
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Retry saved request", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => localStorage.getItem("openseal.home-submission")),
+    )
+    .toBeNull();
+  expect(creates).toHaveLength(2);
+  expect(creates[1]).toEqual(creates[0]);
   await expect(
     page.getByText("Generation failed", { exact: true }),
   ).toBeVisible({ timeout: 30000 });

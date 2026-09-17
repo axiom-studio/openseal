@@ -6,6 +6,40 @@ The complete product is still in development: advanced placement and credential
 mapping, full team management,
 broader approval workflows, advanced channel workflows, and marketplace remain unfinished.
 
+## Home request recovery
+
+Before Home submits an agent proposal, team proposal, or task, it saves the exact
+path/body, prompt/mode/agent draft, and UUID. Pending fields stay copyable but
+read-only, including against programmatic edits. Explicit retry uses the same
+request across reload. Invalid or unreadable saved recovery blocks new requests
+until **Retry recovery** succeeds or the user confirms forgetting. Responses must
+match scope, identity, revision, and request details. The draft is durably cleared
+before releasing the retry key; local cleanup failure retains recovery identity.
+A task that succeeds in the background does not pull navigation away from Settings.
+
+**Forget saved request…** opens an inline confirmation. It removes only this
+device’s retry record and keeps the prompt; it does not cancel a saved proposal or
+work. The explanation warns that submitting the same prompt again may create
+another record. Recovery feedback and confirmation receive focus, and dismissing
+confirmation returns focus to its trigger.
+
+Seven mocked recovery tests and three real-daemon proposal tests passed, including
+an accepted request with a lost response followed by reload and recovery of the
+same proposal ID. Final Linux native smoke passed forced local cleanup failure,
+reload, and recovery of the same proposal ID alongside the prior lifecycle.
+The full browser run finished with 116 passes and two failures caused by existing
+POST fixtures omitting newly validated proposal scope or returning a team-owned
+run for an agent task. After test-only corrections, both affected test files passed
+all nine tests in 15.6 seconds. Product source was unchanged; no clean single-run
+118-test pass is claimed. Production build and formatting passed. This milestone made no Go product changes
+and claims no new Go test run. The bounded review in
+`.impeccable/review/home-recovery-finish.md` accepts the surface without material
+fixes; all three desktop/mobile/native captures were inspected. Existing spacing
+and controls are reused, with no new tokens or ignores; the detector returned no
+findings. Evidence uses synthetic providers, not live model quality or macOS/Windows
+verification. The global comp gate remains open; bounded acceptance is not
+whole-app certification.
+
 ## Proposal review
 
 Home displays generated agents as a structured proposal with expandable instructions,
