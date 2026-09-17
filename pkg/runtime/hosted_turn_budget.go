@@ -61,6 +61,7 @@ const (
 // model. Keeping it portable lets the kernel reserve the same immutable input
 // that an enterprise host dispatches.
 type HostedTurnModelInput struct {
+	Images                    []HostedImageReference           `json:"images,omitempty"`
 	Goal                      string                           `json:"goal"`
 	InputContext              map[string]interface{}           `json:"inputContext,omitempty"`
 	SystemInstructions        []string                         `json:"systemInstructions,omitempty"`
@@ -76,6 +77,16 @@ type HostedTurnModelInput struct {
 	CollaborationResults      map[string]interface{}           `json:"collaborationResults,omitempty"`
 	ContinuationCheckpoint    map[string]interface{}           `json:"continuationCheckpoint,omitempty"`
 	PendingInterventions      []AgentRunIntervention           `json:"pendingInterventions,omitempty"`
+}
+
+// HostedImageReference identifies each image in the separate provider media
+// channel, in the same order, without copying binary data into textual input.
+type HostedImageReference struct {
+	MediaType             string `json:"mediaType"`
+	SourceActionCallID    string `json:"sourceActionCallId,omitempty"`
+	SourceArtifactID      string `json:"sourceArtifactId,omitempty"`
+	SourceArtifactVersion int64  `json:"sourceArtifactVersion,omitempty"`
+	SourceMessageID       string `json:"sourceMessageId,omitempty"`
 }
 
 // HostedActionInvocationContract makes the complete model-authored Turn
@@ -153,8 +164,13 @@ func effectiveExternalOperationPolicy(sideEffect capability.SideEffect, policy c
 }
 
 func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
+	images := make([]HostedImageReference, 0, len(request.ModelMedia))
+	for _, media := range request.ModelMedia {
+		images = append(images, HostedImageReference{MediaType: media.MediaType, SourceActionCallID: media.SourceActionCallID, SourceArtifactID: media.SourceArtifactID, SourceArtifactVersion: media.SourceArtifactVersion, SourceMessageID: media.SourceMessageID})
+	}
 	return json.Marshal(HostedTurnModelInput{
-		Goal: request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
+		Images: images,
+		Goal:   request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
 		EligibleAgents:            request.EligibleAgents,
 		Workspace:                 projectHostedWorkspace(request.Workspace),
 		WorkspaceOperations:       request.WorkspaceOperations,
