@@ -364,6 +364,7 @@ test("an old refinement response cannot replace a newly created proposal", async
   };
   const next = {
     id: "new-proposal",
+    scope: { kind: "local", id: "default" },
     revision: 1,
     status: "review",
     prompt: "New proposal",
