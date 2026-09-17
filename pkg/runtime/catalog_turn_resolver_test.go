@@ -188,6 +188,9 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
 		t.Fatal(err)
 	}
+	if !containsString(host.request.SystemInstructions, agentResourcefulnessGuidance) {
+		t.Fatal("hosted work did not receive resourcefulness guidance")
+	}
 	if host.request.Workspace == nil || host.request.Workspace.Workspace.ID != workspace.DefaultID || host.request.Workspace.Workspace.Policy.Filesystem != workspace.AccessReadWrite {
 		t.Fatalf("workspace authority = %#v", host.request.Workspace)
 	}
@@ -292,7 +295,7 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 	catalog := &resolverCatalog{
 		deployment: &kernelagent.AgentDeployment{
 			ID: "analyst", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "17"}},
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "private-model-reference-17"}},
 		},
 		definition: &kernelagent.AgentDefinition{ID: "analyst", Version: "1", Purpose: "Analyze", SystemPrompt: "Work carefully."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "analyst"},
@@ -305,11 +308,11 @@ func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *
 	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
 		t.Fatal(err)
 	}
-	if host.request.ModelCredential == nil || host.request.ModelCredential.Kind != "model-provider" || host.request.ModelCredential.ID != "17" {
+	if host.request.ModelCredential == nil || host.request.ModelCredential.Kind != "model-provider" || host.request.ModelCredential.ID != "private-model-reference-17" {
 		t.Fatalf("model credential = %#v", host.request.ModelCredential)
 	}
 	modelInput, _ := MarshalHostedTurnModelInput(host.request)
-	if strings.Contains(string(modelInput), "17") || strings.Contains(strings.ToLower(string(modelInput)), "credential") {
+	if strings.Contains(string(modelInput), "private-model-reference-17") || strings.Contains(string(modelInput), `"modelCredential"`) || strings.Contains(string(modelInput), "model-provider") || strings.Contains(string(modelInput), "MODEL_PROVIDER") {
 		t.Fatalf("model input leaked credential reference: %s", modelInput)
 	}
 }
