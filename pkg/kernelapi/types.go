@@ -100,6 +100,7 @@ const (
 	OperationChanges              = "changes"
 	OperationReceipts             = "receipts"
 	OperationCoordinateAuto       = "coordinate-automatically"
+	OperationParticipation        = "configure-participation"
 	OperationStream               = "stream"
 	OperationDeploy               = "deploy"
 	OperationActivate             = "activate"
@@ -178,6 +179,7 @@ type SkillActionList struct {
 // a host. The version and operation vocabulary are canonical; each host
 // advertises only the portable or enterprise adapters it has actually wired.
 type ChannelCapabilityFeatures struct {
+	ParticipationSettings bool
 	Coordination          bool
 	AutomaticCoordination bool
 	Receipts              bool
@@ -675,6 +677,9 @@ func ChannelsCapability(features ChannelCapabilityFeatures) Capability {
 	if features.Coordination {
 		capability.Operations = append(capability.Operations, OperationCoordinate)
 	}
+	if features.ParticipationSettings {
+		capability.Operations = append(capability.Operations, OperationParticipation)
+	}
 	if features.AutomaticCoordination {
 		capability.Operations = append(capability.Operations, OperationCoordinateAuto)
 	}
@@ -1035,10 +1040,11 @@ type CreateConversationRequest struct {
 }
 
 type UpdateConversationRequest struct {
-	Scope            runtime.Scope               `json:"scope"`
-	ExpectedRevision int64                       `json:"expectedRevision"`
-	Title            *string                     `json:"title,omitempty"`
-	Status           *runtime.ConversationStatus `json:"status,omitempty"`
+	ParticipationEnabled *bool                       `json:"participationEnabled,omitempty"`
+	Scope                runtime.Scope               `json:"scope"`
+	ExpectedRevision     int64                       `json:"expectedRevision"`
+	Title                *string                     `json:"title,omitempty"`
+	Status               *runtime.ConversationStatus `json:"status,omitempty"`
 }
 
 type PostChannelMessageRequest struct {

@@ -77,7 +77,7 @@ def model_fixture():
         def do_POST(self):
             payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
             tool_name = payload['tools'][0]['function']['name']
-            assert tool_name in ('submit_authoring_intent', 'submit_agent_turn')
+            assert tool_name in ('submit_authoring_intent', 'submit_agent_turn', 'submit_channel_contribution')
             intent = {'schemaVersion': 'openseal.authoring-intent/v4', 'kind': 'agent', 'name': 'Native analyst', 'purpose': 'Analyze supplied evidence', 'agents': [{'key': 'native-analyst', 'name': 'Native analyst', 'purpose': 'Analyze supplied evidence', 'behavior': 'Analyze accurately and report uncertainty.'}]}
             if tool_name == 'submit_authoring_intent' and json.loads(payload['messages'][1]['content'])['prompt'].startswith('Create one team.'):
                 intent = {'schemaVersion': 'openseal.authoring-intent/v4', 'kind': 'team', 'name': 'Native evidence team', 'purpose': 'Review supplied evidence together.',
@@ -128,6 +128,8 @@ def model_fixture():
                         intent['proposedDelegation'] = {'stepId': 'native-check', 'assignedAgentId': task_input['eligibleAgents'][0]['id'], 'goal': 'Check the supplied reporting evidence.', 'checkpoint': {}, 'budget': budget}
                         if clarified:
                             intent['proposedDelegation']['clarification'] = 'Use the July reporting period.'
+            if tool_name == 'submit_channel_contribution':
+                intent = {'wantsToSpeak': True, 'content': 'Native team reply: verify the source and preserve uncertainty.', 'roleRelevant': True, 'hasNewInformation': True}
             response = json.dumps({'choices': [{'finish_reason': 'tool_calls', 'message': {'tool_calls': [{'id': 'native-fixture', 'type': 'function', 'function': {'name': tool_name, 'arguments': json.dumps(intent)}}]}}]}).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -515,6 +517,15 @@ def main():
             until("return document.querySelector('.channel-read-state')?.innerText.includes('Saved read position refreshed.')")
             assert execute("return document.querySelector('.channel-read-state')?.innerText.includes('You’re caught up')")
             execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Channel settings').click(); return true")
+            execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Enable team replies').click(); return true")
+            until("return document.querySelector('.channel-settings')?.innerText.includes('Team replies are on.')")
+            fill('.channel-thread textarea', 'Review this new evidence with the team.')
+            execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Post message').click(); return true")
+            until("return document.querySelector('.channel-thread')?.innerText.includes('Native team reply: verify the source and preserve uncertainty.')")
+            execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Disable team replies').click(); return true")
+            until("return document.querySelector('.channel-settings')?.innerText.includes('Team replies are off.')")
+            execute("document.querySelector('.channel-settings .channel-availability').scrollIntoView({block:'center'}); return true")
+            (output.parent / 'channel-participation-native-linux.png').write_bytes(base64.b64decode(call('/session/' + session + '/screenshot')))
             fill('.channel-settings input', 'Reviewed native evidence')
             execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Save channel name').click(); return true")
             until("return document.querySelector('.channel-settings')?.innerText.includes('Channel renamed.')")

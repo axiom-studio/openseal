@@ -134,3 +134,18 @@ func (s *DesktopConversationParticipants) resolve(ctx context.Context, query run
 	sort.Slice(members, func(i, j int) bool { return members[i].binding.Participant.ID < members[j].binding.Participant.ID })
 	return members, nil
 }
+
+// ResolvePolicy narrows the host speaker cap using the active Team definition.
+func (s *DesktopConversationParticipants) ResolvePolicy(ctx context.Context, channel *runtime.Conversation) (runtime.ConversationArbitrationPolicy, error) {
+	members, err := s.resolve(ctx, runtime.ConversationParticipantQuery{Conversation: channel})
+	if err != nil {
+		return runtime.ConversationArbitrationPolicy{}, err
+	}
+	authored := members[0].teamDefinition.Coordination
+	policy := runtime.DefaultConversationArbitrationPolicy()
+	if authored.MaximumSpeakersPerRound > 0 {
+		policy.MaximumSpeakers = min(policy.MaximumSpeakers, authored.MaximumSpeakersPerRound)
+	}
+	policy.Participation = &runtime.ConversationParticipationPolicy{QuietByDefault: authored.QuietByDefault, RequireRoleRelevance: authored.RequireRoleRelevance, SuppressDuplicateContent: authored.SuppressDuplicateContent}
+	return policy, nil
+}

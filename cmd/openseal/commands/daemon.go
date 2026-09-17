@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/axiom-studio/openseal/internal/daemon"
 	"github.com/axiom-studio/openseal/internal/server"
@@ -227,6 +228,51 @@ Options:
 			opensealkernel.WithDynamicActionWorkers(runtime.DynamicActionWorkerConfig{Concurrency: 2, WorkerIDPrefix: "standalone-action"}, workerScopeSource, standaloneContext, dispatcher),
 		)
 	}
+	if taskHost != nil {
+		participants := runtime.ConversationParticipantSourceFunc(func(ctx context.Context, query runtime.ConversationParticipantQuery) ([]runtime.ConversationParticipantBinding, error) {
+			if kernel == nil {
+				return nil, runtime.ErrConversationCoordinationUnavailable
+			}
+			source, err := daemon.NewDesktopConversationParticipants(kernel, scope, 8)
+			if err != nil {
+				return nil, err
+			}
+			return source.ResolveConversationParticipants(ctx, query)
+		})
+		proposals := runtime.MeteredParticipationProposalProviderFunc(func(ctx context.Context, input runtime.ParticipationProposalContext) (runtime.MeteredParticipationProposal, error) {
+			if kernel == nil {
+				return runtime.MeteredParticipationProposal{}, runtime.ErrConversationCoordinationUnavailable
+			}
+			source, err := daemon.NewDesktopConversationParticipants(kernel, scope, 8)
+			if err != nil {
+				return runtime.MeteredParticipationProposal{}, err
+			}
+			provider, err := daemon.NewDesktopParticipationProvider(taskHost, source)
+			if err != nil {
+				return runtime.MeteredParticipationProposal{}, err
+			}
+			return provider.ProposeParticipationWithUsage(ctx, input)
+		})
+		config := runtime.DefaultConversationCoordinatorConfig()
+		config.MaximumParticipants, config.MaximumConcurrency, config.RecentMessageLimit = 8, 2, 30
+		config.ProposalBudget = runtime.ParticipationProposalBudget{InputTokens: 16000, OutputTokens: 2048}
+		localScopes := runtime.WorkerScopeSourceFunc(func(context.Context) ([]runtime.Scope, error) { return []runtime.Scope{scope}, nil })
+		engineOptions = append(engineOptions,
+			opensealkernel.WithConversationCoordinator(participants, proposals, config),
+			opensealkernel.WithDynamicConversationRuns(opensealkernel.ConversationRunConfig{
+				Scheduler: runtime.ConversationRunSchedulerConfig{RequireParticipationOptIn: true, Budget: &runtime.BudgetPolicy{MaxTurns: 3, MaxAttempts: 4, MaxTotalTokens: 432000, MaxOutputTokens: 49152, MaxDurationMS: 180000}},
+				Runner: runtime.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true, ResolvePolicy: func(ctx context.Context, channel *runtime.Conversation) (runtime.ConversationArbitrationPolicy, error) {
+					source, err := daemon.NewDesktopConversationParticipants(kernel, scope, 8)
+					if err != nil {
+						return runtime.ConversationArbitrationPolicy{}, err
+					}
+					return source.ResolvePolicy(ctx, channel)
+				}},
+				Workers:    runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindConversation, Concurrency: 2, MaxTurnsPerClaim: 1, WorkerIDPrefix: "desktop-channel"},
+				Reconciler: runtime.ConversationRunReconcilerConfig{Interval: 5 * time.Second},
+			}, localScopes),
+		)
+	}
 	kernel, err = opensealkernel.New(engineOptions...)
 	if err != nil {
 		sugar.Fatalf("configure OpenSeal kernel: %v", err)
@@ -264,6 +310,22 @@ Options:
 	if *desktopOperator {
 		apiServer.SetActionApprovalAuthorizer(server.DesktopApprovalAuthorizer{Scope: scope})
 		apiServer.SetDesktopConversationScope(scope)
+		authorize := func(ctx context.Context, channel *runtime.Conversation) error {
+			if taskHost == nil {
+				return fmt.Errorf("configure a model provider in Settings before enabling team replies")
+			}
+			source, err := daemon.NewDesktopConversationParticipants(kernel, scope, 8)
+			if err != nil {
+				return err
+			}
+			_, err = source.ResolveConversationParticipants(ctx, runtime.ConversationParticipantQuery{Conversation: channel})
+			return err
+		}
+		var post func(context.Context, runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error)
+		if taskHost != nil {
+			post = kernel.PostChannelMessage
+		}
+		apiServer.SetChannelParticipation(authorize, post)
 	}
 	apiServer.SetClawHubLifecycle(kernel, *standaloneOperator)
 	apiServer.SetWorkforceCredentialBindings(standaloneContext.CredentialChoices(scope))

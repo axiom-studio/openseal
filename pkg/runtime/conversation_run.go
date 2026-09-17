@@ -480,6 +480,8 @@ func conversationRunIdempotencyKey(scope Scope, conversationID, messageID string
 }
 
 type ConversationRunTurnRunnerConfig struct {
+	// ResolvePolicy applies canonical host/Team policy before a new round.
+	ResolvePolicy             func(context.Context, *Conversation) (ConversationArbitrationPolicy, error)
 	RequireParticipationOptIn bool
 	MaximumRetries            int
 	InitialRetryDelay         time.Duration
@@ -764,6 +766,21 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		}, nil
 	}
 	key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
+	policy := r.config.Policy
+	if r.config.ResolvePolicy != nil {
+		saved, err := r.conversations.FindParticipationRoundByIdempotencyKey(ctx, input.Run.Scope, conversationID, key)
+		if err != nil {
+			return nil, err
+		}
+		if saved != nil {
+			policy = saved.Round.Policy
+		} else {
+			policy, err = r.config.ResolvePolicy(ctx, conversation)
+			if err != nil {
+				return r.retryOutcome(input.Run, err)
+			}
+		}
+	}
 	usageTurnID := ""
 	if input.Turn != nil {
 		usageTurnID = input.Turn.ID
@@ -771,7 +788,7 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	result, measuredUsage, err := r.coordinator.CoordinateWithUsage(ctx, ConversationCoordinationRequest{
 		UsageTurnID: usageTurnID,
 		Scope:       input.Run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
-		TriggerMessageID: triggerID, Policy: r.config.Policy, MaximumConcurrency: r.config.MaximumConcurrency,
+		TriggerMessageID: triggerID, Policy: policy, MaximumConcurrency: r.config.MaximumConcurrency,
 		MessageReferences: []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}},
 		IdempotencyKey:    key,
 	})

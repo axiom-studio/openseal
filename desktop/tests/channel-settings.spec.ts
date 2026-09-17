@@ -36,7 +36,13 @@ async function visit(page: Page, title = "Source decisions", archived = false) {
     })
     .click();
 }
-async function setup(page: Page, get = () => initial, writable = true) {
+async function setup(
+  page: Page,
+  get = () => initial,
+  writable = true,
+  participation = false,
+  automatic = participation,
+) {
   await page.route("**/api/v1/capabilities", (r) =>
     r.fulfill({
       json: {
@@ -51,6 +57,8 @@ async function setup(page: Page, get = () => initial, writable = true) {
               "read",
               "post",
               ...(writable ? ["update"] : []),
+              ...(participation ? ["configure-participation"] : []),
+              ...(automatic ? ["coordinate-automatically"] : []),
             ],
           },
         ],
@@ -315,4 +323,134 @@ test("read-only capability hides management and unavailable recovery storage pre
     controls.getByRole("alert").filter({ hasText: "Nothing was changed" }),
   ).toBeVisible();
   expect(writes).toBe(0);
+});
+
+test("team replies persist uncertain delivery and recover without replay", async ({
+  page,
+}) => {
+  let current = {
+    ...initial,
+    scope: { kind: "local", id: "default" },
+    participation: { enabled: false, afterSequence: 0 },
+  };
+  const writes: any[] = [];
+  await page.route("**/api/v1/conversations/channel", async (route) => {
+    const body = route.request().postDataJSON();
+    expect(body.scope).toEqual(current.scope);
+    expect(body.expectedRevision).toBe(current.revision);
+    writes.push(body);
+    current = {
+      ...current,
+      revision: current.revision + 1,
+      participation: {
+        enabled: body.participationEnabled,
+        afterSequence: current.lastSequence,
+      },
+    };
+    if (writes.length === 1) return route.abort();
+    return route.fulfill({ json: current });
+  });
+  await setup(page, () => current, true, true);
+  let panel = await settings(page);
+  await expect(
+    panel.getByText("Team replies are off.", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByLabel("Message to this channel", { exact: true })
+    .fill("Keep this message draft.");
+  await panel
+    .getByRole("button", { name: "Enable team replies", exact: true })
+    .click();
+  await expect(panel.getByRole("alert")).toContainText(
+    "Could not confirm the change",
+  );
+  await expect(
+    panel.getByRole("button", { name: "Enable team replies", exact: true }),
+  ).toBeDisabled();
+  await visit(page);
+  panel = page.getByRole("region", { name: "Channel settings", exact: true });
+  await expect(
+    panel.getByRole("button", { name: "Check saved channel", exact: true }),
+  ).toBeVisible();
+  await panel
+    .getByRole("button", { name: "Check saved channel", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "No change was sent again",
+  );
+  expect(writes).toHaveLength(1);
+  await expect(
+    panel.getByText("Team replies are on.", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByLabel("Message to this channel", { exact: true }),
+  ).toHaveValue("Keep this message draft.");
+  await panel
+    .getByRole("button", { name: "Disable team replies", exact: true })
+    .click();
+  await expect(panel.getByRole("status")).toContainText(
+    "Team replies disabled",
+  );
+  await expect(panel.getByRole("status")).toBeFocused();
+  expect(writes.map((w) => w.participationEnabled)).toEqual([true, false]);
+  await panel
+    .getByRole("heading", { name: "Team replies", exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: "../.impeccable/review/channel-participation-desktop.png",
+    fullPage: false,
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await panel
+    .getByRole("heading", { name: "Team replies", exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: "../.impeccable/review/channel-participation-mobile.png",
+    fullPage: false,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test("team replies remain disableable without a provider and are absent without host support", async ({
+  page,
+}) => {
+  const current = {
+    ...initial,
+    scope: { kind: "local", id: "default" },
+    participation: { enabled: true, afterSequence: 0 },
+  };
+  await setup(page, () => current, true, true, false);
+  const panel = await settings(page);
+  await expect(
+    panel.getByText(
+      "Connect a model provider in Settings to enable team replies.",
+    ),
+  ).toBeVisible();
+  await expect(
+    panel.getByRole("button", { name: "Disable team replies", exact: true }),
+  ).toBeEnabled();
+  await page.unroute("**/api/v1/capabilities");
+  await page.route("**/api/v1/capabilities", (r) =>
+    r.fulfill({
+      json: {
+        capabilities: [
+          { id: "team-definitions", available: true, operations: ["list"] },
+          {
+            id: "channels",
+            available: true,
+            operations: ["list", "get", "read", "update"],
+          },
+        ],
+      },
+    }),
+  );
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: /^(Enable|Disable) team replies$/ }),
+  ).toHaveCount(0);
 });
