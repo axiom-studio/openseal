@@ -525,3 +525,29 @@ func TestTurnCoordinatorDiscardsLateOutcomeAfterRunCancellation(t *testing.T) {
 		})
 	}
 }
+
+func TestTurnCoordinatorChargesKnownUsageOnFailedOutcome(t *testing.T) {
+	for _, kind := range []string{"runner-error", "invalid-outcome"} {
+		t.Run(kind, func(t *testing.T) {
+			store := NewMemoryStore()
+			scope := Scope{Kind: "local", ID: "failed-usage"}
+			run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Bounded generation", Budget: &BudgetPolicy{MaxTurns: 2, MaxTotalTokens: 100}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "worker"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				outcome := &TurnOutcome{Usage: TurnUsage{InputTokens: 12, OutputTokens: 8}, NextRunStatus: AgentRunStatus("invalid")}
+				if kind == "runner-error" {
+					return outcome, errors.New("generation failed")
+				}
+				return outcome, nil
+			}))
+			if err == nil {
+				t.Fatal("failed outcome accepted")
+			}
+			if result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.BudgetUsage.InputTokens != 12 || result.Run.BudgetUsage.OutputTokens != 8 || result.Turn.Usage.InputTokens != 12 {
+				t.Fatalf("failed work lost usage: %#v %v", result, err)
+			}
+		})
+	}
+}

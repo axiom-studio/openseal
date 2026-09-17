@@ -68,7 +68,22 @@ func (f ConversationParticipantSourceFunc) ResolveConversationParticipants(ctx c
 	return f(ctx, query)
 }
 
+// ParticipationProposalBudget is an enforceable allowance for one provider
+// invocation. A metered host must preflight input and cap generation to it.
+type ParticipationProposalBudget struct {
+	InputTokens  int64
+	OutputTokens int64
+}
+
+func (b ParticipationProposalBudget) validate() error {
+	if b.InputTokens < 1 || b.OutputTokens < 1 || b.InputTokens > 1_000_000_000 || b.OutputTokens > 1_000_000_000 {
+		return errors.New("participation token allowances must be between 1 and 1000000000")
+	}
+	return nil
+}
+
 type ParticipationProposalContext struct {
+	Budget         *ParticipationProposalBudget
 	Conversation   *Conversation
 	Trigger        *ChannelMessage
 	RecentMessages []*ChannelMessage
@@ -93,7 +108,34 @@ func (f ParticipationProposalProviderFunc) ProposeParticipation(ctx context.Cont
 	return f(ctx, input)
 }
 
+// MeteredParticipationProposal is a host report, not model-authored usage.
+// Providers return any known usage even when generation or validation fails.
+type MeteredParticipationProposal struct {
+	Proposal ParticipationProposal
+	Usage    TurnUsage
+}
+
+// MeteredParticipationProposalProvider extends the legacy embedding contract.
+// Durable conversation Runs use this usage to charge every attempted proposal,
+// including proposals discarded by arbitration or a channel revision conflict.
+type MeteredParticipationProposalProvider interface {
+	ProposeParticipationWithUsage(context.Context, ParticipationProposalContext) (MeteredParticipationProposal, error)
+}
+
+type MeteredParticipationProposalProviderFunc func(context.Context, ParticipationProposalContext) (MeteredParticipationProposal, error)
+
+func (f MeteredParticipationProposalProviderFunc) ProposeParticipationWithUsage(ctx context.Context, input ParticipationProposalContext) (MeteredParticipationProposal, error) {
+	return f(ctx, input)
+}
+
+func (f MeteredParticipationProposalProviderFunc) ProposeParticipation(ctx context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+	result, err := f(ctx, input)
+	return result.Proposal, err
+}
+
 type ConversationCoordinationRequest struct {
+	// UsageTurnID is the durable host turn that will settle this invocation.
+	UsageTurnID      string
 	Scope            Scope
 	ConversationID   string
 	ExpectedRevision int64
@@ -109,6 +151,11 @@ type ConversationCoordinationRequest struct {
 }
 
 type ConversationCoordinatorConfig struct {
+	// RequireUsageReporting rejects providers that cannot report actual usage.
+	RequireUsageReporting bool
+	// ProposalBudget bounds each participant; planning reserves for the configured
+	// maximum roster so membership changes cannot exceed the admitted round.
+	ProposalBudget      ParticipationProposalBudget
 	MaximumParticipants int
 	MaximumConcurrency  int
 	RecentMessageLimit  int
@@ -136,6 +183,12 @@ func (c ConversationCoordinatorConfig) normalize() (ConversationCoordinatorConfi
 		c.PresenceTTL < 5*time.Second || c.PresenceTTL > 30*time.Minute {
 		return ConversationCoordinatorConfig{}, fmt.Errorf("%w: invalid conversation coordinator configuration", ErrInvalidConversation)
 	}
+	if c.ProposalBudget != (ParticipationProposalBudget{}) {
+		if err := c.ProposalBudget.validate(); err != nil {
+			return ConversationCoordinatorConfig{}, err
+		}
+		c.RequireUsageReporting = true
+	}
 	return c, nil
 }
 
@@ -162,10 +215,29 @@ func NewConversationCoordinator(
 	if err != nil {
 		return nil, err
 	}
+	if normalized.RequireUsageReporting {
+		if _, ok := proposals.(MeteredParticipationProposalProvider); !ok {
+			return nil, errors.New("conversation provider must report usage")
+		}
+	}
 	return &ConversationCoordinator{conversations: conversations, participants: participants, proposals: proposals, config: normalized}, nil
 }
 
 func (c *ConversationCoordinator) Coordinate(ctx context.Context, req ConversationCoordinationRequest) (*ParticipationRoundResult, error) {
+	result, _, err := c.CoordinateWithUsage(ctx, req)
+	return result, err
+}
+
+// CoordinateWithUsage reports usage from this invocation only. Replaying a
+// persisted round performs no provider calls and returns zero usage. Usage is
+// returned even when the round fails or its messages cannot be committed.
+func (c *ConversationCoordinator) CoordinateWithUsage(ctx context.Context, req ConversationCoordinationRequest) (*ParticipationRoundResult, TurnUsage, error) {
+	var usage TurnUsage
+	result, err := c.coordinate(ctx, req, &usage)
+	return result, usage, err
+}
+
+func (c *ConversationCoordinator) coordinate(ctx context.Context, req ConversationCoordinationRequest, usage *TurnUsage) (*ParticipationRoundResult, error) {
 	if c == nil || c.conversations == nil || c.participants == nil || c.proposals == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
@@ -274,6 +346,7 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 	}
 
 	proposals := make([]ParticipationProposal, len(bindings))
+	usages := make([]TurnUsage, len(bindings))
 	leases := make([]*ConversationPresence, len(bindings))
 	errs := make([]error, len(bindings))
 	jobs := make(chan int)
@@ -314,12 +387,38 @@ func (c *ConversationCoordinator) Coordinate(ctx context.Context, req Conversati
 				}
 				leases[index] = presence
 				proposalCtx, proposalCancel := context.WithTimeout(workerCtx, c.config.ProposalTimeout)
-				proposal, proposalErr := c.proposals.ProposeParticipation(proposalCtx, ParticipationProposalContext{
+				proposalInput := ParticipationProposalContext{
 					Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(visibleTrigger),
 					RecentMessages: cloneChannelMessages(visibleRecent), Participant: binding.Participant,
 					OpenMessages:  cloneChannelMessages(visibleOpen),
 					SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority,
-				})
+				}
+				if c.config.ProposalBudget != (ParticipationProposalBudget{}) {
+					budget := c.config.ProposalBudget
+					proposalInput.Budget = &budget
+				}
+				var proposal ParticipationProposal
+				var proposalErr error
+				if metered, ok := c.proposals.(MeteredParticipationProposalProvider); ok {
+					report, err := metered.ProposeParticipationWithUsage(proposalCtx, proposalInput)
+					proposal, proposalErr = report.Proposal, err
+					if usageErr := report.Usage.Validate(); usageErr != nil {
+						errs[index] = fmt.Errorf("participant %s reported invalid usage: %w", binding.Participant.ID, usageErr)
+						proposalCancel()
+						cancel()
+						continue
+					}
+					usages[index] = report.Usage
+					budget := c.config.ProposalBudget
+					if budget != (ParticipationProposalBudget{}) && (int64(report.Usage.InputTokens) > budget.InputTokens || int64(report.Usage.OutputTokens) > budget.OutputTokens) {
+						errs[index] = fmt.Errorf("%w: participant %s exceeded its token allowance", ErrInvalidConversation, binding.Participant.ID)
+						proposalCancel()
+						cancel()
+						continue
+					}
+				} else {
+					proposal, proposalErr = c.proposals.ProposeParticipation(proposalCtx, proposalInput)
+				}
 				proposalCancel()
 				if proposalErr != nil {
 					proposals[index] = unavailableParticipationProposal(binding, publicParticipationFailureCode(proposalErr))
@@ -362,6 +461,13 @@ queue:
 	close(jobs)
 	workers.Wait()
 	defer c.releasePresenceLeases(ctx, req.Scope, conversation.ID, bindings, leases)
+	for _, reported := range usages {
+		combined, err := addParticipationUsage(*usage, reported)
+		if err != nil {
+			return nil, err
+		}
+		*usage = combined
+	}
 	for _, proposalErr := range errs {
 		if proposalErr != nil {
 			return nil, proposalErr
@@ -382,6 +488,7 @@ queue:
 	return c.conversations.CoordinateParticipation(ctx, CoordinateParticipationRequest{
 		Scope: req.Scope, ConversationID: conversation.ID, ExpectedRevision: req.ExpectedRevision,
 		TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Policy: policy, Proposals: proposals, IdempotencyKey: key,
+		Usage: *usage, UsageTurnID: req.UsageTurnID,
 	})
 }
 

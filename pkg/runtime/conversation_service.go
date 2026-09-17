@@ -70,6 +70,8 @@ type ChannelMessageFilter struct {
 }
 
 type CoordinateParticipationRequest struct {
+	Usage            TurnUsage
+	UsageTurnID      string
 	ID               string
 	Scope            Scope
 	ConversationID   string
@@ -461,6 +463,7 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 		messages = append(messages, message)
 	}
 	round := &ParticipationRound{
+		Usage: req.Usage, UsageTurnID: req.UsageTurnID,
 		ID: roundID, Scope: req.Scope, ConversationID: conversation.ID, TriggerMessageID: strings.TrimSpace(req.TriggerMessageID),
 		Status: ParticipationRoundCommitted, Policy: normalizedPolicy, Proposals: proposals, Arbitration: *arbitration,
 		IdempotencyKey: key, Revision: 1, CreatedAt: now, CommittedAt: now,

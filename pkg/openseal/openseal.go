@@ -1737,6 +1737,14 @@ func DefaultConversationParticipationPolicy() runtime.ConversationParticipationP
 	return runtime.DefaultConversationParticipationPolicy()
 }
 
+// Metered participation contracts expose host-reported usage to durable Runs.
+type (
+	ParticipationProposalBudget              = runtime.ParticipationProposalBudget
+	MeteredParticipationProposal             = runtime.MeteredParticipationProposal
+	MeteredParticipationProposalProvider     = runtime.MeteredParticipationProposalProvider
+	MeteredParticipationProposalProviderFunc = runtime.MeteredParticipationProposalProviderFunc
+)
+
 func DefaultConversationCoordinatorConfig() runtime.ConversationCoordinatorConfig {
 	return runtime.DefaultConversationCoordinatorConfig()
 }

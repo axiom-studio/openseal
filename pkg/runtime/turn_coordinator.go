@@ -427,6 +427,13 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.EvidenceGrounding = outcome.EvidenceGrounding
 		}
 	}
+	// Provider work is chargeable even if its outcome fails validation, the
+	// runner returns an error, or the duration deadline discards its output.
+	// Preserve only independently valid usage; never accept failed side effects.
+	if outcome != nil && outcome.Usage.Validate() == nil && finish.Status != AgentTurnStatusCompleted {
+		finish.Usage = outcome.Usage
+		finish.Usage.DurationMS = max(finish.Usage.DurationMS, executionDurationMS)
+	}
 	if run.Budget != nil && finish.Status == AgentTurnStatusCompleted {
 		delta := budgetUsageForTurn(finish.Usage)
 		usage, usageErr := run.BudgetUsage.Add(delta)
