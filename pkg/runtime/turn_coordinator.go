@@ -13,6 +13,9 @@ import (
 type TurnExecutionContext struct {
 	Run  *AgentRun
 	Turn *AgentTurn
+	// ModelMedia is trusted, ephemeral input loaded from scoped message artifacts.
+	// It must never be copied into durable run context or model checkpoints.
+	ModelMedia []HostedTurnMedia
 }
 
 // TurnRunner performs one bounded, proposal-only reasoning step. External side
