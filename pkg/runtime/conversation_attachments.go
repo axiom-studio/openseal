@@ -73,10 +73,15 @@ func readConversationAttachment(ctx context.Context, store ArtifactContentStore,
 	}
 	switch mediaType {
 	case "text/plain", "text/csv", "text/tab-separated-values", "text/markdown", "application/json":
+	case spreadsheetMediaType:
 	default:
 		return "unsupported_format", ""
 	}
-	if artifact.SizeBytes < 0 || artifact.SizeBytes > int64(remaining) {
+	byteLimit := remaining
+	if mediaType == spreadsheetMediaType {
+		byteLimit = 4 << 20
+	}
+	if artifact.SizeBytes < 0 || artifact.SizeBytes > int64(byteLimit) || remaining <= 0 {
 		return "size_limit", ""
 	}
 	reader, err := store.Open(ctx, artifact.Scope, artifact.ContentRef)
@@ -84,15 +89,18 @@ func readConversationAttachment(ctx context.Context, store ArtifactContentStore,
 		return "unavailable", ""
 	}
 	defer reader.Close()
-	content, err := io.ReadAll(io.LimitReader(reader, int64(remaining)+1))
+	content, err := io.ReadAll(io.LimitReader(reader, int64(byteLimit)+1))
 	if err != nil {
 		return "unavailable", ""
 	}
-	if len(content) > remaining {
+	if len(content) > byteLimit {
 		return "size_limit", ""
 	}
 	if int64(len(content)) != artifact.SizeBytes || !strings.EqualFold(fmt.Sprintf("sha256:%x", sha256.Sum256(content)), artifact.Digest) {
 		return "integrity_failed", ""
+	}
+	if mediaType == spreadsheetMediaType {
+		return spreadsheetAttachmentText(ctx, content, remaining)
 	}
 	if !utf8.Valid(content) || strings.ContainsRune(string(content), '\x00') {
 		return "unsupported_encoding", ""
