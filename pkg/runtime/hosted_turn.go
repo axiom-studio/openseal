@@ -54,14 +54,17 @@ const HostedTurnAPIVersion = "openseal.hosted-turn/v14"
 const maximumHostedTurnMediaBytes = 1 << 20
 
 // HostedTurnMedia is ephemeral model-visible binary context produced by a
-// governed action. It is carried separately from the textual model envelope so
+// governed action or read from a verified, scoped message artifact. It is carried separately from the textual model envelope so
 // base64 never pollutes prompts, checkpoints returned by the model, or token
 // estimation. The Turn host decides how to encode it for its provider.
 type HostedTurnMedia struct {
-	MediaType          string `json:"mediaType"`
-	DataBase64         string `json:"dataBase64"`
-	Detail             string `json:"detail,omitempty"`
-	SourceActionCallID string `json:"sourceActionCallId"`
+	MediaType             string `json:"mediaType"`
+	DataBase64            string `json:"dataBase64"`
+	Detail                string `json:"detail,omitempty"`
+	SourceActionCallID    string `json:"sourceActionCallId,omitempty"`
+	SourceArtifactID      string `json:"sourceArtifactId,omitempty"`
+	SourceArtifactVersion int64  `json:"sourceArtifactVersion,omitempty"`
+	SourceMessageID       string `json:"sourceMessageId,omitempty"`
 }
 
 // HostedAgentTarget is one active, same-scope Agent deployment eligible for
@@ -645,7 +648,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		CollaborationResults:   collaborationResults,
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
 		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
-		ModelMedia:             hostedTurnMediaFromCheckpoint(input.Run.Checkpoint),
+		ModelMedia:             append(hostedTurnMediaFromCheckpoint(input.Run.Checkpoint), input.ModelMedia...),
 		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
@@ -760,8 +763,11 @@ func validateHostedTurnMedia(media HostedTurnMedia) error {
 	if media.Detail != "" && media.Detail != "low" && media.Detail != "high" && media.Detail != "auto" {
 		return errors.New("hosted Turn media detail must be low, high, or auto")
 	}
-	if strings.TrimSpace(media.SourceActionCallID) == "" {
-		return errors.New("hosted Turn media requires its source ActionCall")
+	actionSource := strings.TrimSpace(media.SourceActionCallID) != ""
+	artifactSource := strings.TrimSpace(media.SourceArtifactID) != "" && media.SourceArtifactVersion > 0 && strings.TrimSpace(media.SourceMessageID) != ""
+	artifactFields := media.SourceArtifactID != "" || media.SourceArtifactVersion != 0 || media.SourceMessageID != ""
+	if (!actionSource && !artifactSource) || (actionSource && artifactFields) {
+		return errors.New("hosted Turn media requires exactly one complete source: ActionCall or message artifact version")
 	}
 	decoded, err := base64.StdEncoding.DecodeString(media.DataBase64)
 	if err != nil || len(decoded) == 0 || len(decoded) > maximumHostedTurnMediaBytes {
