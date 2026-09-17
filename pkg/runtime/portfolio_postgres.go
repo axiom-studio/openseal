@@ -290,6 +290,9 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 	if filter.RootRunID != "" {
 		add(` AND root_run_id = $%d`, filter.RootRunID)
 	}
+	if len(filter.RootRunIDs) > 0 {
+		add(` AND root_run_id = ANY($%d)`, pq.Array(filter.RootRunIDs))
+	}
 	if filter.AssignedAgentID != "" {
 		add(` AND assigned_agent_id = $%d`, filter.AssignedAgentID)
 	}

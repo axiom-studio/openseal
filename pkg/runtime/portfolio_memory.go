@@ -231,6 +231,18 @@ func matchesRunFilter(run *AgentRun, filter AgentRunFilter) bool {
 	if filter.RootRunID != "" && run.RootRunID != filter.RootRunID {
 		return false
 	}
+	if len(filter.RootRunIDs) > 0 {
+		found := false
+		for _, rootID := range filter.RootRunIDs {
+			if run.RootRunID == rootID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
 	if filter.AssignedAgentID != "" && run.AssignedAgentID != filter.AssignedAgentID {
 		return false
 	}

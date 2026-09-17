@@ -138,6 +138,12 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	if err != nil {
 		return nil, err
 	}
+	if req.Viewer != nil {
+		runs, err = s.filterVisibleRuns(ctx, req.Scope, conversationID, runs, *req.Viewer)
+		if err != nil {
+			return nil, err
+		}
+	}
 	runDigest, err := conversationRunProjectionDigest(runs)
 	if err != nil {
 		return nil, err
@@ -196,6 +202,36 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		RunsChanged: runsChanged, ActivityChanged: activityChanged, PresenceChanged: presenceChanged,
 		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore,
 	}, nil
+}
+
+// A child inherits its originating message's visibility, not its assigned
+// agent's identity. Filter before computing digests or projecting activity so
+// hidden work cannot leak through either payloads or change notifications.
+func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope Scope, conversationID string, runs []*AgentRun, viewer ConversationViewer) ([]*AgentRun, error) {
+	visibleRoots := make(map[string]bool)
+	for _, run := range runs {
+		if run.Kind != RunKindConversation {
+			continue
+		}
+		triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+		if strings.TrimSpace(triggerID) == "" {
+			continue // Unknown provenance is not evidence of viewer access.
+		}
+		if _, err := s.conversations.GetVisibleChannelMessage(ctx, scope, conversationID, triggerID, viewer); err != nil {
+			if errors.Is(err, ErrChannelMessageNotFound) {
+				continue
+			}
+			return nil, err
+		}
+		visibleRoots[run.ID] = true
+	}
+	visible := make([]*AgentRun, 0, len(runs))
+	for _, run := range runs {
+		if visibleRoots[run.ID] || visibleRoots[run.RootRunID] {
+			visible = append(visible, run)
+		}
+	}
+	return visible, nil
 }
 
 func (s *ConversationChangeService) filterVisibleRounds(ctx context.Context, scope Scope, conversationID string, rounds []*ParticipationRoundResult, viewer ConversationViewer) ([]*ParticipationRoundResult, error) {
@@ -284,6 +320,35 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 			break
 		}
 	}
+	// Delegated work may outlive the reply that launched it. Batch exact
+	// durable root within this scope; do not infer membership from copied goals
+	// or require children to share the initiating agent's owner identity.
+	roots := append([]*AgentRun(nil), all...)
+	rootByID := make(map[string]*AgentRun, len(roots))
+	rootIDs := make([]string, 0, len(roots))
+	for _, root := range roots {
+		rootByID[root.ID] = root
+		rootIDs = append(rootIDs, root.ID)
+	}
+	for start := 0; start < len(rootIDs); start += pageSize {
+		batch := rootIDs[start:min(start+pageSize, len(rootIDs))]
+		for offset := 0; ; offset += pageSize {
+			page, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
+				Scope: conversation.Scope, Kind: RunKindAgentWork, RootRunIDs: batch, Limit: pageSize, Offset: offset,
+			})
+			if err != nil {
+				return nil, err
+			}
+			for _, child := range page {
+				if rootByID[child.RootRunID] != nil && child.ID != child.RootRunID && child.Scope == conversation.Scope {
+					all = append(all, child)
+				}
+			}
+			if len(page) < pageSize {
+				break
+			}
+		}
+	}
 	sort.Slice(all, func(i, j int) bool {
 		if !all[i].UpdatedAt.Equal(all[j].UpdatedAt) {
 			return all[i].UpdatedAt.After(all[j].UpdatedAt)
@@ -302,6 +367,18 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 		active = append(active, run)
 	}
 	result := append(active, terminal...)
+	// Keep the originating message linkage when a recent/active child survives
+	// the terminal-history window but its completed root does not.
+	included := make(map[string]bool, len(result))
+	for _, run := range result {
+		included[run.ID] = true
+	}
+	for _, run := range append([]*AgentRun(nil), result...) {
+		if root := rootByID[run.RootRunID]; root != nil && !included[root.ID] {
+			result = append(result, root)
+			included[root.ID] = true
+		}
+	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 func migratePortfolio(db *sql.DB) error {
@@ -335,7 +336,19 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) 
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ?`, filter.Scope.Kind, filter.Scope.ID)
+	query := `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ?`
+	args := []any{filter.Scope.Kind, filter.Scope.ID}
+	if filter.RootRunID != "" {
+		query += ` AND root_run_id = ?`
+		args = append(args, filter.RootRunID)
+	}
+	if len(filter.RootRunIDs) > 0 {
+		query += ` AND root_run_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(filter.RootRunIDs)), ",") + `)`
+		for _, rootID := range filter.RootRunIDs {
+			args = append(args, rootID)
+		}
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
