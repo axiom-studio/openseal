@@ -396,3 +396,39 @@ remain supported unless usage reporting or proposal allowances are required.
 The desktop provider adapter, canonical roster resolution, and explicit UI/API
 participation controls still need integration before desktop automatic team
 participation is available.
+
+### Desktop participation host adapters
+
+`internal/daemon.DesktopConversationParticipants` resolves the current local Team
+roster and its exact active definition. It excludes observe-only/disabled roles
+and inactive Agents, rejects pending Team activation, checks Agent definitions
+against role requirements, and enforces the participant limit. Definition and
+scope mismatches fail closed. Deployment-specific model credentials are rejected
+because this desktop adapter uses the workspace provider; no credential is
+transferred through the participant binding.
+
+`DesktopParticipationProvider` implements the metered contract using the existing
+workspace provider transport. It checks eligibility before and after generation,
+sends immutable Agent behavior plus Team/role context and audience-filtered
+channel text, and requests one structured contribution or silence. This adapter
+has no action executor; it cannot propose external actions or claim tool access.
+A contribution is a non-broadcast reply linked to the original trigger, so the
+conversation service enforces the original thread's visibility while letting its
+author read the response.
+
+Each invocation requires an explicit input/output allowance. The request uses a
+conservative byte-based input estimate with protocol overhead, trims oldest
+history before the trigger or instructions, discloses omitted history, caps
+output at the smaller of the allowance and 4,096 tokens, rejects redirects, and
+limits request/response bodies to 4 MiB. Valid provider usage is retained even
+when structured output is rejected or membership changes. When usage is missing
+or the request fails after being attempted, accounting conservatively charges the
+estimated input and reserved output allowance. Oversized input rejected before a
+request has no provider charge. No monetary cost is inferred without provider
+pricing data.
+
+Synthetic HTTP and real runtime integration tests cover privacy, budget settlement,
+stale membership, role authority, invalid output, and provider failures. These
+adapters are not yet registered with desktop conversation workers, and the
+participation settings API/UI is still pending. Live provider quality remains
+unverified.
