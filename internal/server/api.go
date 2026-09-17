@@ -114,6 +114,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/artifacts/{id}/resolve", s.handleResolveArtifactContent)
 	s.mux.HandleFunc("POST /api/v1/conversations", s.handleCreateConversation)
 	s.mux.HandleFunc("GET /api/v1/conversations", s.handleListConversations)
+	s.mux.HandleFunc("GET /api/v1/conversations/{id}/runs", s.handleListConversationRuns)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}", s.handleGetConversation)
 	s.mux.HandleFunc("PATCH /api/v1/conversations/{id}", s.handleUpdateConversation)
 	s.mux.HandleFunc("POST /api/v1/conversations/{id}/messages", s.handlePostChannelMessage)
@@ -217,7 +218,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		capabilities = append(capabilities, kernelapi.ArtifactCapability(contentOperations...))
 	}
 	if _, ok := s.store.(runtime.ConversationStore); ok {
-		capabilities = append(capabilities, kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: s.desktopConversationScope == nil, Changes: true, Receipts: true, ParticipationSettings: s.channelParticipationAuthorizer != nil, AutomaticCoordination: s.channelMessageDispatcher != nil}))
+		capabilities = append(capabilities, kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Runs: true, Coordination: s.desktopConversationScope == nil, Changes: true, Receipts: true, ParticipationSettings: s.channelParticipationAuthorizer != nil, AutomaticCoordination: s.channelMessageDispatcher != nil}))
 	}
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
 		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true, PortableInstallation: true}))

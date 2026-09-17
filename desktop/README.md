@@ -127,6 +127,38 @@ Its desktop/mobile/native captures are valid scrolled viewport samples, not
 whole-page certification. No CSS changes or new ignores were introduced; existing
 tokens and the open global comp gate are preserved.
 
+## Channel reply activity
+
+Channels with the `runs` capability show the latest reply attempt even while
+**Show reply activity** is collapsed. Expanded history lists five attempts plus a
+lookahead, newest first, with the triggering message sequence and local time.
+**Triggering message** reads the exact message context. Outcomes distinguish
+waiting, active, stopped after opt-out, completed without a reply, posted-message
+count, unavailable members, budget pause, and failure; completion does not imply
+that someone replied.
+
+The newest page polls every five seconds. Older pages remain frozen until manual
+refresh, with Newer/Older controls; failed refresh retains saved context and
+explains that it may be stale. **Open reply details** requires separate run-read
+capability and validates a fresh exact run against the workspace, team, channel,
+trigger, identity, and revision before opening the existing inspector. Collapsing
+or navigating away ignores late lookup results. Opening/closing details preserves
+message drafts and returns focus to the invoking control. Viewing activity is
+available independently of provider enablement and does not schedule another run.
+
+All 111 browser tests passed in 3.9 minutes, including five new mocked activity
+cases and updated real-daemon coverage. Full Go suites, runtime/server race checks,
+and build/format checks passed. An isolated HEAD-plus-owned-backend snapshot also
+passed race checks and daemon build without unrelated authoring work. Final Linux
+native smoke passed the addition and existing lifecycle; a preceding attempt
+lost WebDriver transport earlier in activation, then a fresh run passed. The
+bounded review in `.impeccable/review/channel-reply-activity-finish.md` ships without
+material fixes. All three final desktop/mobile/native captures are valid scrolled
+viewports, not whole-page evidence. No CSS, tokens, or ignores changed.
+Synthetic providers do not establish live quality, macOS/Windows behavior, or live
+PostgreSQL integration. The global comp gate remains open; this is not whole-app
+certification.
+
 ## Use a channel message as team work
 
 With create-team capability, **Use as team work** opens an inline review in the
