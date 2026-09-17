@@ -173,9 +173,21 @@ presence:
 /conversations/{id}/messages
 /conversations/{id}/changes
 /conversations/{id}/participation-rounds
+/conversations/{id}/runs
 /conversations/{id}/cursor
 /conversations/{id}/presence
 ```
+
+The `channels` capability includes `runs` for `GET /conversations/{id}/runs`.
+This read-only endpoint resolves the channel in the requested scope, then filters
+canonical agent runs by that channel’s owner, `kind=conversation`, and exact
+context `conversationId` before pagination. It returns runs newest first, with
+`limit` default 20 (range 1–100) and `offset` default 0 (range 0–1,000,000).
+Invalid pagination returns 400, an absent channel returns 404, and a foreign scope
+on the configured desktop host returns 403. No client-supplied team or text query
+substitutes for channel identity. The runtime `AgentRunFilter.ConversationID`
+applies this exact context filter before paging. Reading attempts neither enables
+participation nor creates work; opening a run separately requires run-read access.
 
 Message history supports `order=desc`, `limit`, and exclusive `beforeSequence`
 for browsing older messages, alongside `afterSequence` and `threadRootId`.

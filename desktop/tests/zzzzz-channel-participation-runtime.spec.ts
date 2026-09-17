@@ -140,6 +140,23 @@ test("real daemon replies only to new opted-in messages and persists the choice"
     expect(run.status).toBe("completed");
     expect(run.budgetUsage.inputTokens).toBe(40);
     expect(run.budgetUsage.outputTokens).toBe(20);
+    const activity = thread.getByRole("region", {
+      name: "Reply activity",
+      exact: true,
+    });
+    await activity.getByRole("button", { name: "Show reply activity" }).click();
+    await expect(activity).toContainText("Completed — 1 message posted", {
+      timeout: 10000,
+    });
+    await activity.getByRole("button", { name: "Triggering message" }).click();
+    await expect(activity).toContainText("After opt-in: review this evidence.");
+    await activity
+      .getByRole("button", { name: "Close message", exact: true })
+      .click();
+    await activity.getByRole("button", { name: "Open reply details" }).click();
+    await expect(page.locator(".inspector")).toContainText(run.goal);
+    await page.locator(".inspector button[title]").click();
+    await activity.getByRole("button", { name: "Hide reply activity" }).click();
     await thread
       .getByRole("button", { name: "Disable team replies", exact: true })
       .click();

@@ -210,6 +210,9 @@ func matchesObjectiveFilter(objective *Objective, filter ObjectiveFilter) bool {
 }
 
 func matchesRunFilter(run *AgentRun, filter AgentRunFilter) bool {
+	if filter.ConversationID != "" && run.Context[conversationRunContextConversationID] != filter.ConversationID {
+		return false
+	}
 	if query := strings.ToLower(strings.TrimSpace(filter.Query)); query != "" && !strings.Contains(strings.ToLower(run.Goal+" "+string(run.Status)), query) {
 		return false
 	}
