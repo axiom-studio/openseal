@@ -23,6 +23,9 @@ import (
 // Server exposes the versioned OpenSeal kernel API. Interactive clients
 // discover its exact capabilities rather than depending on hidden routes.
 type Server struct {
+	channelParticipationAuthorizer func(context.Context, *runtime.Conversation) error
+	channelMessageDispatcher       func(context.Context, runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error)
+
 	store                    runtime.KernelStore
 	artifactContent          runtime.ArtifactContentStore
 	artifactResolver         runtime.ArtifactContentResolver
@@ -267,4 +270,12 @@ var _ = time.Now
 // Configure before serving requests; standalone channel behavior is unchanged.
 func (s *Server) SetDesktopConversationScope(scope runtime.Scope) {
 	s.desktopConversationScope = &scope
+}
+
+// SetChannelParticipation enables explicit participation settings and optionally
+// connects posting to immediate durable scheduling. Configure before serving.
+// The authorizer validates enabling; disabling remains available during outages.
+func (s *Server) SetChannelParticipation(authorize func(context.Context, *runtime.Conversation) error, post func(context.Context, runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error)) {
+	s.channelParticipationAuthorizer = authorize
+	s.channelMessageDispatcher = post
 }

@@ -1,7 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api, ApiError, message, scope, scoped } from "./api";
 import type { Conversation } from "./TeamChannels";
-type Change = { expectedRevision: number; title?: string; status?: string };
+type Change = {
+  expectedRevision: number;
+  title?: string;
+  status?: string;
+  participationEnabled?: boolean;
+};
 type Draft = { title: string; baseTitle: string; pending?: Change };
 function restore(key: string, current: Conversation): Draft {
   try {
@@ -13,7 +18,8 @@ function restore(key: string, current: Conversation): Draft {
       typeof value.baseTitle === "string" &&
       (!value.pending ||
         (Number.isSafeInteger(value.pending.expectedRevision) &&
-          (typeof value.pending.title === "string" ||
+          (typeof value.pending.participationEnabled === "boolean" ||
+            typeof value.pending.title === "string" ||
             ["active", "archived"].includes(value.pending.status))))
     )
       return value;
@@ -25,8 +31,12 @@ function restore(key: string, current: Conversation): Draft {
 export default function ChannelSettings({
   conversation,
   onChange,
+  participationAvailable = false,
+  automaticRepliesAvailable = false,
 }: {
   conversation: Conversation;
+  participationAvailable?: boolean;
+  automaticRepliesAvailable?: boolean;
   onChange: (value: Conversation) => void;
 }) {
   const key = `openseal.channel-settings.${conversation.id}`;
@@ -50,6 +60,7 @@ export default function ChannelSettings({
   const fieldId = useId();
   const stale =
     draft.baseTitle !== conversation.title && draft.title !== draft.baseTitle;
+  const repliesEnabled = conversation.participation?.enabled === true;
   const tooLong = new TextEncoder().encode(draft.title.trim()).length > 240;
   useEffect(() => {
     alive.current = true;
@@ -108,7 +119,13 @@ export default function ChannelSettings({
       value.id !== conversation.id ||
       value.owner?.type !== conversation.owner.type ||
       value.owner.id !== conversation.owner.id ||
-      value.revision < conversation.revision
+      !Number.isSafeInteger(value.revision) ||
+      value.revision < conversation.revision ||
+      (value.participation !== undefined &&
+        (typeof value.participation.enabled !== "boolean" ||
+          !Number.isSafeInteger(value.participation.afterSequence) ||
+          value.participation.afterSequence < 0 ||
+          value.participation.afterSequence > value.lastSequence))
     )
       throw new Error(
         "The returned channel does not match the current conversation.",
@@ -141,10 +158,20 @@ export default function ChannelSettings({
       if (!alive.current) return;
       validate(current);
       const pending = draft.pending;
+      if (
+        pending?.participationEnabled !== undefined &&
+        (current.scope?.kind !== scope.kind || current.scope.id !== scope.id)
+      )
+        throw new Error(
+          "The returned channel does not belong to this workspace.",
+        );
       const matches =
         pending &&
         (pending.title === undefined || pending.title === current.title) &&
-        (pending.status === undefined || pending.status === current.status);
+        (pending.status === undefined || pending.status === current.status) &&
+        (pending.participationEnabled === undefined ||
+          pending.participationEnabled ===
+            (current.participation?.enabled === true));
       accept(current, pending);
       setNotice(
         matches
@@ -185,16 +212,25 @@ export default function ChannelSettings({
       validate(current);
       if (
         (pending.title !== undefined && current.title !== pending.title) ||
-        (pending.status !== undefined && current.status !== pending.status)
+        (pending.status !== undefined && current.status !== pending.status) ||
+        (pending.participationEnabled !== undefined &&
+          (pending.participationEnabled !==
+            (current.participation?.enabled === true) ||
+            current.scope?.kind !== scope.kind ||
+            current.scope.id !== scope.id))
       )
         throw new Error("Could not confirm the requested channel state.");
       accept(current, pending);
       setNotice(
-        pending.title !== undefined
-          ? "Channel renamed."
-          : pending.status === "archived"
-            ? "Channel archived. Its messages and your drafts are kept."
-            : "Channel restored. You can post messages again.",
+        pending.participationEnabled !== undefined
+          ? pending.participationEnabled
+            ? "Team replies enabled for new messages. Earlier messages will not be replayed."
+            : "Team replies disabled. Previously started requests may still finish."
+          : pending.title !== undefined
+            ? "Channel renamed."
+            : pending.status === "archived"
+              ? "Channel archived. Its messages and your drafts are kept."
+              : "Channel restored. You can post messages again.",
       );
     } catch (e) {
       if (!alive.current) return;
@@ -230,6 +266,11 @@ export default function ChannelSettings({
       >
         {open ? "Hide channel settings" : "Channel settings"}
       </button>
+      {participationAvailable && (
+        <p className="muted">
+          Team replies are {repliesEnabled ? "on" : "off"}.
+        </p>
+      )}
       {open && (
         <>
           <h4>Channel settings</h4>
@@ -284,6 +325,49 @@ export default function ChannelSettings({
               Save channel name
             </button>
           </form>
+          {participationAvailable && (
+            <div className="channel-availability">
+              <h4>Team replies</h4>
+              <p className="muted">
+                Up to eight eligible team members can review each new message
+                and offer a relevant reply. This uses your model provider and
+                may incur charges. Earlier messages are not replayed.
+              </p>
+              <p className="muted">
+                Observe-only and inactive members do not reply. Turning this off
+                stops queued replies; requests already sent may still incur
+                charges.
+              </p>
+              {!automaticRepliesAvailable && (
+                <p className="inline-help">
+                  Connect a model provider in Settings to enable team replies.
+                </p>
+              )}
+              {conversation.status === "archived" && (
+                <p className="inline-help">
+                  Restore this channel before enabling team replies.
+                </p>
+              )}
+              <button
+                className="button"
+                disabled={
+                  busy ||
+                  !!draft.pending ||
+                  stale ||
+                  (!repliesEnabled &&
+                    (!automaticRepliesAvailable ||
+                      conversation.status !== "active"))
+                }
+                onClick={() =>
+                  void change({ participationEnabled: !repliesEnabled })
+                }
+              >
+                {repliesEnabled
+                  ? "Disable team replies"
+                  : "Enable team replies"}
+              </button>
+            </div>
+          )}
           <div className="channel-availability">
             <h4>
               {conversation.status === "archived"
@@ -293,7 +377,7 @@ export default function ChannelSettings({
             <p className="muted">
               {conversation.status === "archived"
                 ? "Restore posting while keeping the same messages and channel identity."
-                : "Stop new messages while keeping the conversation and your drafts. This does not cancel team tasks."}
+                : "Stop new messages and turn off team replies while keeping the conversation and your drafts. This does not cancel team tasks."}
             </p>
             {!confirm ? (
               <button

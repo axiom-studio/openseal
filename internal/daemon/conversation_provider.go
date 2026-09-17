@@ -202,6 +202,9 @@ func (p *DesktopParticipationProvider) ProposeParticipationWithUsage(ctx context
 	if current.definition.ID != agentID || current.definition.Version != agentVersion || current.teamDefinition.ID != teamID || current.teamDefinition.Version != teamVersion {
 		return fail("the team or agent definition changed while composing this reply")
 	}
+	if !*form.WantsToSpeak {
+		return report, nil
+	}
 	// A non-broadcast reply inherits the trigger/thread visibility through the
 	// conversation service. Using the channel audience here also lets the original
 	// sender read the reply, including a user who addressed an agent-only audience.

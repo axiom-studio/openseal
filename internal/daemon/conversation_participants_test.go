@@ -177,3 +177,21 @@ func TestDesktopParticipationEnforcesLimitAndEmptyRoster(t *testing.T) {
 		t.Fatalf("no eligible members: %v", err)
 	}
 }
+
+func TestDesktopParticipationHonorsAuthoredTeamPolicy(t *testing.T) {
+	catalog, query := participationFixture()
+	catalog.definition.Coordination = team.CoordinationPolicy{MaximumSpeakersPerRound: 1, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true}
+	source, err := NewDesktopConversationParticipants(catalog, query.Conversation.Scope, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := source.ResolvePolicy(t.Context(), query.Conversation)
+	if err != nil || policy.MaximumSpeakers != 1 || !policy.Participation.QuietByDefault || !policy.Participation.RequireRoleRelevance || !policy.Participation.SuppressDuplicateContent {
+		t.Fatalf("authored policy ignored: %#v %v", policy, err)
+	}
+	catalog.definition.Coordination = team.CoordinationPolicy{MaximumSpeakersPerRound: 8}
+	policy, err = source.ResolvePolicy(t.Context(), query.Conversation)
+	if err != nil || policy.MaximumSpeakers != 3 || policy.Participation.QuietByDefault || policy.Participation.RequireRoleRelevance || policy.Participation.SuppressDuplicateContent {
+		t.Fatalf("host cap or explicit false policy ignored: %#v %v", policy, err)
+	}
+}
