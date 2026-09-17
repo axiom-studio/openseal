@@ -36,7 +36,7 @@ func TestHostedTurnFormCompilesOnlyAuthorizedNativeWorkspaceOperations(t *testin
 }
 
 func TestHostedTurnFormCompilesAndRoundTripsExactActionArguments(t *testing.T) {
-	action := capability.ModelAction{Name: "browser.click", InputSchema: map[string]interface{}{
+	action := capability.ModelAction{Name: "browser.click", BindingID: "browser-primary", BindingRevision: 3, InputSchema: map[string]interface{}{
 		"type": "object", "additionalProperties": false,
 		"properties": map[string]interface{}{
 			"target": map[string]interface{}{"type": "string", "pattern": "^s[1-9][0-9]*:e[1-9][0-9]*$"},
@@ -59,6 +59,9 @@ func TestHostedTurnFormCompilesAndRoundTripsExactActionArguments(t *testing.T) {
 	}
 	if response.ProposedAction == nil || response.ProposedAction.InputRef != "/actionInputs/proposed" || response.ProposedAction.Capability != action.Name {
 		t.Fatalf("response = %#v", response)
+	}
+	if response.ProposedAction.BindingID != action.BindingID || response.ProposedAction.BindingRevision != action.BindingRevision {
+		t.Fatal("compiled action lost its authorized binding identity")
 	}
 	roundTrip, err := HostedTurnFormFromResponse(*response)
 	if err != nil {
