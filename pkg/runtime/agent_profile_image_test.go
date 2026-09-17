@@ -51,6 +51,7 @@ func TestProfileImageValidatesScopedContent(t *testing.T) {
 		valid   bool
 	}{
 		{name: "valid", valid: true},
+		{name: "unprojected availability", valid: true, mutate: func(f *profileImageFixture) { f.artifact.ContentAvailability = "" }},
 		{name: "foreign scope", foreign: true},
 		{name: "wrong MIME", mutate: func(f *profileImageFixture) { f.artifact.MediaType = "image/svg+xml" }},
 		{name: "unavailable", mutate: func(f *profileImageFixture) { f.artifact.ContentAvailability = "unavailable" }},
