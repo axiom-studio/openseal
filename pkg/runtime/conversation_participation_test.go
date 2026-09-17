@@ -164,15 +164,18 @@ func TestParticipationOptOutBlocksQueuedAndInFlightPublication(t *testing.T) {
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	t.Cleanup(unblock)
 	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-		return []ConversationParticipantBinding{{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "analyst"}, SemanticRoles: []string{"reviewer"}}}, nil
+		return []ConversationParticipantBinding{{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "analyst"}, SemanticRoles: []string{"reviewer"}}, {Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "second"}, SemanticRoles: []string{"reviewer"}}}, nil
 	})
 	provider := ParticipationProposalProviderFunc(func(context.Context, ParticipationProposalContext) (ParticipationProposal, error) {
-		calls.Add(1)
-		close(started)
+		if calls.Add(1) == 1 {
+			close(started)
+		}
 		<-release
 		return ParticipationProposal{WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Late model answer", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true}}, nil
 	})
-	coordinator, err := NewConversationCoordinator(service, participants, provider, DefaultConversationCoordinatorConfig())
+	config := DefaultConversationCoordinatorConfig()
+	config.MaximumConcurrency = 1
+	coordinator, err := NewConversationCoordinator(service, participants, provider, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,5 +315,47 @@ func TestParticipationOptOutDiscardsAgentOutputAndKeepsUsage(t *testing.T) {
 				t.Fatalf("late reply: %#v %v", messages, err)
 			}
 		})
+	}
+}
+
+func TestConversationRunPinsResolvedPolicyAcrossRoundRecovery(t *testing.T) {
+	store := NewMemoryStore()
+	service := NewConversationService(store)
+	scope := Scope{Kind: "local", ID: "policy"}
+	channel, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, channel, ConversationParticipantUser, MessageIntentQuestion, "Review evidence", "trigger")
+	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduled, _, err := scheduler.ScheduleMessage(t.Context(), scope, channel.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{ResolvePolicy: func(context.Context, *Conversation) (ConversationArbitrationPolicy, error) {
+		calls++
+		if calls > 1 {
+			return ConversationArbitrationPolicy{}, errors.New("team changed after round committed")
+		}
+		policy := DefaultConversationArbitrationPolicy()
+		policy.MaximumSpeakers = 1
+		return policy, nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: scheduled.Run})
+		if err != nil || outcome.NextRunStatus != AgentRunStatusCompleted {
+			t.Fatalf("round recovery: %#v %v", outcome, err)
+		}
+	}
+	rounds, err := service.ListParticipationRounds(t.Context(), ParticipationRoundFilter{Scope: scope, ConversationID: channel.ID})
+	if err != nil || len(rounds) != 1 || rounds[0].Round.Policy.MaximumSpeakers != 1 || calls != 1 {
+		t.Fatalf("resolved policy lost on recovery: %#v %v calls=%d", rounds, err, calls)
 	}
 }

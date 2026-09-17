@@ -19,6 +19,8 @@ import type { ChannelWorkDraft } from "./TeamWork";
 import ChannelReferences, { type ChannelReference } from "./ChannelReferences";
 
 export type Conversation = {
+  scope?: { kind: string; id: string };
+  participation?: { enabled: boolean; afterSequence: number };
   id: string;
   title: string;
   owner: { type: string; id: string };
@@ -191,9 +193,9 @@ export default function TeamChannels({
         <>
           <h2>Team channels</h2>
           <p className="muted">
-            Keep the team’s conversations and decisions together. Posting a
-            message saves it here; use Team work when you want agents to produce
-            a result.
+            {supports(capabilities, "channels", "configure-participation")
+              ? "Keep the team’s conversations and decisions together. Enable automatic team replies in channel settings, or use Team work for delegated tasks."
+              : "Keep the team’s conversations and decisions together. Posting a message saves it here; use Team work when you want agents to produce a result."}
           </p>
           {!canList ? (
             <p className="inline-help">
@@ -524,6 +526,16 @@ function ChannelThread({
       </h3>
       {conversation && supports(capabilities, "channels", "update") && (
         <ChannelSettings
+          participationAvailable={supports(
+            capabilities,
+            "channels",
+            "configure-participation",
+          )}
+          automaticRepliesAvailable={supports(
+            capabilities,
+            "channels",
+            "coordinate-automatically",
+          )}
           conversation={conversation}
           onChange={(next) => {
             setConversation((current) =>
@@ -727,7 +739,9 @@ function ChannelThread({
             context={
               reply
                 ? "Posted as you, keeping the original message’s audience. Replies do not resolve action approvals."
-                : "Posted as you, visible in this channel. Messages do not start team work or resolve action approvals."
+                : conversation?.participation?.enabled
+                  ? "Posted as you. Eligible team members may reply using your model provider. Messages do not approve actions."
+                  : "Posted as you, visible in this channel. Messages do not start team work or resolve action approvals."
             }
             body={(content) => ({
               scope,

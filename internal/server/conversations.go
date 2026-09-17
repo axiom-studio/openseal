@@ -126,12 +126,33 @@ func (s *Server) handleUpdateConversation(w http.ResponseWriter, r *http.Request
 	if !s.authorizeDesktopChannelWrite(w, payload.Scope, nil) {
 		return
 	}
-	if payload.Title == nil && payload.Status == nil {
-		s.respondError(w, http.StatusBadRequest, "a channel title or status change is required")
+	if payload.Title == nil && payload.Status == nil && payload.ParticipationEnabled == nil {
+		s.respondError(w, http.StatusBadRequest, "a channel title, status, or participation change is required")
 		return
 	}
+	if payload.ParticipationEnabled != nil {
+		if s.channelParticipationAuthorizer == nil {
+			s.respondError(w, http.StatusForbidden, "channel participation settings are not available on this host")
+			return
+		}
+		current, err := service.GetConversation(r.Context(), payload.Scope, conversationID)
+		if err != nil {
+			s.respondConversationError(w, err)
+			return
+		}
+		if current.Revision != payload.ExpectedRevision {
+			s.respondConversationError(w, runtime.ErrRevisionConflict)
+			return
+		}
+		if *payload.ParticipationEnabled {
+			if err := s.channelParticipationAuthorizer(r.Context(), current); err != nil {
+				s.respondError(w, http.StatusUnprocessableEntity, err.Error())
+				return
+			}
+		}
+	}
 	result, err := service.UpdateConversation(r.Context(), runtime.UpdateConversationRequest{
-		Scope: payload.Scope, ConversationID: conversationID, ExpectedRevision: payload.ExpectedRevision, Title: payload.Title, Status: payload.Status,
+		Scope: payload.Scope, ConversationID: conversationID, ExpectedRevision: payload.ExpectedRevision, Title: payload.Title, Status: payload.Status, ParticipationEnabled: payload.ParticipationEnabled,
 	})
 	if err != nil {
 		s.respondConversationError(w, err)
@@ -154,7 +175,11 @@ func (s *Server) handlePostChannelMessage(w http.ResponseWriter, r *http.Request
 		return
 	}
 	key := requestIdempotencyKey(r, payload.IdempotencyKey)
-	result, err := service.PostChannelMessage(r.Context(), runtime.PostChannelMessageRequest{
+	post := service.PostChannelMessage
+	if s.channelMessageDispatcher != nil {
+		post = s.channelMessageDispatcher
+	}
+	result, err := post(r.Context(), runtime.PostChannelMessageRequest{
 		ID: payload.ID, Scope: payload.Scope, ConversationID: conversationID, ExpectedRevision: payload.ExpectedRevision,
 		Sender: payload.Sender, Intent: payload.Intent, Content: payload.Content, Audience: payload.Audience,
 		ReplyToMessageID: payload.ReplyToMessageID, BroadcastToChannel: payload.BroadcastToChannel,
@@ -257,6 +282,10 @@ func (s *Server) handleListConversationChanges(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) handleCoordinateParticipation(w http.ResponseWriter, r *http.Request) {
+	if s.desktopConversationScope != nil {
+		s.respondError(w, http.StatusForbidden, "desktop team replies are produced by workspace workers; clients cannot submit agent proposals")
+		return
+	}
 	service, _, conversationID, ok := s.conversationRequestContextFromBodyStore(w, r)
 	if !ok {
 		return

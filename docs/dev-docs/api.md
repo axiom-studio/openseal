@@ -186,7 +186,8 @@ A stale revision with a new key returns a conflict; clients must refresh before
 explicitly retrying.
 
 `PATCH /conversations/{id}` accepts `scope`, a positive `expectedRevision`, and
-at least one of `title` or `status` (`active` or `archived`). It updates the existing
+at least one of `title`, `status` (`active` or `archived`), or
+`participationEnabled` (boolean). It updates the existing
 channel without replacing messages or its identity. Archiving stops new messages;
 restoring enables posting again. Existing team runs are not canceled. Stale
 revisions return 409 and this update endpoint has no idempotency replay contract:
@@ -201,7 +202,19 @@ Cursor PUT also enforces that configured local scope and participant
 for the existing cursor GET/PUT contract; receipt availability is independent
 of posting. These checks cover creation, updates, posting, and cursor writes,
 not a general participant ACL system.
-Posting a message through this API does not by itself start agent work.
+On the desktop, a ready provider wires message posting through the kernel dispatcher:
+new messages in explicitly opted-in channels can schedule automatic team replies.
+This does not approve actions or submit explicit Team work. The `channels`
+capability exposes `configure-participation` even without a provider so disabling
+remains possible; `coordinate-automatically` is advertised only with the provider
+backed dispatcher. Desktop manual participation-proposal submissions return 403.
+
+`participationEnabled` requires host configuration authority and the expected
+channel revision. Enabling also checks provider/team eligibility; disabling does
+not require a provider. Enabling records the current sequence, skipping old
+messages. Archive disables participation; restore does not re-enable it. The
+setting persists across restart. Uncertain PATCH delivery must be checked with
+GET before another edit; it has no automatic replay contract.
 
 `GET /conversations` optionally accepts `participantType` and `participantId`.
 With a valid reader, the response remains an array and each conversation includes
