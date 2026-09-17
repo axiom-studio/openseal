@@ -33,6 +33,10 @@ bin/
 dist/
 web/node_modules/
 web/dist/
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/crates/*/target/
 
 # Local config (root level only)
 /.env
@@ -46,3 +50,16 @@ web/dist/
 /skills/.clawhub/
 /skills/repos/
 openseal
+
+# Desktop development and generated assets
+desktop/.dev-workspace/
+desktop/src-tauri/binaries/
+desktop/src-tauri/gen/
+desktop/test-results/
+desktop/playwright-report/
+desktop/*.tsbuildinfo
+.impeccable/review/
+
+# Python verification caches
+__pycache__/
+*.pyc

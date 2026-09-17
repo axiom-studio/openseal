@@ -45,6 +45,29 @@ closing it does not stop work. The generated configuration stores kernel state
 in `data/openseal.db` and artifact content in `data/artifacts`, relative to the
 configuration file.
 
+## Desktop app
+
+The desktop app is in development, with a Tauri window, agent and work views,
+and a model provider form in Settings. See [desktop development](desktop/README.md).
+
+Verify native startup, authentication, shutdown, and durable workspace recovery:
+
+```bash
+make desktop-host-test
+```
+
+Start the graphical app:
+
+```bash
+make desktop-install
+make desktop-dev
+```
+
+The native host starts an owned daemon on an ephemeral loopback port and keeps
+the per-launch bearer token in native memory. Its API bridge supports the same
+durable kernel used by the command-line client. Release installers, signing,
+and notarization remain unverified.
+
 The TUI uses an outcome-first Agent workspace: **Home** makes the next action
 obvious; **Create**, **Agents**, **Teams**, **Marketplace**, **Work**, and
 **Channels** are the primary destinations; and `?` opens help from anywhere.

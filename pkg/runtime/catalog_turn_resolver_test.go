@@ -160,14 +160,14 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 			ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, DefaultWorkspaceID: spec.ID, Workspaces: []workspace.Spec{spec},
 			Credentials: map[string]capability.CredentialReference{"GITHUB_TOKEN": {Kind: "vault", ID: "vault-credential"}},
 		},
-		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories"},
+		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories", SystemPrompt: "Work carefully."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "coding-agent"},
 	}
 	run := &AgentRun{
 		ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"},
 		AssignedAgentID: "coding-agent", Goal: "Inspect the repository", Context: map[string]interface{}{},
 	}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: requestBoundTurnHost{host}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -705,4 +705,15 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 	if !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent"}) || agentBinding.ActionDeploymentID != "reviewer-agent" || agentBinding.ModelActions[0].BindingID != "agent-teams" {
 		t.Fatalf("Agent run binding=%#v activations=%v", agentBinding, catalog.activationDeployments)
 	}
+}
+
+// This resolver fixture serves both progress acknowledgements and normal turns.
+// Each response must echo the invocation it actually received.
+type requestBoundTurnHost struct{ *recordingTurnHost }
+
+func (h requestBoundTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
+	h.request = request
+	response := *h.response
+	response.InvocationID = request.InvocationID
+	return &response, h.err
 }

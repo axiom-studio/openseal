@@ -197,3 +197,52 @@ func performAgentRunRequest(t *testing.T, handler http.Handler, method, path, bo
 	handler.ServeHTTP(recorder, req)
 	return recorder
 }
+
+func TestAgentRunSearchQueryValidation(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?scopeKind=local&scopeId=default&q=Evidence&order=created_desc&offset=25&limit=26&status=completed", nil)
+	filter, err := agentRunFilterFromQuery(req)
+	if err != nil || filter.Query != "Evidence" || filter.Order != runtime.AgentRunOrderCreatedDesc || filter.Offset != 25 || filter.Limit != 26 || len(filter.Statuses) != 1 {
+		t.Fatalf("filter = %#v, %v", filter, err)
+	}
+	for _, query := range []string{"order=unknown", "q=" + strings.Repeat("x", 1001)} {
+		_, err := agentRunFilterFromQuery(httptest.NewRequest(http.MethodGet, "/?scopeKind=local&scopeId=default&"+query, nil))
+		if err == nil {
+			t.Fatalf("accepted invalid search %s", query)
+		}
+	}
+}
+
+func TestTeamWorkCapabilityRequiresExplicitCapableHost(t *testing.T) {
+	store := runtime.NewMemoryStore()
+	server := NewServer(store, zap.NewNop().Sugar())
+	hasTeamWork := func() bool {
+		response := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/capabilities", "", "")
+		var document kernelapi.CapabilityDocument
+		if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+			t.Fatal(err)
+		}
+		capability, ok := document.Find(kernelapi.AgentRunsCapabilityID, kernelapi.AgentRunsCapabilityVersion)
+		if !ok {
+			t.Fatal("missing work capability")
+		}
+		for _, operation := range capability.Operations {
+			if operation == "create-team" {
+				return true
+			}
+		}
+		return false
+	}
+	server.SetTeamWorkEnabled(true)
+	if hasTeamWork() {
+		t.Fatal("advertised team work without a worker")
+	}
+	server.SetTeamWorkEnabled(false)
+	server.SetAgentRunCreationDispatcher(runtime.NewRunCommandService(store).CreateAgentRun)
+	if hasTeamWork() {
+		t.Fatal("advertised unsupported team ownership")
+	}
+	server.SetTeamWorkEnabled(true)
+	if !hasTeamWork() {
+		t.Fatal("capable team host missing from discovery")
+	}
+}

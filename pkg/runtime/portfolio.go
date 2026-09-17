@@ -382,6 +382,7 @@ type ObjectiveFilter struct {
 }
 
 type AgentRunFilter struct {
+	Query           string // Literal case-insensitive substring of the goal or status.
 	Scope           Scope
 	Kind            RunKind
 	Owner           *ObjectiveOwner

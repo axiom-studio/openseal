@@ -53,6 +53,14 @@ func (s *Server) handleResolveActionApproval(w http.ResponseWriter, r *http.Requ
 		s.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if host, ok := s.actionApprovalAuth.(interface {
+		ValidateApprovalRequest(runtime.Scope, runtime.ApprovalPrincipal) error
+	}); ok {
+		if err := host.ValidateApprovalRequest(scope, payload.Principal); err != nil {
+			s.respondError(w, http.StatusForbidden, err.Error())
+			return
+		}
+	}
 	decisionID := strings.TrimSpace(payload.DecisionID)
 	if decisionID == "" {
 		decisionID = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
@@ -82,7 +90,13 @@ func actionApprovalFilterFromQuery(r *http.Request) (runtime.ApprovalFilter, err
 	if err != nil {
 		return runtime.ApprovalFilter{}, err
 	}
+	order := strings.TrimSpace(r.URL.Query().Get("order"))
+	if order != "" && order != "created_asc" && order != "created_desc" {
+		return runtime.ApprovalFilter{}, fmt.Errorf("invalid approval order %q", order)
+	}
 	filter := runtime.ApprovalFilter{Scope: scope, RunID: strings.TrimSpace(r.URL.Query().Get("runId")), Limit: limit, Offset: offset}
+	filter.NewestFirst = order == "created_desc"
+
 	ownerType, ownerID := strings.TrimSpace(r.URL.Query().Get("ownerType")), strings.TrimSpace(r.URL.Query().Get("ownerId"))
 	if ownerType != "" || ownerID != "" {
 		owner := runtime.ObjectiveOwner{Type: runtime.OwnerType(ownerType), ID: ownerID}
@@ -104,7 +118,7 @@ func actionApprovalFilterFromQuery(r *http.Request) (runtime.ApprovalFilter, err
 func validActionApprovalStatus(status runtime.ApprovalStatus) bool {
 	switch status {
 	case runtime.ApprovalStatusPending, runtime.ApprovalStatusApproved, runtime.ApprovalStatusRejected,
-		runtime.ApprovalStatusExpired, runtime.ApprovalStatusCanceled:
+		runtime.ApprovalStatusExpired, runtime.ApprovalStatusCanceled, runtime.ApprovalStatusChangesRequested:
 		return true
 	default:
 		return false

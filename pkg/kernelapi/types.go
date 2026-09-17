@@ -1014,6 +1014,7 @@ type AgentRunCommandRequest struct {
 	Actor               runtime.ActivityActor       `json:"actor,omitempty"`
 	Summary             string                      `json:"summary,omitempty"`
 	Instruction         string                      `json:"instruction,omitempty"`
+	InterventionID      string                      `json:"interventionId,omitempty"`
 	HumanInterventionID string                      `json:"humanInterventionId,omitempty"`
 	Visibility          runtime.ActivityVisibility  `json:"visibility,omitempty"`
 }

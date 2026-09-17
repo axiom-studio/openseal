@@ -21,11 +21,12 @@ type CreateConversationRequest struct {
 }
 
 type UpdateConversationRequest struct {
-	Scope            Scope
-	ConversationID   string
-	ExpectedRevision int64
-	Title            *string
-	Status           *ConversationStatus
+	Scope                Scope
+	ConversationID       string
+	ExpectedRevision     int64
+	Title                *string
+	Status               *ConversationStatus
+	ParticipationEnabled *bool
 }
 
 type ConversationFilter struct {
@@ -259,9 +260,24 @@ func (s *ConversationService) UpdateConversation(ctx context.Context, req Update
 		if updated.Status == ConversationStatusArchived {
 			archivedAt := s.now().UTC()
 			updated.ArchivedAt = &archivedAt
+			if updated.Participation != nil {
+				updated.Participation.Enabled = false
+			}
 		} else {
 			updated.ArchivedAt = nil
 		}
+	}
+	if req.ParticipationEnabled != nil {
+		if *req.ParticipationEnabled && (updated.Status != ConversationStatusActive || (updated.Owner.Type != OwnerTypeTeam && updated.Owner.Type != OwnerTypeAgent)) {
+			return nil, fmt.Errorf("%w: participation requires an active Agent or Team channel", ErrInvalidConversation)
+		}
+		if updated.Participation == nil {
+			updated.Participation = &ConversationParticipation{}
+		}
+		if *req.ParticipationEnabled && !updated.Participation.Enabled {
+			updated.Participation.AfterSequence = conversation.LastSequence
+		}
+		updated.Participation.Enabled = *req.ParticipationEnabled
 	}
 	updated.Revision++
 	updated.UpdatedAt = s.now().UTC()
@@ -756,6 +772,10 @@ func cloneConversation(in *Conversation) *Conversation {
 		return nil
 	}
 	out := *in
+	if in.Participation != nil {
+		participation := *in.Participation
+		out.Participation = &participation
+	}
 	if in.Origin != nil {
 		origin := *in.Origin
 		out.Origin = &origin

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 )
@@ -64,6 +65,14 @@ type AdvanceAgentRunRequest struct {
 	InputContextRefs  []string
 	PlanRevision      int64
 	BudgetReservation BudgetUsage
+	OutputPublisher   TurnOutputPublisher
+}
+
+// TurnOutputPublisher materializes output from an accepted, durable turn before
+// its run transition. Implementations must be idempotent: recovery can call this
+// again after partial publication. It never executes model-proposed actions.
+type TurnOutputPublisher interface {
+	PublishTurnOutput(context.Context, *AgentRun, *AgentTurn) (map[string]interface{}, error)
 }
 
 type AdvanceAgentRunResult struct {
@@ -121,7 +130,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		return nil, err
 	}
 	if len(pending) > 0 && terminalAgentTurnStatus(pending[0].Status) {
-		return c.applyFinishedTurn(ctx, run, pending[0], req.WorkerID, true)
+		return c.applyFinishedTurn(ctx, run, pending[0], req.WorkerID, true, req.OutputPublisher)
 	}
 	if runAttemptBudgetExceeded(run) {
 		paused, event, pauseErr := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
@@ -227,6 +236,17 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			run = reservedRun
 		}
 	}
+	// Persist exactly which guidance this invocation sees, including retries.
+	ids := interventionIDs(run)
+	if !slices.Equal(turn.InputInterventionIDs, ids) {
+		updated := cloneAgentTurn(turn)
+		updated.InputInterventionIDs = ids
+		updated.Revision++
+		if err := c.turns.turns.UpdateAgentTurn(ctx, updated, turn.Revision, req.WorkerID); err != nil {
+			return nil, err
+		}
+		turn = updated
+	}
 	executionCtx, cancelExecution := context.WithCancel(ctx)
 	durationDeadline := false
 	durationDeadlineChargeMS := int64(0)
@@ -276,9 +296,36 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			runErr = heartbeat.err
 		}
 	}
-	refreshed, refreshErr := c.portfolio.GetAgentRun(ctx, req.Scope, req.RunID)
+	// A command may have ended the Run while its provider was in flight. A
+	// lost Run lease must not leave the owned Turn permanently running. Use a
+	// bounded cleanup context even when the lease heartbeat canceled execution.
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancelCleanup()
+	refreshed, refreshErr := c.portfolio.GetAgentRun(cleanupCtx, req.Scope, req.RunID)
 	if refreshErr != nil {
 		return nil, refreshErr
+	}
+	if isTerminalAgentRunStatus(refreshed.Status) {
+		usage := TurnUsage{DurationMS: executionDurationMS}
+		if outcome != nil && outcome.Usage.Validate() == nil {
+			usage = outcome.Usage
+			if usage.DurationMS < executionDurationMS {
+				usage.DurationMS = executionDurationMS
+			}
+		}
+		finished, finishErr := c.turns.FinishTurn(cleanupCtx, req.Scope, turn.ID, FinishAgentTurnRequest{
+			ExpectedRevision: turn.Revision, WorkerID: req.WorkerID,
+			Status: AgentTurnStatusCanceled, NextRunStatus: refreshed.Status,
+			OutputSummary: "Turn discarded because the Run ended during execution", Usage: usage,
+		})
+		if finishErr != nil {
+			return &AdvanceAgentRunResult{Run: refreshed, Turn: turn}, finishErr
+		}
+		// Never apply the late output, actions, or continuation to a terminal Run.
+		return &AdvanceAgentRunResult{Run: refreshed, Turn: finished}, ErrLeaseLost
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	if refreshed.Status != AgentRunStatusRunning || refreshed.LeaseOwner != "" && refreshed.LeaseOwner != req.WorkerID {
 		released, releaseErr := c.turns.ReleaseTurn(ctx, req.Scope, turn.ID, turn.Revision, req.WorkerID)
@@ -412,9 +459,9 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			return &AdvanceAgentRunResult{Run: run, Turn: turn}, err
 		}
 	}
-	result, err := c.applyFinishedTurn(ctx, run, turn, req.WorkerID, false)
+	result, err := c.applyFinishedTurn(ctx, run, turn, req.WorkerID, false, req.OutputPublisher)
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	return result, executionErr
 }
@@ -483,12 +530,31 @@ func hostedTurnRetryDelay(attempt int64) time.Duration {
 	return 5 * time.Second * time.Duration(1<<(attempt-1))
 }
 
-func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID string, reconciled bool) (*AdvanceAgentRunResult, error) {
+func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID string, reconciled bool, publishers ...TurnOutputPublisher) (*AdvanceAgentRunResult, error) {
 	if turn.Sequence <= run.LastAppliedTurn {
 		return &AdvanceAgentRunResult{Run: run, Turn: turn, Reconciled: reconciled}, nil
 	}
 	if turn.Sequence != run.LastAppliedTurn+1 {
 		return nil, fmt.Errorf("%w: turn %d cannot follow applied turn %d", ErrRevisionConflict, turn.Sequence, run.LastAppliedTurn)
+	}
+	// An instruction arriving during execution (or before crash recovery) must
+	// be considered before any old proposals or completion can be applied.
+	superseded := turn.Status == AgentTurnStatusCompleted && !slices.Equal(turn.InputInterventionIDs, interventionIDs(run))
+	if superseded {
+		turn = cloneAgentTurn(turn)
+		turn.RequestedActions = nil
+		turn.RequestedFork = nil
+		turn.RequestedDelegation = nil
+		turn.RequestedRunbook = nil
+		turn.RunOutput = nil
+		turn.RunError = ""
+		turn.NextRunStatus = AgentRunStatusRunning
+		turn.WakeCondition = nil
+		turn.ContinuationCheckpoint = cloneMap(run.Checkpoint)
+		turn.OutputSummary = "New guidance arrived. Continuing with the saved instruction before applying this turn's output."
+		if turnExhaustsBudget(run, turn) {
+			turn.NextRunStatus = AgentRunStatusPaused
+		}
 	}
 	summary := turn.OutputSummary
 	if summary == "" {
@@ -546,6 +612,9 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		activityPayload["requestedRunbook"] = turn.RequestedRunbook
 	}
 	eventType := ""
+	if superseded {
+		eventType = "turn.guidance_changed"
+	}
 	if turn.BudgetAdmission != nil {
 		eventType = "budget.exhausted"
 		activityPayload["budgetState"] = BudgetStateExhausted
@@ -554,11 +623,30 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		eventType = "budget.exhausted"
 		activityPayload["budgetState"] = BudgetStateExhausted
 	}
+	output := turn.RunOutput
+	if turn.Status == AgentTurnStatusCompleted && len(publishers) > 0 && publishers[0] != nil {
+		var err error
+		output, err = publishers[0].PublishTurnOutput(ctx, run, turn)
+		if err != nil {
+			publicationErr := fmt.Errorf("publish accepted turn output: %w", err)
+			paused, event, pauseErr := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+				ExpectedRevision: run.Revision, Status: AgentRunStatusPaused, LeaseOwner: leaseOwner,
+				Summary:   "Task output could not be saved. Resolve storage access and resume work to retry.",
+				Error:     "Task output could not be saved. Resolve storage access and resume work to retry.",
+				EventType: "turn.output_publication_failed", TurnID: turn.ID,
+				Actor: ActivityActor{Type: "worker", ID: workerID},
+			})
+			if pauseErr != nil {
+				return nil, pauseErr
+			}
+			return &AdvanceAgentRunResult{Run: paused, Turn: turn, Event: event, Reconciled: reconciled}, publicationErr
+		}
+	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
 		EventType: eventType,
 		Actor:     ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
-		WakeCondition: turn.WakeCondition, Output: turn.RunOutput, Error: turn.RunError,
+		WakeCondition: turn.WakeCondition, Output: output, Error: turn.RunError,
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID, Payload: activityPayload,
 		LeaseOwner:                leaseOwner,
 		BudgetAdmission:           turn.BudgetAdmission,
@@ -681,4 +769,12 @@ func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
 		}
 	}
 	return nil
+}
+
+func interventionIDs(run *AgentRun) []string {
+	ids := make([]string, 0, len(run.PendingInterventions))
+	for _, instruction := range run.PendingInterventions {
+		ids = append(ids, instruction.ID)
+	}
+	return ids
 }

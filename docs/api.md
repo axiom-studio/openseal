@@ -58,6 +58,47 @@ Use `GET /api/v1/health` for a process liveness check.
 `POST /agent-runs` is advertised only when the server has a real Run creation
 dispatcher. Read and lifecycle operations can remain available independently.
 
+The desktop host additionally advertises the `agent-runs` operation `create-team`
+when it can execute team-owned work. Use the same create route with
+`owner: {"type":"team","id":"<team deployment ID>"}` and an
+`assignedAgentId` belonging to that team's roster. New work requires an active
+team and active roster members. The host constructs the execution budget and
+actor; renderer-supplied policy, context, parent linkage, and checkpoints are
+rejected. Delegation, acceptance, completion review, and child budgets remain
+kernel-owned. Team work can be listed with `ownerType=team&ownerId=<ID>`.
+
+Retain the `Idempotency-Key` and exact request after uncertain delivery. The
+desktop host recovers an already accepted matching request before checking
+mutable admission state, so a team paused after submission does not prevent
+recovering its existing run. A changed request with the same key conflicts;
+a new request still requires current admission checks.
+
+`GET /agent-runs` supports scoped pagination with `limit` (1–100) and `offset`.
+Use `order=created_desc` for newest-first browsing; the default retains scheduler
+ordering. `q` searches the goal and status as a case-insensitive literal substring
+(up to 1,000 bytes), before pagination. Repeated or comma-separated `status`
+filters combine with the search. `%` and `_` are literal characters, not wildcards.
+
+`GET /action-approvals` supports scoped `status`, `limit` (1–100), and `offset`
+filters. Requests are ordered oldest first by default (`order=created_asc`);
+`order=created_desc` shows newest requests first. Equal timestamps are ordered by
+checkpoint ID for stable page boundaries. Lists are live, so resolving reviews
+can move subsequent offset-based pages.
+
+Action approval decisions use `POST /action-approvals/{id}/decisions` with the
+checkpoint's `expectedRevision`, a stable `decisionId` (or `Idempotency-Key`),
+`principal`, and `decision`: `approve`, `reject`, or `request_changes`. Requesting
+changes requires reviewer guidance in `reason`. Rejection and requested changes
+block that action while allowing the run to reconsider; approval permits that
+exact checkpoint to proceed subject to current runtime authority. The kernel
+checks the deadline, waiting run/action pair, and eligible reviewer.
+
+Authenticated `--desktop-operator` mode pins decisions to `user:local-operator`
+inside its configured local scope. That local owner may satisfy the default
+`role:operator` requirement or an explicit `user:local-operator` requirement;
+other users and roles are not impersonated. Ordinary servers remain read-only
+until an approval authorizer is configured.
+
 ## Agents and Teams
 
 | Resource | Routes | Purpose |
@@ -117,7 +158,7 @@ enabled them.
 
 ## Conversations
 
-Conversation routes support create/list/get, durable message post/list/get,
+Conversation routes support create/list/get/update, durable message post/list/get,
 incremental changes, participation rounds, per-participant cursors, and leased
 presence:
 
@@ -130,11 +171,62 @@ presence:
 /conversations/{id}/presence
 ```
 
+Message history supports `order=desc`, `limit`, and exclusive `beforeSequence`
+for browsing older messages, alongside `afterSequence` and `threadRootId`.
+The desktop uses 50-message windows plus a lookahead and keeps drafts separate
+from immutable messages. Retrying the same idempotency key and unchanged message
+returns the saved result, even when the conversation revision has advanced.
+A stale revision with a new key returns a conflict; clients must refresh before
+explicitly retrying.
+
+`PATCH /conversations/{id}` accepts `scope`, a positive `expectedRevision`, and
+at least one of `title` or `status` (`active` or `archived`). It updates the existing
+channel without replacing messages or its identity. Archiving stops new messages;
+restoring enables posting again. Existing team runs are not canceled. Stale
+revisions return 409 and this update endpoint has no idempotency replay contract:
+after an uncertain response, read the current channel before making another edit.
+
+In `--desktop-operator` mode, conversation creation and updates are restricted to the configured
+local scope, and message posts must name `user:local-operator` as sender. The
+bearer-authenticated host enables these checks; renderer-supplied agent or service
+identities do not authorize a desktop post. Standalone channel behavior is unchanged.
+Cursor PUT also enforces that configured local scope and participant
+`user:local-operator`. The `channels` capability includes the `receipts` operation
+for the existing cursor GET/PUT contract; receipt availability is independent
+of posting. These checks cover creation, updates, posting, and cursor writes,
+not a general participant ACL system.
+Posting a message through this API does not by itself start agent work.
+
+`GET /conversations` optionally accepts `participantType` and `participantId`.
+With a valid reader, the response remains an array and each conversation includes
+`readPosition: { participant, readSequence, revision }`. An absent cursor yields
+sequence and revision zero without creating or updating a cursor. Omitting both
+query fields preserves the original conversation response shape. Invalid reader
+parameters return 400; a cursor-storage error fails the request instead of
+fabricating unread state. Existing scope, owner, status, and pagination filters
+still apply. The server performs a bounded cursor lookup for each listed row;
+this is not a new database batch operation. The desktop requests
+`participantType=user&participantId=local-operator` when the `channels` capability
+includes `receipts`, and shows only positive last-sequence/read-sequence differences.
+A missing projection remains unknown. Counts reflect saved reading positions,
+not automatic viewport tracking.
+
+Cursor GET identifies its participant with `participantType`/`participantId` and
+scope. PUT supplies `scope`, `participant`, `expectedRevision`,
+`deliveredSequence`, and `readSequence`; the desktop advances read position only
+by explicit user action. Reading/opening a channel does not mutate that position.
+After conflict or uncertain delivery, GET the saved cursor before another write;
+there is no automatic replay. Client checks reject mismatched reader/channel/scope,
+regressing revisions/sequences, or delivery below read position. These desktop
+checks preserve the existing standalone behavior.
+
 Messages are the collaboration surface. Run, approval, request, artifact, and
 decision records remain canonical and are referenced rather than copied into a
 parallel chat execution system.
 
 ## Projects, evidence, outreach, and artifacts
+
+
 
 | Resource | Routes | Purpose |
 | --- | --- | --- |
@@ -146,6 +238,26 @@ parallel chat execution system.
 
 Artifact content operations are advertised only when their store or resolver is
 wired. A content reference is opaque; clients must not treat it as a local path.
+
+### Desktop model-generated text files
+
+The desktop `submit_agent_turn` model contract accepts completed-turn
+`runOutput.generatedFiles` entries `{name, mediaType, text}` for `text/plain`,
+`text/markdown`, `text/csv`, and `application/json`: at most eight files and
+256 KiB total UTF-8 content, within the turn token budget. Names must be unique
+portable filenames without paths; text/JSON are validated. Model-supplied
+`artifactRefs` and extra file metadata are rejected. This is generated output,
+not arbitrary filesystem access or a new artifact-upload endpoint.
+
+After the accepted turn is durable, the configured output publisher assigns
+host-owned scoped identities, integrity metadata, provenance, and classification,
+then publishes content/catalog records before completing the run. Run output
+contains `artifactRefs` in place of bodies; turn drafts remain for recovery.
+Storage failure pauses work; Resume retries publication from the saved turn
+without model reinvocation or duplicate records. Cancellation before provider
+return discards files; previously accepted output can have partially published
+files and is not an atomic multi-file batch.
+
 
 ## Source policy lifecycle
 
@@ -194,3 +306,23 @@ the exact bound adapter and credential-free provider configuration; the host
 must generate a new ingress route when it applies the plan. Never copy a
 source-host credential reference, provider identity, or callback URL into
 `placement`.
+
+## Task guidance command
+
+`POST /api/v1/agent-runs/{runId}/commands` with the run's scope accepts
+`kind: "intervene"`, `instruction`, `expectedRevision`, `actor`, and optional
+`interventionId`. Instructions contain 1–16,000 UTF-8 bytes after trimming.
+`interventionId`, when supplied, must be a UUID and is valid only for `intervene`.
+An existing ID matching the instruction and actor returns the saved run before
+revision comparison; mismatched reuse is invalid. New requests retain ordinary
+revision and capability/authority checks. The desktop supplies user
+`local-operator` and persists its UUID before submitting.
+
+Intervention keeps paused work paused and wakes sleeping work; it does not
+resolve approval or dependency waits. Turns persist `InputInterventionIDs` for
+the actual invocation. A completed but unapplied turn whose input interventions
+are stale cannot publish its old output or request old actions, including during
+recovery; usage is retained and work continues subject to remaining budget.
+Already-applied/started actions and partial artifact publication are not undone.
+Saved intervention history establishes recorded task context, not that the model
+followed the instruction.

@@ -60,17 +60,25 @@ func (p ConversationParticipant) Validate() error {
 }
 
 type Conversation struct {
-	ID           string                 `json:"id"`
-	Scope        Scope                  `json:"scope"`
-	Owner        ObjectiveOwner         `json:"owner"`
-	Title        string                 `json:"title"`
-	Origin       *ConversationReference `json:"origin,omitempty"`
-	Status       ConversationStatus     `json:"status"`
-	LastSequence int64                  `json:"lastSequence"`
-	Revision     int64                  `json:"revision"`
-	CreatedAt    time.Time              `json:"createdAt"`
-	UpdatedAt    time.Time              `json:"updatedAt"`
-	ArchivedAt   *time.Time             `json:"archivedAt,omitempty"`
+	ID            string                     `json:"id"`
+	Scope         Scope                      `json:"scope"`
+	Owner         ObjectiveOwner             `json:"owner"`
+	Title         string                     `json:"title"`
+	Origin        *ConversationReference     `json:"origin,omitempty"`
+	Status        ConversationStatus         `json:"status"`
+	LastSequence  int64                      `json:"lastSequence"`
+	Revision      int64                      `json:"revision"`
+	CreatedAt     time.Time                  `json:"createdAt"`
+	UpdatedAt     time.Time                  `json:"updatedAt"`
+	ArchivedAt    *time.Time                 `json:"archivedAt,omitempty"`
+	Participation *ConversationParticipation `json:"participation,omitempty"`
+}
+
+// ConversationParticipation records an explicit host-authorized opt-in. The
+// sequence boundary is kernel-owned: enabling never replays earlier messages.
+type ConversationParticipation struct {
+	Enabled       bool  `json:"enabled"`
+	AfterSequence int64 `json:"afterSequence"`
 }
 
 func (c *Conversation) Validate() error {
@@ -93,6 +101,9 @@ func (c *Conversation) Validate() error {
 	}
 	if c.Revision <= 0 || c.LastSequence < 0 || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: positive revision, sequence, and timestamps are required", ErrInvalidConversation)
+	}
+	if c.Participation != nil && (c.Participation.AfterSequence < 0 || c.Participation.AfterSequence > c.LastSequence) {
+		return fmt.Errorf("%w: participation boundary must be within saved message history", ErrInvalidConversation)
 	}
 	switch c.Status {
 	case ConversationStatusActive:

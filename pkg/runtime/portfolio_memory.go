@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sort"
+	"strings"
 )
 
 func portfolioKey(scope Scope, id string) string { return scope.key() + ":" + id }
@@ -209,6 +210,9 @@ func matchesObjectiveFilter(objective *Objective, filter ObjectiveFilter) bool {
 }
 
 func matchesRunFilter(run *AgentRun, filter AgentRunFilter) bool {
+	if query := strings.ToLower(strings.TrimSpace(filter.Query)); query != "" && !strings.Contains(strings.ToLower(run.Goal+" "+string(run.Status)), query) {
+		return false
+	}
 	if filter.Kind != "" && normalizeRunKind(run.Kind) != filter.Kind {
 		return false
 	}

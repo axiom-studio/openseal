@@ -115,6 +115,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/conversations", s.handleCreateConversation)
 	s.mux.HandleFunc("GET /api/v1/conversations", s.handleListConversations)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}", s.handleGetConversation)
+	s.mux.HandleFunc("PATCH /api/v1/conversations/{id}", s.handleUpdateConversation)
 	s.mux.HandleFunc("POST /api/v1/conversations/{id}/messages", s.handlePostChannelMessage)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}/messages", s.handleListChannelMessages)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}/messages/{messageId}", s.handleGetChannelMessage)
@@ -170,6 +171,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.agentRunCreation != nil {
 		runOperations = append(runOperations, kernelapi.OperationCreate)
+		if s.teamWorkEnabled {
+			runOperations = append(runOperations, "create-team")
+		}
 	}
 	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability(), kernelapi.WorkforceBundlesCapability(s.workforceBundles != nil && s.workforceBundleActor != "")}
 	if s.sourcePolicies != nil {
@@ -213,7 +217,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 		capabilities = append(capabilities, kernelapi.ArtifactCapability(contentOperations...))
 	}
 	if _, ok := s.store.(runtime.ConversationStore); ok {
-		capabilities = append(capabilities, kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))
+		capabilities = append(capabilities, kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true, Receipts: true}))
 	}
 	if _, agentsOK := s.store.(kernelagent.Store); agentsOK {
 		capabilities = append(capabilities, kernelapi.AgentDefinitionsCapability(kernelapi.AgentDefinitionCapabilityFeatures{Lifecycle: true, Amendments: true, PortableInstallation: true}))

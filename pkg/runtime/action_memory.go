@@ -161,6 +161,12 @@ func (s *MemoryStore) ListApprovals(_ context.Context, filter ApprovalFilter) ([
 		result = append(result, cloneApprovalCheckpoint(approval))
 	}
 	sort.Slice(result, func(i, j int) bool {
+		if result[i].CreatedAt.Equal(result[j].CreatedAt) {
+			if filter.NewestFirst {
+				return result[i].ID > result[j].ID
+			}
+			return result[i].ID < result[j].ID
+		}
 		if filter.NewestFirst {
 			return result[i].CreatedAt.After(result[j].CreatedAt)
 		}

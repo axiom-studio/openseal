@@ -107,6 +107,9 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 }
 
 func createActionApprovalFixture(t *testing.T, store *runtime.MemoryStore) *runtime.ActionProposalResult {
+	return createActionApprovalFixtureWithApprover(t, store, runtime.ApprovalPrincipal{Type: "user", ID: "alice"})
+}
+func createActionApprovalFixtureWithApprover(t *testing.T, store *runtime.MemoryStore, approver runtime.ApprovalPrincipal) *runtime.ActionProposalResult {
 	t.Helper()
 	now := time.Now().UTC()
 	scope := runtime.Scope{Kind: "local", ID: "workspace"}
@@ -120,7 +123,7 @@ func createActionApprovalFixture(t *testing.T, store *runtime.MemoryStore) *runt
 	approval := &runtime.ApprovalCheckpoint{
 		ID: "approval-publish", Scope: scope, RunID: run.ID, ActionCallID: "call-publish", Status: runtime.ApprovalStatusPending,
 		Risk: skill.RiskLevelProduction, Summary: "Publish release announcement", ProposedAction: map[string]interface{}{"channel": "public"},
-		EligibleApprovers: []runtime.ApprovalPrincipal{{Type: "user", ID: "alice"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		EligibleApprovers: []runtime.ApprovalPrincipal{approver}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call := &runtime.ActionCall{
 		ID: "call-publish", Scope: scope, RunID: run.ID, DeploymentID: "operator", SkillID: "publishing", SkillVersion: "1", Action: "publish",
@@ -141,4 +144,79 @@ func createActionApprovalFixture(t *testing.T, store *runtime.MemoryStore) *runt
 		t.Fatal(err)
 	}
 	return result
+}
+
+func TestDesktopApprovalDecisionsUseCanonicalStateAndReplay(t *testing.T) {
+	for _, decision := range []runtime.ApprovalDecision{runtime.ApprovalDecisionApprove, runtime.ApprovalDecisionReject, runtime.ApprovalDecisionRequestChanges} {
+		t.Run(string(decision), func(t *testing.T) {
+			store := runtime.NewMemoryStore()
+			fixture := createActionApprovalFixture(t, store)
+			// The fixture names Alice; desktop ownership must not grant her authority.
+			api := NewServer(store, zap.NewNop().Sugar())
+			api.SetActionApprovalAuthorizer(DesktopApprovalAuthorizer{Scope: fixture.Approval.Scope})
+			server := httptest.NewServer(api.Handler())
+			defer server.Close()
+			kernel := client.NewKernelHTTPClient(server.URL, server.Client())
+			request := kernelapi.ResolveActionApprovalRequest{ExpectedRevision: fixture.Approval.Revision, Decision: decision, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "local-operator"}, Reason: "Use the reviewed destination"}
+			_, err := kernel.ResolveActionApproval(t.Context(), fixture.Approval.Scope, fixture.Approval.ID, request, "desktop-decision")
+			var apiError *client.APIError
+			if !errors.As(err, &apiError) || apiError.StatusCode != 403 {
+				t.Fatalf("ineligible owner = %v", err)
+			}
+			// Resolve a fresh, canonical checkpoint with the default operator role.
+			eligible := createDesktopEligibleApprovalFixture(t)
+			api = NewServer(eligible.store, zap.NewNop().Sugar())
+			api.SetActionApprovalAuthorizer(DesktopApprovalAuthorizer{Scope: eligible.proposal.Approval.Scope})
+			server2 := httptest.NewServer(api.Handler())
+			defer server2.Close()
+			kernel = client.NewKernelHTTPClient(server2.URL, server2.Client())
+			fixture = eligible.proposal
+			result, err := kernel.ResolveActionApproval(t.Context(), fixture.Approval.Scope, fixture.Approval.ID, request, "desktop-decision")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := runtime.ApprovalStatusRejected
+			if decision == runtime.ApprovalDecisionApprove {
+				want = runtime.ApprovalStatusApproved
+			}
+			if decision == runtime.ApprovalDecisionRequestChanges {
+				want = runtime.ApprovalStatusChangesRequested
+			}
+			if result.Approval.Status != want || result.Approval.DecisionBy.ID != "local-operator" {
+				t.Fatalf("decision = %#v", result)
+			}
+			replay, err := kernel.ResolveActionApproval(t.Context(), fixture.Approval.Scope, fixture.Approval.ID, request, "desktop-decision")
+			if err != nil || replay.Resolved {
+				t.Fatalf("replay = %#v, %v", replay, err)
+			}
+			request.Principal = runtime.ApprovalPrincipal{Type: "role", ID: "operator"}
+			_, err = kernel.ResolveActionApproval(t.Context(), fixture.Approval.Scope, fixture.Approval.ID, request, "desktop-decision")
+			if !errors.As(err, &apiError) || apiError.StatusCode != 403 {
+				t.Fatalf("impersonated replay = %v", err)
+			}
+		})
+	}
+}
+
+type desktopEligibleFixture struct {
+	store    *runtime.MemoryStore
+	proposal *runtime.ActionProposalResult
+}
+
+func createDesktopEligibleApprovalFixture(t *testing.T) desktopEligibleFixture {
+	// A separate store helper keeps both fixtures on the normal proposal transaction.
+	store := runtime.NewMemoryStore()
+	return desktopEligibleFixture{store: store, proposal: createActionApprovalFixtureWithApprover(t, store, runtime.ApprovalPrincipal{Type: "role", ID: "operator"})}
+}
+
+func TestApprovalInboxOrderAndStatusFilters(t *testing.T) {
+	for _, order := range []string{"created_asc", "created_desc"} {
+		filter, err := actionApprovalFilterFromQuery(httptest.NewRequest("GET", "/?scopeKind=local&scopeId=default&status=changes_requested&limit=26&offset=25&order="+order, nil))
+		if err != nil || filter.NewestFirst != (order == "created_desc") || len(filter.Status) != 1 || filter.Status[0] != runtime.ApprovalStatusChangesRequested || filter.Offset != 25 {
+			t.Fatalf("filter = %#v, %v", filter, err)
+		}
+	}
+	if _, err := actionApprovalFilterFromQuery(httptest.NewRequest("GET", "/?scopeKind=local&scopeId=default&order=invalid", nil)); err == nil {
+		t.Fatal("invalid order accepted")
+	}
 }
