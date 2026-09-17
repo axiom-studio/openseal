@@ -29,7 +29,9 @@ func ValidateAgentProfileImage(ctx context.Context, store interface {
 		return err
 	}
 	const maximum = 1 << 20
-	if artifact == nil || artifact.Scope != scope || artifact.ID != reference.ArtifactID || artifact.Version != reference.Version || artifact.SizeBytes < 1 || artifact.SizeBytes > maximum || artifact.ContentAvailability != ArtifactContentAvailable {
+	// Availability may be projected by the host rather than persisted. Opening
+	// and validating the content below is the authoritative availability check.
+	if artifact == nil || artifact.Scope != scope || artifact.ID != reference.ArtifactID || artifact.Version != reference.Version || artifact.SizeBytes < 1 || artifact.SizeBytes > maximum || artifact.ContentAvailability == ArtifactContentUnavailable {
 		return errors.New("profile image must be an available image in this workspace, at most 1 MiB")
 	}
 	switch artifact.MediaType {
