@@ -145,10 +145,18 @@ func TestDesktopParticipationProviderBoundsRepliesAndRetainsUsage(t *testing.T) 
 			if mode == "missing-usage" && (result.Usage.OutputTokens != 100 || result.Usage.InputTokens <= 40 || result.Usage.InputTokens > 10000) {
 				t.Fatalf("missing usage did not charge bounded estimate: %#v", result.Usage)
 			}
+			if mode == "quiet" {
+				proposal := result.Proposal
+				proposal.ID, proposal.RoundID = "proposal", "round"
+				proposal.Participant = input.Participant
+				if err := proposal.Validate(); err != nil {
+					t.Fatalf("quiet proposal invalid: %v", err)
+				}
+			}
 			if mode == "overage" && result.Usage.OutputTokens != 101 {
 				t.Fatal("overage was hidden")
 			}
-			if success {
+			if success && mode != "quiet" {
 				if result.Proposal.Audience.Kind != runtime.ConversationAudienceChannel || result.Proposal.BroadcastToChannel || result.Proposal.ReplyToMessageID != "trigger" || result.Proposal.ProposedAction != nil {
 					t.Fatalf("reply escaped its audience or gained authority: %#v", result.Proposal)
 				}

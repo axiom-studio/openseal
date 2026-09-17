@@ -342,7 +342,8 @@ policy in standalone defaults.
 Embedding hosts can require explicit per-channel participation by setting
 `RequireParticipationOptIn` on both the conversation scheduler and turn runner.
 The engine rejects mismatched policies. The default remains compatible with
-existing hosts; the desktop does not yet enable automatic participation.
+existing hosts. The desktop enables this policy on both components and exposes
+explicit per-channel Team replies settings.
 
 `ConversationService.UpdateConversation` accepts `ParticipationEnabled` under
 revision control. Enabling records the channel's current sequence as a boundary:
@@ -356,7 +357,7 @@ revision checks to reject a round computed against an outdated channel.
 
 Opt-out does not undo already completed work or cancel actions already admitted
 for execution. Host authorization, participant eligibility, model budgets, and
-usage accounting remain necessary before enabling this in a desktop host.
+usage accounting remain enforced by the desktop host.
 
 ### Metered team participation
 
@@ -393,9 +394,8 @@ existing idempotent turn accounting.
 Unreported usage from a process crash before a round or turn is committed cannot
 be reconstructed from this contract. Existing unmetered embedding providers
 remain supported unless usage reporting or proposal allowances are required.
-The desktop provider adapter, canonical roster resolution, and explicit UI/API
-participation controls still need integration before desktop automatic team
-participation is available.
+The desktop wires the provider adapter, canonical roster resolver, explicit UI/API
+participation controls, reconciler, and conversation workers when its provider is ready.
 
 ### Desktop participation host adapters
 
@@ -429,6 +429,22 @@ pricing data.
 
 Synthetic HTTP and real runtime integration tests cover privacy, budget settlement,
 stale membership, role authority, invalid output, and provider failures. These
-adapters are not yet registered with desktop conversation workers, and the
-participation settings API/UI is still pending. Live provider quality remains
-unverified.
+adapters are registered with desktop conversation workers when the provider is
+ready. Channel settings persist explicit opt-in/off through revision-checked PATCH
+and recovery-by-read after uncertain delivery. Configuration remains available
+without a provider for opt-out; automatic coordination does not. Desktop clients
+cannot inject manual participation proposals.
+
+Desktop bounds are eight eligible participants, two concurrent proposals, 30
+recent messages, and 16,000 input/2,048 output tokens per participant. Conversation
+runs allow three turns, four attempts, 432,000 total tokens, 49,152 output tokens,
+and 180,000 ms. Authored quiet-by-default, role-relevance, and duplicate-suppression
+policies apply; authored maximum speakers narrows the host cap of three. New
+rounds resolve current canonical policy; recovery of committed rounds reuses the
+saved policy. Queued provider calls check channel revision before starting, so
+changes stop unstarted proposals. Requests already sent can still incur charges;
+reported usage is retained and stale publication is rejected.
+
+Full Go suites/race checks, 106 desktop browser tests, and Linux native smoke passed
+with synthetic providers. Live provider quality and other operating systems remain
+unverified; this bounded integration does not certify overall app completion.

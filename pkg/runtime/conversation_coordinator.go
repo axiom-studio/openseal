@@ -376,6 +376,18 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					proposals[index] = ParticipationProposal{Participant: binding.Participant, SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority, Availability: ParticipationAvailability{Status: ParticipationNotInvited}}
 					continue
 				}
+				if workerCtx.Err() != nil {
+					continue
+				}
+				current, checkErr := c.conversations.GetConversation(workerCtx, req.Scope, conversation.ID)
+				if checkErr != nil || current.Revision != conversation.Revision {
+					if checkErr == nil {
+						checkErr = ErrRevisionConflict
+					}
+					errs[index] = checkErr
+					cancel()
+					continue
+				}
 				presence, presenceErr := c.conversations.SetPresence(workerCtx, SetConversationPresenceRequest{
 					Scope: req.Scope, ConversationID: conversation.ID, Participant: binding.Participant,
 					State: ConversationPresenceThinking, Summary: "Reviewing channel activity", TTL: c.config.PresenceTTL,
