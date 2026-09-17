@@ -195,6 +195,10 @@ const (
 // ParticipationRound preserves every proposal and deterministic decision,
 // including silence and deferral, without exposing hidden model reasoning.
 type ParticipationRound struct {
+	// Host-reported usage is committed with the round so recovery can settle
+	// the originating Turn even after a crash before its outcome was persisted.
+	Usage                TurnUsage                     `json:"usage,omitempty"`
+	UsageTurnID          string                        `json:"usageTurnId,omitempty"`
 	ID                   string                        `json:"id"`
 	Scope                Scope                         `json:"scope"`
 	ConversationID       string                        `json:"conversationId"`
@@ -218,6 +222,12 @@ func (r *ParticipationRound) Validate() error {
 	}
 	if err := r.Scope.Validate(); err != nil {
 		return err
+	}
+	if err := r.Usage.Validate(); err != nil {
+		return err
+	}
+	if r.UsageTurnID != "" && !validOpaqueIdentifier(r.UsageTurnID, 128) {
+		return errors.New("participation usage turn id must be portable")
 	}
 	if r.TriggerMessageID != "" && !validOpaqueIdentifier(r.TriggerMessageID, 128) {
 		return errors.New("participation trigger message id must be portable")
