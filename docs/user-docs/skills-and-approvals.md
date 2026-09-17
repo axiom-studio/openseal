@@ -2,6 +2,14 @@
 
 A Skill is a typed definition of what an Agent can do outside its own reasoning. Skills are registered in a catalog, bound to specific deployments, and invoked as action calls at execution time — and an action that policy holds stops at a durable approval rather than proceeding.
 
+## Finding a way to complete the task
+
+Agents are instructed to apply relevant Skills proactively and look at what actions can accomplish, rather than requiring a Skill named after the task. The creator receives the same direction when selecting capabilities and describing Agent behavior. Existing hosted Agents receive this guidance at runtime without rewriting their definitions.
+
+For example, graphing the S&P 500 for the last month may use a dedicated data integration, a documented service learned through the generic API Skill, a verified MCP service, or an accessible browser source, followed by an available chart capability. These are routes to investigate, not a guarantee that every deployment has the tools or source access needed.
+
+Agents should try a suitable authorized alternative after a recoverable failure, explain useful progress, and ask focused questions when a decision or setup prerequisite is missing. When blocked, they should report the specific obstacle, what they checked, and the next step that would enable progress. This guidance does not grant bindings, bypass approvals, or supply credentials, and it does not guarantee model compliance.
+
 ## Skills and Bindings
 
 Registering a Skill does not grant it. The binding is the unit of least privilege: each Agent deployment or Team deployment carries only the bindings it has been given, and a Skill in the catalog that is bound to nothing can be invoked by nothing.
