@@ -466,7 +466,7 @@ func hostedAgentInstructions(definition *kernelagent.AgentDefinition) []string {
 	if definition == nil {
 		return nil
 	}
-	instructions := []string{definition.SystemPrompt, "Purpose: " + definition.Purpose}
+	instructions := []string{definition.SystemPrompt, "Purpose: " + definition.Purpose, agentResourcefulnessGuidance}
 	if definition.Personality != "" {
 		instructions = append(instructions, "Personality: "+definition.Personality)
 	}
