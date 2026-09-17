@@ -173,6 +173,18 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	changes, _ := NewConversationChangeService(store, store)
+	now := time.Now().UTC()
+	for _, run := range []*AgentRun{
+		{ID: "hidden-root", Kind: RunKindConversation, RootRunID: "hidden-root", ConcurrencyKey: conversation.ID, Context: map[string]interface{}{conversationRunContextTriggerID: hidden.Message.ID}},
+		{ID: "hidden-child", Kind: RunKindAgentWork, RootRunID: "hidden-root", ParentRunID: "hidden-root"},
+	} {
+		run.Scope, run.Owner = scope, conversation.Owner
+		run.Goal, run.Source, run.Status = "Private task contents", RunSourceChat, AgentRunStatusRunning
+		run.Revision, run.CreatedAt, run.UpdatedAt, run.AvailableAt, run.QueueEnteredAt = 1, now, now, now, now
+		if err := store.CreateAgentRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
 	first, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Limit: 1, Viewer: &viewer})
 	if err != nil {
 		t.Fatal(err)
@@ -180,12 +192,34 @@ func TestConversationChangesAdvanceOpaqueCursorAcrossHiddenPage(t *testing.T) {
 	if len(first.Messages) != 0 || !first.HasMore || first.Cursor == "" {
 		t.Fatalf("first=%#v", first)
 	}
+	if len(first.Runs) != 0 || len(first.Activity) != 0 {
+		t.Fatal("private execution leaked to a viewer without message access")
+	}
+	allowed := ConversationViewer{Participant: target}
+	private, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &allowed})
+	if err != nil || len(private.Runs) != 2 {
+		t.Fatalf("authorized viewer lost execution: %#v, %v", private, err)
+	}
 	second, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: first.Cursor, Limit: 1, Viewer: &viewer})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(second.Messages) != 1 || second.Messages[0].Content != "channel update" {
 		t.Fatalf("second=%#v", second)
+	}
+	if _, _, err := NewRunActivityService(store, store).TransitionRun(ctx, scope, "hidden-child", RunTransitionRequest{
+		ExpectedRevision: 1, Status: AgentRunStatusFailed,
+		Actor: ActivityActor{Type: "worker", ID: "private-worker"}, Summary: "Private failure details",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	afterHiddenChange, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: second.Cursor, Viewer: &viewer})
+	if err != nil || afterHiddenChange.HasChanges || afterHiddenChange.Cursor != second.Cursor || len(afterHiddenChange.Activity) != 0 {
+		t.Fatalf("hidden work leaked through cursor or activity: %#v, %v", afterHiddenChange, err)
+	}
+	private, err = changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Viewer: &allowed})
+	if err != nil || len(private.Activity) == 0 {
+		t.Fatalf("authorized viewer lost private activity: %#v, %v", private, err)
 	}
 }
 
