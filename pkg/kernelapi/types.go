@@ -179,6 +179,7 @@ type SkillActionList struct {
 // a host. The version and operation vocabulary are canonical; each host
 // advertises only the portable or enterprise adapters it has actually wired.
 type ChannelCapabilityFeatures struct {
+	Runs                  bool
 	ParticipationSettings bool
 	Coordination          bool
 	AutomaticCoordination bool
@@ -676,6 +677,9 @@ func ChannelsCapability(features ChannelCapabilityFeatures) Capability {
 	}
 	if features.Coordination {
 		capability.Operations = append(capability.Operations, OperationCoordinate)
+	}
+	if features.Runs {
+		capability.Operations = append(capability.Operations, "runs")
 	}
 	if features.ParticipationSettings {
 		capability.Operations = append(capability.Operations, OperationParticipation)
