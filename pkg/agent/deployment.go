@@ -62,9 +62,18 @@ type DeploymentHealth struct {
 	LastHeartbeatAt *time.Time `json:"lastHeartbeatAt,omitempty"`
 }
 
+// ProfileImage identifies immutable image content in the deployment's scope.
+// Hosts must authorize the artifact and verify its image content before assigning
+// or serving it. Never store a provider URL, signed URL, or image bytes here.
+type ProfileImage struct {
+	ArtifactID string `json:"artifactId"`
+	Version    int64  `json:"version"`
+}
+
 type AgentDeployment struct {
 	ID                 string                                    `json:"id"`
 	DisplayName        string                                    `json:"displayName,omitempty"`
+	ProfileImage       *ProfileImage                             `json:"profileImage,omitempty"`
 	Scope              capability.ScopeReference                 `json:"scope"`
 	DefinitionID       string                                    `json:"definitionId"`
 	ActiveVersion      string                                    `json:"activeVersion"`
@@ -96,6 +105,14 @@ func (d *AgentDeployment) Validate() error {
 	}
 	if len(strings.TrimSpace(d.DisplayName)) > 200 {
 		return errors.New("deployment display name must not exceed 200 characters")
+	}
+	if d.ProfileImage != nil {
+		image := d.ProfileImage
+		if strings.TrimSpace(image.ArtifactID) == "" || image.Version < 1 ||
+			image.ArtifactID != strings.TrimSpace(image.ArtifactID) || len(image.ArtifactID) > 256 ||
+			strings.ContainsAny(image.ArtifactID, "/\\?#\r\n\t") {
+			return errors.New("deployment profile image requires an opaque artifact id and exact version")
+		}
 	}
 	if d.RolloutStatus != RolloutPending && d.RolloutStatus != RolloutActive && d.RolloutStatus != RolloutDegraded && d.RolloutStatus != RolloutPaused && d.RolloutStatus != RolloutRetired {
 		return errors.New("deployment rollout status is invalid")
