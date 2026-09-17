@@ -1,3 +1,4 @@
+import ChannelReplyActivity from "./ChannelReplyActivity";
 import { useEffect, useRef, useState } from "react";
 import {
   api,
@@ -543,6 +544,16 @@ function ChannelThread({
             );
             onUpdated(next);
           }}
+        />
+      )}
+      {conversation && supports(capabilities, "channels", "runs") && (
+        <ChannelReplyActivity
+          key={id}
+          id={id}
+          teamId={teamId}
+          canInspect={supports(capabilities, "agent-runs", "get")}
+          onOpenRun={onOpenRun}
+          sender={sender}
         />
       )}
       {conversation && supports(capabilities, "channels", "receipts") && (

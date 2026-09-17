@@ -382,6 +382,7 @@ type ObjectiveFilter struct {
 }
 
 type AgentRunFilter struct {
+	ConversationID  string // Exact canonical conversation ID stored in run context.
 	Query           string // Literal case-insensitive substring of the goal or status.
 	Scope           Scope
 	Kind            RunKind
