@@ -158,6 +158,7 @@ func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capabilit
 	actionInputs["proposed"] = arguments
 	response.ProposedAction = &TurnAction{
 		Type: "skill_action", Capability: selected.Name, Summary: strings.TrimSpace(form.ProposedAction.Summary),
+		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		IdempotencyKey: strings.TrimSpace(form.ProposedAction.IdempotencyKey), InputRef: "/actionInputs/proposed",
 		EvidenceRefs: append([]string(nil), form.ProposedAction.EvidenceRefs...), ExternalOperation: form.ProposedAction.ExternalOperation,
 		ReviewContext: cloneApprovalReviewContext(form.ProposedAction.ReviewContext),
