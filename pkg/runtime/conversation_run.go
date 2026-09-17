@@ -31,6 +31,8 @@ type ConversationRunSchedulerConfig struct {
 	// RequireParticipationOptIn leaves unconfigured channels inert. Existing
 	// embedding hosts retain their prior scheduling policy when false.
 	RequireParticipationOptIn bool
+	// Budget is host-owned and copied onto each newly scheduled Run.
+	Budget *BudgetPolicy
 }
 
 func (c ConversationRunSchedulerConfig) normalize() (ConversationRunSchedulerConfig, error) {
@@ -42,6 +44,12 @@ func (c ConversationRunSchedulerConfig) normalize() (ConversationRunSchedulerCon
 	}
 	if c.ConversationPageSize < 1 || c.ConversationPageSize > 1000 || c.MessagePageSize < 1 || c.MessagePageSize > 1000 {
 		return ConversationRunSchedulerConfig{}, fmt.Errorf("%w: conversation reconciliation page sizes must be between 1 and 1000", ErrInvalidConversation)
+	}
+	if c.Budget != nil {
+		if err := c.Budget.Validate(); err != nil {
+			return ConversationRunSchedulerConfig{}, err
+		}
+		c.Budget = cloneBudgetPolicy(c.Budget)
 	}
 	return c, nil
 }
@@ -155,6 +163,7 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 
 func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *Conversation, message *ChannelMessage) (CreateAgentRunRequest, error) {
 	request := conversationAgentRunRequest(conversation, message)
+	request.Budget = cloneBudgetPolicy(s.config.Budget)
 	if s.sessionContext == nil {
 		return request, nil
 	}
@@ -640,9 +649,72 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	return binding, nil
 }
 
-func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+// PlanTurnBudget reserves the full permitted fan-out before any proposal call.
+// The provider receives its per-participant allowance independently of model
+// content; a changed roster remains bounded by MaximumParticipants.
+func (r *ConversationRunTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
+	if err := validateConversationRun(input.Run); err != nil {
+		return BudgetUsage{}, err
+	}
+	if input.Run.Owner.Type != OwnerTypeTeam {
+		return BudgetUsage{}, nil
+	}
+	if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
+		return BudgetUsage{}, err
+	} else if stopped {
+		return BudgetUsage{}, nil
+	}
+	if _, completed := governedConversationActionOutcome(input.Run); completed {
+		return BudgetUsage{}, nil
+	}
+	budget := r.coordinator.config.ProposalBudget
+	if budget == (ParticipationProposalBudget{}) {
+		return BudgetUsage{}, nil
+	}
+	// An already committed round needs no new model capacity on recovery.
+	conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
+	triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
+	key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
+	existing, err := r.conversations.FindParticipationRoundByIdempotencyKey(ctx, input.Run.Scope, conversationID, key)
+	if err != nil {
+		return BudgetUsage{}, err
+	}
+	if existing != nil {
+		return BudgetUsage{}, nil
+	}
+	count := int64(r.coordinator.config.MaximumParticipants)
+	return BudgetUsage{InputTokens: count * budget.InputTokens, OutputTokens: count * budget.OutputTokens}, nil
+}
+
+func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (outcome *TurnOutcome, runErr error) {
+	// Retain provider usage on every exit after coordination, including errors,
+	// revision-conflict retries, opt-out, and failures publishing fallback text.
+	var participationUsage TurnUsage
+	defer func() {
+		if participationUsage == (TurnUsage{}) {
+			return
+		}
+		if outcome == nil {
+			outcome = &TurnOutcome{}
+		}
+		outcome.Usage = participationUsage
+	}()
 	if err := validateConversationRun(input.Run); err != nil {
 		return nil, err
+	}
+	// Recover a committed round's charge only for its original unfinished
+	// turn. A later continuation must not charge that round again.
+	if input.Turn != nil && input.Run.Owner.Type == OwnerTypeTeam {
+		conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
+		triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
+		key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
+		saved, err := r.conversations.FindParticipationRoundByIdempotencyKey(ctx, input.Run.Scope, conversationID, key)
+		if err != nil {
+			return nil, err
+		}
+		if saved != nil && saved.Round.UsageTurnID == input.Turn.ID {
+			participationUsage = saved.Round.Usage
+		}
 	}
 	if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
 		return nil, err
@@ -692,12 +764,20 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		}, nil
 	}
 	key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
-	result, err := r.coordinator.Coordinate(ctx, ConversationCoordinationRequest{
-		Scope: input.Run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
+	usageTurnID := ""
+	if input.Turn != nil {
+		usageTurnID = input.Turn.ID
+	}
+	result, measuredUsage, err := r.coordinator.CoordinateWithUsage(ctx, ConversationCoordinationRequest{
+		UsageTurnID: usageTurnID,
+		Scope:       input.Run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		TriggerMessageID: triggerID, Policy: r.config.Policy, MaximumConcurrency: r.config.MaximumConcurrency,
 		MessageReferences: []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}},
 		IdempotencyKey:    key,
 	})
+	if measuredUsage != (TurnUsage{}) {
+		participationUsage = measuredUsage
+	}
 	if err != nil {
 		if ctx.Err() != nil || permanentConversationRunError(err) {
 			return nil, err

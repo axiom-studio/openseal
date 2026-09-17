@@ -357,3 +357,42 @@ revision checks to reject a round computed against an outdated channel.
 Opt-out does not undo already completed work or cancel actions already admitted
 for execution. Host authorization, participant eligibility, model budgets, and
 usage accounting remain necessary before enabling this in a desktop host.
+
+### Metered team participation
+
+A host that enables model-backed team rounds should configure a per-run
+`ConversationRunSchedulerConfig.Budget` and a per-participant
+`ConversationCoordinatorConfig.ProposalBudget`. The scheduler copies the host's
+policy into each new run. Before execution, the turn budget planner reserves
+input and output capacity for `MaximumParticipants`, independently of the current
+roster. An insufficient remaining budget pauses the run before provider calls.
+This conservative reservation permits roster changes within that maximum without
+admitting more model work than the run can afford.
+
+A proposal allowance requires `MeteredParticipationProposalProvider`. Each call
+receives a private copy of the input/output allowance in
+`ParticipationProposalContext.Budget`; the host must check input size and cap
+model generation before making the request. It reports provider usage through
+`MeteredParticipationProposal`, including any known usage when returning an
+error. Usage is host-reported, never accepted from model-authored proposal fields.
+Over-limit or invalid reports prevent publication. Valid reported overages are
+still charged. The runtime cannot stop a provider from exceeding a limit that the
+provider itself ignores.
+
+The coordinator sums tokens, cost, and provider/validation time across attempted
+proposals, including unavailable participants and discarded rounds. Elapsed turn
+time remains wall-clock time. `CoordinateWithUsage` returns invocation usage even
+when coordination fails; replaying a committed round makes no new calls. Durable
+conversation runners retain that usage on retry, failed publication, and failed
+outcomes. A committed round also records usage and its originating turn ID, so a
+restart after round commit but before turn finalization can recover the charge.
+Only that original turn recovers the recorded charge; later continuation turns
+do not charge it again. Reconciliation of an already finalized turn uses the
+existing idempotent turn accounting.
+
+Unreported usage from a process crash before a round or turn is committed cannot
+be reconstructed from this contract. Existing unmetered embedding providers
+remain supported unless usage reporting or proposal allowances are required.
+The desktop provider adapter, canonical roster resolution, and explicit UI/API
+participation controls still need integration before desktop automatic team
+participation is available.
