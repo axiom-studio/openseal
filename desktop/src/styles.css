@@ -2261,3 +2261,17 @@ dialog::backdrop {
 .channel-composer input {
   min-height: 0;
 }
+
+.home-recovery {
+  padding: 0 20px 16px;
+  overflow-wrap: anywhere;
+}
+.home-recovery p {
+  margin-bottom: 12px;
+}
+.home-recovery .inline-help {
+  padding: 0;
+}
+.home-recovery .inspector-actions {
+  flex-wrap: wrap;
+}
