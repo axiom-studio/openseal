@@ -22,6 +22,8 @@ const HostedTurnFormSchemaVersion = "openseal.hosted-turn-form/v1"
 // schema-backed form. CompileHostedTurnForm owns the kernel-specific pointer
 // and checkpoint representation; models never construct that wiring.
 type HostedTurnForm struct {
+	// Public intent only; emitted by the harness while the rest of the form streams.
+	ProgressSummary            string                        `json:"progressSummary,omitempty"`
 	SchemaVersion              string                        `json:"schemaVersion"`
 	SkillSelections            []HostedSkillSelection        `json:"skillSelections"`
 	Decisions                  []TurnDecision                `json:"decisions"`
