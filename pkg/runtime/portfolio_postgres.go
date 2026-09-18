@@ -284,6 +284,9 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 	if filter.ConversationID != "" {
 		add(` AND payload->'context'->>'conversationId' = $%d`, filter.ConversationID)
 	}
+	if filter.ConcurrencyKey != "" {
+		add(` AND payload->>'concurrencyKey' = $%d`, filter.ConcurrencyKey)
+	}
 	if filter.ParentRunID != "" {
 		add(` AND parent_run_id = $%d`, filter.ParentRunID)
 	}

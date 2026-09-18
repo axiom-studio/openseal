@@ -53,6 +53,8 @@ func migratePortfolio(db *sql.DB) error {
 			ON agent_runs(scope_kind, scope_id, objective_id, status, priority, created_at);
 		CREATE INDEX IF NOT EXISTS idx_agent_runs_lineage
 			ON agent_runs(scope_kind, scope_id, root_run_id, parent_run_id, created_at);
+		CREATE INDEX IF NOT EXISTS idx_agent_runs_concurrency
+			ON agent_runs(scope_kind, scope_id, json_extract(payload, '$.concurrencyKey'));
 	`)
 	if err != nil {
 		return err
@@ -338,6 +340,10 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) 
 	}
 	query := `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ?`
 	args := []any{filter.Scope.Kind, filter.Scope.ID}
+	if filter.ConcurrencyKey != "" {
+		query += ` AND json_extract(payload, '$.concurrencyKey') = ?`
+		args = append(args, filter.ConcurrencyKey)
+	}
 	if filter.RootRunID != "" {
 		query += ` AND root_run_id = ?`
 		args = append(args, filter.RootRunID)
