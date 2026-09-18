@@ -115,7 +115,10 @@ func externalConversationEndpointMatchesVerifiedRoute(
 		endpoint.Adapter.AdapterID != route.AdapterID {
 		return false
 	}
-	return route.ApplicationID == "" || endpoint.ApplicationID == route.ApplicationID
+	// The endpoint owns the optional application pin. A missing event identity
+	// must not bypass an explicit pin; unpinned endpoints are further restricted
+	// to their own authenticated gateway binding by the ingress service.
+	return endpoint.ApplicationID == "" || endpoint.ApplicationID == route.ApplicationID
 }
 
 func (s *MemoryStore) UpdateExternalConversationEndpoint(_ context.Context, endpoint *ExternalConversationEndpoint, expectedRevision int64) error {

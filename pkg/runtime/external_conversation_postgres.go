@@ -178,7 +178,7 @@ func (s *PostgresStore) ListExternalConversationEndpointsByVerifiedRoute(
 		  AND payload->'adapter'->>'skillVersion'=$6
 		  AND COALESCE(payload->'adapter'->>'sourceIdentity','')=$7
 		  AND payload->'adapter'->>'adapterId'=$8
-		  AND ($9='' OR payload->>'applicationId'=$9)
+		  AND (COALESCE(payload->>'applicationId','')='' OR payload->>'applicationId'=$9)
 		ORDER BY scope_kind,scope_id,id`,
 		route.Provider, ExternalConversationEndpointActive, route.InstallationID, route.Address,
 		route.SkillID, route.SkillVersion, route.SourceIdentity, route.AdapterID, route.ApplicationID)
