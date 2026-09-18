@@ -214,7 +214,7 @@ func (g *OpenAICompatibleGenerator) RepairIntent(ctx context.Context, request Ge
 func (g *OpenAICompatibleGenerator) completeAuthoringIntent(ctx context.Context, request GenerateRequest, invocationKey string, messages []map[string]string) (AuthoringIntent, error) {
 	var lastErr error
 	for attempt := 0; attempt <= maximumSchemaRepairAttempts; attempt++ {
-		raw, err := g.completeContract(ctx, invocationKey, messages, authoringIntentContract())
+		raw, err := g.completeContract(ctx, invocationKey, messages, authoringIntentContractForCatalog(request.Catalog))
 		if err != nil {
 			return AuthoringIntent{}, err
 		}
@@ -229,7 +229,10 @@ func (g *OpenAICompatibleGenerator) completeAuthoringIntent(ctx context.Context,
 		if attempt == maximumSchemaRepairAttempts {
 			break
 		}
-		diagnostic, _ := json.Marshal(map[string]interface{}{"validationErrors": authoringIntentRepairDiagnostics(err)})
+		diagnostic, _ := json.Marshal(map[string]interface{}{
+			"previousSemanticAnswers": string(raw),
+			"validationErrors":        authoringIntentRepairDiagnostics(err),
+		})
 		messages = append(messages, map[string]string{
 			"role": "user", "content": "The semantic answer sheet was invalid. Correct only this validation error and submit a complete replacement answer sheet.\n" + string(diagnostic),
 		})
