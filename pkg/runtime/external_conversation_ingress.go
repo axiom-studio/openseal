@@ -340,6 +340,23 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 		if err != nil {
 			return nil, err
 		}
+		// An optional application pin may be absent when provider discovery only
+		// returns the installation identity. Such endpoints may receive events
+		// only through their own exact, authenticated tenant gateway binding.
+		// Platform gateways and other bindings still require an explicit app pin.
+		bound := endpoints[:0]
+		for _, endpoint := range endpoints {
+			if endpoint == nil {
+				continue
+			}
+			if endpoint.ApplicationID == "" && (gateway.Scope.Kind == "platform" ||
+				endpoint.Scope != gateway.Scope || endpoint.DeploymentID != gateway.DeploymentID ||
+				endpoint.Adapter.BindingID != ref.BindingID || endpoint.Adapter.BindingRevision != ref.BindingRevision) {
+				continue
+			}
+			bound = append(bound, endpoint)
+		}
+		endpoints = bound
 		// Tenant- and local-owned gateways may route only within their own
 		// ownership boundary. A host may deliberately provision a platform
 		// gateway for one provider application shared across tenants, but a
