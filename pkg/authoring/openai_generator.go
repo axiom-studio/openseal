@@ -503,7 +503,10 @@ func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invoca
 	if mode == OpenAICompatibleStructuredOutputTool {
 		expectedFinish = "tool_calls"
 	}
-	if reason := strings.TrimSpace(choice.FinishReason); reason != "" && reason != expectedFinish {
+	// Some compatible providers (including Qwen) report "stop" for completed
+	// tool calls. Validate the required call below instead of treating a normal
+	// stop as truncation. Length, filtering, and unknown reasons still fail closed.
+	if reason := strings.TrimSpace(choice.FinishReason); reason != "" && reason != expectedFinish && !(mode == OpenAICompatibleStructuredOutputTool && reason == "stop") {
 		return nil, &ProviderIncompleteError{FinishReason: reason}
 	}
 	if mode == OpenAICompatibleStructuredOutputTool {
