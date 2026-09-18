@@ -282,6 +282,37 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	}
 	heartbeatDone := make(chan turnLeaseHeartbeatResult, 1)
 	go c.heartbeatTurnLease(executionCtx, cancelExecution, req.Scope, turn, req.WorkerID, req.LeaseDuration, heartbeatDone)
+	// Progress is append-only activity, not a Turn mutation: lease heartbeats and
+	// terminal result commits retain their existing revision discipline.
+	lastSummary := ""
+	executionCtx = WithTurnProgress(executionCtx, func(progressCtx context.Context, summary string) error {
+		if summary == lastSummary {
+			return nil
+		}
+		current, err := c.turns.turns.GetAgentTurn(progressCtx, req.Scope, turn.ID)
+		if err != nil {
+			return err
+		}
+		if current == nil || current.Status != AgentTurnStatusRunning || current.LeaseOwner != req.WorkerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(c.activity.now()) {
+			return ErrTurnLeaseHeld
+		}
+		active, err := c.portfolio.GetAgentRun(progressCtx, req.Scope, run.ID)
+		if err != nil {
+			return err
+		}
+		if active == nil || active.Status != AgentRunStatusRunning || active.LeaseOwner != "" && active.LeaseOwner != req.WorkerID {
+			return ErrLeaseLost
+		}
+		_, err = c.activity.AppendActivity(progressCtx, &ActivityEvent{
+			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: run.Owner.ID,
+			EventType: "turn.progress", Summary: summary, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
+			Visibility: ActivityVisibilityScope,
+		})
+		if err == nil {
+			lastSummary = summary
+		}
+		return err
+	})
 	executionStarted := time.Now()
 	outcome, runErr := runner.RunTurn(executionCtx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
 	executionDurationMS := time.Since(executionStarted).Milliseconds()
