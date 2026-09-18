@@ -210,6 +210,9 @@ func matchesObjectiveFilter(objective *Objective, filter ObjectiveFilter) bool {
 }
 
 func matchesRunFilter(run *AgentRun, filter AgentRunFilter) bool {
+	if filter.ConcurrencyKey != "" && run.ConcurrencyKey != filter.ConcurrencyKey {
+		return false
+	}
 	if filter.ConversationID != "" && run.Context[conversationRunContextConversationID] != filter.ConversationID {
 		return false
 	}

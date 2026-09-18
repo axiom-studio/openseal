@@ -307,6 +307,7 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 	for offset := 0; ; offset += pageSize {
 		page, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 			Scope: conversation.Scope, Kind: RunKindConversation, Owner: &conversation.Owner, Limit: pageSize, Offset: offset,
+			ConcurrencyKey: conversation.ID,
 		})
 		if err != nil {
 			return nil, err
