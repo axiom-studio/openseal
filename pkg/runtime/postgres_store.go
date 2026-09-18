@@ -428,9 +428,11 @@ func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query post
 	return applied, err
 }
 
-// postgresSchemaCurrent verifies the complete contiguous migration ledger
+// postgresSchemaCurrent verifies the complete supported migration ledger
 // while the caller holds migration leadership. A highest-version-only check
 // could hide a partially restored or manually damaged ledger.
+// Migration 34 (Objective run templates) was retired with the runbook-only
+// execution contract. Older databases may retain it; fresh databases omit it.
 func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgresMigrationQuerier) (bool, int64, error) {
 	var relation sql.NullString
 	if err := query.QueryRowContext(ctx, `SELECT to_regclass($1)`, s.schema+".schema_migrations").Scan(&relation); err != nil {
@@ -442,12 +444,12 @@ func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgre
 	var knownVersions, schemaVersion int64
 	if err := query.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1),
+			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1 AND version <> 34),
 			COALESCE(MAX(version), 0)
 		FROM `+s.table("schema_migrations"), currentPostgresSchemaVersion).Scan(&knownVersions, &schemaVersion); err != nil {
 		return false, 0, err
 	}
-	return knownVersions == currentPostgresSchemaVersion, schemaVersion, nil
+	return knownVersions == currentPostgresSchemaVersion-1, schemaVersion, nil
 }
 
 func (s *PostgresStore) recordMigrationOutcome(phase PostgresMigrationPhase, stats PostgresMigrationStats) {
