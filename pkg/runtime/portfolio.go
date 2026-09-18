@@ -382,6 +382,7 @@ type ObjectiveFilter struct {
 }
 
 type AgentRunFilter struct {
+	ConcurrencyKey string // Exact scheduler key; intersected with scope and owner.
 	ConversationID string // Exact canonical conversation ID stored in run context.
 	Query          string // Literal case-insensitive substring of the goal or status.
 	Scope          Scope
