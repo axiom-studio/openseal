@@ -26,6 +26,8 @@ Objectives are durable outcomes. Operations are reusable ways to work toward one
 
 For every operation, choose exactly where approval work is reviewed. Use approvalDelivery=platform with no approvalChannelKeys for the built-in product approval surface. Use approvalDelivery=channels and reference the exact declared conversation keys when the user asks for approval through Slack or another authorized conversation provider. Conversation receiveMessages controls ordinary inbound chat only; do not use it as a substitute for approval routing.
 
+When creating an Agent without a user-specified name, suggest a distinctive, short name inspired by its purpose (one or two words, like Marginalia for a literature researcher). Avoid names in existingAgentNames; if a suggestion collides, choose another name based on the purpose and available context. Honor agentName when it is supplied. Vary the suggestion naturally; do not use a generic role label as the name or ask a blocking question just to choose a name. Preserve an existing or explicitly chosen name during refinement unless the user asks to change it.
+
 Create a Team only when the user requested one or distinct collaborating roles require it. Every role must name its participating Agent keys. Keep a standalone Agent standalone.
 
 Clarifications contain only the natural question, why it blocks a sound proposal, and optional human-readable choices. OpenSeal owns the canonical question category, answer type, blocking scope, provenance, and validation.`
@@ -320,7 +322,7 @@ func promptGenerateRequest(request GenerateRequest) AuthoringIntentRequest {
 		catalog.Skills[id] = skill
 	}
 	return AuthoringIntentRequest{
-		Mode: request.Mode, Prompt: request.Prompt, Existing: ProjectAuthoringIntent(request.Existing),
+		Mode: request.Mode, Prompt: request.Prompt, Existing: ProjectAuthoringIntent(request.Existing), AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...),
 		Catalog: catalog, CompositionRequirements: request.CompositionRequirements, Refinement: request.Refinement,
 	}
 }

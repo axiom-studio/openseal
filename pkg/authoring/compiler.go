@@ -198,6 +198,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 		deferInactiveCredentialRefinements(&generated)
 		validation := append(validateCandidate(&generated.Candidate, request.Existing), commitmentIssues...)
 		validation = append(validation, formIssues...)
+		validation = append(validation, validateSuggestedAgentNames(&generated.Candidate, request)...)
 		validation = append(validation, validateConversationComposition(&generated.Candidate, request)...)
 		validation = append(validation, materializationIssues...)
 		validation = append(validation, scheduleIntentIssues...)
@@ -271,6 +272,7 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	}
 	normalizeUnboundAmendmentPolicies(&result.Candidate)
 	result.Validation = validateCandidate(&result.Candidate, request.Existing)
+	result.Validation = append(result.Validation, validateSuggestedAgentNames(&result.Candidate, request)...)
 	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, request)...)
 	result.Validation = append(result.Validation, materializationIssues...)
 	result.Validation = append(result.Validation, scheduleIntentIssues...)
@@ -296,6 +298,9 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 			RepairAttempts: contractRepairAttempts,
 			Diagnostic:     publicContractDiagnostic(refinementValidation),
 		}
+	}
+	if nameIssues := validateSuggestedAgentNames(&result.Candidate, request); len(nameIssues) > 0 {
+		return nil, &ContractGenerationError{RepairAttempts: contractRepairAttempts, Diagnostic: publicContractDiagnostic(nameIssues)}
 	}
 	if contractValidation := exhaustedInternalContractValidation(result.Validation); len(contractValidation) > 0 {
 		return nil, &ContractGenerationError{
