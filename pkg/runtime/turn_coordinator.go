@@ -313,6 +313,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 		return err
 	})
+	executionCtx = c.observeTurnAnswer(executionCtx, req.Scope, run, turn, req.WorkerID)
 	executionStarted := time.Now()
 	outcome, runErr := runner.RunTurn(executionCtx, TurnExecutionContext{Run: cloneAgentRun(run), Turn: cloneAgentTurn(turn)})
 	executionDurationMS := time.Since(executionStarted).Milliseconds()
