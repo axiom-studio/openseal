@@ -275,7 +275,7 @@ func ProjectAuthoringIntent(candidate *WorkforceCandidate) *AuthoringIntent {
 	}
 	if candidate.Team != nil {
 		teamAnswer := &AuthoringTeamIntent{
-			Key: authoringPortableKey(candidate.Team.ID), Name: candidate.Team.DisplayName, Purpose: candidate.Team.Purpose,
+			Key: authoringTeamKey(candidate), Name: candidate.Team.DisplayName, Purpose: candidate.Team.Purpose,
 			OperatingPrinciples: append([]string(nil), candidate.Team.OperatingPrinciples...),
 		}
 		assignments := map[string][]string{}
@@ -434,7 +434,7 @@ func deterministicAuthoringActivation(request GenerateRequest) WorkforceActivati
 
 func compileAuthoringAgent(answer AuthoringAgentIntent, request GenerateRequest) (*agent.AgentDefinition, error) {
 	definition := &agent.AgentDefinition{
-		ID: answer.Key, Version: "1.0.0", DisplayName: strings.TrimSpace(answer.Name),
+		ID: answer.Key, AuthoringKey: answer.Key, Version: "1.0.0", DisplayName: strings.TrimSpace(answer.Name),
 		Purpose: strings.TrimSpace(answer.Purpose), SystemPrompt: strings.TrimSpace(answer.Behavior),
 		Personality: strings.TrimSpace(answer.Personality), OperatingPrinciples: normalized(answer.OperatingPrinciples),
 		Authority:  agent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
@@ -558,7 +558,7 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 
 func compileAuthoringTeam(answer AuthoringTeamIntent, agents map[string]*agent.AgentDefinition, catalog CapabilityCatalog) (*team.Definition, []Assignment, error) {
 	definition := &team.Definition{
-		ID: answer.Key, Version: "1.0.0", DisplayName: strings.TrimSpace(answer.Name), Purpose: strings.TrimSpace(answer.Purpose),
+		ID: answer.Key, AuthoringKey: answer.Key, Version: "1.0.0", DisplayName: strings.TrimSpace(answer.Name), Purpose: strings.TrimSpace(answer.Purpose),
 		OperatingPrinciples: normalized(answer.OperatingPrinciples),
 		Coordination:        team.CoordinationPolicy{MaximumSpeakersPerRound: maxInt(1, len(answer.Roles)), QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
 		Delegation:          team.DelegationPolicy{MaximumDepth: 4, MaximumConcurrent: maxInt(1, len(agents)), AllowPeerDelegation: true, RequireAcceptance: true, RequireCompletionReview: true},
@@ -877,13 +877,21 @@ func semanticAgentKeys(definitions []*agent.AgentDefinition) map[string]string {
 		if definition == nil {
 			continue
 		}
-		base := authoringPortableKey(definition.ID)
+		base := definition.AuthoringKey
+		if base == "" {
+			base = authoringPortableKey(definition.ID)
+		}
 		if base == "" {
 			base = fmt.Sprintf("agent-%d", index+1)
 		}
 		key := base
 		for suffix := 2; used[key]; suffix++ {
-			key = fmt.Sprintf("%s-%d", base, suffix)
+			suffixText := fmt.Sprintf("-%d", suffix)
+			prefix := base
+			if len(prefix)+len(suffixText) > 64 {
+				prefix = prefix[:64-len(suffixText)]
+			}
+			key = prefix + suffixText
 		}
 		used[key], result[definition.ID] = true, key
 	}
@@ -960,4 +968,11 @@ func endpointProvider(_ *WorkforceCandidate, endpoint ConversationEndpointBluepr
 	// provider label. Catalog ids are the stable semantic fallback on amend;
 	// the current catalog resolves the adapter again during compilation.
 	return endpoint.SkillID
+}
+
+func authoringTeamKey(candidate *WorkforceCandidate) string {
+	if candidate.Team.AuthoringKey != "" {
+		return candidate.Team.AuthoringKey
+	}
+	return authoringPortableKey(candidate.Team.ID)
 }

@@ -494,9 +494,14 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		return nil, false, err
 	}
 	applyDraftAgentName(&result.Candidate, request.AgentName)
-	canonicalizeCandidateScope(&result.Candidate, request.Scope)
+	identityMap, err := assignCandidateIdentities(&result.Candidate, existing)
+	if err != nil {
+		return nil, false, err
+	}
 	result.UnresolvedQuestions = unansweredRefinementQuestions(result.UnresolvedQuestions, inheritedRefinement)
-	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate)
+	if err := canonicalizePlacementWithIDs(&request.Placement, request.Scope, &result.Candidate, identityMap); err != nil {
+		return nil, false, err
+	}
 	reconcilePlacementToCandidate(&request.Placement, &result.Candidate)
 	seedExactCatalogSkillPlacement(&result.Candidate, request.Catalog, &request.Placement)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, compileRequest)
@@ -816,9 +821,14 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	}
 	existing := changeSet.Generation.Request.Existing
 	applyDraftAgentName(&result.Candidate, changeSet.AgentName)
-	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
+	identityMap, err := assignCandidateIdentities(&result.Candidate, existing)
+	if err != nil {
+		return nil, err
+	}
 	result.UnresolvedQuestions = unansweredRefinementQuestions(result.UnresolvedQuestions, changeSet.Refinement)
-	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate)
+	if err := canonicalizePlacementWithIDs(&changeSet.Placement, changeSet.Scope, &result.Candidate, identityMap); err != nil {
+		return nil, err
+	}
 	reconcilePlacementToCandidate(&changeSet.Placement, &result.Candidate)
 	seedExactCatalogSkillPlacement(&result.Candidate, changeSet.Catalog, &changeSet.Placement)
 	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, changeSet.Generation.Request)
@@ -1319,7 +1329,10 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 			return nil, false, err
 		}
 	}
-	canonicalizePlacement(&request.Placement, current.Scope, &current.Result.Candidate)
+	inheritDeploymentIdentities(&request.Placement, current)
+	if err := canonicalizePlacementWithIDs(&request.Placement, current.Scope, &current.Result.Candidate, candidateAgentIdentityMap(&current.Result.Candidate)); err != nil {
+		return nil, false, err
+	}
 	if err := validatePlacementReferences(request.Placement, &current.Result.Candidate); err != nil {
 		return nil, false, err
 	}
@@ -2128,12 +2141,16 @@ func canonicalIdentity(scope capability.ScopeReference, id string) string {
 }
 
 func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.ScopeReference) {
+	canonicalizeCandidateReferences(candidate, func(id string, team bool) string { return canonicalIdentity(scope, id) })
+}
+
+func canonicalizeCandidateReferences(candidate *WorkforceCandidate, resolve func(string, bool) string) {
 	ids := map[string]string{}
 	objectiveIDs := map[string]string{}
 	for _, definition := range candidate.Agents {
 		if definition != nil {
 			old := definition.ID
-			qualified := canonicalIdentity(scope, old)
+			qualified := resolve(old, false)
 			ids[old] = qualified
 			for _, template := range definition.ObjectiveTemplates {
 				objectiveIDs[WorkforceObjectiveKey(ProjectOwnerAgent, old, template.ID)] = WorkforceObjectiveKey(ProjectOwnerAgent, qualified, template.ID)
@@ -2143,7 +2160,7 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 	teamID := ""
 	if candidate.Team != nil {
 		teamID = candidate.Team.ID
-		qualified := canonicalIdentity(scope, teamID)
+		qualified := resolve(teamID, true)
 		for _, template := range candidate.Team.ObjectiveTemplates {
 			objectiveIDs[WorkforceObjectiveKey(ProjectOwnerTeam, teamID, template.ID)] = WorkforceObjectiveKey(ProjectOwnerTeam, qualified, template.ID)
 		}
@@ -2161,7 +2178,7 @@ func canonicalizeCandidateScope(candidate *WorkforceCandidate, scope capability.
 		}
 	}
 	if candidate.Team != nil {
-		candidate.Team.ID = canonicalIdentity(scope, teamID)
+		candidate.Team.ID = resolve(teamID, true)
 		for i := range candidate.Team.Roles {
 			for j, id := range candidate.Team.Roles[i].RequiredDefinitionIDs {
 				if qualified := ids[id]; qualified != "" {
@@ -2251,25 +2268,41 @@ func canonicalizeBlueprintObjectiveRefs(refs []string, ids map[string]string) {
 	}
 }
 
-func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.ScopeReference, candidate *WorkforceCandidate) {
+func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.ScopeReference, candidate *WorkforceCandidate) error {
+	return canonicalizePlacementWithIDs(placement, scope, candidate, nil)
+}
+
+func canonicalizePlacementWithIDs(placement *ChangeSetPlacement, scope capability.ScopeReference, candidate *WorkforceCandidate, identities map[string]string) error {
+	resolve := func(id string) string {
+		if identities != nil {
+			if value := identities[id]; value != "" {
+				return value
+			}
+			if value := identities[canonicalIdentity(scope, id)]; value != "" {
+				return value
+			}
+			return id
+		}
+		return canonicalIdentity(scope, id)
+	}
 	stringsByAgent := map[string]string{}
 	for id, value := range placement.AgentDeploymentIDs {
-		stringsByAgent[canonicalIdentity(scope, id)] = value
+		stringsByAgent[resolve(id)] = value
 	}
 	placement.AgentDeploymentIDs = stringsByAgent
 	revisions := map[string]int64{}
 	for id, value := range placement.AgentExpectedRevisions {
-		revisions[canonicalIdentity(scope, id)] = value
+		revisions[resolve(id)] = value
 	}
 	placement.AgentExpectedRevisions = revisions
 	credentials := map[string]map[string]capability.CredentialReference{}
 	for id, value := range placement.CredentialReferences {
-		credentials[canonicalIdentity(scope, id)] = value
+		credentials[resolve(id)] = value
 	}
 	placement.CredentialReferences = credentials
 	bindingConfigs := map[string]map[string]map[string]interface{}{}
 	for id, values := range placement.BindingConfigs {
-		qualified := canonicalIdentity(scope, id)
+		qualified := resolve(id)
 		bindingConfigs[qualified] = make(map[string]map[string]interface{}, len(values))
 		for skillID, config := range values {
 			bindingConfigs[qualified][strings.TrimSpace(skillID)] = cloneAuthoringMap(config)
@@ -2278,7 +2311,7 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	placement.BindingConfigs = bindingConfigs
 	skillSources := map[string]map[string]string{}
 	for id, values := range placement.SkillSourceIdentities {
-		qualified := canonicalIdentity(scope, id)
+		qualified := resolve(id)
 		skillSources[qualified] = make(map[string]string, len(values))
 		for skillID, identity := range values {
 			skillSources[qualified][strings.TrimSpace(skillID)] = strings.TrimSpace(identity)
@@ -2287,7 +2320,7 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	placement.SkillSourceIdentities = skillSources
 	skillVersions := map[string]map[string]string{}
 	for id, values := range placement.SkillSourceVersions {
-		qualified := canonicalIdentity(scope, id)
+		qualified := resolve(id)
 		skillVersions[qualified] = make(map[string]string, len(values))
 		for skillID, version := range values {
 			skillVersions[qualified][strings.TrimSpace(skillID)] = strings.TrimSpace(version)
@@ -2296,7 +2329,7 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	placement.SkillSourceVersions = skillVersions
 	skillIdentities := map[string]map[string]capability.SkillIdentity{}
 	for id, values := range placement.SkillRuntimeIdentities {
-		qualified := canonicalIdentity(scope, id)
+		qualified := resolve(id)
 		skillIdentities[qualified] = make(map[string]capability.SkillIdentity, len(values))
 		for skillID, identity := range values {
 			skillIdentities[qualified][strings.TrimSpace(skillID)] = identity.Normalized()
@@ -2332,11 +2365,19 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	}
 	for _, definition := range candidate.Agents {
 		if definition != nil && strings.TrimSpace(placement.AgentDeploymentIDs[definition.ID]) == "" {
-			placement.AgentDeploymentIDs[definition.ID] = "agent:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + definition.ID)[:32]
+			id, err := newResourceID()
+			if err != nil {
+				return err
+			}
+			placement.AgentDeploymentIDs[definition.ID] = id
 		}
 	}
 	if candidate.Team != nil && strings.TrimSpace(placement.TeamDeploymentID) == "" {
-		placement.TeamDeploymentID = "team:" + digestString(scope.Kind + "\x00" + scope.ID + "\x00" + candidate.Team.ID)[:32]
+		id, err := newResourceID()
+		if err != nil {
+			return err
+		}
+		placement.TeamDeploymentID = id
 	}
 	if candidate.Project != nil {
 		if strings.TrimSpace(placement.ProjectID) == "" {
@@ -2384,12 +2425,14 @@ func canonicalizePlacement(placement *ChangeSetPlacement, scope capability.Scope
 	if candidate.Team != nil {
 		add("team", candidate.Team.ID, candidate.Team.ObjectiveTemplates)
 	}
+	return nil
 }
 
 // reconcilePlacementToCandidate removes inherited bindings whose owning
 // resource or declared Skill no longer exists in an amended candidate. The
 // remaining placement is still validated normally; this only prevents stale
 // parent state from making an otherwise valid revision impossible to configure.
+
 func reconcilePlacementToCandidate(placement *ChangeSetPlacement, candidate *WorkforceCandidate) {
 	if placement == nil || candidate == nil {
 		return
