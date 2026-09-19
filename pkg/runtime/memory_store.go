@@ -8,6 +8,7 @@ import (
 
 // MemoryStore holds canonical kernel state in memory.
 type MemoryStore struct {
+	skillSetupRequests        map[string]*SkillSetupRequest
 	mu                        sync.RWMutex
 	objectives                map[string]*Objective
 	runbookActivations        map[string]*RunbookActivation
@@ -64,6 +65,7 @@ type MemoryStore struct {
 // NewMemoryStore creates an in-memory canonical kernel store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
+		skillSetupRequests:        make(map[string]*SkillSetupRequest),
 		objectives:                make(map[string]*Objective),
 		runbookActivations:        make(map[string]*RunbookActivation),
 		projects:                  make(map[string]*Project),
