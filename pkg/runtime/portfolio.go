@@ -487,6 +487,7 @@ type ObjectiveScopeStore interface {
 // Engine. Embedding applications can supply an implementation; standalone
 // OpenSeal ships memory and SQLite implementations.
 type KernelStore interface {
+	SkillSetupRequestStore
 	PortfolioStore
 	RunbookActivationStore
 	SourceMonitorStore
