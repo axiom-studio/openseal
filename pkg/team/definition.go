@@ -88,6 +88,8 @@ type ApprovalPolicy struct {
 // Definition is immutable Team behavior. Roster assignments and active
 // versions belong to Deployment so the same Team design remains portable.
 type Definition struct {
+	// AuthoringKey is a stable form reference separate from the resource identity.
+	AuthoringKey        string                          `json:"authoringKey,omitempty"`
 	ID                  string                          `json:"id"`
 	Version             string                          `json:"version"`
 	DisplayName         string                          `json:"displayName"`

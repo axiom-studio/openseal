@@ -178,7 +178,7 @@ func TestEngineUpdatesWorkforcePlacementWithoutModelGeneration(t *testing.T) {
 		t.Fatal("source-qualified placement without an immutable version was accepted")
 	}
 	updated, replayed, err := engine.UpdateWorkforceChangeSetPlacement(t.Context(), request)
-	qualifiedAgentID := "workspace/local/researcher"
+	qualifiedAgentID := created.Result.Candidate.Agents[0].ID
 	if err != nil || replayed || updated.Status != WorkforceChangeSetReview || updated.Revision != evaluated.Revision+1 ||
 		updated.Placement.SkillSourceIdentities[qualifiedAgentID]["research"] != "clawhub::@alice/research" ||
 		updated.Placement.SkillSourceVersions[qualifiedAgentID]["research"] != "1.0.0+source.alice" || len(updated.PlacementUpdates) != 1 {
