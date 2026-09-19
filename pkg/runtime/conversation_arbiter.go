@@ -93,6 +93,10 @@ func (a ParticipationAvailability) Validate() error {
 // relevance check. It contains no chain-of-thought: only the proposed message,
 // structured intent, audience, and independently auditable signals.
 type ParticipationProposal struct {
+	// WorkingContextCheckpoint carries temporary host context only. The coordinator
+	// consumes it before arbitration; it must never be serialized or executed.
+	WorkingContextCheckpoint map[string]interface{} `json:"-"`
+
 	ID                 string                    `json:"id"`
 	RoundID            string                    `json:"roundId"`
 	Participant        ConversationParticipant   `json:"participant"`
