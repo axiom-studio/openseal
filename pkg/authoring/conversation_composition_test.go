@@ -493,15 +493,15 @@ func TestChangeSetPreservesReactiveCompositionAndCreatesEndpointPlacement(t *tes
 		t.Fatalf("create replayed=%t err=%v", replayed, err)
 	}
 	endpoint := changeSet.Result.Candidate.ConversationEndpoints[0]
-	if endpoint.Owner.ID != "tenant/one/slack-response-agent" ||
-		endpoint.Handler.AgentDefinitionID != "tenant/one/slack-response-agent" {
+	if endpoint.Owner.ID != changeSet.Result.Candidate.Agents[0].ID ||
+		endpoint.Handler.AgentDefinitionID != changeSet.Result.Candidate.Agents[0].ID {
 		t.Fatalf("canonical endpoint owner/handler = %#v", endpoint)
 	}
 	var delegatedAgentID string
 	if err := json.Unmarshal(
 		changeSet.Result.Candidate.Agents[0].Runbook.Steps["reason"].Delegate.AgentID.Literal,
 		&delegatedAgentID,
-	); err != nil || delegatedAgentID != "tenant/one/slack-response-agent" {
+	); err != nil || delegatedAgentID != changeSet.Result.Candidate.Agents[0].ID {
 		t.Fatalf("canonical delegated Agent id = %q, %v", delegatedAgentID, err)
 	}
 	placement := changeSet.Placement.ConversationEndpoints[endpoint.ID]

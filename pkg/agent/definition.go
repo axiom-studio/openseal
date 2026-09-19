@@ -97,6 +97,8 @@ type DefinitionProvenance = workforce.DefinitionProvenance
 // AgentDefinition is immutable behavior. It deliberately excludes credentials,
 // placement, health, active runs, and every other tenant-local mutable value.
 type AgentDefinition struct {
+	// AuthoringKey is a stable form reference, never a resource identity or display name.
+	AuthoringKey        string                 `json:"authoringKey,omitempty"`
 	ID                  string                 `json:"id"`
 	Version             string                 `json:"version"`
 	DisplayName         string                 `json:"displayName"`

@@ -97,8 +97,8 @@ func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	if err != nil || completed.Status != ChangeSetReview || completed.Revision != 2 || completed.CandidateDigest == "" || completed.Generation.CompletedAt == nil || len(generator.payloads) != 0 {
 		t.Fatalf("completed=%#v payloads=%d err=%v", completed, len(generator.payloads), err)
 	}
-	if completed.Placement.Environment != "default" || !strings.HasPrefix(completed.Placement.TeamDeploymentID, "team:") || strings.Contains(completed.Placement.TeamDeploymentID, "/") ||
-		!strings.HasPrefix(completed.Placement.AgentDeploymentIDs["tenant/one/community-researcher"], "agent:") || strings.Contains(completed.Placement.AgentDeploymentIDs["tenant/one/community-researcher"], "/") {
+	if completed.Placement.Environment != "default" || len(completed.Placement.TeamDeploymentID) != 21 || strings.Contains(completed.Placement.TeamDeploymentID, "/") ||
+		len(completed.Placement.AgentDeploymentIDs[completed.Result.Candidate.Agents[0].ID]) != 21 || strings.Contains(completed.Placement.AgentDeploymentIDs[completed.Result.Candidate.Agents[0].ID], "/") {
 		t.Fatalf("default placement=%#v", completed.Placement)
 	}
 	if _, err := service.GeneratePrepared(context.Background(), prepared.Scope, prepared.ID, prepared.Revision); !errors.Is(err, ErrChangeSetRevision) {
@@ -770,8 +770,8 @@ func TestPrepareActivationReusesAppliedResourcesAndGovernedApply(t *testing.T) {
 		IdempotencyKey: "prepare-activation",
 	})
 	if err != nil || replayed || activation.ParentID != applied.ID || activation.Result.Candidate.Activation != WorkforceActivationActive ||
-		activation.Status != ChangeSetReview || activation.RequiredCredentials["tenant/one/community-researcher"][0] != "MODEL_PROVIDER" ||
-		activation.Placement.AgentExpectedRevisions["tenant/one/community-researcher"] < 1 || activation.Placement.TeamExpectedRevision < 1 {
+		activation.Status != ChangeSetReview || activation.RequiredCredentials[created.Result.Candidate.Agents[0].ID][0] != "MODEL_PROVIDER" ||
+		activation.Placement.AgentExpectedRevisions[created.Result.Candidate.Agents[0].ID] < 1 || activation.Placement.TeamExpectedRevision < 1 {
 		t.Fatalf("activation=%#v replayed=%v err=%v", activation, replayed, err)
 	}
 	if replay, wasReplayed, replayErr := service.PrepareActivation(context.Background(), PrepareChangeSetActivationRequest{
@@ -797,7 +797,7 @@ func TestPrepareActivationReusesAppliedResourcesAndGovernedApply(t *testing.T) {
 	}
 
 	placed := ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
-		"tenant/one/community-researcher": {
+		created.Result.Candidate.Agents[0].ID: {
 			"MODEL_PROVIDER": {Kind: "managed-secret", ID: "29"},
 		},
 	}}
@@ -806,14 +806,14 @@ func TestPrepareActivationReusesAppliedResourcesAndGovernedApply(t *testing.T) {
 		Reason: "Select authorized model provider", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "place-provider",
 	})
 	if err != nil || updated.Status != ChangeSetReview ||
-		updated.Placement.AgentDeploymentIDs["tenant/one/community-researcher"] != activation.Placement.AgentDeploymentIDs["tenant/one/community-researcher"] ||
-		updated.Placement.AgentExpectedRevisions["tenant/one/community-researcher"] != activation.Placement.AgentExpectedRevisions["tenant/one/community-researcher"] ||
+		updated.Placement.AgentDeploymentIDs[created.Result.Candidate.Agents[0].ID] != activation.Placement.AgentDeploymentIDs[created.Result.Candidate.Agents[0].ID] ||
+		updated.Placement.AgentExpectedRevisions[created.Result.Candidate.Agents[0].ID] != activation.Placement.AgentExpectedRevisions[created.Result.Candidate.Agents[0].ID] ||
 		updated.Placement.TeamDeploymentID != activation.Placement.TeamDeploymentID ||
 		updated.Placement.TeamExpectedRevision != activation.Placement.TeamExpectedRevision {
 		t.Fatalf("placement=%#v err=%v", updated, err)
 	}
 	retargeted := clonePlacement(updated.Placement)
-	retargeted.AgentDeploymentIDs["tenant/one/community-researcher"] = "different-agent"
+	retargeted.AgentDeploymentIDs[created.Result.Candidate.Agents[0].ID] = "different-agent"
 	if _, _, err = service.UpdatePlacement(context.Background(), UpdateChangeSetPlacementRequest{
 		Scope: scope, ChangeSetID: updated.ID, ExpectedRevision: updated.Revision, Placement: retargeted,
 		Reason: "Retarget activation", Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "retarget-activation",
@@ -1472,7 +1472,7 @@ func TestChangeSetCanonicalizesDefinitionIdentityPerScopeBeforeApproval(t *testi
 		return value
 	}
 	one, two := create("one", "one"), create("two", "two")
-	if one.Result.Candidate.Agents[0].ID != "tenant/one/community-researcher" || two.Result.Candidate.Agents[0].ID != "tenant/two/community-researcher" || one.CandidateDigest == two.CandidateDigest {
+	if one.Result.Candidate.Agents[0].ID == two.Result.Candidate.Agents[0].ID || strings.Contains(one.Result.Candidate.Agents[0].ID, "community-researcher") || one.CandidateDigest == two.CandidateDigest {
 		t.Fatalf("one=%s two=%s", one.Result.Candidate.Agents[0].ID, two.Result.Candidate.Agents[0].ID)
 	}
 	if one.Placement.AgentDeploymentIDs[one.Result.Candidate.Agents[0].ID] != "agent-live" {
