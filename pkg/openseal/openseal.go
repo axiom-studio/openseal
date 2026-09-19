@@ -494,6 +494,7 @@ type (
 	ConversationParticipantSource        = runtime.ConversationParticipantSource
 	ConversationParticipantSourceFunc    = runtime.ConversationParticipantSourceFunc
 	ParticipationProposalContext         = runtime.ParticipationProposalContext
+	ConversationCompactionRequest        = runtime.ConversationCompactionRequest
 	ParticipationProposalProvider        = runtime.ParticipationProposalProvider
 	ParticipationProposalProviderFunc    = runtime.ParticipationProposalProviderFunc
 	ConversationCoordinationRequest      = runtime.ConversationCoordinationRequest

@@ -83,14 +83,16 @@ func (b ParticipationProposalBudget) validate() error {
 }
 
 type ParticipationProposalContext struct {
-	Budget         *ParticipationProposalBudget
-	Conversation   *Conversation
-	Trigger        *ChannelMessage
-	RecentMessages []*ChannelMessage
-	OpenMessages   []*ChannelMessage
-	Participant    ConversationParticipant
-	SemanticRoles  []string
-	Priority       int
+	HistorySummary    string
+	HistoryCompaction *ConversationCompactionRequest
+	Budget            *ParticipationProposalBudget
+	Conversation      *Conversation
+	Trigger           *ChannelMessage
+	RecentMessages    []*ChannelMessage
+	OpenMessages      []*ChannelMessage
+	Participant       ConversationParticipant
+	SemanticRoles     []string
+	Priority          int
 }
 
 // ParticipationProposalProvider asks one Agent whether it has new,
@@ -196,6 +198,7 @@ func (c ConversationCoordinatorConfig) normalize() (ConversationCoordinatorConfi
 // participation round. Model calls happen concurrently behind a bounded host
 // interface; arbitration and persistence remain deterministic and atomic.
 type ConversationCoordinator struct {
+	summaries     conversationSummaryCache
 	conversations *ConversationService
 	participants  ConversationParticipantSource
 	proposals     ParticipationProposalProvider
@@ -405,6 +408,26 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					OpenMessages:  cloneChannelMessages(visibleOpen),
 					SemanticRoles: append([]string(nil), binding.SemanticRoles...), Priority: binding.Priority,
 				}
+				viewer := ConversationViewer{Participant: binding.Participant, Roles: append([]string(nil), binding.SemanticRoles...)}
+				historyPlan := conversationHistoryPlan{Messages: visibleRecent}
+				saved := c.summaries.get(conversation.Scope, conversation.ID, conversationViewerKey(viewer))
+				history, historyErr := loadConversationCompactionHistory(proposalCtx, c.conversations, conversation, viewer, visibleRecent, saved)
+				if historyErr == nil {
+					triggerID := ""
+					if visibleTrigger != nil {
+						triggerID = visibleTrigger.ID
+					}
+					historyPlan = planConversationHistory(conversation, triggerID, viewer, history, saved)
+					proposalInput.RecentMessages = cloneChannelMessages(historyPlan.Messages)
+					if historyPlan.Summary != nil {
+						proposalInput.HistorySummary = historyPlan.Summary.Text
+					}
+					if historyPlan.Request != nil {
+						request := *historyPlan.Request
+						request.SourceMessageIDs = append([]string(nil), request.SourceMessageIDs...)
+						proposalInput.HistoryCompaction = &request
+					}
+				}
 				if c.config.ProposalBudget != (ParticipationProposalBudget{}) {
 					budget := c.config.ProposalBudget
 					proposalInput.Budget = &budget
@@ -436,6 +459,10 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					proposals[index] = unavailableParticipationProposal(binding, publicParticipationFailureCode(proposalErr))
 					continue
 				}
+				if summary := acceptedConversationSummary(conversation, viewer, historyPlan, proposal.WorkingContextCheckpoint); summary != nil {
+					c.summaries.put(summary)
+				}
+				proposal.WorkingContextCheckpoint = nil
 				proposal.ID = ""
 				proposal.RoundID = ""
 				proposal.Participant = binding.Participant
