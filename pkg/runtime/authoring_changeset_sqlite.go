@@ -222,3 +222,29 @@ func (s *SQLiteStore) listChangeSetsByStatus(ctx context.Context, scope capabili
 }
 
 var _ authoring.ChangeSetStore = (*SQLiteStore)(nil)
+
+func (s *SQLiteStore) RenameChangeSetAgent(ctx context.Context, scope capability.ScopeReference, id string, revision int64, name string, actor authoring.ChangeSetActor, now time.Time) (*authoring.ChangeSet, error) {
+	current, err := s.GetChangeSet(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	next, err := authoring.PrepareAgentNameUpdate(current, revision, name, actor, now)
+	if err != nil {
+		return nil, err
+	}
+	if next.Revision == current.Revision {
+		return next, nil
+	}
+	payload, err := json.Marshal(next)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE workforce_change_sets SET status = ?, revision = ?, candidate_digest = ?, updated_at = ?, payload = ? WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND candidate_digest = ?`, next.Status, next.Revision, next.CandidateDigest, next.UpdatedAt, string(payload), scope.Kind, scope.ID, id, current.Revision, current.CandidateDigest)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, authoring.ErrChangeSetRevision
+	}
+	return decodeChangeSet(string(payload))
+}

@@ -76,6 +76,8 @@ type AuthoringIntent struct {
 // is represented through the same semantic answer sheet; canonical resource
 // structs and the compiler-owned authoring form never enter model context.
 type AuthoringIntentRequest struct {
+	AgentName               string                          `json:"agentName,omitempty"`
+	ExistingAgentNames      []string                        `json:"existingAgentNames,omitempty"`
 	Mode                    Mode                            `json:"mode"`
 	Prompt                  string                          `json:"prompt"`
 	Existing                *AuthoringIntent                `json:"existing,omitempty"`

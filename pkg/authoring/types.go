@@ -411,6 +411,8 @@ func EffectiveWorkforceActivationIntent(value WorkforceActivationIntent) (Workfo
 }
 
 type GenerateRequest struct {
+	AgentName               string                          `json:"agentName,omitempty"`
+	ExistingAgentNames      []string                        `json:"existingAgentNames,omitempty"`
 	Mode                    Mode                            `json:"mode"`
 	Prompt                  string                          `json:"prompt"`
 	Existing                *WorkforceCandidate             `json:"existing,omitempty"`
