@@ -35,6 +35,7 @@ type ActivityFeedRequest struct {
 }
 
 type ActivityProjection struct {
+	AnswerPreview    *TurnAnswerPreview     `json:"answerPreview,omitempty"`
 	ID               string                 `json:"id"`
 	Sequence         int64                  `json:"sequence"`
 	EventType        string                 `json:"eventType"`
@@ -142,6 +143,7 @@ func projectActivityEvent(event *ActivityEvent, includeDetails bool) ActivityPro
 		projection.CorrelationID = event.CorrelationID
 		projection.CausationID = event.CausationID
 	}
+	projection.AnswerPreview = projectTurnAnswerPreview(event)
 	return projection
 }
 
