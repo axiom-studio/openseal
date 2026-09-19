@@ -15,7 +15,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.3.0"
+	SkillManagementSkillVersion = "1.4.0"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -68,7 +68,9 @@ func SkillManagementSkill() *skill.Definition {
 		Name: "Skills", Description: "Propose governed changes to the current Agent's Skill access.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: SkillManagementEndpoint},
 		Actions: map[string]skill.Action{
-			SkillActionDiscoverBinding: skillDiscoveryAction(),
+			SkillActionDiscoverBinding:   skillDiscoveryAction(),
+			SkillActionRequestSetup:      skillSetupAction(),
+			SkillActionListSetupRequests: skillListSetupRequestsAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
 				"Propose enabling or updating an exact registered Skill for this Agent. Credential values are never accepted; credentials must be opaque references.",
@@ -305,7 +307,10 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 		"resourceType": "skill_binding", "operation": input.Bound.Action.Name, "deploymentId": deploymentID,
 	}
 	switch input.Bound.Action.Name {
-	case SkillActionDiscoverBinding:
+	case SkillActionRequestSetup:
+		_, err := decodeSkillSetupArguments(input.Arguments)
+		return nil, err
+	case SkillActionDiscoverBinding, SkillActionListSetupRequests:
 		return nil, nil
 	case SkillActionUpsertBinding:
 		args, definition, current, resolveErr := resolveSkillBindingUpsert(ctx, v.catalog, scope, deploymentID, input.Arguments)
@@ -395,6 +400,10 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 	}
 	scope := skill.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}
 	switch input.Bound.Action.Name {
+	case SkillActionRequestSetup:
+		return d.requestSkillSetup(ctx, input, run, deploymentID)
+	case SkillActionListSetupRequests:
+		return d.listSkillSetupRequests(ctx, run, deploymentID)
 	case SkillActionDiscoverBinding:
 		if d.discovery == nil {
 			return nil, errors.New("authorized Skill discovery is unavailable")
@@ -752,5 +761,5 @@ func isSkillBindingAction(bound *skill.BoundAction) bool {
 	if bound == nil || bound.Definition == nil || bound.Definition.ID != SkillManagementSkillID || bound.Definition.Version != SkillManagementSkillVersion {
 		return false
 	}
-	return bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
+	return bound.Action.Name == SkillActionListSetupRequests || bound.Action.Name == SkillActionRequestSetup || bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
 }
