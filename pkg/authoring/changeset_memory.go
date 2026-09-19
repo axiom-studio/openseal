@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -298,4 +299,20 @@ func cloneChangeSet(value *ChangeSet) *ChangeSet {
 	var copy ChangeSet
 	_ = json.Unmarshal(payload, &copy)
 	return &copy
+}
+
+func (s *MemoryChangeSetStore) RenameChangeSetAgent(_ context.Context, scope capability.ScopeReference, id string, revision int64, name string, actor ChangeSetActor, now time.Time) (*ChangeSet, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := changeSetKey(scope, id)
+	current := s.changeSets[key]
+	if current == nil {
+		return nil, ErrChangeSetNotFound
+	}
+	next, err := PrepareAgentNameUpdate(current, revision, name, actor, now)
+	if err != nil {
+		return nil, err
+	}
+	s.changeSets[key] = cloneChangeSet(next)
+	return cloneChangeSet(next), nil
 }

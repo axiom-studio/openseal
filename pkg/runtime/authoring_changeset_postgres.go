@@ -234,3 +234,29 @@ func decodeChangeSet(payload string) (*authoring.ChangeSet, error) {
 }
 
 var _ authoring.ChangeSetStore = (*PostgresStore)(nil)
+
+func (s *PostgresStore) RenameChangeSetAgent(ctx context.Context, scope capability.ScopeReference, id string, revision int64, name string, actor authoring.ChangeSetActor, now time.Time) (*authoring.ChangeSet, error) {
+	current, err := s.GetChangeSet(ctx, scope, id)
+	if err != nil {
+		return nil, err
+	}
+	next, err := authoring.PrepareAgentNameUpdate(current, revision, name, actor, now)
+	if err != nil {
+		return nil, err
+	}
+	if next.Revision == current.Revision {
+		return next, nil
+	}
+	payload, err := json.Marshal(next)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("workforce_change_sets")+` SET status = $1, revision = $2, candidate_digest = $3, updated_at = $4, payload = $5::jsonb WHERE scope_kind = $6 AND scope_id = $7 AND id = $8 AND revision = $9 AND candidate_digest = $10`, next.Status, next.Revision, next.CandidateDigest, next.UpdatedAt, string(payload), scope.Kind, scope.ID, id, current.Revision, current.CandidateDigest)
+	if err != nil {
+		return nil, err
+	}
+	if affected, _ := result.RowsAffected(); affected != 1 {
+		return nil, authoring.ErrChangeSetRevision
+	}
+	return decodeChangeSet(string(payload))
+}
