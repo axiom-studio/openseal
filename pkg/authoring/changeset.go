@@ -184,6 +184,8 @@ type ChangeSetApplyReceipt struct {
 // lifecycle. Apply is deliberately a later transition, never a side effect of
 // compilation or refinement.
 type ChangeSet struct {
+	ExistingAgentNames  []string                  `json:"existingAgentNames,omitempty"`
+	AgentName           string                    `json:"agentName,omitempty"`
 	ID                  string                    `json:"id"`
 	Scope               capability.ScopeReference `json:"scope"`
 	ParentID            string                    `json:"parentId,omitempty"`
@@ -369,13 +371,16 @@ type ChangeSetReadinessValidator interface {
 }
 
 type CreateChangeSetRequest struct {
-	Scope          capability.ScopeReference `json:"scope"`
-	ParentID       string                    `json:"parentId,omitempty"`
-	Prompt         string                    `json:"prompt"`
-	Catalog        CapabilityCatalog         `json:"catalog"`
-	Placement      ChangeSetPlacement        `json:"placement"`
-	Actor          ChangeSetActor            `json:"actor"`
-	IdempotencyKey string                    `json:"idempotencyKey,omitempty"`
+	// ExistingAgentNames is populated by the host from authorized workspace context.
+	ExistingAgentNames []string                  `json:"-"`
+	AgentName          string                    `json:"agentName,omitempty"`
+	Scope              capability.ScopeReference `json:"scope"`
+	ParentID           string                    `json:"parentId,omitempty"`
+	Prompt             string                    `json:"prompt"`
+	Catalog            CapabilityCatalog         `json:"catalog"`
+	Placement          ChangeSetPlacement        `json:"placement"`
+	Actor              ChangeSetActor            `json:"actor"`
+	IdempotencyKey     string                    `json:"idempotencyKey,omitempty"`
 }
 
 type ChangeSetStore interface {
@@ -436,6 +441,10 @@ func NewChangeSetService(compiler *Compiler, store ChangeSetStore, validators ..
 }
 
 func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRequest) (*ChangeSet, bool, error) {
+	request.AgentName = strings.TrimSpace(request.AgentName)
+	if err := validateDraftAgentName(request.AgentName, true); err != nil {
+		return nil, false, err
+	}
 	request.Prompt = strings.TrimSpace(request.Prompt)
 	request.ParentID = strings.TrimSpace(request.ParentID)
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
@@ -461,9 +470,15 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		candidate := parent.Result.Candidate
 		existing = &candidate
 		inheritParentPlacement(&request.Placement, parent)
+		if request.AgentName == "" {
+			request.AgentName = parent.AgentName
+		}
+		if request.ExistingAgentNames == nil {
+			request.ExistingAgentNames = append([]string(nil), parent.ExistingAgentNames...)
+		}
 		inheritedRefinement = refinementForUnchangedParentPrompt(parent, request.Prompt)
 	}
-	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog}
+	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...)}
 	if len(inheritedRefinement.Answers) > 0 {
 		compileRequest.Refinement = providerRefinementContext(inheritedRefinement)
 	}
@@ -478,6 +493,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	if err != nil {
 		return nil, false, err
 	}
+	applyDraftAgentName(&result.Candidate, request.AgentName)
 	canonicalizeCandidateScope(&result.Candidate, request.Scope)
 	result.UnresolvedQuestions = unansweredRefinementQuestions(result.UnresolvedQuestions, inheritedRefinement)
 	canonicalizePlacement(&request.Placement, request.Scope, &result.Candidate)
@@ -514,7 +530,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		status = ChangeSetBlocked
 	}
 	changeSet := &ChangeSet{
-		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode,
+		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...),
 		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), CandidateDigest: candidateDigest,
 		Result: *result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement),
 		RequiredCredentials:        requiredCredentials(result.Candidate, request.Catalog),
@@ -530,6 +546,10 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 // Prepare durably records generation intent before any model call. Replaying
 // the same idempotency key returns the same aggregate without another call.
 func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetRequest) (*ChangeSet, bool, error) {
+	request.AgentName = strings.TrimSpace(request.AgentName)
+	if err := validateDraftAgentName(request.AgentName, true); err != nil {
+		return nil, false, err
+	}
 	request.Prompt = strings.TrimSpace(request.Prompt)
 	request.ParentID = strings.TrimSpace(request.ParentID)
 	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
@@ -555,9 +575,15 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 		candidate := parent.Result.Candidate
 		existing = &candidate
 		inheritParentPlacement(&request.Placement, parent)
+		if request.AgentName == "" {
+			request.AgentName = parent.AgentName
+		}
+		if request.ExistingAgentNames == nil {
+			request.ExistingAgentNames = append([]string(nil), parent.ExistingAgentNames...)
+		}
 		inheritedRefinement = refinementForUnchangedParentPrompt(parent, request.Prompt)
 	}
-	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog}
+	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...)}
 	if len(inheritedRefinement.Answers) > 0 {
 		compileRequest.Refinement = providerRefinementContext(inheritedRefinement)
 	}
@@ -570,7 +596,7 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 	}
 	now := s.now().UTC()
 	changeSet := &ChangeSet{
-		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode,
+		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...),
 		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement),
 		Status: ChangeSetEvaluating, Actor: request.Actor, Generation: &ChangeSetGeneration{Request: compileRequest},
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -789,6 +815,7 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 		return persisted, err
 	}
 	existing := changeSet.Generation.Request.Existing
+	applyDraftAgentName(&result.Candidate, changeSet.AgentName)
 	canonicalizeCandidateScope(&result.Candidate, changeSet.Scope)
 	result.UnresolvedQuestions = unansweredRefinementQuestions(result.UnresolvedQuestions, changeSet.Refinement)
 	canonicalizePlacement(&changeSet.Placement, changeSet.Scope, &result.Candidate)
@@ -946,8 +973,13 @@ func (s *ChangeSetService) AnswerRefinement(ctx context.Context, request AnswerC
 		Source: request.Source, Actor: request.Actor, AnsweredAt: now,
 	})
 	next.Status, next.Revision, next.UpdatedAt = ChangeSetEvaluating, current.Revision+1, now
+	existingNames := append([]string(nil), current.ExistingAgentNames...)
+	if len(existingNames) == 0 && current.Generation != nil {
+		existingNames = append([]string(nil), current.Generation.Request.ExistingAgentNames...)
+	}
 	next.Generation = &ChangeSetGeneration{
 		Request: GenerateRequest{Mode: ModeAmend, Prompt: current.Prompt, Existing: &current.Result.Candidate,
+			AgentName: current.AgentName, ExistingAgentNames: existingNames,
 			Catalog: cloneCapabilityCatalog(current.Catalog), Refinement: providerRefinementContext(next.Refinement)},
 		Attempt: generationAttempt(current), PreviousCandidateDigest: current.CandidateDigest,
 	}
@@ -1254,7 +1286,7 @@ func (s *ChangeSetService) PrepareActivation(ctx context.Context, request Prepar
 		status = ChangeSetBlocked
 	}
 	child := &ChangeSet{
-		ID: uuid.NewString(), Scope: request.Scope, ParentID: parent.ID, Mode: ModeAmend,
+		ID: uuid.NewString(), Scope: request.Scope, ParentID: parent.ID, Mode: ModeAmend, AgentName: parent.AgentName, ExistingAgentNames: append([]string(nil), parent.ExistingAgentNames...),
 		Prompt: parent.Prompt, PromptDigest: parent.PromptDigest, CandidateDigest: candidateDigest,
 		Result: result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: placement,
 		RequiredCredentials:        requiredCredentials(result.Candidate, request.Catalog),
@@ -2995,7 +3027,8 @@ func digestChangeSetRequest(request CreateChangeSetRequest, mode Mode, existing 
 		Placement ChangeSetPlacement
 		Actor     ChangeSetActor
 		Existing  *WorkforceCandidate
-	}{request.Scope, request.ParentID, mode, request.Prompt, request.Catalog, request.Placement, request.Actor, existing}
+		AgentName string `json:",omitempty"`
+	}{request.Scope, request.ParentID, mode, request.Prompt, request.Catalog, request.Placement, request.Actor, existing, request.AgentName}
 	return digestJSON(value)
 }
 
