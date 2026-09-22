@@ -11,6 +11,24 @@ on:
 permissions:
   contents: read
 
+# The minimum glibc the published Linux binary may require. Declared at
+# workflow scope because two jobs need it: `binary` enforces it against the
+# built artifact, and `release` states it to users in the notes.
+#
+# Declared, not inherited. cgo is mandatory here, so the Linux binary links
+# libc dynamically and carries a floor; leaving that floor to whatever
+# `ubuntu-latest` happens to be means releases can quietly stop starting on
+# distributions they worked on last month, with nothing red in CI and the
+# failure landing as a loader error on a user's machine. The check in `binary`
+# fails the release if the artifact needs more than this, so the floor moves
+# only when someone raises it on purpose.
+#
+# 2.34 covers Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9. Below it — Ubuntu 20.04,
+# Debian 11, RHEL 8, Amazon Linux 2 — the tarball will not start, and those
+# users want the container image, which is musl-linked and self-contained.
+env:
+  LINUX_GLIBC_FLOOR: "2.34"
+
 # The axiom-studio org Actions policy is reported (in a sibling repository's
 # workflows) to allow actions only from org-owned repositories, while other
 # sibling repositories use marketplace actions freely. The two cannot both be
@@ -210,6 +228,42 @@ jobs:
             *OpenSeal*) ;;
             *) echo "::error::unexpected version output: ${OUT}" >&2; exit 1 ;;
           esac
+
+      - name: Check the Linux binary's glibc floor has not drifted
+        if: ${{ matrix.goos == 'linux' }}
+        run: |
+          set -euo pipefail
+          # cgo is mandatory here, so the Linux binary links libc dynamically
+          # and carries a minimum glibc requirement. That floor is a property of
+          # which versioned symbols Go and the cgo SQLite driver bind, not
+          # simply of the runner's own glibc — measured on a host running 2.43,
+          # this binary still required only 2.34.
+          #
+          # It can still drift, from a Go release, a new dependency, or a
+          # `ubuntu-latest` roll-forward that offers newer symbol versions. When
+          # it does, releases silently stop starting on distributions they
+          # worked on last month: the failure is a loader error before main, on
+          # the user's machine, with nothing red in CI.
+          #
+          # So the floor is declared rather than inherited. Raising it is a
+          # deliberate edit to LINUX_GLIBC_FLOOR, taken knowing which
+          # distributions it drops.
+          command -v objdump >/dev/null 2>&1 || {
+            echo "::error::objdump is required to check the glibc floor" >&2; exit 1; }
+
+          REQUIRED="$(objdump -T openseal | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)"
+          if [ -z "$REQUIRED" ]; then
+            echo "::error::could not determine the glibc requirement of the built binary" >&2
+            exit 1
+          fi
+          echo "binary requires glibc ${REQUIRED}; declared floor is ${LINUX_GLIBC_FLOOR}"
+
+          HIGHEST="$(printf '%s\n%s\n' "$REQUIRED" "$LINUX_GLIBC_FLOOR" | sort -V | tail -1)"
+          if [ "$REQUIRED" != "$LINUX_GLIBC_FLOOR" ] && [ "$HIGHEST" = "$REQUIRED" ]; then
+            echo "::error::the Linux binary now requires glibc ${REQUIRED}, above the declared floor of ${LINUX_GLIBC_FLOOR}." >&2
+            echo "::error::This drops distributions the previous release supported. Either build against an older glibc, or raise LINUX_GLIBC_FLOOR deliberately and update the release notes." >&2
+            exit 1
+          fi
 
       - name: Package
         run: |
@@ -853,7 +907,7 @@ jobs:
             echo "### Downloads"
             echo
             echo "- **Desktop app** — the \`.dmg\`, \`.msi\`, \`.deb\` or \`.AppImage\` below. The daemon is bundled; nothing else to install."
-            echo "- **Command line** — the \`openseal_${VERSION}_<os>_<arch>\` archive for your platform."
+            echo "- **Command line** — the \`openseal_${VERSION}_<os>_<arch>\` archive for your platform. The Linux build links glibc and needs **${LINUX_GLIBC_FLOOR} or newer** (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9). On older distributions use the container image, which is self-contained."
             echo "- **Container** — \`docker pull ${IMAGE}:${VERSION}\`"
             echo
             echo "Built from commit \`${GITHUB_SHA}\`."
