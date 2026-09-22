@@ -1,0 +1,236 @@
+name: Release
+
+# Triggered by pushing a semver tag, e.g. v0.1.0 or v0.1.0-rc1.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Tags are immutable, so cancelling an in-progress run buys nothing and risks
+# half-publishing. Default token scope is read-only; jobs opt into their writes.
+permissions:
+  contents: read
+
+# The axiom-studio org Actions policy is reported (in a sibling repository's
+# workflows) to allow actions only from org-owned repositories, while other
+# sibling repositories use marketplace actions freely. The two cannot both be
+# true, and a workflow built on marketplace actions does not merely degrade if
+# the restriction is real — it never starts. These workflows therefore use no
+# `uses:` steps at all: that is the strict subset, correct under either policy.
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Create the release up front, as a draft, so every build job has somewhere to
+  # put its asset the moment it finishes.
+  #
+  # This is what replaces artifact-passing between jobs. The upload actions are
+  # off the table along with every other `uses:` step, and the artifact REST API
+  # is awkward to drive by hand, but `gh` is preinstalled on all hosted runners
+  # and is a CLI rather than an action, so it is unaffected by the policy.
+  #
+  # The release stays a draft until the assembly job publishes it, so a partial
+  # or failed run never leaves a half-populated release visible to users.
+  prepare:
+    name: Create the draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Create the draft release if it does not already exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release ${TAG} already exists; reusing it"
+            exit 0
+          fi
+          # Pre-release when the tag carries a suffix such as -rc1.
+          PRERELEASE=""
+          case "$TAG" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
+          gh release create "$TAG" \
+            --draft \
+            $PRERELEASE \
+            --title "OpenSeal ${TAG}" \
+            --notes "Draft release. Assets are uploaded by the build jobs; this becomes visible once the assembly job publishes it."
+
+  # ---------------------------------------------------------------------------
+  # Standalone binary, one native build per target.
+  #
+  # Why native rather than a single cross-building job: the daemon links
+  # github.com/mattn/go-sqlite3, so cgo is mandatory. `CGO_ENABLED=0` does not
+  # degrade the binary, it fails to compile outright (undefined: sqlite3.Error
+  # and two siblings in pkg/runtime/authoring_apply_sqlite.go). Cross-compiling
+  # cgo needs a C toolchain per target, and darwin additionally needs the
+  # platform SDK. Building natively on each runner avoids all of it — and the
+  # desktop job needs these same runners regardless, so it costs no extra
+  # infrastructure.
+  #
+  # Every leg runs on a GitHub-hosted runner, including linux. That is
+  # deliberate: hosted images ship a Go toolchain, so all four legs share one
+  # setup path. The self-hosted fleet is used where it actually earns its
+  # keep — the container job, which needs a Docker daemon.
+  #
+  # linux/arm64 is NOT built here. It is the one target with no native runner
+  # available, so it would need a cross toolchain that could not be verified
+  # while writing this. Adding it later means either an arm64 runner (native,
+  # preferred) or gcc-aarch64-linux-gnu with CC set and CGO_ENABLED=1. The
+  # container job publishes a linux/arm64 image independently of this gap.
+  binary:
+    name: Binary (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          - runner: macos-13        # Intel; macos-latest is Apple silicon
+            goos: darwin
+            goarch: amd64
+          - runner: macos-latest    # Apple silicon
+            goos: darwin
+            goarch: arm64
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+
+    defaults:
+      run:
+        # Windows runners default to PowerShell. One shell for every leg keeps
+        # the steps identical instead of forking per platform.
+        shell: bash
+
+    steps:
+      - name: Check out the tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # Auth via a transient http.extraHeader passed per-command — never
+          # written to .git/config, so the token is not left on the runner's
+          # filesystem for later steps to read.
+          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
+            fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Set up the Go toolchain named by go.mod
+        run: |
+          set -euo pipefail
+          WANT="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+          if [ -z "$WANT" ]; then
+            echo "::error::could not read the go directive from go.mod" >&2
+            exit 1
+          fi
+          if ! command -v go >/dev/null 2>&1; then
+            echo "::error::no Go toolchain on ${{ matrix.runner }}; this job relies on the hosted image providing one" >&2
+            exit 1
+          fi
+          # GOTOOLCHAIN is left at its default (auto) on purpose. When the
+          # installed Go is older than the version go.mod requires, the go
+          # command fetches that exact toolchain as a module and verifies it
+          # against the Go checksum database. That is a stronger guarantee than
+          # downloading a tarball by hand, and it is identical on all four
+          # runners. Assert the result rather than trusting it.
+          GOT="$(go version | awk '{print $3}' | sed 's/^go//')"
+          echo "go.mod wants ${WANT}; toolchain resolved to ${GOT}"
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::Go toolchain is ${GOT} but go.mod requires ${WANT}" >&2
+            exit 1
+          fi
+
+      - name: Build
+        env:
+          CGO_ENABLED: '1'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          BIN=openseal
+          if [ "${{ matrix.goos }}" = "windows" ]; then BIN=openseal.exe; fi
+          # -w -s strips DWARF and the symbol table; the unstripped binary is
+          # ~96 MB. Matches what the Dockerfile already does.
+          #
+          # No -X version stamping: cmd/openseal/commands/root.go declares
+          # `const version`, and -X can only write to a string *variable*.
+          # Changing that const to a var is a source change and belongs in its
+          # own work item, not smuggled into a pipeline commit.
+          go build -trimpath -ldflags="-w -s" -o "$BIN" ./cmd/openseal
+          test -x "$BIN" || test -f "$BIN"
+
+      - name: Smoke-test the binary
+        # Skipped when the build is not executable on the runner that made it.
+        # Every current matrix leg is native, so this always runs today; the
+        # guard keeps the step honest if a cross-built target is added later.
+        if: ${{ !(matrix.goos == 'windows' && runner.os != 'Windows') }}
+        run: |
+          set -euo pipefail
+          BIN=./openseal
+          if [ "${{ matrix.goos }}" = "windows" ]; then BIN=./openseal.exe; fi
+          # `version`, not `--version`: the CLI treats an unrecognised flag as
+          # an unknown command, prints usage and still exits 0, so `--version`
+          # would pass here on a completely broken binary.
+          OUT="$("$BIN" version)"
+          echo "$OUT"
+          case "$OUT" in
+            *OpenSeal*) ;;
+            *) echo "::error::unexpected version output: ${OUT}" >&2; exit 1 ;;
+          esac
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="openseal_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "dist/${STAGE}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            cp openseal.exe "dist/${STAGE}/"
+          else
+            cp openseal "dist/${STAGE}/"
+          fi
+          cp LICENSE README.md "dist/${STAGE}/"
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            # Git Bash ships no `zip`. Prefer 7z when the image provides it and
+            # fall back to PowerShell, rather than assuming either is present.
+            if command -v 7z >/dev/null 2>&1; then
+              7z a -tzip "${STAGE}.zip" "${STAGE}" >/dev/null
+            else
+              powershell -NoProfile -NonInteractive -Command \
+                "Compress-Archive -Path '${STAGE}' -DestinationPath '${STAGE}.zip' -Force"
+            fi
+          else
+            tar -czf "${STAGE}.tar.gz" "${STAGE}"
+          fi
+          rm -rf "${STAGE}"
+          ls -l
+
+      - name: Upload the archive to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="openseal_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then ARCHIVE="dist/${STAGE}.zip"; else ARCHIVE="dist/${STAGE}.tar.gz"; fi
+          # An empty or missing archive fails the job rather than uploading
+          # nothing and letting the assembly job publish a release with a hole
+          # in it.
+          test -s "$ARCHIVE" || { echo "::error::archive ${ARCHIVE} is missing or empty" >&2; exit 1; }
+          # --clobber so re-running a failed leg replaces its asset instead of
+          # erroring on a name that already exists.
+          gh release upload "${GITHUB_REF_NAME}" "$ARCHIVE" --clobber
+          echo "uploaded ${ARCHIVE}"
