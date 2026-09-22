@@ -234,3 +234,133 @@ jobs:
           # erroring on a name that already exists.
           gh release upload "${GITHUB_REF_NAME}" "$ARCHIVE" --clobber
           echo "uploaded ${ARCHIVE}"
+
+  # ---------------------------------------------------------------------------
+  # Container images, published to GHCR.
+  #
+  # Runs on a hosted runner rather than the self-hosted fleet: this job needs a
+  # Docker daemon with buildx, which hosted images provide and which could not
+  # be confirmed on the fleet from here.
+  #
+  # linux/arm64 is built by emulating the builder stage. That is genuinely slow
+  # for this project — the image compiles a cgo SQLite driver from C under QEMU,
+  # not a pure-Go binary — so the timeout is generous on purpose.
+  container:
+    name: Container image
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out the tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
+            fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Enable cross-architecture emulation and a buildx builder
+        run: |
+          set -euo pipefail
+          # binfmt handlers for the non-native architecture. This is the plain
+          # docker equivalent of the QEMU setup action.
+          docker run --privileged --rm tonistiigi/binfmt:qemu-v8.1.5 --install arm64
+          docker buildx create --name openseal --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+      - name: Log in to the container registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push the multi-architecture image
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Lower-case the owner: image references must be lower-case, but the
+          # org name's casing is whatever GitHub reports.
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          # `latest` only moves for a final release. A pre-release tag such as
+          # v0.2.0-rc1 publishes its version tag and nothing else, so `latest`
+          # never silently points at a release candidate.
+          TAGS=( --tag "${IMAGE}:${VERSION}" )
+          case "${GITHUB_REF_NAME}" in
+            *-*) echo "pre-release ${GITHUB_REF_NAME}: not moving :latest" ;;
+            *)   TAGS+=( --tag "${IMAGE}:latest" ) ;;
+          esac
+
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            "${TAGS[@]}" \
+            --label "org.opencontainers.image.title=OpenSeal" \
+            --label "org.opencontainers.image.description=Agent execution platform" \
+            --label "org.opencontainers.image.url=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "org.opencontainers.image.licenses=Apache-2.0" \
+            --push \
+            .
+          echo "pushed ${IMAGE}:${VERSION}"
+
+      - name: Verify the published image serves its port
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          # Pull the amd64 manifest back and actually run it. Publishing an
+          # image that cannot serve a request is the failure mode this whole
+          # job exists to avoid, and it is exactly what shipped before: the
+          # daemon bound loopback, so the published port reached nothing.
+          docker run -d --name openseal-verify -p 18080:8080 --platform linux/amd64 "${IMAGE}:${VERSION}"
+
+          for attempt in $(seq 1 30); do
+            if curl -fsS --max-time 3 http://127.0.0.1:18080/api/v1/health >/dev/null 2>&1; then
+              echo "health endpoint answered on the published port after ${attempt} attempt(s)"
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::published port never answered" >&2
+              docker logs openseal-verify || true
+              docker rm -f openseal-verify || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          # The health check is declared in the image; confirm Docker agrees,
+          # rather than only confirming that curl worked.
+          for attempt in $(seq 1 30); do
+            STATUS="$(docker inspect --format '{{.State.Health.Status}}' openseal-verify 2>/dev/null || echo unknown)"
+            echo "container health: ${STATUS}"
+            case "$STATUS" in
+              healthy) break ;;
+              unhealthy)
+                echo "::error::container reported unhealthy" >&2
+                docker logs openseal-verify || true
+                docker rm -f openseal-verify || true
+                exit 1 ;;
+            esac
+            if [ "$attempt" -eq 30 ]; then
+              echo "::error::container never reached healthy (last status: ${STATUS})" >&2
+              docker logs openseal-verify || true
+              docker rm -f openseal-verify || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker rm -f openseal-verify
