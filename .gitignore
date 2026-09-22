@@ -58,6 +58,7 @@ desktop/crates/*/target/
 # Desktop development and generated assets
 desktop/.dev-workspace/
 desktop/src-tauri/binaries/
+desktop/src-tauri/THIRD_PARTY_NOTICES
 desktop/src-tauri/gen/
 desktop/test-results/
 desktop/playwright-report/

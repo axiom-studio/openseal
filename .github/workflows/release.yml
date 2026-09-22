@@ -218,6 +218,13 @@ jobs:
           go build -trimpath -ldflags="-w -s" -o "$BIN" ./cmd/openseal
           test -x "$BIN" || test -f "$BIN"
 
+          # Regenerate the third-party notices rather than trusting the
+          # committed copy. The archive ships what this build actually linked,
+          # so a dependency change that reached the binary cannot ship with a
+          # stale notices file beside it.
+          ./scripts/generate-third-party-notices.sh
+          test -s THIRD_PARTY_NOTICES
+
       - name: Smoke-test the binary
         # Skipped when the build is not executable on the runner that made it.
         # Every current matrix leg is native, so this always runs today; the
@@ -285,7 +292,7 @@ jobs:
           else
             cp openseal "dist/${STAGE}/"
           fi
-          cp LICENSE README.md "dist/${STAGE}/"
+          cp LICENSE README.md THIRD_PARTY_NOTICES "dist/${STAGE}/"
           cd dist
           if [ "${{ matrix.goos }}" = "windows" ]; then
             # Git Bash ships no `zip`. Prefer 7z when the image provides it and
@@ -363,6 +370,16 @@ jobs:
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
           git fetch -q --depth 1 origin "$GITHUB_SHA"
           git checkout -q --detach FETCH_HEAD
+
+      - name: Refresh the third-party notices the image ships
+        run: |
+          set -euo pipefail
+          # The Dockerfile COPYs this from the build context, and `docker build`
+          # does not run generators. Regenerate it here so the image ships the
+          # notices for what it actually links, rather than whatever the
+          # committed copy last recorded.
+          ./scripts/generate-third-party-notices.sh
+          test -s THIRD_PARTY_NOTICES
 
       - name: Enable cross-architecture emulation and a buildx builder
         run: |
@@ -537,6 +554,15 @@ jobs:
               continue
             fi
             echo "${platform}: /app/LICENSE present"
+
+            if ! docker exec "$name" head -1 /app/THIRD_PARTY_NOTICES | grep -q "THIRD-PARTY"; then
+              echo "::error::${platform}: /app/THIRD_PARTY_NOTICES is missing or malformed" >&2
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+            echo "${platform}: /app/THIRD_PARTY_NOTICES present"
 
             docker rm -f "$name"
             port=$((port + 1))
@@ -762,6 +788,12 @@ jobs:
             awk -v v="$CORE" '!done && /^version = /{ print "version = \"" v "\""; done=1; next } 1' \
               "$manifest" > "${manifest}.tmp" && mv "${manifest}.tmp" "$manifest"
           done
+
+          # tauri.conf.json declares THIRD_PARTY_NOTICES as a bundle resource, so
+          # it must exist before `pnpm tauri build` runs. Generated here from
+          # what this build links, not copied from a committed snapshot.
+          ./scripts/generate-third-party-notices.sh
+          cp THIRD_PARTY_NOTICES desktop/src-tauri/THIRD_PARTY_NOTICES
 
           echo "bundle version set to ${CORE} (tag ${TAG_VERSION}):"
           grep -H '"version"' desktop/src-tauri/tauri.conf.json desktop/package.json
