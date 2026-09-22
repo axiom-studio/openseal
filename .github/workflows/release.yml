@@ -611,6 +611,10 @@ jobs:
             HEADING="Changes"
           fi
 
+          # Cap the changelog at 100 entries, and say so when it is cut.
+          LIMIT=100
+          TOTAL="$(git rev-list --no-merges --count "${RANGE}")"
+
           {
             echo "## OpenSeal ${VERSION}"
             echo
@@ -632,7 +636,19 @@ jobs:
             echo
             echo "### ${HEADING}"
             echo
-            git log --no-merges --pretty='- %s' "${RANGE}" | head -100
+            # `-n`, not `| head`. Piping into head under `set -euo pipefail`
+            # kills the step: head closes the pipe after its 100th line, git
+            # log takes SIGPIPE and exits 141, pipefail propagates it and set
+            # -e aborts. That would abort this step before the final
+            # `--draft=false` below, so every artifact would be built and
+            # uploaded and then no release published at all — and SIGPIPE
+            # prints nothing, so it would surface as a step failing silently.
+            # It only bites once a range exceeds the cap, so it would pass
+            # early releases and fail a later one with no change here.
+            git log --no-merges -n "${LIMIT}" --pretty='- %s' "${RANGE}"
+            if [ "${TOTAL}" -gt "${LIMIT}" ]; then
+              echo "- …and $(( TOTAL - LIMIT )) more commits"
+            fi
           } > notes.md
 
           gh release edit "${TAG}" --notes-file notes.md
