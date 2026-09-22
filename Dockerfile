@@ -32,8 +32,18 @@ COPY --from=builder /build/openseal .
 # for compose users and makes the bare image work on its own.
 COPY docker/daemon.yaml /app/daemon.yaml
 
-# Create the runtime data directory.
-RUN mkdir -p /app/data
+# Run as an unprivileged user. The API authenticates nothing, so anything
+# reached through a route — or any container escape — would otherwise land as
+# uid 0. Port 8080 is above 1024, so binding it needs no capability.
+#
+# Order matters: create the user and chown /app (including /app/data, where the
+# daemon writes openseal.db and artifacts/) BEFORE dropping to it, or the
+# daemon cannot open its own database.
+RUN addgroup -S openseal && adduser -S -G openseal openseal \
+ && mkdir -p /app/data \
+ && chown -R openseal:openseal /app
+
+USER openseal
 
 ENV OPENSEAL_DB_PATH=/app/data/openseal.db
 
