@@ -132,18 +132,57 @@ jobs:
           "${GO_ROOT}/go/bin/go" version
 
       # The committed copy is what a plain `docker build` and a local desktop
-      # build use, so it has to stay current with go.mod. Regenerating and
-      # diffing catches a dependency change that did not refresh it.
-      - name: Third-party notices are up to date
+      # build consume, so it should track go.mod. Every published artifact
+      # regenerates its own notices at build time, so this check guards the
+      # convenience copy, not the shipped ones.
+      #
+      # It compares the MODULE SET, not the file byte-for-byte. A byte
+      # comparison also fails when a licence file's text differs between module
+      # caches, or when `go list -deps` resolves a transitive package
+      # differently on another host — neither of which changes what a published
+      # artifact carries. A gate that fails on correct code teaches people to
+      # bypass it.
+      - name: Third-party notices cover the current module set
         run: |
           set -euo pipefail
           ./scripts/generate-third-party-notices.sh /tmp/notices.generated
-          if ! diff -q THIRD_PARTY_NOTICES /tmp/notices.generated >/dev/null; then
-            echo "::error::THIRD_PARTY_NOTICES is stale; run 'make third-party-notices' and commit the result" >&2
-            diff THIRD_PARTY_NOTICES /tmp/notices.generated | head -40 >&2
-            exit 1
+
+          # Module headers are the lines between the two rule lines of each
+          # block. grep -c would be enough to count, but the sets are what
+          # matter, so extract and compare them.
+          # LC_ALL=C on both the sort and the later comm: sort's locale
+          # collation and comm's byte comparison disagree on paths containing
+          # '/' and '.', which makes comm warn and its output unreliable.
+          extract_modules() {
+            grep -A1 '^=\{80\}$' "$1" | grep -v '^=\{80\}$' | grep -v '^--$' \
+              | awk 'NF {print $1}' | LC_ALL=C sort -u
+          }
+          extract_modules THIRD_PARTY_NOTICES > /tmp/mods.committed
+          extract_modules /tmp/notices.generated > /tmp/mods.generated
+
+          if cmp -s /tmp/mods.committed /tmp/mods.generated; then
+            echo "third-party notices cover the current module set ($(wc -l < /tmp/mods.committed) modules)"
+            exit 0
           fi
-          echo "third-party notices are current"
+
+          # Report BOTH sides in full. The previous version piped a diff into
+          # head, which under pipefail killed the step with SIGPIPE before the
+          # intended exit and truncated the evidence mid-module — the same
+          # defect as issue #3735. No pipe into an early-closing consumer here,
+          # and comm output is bounded by the module count.
+          echo "::error::THIRD_PARTY_NOTICES does not cover the current module set" >&2
+          echo "::error::run 'make third-party-notices' and commit the result" >&2
+          {
+            echo "committed: $(wc -l < /tmp/mods.committed) modules"
+            echo "resolved here: $(wc -l < /tmp/mods.generated) modules"
+            echo
+            echo "only in the committed file:"
+            LC_ALL=C comm -23 /tmp/mods.committed /tmp/mods.generated || true
+            echo
+            echo "only resolved on this runner:"
+            LC_ALL=C comm -13 /tmp/mods.committed /tmp/mods.generated || true
+          } >&2
+          exit 1
 
       - name: go vet
         run: make vet
