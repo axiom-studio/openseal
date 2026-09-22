@@ -1,4 +1,4 @@
-.PHONY: build test vet desktop-install desktop-dev desktop-build desktop-host-test docker-up docker-down docker-logs
+.PHONY: build test vet licence-inventory desktop-install desktop-dev desktop-build desktop-host-test docker-up docker-down docker-logs
 
 build:
 	go build -o openseal ./cmd/openseal
@@ -8,6 +8,11 @@ test:
 
 vet:
 	go vet ./...
+
+# Licences of everything statically linked into the binary. Produces the facts
+# for a compliance review; makes no compliance judgement itself.
+licence-inventory:
+	./scripts/licence-inventory.sh
 
 desktop-install:
 	cd desktop && pnpm install
