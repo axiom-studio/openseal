@@ -179,9 +179,10 @@ jobs:
           set -euo pipefail
           BIN=./openseal
           if [ "${{ matrix.goos }}" = "windows" ]; then BIN=./openseal.exe; fi
-          # `version`, not `--version`: the CLI treats an unrecognised flag as
-          # an unknown command, prints usage and still exits 0, so `--version`
-          # would pass here on a completely broken binary.
+          # `version`, not `--version`: this CLI is subcommand-based and has no
+          # --version flag; it would be rejected as an unknown command. The
+          # output is asserted below rather than trusting the exit status, so
+          # this proves the binary runs and reports itself.
           OUT="$("$BIN" version)"
           echo "$OUT"
           case "$OUT" in

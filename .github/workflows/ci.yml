@@ -132,7 +132,9 @@ jobs:
           set -euo pipefail
           make build
           test -x ./openseal
-          # `version`, not `--version`: the CLI treats an unrecognised flag as an
-          # unknown command, prints usage, and still exits 0 — so `--version`
-          # would pass this check without ever proving the binary works.
+          # `version`, not `--version`: this CLI is subcommand-based and has no
+          # --version flag. It would be rejected as an unknown command — the
+          # binary exits non-zero, so the check would fail rather than pass
+          # wrongly, but it would be testing argument parsing instead of the
+          # build. `version` prints real output, which the next line asserts.
           ./openseal version
