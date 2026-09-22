@@ -516,6 +516,19 @@ jobs:
             fi
             echo "${platform}: /app/data is writable by the runtime user"
 
+            # The licence must actually be in the image. Checked rather than
+            # assumed because .dockerignore resolves by last match, so a
+            # re-include placed above its exclusion is silently undone and the
+            # COPY would be the only thing that failed — or, worse, would not.
+            if ! docker exec "$name" head -1 /app/LICENSE | grep -q "Apache License"; then
+              echo "::error::${platform}: /app/LICENSE is missing or is not the Apache License" >&2
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+            echo "${platform}: /app/LICENSE present"
+
             docker rm -f "$name"
             port=$((port + 1))
           done
