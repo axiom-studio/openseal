@@ -55,7 +55,10 @@ while IFS= read -r module; do
     # Common licence filenames, in the order a reviewer would look.
     file="$(find "$dir" -maxdepth 1 -type f \
       \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
-      -printf '%f\n' 2>/dev/null | sort | head -1)"
+      -printf '%f\n' 2>/dev/null | LC_ALL=C sort)"
+    # First line only, taken in the shell rather than by piping into `head`,
+    # which closes the pipe early and can SIGPIPE the producer under pipefail.
+    file="${file%%$'\n'*}"
     if [ -n "$file" ]; then
       # First non-empty line is usually enough to identify the licence family;
       # classification is the reviewer's job, not this script's.
