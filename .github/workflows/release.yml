@@ -364,3 +364,172 @@ jobs:
           done
 
           docker rm -f openseal-verify
+
+  # ---------------------------------------------------------------------------
+  # Desktop application bundles.
+  #
+  # Tauri does not cross-compile and tauri.conf.json sets bundle.targets to
+  # "all", so each platform's installers must be produced on that platform.
+  # The self-hosted fleet is Linux-only, hence hosted runners here.
+  #
+  # Every leg needs Go, Rust, Node and pnpm together, because the bundle embeds
+  # the daemon: tauri.conf.json's beforeBuildCommand runs `pnpm prepare:daemon`,
+  # which reads the Rust host triple and compiles the Go binary to
+  # src-tauri/binaries/openseal-daemon-<triple>. That is the whole mechanism
+  # behind the daemon being bundled, and it is why `pnpm tauri build` alone is
+  # sufficient — no separate Go build step belongs in this job.
+  desktop:
+    name: Desktop (${{ matrix.label }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            label: linux-x86_64
+          - runner: macos-13        # Intel
+            label: macos-x86_64
+          - runner: macos-latest    # Apple silicon
+            label: macos-aarch64
+          - runner: windows-latest
+            label: windows-x86_64
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out the tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
+            fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Install the Linux bundling dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # Tauri v2 links webkit2gtk 4.1. patchelf and librsvg are needed to
+          # produce the AppImage.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential
+
+      - name: Check the toolchains this bundle needs
+        run: |
+          set -euo pipefail
+          missing=""
+          for tool in go rustc cargo node npm; do
+            command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::runner is missing required toolchains:${missing}" >&2
+            exit 1
+          fi
+          # The sidecar filename is derived from this triple, so print it: if a
+          # bundle ever ships without its daemon, this line identifies which
+          # name was expected.
+          rustc -vV | sed -n 's/^host: /rust host triple: /p'
+          WANT="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+          GOT="$(go version | awk '{print $3}' | sed 's/^go//')"
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::Go toolchain is ${GOT} but go.mod requires ${WANT}" >&2
+            exit 1
+          fi
+          echo "go ${GOT}, node $(node --version)"
+
+      - name: Install pnpm
+        run: |
+          set -euo pipefail
+          if ! command -v pnpm >/dev/null 2>&1; then
+            npm install -g pnpm
+          fi
+          pnpm --version
+
+      - name: Install the workspace dependencies
+        working-directory: desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the bundles
+        working-directory: desktop
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          # `pnpm tauri build`, not `make desktop-build`. The Makefile target
+          # runs `make build` first, producing a root ./openseal that the bundle
+          # never uses — tauri.conf.json's beforeBuildCommand compiles its own
+          # sidecar under the Rust host triple. Skipping it avoids a redundant
+          # cgo build on every leg.
+          pnpm tauri build
+
+      - name: Collect the bundles
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          OUT="bundles"
+          mkdir -p "$OUT"
+          BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
+          if [ ! -d "$BUNDLE_DIR" ]; then
+            echo "::error::no bundle directory at ${BUNDLE_DIR}" >&2
+            exit 1
+          fi
+          # Installers only. The .app directory is what the .dmg wraps, and a
+          # directory cannot be a release asset.
+          find "$BUNDLE_DIR" -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
+            -exec cp {} "$OUT/" \;
+          COUNT="$(find "$OUT" -type f | wc -l | tr -d ' ')"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::the build produced no installer for ${{ matrix.label }}" >&2
+            find "$BUNDLE_DIR" -maxdepth 2 -type d || true
+            exit 1
+          fi
+          echo "collected ${COUNT} installer(s) for ${{ matrix.label }}:"
+          ls -l "$OUT"
+
+      - name: Report the signing posture
+        run: |
+          set -euo pipefail
+          # Signing is opt-in and absent by default. Say so in the log rather
+          # than shipping unsigned artifacts silently: an unsigned .dmg trips
+          # Gatekeeper and an unsigned installer trips SmartScreen, and whoever
+          # ships this release should know that before users discover it.
+          case "${{ runner.os }}" in
+            macOS)
+              echo "::warning::macOS bundles are UNSIGNED and not notarized — users will see a Gatekeeper warning. Set the signing secrets and add a signing step to change this."
+              ;;
+            Windows)
+              echo "::warning::Windows installers are UNSIGNED — users will see a SmartScreen warning. Set the signing secrets and add a signing step to change this."
+              ;;
+            *)
+              echo "Linux bundles are unsigned, which is conventional for .deb and .AppImage."
+              ;;
+          esac
+
+      - name: Upload the bundles to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # --clobber so a re-run replaces its own assets rather than failing on
+          # a name that already exists.
+          find bundles -type f -print0 \
+            | xargs -0 gh release upload "${GITHUB_REF_NAME}" --clobber
+          echo "uploaded the ${{ matrix.label }} bundles"
