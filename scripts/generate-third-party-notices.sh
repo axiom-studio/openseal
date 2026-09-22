@@ -72,7 +72,10 @@ while IFS= read -r module; do
   if [ -n "$dir" ] && [ -d "$dir" ]; then
     file="$(find "$dir" -maxdepth 1 -type f \
       \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \) \
-      -printf '%f\n' 2>/dev/null | sort | head -1)"
+      -printf '%f\n' 2>/dev/null | LC_ALL=C sort)"
+    # First line only, taken in the shell rather than by piping into `head`,
+    # which closes the pipe early and can SIGPIPE the producer under pipefail.
+    file="${file%%$'\n'*}"
   fi
 
   if [ -n "$file" ]; then
