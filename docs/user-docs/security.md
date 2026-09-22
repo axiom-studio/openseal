@@ -30,6 +30,22 @@ Expose it only through an authorization-aware reverse proxy or local network bou
 
 The daemon starts anyway. The warning is a warning, not a refusal.
 
+#### Running in a Container
+
+A container changes where that boundary sits, and the shipped files use three different addresses on purpose.
+
+| Where | Address | Why |
+|---|---|---|
+| `docker/daemon.yaml` | `0.0.0.0:8080` | A published port arrives on the container's own interface, never its loopback. Bound to `127.0.0.1` the daemon is unreachable from outside the container and the published port forwards to nothing. |
+| `docker-compose.yml` | `127.0.0.1:8080:8080` | The host side. This is the line that decides network exposure. |
+| Built-in default | `127.0.0.1:8080` | Unchanged, for the daemon run directly on a host. |
+
+The container binding every interface is safe only because the compose file publishes to loopback. Widening the publish spec to `8080:8080` binds the host side to every interface and puts all API routes, including the approval decision endpoint, in reach of any peer that can route to the host.
+
+> **A host firewall will not contain this.** Docker installs its port forward as a DNAT rule traversed *before* the host's `INPUT` filter chain, so a `ufw default deny incoming` policy does not block a published port. An operator who believes the host is firewalled would be wrong.
+
+Widen the publish spec only together with an authenticating reverse proxy in front of it. Do not instead change `docker/daemon.yaml` back to loopback: that does not reduce exposure, it only stops the container working.
+
 ### The Operator Flag
 
 `--standalone-operator` refuses to start unless the listen address is loopback, and it is what turns on the local-operator authorities.
