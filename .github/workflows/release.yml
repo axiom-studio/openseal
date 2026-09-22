@@ -726,9 +726,17 @@ jobs:
           mv "$tmp" desktop/package.json
           # Only the first `version =` line, which is the one under [package];
           # dependency versions further down must not be touched.
+          #
+          # awk, not sed. The obvious sed form for "first match only" is
+          # `0,/re/`, which is a GNU extension: BSD sed — /usr/bin/sed on both
+          # macOS legs — rejects a line-0 address, and busybox sed accepts it
+          # and silently does nothing. `1,/re/` is NOT a substitute: if line 1
+          # matched it would run to the *next* match, which is the reason
+          # `0,/re/` exists. awk is POSIX, behaves identically everywhere, and
+          # is already required by the toolchain preflight.
           for manifest in desktop/src-tauri/Cargo.toml desktop/crates/daemon-host/Cargo.toml; do
-            sed -i.bak "0,/^version = \".*\"$/s//version = \"${CORE}\"/" "$manifest"
-            rm -f "${manifest}.bak"
+            awk -v v="$CORE" '!done && /^version = /{ print "version = \"" v "\""; done=1; next } 1' \
+              "$manifest" > "${manifest}.tmp" && mv "${manifest}.tmp" "$manifest"
           done
 
           echo "bundle version set to ${CORE} (tag ${TAG_VERSION}):"
@@ -928,7 +936,11 @@ jobs:
             echo "Verify any download against \`checksums.txt\`:"
             echo
             echo '```'
+            echo "# Linux"
             echo "sha256sum -c checksums.txt --ignore-missing"
+            echo
+            echo "# macOS — no sha256sum; shasum ships with the system"
+            echo "shasum -a 256 -c checksums.txt --ignore-missing"
             echo '```'
             echo
             echo "### Note on unsigned builds"
