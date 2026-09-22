@@ -420,8 +420,20 @@ func TestGovernedInactiveWorkforceAdvertisesAndPreparesActivation(t *testing.T) 
 	var activation authoring.ChangeSet
 	if response.Code != http.StatusCreated || json.NewDecoder(response.Body).Decode(&activation) != nil ||
 		activation.ParentID != applied.ID || activation.Result.Candidate.Activation != authoring.WorkforceActivationActive ||
-		activation.Actor.ID != "configured-operator" || activation.RequiredCredentials["tenant/one/researcher"][0] != "MODEL_PROVIDER" {
+		activation.Actor.ID != "configured-operator" {
 		t.Fatalf("activation=%d %s", response.Code, response.Body.String())
+	}
+	// Agent IDs are opaque and allocated independently of agent names, so the
+	// credential map is keyed by the candidate's own ID rather than a
+	// name-derived path. Resolve it from the candidate instead of hardcoding
+	// one. The generator for this test produces exactly one Agent.
+	if len(activation.Result.Candidate.Agents) != 1 {
+		t.Fatalf("activation candidate agents = %d, want 1", len(activation.Result.Candidate.Agents))
+	}
+	researcherID := activation.Result.Candidate.Agents[0].ID
+	if credentials := activation.RequiredCredentials[researcherID]; len(credentials) != 1 || credentials[0] != "MODEL_PROVIDER" {
+		t.Fatalf("required credentials for Agent %q = %v, want [MODEL_PROVIDER]; all = %v",
+			researcherID, credentials, activation.RequiredCredentials)
 	}
 	replay := performAgentRunRequest(t, api.Handler(), http.MethodPost, path, mustJSON(t, request), "activate-stable")
 	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), activation.ID) {
