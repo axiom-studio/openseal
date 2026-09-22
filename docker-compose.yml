@@ -16,7 +16,8 @@ services:
     environment:
       - OPENSEAL_LOG_LEVEL=info
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/v1/health"]
+      # 127.0.0.1, not localhost — see the note on the Dockerfile HEALTHCHECK.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
