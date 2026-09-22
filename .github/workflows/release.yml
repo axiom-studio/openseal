@@ -45,7 +45,25 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "release ${TAG} already exists; reusing it"
+            # Reusing a DRAFT is the point: it lets a failed run be re-run
+            # against the release it already started. Reusing a PUBLISHED one is
+            # a different thing entirely — every upload below passes --clobber
+            # and the assembly job regenerates checksums.txt from whatever is
+            # attached, so a re-pushed tag would replace the artifacts users
+            # already downloaded and produce a checksums file that correctly
+            # matches the replacements. The verification step the release notes
+            # tell users to run would pass against the substituted bytes, which
+            # is the one outcome an integrity check must not have.
+            #
+            # Fail closed: an isDraft that cannot be read is treated as
+            # published.
+            IS_DRAFT="$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || true)"
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::release ${TAG} already exists and is not a draft (isDraft='${IS_DRAFT:-unknown}'); refusing to overwrite its assets." >&2
+              echo "::error::Cut a new tag, or delete that release deliberately if replacement is genuinely intended." >&2
+              exit 1
+            fi
+            echo "draft release ${TAG} already exists; reusing it"
             exit 0
           fi
           # Pre-release when the tag carries a suffix such as -rc1.
@@ -837,6 +855,8 @@ jobs:
             echo "- **Desktop app** — the \`.dmg\`, \`.msi\`, \`.deb\` or \`.AppImage\` below. The daemon is bundled; nothing else to install."
             echo "- **Command line** — the \`openseal_${VERSION}_<os>_<arch>\` archive for your platform."
             echo "- **Container** — \`docker pull ${IMAGE}:${VERSION}\`"
+            echo
+            echo "Built from commit \`${GITHUB_SHA}\`."
             echo
             echo "Verify any download against \`checksums.txt\`:"
             echo
