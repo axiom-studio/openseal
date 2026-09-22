@@ -995,13 +995,14 @@ jobs:
               echo
               echo "The container image now runs as an unprivileged user instead of root. A **new** data volume needs no action."
               echo
-              echo "A volume created by an earlier release is still owned by root, and the daemon cannot open its database. It exits with:"
+              echo "A volume created by an earlier release is still owned by root, and the daemon cannot open its database. It exits with one of:"
               echo
               echo '```text'
+              echo "failed to open kernel store: migrate: attempt to write a readonly database"
               echo "failed to open kernel store: migrate: unable to open database file: no such file or directory"
               echo '```'
               echo
-              echo "That message names neither ownership nor permissions, and the file it reports missing is one it was not allowed to create. Fix the ownership once:"
+              echo "The first is the usual case, for a volume that already holds data. The second appears when the volume is root-owned but empty. Neither message names ownership or permissions. Fix the ownership once:"
               echo
               echo '```bash'
               echo "docker run --rm -v openseal-data:/app/data --user root \\"
