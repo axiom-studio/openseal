@@ -8,11 +8,39 @@ Identity and authorization belong to the deployment rather than to the kernel. O
 
 | Property | Where it lives |
 |---|---|
-| Authentication | The embedding host, or a fronting proxy. No credential is parsed from any request, and no route returns `401 Unauthorized`, because no route distinguishes an authenticated caller from an unauthenticated one |
+| Authentication | Off unless you set `OPENSEAL_API_TOKEN`. With it set the daemon requires a bearer token on every route; with it unset no credential is parsed and no route returns `401`. See [Enabling API Authentication](#enabling-api-authentication) below |
 | Transport security | The embedding host, or a fronting proxy. The API server is plain HTTP — there is no TLS configuration, no certificate handling, and no TLS listener |
 | Authorization | The embedding host. There is no role model, no permission check, and no per-scope entitlement check on any route |
 
-> **Plan the deployment around that boundary.** Any process that can reach the listen address can call every route, including every mutation route. The default loopback bind is what keeps the boundary closed until a deployment deliberately opens it.
+> **Plan the deployment around that boundary.** With no token set, any process that can reach the listen address can call every route, including every mutation route. The default loopback bind is what keeps the boundary closed until a deployment deliberately opens it.
+
+Note what authentication does and does not buy you here: a token establishes *that* a caller is authorized to use the API at all. It does not distinguish between callers, and it does not restrict which routes a caller may reach. Authorization remains the embedding host's job.
+
+## Enabling API Authentication
+
+Set `OPENSEAL_API_TOKEN` in the daemon's environment:
+
+```bash
+OPENSEAL_API_TOKEN="$(openssl rand -hex 32)" openseal daemon --config daemon.yaml
+```
+
+Every route then requires a bearer token:
+
+```bash
+curl -H "Authorization: Bearer $OPENSEAL_API_TOKEN" http://127.0.0.1:8080/api/v1/health
+```
+
+| Request | Response |
+|---|---|
+| No `Authorization` header | `401`, with `WWW-Authenticate: Bearer realm="openseal"` |
+| Wrong token | `401` |
+| Correct token | the route's normal response |
+
+This applies on every path — the daemon, the container and the desktop sidecar — not only to the desktop app. The comparison is constant-time, and a request carrying more than one `Authorization` header is rejected.
+
+**Leaving it unset leaves every route open.** That is the default, and it is deliberate: it keeps existing deployments working. It is also why the loopback bind matters. If you publish the API beyond loopback, set a token, put an authenticating proxy in front, or both.
+
+The desktop application sets this for you. It generates a token per launch and passes it to the sidecar it spawns, so the bundled daemon is never reachable without it.
 
 ## The Two Guardrails
 
@@ -24,8 +52,16 @@ The API binds `127.0.0.1:8080` by default. When the configured listen address is
 
 ```text
 OpenSeal API is exposed on non-loopback interface
-OpenSeal has no built-in API authentication.
-Expose it only through an authorization-aware reverse proxy or local network boundary.
+OPENSEAL_API_TOKEN is not set, so every route is reachable without a credential.
+Set it, or expose this only through an authorization-aware reverse proxy or local network boundary.
+```
+
+With a token set, the same situation reports the narrower risk instead — that a token authenticates but does not authorize:
+
+```text
+OpenSeal API is exposed on non-loopback interface
+OPENSEAL_API_TOKEN is set, so routes require a bearer token. There is still no
+authorization model: any holder of the token can call every route.
 ```
 
 The daemon starts anyway. The warning is a warning, not a refusal.
