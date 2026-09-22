@@ -12,6 +12,12 @@ services:
       - "8080:8080"   # Versioned kernel API
     volumes:
       - ./docker/daemon.yaml:/app/daemon.yaml:ro
+      # The image runs as the unprivileged `openseal` user. Docker seeds a new
+      # named volume with the image directory's ownership, so a fresh volume is
+      # writable. A volume created before the image dropped root is still owned
+      # by uid 0 and the daemon cannot open its database: fix with
+      #   docker compose run --rm --user root openseal chown -R openseal:openseal /app/data
+      # or discard it with `docker compose down -v`.
       - openseal-data:/app/data
     environment:
       - OPENSEAL_LOG_LEVEL=info
