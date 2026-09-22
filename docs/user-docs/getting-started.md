@@ -1,6 +1,8 @@
 # Getting Started
 
-OpenSeal builds from source into a single binary that runs a background daemon, a versioned HTTP API, and a terminal client. This page covers a first local deployment: building, starting the daemon, confirming it serves, and connecting the terminal client.
+OpenSeal is a single binary that runs a background daemon, a versioned HTTP API, and a terminal client. This page covers a first local deployment from source: building, starting the daemon, confirming it serves, and connecting the terminal client.
+
+Building is not required to run OpenSeal. Releases publish a prebuilt binary, a container image, and a desktop application — see [Installing OpenSeal](installing.md) to choose between them. Build from source when you want to modify OpenSeal, or to run an unreleased commit.
 
 ## Requirements
 
@@ -15,6 +17,8 @@ OpenSeal's durable store is SQLite through cgo, so a C toolchain is required alo
 | License | Apache License 2.0 |
 
 ## Building the Binary
+
+The requirements above apply to building. A published binary has no Go or C toolchain requirement — see [Installing OpenSeal](installing.md).
 
 ```bash
 git clone https://github.com/axiom-studio/openseal.git
