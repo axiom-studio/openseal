@@ -434,7 +434,7 @@ jobs:
         run: |
           set -euo pipefail
           missing=""
-          for tool in go rustc cargo node npm; do
+          for tool in go rustc cargo node npm jq; do
             command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
           done
           if [ -n "$missing" ]; then
@@ -465,6 +465,47 @@ jobs:
         working-directory: desktop
         run: pnpm install --frozen-lockfile
 
+      - name: Set the bundle version from the tag
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          # Windows Installer ProductVersion is strictly numeric major.minor.build
+          # and rejects a semver pre-release suffix, so the bundlers get the
+          # numeric core. For a final release the two are identical; for
+          # v0.2.0-rc1 the bundles are versioned 0.2.0 and the Collect step below
+          # puts the full tag back into the asset filenames, so release
+          # candidates stay distinguishable once downloaded.
+          CORE="${TAG_VERSION%%-*}"
+          if [ "$CORE" != "$TAG_VERSION" ]; then
+            echo "::warning::pre-release ${TAG_VERSION}: bundles are versioned ${CORE} because MSI ProductVersion must be numeric; asset filenames carry the full tag"
+          fi
+          echo "TAG_VERSION=${TAG_VERSION}" >> "$GITHUB_ENV"
+          echo "BUNDLE_VERSION=${CORE}"     >> "$GITHUB_ENV"
+
+          # Tauri reads the bundle version from tauri.conf.json. Without this the
+          # installers would carry the hardcoded 0.1.0 on every release, which is
+          # not merely a wrong label: dpkg and Windows Installer key upgrade
+          # detection on it, so a static version means later releases do not
+          # register as upgrades at all.
+          #
+          # This runs on a detached checkout inside the job. It is never
+          # committed and cannot reach a branch.
+          tmp="$(mktemp)"
+          jq --arg v "$CORE" '.version = $v' desktop/src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" desktop/src-tauri/tauri.conf.json
+          jq --arg v "$CORE" '.version = $v' desktop/package.json > "$tmp"
+          mv "$tmp" desktop/package.json
+          # Only the first `version =` line, which is the one under [package];
+          # dependency versions further down must not be touched.
+          for manifest in desktop/src-tauri/Cargo.toml desktop/crates/daemon-host/Cargo.toml; do
+            sed -i.bak "0,/^version = \".*\"$/s//version = \"${CORE}\"/" "$manifest"
+            rm -f "${manifest}.bak"
+          done
+
+          echo "bundle version set to ${CORE} (tag ${TAG_VERSION}):"
+          grep -H '"version"' desktop/src-tauri/tauri.conf.json desktop/package.json
+          grep -Hm1 '^version' desktop/src-tauri/Cargo.toml desktop/crates/daemon-host/Cargo.toml
+
       - name: Build the bundles
         working-directory: desktop
         env:
@@ -481,7 +522,6 @@ jobs:
       - name: Collect the bundles
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
           OUT="bundles"
           mkdir -p "$OUT"
           BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
@@ -501,7 +541,31 @@ jobs:
             find "$BUNDLE_DIR" -maxdepth 2 -type d || true
             exit 1
           fi
-          echo "collected ${COUNT} installer(s) for ${{ matrix.label }}:"
+
+          # Assert the version actually landed in the filenames. Tauri taking the
+          # version from config rather than the tag is silent when wrong — every
+          # job succeeds and the mismatch only surfaces when a user's upgrade
+          # does nothing — so it is checked rather than assumed.
+          for f in "$OUT"/*; do
+            case "$(basename "$f")" in
+              *"${BUNDLE_VERSION}"*) ;;
+              *)
+                echo "::error::bundle $(basename "$f") does not carry version ${BUNDLE_VERSION}" >&2
+                exit 1 ;;
+            esac
+          done
+
+          # For a pre-release, put the full tag back into the filename so two
+          # release candidates of the same version stay distinguishable once
+          # downloaded. The installer metadata keeps the numeric core.
+          if [ "$TAG_VERSION" != "$BUNDLE_VERSION" ]; then
+            for f in "$OUT"/*; do
+              base="$(basename "$f")"
+              mv "$f" "${OUT}/${base/${BUNDLE_VERSION}/${TAG_VERSION}}"
+            done
+          fi
+
+          echo "collected ${COUNT} installer(s) for ${{ matrix.label }} at version ${TAG_VERSION}:"
           ls -l "$OUT"
 
       - name: Report the signing posture
