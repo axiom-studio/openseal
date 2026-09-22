@@ -258,6 +258,13 @@ jobs:
       contents: read
       packages: write
 
+    env:
+      # One list, consumed by both the build and the verification. Declaring the
+      # platforms twice is how the published set and the tested set drift apart
+      # — which is exactly what happened before: both architectures were built
+      # and only amd64 was ever run.
+      PLATFORMS: linux/amd64 linux/arm64
+
     steps:
       - name: Check out the tag
         env:
@@ -324,7 +331,7 @@ jobs:
           # already gets this right by staying a draft until everything passes;
           # this brings images in line with the same guarantee.
           docker buildx build \
-            --platform linux/amd64,linux/arm64 \
+            --platform "$(echo "$PLATFORMS" | tr ' ' ',')" \
             --tag "${IMAGE}:${VERSION}" \
             --label "org.opencontainers.image.title=OpenSeal" \
             --label "org.opencontainers.image.description=Agent execution platform" \
@@ -338,74 +345,116 @@ jobs:
             .
           echo "pushed ${IMAGE}:${VERSION}"
 
-      - name: Verify the published image serves its port
+      - name: Verify the published image on every platform it publishes
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
 
-          # Pull the amd64 manifest back and actually run it. Publishing an
-          # image that cannot serve a request is the failure mode this whole
-          # job exists to avoid, and it is exactly what shipped before: the
-          # daemon bound loopback, so the published port reached nothing.
-          docker run -d --name openseal-verify -p 18080:8080 --platform linux/amd64 "${IMAGE}:${VERSION}"
+          # Pull each published manifest back and actually run it. Publishing an
+          # image that cannot serve a request is the failure mode this job
+          # exists to prevent, and it is what shipped once already: the daemon
+          # bound loopback, so the published port reached nothing.
+          #
+          # Every platform is exercised, not just the native one. arm64 is the
+          # artifact with the most that can go wrong and the least that has been
+          # observed — it compiles a cgo SQLite driver from C under emulation,
+          # and nothing in this repository has ever run an arm64 build. The
+          # binfmt handlers installed earlier for the build let the runner
+          # execute it here at no extra cost.
+          port=18080
+          rc=0
+          for platform in $PLATFORMS; do
+            arch="${platform#*/}"
+            name="openseal-verify-${arch}"
 
-          for attempt in $(seq 1 30); do
-            if curl -fsS --max-time 3 http://127.0.0.1:18080/api/v1/health >/dev/null 2>&1; then
-              echo "health endpoint answered on the published port after ${attempt} attempt(s)"
-              break
-            fi
-            if [ "$attempt" -eq 30 ]; then
-              echo "::error::published port never answered" >&2
-              docker logs openseal-verify || true
-              docker rm -f openseal-verify || true
-              exit 1
-            fi
-            sleep 2
-          done
-
-          # The health check is declared in the image; confirm Docker agrees,
-          # rather than only confirming that curl worked.
-          for attempt in $(seq 1 30); do
-            STATUS="$(docker inspect --format '{{.State.Health.Status}}' openseal-verify 2>/dev/null || echo unknown)"
-            echo "container health: ${STATUS}"
-            case "$STATUS" in
-              healthy) break ;;
-              unhealthy)
-                echo "::error::container reported unhealthy" >&2
-                docker logs openseal-verify || true
-                docker rm -f openseal-verify || true
-                exit 1 ;;
+            # Emulated startup is materially slower than native, so the window
+            # is sized per platform rather than reusing a figure chosen for a
+            # native run.
+            case "$platform" in
+              linux/amd64) attempts=30 ;;
+              *)           attempts=90 ;;
             esac
-            if [ "$attempt" -eq 30 ]; then
-              echo "::error::container never reached healthy (last status: ${STATUS})" >&2
-              docker logs openseal-verify || true
-              docker rm -f openseal-verify || true
-              exit 1
+
+            echo "--- verifying ${platform} (up to $((attempts * 2))s) ---"
+            docker rm -f "$name" >/dev/null 2>&1 || true
+            docker run -d --name "$name" -p "${port}:8080" --platform "$platform" "${IMAGE}:${VERSION}"
+
+            ok=0
+            for attempt in $(seq 1 "$attempts"); do
+              if curl -fsS --max-time 3 "http://127.0.0.1:${port}/api/v1/health" >/dev/null 2>&1; then
+                echo "${platform}: health endpoint answered on the published port after ${attempt} attempt(s)"
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::${platform}: published port never answered" >&2
+              docker logs "$name" || true
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
             fi
-            sleep 2
+
+            # The health check is declared in the image; confirm Docker agrees,
+            # rather than only confirming that curl worked.
+            ok=0
+            for attempt in $(seq 1 "$attempts"); do
+              STATUS="$(docker inspect --format '{{.State.Health.Status}}' "$name" 2>/dev/null || echo unknown)"
+              case "$STATUS" in
+                healthy)   echo "${platform}: container healthy"; ok=1; break ;;
+                unhealthy) echo "::error::${platform}: container reported unhealthy" >&2; break ;;
+              esac
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::${platform}: container never reached healthy" >&2
+              docker logs "$name" || true
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+
+            # The image must not run as root. Asserted rather than assumed,
+            # because nothing else in the run would notice: a root container
+            # serves health checks exactly as well as an unprivileged one.
+            IMAGE_USER="$(docker inspect --format '{{.Config.User}}' "${IMAGE}:${VERSION}")"
+            RUNTIME_UID="$(docker exec "$name" id -u)"
+            echo "${platform}: image USER='${IMAGE_USER}', runtime uid=${RUNTIME_UID}"
+            if [ -z "$IMAGE_USER" ] || [ "$RUNTIME_UID" = "0" ]; then
+              echo "::error::${platform}: published image runs as root" >&2
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+
+            # The daemon must be able to write its SQLite database as that user.
+            # This is the failure a USER directive introduces if /app was not
+            # chowned, and it would otherwise surface after publication.
+            if ! docker exec "$name" test -w /app/data; then
+              echo "::error::${platform}: /app/data is not writable by the runtime user" >&2
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+            echo "${platform}: /app/data is writable by the runtime user"
+
+            docker rm -f "$name"
+            port=$((port + 1))
           done
 
-          # The image must not run as root. Asserted rather than assumed,
-          # because nothing else in the run would notice: a root container
-          # serves health checks exactly as well as an unprivileged one.
-          IMAGE_USER="$(docker inspect --format '{{.Config.User}}' "${IMAGE}:${VERSION}")"
-          RUNTIME_UID="$(docker exec openseal-verify id -u)"
-          echo "image USER='${IMAGE_USER}', runtime uid=${RUNTIME_UID}"
-          if [ -z "$IMAGE_USER" ] || [ "$RUNTIME_UID" = "0" ]; then
-            echo "::error::published image runs as root (USER='${IMAGE_USER}', uid=${RUNTIME_UID})" >&2
-            docker rm -f openseal-verify || true
+          # Every platform is attempted before failing, so one run reports all
+          # broken architectures rather than only the first.
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::one or more platforms failed verification; :latest will not move" >&2
             exit 1
           fi
-
-          # The daemon must be able to write its SQLite database as that user.
-          # This is the failure mode a USER directive introduces if /app was not
-          # chowned, and it would otherwise surface as a broken image after
-          # publication rather than here.
-          docker exec openseal-verify test -w /app/data
-          echo "/app/data is writable by the runtime user"
-
-          docker rm -f openseal-verify
+          echo "all platforms verified: ${PLATFORMS}"
 
       - name: Move :latest to the verified image
         run: |
