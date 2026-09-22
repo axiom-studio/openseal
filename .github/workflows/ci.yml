@@ -131,6 +131,20 @@ jobs:
           echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
           "${GO_ROOT}/go/bin/go" version
 
+      # The committed copy is what a plain `docker build` and a local desktop
+      # build use, so it has to stay current with go.mod. Regenerating and
+      # diffing catches a dependency change that did not refresh it.
+      - name: Third-party notices are up to date
+        run: |
+          set -euo pipefail
+          ./scripts/generate-third-party-notices.sh /tmp/notices.generated
+          if ! diff -q THIRD_PARTY_NOTICES /tmp/notices.generated >/dev/null; then
+            echo "::error::THIRD_PARTY_NOTICES is stale; run 'make third-party-notices' and commit the result" >&2
+            diff THIRD_PARTY_NOTICES /tmp/notices.generated | head -40 >&2
+            exit 1
+          fi
+          echo "third-party notices are current"
+
       - name: go vet
         run: make vet
 

@@ -1,4 +1,4 @@
-.PHONY: build test vet licence-inventory desktop-install desktop-dev desktop-build desktop-host-test docker-up docker-down docker-logs
+.PHONY: build test vet licence-inventory third-party-notices desktop-install desktop-dev desktop-build desktop-host-test docker-up docker-down docker-logs
 
 build:
 	go build -o openseal ./cmd/openseal
@@ -14,6 +14,11 @@ vet:
 licence-inventory:
 	./scripts/licence-inventory.sh
 
+# Full licence text of every linked module, shipped inside each artifact.
+# Generated, not hand-maintained — regenerate after any dependency change.
+third-party-notices:
+	./scripts/generate-third-party-notices.sh
+
 desktop-install:
 	cd desktop && pnpm install
 
@@ -21,7 +26,8 @@ desktop-dev: build
 	cd desktop && pnpm prepare:daemon
 	cd desktop && OPENSEAL_DAEMON_PATH=$(CURDIR)/openseal pnpm tauri dev
 
-desktop-build: build
+desktop-build: build third-party-notices
+	cp THIRD_PARTY_NOTICES desktop/src-tauri/THIRD_PARTY_NOTICES
 	cd desktop && pnpm tauri build
 
 desktop-host-test: build
