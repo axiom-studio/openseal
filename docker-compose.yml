@@ -9,7 +9,21 @@ services:
     container_name: openseal
     restart: unless-stopped
     ports:
-      - "8080:8080"   # Versioned kernel API
+      # Loopback only. The kernel API serves no authentication on any route, so
+      # an unqualified "8080:8080" would bind the host side to 0.0.0.0 and put
+      # every route — including the approval decision endpoint — on the network
+      # for anyone who can route to this host.
+      #
+      # Docker installs its forward as a DNAT rule traversed BEFORE the host's
+      # INPUT filter chain, so a `ufw default deny incoming` policy does not
+      # block it. An operator who believes the host is firewalled would be
+      # wrong.
+      #
+      # Remote access belongs behind an authenticating reverse proxy. Widen this
+      # only together with that. Do NOT "fix" it by reverting
+      # docker/daemon.yaml to loopback — the container must still bind
+      # 0.0.0.0 for the published port to reach it at all.
+      - "127.0.0.1:8080:8080"   # Versioned kernel API
     volumes:
       - ./docker/daemon.yaml:/app/daemon.yaml:ro
       # The image runs as the unprivileged `openseal` user. Docker seeds a new
