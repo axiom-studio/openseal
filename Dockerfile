@@ -37,6 +37,7 @@ COPY docker/daemon.yaml /app/daemon.yaml
 # The release tarballs already carry LICENSE; this keeps the container channel
 # consistent with them rather than relying on the OCI label alone.
 COPY LICENSE /app/LICENSE
+COPY THIRD_PARTY_NOTICES /app/THIRD_PARTY_NOTICES
 
 # Run as an unprivileged user. The API authenticates nothing, so anything
 # reached through a route — or any container escape — would otherwise land as

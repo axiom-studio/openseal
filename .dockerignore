@@ -64,3 +64,4 @@ LICENSE
 # This exception must stay BELOW the `LICENSE` line above: .dockerignore
 # resolves by last match, so re-including it first would be silently undone.
 !LICENSE
+!THIRD_PARTY_NOTICES
