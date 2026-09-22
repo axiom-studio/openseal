@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // The container configuration and the built-in default deliberately disagree
@@ -17,9 +19,21 @@ import (
 // safe default: it keeps an unauthenticated API off the network until an
 // operator deliberately exposes it.
 //
-// The two values are one line apart in effect but opposite in intent, so a
-// well-meaning "consistency" edit to either one silently breaks something.
-// These tests pin both.
+// The compose publish spec is the third value in the same arrangement, and it
+// is the one that decides network exposure. Because the container now really
+// does listen, an unqualified "8080:8080" would bind the HOST side to 0.0.0.0
+// and put an API that authenticates nothing on every interface. Docker's
+// forward is a DNAT rule traversed before the host INPUT chain, so a host
+// firewall does not contain it.
+//
+// So the intended arrangement is three values that do not agree, on purpose:
+//
+//	docker/daemon.yaml        0.0.0.0:8080       (inside the container)
+//	docker-compose.yml        127.0.0.1:8080:... (on the host)
+//	internal/daemon/config.go 127.0.0.1:8080     (built-in default)
+//
+// Any "consistency" edit to one of them silently breaks something. These tests
+// pin all three.
 
 func TestContainerDaemonConfigBindsAllInterfaces(t *testing.T) {
 	path := filepath.Join("..", "..", "docker", "daemon.yaml")
@@ -48,5 +62,42 @@ func TestContainerDaemonConfigBindsAllInterfaces(t *testing.T) {
 func TestDefaultDaemonConfigStaysOnLoopback(t *testing.T) {
 	if got := DefaultDaemonConfig().API.ListenAddr; got != "127.0.0.1:8080" {
 		t.Fatalf("default listenAddr = %q, want 127.0.0.1:8080 — the non-container default must not widen exposure", got)
+	}
+}
+
+func TestComposePublishesTheAPIOnLoopbackOnly(t *testing.T) {
+	path := filepath.Join("..", "..", "docker-compose.yml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var compose struct {
+		Services map[string]struct {
+			Ports []string `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(data, &compose); err != nil {
+		t.Fatal(err)
+	}
+
+	service, ok := compose.Services["openseal"]
+	if !ok {
+		t.Fatalf("docker-compose.yml has no openseal service; services = %v", compose.Services)
+	}
+	if len(service.Ports) != 1 {
+		t.Fatalf("openseal publishes %d ports, want exactly 1", len(service.Ports))
+	}
+
+	// A published port is host[:hostPort]:containerPort. Without a host address
+	// Docker binds 0.0.0.0, which is the case this test exists to reject.
+	published := service.Ports[0]
+	if !strings.HasPrefix(published, "127.0.0.1:") {
+		t.Fatalf("openseal publishes %q, want a 127.0.0.1-qualified spec — "+
+			"an unqualified host port binds 0.0.0.0 and exposes an API that "+
+			"authenticates nothing on every interface", published)
+	}
+	if !strings.HasSuffix(published, ":8080") {
+		t.Fatalf("openseal publishes %q, want it to reach container port 8080", published)
 	}
 }
