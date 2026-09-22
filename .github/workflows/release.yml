@@ -572,10 +572,38 @@ jobs:
       - name: Install pnpm
         run: |
           set -euo pipefail
-          if ! command -v pnpm >/dev/null 2>&1; then
-            npm install -g pnpm
+          # The exact version is declared in desktop/package.json's
+          # packageManager field, so the workflow, developer machines and any
+          # Corepack-aware environment all agree on one value, and it lives next
+          # to the lockfile it governs rather than only here.
+          PNPM_VERSION="$(jq -r '.packageManager' desktop/package.json | sed 's/^pnpm@//')"
+          case "$PNPM_VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::desktop/package.json packageManager is not a pinned pnpm version: ${PNPM_VERSION}" >&2; exit 1 ;;
+          esac
+
+          # `pnpm install --frozen-lockfile` is the control that stops this
+          # project's own dependencies re-resolving at release time, and it
+          # works. But the tool that reads and enforces that lockfile was being
+          # fetched unpinned on every run — a solid lock with the key collected
+          # fresh from the internet each time. This is the job that produces the
+          # installers end users execute, and they are unsigned, so a tampered
+          # bundle would be attested rather than rejected by the checksums
+          # generated downstream from it.
+          #
+          # The guard checks the version, not merely presence: a hosted image
+          # may already ship some pnpm, and accepting whatever is there is the
+          # same gap in a different costume.
+          if [ "$(pnpm --version 2>/dev/null || true)" != "$PNPM_VERSION" ]; then
+            npm install -g "pnpm@${PNPM_VERSION}"
           fi
-          pnpm --version
+
+          ACTUAL="$(pnpm --version)"
+          if [ "$ACTUAL" != "$PNPM_VERSION" ]; then
+            echo "::error::pnpm is ${ACTUAL} but ${PNPM_VERSION} is pinned" >&2
+            exit 1
+          fi
+          echo "pnpm ${ACTUAL} (pinned)"
 
       - name: Install the workspace dependencies
         working-directory: desktop
