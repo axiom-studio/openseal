@@ -35,6 +35,13 @@ context.yaml
 workflow.hcl
 bad_workflow.hcl
 
+# ...but the container's own config must reach the build context: the Dockerfile
+# copies it to /app/daemon.yaml, which is the path CMD names. The `daemon.yaml`
+# pattern above is anchored to the context root and so does not match this
+# nested path, but state it explicitly rather than depend on that subtlety — if
+# the exclusion ever did apply, the COPY would fail the build.
+!docker/daemon.yaml
+
 # Git
 .git/
 .gitignore
