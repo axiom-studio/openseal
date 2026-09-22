@@ -942,6 +942,23 @@ jobs:
             HEADING="Changes"
           fi
 
+          # The container image dropped root in this commit. Anyone upgrading a
+          # data volume created before it needs a one-time chown, so the notes
+          # carry an upgrade section — but only while it is still relevant.
+          #
+          # Self-retiring: once the previous release already contains the
+          # change, the note stops being printed. Carrying an upgrade warning on
+          # every release forever trains people to skip the section.
+          UID_CHANGE_COMMIT="bc874cf4b8afa828e0e5f644fb81aaec19ee6252"
+          SHOW_UID_NOTE=0
+          if [ -z "$PREV" ]; then
+            # First release: no earlier tag, but local compose volumes predating
+            # the change still exist, so the note is still worth carrying.
+            SHOW_UID_NOTE=1
+          elif ! git merge-base --is-ancestor "$UID_CHANGE_COMMIT" "$PREV" 2>/dev/null; then
+            SHOW_UID_NOTE=1
+          fi
+
           # Cap the changelog at 100 entries, and say so when it is cut.
           LIMIT=100
           TOTAL="$(git rev-list --no-merges --count "${RANGE}")"
@@ -971,6 +988,27 @@ jobs:
             echo
             echo "The macOS and Windows desktop builds are not yet code-signed. macOS shows a Gatekeeper warning on first launch (right-click the app and choose Open), and Windows shows a SmartScreen prompt (More info, then Run anyway)."
             echo
+            if [ "$SHOW_UID_NOTE" = "1" ]; then
+              echo "### Upgrading a container deployment"
+              echo
+              echo "The container image now runs as an unprivileged user instead of root. A **new** data volume needs no action."
+              echo
+              echo "A volume created by an earlier release is still owned by root, and the daemon cannot open its database. It exits with:"
+              echo
+              echo '```text'
+              echo "failed to open kernel store: migrate: unable to open database file: no such file or directory"
+              echo '```'
+              echo
+              echo "That message names neither ownership nor permissions, and the file it reports missing is one it was not allowed to create. Fix the ownership once:"
+              echo
+              echo '```bash'
+              echo "docker run --rm -v openseal-data:/app/data --user root \\"
+              echo "  ${IMAGE}:${VERSION} chown -R openseal:openseal /app/data"
+              echo '```'
+              echo
+              echo "Or discard the volume with \`docker compose down -v\` if the data is not needed."
+              echo
+            fi
             echo "### ${HEADING}"
             echo
             # `-n`, not `| head`. Piping into head under `set -euo pipefail`
