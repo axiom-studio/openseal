@@ -32,8 +32,11 @@ ENV OPENSEAL_DB_PATH=/app/data/openseal.db
 
 EXPOSE 8080
 
+# Address 127.0.0.1 explicitly rather than `localhost`: the image resolves
+# `localhost` to ::1 as well as 127.0.0.1, wget tries ::1 first, and the daemon
+# has no IPv6 listener — so the check failed against a healthy process.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget -qO- http://localhost:8080/api/v1/health || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/api/v1/health || exit 1
 
 ENTRYPOINT ["./openseal"]
 CMD ["daemon", "--config", "/app/daemon.yaml"]
