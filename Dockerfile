@@ -25,6 +25,13 @@ WORKDIR /app
 
 COPY --from=builder /build/openseal .
 
+# Ship the config that CMD names. Without it the daemon finds no file at
+# /app/daemon.yaml and writes its own built-in defaults there — which bind
+# loopback, leaving a plain `docker run -p 8080:8080` unable to reach the API.
+# docker-compose.yml mounts its own copy over this one, so this changes nothing
+# for compose users and makes the bare image work on its own.
+COPY docker/daemon.yaml /app/daemon.yaml
+
 # Create the runtime data directory.
 RUN mkdir -p /app/data
 
