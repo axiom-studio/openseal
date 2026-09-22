@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+
+# CI only reads the repository. Nothing here publishes an artifact — building
+# and publishing happens on tags, in release.yml, which opts into the writes it
+# needs.
+permissions:
+  contents: read
+
+# A pull request that is pushed to repeatedly should not queue a run per push.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The axiom-studio org Actions policy is reported (in a sibling repository's
+# workflows) to allow actions only from org-owned repositories, while other
+# sibling repositories use marketplace actions freely. The two cannot both be
+# true, and a workflow built on marketplace actions does not merely degrade if
+# the restriction is real — it never starts. These workflows therefore use no
+# `uses:` steps at all: that is the strict subset, correct under either policy.
+# Checkout and Go toolchain setup run as plain shell.
+
+jobs:
+  go:
+    name: vet, test, build
+    runs-on: self-hosted
+    timeout-minutes: 45
+
+    steps:
+      # Self-hosted runners reuse their working directory between runs, and
+      # nothing cleans it for us the way actions/checkout would. Start from an
+      # empty tree so a file deleted in this PR cannot survive from a previous
+      # run and mask a build failure.
+      - name: Reset the workspace
+        run: |
+          set -euo pipefail
+          find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      # Fail loudly and early on a runner that is missing a tool, rather than
+      # midway through with an error that reads like a code problem. cc matters
+      # most: the daemon links github.com/mattn/go-sqlite3, so cgo is mandatory
+      # and a missing C compiler surfaces as `undefined: sqlite3.Error` — which
+      # looks like broken source, not a broken runner.
+      - name: Check the runner has the tools this job needs
+        run: |
+          set -euo pipefail
+          missing=""
+          for tool in git curl jq tar sha256sum make cc; do
+            command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::runner is missing required tools:${missing}" >&2
+            exit 1
+          fi
+
+      - name: Check out the pull request head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # Auth via a transient http.extraHeader passed per-command — never
+          # written to .git/config, so the token is not left on the runner's
+          # filesystem for later steps, or later jobs, to read.
+          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
+            fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Set up Go
+        run: |
+          set -euo pipefail
+          # Read the version from go.mod instead of hardcoding it, so the
+          # toolchain cannot drift away from what the module requires.
+          GO_VERSION="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+          if [ -z "$GO_VERSION" ]; then
+            echo "::error::could not read the go directive from go.mod" >&2
+            exit 1
+          fi
+          GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
+
+          # Install under a versioned path the runner owns. No sudo (a
+          # self-hosted runner is not guaranteed passwordless sudo, and
+          # clobbering a system-wide /usr/local/go would be a side effect on a
+          # host shared with other repositories' jobs). The version in the path
+          # doubles as the cache key: a toolchain already unpacked here is
+          # reused across runs.
+          GO_ROOT="${RUNNER_TOOL_CACHE:-$HOME/.cache}/openseal-go/${GO_VERSION}"
+
+          if [ ! -x "${GO_ROOT}/go/bin/go" ]; then
+            # Verify the tarball against the SHA256 that go.dev publishes in its
+            # download manifest before extracting. This toolchain compiles
+            # everything the project ships, so a tampered tarball would backdoor
+            # every artifact. Fetching the hash rather than hardcoding it keeps
+            # the check working when go.mod bumps the Go version. Fails closed.
+            GO_SHA256="$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' \
+              | jq -r --arg f "$GO_TARBALL" '.[].files[] | select(.filename == $f) | .sha256')"
+            if [ -z "$GO_SHA256" ] || [ "$GO_SHA256" = "null" ]; then
+              echo "::error::no published SHA256 for ${GO_TARBALL} in the go.dev manifest" >&2
+              exit 1
+            fi
+            curl -fsSL "https://go.dev/dl/${GO_TARBALL}" -o /tmp/go.tgz
+            echo "${GO_SHA256}  /tmp/go.tgz" | sha256sum -c -
+            # Extract to a scratch path and move into place, so an interrupted
+            # run cannot leave a half-unpacked tree that the next run trusts.
+            rm -rf "${GO_ROOT}.tmp" "${GO_ROOT}"
+            mkdir -p "${GO_ROOT}.tmp"
+            tar -C "${GO_ROOT}.tmp" -xzf /tmp/go.tgz
+            mv "${GO_ROOT}.tmp" "${GO_ROOT}"
+            rm -f /tmp/go.tgz
+          fi
+
+          echo "${GO_ROOT}/go/bin" >> "$GITHUB_PATH"
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          # GOTOOLCHAIN=local pins the build to the toolchain just verified.
+          # Left on its default, Go would silently download a toolchain of its
+          # own choosing over the network, bypassing the checksum check above.
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          "${GO_ROOT}/go/bin/go" version
+
+      - name: go vet
+        run: make vet
+
+      - name: go test
+        run: make test
+
+      - name: Build the binary
+        run: |
+          set -euo pipefail
+          make build
+          test -x ./openseal
+          # `version`, not `--version`: the CLI treats an unrecognised flag as an
+          # unknown command, prints usage, and still exits 0 — so `--version`
+          # would pass this check without ever proving the binary works.
+          ./openseal version
