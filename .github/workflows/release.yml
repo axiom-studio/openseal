@@ -119,11 +119,14 @@ jobs:
           set -euo pipefail
           git init -q .
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          # Auth via a transient http.extraHeader passed per-command — never
-          # written to .git/config, so the token is not left on the runner's
-          # filesystem for later steps to read.
-          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
-            fetch -q --depth 1 origin "$GITHUB_SHA"
+          # GIT_CONFIG_* rather than `git -c`: both keep the token out of
+          # .git/config, but `-c` puts it in argv, which is world-readable via
+          # /proc/<pid>/cmdline. The env form avoids the command line entirely.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
           git checkout -q --detach FETCH_HEAD
 
       - name: Set up the Go toolchain named by go.mod
@@ -263,8 +266,14 @@ jobs:
           set -euo pipefail
           git init -q .
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
-            fetch -q --depth 1 origin "$GITHUB_SHA"
+          # GIT_CONFIG_* rather than `git -c`: both keep the token out of
+          # .git/config, but `-c` puts it in argv, which is world-readable via
+          # /proc/<pid>/cmdline. The env form avoids the command line entirely.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
           git checkout -q --detach FETCH_HEAD
 
       - name: Enable cross-architecture emulation and a buildx builder
@@ -411,8 +420,14 @@ jobs:
           set -euo pipefail
           git init -q .
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
-            fetch -q --depth 1 origin "$GITHUB_SHA"
+          # GIT_CONFIG_* rather than `git -c`: both keep the token out of
+          # .git/config, but `-c` puts it in argv, which is world-readable via
+          # /proc/<pid>/cmdline. The env form avoids the command line entirely.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
           git checkout -q --detach FETCH_HEAD
 
       - name: Install the Linux bundling dependencies
@@ -624,8 +639,14 @@ jobs:
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           # Full history and tags, unlike the shallow fetch the build jobs use:
           # the changelog needs the commit range since the previous tag.
-          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
-            fetch -q --prune --tags origin
+          # GIT_CONFIG_* rather than `git -c`: both keep the token out of
+          # .git/config, but `-c` puts it in argv, which is world-readable via
+          # /proc/<pid>/cmdline. The env form avoids the command line entirely.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --prune --tags origin
           git checkout -q --detach "$GITHUB_SHA"
 
       - name: Download every asset and checksum them together
