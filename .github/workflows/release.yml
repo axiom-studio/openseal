@@ -533,3 +533,117 @@ jobs:
           find bundles -type f -print0 \
             | xargs -0 gh release upload "${GITHUB_REF_NAME}" --clobber
           echo "uploaded the ${{ matrix.label }} bundles"
+
+  # ---------------------------------------------------------------------------
+  # Assemble and publish.
+  #
+  # Depends on every artifact-producing job, so the release only becomes visible
+  # once the binaries, the image and the desktop bundles have all succeeded. A
+  # failure anywhere leaves the release a draft: incomplete and unpublished
+  # beats published with holes in it.
+  release:
+    name: Checksum and publish
+    needs: [binary, container, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out with full history for the changelog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # Full history and tags, unlike the shallow fetch the build jobs use:
+          # the changelog needs the commit range since the previous tag.
+          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
+            fetch -q --prune --tags origin
+          git checkout -q --detach "$GITHUB_SHA"
+
+      - name: Download every asset and checksum them together
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${GITHUB_REF_NAME}" --dir dist
+
+          # A release with no assets means every upstream job uploaded nothing
+          # while still reporting success. Fail rather than publish an empty
+          # release.
+          COUNT="$(find dist -maxdepth 1 -type f ! -name 'checksums.txt' | wc -l | tr -d ' ')"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::the draft release carries no assets" >&2
+            exit 1
+          fi
+          echo "found ${COUNT} asset(s)"
+
+          # One checksums file spanning binaries and desktop bundles alike, so a
+          # user can verify whichever artifact they downloaded from one place.
+          cd dist
+          rm -f checksums.txt
+          find . -maxdepth 1 -type f ! -name 'checksums.txt' -printf '%f\n' \
+            | sort \
+            | xargs sha256sum > checksums.txt
+          cat checksums.txt
+
+      - name: Write the release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -n "$PREV" ]; then
+            RANGE="${PREV}..${TAG}"
+            HEADING="Changes since ${PREV}"
+          else
+            RANGE="${TAG}"
+            HEADING="Changes"
+          fi
+
+          {
+            echo "## OpenSeal ${VERSION}"
+            echo
+            echo "### Downloads"
+            echo
+            echo "- **Desktop app** — the \`.dmg\`, \`.msi\`, \`.deb\` or \`.AppImage\` below. The daemon is bundled; nothing else to install."
+            echo "- **Command line** — the \`openseal_${VERSION}_<os>_<arch>\` archive for your platform."
+            echo "- **Container** — \`docker pull ${IMAGE}:${VERSION}\`"
+            echo
+            echo "Verify any download against \`checksums.txt\`:"
+            echo
+            echo '```'
+            echo "sha256sum -c checksums.txt --ignore-missing"
+            echo '```'
+            echo
+            echo "### Note on unsigned builds"
+            echo
+            echo "The macOS and Windows desktop builds are not yet code-signed. macOS shows a Gatekeeper warning on first launch (right-click the app and choose Open), and Windows shows a SmartScreen prompt (More info, then Run anyway)."
+            echo
+            echo "### ${HEADING}"
+            echo
+            git log --no-merges --pretty='- %s' "${RANGE}" | head -100
+          } > notes.md
+
+          gh release edit "${TAG}" --notes-file notes.md
+
+      - name: Upload the checksums and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release upload "${GITHUB_REF_NAME}" dist/checksums.txt --clobber
+          # --draft=false is the single step that makes the release visible.
+          # Everything above this line is reversible by deleting a draft.
+          gh release edit "${GITHUB_REF_NAME}" --draft=false
+          echo "published ${GITHUB_REF_NAME}"
