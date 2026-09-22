@@ -63,11 +63,16 @@ jobs:
           set -euo pipefail
           git init -q .
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          # Auth via a transient http.extraHeader passed per-command — never
-          # written to .git/config, so the token is not left on the runner's
-          # filesystem for later steps, or later jobs, to read.
-          git -c http.extraHeader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')" \
-            fetch -q --depth 1 origin "$GITHUB_SHA"
+          # Auth via GIT_CONFIG_* rather than `git -c`. Both keep the token out
+          # of .git/config, but `-c` puts it in argv, and /proc/<pid>/cmdline is
+          # world-readable without hidepid — so on a shared runner a concurrent
+          # job from another repository could read it mid-fetch. The env form
+          # applies the same config without ever placing it on a command line.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
           git checkout -q --detach FETCH_HEAD
 
       - name: Set up Go
@@ -89,18 +94,32 @@ jobs:
           # doubles as the cache key: a toolchain already unpacked here is
           # reused across runs.
           GO_ROOT="${RUNNER_TOOL_CACHE:-$HOME/.cache}/openseal-go/${GO_VERSION}"
+          STAMP="${GO_ROOT}/.verified-sha256"
 
-          if [ ! -x "${GO_ROOT}/go/bin/go" ]; then
-            # Verify the tarball against the SHA256 that go.dev publishes in its
-            # download manifest before extracting. This toolchain compiles
-            # everything the project ships, so a tampered tarball would backdoor
-            # every artifact. Fetching the hash rather than hardcoding it keeps
-            # the check working when go.mod bumps the Go version. Fails closed.
-            GO_SHA256="$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' \
-              | jq -r --arg f "$GO_TARBALL" '.[].files[] | select(.filename == $f) | .sha256')"
-            if [ -z "$GO_SHA256" ] || [ "$GO_SHA256" = "null" ]; then
-              echo "::error::no published SHA256 for ${GO_TARBALL} in the go.dev manifest" >&2
-              exit 1
+          # Resolve the expected digest on EVERY run, warm cache included.
+          #
+          # This toolchain compiles everything the project ships, so a tampered
+          # tarball would backdoor every artifact. Guarding the download on
+          # "does an executable exist at this path" would mean a warm cache is
+          # put on PATH having been verified on no run at all — and this host is
+          # shared with other repositories' jobs, any of which could write to
+          # that path. The digest is fetched rather than hardcoded so the check
+          # keeps working when go.mod bumps the Go version. Fails closed.
+          GO_SHA256="$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' \
+            | jq -r --arg f "$GO_TARBALL" '.[].files[] | select(.filename == $f) | .sha256')"
+          if [ -z "$GO_SHA256" ] || [ "$GO_SHA256" = "null" ]; then
+            echo "::error::no published SHA256 for ${GO_TARBALL} in the go.dev manifest" >&2
+            exit 1
+          fi
+
+          # Reuse the cache only when it carries a stamp matching that digest.
+          # A missing stamp, a stale one, or a missing binary all mean reinstall
+          # — never "use what is there".
+          if [ -x "${GO_ROOT}/go/bin/go" ] && [ "$(cat "$STAMP" 2>/dev/null || true)" = "$GO_SHA256" ]; then
+            echo "cached Go ${GO_VERSION} matches the published digest; reusing it"
+          else
+            if [ -e "$GO_ROOT" ]; then
+              echo "::warning::cached Go at ${GO_ROOT} is unverified or stale; discarding and reinstalling"
             fi
             curl -fsSL "https://go.dev/dl/${GO_TARBALL}" -o /tmp/go.tgz
             echo "${GO_SHA256}  /tmp/go.tgz" | sha256sum -c -
@@ -111,6 +130,9 @@ jobs:
             tar -C "${GO_ROOT}.tmp" -xzf /tmp/go.tgz
             mv "${GO_ROOT}.tmp" "${GO_ROOT}"
             rm -f /tmp/go.tgz
+            # Written only after the digest check and the extract both succeed,
+            # so a stamp can never vouch for a tree that was not verified.
+            printf '%s' "$GO_SHA256" > "$STAMP"
           fi
 
           echo "${GO_ROOT}/go/bin" >> "$GITHUB_PATH"
