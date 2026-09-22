@@ -82,6 +82,10 @@ Installers are published for macOS, Windows, and Linux. The daemon is bundled in
 | Windows | `.msi` |
 | Linux | `.deb`, `.AppImage` |
 
+These are the formats every release produces. A release may also publish additional installers for a platform — a Windows `.exe` setup program, or a Linux `.rpm` — because the desktop application is bundled for all formats its toolchain supports rather than a fixed list. The release page is the authoritative list of what a given version published.
+
+Where a platform offers more than one, any of them installs the same application. Prefer the `.msi` on Windows and the `.deb` or `.rpm` on Linux if the machine is centrally managed, since both integrate with system package management; the `.exe` and `.AppImage` suit a per-user install that needs no administrator.
+
 ### Unsigned Builds
 
 The macOS and Windows installers are not yet code-signed, so both systems warn on first launch. The downloads are the ones the release published; the warning reflects the absence of a signing certificate, not a problem with the file.
