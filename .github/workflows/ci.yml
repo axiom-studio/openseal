@@ -87,24 +87,26 @@ jobs:
           fi
           GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
 
-          # Install under a versioned path the runner owns. No sudo (a
-          # self-hosted runner is not guaranteed passwordless sudo, and
-          # clobbering a system-wide /usr/local/go would be a side effect on a
-          # host shared with other repositories' jobs). The version in the path
-          # doubles as the cache key: a toolchain already unpacked here is
-          # reused across runs.
-          GO_ROOT="${RUNNER_TOOL_CACHE:-$HOME/.cache}/openseal-go/${GO_VERSION}"
-          STAMP="${GO_ROOT}/.verified-sha256"
-
-          # Resolve the expected digest on EVERY run, warm cache included.
+          # Download and verify on EVERY run, into a directory scoped to this
+          # run. Nothing pre-existing on disk is reused.
           #
-          # This toolchain compiles everything the project ships, so a tampered
-          # tarball would backdoor every artifact. Guarding the download on
-          # "does an executable exist at this path" would mean a warm cache is
-          # put on PATH having been verified on no run at all — and this host is
-          # shared with other repositories' jobs, any of which could write to
-          # that path. The digest is fetched rather than hardcoded so the check
-          # keeps working when go.mod bumps the Go version. Fails closed.
+          # This toolchain compiles everything the project ships, and the runner
+          # is shared with other repositories' jobs, which run as the same user.
+          # Any scheme that reuses an unpacked tree has to establish that the
+          # tree is still what was verified — and a marker file cannot do that,
+          # because whoever can overwrite `go/bin/go` can equally leave a
+          # matching marker in place. Re-deriving a digest from the bytes on
+          # disk each run would work, but hashing a whole GOROOT is slower and
+          # fiddlier than simply not trusting anything.
+          #
+          # So: no reuse. It costs about a minute per run and removes the class
+          # of problem rather than narrowing it.
+          GO_ROOT="${RUNNER_TEMP:-/tmp}/openseal-go-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$GO_ROOT"
+          mkdir -p "$GO_ROOT"
+
+          # The digest is fetched rather than hardcoded so the check keeps
+          # working when go.mod bumps the Go version. Fails closed.
           GO_SHA256="$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' \
             | jq -r --arg f "$GO_TARBALL" '.[].files[] | select(.filename == $f) | .sha256')"
           if [ -z "$GO_SHA256" ] || [ "$GO_SHA256" = "null" ]; then
@@ -112,28 +114,14 @@ jobs:
             exit 1
           fi
 
-          # Reuse the cache only when it carries a stamp matching that digest.
-          # A missing stamp, a stale one, or a missing binary all mean reinstall
-          # — never "use what is there".
-          if [ -x "${GO_ROOT}/go/bin/go" ] && [ "$(cat "$STAMP" 2>/dev/null || true)" = "$GO_SHA256" ]; then
-            echo "cached Go ${GO_VERSION} matches the published digest; reusing it"
-          else
-            if [ -e "$GO_ROOT" ]; then
-              echo "::warning::cached Go at ${GO_ROOT} is unverified or stale; discarding and reinstalling"
-            fi
-            curl -fsSL "https://go.dev/dl/${GO_TARBALL}" -o /tmp/go.tgz
-            echo "${GO_SHA256}  /tmp/go.tgz" | sha256sum -c -
-            # Extract to a scratch path and move into place, so an interrupted
-            # run cannot leave a half-unpacked tree that the next run trusts.
-            rm -rf "${GO_ROOT}.tmp" "${GO_ROOT}"
-            mkdir -p "${GO_ROOT}.tmp"
-            tar -C "${GO_ROOT}.tmp" -xzf /tmp/go.tgz
-            mv "${GO_ROOT}.tmp" "${GO_ROOT}"
-            rm -f /tmp/go.tgz
-            # Written only after the digest check and the extract both succeed,
-            # so a stamp can never vouch for a tree that was not verified.
-            printf '%s' "$GO_SHA256" > "$STAMP"
-          fi
+          TARBALL="${GO_ROOT}/${GO_TARBALL}"
+          curl -fsSL "https://go.dev/dl/${GO_TARBALL}" -o "$TARBALL"
+          echo "${GO_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -C "$GO_ROOT" -xzf "$TARBALL"
+          rm -f "$TARBALL"
+          # States only what was established: these exact bytes were downloaded
+          # this run and matched the published digest before being unpacked.
+          echo "downloaded Go ${GO_VERSION} and verified it against the published digest"
 
           echo "${GO_ROOT}/go/bin" >> "$GITHUB_PATH"
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
