@@ -942,20 +942,22 @@ jobs:
             HEADING="Changes"
           fi
 
-          # The container image dropped root in this commit. Anyone upgrading a
-          # data volume created before it needs a one-time chown, so the notes
-          # carry an upgrade section — but only while it is still relevant.
+          # Anyone upgrading a container data volume created before the image
+          # dropped root needs a one-time chown, so the notes carry an upgrade
+          # section — but only while it is still relevant.
           #
-          # Self-retiring: once the previous release already contains the
-          # change, the note stops being printed. Carrying an upgrade warning on
-          # every release forever trains people to skip the section.
-          UID_CHANGE_COMMIT="bc874cf4b8afa828e0e5f644fb81aaec19ee6252"
+          # Anchored on the previous release's CONTENT, not on a commit SHA. A
+          # SHA identifies a commit on this branch; squash-merging to develop
+          # rewrites it, after which `git merge-base` can no longer resolve it
+          # and the note would print on every release forever. Asking whether
+          # the previous tag's Dockerfile already dropped root is the property
+          # actually being tested, and it survives any merge strategy.
           SHOW_UID_NOTE=0
           if [ -z "$PREV" ]; then
             # First release: no earlier tag, but local compose volumes predating
             # the change still exist, so the note is still worth carrying.
             SHOW_UID_NOTE=1
-          elif ! git merge-base --is-ancestor "$UID_CHANGE_COMMIT" "$PREV" 2>/dev/null; then
+          elif ! git show "${PREV}:Dockerfile" 2>/dev/null | grep -q '^USER '; then
             SHOW_UID_NOTE=1
           fi
 
@@ -1003,8 +1005,11 @@ jobs:
               echo
               echo '```bash'
               echo "docker run --rm -v openseal-data:/app/data --user root \\"
-              echo "  ${IMAGE}:${VERSION} chown -R openseal:openseal /app/data"
+              echo "  --entrypoint chown ${IMAGE}:${VERSION} \\"
+              echo "  -R openseal:openseal /app/data"
               echo '```'
+              echo
+              echo "\`--entrypoint\` is required: the image's entrypoint is the OpenSeal binary, so trailing arguments would be passed to it as a subcommand rather than run as a program."
               echo
               echo "Or discard the volume with \`docker compose down -v\` if the data is not needed."
               echo
