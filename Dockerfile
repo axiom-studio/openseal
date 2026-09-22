@@ -32,6 +32,12 @@ COPY --from=builder /build/openseal .
 # for compose users and makes the bare image work on its own.
 COPY docker/daemon.yaml /app/daemon.yaml
 
+# Apache-2.0 section 4(a) requires recipients of the Work to receive a copy of
+# the License, and pushing to a registry distributes it to anyone who pulls.
+# The release tarballs already carry LICENSE; this keeps the container channel
+# consistent with them rather than relying on the OCI label alone.
+COPY LICENSE /app/LICENSE
+
 # Run as an unprivileged user. The API authenticates nothing, so anything
 # reached through a route — or any container escape — would otherwise land as
 # uid 0. Port 8080 is above 1024, so binding it needs no capability.
