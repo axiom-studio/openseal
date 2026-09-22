@@ -54,3 +54,13 @@ docker-compose.yml
 # Documentation
 *.md
 LICENSE
+
+# ...but the licence itself must ship inside the image. Apache-2.0 section 4(a)
+# requires giving recipients of the Work a copy of the License, and pushing to a
+# registry distributes it to anyone who pulls. The release tarballs already
+# include LICENSE, so shipping it here also stops the two distribution channels
+# disagreeing.
+#
+# This exception must stay BELOW the `LICENSE` line above: .dockerignore
+# resolves by last match, so re-including it first would be silently undone.
+!LICENSE
