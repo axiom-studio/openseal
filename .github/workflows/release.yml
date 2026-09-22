@@ -824,6 +824,17 @@ jobs:
           fi
           # Installers only. The .app directory is what the .dmg wraps, and a
           # directory cannot be a release asset.
+          #
+          # This list is a deliberate SUPERSET of what any one platform emits.
+          # tauri.conf.json sets bundle.targets to "all", so the set produced is
+          # whatever the toolchain supports on that runner — Windows may emit an
+          # NSIS .exe beside the .msi, Linux an .rpm beside .deb and .AppImage.
+          # Collecting a type that does not appear costs nothing; failing to
+          # collect one that does would silently drop an installer users were
+          # offered. docs/user-docs/installing.md matches this by naming the
+          # formats every release produces and pointing at the release page for
+          # the authoritative list, rather than asserting a fixed set.
+          # Reconcile both against a real release once one exists (issue #5371).
           find "$BUNDLE_DIR" -type f \
             \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
                -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
