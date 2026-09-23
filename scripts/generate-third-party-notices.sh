@@ -82,7 +82,7 @@ while IFS= read -r module; do
     echo
   } >> "$tmp"
 
-  file=""
+  files=""
   if [ -n "$dir" ] && [ -d "$dir" ]; then
     # `-print` piped through sed, NOT `-printf '%f\n'`. `-printf` is a GNU
     # extension: BSD find — /usr/bin/find on both macOS legs — and busybox find
@@ -111,7 +111,7 @@ while IFS= read -r module; do
     # non-zero printing nothing falsified it in one test. Delegating the
     # diagnostic and asserting that no path is silent are different things;
     # this makes the code match the claim rather than softening the claim.
-    if ! file="$(find "$dir" -maxdepth 1 -type f \
+    if ! files="$(find "$dir" -maxdepth 1 -type f \
       \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \) \
       -print | sed 's#.*/##' | LC_ALL=C sort)"; then
       echo "error: the licence-file lookup failed for ${module}" >&2
@@ -120,16 +120,39 @@ while IFS= read -r module; do
       echo "       ${OUT} has NOT been written." >&2
       exit 1
     fi
-    # First line only, taken in the shell rather than by piping into `head`,
-    # which closes the pipe early and can SIGPIPE the producer under pipefail.
-    file="${file%%$'\n'*}"
   fi
 
-  if [ -n "$file" ]; then
-    cat "${dir}/${file}" >> "$tmp"
+  # EVERY matched file is reproduced, not just the first.
+  #
+  # A module can carry more than one licence. go.yaml.in/yaml/v2 ships LICENSE
+  # (Apache-2.0) alongside LICENSE.libyaml (MIT, covering the files ported from
+  # C libyaml), and taking only the alphabetically-first one dropped the MIT
+  # notice from every artifact while this file's own header promised that every
+  # licence is reproduced in full. Nothing downstream could catch it: the CI
+  # gate compares module paths and versions, `test -s` sees bytes, and the
+  # image check reads the banner line.
+  #
+  # Each file is labelled so a reader can tell which text came from which
+  # filename, in the same form the NOTICE block below already uses.
+  if [ -n "$files" ]; then
+    separate=0
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      if [ "$separate" -eq 1 ]; then
+        echo >> "$tmp"
+      fi
+      separate=1
+      {
+        echo "--- ${name} (${module}) ---"
+        echo
+        cat "${dir}/${name}"
+      } >> "$tmp"
+    done <<< "$files"
   else
     echo "No licence file was found at this module's root." >> "$tmp"
     echo "Review this module's licensing before distributing." >> "$tmp"
+    # Counted once per module, not once per absent file: the floor below is
+    # about how many modules yielded no licence text at all.
     missing=$((missing + 1))
   fi
   echo >> "$tmp"
