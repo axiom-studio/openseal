@@ -1,0 +1,304 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [develop]
+
+# CI only reads the repository. Nothing here publishes an artifact — building
+# and publishing happens on tags, in release.yml, which opts into the writes it
+# needs.
+permissions:
+  contents: read
+
+# A pull request that is pushed to repeatedly should not queue a run per push.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# The axiom-studio org Actions policy is reported (in a sibling repository's
+# workflows) to allow actions only from org-owned repositories, while other
+# sibling repositories use marketplace actions freely. The two cannot both be
+# true, and a workflow built on marketplace actions does not merely degrade if
+# the restriction is real — it never starts. These workflows therefore use no
+# `uses:` steps at all: that is the strict subset, correct under either policy.
+# Checkout and Go toolchain setup run as plain shell.
+
+jobs:
+  go:
+    name: vet, test, build
+    runs-on: self-hosted
+    timeout-minutes: 45
+
+    steps:
+      # Self-hosted runners reuse their working directory between runs, and
+      # nothing cleans it for us the way actions/checkout would. Start from an
+      # empty tree so a file deleted in this PR cannot survive from a previous
+      # run and mask a build failure.
+      - name: Reset the workspace
+        run: |
+          set -euo pipefail
+          find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+      # Fail loudly and early on a runner that is missing a tool, rather than
+      # midway through with an error that reads like a code problem. cc matters
+      # most: the daemon links github.com/mattn/go-sqlite3, so cgo is mandatory
+      # and a missing C compiler surfaces as `undefined: sqlite3.Error` — which
+      # looks like broken source, not a broken runner.
+      - name: Check the runner has the tools this job needs
+        run: |
+          set -euo pipefail
+          missing=""
+          for tool in git curl jq tar sha256sum make cc awk base64; do
+            command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::runner is missing required tools:${missing}" >&2
+            exit 1
+          fi
+
+      - name: Check out the pull request head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # Auth via GIT_CONFIG_* rather than `git -c`. Both keep the token out
+          # of .git/config, but `-c` puts it in argv, and /proc/<pid>/cmdline is
+          # world-readable without hidepid — so on a shared runner a concurrent
+          # job from another repository could read it mid-fetch. The env form
+          # applies the same config without ever placing it on a command line.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Set up Go
+        run: |
+          set -euo pipefail
+          # Read the version from go.mod instead of hardcoding it, so the
+          # toolchain cannot drift away from what the module requires.
+          GO_VERSION="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+          if [ -z "$GO_VERSION" ]; then
+            echo "::error::could not read the go directive from go.mod" >&2
+            exit 1
+          fi
+          GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
+
+          # Download and verify on EVERY run, into a directory scoped to this
+          # run. Nothing pre-existing on disk is reused.
+          #
+          # This toolchain compiles everything the project ships, and the runner
+          # is shared with other repositories' jobs, which run as the same user.
+          # Any scheme that reuses an unpacked tree has to establish that the
+          # tree is still what was verified — and a marker file cannot do that,
+          # because whoever can overwrite `go/bin/go` can equally leave a
+          # matching marker in place. Re-deriving a digest from the bytes on
+          # disk each run would work, but hashing a whole GOROOT is slower and
+          # fiddlier than simply not trusting anything.
+          #
+          # So: no reuse. It costs about a minute per run and removes the class
+          # of problem rather than narrowing it.
+          GO_ROOT="${RUNNER_TEMP:-/tmp}/openseal-go-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$GO_ROOT"
+          mkdir -p "$GO_ROOT"
+
+          # The digest is fetched rather than hardcoded so the check keeps
+          # working when go.mod bumps the Go version. Fails closed.
+          GO_SHA256="$(curl -fsSL 'https://go.dev/dl/?mode=json&include=all' \
+            | jq -r --arg f "$GO_TARBALL" '.[].files[] | select(.filename == $f) | .sha256')"
+          if [ -z "$GO_SHA256" ] || [ "$GO_SHA256" = "null" ]; then
+            echo "::error::no published SHA256 for ${GO_TARBALL} in the go.dev manifest" >&2
+            exit 1
+          fi
+
+          TARBALL="${GO_ROOT}/${GO_TARBALL}"
+          curl -fsSL "https://go.dev/dl/${GO_TARBALL}" -o "$TARBALL"
+          echo "${GO_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -C "$GO_ROOT" -xzf "$TARBALL"
+          rm -f "$TARBALL"
+          # States only what was established: these exact bytes were downloaded
+          # this run and matched the published digest before being unpacked.
+          echo "downloaded Go ${GO_VERSION} and verified it against the published digest"
+
+          echo "${GO_ROOT}/go/bin" >> "$GITHUB_PATH"
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          # GOTOOLCHAIN=local pins the build to the toolchain just verified.
+          # Left on its default, Go would silently download a toolchain of its
+          # own choosing over the network, bypassing the checksum check above.
+          echo "GOTOOLCHAIN=local" >> "$GITHUB_ENV"
+          "${GO_ROOT}/go/bin/go" version
+
+      # The committed copy is what a plain `docker build` and a local desktop
+      # build consume, so it should track go.mod. Every published artifact
+      # regenerates its own notices at build time, so this check guards the
+      # convenience copy, not the shipped ones.
+      #
+      # It compares the MODULE SET, not the file byte-for-byte. A byte
+      # comparison also fails when a licence file's text differs between module
+      # caches, or when `go list -deps` resolves a transitive package
+      # differently on another host — neither of which changes what a published
+      # artifact carries. A gate that fails on correct code teaches people to
+      # bypass it.
+      - name: Third-party notices cover the current module set
+        run: |
+          set -euo pipefail
+          # Run-scoped, matching the GO_ROOT idiom three steps above, and for
+          # the same reason that step states: this is the repository's only
+          # `self-hosted` job, the runner is shared with other repositories'
+          # jobs running as the same user, and `concurrency` is keyed on
+          # github.ref — so it serialises pushes to one PR but not two
+          # different PRs on the same host.
+          #
+          # With fixed paths that needs no attacker to go wrong. Run A writes
+          # mods.committed from its tree; run B overwrites mods.generated from
+          # its tree before A reaches `cmp`; A then decides by comparing its
+          # own committed set against B's resolved set, and the log gives no
+          # sign of it. The verdict of a build-time control must not be
+          # readable or writable by an unrelated job.
+          NOTICES_TMP="${RUNNER_TEMP:-/tmp}/openseal-notices-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$NOTICES_TMP"
+          mkdir -p "$NOTICES_TMP"
+          ./scripts/generate-third-party-notices.sh "${NOTICES_TMP}/notices.generated"
+
+          # Module headers are the lines between the two rule lines of each
+          # block. grep -c would be enough to count, but the sets are what
+          # matter, so extract and compare them.
+          # LC_ALL=C on both the sort and the later comm: sort's locale
+          # collation and comm's byte comparison disagree on paths containing
+          # '/' and '.', which makes comm warn and its output unreliable.
+          # The comparison covers module path AND version, deliberately.
+          #
+          # This was a real judgement call, so the reasoning is recorded rather
+          # than left to be re-derived. The argument against is that this gate
+          # exists because module resolution was observed to differ between the
+          # runner and a dev host, and a comparison that is sensitive to more
+          # fields could fail on correct code again.
+          #
+          # It does not apply to versions. Licence TEXT varies between module
+          # caches, which is why the byte comparison had to go. Versions do not:
+          # they come from the module graph, and minimum version selection is
+          # deterministic given go.mod and go.sum. If the same module ever did
+          # resolve to two different versions on two hosts, that is a go.sum
+          # integrity problem and failing CI is the correct response, not a
+          # false positive.
+          #
+          # And a version bump is the most common dependency change there is —
+          # the case this check was originally written for. On paths alone the
+          # gate misses it while still reading as though it covers it.
+          # Extraction is STRUCTURAL, not "the line after any rule line".
+          #
+          # `grep -A1` fired on both rule lines of every block — the opening one
+          # (yielding the module, as intended) and the closing one (yielding
+          # whatever followed). What follows a closing rule is a blank line
+          # today, so it was harmless; but the line after that is `cat` of a
+          # third-party licence file, which is arbitrary unescaped text. Any
+          # licence body containing a line of exactly eighty '=' injected a
+          # phantom module, failed CI on correct content, and sent the reader
+          # off to run `make third-party-notices` — which regenerates the same
+          # phantom. Unreachable with today's dependency set and one dependency
+          # away from being reached.
+          #
+          # A module header is instead identified by its block shape: a rule
+          # line whose NEXT-BUT-ONE line is also a rule line. Licence text
+          # cannot produce that without containing two eighty-'=' lines exactly
+          # two apart, and the count cross-check below catches even that.
+          # The rule line is compared as a literal string, not matched with
+          # /^={80}$/. ERE interval expressions are not implemented by mawk
+          # before 1.3.4-20200717, and mawk is the default awk on Debian and
+          # Ubuntu; there, `{80}` is taken literally, nothing matches, and the
+          # count cross-check below fails the build with "extracted 0 module
+          # headers" on a file that is perfectly correct. The runner this
+          # repository uses has a new enough mawk -- verified -- but the fleet
+          # is addressed by label and this dependency buys nothing: the
+          # generator writes a fixed eighty-character line, so comparing
+          # against that exact string is both stricter and portable to every
+          # awk.
+          extract_modules() {
+            awk '
+              BEGIN { rule = sprintf("%80s", ""); gsub(/ /, "=", rule) }
+              { line[NR] = $0 }
+              END {
+                for (i = 1; i <= NR; i++)
+                  if (line[i] == rule && line[i+2] == rule && line[i+1] != "")
+                    print line[i+1]
+              }
+            ' "$1" | awk 'NF {print $1" "$2}' | LC_ALL=C sort -u
+          }
+
+          # The generator states its own module count in the preamble. Checking
+          # the extracted count against it turns any future parser drift into a
+          # named parser failure instead of a phantom module reported as a
+          # dependency mismatch — which was the real cost of the old anchor.
+          stated_count() {
+            awk '/^OpenSeal is distributed as a statically linked binary\. The [0-9]+ modules$/ {
+                   print $(NF-1); exit }' "$1"
+          }
+          check_parse() {
+            got="$(wc -l < "$2" | tr -d ' ')"
+            want="$(stated_count "$1")"
+            if [ -z "$want" ]; then
+              echo "::error::could not read the module count from $1's preamble" >&2
+              exit 1
+            fi
+            if [ "$got" != "$want" ]; then
+              echo "::error::parser drift in $1: extracted ${got} module headers, the file states ${want}" >&2
+              echo "::error::this is a problem with the notices format or this parser, NOT a dependency change" >&2
+              exit 1
+            fi
+          }
+
+          extract_modules THIRD_PARTY_NOTICES > "${NOTICES_TMP}/mods.committed"
+          extract_modules "${NOTICES_TMP}/notices.generated" > "${NOTICES_TMP}/mods.generated"
+          check_parse THIRD_PARTY_NOTICES "${NOTICES_TMP}/mods.committed"
+          check_parse "${NOTICES_TMP}/notices.generated" "${NOTICES_TMP}/mods.generated"
+
+          if cmp -s "${NOTICES_TMP}/mods.committed" "${NOTICES_TMP}/mods.generated"; then
+            echo "third-party notices cover the current module set ($(wc -l < "${NOTICES_TMP}/mods.committed") modules)"
+            exit 0
+          fi
+
+          # Report BOTH sides in full. The previous version piped a diff into
+          # head, which under pipefail killed the step with SIGPIPE before the
+          # intended exit and truncated the evidence mid-module — the same
+          # defect as issue #3735. No pipe into an early-closing consumer here,
+          # and comm output is bounded by the module count.
+          echo "::error::THIRD_PARTY_NOTICES does not cover the current module set" >&2
+          echo "::error::run 'make third-party-notices' and commit the result" >&2
+          {
+            echo "committed: $(wc -l < "${NOTICES_TMP}/mods.committed") modules"
+            echo "resolved here: $(wc -l < "${NOTICES_TMP}/mods.generated") modules"
+            echo
+            echo "only in the committed file (path and version):"
+            LC_ALL=C comm -23 "${NOTICES_TMP}/mods.committed" "${NOTICES_TMP}/mods.generated" || true
+            echo
+            echo "only resolved on this runner (path and version):"
+            LC_ALL=C comm -13 "${NOTICES_TMP}/mods.committed" "${NOTICES_TMP}/mods.generated" || true
+          } >&2
+          exit 1
+
+      - name: go vet
+        run: make vet
+
+      - name: go test
+        run: make test
+
+      - name: Build the binary
+        run: |
+          set -euo pipefail
+          make build
+          test -x ./openseal
+          # `version`, not `--version`: this CLI is subcommand-based and has no
+          # --version flag; it would be rejected as an unknown command. The
+          # output is asserted below rather than trusting the exit status, so
+          # this proves the binary runs and reports itself. Kept identical in
+          # substance to release.yml's smoke test — two files checking the same
+          # property of the same binary should not disagree about how.
+          OUT="$(./openseal version)"
+          echo "$OUT"
+          case "$OUT" in
+            *OpenSeal*) ;;
+            *) echo "::error::unexpected version output: ${OUT}" >&2; exit 1 ;;
+          esac

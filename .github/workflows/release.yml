@@ -1,0 +1,1247 @@
+name: Release
+
+# Triggered by pushing a semver tag, e.g. v0.1.0 or v0.1.0-rc1.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Tags are immutable, so cancelling an in-progress run buys nothing and risks
+# half-publishing. Default token scope is read-only; jobs opt into their writes.
+permissions:
+  contents: read
+
+# The minimum glibc the published Linux binary may require. Declared at
+# workflow scope because two jobs need it: `binary` enforces it against the
+# built artifact, and `release` states it to users in the notes.
+#
+# Declared, not inherited. cgo is mandatory here, so the Linux binary links
+# libc dynamically and carries a floor; leaving that floor to whatever
+# `ubuntu-latest` happens to be means releases can quietly stop starting on
+# distributions they worked on last month, with nothing red in CI and the
+# failure landing as a loader error on a user's machine. The check in `binary`
+# fails the release if the artifact needs more than this, so the floor moves
+# only when someone raises it on purpose.
+#
+# 2.34 covers Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9. Below it — Ubuntu 20.04,
+# Debian 11, RHEL 8, Amazon Linux 2 — the tarball will not start, and those
+# users want the container image, which is musl-linked and self-contained.
+env:
+  LINUX_GLIBC_FLOOR: "2.34"
+
+# The axiom-studio org Actions policy is reported (in a sibling repository's
+# workflows) to allow actions only from org-owned repositories, while other
+# sibling repositories use marketplace actions freely. The two cannot both be
+# true, and a workflow built on marketplace actions does not merely degrade if
+# the restriction is real — it never starts. These workflows therefore use no
+# `uses:` steps at all: that is the strict subset, correct under either policy.
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Create the release up front, as a draft, so every build job has somewhere to
+  # put its asset the moment it finishes.
+  #
+  # This is what replaces artifact-passing between jobs. The upload actions are
+  # off the table along with every other `uses:` step, and the artifact REST API
+  # is awkward to drive by hand, but `gh` is preinstalled on all hosted runners
+  # and is a CLI rather than an action, so it is unaffected by the policy.
+  #
+  # The release stays a draft until the assembly job publishes it, so a partial
+  # or failed run never leaves a half-populated release visible to users.
+  prepare:
+    name: Create the draft release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Create the draft release if it does not already exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+
+          # Reject a malformed tag here, at the one job every build job needs,
+          # so nothing downstream starts. The `v*.*.*` trigger is a glob and
+          # admits refnames git allows but semver does not.
+          if ! printf '%s' "${TAG#v}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag ${TAG} is not a semver release tag (expected vMAJOR.MINOR.PATCH[-prerelease])" >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Reusing a DRAFT is the point: it lets a failed run be re-run
+            # against the release it already started. Reusing a PUBLISHED one is
+            # a different thing entirely — every upload below passes --clobber
+            # and the assembly job regenerates checksums.txt from whatever is
+            # attached, so a re-pushed tag would replace the artifacts users
+            # already downloaded and produce a checksums file that correctly
+            # matches the replacements. The verification step the release notes
+            # tell users to run would pass against the substituted bytes, which
+            # is the one outcome an integrity check must not have.
+            #
+            # Fail closed: an isDraft that cannot be read is treated as
+            # published.
+            IS_DRAFT="$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || true)"
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::release ${TAG} already exists and is not a draft (isDraft='${IS_DRAFT:-unknown}'); refusing to overwrite its assets." >&2
+              echo "::error::Cut a new tag, or delete that release deliberately if replacement is genuinely intended." >&2
+              exit 1
+            fi
+            echo "draft release ${TAG} already exists; reusing it"
+            exit 0
+          fi
+          # Pre-release when the tag carries a suffix such as -rc1.
+          PRERELEASE=""
+          case "$TAG" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
+          gh release create "$TAG" \
+            --draft \
+            $PRERELEASE \
+            --title "OpenSeal ${TAG}" \
+            --notes "Draft release. Assets are uploaded by the build jobs; this becomes visible once the assembly job publishes it."
+
+  # ---------------------------------------------------------------------------
+  # Standalone binary, one native build per target.
+  #
+  # Why native rather than a single cross-building job: the daemon links
+  # github.com/mattn/go-sqlite3, so cgo is mandatory. `CGO_ENABLED=0` does not
+  # degrade the binary, it fails to compile outright (undefined: sqlite3.Error
+  # and two siblings in pkg/runtime/authoring_apply_sqlite.go). Cross-compiling
+  # cgo needs a C toolchain per target, and darwin additionally needs the
+  # platform SDK. Building natively on each runner avoids all of it — and the
+  # desktop job needs these same runners regardless, so it costs no extra
+  # infrastructure.
+  #
+  # Every leg runs on a GitHub-hosted runner, including linux. That is
+  # deliberate: hosted images ship a Go toolchain, so all four legs share one
+  # setup path. The self-hosted fleet is used where it actually earns its
+  # keep — the container job, which needs a Docker daemon.
+  #
+  # linux/arm64 is NOT built here. It is the one target with no native runner
+  # available, so it would need a cross toolchain that could not be verified
+  # while writing this. Adding it later means either an arm64 runner (native,
+  # preferred) or gcc-aarch64-linux-gnu with CC set and CGO_ENABLED=1. The
+  # container job publishes a linux/arm64 image independently of this gap.
+  binary:
+    name: Binary (${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+          # Intel. macos-13 was retired: GitHub's current macOS labels are
+          # macos-14 (deprecated), macos-15 and macos-26 on Apple silicon, with
+          # Intel only as the explicit -intel variants. A runs-on label that
+          # matches no runner does not fail the job — the job never becomes
+          # eligible, so `release` (needs: binary) never runs and every other
+          # artifact lands in a draft that is never promoted.
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - runner: macos-latest    # Apple silicon
+            goos: darwin
+            goarch: arm64
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+
+    defaults:
+      run:
+        # Windows runners default to PowerShell. One shell for every leg keeps
+        # the steps identical instead of forking per platform.
+        shell: bash
+
+    steps:
+      - name: Check out the tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # GIT_CONFIG_* rather than `git -c`: both keep the token out of
+          # .git/config, but `-c` puts it in argv, which is world-readable via
+          # /proc/<pid>/cmdline. The env form avoids the command line entirely.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      # Shared with the desktop job. See scripts/ci-setup-go.sh for why the
+      # hosted image's Go cannot be relied on and why the toolchain is pinned
+      # rather than left at GOTOOLCHAIN=auto.
+      - name: Set up the Go toolchain named by go.mod
+        run: ./scripts/ci-setup-go.sh
+
+      - name: Build
+        env:
+          CGO_ENABLED: '1'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          BIN=openseal
+          if [ "${{ matrix.goos }}" = "windows" ]; then BIN=openseal.exe; fi
+          # -w -s strips DWARF and the symbol table; the unstripped binary is
+          # ~96 MB. Matches what the Dockerfile already does.
+          #
+          # No -X version stamping: cmd/openseal/commands/root.go declares
+          # `const version`, and -X can only write to a string *variable*.
+          # Changing that const to a var is a source change and belongs in its
+          # own work item, not smuggled into a pipeline commit.
+          go build -trimpath -ldflags="-w -s" -o "$BIN" ./cmd/openseal
+          test -x "$BIN" || test -f "$BIN"
+
+          # Regenerate the third-party notices rather than trusting the
+          # committed copy. The archive ships what this build actually linked,
+          # so a dependency change that reached the binary cannot ship with a
+          # stale notices file beside it.
+          ./scripts/generate-third-party-notices.sh
+          test -s THIRD_PARTY_NOTICES
+
+      - name: Smoke-test the binary
+        # Skipped when the build is not executable on the runner that made it.
+        # Every current matrix leg is native, so this always runs today; the
+        # guard keeps the step honest if a cross-built target is added later.
+        if: ${{ !(matrix.goos == 'windows' && runner.os != 'Windows') }}
+        run: |
+          set -euo pipefail
+          BIN=./openseal
+          if [ "${{ matrix.goos }}" = "windows" ]; then BIN=./openseal.exe; fi
+          # `version`, not `--version`: this CLI is subcommand-based and has no
+          # --version flag; it would be rejected as an unknown command. The
+          # output is asserted below rather than trusting the exit status, so
+          # this proves the binary runs and reports itself.
+          OUT="$("$BIN" version)"
+          echo "$OUT"
+          case "$OUT" in
+            *OpenSeal*) ;;
+            *) echo "::error::unexpected version output: ${OUT}" >&2; exit 1 ;;
+          esac
+
+      - name: Check the Linux binary's glibc floor has not drifted
+        if: ${{ matrix.goos == 'linux' }}
+        run: |
+          set -euo pipefail
+          # cgo is mandatory here, so the Linux binary links libc dynamically
+          # and carries a minimum glibc requirement. That floor is a property of
+          # which versioned symbols Go and the cgo SQLite driver bind, not
+          # simply of the runner's own glibc — measured on a host running 2.43,
+          # this binary still required only 2.34.
+          #
+          # It can still drift, from a Go release, a new dependency, or a
+          # `ubuntu-latest` roll-forward that offers newer symbol versions. When
+          # it does, releases silently stop starting on distributions they
+          # worked on last month: the failure is a loader error before main, on
+          # the user's machine, with nothing red in CI.
+          #
+          # So the floor is declared rather than inherited. Raising it is a
+          # deliberate edit to LINUX_GLIBC_FLOOR, taken knowing which
+          # distributions it drops.
+          command -v objdump >/dev/null 2>&1 || {
+            echo "::error::objdump is required to check the glibc floor" >&2; exit 1; }
+
+          # `|| true` on the grep, not on the whole substitution: under
+          # `set -euo pipefail` a grep that matches nothing exits 1, pipefail
+          # propagates it, and set -e kills the assignment -- so the [ -z ]
+          # check below and its error message could never run. The step died
+          # with grep's silence in the log instead of the sentence written for
+          # exactly this case. objdump's own failure is still fatal, because
+          # only the grep is guarded.
+          REQUIRED="$(objdump -T openseal | { grep -o 'GLIBC_[0-9.]*' || true; } | sed 's/GLIBC_//' | sort -uV | tail -1)"
+          if [ -z "$REQUIRED" ]; then
+            echo "::error::could not determine the glibc requirement of the built binary" >&2
+            exit 1
+          fi
+          echo "binary requires glibc ${REQUIRED}; declared floor is ${LINUX_GLIBC_FLOOR}"
+
+          HIGHEST="$(printf '%s\n%s\n' "$REQUIRED" "$LINUX_GLIBC_FLOOR" | sort -V | tail -1)"
+          if [ "$REQUIRED" != "$LINUX_GLIBC_FLOOR" ] && [ "$HIGHEST" = "$REQUIRED" ]; then
+            echo "::error::the Linux binary now requires glibc ${REQUIRED}, above the declared floor of ${LINUX_GLIBC_FLOOR}." >&2
+            echo "::error::This drops distributions the previous release supported. Either build against an older glibc, or raise LINUX_GLIBC_FLOOR deliberately and update the release notes." >&2
+            exit 1
+          fi
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="openseal_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          mkdir -p "dist/${STAGE}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            cp openseal.exe "dist/${STAGE}/"
+          else
+            cp openseal "dist/${STAGE}/"
+          fi
+          cp LICENSE README.md THIRD_PARTY_NOTICES "dist/${STAGE}/"
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            # Git Bash ships no `zip`. Prefer 7z when the image provides it and
+            # fall back to PowerShell, rather than assuming either is present.
+            if command -v 7z >/dev/null 2>&1; then
+              7z a -tzip "${STAGE}.zip" "${STAGE}" >/dev/null
+            else
+              powershell -NoProfile -NonInteractive -Command \
+                "Compress-Archive -Path '${STAGE}' -DestinationPath '${STAGE}.zip' -Force"
+            fi
+          else
+            tar -czf "${STAGE}.tar.gz" "${STAGE}"
+          fi
+          rm -rf "${STAGE}"
+          ls -l
+
+      - name: Upload the archive to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          STAGE="openseal_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then ARCHIVE="dist/${STAGE}.zip"; else ARCHIVE="dist/${STAGE}.tar.gz"; fi
+          # An empty or missing archive fails the job rather than uploading
+          # nothing and letting the assembly job publish a release with a hole
+          # in it.
+          test -s "$ARCHIVE" || { echo "::error::archive ${ARCHIVE} is missing or empty" >&2; exit 1; }
+          # --clobber so re-running a failed leg replaces its asset instead of
+          # erroring on a name that already exists.
+          gh release upload "${GITHUB_REF_NAME}" "$ARCHIVE" --clobber
+          echo "uploaded ${ARCHIVE}"
+
+  # ---------------------------------------------------------------------------
+  # Container images, published to GHCR.
+  #
+  # Runs on a hosted runner rather than the self-hosted fleet: this job needs a
+  # Docker daemon with buildx, which hosted images provide and which could not
+  # be confirmed on the fleet from here.
+  #
+  # linux/arm64 is built by emulating the builder stage. That is genuinely slow
+  # for this project — the image compiles a cgo SQLite driver from C under QEMU,
+  # not a pure-Go binary — so the timeout is generous on purpose.
+  container:
+    name: Container image
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      # One list, consumed by both the build and the verification. Declaring the
+      # platforms twice is how the published set and the tested set drift apart
+      # — which is exactly what happened before: both architectures were built
+      # and only amd64 was ever run.
+      PLATFORMS: linux/amd64 linux/arm64
+
+    steps:
+      - name: Check out the tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # GIT_CONFIG_* rather than `git -c`: both keep the token out of
+          # .git/config, but `-c` puts it in argv, which is world-readable via
+          # /proc/<pid>/cmdline. The env form avoids the command line entirely.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Refresh the third-party notices the image ships
+        run: |
+          set -euo pipefail
+          # The Dockerfile COPYs this from the build context, and `docker build`
+          # does not run generators. Regenerate it here so the image ships the
+          # notices for what it actually links, rather than whatever the
+          # committed copy last recorded.
+          ./scripts/generate-third-party-notices.sh
+          test -s THIRD_PARTY_NOTICES
+
+      - name: Enable cross-architecture emulation and a buildx builder
+        run: |
+          set -euo pipefail
+          # binfmt handlers for the non-native architecture. This is the plain
+          # docker equivalent of the QEMU setup action.
+          #
+          # Pinned by digest, not tag. A tag is mutable, and this runs
+          # --privileged with Docker socket access in the same job that holds
+          # the packages:write token and is about to build the release image —
+          # so a repointed tag could tamper with the image and push it under the
+          # official name. This workflow avoids `uses:` steps precisely to keep
+          # third parties out of the publishing path; pinning here applies the
+          # same discipline to the one third-party image that remains.
+          #
+          # Digest for tonistiigi/binfmt:qemu-v8.1.5, resolved 2026-09-22.
+          # Bump deliberately: re-resolve with
+          #   docker buildx imagetools inspect tonistiigi/binfmt:<tag>
+          BINFMT_IMAGE="tonistiigi/binfmt:qemu-v8.1.5@sha256:2d2918e86e5327d0661f7083d67a95280b0f7be8f77ed79a8418f81d7d90ce6f"
+          docker run --privileged --rm "$BINFMT_IMAGE" --install arm64
+          docker buildx create --name openseal --driver docker-container --use
+          docker buildx inspect --bootstrap
+
+      - name: Log in to the container registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push the multi-architecture image
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Lower-case the owner: image references must be lower-case, but the
+          # org name's casing is whatever GitHub reports.
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          # Only the version tag is pushed here. `:latest` moves in the
+          # `promote-latest` job, which is `needs: release`.
+          #
+          # Pushing both up front meant a run whose verification failed still
+          # left `:latest` resolving to the new image: `docker pull …:latest`
+          # would return an image from a release that was abandoned as broken,
+          # for a version the GitHub release never advertised.
+          #
+          # Moving it after verification fixed that but not the wider case: this
+          # job is `needs: prepare`, so verifying here says nothing about whether
+          # `binary` and `desktop` succeeded, or whether a release was ever
+          # published. Gating on `release` is what actually matches the
+          # draft-release guarantee — nothing user-visible until assembly
+          # succeeds. The versioned tag is fine to push here: it is immutable and
+          # a user has to ask for it by name.
+          docker buildx build \
+            --platform "$(echo "$PLATFORMS" | tr ' ' ',')" \
+            --tag "${IMAGE}:${VERSION}" \
+            --label "org.opencontainers.image.title=OpenSeal" \
+            --label "org.opencontainers.image.description=Agent execution platform" \
+            --label "org.opencontainers.image.url=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --label "org.opencontainers.image.version=${VERSION}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --label "org.opencontainers.image.licenses=Apache-2.0" \
+            --push \
+            .
+          echo "pushed ${IMAGE}:${VERSION}"
+
+      - name: Verify the published image on every platform it publishes
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          # Pull each published manifest back and actually run it. Publishing an
+          # image that cannot serve a request is the failure mode this job
+          # exists to prevent, and it is what shipped once already: the daemon
+          # bound loopback, so the published port reached nothing.
+          #
+          # Every platform is exercised, not just the native one. arm64 is the
+          # artifact with the most that can go wrong and the least that has been
+          # observed — it compiles a cgo SQLite driver from C under emulation,
+          # and nothing in this repository has ever run an arm64 build. The
+          # binfmt handlers installed earlier for the build let the runner
+          # execute it here at no extra cost.
+          port=18080
+          rc=0
+          for platform in $PLATFORMS; do
+            arch="${platform#*/}"
+            name="openseal-verify-${arch}"
+
+            # Emulated startup is materially slower than native, so the window
+            # is sized per platform rather than reusing a figure chosen for a
+            # native run.
+            case "$platform" in
+              linux/amd64) attempts=30 ;;
+              *)           attempts=90 ;;
+            esac
+
+            echo "--- verifying ${platform} (up to $((attempts * 2))s) ---"
+            docker rm -f "$name" >/dev/null 2>&1 || true
+            docker run -d --name "$name" -p "${port}:8080" --platform "$platform" "${IMAGE}:${VERSION}"
+
+            ok=0
+            for attempt in $(seq 1 "$attempts"); do
+              if curl -fsS --max-time 3 "http://127.0.0.1:${port}/api/v1/health" >/dev/null 2>&1; then
+                echo "${platform}: health endpoint answered on the published port after ${attempt} attempt(s)"
+                ok=1
+                break
+              fi
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::${platform}: published port never answered" >&2
+              docker logs "$name" || true
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+
+            # The health check is declared in the image; confirm Docker agrees,
+            # rather than only confirming that curl worked.
+            ok=0
+            for attempt in $(seq 1 "$attempts"); do
+              STATUS="$(docker inspect --format '{{.State.Health.Status}}' "$name" 2>/dev/null || echo unknown)"
+              case "$STATUS" in
+                healthy)   echo "${platform}: container healthy"; ok=1; break ;;
+                unhealthy) echo "::error::${platform}: container reported unhealthy" >&2; break ;;
+              esac
+              sleep 2
+            done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::${platform}: container never reached healthy" >&2
+              docker logs "$name" || true
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+
+            # The image must not run as root. Asserted rather than assumed,
+            # because nothing else in the run would notice: a root container
+            # serves health checks exactly as well as an unprivileged one.
+            IMAGE_USER="$(docker inspect --format '{{.Config.User}}' "${IMAGE}:${VERSION}")"
+            RUNTIME_UID="$(docker exec "$name" id -u)"
+            echo "${platform}: image USER='${IMAGE_USER}', runtime uid=${RUNTIME_UID}"
+            if [ -z "$IMAGE_USER" ] || [ "$RUNTIME_UID" = "0" ]; then
+              echo "::error::${platform}: published image runs as root" >&2
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+
+            # The daemon must be able to write its SQLite database as that user.
+            # This is the failure a USER directive introduces if /app was not
+            # chowned, and it would otherwise surface after publication.
+            if ! docker exec "$name" test -w /app/data; then
+              echo "::error::${platform}: /app/data is not writable by the runtime user" >&2
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+            echo "${platform}: /app/data is writable by the runtime user"
+
+            # The licence must actually be in the image. Checked rather than
+            # assumed because .dockerignore resolves by last match, so a
+            # re-include placed above its exclusion is silently undone and the
+            # COPY would be the only thing that failed — or, worse, would not.
+            if ! docker exec "$name" head -1 /app/LICENSE | grep -q "Apache License"; then
+              echo "::error::${platform}: /app/LICENSE is missing or is not the Apache License" >&2
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+            echo "${platform}: /app/LICENSE present"
+
+            if ! docker exec "$name" head -1 /app/THIRD_PARTY_NOTICES | grep -q "THIRD-PARTY"; then
+              echo "::error::${platform}: /app/THIRD_PARTY_NOTICES is missing or malformed" >&2
+              docker rm -f "$name" || true
+              rc=1
+              port=$((port + 1))
+              continue
+            fi
+            echo "${platform}: /app/THIRD_PARTY_NOTICES present"
+
+            docker rm -f "$name"
+            port=$((port + 1))
+          done
+
+          # Every platform is attempted before failing, so one run reports all
+          # broken architectures rather than only the first.
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::one or more platforms failed verification; :latest will not move" >&2
+            exit 1
+          fi
+          echo "all platforms verified: ${PLATFORMS}"
+
+
+  # ---------------------------------------------------------------------------
+  # Desktop application bundles.
+  #
+  # Tauri does not cross-compile and tauri.conf.json sets bundle.targets to
+  # "all", so each platform's installers must be produced on that platform.
+  # The self-hosted fleet is Linux-only, hence hosted runners here.
+  #
+  # Every leg needs Go, Rust, Node and pnpm together, because the bundle embeds
+  # the daemon: tauri.conf.json's beforeBuildCommand runs `pnpm prepare:daemon`,
+  # which reads the Rust host triple and compiles the Go binary to
+  # src-tauri/binaries/openseal-daemon-<triple>. That is the whole mechanism
+  # behind the daemon being bundled, and it is why `pnpm tauri build` alone is
+  # sufficient — no separate Go build step belongs in this job.
+  desktop:
+    name: Desktop (${{ matrix.label }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            label: linux-x86_64
+          # Intel — see the note on the binary job's matrix. macos-13 is gone;
+          # Intel is only available as an explicit -intel label.
+          - runner: macos-15-intel
+            label: macos-x86_64
+          - runner: macos-latest    # Apple silicon
+            label: macos-aarch64
+          - runner: windows-latest
+            label: windows-x86_64
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out the tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # GIT_CONFIG_* rather than `git -c`: both keep the token out of
+          # .git/config, but `-c` puts it in argv, which is world-readable via
+          # /proc/<pid>/cmdline. The env form avoids the command line entirely.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Install the Linux bundling dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # Tauri v2 links webkit2gtk 4.1. patchelf and librsvg are needed to
+          # produce the AppImage.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential
+
+      # Runs BEFORE the preflight below, which would otherwise report `go`
+      # missing on the macOS legs — where the image ships no Go on PATH. Same
+      # script as the binary job; see scripts/ci-setup-go.sh.
+      - name: Set up the Go toolchain named by go.mod
+        run: ./scripts/ci-setup-go.sh
+
+      - name: Check the toolchains this bundle needs
+        run: |
+          set -euo pipefail
+          missing=""
+          # `go` is not in this list: the step above guarantees it and asserts
+          # its version, so repeating the check here would duplicate the one
+          # thing that has to stay in one place.
+          #
+          # sed and find are used by this job's own steps and by
+          # scripts/generate-third-party-notices.sh, which this job calls. They
+          # were depended on without being declared — the same gap #5367 found
+          # for awk, where a comment claimed a tool was listed and it was not.
+          for tool in rustc cargo node npm jq awk sed find gh; do
+            command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::runner is missing required toolchains:${missing}" >&2
+            exit 1
+          fi
+          # The sidecar filename is derived from this triple, so print it: if a
+          # bundle ever ships without its daemon, this line identifies which
+          # name was expected.
+          rustc -vV | sed -n 's/^host: /rust host triple: /p'
+          echo "go $(go version | awk '{print $3}' | sed 's/^go//'), node $(node --version)"
+
+      - name: Install pnpm
+        run: |
+          set -euo pipefail
+          # The exact version is declared in desktop/package.json's
+          # packageManager field, so the workflow, developer machines and any
+          # Corepack-aware environment all agree on one value, and it lives next
+          # to the lockfile it governs rather than only here.
+          PNPM_VERSION="$(jq -r '.packageManager' desktop/package.json | sed 's/^pnpm@//')"
+          case "$PNPM_VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::desktop/package.json packageManager is not a pinned pnpm version: ${PNPM_VERSION}" >&2; exit 1 ;;
+          esac
+
+          # `pnpm install --frozen-lockfile` is the control that stops this
+          # project's own dependencies re-resolving at release time, and it
+          # works. But the tool that reads and enforces that lockfile was being
+          # fetched unpinned on every run — a solid lock with the key collected
+          # fresh from the internet each time. This is the job that produces the
+          # installers end users execute, and they are unsigned, so a tampered
+          # bundle would be attested rather than rejected by the checksums
+          # generated downstream from it.
+          #
+          # The guard checks the version, not merely presence: a hosted image
+          # may already ship some pnpm, and accepting whatever is there is the
+          # same gap in a different costume.
+          if [ "$(pnpm --version 2>/dev/null || true)" != "$PNPM_VERSION" ]; then
+            npm install -g "pnpm@${PNPM_VERSION}"
+          fi
+
+          ACTUAL="$(pnpm --version)"
+          if [ "$ACTUAL" != "$PNPM_VERSION" ]; then
+            echo "::error::pnpm is ${ACTUAL} but ${PNPM_VERSION} is pinned" >&2
+            exit 1
+          fi
+          echo "pnpm ${ACTUAL} (pinned)"
+
+      - name: Install the workspace dependencies
+        working-directory: desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Set the bundle version from the tag
+        run: |
+          set -euo pipefail
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+
+          # Validate before the value is used to rewrite build manifests.
+          #
+          # The `v*.*.*` trigger is a glob, not a grammar: git accepts refnames
+          # like `v1.2.3&` and `v1.2.3 rc`, and they match it. Nothing downstream
+          # currently executes the value — jq binds it with --arg, awk takes it
+          # via -v, and every expansion is quoted — but that safety rests on
+          # invariants stated nowhere near this step, and one of them (GitHub's
+          # `*` not matching `/`) is a policy detail rather than a guarantee.
+          # An explicit local check is worth more than two non-local accidents.
+          if ! printf '%s' "$TAG_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::tag ${GITHUB_REF_NAME} is not a semver release tag; refusing to patch manifests with it" >&2
+            exit 1
+          fi
+
+          # Windows Installer ProductVersion is strictly numeric major.minor.build
+          # and rejects a semver pre-release suffix, so the bundlers get the
+          # numeric core. For a final release the two are identical; for
+          # v0.2.0-rc1 the bundles are versioned 0.2.0 and the Collect step below
+          # puts the full tag back into the asset filenames, so release
+          # candidates stay distinguishable once downloaded.
+          CORE="${TAG_VERSION%%-*}"
+          if [ "$CORE" != "$TAG_VERSION" ]; then
+            echo "::warning::pre-release ${TAG_VERSION}: bundles are versioned ${CORE} because MSI ProductVersion must be numeric; asset filenames carry the full tag"
+          fi
+          echo "TAG_VERSION=${TAG_VERSION}" >> "$GITHUB_ENV"
+          echo "BUNDLE_VERSION=${CORE}"     >> "$GITHUB_ENV"
+
+          # Tauri reads the bundle version from tauri.conf.json. Without this the
+          # installers would carry the hardcoded 0.1.0 on every release, which is
+          # not merely a wrong label: dpkg and Windows Installer key upgrade
+          # detection on it, so a static version means later releases do not
+          # register as upgrades at all.
+          #
+          # This runs on a detached checkout inside the job. It is never
+          # committed and cannot reach a branch.
+          # Explicit template. A bare `mktemp` is a GNU convenience, and this
+          # step runs on both macOS legs; passing a template is accepted
+          # everywhere and removes the question rather than answering it.
+          tmp="$(mktemp "${TMPDIR:-/tmp}/openseal-manifest.XXXXXX")"
+          jq --arg v "$CORE" '.version = $v' desktop/src-tauri/tauri.conf.json > "$tmp"
+          mv "$tmp" desktop/src-tauri/tauri.conf.json
+          jq --arg v "$CORE" '.version = $v' desktop/package.json > "$tmp"
+          mv "$tmp" desktop/package.json
+          # Only the first `version =` line, which is the one under [package];
+          # dependency versions further down must not be touched.
+          #
+          # awk, not sed. The obvious sed form for "first match only" is
+          # `0,/re/`, which is a GNU extension: BSD sed — /usr/bin/sed on both
+          # macOS legs — rejects a line-0 address, and busybox sed accepts it
+          # and silently does nothing. `1,/re/` is NOT a substitute: if line 1
+          # matched it would run to the *next* match, which is the reason
+          # `0,/re/` exists. awk is POSIX, behaves identically everywhere, and
+          # is already required by the toolchain preflight.
+          for manifest in desktop/src-tauri/Cargo.toml desktop/crates/daemon-host/Cargo.toml; do
+            awk -v v="$CORE" '!done && /^version = /{ print "version = \"" v "\""; done=1; next } 1' \
+              "$manifest" > "${manifest}.tmp" && mv "${manifest}.tmp" "$manifest"
+          done
+
+          # tauri.conf.json declares THIRD_PARTY_NOTICES as a bundle resource, so
+          # it must exist before `pnpm tauri build` runs. Generated here from
+          # what this build links, not copied from a committed snapshot.
+          ./scripts/generate-third-party-notices.sh
+          # Mirrors the assertion the binary and container jobs already carry.
+          # A generator that exits 0 having written nothing is a real failure
+          # mode, not a hypothetical one — an empty `find` on PATH produces
+          # exactly that, and the exit status alone does not show it.
+          test -s THIRD_PARTY_NOTICES
+          cp THIRD_PARTY_NOTICES desktop/src-tauri/THIRD_PARTY_NOTICES
+
+          echo "bundle version set to ${CORE} (tag ${TAG_VERSION}):"
+          grep -H '"version"' desktop/src-tauri/tauri.conf.json desktop/package.json
+          grep -Hm1 '^version' desktop/src-tauri/Cargo.toml desktop/crates/daemon-host/Cargo.toml
+
+      - name: Build the bundles
+        working-directory: desktop
+        env:
+          CGO_ENABLED: '1'
+        run: |
+          set -euo pipefail
+          # `pnpm tauri build`, not `make desktop-build`. The Makefile target
+          # runs `make build` first, producing a root ./openseal that the bundle
+          # never uses — tauri.conf.json's beforeBuildCommand compiles its own
+          # sidecar under the Rust host triple. Skipping it avoids a redundant
+          # cgo build on every leg.
+          pnpm tauri build
+
+      - name: Assert the notices reached the bundle payload
+        run: |
+          set -euo pipefail
+          # The binary job asserts the notices file at its Package step and the
+          # container job asserts it inside the running image. The desktop job
+          # had no equivalent, so a leg that bundled without notices would have
+          # passed quietly — which is how the GNU-only `find -printf` in the
+          # generator stayed invisible until a QA pass went looking.
+          #
+          # tauri.conf.json declares THIRD_PARTY_NOTICES under bundle.resources,
+          # so Tauri stages it into the payload tree it packs from. On Linux and
+          # macOS that payload is plain files on disk and can be asserted
+          # directly, so a miss is a hard failure. Windows' .msi and NSIS .exe
+          # are compiled archives whose contents need a platform extractor to
+          # read, so there a miss is reported and not fatal — failing a release
+          # on the limits of this check would be worse than the gap it closes.
+          # Settle the Windows case against a real release page (issue #5371).
+          BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
+          FOUND=""
+          if [ -d "$BUNDLE_DIR" ]; then
+            FOUND="$(find "$BUNDLE_DIR" -name THIRD_PARTY_NOTICES -print | LC_ALL=C sort)"
+          fi
+          if [ -n "$FOUND" ]; then
+            echo "notices present in the ${{ matrix.label }} payload:"
+            printf '%s\n' "$FOUND"
+          elif [ "${RUNNER_OS:-}" = "Windows" ]; then
+            echo "::warning::${{ matrix.label }}: THIRD_PARTY_NOTICES not visible under ${BUNDLE_DIR}; the Windows installers are compiled archives, so this check cannot see inside them"
+          else
+            echo "::error::${{ matrix.label }}: THIRD_PARTY_NOTICES is not in the bundle payload under ${BUNDLE_DIR}" >&2
+            exit 1
+          fi
+
+      - name: Collect the bundles
+        run: |
+          set -euo pipefail
+          OUT="bundles"
+          mkdir -p "$OUT"
+          BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
+          if [ ! -d "$BUNDLE_DIR" ]; then
+            echo "::error::no bundle directory at ${BUNDLE_DIR}" >&2
+            exit 1
+          fi
+          # Installers only. The .app directory is what the .dmg wraps, and a
+          # directory cannot be a release asset.
+          #
+          # This list is EXACTLY what bundle.targets: "all" produces, per leg —
+          # established from the bundler's own source at the version this
+          # pipeline pins, not inferred from the config.
+          #
+          # tauri-bundler's ALL_PACKAGE_TYPES is cfg-gated by target_os, and
+          # package_types() resolves it to:
+          #
+          #   Windows : WindowsMsi, Nsis      -> .msi, .exe
+          #   macOS   : MacOsBundle, Dmg      -> .app, .dmg
+          #   Linux   : Deb, Rpm, AppImage    -> .deb, .rpm, .AppImage
+          #
+          # (crates/tauri-bundler/src/bundle/settings.rs at tag
+          # tauri-cli-v2.11.4, which is what pnpm-lock.yaml resolves
+          # @tauri-apps/cli to and --frozen-lockfile pins.)
+          #
+          # So six file types, and all six are globbed. .app is excluded because
+          # it is a directory — the .dmg wraps it — and a directory cannot be a
+          # release asset. Updater artifacts are not produced: they require
+          # bundle.createUpdaterArtifacts, which the config does not set.
+          #
+          # docs/user-docs/installing.md lists the same six and says which to
+          # choose. Keep the two in step; the step below reports any format
+          # appearing here that the page does not name.
+          find "$BUNDLE_DIR" -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+               -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
+            -exec cp {} "$OUT/" \;
+          COUNT="$(find "$OUT" -type f | wc -l | tr -d ' ')"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::the build produced no installer for ${{ matrix.label }}" >&2
+            find "$BUNDLE_DIR" -maxdepth 2 -type d || true
+            exit 1
+          fi
+
+          # Assert the version actually landed in the filenames. Tauri taking the
+          # version from config rather than the tag is silent when wrong — every
+          # job succeeds and the mismatch only surfaces when a user's upgrade
+          # does nothing — so it is checked rather than assumed.
+          for f in "$OUT"/*; do
+            case "$(basename "$f")" in
+              *"${BUNDLE_VERSION}"*) ;;
+              *)
+                echo "::error::bundle $(basename "$f") does not carry version ${BUNDLE_VERSION}" >&2
+                exit 1 ;;
+            esac
+          done
+
+          # For a pre-release, put the full tag back into the filename so two
+          # release candidates of the same version stay distinguishable once
+          # downloaded. The installer metadata keeps the numeric core.
+          if [ "$TAG_VERSION" != "$BUNDLE_VERSION" ]; then
+            for f in "$OUT"/*; do
+              base="$(basename "$f")"
+              mv "$f" "${OUT}/${base/${BUNDLE_VERSION}/${TAG_VERSION}}"
+            done
+          fi
+
+          echo "collected ${COUNT} installer(s) for ${{ matrix.label }} at version ${TAG_VERSION}:"
+          ls -l "$OUT"
+
+          # Report the installer formats this leg actually produced, and flag
+          # any the documentation does not name.
+          #
+          # The documented set now matches the bundler's own per-platform
+          # target list (see the Collect comment above), so this is no longer a
+          # discovery mechanism — it is a regression check. If a format appears
+          # that installing.md does not name, either Tauri's targets changed
+          # under a version bump or the page drifted, and both want knowing.
+          DOCUMENTED="AppImage deb dmg exe msi rpm"
+          PRODUCED="$(find "$OUT" -type f | sed 's#.*\.##' | LC_ALL=C sort -u | tr '\n' ' ')"
+          echo "installer formats on ${{ matrix.label }}: ${PRODUCED}"
+          EXTRA=""
+          for fmt in $PRODUCED; do
+            case " ${DOCUMENTED} " in
+              *" ${fmt} "*) ;;
+              *) EXTRA="${EXTRA} ${fmt}" ;;
+            esac
+          done
+          if [ -n "$EXTRA" ]; then
+            echo "::notice::${{ matrix.label }} also produced:${EXTRA} — installing.md names only the always-present formats. Reconcile its table and this step's filter against this release (issue #5371)."
+          fi
+
+      - name: Report the signing posture
+        run: |
+          set -euo pipefail
+          # Signing is opt-in and absent by default. Say so in the log rather
+          # than shipping unsigned artifacts silently: an unsigned .dmg trips
+          # Gatekeeper and an unsigned installer trips SmartScreen, and whoever
+          # ships this release should know that before users discover it.
+          case "${{ runner.os }}" in
+            macOS)
+              echo "::warning::macOS bundles are UNSIGNED and not notarized — users will see a Gatekeeper warning. Set the signing secrets and add a signing step to change this."
+              ;;
+            Windows)
+              echo "::warning::Windows installers are UNSIGNED — users will see a SmartScreen warning. Set the signing secrets and add a signing step to change this."
+              ;;
+            *)
+              echo "Linux bundles are unsigned, which is conventional for .deb, .rpm and .AppImage."
+              ;;
+          esac
+
+      - name: Upload the bundles to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # --clobber so a re-run replaces its own assets rather than failing on
+          # a name that already exists.
+          find bundles -type f -print0 \
+            | xargs -0 gh release upload "${GITHUB_REF_NAME}" --clobber
+          echo "uploaded the ${{ matrix.label }} bundles"
+
+  # ---------------------------------------------------------------------------
+  # Assemble and publish.
+  #
+  # Depends on every artifact-producing job, so the release only becomes visible
+  # once the binaries, the image and the desktop bundles have all succeeded. A
+  # failure anywhere leaves the release a draft: incomplete and unpublished
+  # beats published with holes in it.
+  release:
+    name: Checksum and publish
+    needs: [binary, container, desktop]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out with full history for the changelog
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          # Full history and tags, unlike the shallow fetch the build jobs use:
+          # the changelog needs the commit range since the previous tag.
+          # GIT_CONFIG_* rather than `git -c`: both keep the token out of
+          # .git/config, but `-c` puts it in argv, which is world-readable via
+          # /proc/<pid>/cmdline. The env form avoids the command line entirely.
+          GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0="http.extraHeader"
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic ${GIT_AUTH_B64}"
+          git fetch -q --prune --tags origin
+          git checkout -q --detach "$GITHUB_SHA"
+
+      - name: Download every asset and checksum them together
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          # The status is captured so this workflow can say what it was doing.
+          # `gh release download` fails when the release has no assets, and
+          # under `set -e` that killed the step with gh's bare message before
+          # the guard below could run -- the friendly error written for exactly
+          # that case was unreachable, the same shape as the changelog `| head`
+          # and the glibc `grep` already fixed on this branch.
+          #
+          # Capturing it also covers the failures that are not about assets at
+          # all: auth, network, a deleted draft. Those produced a raw tool error
+          # too.
+          if ! gh release download "${GITHUB_REF_NAME}" --dir dist 2>"$RUNNER_TEMP/gh-download.err"; then
+            echo "::error::could not download the draft release's assets for ${GITHUB_REF_NAME}" >&2
+            echo "::error::gh said:" >&2
+            sed 's/^/  /' "$RUNNER_TEMP/gh-download.err" >&2 || true
+            echo "::error::if the draft carries no assets, every upstream job uploaded nothing while reporting success" >&2
+            exit 1
+          fi
+
+          # Reached when gh succeeded but produced nothing — a release whose
+          # assets are all filtered out below, or a future gh that treats an
+          # empty download as success.
+          # A release with no assets means every upstream job uploaded nothing
+          # while still reporting success. Fail rather than publish an empty
+          # release.
+          COUNT="$(find dist -maxdepth 1 -type f ! -name 'checksums.txt' | wc -l | tr -d ' ')"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "::error::the draft release carries no assets" >&2
+            exit 1
+          fi
+          echo "found ${COUNT} asset(s)"
+
+          # One checksums file spanning binaries and desktop bundles alike, so a
+          # user can verify whichever artifact they downloaded from one place.
+          cd dist
+          rm -f checksums.txt
+          find . -maxdepth 1 -type f ! -name 'checksums.txt' -printf '%f\n' \
+            | sort \
+            | xargs sha256sum > checksums.txt
+          cat checksums.txt
+
+      - name: Write the release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          PREV="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -n "$PREV" ]; then
+            RANGE="${PREV}..${TAG}"
+            HEADING="Changes since ${PREV}"
+          else
+            RANGE="${TAG}"
+            HEADING="Changes"
+          fi
+
+          # Anyone upgrading a container data volume created before the image
+          # dropped root needs a one-time chown, so the notes carry an upgrade
+          # section — but only while it is still relevant.
+          #
+          # Anchored on the previous release's CONTENT, not on a commit SHA. A
+          # SHA identifies a commit on this branch; squash-merging to develop
+          # rewrites it, after which `git merge-base` can no longer resolve it
+          # and the note would print on every release forever. Asking whether
+          # the previous tag's Dockerfile already dropped root is the property
+          # actually being tested, and it survives any merge strategy.
+          SHOW_UID_NOTE=0
+          if [ -z "$PREV" ]; then
+            # First release: no earlier tag, but local compose volumes predating
+            # the change still exist, so the note is still worth carrying.
+            SHOW_UID_NOTE=1
+          elif ! git show "${PREV}:Dockerfile" 2>/dev/null | grep -q '^USER '; then
+            SHOW_UID_NOTE=1
+          fi
+
+          # Cap the changelog at 100 entries, and say so when it is cut.
+          LIMIT=100
+          TOTAL="$(git rev-list --no-merges --count "${RANGE}")"
+
+          {
+            echo "## OpenSeal ${VERSION}"
+            echo
+            echo "### Downloads"
+            echo
+            # Every format the bundler produces, matching the Collect filter
+            # above and docs/user-docs/installing.md. Listing four of the six
+            # told a Fedora user their .rpm did not exist, on the page that
+            # installing.md itself calls authoritative.
+            echo "- **Desktop app** — macOS \`.dmg\`; Windows \`.msi\` or \`.exe\`; Linux \`.deb\`, \`.rpm\` or \`.AppImage\`. The daemon is bundled; nothing else to install. Where a platform offers more than one, the Installing page in the documentation says which to choose."
+            echo "- **Command line** — the \`openseal_${VERSION}_<os>_<arch>\` archive for your platform. The Linux build links glibc and needs **${LINUX_GLIBC_FLOOR} or newer** (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9). On older distributions use the container image, which is self-contained."
+            echo "- **Container** — \`docker pull ${IMAGE}:${VERSION}\`"
+            echo
+            echo "Built from commit \`${GITHUB_SHA}\`."
+            echo
+            echo "Verify any download against \`checksums.txt\`:"
+            echo
+            echo '```'
+            echo "# Linux"
+            echo "sha256sum -c checksums.txt --ignore-missing"
+            echo
+            echo "# macOS — no sha256sum; shasum ships with the system"
+            echo "shasum -a 256 -c checksums.txt --ignore-missing"
+            echo '```'
+            echo
+            echo "### Note on unsigned builds"
+            echo
+            echo "The macOS and Windows desktop builds are not yet code-signed. macOS shows a Gatekeeper warning on first launch (right-click the app and choose Open), and Windows shows a SmartScreen prompt (More info, then Run anyway)."
+            echo
+            if [ "$SHOW_UID_NOTE" = "1" ]; then
+              echo "### Upgrading a container deployment"
+              echo
+              echo "The container image now runs as an unprivileged user instead of root. A **new** data volume needs no action."
+              echo
+              echo "A volume created by an earlier release is still owned by root, and the daemon cannot open its database. It exits with one of:"
+              echo
+              echo '```text'
+              echo "failed to open kernel store: migrate: attempt to write a readonly database"
+              echo "failed to open kernel store: migrate: unable to open database file: no such file or directory"
+              echo '```'
+              echo
+              echo "The first is the usual case, for a volume that already holds data. The second appears when the volume is root-owned but empty. Neither message names ownership or permissions. Fix the ownership once."
+              echo
+              echo "**If you run Compose**, from the directory holding your \`docker-compose.yml\`:"
+              echo
+              echo '```bash'
+              echo "docker compose run --rm --user root --entrypoint chown openseal \\"
+              echo "  -R openseal:openseal /app/data"
+              echo '```'
+              echo
+              echo "Compose is what resolves the volume. It declares \`openseal-data\` without a \`name:\`, so the volume is really called \`<project>_openseal-data\` — \`openseal_openseal-data\` for a directory named \`openseal\`. A plain \`docker run -v openseal-data:...\` would not fail on that name: Docker would **create** a new, empty volume, chown it, exit 0, and leave your data still owned by root."
+              echo
+              echo "**If you run the container directly**, name the volume exactly as you mounted it:"
+              echo
+              echo '```bash'
+              echo "docker volume ls   # find the volume you mounted"
+              echo "docker run --rm -v <your-volume>:/app/data --user root \\"
+              echo "  --entrypoint chown ${IMAGE}:${VERSION} \\"
+              echo "  -R openseal:openseal /app/data"
+              echo '```'
+              echo
+              echo "\`--entrypoint\` is required in both forms: the image's entrypoint is the OpenSeal binary, so trailing arguments would be passed to it as a subcommand rather than run as a program."
+              echo
+              echo "Or discard the volume with \`docker compose down -v\` if the data is not needed."
+              echo
+            fi
+            echo "### ${HEADING}"
+            echo
+            # `-n`, not `| head`. Piping into head under `set -euo pipefail`
+            # kills the step: head closes the pipe after its 100th line, git
+            # log takes SIGPIPE and exits 141, pipefail propagates it and set
+            # -e aborts. That would abort this step before the final
+            # `--draft=false` below, so every artifact would be built and
+            # uploaded and then no release published at all — and SIGPIPE
+            # prints nothing, so it would surface as a step failing silently.
+            # It only bites once a range exceeds the cap, so it would pass
+            # early releases and fail a later one with no change here.
+            git log --no-merges -n "${LIMIT}" --pretty='- %s' "${RANGE}"
+            if [ "${TOTAL}" -gt "${LIMIT}" ]; then
+              echo "- …and $(( TOTAL - LIMIT )) more commits"
+            fi
+          } > notes.md
+
+          gh release edit "${TAG}" --notes-file notes.md
+
+      - name: Upload the checksums and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release upload "${GITHUB_REF_NAME}" dist/checksums.txt --clobber
+          # --draft=false is the single step that makes the release visible.
+          # Everything above this line is reversible by deleting a draft.
+          gh release edit "${GITHUB_REF_NAME}" --draft=false
+          echo "published ${GITHUB_REF_NAME}"
+
+  # ---------------------------------------------------------------------------
+  # Move :latest only once the release is genuinely published.
+  #
+  # This used to run inside the `container` job, which is `needs: prepare` only.
+  # That gated it on the container verifying itself and nothing else: if the
+  # desktop or binary job then failed, `release` never ran, the GitHub release
+  # stayed a draft forever -- and `:latest` was already serving an image for a
+  # version with no release page, no notes and no checksums.txt.
+  #
+  # `needs: release` is the whole fix. The versioned tag is unaffected and still
+  # publishes from the container job: it is immutable and a user has to ask for
+  # it by name, whereas `:latest` is what an unqualified `docker pull` resolves
+  # to.
+  #
+  # A separate job rather than a step appended to `release`, so the token stays
+  # least-privilege: `release` keeps `contents: write` and this job takes only
+  # `packages: write`.
+  promote-latest:
+    name: Point :latest at the published release
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: write
+
+    steps:
+      - name: Log in to the container registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Move :latest to the published image
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          # Only for a final release. A pre-release such as v0.2.0-rc1 keeps its
+          # version tag and nothing else, so `:latest` never silently points at
+          # a release candidate.
+          case "${GITHUB_REF_NAME}" in
+            *-*)
+              echo "pre-release ${GITHUB_REF_NAME}: leaving :latest where it is"
+              exit 0 ;;
+          esac
+
+          # imagetools copies the existing multi-arch manifest rather than
+          # rebuilding, so :latest resolves to the exact bytes the container job
+          # built and verified.
+          docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
+          echo "moved ${IMAGE}:latest to the published ${VERSION} image"
