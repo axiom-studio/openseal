@@ -205,12 +205,24 @@ jobs:
           # line whose NEXT-BUT-ONE line is also a rule line. Licence text
           # cannot produce that without containing two eighty-'=' lines exactly
           # two apart, and the count cross-check below catches even that.
+          # The rule line is compared as a literal string, not matched with
+          # /^={80}$/. ERE interval expressions are not implemented by mawk
+          # before 1.3.4-20200717, and mawk is the default awk on Debian and
+          # Ubuntu; there, `{80}` is taken literally, nothing matches, and the
+          # count cross-check below fails the build with "extracted 0 module
+          # headers" on a file that is perfectly correct. The runner this
+          # repository uses has a new enough mawk -- verified -- but the fleet
+          # is addressed by label and this dependency buys nothing: the
+          # generator writes a fixed eighty-character line, so comparing
+          # against that exact string is both stricter and portable to every
+          # awk.
           extract_modules() {
             awk '
+              BEGIN { rule = sprintf("%80s", ""); gsub(/ /, "=", rule) }
               { line[NR] = $0 }
               END {
                 for (i = 1; i <= NR; i++)
-                  if (line[i] ~ /^={80}$/ && line[i+2] ~ /^={80}$/ && line[i+1] != "")
+                  if (line[i] == rule && line[i+2] == rule && line[i+1] != "")
                     print line[i+1]
               }
             ' "$1" | awk 'NF {print $1" "$2}' | LC_ALL=C sort -u
