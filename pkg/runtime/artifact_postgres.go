@@ -33,6 +33,7 @@ func (s *PostgresStore) migrateArtifacts(ctx context.Context, tx *sql.Tx) error 
 		`CREATE INDEX IF NOT EXISTS artifacts_latest_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, id, version DESC)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_catalog_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, type, media_type, classification, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_provenance_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, producer_run_id, producer_request_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS artifacts_owner_page_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, ((payload->'provenance'->'owner'->>'type')), ((payload->'provenance'->'owner'->>'id')), created_at DESC, id, version DESC)`,
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
@@ -104,6 +105,10 @@ func (s *PostgresStore) GetArtifact(ctx context.Context, scope Scope, id string,
 func (s *PostgresStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) ([]*Artifact, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
+	}
+	if filter.EvidenceTarget == "" && filter.RetentionDueBefore == nil {
+		query, args := artifactListQuery(filter, s.table("artifacts"), true)
+		return queryArtifactPage(ctx, s.db, query, args)
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("artifacts")+` WHERE scope_kind = $1 AND scope_id = $2`, filter.Scope.Kind, filter.Scope.ID)
 	if err != nil {

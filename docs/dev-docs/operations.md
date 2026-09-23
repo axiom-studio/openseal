@@ -14,7 +14,7 @@ storage:
   path: data/openseal.db
   artifactsPath: data/artifacts
 api:
-  listenAddr: :8080
+  listenAddr: 127.0.0.1:8080
 ```
 
 Only `sqlite` is accepted by the standalone configuration. Relative database,
@@ -26,6 +26,14 @@ kernel API; use `/api/v1/health` for health checks. Durable schedules and
 external events are configured through Objective-owned Runbook triggers and
 event-source subscriptions. Removed `workflowsDir`, `triggers`, and `webhook` daemon keys are
 rejected instead of being silently ignored.
+
+Setting `OPENSEAL_API_TOKEN` requires a bearer token on every API route,
+including health and capability discovery. It is one shared secret, not a
+multi-user authorization system. `--desktop-operator` requires this token, a
+loopback listener, and a local workspace scope; it provides the desktop's
+local owner review and installation authority. `--standalone-operator` permits
+action approvals, ClawHub mutations, configured outreach, and authoring retry
+and refinement, but not workforce evaluation, approval, or apply.
 
 ## Standalone context, local Vault, and model-backed authoring
 

@@ -40,7 +40,7 @@ When the standalone context file defines an `authoring` block, it takes preceden
 
 With a complete configuration the daemon also starts a durable authoring worker bound to a single scope. Change-set operations are advertised only when both the durable store and that worker are present.
 
-> **The governed half of authoring requires a lifecycle authorizer.** Evaluate, approve, and apply need one, and standalone mode supplies it only under `--standalone-operator`. Without the flag the daemon logs that generation retry is disabled and installs no authorizer, so compile and inspection work while the governed steps do not. The flag itself refuses to start unless the API listen address is a loopback address.
+> **Review and installation require lifecycle authority.** The plain standalone daemon can compile and inspect proposals. `--standalone-operator` adds retry and refinement on a loopback API, but does not authorize evaluate, approve, or apply. The authenticated desktop's `--desktop-operator` mode supplies local owner review and installation for its configured workspace. An embedding host can supply its own lifecycle authority. See [Security](security.md).
 
 ## Workforce Bundles
 
