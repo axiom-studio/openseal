@@ -172,12 +172,60 @@ jobs:
           # And a version bump is the most common dependency change there is —
           # the case this check was originally written for. On paths alone the
           # gate misses it while still reading as though it covers it.
+          # Extraction is STRUCTURAL, not "the line after any rule line".
+          #
+          # `grep -A1` fired on both rule lines of every block — the opening one
+          # (yielding the module, as intended) and the closing one (yielding
+          # whatever followed). What follows a closing rule is a blank line
+          # today, so it was harmless; but the line after that is `cat` of a
+          # third-party licence file, which is arbitrary unescaped text. Any
+          # licence body containing a line of exactly eighty '=' injected a
+          # phantom module, failed CI on correct content, and sent the reader
+          # off to run `make third-party-notices` — which regenerates the same
+          # phantom. Unreachable with today's dependency set and one dependency
+          # away from being reached.
+          #
+          # A module header is instead identified by its block shape: a rule
+          # line whose NEXT-BUT-ONE line is also a rule line. Licence text
+          # cannot produce that without containing two eighty-'=' lines exactly
+          # two apart, and the count cross-check below catches even that.
           extract_modules() {
-            grep -A1 '^=\{80\}$' "$1" | grep -v '^=\{80\}$' | grep -v '^--$' \
-              | awk 'NF {print $1" "$2}' | LC_ALL=C sort -u
+            awk '
+              { line[NR] = $0 }
+              END {
+                for (i = 1; i <= NR; i++)
+                  if (line[i] ~ /^={80}$/ && line[i+2] ~ /^={80}$/ && line[i+1] != "")
+                    print line[i+1]
+              }
+            ' "$1" | awk 'NF {print $1" "$2}' | LC_ALL=C sort -u
           }
+
+          # The generator states its own module count in the preamble. Checking
+          # the extracted count against it turns any future parser drift into a
+          # named parser failure instead of a phantom module reported as a
+          # dependency mismatch — which was the real cost of the old anchor.
+          stated_count() {
+            awk '/^OpenSeal is distributed as a statically linked binary\. The [0-9]+ modules$/ {
+                   print $(NF-1); exit }' "$1"
+          }
+          check_parse() {
+            got="$(wc -l < "$2" | tr -d ' ')"
+            want="$(stated_count "$1")"
+            if [ -z "$want" ]; then
+              echo "::error::could not read the module count from $1's preamble" >&2
+              exit 1
+            fi
+            if [ "$got" != "$want" ]; then
+              echo "::error::parser drift in $1: extracted ${got} module headers, the file states ${want}" >&2
+              echo "::error::this is a problem with the notices format or this parser, NOT a dependency change" >&2
+              exit 1
+            fi
+          }
+
           extract_modules THIRD_PARTY_NOTICES > /tmp/mods.committed
           extract_modules /tmp/notices.generated > /tmp/mods.generated
+          check_parse THIRD_PARTY_NOTICES /tmp/mods.committed
+          check_parse /tmp/notices.generated /tmp/mods.generated
 
           if cmp -s /tmp/mods.committed /tmp/mods.generated; then
             echo "third-party notices cover the current module set ($(wc -l < /tmp/mods.committed) modules)"
