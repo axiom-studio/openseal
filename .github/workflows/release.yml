@@ -869,16 +869,29 @@ jobs:
           # Installers only. The .app directory is what the .dmg wraps, and a
           # directory cannot be a release asset.
           #
-          # This list is a deliberate SUPERSET of what any one platform emits.
-          # tauri.conf.json sets bundle.targets to "all", so the set produced is
-          # whatever the toolchain supports on that runner — Windows may emit an
-          # NSIS .exe beside the .msi, Linux an .rpm beside .deb and .AppImage.
-          # Collecting a type that does not appear costs nothing; failing to
-          # collect one that does would silently drop an installer users were
-          # offered. docs/user-docs/installing.md matches this by naming the
-          # formats every release produces and pointing at the release page for
-          # the authoritative list, rather than asserting a fixed set.
-          # Reconcile both against a real release once one exists (issue #5371).
+          # This list is EXACTLY what bundle.targets: "all" produces, per leg —
+          # established from the bundler's own source at the version this
+          # pipeline pins, not inferred from the config.
+          #
+          # tauri-bundler's ALL_PACKAGE_TYPES is cfg-gated by target_os, and
+          # package_types() resolves it to:
+          #
+          #   Windows : WindowsMsi, Nsis      -> .msi, .exe
+          #   macOS   : MacOsBundle, Dmg      -> .app, .dmg
+          #   Linux   : Deb, Rpm, AppImage    -> .deb, .rpm, .AppImage
+          #
+          # (crates/tauri-bundler/src/bundle/settings.rs at tag
+          # tauri-cli-v2.11.4, which is what pnpm-lock.yaml resolves
+          # @tauri-apps/cli to and --frozen-lockfile pins.)
+          #
+          # So six file types, and all six are globbed. .app is excluded because
+          # it is a directory — the .dmg wraps it — and a directory cannot be a
+          # release asset. Updater artifacts are not produced: they require
+          # bundle.createUpdaterArtifacts, which the config does not set.
+          #
+          # docs/user-docs/installing.md lists the same six and says which to
+          # choose. Keep the two in step; the step below reports any format
+          # appearing here that the page does not name.
           find "$BUNDLE_DIR" -type f \
             \( -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
                -o -name '*.deb' -o -name '*.AppImage' -o -name '*.rpm' \) \
@@ -919,13 +932,12 @@ jobs:
           # Report the installer formats this leg actually produced, and flag
           # any the documentation does not name.
           #
-          # docs/user-docs/installing.md lists the formats every release
-          # produces and points at the release page for the rest, because
-          # bundle.targets is "all" and what that yields on a given runner
-          # cannot be read out of the repository — only observed. This step is
-          # where it first becomes observable, so it says so in the log rather
-          # than leaving the reconciliation to whoever remembers issue #5371.
-          DOCUMENTED="AppImage deb dmg msi"
+          # The documented set now matches the bundler's own per-platform
+          # target list (see the Collect comment above), so this is no longer a
+          # discovery mechanism — it is a regression check. If a format appears
+          # that installing.md does not name, either Tauri's targets changed
+          # under a version bump or the page drifted, and both want knowing.
+          DOCUMENTED="AppImage deb dmg exe msi rpm"
           PRODUCED="$(find "$OUT" -type f | sed 's#.*\.##' | LC_ALL=C sort -u | tr '\n' ' ')"
           echo "installer formats on ${{ matrix.label }}: ${PRODUCED}"
           EXTRA=""

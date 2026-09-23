@@ -90,15 +90,23 @@ The image runs as an unprivileged user and serves the API on port 8080. The publ
 
 Installers are published for macOS, Windows, and Linux. The daemon is bundled inside the application; nothing else needs installing.
 
-| Platform | Installer |
+| Platform | Installers |
 |---|---|
 | macOS | `.dmg` |
-| Windows | `.msi` |
-| Linux | `.deb`, `.AppImage` |
+| Windows | `.msi`, `.exe` |
+| Linux | `.deb`, `.rpm`, `.AppImage` |
 
-These are the formats every release produces. A release may also publish additional installers for a platform — a Windows `.exe` setup program, or a Linux `.rpm` — because the desktop application is bundled for all formats its toolchain supports rather than a fixed list. The release page is the authoritative list of what a given version published.
+Windows and Linux each publish more than one installer. They contain the same application and differ only in how they install it:
 
-Where a platform offers more than one, any of them installs the same application. Prefer the `.msi` on Windows and the `.deb` or `.rpm` on Linux if the machine is centrally managed, since both integrate with system package management; the `.exe` and `.AppImage` suit a per-user install that needs no administrator.
+| Installer | Choose it when |
+|---|---|
+| `.msi` | Windows, centrally managed — deployable through Group Policy or Intune |
+| `.exe` | Windows, installing for yourself — a per-user setup needing no administrator |
+| `.deb` | Debian or Ubuntu, so the package manager tracks and upgrades it |
+| `.rpm` | Fedora, RHEL or openSUSE, for the same reason |
+| `.AppImage` | Any Linux, no package manager involved — one executable file you run |
+
+The release page for a version is the authoritative list of what it actually published.
 
 ### Unsigned Builds
 
