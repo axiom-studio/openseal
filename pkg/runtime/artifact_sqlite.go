@@ -33,6 +33,11 @@ func migrateArtifacts(db *sql.DB) error {
 			ON artifacts(scope_kind, scope_id, type, media_type, classification, created_at DESC);
 		CREATE INDEX IF NOT EXISTS idx_artifacts_provenance
 			ON artifacts(scope_kind, scope_id, producer_run_id, producer_request_id, created_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_artifacts_owner_page
+			ON artifacts(scope_kind, scope_id,
+				json_extract(payload, '$.provenance.owner.type'),
+				json_extract(payload, '$.provenance.owner.id'),
+				created_at DESC, id, version DESC);
 	`)
 	return err
 }
@@ -91,6 +96,10 @@ func (s *SQLiteStore) GetArtifact(ctx context.Context, scope Scope, id string, v
 func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter ArtifactFilter) ([]*Artifact, error) {
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
+	}
+	if filter.EvidenceTarget == "" && filter.RetentionDueBefore == nil {
+		query, args := artifactListQuery(filter, "artifacts", false)
+		return queryArtifactPage(ctx, s.db, query, args)
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM artifacts WHERE scope_kind = ? AND scope_id = ?`, filter.Scope.Kind, filter.Scope.ID)
 	if err != nil {

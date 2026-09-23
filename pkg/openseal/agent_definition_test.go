@@ -87,7 +87,7 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	controlChannels, err := engine.ListConversations(ctx, ConversationFilter{
 		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID},
 	})
-	if err != nil || len(controlChannels) != 2 {
+	if err != nil || len(controlChannels) != 1 {
 		t.Fatalf("Agent control channel = %#v, %v", controlChannels, err)
 	}
 	channelsByOrigin := make(map[ConversationReferenceKind]*Conversation, len(controlChannels))
@@ -100,10 +100,8 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	if control == nil || control.Title != "Agent control" || control.Origin.ID != agentControlReferenceID(deployment.ID) {
 		t.Fatalf("Agent control channel = %#v", control)
 	}
-	approvals := channelsByOrigin[ConversationReferenceAgentApprovals]
-	if approvals == nil || approvals.Title != "Approvals" ||
-		approvals.Origin.ID != AgentApprovalsConversationReferenceID(ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID}) {
-		t.Fatalf("Agent approvals channel = %#v", approvals)
+	if channelsByOrigin[ConversationReferenceAgentApprovals] != nil {
+		t.Fatal("internal approvals conversation was created")
 	}
 	if _, err := engine.GetAgentDeployment(ctx, scope, deployment.ID); err != nil {
 		t.Fatal(err)
@@ -111,7 +109,7 @@ func TestEngineExposesVersionedAgentDefinitionLifecycle(t *testing.T) {
 	reconciledChannels, err := engine.ListConversations(ctx, ConversationFilter{
 		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment.ID},
 	})
-	if err != nil || len(reconciledChannels) != 2 {
+	if err != nil || len(reconciledChannels) != 1 {
 		t.Fatalf("Agent control channel reconciliation duplicated channels: %#v, %v", reconciledChannels, err)
 	}
 	deployed, activation, err := engine.ActivateAgentDefinition(ctx, scope, deployment.ID, "1.1.0", deployment.Revision, "user", "admin", "evaluation passed")
