@@ -22,7 +22,14 @@ third-party-notices:
 desktop-install:
 	cd desktop && pnpm install
 
-desktop-dev: build
+# third-party-notices and the copy are prerequisites of the DEV path too, not
+# just the release path. tauri.conf.json declares THIRD_PARTY_NOTICES under
+# bundle.resources, and tauri-build copies resources on every cargo build --
+# dev included -- erroring on a path that does not exist. The file is
+# gitignored and generated, so without this a fresh clone cannot start the app:
+# build.rs fails naming a file the contributor has never seen.
+desktop-dev: build third-party-notices
+	cp THIRD_PARTY_NOTICES desktop/src-tauri/THIRD_PARTY_NOTICES
 	cd desktop && pnpm prepare:daemon
 	cd desktop && OPENSEAL_DAEMON_PATH=$(CURDIR)/openseal pnpm tauri dev
 
