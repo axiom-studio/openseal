@@ -8,7 +8,7 @@ Identity and authorization belong to the deployment rather than to the kernel. O
 
 | Property | Where it lives |
 |---|---|
-| Authentication | Off unless you set `OPENSEAL_API_TOKEN`. With it set the daemon requires a bearer token on every route; with it unset no credential is parsed and no route returns `401`. See [Enabling API Authentication](#enabling-api-authentication) below |
+| Authentication | Off unless you set `OPENSEAL_API_TOKEN`. With it set the daemon requires a bearer token on every route except `GET /api/v1/health`, which answers a container liveness probe without a credential; with it unset no credential is parsed and no route returns `401`. See [Enabling API Authentication](#enabling-api-authentication) below |
 | Transport security | The embedding host, or a fronting proxy. The API server is plain HTTP — there is no TLS configuration, no certificate handling, and no TLS listener |
 | Authorization | The embedding host. There is no role model, no permission check, and no per-scope entitlement check on any route |
 
