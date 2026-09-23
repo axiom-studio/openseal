@@ -62,13 +62,17 @@ openseal daemon [options]
 --config <path>       daemon YAML (default daemon.yaml)
 --context <path>      local Vault/provider context (default context.yaml)
 --scope <kind:id>     standalone authoring scope (default local:default)
---standalone-operator enable governed generation retry on a loopback API
+--listen <addr>      override configured API address; port 0 selects a free port
+--standalone-operator enable local action, ClawHub, outreach, and authoring retry/refinement authority on loopback
+--desktop-operator enable authenticated local workspace review and installation
 --help
 ```
 
 If the configuration path does not exist, OpenSeal writes the default
 configuration before starting. `--standalone-operator` is rejected unless the
-configured API address is loopback.
+API address is loopback. `--desktop-operator` additionally requires a nonempty
+`OPENSEAL_API_TOKEN` and a local workspace scope. The API token protects all
+routes but does not provide multi-user roles.
 The context file is optional; when present, it maps opaque credential
 references to environment variables or private files and can configure the
 standalone authoring model. See [Standalone context](standalone-context.md).
