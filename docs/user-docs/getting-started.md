@@ -1,8 +1,6 @@
 # Getting Started
 
-OpenSeal is a single binary that runs a background daemon, a versioned HTTP API, and a terminal client. This page covers a first local deployment from source: building, starting the daemon, confirming it serves, and connecting the terminal client.
-
-Building is not required to run OpenSeal. Releases publish a prebuilt binary, a container image, and a desktop application — see [Installing OpenSeal](installing.md) to choose between them. Build from source when you want to modify OpenSeal, or to run an unreleased commit.
+OpenSeal builds from source into a single binary that runs a background daemon, a versioned HTTP API, and a terminal client. This page covers a first local deployment without a model provider: building, starting the daemon, confirming it serves, and connecting the terminal client. To generate proposals, add a provider after this first run.
 
 ## Requirements
 
@@ -33,16 +31,27 @@ make build
 The daemon holds all authoritative state. Start it before anything else, and leave it running.
 
 ```bash
-cp context.example.yaml context.yaml
-export OPENAI_API_KEY='...'
-./openseal daemon --config ./local.yaml --context ./context.yaml --standalone-operator
+./openseal daemon --config ./local.yaml
 ```
 
 If the file named by `--config` does not exist, the daemon writes a default configuration to that path and continues, so a first run needs no configuration file. The defaults bind the API to `127.0.0.1:8080`, store kernel state in `data/openseal.db`, and store artifact content in `data/artifacts`.
 
 > **Relative storage paths resolve against the configuration file's directory,** not against the shell's working directory. A daemon started with `--config ./deploy/local.yaml` writes its database to `./deploy/data/openseal.db`.
 
-`--standalone-operator` grants local-operator authority: it enables approval decisions, ClawHub install and update operations, workforce lifecycle decisions, and outreach delivery. Without it those operations are not advertised and not served. The flag refuses to start unless the API listen address is a loopback address. See [Security](security.md) for what the flag does and does not establish.
+For model-backed proposal generation, stop the first daemon, copy the safe
+context template, set the referenced API key, and restart:
+
+```bash
+cp context.example.yaml context.yaml
+export OPENAI_API_KEY='...'
+./openseal daemon --config ./local.yaml --context ./context.yaml --standalone-operator
+```
+
+`--standalone-operator` adds local action approvals, ClawHub mutations, outreach
+delivery where a source policy allows it, and authoring retry and refinement.
+Workforce evaluation, approval, and installation require the authenticated
+desktop mode or an embedding host. See [Workforces](workforces.md) and
+[Security](security.md).
 
 ## Confirming the Daemon Is Serving
 
@@ -51,7 +60,7 @@ curl http://127.0.0.1:8080/api/v1/health
 curl http://127.0.0.1:8080/api/v1/capabilities
 ```
 
-The health route returns a fixed body and always answers `200`:
+Without an API token, the health route returns a fixed body and answers `200`:
 
 ```json
 {"status": "ok"}
@@ -81,7 +90,7 @@ The workspace opens on **Home**. Use the left and right arrow keys to move betwe
 | Daemon configuration | The path given to `--config`, default `daemon.yaml` |
 | Credential references | The path given to `--context`, default `context.yaml` |
 
-All five resolve relative to the configuration file's directory unless given as absolute paths. A missing `--context` file is not an error; it means no local credential source is configured.
+Storage and the default Skills directory resolve relative to the configuration file's directory. `--config` and `--context` are paths supplied from the shell; files referenced inside the context resolve relative to the context file. The TUI download directory resolves from the shell's working directory. A missing `--context` file is not an error; it means no local credential source is configured.
 
 ## Next Steps
 

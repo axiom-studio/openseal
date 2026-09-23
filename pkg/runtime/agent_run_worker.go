@@ -752,10 +752,7 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 	if err != nil {
 		return nil, err
 	}
-	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
-	if idempotencyKey == "" {
-		idempotencyKey = fmt.Sprintf("turn:%s:action:0", turn.ID)
-	}
+	idempotencyKey := turnActionIdempotencyKey(request.IdempotencyKey, selected.SideEffect, turn.ID)
 	actionDeploymentID := strings.TrimSpace(binding.ActionDeploymentID)
 	if strings.TrimSpace(selected.DeploymentID) != "" {
 		actionDeploymentID = strings.TrimSpace(selected.DeploymentID)
@@ -802,6 +799,18 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		}
 	}
 	return proposal.Run, nil
+}
+
+func turnActionIdempotencyKey(proposed string, sideEffect capability.SideEffect, turnID string) string {
+	if sideEffect == capability.SideEffectRead || sideEffect == capability.SideEffectNone {
+		// A later Turn may need a fresh observation after the resource changes.
+		// The Turn ID still makes worker retries of this proposal idempotent.
+		return fmt.Sprintf("turn:%s:read:0", turnID)
+	}
+	if key := strings.TrimSpace(proposed); key != "" {
+		return key
+	}
+	return fmt.Sprintf("turn:%s:action:0", turnID)
 }
 
 func (p *AgentRunWorkerPool) resumeReplayedTurnAction(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, call *ActionCall) (*AgentRun, error) {

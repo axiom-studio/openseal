@@ -32,7 +32,7 @@ OpenSeal ships two persistent stores and an in-memory store. Only one of them is
 
 ### SQLite
 
-SQLite is opened with write-ahead logging and a five-second busy timeout, and it runs its migrations on open. Migration is a fixed sequence of 21 steps covering the portfolio, runbook activations, projects, source monitors, source policies, event-source checkpoints and subscriptions, outreach, the agent and team registries, the Skill catalog, Skill source artifacts, action credential lease redemptions, authoring change sets, sensitive authoring prompts, natural team coordination, team coordination defaults, activation continuations, Skill binding lifecycle repair, the callback registry, and embed installations.
+SQLite is opened with write-ahead logging and a five-second busy timeout, and it runs its migrations on open. The migration sequence covers Skills, the portfolio, runbook activations, projects, source monitors and policies, event-source checkpoints and subscriptions, outreach, Agent and Team registries, action credentials, authoring change sets, conversations, callbacks, and installations.
 
 The sequence is not versioned in a table. Every step is idempotent and runs on every open.
 
@@ -72,10 +72,10 @@ The daemon emits structured JSON logs at info level through a production logger.
 | Field | Value |
 |---|---|
 | Path | `GET /api/v1/health` |
-| Status | Always `200` |
+| Status | `200` when reached; `401` without a valid token if `OPENSEAL_API_TOKEN` is set |
 | Body | `{"status": "ok"}` |
 
-> **There is no metrics endpoint, and the health check is not a readiness check.** No Prometheus client, no expvar, and no `/metrics` route exists. The health handler returns a hard-coded body without touching the store, the workers, or the model provider, so it reports `200` while the database is unreachable, every worker is stalled, and every Run is stuck. Treating it as a liveness signal for the HTTP listener is correct. Treating it as a readiness signal for the system is not.
+> **There is no metrics endpoint, and the health check is not a readiness check.** No Prometheus client, no expvar, and no `/metrics` route exists. After any token check, the health handler returns a hard-coded body without touching the store, the workers, or the model provider, so it can report `200` while those dependencies are unavailable. Treat it as an HTTP liveness signal, not system readiness.
 
 ### The Activity Feed
 
