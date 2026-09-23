@@ -670,7 +670,11 @@ jobs:
         run: |
           set -euo pipefail
           missing=""
-          for tool in go rustc cargo node npm jq awk gh; do
+          # sed and find are used by this job's own steps and by
+          # scripts/generate-third-party-notices.sh, which this job calls. They
+          # were depended on without being declared — the same gap #5367 found
+          # for awk, where a comment claimed a tool was listed and it was not.
+          for tool in go rustc cargo node npm jq awk sed find gh; do
             command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
           done
           if [ -n "$missing" ]; then
@@ -769,7 +773,10 @@ jobs:
           #
           # This runs on a detached checkout inside the job. It is never
           # committed and cannot reach a branch.
-          tmp="$(mktemp)"
+          # Explicit template. A bare `mktemp` is a GNU convenience, and this
+          # step runs on both macOS legs; passing a template is accepted
+          # everywhere and removes the question rather than answering it.
+          tmp="$(mktemp "${TMPDIR:-/tmp}/openseal-manifest.XXXXXX")"
           jq --arg v "$CORE" '.version = $v' desktop/src-tauri/tauri.conf.json > "$tmp"
           mv "$tmp" desktop/src-tauri/tauri.conf.json
           jq --arg v "$CORE" '.version = $v' desktop/package.json > "$tmp"
@@ -793,6 +800,11 @@ jobs:
           # it must exist before `pnpm tauri build` runs. Generated here from
           # what this build links, not copied from a committed snapshot.
           ./scripts/generate-third-party-notices.sh
+          # Mirrors the assertion the binary and container jobs already carry.
+          # A generator that exits 0 having written nothing is a real failure
+          # mode, not a hypothetical one — an empty `find` on PATH produces
+          # exactly that, and the exit status alone does not show it.
+          test -s THIRD_PARTY_NOTICES
           cp THIRD_PARTY_NOTICES desktop/src-tauri/THIRD_PARTY_NOTICES
 
           echo "bundle version set to ${CORE} (tag ${TAG_VERSION}):"
@@ -811,6 +823,38 @@ jobs:
           # sidecar under the Rust host triple. Skipping it avoids a redundant
           # cgo build on every leg.
           pnpm tauri build
+
+      - name: Assert the notices reached the bundle payload
+        run: |
+          set -euo pipefail
+          # The binary job asserts the notices file at its Package step and the
+          # container job asserts it inside the running image. The desktop job
+          # had no equivalent, so a leg that bundled without notices would have
+          # passed quietly — which is how the GNU-only `find -printf` in the
+          # generator stayed invisible until a QA pass went looking.
+          #
+          # tauri.conf.json declares THIRD_PARTY_NOTICES under bundle.resources,
+          # so Tauri stages it into the payload tree it packs from. On Linux and
+          # macOS that payload is plain files on disk and can be asserted
+          # directly, so a miss is a hard failure. Windows' .msi and NSIS .exe
+          # are compiled archives whose contents need a platform extractor to
+          # read, so there a miss is reported and not fatal — failing a release
+          # on the limits of this check would be worse than the gap it closes.
+          # Settle the Windows case against a real release page (issue #5371).
+          BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
+          FOUND=""
+          if [ -d "$BUNDLE_DIR" ]; then
+            FOUND="$(find "$BUNDLE_DIR" -name THIRD_PARTY_NOTICES -print | LC_ALL=C sort)"
+          fi
+          if [ -n "$FOUND" ]; then
+            echo "notices present in the ${{ matrix.label }} payload:"
+            printf '%s\n' "$FOUND"
+          elif [ "${RUNNER_OS:-}" = "Windows" ]; then
+            echo "::warning::${{ matrix.label }}: THIRD_PARTY_NOTICES not visible under ${BUNDLE_DIR}; the Windows installers are compiled archives, so this check cannot see inside them"
+          else
+            echo "::error::${{ matrix.label }}: THIRD_PARTY_NOTICES is not in the bundle payload under ${BUNDLE_DIR}" >&2
+            exit 1
+          fi
 
       - name: Collect the bundles
         run: |
