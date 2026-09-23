@@ -23,17 +23,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# shellcheck source=scripts/lib/licence-common.sh
+. "$(dirname "$0")/lib/licence-common.sh"
+
 FORMAT="table"
 if [ "${1:-}" = "--tsv" ]; then
   FORMAT="tsv"
 fi
 
-MODULE="$(go list -m)"
-
-# Modules contributing packages to the binary. Excludes the standard library
-# (no .Module) and this module itself.
-modules="$(go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./cmd/openseal \
-  | sort -u | grep -v '^$' | grep -Fxv "$MODULE")"
+modules="$(licence_modules)"
 
 if [ "$FORMAT" = "table" ]; then
   printf '%-52s %-10s %-14s %s\n' "MODULE" "VERSION" "LICENCE FILE" "FIRST LINE"
@@ -52,15 +50,9 @@ while IFS= read -r module; do
   file=""
   first=""
   if [ -n "$dir" ] && [ -d "$dir" ]; then
-    # Common licence filenames, in the order a reviewer would look.
-    #
-    # `-print` piped through sed rather than `-printf '%f\n'`: `-printf` is a
-    # GNU extension that BSD and busybox find reject. This script is not on the
-    # release path, but it broke identically for any macOS developer running
-    # `make licence-inventory`. Fuller note in generate-third-party-notices.sh.
-    file="$(find "$dir" -maxdepth 1 -type f \
-      \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
-      -print | sed 's#.*/##' | LC_ALL=C sort)"
+    # The same lookup the generator uses, so the two tools cannot disagree
+    # about whether a module is licensed. See scripts/lib/licence-common.sh.
+    file="$(licence_files "$dir")"
     # First line only, taken in the shell rather than by piping into `head`,
     # which closes the pipe early and can SIGPIPE the producer under pipefail.
     file="${file%%$'\n'*}"
@@ -74,6 +66,11 @@ while IFS= read -r module; do
   if [ -z "$file" ]; then
     file="MISSING"
     first="no licence file found at the module root"
+    # A NOTICE is not a licence grant, so it does not clear MISSING -- but it
+    # is worth naming, because it changes what a reviewer has to read.
+    if [ -n "$dir" ] && [ -f "${dir}/NOTICE" ]; then
+      first="no licence file; a NOTICE is present, review it"
+    fi
     missing=$((missing + 1))
   fi
 
