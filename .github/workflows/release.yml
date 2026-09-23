@@ -140,7 +140,13 @@ jobs:
           - runner: ubuntu-latest
             goos: linux
             goarch: amd64
-          - runner: macos-13        # Intel; macos-latest is Apple silicon
+          # Intel. macos-13 was retired: GitHub's current macOS labels are
+          # macos-14 (deprecated), macos-15 and macos-26 on Apple silicon, with
+          # Intel only as the explicit -intel variants. A runs-on label that
+          # matches no runner does not fail the job — the job never becomes
+          # eligible, so `release` (needs: binary) never runs and every other
+          # artifact lands in a draft that is never promoted.
+          - runner: macos-15-intel
             goos: darwin
             goarch: amd64
           - runner: macos-latest    # Apple silicon
@@ -622,7 +628,9 @@ jobs:
         include:
           - runner: ubuntu-latest
             label: linux-x86_64
-          - runner: macos-13        # Intel
+          # Intel — see the note on the binary job's matrix. macos-13 is gone;
+          # Intel is only available as an explicit -intel label.
+          - runner: macos-15-intel
             label: macos-x86_64
           - runner: macos-latest    # Apple silicon
             label: macos-aarch64
