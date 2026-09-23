@@ -49,11 +49,16 @@ desktop/crates/*/target/
 /data/*.db-*
 /skills/.clawhub/
 /skills/repos/
-openseal
+# Anchored: this is the `make build` output at the repository root. Unanchored,
+# it also matches the cmd/openseal/ source directory, which silently ignores
+# every NEW file added there — existing files survive only because tracked
+# files are exempt from ignore rules.
+/openseal
 
 # Desktop development and generated assets
 desktop/.dev-workspace/
 desktop/src-tauri/binaries/
+desktop/src-tauri/THIRD_PARTY_NOTICES
 desktop/src-tauri/gen/
 desktop/test-results/
 desktop/playwright-report/

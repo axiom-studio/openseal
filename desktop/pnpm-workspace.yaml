@@ -1,2 +1,40 @@
-allowBuilds:
-  esbuild: true
+# pnpm treats the presence of this file as declaring a workspace and refuses
+# to run without a `packages` field -- every pnpm invocation in this directory
+# failed with "packages field missing or empty", including `pnpm --version`.
+# That took out `pnpm install --frozen-lockfile` in the release workflow's
+# desktop job on all four legs, and `make desktop-install`, `desktop-dev` and
+# `desktop-build` locally.
+#
+# There is one package.json here and no pnpm workspace to describe, so this
+# lists the single package rather than inventing structure. The Rust crates
+# under crates/ are a Cargo workspace, which is unrelated.
+packages:
+  - .
+
+# Dependency install scripts are NOT restricted here, and that is worth saying
+# plainly rather than leaving to inference.
+#
+# This file used to carry:
+#
+#   allowBuilds:
+#     esbuild: true
+#
+# which reads as an allowlist and is not one: pnpm 9 does not recognise the key,
+# and on the pinned 9.15.9 dependency lifecycle scripts run by default. It
+# restricted nothing. A configuration that looks like enforcement and enforces
+# nothing is worse than none, because a reader stops asking the question.
+#
+# What is actually true today: of the 82 packages in the store, exactly one runs
+# code at install time -- esbuild@0.28.2, whose `postinstall` (node install.js)
+# links its platform binary. The controls relied on are the committed
+# pnpm-lock.yaml and `--frozen-lockfile`, which pin what is fetched; nothing
+# constrains what a fetched package does during install.
+#
+# `ignore-scripts=true` is not the fix: pnpm 9 has no per-package allowlist, so
+# it is all-or-nothing and would break esbuild's binary linking.
+#
+# If enforcement is wanted, the path is pnpm 10, where build approval is opt-in
+# and spelled `onlyBuiltDependencies: [esbuild]`. That means a pnpm major bump,
+# regenerating a lockfile currently produced by 9.15.9, and moving the version
+# pin in desktop/package.json together with the preflight in release.yml that
+# asserts it -- a toolchain decision, not a drive-by one.
