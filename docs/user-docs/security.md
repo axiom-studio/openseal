@@ -4,19 +4,19 @@ OpenSeal is designed for one of two deployments: a single-operator local process
 
 ## The Deployment Model
 
-Identity and authorization belong to the deployment rather than to the kernel. OpenSeal implements neither, and binds to loopback by default for that reason.
+Identity and authorization belong to the deployment rather than to the portable kernel. The plain daemon binds to loopback by default. An optional API bearer token protects all routes, and the desktop host supplies a token and local owner authority; this is not a multi-user role system.
 
 | Property | Where it lives |
 |---|---|
-| Authentication | The embedding host, or a fronting proxy. No credential is parsed from any request, and no route returns `401 Unauthorized`, because no route distinguishes an authenticated caller from an unauthenticated one |
+| Authentication | The optional `OPENSEAL_API_TOKEN` bearer token protects every daemon route when set. A host or fronting proxy supplies identity-aware authentication for shared deployments |
 | Transport security | The embedding host, or a fronting proxy. The API server is plain HTTP — there is no TLS configuration, no certificate handling, and no TLS listener |
-| Authorization | The embedding host. There is no role model, no permission check, and no per-scope entitlement check on any route |
+| Authorization | The desktop's explicit local-owner mode or an embedding host. The bearer token alone supplies no roles or per-scope entitlements |
 
-> **Plan the deployment around that boundary.** Any process that can reach the listen address can call every route, including every mutation route. The default loopback bind is what keeps the boundary closed until a deployment deliberately opens it.
+> **Plan the deployment around that boundary.** Without `OPENSEAL_API_TOKEN`, any process that can reach the listen address can call available routes. With a token, callers must present it, but all token holders share the same daemon authority. Keep the API on loopback unless an authorizing host controls access.
 
-## The Two Guardrails
+## Local Guardrails
 
-The daemon compensates with two mechanisms, neither of which is a substitute for an authorization layer.
+The daemon uses a loopback default and explicit operator modes. The optional bearer token authenticates possession of one secret, not a person or tenant.
 
 ### Loopback by Default, With a Warning
 
@@ -28,7 +28,9 @@ OpenSeal has no built-in API authentication.
 Expose it only through an authorization-aware reverse proxy or local network boundary.
 ```
 
-The daemon starts anyway. The warning is a warning, not a refusal.
+The daemon starts anyway. The warning is a warning, not a refusal. Its wording
+describes the absence of built-in identity-aware authorization even when a
+shared bearer token is configured.
 
 ### The Operator Flag
 
@@ -39,12 +41,14 @@ The daemon starts anyway. The warning is a warning, not a refusal.
 | Action policy | Installs a policy naming a single approver, `user:local` |
 | Approval authorizer | Enables resolving action approvals |
 | ClawHub mutation authority | Enables install, update, pin, unpin, and uninstall |
-| Workforce lifecycle authority | Enables evaluate, approve, and apply, acting as `local-operator` |
+| Workforce authoring recovery | Enables generation retry and refinement as `local-operator`; evaluate, approve, and apply remain unavailable |
 | Outreach delivery dispatcher | Enables message delivery, for outreach-enabled scopes only |
 
 Running without the flag leaves those mutations unavailable rather than silently self-approving. That is the intended failure mode: absence of an authority produces a `501`, never an assumption.
 
-> **Standalone mode approves as a single local principal.** Every approval recorded in a standalone deployment carries the identity `user:local`, and the workforce authorizer acts as `local-operator`, regardless of who actually made the decision. Approval records are auditable, but they do not attribute. A deployment that needs to know which person approved something needs an embedding host that authenticates people.
+> **Standalone mode approves actions as a single local principal.** Its action approvals carry `user:local`, and authoring retry/refinement acts as `local-operator`. These records do not identify a person. A deployment needing individual attribution requires a host that authenticates people.
+
+The desktop's separate `--desktop-operator` mode requires a loopback listener, a nonempty `OPENSEAL_API_TOKEN`, and a local workspace scope. It provides local policy evaluation, owner review, and installation for that workspace. The native desktop host creates and retains the per-launch token; see [desktop development](../../desktop/README.md).
 
 ## Scopes Partition, Hosts Isolate
 
@@ -52,7 +56,7 @@ Every durable record is scoped, and a scope is the only tenancy primitive in the
 
 Scope validation accepts any non-empty `kind` and `id` pair. There is no registry of known scopes, no hierarchy, and no membership check. The kernel uses the scope to partition storage and to route work to the correct worker; deciding whether a caller is entitled to a given scope sits on the deployment side of the boundary.
 
-> **Tenant isolation is the host's half of the contract.** Since the kernel does not authenticate, any caller reaching it can supply any `scopeKind` and `scopeId` and be served the records in that partition. An embedding host provides isolation by authenticating the caller and constraining which scope values that caller may present — partitioning alone is not isolation.
+> **Tenant isolation is the host's half of the contract.** A caller with API access can supply scope values; the bearer token does not constrain them. An embedding host provides isolation by authenticating the caller and constraining which scope values that caller may present — partitioning alone is not isolation.
 
 ## Secret Handling
 
@@ -82,7 +86,7 @@ Two headers are reserved by the kernel protocol and cannot be overridden: `Conte
 
 Header names and values containing whitespace, colons, or line breaks are also rejected, which prevents header injection through the flag.
 
-> **The proxy is doing the authorization, not OpenSeal.** Header pass-through lets a client satisfy an external authority; it does not cause the daemon to evaluate one. A daemon behind a proxy is exactly as unauthenticated as one that is not — the proxy's job is to ensure nothing reaches the daemon that should not.
+> **The proxy is doing the authorization.** Header pass-through lets a client satisfy an external authority; it does not make the daemon evaluate roles or tenant entitlements. The proxy must ensure unauthorized requests cannot reach the daemon.
 
 ## Deployment Checklist
 

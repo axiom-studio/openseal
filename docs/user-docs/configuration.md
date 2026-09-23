@@ -128,6 +128,7 @@ credential scopes + outreach-enabled policy scopes → worker scopes → Run and
 | `OPENSEAL_LLM_BASE_URL` | Workforce authoring model endpoint |
 | `OPENSEAL_LLM_MODEL` | Workforce authoring model name |
 | `OPENAI_API_KEY` | Workforce authoring credential |
+| `OPENSEAL_API_TOKEN` | Optional bearer token required on every daemon API route; required by `--desktop-operator` |
 | `CLAWHUB_REGISTRY` | ClawHub registry base URL; defaults to `https://clawhub.ai` |
 | `OPENSEAL_API_URL` | Default endpoint for the terminal client |
 
@@ -138,7 +139,9 @@ credential scopes + outreach-enabled policy scopes → worker scopes → Run and
 | `--config` | Path to the daemon configuration file | `daemon.yaml` |
 | `--context` | Path to the standalone context file | `context.yaml` |
 | `--scope` | Durable standalone authoring scope as `kind:id` | `local:default` |
-| `--standalone-operator` | Grant local-operator authorities; requires a loopback listen address | off |
+| `--listen` | Override `api.listenAddr`; port `0` selects a free port | configuration value |
+| `--standalone-operator` | Grant local action, ClawHub, outreach, and authoring retry/refinement authorities; requires loopback | off |
+| `--desktop-operator` | Grant authenticated local workspace review and installation; requires loopback, `OPENSEAL_API_TOKEN`, and a local scope | off |
 | `--help` | Print help | — |
 
 ## Next Steps
