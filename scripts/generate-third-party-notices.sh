@@ -34,7 +34,11 @@ modules="$(go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./cmd/opense
 
 count="$(printf '%s\n' "$modules" | grep -c . || true)"
 
-tmp="$(mktemp)"
+# An explicit template, not a bare `mktemp`. This script runs on every desktop
+# release leg, including both macOS runners, and the bare form is a GNU
+# convenience rather than a guaranteed one. Passing a template is accepted by
+# every implementation, which removes the question instead of answering it.
+tmp="$(mktemp "${TMPDIR:-/tmp}/openseal-notices.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 
 {
@@ -70,9 +74,26 @@ while IFS= read -r module; do
 
   file=""
   if [ -n "$dir" ] && [ -d "$dir" ]; then
+    # `-print` piped through sed, NOT `-printf '%f\n'`. `-printf` is a GNU
+    # extension: BSD find — /usr/bin/find on both macOS legs — and busybox find
+    # reject it outright. Under `set -e` that killed this assignment at the
+    # FIRST module, so the desktop release legs produced no notices file at all,
+    # which failed the desktop job and with it the whole release.
+    #
+    # `-maxdepth` and `-iname` are also outside POSIX but are implemented by
+    # both BSD and busybox find, so they stay.
+    #
+    # sed drains its input, so it cannot close the pipe early and SIGPIPE find
+    # under pipefail — the hazard that broke the changelog step in #3735 and
+    # came back in #5381. `-exec basename {} \;` would also be portable but
+    # spawns a process per file across every linked module.
+    #
+    # No `2>/dev/null` here. Suppressing the diagnostic never suppressed the
+    # exit status; it only made this exact failure silent and cost a QA cycle
+    # to diagnose.
     file="$(find "$dir" -maxdepth 1 -type f \
       \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \) \
-      -printf '%f\n' 2>/dev/null | LC_ALL=C sort)"
+      -print | sed 's#.*/##' | LC_ALL=C sort)"
     # First line only, taken in the shell rather than by piping into `head`,
     # which closes the pipe early and can SIGPIPE the producer under pipefail.
     file="${file%%$'\n'*}"
