@@ -216,6 +216,22 @@ if [ "$missing" -gt "$MAX_MISSING" ]; then
   exit 1
 fi
 
+# mktemp creates 0600 and mv preserves it, so without this every generated
+# notices file ships unreadable to anyone but its owner -- and all three
+# artifact families regenerate before packaging.
+#
+# The committed copy is unaffected (git records only the executable bit), but
+# the artifacts are: the tarball records -rw------- and extracts that way, so a
+# root extract plus a system-wide install leaves the notices root-only; and the
+# file is a Tauri bundle.resources entry, so a .deb or .rpm install leaves the
+# application unable to read its own attribution. The container escapes it only
+# incidentally, via the Dockerfile's chown -R.
+#
+# An attribution file nobody can read does not discharge the obligation it
+# exists for. umask still applies; this only stops the 0600 from mktemp
+# propagating into every artifact.
+chmod a+r "$tmp"
+
 mv "$tmp" "$OUT"
 trap - EXIT
 
