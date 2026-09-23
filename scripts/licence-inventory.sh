@@ -68,7 +68,12 @@ while IFS= read -r module; do
     first="no licence file found at the module root"
     # A NOTICE is not a licence grant, so it does not clear MISSING -- but it
     # is worth naming, because it changes what a reviewer has to read.
-    if [ -n "$dir" ] && [ -f "${dir}/NOTICE" ]; then
+    #
+    # notice_files, not a test for the exact name NOTICE: the same shared
+    # helper the generator uses, so the two cannot disagree about what counts
+    # as a notice. An exact test here would miss NOTICE.txt exactly as the
+    # generator's did.
+    if [ -n "$dir" ] && [ -d "$dir" ] && [ -n "$(notice_files "$dir")" ]; then
       first="no licence file; a NOTICE is present, review it"
     fi
     missing=$((missing + 1))
