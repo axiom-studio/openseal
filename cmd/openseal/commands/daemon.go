@@ -85,9 +85,17 @@ Options:
 	)
 
 	if !isLoopbackListenAddress(cfg.API.ListenAddr) {
+		// The warning has to distinguish the two states. Saying OpenSeal has no
+		// authentication is false when OPENSEAL_API_TOKEN is set, and an
+		// operator who has correctly armed the token should not be told
+		// otherwise on every start.
+		warning := "OPENSEAL_API_TOKEN is set, so routes require a bearer token. There is still no authorization model: any holder of the token can call every route. Prefer an authorization-aware reverse proxy."
+		if strings.TrimSpace(os.Getenv("OPENSEAL_API_TOKEN")) == "" {
+			warning = "OPENSEAL_API_TOKEN is not set, so every route is reachable without a credential. Set it, or expose this only through an authorization-aware reverse proxy or local network boundary."
+		}
 		sugar.Warnw("OpenSeal API is exposed on non-loopback interface",
 			"apiAddr", cfg.API.ListenAddr,
-			"warning", "OpenSeal has no built-in API authentication. Expose it only through an authorization-aware reverse proxy or local network boundary.",
+			"warning", warning,
 		)
 	}
 

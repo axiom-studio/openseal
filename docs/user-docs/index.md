@@ -49,7 +49,8 @@ The design holds to one rule throughout: the kernel never manufactures authority
 
 | Section | Description |
 |---|---|
-| [Getting Started](getting-started.md) | Requirements, building, starting the daemon, and connecting the terminal client |
+| [Installing OpenSeal](installing.md) | Choosing between the binary, container image, and desktop application, and verifying a download |
+| [Getting Started](getting-started.md) | Requirements, building from source, starting the daemon, and connecting the terminal client |
 | [Core Concepts](concepts.md) | The execution model, capability discovery, scopes, owners, and the two execution paths |
 | [Agents and Teams](agents-and-teams.md) | Definitions, deployments, activation, rollback, the amendment sequence, and agent requests |
 | [Objectives, Projects, and Runs](objectives-and-runs.md) | The portfolio, the Run and Turn lifecycles, steering commands, and event routing |
