@@ -62,8 +62,18 @@ missing=0
 while IFS= read -r module; do
   [ -n "$module" ] || continue
 
+  # A missing version degrades the header; a missing directory means no licence
+  # text at all, which is the failure this script must not absorb quietly. So
+  # the two are guarded differently on purpose.
+  #
+  # .Version keeps its guard: a local or `replace`d module legitimately has no
+  # version, and that is not a reason to fail a release.
   version="$(go list -m -f '{{.Version}}' "$module" 2>/dev/null || true)"
-  dir="$(go list -m -f '{{.Dir}}' "$module" 2>/dev/null || true)"
+  # .Dir does NOT. If the module cannot be located, the entry silently becomes
+  # "No licence file was found" — indistinguishable from a module that really
+  # ships none — and a broken lookup across the whole tree produces a complete
+  # -looking file with no licence text in it. Let it fail here, loudly.
+  dir="$(go list -m -f '{{.Dir}}' "$module")"
 
   {
     echo "================================================================================"
@@ -119,6 +129,27 @@ while IFS= read -r module; do
     } >> "$tmp"
   fi
 done <<< "$modules"
+
+# A floor on the control, not merely a note about it.
+#
+# A handful of modules genuinely ship no licence file at their root; MOST of
+# them yielding none means the lookup broke, not that the licences vanished.
+# That distinction matters because the degenerate file is structurally perfect
+# and every downstream assertion passes on it: `test -s` sees bytes, the image
+# check sees the banner line, and CI's module-set gate sees all the module
+# headers. Nothing else in the pipeline can catch an all-empty notices file, so
+# it is caught here or not at all — and shipping one would defeat the entire
+# obligation this script exists to discharge.
+#
+# Checked BEFORE the temp file is moved into place, so a broken run cannot
+# overwrite a good committed copy with a hollow one.
+MAX_MISSING="${MAX_MISSING:-5}"
+if [ "$missing" -gt "$MAX_MISSING" ]; then
+  echo "error: ${missing} of ${count} modules yielded no licence text (max ${MAX_MISSING})" >&2
+  echo "the module lookup is probably broken; the notices file would be incomplete" >&2
+  echo "${OUT} has NOT been written. Set MAX_MISSING to raise the floor deliberately." >&2
+  exit 1
+fi
 
 mv "$tmp" "$OUT"
 trap - EXIT
