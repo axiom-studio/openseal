@@ -1,2 +1,24 @@
+# pnpm treats the presence of this file as declaring a workspace and refuses
+# to run without a `packages` field -- every pnpm invocation in this directory
+# failed with "packages field missing or empty", including `pnpm --version`.
+# That took out `pnpm install --frozen-lockfile` in the release workflow's
+# desktop job on all four legs, and `make desktop-install`, `desktop-dev` and
+# `desktop-build` locally.
+#
+# There is one package.json here and no pnpm workspace to describe, so this
+# lists the single package rather than inventing structure. The Rust crates
+# under crates/ are a Cargo workspace, which is unrelated.
+packages:
+  - .
+
+# allowBuilds is kept rather than deleted, but it is worth knowing it is doing
+# nothing today: it is not a key pnpm 9 recognises. On the pinned pnpm 9.15.9
+# dependency build scripts run by default, and no "ignored build scripts"
+# warning appears with or without this block. pnpm 10 is where build approval
+# became opt-in, and there it is spelled `onlyBuiltDependencies`.
+#
+# Left in place because removing a setting someone added deliberately is a
+# decision for whoever added it, and because if the pinned pnpm is ever moved
+# to 10 the intent recorded here is what should be translated.
 allowBuilds:
   esbuild: true
