@@ -16,6 +16,8 @@ not a violation; omitting what is required would be.
 github.com/agext/levenshtein v1.2.1
 ================================================================================
 
+--- LICENSE (github.com/agext/levenshtein) ---
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -230,6 +232,8 @@ This product includes software developed at ALRUX Inc.
 github.com/apparentlymart/go-textseg/v13 v13.0.0
 ================================================================================
 
+--- LICENSE (github.com/apparentlymart/go-textseg/v13) ---
+
 Copyright (c) 2017 Martin Atkins
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -330,6 +334,8 @@ written authorization of the copyright holder.
 github.com/atotto/clipboard v0.1.4
 ================================================================================
 
+--- LICENSE (github.com/atotto/clipboard) ---
+
 Copyright (c) 2013 Ato Araki. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -369,6 +375,8 @@ Review this module's licensing before distributing.
 github.com/aymanbagabas/go-osc52/v2 v2.0.1
 ================================================================================
 
+--- LICENSE (github.com/aymanbagabas/go-osc52/v2) ---
+
 MIT License
 
 Copyright (c) 2022 Ayman Bagabas
@@ -394,6 +402,8 @@ SOFTWARE.
 ================================================================================
 github.com/bahlo/generic-list-go v0.2.0
 ================================================================================
+
+--- LICENSE (github.com/bahlo/generic-list-go) ---
 
 Copyright (c) 2009 The Go Authors. All rights reserved.
 
@@ -427,6 +437,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 github.com/buger/jsonparser v1.1.2
 ================================================================================
 
+--- LICENSE (github.com/buger/jsonparser) ---
+
 MIT License
 
 Copyright (c) 2016 Leonid Bugaev
@@ -452,6 +464,8 @@ SOFTWARE.
 ================================================================================
 github.com/caarlos0/env v3.5.0+incompatible
 ================================================================================
+
+--- LICENSE.md (github.com/caarlos0/env) ---
 
 The MIT License (MIT)
 
@@ -479,6 +493,8 @@ SOFTWARE.
 github.com/charmbracelet/bubbles v0.21.0
 ================================================================================
 
+--- LICENSE (github.com/charmbracelet/bubbles) ---
+
 MIT License
 
 Copyright (c) 2020-2023 Charmbracelet, Inc
@@ -504,6 +520,8 @@ SOFTWARE.
 ================================================================================
 github.com/charmbracelet/bubbletea v1.3.10
 ================================================================================
+
+--- LICENSE (github.com/charmbracelet/bubbletea) ---
 
 MIT License
 
@@ -531,6 +549,8 @@ SOFTWARE.
 github.com/charmbracelet/colorprofile v0.3.2
 ================================================================================
 
+--- LICENSE (github.com/charmbracelet/colorprofile) ---
+
 MIT License
 
 Copyright (c) 2020-2024 Charmbracelet, Inc
@@ -556,6 +576,8 @@ SOFTWARE.
 ================================================================================
 github.com/charmbracelet/lipgloss v1.1.0
 ================================================================================
+
+--- LICENSE (github.com/charmbracelet/lipgloss) ---
 
 MIT License
 
@@ -583,6 +605,8 @@ SOFTWARE.
 github.com/charmbracelet/x/ansi v0.10.1
 ================================================================================
 
+--- LICENSE (github.com/charmbracelet/x/ansi) ---
+
 MIT License
 
 Copyright (c) 2023 Charmbracelet, Inc.
@@ -608,6 +632,8 @@ SOFTWARE.
 ================================================================================
 github.com/charmbracelet/x/cellbuf v0.0.13-0.20250311204145-2c3ea96c31dd
 ================================================================================
+
+--- LICENSE (github.com/charmbracelet/x/cellbuf) ---
 
 MIT License
 
@@ -635,6 +661,8 @@ SOFTWARE.
 github.com/charmbracelet/x/term v0.2.2
 ================================================================================
 
+--- LICENSE (github.com/charmbracelet/x/term) ---
+
 MIT License
 
 Copyright (c) 2023 Charmbracelet, Inc.
@@ -661,6 +689,8 @@ SOFTWARE.
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc
 ================================================================================
 
+--- LICENSE (github.com/davecgh/go-spew) ---
+
 ISC License
 
 Copyright (c) 2012-2016 Dave Collins <dave@davec.name>
@@ -680,6 +710,8 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ================================================================================
 github.com/emicklei/go-restful/v3 v3.12.2
 ================================================================================
+
+--- LICENSE (github.com/emicklei/go-restful/v3) ---
 
 Copyright (c) 2012,2013 Ernest Micklei
 
@@ -707,6 +739,8 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 github.com/fxamacker/cbor/v2 v2.8.0
 ================================================================================
 
+--- LICENSE (github.com/fxamacker/cbor/v2) ---
+
 MIT License
 
 Copyright (c) 2019-present Faye Amacker
@@ -731,6 +765,8 @@ SOFTWARE.
 ================================================================================
 github.com/gogo/protobuf v1.3.2
 ================================================================================
+
+--- LICENSE (github.com/gogo/protobuf) ---
 
 Copyright (c) 2013, The GoGo Authors. All rights reserved.
 
@@ -772,6 +808,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 github.com/golang-jwt/jwt/v4 v4.5.2
 ================================================================================
 
+--- LICENSE (github.com/golang-jwt/jwt/v4) ---
+
 Copyright (c) 2012 Dave Grijalva
 Copyright (c) 2021 golang-jwt maintainers
 
@@ -785,6 +823,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ================================================================================
 github.com/go-logr/logr v1.4.3
 ================================================================================
+
+--- LICENSE (github.com/go-logr/logr) ---
 
                                  Apache License
                            Version 2.0, January 2004
@@ -991,6 +1031,8 @@ github.com/go-logr/logr v1.4.3
 ================================================================================
 github.com/google/gnostic-models v0.6.9
 ================================================================================
+
+--- LICENSE (github.com/google/gnostic-models) ---
 
 
                                  Apache License
@@ -1200,6 +1242,8 @@ github.com/google/gnostic-models v0.6.9
 github.com/google/go-cmp v0.7.0
 ================================================================================
 
+--- LICENSE (github.com/google/go-cmp) ---
+
 Copyright (c) 2017 The Go Authors. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -1232,6 +1276,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 github.com/google/jsonschema-go v0.4.2
 ================================================================================
 
+--- LICENSE (github.com/google/jsonschema-go) ---
+
 MIT License
 
 Copyright (c) 2025 JSON Schema Go Project Authors
@@ -1257,6 +1303,8 @@ SOFTWARE.
 ================================================================================
 github.com/google/uuid v1.6.0
 ================================================================================
+
+--- LICENSE (github.com/google/uuid) ---
 
 Copyright (c) 2009,2014 Google Inc. All rights reserved.
 
@@ -1289,6 +1337,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 github.com/go-openapi/jsonpointer v0.21.1
 ================================================================================
+
+--- LICENSE (github.com/go-openapi/jsonpointer) ---
 
 
                                  Apache License
@@ -1497,6 +1547,8 @@ github.com/go-openapi/jsonpointer v0.21.1
 github.com/go-openapi/jsonreference v0.21.0
 ================================================================================
 
+--- LICENSE (github.com/go-openapi/jsonreference) ---
+
 
                                  Apache License
                            Version 2.0, January 2004
@@ -1703,6 +1755,8 @@ github.com/go-openapi/jsonreference v0.21.0
 ================================================================================
 github.com/go-openapi/swag v0.23.1
 ================================================================================
+
+--- LICENSE (github.com/go-openapi/swag) ---
 
 
                                  Apache License
@@ -1911,6 +1965,8 @@ github.com/go-openapi/swag v0.23.1
 github.com/gorilla/mux v1.8.1
 ================================================================================
 
+--- LICENSE (github.com/gorilla/mux) ---
+
 Copyright (c) 2023 The Gorilla Authors. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -1942,6 +1998,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 github.com/hashicorp/hcl/v2 v2.17.0
 ================================================================================
+
+--- LICENSE (github.com/hashicorp/hcl/v2) ---
 
 Copyright (c) 2014 HashiCorp, Inc.
 
@@ -2303,6 +2361,8 @@ Exhibit B - “Incompatible With Secondary Licenses” Notice
 github.com/invopop/jsonschema v0.14.0
 ================================================================================
 
+--- COPYING (github.com/invopop/jsonschema) ---
+
 Copyright (C) 2014 Alec Thomas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
@@ -2326,6 +2386,8 @@ SOFTWARE.
 ================================================================================
 github.com/josharian/intern v1.0.0
 ================================================================================
+
+--- license.md (github.com/josharian/intern) ---
 
 MIT License
 
@@ -2353,6 +2415,8 @@ SOFTWARE.
 github.com/json-iterator/go v1.1.12
 ================================================================================
 
+--- LICENSE (github.com/json-iterator/go) ---
+
 MIT License
 
 Copyright (c) 2016 json-iterator
@@ -2379,6 +2443,8 @@ SOFTWARE.
 github.com/lib/pq v1.10.9
 ================================================================================
 
+--- LICENSE.md (github.com/lib/pq) ---
+
 Copyright (c) 2011-2013, 'pq' Contributors
 Portions Copyright (C) 2011 Blake Mizerany
 
@@ -2392,6 +2458,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 github.com/lucasb-eyer/go-colorful v1.4.0
 ================================================================================
 
+--- LICENSE (github.com/lucasb-eyer/go-colorful) ---
+
 Copyright (c) 2013 Lucas Beyer
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -2404,6 +2472,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 github.com/mailru/easyjson v0.9.0
 ================================================================================
 
+--- LICENSE (github.com/mailru/easyjson) ---
+
 Copyright (c) 2016 Mail.Ru Group
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -2415,6 +2485,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ================================================================================
 github.com/matoous/go-nanoid/v2 v2.1.0
 ================================================================================
+
+--- LICENSE (github.com/matoous/go-nanoid/v2) ---
 
 The MIT License (MIT)
 
@@ -2442,6 +2514,8 @@ THE SOFTWARE.
 github.com/mattn/go-isatty v0.0.20
 ================================================================================
 
+--- LICENSE (github.com/mattn/go-isatty) ---
+
 Copyright (c) Yasuhiro MATSUMOTO <mattn.jp@gmail.com>
 
 MIT License (Expat)
@@ -2455,6 +2529,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ================================================================================
 github.com/mattn/go-runewidth v0.0.16
 ================================================================================
+
+--- LICENSE (github.com/mattn/go-runewidth) ---
 
 The MIT License (MIT)
 
@@ -2482,6 +2558,8 @@ SOFTWARE.
 github.com/mattn/go-sqlite3 v1.14.22
 ================================================================================
 
+--- LICENSE (github.com/mattn/go-sqlite3) ---
+
 The MIT License (MIT)
 
 Copyright (c) 2014 Yasuhiro Matsumoto
@@ -2508,6 +2586,8 @@ SOFTWARE.
 github.com/mitchellh/go-wordwrap v1.0.1
 ================================================================================
 
+--- LICENSE.md (github.com/mitchellh/go-wordwrap) ---
+
 The MIT License (MIT)
 
 Copyright (c) 2014 Mitchell Hashimoto
@@ -2533,6 +2613,8 @@ THE SOFTWARE.
 ================================================================================
 github.com/modelcontextprotocol/go-sdk v1.4.1
 ================================================================================
+
+--- LICENSE (github.com/modelcontextprotocol/go-sdk) ---
 
 The MCP project is undergoing a licensing transition from the MIT License to the Apache License, Version 2.0 ("Apache-2.0"). All new code and specification contributions to the project are licensed under Apache-2.0. Documentation contributions (excluding specifications) are licensed under CC-BY-4.0.
 
@@ -2755,6 +2837,8 @@ the full license text.
 github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
 ================================================================================
 
+--- LICENSE (github.com/modern-go/concurrent) ---
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -2960,6 +3044,8 @@ github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd
 ================================================================================
 github.com/modern-go/reflect2 v1.0.2
 ================================================================================
+
+--- LICENSE (github.com/modern-go/reflect2) ---
 
                                  Apache License
                            Version 2.0, January 2004
@@ -3167,6 +3253,8 @@ github.com/modern-go/reflect2 v1.0.2
 github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6
 ================================================================================
 
+--- LICENSE (github.com/muesli/ansi) ---
+
 MIT License
 
 Copyright (c) 2021 Christian Muehlhaeuser
@@ -3192,6 +3280,8 @@ SOFTWARE.
 ================================================================================
 github.com/muesli/cancelreader v0.2.2
 ================================================================================
+
+--- LICENSE (github.com/muesli/cancelreader) ---
 
 MIT License
 
@@ -3219,6 +3309,8 @@ SOFTWARE.
 github.com/muesli/termenv v0.16.0
 ================================================================================
 
+--- LICENSE (github.com/muesli/termenv) ---
+
 MIT License
 
 Copyright (c) 2019 Christian Muehlhaeuser
@@ -3244,6 +3336,8 @@ SOFTWARE.
 ================================================================================
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822
 ================================================================================
+
+--- LICENSE (github.com/munnerz/goautoneg) ---
 
 Copyright (c) 2011, Open Knowledge Foundation Ltd.
 All rights reserved.
@@ -3280,6 +3374,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 github.com/pb33f/ordered-map/v2 v2.3.1
 ================================================================================
+
+--- LICENSE (github.com/pb33f/ordered-map/v2) ---
 
                                  Apache License
                            Version 2.0, January 2004
@@ -3487,6 +3583,8 @@ github.com/pb33f/ordered-map/v2 v2.3.1
 github.com/pkg/errors v0.9.1
 ================================================================================
 
+--- LICENSE (github.com/pkg/errors) ---
+
 Copyright (c) 2015, Dave Cheney <dave@cheney.net>
 All rights reserved.
 
@@ -3515,6 +3613,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 github.com/rivo/uniseg v0.4.7
 ================================================================================
 
+--- LICENSE.txt (github.com/rivo/uniseg) ---
+
 MIT License
 
 Copyright (c) 2019 Oliver Kuederle
@@ -3541,6 +3641,8 @@ SOFTWARE.
 github.com/robfig/cron/v3 v3.0.1
 ================================================================================
 
+--- LICENSE (github.com/robfig/cron/v3) ---
+
 Copyright (C) 2012 Rob Figueiredo
 All Rights Reserved.
 
@@ -3566,6 +3668,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ================================================================================
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 ================================================================================
+
+--- LICENSE (github.com/santhosh-tekuri/jsonschema/v6) ---
 
 
                                  Apache License
@@ -3746,6 +3850,8 @@ github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 github.com/segmentio/asm v1.1.3
 ================================================================================
 
+--- LICENSE (github.com/segmentio/asm) ---
+
 MIT License
 
 Copyright (c) 2021 Segment
@@ -3772,6 +3878,8 @@ SOFTWARE.
 github.com/segmentio/encoding v0.5.4
 ================================================================================
 
+--- LICENSE (github.com/segmentio/encoding) ---
+
 MIT License
 
 Copyright (c) 2019 Segment.io, Inc.
@@ -3797,6 +3905,8 @@ SOFTWARE.
 ================================================================================
 github.com/spf13/pflag v1.0.7
 ================================================================================
+
+--- LICENSE (github.com/spf13/pflag) ---
 
 Copyright (c) 2012 Alex Ogier. All rights reserved.
 Copyright (c) 2012 The Go Authors. All rights reserved.
@@ -3831,6 +3941,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 github.com/x448/float16 v0.8.4
 ================================================================================
 
+--- LICENSE (github.com/x448/float16) ---
+
 MIT License
 
 Copyright (c) 2019 Montgomery Edwards⁴⁴⁸ and Faye Amacker
@@ -3858,6 +3970,8 @@ SOFTWARE.
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e
 ================================================================================
 
+--- LICENSE (github.com/xo/terminfo) ---
+
 The MIT License (MIT)
 
 Copyright (c) 2016 Anmol Sethi
@@ -3883,6 +3997,8 @@ SOFTWARE.
 ================================================================================
 github.com/yosida95/uritemplate/v3 v3.0.2
 ================================================================================
+
+--- LICENSE (github.com/yosida95/uritemplate/v3) ---
 
 Copyright (C) 2016, Kohei YOSHIDA <https://yosida95.com/>. All rights reserved.
 
@@ -3914,6 +4030,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 github.com/zclconf/go-cty v1.13.2
 ================================================================================
 
+--- LICENSE (github.com/zclconf/go-cty) ---
+
 MIT License
 
 Copyright (c) 2017-2018 Martin Atkins
@@ -3939,6 +4057,8 @@ SOFTWARE.
 ================================================================================
 golang.org/x/net v0.49.0
 ================================================================================
+
+--- LICENSE (golang.org/x/net) ---
 
 Copyright 2009 The Go Authors.
 
@@ -3972,6 +4092,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 golang.org/x/oauth2 v0.34.0
 ================================================================================
 
+--- LICENSE (golang.org/x/oauth2) ---
+
 Copyright 2009 The Go Authors.
 
 Redistribution and use in source and binary forms, with or without
@@ -4003,6 +4125,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 golang.org/x/sys v0.40.0
 ================================================================================
+
+--- LICENSE (golang.org/x/sys) ---
 
 Copyright 2009 The Go Authors.
 
@@ -4036,6 +4160,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 golang.org/x/term v0.39.0
 ================================================================================
 
+--- LICENSE (golang.org/x/term) ---
+
 Copyright 2009 The Go Authors.
 
 Redistribution and use in source and binary forms, with or without
@@ -4067,6 +4193,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 golang.org/x/text v0.33.0
 ================================================================================
+
+--- LICENSE (golang.org/x/text) ---
 
 Copyright 2009 The Go Authors.
 
@@ -4100,6 +4228,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 golang.org/x/time v0.11.0
 ================================================================================
 
+--- LICENSE (golang.org/x/time) ---
+
 Copyright 2009 The Go Authors.
 
 Redistribution and use in source and binary forms, with or without
@@ -4131,6 +4261,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 google.golang.org/genproto/googleapis/rpc v0.0.0-20250929231259-57b25ae835d4
 ================================================================================
+
+--- LICENSE (google.golang.org/genproto/googleapis/rpc) ---
 
 
                                  Apache License
@@ -4339,6 +4471,8 @@ google.golang.org/genproto/googleapis/rpc v0.0.0-20250929231259-57b25ae835d4
 google.golang.org/grpc v1.75.1
 ================================================================================
 
+--- LICENSE (google.golang.org/grpc) ---
+
 
                                  Apache License
                            Version 2.0, January 2004
@@ -4546,6 +4680,8 @@ google.golang.org/grpc v1.75.1
 google.golang.org/protobuf v1.36.10
 ================================================================================
 
+--- LICENSE (google.golang.org/protobuf) ---
+
 Copyright (c) 2018 The Go Authors. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -4578,6 +4714,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 gopkg.in/evanphx/json-patch.v4 v4.12.0
 ================================================================================
 
+--- LICENSE (gopkg.in/evanphx/json-patch.v4) ---
+
 Copyright (c) 2014, Evan Phoenix
 All rights reserved.
 
@@ -4607,6 +4745,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 gopkg.in/inf.v0 v0.9.1
 ================================================================================
+
+--- LICENSE (gopkg.in/inf.v0) ---
 
 Copyright (c) 2012 Péter Surányi. Portions Copyright (c) 2009 The Go
 Authors. All rights reserved.
@@ -4640,6 +4780,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ================================================================================
 gopkg.in/yaml.v3 v3.0.1
 ================================================================================
+
+--- LICENSE (gopkg.in/yaml.v3) ---
 
 
 This project is covered by two different licenses: MIT and Apache.
@@ -4712,6 +4854,8 @@ limitations under the License.
 go.uber.org/multierr v1.11.0
 ================================================================================
 
+--- LICENSE.txt (go.uber.org/multierr) ---
+
 Copyright (c) 2017-2021 Uber Technologies, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -4736,6 +4880,8 @@ THE SOFTWARE.
 go.uber.org/zap v1.27.0
 ================================================================================
 
+--- LICENSE (go.uber.org/zap) ---
+
 Copyright (c) 2016-2017 Uber Technologies, Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -4759,6 +4905,8 @@ THE SOFTWARE.
 ================================================================================
 go.yaml.in/yaml/v2 v2.4.2
 ================================================================================
+
+--- LICENSE (go.yaml.in/yaml/v2) ---
 
                                  Apache License
                            Version 2.0, January 2004
@@ -4962,6 +5110,40 @@ go.yaml.in/yaml/v2 v2.4.2
    See the License for the specific language governing permissions and
    limitations under the License.
 
+--- LICENSE.libyaml (go.yaml.in/yaml/v2) ---
+
+The following files were ported to Go from C files of libyaml, and thus
+are still covered by their original copyright and license:
+
+    apic.go
+    emitterc.go
+    parserc.go
+    readerc.go
+    scannerc.go
+    writerc.go
+    yamlh.go
+    yamlprivateh.go
+
+Copyright (c) 2006 Kirill Simonov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 --- NOTICE (go.yaml.in/yaml/v2) ---
 
 Copyright 2011-2016 Canonical Ltd.
@@ -4981,6 +5163,8 @@ limitations under the License.
 ================================================================================
 go.yaml.in/yaml/v4 v4.0.0-rc.2
 ================================================================================
+
+--- LICENSE (go.yaml.in/yaml/v4) ---
 
 
 This project is covered by two different licenses: MIT and Apache.
@@ -5052,6 +5236,8 @@ limitations under the License.
 ================================================================================
 k8s.io/api v0.33.3
 ================================================================================
+
+--- LICENSE (k8s.io/api) ---
 
 
                                  Apache License
@@ -5260,6 +5446,8 @@ k8s.io/api v0.33.3
 k8s.io/apimachinery v0.33.3
 ================================================================================
 
+--- LICENSE (k8s.io/apimachinery) ---
+
 
                                  Apache License
                            Version 2.0, January 2004
@@ -5466,6 +5654,8 @@ k8s.io/apimachinery v0.33.3
 ================================================================================
 k8s.io/client-go v0.33.3
 ================================================================================
+
+--- LICENSE (k8s.io/client-go) ---
 
 
                                  Apache License
@@ -5674,6 +5864,8 @@ k8s.io/client-go v0.33.3
 k8s.io/klog/v2 v2.130.1
 ================================================================================
 
+--- LICENSE (k8s.io/klog/v2) ---
+
 Apache License
 Version 2.0, January 2004
 http://www.apache.org/licenses/
@@ -5869,6 +6061,8 @@ third-party archives.
 ================================================================================
 k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff
 ================================================================================
+
+--- LICENSE (k8s.io/kube-openapi) ---
 
 
                                  Apache License
@@ -6077,6 +6271,8 @@ k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff
 k8s.io/utils v0.0.0-20250502105355-0f33e8f1c979
 ================================================================================
 
+--- LICENSE (k8s.io/utils) ---
+
 
                                  Apache License
                            Version 2.0, January 2004
@@ -6283,6 +6479,8 @@ k8s.io/utils v0.0.0-20250502105355-0f33e8f1c979
 ================================================================================
 sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8
 ================================================================================
+
+--- LICENSE (sigs.k8s.io/json) ---
 
 Files other than internal/golang/* licensed under:
 
@@ -6527,6 +6725,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 sigs.k8s.io/randfill v1.0.0
 ================================================================================
 
+--- LICENSE (sigs.k8s.io/randfill) ---
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -6761,6 +6961,8 @@ Submitted on behalf of a third-party: @disconnect3d (Disconnect3d)
 sigs.k8s.io/structured-merge-diff/v4 v4.6.0
 ================================================================================
 
+--- LICENSE (sigs.k8s.io/structured-merge-diff/v4) ---
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -6966,6 +7168,8 @@ sigs.k8s.io/structured-merge-diff/v4 v4.6.0
 ================================================================================
 sigs.k8s.io/yaml v1.5.0
 ================================================================================
+
+--- LICENSE (sigs.k8s.io/yaml) ---
 
 The MIT License (MIT)
 
