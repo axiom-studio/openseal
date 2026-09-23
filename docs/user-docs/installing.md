@@ -30,7 +30,7 @@ Published platforms:
 | darwin | arm64 |
 | windows | amd64 |
 
-Each archive contains the `openseal` binary, `LICENSE`, and `README.md`. Extract it and place the binary on your path:
+Each archive contains the `openseal` binary, `LICENSE`, `README.md`, and `THIRD_PARTY_NOTICES`. Extract it and place the binary on your path:
 
 ```bash
 tar -xzf openseal_<version>_linux_amd64.tar.gz
@@ -39,6 +39,20 @@ openseal version
 ```
 
 Continue from [Starting the Daemon](getting-started.md) once the binary is in place.
+
+### Third-Party Licence Notices
+
+OpenSeal is a statically linked binary, so the code of every library it links travels inside the artifact you downloaded. `THIRD_PARTY_NOTICES` reproduces the licence text of all of them, plus any `NOTICE` file a dependency carries under Apache-2.0 section 4(d). If you redistribute OpenSeal — repackaging it, bundling it, or shipping it inside your own product — that file is the attribution you are inheriting, and it travels with the binary rather than replacing your own obligations.
+
+Every artifact family carries it, so you never have to go looking for the right download:
+
+| Artifact | Where the notices are |
+|---|---|
+| Binary archive | `THIRD_PARTY_NOTICES`, beside the binary |
+| Container image | `/app/THIRD_PARTY_NOTICES` |
+| Desktop bundle | Bundled as an application resource |
+
+The file is regenerated from the dependency graph on every release, so it describes the build you have rather than a snapshot taken earlier.
 
 ### The Linux glibc Requirement
 
