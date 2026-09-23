@@ -1,12 +1,15 @@
 package commands
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -113,11 +116,31 @@ func startDaemonForAuth(t *testing.T, token string) (string, func()) {
 	}
 
 	command := exec.Command(os.Args[0], "-test.run=TestDaemonAuthHelperProcess")
-	command.Env = append(os.Environ(),
+	// An explicit environment, not os.Environ().
+	//
+	// daemonCmd fatals unless OPENSEAL_LLM_BASE_URL, OPENAI_API_KEY and
+	// OPENSEAL_LLM_MODEL are all set or all unset, so inheriting the
+	// developer's shell made `make test` fail on any machine with just
+	// OPENAI_API_KEY exported -- a very common thing to have. With all three
+	// set the failure inverts: the test daemon starts a real authoring worker
+	// against the developer's own LLM endpoint. OPENSEAL_SKILLS_DIR and every
+	// other OPENSEAL_* variable leaked the same way.
+	//
+	// These tests are about one thing: whether the daemon applies
+	// OPENSEAL_API_TOKEN. Nothing else from the ambient environment should be
+	// able to change their outcome.
+	command.Env = append(childEnv(),
 		"OPENSEAL_AUTH_HELPER=1",
 		"OPENSEAL_AUTH_CONFIG="+configPath,
 		"OPENSEAL_API_TOKEN="+token,
 	)
+	// The child's output is captured so a startup failure reports its reason.
+	// Left unset, its stderr goes nowhere and the only symptom is
+	// waitForDaemon timing out after 60 seconds with "daemon did not start
+	// listening", which names neither the cause nor the variable responsible.
+	output := &lockedBuffer{}
+	command.Stdout = output
+	command.Stderr = output
 	if err := command.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -127,14 +150,53 @@ func startDaemonForAuth(t *testing.T, token string) (string, func()) {
 	}
 
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	waitForDaemon(t, base, stop)
+	waitForDaemon(t, base, stop, output)
 	return base, stop
+}
+
+// childEnv is the environment the helper daemon runs with: enough to execute,
+// and nothing that can change what the test observes. Each entry is here for a
+// reason rather than because it happened to be exported.
+func childEnv() []string {
+	var env []string
+	for _, name := range []string{
+		"PATH",        // re-executing this test binary, and anything it shells out to
+		"HOME",        // Go and SQLite consult it; an unset HOME changes behaviour
+		"TMPDIR",      // the daemon writes temporary files
+		"TMP", "TEMP", // the Windows spellings of TMPDIR
+		"SYSTEMROOT", "USERPROFILE", // required for process creation on Windows
+		"GOCOVERDIR", // preserved so `go test -cover` still collects from the child
+	} {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
+}
+
+// lockedBuffer collects the child's output. exec.Cmd copies into it from its
+// own goroutine while the test reads it on timeout, so the two must not race.
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
 }
 
 // waitForDaemon blocks until the port answers. Any HTTP response means the
 // server is up — including a 401, which is the expected answer in the armed
 // case and must not be mistaken for the daemon not having started.
-func waitForDaemon(t *testing.T, base string, stop func()) {
+func waitForDaemon(t *testing.T, base string, stop func(), output *lockedBuffer) {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
@@ -146,7 +208,14 @@ func waitForDaemon(t *testing.T, base string, stop func()) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	stop()
-	t.Fatalf("daemon did not start listening on %s", base)
+	// The child's own output is the diagnosis. A bare "did not start" sends
+	// the reader looking at the network, when the cause is usually that the
+	// daemon exited during construction and said why.
+	logs := strings.TrimSpace(output.String())
+	if logs == "" {
+		logs = "(the daemon produced no output)"
+	}
+	t.Fatalf("daemon did not start listening on %s\n--- daemon output ---\n%s", base, logs)
 }
 
 // guardedRoute is a route behind the bearer gate, used to assert that the
