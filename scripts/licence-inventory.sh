@@ -53,9 +53,14 @@ while IFS= read -r module; do
   first=""
   if [ -n "$dir" ] && [ -d "$dir" ]; then
     # Common licence filenames, in the order a reviewer would look.
+    #
+    # `-print` piped through sed rather than `-printf '%f\n'`: `-printf` is a
+    # GNU extension that BSD and busybox find reject. This script is not on the
+    # release path, but it broke identically for any macOS developer running
+    # `make licence-inventory`. Fuller note in generate-third-party-notices.sh.
     file="$(find "$dir" -maxdepth 1 -type f \
       \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' -o -iname 'NOTICE*' \) \
-      -printf '%f\n' 2>/dev/null | LC_ALL=C sort)"
+      -print | sed 's#.*/##' | LC_ALL=C sort)"
     # First line only, taken in the shell rather than by piping into `head`,
     # which closes the pipe early and can SIGPIPE the producer under pipefail.
     file="${file%%$'\n'*}"
