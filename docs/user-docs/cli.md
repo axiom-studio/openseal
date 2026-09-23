@@ -29,7 +29,9 @@ Starts the durable kernel and the versioned API. See [Configuration](configurati
 | `--config` | Path to the daemon configuration file | `daemon.yaml` |
 | `--context` | Path to the standalone context file | `context.yaml` |
 | `--scope` | Durable standalone authoring scope as `kind:id` | `local:default` |
-| `--standalone-operator` | Grant local-operator authorities; requires a loopback listen address | off |
+| `--listen` | Override the configured API address; port `0` selects a free port | configuration value |
+| `--standalone-operator` | Grant local action, ClawHub, outreach, and authoring retry/refinement authorities; requires loopback | off |
+| `--desktop-operator` | Grant authenticated local workspace review and installation; requires loopback, `OPENSEAL_API_TOKEN`, and a local scope | off |
 | `--help` | Print help | — |
 
 A missing `--config` file is created with defaults. A missing `--context` file is treated as an unconfigured local credential source, not an error.

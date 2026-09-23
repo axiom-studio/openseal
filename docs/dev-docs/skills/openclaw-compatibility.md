@@ -29,7 +29,6 @@ Start the daemon in trusted loopback operator mode to enable registry
 mutations, then open the Skills workspace:
 
 ```bash
-# Set api.listenAddr to 127.0.0.1:8080 in local.yaml first.
 openseal daemon --config ./local.yaml --standalone-operator
 openseal tui --endpoint http://127.0.0.1:8080
 ```
