@@ -4,71 +4,19 @@ OpenSeal is designed for one of two deployments: a single-operator local process
 
 ## The Deployment Model
 
-Identity and authorization belong to the deployment rather than to the kernel. OpenSeal implements neither, and binds to loopback by default for that reason.
+Identity and authorization belong to the deployment rather than to the portable kernel. The plain daemon binds to loopback by default. An optional API bearer token protects all routes, and the desktop host supplies a token and local owner authority; this is not a multi-user role system.
 
 | Property | Where it lives |
 |---|---|
-| Authentication | Off unless you set `OPENSEAL_API_TOKEN`. With it set the daemon requires a bearer token on every route except `GET /api/v1/health`, which answers a container liveness probe without a credential; with it unset no credential is parsed and no route returns `401`. See [Enabling API Authentication](#enabling-api-authentication) below |
+| Authentication | The optional `OPENSEAL_API_TOKEN` bearer token protects every daemon route when set. A host or fronting proxy supplies identity-aware authentication for shared deployments |
 | Transport security | The embedding host, or a fronting proxy. The API server is plain HTTP — there is no TLS configuration, no certificate handling, and no TLS listener |
-| Authorization | The embedding host. There is no role model, no permission check, and no per-scope entitlement check on any route |
+| Authorization | The desktop's explicit local-owner mode or an embedding host. The bearer token alone supplies no roles or per-scope entitlements |
 
-> **Plan the deployment around that boundary.** With no token set, any process that can reach the listen address can call every route, including every mutation route. The default loopback bind is what keeps the boundary closed until a deployment deliberately opens it.
+> **Plan the deployment around that boundary.** Without `OPENSEAL_API_TOKEN`, any process that can reach the listen address can call available routes. With a token, callers must present it, but all token holders share the same daemon authority. Keep the API on loopback unless an authorizing host controls access.
 
-Note what authentication does and does not buy you here: a token establishes *that* a caller is authorized to use the API at all. It does not distinguish between callers, and it does not restrict which routes a caller may reach. Authorization remains the embedding host's job.
+## Local Guardrails
 
-## Enabling API Authentication
-
-Set `OPENSEAL_API_TOKEN` in the daemon's environment:
-
-```bash
-OPENSEAL_API_TOKEN="$(openssl rand -hex 32)" openseal daemon --config daemon.yaml
-```
-
-Every route then requires a bearer token, with one exception covered below:
-
-```bash
-curl -H "Authorization: Bearer $OPENSEAL_API_TOKEN" http://127.0.0.1:8080/api/v1/capabilities
-```
-
-| Request | Response |
-|---|---|
-| No `Authorization` header | `401`, with `WWW-Authenticate: Bearer realm="openseal"` |
-| Wrong token | `401` |
-| Correct token | the route's normal response |
-
-This applies on every path — the daemon, the container and the desktop sidecar — not only to the desktop app. The comparison is constant-time, and a request carrying more than one `Authorization` header is rejected.
-
-To confirm the token is actually in force, check that a request **without** it is refused:
-
-```bash
-curl -si http://127.0.0.1:8080/api/v1/capabilities | head -1
-# HTTP/1.1 401 Unauthorized
-```
-
-Use a route other than `/api/v1/health` for that check — see below.
-
-### The Health Route Is Exempt
-
-`GET /api/v1/health` answers without a credential, whether or not a token is set:
-
-```bash
-curl -s http://127.0.0.1:8080/api/v1/health
-# {"status":"ok"}
-```
-
-A container liveness probe cannot carry a credential — Docker's `HEALTHCHECK` and Compose's `healthcheck` run a fixed command with no access to the token — so gating this route would leave every authenticated container permanently `unhealthy`. The exemption is exact: `GET`, that path only. `POST` to the same path, and every other route, still requires the token.
-
-The route returns `{"status":"ok"}` and nothing else — no configuration, no identifiers, no store contents — so it discloses nothing that connecting to the port does not already reveal.
-
-The practical consequence is the one worth remembering: **a `curl` against `/api/v1/health` cannot tell you whether your token is armed**, because it returns `200` either way.
-
-**Leaving it unset leaves every route open.** That is the default, and it is deliberate: it keeps existing deployments working. It is also why the loopback bind matters. If you publish the API beyond loopback, set a token, put an authenticating proxy in front, or both.
-
-The desktop application sets this for you. It generates a token per launch and passes it to the sidecar it spawns, so the bundled daemon is never reachable without it.
-
-## The Two Guardrails
-
-The daemon compensates with two mechanisms, neither of which is a substitute for an authorization layer.
+The daemon uses a loopback default and explicit operator modes. The optional bearer token authenticates possession of one secret, not a person or tenant.
 
 ### Loopback by Default, With a Warning
 
@@ -88,7 +36,9 @@ OPENSEAL_API_TOKEN is set, so routes require a bearer token. There is still no
 authorization model: any holder of the token can call every route.
 ```
 
-The daemon starts anyway. The warning is a warning, not a refusal.
+The daemon starts anyway. The warning is a warning, not a refusal. Its wording
+describes the absence of built-in identity-aware authorization even when a
+shared bearer token is configured.
 
 #### Running in a Container
 
@@ -115,12 +65,14 @@ Widen the publish spec only together with an authenticating reverse proxy in fro
 | Action policy | Installs a policy naming a single approver, `user:local` |
 | Approval authorizer | Enables resolving action approvals |
 | ClawHub mutation authority | Enables install, update, pin, unpin, and uninstall |
-| Workforce lifecycle authority | Enables evaluate, approve, and apply, acting as `local-operator` |
+| Workforce authoring recovery | Enables generation retry and refinement as `local-operator`; evaluate, approve, and apply remain unavailable |
 | Outreach delivery dispatcher | Enables message delivery, for outreach-enabled scopes only |
 
 Running without the flag leaves those mutations unavailable rather than silently self-approving. That is the intended failure mode: absence of an authority produces a `501`, never an assumption.
 
-> **Standalone mode approves as a single local principal.** Every approval recorded in a standalone deployment carries the identity `user:local`, and the workforce authorizer acts as `local-operator`, regardless of who actually made the decision. Approval records are auditable, but they do not attribute. A deployment that needs to know which person approved something needs an embedding host that authenticates people.
+> **Standalone mode approves actions as a single local principal.** Its action approvals carry `user:local`, and authoring retry/refinement acts as `local-operator`. These records do not identify a person. A deployment needing individual attribution requires a host that authenticates people.
+
+The desktop's separate `--desktop-operator` mode requires a loopback listener, a nonempty `OPENSEAL_API_TOKEN`, and a local workspace scope. It provides local policy evaluation, owner review, and installation for that workspace. The native desktop host creates and retains the per-launch token; see [desktop development](../../desktop/README.md).
 
 ## Scopes Partition, Hosts Isolate
 
@@ -128,7 +80,7 @@ Every durable record is scoped, and a scope is the only tenancy primitive in the
 
 Scope validation accepts any non-empty `kind` and `id` pair. There is no registry of known scopes, no hierarchy, and no membership check. The kernel uses the scope to partition storage and to route work to the correct worker; deciding whether a caller is entitled to a given scope sits on the deployment side of the boundary.
 
-> **Tenant isolation is the host's half of the contract.** Since the kernel does not authenticate, any caller reaching it can supply any `scopeKind` and `scopeId` and be served the records in that partition. An embedding host provides isolation by authenticating the caller and constraining which scope values that caller may present — partitioning alone is not isolation.
+> **Tenant isolation is the host's half of the contract.** A caller with API access can supply scope values; the bearer token does not constrain them. An embedding host provides isolation by authenticating the caller and constraining which scope values that caller may present — partitioning alone is not isolation.
 
 ## Secret Handling
 
@@ -158,7 +110,7 @@ Two headers are reserved by the kernel protocol and cannot be overridden: `Conte
 
 Header names and values containing whitespace, colons, or line breaks are also rejected, which prevents header injection through the flag.
 
-> **The proxy is doing the authorization, not OpenSeal.** Header pass-through lets a client satisfy an external authority; it does not cause the daemon to evaluate one. A daemon behind a proxy is exactly as unauthenticated as one that is not — the proxy's job is to ensure nothing reaches the daemon that should not.
+> **The proxy is doing the authorization.** Header pass-through lets a client satisfy an external authority; it does not make the daemon evaluate roles or tenant entitlements. The proxy must ensure unauthorized requests cannot reach the daemon.
 
 ## Deployment Checklist
 
