@@ -254,7 +254,14 @@ jobs:
           command -v objdump >/dev/null 2>&1 || {
             echo "::error::objdump is required to check the glibc floor" >&2; exit 1; }
 
-          REQUIRED="$(objdump -T openseal | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)"
+          # `|| true` on the grep, not on the whole substitution: under
+          # `set -euo pipefail` a grep that matches nothing exits 1, pipefail
+          # propagates it, and set -e kills the assignment -- so the [ -z ]
+          # check below and its error message could never run. The step died
+          # with grep's silence in the log instead of the sentence written for
+          # exactly this case. objdump's own failure is still fatal, because
+          # only the grep is guarded.
+          REQUIRED="$(objdump -T openseal | { grep -o 'GLIBC_[0-9.]*' || true; } | sed 's/GLIBC_//' | sort -uV | tail -1)"
           if [ -z "$REQUIRED" ]; then
             echo "::error::could not determine the glibc requirement of the built binary" >&2
             exit 1
