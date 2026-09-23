@@ -18,7 +18,7 @@ operation is available.
 | --- | --- |
 | Kernel and embedding | [Runtime architecture](architecture/autonomous-agent-runtime.md), [REST API](api.md), [Operations](operations.md) |
 | Terminal client and commands | [Terminal UI](tui.md), [CLI reference](cli.md) |
-| Desktop app | [Desktop development](../../desktop/README.md), [REST API](api.md) |
+| Desktop app | [Desktop quick start](../../desktop/README.md), [Implementation notes](../../desktop/implementation-notes.md), [REST API](api.md) |
 | Model and credential setup | [Standalone context](standalone-context.md), [Operations](operations.md) |
 | Teams and workforces | [Team coordination](team-coordination.md), [Portable bundles](workforce-bundles.md), [Workforce identities](architecture/workforce-identities.md) |
 | Skills and deterministic work | [OpenClaw compatibility](skills/openclaw-compatibility.md), [Callable runbooks](callable-runbooks.md), [Runbook verification](runbook-verification.md) |
