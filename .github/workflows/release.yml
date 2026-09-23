@@ -916,6 +916,29 @@ jobs:
           echo "collected ${COUNT} installer(s) for ${{ matrix.label }} at version ${TAG_VERSION}:"
           ls -l "$OUT"
 
+          # Report the installer formats this leg actually produced, and flag
+          # any the documentation does not name.
+          #
+          # docs/user-docs/installing.md lists the formats every release
+          # produces and points at the release page for the rest, because
+          # bundle.targets is "all" and what that yields on a given runner
+          # cannot be read out of the repository — only observed. This step is
+          # where it first becomes observable, so it says so in the log rather
+          # than leaving the reconciliation to whoever remembers issue #5371.
+          DOCUMENTED="AppImage deb dmg msi"
+          PRODUCED="$(find "$OUT" -type f | sed 's#.*\.##' | LC_ALL=C sort -u | tr '\n' ' ')"
+          echo "installer formats on ${{ matrix.label }}: ${PRODUCED}"
+          EXTRA=""
+          for fmt in $PRODUCED; do
+            case " ${DOCUMENTED} " in
+              *" ${fmt} "*) ;;
+              *) EXTRA="${EXTRA} ${fmt}" ;;
+            esac
+          done
+          if [ -n "$EXTRA" ]; then
+            echo "::notice::${{ matrix.label }} also produced:${EXTRA} — installing.md names only the always-present formats. Reconcile its table and this step's filter against this release (issue #5371)."
+          fi
+
       - name: Report the signing posture
         run: |
           set -euo pipefail
