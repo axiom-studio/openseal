@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -189,6 +191,63 @@ func TestSQLiteArtifactCatalogSurvivesRestart(t *testing.T) {
 	}
 	if loaded.Digest != created.Artifact.Digest || loaded.Provenance.RequestID != "request-research" {
 		t.Fatalf("loaded = %#v", loaded)
+	}
+}
+
+func TestSQLiteArtifactCatalogPagesMatchMemoryFilters(t *testing.T) {
+	ctx := context.Background()
+	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "catalog.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlite.Close()
+	catalogs := []*ArtifactCatalog{NewArtifactCatalog(NewMemoryStore()), NewArtifactCatalog(sqlite)}
+	stamp := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	for _, catalog := range catalogs {
+		catalog.now = func() time.Time { return stamp }
+		for i := 0; i < 125; i++ {
+			artifact := validCatalogArtifact(fmt.Sprintf("artifact-%03d", i), 1)
+			if i%2 == 0 {
+				artifact.Provenance.Owner = &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}
+			}
+			if i%3 == 0 {
+				artifact.Type = "slides"
+				artifact.MediaType = "text/html"
+			}
+			if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: artifact}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The latest version changes owners, so filtering must select latest
+		// globally before applying the owner predicate.
+		latest := validCatalogArtifact("artifact-000", 2)
+		latest.ContentRef = "object-store:artifact-000-v2"
+		latest.Digest = digestFor("artifact-000-v2")
+		if _, err := catalog.Register(ctx, RegisterArtifactRequest{Artifact: latest, ExpectedLatestVersion: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owner := &ObjectiveOwner{Type: OwnerTypeAgent, ID: "alice"}
+	filters := []ArtifactFilter{
+		{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, LatestOnly: true, Limit: 25, Offset: 25},
+		{Scope: Scope{Kind: "tenant", ID: "one"}, Types: []string{" slides "}, MediaTypes: []string{"text/html"}, LatestOnly: true, Limit: 20, Offset: 20},
+		{Scope: Scope{Kind: "tenant", ID: "one"}, ProducerRunID: "run-research", ProducerRequestID: "request-research", Classifications: []ArtifactClassification{ArtifactClassificationInternal}, Limit: 100, Offset: 100},
+		{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: owner, EvidenceTarget: "https://forum.example/research/thread-7", Limit: 20, Offset: 40},
+	}
+	for _, filter := range filters {
+		pages := make([][]string, len(catalogs))
+		for i, catalog := range catalogs {
+			artifacts, err := catalog.List(ctx, filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, artifact := range artifacts {
+				pages[i] = append(pages[i], fmt.Sprintf("%s:%d", artifact.ID, artifact.Version))
+			}
+		}
+		if !reflect.DeepEqual(pages[0], pages[1]) {
+			t.Fatalf("filter %#v: memory page %v, sqlite page %v", filter, pages[0], pages[1])
+		}
 	}
 }
 
