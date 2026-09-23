@@ -37,7 +37,10 @@ state transition.
 - List filters and pagination are route-specific. Follow typed response fields;
   do not invent client-side pagination.
 
-Use `GET /api/v1/health` for a process liveness check.
+Use `GET /api/v1/health` for a process liveness check. If
+`OPENSEAL_API_TOKEN` is set, every route, including health and capability
+discovery, requires `Authorization: Bearer <token>` and returns `401` without
+it. This shared token does not provide per-user or per-scope authorization.
 
 ## Runtime and work
 
