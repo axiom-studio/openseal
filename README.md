@@ -1,23 +1,13 @@
 # OpenSeal
 
-![OpenSeal - autonomous agent kernel](./openseal.jpeg)
+![OpenSeal: Build Agents. Orchestrate Teams. Scale a Workforce.](assets/readme/open-seal-project.png)
 
 OpenSeal is a prompt-first, durable kernel for autonomous Agents and Teams. It
 provides one portable execution model for objectives, long-running Runs,
 collaboration, governed Skills, approvals, activity, artifacts, and recovery.
 Deterministic workflows remain available as an optional runbook layer.
 
-```mermaid
-flowchart LR
-    Intent[Prompt or event] --> Owner[Agent or Team]
-    Owner --> Objective[Objective portfolio]
-    Objective --> Run[Durable Run]
-    Run --> Turn[Bounded turn]
-    Turn --> Skill[Governed Skill action]
-    Skill -->|allowed| Result[Activity and artifacts]
-    Skill -->|approval required| Approval[Durable checkpoint]
-    Approval --> Turn
-```
+![OpenSeal architecture: a prompt or event flows through an Agent or Team, objectives, a durable Run, bounded turns, and governed Skills to activity and artifacts or a durable approval.](assets/readme/open-seal-architecture.png)
 
 ## Start locally
 
