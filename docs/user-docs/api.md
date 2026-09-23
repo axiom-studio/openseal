@@ -19,6 +19,7 @@ All routes are served under `/api/v1` from the address in `api.listenAddr`. Resp
 | Status | Description |
 |---|---|
 | 200 | Success |
+| 401 | Missing or invalid bearer token when `OPENSEAL_API_TOKEN` is configured |
 | 400 | Malformed request, missing scope, or invalid body |
 | 403 | Refused by policy |
 | 404 | Resource does not exist |
@@ -31,7 +32,7 @@ All routes are served under `/api/v1` from the address in `api.listenAddr`. Resp
 | 502 | An upstream registry or transport failed |
 | 503 | A required dependency is temporarily unavailable |
 
-> **No route returns `401 Unauthorized`, because no route authenticates.** This is not an omission in the documentation. See [Security](security.md).
+> **Bearer authentication is optional.** With `OPENSEAL_API_TOKEN`, every route requires `Authorization: Bearer <token>` and rejects missing or invalid tokens with `401`. The token does not supply individual identity or per-scope authorization. See [Security](security.md).
 
 ### Reading the Capability Document First
 
