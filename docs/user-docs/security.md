@@ -24,10 +24,10 @@ Set `OPENSEAL_API_TOKEN` in the daemon's environment:
 OPENSEAL_API_TOKEN="$(openssl rand -hex 32)" openseal daemon --config daemon.yaml
 ```
 
-Every route then requires a bearer token:
+Every route then requires a bearer token, with one exception covered below:
 
 ```bash
-curl -H "Authorization: Bearer $OPENSEAL_API_TOKEN" http://127.0.0.1:8080/api/v1/health
+curl -H "Authorization: Bearer $OPENSEAL_API_TOKEN" http://127.0.0.1:8080/api/v1/capabilities
 ```
 
 | Request | Response |
@@ -37,6 +37,30 @@ curl -H "Authorization: Bearer $OPENSEAL_API_TOKEN" http://127.0.0.1:8080/api/v1
 | Correct token | the route's normal response |
 
 This applies on every path — the daemon, the container and the desktop sidecar — not only to the desktop app. The comparison is constant-time, and a request carrying more than one `Authorization` header is rejected.
+
+To confirm the token is actually in force, check that a request **without** it is refused:
+
+```bash
+curl -si http://127.0.0.1:8080/api/v1/capabilities | head -1
+# HTTP/1.1 401 Unauthorized
+```
+
+Use a route other than `/api/v1/health` for that check — see below.
+
+### The Health Route Is Exempt
+
+`GET /api/v1/health` answers without a credential, whether or not a token is set:
+
+```bash
+curl -s http://127.0.0.1:8080/api/v1/health
+# {"status":"ok"}
+```
+
+A container liveness probe cannot carry a credential — Docker's `HEALTHCHECK` and Compose's `healthcheck` run a fixed command with no access to the token — so gating this route would leave every authenticated container permanently `unhealthy`. The exemption is exact: `GET`, that path only. `POST` to the same path, and every other route, still requires the token.
+
+The route returns `{"status":"ok"}` and nothing else — no configuration, no identifiers, no store contents — so it discloses nothing that connecting to the port does not already reveal.
+
+The practical consequence is the one worth remembering: **a `curl` against `/api/v1/health` cannot tell you whether your token is armed**, because it returns `200` either way.
 
 **Leaving it unset leaves every route open.** That is the default, and it is deliberate: it keeps existing deployments working. It is also why the loopback bind matters. If you publish the API beyond loopback, set a token, put an authenticating proxy in front, or both.
 
