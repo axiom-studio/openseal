@@ -180,30 +180,11 @@ jobs:
           git fetch -q --depth 1 origin "$GITHUB_SHA"
           git checkout -q --detach FETCH_HEAD
 
+      # Shared with the desktop job. See scripts/ci-setup-go.sh for why the
+      # hosted image's Go cannot be relied on and why the toolchain is pinned
+      # rather than left at GOTOOLCHAIN=auto.
       - name: Set up the Go toolchain named by go.mod
-        run: |
-          set -euo pipefail
-          WANT="$(awk '$1 == "go" { print $2; exit }' go.mod)"
-          if [ -z "$WANT" ]; then
-            echo "::error::could not read the go directive from go.mod" >&2
-            exit 1
-          fi
-          if ! command -v go >/dev/null 2>&1; then
-            echo "::error::no Go toolchain on ${{ matrix.runner }}; this job relies on the hosted image providing one" >&2
-            exit 1
-          fi
-          # GOTOOLCHAIN is left at its default (auto) on purpose. When the
-          # installed Go is older than the version go.mod requires, the go
-          # command fetches that exact toolchain as a module and verifies it
-          # against the Go checksum database. That is a stronger guarantee than
-          # downloading a tarball by hand, and it is identical on all four
-          # runners. Assert the result rather than trusting it.
-          GOT="$(go version | awk '{print $3}' | sed 's/^go//')"
-          echo "go.mod wants ${WANT}; toolchain resolved to ${GOT}"
-          if [ "$GOT" != "$WANT" ]; then
-            echo "::error::Go toolchain is ${GOT} but go.mod requires ${WANT}" >&2
-            exit 1
-          fi
+        run: ./scripts/ci-setup-go.sh
 
       - name: Build
         env:
@@ -674,15 +655,25 @@ jobs:
             patchelf \
             build-essential
 
+      # Runs BEFORE the preflight below, which would otherwise report `go`
+      # missing on the macOS legs — where the image ships no Go on PATH. Same
+      # script as the binary job; see scripts/ci-setup-go.sh.
+      - name: Set up the Go toolchain named by go.mod
+        run: ./scripts/ci-setup-go.sh
+
       - name: Check the toolchains this bundle needs
         run: |
           set -euo pipefail
           missing=""
+          # `go` is not in this list: the step above guarantees it and asserts
+          # its version, so repeating the check here would duplicate the one
+          # thing that has to stay in one place.
+          #
           # sed and find are used by this job's own steps and by
           # scripts/generate-third-party-notices.sh, which this job calls. They
           # were depended on without being declared — the same gap #5367 found
           # for awk, where a comment claimed a tool was listed and it was not.
-          for tool in go rustc cargo node npm jq awk sed find gh; do
+          for tool in rustc cargo node npm jq awk sed find gh; do
             command -v "$tool" >/dev/null 2>&1 || missing="${missing} ${tool}"
           done
           if [ -n "$missing" ]; then
@@ -693,13 +684,7 @@ jobs:
           # bundle ever ships without its daemon, this line identifies which
           # name was expected.
           rustc -vV | sed -n 's/^host: /rust host triple: /p'
-          WANT="$(awk '$1 == "go" { print $2; exit }' go.mod)"
-          GOT="$(go version | awk '{print $3}' | sed 's/^go//')"
-          if [ "$GOT" != "$WANT" ]; then
-            echo "::error::Go toolchain is ${GOT} but go.mod requires ${WANT}" >&2
-            exit 1
-          fi
-          echo "go ${GOT}, node $(node --version)"
+          echo "go $(go version | awk '{print $3}' | sed 's/^go//'), node $(node --version)"
 
       - name: Install pnpm
         run: |
