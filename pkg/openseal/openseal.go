@@ -5153,21 +5153,6 @@ func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment 
 	if err != nil {
 		return nil, fmt.Errorf("ensure Agent control channel for %s: %w", deployment.ID, err)
 	}
-	if _, _, err = e.conversations.CreateConversation(ctx, runtime.CreateConversationRequest{
-		Scope: scope,
-		Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: deployment.ID},
-		Title: "Approvals",
-		Origin: &runtime.ConversationReference{
-			Kind: runtime.ConversationReferenceAgentApprovals,
-			ID: AgentApprovalsConversationReferenceID(runtime.ObjectiveOwner{
-				Type: runtime.OwnerTypeAgent,
-				ID:   deployment.ID,
-			}),
-		},
-		IdempotencyKey: "agent-approvals:" + string(runtime.OwnerTypeAgent) + ":" + deployment.ID,
-	}); err != nil {
-		return nil, fmt.Errorf("ensure Agent approvals channel for %s: %w", deployment.ID, err)
-	}
 	return conversation, nil
 }
 
