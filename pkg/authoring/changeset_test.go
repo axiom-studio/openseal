@@ -770,9 +770,24 @@ func TestPrepareActivationReusesAppliedResourcesAndGovernedApply(t *testing.T) {
 		IdempotencyKey: "prepare-activation",
 	})
 	if err != nil || replayed || activation.ParentID != applied.ID || activation.Result.Candidate.Activation != WorkforceActivationActive ||
-		activation.Status != ChangeSetReview || activation.RequiredCredentials[created.Result.Candidate.Agents[0].ID][0] != "MODEL_PROVIDER" ||
-		activation.Placement.AgentExpectedRevisions[created.Result.Candidate.Agents[0].ID] < 1 || activation.Placement.TeamExpectedRevision < 1 {
+		activation.Status != ChangeSetReview || activation.Placement.TeamExpectedRevision < 1 {
 		t.Fatalf("activation=%#v replayed=%v err=%v", activation, replayed, err)
+	}
+	// Assert the agent count before indexing. Reading Agents[0] inside the
+	// compound condition above would panic on an empty slice rather than fail,
+	// taking the rest of the package's tests down with it — the exact shape
+	// that made the equivalent assertion in internal/server panic instead of
+	// reporting a stale key.
+	if len(created.Result.Candidate.Agents) != 1 {
+		t.Fatalf("created candidate agents = %d, want 1", len(created.Result.Candidate.Agents))
+	}
+	agentID := created.Result.Candidate.Agents[0].ID
+	if credentials := activation.RequiredCredentials[agentID]; len(credentials) != 1 || credentials[0] != "MODEL_PROVIDER" {
+		t.Fatalf("required credentials for Agent %q = %v, want [MODEL_PROVIDER]; all = %v",
+			agentID, credentials, activation.RequiredCredentials)
+	}
+	if revision := activation.Placement.AgentExpectedRevisions[agentID]; revision < 1 {
+		t.Fatalf("expected revision for Agent %q = %d, want >= 1", agentID, revision)
 	}
 	if replay, wasReplayed, replayErr := service.PrepareActivation(context.Background(), PrepareChangeSetActivationRequest{
 		Scope: scope, ChangeSetID: applied.ID, ExpectedRevision: applied.Revision, CandidateDigest: applied.CandidateDigest,
