@@ -143,13 +143,29 @@ while IFS= read -r module; do
 
   # A NOTICE file carries its own obligation under Apache-2.0 section 4(d), so
   # it is reproduced in addition to the licence rather than instead of it.
-  if [ -n "$dir" ] && [ -f "${dir}/NOTICE" ]; then
-    {
-      echo "--- NOTICE (${module}) ---"
-      echo
-      cat "${dir}/NOTICE"
-      echo
-    } >> "$tmp"
+  #
+  # Matched by name rather than tested as the exact path "$dir/NOTICE", and
+  # every match reproduced rather than one. The exact test dropped
+  # google.golang.org/grpc's NOTICE.txt from every artifact -- the same class
+  # of defect as the licence branch's "first file only", surviving one branch
+  # away because that fix did not reach this code path.
+  if [ -n "$dir" ] && [ -d "$dir" ]; then
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      {
+        echo "--- ${name} (${module}) ---"
+        echo
+        cat "${dir}/${name}"
+        echo
+      } >> "$tmp"
+    done <<< "$(notice_files "$dir")"
+
+    # A NOTICE-like file the allowlist did not recognise is reported rather
+    # than dropped. Silence is how NOTICE.txt went missing in the first place.
+    while IFS= read -r name; do
+      [ -n "$name" ] || continue
+      echo "warning: ${module} ships ${name}, which looks like an attribution notice but is not one of NOTICE, NOTICE.txt or NOTICE.md; it was NOT reproduced" >&2
+    done <<< "$(notice_files_unrecognised "$dir")"
   fi
 done <<< "$modules"
 
