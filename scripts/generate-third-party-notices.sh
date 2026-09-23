@@ -26,11 +26,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-OUT="${1:-THIRD_PARTY_NOTICES}"
-MODULE="$(go list -m)"
+# shellcheck source=scripts/lib/licence-common.sh
+. "$(dirname "$0")/lib/licence-common.sh"
 
-modules="$(go list -deps -f '{{if .Module}}{{.Module.Path}}{{end}}' ./cmd/openseal \
-  | sort -u | grep -v '^$' | grep -Fxv "$MODULE")"
+OUT="${1:-THIRD_PARTY_NOTICES}"
+
+modules="$(licence_modules)"
 
 count="$(printf '%s\n' "$modules" | grep -c . || true)"
 
@@ -84,39 +85,22 @@ while IFS= read -r module; do
 
   files=""
   if [ -n "$dir" ] && [ -d "$dir" ]; then
-    # `-print` piped through sed, NOT `-printf '%f\n'`. `-printf` is a GNU
-    # extension: BSD find — /usr/bin/find on both macOS legs — and busybox find
-    # reject it outright. Under `set -e` that killed this assignment at the
-    # FIRST module, so the desktop release legs produced no notices file at all,
-    # which failed the desktop job and with it the whole release.
+    # No NOTICE* here: it is reproduced separately below under its own heading
+    # for Apache-2.0 section 4(d), and matching it as a licence would emit it
+    # twice. See licence_files in scripts/lib/licence-common.sh for why the
+    # lookup is shaped the way it is.
     #
-    # `-maxdepth` and `-iname` are also outside POSIX but are implemented by
-    # both BSD and busybox find, so they stay.
-    #
-    # sed drains its input, so it cannot close the pipe early and SIGPIPE find
-    # under pipefail — the hazard that broke the changelog step in #3735 and
-    # came back in #5381. `-exec basename {} \;` would also be portable but
-    # spawns a process per file across every linked module.
-    #
-    # No `2>/dev/null` here. Suppressing the diagnostic never suppressed the
-    # exit status; it only made this exact failure silent and cost a QA cycle
-    # to diagnose.
     # The status is captured rather than left to `set -e`, so this script emits
-    # its OWN diagnostic instead of relying on the tool to have emitted one.
-    #
-    # Every `find` available to test here does speak up on failure — bfs,
-    # busybox and GNU findutils all write to stderr for a bad primary or a
-    # missing directory — so this is not a reachable silence today. But the
-    # previous wording of that claim was universal, and a `find` that exits
-    # non-zero printing nothing falsified it in one test. Delegating the
-    # diagnostic and asserting that no path is silent are different things;
-    # this makes the code match the claim rather than softening the claim.
-    if ! files="$(find "$dir" -maxdepth 1 -type f \
-      \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \) \
-      -print | sed 's#.*/##' | LC_ALL=C sort)"; then
+    # its OWN diagnostic instead of relying on find to have emitted one. Every
+    # find available to test here does speak up on failure, so this is not a
+    # reachable silence today — but the previous wording of that claim was
+    # universal, and a find that exits non-zero printing nothing falsified it
+    # in one test. Delegating the diagnostic and asserting that no path is
+    # silent are different things.
+    if ! files="$(licence_files "$dir")"; then
       echo "error: the licence-file lookup failed for ${module}" >&2
       echo "       directory: ${dir}" >&2
-      echo "       command:   find <dir> -maxdepth 1 -type f \\( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \\) -print | sed | sort" >&2
+      echo "       lookup:    licence_files (scripts/lib/licence-common.sh)" >&2
       echo "       ${OUT} has NOT been written." >&2
       exit 1
     fi
