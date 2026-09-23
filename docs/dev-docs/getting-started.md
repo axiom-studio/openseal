@@ -53,8 +53,9 @@ The first response is `{"status":"ok"}`. The second response is authoritative:
 it lists the capability versions and operations available in this particular
 daemon. An operation omitted from that document is not available.
 
-> The repository's checked-in `daemon.yaml` and a generated `local.yaml` both
-> use `127.0.0.1:8080` unless you explicitly change `api.listenAddr`.
+> The repository does not include a root `daemon.yaml`. A missing configuration
+> file is created with `127.0.0.1:8080`; use `api.listenAddr` or `--listen` to
+> change it.
 
 ## Open the terminal workspace
 
@@ -93,25 +94,24 @@ The YAML contains `baseURL`, `model`, and the opaque reference
 owner-only file sources are resolved only when needed. See
 [Standalone context and local Vault](standalone-context.md).
 
-Start the local operator surface with an explicitly loopback listener:
+Restart with the local operator surface after stopping the first daemon:
 
 ```bash
-# Set api.listenAddr to 127.0.0.1:8080 in local.yaml first.
 ./openseal daemon \
   --config ./local.yaml \
   --context ./context.yaml \
   --standalone-operator
 ```
 
-`--standalone-operator` enables trusted local ClawHub mutations, refinement
-answers, and generation retry
-only when the API listen address is explicitly loopback, such as
-`127.0.0.1:8080`. The default `:8080` wildcard is intentionally rejected. This
-mode is not an authentication system. Credential placement exposes only the
-context's secret-free display names and opaque references. Evaluation,
-approval, and Apply still require an embedding host with explicit lifecycle
-authority. Networked and multi-user deployments must supply identity,
-authorization, and Vault/KMS-backed resolution through that boundary.
+`--standalone-operator` enables local action approval decisions, ClawHub
+mutations, governed outreach where configured, refinement answers, and generation
+retry. It requires a loopback listener; the generated default already uses
+`127.0.0.1:8080`. This flag does not authorize workforce evaluation, approval,
+or Apply. Those steps need the authenticated desktop mode or an embedding host
+with lifecycle authority. Credential placement exposes only the context's
+secret-free display names and opaque references. Networked and multi-user
+deployments must supply identity, authorization, and Vault/KMS-backed resolution
+through the host boundary.
 
 Authoring is a review process:
 
@@ -129,7 +129,7 @@ sequenceDiagram
     K-->>C: Candidate or next refinement
     U->>C: Answer / place credentials / review
     C->>K: Evaluate and decide requirements
-    U->>C: Apply reviewed digest (authorized host)
+    U->>C: Apply reviewed digest (desktop or authorized host)
     C->>K: Atomic apply
     K-->>C: Receipt with created resources
 ```

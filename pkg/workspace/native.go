@@ -4,6 +4,7 @@ const (
 	OperationListDirectory = "workspace.list_directory"
 	OperationReadFile      = "workspace.read_file"
 	OperationSearchFiles   = "workspace.search_files"
+	OperationBatchRead     = "workspace.batch_read"
 	OperationWriteFile     = "workspace.write_file"
 	OperationApplyPatch    = "workspace.apply_patch"
 	OperationRunCommand    = "workspace.run_command"
@@ -27,6 +28,7 @@ func Operations(authority *Authority) []Operation {
 		{Name: OperationListDirectory, Description: "List bounded entries below a Workspace-relative path.", InputSchema: listInput()},
 		{Name: OperationReadFile, Description: "Read a bounded UTF-8 file from the Workspace.", InputSchema: pathInput()},
 		{Name: OperationSearchFiles, Description: "Search Workspace files for text or a regular expression.", InputSchema: searchInput()},
+		{Name: OperationBatchRead, Description: "Run two to eight independent Workspace list, read, or search requests concurrently and return their results in request order. Use only when no request depends on another result.", InputSchema: batchReadInput()},
 	}
 	if authority.Workspace.Policy.Filesystem == AccessReadWrite {
 		result = append(result,
@@ -44,6 +46,29 @@ func Operations(authority *Authority) []Operation {
 		}
 	}
 	return result
+}
+
+func batchReadInput() map[string]interface{} {
+	branches := []interface{}{}
+	for _, item := range []struct {
+		name   string
+		schema map[string]interface{}
+	}{{OperationListDirectory, listInput()}, {OperationReadFile, pathInput()}, {OperationSearchFiles, searchInput()}} {
+		branches = append(branches, map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"required": []interface{}{"operation", "arguments"},
+			"properties": map[string]interface{}{
+				"operation": map[string]interface{}{"type": "string", "const": item.name},
+				"arguments": item.schema,
+			},
+		})
+	}
+	return map[string]interface{}{
+		"type": "object", "additionalProperties": false, "required": []interface{}{"calls"},
+		"properties": map[string]interface{}{
+			"calls": map[string]interface{}{"type": "array", "minItems": 2, "maxItems": 8, "items": map[string]interface{}{"oneOf": branches}},
+		},
+	}
 }
 
 func gitCloneInput() map[string]interface{} {

@@ -2,6 +2,19 @@
 
 These pages describe OpenSeal: what it is, how to run it, and what its API, terminal client, and Go facade provide. Use them when evaluating OpenSeal, standing up a first deployment, or building against its API.
 
+## Start here
+
+| Goal | First guide | Then read |
+| --- | --- | --- |
+| Run the daemon and terminal client | [Getting started](getting-started.md) | [Configuration](configuration.md) and [Security](security.md) |
+| Explore the desktop app | [Desktop quick start](../../desktop/README.md#start-desktop-development) | [Agents and Teams](agents-and-teams.md) |
+| Generate and install a workforce | [Workforces](workforces.md) | [Security](security.md) for the authority boundary |
+| Build a client or embed the kernel | [Core concepts](concepts.md) | [API reference](api.md) and [developer guides](../dev-docs/README.md) |
+
+The daemon and terminal client can run without a model provider. Proposal
+generation needs provider configuration; review and installation need the
+authenticated desktop mode or an embedding host.
+
 ## What is OpenSeal?
 
 OpenSeal is a prompt-first, durable kernel for autonomous Agents and Teams. It ships as a single Go binary that runs a background daemon, a versioned HTTP API, and a terminal client, and it is also importable as a Go library.
