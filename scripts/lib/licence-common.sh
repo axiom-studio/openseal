@@ -45,9 +45,20 @@ licence_modules() {
 #
 # No 2>/dev/null: suppressing the diagnostic never suppressed the exit status,
 # it only made a failure silent. The caller decides what to do with a failure.
+# `! -iname '*.go'` for the same reason notice_files_unrecognised carries it:
+# a module can ship source whose name matches these globs. github.com/lib/pq
+# ships notice.go, and license.go or copying.go at a module root is equally
+# possible. Reproducing Go source as the licence grant is worse than omitting
+# one, because it looks like diligence and a reviewer has no reason to doubt it.
+#
+# No linked module matches both today -- checked across all 86 -- so this is a
+# guard, not a fix. It is here because the opposite decision is written thirty
+# lines below for the identical hazard, and two helpers in one file disagreeing
+# about whether Go source can be attribution is the shape that produced #5403
+# and #5404.
 licence_files() {
   local dir="$1"
-  find "$dir" -maxdepth 1 -type f \
+  find "$dir" -maxdepth 1 -type f ! -iname '*.go' \
     \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \) \
     -print | sed 's#.*/##' | LC_ALL=C sort
 }
