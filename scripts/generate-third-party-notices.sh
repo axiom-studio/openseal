@@ -149,7 +149,33 @@ while IFS= read -r module; do
   # google.golang.org/grpc's NOTICE.txt from every artifact -- the same class
   # of defect as the licence branch's "first file only", surviving one branch
   # away because that fix did not reach this code path.
+  # The lookups are assigned FIRST, so their exit status is checked. A
+  # here-string discards it -- `done <<< "$(notice_files "$dir")"` runs one
+  # empty iteration and continues, even under `set -euo pipefail`:
+  #
+  #   $ bash -c 'set -euo pipefail; f(){ return 7; }
+  #              while read -r x; do :; done <<< "$(f)"; echo REACHED'
+  #   REACHED          exit=0
+  #
+  # A failing lookup would therefore drop every NOTICE for that module in
+  # silence. The licence branch above has been guarded since the start; this
+  # branch was not, which is the same asymmetry that dropped grpc's NOTICE.txt.
   if [ -n "$dir" ] && [ -d "$dir" ]; then
+    if ! notices="$(notice_files "$dir")"; then
+      echo "error: the notice-file lookup failed for ${module}" >&2
+      echo "       directory: ${dir}" >&2
+      echo "       lookup:    notice_files (scripts/lib/licence-common.sh)" >&2
+      echo "       ${OUT} has NOT been written." >&2
+      exit 1
+    fi
+    if ! unrecognised="$(notice_files_unrecognised "$dir")"; then
+      echo "error: the unrecognised-notice scan failed for ${module}" >&2
+      echo "       directory: ${dir}" >&2
+      echo "       lookup:    notice_files_unrecognised (scripts/lib/licence-common.sh)" >&2
+      echo "       ${OUT} has NOT been written." >&2
+      exit 1
+    fi
+
     while IFS= read -r name; do
       [ -n "$name" ] || continue
       {
@@ -158,14 +184,14 @@ while IFS= read -r module; do
         cat "${dir}/${name}"
         echo
       } >> "$tmp"
-    done <<< "$(notice_files "$dir")"
+    done <<< "$notices"
 
     # A NOTICE-like file the allowlist did not recognise is reported rather
     # than dropped. Silence is how NOTICE.txt went missing in the first place.
     while IFS= read -r name; do
       [ -n "$name" ] || continue
       echo "warning: ${module} ships ${name}, which looks like an attribution notice but is not one of NOTICE, NOTICE.txt or NOTICE.md; it was NOT reproduced" >&2
-    done <<< "$(notice_files_unrecognised "$dir")"
+    done <<< "$unrecognised"
   fi
 done <<< "$modules"
 
