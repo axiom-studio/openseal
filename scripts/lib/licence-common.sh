@@ -51,3 +51,39 @@ licence_files() {
     \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \) \
     -print | sed 's#.*/##' | LC_ALL=C sort
 }
+
+# notice_files prints the attribution-notice filenames at a module root, one
+# per line, sorted. $1 is the module directory.
+#
+# An explicit allowlist -- NOTICE, NOTICE.txt, NOTICE.md -- and deliberately
+# NOT a NOTICE* glob.
+#
+# github.com/lib/pq ships notice.go, notice_example_test.go and notice_test.go.
+# A NOTICE* glob would reproduce Go SOURCE into THIRD_PARTY_NOTICES as though
+# it were an attribution notice. That is worse than omitting one: it looks like
+# diligence and is not, and a reviewer would have no reason to doubt it.
+#
+# The exact-name test this replaces (`[ -f "$dir/NOTICE" ]`) dropped
+# google.golang.org/grpc's NOTICE.txt from every artifact -- an Apache-2.0
+# section 4(d) notice the project is obliged to carry.
+notice_files() {
+  local dir="$1"
+  find "$dir" -maxdepth 1 -type f \
+    \( -iname 'NOTICE' -o -iname 'NOTICE.txt' -o -iname 'NOTICE.md' \) \
+    -print | sed 's#.*/##' | LC_ALL=C sort
+}
+
+# notice_files_unrecognised prints NOTICE-like filenames the allowlist did not
+# accept, excluding Go source. $1 is the module directory.
+#
+# An allowlist trades completeness for safety: a future dependency shipping
+# NOTICE.rst would be dropped exactly as grpc's NOTICE.txt was. This turns that
+# residual from silent into loud. It is deliberately quiet about *.go, because
+# lib/pq's notice*.go files are the reason the allowlist exists and warning
+# about them every run would train the reader to ignore the warning.
+notice_files_unrecognised() {
+  local dir="$1"
+  find "$dir" -maxdepth 1 -type f -iname 'NOTICE*' ! -iname '*.go' -print \
+    | sed 's#.*/##' | LC_ALL=C sort \
+    | { grep -vixE 'NOTICE|NOTICE\.txt|NOTICE\.md' || true; }
+}
