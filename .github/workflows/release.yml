@@ -413,15 +413,21 @@ jobs:
           # org name's casing is whatever GitHub reports.
           IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
 
-          # Only the version tag is pushed here. `:latest` is moved after the
-          # verification step, never before.
+          # Only the version tag is pushed here. `:latest` moves in the
+          # `promote-latest` job, which is `needs: release`.
           #
           # Pushing both up front meant a run whose verification failed still
           # left `:latest` resolving to the new image: `docker pull …:latest`
           # would return an image from a release that was abandoned as broken,
-          # for a version the GitHub release never advertised. The binary path
-          # already gets this right by staying a draft until everything passes;
-          # this brings images in line with the same guarantee.
+          # for a version the GitHub release never advertised.
+          #
+          # Moving it after verification fixed that but not the wider case: this
+          # job is `needs: prepare`, so verifying here says nothing about whether
+          # `binary` and `desktop` succeeded, or whether a release was ever
+          # published. Gating on `release` is what actually matches the
+          # draft-release guarantee — nothing user-visible until assembly
+          # succeeds. The versioned tag is fine to push here: it is immutable and
+          # a user has to ask for it by name.
           docker buildx build \
             --platform "$(echo "$PLATFORMS" | tr ' ' ',')" \
             --tag "${IMAGE}:${VERSION}" \
@@ -570,25 +576,6 @@ jobs:
           fi
           echo "all platforms verified: ${PLATFORMS}"
 
-      - name: Move :latest to the verified image
-        run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
-          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
-
-          # Only now, and only for a final release. A pre-release such as
-          # v0.2.0-rc1 keeps its version tag and nothing else, so `:latest`
-          # never silently points at a release candidate.
-          case "${GITHUB_REF_NAME}" in
-            *-*)
-              echo "pre-release ${GITHUB_REF_NAME}: leaving :latest where it is"
-              exit 0 ;;
-          esac
-
-          # imagetools copies the existing multi-arch manifest rather than
-          # rebuilding, so :latest resolves to the exact bytes just verified.
-          docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
-          echo "moved ${IMAGE}:latest to the verified ${VERSION} image"
 
   # ---------------------------------------------------------------------------
   # Desktop application bundles.
@@ -1203,3 +1190,58 @@ jobs:
           # Everything above this line is reversible by deleting a draft.
           gh release edit "${GITHUB_REF_NAME}" --draft=false
           echo "published ${GITHUB_REF_NAME}"
+
+  # ---------------------------------------------------------------------------
+  # Move :latest only once the release is genuinely published.
+  #
+  # This used to run inside the `container` job, which is `needs: prepare` only.
+  # That gated it on the container verifying itself and nothing else: if the
+  # desktop or binary job then failed, `release` never ran, the GitHub release
+  # stayed a draft forever -- and `:latest` was already serving an image for a
+  # version with no release page, no notes and no checksums.txt.
+  #
+  # `needs: release` is the whole fix. The versioned tag is unaffected and still
+  # publishes from the container job: it is immutable and a user has to ask for
+  # it by name, whereas `:latest` is what an unqualified `docker pull` resolves
+  # to.
+  #
+  # A separate job rather than a step appended to `release`, so the token stays
+  # least-privilege: `release` keeps `contents: write` and this job takes only
+  # `packages: write`.
+  promote-latest:
+    name: Point :latest at the published release
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      packages: write
+
+    steps:
+      - name: Log in to the container registry
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Move :latest to the published image
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE="ghcr.io/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+
+          # Only for a final release. A pre-release such as v0.2.0-rc1 keeps its
+          # version tag and nothing else, so `:latest` never silently points at
+          # a release candidate.
+          case "${GITHUB_REF_NAME}" in
+            *-*)
+              echo "pre-release ${GITHUB_REF_NAME}: leaving :latest where it is"
+              exit 0 ;;
+          esac
+
+          # imagetools copies the existing multi-arch manifest rather than
+          # rebuilding, so :latest resolves to the exact bytes the container job
+          # built and verified.
+          docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${VERSION}"
+          echo "moved ${IMAGE}:latest to the published ${VERSION} image"
