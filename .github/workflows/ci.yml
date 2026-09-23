@@ -153,9 +153,28 @@ jobs:
           # LC_ALL=C on both the sort and the later comm: sort's locale
           # collation and comm's byte comparison disagree on paths containing
           # '/' and '.', which makes comm warn and its output unreliable.
+          # The comparison covers module path AND version, deliberately.
+          #
+          # This was a real judgement call, so the reasoning is recorded rather
+          # than left to be re-derived. The argument against is that this gate
+          # exists because module resolution was observed to differ between the
+          # runner and a dev host, and a comparison that is sensitive to more
+          # fields could fail on correct code again.
+          #
+          # It does not apply to versions. Licence TEXT varies between module
+          # caches, which is why the byte comparison had to go. Versions do not:
+          # they come from the module graph, and minimum version selection is
+          # deterministic given go.mod and go.sum. If the same module ever did
+          # resolve to two different versions on two hosts, that is a go.sum
+          # integrity problem and failing CI is the correct response, not a
+          # false positive.
+          #
+          # And a version bump is the most common dependency change there is —
+          # the case this check was originally written for. On paths alone the
+          # gate misses it while still reading as though it covers it.
           extract_modules() {
             grep -A1 '^=\{80\}$' "$1" | grep -v '^=\{80\}$' | grep -v '^--$' \
-              | awk 'NF {print $1}' | LC_ALL=C sort -u
+              | awk 'NF {print $1" "$2}' | LC_ALL=C sort -u
           }
           extract_modules THIRD_PARTY_NOTICES > /tmp/mods.committed
           extract_modules /tmp/notices.generated > /tmp/mods.generated
@@ -176,10 +195,10 @@ jobs:
             echo "committed: $(wc -l < /tmp/mods.committed) modules"
             echo "resolved here: $(wc -l < /tmp/mods.generated) modules"
             echo
-            echo "only in the committed file:"
+            echo "only in the committed file (path and version):"
             LC_ALL=C comm -23 /tmp/mods.committed /tmp/mods.generated || true
             echo
-            echo "only resolved on this runner:"
+            echo "only resolved on this runner (path and version):"
             LC_ALL=C comm -13 /tmp/mods.committed /tmp/mods.generated || true
           } >&2
           exit 1
