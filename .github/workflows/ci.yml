@@ -145,7 +145,23 @@ jobs:
       - name: Third-party notices cover the current module set
         run: |
           set -euo pipefail
-          ./scripts/generate-third-party-notices.sh /tmp/notices.generated
+          # Run-scoped, matching the GO_ROOT idiom three steps above, and for
+          # the same reason that step states: this is the repository's only
+          # `self-hosted` job, the runner is shared with other repositories'
+          # jobs running as the same user, and `concurrency` is keyed on
+          # github.ref — so it serialises pushes to one PR but not two
+          # different PRs on the same host.
+          #
+          # With fixed paths that needs no attacker to go wrong. Run A writes
+          # mods.committed from its tree; run B overwrites mods.generated from
+          # its tree before A reaches `cmp`; A then decides by comparing its
+          # own committed set against B's resolved set, and the log gives no
+          # sign of it. The verdict of a build-time control must not be
+          # readable or writable by an unrelated job.
+          NOTICES_TMP="${RUNNER_TEMP:-/tmp}/openseal-notices-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          rm -rf "$NOTICES_TMP"
+          mkdir -p "$NOTICES_TMP"
+          ./scripts/generate-third-party-notices.sh "${NOTICES_TMP}/notices.generated"
 
           # Module headers are the lines between the two rule lines of each
           # block. grep -c would be enough to count, but the sets are what
@@ -222,13 +238,13 @@ jobs:
             fi
           }
 
-          extract_modules THIRD_PARTY_NOTICES > /tmp/mods.committed
-          extract_modules /tmp/notices.generated > /tmp/mods.generated
-          check_parse THIRD_PARTY_NOTICES /tmp/mods.committed
-          check_parse /tmp/notices.generated /tmp/mods.generated
+          extract_modules THIRD_PARTY_NOTICES > "${NOTICES_TMP}/mods.committed"
+          extract_modules "${NOTICES_TMP}/notices.generated" > "${NOTICES_TMP}/mods.generated"
+          check_parse THIRD_PARTY_NOTICES "${NOTICES_TMP}/mods.committed"
+          check_parse "${NOTICES_TMP}/notices.generated" "${NOTICES_TMP}/mods.generated"
 
-          if cmp -s /tmp/mods.committed /tmp/mods.generated; then
-            echo "third-party notices cover the current module set ($(wc -l < /tmp/mods.committed) modules)"
+          if cmp -s "${NOTICES_TMP}/mods.committed" "${NOTICES_TMP}/mods.generated"; then
+            echo "third-party notices cover the current module set ($(wc -l < "${NOTICES_TMP}/mods.committed") modules)"
             exit 0
           fi
 
@@ -240,14 +256,14 @@ jobs:
           echo "::error::THIRD_PARTY_NOTICES does not cover the current module set" >&2
           echo "::error::run 'make third-party-notices' and commit the result" >&2
           {
-            echo "committed: $(wc -l < /tmp/mods.committed) modules"
-            echo "resolved here: $(wc -l < /tmp/mods.generated) modules"
+            echo "committed: $(wc -l < "${NOTICES_TMP}/mods.committed") modules"
+            echo "resolved here: $(wc -l < "${NOTICES_TMP}/mods.generated") modules"
             echo
             echo "only in the committed file (path and version):"
-            LC_ALL=C comm -23 /tmp/mods.committed /tmp/mods.generated || true
+            LC_ALL=C comm -23 "${NOTICES_TMP}/mods.committed" "${NOTICES_TMP}/mods.generated" || true
             echo
             echo "only resolved on this runner (path and version):"
-            LC_ALL=C comm -13 /tmp/mods.committed /tmp/mods.generated || true
+            LC_ALL=C comm -13 "${NOTICES_TMP}/mods.committed" "${NOTICES_TMP}/mods.generated" || true
           } >&2
           exit 1
 
