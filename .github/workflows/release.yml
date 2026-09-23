@@ -1117,15 +1117,27 @@ jobs:
               echo "failed to open kernel store: migrate: unable to open database file: no such file or directory"
               echo '```'
               echo
-              echo "The first is the usual case, for a volume that already holds data. The second appears when the volume is root-owned but empty. Neither message names ownership or permissions. Fix the ownership once:"
+              echo "The first is the usual case, for a volume that already holds data. The second appears when the volume is root-owned but empty. Neither message names ownership or permissions. Fix the ownership once."
+              echo
+              echo "**If you run Compose**, from the directory holding your \`docker-compose.yml\`:"
               echo
               echo '```bash'
-              echo "docker run --rm -v openseal-data:/app/data --user root \\"
+              echo "docker compose run --rm --user root --entrypoint chown openseal \\"
+              echo "  -R openseal:openseal /app/data"
+              echo '```'
+              echo
+              echo "Compose is what resolves the volume. It declares \`openseal-data\` without a \`name:\`, so the volume is really called \`<project>_openseal-data\` — \`openseal_openseal-data\` for a directory named \`openseal\`. A plain \`docker run -v openseal-data:...\` would not fail on that name: Docker would **create** a new, empty volume, chown it, exit 0, and leave your data still owned by root."
+              echo
+              echo "**If you run the container directly**, name the volume exactly as you mounted it:"
+              echo
+              echo '```bash'
+              echo "docker volume ls   # find the volume you mounted"
+              echo "docker run --rm -v <your-volume>:/app/data --user root \\"
               echo "  --entrypoint chown ${IMAGE}:${VERSION} \\"
               echo "  -R openseal:openseal /app/data"
               echo '```'
               echo
-              echo "\`--entrypoint\` is required: the image's entrypoint is the OpenSeal binary, so trailing arguments would be passed to it as a subcommand rather than run as a program."
+              echo "\`--entrypoint\` is required in both forms: the image's entrypoint is the OpenSeal binary, so trailing arguments would be passed to it as a subcommand rather than run as a program."
               echo
               echo "Or discard the volume with \`docker compose down -v\` if the data is not needed."
               echo
