@@ -966,7 +966,7 @@ jobs:
               echo "::warning::Windows installers are UNSIGNED — users will see a SmartScreen warning. Set the signing secrets and add a signing step to change this."
               ;;
             *)
-              echo "Linux bundles are unsigned, which is conventional for .deb and .AppImage."
+              echo "Linux bundles are unsigned, which is conventional for .deb, .rpm and .AppImage."
               ;;
           esac
 
@@ -1092,7 +1092,11 @@ jobs:
             echo
             echo "### Downloads"
             echo
-            echo "- **Desktop app** — the \`.dmg\`, \`.msi\`, \`.deb\` or \`.AppImage\` below. The daemon is bundled; nothing else to install."
+            # Every format the bundler produces, matching the Collect filter
+            # above and docs/user-docs/installing.md. Listing four of the six
+            # told a Fedora user their .rpm did not exist, on the page that
+            # installing.md itself calls authoritative.
+            echo "- **Desktop app** — macOS \`.dmg\`; Windows \`.msi\` or \`.exe\`; Linux \`.deb\`, \`.rpm\` or \`.AppImage\`. The daemon is bundled; nothing else to install. Where a platform offers more than one, the Installing page in the documentation says which to choose."
             echo "- **Command line** — the \`openseal_${VERSION}_<os>_<arch>\` archive for your platform. The Linux build links glibc and needs **${LINUX_GLIBC_FLOOR} or newer** (Ubuntu 22.04+, Debian 12+, RHEL/Rocky 9). On older distributions use the container image, which is self-contained."
             echo "- **Container** — \`docker pull ${IMAGE}:${VERSION}\`"
             echo
