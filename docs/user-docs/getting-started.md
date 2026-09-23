@@ -16,6 +16,8 @@ OpenSeal's durable store is SQLite through cgo, so a C toolchain is required alo
 
 ## Building the Binary
 
+The requirements above apply to building. A published binary has no Go or C toolchain requirement — see [Installing OpenSeal](installing.md).
+
 ```bash
 git clone https://github.com/axiom-studio/openseal.git
 cd openseal
