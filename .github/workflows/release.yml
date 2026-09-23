@@ -1024,8 +1024,28 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          gh release download "${GITHUB_REF_NAME}" --dir dist
 
+          # The status is captured so this workflow can say what it was doing.
+          # `gh release download` fails when the release has no assets, and
+          # under `set -e` that killed the step with gh's bare message before
+          # the guard below could run -- the friendly error written for exactly
+          # that case was unreachable, the same shape as the changelog `| head`
+          # and the glibc `grep` already fixed on this branch.
+          #
+          # Capturing it also covers the failures that are not about assets at
+          # all: auth, network, a deleted draft. Those produced a raw tool error
+          # too.
+          if ! gh release download "${GITHUB_REF_NAME}" --dir dist 2>"$RUNNER_TEMP/gh-download.err"; then
+            echo "::error::could not download the draft release's assets for ${GITHUB_REF_NAME}" >&2
+            echo "::error::gh said:" >&2
+            sed 's/^/  /' "$RUNNER_TEMP/gh-download.err" >&2 || true
+            echo "::error::if the draft carries no assets, every upstream job uploaded nothing while reporting success" >&2
+            exit 1
+          fi
+
+          # Reached when gh succeeded but produced nothing — a release whose
+          # assets are all filtered out below, or a future gh that treats an
+          # empty download as success.
           # A release with no assets means every upstream job uploaded nothing
           # while still reporting success. Fail rather than publish an empty
           # release.
