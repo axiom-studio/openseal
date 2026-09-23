@@ -101,9 +101,25 @@ while IFS= read -r module; do
     # No `2>/dev/null` here. Suppressing the diagnostic never suppressed the
     # exit status; it only made this exact failure silent and cost a QA cycle
     # to diagnose.
-    file="$(find "$dir" -maxdepth 1 -type f \
+    # The status is captured rather than left to `set -e`, so this script emits
+    # its OWN diagnostic instead of relying on the tool to have emitted one.
+    #
+    # Every `find` available to test here does speak up on failure — bfs,
+    # busybox and GNU findutils all write to stderr for a bad primary or a
+    # missing directory — so this is not a reachable silence today. But the
+    # previous wording of that claim was universal, and a `find` that exits
+    # non-zero printing nothing falsified it in one test. Delegating the
+    # diagnostic and asserting that no path is silent are different things;
+    # this makes the code match the claim rather than softening the claim.
+    if ! file="$(find "$dir" -maxdepth 1 -type f \
       \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \) \
-      -print | sed 's#.*/##' | LC_ALL=C sort)"
+      -print | sed 's#.*/##' | LC_ALL=C sort)"; then
+      echo "error: the licence-file lookup failed for ${module}" >&2
+      echo "       directory: ${dir}" >&2
+      echo "       command:   find <dir> -maxdepth 1 -type f \\( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \\) -print | sed | sort" >&2
+      echo "       ${OUT} has NOT been written." >&2
+      exit 1
+    fi
     # First line only, taken in the shell rather than by piping into `head`,
     # which closes the pipe early and can SIGPIPE the producer under pipefail.
     file="${file%%$'\n'*}"
