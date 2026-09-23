@@ -1,10 +1,38 @@
 # OpenSeal desktop
 
-The React and Tauri app includes Home, Agents, Work, Reviews, Teams, and Settings. It owns a
+The React and Tauri app includes Home, Agents, Work, Reviews, Teams, Channels, and Settings. It owns a
 local Go daemon and persists workspace data in the OS application-data directory.
 The complete product is still in development: advanced placement and credential
 mapping, full team management,
 broader approval workflows, advanced channel workflows, and marketplace remain unfinished.
+
+## Start desktop development
+
+Install Go, Rust, Node.js, pnpm, and the platform-specific
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/). From the repository root:
+
+```bash
+make desktop-install
+make desktop-dev
+```
+
+The native host starts its own daemon on a loopback port and keeps its API token
+in native memory. Add a model provider in Settings before generating an Agent or
+Team proposal. The desktop guides review, installation, and later activation.
+Use `make desktop-host-test` to verify the native host. The terminal client has
+a separate [first-run guide](../docs/user-docs/getting-started.md).
+
+## Find a topic
+
+| Task | Section |
+| --- | --- |
+| Generate and install an Agent or Team | [Proposal review](#proposal-review), [Create and review a team](#create-and-review-a-team) |
+| Work with Teams and Channels | [Teams](#teams), [Team channels](#team-channels), [Automatic Team replies](#automatic-team-replies) |
+| Submit and inspect work | [Start team work](#start-team-work), [Browse work](#browse-work), [Task execution and results](#task-execution-and-results) |
+| Configure the provider or understand process ownership | [Model provider](#model-provider), [Native process ownership](#native-process-ownership) |
+| Verify changes | [Verification](#verification), [Installation authority](#installation-authority) |
+
+The detailed sections below also record implementation and milestone evidence.
 
 ## Home request recovery
 

@@ -1,33 +1,29 @@
-# OpenSeal documentation
+# Developer documentation
 
-Use these guides in order for a first deployment:
+Start with the [repository README](../../README.md) for the product and quick
+starts. The [user guides](../user-docs/index.md) describe supported behavior;
+these developer guides explain implementation, extension points, and verification.
+Check `/api/v1/capabilities` on a running deployment before assuming an optional
+operation is available.
 
-1. [Getting started](getting-started.md) — build, configure, start, and verify a
-   standalone daemon.
-2. [Standalone context and local Vault](standalone-context.md) — configure
-   model routing and local credential references without storing secret values.
-3. [Core concepts](concepts.md) — understand Agents, Teams, objectives, Runs,
-   Skills, approvals, conversations, and evidence.
-4. [Callable runbooks](callable-runbooks.md) — compose exact deterministic
-   operations into otherwise cognitive Agents.
-5. [Runbook activation verification](runbook-verification.md) — prove graphs,
-   exact Skill bindings, authority, credentials, approval reachability, and
-   budgets before work can execute.
-6. [Terminal UI](tui.md) — create and operate resources interactively.
-7. [CLI reference](cli.md) — inspect every implemented command and option.
-8. [REST API](api.md) — build capability-aware clients and integrations.
-9. [Operations](operations.md) — persistence, recovery, secrets, PostgreSQL, and
-   test gates.
-10. [Portable workforce bundles](workforce-bundles.md) — signed export, trust,
-   target placement, atomic import, upgrade, and rollback.
-11. [Team coordination](team-coordination.md) — durable work offers, role and
-   capacity assignment, child Runs, review quorums, and disagreement escalation.
+## First contribution
 
-Architecture and compatibility references:
+1. [Build and start a daemon](getting-started.md), then run `make test` and
+   `make vet` for code changes.
+2. Read [core concepts](concepts.md) for Agents, Teams, Runs, Skills, approvals,
+   conversations, and evidence.
+3. Follow the area relevant to the change:
 
-- [Autonomous runtime architecture](architecture/autonomous-agent-runtime.md)
-- [OpenClaw skill compatibility](skills/openclaw-compatibility.md)
+| Area | Guides |
+| --- | --- |
+| Kernel and embedding | [Runtime architecture](architecture/autonomous-agent-runtime.md), [REST API](api.md), [Operations](operations.md) |
+| Terminal client and commands | [Terminal UI](tui.md), [CLI reference](cli.md) |
+| Desktop app | [Desktop development](../../desktop/README.md), [REST API](api.md) |
+| Model and credential setup | [Standalone context](standalone-context.md), [Operations](operations.md) |
+| Teams and workforces | [Team coordination](team-coordination.md), [Portable bundles](workforce-bundles.md), [Workforce identities](architecture/workforce-identities.md) |
+| Skills and deterministic work | [OpenClaw compatibility](skills/openclaw-compatibility.md), [Callable runbooks](callable-runbooks.md), [Runbook verification](runbook-verification.md) |
 
-These documents describe code implemented in this repository. Optional behavior
-is identified as an embedding boundary, and clients are expected to use the
-server capability document as the source of truth for a running deployment.
+The user and developer guides cover the same product from different angles. When
+behavior changes, update the relevant user guide and the implementation guide
+in the same change. Optional behavior must state which authority or adapter
+makes it available.
