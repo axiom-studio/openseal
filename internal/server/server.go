@@ -103,12 +103,32 @@ func (s *Server) SetBearerToken(token string) {
 	s.bearerToken = strings.TrimSpace(token)
 }
 
+// healthProbePath is the one route reachable without a bearer token.
+//
+// A container liveness probe cannot carry a credential. Docker's HEALTHCHECK
+// and Compose's healthcheck run a fixed command with no access to the token, so
+// gating this route makes an authenticated deployment permanently unhealthy --
+// which is what the daemon's own startup warning tells operators to configure.
+// docker compose up --wait then fails, depends_on: service_healthy never
+// satisfies, and orchestrators restart-loop a container that is working.
+//
+// The exemption is narrow on purpose: exact path, GET only. handleHealth
+// responds {"status":"ok"} and nothing else -- no store contents, no
+// configuration, no identifiers -- so it discloses nothing that connecting to
+// the port does not already reveal. Every other route, and every other method
+// on this path, still requires the token.
+const healthProbePath = "/api/v1/health"
+
 func (s *Server) authenticatedHandler() http.Handler {
 	token := s.bearerToken
 	if token == "" {
 		return s.mux
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == healthProbePath {
+			s.mux.ServeHTTP(w, r)
+			return
+		}
 		scheme, provided, ok := strings.Cut(r.Header.Get("Authorization"), " ")
 		provided = strings.TrimLeft(provided, " ")
 		if !ok || !strings.EqualFold(scheme, "Bearer") || len(r.Header.Values("Authorization")) != 1 || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
