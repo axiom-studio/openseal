@@ -41,27 +41,44 @@ func TestDaemonEnforcesBearerTokenFromEnvironment(t *testing.T) {
 	defer stop()
 
 	for _, testCase := range []struct {
-		name   string
-		header string
-		want   int
+		name        string
+		header      string
+		wantBlocked bool
 	}{
-		{name: "no authorization header", header: "", want: http.StatusUnauthorized},
-		{name: "wrong token", header: "Bearer wrong-token", want: http.StatusUnauthorized},
-		{name: "correct token", header: "Bearer test-secret-123", want: http.StatusOK},
+		{name: "no authorization header", header: "", wantBlocked: true},
+		{name: "wrong token", header: "Bearer wrong-token", wantBlocked: true},
+		{name: "correct token", header: "Bearer test-secret-123", wantBlocked: false},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			status, headers := getHealth(t, base, testCase.header)
-			if status != testCase.want {
-				t.Fatalf("GET /api/v1/health with %q = %d, want %d — "+
+			status, headers := getGuarded(t, base, testCase.header)
+			blocked := status == http.StatusUnauthorized
+			if blocked != testCase.wantBlocked {
+				t.Fatalf("GET %s with %q = %d, blocked = %v, want blocked = %v — "+
 					"the daemon must apply OPENSEAL_API_TOKEN to the API server",
-					testCase.header, status, testCase.want)
+					guardedRoute, testCase.header, status, blocked, testCase.wantBlocked)
 			}
-			if testCase.want == http.StatusUnauthorized {
+			if testCase.wantBlocked {
 				if challenge := headers.Get("WWW-Authenticate"); challenge == "" {
 					t.Fatalf("401 carried no WWW-Authenticate header")
 				}
 			}
 		})
+	}
+}
+
+// TestDaemonHealthProbeWorksWithTokenArmed is the regression this pair of tests
+// was missing: the daemon can have authentication correctly armed and still be
+// unusable, because a container's HEALTHCHECK cannot send a credential and the
+// orchestrator marks the container unhealthy.
+func TestDaemonHealthProbeWorksWithTokenArmed(t *testing.T) {
+	base, stop := startDaemonForAuth(t, "test-secret-123")
+	defer stop()
+
+	if status, _ := getHealth(t, base, ""); status != http.StatusOK {
+		t.Fatalf("GET /api/v1/health with no credential = %d, want %d — "+
+			"HEALTHCHECK sends no Authorization header, so an armed token "+
+			"would leave every container permanently unhealthy",
+			status, http.StatusOK)
 	}
 }
 
@@ -132,9 +149,29 @@ func waitForDaemon(t *testing.T, base string, stop func()) {
 	t.Fatalf("daemon did not start listening on %s", base)
 }
 
+// guardedRoute is a route behind the bearer gate, used to assert that the
+// daemon armed authentication. It is deliberately NOT /api/v1/health: that
+// route is exempt so a container's HEALTHCHECK can reach an authenticated
+// daemon, so probing it would assert nothing about the token being applied.
+// No such route exists, which is the point — clearing the gate reaches the mux
+// and 404s, and only a 401 means the credential was rejected.
+const guardedRoute = "/api/v1/__not_a_route"
+
+// getGuarded returns the status of a request to a token-protected route.
+func getGuarded(t *testing.T, base, authorization string) (int, http.Header) {
+	t.Helper()
+	return get(t, base+guardedRoute, authorization)
+}
+
+// getHealth probes the liveness route, which is exempt from the bearer gate.
 func getHealth(t *testing.T, base, authorization string) (int, http.Header) {
 	t.Helper()
-	request, err := http.NewRequest(http.MethodGet, base+"/api/v1/health", nil)
+	return get(t, base+"/api/v1/health", authorization)
+}
+
+func get(t *testing.T, url, authorization string) (int, http.Header) {
+	t.Helper()
+	request, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
