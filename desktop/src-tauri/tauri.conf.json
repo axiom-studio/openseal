@@ -56,6 +56,16 @@
           "y": 170
         }
       }
+    },
+    "windows": {
+      "nsis": {
+        "headerImage": "windows/nsis-header.bmp",
+        "sidebarImage": "windows/nsis-sidebar.bmp"
+      },
+      "wix": {
+        "bannerPath": "windows/wix-banner.bmp",
+        "dialogImagePath": "windows/wix-dialog.bmp"
+      }
     }
   }
 }
