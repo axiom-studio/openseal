@@ -29,7 +29,7 @@ func TestDesktopParticipationProviderBoundsRepliesAndRetainsUsage(t *testing.T) 
 					t.Error("missing authorization")
 				}
 				var payload struct {
-					MaxTokens int `json:"max_tokens"`
+					MaxTokens int `json:"max_completion_tokens"`
 					Messages  []struct {
 						Content string `json:"content"`
 					} `json:"messages"`
