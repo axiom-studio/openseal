@@ -1,3 +1,4 @@
+import brandMark from "./brand-mark.png";
 import {
   readHomeSubmission,
   newHomeSubmission,
@@ -777,7 +778,7 @@ export default function App() {
       >
         <div className="brand">
           <span className="brand-mark">
-            <Layers3 size={21} />
+            <img src={brandMark} alt="" width={24} height={24} />
           </span>
           <strong>OpenSeal</strong>
           <span className="edition">Desktop</span>

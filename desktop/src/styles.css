@@ -246,6 +246,12 @@ select {
   display: grid;
   place-items: center;
 }
+.brand-mark img {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: block;
+}
 .edition {
   font-size: 10px;
   color: var(--secondary);
