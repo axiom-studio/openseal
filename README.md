@@ -2,6 +2,18 @@
 
 ![OpenSeal: Build Agents. Orchestrate Teams. Scale a Workforce.](assets/readme/open-seal-project.png)
 
+> [!IMPORTANT]
+> **The desktop app is not code-signed yet.** macOS and Windows will warn on first launch.
+> Code signing and notarization are in progress; until then, use the steps below.
+> The downloads are the ones the release published. Verify them against `checksums.txt` if in doubt.
+>
+> **macOS** shows "OpenSeal is damaged" or "Apple could not verify OpenSeal". Click **Done** (not Move to Trash), open **System Settings > Privacy & Security**, scroll to the Security section and click **Open Anyway** next to OpenSeal, then launch it again.
+> From a terminal instead: `xattr -d com.apple.quarantine /Applications/OpenSeal.app`
+>
+> **Windows** shows a SmartScreen prompt. Click **More info**, then **Run anyway**.
+>
+> Details in [Installing: unsigned builds](docs/user-docs/installing.md#unsigned-builds).
+
 OpenSeal is a prompt-first, durable kernel for autonomous Agents and Teams. It
 provides one portable execution model for objectives, long-running Runs,
 collaboration, governed Skills, approvals, activity, artifacts, and recovery.
