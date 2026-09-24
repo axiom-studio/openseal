@@ -1622,6 +1622,29 @@ dialog::backdrop {
 .form-field input:hover:not(:disabled) {
   border-color: var(--secondary);
 }
+.form-field select {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 11px 12px;
+  width: 100%;
+  font: inherit;
+}
+.skill-configuration,
+.skill-install,
+.skill-discovery {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.skill-connection form {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+}
 .form-field small {
   color: var(--secondary);
   font-size: 11px;

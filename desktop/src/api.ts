@@ -14,6 +14,28 @@ export type Capability = {
   context?: {
     changeSetId: string;
     revision: number;
+    credentialBindings?: {
+      reference: { kind: string; id: string };
+      displayName: string;
+      bindingKeys?: string[];
+    }[];
+    bindingConfigurationFields?: {
+      catalogSkillId: string;
+      key: string;
+      type: string;
+      required?: boolean;
+      prompt: string;
+      options: {
+        label: string;
+        description?: string;
+        value: {
+          string?: string;
+          integer?: number;
+          number?: number;
+          boolean?: boolean;
+        };
+      }[];
+    }[];
     eligibleApprovalRequirements?: {
       evaluationId: string;
       policyId: string;
@@ -149,6 +171,27 @@ export type Proposal = {
   status: string;
   revision: number;
   candidateDigest?: string;
+  catalog?: {
+    skills?: Record<
+      string,
+      {
+        id: string;
+        name?: string;
+        version?: string;
+        sourceIdentity?: string;
+        readiness?: string;
+      }
+    >;
+  };
+  placement?: {
+    credentialReferences?: Record<
+      string,
+      Record<string, { kind: string; id: string }>
+    >;
+    bindingConfigs?: Record<string, Record<string, Record<string, unknown>>>;
+    [key: string]: unknown;
+  };
+  requiredCredentialBindings?: Record<string, { key: string; kind: string }[]>;
   generation?: {
     attempt: number;
     lastError?: string;
@@ -278,6 +321,17 @@ export type ProviderSaveResult = {
   reconnected: boolean;
   message: string;
 };
+export type SkillCredentialUpdate = {
+  kind: string;
+  bindingKey: string;
+  displayName: string;
+  secret: string;
+};
+export type SkillCredentialSaveResult = {
+  credential: { kind: string; id: string; displayName: string };
+  reconnected: boolean;
+  message: string;
+};
 export class NativeUpdateRequired extends Error {
   constructor() {
     super(
@@ -319,6 +373,22 @@ export async function saveProvider(
   const result = await response.json();
   if (!response.ok)
     throw new Error(result.error || "Could not save provider settings.");
+  return result;
+}
+export async function saveSkillCredential(
+  credential: SkillCredentialUpdate,
+): Promise<SkillCredentialSaveResult> {
+  if (isTauri())
+    return invokeProvider("save_skill_credential_settings", { credential });
+  const response = await fetch("/__desktop/skill-credential", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(credential),
+    signal: AbortSignal.timeout(45_000),
+  });
+  const result = await response.json();
+  if (!response.ok)
+    throw new Error(result.error || "Could not save Skill connection.");
   return result;
 }
 
