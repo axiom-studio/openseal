@@ -61,6 +61,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/projects/{id}/outreach/{threadId}", s.handleGetOutreachThread)
 	s.mux.HandleFunc("POST /api/v1/projects/{id}/outreach/{threadId}/messages/{messageId}/deliveries", s.handleDeliverOutreachMessage)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}", s.handleInspectClawHub)
+	s.mux.HandleFunc("GET /api/v1/clawhub/search", s.handleSearchClawHub)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}/versions", s.handleListClawHubVersions)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}/file", s.handleGetClawHubFile)
 	s.mux.HandleFunc("POST /api/v1/clawhub/catalog/{reference}/verify", s.handleVerifyClawHub)
