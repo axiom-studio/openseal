@@ -17,7 +17,8 @@ import (
 	validateschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-const authoringResultSchemaResource = "openseal-authoring-result-v1.json"
+// Absolute URL for the same reason as authoringIntentSchemaResource.
+const authoringResultSchemaResource = "https://openseal.dev/schemas/openseal-authoring-result-v1.json"
 
 var (
 	authoringResultSchemaOnce sync.Once

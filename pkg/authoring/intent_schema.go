@@ -21,7 +21,13 @@ var (
 	authoringIntentSchemaErr  error
 )
 
-const authoringIntentSchemaResource = "openseal-authoring-intent-v1.json"
+// Schema resources carry absolute, non-file URLs. The validator resolves a
+// bare name against the process working directory as a file:// URL, and a
+// directory with a space in its name (the desktop daemon runs from
+// ~/Library/Application Support/...) is percent-encoded on lookup but not on
+// registration, so the in-memory document is never found and the compiler
+// tries to read it from disk. See TestAuthoringSchemasCompileFromCwdWithSpace.
+const authoringIntentSchemaResource = "https://openseal.dev/schemas/openseal-authoring-intent-v1.json"
 
 // AuthoringIntentJSONSchema is the only schema sent to an authoring model.
 // Canonical runtime and resource types must never become reachable from it.
