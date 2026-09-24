@@ -30,6 +30,8 @@ Thumbs.db
 
 # Build output
 bin/
+!desktop/crates/daemon-host/src/bin/
+!desktop/crates/daemon-host/src/bin/openseal-provider-settings.rs
 dist/
 web/node_modules/
 web/dist/

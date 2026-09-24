@@ -73,6 +73,16 @@ func TestStandaloneClawHubLifecycleCapabilityAndMutations(t *testing.T) {
 	if !bytes.Contains(encoded, []byte(`"clawhub-lifecycle"`)) || bytes.Contains(encoded, []byte(`"install"`)) {
 		t.Fatalf("read-only capability=%s", encoded)
 	}
+	response = serverRequest(t, http.MethodGet, server.URL+"/api/v1/clawhub/search?query=research", "")
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("Skill search=%d", response.StatusCode)
+	}
+	response.Body.Close()
+	response = serverRequest(t, http.MethodGet, server.URL+"/api/v1/clawhub/search", "")
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("empty Skill search=%d", response.StatusCode)
+	}
+	response.Body.Close()
 	response = serverRequest(t, http.MethodPost, server.URL+"/api/v1/clawhub/catalog/%40acme%2Fresearch/install", `{}`)
 	if response.StatusCode != http.StatusForbidden {
 		t.Fatalf("untrusted install=%d", response.StatusCode)

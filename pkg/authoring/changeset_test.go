@@ -74,6 +74,20 @@ func TestChangeSetReadinessErrorClassifiesOnlyAgentDeploymentIdentityConflicts(t
 	}
 }
 
+func TestApplyReportsMissingTeamRequirementWithRepair(t *testing.T) {
+	value := &ChangeSet{Result: CompileResult{
+		Valid:               false,
+		MissingRequirements: []MissingRequirement{{Kind: "skill_binding", ID: "delivery", RequiredBy: "team:outbound/role:sender"}},
+	}}
+	err := validateApplyPlacement(value)
+	var readiness *ChangeSetReadinessError
+	if !errors.As(err, &readiness) || len(readiness.Issues) != 1 ||
+		!strings.Contains(err.Error(), "Skill delivery required by team:outbound/role:sender") ||
+		!strings.Contains(err.Error(), "select and configure its binding") {
+		t.Fatalf("team requirement error = %#v", err)
+	}
+}
+
 func TestPreparePersistsGenerationBeforeModelWorkAndReplays(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	generator := &sequenceChangeSetGenerator{payloads: [][]byte{payload}}

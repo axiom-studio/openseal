@@ -1,5 +1,12 @@
 import InstallationReview from "./InstallationReview";
 import TeamProposal from "./TeamProposal";
+import SkillInstall, { clawHubReference } from "./SkillInstall";
+import SkillConfiguration from "./SkillConfiguration";
+import SkillDiscovery from "./SkillDiscovery";
+import {
+  missingRequirementHelp,
+  validationIssueHelp,
+} from "./proposalBlockers";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import {
@@ -201,6 +208,7 @@ export default function ProposalReview({
   onDerived,
   onViewAgents,
   onViewTeams,
+  onPrepareFreshProposal,
 }: {
   proposal: Proposal;
   onChange: (value: Proposal) => void;
@@ -208,6 +216,7 @@ export default function ProposalReview({
   onDerived: (value: Proposal) => void;
   onViewAgents: () => void;
   onViewTeams: () => void;
+  onPrepareFreshProposal: (prompt: string) => void;
 }) {
   const activating = isActivationProposal(proposal);
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
@@ -216,6 +225,7 @@ export default function ProposalReview({
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [check, setCheck] = useState(0);
+  const [installedSkill, setInstalledSkill] = useState(false);
   const locked = useRef(false);
   const pending = useRef<{ fingerprint: string; key: string } | null>(null);
   const feedback = useRef<HTMLDivElement>(null);
@@ -406,7 +416,11 @@ export default function ProposalReview({
           <h3>Before this can proceed</h3>
           <ul>
             {proposal.result.validation.map((v, i) => (
-              <li key={i}>{v.message}</li>
+              <li key={i}>
+                <strong>{v.message}</strong>
+                <span className="muted"> · {v.path}</span>
+                <div>How to fix: {validationIssueHelp(v)}</div>
+              </li>
             ))}
           </ul>
         </div>
@@ -414,14 +428,102 @@ export default function ProposalReview({
       {!!proposal.result?.missingRequirements?.length && (
         <div className="proposal-notes">
           <h3>Required capabilities</h3>
+          {candidate?.activation === "active" && (
+            <p className="muted">
+              This proposal enables the {candidate.team ? "Team" : "Agent"}
+              {candidate.team ? " and its workflows" : ""} when installed. To
+              save it first, make a new request to create it inactive; these
+              activation requirements will still need to be resolved before
+              enabling it later.
+            </p>
+          )}
           <ul>
-            {proposal.result.missingRequirements.map((v, i) => (
-              <li key={i}>
-                {v.kind}: {v.id}
-                <span className="muted"> · Required by {v.requiredBy}</span>
-              </li>
-            ))}
+            {proposal.result.missingRequirements.map((v, i) => {
+              const help = missingRequirementHelp(v);
+              const skill = proposal.catalog?.skills?.[v.id];
+              const installable =
+                v.kind === "skill_installation" && clawHubReference(skill);
+              const credentialParts = /^agent:([^/]+)\/skill:(.+)$/.exec(
+                v.requiredBy,
+              );
+              const configureCredential =
+                v.kind === "credential" &&
+                credentialParts &&
+                !proposal.result?.missingRequirements?.some(
+                  (other) =>
+                    other.kind === "skill_binding" &&
+                    other.id === credentialParts[2] &&
+                    other.requiredBy === `agent:${credentialParts[1]}`,
+                );
+              return (
+                <li key={i}>
+                  <strong>{help.blocker}</strong>
+                  <span className="muted"> · Required by {v.requiredBy}</span>
+                  <div>
+                    How to fix:{" "}
+                    {installable
+                      ? "Review and install the exact Skill version below, then create a fresh proposal to check the updated workspace."
+                      : help.fix}
+                  </div>
+                  {installable && skill && (
+                    <SkillInstall
+                      skill={skill}
+                      capabilities={capabilities}
+                      onInstalled={() => setInstalledSkill(true)}
+                    />
+                  )}
+                  {(v.kind === "skill" ||
+                    v.kind === "skill_unavailable" ||
+                    (v.kind === "skill_installation" && !installable)) && (
+                    <SkillDiscovery
+                      query={v.id}
+                      capabilities={capabilities}
+                      onInstalled={() => setInstalledSkill(true)}
+                    />
+                  )}
+                  {v.kind === "skill_binding" &&
+                    v.requiredBy.startsWith("agent:") && (
+                      <SkillConfiguration
+                        proposal={proposal}
+                        capability={capability}
+                        skillId={v.id}
+                        ownerId={v.requiredBy.slice("agent:".length)}
+                        onChange={onChange}
+                      />
+                    )}
+                  {configureCredential && (
+                    <SkillConfiguration
+                      proposal={proposal}
+                      capability={capability}
+                      skillId={credentialParts[2]}
+                      ownerId={credentialParts[1]}
+                      onChange={onChange}
+                    />
+                  )}
+                </li>
+              );
+            })}
           </ul>
+          {(installedSkill ||
+            proposal.result.missingRequirements.some((v) =>
+              [
+                "skill",
+                "skill_installation",
+                "skill_unavailable",
+                "skill_binding",
+                "credential",
+              ].includes(v.kind),
+            )) && (
+            <button
+              type="button"
+              className="button primary"
+              onClick={() => onPrepareFreshProposal(proposal.prompt)}
+            >
+              {installedSkill
+                ? "Use installed Skill in a fresh proposal"
+                : "Create a fresh proposal using current Skills"}
+            </button>
+          )}
         </div>
       )}
       {question && (

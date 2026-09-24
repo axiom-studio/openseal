@@ -3,8 +3,10 @@
 The React and Tauri app includes Home, Agents, Work, Reviews, Teams, Channels, and Settings. It owns a
 local Go daemon and persists workspace data in the OS application-data directory.
 The complete product is still in development: advanced placement and credential
-mapping, full team management,
-broader approval workflows, advanced channel workflows, and marketplace remain unfinished.
+mapping, full team management, broader approval workflows, and advanced channel
+workflows remain unfinished. Proposal review supports ClawHub Skill search,
+verification, exact-version installation, authorized Skill setting choices,
+and private local credential connections.
 
 ## Start desktop development
 
@@ -21,6 +23,13 @@ in native memory. Add a model provider in Settings before generating an Agent or
 Team proposal. The desktop guides review, installation, and later activation.
 Use `make desktop-host-test` to verify the native host. The terminal client has
 a separate [first-run guide](../docs/user-docs/getting-started.md).
+
+When a proposal requires a Skill, use **Review Skill for installation** for an
+exact ClawHub version, or **Find Skill** to choose a registry result. Review its
+verification before installing. In **Configure Skill**, select available
+settings and credential connections or add a private local connection.
+Installation changes workspace inventory;
+use **Use installed Skill in a fresh proposal** to check the new inventory.
 
 ## Find a topic
 
