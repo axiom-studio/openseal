@@ -8,6 +8,7 @@ use reqwest::{blocking::Client, header, Method, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    fs::{self, OpenOptions},
     io::{BufRead, BufReader, Read},
     path::Path,
     process::{Child, Command, Stdio},
@@ -63,6 +64,22 @@ impl DaemonHost {
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| format!("Cannot initialize local connection: {e}"))?;
+        // The daemon logs to stderr. Keep it on disk so a failure leaves
+        // evidence: the public error shown in the app is deliberately generic.
+        let log_dir = data_dir.join("logs");
+        fs::create_dir_all(&log_dir).map_err(|e| format!("Cannot create log directory: {e}"))?;
+        let log_path = log_dir.join("daemon.log");
+        // ponytail: no rotation; start fresh once the file passes 10 MiB.
+        let oversized = fs::metadata(&log_path)
+            .map(|m| m.len() > 10 * 1024 * 1024)
+            .unwrap_or(false);
+        let log_file = OpenOptions::new()
+            .create(true)
+            .append(!oversized)
+            .write(true)
+            .truncate(oversized)
+            .open(&log_path)
+            .map_err(|e| format!("Cannot open daemon log: {e}"))?;
         let mut command = Command::new(executable);
         command
             .arg("daemon")
@@ -78,7 +95,7 @@ impl DaemonHost {
             .current_dir(&data_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null());
+            .stderr(Stdio::from(log_file));
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
