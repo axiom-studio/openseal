@@ -23,8 +23,8 @@ func TestProviderTurnHostValidatesAndBoundsProvider(t *testing.T) {
 				}
 				var body map[string]interface{}
 				json.NewDecoder(r.Body).Decode(&body)
-				if body["max_tokens"] != float64(2048) {
-					t.Errorf("output cap: %v", body["max_tokens"])
+				if body["max_completion_tokens"] != float64(2048) {
+					t.Errorf("output cap: %v", body["max_completion_tokens"])
 				}
 				serialized, _ := json.Marshal(body)
 				if strings.Contains(string(serialized), "private-key") || strings.Contains(string(serialized), "workspaceCredentials") {
