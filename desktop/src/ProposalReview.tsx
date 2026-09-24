@@ -348,6 +348,14 @@ export default function ProposalReview({
           {proposal.generation.lastError}
         </p>
       )}
+      {proposal.status === "failed" &&
+        proposal.generation?.failureCode === "provider_failed" && (
+          <p className="muted">
+            The full error is recorded in logs/daemon.log inside the OpenSeal
+            workspace folder. It is kept out of this screen because provider
+            errors can contain your API key.
+          </p>
+        )}
       {candidate?.team && (
         <TeamProposal candidate={candidate} activating={activating} />
       )}
