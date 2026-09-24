@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 use openseal_daemon_host::provider::{
-    load_provider, save_provider, ProviderSettings, ProviderUpdate,
+    load_provider, save_provider, save_skill_credential, ProviderSettings, ProviderUpdate,
+    SkillCredentialSaved, SkillCredentialUpdate,
 };
 use openseal_daemon_host::{ApiResponse, DaemonHost};
 use serde::Serialize;
@@ -170,6 +171,50 @@ struct ProviderSaveResult {
     message: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillCredentialSaveResult {
+    credential: SkillCredentialSaved,
+    reconnected: bool,
+    message: String,
+}
+
+#[tauri::command]
+async fn save_skill_credential_settings(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<Desktop>>,
+    credential: SkillCredentialUpdate,
+) -> Result<SkillCredentialSaveResult, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| "Cannot locate workspace")?;
+    let executable = daemon_executable()?;
+    let desktop = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(startup) = desktop.startup.lock().map_err(|_| "Workspace startup unavailable")?.take() {
+            startup.join().map_err(|_| "Workspace startup interrupted")?;
+        }
+        let mut host = desktop.host.lock().map_err(|_| "Workspace connection unavailable")?;
+        let saved = save_skill_credential(&directory, credential)?;
+        { let mut status = desktop.status.lock().map_err(|_| "Workspace status unavailable")?; status.state = "starting".into(); status.message.clear(); }
+        if let Some(mut previous) = host.take() { previous.shutdown(); }
+        let result = match DaemonHost::start(&executable, &directory) {
+            Ok(new_host) => {
+                *host = Some(new_host);
+                desktop.status.lock().map_err(|_| "Workspace status unavailable")?.state = "ready".into();
+                SkillCredentialSaveResult { credential: saved, reconnected: true, message: "Skill connection saved. Workspace reconnected.".into() }
+            }
+            Err(error) => {
+                let mut status = desktop.status.lock().map_err(|_| "Workspace status unavailable")?;
+                status.state = "error".into(); status.message = error;
+                SkillCredentialSaveResult { credential: saved, reconnected: false, message: "Skill connection was saved, but the workspace could not restart. Check the configuration and reopen OpenSeal.".into() }
+            }
+        };
+        Ok(result)
+    }).await.map_err(|_| "Skill connection update interrupted")?
+}
+
 #[tauri::command]
 async fn load_provider_settings(app: tauri::AppHandle) -> Result<ProviderSettings, String> {
     let directory = app
@@ -232,7 +277,8 @@ fn main() {
             preview_artifact,
             save_artifact,
             load_provider_settings,
-            save_provider_settings
+            save_provider_settings,
+            save_skill_credential_settings
         ])
         .setup(|app| {
             let directory = app.path().app_data_dir()?;

@@ -28,6 +28,24 @@ pub struct ProviderUpdate {
     pub api_key: String,
 }
 
+// Never derive Debug: this request carries a Skill credential.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkillCredentialUpdate {
+    pub kind: String,
+    pub binding_key: String,
+    pub display_name: String,
+    pub secret: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillCredentialSaved {
+    pub kind: String,
+    pub id: String,
+    pub display_name: String,
+}
+
 fn context(data_dir: &Path) -> Result<Value, String> {
     let path = data_dir.join("context.yaml");
     match fs::symlink_metadata(&path) {
@@ -230,9 +248,131 @@ pub fn save_provider(data_dir: &Path, update: ProviderUpdate) -> Result<Provider
     load_provider(data_dir)
 }
 
+pub fn save_skill_credential(
+    data_dir: &Path,
+    update: SkillCredentialUpdate,
+) -> Result<SkillCredentialSaved, String> {
+    let kind = update.kind.trim();
+    let binding_key = update.binding_key.trim();
+    let display_name = update.display_name.trim();
+    let secret = update.secret.trim();
+    let safe_key = |text: &str| {
+        !text.is_empty()
+            && text.len() <= 128
+            && text
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+    };
+    if !safe_key(kind)
+        || !safe_key(binding_key)
+        || display_name.is_empty()
+        || display_name.len() > 128
+        || display_name.chars().any(char::is_control)
+        || secret.is_empty()
+        || secret.len() > 65536
+        || secret.contains('\0')
+    {
+        return Err("Enter a valid credential kind, binding key, name, and secret.".into());
+    }
+    fs::create_dir_all(data_dir).map_err(|_| "Cannot open the workspace directory.")?;
+    let mut value = context(data_dir)?;
+    if !value["credentials"].is_null() && !value["credentials"].is_array() {
+        return Err("The workspace credential configuration is invalid.".into());
+    }
+    let secrets = data_dir.join(".secrets");
+    if secrets.exists()
+        && fs::symlink_metadata(&secrets)
+            .map_err(|_| "Cannot inspect the credential directory.")?
+            .file_type()
+            .is_symlink()
+    {
+        return Err("The credential directory must not be a symbolic link.".into());
+    }
+    fs::create_dir_all(&secrets).map_err(|_| "Cannot create the credential directory.")?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&secrets, fs::Permissions::from_mode(0o700))
+            .map_err(|_| "Cannot protect the credential directory.")?;
+    }
+    let id = format!("desktop-skill-{}", uuid::Uuid::new_v4());
+    let relative = format!(".secrets/{id}.key");
+    let secret_path = data_dir.join(&relative);
+    if let Err(error) = write_private(&secret_path, secret.as_bytes()) {
+        let _ = fs::remove_file(&secret_path);
+        return Err(error);
+    }
+    if value["credentials"].is_null() {
+        value["credentials"] = json!([]);
+    }
+    value["credentials"]
+        .as_array_mut()
+        .expect("validated credential list")
+        .push(json!({
+            "scope": {"kind": "local", "id": "default"}, "kind": kind, "id": id,
+            "displayName": display_name, "bindingKeys": [binding_key], "file": relative
+        }));
+    let bytes =
+        serde_yaml::to_string(&value).map_err(|_| "Cannot encode workspace credentials.")?;
+    let temporary = data_dir.join(format!(".context-{}.tmp", uuid::Uuid::new_v4()));
+    let result = write_private(&temporary, bytes.as_bytes()).and_then(|_| {
+        fs::rename(&temporary, data_dir.join("context.yaml"))
+            .map_err(|_| "Cannot replace workspace settings.".into())
+    });
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temporary);
+        let _ = fs::remove_file(&secret_path);
+        return Err(error);
+    }
+    Ok(SkillCredentialSaved {
+        kind: kind.into(),
+        id,
+        display_name: display_name.into(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saves_skill_credential_privately_and_keeps_provider() {
+        let dir = tempfile::tempdir().unwrap();
+        save_provider(dir.path(), update("model-secret")).unwrap();
+        let saved = save_skill_credential(
+            dir.path(),
+            SkillCredentialUpdate {
+                kind: "environment-secret".into(),
+                binding_key: "RESEARCH_API_KEY".into(),
+                display_name: "Research connection".into(),
+                secret: "research-secret".into(),
+            },
+        )
+        .unwrap();
+        let value = context(dir.path()).unwrap();
+        let credential = value["credentials"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == saved.id)
+            .unwrap();
+        assert_eq!(credential["bindingKeys"][0], "RESEARCH_API_KEY");
+        assert_eq!(credential["kind"], "environment-secret");
+        assert!(load_provider(dir.path()).unwrap().has_api_key);
+        assert!(!fs::read_to_string(dir.path().join("context.yaml"))
+            .unwrap()
+            .contains("research-secret"));
+        let secret_path = dir.path().join(credential["file"].as_str().unwrap());
+        assert_eq!(fs::read_to_string(&secret_path).unwrap(), "research-secret");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(secret_path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
     fn directory() -> PathBuf {
         let p = std::env::temp_dir().join(format!("openseal-provider-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&p).unwrap();
