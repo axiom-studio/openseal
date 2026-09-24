@@ -1,0 +1,6 @@
+html,body{margin:0;overflow:hidden}
+body{font-family:"Segoe UI",-apple-system,"Helvetica Neue",Arial,sans-serif;background:#f6f8fb;position:relative;color:#0f1b3d}
+.word{font-weight:800;letter-spacing:-.04em;line-height:1}
+.word b{background:linear-gradient(90deg,#00d68f,#00a3ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+img.mark{border-radius:18%}
+.wave{position:absolute;left:0;right:0;bottom:0}
