@@ -121,11 +121,13 @@ jobs:
   # setup path. The self-hosted fleet is used where it actually earns its
   # keep — the container job, which needs a Docker daemon.
   #
-  # linux/arm64 is NOT built here. It is the one target with no native runner
+  # linux/arm64 is NOT built here, nor by the container job any more.
+  # It is the one target with no native runner
   # available, so it would need a cross toolchain that could not be verified
   # while writing this. Adding it later means either an arm64 runner (native,
   # preferred) or gcc-aarch64-linux-gnu with CC set and CGO_ENABLED=1. The
-  # container job publishes a linux/arm64 image independently of this gap.
+  # container job used to publish a linux/arm64 image through emulation and
+  # stopped because it took 45 minutes per release.
   binary:
     name: Binary (${{ matrix.goos }}/${{ matrix.goarch }})
     needs: prepare
@@ -328,9 +330,11 @@ jobs:
   # Docker daemon with buildx, which hosted images provide and which could not
   # be confirmed on the fleet from here.
   #
-  # linux/arm64 is built by emulating the builder stage. That is genuinely slow
-  # for this project — the image compiles a cgo SQLite driver from C under QEMU,
-  # not a pure-Go binary — so the timeout is generous on purpose.
+  # linux/amd64 only. linux/arm64 used to be built by emulating the builder
+  # stage under QEMU, and that one step took 45 minutes per release: the image
+  # compiles a cgo SQLite driver from C, not a pure-Go binary. Bring arm64 back
+  # on a native arm64 runner (ubuntu-24.04-arm) with a manifest merge, never
+  # through emulation.
   container:
     name: Container image
     needs: prepare
@@ -345,7 +349,7 @@ jobs:
       # platforms twice is how the published set and the tested set drift apart
       # — which is exactly what happened before: both architectures were built
       # and only amd64 was ever run.
-      PLATFORMS: linux/amd64 linux/arm64
+      PLATFORMS: linux/amd64
 
     steps:
       - name: Check out the tag
@@ -375,25 +379,12 @@ jobs:
           ./scripts/generate-third-party-notices.sh
           test -s THIRD_PARTY_NOTICES
 
-      - name: Enable cross-architecture emulation and a buildx builder
+      - name: Create a buildx builder
         run: |
           set -euo pipefail
-          # binfmt handlers for the non-native architecture. This is the plain
-          # docker equivalent of the QEMU setup action.
-          #
-          # Pinned by digest, not tag. A tag is mutable, and this runs
-          # --privileged with Docker socket access in the same job that holds
-          # the packages:write token and is about to build the release image —
-          # so a repointed tag could tamper with the image and push it under the
-          # official name. This workflow avoids `uses:` steps precisely to keep
-          # third parties out of the publishing path; pinning here applies the
-          # same discipline to the one third-party image that remains.
-          #
-          # Digest for tonistiigi/binfmt:qemu-v8.1.5, resolved 2026-09-22.
-          # Bump deliberately: re-resolve with
-          #   docker buildx imagetools inspect tonistiigi/binfmt:<tag>
-          BINFMT_IMAGE="tonistiigi/binfmt:qemu-v8.1.5@sha256:2d2918e86e5327d0661f7083d67a95280b0f7be8f77ed79a8418f81d7d90ce6f"
-          docker run --privileged --rm "$BINFMT_IMAGE" --install arm64
+          # Native platform only, so no binfmt/QEMU handlers. If a non-native
+          # platform is ever added back, install tonistiigi/binfmt here pinned
+          # by digest, not tag: this job holds the packages:write token.
           docker buildx create --name openseal --driver docker-container --use
           docker buildx inspect --bootstrap
 

@@ -76,7 +76,7 @@ The release pipeline enforces this floor rather than inheriting it: a build whos
 
 ## Container Image
 
-Images are published to the GitHub Container Registry for `linux/amd64` and `linux/arm64`:
+Images are published to the GitHub Container Registry for `linux/amd64`:
 
 ```bash
 docker pull ghcr.io/axiom-studio/openseal:<version>
