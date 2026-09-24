@@ -3,7 +3,7 @@ module github.com/axiom-studio/openseal
 go 1.26.0
 
 require (
-	github.com/axiom-studio/skills.sdk v0.0.0-20260403203113-eb1a3e5d8c53
+	github.com/axiom-studio/skills.sdk v0.0.0-20260923173003-cf5c109378fe
 	github.com/caarlos0/env v3.5.0+incompatible
 	github.com/charmbracelet/bubbles v0.21.0
 	github.com/charmbracelet/bubbletea v1.3.10
