@@ -1281,6 +1281,26 @@ export default function App() {
                     onInstalled={() => void refresh(true)}
                     onViewAgents={() => navigate("Agents")}
                     onViewTeams={() => navigate("Teams")}
+                    onPrepareFreshProposal={(originalPrompt) => {
+                      const teamPrefix = "Create one team.\n\n";
+                      setComposerMode(
+                        originalPrompt.startsWith(teamPrefix)
+                          ? "team"
+                          : "agent",
+                      );
+                      setPrompt(
+                        originalPrompt.startsWith(teamPrefix)
+                          ? originalPrompt.slice(teamPrefix.length)
+                          : originalPrompt,
+                      );
+                      requestAnimationFrame(() => {
+                        composer.current?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center",
+                        });
+                        composer.current?.focus();
+                      });
+                    }}
                     onChange={(next) =>
                       setProposal((current) =>
                         current?.id === next.id &&

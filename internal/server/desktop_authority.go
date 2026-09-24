@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
@@ -37,6 +39,9 @@ func (a DesktopLifecycleAuthorizer) AuthorizeWorkforceLifecycle(_ context.Contex
 	result := WorkforceLifecycleAuthorization{Actor: authoring.ChangeSetActor{Type: "user", ID: "local-operator"}}
 	switch operation {
 	case kernelapi.OperationRetry, kernelapi.OperationRefine, kernelapi.OperationPatch, kernelapi.OperationActivate:
+		if operation == kernelapi.OperationPatch {
+			result.BindingConfigurationFields = desktopBindingConfigurationFields(changeSet)
+		}
 		return result, nil
 	case kernelapi.OperationApply:
 		if !desktopOwnerReviewed(changeSet, result.Actor) {
@@ -65,6 +70,97 @@ func (a DesktopLifecycleAuthorizer) AuthorizeWorkforceLifecycle(_ context.Contex
 		return result, nil
 	default:
 		return WorkforceLifecycleAuthorization{}, errors.New("unsupported desktop lifecycle operation")
+	}
+}
+
+// The desktop owner may select only schema-declared scalar choices. Free-form
+// secret-like properties are deliberately not projected into proposal review.
+func desktopBindingConfigurationFields(changeSet *authoring.ChangeSet) []capability.BindingConfigurationFieldChoice {
+	var fields []capability.BindingConfigurationFieldChoice
+	ids := make([]string, 0, len(changeSet.Catalog.Skills))
+	for id := range changeSet.Catalog.Skills {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		skill := changeSet.Catalog.Skills[id]
+		properties, ok := skill.BindingConfigSchema["properties"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+		required := map[string]bool{}
+		for _, value := range interfaceStrings(skill.BindingConfigSchema["required"]) {
+			required[value] = true
+		}
+		keys := make([]string, 0, len(properties))
+		for key := range properties {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			property, ok := properties[key].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			kind, _ := property["type"].(string)
+			values, _ := property["enum"].([]interface{})
+			if len(values) == 0 && kind == "boolean" {
+				values = []interface{}{true, false}
+			}
+			if len(values) == 0 {
+				if constant, exists := property["const"]; exists {
+					values = []interface{}{constant}
+				}
+			}
+			field := capability.BindingConfigurationFieldChoice{
+				CatalogSkillID: id, Skill: capability.NewSkillIdentity(skill.ID, skill.Version, skill.SourceIdentity),
+				Key: key, Type: kind, Required: required[key], Prompt: key,
+			}
+			if title, ok := property["title"].(string); ok && strings.TrimSpace(title) != "" {
+				field.Prompt = title
+			}
+			for _, value := range values {
+				option := capability.BindingConfigurationOption{Label: fmt.Sprint(value)}
+				switch typed := value.(type) {
+				case string:
+					option.Value.String = &typed
+				case bool:
+					option.Value.Boolean = &typed
+				case float64:
+					if kind == "integer" && typed == float64(int64(typed)) {
+						integer := int64(typed)
+						option.Value.Integer = &integer
+					} else if kind == "number" {
+						option.Value.Number = &typed
+					}
+				}
+				field.Options = append(field.Options, option)
+			}
+			if capability.ValidateBindingConfigurationFields([]capability.BindingConfigurationFieldChoice{field}) == nil && capability.ValidateBindingConfigurationFieldSchema(field, skill.BindingConfigSchema) == nil {
+				fields = append(fields, field)
+			}
+		}
+	}
+	if capability.ValidateBindingConfigurationFields(fields) != nil {
+		return nil
+	}
+	return fields
+}
+
+func interfaceStrings(value interface{}) []string {
+	switch values := value.(type) {
+	case []string:
+		return values
+	case []interface{}:
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			if text, ok := value.(string); ok {
+				result = append(result, text)
+			}
+		}
+		return result
+	default:
+		return nil
 	}
 }
 
