@@ -28,6 +28,24 @@ func parseClawHubReference(r *http.Request) (clawhub.SkillReference, error) {
 	return clawhub.ParseSkillReference(strings.TrimSpace(r.PathValue("reference")))
 }
 
+func (s *Server) handleSearchClawHub(w http.ResponseWriter, r *http.Request) {
+	engine, ok := s.requireClawHub(w, false)
+	if !ok {
+		return
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("query"))
+	if query == "" || len(query) > 256 {
+		s.respondError(w, http.StatusBadRequest, "Skill search query must be 1 to 256 characters")
+		return
+	}
+	result, err := engine.SearchClawHubSkills(r.Context(), clawhub.SearchRequest{Query: query, Limit: 10, NonSuspiciousOnly: true})
+	if err != nil {
+		s.respondClawHubError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleInspectClawHub(w http.ResponseWriter, r *http.Request) {
 	engine, ok := s.requireClawHub(w, false)
 	if !ok {

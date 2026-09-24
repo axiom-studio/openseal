@@ -253,6 +253,61 @@ function localDaemon(): Plugin {
           }
           return;
         }
+        if (req.url === "/__desktop/skill-credential") {
+          if (
+            req.method !== "POST" ||
+            saving ||
+            !req.headers["content-type"]?.startsWith("application/json")
+          ) {
+            res
+              .writeHead(saving ? 409 : 400)
+              .end(
+                JSON.stringify({
+                  error: saving
+                    ? "A workspace update is already in progress."
+                    : "Invalid Skill connection request.",
+                }),
+              );
+            return;
+          }
+          saving = true;
+          try {
+            const credential = await providerSettings(directory, {
+              action: "save_skill_credential",
+              credential: JSON.parse((await requestBody(req)).toString()),
+            });
+            await stop();
+            let reconnected = true;
+            try {
+              await start();
+            } catch {
+              reconnected = false;
+            }
+            res.end(
+              JSON.stringify({
+                credential,
+                reconnected,
+                message: reconnected
+                  ? "Skill connection saved. Workspace reconnected."
+                  : "Skill connection was saved, but the workspace could not restart. Check the configuration and reopen OpenSeal.",
+              }),
+            );
+          } catch (e) {
+            res
+              .writeHead(400)
+              .end(
+                JSON.stringify({
+                  error:
+                    e instanceof SyntaxError
+                      ? "Invalid Skill connection request."
+                      : (e as Error).message,
+                }),
+              );
+          } finally {
+            saving = false;
+          }
+          return;
+        }
         if (!endpoint || error || saving) {
           res
             .writeHead(503)

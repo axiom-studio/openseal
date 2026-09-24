@@ -1715,7 +1715,25 @@ func (e *ChangeSetReadinessError) Unwrap() error {
 
 func validateApplyPlacement(value *ChangeSet) error {
 	if !value.Result.Valid || len(value.Result.MissingRequirements) > 0 {
-		return errors.New("workforce candidate has unresolved requirements")
+		issues := append([]ValidationIssue(nil), value.Result.Validation...)
+		for _, requirement := range value.Result.MissingRequirements {
+			issues = append(issues, ValidationIssue{
+				Path:    "missingRequirements",
+				Code:    "missing_" + requirement.Kind,
+				Message: missingRequirementReadinessMessage(requirement),
+			})
+		}
+		for _, question := range value.Result.UnresolvedQuestions {
+			issues = append(issues, ValidationIssue{
+				Path:    "unresolvedQuestions",
+				Code:    "unanswered_refinement",
+				Message: fmt.Sprintf("Answer %q in the proposal before enabling this workforce", question.Prompt),
+			})
+		}
+		if len(issues) == 0 {
+			issues = append(issues, ValidationIssue{Path: "result", Code: "invalid_candidate", Message: "The proposal is marked invalid; check or regenerate it before enabling this workforce"})
+		}
+		return &ChangeSetReadinessError{Issues: issues}
 	}
 	if issues := validateObjectiveCapabilityInputs(&value.Result.Candidate, value.Catalog, true); len(issues) > 0 {
 		return &ChangeSetReadinessError{Issues: issues}
@@ -1804,6 +1822,25 @@ func validateApplyPlacement(value *ChangeSet) error {
 		}
 	}
 	return nil
+}
+
+func missingRequirementReadinessMessage(requirement MissingRequirement) string {
+	owner := requirement.RequiredBy
+	if owner == "" {
+		owner = "the proposal"
+	}
+	switch requirement.Kind {
+	case "skill", "skill_unavailable", "skill_installation":
+		return fmt.Sprintf("Skill %s required by %s is unavailable; install or select the exact Skill, or revise the proposal", requirement.ID, owner)
+	case "skill_binding":
+		return fmt.Sprintf("Skill %s required by %s has no ready binding; select and configure its binding in placement", requirement.ID, owner)
+	case "credential":
+		return fmt.Sprintf("Credential %s required by %s is not bound; add it in Vault and select its reference in placement", requirement.ID, owner)
+	case "action", "version", "prompt", "conversation_adapter":
+		return fmt.Sprintf("Required %s %s for %s is unavailable; select a compatible Skill or revise the proposal", requirement.Kind, requirement.ID, owner)
+	default:
+		return fmt.Sprintf("Required %s %s for %s is unresolved; update the proposal or placement and check again", requirement.Kind, requirement.ID, owner)
+	}
 }
 
 func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
