@@ -7,9 +7,9 @@ These pages describe OpenSeal: what it is, how to run it, and what its API, term
 | Goal | First guide | Then read |
 | --- | --- | --- |
 | Run the daemon and terminal client | [Getting started](getting-started.md) | [Configuration](configuration.md) and [Security](security.md) |
-| Explore the desktop app | [Desktop quick start](../../desktop/README.md#start-desktop-development) | [Agents and Teams](agents-and-teams.md) |
+| Explore the desktop app | [Desktop application](installing.md) | [Agents and Teams](agents-and-teams.md) |
 | Generate and install a workforce | [Workforces](workforces.md) | [Security](security.md) for the authority boundary |
-| Build a client or embed the kernel | [Core concepts](concepts.md) | [API reference](api.md) and [developer guides](../dev-docs/README.md) |
+| Build a client or embed the kernel | [Core concepts](concepts.md) | [API reference](api.md) |
 
 The daemon and terminal client can run without a model provider. Proposal
 generation needs provider configuration; review and installation need the

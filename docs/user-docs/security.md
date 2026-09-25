@@ -72,7 +72,7 @@ Running without the flag leaves those mutations unavailable rather than silently
 
 > **Standalone mode approves actions as a single local principal.** Its action approvals carry `user:local`, and authoring retry/refinement acts as `local-operator`. These records do not identify a person. A deployment needing individual attribution requires a host that authenticates people.
 
-The desktop's separate `--desktop-operator` mode requires a loopback listener, a nonempty `OPENSEAL_API_TOKEN`, and a local workspace scope. It provides local policy evaluation, owner review, and installation for that workspace. The native desktop host creates and retains the per-launch token; see [desktop development](../../desktop/README.md).
+The desktop's separate `--desktop-operator` mode requires a loopback listener, a nonempty `OPENSEAL_API_TOKEN`, and a local workspace scope. It provides local policy evaluation, owner review, and installation for that workspace. The native desktop host creates and retains the per-launch token.
 
 ## Scopes Partition, Hosts Isolate
 
