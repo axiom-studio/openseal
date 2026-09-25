@@ -44,8 +44,13 @@ func TestSkillDefinitionExposesVersionedArtifactAction(t *testing.T) {
 	if definition.ID != SkillID || action.EmittedArtifactTypes[0] != ArtifactType || !definition.Requirements.AlwaysAvailable {
 		t.Fatalf("definition = %#v", definition)
 	}
-	if !strings.Contains(definition.Prompt.Instructions, "Communicate visually") || !strings.Contains(definition.Prompt.Instructions, "streaming revisions") {
+	if !strings.Contains(definition.Prompt.Instructions, "plot_chart") || !strings.Contains(definition.Prompt.Instructions, "publish_surface") || len(definition.Prompt.AllowedTools) != 2 {
 		t.Fatalf("prompt = %q", definition.Prompt.Instructions)
+	}
+	plot := definition.Actions[PlotChart]
+	if plot.InputSchema["additionalProperties"] != false || plot.InputSchema["properties"].(map[string]interface{})["points"] == nil ||
+		plot.Retry.MaxAttempts != 1 || plot.EmittedArtifactTypes[0] != ArtifactType {
+		t.Fatalf("bounded chart action = %#v", plot)
 	}
 	components := action.InputSchema["properties"].(map[string]interface{})["components"].(map[string]interface{})
 	component := components["items"].(map[string]interface{})
