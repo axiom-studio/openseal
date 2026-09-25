@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
@@ -19,6 +21,14 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	if input.Bound.Action.Risk == capability.RiskLevelRead &&
 		(input.Bound.Action.SideEffect == capability.SideEffectNone || input.Bound.Action.SideEffect == capability.SideEffectRead) {
 		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "read-only action"}, nil
+	}
+	// These host-owned actions create bounded conversation artifacts. Public
+	// site publication and all unrelated writes still follow approval policy.
+	if input.Bound.Definition.ID == builtin.SkillID && input.Bound.Definition.Version == builtin.SkillVersion &&
+		(input.Bound.Action.Name == builtin.GenerateImage || input.Bound.Action.Name == builtin.CreateSite || input.Bound.Action.Name == builtin.UpdateSite) ||
+		input.Bound.Definition.ID == presentation.SkillID && input.Bound.Definition.Version == presentation.SkillVersion &&
+			(input.Bound.Action.Name == presentation.Publish || input.Bound.Action.Name == presentation.PlotChart) {
+		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "create bounded conversation artifact"}, nil
 	}
 	// Starting an already reviewed Runbook does not widen authority: the
 	// activation pins its owner, Objective, definition, policy, budget, and
