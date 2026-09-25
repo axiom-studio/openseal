@@ -133,6 +133,9 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 	}
 	if current != nil {
 		result, err := s.runs.CreateAgentRun(ctx, request)
+		if err == nil {
+			err = s.interruptSupersededConversationRuns(ctx, conversation, message, result.Run.ID)
+		}
 		return result, true, err
 	}
 	coordinated, err := s.coordinatedTriggerIDs(ctx, conversation)
@@ -158,7 +161,89 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	if err != nil {
 		return nil, false, err
 	}
+	if err := s.interruptSupersededConversationRuns(ctx, conversation, message, result.Run.ID); err != nil {
+		return result, false, err
+	}
 	return result, result.Event == nil, nil
+}
+
+// A new human prompt supersedes unfinished replies in the same channel. The
+// message and its replacement Run are durable before cancellation, so a failed
+// cancellation can be retried by message reconciliation without losing input.
+func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx context.Context, conversation *Conversation, message *ChannelMessage, replacementID string) error {
+	if message.Sender.Type != ConversationParticipantUser || !message.RequiresResponse {
+		return nil
+	}
+	const pageSize = 100
+	// Two HTTP posts can overlap: an older message may be scheduled after the
+	// newer one. In that case its own Run must be canceled as well.
+	supersedingSequence := message.Sequence
+	for after := message.Sequence; ; {
+		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+			Scope: conversation.Scope, ConversationID: conversation.ID, AfterSequence: after, Limit: pageSize,
+		})
+		if err != nil {
+			return err
+		}
+		for _, candidate := range messages {
+			if candidate.Sender.Type == ConversationParticipantUser && candidate.RequiresResponse {
+				supersedingSequence = candidate.Sequence
+			}
+		}
+		if len(messages) < pageSize {
+			break
+		}
+		after = messages[len(messages)-1].Sequence
+	}
+	for offset := 0; ; offset += pageSize {
+		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+			Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
+			ConcurrencyKey: conversation.ID, Limit: pageSize, Offset: offset,
+		})
+		if err != nil {
+			return err
+		}
+		for _, run := range runs {
+			if run == nil || (run.ID == replacementID && supersedingSequence == message.Sequence) || isTerminalAgentRunStatus(run.Status) {
+				continue
+			}
+			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+			if triggerID == "" {
+				continue
+			}
+			trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
+			if err != nil {
+				return err
+			}
+			if trigger.Sequence >= supersedingSequence {
+				continue
+			}
+			visibility := ActivityVisibilityPrivate
+			if conversation.Owner.Type == OwnerTypeTeam {
+				visibility = ActivityVisibilityTeam
+			}
+			for attempt := 0; attempt < 3; attempt++ {
+				_, err = s.runs.CommandAgentRun(ctx, AgentRunCommandRequest{
+					Scope: conversation.Scope, RunID: run.ID, ExpectedRevision: run.Revision,
+					Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
+					Summary: "Interrupted by a newer message", Visibility: visibility,
+				})
+				if !errors.Is(err, ErrRevisionConflict) {
+					break
+				}
+				run, err = s.runs.store.GetAgentRun(ctx, conversation.Scope, run.ID)
+				if err != nil || run == nil || isTerminalAgentRunStatus(run.Status) {
+					break
+				}
+			}
+			if err != nil && !(run != nil && isTerminalAgentRunStatus(run.Status)) {
+				return err
+			}
+		}
+		if len(runs) < pageSize {
+			return nil
+		}
+	}
 }
 
 func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *Conversation, message *ChannelMessage) (CreateAgentRunRequest, error) {
