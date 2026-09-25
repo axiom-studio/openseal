@@ -15,6 +15,31 @@ const slackChatbotPrompt = "I want a Slack agent that listens to my message in t
 
 const orchestratedSlackChatbotPrompt = "Create a Slack chatbot that listens for messages, triages them, asks for approval when needed, and then responds."
 
+func TestMeetVoiceSessionUsesExistingAgentConversation(t *testing.T) {
+	catalog := CapabilityCatalog{RuntimeComposition: CanonicalRuntimeCompositionCapability(), Skills: map[string]SkillCapability{
+		"openseal.meet.voice": {ID: "openseal.meet.voice", Version: "0.1.0", Actions: []string{"meet-start", "meet-status", "meet-stop"}},
+	}}
+	prompt := "Create an agent that joins Google Meet, listens to people, replies aloud, and keeps the transcript and approvals in Seal Chat."
+	if got := deriveRuntimeCompositionRequirements(prompt, catalog); got != nil {
+		t.Fatalf("Meet voice incorrectly requires an external chat endpoint: %#v", got)
+	}
+	if issues := validateConversationComposition(&WorkforceCandidate{}, GenerateRequest{Prompt: prompt, Catalog: catalog}); len(issues) != 0 {
+		t.Fatalf("Meet voice composition issues = %#v", issues)
+	}
+	for _, other := range []string{
+		" Also listen and reply in Slack.",
+		" Also listen and reply in web chat.",
+	} {
+		if got := deriveRuntimeCompositionRequirements(prompt+other, catalog); got == nil || got.Conversation == nil {
+			t.Fatalf("external messaging intent lost its endpoint requirement for %q", other)
+		}
+	}
+	delete(catalog.Skills, "openseal.meet.voice")
+	if got := deriveRuntimeCompositionRequirements(prompt, catalog); got == nil || got.Conversation == nil {
+		t.Fatal("unavailable Meet voice Skill suppressed the endpoint requirement")
+	}
+}
+
 type compositionCaptureGenerator struct {
 	request GenerateRequest
 	payload []byte

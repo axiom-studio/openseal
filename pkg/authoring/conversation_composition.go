@@ -482,6 +482,9 @@ func validateConversationComposition(candidate *WorkforceCandidate, request Gene
 // only when the user asks for deterministic orchestration such as approvals,
 // waits, handoffs, routing, retries, or an explicit workflow.
 func deriveRuntimeCompositionRequirements(prompt string, catalog CapabilityCatalog) *RuntimeCompositionRequirements {
+	if meetVoiceUsesAgentConversation(prompt, catalog) {
+		return nil
+	}
 	if !explicitReactiveConversationIntent(prompt) {
 		return nil
 	}
@@ -510,6 +513,24 @@ func deriveRuntimeCompositionRequirements(prompt string, catalog CapabilityCatal
 		}
 	}
 	return &RuntimeCompositionRequirements{Conversation: requirement}
+}
+
+// A Meet voice session is started by an Agent action and sends observations
+// into that Agent's existing Seal Chat. It is not a separately installed
+// external messaging endpoint. Keep the ordinary endpoint requirement when
+// the same prompt also asks for another messaging surface.
+func meetVoiceUsesAgentConversation(prompt string, catalog CapabilityCatalog) bool {
+	skill, ok := catalog.Skills["openseal.meet.voice"]
+	if !ok || !containsExactString(skill.Actions, "meet-start") {
+		return false
+	}
+	lower := strings.ToLower(prompt)
+	if !strings.Contains(lower, "google meet") {
+		return false
+	}
+	tokens := compositionTokens(prompt)
+	return !containsAnyToken(tokens, "slack", "discord", "telegram", "whatsapp", "teams", "sms", "webchat") &&
+		!strings.Contains(lower, "web chat")
 }
 
 func explicitConversationOrchestrationIntent(prompt string) bool {
