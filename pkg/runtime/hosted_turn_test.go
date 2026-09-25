@@ -979,6 +979,26 @@ func TestHostedTurnRunnerCarriesOneDurableWorkProposal(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "self-fork",
+			response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model", OutputSummary: "Split the work",
+				ProposedFork: &TurnForkProposal{
+					ForkID: "split-work", Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+					Branches: []RunForkBranch{
+						{ID: "part-a", Goal: "Complete part A", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}},
+						{ID: "part-b", Goal: "Complete part B", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}},
+					},
+				},
+			},
+			assertions: func(t *testing.T, outcome *TurnOutcome) {
+				if outcome.ProposedFork == nil || len(outcome.ProposedFork.Branches) != 2 ||
+					outcome.ProposedFork.Branches[0].AssignedAgentID != "" || outcome.ProposedFork.Branches[1].AssignedAgentID != "" {
+					t.Fatalf("self-fork targets changed: %#v", outcome.ProposedFork)
+				}
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
