@@ -25,11 +25,13 @@ produces a release marked pre-release, and the container `:latest` tag is left
 where it is so an unqualified `docker pull` never resolves to a release
 candidate.
 
-**The tag decides pre-release status, on both paths.** The workflow derives it
-from the tag suffix whether it creates the release or adopts one created from
-the web UI, so the web UI's **Set as a pre-release** checkbox is not
-authoritative and its setting is overwritten. Getting that checkbox wrong is
-therefore harmless; getting the tag wrong is not.
+**The tag decides pre-release status, on every path.** The workflow derives it
+from the tag suffix in all three cases — creating a release, adopting one made
+from the web UI, and reusing an existing draft — so the web UI's **Set as a
+pre-release** checkbox is never authoritative and its setting is overwritten on
+each run. That includes a draft edited by hand between a failed run and a
+re-run. Getting the checkbox wrong is therefore harmless; getting the tag wrong
+is not.
 
 ## What The Pipeline Does
 
