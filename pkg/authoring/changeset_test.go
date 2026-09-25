@@ -647,6 +647,48 @@ func TestGenerationRetryIsConcurrentIdempotent(t *testing.T) {
 	}
 }
 
+func TestGenerationRetryRepairsValidationOnlyBlockedDraft(t *testing.T) {
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	prepared, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "validation-retry-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked := cloneChangeSet(prepared)
+	blocked.Status = ChangeSetBlocked
+	blocked.Revision++
+	blocked.Result.Validation = []ValidationIssue{issue("conversationEndpoints", "reactive_conversation_endpoint_missing", "old validator")}
+	blocked, err = store.UpdateChangeSet(context.Background(), blocked, prepared.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RetryChangeSetGenerationRequest{Scope: blocked.Scope, ChangeSetID: blocked.ID,
+		ExpectedRevision: blocked.Revision, Reason: "validator corrected", Actor: blocked.Actor,
+		IdempotencyKey: "validation-retry"}
+	retried, replayed, err := service.RetryGeneration(context.Background(), request)
+	if err != nil || replayed || retried.Status != ChangeSetEvaluating || retried.Revision != blocked.Revision+1 {
+		t.Fatalf("validation retry = %#v, replayed=%t, err=%v", retried, replayed, err)
+	}
+	if len(retried.Lifecycle) == 0 || retried.Lifecycle[len(retried.Lifecycle)-1].From != ChangeSetBlocked {
+		t.Fatalf("validation retry lifecycle = %#v", retried.Lifecycle)
+	}
+
+	questions := cloneChangeSet(blocked)
+	questions.ID = "blocked-with-question"
+	questions.Result.UnresolvedQuestions = []RefinementQuestion{{ID: "admission"}}
+	if _, _, err := store.CreateChangeSet(context.Background(), questions, "question-create", "question-digest"); err != nil {
+		t.Fatal(err)
+	}
+	request.ChangeSetID, request.ExpectedRevision, request.IdempotencyKey = questions.ID, questions.Revision, "question-retry"
+	if _, _, err := service.RetryGeneration(context.Background(), request); !errors.Is(err, ErrChangeSetTransition) {
+		t.Fatalf("unanswered question retry = %v", err)
+	}
+}
+
 func TestAtomicMemoryApplyIsIdempotentAndConcurrent(t *testing.T) {
 	payload, _ := json.Marshal(GenerationResponse{Candidate: marketingCandidate("1", capability.RiskLevelRead)})
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{payloads: [][]byte{payload}})
