@@ -71,6 +71,29 @@ jobs:
             exit 1
           fi
 
+          # THE single source of truth for pre-release status: the tag decides,
+          # never a stored flag and never a web UI checkbox.
+          #
+          # This job has THREE paths that can hand a release to the build jobs —
+          # create, adopt, and draft-reuse — and every one of them must agree on
+          # this value. Two earlier rounds got that wrong in the same way: the
+          # adopt path shipped without the flag (#5453) and, once that was fixed
+          # by mirroring the rule inline, draft-reuse was found still inheriting
+          # it (#5457). The defect was never the individual line; it was the rule
+          # existing in more than one place. Hence one function, called by all
+          # three. A fourth path gets it by calling this, not by copying it.
+          #
+          # =true/=false, never a bare --prerelease: the bare form is a set-only
+          # boolean and cannot CLEAR the flag, so it would fix an RC tag and
+          # leave the inverse — a final tag someone marked pre-release — broken.
+          # Always emits a real argument, so every caller can quote it.
+          prerelease_flag() {
+            case "$1" in
+              *-*) printf '%s' '--prerelease=true' ;;
+              *)   printf '%s' '--prerelease=false' ;;
+            esac
+          }
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             # Reusing a DRAFT is the point: it lets a failed run be re-run
             # against the release it already started.
@@ -125,39 +148,24 @@ jobs:
               # final tag someone ticked as pre-release must be cleared, because
               # promote-latest decides from the tag and would move :latest while
               # the release page said pre-release.
-              #
-              # MIRRORS the create path below. The rule lives in two places;
-              # keep them in step if either changes.
-              #
-              # =true/=false rather than a bare --prerelease: the bare form is
-              # set-only and cannot clear the flag, which would fix the RC
-              # direction and leave the inverse broken. Quoted because this is
-              # always non-empty — unlike the create path's $PRERELEASE, which
-              # must stay unquoted so an empty value disappears.
-              PRERELEASE_FLAG="--prerelease=false"
-              case "$TAG" in
-                *-*) PRERELEASE_FLAG="--prerelease=true" ;;
-              esac
+              PRERELEASE_FLAG="$(prerelease_flag "$TAG")"
               gh release edit "$TAG" --draft=true "$PRERELEASE_FLAG"
               echo "release ${TAG} was published with no assets; adopted it, set ${PRERELEASE_FLAG}, and returned it to draft"
               exit 0
             fi
-            echo "draft release ${TAG} already exists; reusing it"
+            # Reusing the draft, but NOT its stored pre-release flag. A draft can
+            # be edited by hand between a failed run and a re-run — the recovery
+            # path releasing.md documents — and unticking "Set as a pre-release"
+            # while reading the notes would otherwise survive into publication
+            # (#5457). The tag decides here too.
+            PRERELEASE_FLAG="$(prerelease_flag "$TAG")"
+            gh release edit "$TAG" "$PRERELEASE_FLAG"
+            echo "draft release ${TAG} already exists; reusing it, set ${PRERELEASE_FLAG}"
             exit 0
           fi
-          # Pre-release when the tag carries a suffix such as -rc1.
-          #
-          # MIRRORED by the adopt path above, which re-derives the same decision
-          # with the --prerelease=true/false form. Keep the two in step if either
-          # changes. Unquoted below on purpose: an empty value must disappear
-          # from the command line rather than be passed as an empty argument.
-          PRERELEASE=""
-          case "$TAG" in
-            *-*) PRERELEASE="--prerelease" ;;
-          esac
           gh release create "$TAG" \
             --draft \
-            $PRERELEASE \
+            "$(prerelease_flag "$TAG")" \
             --title "OpenSeal ${TAG}" \
             --notes "Draft release. Assets are uploaded by the build jobs; this becomes visible once the assembly job publishes it."
 
