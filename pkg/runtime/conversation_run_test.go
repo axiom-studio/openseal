@@ -101,6 +101,67 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	}
 }
 
+func TestConversationRunSchedulerSteersWithNewestUserMessage(t *testing.T) {
+	for _, reverseSchedule := range []bool{false, true} {
+		t.Run(fmt.Sprint("reverse=", reverseSchedule), func(t *testing.T) {
+			store := NewMemoryStore()
+			service := NewConversationService(store)
+			scope := Scope{Kind: "tenant", ID: "steering"}
+			conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
+				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"},
+				Title: "Steering", IdempotencyKey: "steering-channel",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			post := func(content, key string) *ChannelMessage {
+				t.Helper()
+				current, getErr := service.GetConversation(t.Context(), scope, conversation.ID)
+				if getErr != nil {
+					t.Fatal(getErr)
+				}
+				result, postErr := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
+					Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
+					Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"},
+					Intent: MessageIntentQuestion, Content: content, RequiresResponse: true,
+					Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: key,
+				})
+				if postErr != nil {
+					t.Fatal(postErr)
+				}
+				return result.Message
+			}
+			first := post("Draft a report", "first")
+			scheduler := mustConversationRunScheduler(t, store)
+			runs := map[string]string{}
+			schedule := func(message *ChannelMessage) {
+				t.Helper()
+				result, _, scheduleErr := scheduler.ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
+				if scheduleErr != nil || result == nil || result.Run == nil {
+					t.Fatalf("schedule %s: %#v, %v", message.ID, result, scheduleErr)
+				}
+				runs[message.ID] = result.Run.ID
+			}
+			if !reverseSchedule {
+				schedule(first)
+			}
+			second := post("Make it a one-page summary instead", "second")
+			schedule(second)
+			if reverseSchedule {
+				schedule(first)
+			}
+			oldRun, err := store.GetAgentRun(t.Context(), scope, runs[first.ID])
+			if err != nil || oldRun.Status != AgentRunStatusCanceled {
+				t.Fatalf("superseded run = %#v, %v", oldRun, err)
+			}
+			newRun, err := store.GetAgentRun(t.Context(), scope, runs[second.ID])
+			if err != nil || isTerminalAgentRunStatus(newRun.Status) {
+				t.Fatalf("newest request was interrupted: %#v, %v", newRun, err)
+			}
+		})
+	}
+}
+
 func TestConversationMessageStartsRunSkipsApprovalCoordinatorProjections(t *testing.T) {
 	conversation := &Conversation{
 		ID: "approval-channel", Scope: Scope{Kind: "tenant", ID: "11"},
