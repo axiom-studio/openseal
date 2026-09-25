@@ -1112,8 +1112,10 @@ func (s *ChangeSetService) ListPendingEvaluations(ctx context.Context, scope cap
 	return store.ListPendingChangeSetEvaluations(ctx, scope, limit)
 }
 
-// RetryGeneration explicitly requeues a failed model attempt. The previous
-// error and lifecycle remain auditable; a host schedules a new canonical Run.
+// RetryGeneration explicitly requeues a failed attempt or a validation-only
+// blocked draft after its authoring contract has been corrected. Unanswered
+// questions and missing setup still require their normal user-owned flows.
+// The previous result and lifecycle remain auditable.
 func (s *ChangeSetService) RetryGeneration(ctx context.Context, request RetryChangeSetGenerationRequest) (*ChangeSet, bool, error) {
 	request.ChangeSetID = strings.TrimSpace(request.ChangeSetID)
 	request.Reason = strings.TrimSpace(request.Reason)
@@ -1151,7 +1153,9 @@ func (s *ChangeSetService) RetryGeneration(ctx context.Context, request RetryCha
 	if current.Revision != request.ExpectedRevision {
 		return nil, false, ErrChangeSetRevision
 	}
-	if current.Status != ChangeSetFailed || current.Generation == nil {
+	validationOnlyBlock := current.Status == ChangeSetBlocked && len(current.Result.Validation) > 0 &&
+		len(current.Result.UnresolvedQuestions) == 0 && len(current.Result.MissingRequirements) == 0
+	if (current.Status != ChangeSetFailed && !validationOnlyBlock) || current.Generation == nil {
 		return nil, false, fmt.Errorf("%w: cannot retry status %s", ErrChangeSetTransition, current.Status)
 	}
 	next := cloneChangeSet(current)
