@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -12,6 +13,28 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
+
+func TestAgentConversationGoalSeparatesCurrentRequestFromOldCommands(t *testing.T) {
+	conversation := &Conversation{ID: "chat", Title: "Assistant"}
+	previous := &ChannelMessage{ID: "old", Sequence: 1, Content: "Create a PDF"}
+	trigger := &ChannelMessage{ID: "new", Sequence: 2, Content: "Reply with exactly OK"}
+	goal, err := (&ConversationRunTurnRunner{}).agentConversationGoal(t.Context(), conversation, trigger, []*ChannelMessage{previous, trigger}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(goal, "Respond only to currentMessage") {
+		t.Fatal("prompt does not prioritize the triggering request")
+	}
+	var payload struct {
+		Messages       []agentConversationPromptMessage `json:"messages"`
+		CurrentMessage agentConversationPromptMessage   `json:"currentMessage"`
+	}
+	_, raw, ok := strings.Cut(goal, "\n\n")
+	if !ok || json.Unmarshal([]byte(raw), &payload) != nil || len(payload.Messages) != 1 ||
+		payload.Messages[0].ID != previous.ID || payload.CurrentMessage.ID != trigger.ID || payload.CurrentMessage.Content != trigger.Content {
+		t.Fatalf("current request was mixed with history: %s", goal)
+	}
+}
 
 func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *testing.T) {
 	store := NewMemoryStore()
