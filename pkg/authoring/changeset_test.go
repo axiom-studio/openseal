@@ -647,6 +647,36 @@ func TestGenerationRetryIsConcurrentIdempotent(t *testing.T) {
 	}
 }
 
+func TestGenerationRetryPinsCurrentCandidateDigest(t *testing.T) {
+	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
+	store := NewMemoryChangeSetStore()
+	service, _ := NewChangeSetService(compiler, store)
+	prepared, _, err := service.Prepare(context.Background(), CreateChangeSetRequest{
+		Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Prompt: "create",
+		Actor: ChangeSetActor{Type: "user", ID: "7"}, IdempotencyKey: "retry-digest-create",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := cloneChangeSet(prepared)
+	failed.Status = ChangeSetFailed
+	failed.CandidateDigest = "newer-candidate"
+	failed.Generation.PreviousCandidateDigest = "older-candidate"
+	store.mu.Lock()
+	store.changeSets[changeSetKey(failed.Scope, failed.ID)] = cloneChangeSet(failed)
+	store.mu.Unlock()
+	retried, _, err := service.RetryGeneration(context.Background(), RetryChangeSetGenerationRequest{
+		Scope: failed.Scope, ChangeSetID: failed.ID, ExpectedRevision: failed.Revision,
+		Reason: "retry", Actor: failed.Actor, IdempotencyKey: "retry-digest",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.Generation.PreviousCandidateDigest != failed.CandidateDigest {
+		t.Fatalf("retry pinned digest %q, want %q", retried.Generation.PreviousCandidateDigest, failed.CandidateDigest)
+	}
+}
+
 func TestGenerationRetryRepairsValidationOnlyBlockedDraft(t *testing.T) {
 	compiler, _ := NewCompiler(&sequenceChangeSetGenerator{})
 	store := NewMemoryChangeSetStore()
