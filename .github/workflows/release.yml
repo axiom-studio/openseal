@@ -115,14 +115,42 @@ jobs:
               #
               # Restores the release PAGE only. A release notification GitHub
               # already emitted when the web UI published it cannot be recalled.
-              gh release edit "$TAG" --draft=true
-              echo "release ${TAG} was published with no assets; adopted it and returned it to draft"
+              #
+              # The pre-release flag is re-derived from the TAG, never inherited
+              # from whatever the web UI form was set to. Its "Set as a
+              # pre-release" checkbox defaults to unticked, so without this an
+              # adopted v1.3.0-rc1 publishes with prerelease=false and GitHub
+              # badges it "Latest" — /releases/latest would then serve release
+              # candidates as the stable download. The inverse matters too: a
+              # final tag someone ticked as pre-release must be cleared, because
+              # promote-latest decides from the tag and would move :latest while
+              # the release page said pre-release.
+              #
+              # MIRRORS the create path below. The rule lives in two places;
+              # keep them in step if either changes.
+              #
+              # =true/=false rather than a bare --prerelease: the bare form is
+              # set-only and cannot clear the flag, which would fix the RC
+              # direction and leave the inverse broken. Quoted because this is
+              # always non-empty — unlike the create path's $PRERELEASE, which
+              # must stay unquoted so an empty value disappears.
+              PRERELEASE_FLAG="--prerelease=false"
+              case "$TAG" in
+                *-*) PRERELEASE_FLAG="--prerelease=true" ;;
+              esac
+              gh release edit "$TAG" --draft=true "$PRERELEASE_FLAG"
+              echo "release ${TAG} was published with no assets; adopted it, set ${PRERELEASE_FLAG}, and returned it to draft"
               exit 0
             fi
             echo "draft release ${TAG} already exists; reusing it"
             exit 0
           fi
           # Pre-release when the tag carries a suffix such as -rc1.
+          #
+          # MIRRORED by the adopt path above, which re-derives the same decision
+          # with the --prerelease=true/false form. Keep the two in step if either
+          # changes. Unquoted below on purpose: an empty value must disappear
+          # from the command line rather than be passed as an empty argument.
           PRERELEASE=""
           case "$TAG" in
             *-*) PRERELEASE="--prerelease" ;;
