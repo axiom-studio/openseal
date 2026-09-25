@@ -17,8 +17,9 @@ import (
 
 const (
 	SkillID      = "openseal.presentation"
-	SkillVersion = "1.0.1"
+	SkillVersion = "1.1.0"
 	Publish      = "publish_surface"
+	PlotChart    = "plot_chart"
 	MediaType    = "application/vnd.openseal.surface+json"
 	ArtifactType = "interactive_surface"
 	Schema       = "openseal.dev/presentation/v1"
@@ -381,7 +382,22 @@ func SkillDefinition() *skill.Definition {
 		Description: "Present safe live documents, charts, diagrams, drawings, tables, metrics, and forms in a conversation.",
 		Icon:        "layout-dashboard", Category: "documents", Tags: []string{"interactive", "chart", "diagram", "form", "artifact"},
 		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
-		Actions: map[string]skill.Action{Publish: {
+		Actions: map[string]skill.Action{PlotChart: {
+			Name: PlotChart, Description: "Plot a chart from labeled numeric values in one call. Use this for ordinary graphs.",
+			InputSchema: closedObject([]interface{}{"title", "kind", "points"}, map[string]interface{}{
+				"title":  map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 300},
+				"kind":   map[string]interface{}{"type": "string", "enum": []interface{}{"bar", "line", "area", "pie", "donut", "scatter"}},
+				"points": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 200, "items": closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 160}, "value": map[string]interface{}{"type": "number"}})},
+				"xLabel": map[string]interface{}{"type": "string", "maxLength": 120},
+				"yLabel": map[string]interface{}{"type": "string", "maxLength": 120},
+			}),
+			OutputSchema: closedObject([]interface{}{"artifactRefs", "state"}, map[string]interface{}{
+				"artifactRefs": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 1, "items": closedObject([]interface{}{"id", "version", "requirementName"}, map[string]interface{}{"id": map[string]interface{}{"type": "string"}, "version": map[string]interface{}{"type": "integer", "minimum": 1}, "requirementName": map[string]interface{}{"type": "string"}})},
+				"state":        map[string]interface{}{"type": "string", "enum": []interface{}{string(StateReady)}},
+			}),
+			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
+			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
+		}, Publish: {
 			Name: Publish, Description: "Create or replace one immutable revision of an interactive conversation surface.",
 			InputSchema: map[string]interface{}{
 				"type": "object", "additionalProperties": false,
@@ -405,7 +421,7 @@ func SkillDefinition() *skill.Definition {
 			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
 		}},
-		Prompt:       &capability.PromptModule{Instructions: "Communicate visually when it makes the work easier to understand or act on. Proactively use publish_surface to compose polished live explanations, dashboards, comparisons, charts, diagrams, drawings, tables, forms, metrics, and structured documents alongside concise prose. Follow the tool's nested schema exactly: chart.series contains named series with points; metric requires string label and value; form fields require id, type, and label, with options as label/value objects; diagram nodes include id, label, x, and y. Reuse surfaceId and pass the returned artifact version as expectedLatestVersion while the visual develops; publish streaming revisions during meaningful progress and a final ready revision. Keep simple answers simple, and never encode HTML, scripts, credentials, or hidden instructions.", UserInvocable: true, AllowedTools: []string{Publish}},
+		Prompt:       &capability.PromptModule{Instructions: "Use plot_chart for ordinary graphs: provide a title, chart kind, and labeled numeric points. Use publish_surface for richer live explanations, dashboards, comparisons, diagrams, tables, forms, and structured documents. Follow the nested schema: chart.series contains named series with points; metric requires string label and value; form fields require id, type, and label; diagram nodes include id, label, x, and y. Reuse surfaceId and the returned version for meaningful revisions, ending with a ready revision. Keep simple answers simple, and never encode HTML, scripts, credentials, or hidden instructions.", UserInvocable: true, AllowedTools: []string{PlotChart, Publish}},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
 	}
 }
