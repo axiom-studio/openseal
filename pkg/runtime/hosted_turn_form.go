@@ -64,6 +64,7 @@ type HostedTurnActionForm struct {
 // final authority during compilation and materialization.
 type HostedTurnFormAuthority struct {
 	CanDelegate           bool
+	CanForkSelf           bool
 	CanInvokeRunbook      bool
 	SkillPromptReferences []string
 	WorkspaceOperations   []workspace.Operation
@@ -359,6 +360,8 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 	if len(authority) > 0 {
 		if !authority[0].CanDelegate {
 			delete(properties, "proposedDelegation")
+		}
+		if !authority[0].CanDelegate && !authority[0].CanForkSelf {
 			delete(properties, "proposedFork")
 		}
 		if !authority[0].CanInvokeRunbook {
