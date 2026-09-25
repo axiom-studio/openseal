@@ -43,6 +43,37 @@ func TestConversationCompactionKeepsOriginalsUntilAccepted(t *testing.T) {
 	}
 }
 
+func TestConversationCompactionCountsProjectedMessageMetadata(t *testing.T) {
+	c := &Conversation{ID: "chat", Scope: Scope{Kind: "tenant", ID: "one"}, LastSequence: 80}
+	v := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent"}}
+	messages := make([]*ChannelMessage, 80)
+	for i := range messages {
+		messages[i] = &ChannelMessage{
+			ID: fmt.Sprintf("m%d", i+1), Sequence: int64(i + 1),
+			Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"},
+			Intent: MessageIntentUpdate, Content: "short reply",
+			References: []ConversationReference{
+				{Kind: ConversationReferenceArtifact, ID: strings.Repeat("a", 128)},
+				{Kind: ConversationReferenceRun, ID: strings.Repeat("b", 128)},
+			},
+		}
+	}
+	plan := planConversationHistory(c, "m80", v, messages, nil)
+	if plan.Request == nil || plan.Request.ThroughSequence != 68 || len(plan.Messages) != 80 {
+		t.Fatalf("projected metadata did not trigger safe compaction: %+v", plan)
+	}
+	saved := acceptedConversationSummary(c, v, plan, map[string]interface{}{
+		conversationSummaryCheckpoint: map[string]interface{}{"basis": plan.Request.Basis, "text": "Earlier short replies and artifact references."},
+	})
+	if saved == nil {
+		t.Fatal("valid summary rejected")
+	}
+	compacted := planConversationHistory(c, "m80", v, messages, saved)
+	if len(compacted.Messages) != 12 || compacted.Messages[0].ID != "m69" {
+		t.Fatalf("summary did not remove covered projected history: %+v", compacted)
+	}
+}
+
 func TestConversationCompactionRunsWithoutExtraModelCall(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewConversationService(store)
