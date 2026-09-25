@@ -21,3 +21,16 @@ func TestAgentConversationGoalPreservesAttachmentReferences(t *testing.T) {
 		t.Fatal("input message was mutated")
 	}
 }
+
+func TestAgentConversationGoalEndsWithCurrentRequest(t *testing.T) {
+	conversation := &Conversation{ID: "chat", Scope: Scope{Kind: "tenant", ID: "tenant"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}}
+	old := &ChannelMessage{ID: "old", Sequence: 1, Content: "Create a PDF"}
+	current := &ChannelMessage{ID: "current", Sequence: 2, Content: "Reply with exactly READY."}
+	goal, err := (&ConversationRunTurnRunner{}).agentConversationGoal(t.Context(), conversation, current, []*ChannelMessage{old, current}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(goal, `"content":"Create a PDF"`) || !strings.HasSuffix(goal, `"content":"Reply with exactly READY."}}`) {
+		t.Fatalf("historical request displaced the current request: %s", goal)
+	}
+}
