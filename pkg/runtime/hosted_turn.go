@@ -442,6 +442,11 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if response.ProposedFork != nil {
 		proposalCount++
 		for index := range response.ProposedFork.Branches {
+			// An omitted target forks this Agent's own bounded Run. The fork
+			// coordinator retains the source Agent and its authority.
+			if strings.TrimSpace(response.ProposedFork.Branches[index].AssignedAgentID) == "" {
+				continue
+			}
 			response.ProposedFork.Branches[index].AssignedAgentID, err = resolveHostedAgentTarget(
 				response.ProposedFork.Branches[index].AssignedAgentID, request.EligibleAgents,
 			)
