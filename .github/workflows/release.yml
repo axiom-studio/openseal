@@ -73,22 +73,51 @@ jobs:
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             # Reusing a DRAFT is the point: it lets a failed run be re-run
-            # against the release it already started. Reusing a PUBLISHED one is
-            # a different thing entirely — every upload below passes --clobber
-            # and the assembly job regenerates checksums.txt from whatever is
-            # attached, so a re-pushed tag would replace the artifacts users
-            # already downloaded and produce a checksums file that correctly
-            # matches the replacements. The verification step the release notes
-            # tell users to run would pass against the substituted bytes, which
-            # is the one outcome an integrity check must not have.
+            # against the release it already started.
             #
             # Fail closed: an isDraft that cannot be read is treated as
             # published.
             IS_DRAFT="$(gh release view "$TAG" --json isDraft -q .isDraft 2>/dev/null || true)"
             if [ "$IS_DRAFT" != "true" ]; then
-              echo "::error::release ${TAG} already exists and is not a draft (isDraft='${IS_DRAFT:-unknown}'); refusing to overwrite its assets." >&2
-              echo "::error::Cut a new tag, or delete that release deliberately if replacement is genuinely intended." >&2
-              exit 1
+              # A PUBLISHED release is decided on its ATTACHED ASSETS, not on
+              # draft state, because draft state answers the wrong question.
+              #
+              # What must never happen: adopting a release that already carries
+              # artifacts. Every upload below passes --clobber and the assembly
+              # job regenerates checksums.txt from whatever is attached, so a
+              # re-pushed tag would replace artifacts users already downloaded
+              # AND emit a checksums file that correctly matches the
+              # replacements — the verification step the release notes tell
+              # users to run would pass against the substituted bytes, which is
+              # the one outcome an integrity check must not have.
+              #
+              # That hazard is asset-bearing, not publication-bearing. A release
+              # created from the GitHub web UI carries ZERO assets: the web form
+              # creates the release and its tag in one action, and that tag push
+              # is what triggers this workflow. Refusing it protected nothing and
+              # killed the run in ~5s before any build started (v1.0.17 run
+              # 35976118250, v1.0.19 run 36038036013).
+              #
+              # Fail closed again: a count gh cannot return is an empty string,
+              # which is not "0", so it refuses. Never read an unreadable count
+              # as "no assets".
+              ASSET_COUNT="$(gh release view "$TAG" --json assets -q '.assets | length' 2>/dev/null || true)"
+              if [ "$ASSET_COUNT" != "0" ]; then
+                echo "::error::release ${TAG} is published and carries ${ASSET_COUNT:-an unreadable number of} asset(s); refusing to overwrite them." >&2
+                echo "::error::Cut a new tag, or delete that release deliberately if replacement is genuinely intended." >&2
+                exit 1
+              fi
+              # Nothing to clobber. Put it back to a draft BEFORE any build job
+              # attaches anything, so the header comment on this job stays true:
+              # a partial or failed run never leaves a half-populated release
+              # visible. Without this the release would sit public for the whole
+              # ~45min build with checksums.txt covering only what had landed.
+              #
+              # Restores the release PAGE only. A release notification GitHub
+              # already emitted when the web UI published it cannot be recalled.
+              gh release edit "$TAG" --draft=true
+              echo "release ${TAG} was published with no assets; adopted it and returned it to draft"
+              exit 0
             fi
             echo "draft release ${TAG} already exists; reusing it"
             exit 0
