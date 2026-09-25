@@ -22,6 +22,7 @@ operation is available.
 | Model and credential setup | [Standalone context](standalone-context.md), [Operations](operations.md) |
 | Teams and workforces | [Team coordination](team-coordination.md), [Portable bundles](workforce-bundles.md), [Workforce identities](architecture/workforce-identities.md) |
 | Skills and deterministic work | [OpenClaw compatibility](skills/openclaw-compatibility.md), [Callable runbooks](callable-runbooks.md), [Runbook verification](runbook-verification.md) |
+| Cutting a release | [Releasing](releasing.md) |
 
 The user and developer guides cover the same product from different angles. When
 behavior changes, update the relevant user guide and the implementation guide
