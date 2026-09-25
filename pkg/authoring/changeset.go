@@ -1162,6 +1162,10 @@ func (s *ChangeSetService) RetryGeneration(ctx context.Context, request RetryCha
 	now := s.now().UTC()
 	next.Status, next.Revision, next.UpdatedAt = ChangeSetEvaluating, current.Revision+1, now
 	next.Generation.RunID = ""
+	// The candidate may have changed since this generation was first prepared.
+	// Completion uses this digest as a compare-and-swap guard, so retries must
+	// pin the candidate that is current at the time of the retry.
+	next.Generation.PreviousCandidateDigest = current.CandidateDigest
 	next.Generation.Request.InvocationKey = generationInvocationKey(next.ID, next.Generation.Attempt)
 	next.Generation.Retries = append(next.Generation.Retries, ChangeSetGenerationRetry{
 		IdempotencyKey: request.IdempotencyKey, RequestDigest: retryDigest, Attempt: next.Generation.Attempt,
