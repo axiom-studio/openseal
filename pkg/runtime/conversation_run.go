@@ -1226,13 +1226,13 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		HistoryCompaction      *ConversationCompactionRequest   `json:"historyCompaction,omitempty"`
 		TriggerID              string                           `json:"triggerMessageId"`
 		Messages               []agentConversationPromptMessage `json:"messages"`
-		CurrentMessage         agentConversationPromptMessage   `json:"currentMessage"`
 		Objectives             []agentConversationObjective     `json:"objectives,omitempty"`
 		Runbooks               []agentConversationRunbook       `json:"runbooks,omitempty"`
 		Operations             []agentConversationOperation     `json:"operations,omitempty"`
 		ActiveRuns             []agentConversationActiveRun     `json:"activeRuns"`
 		AttachmentGuidance     string                           `json:"attachmentGuidance"`
 		Attachments            []conversationAttachment         `json:"attachments,omitempty"`
+		CurrentMessage         agentConversationPromptMessage   `json:"currentMessage"`
 	}{
 		TriggerID: trigger.ID,
 		Messages:  make([]agentConversationPromptMessage, 0, len(recent)),
