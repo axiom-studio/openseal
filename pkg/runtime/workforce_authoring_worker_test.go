@@ -678,6 +678,51 @@ func TestWorkforceAuthoringWorkerStopYieldsWhenProviderLosesCancellationCause(t 
 	}
 }
 
+func TestWorkforceAuthoringWorkerObservesDurableDraftCancellation(t *testing.T) {
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	generator := &cancellationBoundaryWorkforceGenerator{started: make(chan struct{}), loseCancellation: true}
+	compiler, _ := authoring.NewCompiler(generator)
+	service, _ := NewWorkforceAuthoringRunService(compiler, store)
+	request := testPrepareWorkforceRequest()
+	changeSet, run, _, err := service.Prepare(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: request.Scope.Kind, ID: request.Scope.ID}
+	worker, _ := NewWorkforceAuthoringWorker(service, nil, WorkforceAuthoringWorkerConfig{
+		Scope: scope, WorkerID: "draft-cancel-worker", LeaseDuration: time.Minute, GenerationTimeout: 10 * time.Second,
+	})
+	finished := make(chan error, 1)
+	go func() {
+		_, runErr := worker.RunOnce(context.Background())
+		finished <- runErr
+	}()
+	select {
+	case <-generator.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("provider did not start")
+	}
+	if _, err := service.changeSets.CancelPreparedGeneration(t.Context(), request.Scope, changeSet.ID, changeSet.Revision, request.Actor); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-finished:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("worker did not observe durable cancellation")
+	}
+	stored, err := store.GetAgentRun(t.Context(), scope, run.ID)
+	if err != nil || stored.Status != AgentRunStatusCanceled {
+		t.Fatalf("run=%#v, err=%v", stored, err)
+	}
+}
+
 func TestWorkforceAuthoringShutdownReconcilesProviderSuccessAtCancellationBoundary(t *testing.T) {
 	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "kernel.db"))
 	if err != nil {
