@@ -2014,6 +2014,7 @@ const (
 
 	AgentRunCommandPause                    = runtime.AgentRunCommandPause
 	AgentRunCommandResume                   = runtime.AgentRunCommandResume
+	AgentRunCommandRetry                    = runtime.AgentRunCommandRetry
 	AgentRunCommandCancel                   = runtime.AgentRunCommandCancel
 	AgentRunCommandIntervene                = runtime.AgentRunCommandIntervene
 	AgentRunCommandResolveHumanIntervention = runtime.AgentRunCommandResolveHumanIntervention
@@ -4186,6 +4187,10 @@ func (e *Engine) ValidateAgentRunEntrypoint(ctx context.Context, scope runtime.S
 
 func (e *Engine) CommandAgentRun(ctx context.Context, req runtime.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
 	return runtime.NewRunCommandService(e.store).CommandAgentRun(ctx, req)
+}
+
+func (e *Engine) ConversationRetryEligibility(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunRetryEligibility, error) {
+	return runtime.NewRunCommandService(e.store).ConversationRetryEligibility(ctx, scope, runID)
 }
 
 func (e *Engine) GetAgentRun(ctx context.Context, scope runtime.Scope, runID string) (*runtime.AgentRun, error) {

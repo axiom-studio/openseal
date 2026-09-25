@@ -20,8 +20,12 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 				store = db
 			}
 			service, failed := failedReplyFixture(t, store)
-			request := AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Actor: ActivityActor{Type: "user", ID: "user"}}
-			result, err := service.RetryConversationRun(t.Context(), request)
+			eligibility, err := service.ConversationRetryEligibility(t.Context(), failed.Scope, failed.ID)
+			if err != nil || !eligibility.Available || eligibility.Revision != failed.Revision {
+				t.Fatalf("failed reply eligibility = %#v, %v", eligibility, err)
+			}
+			request := AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision, Kind: AgentRunCommandRetry, Actor: ActivityActor{Type: "user", ID: "user"}}
+			result, err := service.CommandAgentRun(t.Context(), request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -34,11 +38,15 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 			if result.Event.EventType != "run.retried" {
 				t.Fatal("missing retry audit")
 			}
-			if _, err := service.RetryConversationRun(t.Context(), request); !errors.Is(err, ErrRevisionConflict) {
+			if _, err := service.CommandAgentRun(t.Context(), request); !errors.Is(err, ErrRevisionConflict) {
 				t.Fatalf("duplicate retry: %v", err)
 			}
+			eligibility, err = service.ConversationRetryEligibility(t.Context(), failed.Scope, failed.ID)
+			if err != nil || eligibility.Available || eligibility.Reason != "not_failed" {
+				t.Fatalf("queued reply eligibility = %#v, %v", eligibility, err)
+			}
 			request.Scope.ID = "other"
-			if result, err := service.RetryConversationRun(t.Context(), request); err == nil || result != nil {
+			if result, err := service.CommandAgentRun(t.Context(), request); err == nil || result != nil {
 				t.Fatal("cross-tenant retry accepted")
 			}
 		})
