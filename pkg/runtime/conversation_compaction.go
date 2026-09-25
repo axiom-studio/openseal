@@ -78,12 +78,23 @@ func planConversationHistory(conversation *Conversation, triggerID string, viewe
 	if len(older) > 88 {
 		older = older[:88]
 	}
+	// The hosted prompt projects each message as JSON with sender, sequence,
+	// intent, and references. Counting content alone delays compaction for
+	// conversations with many short messages or artifact references.
 	bytes := 0
 	for _, message := range older {
 		if message == nil || message.ID == triggerID {
 			return plan
 		}
-		bytes += len(message.Content)
+		projected, err := json.Marshal(agentConversationPromptMessage{
+			ID: message.ID, Sequence: message.Sequence, Sender: message.Sender,
+			Intent: message.Intent, Content: message.Content,
+			References: message.References,
+		})
+		if err != nil {
+			return plan
+		}
+		bytes += len(projected) + 1 // JSON array separator.
 	}
 	if bytes < 24000 && len(plan.Messages) <= 100 {
 		return plan
