@@ -24,21 +24,24 @@ concurrency:
 # Checkout and Go toolchain setup run as plain shell.
 
 jobs:
+  # GitHub-hosted, and that is a requirement rather than a preference. This
+  # repository is public and the trigger is `pull_request` with no fork guard, so
+  # the job checks out a PR head from any fork and runs `make test` and
+  # `make build` over it — arbitrary code execution by construction. On a
+  # self-hosted runner that lands on a persistent host shared with other
+  # repositories' jobs running as the same user. A hosted runner is a fresh VM
+  # discarded afterwards, so there is no host to compromise and nothing to
+  # persist into the next run.
+  #
+  # A fork guard was the alternative and was rejected: it would leave fork PRs
+  # with no CI at all, which removes the gate from exactly the contributions that
+  # most need it.
   go:
     name: vet, test, build
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-      # Self-hosted runners reuse their working directory between runs, and
-      # nothing cleans it for us the way actions/checkout would. Start from an
-      # empty tree so a file deleted in this PR cannot survive from a previous
-      # run and mask a build failure.
-      - name: Reset the workspace
-        run: |
-          set -euo pipefail
-          find . -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-
       # Fail loudly and early on a runner that is missing a tool, rather than
       # midway through with an error that reads like a code problem. cc matters
       # most: the daemon links github.com/mattn/go-sqlite3, so cgo is mandatory
@@ -65,9 +68,12 @@ jobs:
           git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
           # Auth via GIT_CONFIG_* rather than `git -c`. Both keep the token out
           # of .git/config, but `-c` puts it in argv, and /proc/<pid>/cmdline is
-          # world-readable without hidepid — so on a shared runner a concurrent
-          # job from another repository could read it mid-fetch. The env form
-          # applies the same config without ever placing it on a command line.
+          # world-readable without hidepid — so any process the runner can host
+          # reads it mid-fetch. On a hosted runner that is a smaller set than it
+          # was on the shared fleet, but the job still executes PR-supplied code
+          # in later steps, and a secret that never reaches a command line cannot
+          # be read off one. The env form applies the same config without ever
+          # placing it on argv.
           GIT_AUTH_B64="$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 | tr -d '\n')"
           export GIT_CONFIG_COUNT=1
           export GIT_CONFIG_KEY_0="http.extraHeader"
@@ -87,21 +93,16 @@ jobs:
           fi
           GO_TARBALL="go${GO_VERSION}.linux-amd64.tar.gz"
 
-          # Download and verify on EVERY run, into a directory scoped to this
-          # run. Nothing pre-existing on disk is reused.
+          # Download and verify on EVERY run. Nothing pre-existing on disk is
+          # reused — which on a hosted runner is inherent rather than enforced,
+          # since the VM is created for this job and discarded after it.
           #
-          # This toolchain compiles everything the project ships, and the runner
-          # is shared with other repositories' jobs, which run as the same user.
-          # Any scheme that reuses an unpacked tree has to establish that the
-          # tree is still what was verified — and a marker file cannot do that,
-          # because whoever can overwrite `go/bin/go` can equally leave a
-          # matching marker in place. Re-deriving a digest from the bytes on
-          # disk each run would work, but hashing a whole GOROOT is slower and
-          # fiddlier than simply not trusting anything.
-          #
-          # So: no reuse. It costs about a minute per run and removes the class
-          # of problem rather than narrowing it.
-          GO_ROOT="${RUNNER_TEMP:-/tmp}/openseal-go-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # Kept explicit anyway, because the property is what the digest check
+          # below is worth: a verified tarball establishes nothing if an
+          # unverified tree from an earlier run is what actually gets used. The
+          # `rm -rf` costs nothing on a fresh VM and keeps the guarantee stated
+          # in the file rather than inherited from the runner's lifecycle.
+          GO_ROOT="${RUNNER_TEMP:-/tmp}/openseal-go"
           rm -rf "$GO_ROOT"
           mkdir -p "$GO_ROOT"
 
@@ -145,20 +146,18 @@ jobs:
       - name: Third-party notices cover the current module set
         run: |
           set -euo pipefail
-          # Run-scoped, matching the GO_ROOT idiom three steps above, and for
-          # the same reason that step states: this is the repository's only
-          # `self-hosted` job, the runner is shared with other repositories'
-          # jobs running as the same user, and `concurrency` is keyed on
-          # github.ref — so it serialises pushes to one PR but not two
-          # different PRs on the same host.
+          # Under RUNNER_TEMP, which on a hosted runner is private to this job's
+          # VM. The cross-run race this used to defend against needed a shared
+          # persistent host: run A writing mods.committed from its tree while
+          # run B overwrote mods.generated from a different tree, leaving A to
+          # compare its own committed set against B's resolved set with nothing
+          # in the log to show it. That required two jobs on one filesystem,
+          # which a per-job VM does not provide.
           #
-          # With fixed paths that needs no attacker to go wrong. Run A writes
-          # mods.committed from its tree; run B overwrites mods.generated from
-          # its tree before A reaches `cmp`; A then decides by comparing its
-          # own committed set against B's resolved set, and the log gives no
-          # sign of it. The verdict of a build-time control must not be
-          # readable or writable by an unrelated job.
-          NOTICES_TMP="${RUNNER_TEMP:-/tmp}/openseal-notices-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # The general rule it came from still holds and is worth keeping in
+          # mind if this ever moves: the verdict of a build-time control must
+          # not be readable or writable by an unrelated job.
+          NOTICES_TMP="${RUNNER_TEMP:-/tmp}/openseal-notices"
           rm -rf "$NOTICES_TMP"
           mkdir -p "$NOTICES_TMP"
           ./scripts/generate-third-party-notices.sh "${NOTICES_TMP}/notices.generated"
@@ -210,12 +209,13 @@ jobs:
           # before 1.3.4-20200717, and mawk is the default awk on Debian and
           # Ubuntu; there, `{80}` is taken literally, nothing matches, and the
           # count cross-check below fails the build with "extracted 0 module
-          # headers" on a file that is perfectly correct. The runner this
-          # repository uses has a new enough mawk -- verified -- but the fleet
-          # is addressed by label and this dependency buys nothing: the
-          # generator writes a fixed eighty-character line, so comparing
-          # against that exact string is both stricter and portable to every
-          # awk.
+          # headers" on a file that is perfectly correct.
+          #
+          # `ubuntu-latest` is a Debian-family image and so ships mawk as awk,
+          # which makes this the hosted runner's concern too, not a leftover from
+          # the self-hosted fleet. The dependency buys nothing either way: the
+          # generator writes a fixed eighty-character line, so comparing against
+          # that exact string is both stricter and portable to every awk.
           extract_modules() {
             awk '
               BEGIN { rule = sprintf("%80s", ""); gsub(/ /, "=", rule) }
