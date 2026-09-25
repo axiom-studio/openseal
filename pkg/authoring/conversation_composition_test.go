@@ -40,6 +40,24 @@ func TestMeetVoiceSessionUsesExistingAgentConversation(t *testing.T) {
 	}
 }
 
+func TestMeetingVoiceUsesExistingAgentConversationAcrossPlatforms(t *testing.T) {
+	catalog := CapabilityCatalog{RuntimeComposition: CanonicalRuntimeCompositionCapability(), Skills: map[string]SkillCapability{
+		"openseal.meeting.voice": {ID: "openseal.meeting.voice", Version: "0.2.0", Actions: []string{"meet-start", "meet-status", "meet-stop"}},
+	}}
+	for _, prompt := range []string{
+		"Create an agent that joins Google Meet, listens and replies aloud in Seal Chat.",
+		"Create an agent that joins Zoom, listens and replies aloud in Seal Chat.",
+		"Create an agent that joins a Microsoft Teams meeting, listens and replies aloud in Seal Chat.",
+	} {
+		if got := deriveRuntimeCompositionRequirements(prompt, catalog); got != nil {
+			t.Fatalf("meeting voice incorrectly requires an external chat endpoint for %q: %#v", prompt, got)
+		}
+		if got := deriveRuntimeCompositionRequirements(prompt+" Also listen and reply in Slack.", catalog); got == nil {
+			t.Fatalf("Slack endpoint requirement was suppressed for %q", prompt)
+		}
+	}
+}
+
 type compositionCaptureGenerator struct {
 	request GenerateRequest
 	payload []byte
