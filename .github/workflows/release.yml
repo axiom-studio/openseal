@@ -175,8 +175,14 @@ jobs:
   #
   # Every leg runs on a GitHub-hosted runner, including linux. That is
   # deliberate: hosted images ship a Go toolchain, so all four legs share one
-  # setup path. The self-hosted fleet is used where it actually earns its
-  # keep — the container job, which needs a Docker daemon.
+  # setup path.
+  #
+  # No job in this repository runs on a self-hosted runner. This comment used to
+  # say the fleet ran the container job; it never did — that job is
+  # `ubuntu-latest` and its own comment says so. `ci.yml` held the last
+  # self-hosted job and moved to `ubuntu-latest` in #5451, because this
+  # repository is public and a fork PR's code would otherwise execute on a
+  # persistent host shared with other repositories' jobs.
   #
   # linux/arm64 is NOT built here, nor by the container job any more.
   # It is the one target with no native runner
@@ -630,7 +636,8 @@ jobs:
   #
   # Tauri does not cross-compile and tauri.conf.json sets bundle.targets to
   # "all", so each platform's installers must be produced on that platform.
-  # The self-hosted fleet is Linux-only, hence hosted runners here.
+  # macOS and Windows runners exist only as hosted images, so every leg here is
+  # hosted — as is every other job in this repository.
   #
   # Every leg needs Go, Rust, Node and pnpm together, because the bundle embeds
   # the daemon: tauri.conf.json's beforeBuildCommand runs `pnpm prepare:daemon`,
