@@ -256,6 +256,18 @@ func TestHostedTurnFormSchemaOmitsUnavailableProposalFamilies(t *testing.T) {
 			t.Fatalf("authorized proposal %s was removed from schema", name)
 		}
 	}
+
+	schema, err = HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{CanForkSelf: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	properties = schema["properties"].(map[string]interface{})
+	if _, exists := properties["proposedFork"]; !exists {
+		t.Fatal("self-fork proposal was removed from schema")
+	}
+	if _, exists := properties["proposedDelegation"]; exists {
+		t.Fatal("self-fork authority exposed delegation")
+	}
 }
 
 func TestHostedTurnFormSchemaRequiresExactOfferedSkillDispositions(t *testing.T) {
