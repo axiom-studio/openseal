@@ -153,6 +153,9 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	conversation *Conversation,
 	message *ChannelMessage,
 ) (*AgentRunCommandResult, bool, error) {
+	if resumed, handled, err := s.resumeConversationAnswer(ctx, conversation, message); err != nil || handled {
+		return resumed, resumed != nil && resumed.Event == nil, err
+	}
 	request, err := s.conversationAgentRunRequest(ctx, conversation, message)
 	if err != nil {
 		return nil, false, err
@@ -296,6 +299,9 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 		return nil, err
 	}
 	result := &ConversationRunReconcileResult{}
+	if err := s.reconcileConversationQuestions(ctx, scope, result); err != nil {
+		return result, err
+	}
 	for offset := 0; ; offset += s.config.ConversationPageSize {
 		conversations, err := s.conversations.ListConversations(ctx, ConversationFilter{
 			Scope: scope, Statuses: []ConversationStatus{ConversationStatusActive},
@@ -316,6 +322,9 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 		if len(conversations) < s.config.ConversationPageSize {
 			break
 		}
+	}
+	if err := s.reconcileConversationOperationOutputs(ctx, scope, result); err != nil {
+		return result, err
 	}
 	if err := s.reconcileCanceledConversationRuns(ctx, scope, result); err != nil {
 		return result, err
@@ -1573,6 +1582,11 @@ func (r *ConversationRunTurnRunner) governedConversationOperationOutcome(ctx con
 			content = label + " failed. Review the Run for the exact failed step and retry when ready."
 		case AgentRunStatusCanceled:
 			content = label + " was canceled."
+		}
+		if saved, err := conversationOperationSavedOutput(ctx, r.portfolio, child); err != nil {
+			return nil, false, err
+		} else if saved != "" {
+			content = saved
 		}
 		return &governedConversationCompletion{
 			Content: content, ResourceType: runResourceType, ResourceID: child.ID,

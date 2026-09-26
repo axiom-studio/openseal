@@ -311,6 +311,10 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	resolvedBinding := *binding
 	resolvedBinding.InputContextRefs = append([]string(nil), binding.InputContextRefs...)
 	binding = &resolvedBinding
+	if p.reportingStore != nil {
+		binding.Runner = conversationWorkTurnRunner{inner: binding.Runner, runs: p.portfolio, conversations: p.reportingStore}
+	}
+
 	if ref := evidenceSnapshotInputContextRef(run.Context); ref != "" && !containsString(binding.InputContextRefs, ref) {
 		binding.InputContextRefs = append(binding.InputContextRefs, ref)
 	}
