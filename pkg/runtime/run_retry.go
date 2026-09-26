@@ -21,7 +21,7 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	if req.RunID == "" || req.ExpectedRevision <= 0 {
 		return nil, ErrInvalidRunCommand
 	}
-	if req.Instruction != "" || req.HumanInterventionID != "" {
+	if req.Instruction != "" || req.InterventionID != "" || req.HumanInterventionID != "" {
 		return nil, fmt.Errorf("%w: retry cannot change the saved request", ErrInvalidRunCommand)
 	}
 	current, err := s.store.GetAgentRun(ctx, req.Scope, req.RunID)
