@@ -657,6 +657,9 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
+	if input.Run.Context[DelegationModeContextKey] == "reason" {
+		request.SystemInstructions = append(request.SystemInstructions, "For a writing or reasoning task, put the actual deliverable in runOutput.summary. Once the requested draft or answer is ready, return nextRunStatus completed in that same response. An invitation for optional revisions does not require this Run to stay running or wait; a later user request can start a revision. Preserve the original request's explicit length and units. completionEvidenceRefs must be empty when no tool action ran: a written draft needs no ActionCall receipt. Never use a Run ID, message ID, or invented value as tool evidence. Return exactly one response object, not separate draft and completion objects.")
+	}
 	if len(request.Actions) > 0 && len(actionHistoryEntries(input.Run.Checkpoint)) == 0 {
 		request.SystemInstructions = append(request.SystemInstructions,
 			"The authoritative governed action history is empty. If this goal requires observing or changing an external resource, begin by proposing exactly one authorized acquisition/start action when one is available, otherwise one authorized read action. Do not claim that an action ran, that a resource or observation exists, or that preparatory evidence was produced until a matching succeeded entry appears in continuationCheckpoint._opensealActionHistory. Do not propose a write or external side effect whose documented prerequisites are absent from that history.")
