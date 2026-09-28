@@ -448,6 +448,13 @@ func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerI
 		"summary":   strings.TrimSpace(proposal.Summary),
 		"arguments": cloneMap(proposal.Arguments),
 	}
+	sourceMessage, err := runbookSourceMessage(ctx, p.reportingStore, run)
+	if err != nil {
+		return nil, err
+	}
+	if sourceMessage != nil {
+		operationContext[RunbookInvocationContextKey].(map[string]interface{})["sourceMessage"] = sourceMessage
+	}
 	if strings.TrimSpace(authorized.DefinitionID) != "" && strings.TrimSpace(authorized.DefinitionVersion) != "" {
 		operationContext["runbookDefinitionId"] = strings.TrimSpace(authorized.DefinitionID)
 		operationContext["runbookDefinitionVersion"] = strings.TrimSpace(authorized.DefinitionVersion)
@@ -586,7 +593,9 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 		sharedContext["triggerInput"] = runbookOrigin
 	}
 	if invocation, ok := run.Context[RunbookInvocationContextKey].(map[string]interface{}); ok {
-		sharedContext[RunbookInvocationContextKey] = cloneMap(invocation)
+		// Explicit model arguments remain shareable; an original chat message
+		// is retained only when the same Agent continues its own operation.
+		sharedContext[RunbookInvocationContextKey] = forwardRunbookInvocation(invocation, proposal.AssignedAgentID == run.AssignedAgentID)
 	}
 	if proposal.Mode != "" {
 		sharedContext[DelegationModeContextKey] = proposal.Mode
