@@ -34,9 +34,13 @@ func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (Ge
 	}
 	result := GenerationResponse{
 		SchemaVersion: AuthoringResultSchemaVersion,
-		Candidate:     WorkforceCandidate{Activation: deterministicAuthoringActivation(request)},
-		Authoring:     AuthoringFormSubmission{Version: AuthoringFormVersionV1},
-		Assumptions:   normalized(intent.Assumptions),
+		// These receipts are compiler-owned, not fields in AuthoringIntent.
+		// Validate the resulting resources against them below; asking the
+		// semantic planner to emit them can never repair missing coverage.
+		Commitments: extractExplicitPromptCommitments(request.Prompt),
+		Candidate:   WorkforceCandidate{Activation: deterministicAuthoringActivation(request)},
+		Authoring:   AuthoringFormSubmission{Version: AuthoringFormVersionV1},
+		Assumptions: normalized(intent.Assumptions),
 	}
 	agents := make(map[string]*agent.AgentDefinition, len(intent.Agents))
 	existingAgents := existingAuthoringAgentsByKey(request.Existing)
