@@ -30,7 +30,9 @@ When creating an Agent without a user-specified name, suggest a distinctive, sho
 
 Create a Team only when the user requested one or distinct collaborating roles require it. Every role must name its participating Agent keys. Keep a standalone Agent standalone.
 
-Clarifications contain only the natural question, why it blocks a sound proposal, and optional human-readable choices. OpenSeal owns the canonical question category, answer type, blocking scope, provenance, and validation.`
+Clarifications contain only the natural question, why it blocks a sound proposal, and optional human-readable choices. OpenSeal owns the canonical question category, answer type, blocking scope, provenance, and validation.
+
+Keep creation concise. Do not interview the user about details already supplied or inputs they can provide when asking the Agent to do its work. Choose sensible reversible defaults and state them briefly as assumptions. Skill installation, credential selection, and connection setup are handled by the application's governed setup forms; select the needed capability but do not duplicate those forms with clarification questions. Never ask again for an answered decision. Return no clarifications when the request already supports a sound proposal.`
 
 const authoringSourceIdentityPrompt = " Treat sourceIdentity as exact immutable provenance whenever it is supplied; never substitute another publisher variant with the same id and version."
 const authoringSkillOptionActionsPrompt = " A skill_selection option may include actions, but every value must be an exact action exposed by that catalog Skill. Other answer option kinds must not include actions."

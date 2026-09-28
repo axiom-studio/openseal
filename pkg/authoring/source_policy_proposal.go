@@ -103,52 +103,20 @@ func providerRepairableMissingRequirements(candidate *WorkforceCandidate, missin
 			proposed[reference] = candidateUsesProposedSourcePolicy(candidate, reference, draft.SkillIDs)
 		}
 	}
-	selectedSkills := answeredCapabilityNeedSkills(request)
 	result := make([]MissingRequirement, 0, len(missing))
 	for _, requirement := range missing {
-		if requirement.Kind == "source_policy" && proposed[strings.TrimSpace(requirement.ID)] {
+		// Readiness is resolved by governed installation/binding/credential
+		// setup. A model cannot make it ready, and must not substitute a
+		// different capability merely to avoid a setup question. Keep these
+		// requirements in the result so review/apply remains blocked.
+		switch requirement.Kind {
+		case "skill_binding", "skill_installation", "credential":
 			continue
 		}
-		if selectedCapabilityReadinessRequirement(requirement, selectedSkills) {
+		if requirement.Kind == "source_policy" && proposed[strings.TrimSpace(requirement.ID)] {
 			continue
 		}
 		result = append(result, requirement)
 	}
 	return result
-}
-
-func answeredCapabilityNeedSkills(request GenerateRequest) map[string]bool {
-	selected := make(map[string]bool)
-	if request.Refinement == nil {
-		return selected
-	}
-	needs := make(map[string]bool, len(request.Catalog.CapabilityNeeds))
-	for _, need := range request.Catalog.CapabilityNeeds {
-		needs[CapabilityNeedQuestionID(need.ID)] = true
-	}
-	for _, answer := range request.Refinement.Answers {
-		if !needs[strings.TrimSpace(answer.QuestionID)] {
-			continue
-		}
-		for _, skillID := range answer.Value.SkillIDs {
-			if skillID = strings.TrimSpace(skillID); skillID != "" {
-				selected[skillID] = true
-			}
-		}
-	}
-	return selected
-}
-
-func selectedCapabilityReadinessRequirement(requirement MissingRequirement, selected map[string]bool) bool {
-	switch requirement.Kind {
-	case "skill_installation", "skill_binding":
-		return selected[strings.TrimSpace(requirement.ID)]
-	case "credential":
-		for skillID := range selected {
-			if strings.HasSuffix(strings.TrimSpace(requirement.RequiredBy), "/skill:"+skillID) {
-				return true
-			}
-		}
-	}
-	return false
 }
