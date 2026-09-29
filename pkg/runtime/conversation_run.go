@@ -189,7 +189,7 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 		assignedAgentID = conversation.Owner.ID
 		visibility = ActivityVisibilityPrivate
 	}
-	return CreateAgentRunRequest{
+	request := CreateAgentRunRequest{
 		Scope: conversation.Scope, Kind: RunKindConversation, Owner: conversation.Owner,
 		AssignedAgentID: assignedAgentID, ConcurrencyKey: conversation.ID, Goal: goal, Source: RunSourceChat,
 		Context: map[string]interface{}{
@@ -201,6 +201,10 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 		Actor:          ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
 		Visibility:     visibility,
 	}
+	if message.ResponseMode != "" {
+		request.Context["responseMode"] = message.ResponseMode
+	}
+	return request
 }
 
 func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Scope) (*ConversationRunReconcileResult, error) {
@@ -1094,6 +1098,14 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		}
 	}
 	if outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted {
+		return outcome, nil
+	}
+	if silent, _ := outcome.RunOutput["silent"].(bool); silent {
+		if trigger.ResponseMode != "spoken" {
+			return nil, errors.New("silent completion requires a spoken response channel")
+		}
+		outcome.OutputSummary = "No spoken response needed"
+		outcome.RunOutput = map[string]interface{}{"silent": true, "conversationId": conversation.ID, "triggerMessageId": trigger.ID}
 		return outcome, nil
 	}
 	content := agentConversationResponseContent(outcome)
