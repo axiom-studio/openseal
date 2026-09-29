@@ -288,6 +288,8 @@ type ChannelMessage struct {
 	SenderDisplayName string                    `json:"senderDisplayName,omitempty"`
 	Intent            ConversationMessageIntent `json:"intent"`
 	Content           string                    `json:"content"`
+	// ResponseMode describes presentation only; it never changes sender authority.
+	ResponseMode string `json:"responseMode,omitempty"`
 	// ContributionKey is a privacy-safe, normalized semantic claim identifier
 	// used to suppress paraphrased pile-ons (for example rollout-owner:agent-37).
 	// It is user-visible metadata, never hidden reasoning.
@@ -310,6 +312,9 @@ type ChannelMessage struct {
 func (m *ChannelMessage) Validate() error {
 	if m == nil {
 		return fmt.Errorf("%w: message is required", ErrInvalidConversation)
+	}
+	if m.ResponseMode != "" && m.ResponseMode != "spoken" {
+		return fmt.Errorf("%w: unsupported response mode", ErrInvalidConversation)
 	}
 	if err := m.Scope.Validate(); err != nil {
 		return err
