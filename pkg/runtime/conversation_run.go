@@ -465,6 +465,10 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == "approval-coordinator" {
 		return false
 	}
+	// Saved-artifact receipts project completed work; they are not new tasks.
+	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == conversationArtifactReceiptService {
+		return false
+	}
 	// The owning Agent's reply is the projection of the current conversation
 	// Run, never a new wake. Other Agents may still hand work into this channel.
 	if conversation.Owner.Type == OwnerTypeAgent && message.Sender.Type == ConversationParticipantAgent &&
@@ -974,6 +978,14 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	}
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
 		return participationStoppedOutcome(), nil
+	}
+	// Deliver committed files independently of the next model call. A failed
+	// continuation must not hide work that the action worker already saved.
+	if err := r.postConversationActionArtifacts(ctx, input.Run, conversation, trigger); err != nil {
+		if errors.Is(err, errConversationParticipationStopped) {
+			return participationStoppedOutcome(), nil
+		}
+		return nil, err
 	}
 	recent, err := r.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: input.Run.Scope, ConversationID: conversation.ID, Limit: 100, Descending: true, Viewer: &viewer,
