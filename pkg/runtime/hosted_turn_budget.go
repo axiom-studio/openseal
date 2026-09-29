@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -218,10 +219,9 @@ func compactHostedTurnActionHistory(checkpoint map[string]interface{}) {
 	if checkpoint == nil {
 		return
 	}
-	lastActionID := ""
-	if last, ok := checkpoint["lastAction"].(map[string]interface{}); ok {
-		lastActionID = strings.TrimSpace(fmt.Sprint(last["actionCallId"]))
-	}
+	last, _ := checkpoint["lastAction"].(map[string]interface{})
+	lastActionID, _ := last["actionCallId"].(string)
+	lastActionID = strings.TrimSpace(lastActionID)
 	history, ok := checkpoint[actionHistoryCheckpointKey].([]interface{})
 	if !ok {
 		return
@@ -231,13 +231,30 @@ func compactHostedTurnActionHistory(checkpoint map[string]interface{}) {
 		if !ok {
 			continue
 		}
+		// Preserve one exact copy of large current inputs (documents, slides,
+		// code) instead of repeating them in both evidence projections. Only
+		// deduplicate equal values belonging to the same real ActionCall.
+		// This operates on the deep-cloned model view, never durable evidence.
+		if id, _ := entry["actionCallId"].(string); lastActionID != "" && id == lastActionID {
+			arguments, present := entry["arguments"]
+			latestArguments, latestPresent := last["arguments"]
+			if present && latestPresent {
+				encoded, encodeErr := json.Marshal(arguments)
+				latestEncoded, latestErr := json.Marshal(latestArguments)
+				const reference = "continuationCheckpoint.lastAction.arguments"
+				if encodeErr == nil && latestErr == nil && len(encoded) > len(reference)+16 && bytes.Equal(encoded, latestEncoded) {
+					delete(entry, "arguments")
+					entry["argumentsRef"] = reference
+				}
+			}
+		}
 		result, exists := entry["result"]
 		if !exists {
 			continue
 		}
 		actionCallID := strings.TrimSpace(fmt.Sprint(entry["actionCallId"]))
 		encoded, err := json.Marshal(result)
-		if actionCallID == lastActionID {
+		if lastActionID != "" && actionCallID == lastActionID {
 			entry["result"] = map[string]interface{}{
 				"compacted": true, "evidenceRef": "action-call:" + actionCallID,
 				"currentResultRef": "continuationCheckpoint.lastAction.result",
