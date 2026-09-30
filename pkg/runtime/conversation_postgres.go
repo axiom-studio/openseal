@@ -62,6 +62,8 @@ func (s *PostgresStore) migrateConversations(ctx context.Context, tx *sql.Tx) er
 		`CREATE INDEX IF NOT EXISTS channel_messages_thread_idx ON ` + s.table("channel_messages") + ` (scope_kind, scope_id, conversation_id, thread_root_id, sequence)`,
 		`CREATE INDEX IF NOT EXISTS channel_messages_round_idx ON ` + s.table("channel_messages") + ` (scope_kind, scope_id, conversation_id, participation_round_id, sequence)`,
 		`CREATE INDEX IF NOT EXISTS conversation_presence_active_idx ON ` + s.table("conversation_presence") + ` (scope_kind, scope_id, conversation_id, expires_at)`,
+		`CREATE INDEX IF NOT EXISTS conversations_search_idx ON ` + s.table("conversations") + ` USING GIN (to_tsvector('simple', coalesce(payload->>'title', '')))`,
+		`CREATE INDEX IF NOT EXISTS channel_messages_search_idx ON ` + s.table("channel_messages") + ` USING GIN (to_tsvector('simple', coalesce(payload->>'content', '')))`,
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
