@@ -60,6 +60,7 @@ func (s *PostgresStore) migratePortfolio(ctx context.Context, tx *sql.Tx) error 
 		`CREATE INDEX IF NOT EXISTS agent_runs_lineage_idx ON ` + s.table("agent_runs") + ` (scope_kind, scope_id, root_run_id, parent_run_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS agent_runs_runnable_idx ON ` + s.table("agent_runs") + ` (scope_kind, scope_id, status, available_at, lease_expires_at, priority, queue_entered_at)`,
 		`CREATE INDEX IF NOT EXISTS agent_runs_global_recovery_idx ON ` + s.table("agent_runs") + ` (status, available_at, lease_expires_at, scope_kind, scope_id) WHERE COALESCE(payload->>'kind', 'agent_work') = 'workforce_authoring'`,
+		`CREATE INDEX IF NOT EXISTS agent_runs_search_idx ON ` + s.table("agent_runs") + ` USING GIN (to_tsvector('simple', coalesce(payload->>'goal','') || ' ' || coalesce(payload->>'output','')))`,
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {

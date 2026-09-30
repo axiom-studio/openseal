@@ -1353,6 +1353,10 @@ func AgentRunsCapability() KernelCapability {
 	return kernelapi.AgentRunsCapability()
 }
 
+func WorkspaceSearchCapability() KernelCapability {
+	return kernelapi.WorkspaceSearchCapability()
+}
+
 func ObjectivesCapability() KernelCapability {
 	return kernelapi.ObjectivesCapability()
 }

@@ -13,6 +13,9 @@ func (s *PostgresStore) migrateProjects(ctx context.Context, tx *sql.Tx) error {
 	if _, e := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+s.table("projects")+` (id TEXT NOT NULL,scope_kind TEXT NOT NULL,scope_id TEXT NOT NULL,owner_type TEXT NOT NULL,owner_id TEXT NOT NULL,status TEXT NOT NULL,revision BIGINT NOT NULL,updated_at TIMESTAMPTZ NOT NULL,idempotency_key_hash TEXT NOT NULL DEFAULT '',payload JSONB NOT NULL,PRIMARY KEY(scope_kind,scope_id,id),CHECK(revision>0)); CREATE UNIQUE INDEX IF NOT EXISTS projects_idempotency_idx ON `+s.table("projects")+`(scope_kind,scope_id,idempotency_key_hash) WHERE idempotency_key_hash<>''; CREATE INDEX IF NOT EXISTS projects_scope_idx ON `+s.table("projects")+`(scope_kind,scope_id,status,updated_at DESC); CREATE INDEX IF NOT EXISTS projects_owner_idx ON `+s.table("projects")+`(scope_kind,scope_id,owner_type,owner_id,updated_at DESC)`); e != nil {
 		return e
 	}
+	if _, e := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS projects_search_idx ON `+s.table("projects")+` USING GIN (to_tsvector('simple', coalesce(payload->>'title','') || ' ' || coalesce(payload->>'purpose','') || ' ' || coalesce(payload->>'milestones','') || ' ' || coalesce(payload->>'deliverables','')))`); e != nil {
+		return e
+	}
 	_, e := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name)VALUES(14,'durable projects')ON CONFLICT(version)DO NOTHING`)
 	return e
 }
