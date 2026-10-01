@@ -284,9 +284,13 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	go c.heartbeatTurnLease(executionCtx, cancelExecution, req.Scope, turn, req.WorkerID, req.LeaseDuration, heartbeatDone)
 	// Progress is append-only activity, not a Turn mutation: lease heartbeats and
 	// terminal result commits retain their existing revision discipline.
-	lastSummary := ""
+	lastSummary, lastKind := "", ""
 	executionCtx = WithTurnProgress(executionCtx, func(progressCtx context.Context, summary string) error {
-		if summary == lastSummary {
+		kind := "turn.progress"
+		if IsTurnCommentary(progressCtx) {
+			kind = "turn.commentary"
+		}
+		if summary == lastSummary && kind == lastKind {
 			return nil
 		}
 		current, err := c.turns.turns.GetAgentTurn(progressCtx, req.Scope, turn.ID)
@@ -305,11 +309,11 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 		_, err = c.activity.AppendActivity(progressCtx, &ActivityEvent{
 			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: run.Owner.ID,
-			EventType: "turn.progress", Summary: summary, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
+			EventType: kind, Summary: summary, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
 			Visibility: ActivityVisibilityScope,
 		})
 		if err == nil {
-			lastSummary = summary
+			lastSummary, lastKind = summary, kind
 		}
 		return err
 	})
