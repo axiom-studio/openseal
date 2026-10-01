@@ -314,8 +314,21 @@ func (s *Service) CompleteAuthorization(ctx context.Context, request CompleteAut
 		s.failSession(ctx, session, "identity_invalid")
 		return nil, err
 	}
+	connectionID, current, err := s.authorizationAccountConnection(ctx, session, grantSummary, externalIdentity)
+	if err != nil {
+		s.failSession(ctx, session, "account_identity_conflict")
+		return nil, err
+	}
+	if current != nil && current.Status == ConnectionActive && grant.RefreshToken == "" {
+		previous, readErr := s.credentials.GetConnection(ctx, session.Scope, current.CredentialReference)
+		if readErr != nil {
+			s.failSession(ctx, session, "credential_unavailable")
+			return nil, errors.New("existing OAuth account credentials are unavailable")
+		}
+		grant.RefreshToken = previous.RefreshToken
+	}
 	reference, tokenVersion, err := s.credentials.PutConnection(ctx, CredentialStoreRequest{
-		Scope: session.Scope, ConnectionID: session.ConnectionID, Kind: session.Kind,
+		Scope: session.Scope, ConnectionID: connectionID, Kind: session.Kind,
 		Provider: session.Requirement.Provider, Grant: grant,
 	})
 	if err != nil {
@@ -326,16 +339,13 @@ func (s *Service) CompleteAuthorization(ctx context.Context, request CompleteAut
 		s.failSession(ctx, session, "credential_reference_invalid")
 		return nil, fmt.Errorf("%w: credential store returned an invalid reference", ErrInvalid)
 	}
-	current, getErr := s.store.GetConnection(ctx, session.Scope, session.ConnectionID)
 	expectedConnectionRevision := int64(0)
 	createdAt := now
-	if getErr == nil {
+	if current != nil {
 		expectedConnectionRevision, createdAt = current.Revision, current.CreatedAt
-	} else if !errors.Is(getErr, ErrConnectionNotFound) {
-		return nil, getErr
 	}
 	connection := &Connection{
-		APIVersion: APIVersion, Scope: session.Scope, ID: session.ConnectionID, Kind: session.Kind,
+		APIVersion: APIVersion, Scope: session.Scope, ID: connectionID, Kind: session.Kind,
 		Owner: session.Owner, Grant: grantSummary, ExternalIdentity: externalIdentity,
 		CredentialReference: reference, Status: ConnectionActive, TokenVersion: tokenVersion,
 		ExpiresAt: grant.ExpiresAt, Revision: expectedConnectionRevision + 1,
