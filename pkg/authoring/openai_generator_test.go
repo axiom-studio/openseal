@@ -726,3 +726,32 @@ func TestOpenAICompatibleRepairSuppliesMachineReadableViolations(t *testing.T) {
 		t.Fatal("system prompt duplicates schema shape")
 	}
 }
+
+func TestSemanticPlannerOmitsCompilerAndSetupContracts(t *testing.T) {
+	catalog := CapabilityCatalog{
+		RuntimeComposition: CanonicalRuntimeCompositionCapability(),
+		Skills: map[string]SkillCapability{"research": {
+			ID: "research", Name: "Research", Version: "1.0.0", Description: "Research with evidence", Readiness: SkillReadinessNeedsBinding,
+			Actions: []string{"search"}, ActionRisks: map[string]capability.RiskLevel{"search": capability.RiskLevel("read")},
+			BindingConfigSchema: map[string]interface{}{"description": strings.Repeat("setup form fields ", 1000)},
+			ActionContracts:     map[string]SkillActionContract{"search": {InputSchema: map[string]interface{}{"description": strings.Repeat("runtime action contract ", 1000)}}},
+			Compatibility:       []SkillCompatibility{{Requirement: "binding_configuration", Compatible: false, Evidence: "Select a connection before activation"}},
+		}},
+	}
+	before, _ := json.Marshal(catalog)
+	projected := promptGenerateRequest(GenerateRequest{Mode: ModeCreate, Prompt: "Create a researcher", Catalog: catalog})
+	after, _ := json.Marshal(projected.Catalog)
+	if len(after)*10 >= len(before) {
+		t.Fatalf("planner context not reduced: %d -> %d bytes", len(before), len(after))
+	}
+	skill := projected.Catalog.Skills["research"]
+	if projected.Catalog.RuntimeComposition != nil || skill.BindingConfigSchema != nil || skill.ActionContracts != nil {
+		t.Fatal("compiler/setup contracts leaked into semantic planner")
+	}
+	if skill.ID != "research" || skill.Readiness != SkillReadinessNeedsBinding || len(skill.Actions) != 1 || skill.ActionRisks["search"] != capability.RiskLevel("read") || len(skill.Compatibility) != 1 {
+		t.Fatal("planning capability or setup prerequisite was lost")
+	}
+	if catalog.RuntimeComposition == nil || catalog.Skills["research"].BindingConfigSchema == nil || catalog.Skills["research"].ActionContracts == nil {
+		t.Fatal("canonical compiler catalog was mutated")
+	}
+}
