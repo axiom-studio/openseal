@@ -203,7 +203,7 @@ func skillSetupResult(r *SkillSetupRequest) (map[string]interface{}, error) {
 }
 
 func skillListSetupRequestsAction() skill.Action {
-	return skill.Action{Name: SkillActionListSetupRequests, Description: "Read the current conversation's durable Skill setup requests and their pending, resolved, or dismissed status. Use this after the user reports completing setup; resolved means configuration was saved, not that a provider operation has succeeded. Retry the requested provider operation through its normal authorized action to verify it.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2}, InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "additionalProperties": false}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"requests": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}}, "required": []interface{}{"requests"}, "additionalProperties": false}}
+	return skill.Action{Name: SkillActionListSetupRequests, Description: "Read the current conversation's durable Skill setup requests and their pending, resolved, or dismissed status. Use this once after the user reports completing setup; resolved means account configuration was saved, not that provider actions were authorized or verified. Inspect bindingAccess.enabledActions before choosing an operation. If discovery declares an action that is not enabled on the saved binding, request setup for that exact action and explain the access needed; do not call this a missing account or missing credential. A pending request needs user input: finish the reply and do not poll it. Retry the requested provider operation through its normal authorized action to verify it.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2}, InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "additionalProperties": false}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"requests": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}}, "required": []interface{}{"requests"}, "additionalProperties": false}}
 }
 func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Context, run *AgentRun, deploymentID string) (map[string]interface{}, error) {
 	conversationID, _ := run.Context["conversationId"].(string)
@@ -220,7 +220,26 @@ func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Contex
 		if err != nil {
 			return nil, err
 		}
-		values = append(values, value["setupRequest"])
+		item := value["setupRequest"].(map[string]interface{})
+		bindingID := r.ResolvedBindingID
+		if bindingID == "" {
+			bindingID = r.BindingID
+		}
+		if bindingID != "" {
+			binding, bindingErr := d.catalog.GetBinding(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, deploymentID, bindingID)
+			if bindingErr != nil {
+				return nil, bindingErr
+			}
+			if binding != nil && binding.SkillID == r.SkillID && binding.SkillVersion == r.SkillVersion && binding.SourceIdentity == r.SourceIdentity {
+				enabledActions := []string{}
+				if !binding.Disabled {
+					enabledActions = append(enabledActions, binding.AllowedActions...)
+				}
+				sort.Strings(enabledActions)
+				item["bindingAccess"] = map[string]interface{}{"enabled": !binding.Disabled, "enabledActions": enabledActions, "promptEnabled": !binding.Disabled && binding.EnablePrompt}
+			}
+		}
+		values = append(values, item)
 	}
 	return map[string]interface{}{"requests": values}, nil
 }
