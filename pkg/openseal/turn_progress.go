@@ -14,3 +14,8 @@ func HasTurnProgress(ctx context.Context) bool { return runtime.HasTurnProgress(
 func ReportTurnProgress(ctx context.Context, summary string) error {
 	return runtime.ReportTurnProgress(ctx, summary)
 }
+
+func IsTurnCommentary(ctx context.Context) bool { return runtime.IsTurnCommentary(ctx) }
+func ReportTurnCommentary(ctx context.Context, summary string) error {
+	return runtime.ReportTurnCommentary(ctx, summary)
+}
