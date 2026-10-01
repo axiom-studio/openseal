@@ -252,29 +252,36 @@ type ApprovalDestination struct {
 	EndpointID string `json:"endpointId"`
 }
 
+// ApprovalConversationContext is a list projection, never an authority for decisions.
+type ApprovalConversationContext struct {
+	ConversationID   string `json:"conversationId,omitempty"`
+	TriggerMessageID string `json:"triggerMessageId,omitempty"`
+}
+
 type ApprovalCheckpoint struct {
-	ID                     string                  `json:"id"`
-	Scope                  Scope                   `json:"scope"`
-	RunID                  string                  `json:"runId"`
-	ActionCallID           string                  `json:"actionCallId"`
-	Status                 ApprovalStatus          `json:"status"`
-	Risk                   skill.RiskLevel         `json:"risk"`
-	Summary                string                  `json:"summary"`
-	PolicyReason           string                  `json:"policyReason,omitempty"`
-	ProposedAction         map[string]interface{}  `json:"proposedAction"`
-	EvidenceRefs           []string                `json:"evidenceRefs,omitempty"`
-	EligibleApprovers      []ApprovalPrincipal     `json:"eligibleApprovers"`
-	Destinations           []ApprovalDestination   `json:"destinations,omitempty"`
-	ContinuationCheckpoint map[string]interface{}  `json:"continuationCheckpoint,omitempty"`
-	ExpiresAt              time.Time               `json:"expiresAt"`
-	TimeoutDecision        ApprovalTimeoutDecision `json:"timeoutDecision,omitempty"`
-	DecisionBy             *ApprovalPrincipal      `json:"decisionBy,omitempty"`
-	DecisionID             string                  `json:"decisionId,omitempty"`
-	DecisionReason         string                  `json:"decisionReason,omitempty"`
-	Revision               int64                   `json:"revision"`
-	CreatedAt              time.Time               `json:"createdAt"`
-	UpdatedAt              time.Time               `json:"updatedAt"`
-	DecidedAt              *time.Time              `json:"decidedAt,omitempty"`
+	ConversationContext    *ApprovalConversationContext `json:"conversationContext,omitempty"`
+	ID                     string                       `json:"id"`
+	Scope                  Scope                        `json:"scope"`
+	RunID                  string                       `json:"runId"`
+	ActionCallID           string                       `json:"actionCallId"`
+	Status                 ApprovalStatus               `json:"status"`
+	Risk                   skill.RiskLevel              `json:"risk"`
+	Summary                string                       `json:"summary"`
+	PolicyReason           string                       `json:"policyReason,omitempty"`
+	ProposedAction         map[string]interface{}       `json:"proposedAction"`
+	EvidenceRefs           []string                     `json:"evidenceRefs,omitempty"`
+	EligibleApprovers      []ApprovalPrincipal          `json:"eligibleApprovers"`
+	Destinations           []ApprovalDestination        `json:"destinations,omitempty"`
+	ContinuationCheckpoint map[string]interface{}       `json:"continuationCheckpoint,omitempty"`
+	ExpiresAt              time.Time                    `json:"expiresAt"`
+	TimeoutDecision        ApprovalTimeoutDecision      `json:"timeoutDecision,omitempty"`
+	DecisionBy             *ApprovalPrincipal           `json:"decisionBy,omitempty"`
+	DecisionID             string                       `json:"decisionId,omitempty"`
+	DecisionReason         string                       `json:"decisionReason,omitempty"`
+	Revision               int64                        `json:"revision"`
+	CreatedAt              time.Time                    `json:"createdAt"`
+	UpdatedAt              time.Time                    `json:"updatedAt"`
+	DecidedAt              *time.Time                   `json:"decidedAt,omitempty"`
 }
 
 func (a *ApprovalCheckpoint) Validate() error {
@@ -354,13 +361,15 @@ type ActionFilter struct {
 }
 
 type ApprovalFilter struct {
-	Scope       Scope
-	Owner       *ObjectiveOwner
-	RunID       string
-	Status      []ApprovalStatus
-	Limit       int
-	Offset      int
-	NewestFirst bool
+	ConversationID  string
+	IncludeUnscoped bool // Only the owner's legacy control conversation may include unscoped work.
+	Scope           Scope
+	Owner           *ObjectiveOwner
+	RunID           string
+	Status          []ApprovalStatus
+	Limit           int
+	Offset          int
+	NewestFirst     bool
 }
 
 type ActionClaim struct {

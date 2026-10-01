@@ -229,12 +229,33 @@ func (s *PostgresStore) ListApprovals(ctx context.Context, filter ApprovalFilter
 		if err := filter.Owner.Validate(); err != nil {
 			return nil, err
 		}
+	}
+	if filter.Owner != nil || filter.ConversationID != "" {
 		query += ` JOIN ` + s.table("agent_runs") + ` r ON r.scope_kind = a.scope_kind AND r.scope_id = a.scope_id AND r.id = a.run_id`
+	}
+	var conversationExpr, triggerExpr string
+	if filter.ConversationID != "" {
+		query += ` LEFT JOIN ` + s.table("agent_runs") + ` root ON root.scope_kind = r.scope_kind AND root.scope_id = r.scope_id AND root.id = r.root_run_id`
+		conversationExpr = `COALESCE(NULLIF(r.payload->'context'->>'conversationId', ''), root.payload->'context'->>'conversationId', '')`
+		triggerExpr = `COALESCE(NULLIF(r.payload->'context'->>'triggerMessageId', ''), root.payload->'context'->>'triggerMessageId', '')`
+		query = strings.Replace(query, "SELECT a.payload", "SELECT a.payload, "+conversationExpr+", "+triggerExpr, 1)
 	}
 	query += ` WHERE a.scope_kind = $1 AND a.scope_id = $2`
 	if filter.Owner != nil {
-		query += ` AND r.payload->'owner'->>'type' = $3 AND r.payload->'owner'->>'id' = $4`
+		ownerType, ownerID := `r.payload->'owner'->>'type'`, `r.payload->'owner'->>'id'`
+		if filter.ConversationID != "" {
+			ownerType, ownerID = `COALESCE(root.payload->'owner'->>'type', r.payload->'owner'->>'type')`, `COALESCE(root.payload->'owner'->>'id', r.payload->'owner'->>'id')`
+		}
+		query += " AND " + ownerType + " = $3 AND " + ownerID + " = $4"
 		args = append(args, filter.Owner.Type, filter.Owner.ID)
+	}
+	if filter.ConversationID != "" {
+		args = append(args, filter.ConversationID)
+		query += " AND (" + conversationExpr + " = $" + strconv.Itoa(len(args))
+		if filter.IncludeUnscoped {
+			query += " OR " + conversationExpr + " = ''"
+		}
+		query += ")"
 	}
 	if filter.RunID != "" {
 		args = append(args, filter.RunID)
@@ -269,12 +290,22 @@ func (s *PostgresStore) ListApprovals(ctx context.Context, filter ApprovalFilter
 	result := make([]*ApprovalCheckpoint, 0)
 	for rows.Next() {
 		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
+		projection := &ApprovalConversationContext{}
+		var scanErr error
+		if filter.ConversationID != "" {
+			scanErr = rows.Scan(&payload, &projection.ConversationID, &projection.TriggerMessageID)
+		} else {
+			scanErr = rows.Scan(&payload)
+		}
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		approval, err := decodeApproval(payload)
 		if err != nil {
 			return nil, err
+		}
+		if filter.ConversationID != "" {
+			approval.ConversationContext = projection
 		}
 		result = append(result, approval)
 	}
