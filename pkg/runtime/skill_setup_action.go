@@ -104,11 +104,11 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		}
 		cursor = page.NextCursor
 	}
-	credentialSetup := skillCandidateNeedsCredentialSetup(candidate) && a.Kind != "install"
-	if candidate == nil || (candidate.Readiness == skill.DiscoveryReadinessUnavailable && !credentialSetup) {
+	configurationSetup := skillCandidateNeedsConfigurationSetup(candidate) && a.Kind != "install"
+	if candidate == nil || (candidate.Readiness == skill.DiscoveryReadinessUnavailable && !configurationSetup) {
 		return nil, errors.New("requested Skill is not available in the authorized catalog")
 	}
-	if a.Kind != "install" && candidate.Readiness != skill.DiscoveryReadinessBindable && !credentialSetup {
+	if a.Kind != "install" && candidate.Readiness != skill.DiscoveryReadinessBindable && !configurationSetup {
 		return nil, errors.New("Skill must be installed before configuration")
 	}
 	for _, name := range a.RequiredActions {
@@ -225,10 +225,10 @@ func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Contex
 	return map[string]interface{}{"requests": values}, nil
 }
 
-// Missing credentials block execution, but must not block the request that
-// collects them. Other incompatibilities still reject setup; requesting setup
+// Missing credentials or binding configuration block execution, but must not
+// block the request that collects them. Other incompatibilities still reject setup; requesting setup
 // never activates a binding or grants access.
-func skillCandidateNeedsCredentialSetup(candidate *skill.DiscoveryCandidate) bool {
+func skillCandidateNeedsConfigurationSetup(candidate *skill.DiscoveryCandidate) bool {
 	if candidate == nil || candidate.Readiness != skill.DiscoveryReadinessUnavailable {
 		return false
 	}
@@ -237,7 +237,7 @@ func skillCandidateNeedsCredentialSetup(candidate *skill.DiscoveryCandidate) boo
 		if check.Compatible {
 			continue
 		}
-		if !strings.HasPrefix(check.Requirement, "credential:") || strings.TrimPrefix(check.Requirement, "credential:") == "" {
+		if check.Requirement != "binding_configuration" && (!strings.HasPrefix(check.Requirement, "credential:") || strings.TrimPrefix(check.Requirement, "credential:") == "") {
 			return false
 		}
 		missing = true
