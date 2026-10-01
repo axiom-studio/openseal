@@ -531,6 +531,22 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 		}
 		canonicalManagement[activated.SkillID+"@"+activated.SkillVersion] = canonicalID
 	}
+	// An explicit Agent binding can pin an older version of a Skill also
+	// supplied by chat defaults. Prefer that exact binding for overlapping
+	// actions; retain default-only actions and ambiguity between explicit
+	// bindings, which may carry different credentials or authority.
+	explicitActions := make(map[string]bool)
+	for _, activated := range activation.Skills {
+		if strings.HasPrefix(activated.BindingID, "bundled:") {
+			continue
+		}
+		if canonicalID := canonicalManagement[activated.SkillID+"@"+activated.SkillVersion]; canonicalID != "" {
+			continue
+		}
+		for _, action := range activated.Actions {
+			explicitActions[action.SkillID+"\x00"+action.Action] = true
+		}
+	}
 	for _, activated := range activation.Skills {
 		if canonicalID := canonicalManagement[activated.SkillID+"@"+activated.SkillVersion]; canonicalID != "" && activated.BindingID != canonicalID {
 			continue
@@ -543,6 +559,9 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 			refs = append(refs, fmt.Sprintf("skill:%s@%s#binding:%s@%d", activated.SkillID, activated.SkillVersion, activated.BindingID, activated.BindingRevision))
 		}
 		for _, action := range activated.Actions {
+			if strings.HasPrefix(activated.BindingID, "bundled:") && explicitActions[action.SkillID+"\x00"+action.Action] {
+				continue
+			}
 			if strings.TrimSpace(action.DeploymentID) == "" {
 				action.DeploymentID = activation.DeploymentID
 			}
