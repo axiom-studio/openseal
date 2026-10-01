@@ -104,10 +104,11 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		}
 		cursor = page.NextCursor
 	}
-	if candidate == nil || candidate.Readiness == skill.DiscoveryReadinessUnavailable {
+	credentialSetup := skillCandidateNeedsCredentialSetup(candidate) && a.Kind != "install"
+	if candidate == nil || (candidate.Readiness == skill.DiscoveryReadinessUnavailable && !credentialSetup) {
 		return nil, errors.New("requested Skill is not available in the authorized catalog")
 	}
-	if a.Kind != "install" && candidate.Readiness != skill.DiscoveryReadinessBindable {
+	if a.Kind != "install" && candidate.Readiness != skill.DiscoveryReadinessBindable && !credentialSetup {
 		return nil, errors.New("Skill must be installed before configuration")
 	}
 	for _, name := range a.RequiredActions {
@@ -222,4 +223,24 @@ func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Contex
 		values = append(values, value["setupRequest"])
 	}
 	return map[string]interface{}{"requests": values}, nil
+}
+
+// Missing credentials block execution, but must not block the request that
+// collects them. Other incompatibilities still reject setup; requesting setup
+// never activates a binding or grants access.
+func skillCandidateNeedsCredentialSetup(candidate *skill.DiscoveryCandidate) bool {
+	if candidate == nil || candidate.Readiness != skill.DiscoveryReadinessUnavailable {
+		return false
+	}
+	missing := false
+	for _, check := range candidate.Compatibility {
+		if check.Compatible {
+			continue
+		}
+		if !strings.HasPrefix(check.Requirement, "credential:") || strings.TrimPrefix(check.Requirement, "credential:") == "" {
+			return false
+		}
+		missing = true
+	}
+	return missing
 }
