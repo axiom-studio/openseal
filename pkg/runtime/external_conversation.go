@@ -231,20 +231,21 @@ type ExternalConversationEndpointFilter struct {
 }
 
 type CreateExternalConversationEndpointRequest struct {
-	ID             string
-	Scope          Scope
-	Owner          ObjectiveOwner
-	DeploymentID   string
-	Name           string
-	Adapter        ExternalConversationAdapterReference
-	Mode           capability.ConversationEndpointMode
-	InstallationID string
-	ApplicationID  string
-	Address        string
-	Handler        ExternalConversationHandler
-	Policy         ExternalConversationPolicy
-	Configuration  map[string]interface{}
-	Status         ExternalConversationEndpointStatus
+	ID               string
+	Scope            Scope
+	Owner            ObjectiveOwner
+	DeploymentID     string
+	Name             string
+	Adapter          ExternalConversationAdapterReference
+	Mode             capability.ConversationEndpointMode
+	InstallationID   string
+	ApplicationID    string
+	Address          string
+	InstallationWide bool
+	Handler          ExternalConversationHandler
+	Policy           ExternalConversationPolicy
+	Configuration    map[string]interface{}
+	Status           ExternalConversationEndpointStatus
 }
 
 type UpdateExternalConversationEndpointRequest struct {
@@ -252,6 +253,7 @@ type UpdateExternalConversationEndpointRequest struct {
 	Adapter          *ExternalConversationAdapterReference
 	Name             *string
 	Address          *string
+	InstallationWide *bool
 	Handler          *ExternalConversationHandler
 	Policy           *ExternalConversationPolicy
 	Configuration    map[string]interface{}
@@ -297,7 +299,7 @@ func (s *ExternalConversationEndpointService) Create(ctx context.Context, req Cr
 		ID: strings.TrimSpace(req.ID), Scope: req.Scope, Owner: req.Owner, DeploymentID: strings.TrimSpace(req.DeploymentID),
 		Name: strings.TrimSpace(req.Name), Adapter: normalizeExternalConversationAdapterReference(req.Adapter),
 		Mode: req.Mode, InstallationID: strings.TrimSpace(req.InstallationID), ApplicationID: strings.TrimSpace(req.ApplicationID),
-		Address: strings.TrimSpace(req.Address), Handler: normalizeExternalConversationHandler(req.Handler),
+		Address: strings.TrimSpace(req.Address), InstallationWide: req.InstallationWide, Handler: normalizeExternalConversationHandler(req.Handler),
 		Policy: req.Policy, Configuration: cloneMap(req.Configuration), Status: status,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -379,6 +381,9 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 	if req.Address != nil {
 		next.Address = strings.TrimSpace(*req.Address)
 	}
+	if req.InstallationWide != nil {
+		next.InstallationWide = *req.InstallationWide
+	}
 	if req.Handler != nil {
 		next.Handler = normalizeExternalConversationHandler(*req.Handler)
 	}
@@ -427,7 +432,7 @@ func externalConversationEndpointSafetyShutdown(
 	req UpdateExternalConversationEndpointRequest,
 ) bool {
 	if current == nil || next == nil || req.Status == nil ||
-		req.Adapter != nil || req.Name != nil || req.Address != nil || req.Handler != nil || req.Policy != nil || req.ReplaceConfig {
+		req.Adapter != nil || req.Name != nil || req.Address != nil || req.InstallationWide != nil || req.Handler != nil || req.Policy != nil || req.ReplaceConfig {
 		return false
 	}
 	return next.Status == ExternalConversationEndpointPaused || next.Status == ExternalConversationEndpointRetired
