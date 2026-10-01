@@ -13,6 +13,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 		allowed bool
 	}{
 		{"credentials", []skill.DiscoveryCompatibility{{Requirement: "credential:oauth", Compatible: false, Evidence: "Setup compatibility evidence"}}, true},
+		{"credentials and config", []skill.DiscoveryCompatibility{{Requirement: "credential:oauth", Compatible: false, Evidence: "Missing credential"}, {Requirement: "binding_configuration", Compatible: false, Evidence: "Configuration required"}}, true},
 		{"host blocked", []skill.DiscoveryCompatibility{{Requirement: "credential:oauth", Compatible: false, Evidence: "Setup compatibility evidence"}, {Requirement: "execution-host:missing", Compatible: false, Evidence: "Setup compatibility evidence"}}, false},
 		{"unknown unavailable", nil, false},
 		{"empty kind", []skill.DiscoveryCompatibility{{Requirement: "credential:", Compatible: false, Evidence: "Setup compatibility evidence"}}, false},
