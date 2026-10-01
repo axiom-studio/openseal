@@ -33,6 +33,17 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 			run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 			run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 			before, _ := catalog.ListBindings(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "agent")
+			if tc.allowed {
+				_, invalidErr := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "invalid-action", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect", "requiredActions": []interface{}{"binding_configuration"}}}, run, "agent")
+				if invalidErr == nil {
+					t.Fatal("configuration requirement accepted as an action")
+				}
+				pending, _ := store.ListSkillSetupRequests(ctx, scope, "agent", "chat")
+				if len(pending) != 0 {
+					t.Fatal("invalid permission scope created setup request")
+				}
+			}
+
 			result, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "call", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect the requested integration"}}, run, "agent")
 			if (err == nil) != tc.allowed {
 				t.Fatalf("allowed=%v result=%v err=%v", tc.allowed, result, err)
