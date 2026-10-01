@@ -1134,7 +1134,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 // they still describe the entrypoint's authored invocation role.
 func (r *ConversationRunTurnRunner) automaticConversationOperationEntrypoints(ctx context.Context, conversation *Conversation) (map[string]bool, error) {
 	result := make(map[string]bool)
-	if r == nil || r.runbooks == nil || conversation == nil {
+	if r == nil || r.runbooks == nil || conversation == nil || externalChannelContext(conversation) {
 		return result, nil
 	}
 	objectiveID := ""
@@ -1260,7 +1260,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 	if conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceObjective {
 		objectiveID = conversation.Origin.ID
 	}
-	if r != nil && r.portfolio != nil {
+	if r != nil && r.portfolio != nil && !externalChannelContext(conversation) {
 		var objectives []*Objective
 		var listErr error
 		if objectiveID != "" {
@@ -1287,7 +1287,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 			})
 		}
 	}
-	if r != nil && r.runbooks != nil {
+	if r != nil && r.runbooks != nil && !externalChannelContext(conversation) {
 		activations, listErr := r.runbooks.ListRunbookActivations(ctx, RunbookActivationFilter{
 			Scope: conversation.Scope, Owner: &conversation.Owner, ObjectiveID: objectiveID, Limit: 50,
 		})
@@ -2036,4 +2036,9 @@ var errConversationParticipationStopped = errors.New("channel participation is d
 
 func participationStoppedOutcome() *TurnOutcome {
 	return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Channel participation is disabled for this message", RunOutput: map[string]interface{}{"participationSkipped": true, "reply": "No further participation will start for this message because it is outside the channel’s current participation opt-in. Previously started actions may still finish."}}
+}
+
+// External provider messages never inherit the agent’s other private work.
+func externalChannelContext(conversation *Conversation) bool {
+	return conversation != nil && conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceExternalSource
 }
