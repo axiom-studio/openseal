@@ -36,3 +36,16 @@ func ReportTurnProgress(ctx context.Context, summary string) error {
 	}
 	return observer(ctx, summary)
 }
+
+// Commentary shares progress delivery and lease fencing, but has its own
+// durable event kind so clients can render a chat bubble beside the trail.
+type turnCommentaryKey struct{}
+
+func IsTurnCommentary(ctx context.Context) bool {
+	marked, _ := ctx.Value(turnCommentaryKey{}).(bool)
+	return marked
+}
+
+func ReportTurnCommentary(ctx context.Context, summary string) error {
+	return ReportTurnProgress(context.WithValue(ctx, turnCommentaryKey{}, true), summary)
+}
