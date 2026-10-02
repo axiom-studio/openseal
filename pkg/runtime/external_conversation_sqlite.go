@@ -771,7 +771,7 @@ func (s *SQLiteStore) ClaimExternalConversationDelivery(ctx context.Context, sco
 		  ON e.scope_kind=d.scope_kind AND e.scope_id=d.scope_id AND e.id=d.endpoint_id
 		WHERE d.scope_kind=? AND d.scope_id=? AND d.available_at<=?
 		  AND (d.status IN (?,?) OR (d.status=? AND d.lease_expires_at<=?))
-		  AND e.status=? AND e.revision=d.endpoint_revision
+		  AND e.status=? AND e.revision>=d.endpoint_revision
 		  AND NOT EXISTS (
 		    SELECT 1 FROM external_conversation_deliveries active
 		    WHERE active.scope_kind=d.scope_kind AND active.scope_id=d.scope_id
