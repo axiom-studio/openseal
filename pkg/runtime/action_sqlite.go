@@ -284,12 +284,33 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 		if err := filter.Owner.Validate(); err != nil {
 			return nil, err
 		}
+	}
+	if filter.Owner != nil || filter.ConversationID != "" {
 		query += ` JOIN agent_runs r ON r.scope_kind = a.scope_kind AND r.scope_id = a.scope_id AND r.id = a.run_id`
+	}
+	var conversationExpr, triggerExpr string
+	if filter.ConversationID != "" {
+		query += ` LEFT JOIN agent_runs root ON root.scope_kind = r.scope_kind AND root.scope_id = r.scope_id AND root.id = r.root_run_id`
+		conversationExpr = `COALESCE(NULLIF(json_extract(r.payload, '$.context.conversationId'), ''), json_extract(root.payload, '$.context.conversationId'), '')`
+		triggerExpr = `COALESCE(NULLIF(json_extract(r.payload, '$.context.triggerMessageId'), ''), json_extract(root.payload, '$.context.triggerMessageId'), '')`
+		query = strings.Replace(query, "SELECT a.payload", "SELECT a.payload, "+conversationExpr+", "+triggerExpr, 1)
 	}
 	query += ` WHERE a.scope_kind = ? AND a.scope_id = ?`
 	if filter.Owner != nil {
-		query += ` AND json_extract(r.payload, '$.owner.type') = ? AND json_extract(r.payload, '$.owner.id') = ?`
+		ownerType, ownerID := `json_extract(r.payload, '$.owner.type')`, `json_extract(r.payload, '$.owner.id')`
+		if filter.ConversationID != "" {
+			ownerType, ownerID = `COALESCE(json_extract(root.payload, '$.owner.type'), json_extract(r.payload, '$.owner.type'))`, `COALESCE(json_extract(root.payload, '$.owner.id'), json_extract(r.payload, '$.owner.id'))`
+		}
+		query += " AND " + ownerType + " = ? AND " + ownerID + " = ?"
 		args = append(args, filter.Owner.Type, filter.Owner.ID)
+	}
+	if filter.ConversationID != "" {
+		args = append(args, filter.ConversationID)
+		query += " AND (" + conversationExpr + " = ?"
+		if filter.IncludeUnscoped {
+			query += " OR " + conversationExpr + " = ''"
+		}
+		query += ")"
 	}
 	if filter.NewestFirst {
 		query += ` ORDER BY a.created_at DESC, a.id DESC`
@@ -304,12 +325,22 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 	result := make([]*ApprovalCheckpoint, 0)
 	for rows.Next() {
 		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
+		projection := &ApprovalConversationContext{}
+		var scanErr error
+		if filter.ConversationID != "" {
+			scanErr = rows.Scan(&payload, &projection.ConversationID, &projection.TriggerMessageID)
+		} else {
+			scanErr = rows.Scan(&payload)
+		}
+		if scanErr != nil {
+			return nil, scanErr
 		}
 		approval, err := decodeApproval(payload)
 		if err != nil {
 			return nil, err
+		}
+		if filter.ConversationID != "" {
+			approval.ConversationContext = projection
 		}
 		if (filter.RunID == "" || approval.RunID == filter.RunID) && (len(filter.Status) == 0 || containsApprovalStatus(filter.Status, approval.Status)) {
 			result = append(result, approval)

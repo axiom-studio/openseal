@@ -69,3 +69,39 @@ func TestTurnProgressBoundsTextAndHonorsCancellation(t *testing.T) {
 		t.Fatalf("late summary: %v", err)
 	}
 }
+
+func TestCommentaryPersistsSeparatelyFromMatchingActivitySummary(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "7"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Inspect", Source: RunSourceObjective})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "worker"}, TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+		for _, report := range []func(context.Context, string) error{ReportTurnProgress, ReportTurnCommentary, ReportTurnCommentary} {
+			if err := report(ctx, "Let’s check the sources."); err != nil {
+				return nil, err
+			}
+		}
+		events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		counts := map[string]int{}
+		for _, event := range events {
+			if event.EventType == "turn.progress" || event.EventType == "turn.commentary" {
+				counts[event.EventType]++
+				if event.Scope != scope || event.TurnID != input.Turn.ID || event.Visibility != ActivityVisibilityScope {
+					t.Fatalf("wrong identity: %+v", event)
+				}
+			}
+		}
+		if counts["turn.progress"] != 1 || counts["turn.commentary"] != 1 {
+			t.Fatalf("wrong event kinds: %v", counts)
+		}
+		return &TurnOutcome{OutputSummary: "Done", NextRunStatus: AgentRunStatusCompleted}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
