@@ -56,7 +56,7 @@ func (s *RunEventWaitSpec) UnmarshalJSON(data []byte) error {
 }
 
 func (s *RunEventWaitSpec) Validate() error {
-	if s == nil || !validOpaqueIdentifier(s.Key, 256) || !validateEventSelector(s.Type) || s.Type == "*" || !validOpaqueIdentifier(s.Source, 256) || !validOpaqueIdentifier(s.Subject, 512) {
+	if s == nil || !validOpaqueIdentifier(s.Key, 256) || !validateEventSelector(s.Type) || s.Type == "*" || !validOpaqueIdentifier(s.Source, 256) || !validExternalConversationReference(s.Subject, 512) {
 		return ErrInvalidRunEventWait
 	}
 	if s.After.IsZero() || !runEventNanoTimeValid(s.After) || !runEventNanoTimeValid(s.Deadline) || !s.Deadline.After(s.After) || s.Deadline.Sub(s.After) > MaximumRunEventWaitDuration || len(s.Attributes) > 16 {
