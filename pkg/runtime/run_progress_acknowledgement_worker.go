@@ -57,6 +57,7 @@ type RunProgressAcknowledgement struct {
 }
 
 type RunProgressAcknowledgementWorkerConfig struct {
+	ReviewURL               func(kind, requestID, deploymentID, conversationID string, owner ObjectiveOwner) (string, error)
 	MinimumRunAge           time.Duration
 	MinimumInterval         time.Duration
 	PageSize                int
@@ -145,6 +146,13 @@ func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, sco
 	}
 	result := make([]*ExternalConversationDelivery, 0)
 	var processErrors []error
+	if !renderStatus {
+		reviews, err := w.projectReviewRequests(ctx, scope)
+		result = append(result, reviews...)
+		if err != nil {
+			processErrors = append(processErrors, err)
+		}
+	}
 	for _, item := range items {
 		updates, hasCommentary, processErr := w.projectCommentary(ctx, item)
 		if processErr != nil {
