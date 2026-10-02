@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -139,5 +140,43 @@ func TestOriginApprovalDestinationRequiresDurableImportedTrigger(t *testing.T) {
 	run.Context["triggerMessageId"] = "app-origin-message"
 	if allowed, err := service.approvalOriginDestination(t.Context(), approval, fixture.endpoint); err != nil || allowed {
 		t.Fatalf("app message reused Slack approval authority %v %v", allowed, err)
+	}
+}
+
+func TestOriginApprovalConversationMembersMayDecide(t *testing.T) {
+	for _, decision := range []string{"approve", "reject"} {
+		fixture := newRunProgressWorkerFixture(t, "slack", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend})
+		now := time.Now().UTC()
+		run := fixture.store.agentRuns[portfolioKey(fixture.run.Scope, fixture.run.ID)]
+		run.Context = map[string]interface{}{"conversationId": fixture.conversation.ID, "triggerMessageId": fixture.inbound.ID}
+		run.Status = AgentRunStatusWaitingForApproval
+		run.WakeCondition = &WakeCondition{Type: "approval", Reference: "approval"}
+		run.LeaseOwner = ""
+		run.LeaseExpiresAt = nil
+		call := &ActionCall{ID: "call", Scope: run.Scope, RunID: run.ID, DeploymentID: fixture.endpoint.DeploymentID, SkillID: "browser", SkillVersion: "1", Action: "send", Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"text": "reviewed"}, ApprovalID: "approval", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now}
+		call.InvocationDigest = ComputeActionInvocationDigest(call)
+		call.SemanticDigest = ComputeActionSemanticDigest(call)
+		approval := &ApprovalCheckpoint{ID: "approval", Scope: run.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Send reviewed text", EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now}
+		fixture.store.actions[portfolioKey(run.Scope, call.ID)] = call
+		fixture.store.approvals[portfolioKey(run.Scope, approval.ID)] = approval
+		event := NormalizedExternalConversationEvent{ID: "decision", ExternalParticipantID: "UANY", Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID, "invocationDigest": call.InvocationDigest, "decision": decision, "principalType": "external_participant", "principalId": "UOTHER"}}
+		service := NewExternalConversationTransportService(fixture.store, fixture.catalog)
+		if _, err := service.resolveExternalApprovalDecision(t.Context(), fixture.endpoint, event); err == nil {
+			t.Fatal("mismatched provider identity accepted")
+		}
+		event.Attributes["principalId"] = "UANY"
+		result, err := service.resolveExternalApprovalDecision(t.Context(), fixture.endpoint, event)
+		expected := ApprovalStatusApproved
+		if decision == "reject" {
+			expected = ApprovalStatusRejected
+		}
+		if err != nil || result == nil || result.Approval.Status != expected || result.Approval.DecisionBy.ID != "UANY" {
+			t.Fatalf("member decision failed: %v %v", result, err)
+		}
+		event.ID = "another-click"
+		if _, err := service.resolveExternalApprovalDecision(t.Context(), fixture.endpoint, event); err == nil {
+			t.Fatal("stale card changed a completed decision")
+		}
+
 	}
 }
