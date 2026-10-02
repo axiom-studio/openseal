@@ -190,14 +190,14 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 				contextValues[EvidenceSnapshotContextKey] = projected
 			}
 		}
-		channel, messageKey, err := prepareRunReporting(ctx, s.reportingStore, scope, activation.Owner, activation.Trigger.Reporting, runID, contextValues)
+		channel, messageKey, err := prepareActivationReporting(ctx, s.reportingStore, activation, runID, contextValues)
 		if err != nil {
 			return result, fmt.Errorf("prepare Runbook activation %s reporting: %w", activation.ID, err)
 		}
 		created, err := NewRunCommandService(s.store).CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 			Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
-			Goal: objective.Goal, Source: RunSourceSchedule, Priority: objective.Priority, Context: contextValues,
+			Goal: activationGoal(activation, objective), Source: RunSourceSchedule, Priority: objective.Priority, Context: contextValues,
 			Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget), IdempotencyKey: idempotencyKey,
 			Actor: ActivityActor{Type: "service", ID: "runbook-scheduler"}, Visibility: runbookScheduleVisibility(activation),
 		})
