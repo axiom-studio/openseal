@@ -267,6 +267,10 @@ func (s *SQLiteStore) ListExternalConversationEndpointsByVerifiedRoute(
 }
 
 func (s *SQLiteStore) UpdateExternalConversationEndpoint(ctx context.Context, endpoint *ExternalConversationEndpoint, expectedRevision int64) error {
+	return s.updateExternalConversationEndpoint(ctx, s.db, endpoint, expectedRevision)
+}
+
+func (s *SQLiteStore) updateExternalConversationEndpoint(ctx context.Context, executor endpointUpdateExecutor, endpoint *ExternalConversationEndpoint, expectedRevision int64) error {
 	if err := endpoint.Validate(); err != nil {
 		return err
 	}
@@ -274,7 +278,7 @@ func (s *SQLiteStore) UpdateExternalConversationEndpoint(ctx context.Context, en
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE external_conversation_endpoints
+	result, err := executor.ExecContext(ctx, `UPDATE external_conversation_endpoints
 		SET status=?,revision=?,updated_at=?,payload=?
 		WHERE scope_kind=? AND scope_id=? AND id=? AND ingress_route=? AND revision=?`,
 		endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
