@@ -162,6 +162,92 @@ func TestConversationRunSchedulerSteersWithNewestUserMessage(t *testing.T) {
 	}
 }
 
+func TestNewUserMessageInterruptsEarlierConversationRun(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "steering"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
+		Title: "Research", IdempotencyKey: "steering-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	postPrompt := func(current *Conversation, content, key string) *ChannelMessage {
+		t.Helper()
+		posted, postErr := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+			Scope: scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
+			Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"},
+			Intent: MessageIntentQuestion, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			RequiresResponse: true, IdempotencyKey: key,
+		})
+		if postErr != nil {
+			t.Fatal(postErr)
+		}
+		return posted.Message
+	}
+	first := postPrompt(conversation, "Research Tanzania", "steering-first")
+	initial, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, first.ID)
+	if err != nil || initial == nil || initial.Run == nil {
+		t.Fatalf("first Run = %#v, %v", initial, err)
+	}
+	conversation, err = service.GetConversation(ctx, scope, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := postPrompt(conversation, "Focus on current population instead", "steering-second")
+	steered, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, second.ID)
+	if err != nil || steered == nil || steered.Run == nil {
+		t.Fatalf("steered Run = %#v, %v", steered, err)
+	}
+	previous, err := store.GetAgentRun(ctx, scope, initial.Run.ID)
+	if err != nil || previous.Status != AgentRunStatusCanceled {
+		t.Fatalf("previous Run = %#v, %v", previous, err)
+	}
+	current, err := store.GetAgentRun(ctx, scope, steered.Run.ID)
+	if err != nil || current.Status == AgentRunStatusCanceled || current.Context[conversationRunContextTriggerID] != second.ID {
+		t.Fatalf("replacement Run = %#v, %v", current, err)
+	}
+	if _, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, first.ID); err != nil {
+		t.Fatalf("replaying the old prompt: %v", err)
+	}
+	current, err = store.GetAgentRun(ctx, scope, steered.Run.ID)
+	if err != nil || current.Status == AgentRunStatusCanceled {
+		t.Fatalf("old prompt replay canceled replacement = %#v, %v", current, err)
+	}
+	conversation, err = service.GetConversation(ctx, scope, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third := postPrompt(conversation, "One more detail", "steering-third")
+	conversation, err = service.GetConversation(ctx, scope, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fourth := postPrompt(conversation, "Actually use a table", "steering-fourth")
+	latest, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, fourth.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	late, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, third.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lateRun, err := store.GetAgentRun(ctx, scope, late.Run.ID)
+	if err != nil || lateRun.Status != AgentRunStatusCanceled {
+		t.Fatalf("late older Run = %#v, %v", lateRun, err)
+	}
+	latestRun, err := store.GetAgentRun(ctx, scope, latest.Run.ID)
+	if err != nil || latestRun.Status == AgentRunStatusCanceled {
+		t.Fatalf("latest Run = %#v, %v", latestRun, err)
+	}
+}
+
 func TestConversationMessageStartsRunSkipsApprovalCoordinatorProjections(t *testing.T) {
 	conversation := &Conversation{
 		ID: "approval-channel", Scope: Scope{Kind: "tenant", ID: "11"},
