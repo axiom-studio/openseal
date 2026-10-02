@@ -159,13 +159,17 @@ func TestOriginApprovalConversationMembersMayDecide(t *testing.T) {
 		approval := &ApprovalCheckpoint{ID: "approval", Scope: run.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Send reviewed text", EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now}
 		fixture.store.actions[portfolioKey(run.Scope, call.ID)] = call
 		fixture.store.approvals[portfolioKey(run.Scope, approval.ID)] = approval
-		event := NormalizedExternalConversationEvent{ID: "decision", ExternalParticipantID: "UANY", Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID, "invocationDigest": call.InvocationDigest, "decision": decision, "principalType": "external_participant", "principalId": "UOTHER"}}
+		event := NormalizedExternalConversationEvent{ID: "decision", Type: capability.ConversationEventApprovalDecided, ExternalConversationID: "C123", ExternalMessageID: "171.003", OrderingKey: "C123:171.003", OccurredAt: now, ExternalParticipantID: "UANY", Attributes: map[string]interface{}{"approvalId": approval.ID, "approvalRevision": int64(1), "actionCallId": call.ID, "invocationDigest": call.InvocationDigest, "decision": decision, "principalType": "external_participant", "principalId": "UOTHER"}}
 		service := NewExternalConversationTransportService(fixture.store, fixture.catalog)
 		if _, err := service.resolveExternalApprovalDecision(t.Context(), fixture.endpoint, event); err == nil {
 			t.Fatal("mismatched provider identity accepted")
 		}
 		event.Attributes["principalId"] = "UANY"
-		result, err := service.resolveExternalApprovalDecision(t.Context(), fixture.endpoint, event)
+		received, err := service.Receive(t.Context(), ReceiveExternalConversationEventRequest{Scope: fixture.endpoint.Scope, EndpointID: fixture.endpoint.ID, Event: event})
+		var result *ApprovalResolutionResult
+		if received != nil {
+			result = received.Approval
+		}
 		expected := ApprovalStatusApproved
 		if decision == "reject" {
 			expected = ApprovalStatusRejected
