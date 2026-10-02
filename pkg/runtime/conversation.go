@@ -286,6 +286,7 @@ type ChannelMessage struct {
 	Sequence          int64                     `json:"sequence"`
 	Sender            ConversationParticipant   `json:"sender"`
 	SenderDisplayName string                    `json:"senderDisplayName,omitempty"`
+	ExternalSource    *ExternalMessageSource    `json:"externalSource,omitempty"`
 	Intent            ConversationMessageIntent `json:"intent"`
 	Content           string                    `json:"content"`
 	// ContributionKey is a privacy-safe, normalized semantic claim identifier

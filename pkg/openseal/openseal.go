@@ -1879,6 +1879,8 @@ const (
 	RunActionCancel                 = runtime.RunActionCancel
 	AgentActionAmendBehavior        = runtime.AgentActionAmendBehavior
 	AgentActionListChannels         = runtime.AgentActionListChannels
+	AgentActionListWorkspace        = runtime.AgentActionListWorkspace
+	AgentActionConfigureWorkspace   = runtime.AgentActionConfigureWorkspace
 	AgentActionConfigureChannel     = runtime.AgentActionConfigureChannel
 	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
 	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
@@ -3052,7 +3054,12 @@ func (e *Engine) rebuildExternalConversations() error {
 	}
 	runbookDispatcher := runtime.NewExternalConversationRunbookEventDispatcher(e.store, runbookResolver)
 	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler, runbookDispatcher)
-	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, e.externalConversations.config.Inbox)
+	inboxConfig := e.externalConversations.config.Inbox
+	if contextHost, ok := e.externalConversations.host.(runtime.ExternalConversationContextHost); ok {
+		inboxConfig.ContextHost = contextHost
+		inboxConfig.ContextCatalog = e.skills
+	}
+	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, inboxConfig)
 	if err != nil {
 		return err
 	}
@@ -3432,12 +3439,14 @@ func (e *Engine) configureAgentManagementActions() error {
 	if err != nil {
 		return err
 	}
+	validator.SetWorkspaceCatalog(e.skills)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionPoolSpecs[index].dispatcher, e.externalConversations.endpoints)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
+		dispatcher.SetWorkspaceCatalog(e.skills)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3445,6 +3454,7 @@ func (e *Engine) configureAgentManagementActions() error {
 		if dispatchErr != nil {
 			return dispatchErr
 		}
+		dispatcher.SetWorkspaceCatalog(e.skills)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil

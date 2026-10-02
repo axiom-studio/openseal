@@ -57,6 +57,7 @@ type RunProgressAcknowledgement struct {
 }
 
 type RunProgressAcknowledgementWorkerConfig struct {
+	ReviewURL               func(kind, requestID, deploymentID, conversationID string, owner ObjectiveOwner) (string, error)
 	MinimumRunAge           time.Duration
 	MinimumInterval         time.Duration
 	PageSize                int
@@ -124,6 +125,16 @@ func NewRunProgressAcknowledgementWorker(
 }
 
 func (w *RunProgressAcknowledgementWorker) ProcessScope(ctx context.Context, scope Scope) ([]*ExternalConversationDelivery, error) {
+	return w.processScope(ctx, scope, true)
+}
+
+// ProcessCommentaryScope delivers existing public Agent updates without a
+// second model call or synthesized lifecycle narration.
+func (w *RunProgressAcknowledgementWorker) ProcessCommentaryScope(ctx context.Context, scope Scope) ([]*ExternalConversationDelivery, error) {
+	return w.processScope(ctx, scope, false)
+}
+
+func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, scope Scope, renderStatus bool) ([]*ExternalConversationDelivery, error) {
 	if w == nil || w.store == nil || w.resolver == nil || w.renderer == nil || w.conversations == nil || w.transport == nil {
 		return nil, errors.New("Run progress acknowledgement worker is not configured")
 	}
@@ -135,7 +146,32 @@ func (w *RunProgressAcknowledgementWorker) ProcessScope(ctx context.Context, sco
 	}
 	result := make([]*ExternalConversationDelivery, 0)
 	var processErrors []error
+	if !renderStatus {
+		reviews, err := w.projectReviewRequests(ctx, scope)
+		result = append(result, reviews...)
+		if err != nil {
+			processErrors = append(processErrors, err)
+		}
+	}
 	for _, item := range items {
+		updates, hasCommentary, processErr := w.projectCommentary(ctx, item)
+		if processErr != nil {
+			processErrors = append(processErrors, fmt.Errorf("project channel commentary for inbox item %s: %w", item.ID, processErr))
+			continue
+		}
+		result = append(result, updates...)
+		if !renderStatus {
+			status, statusErr := w.projectThreadStatus(ctx, item)
+			if statusErr != nil {
+				processErrors = append(processErrors, statusErr)
+			} else if status != nil {
+				result = append(result, status)
+			}
+			continue
+		}
+		if hasCommentary {
+			continue
+		}
 		delivery, processErr := w.process(ctx, item)
 		if processErr != nil {
 			processErrors = append(processErrors, fmt.Errorf("project Run acknowledgement for inbox item %s: %w", item.ID, processErr))

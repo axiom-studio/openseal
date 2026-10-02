@@ -1,0 +1,136 @@
+package runtime
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
+
+func TestSkillReferenceUpgradeAdapterMatchesOnlySameBindingAndPastRevision(t *testing.T) {
+	binding := &skill.Binding{ID: "slack-account", SkillID: "slack", SkillVersion: "2.3.1", SourceIdentity: "trusted:slack", Revision: 4}
+	base := ExternalConversationAdapterReference{SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity, BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversation"}
+	tests := []struct {
+		name   string
+		mutate func(*ExternalConversationAdapterReference)
+		want   bool
+	}{
+		{name: "current", want: true},
+		{name: "older", mutate: func(ref *ExternalConversationAdapterReference) { ref.BindingRevision = 3 }, want: true},
+		{name: "first", mutate: func(ref *ExternalConversationAdapterReference) { ref.BindingRevision = 1 }, want: true},
+		{name: "future", mutate: func(ref *ExternalConversationAdapterReference) { ref.BindingRevision = 5 }},
+		{name: "zero", mutate: func(ref *ExternalConversationAdapterReference) { ref.BindingRevision = 0 }},
+		{name: "negative", mutate: func(ref *ExternalConversationAdapterReference) { ref.BindingRevision = -1 }},
+		{name: "other binding", mutate: func(ref *ExternalConversationAdapterReference) { ref.BindingID = "another-account" }},
+		{name: "other skill", mutate: func(ref *ExternalConversationAdapterReference) { ref.SkillID = "another-skill" }},
+		{name: "other version", mutate: func(ref *ExternalConversationAdapterReference) { ref.SkillVersion = "2.2.0" }},
+		{name: "other source", mutate: func(ref *ExternalConversationAdapterReference) { ref.SourceIdentity = "untrusted:slack" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ref := base
+			if test.mutate != nil {
+				test.mutate(&ref)
+			}
+			if got := upgradeConversationReferenceMatches(ref, binding); got != test.want {
+				t.Fatalf("conversation match=%v, want %v", got, test.want)
+			}
+			callback := CallbackAdapterReference{SkillID: ref.SkillID, SkillVersion: ref.SkillVersion, SourceIdentity: ref.SourceIdentity, BindingID: ref.BindingID, BindingRevision: ref.BindingRevision, AdapterID: "callback"}
+			if got := upgradeCallbackReferenceMatches(callback, binding); got != test.want {
+				t.Fatalf("callback match=%v, want %v", got, test.want)
+			}
+		})
+	}
+	if upgradeConversationReferenceMatches(base, nil) {
+		t.Fatal("nil conversation binding matched")
+	}
+	if upgradeCallbackReferenceMatches(CallbackAdapterReference{}, nil) {
+		t.Fatal("nil callback binding matched")
+	}
+}
+
+func TestSkillReferenceUpgradeMovesOlderConversationAndCallbackPinsAtomically(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog := skill.NewCatalogWithStore(store)
+	for _, version := range []string{"1.0.0", "1.1.0"} {
+		conversationAdapter, err := capability.NormalizeConversationAdapter(skill.ConversationAdapter{
+			ProtocolVersion: capability.ConversationAdapterProtocolV1, Name: "Slack conversations", Description: "Deliver governed Slack messages.", Provider: "slack",
+			EndpointModes: []capability.ConversationEndpointMode{capability.ConversationEndpointChannel}, InboundEventTypes: []string{capability.ConversationEventMessageReceived},
+			Features:    []capability.ConversationAdapterFeature{capability.ConversationFeatureThreads},
+			Credentials: []capability.CredentialRequirement{{Name: "token", Kind: "api_key"}},
+			Delivery:    capability.ConversationDeliveryCapabilities{Operations: []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend}, Ordering: capability.ConversationDeliveryOrderEndpoint, Idempotency: capability.IdempotencyRequired},
+			Transport:   capability.ConversationAdapterTransport{Kind: "http", IngressEndpoint: "/ingress", DeliveryEndpoint: "/deliver", IngressCredentials: []string{"token"}, DeliveryCredentials: []string{"token"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		callbackAdapter, err := capability.NormalizeCallbackAdapter(skill.CallbackAdapter{
+			ProtocolVersion: capability.CallbackAdapterProtocolV1, Name: "Slack interactions", Description: "Verify governed Slack interactions.", Provider: "slack",
+			EventTypes: []string{capability.CallbackEventApprovalDecided}, Credentials: []capability.CredentialRequirement{{Name: "token", Kind: "api_key"}},
+			Transport: capability.CallbackAdapterTransport{Kind: "http", IngressEndpoint: "/interactions", IngressCredentials: []string{"token"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := catalog.Register(ctx, &skill.Definition{
+			ID: "slack", Version: version, Name: "Slack", Requirements: skill.Requirements{AlwaysAvailable: true},
+			ConversationAdapters: map[string]skill.ConversationAdapter{"conversations": conversationAdapter},
+			CallbackAdapters:     map[string]skill.CallbackAdapter{"interactions": callbackAdapter},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := Scope{Kind: "tenant", ID: "1"}
+	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	if err := store.SaveSkillBinding(ctx, &skill.Binding{
+		ID: "slack", Scope: skillScope, DeploymentID: "agent:researcher", SkillID: "slack", SkillVersion: "1.0.0",
+		EnabledConversationAdapters: []string{"conversations"}, EnabledCallbackAdapters: []string{"interactions"},
+		Credentials: map[string]skill.CredentialReference{"token": {Kind: "api_key", ID: "credential://slack.token"}},
+		MaximumRisk: skill.RiskLevelExternal, Revision: 3,
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 30, 0, 0, 0, 0, time.UTC)
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent:researcher"}
+	if err := store.CreateExternalConversationEndpoint(ctx, &ExternalConversationEndpoint{
+		ID: "approval-channel", IngressRoute: "approval-channel-route", Scope: scope, Owner: owner, DeploymentID: owner.ID,
+		Name: "Approval channel", Provider: "slack", Mode: capability.ConversationEndpointChannel, Address: "C123",
+		Adapter: ExternalConversationAdapterReference{SkillID: "slack", SkillVersion: "1.0.0", BindingID: "slack", BindingRevision: 2, AdapterID: "conversations"},
+		Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: owner.ID},
+		Policy:  ExternalConversationPolicy{MessageSelection: ExternalConversationSelectAllMessages, ReplyMode: ExternalConversationReplyThread, IgnoreBots: true},
+		Status:  ExternalConversationEndpointActive, Revision: 2, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateCallbackRegistration(ctx, &CallbackRegistration{
+		ID: "approval-callback", IngressRoute: "approval-callback-route", Scope: scope, Owner: owner, DeploymentID: owner.ID,
+		Name: "Approval callback", Provider: "slack",
+		Adapter:       CallbackAdapterReference{SkillID: "slack", SkillVersion: "1.0.0", BindingID: "slack", BindingRevision: 2, AdapterID: "interactions"},
+		Subscriptions: []CallbackSubscription{{EventType: capability.CallbackEventApprovalDecided, Consumer: "approvals"}},
+		Status:        CallbackRegistrationActive, Revision: 2, CreatedAt: now, UpdatedAt: now,
+		Lifecycle: []CallbackRegistrationLifecycleEntry{{Revision: 2, Action: CallbackRegistrationActivated, Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "activate", At: now}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewSkillReferenceUpgradeService(store, catalog)
+	service.now = func() time.Time { return now.Add(time.Hour) }
+	plan, err := service.Plan(ctx, PlanSkillReferenceUpgradeRequest{Scope: scope, DeploymentID: owner.ID, BindingID: "slack", ToVersion: "1.1.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ConversationEndpoints) != 1 || len(plan.CallbackRegistrations) != 1 {
+		t.Fatalf("adapter impacts = %#v %#v", plan.ConversationEndpoints, plan.CallbackRegistrations)
+	}
+	if _, err = service.Apply(ctx, ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "upgrade Slack"}); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, _ := store.GetExternalConversationEndpoint(ctx, scope, "approval-channel")
+	registration, _ := store.GetCallbackRegistration(ctx, scope, "approval-callback")
+	if endpoint.Adapter.SkillVersion != "1.1.0" || endpoint.Adapter.BindingRevision != 4 || endpoint.Revision != 3 ||
+		registration.Adapter.SkillVersion != "1.1.0" || registration.Adapter.BindingRevision != 4 || registration.Revision != 3 {
+		t.Fatalf("upgraded adapters = endpoint %#v callback %#v", endpoint.Adapter, registration.Adapter)
+	}
+}
