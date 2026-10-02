@@ -1650,6 +1650,9 @@ func governedConversationActionCompletion(run *AgentRun) (*governedConversationC
 	}
 	resourceType := strings.TrimSpace(fmt.Sprint(result["resourceType"]))
 	if resourceType == runbookActivationResourceType {
+		if completion, ok := scheduledTaskConversationCompletion(run, result); ok {
+			return completion, true
+		}
 		activation := conversationResultMap(result["activation"])
 		activationID := conversationResultString(activation, "id")
 		if !validOpaqueIdentifier(activationID, 256) {
@@ -1818,7 +1821,7 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	operation := strings.TrimSpace(fmt.Sprint(last["action"]))
 	if operation != ObjectiveActionCreate && operation != ObjectiveActionUpdate && operation != ObjectiveActionPause &&
 		operation != AgentActionAmendBehavior && operation != AgentActionConfigureChannel && operation != RunbookActionStart && operation != RunbookActionReplaceSchedule &&
-		operation != RunActionPause && operation != RunActionResume && operation != RunActionCancel {
+		operation != RunActionPause && operation != RunActionResume && operation != RunActionCancel && operation != RunbookActionCreateTask && operation != RunbookActionSetStatus {
 		return nil, false
 	}
 	actionDescription := label + " " + strings.ReplaceAll(operation, "_", " ")
