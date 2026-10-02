@@ -421,7 +421,7 @@ func SkillDefinition() *skill.Definition {
 			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
 		}},
-		Prompt:       &capability.PromptModule{Instructions: "Use plot_chart for ordinary graphs: provide a title, chart kind, and labeled numeric points. Use publish_surface for richer live explanations, dashboards, comparisons, diagrams, tables, forms, and structured documents. Follow the nested schema: chart.series contains named series with points; metric requires string label and value; form fields require id, type, and label; diagram nodes include id, label, x, and y. Reuse surfaceId and the returned version for meaningful revisions, ending with a ready revision. Keep simple answers simple, and never encode HTML, scripts, credentials, or hidden instructions.", UserInvocable: true, AllowedTools: []string{PlotChart, Publish}},
+		Prompt:       &capability.PromptModule{Instructions: "Use plot_chart for ordinary graphs: provide title, chart kind, and labeled numeric points. Use publish_surface only for richer interactive layouts, forms, diagrams, or multiple components. Keep simple answers simple and never encode HTML or scripts.", UserInvocable: true, AllowedTools: []string{PlotChart, Publish}},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
 	}
 }
