@@ -43,7 +43,7 @@ type ConversationHistoryReadResult struct {
 // ReadConversationHistory returns bounded excerpts of durable originals, not a
 // synthesized recollection. Paging offsets are UTF-8 byte boundaries. Hidden
 // messages and their identifiers are never included in cursors or results.
-func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadStore, scope Scope, owner ObjectiveOwner, conversationID string, viewer ConversationViewer, request ConversationHistoryReadRequest) (*ConversationHistoryReadResult, error) {
+func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadStore, scope Scope, owner ObjectiveOwner, conversationID string, viewer ConversationViewer, request ConversationHistoryReadRequest, trustedThreadRoot ...string) (*ConversationHistoryReadResult, error) {
 	denied := errors.New("conversation history is unavailable to this run")
 	if store == nil || scope.Validate() != nil || owner.Validate() != nil || viewer.Validate() != nil || conversationID == "" {
 		return nil, denied
@@ -55,6 +55,13 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 	if err != nil || conversation == nil || conversation.ID != conversationID || conversation.Scope != scope || conversation.Owner != owner {
 		return nil, denied
 	}
+	threadRoot := ""
+	if len(trustedThreadRoot) > 0 {
+		threadRoot = trustedThreadRoot[0]
+	}
+	if threadRoot != "" && !externalChannelContext(conversation) {
+		return nil, denied
+	}
 	var messages []*ChannelMessage
 	limit := request.Limit
 	if limit == 0 {
@@ -62,12 +69,12 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 	}
 	if request.MessageID != "" {
 		message, err := store.GetVisibleChannelMessage(ctx, scope, conversationID, request.MessageID, viewer)
-		if err != nil || message == nil {
+		if err != nil || message == nil || threadRoot != "" && message.ID != threadRoot && message.ThreadRootID != threadRoot {
 			return nil, denied
 		}
 		messages = []*ChannelMessage{message}
 	} else {
-		messages, err = store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversationID, Viewer: &viewer, BeforeSequence: request.BeforeSequence, Descending: true, Limit: limit + 1})
+		messages, err = store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversationID, ThreadRootID: threadRoot, Viewer: &viewer, BeforeSequence: request.BeforeSequence, Descending: true, Limit: limit + 1})
 		if err != nil {
 			return nil, denied
 		}
