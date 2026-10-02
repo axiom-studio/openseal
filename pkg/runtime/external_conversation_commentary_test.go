@@ -18,6 +18,9 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
+			if updates, err := worker.ProcessCommentaryScope(t.Context(), fixture.endpoint.Scope); err != nil || len(updates) != 0 {
+				t.Fatalf("empty run synthesized an update: %#v %v", updates, err)
+			}
 			activity := NewRunActivityService(fixture.store, fixture.store)
 			for i, eventType := range []string{"turn.commentary", "turn.progress", "turn.commentary", "turn.commentary"} {
 				visibility := ActivityVisibilityScope
@@ -28,6 +31,9 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 				if err != nil {
 					t.Fatal(err)
 				}
+			}
+			if updates, err := worker.ProcessCommentaryScope(t.Context(), fixture.endpoint.Scope); err != nil || len(updates) != 2 {
+				t.Fatalf("updates withheld until completion: %#v %v", updates, err)
 			}
 			// Even a quick completed run must keep its public updates before the answer.
 			if _, _, err := activity.TransitionRun(t.Context(), fixture.endpoint.Scope, fixture.run.ID, RunTransitionRequest{ExpectedRevision: fixture.run.Revision, Status: AgentRunStatusCompleted, Summary: "Done", EventType: "run.completed", Actor: ActivityActor{Type: "worker", ID: "test"}}); err != nil {
