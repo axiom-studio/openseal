@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/authoring"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -35,20 +36,33 @@ type WorkflowTeamCatalog interface {
 }
 
 type WorkflowEventSource struct {
-	BindingID             string                       `json:"bindingId"`
-	AdapterID             string                       `json:"adapterId"`
-	AdapterKind           string                       `json:"adapterKind"`
-	SkillID               string                       `json:"skillId"`
-	SourceIdentity        string                       `json:"sourceIdentity,omitempty"`
-	BindingRevision       int64                        `json:"bindingRevision"`
-	Name                  string                       `json:"name"`
-	Provider              string                       `json:"provider"`
-	EventTypes            []string                     `json:"eventTypes"`
-	SubjectDescription    string                       `json:"subjectDescription"`
-	CorrelationAttributes []string                     `json:"correlationAttributes,omitempty"`
-	Available             bool                         `json:"available"`
-	UnavailableReason     string                       `json:"unavailableReason,omitempty"`
-	Installations         []WorkflowSourceInstallation `json:"installations,omitempty"`
+	BindingID             string                                   `json:"bindingId"`
+	AdapterID             string                                   `json:"adapterId"`
+	AdapterKind           string                                   `json:"adapterKind"`
+	SkillID               string                                   `json:"skillId"`
+	SkillVersion          string                                   `json:"skillVersion"`
+	SourceIdentity        string                                   `json:"sourceIdentity,omitempty"`
+	BindingRevision       int64                                    `json:"bindingRevision"`
+	Name                  string                                   `json:"name"`
+	Provider              string                                   `json:"provider"`
+	EventTypes            []string                                 `json:"eventTypes"`
+	SubjectDescription    string                                   `json:"subjectDescription"`
+	CorrelationAttributes []string                                 `json:"correlationAttributes,omitempty"`
+	Available             bool                                     `json:"available"`
+	UnavailableReason     string                                   `json:"unavailableReason,omitempty"`
+	Installations         []WorkflowSourceInstallation             `json:"installations,omitempty"`
+	SubjectEvidence       []capability.ConversationSubjectEvidence `json:"subjectEvidence,omitempty"`
+	EvidenceRequired      bool                                     `json:"evidenceRequired"`
+	KnownSubjects         []WorkflowKnownSubject                   `json:"knownSubjects,omitempty"`
+	binding               *skill.Binding
+	definition            *skill.Definition
+}
+
+// WorkflowKnownSubject exposes only the declared conversation identity and
+// its durable action provenance, never a complete action output.
+type WorkflowKnownSubject struct {
+	ExternalConversationID string `json:"externalConversationId"`
+	ActionCallID           string `json:"actionCallId"`
 }
 
 type WorkflowSourceInstallation struct {
@@ -157,15 +171,16 @@ func projectWorkflowSourceInstallation(source *WorkflowEventSource, installed []
 }
 
 type workflowCreateArguments struct {
-	Title       string                 `json:"title"`
-	Goal        string                 `json:"goal"`
-	BindingID   string                 `json:"bindingId"`
-	AdapterID   string                 `json:"adapterId"`
-	AdapterKind string                 `json:"adapterKind"`
-	EventType   string                 `json:"eventType"`
-	Subject     string                 `json:"subject"`
-	Attributes  map[string]interface{} `json:"attributes,omitempty"`
-	Deadline    string                 `json:"deadline"`
+	Title                       string                 `json:"title"`
+	Goal                        string                 `json:"goal"`
+	BindingID                   string                 `json:"bindingId"`
+	AdapterID                   string                 `json:"adapterId"`
+	AdapterKind                 string                 `json:"adapterKind"`
+	EventType                   string                 `json:"eventType"`
+	Subject                     string                 `json:"subject"`
+	Attributes                  map[string]interface{} `json:"attributes,omitempty"`
+	Deadline                    string                 `json:"deadline"`
+	SubjectEvidenceActionCallID string                 `json:"subjectEvidenceActionCallId,omitempty"`
 }
 
 func workflowCreationDigest(arguments map[string]interface{}) (string, error) {
@@ -185,7 +200,7 @@ func isWorkflowActionName(name string) bool {
 	return name == RunbookActionCreateWorkflow || name == RunbookActionWorkflowSources || name == RunbookActionInspectWorkflows
 }
 
-func workflowCreateAction() skill.Action {
+func workflowCreateActionLegacy130() skill.Action {
 	return skill.Action{Name: RunbookActionCreateWorkflow,
 		Description: "Register a durable follow-up for an authenticated external event, then continue the current chat. Use workflow_sources to select an enabled event adapter. Supply the exact resource/conversation subject and participant/thread selectors; the current Agent executes the self-contained goal when a match arrives or the deadline expires, and reports here. Register before sending an external request when the subject is known. If delivery first supplies the subject, register immediately after its receipt; the durable inbox retains fast replies from the original human request boundary. For multiple recipients create one follow-up per recipient. This does not enable missing connector access, create polling, send the initial request, or promise services without an event source. Do not create another workflow in the goal. Existing Run tools inspect, pause, resume or cancel the returned workflowId.",
 		Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
@@ -204,11 +219,25 @@ func workflowCreateAction() skill.Action {
 	}
 }
 
-func workflowSourcesAction() skill.Action {
+func workflowSourcesActionLegacy130() skill.Action {
 	return skill.Action{Name: RunbookActionWorkflowSources, Description: "List the current Agent's enabled, authenticated event adapter capabilities for durable follow-ups. Select exact bindingId, adapterId, adapterKind, eventType and subject from these capabilities; an account with only read/write actions cannot be watched until an event adapter is enabled. This lists adapter permission, not delivery health or arbitrary provider polling.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported,
 		InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{}},
 		OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"sources"}, "properties": map[string]interface{}{"sources": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}}},
 	}
+}
+
+func workflowCreateAction() skill.Action {
+	action := workflowCreateActionLegacy130()
+	action.Description += " For conversation adapters with evidenceRequired, supply subjectEvidenceActionCallId from a succeeded action in this originating chat Run. The persisted output at the adapter's declared subjectEvidence path must equal subject exactly; a participant ID or intended delivery target is not conversation evidence."
+	action.InputSchema["properties"].(map[string]interface{})["subjectEvidenceActionCallId"] = map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "Durable succeeded action call from this originating chat Run, using this exact current connector binding and Skill version. Required when the selected conversation adapter declares subjectEvidence. Its declared output conversation ID must exactly equal subject."}
+	return action
+}
+
+func workflowSourcesAction() skill.Action {
+	action := workflowSourcesActionLegacy130()
+	action.Description += " Conversation sources report subjectEvidence declarations, evidenceRequired, and bounded knownSubjects with actionCallId provenance. Optionally supply subjectEvidenceActionCallId to inspect one durable action receipt from this originating chat Run. Known subjects contain only the declared external conversation ID, not complete action output."
+	action.InputSchema["properties"].(map[string]interface{})["subjectEvidenceActionCallId"] = map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "Optional succeeded action call receipt to project through the selected adapter's declared conversation subject path. Only same-Run, same-binding evidence is returned."}
+	return action
 }
 
 func workflowInspectAction() skill.Action {
@@ -250,11 +279,15 @@ func workflowBoundSource(ctx context.Context, catalog WorkflowSourceCatalog, run
 		if err != nil {
 			return nil, fmt.Errorf("enabled conversation event source is unavailable: %w", err)
 		}
-		if bound == nil || bound.Binding == nil || bound.Binding.Disabled {
+		if bound == nil || bound.Binding == nil || bound.Definition == nil || bound.Binding.Disabled {
 			return nil, errors.New("conversation event source is unavailable")
 		}
 		base.Name, base.Provider, base.EventTypes = bound.Adapter.Name, bound.Adapter.Provider, slices.Clone(bound.Adapter.InboundEventTypes)
 		base.SkillID, base.BindingRevision = bound.Definition.ID, bound.Binding.Revision
+		base.SkillVersion = bound.Definition.Version
+		base.SubjectEvidence = slices.Clone(bound.Adapter.SubjectEvidence)
+		base.EvidenceRequired = len(base.SubjectEvidence) > 0
+		base.binding, base.definition = bound.Binding, bound.Definition
 		base.SourceIdentity = bound.Binding.SourceIdentity
 		base.SubjectDescription = "Exact external conversation ID"
 		base.CorrelationAttributes = []string{"externalParticipantId", "externalThreadId", "externalMessageId", "direct", "installationId", "applicationId"}
@@ -263,11 +296,12 @@ func workflowBoundSource(ctx context.Context, catalog WorkflowSourceCatalog, run
 		if err != nil {
 			return nil, fmt.Errorf("enabled callback event source is unavailable: %w", err)
 		}
-		if bound == nil || bound.Binding == nil || bound.Binding.Disabled {
+		if bound == nil || bound.Binding == nil || bound.Definition == nil || bound.Binding.Disabled {
 			return nil, errors.New("callback event source is unavailable")
 		}
 		base.Name, base.Provider, base.EventTypes = bound.Adapter.Name, bound.Adapter.Provider, slices.Clone(bound.Adapter.EventTypes)
 		base.SkillID, base.BindingRevision = bound.Definition.ID, bound.Binding.Revision
+		base.SkillVersion = bound.Definition.Version
 		base.SourceIdentity = bound.Binding.SourceIdentity
 		base.SubjectDescription = "Exact resource subject supplied by the authenticated callback adapter; subjectless events cannot satisfy a wait"
 	default:
@@ -276,7 +310,14 @@ func workflowBoundSource(ctx context.Context, catalog WorkflowSourceCatalog, run
 	return &base, nil
 }
 
-func workflowSources(ctx context.Context, store runbookActionStore, catalog WorkflowSourceCatalog, run *AgentRun) ([]*WorkflowEventSource, error) {
+func workflowSources(ctx context.Context, store runbookActionStore, catalog WorkflowSourceCatalog, run *AgentRun, evidenceActionCallIDs ...string) ([]*WorkflowEventSource, error) {
+	if len(evidenceActionCallIDs) > 1 {
+		return nil, errors.New("workflow source discovery accepts at most one explicit action evidence receipt")
+	}
+	evidenceActionCallID := ""
+	if len(evidenceActionCallIDs) == 1 {
+		evidenceActionCallID = evidenceActionCallIDs[0]
+	}
 	if catalog == nil {
 		return nil, errors.New("workflow event catalog is unavailable")
 	}
@@ -308,10 +349,13 @@ func workflowSources(ctx context.Context, store runbookActionStore, catalog Work
 			}
 		}
 	}
+	if err := projectWorkflowKnownSubjects(ctx, store, run, result, evidenceActionCallID); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
-func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalog WorkflowSourceCatalog, run *AgentRun, arguments map[string]interface{}) (*workflowCreateArguments, *ScheduledAgentTask, *RunEventWaitSpec, error) {
+func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalog WorkflowSourceCatalog, run *AgentRun, arguments map[string]interface{}, actionVersions ...string) (*workflowCreateArguments, *ScheduledAgentTask, *RunEventWaitSpec, error) {
 	var args workflowCreateArguments
 	if err := decodeScheduledTaskArguments(arguments, &args); err != nil {
 		return nil, nil, nil, err
@@ -346,6 +390,19 @@ func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalo
 	}
 	if !slices.Contains(source.EventTypes, args.EventType) {
 		return nil, nil, nil, errors.New("selected adapter does not declare this event type")
+	}
+	if source.AdapterKind == "conversation" && source.EvidenceRequired {
+		var evidenceErr error
+		if len(actionVersions) == 1 && actionVersions[0] == "1.3.0" {
+			// The immutable 1.3.0 schema has no receipt argument. Its bounded
+			// kernel-owned hints select durable receipt lookups instead.
+			evidenceErr = requireLegacyWorkflowSubjectEvidence(ctx, store, run, source, args.Subject)
+		} else {
+			evidenceErr = requireWorkflowSubjectEvidence(ctx, store, run, source, args.SubjectEvidenceActionCallID, args.Subject)
+		}
+		if evidenceErr != nil {
+			return nil, nil, nil, evidenceErr
+		}
 	}
 	deadline, err := time.Parse(time.RFC3339Nano, args.Deadline)
 	if err != nil {
@@ -412,7 +469,7 @@ func validateWorkflowAction(ctx context.Context, store runbookActionStore, catal
 	if _, ok := store.(RunEventWaitStore); !ok {
 		return nil, errors.New("durable workflow event storage is unavailable")
 	}
-	args, task, spec, err := resolveWorkflowCreate(ctx, store, catalog, input.Run, input.Arguments)
+	args, task, spec, err := resolveWorkflowCreate(ctx, store, catalog, input.Run, input.Arguments, input.Bound.Definition.Version)
 	if err != nil {
 		return nil, err
 	}
@@ -435,11 +492,13 @@ func dispatchWorkflowAction(ctx context.Context, store runbookActionStore, catal
 	}
 	switch input.Bound.Action.Name {
 	case RunbookActionWorkflowSources:
-		var args struct{}
+		var args struct {
+			SubjectEvidenceActionCallID string `json:"subjectEvidenceActionCallId"`
+		}
 		if err := decodeScheduledTaskArguments(input.Arguments, &args); err != nil {
 			return nil, err
 		}
-		sources, err := workflowSources(ctx, store, catalog, run)
+		sources, err := workflowSources(ctx, store, catalog, run, args.SubjectEvidenceActionCallID)
 		if err != nil {
 			return nil, err
 		}
@@ -471,7 +530,7 @@ func dispatchWorkflowAction(ctx context.Context, store runbookActionStore, catal
 			}
 			return map[string]interface{}{"workflowId": persisted.ID, "run": persisted, "replayed": true}, nil
 		}
-		args, task, spec, err := resolveWorkflowCreate(ctx, store, catalog, run, input.Arguments)
+		args, task, spec, err := resolveWorkflowCreate(ctx, store, catalog, run, input.Arguments, input.Bound.Definition.Version)
 		if err != nil {
 			return nil, err
 		}

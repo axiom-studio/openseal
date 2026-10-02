@@ -15,7 +15,7 @@ import (
 
 const (
 	RunbookManagementSkillID      = "openseal.runbooks"
-	RunbookManagementSkillVersion = "1.3.0"
+	RunbookManagementSkillVersion = "1.3.1"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -26,13 +26,23 @@ const (
 // Runbook activations. Starting an activation creates a normal durable Run;
 // the model cannot manufacture a definition, execution policy, or authority.
 func RunbookManagementSkill() *skill.Definition {
+	return runbookManagementSkill(RunbookManagementSkillVersion, workflowCreateAction(), workflowSourcesAction())
+}
+
+// RunbookManagementSkillLegacy130 preserves the immutable published 1.3.0
+// contract so already queued calls remain resolvable after a host upgrades.
+func RunbookManagementSkillLegacy130() *skill.Definition {
+	return runbookManagementSkill("1.3.0", workflowCreateActionLegacy130(), workflowSourcesActionLegacy130())
+}
+
+func runbookManagementSkill(version string, createWorkflow, workflowSources skill.Action) *skill.Definition {
 	return &skill.Definition{
-		ID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
+		ID: RunbookManagementSkillID, Version: version,
 		Name: "Routines and workflows", Description: "Create scheduled tasks and durable event-driven follow-ups, inspect their state, start reviewed Runbooks and manage schedules. Work uses the current Agent tools and reports results back to the originating chat.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunbookManagementEndpoint},
 		Actions: map[string]skill.Action{
-			RunbookActionCreateWorkflow:   workflowCreateAction(),
-			RunbookActionWorkflowSources:  workflowSourcesAction(),
+			RunbookActionCreateWorkflow:   createWorkflow,
+			RunbookActionWorkflowSources:  workflowSources,
 			RunbookActionInspectWorkflows: workflowInspectAction(),
 			RunbookActionCreateTask:       scheduledTaskCreateAction(),
 			RunbookActionList:             scheduledTaskListAction(),
@@ -486,6 +496,6 @@ func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, r
 
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.3.0" || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
 		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || isWorkflowActionName(bound.Action.Name))
 }

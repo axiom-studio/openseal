@@ -46,6 +46,10 @@ func NormalizeConversationAdapter(value ConversationAdapter) (ConversationAdapte
 	if err != nil {
 		return ConversationAdapter{}, err
 	}
+	value.SubjectEvidence, err = normalizeConversationSubjectEvidence(value.SubjectEvidence)
+	if err != nil {
+		return ConversationAdapter{}, err
+	}
 	value.Delivery, err = normalizeConversationDeliveryCapabilities(value.Delivery)
 	if err != nil {
 		return ConversationAdapter{}, err
@@ -95,6 +99,30 @@ func NormalizeConversationAdapter(value ConversationAdapter) (ConversationAdapte
 		return ConversationAdapter{}, errors.New("conversation adapter credentials must declare ingress or delivery use")
 	}
 	return value, nil
+}
+
+func normalizeConversationSubjectEvidence(values []ConversationSubjectEvidence) ([]ConversationSubjectEvidence, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > 16 {
+		return nil, errors.New("conversation adapter has too much subject evidence")
+	}
+	seenActions := make(map[string]bool, len(values))
+	result := make([]ConversationSubjectEvidence, len(values))
+	for index, value := range values {
+		if value.Action != strings.TrimSpace(value.Action) || value.SubjectPath != strings.TrimSpace(value.SubjectPath) ||
+			!validConversationAdapterIdentifier(value.Action, 128) || !validConversationProjectionPath(value.SubjectPath) {
+			return nil, errors.New("conversation adapter subject evidence is invalid")
+		}
+		if seenActions[value.Action] {
+			return nil, errors.New("conversation adapter subject evidence actions must be unique")
+		}
+		seenActions[value.Action] = true
+		result[index] = value
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Action < result[j].Action })
+	return result, nil
 }
 
 func normalizeConversationDestinationDiscovery(values []ConversationDestinationDiscovery, modes []ConversationEndpointMode) ([]ConversationDestinationDiscovery, error) {

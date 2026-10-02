@@ -29,6 +29,7 @@ type ConversationDeliveryOrdering = capability.ConversationDeliveryOrdering
 type ConversationDeliveryCapabilities = capability.ConversationDeliveryCapabilities
 type ConversationAdapterTransport = capability.ConversationAdapterTransport
 type ConversationDestinationDiscovery = capability.ConversationDestinationDiscovery
+type ConversationSubjectEvidence = capability.ConversationSubjectEvidence
 type ConversationAdapter = capability.ConversationAdapter
 type BoundConversationAdapter = capability.BoundConversationAdapter
 type CallbackAdapterTransport = capability.CallbackAdapterTransport
@@ -960,6 +961,10 @@ func validateDefinition(definition *Definition) error {
 		if !reflect.DeepEqual(normalized, adapter) {
 			return fmt.Errorf("skill conversation adapter %s must use canonical ordering and values", id)
 		}
+		adapterCredentials := make(map[string]CredentialRequirement, len(adapter.Credentials))
+		for _, requirement := range adapter.Credentials {
+			adapterCredentials[requirement.Name] = requirement
+		}
 		for _, discovery := range adapter.DestinationDiscovery {
 			action, ok := definition.Actions[discovery.Action]
 			if !ok {
@@ -967,10 +972,6 @@ func validateDefinition(definition *Definition) error {
 			}
 			if action.Risk != RiskLevelRead || (action.SideEffect != SideEffectRead && action.SideEffect != SideEffectNone) {
 				return fmt.Errorf("skill conversation adapter %s destination discovery action %s must be read-only", id, discovery.Action)
-			}
-			adapterCredentials := make(map[string]CredentialRequirement, len(adapter.Credentials))
-			for _, requirement := range adapter.Credentials {
-				adapterCredentials[requirement.Name] = requirement
 			}
 			for _, requirement := range action.Credentials {
 				declared, exists := adapterCredentials[requirement.Name]
@@ -980,6 +981,21 @@ func validateDefinition(definition *Definition) error {
 			}
 			if err := validateConversationDestinationDiscoverySchema(action, discovery); err != nil {
 				return fmt.Errorf("skill conversation adapter %s destination discovery action %s is invalid: %w", id, discovery.Action, err)
+			}
+		}
+		for _, evidence := range adapter.SubjectEvidence {
+			action, ok := definition.Actions[evidence.Action]
+			if !ok {
+				return fmt.Errorf("skill conversation adapter %s subject evidence references missing action %s", id, evidence.Action)
+			}
+			for _, requirement := range action.Credentials {
+				declared, exists := adapterCredentials[requirement.Name]
+				if !exists || declared.Kind != requirement.Kind || declared.Optional != requirement.Optional || !reflect.DeepEqual(declared.OAuth2, requirement.OAuth2) {
+					return fmt.Errorf("skill conversation adapter %s subject evidence action %s credential %s is not declared identically by the adapter", id, evidence.Action, requirement.Name)
+				}
+			}
+			if err := validateConversationSubjectEvidenceSchema(action, evidence); err != nil {
+				return fmt.Errorf("skill conversation adapter %s subject evidence action %s is invalid: %w", id, evidence.Action, err)
 			}
 		}
 	}
@@ -1193,6 +1209,26 @@ func validateConversationDestinationDiscoverySchema(action Action, discovery Con
 		if !ok || value["type"] != "string" {
 			return errors.New("next cursor path must resolve to an output string")
 		}
+	}
+	return nil
+}
+
+func validateConversationSubjectEvidenceSchema(action Action, evidence ConversationSubjectEvidence) error {
+	current := action.OutputSchema
+	for _, component := range strings.Split(evidence.SubjectPath, ".") {
+		// Older JSON Schema drafts ignore siblings of $ref, so an inline type
+		// beside a reference cannot establish the declared object or string.
+		if _, referenced := current["$ref"]; referenced || current["type"] != "object" {
+			return errors.New("subject path must traverse declared output objects")
+		}
+		property, ok := topLevelSchemaProperty(current, component)
+		if !ok {
+			return errors.New("subject path must resolve to a declared non-null output string")
+		}
+		current = property
+	}
+	if _, referenced := current["$ref"]; referenced || current["type"] != "string" {
+		return errors.New("subject path must resolve to a declared non-null output string")
 	}
 	return nil
 }
