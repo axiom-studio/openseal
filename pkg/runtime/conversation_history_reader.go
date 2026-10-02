@@ -18,6 +18,7 @@ type ConversationHistoryReadStore interface {
 type ConversationHistoryReadRequest struct {
 	MessageID      string `json:"messageId,omitempty"`
 	BeforeSequence int64  `json:"beforeSequence,omitempty"`
+	AfterSequence  *int64 `json:"afterSequence,omitempty"`
 	OffsetBytes    int    `json:"offsetBytes,omitempty"`
 	Limit          int    `json:"limit,omitempty"`
 }
@@ -38,12 +39,13 @@ type ConversationHistoryExcerpt struct {
 type ConversationHistoryReadResult struct {
 	Messages           []ConversationHistoryExcerpt `json:"messages"`
 	NextBeforeSequence int64                        `json:"nextBeforeSequence,omitempty"`
+	NextAfterSequence  int64                        `json:"nextAfterSequence,omitempty"`
 }
 
 // ReadConversationHistory returns bounded excerpts of durable originals, not a
 // synthesized recollection. Paging offsets are UTF-8 byte boundaries. Hidden
 // messages and their identifiers are never included in cursors or results.
-func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadStore, scope Scope, owner ObjectiveOwner, conversationID string, viewer ConversationViewer, request ConversationHistoryReadRequest) (*ConversationHistoryReadResult, error) {
+func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadStore, scope Scope, owner ObjectiveOwner, conversationID string, viewer ConversationViewer, request ConversationHistoryReadRequest, trustedThreadRoot ...string) (*ConversationHistoryReadResult, error) {
 	denied := errors.New("conversation history is unavailable to this run")
 	if store == nil || scope.Validate() != nil || owner.Validate() != nil || viewer.Validate() != nil || conversationID == "" {
 		return nil, denied
@@ -51,8 +53,23 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 	if request.Limit < 0 || request.Limit > 10 || request.BeforeSequence < 0 || request.OffsetBytes < 0 || request.MessageID == "" && request.OffsetBytes != 0 || request.MessageID != "" && request.BeforeSequence != 0 {
 		return nil, errors.New("invalid history page")
 	}
+	forward := request.AfterSequence != nil
+	var after int64
+	if forward {
+		after = *request.AfterSequence
+		if after < 0 || request.BeforeSequence != 0 || request.MessageID != "" {
+			return nil, errors.New("invalid history page")
+		}
+	}
 	conversation, err := store.GetConversation(ctx, scope, conversationID)
 	if err != nil || conversation == nil || conversation.ID != conversationID || conversation.Scope != scope || conversation.Owner != owner {
+		return nil, denied
+	}
+	threadRoot := ""
+	if len(trustedThreadRoot) > 0 {
+		threadRoot = trustedThreadRoot[0]
+	}
+	if threadRoot != "" && !externalChannelContext(conversation) {
 		return nil, denied
 	}
 	var messages []*ChannelMessage
@@ -62,12 +79,12 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 	}
 	if request.MessageID != "" {
 		message, err := store.GetVisibleChannelMessage(ctx, scope, conversationID, request.MessageID, viewer)
-		if err != nil || message == nil {
+		if err != nil || message == nil || threadRoot != "" && message.ID != threadRoot && message.ThreadRootID != threadRoot {
 			return nil, denied
 		}
 		messages = []*ChannelMessage{message}
 	} else {
-		messages, err = store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversationID, Viewer: &viewer, BeforeSequence: request.BeforeSequence, Descending: true, Limit: limit + 1})
+		messages, err = store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversationID, ThreadRootID: threadRoot, Viewer: &viewer, BeforeSequence: request.BeforeSequence, AfterSequence: after, Descending: !forward, Limit: limit + 1})
 		if err != nil {
 			return nil, denied
 		}
@@ -78,7 +95,11 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 		if messages[len(messages)-1] == nil {
 			return nil, denied
 		}
-		result.NextBeforeSequence = messages[len(messages)-1].Sequence
+		if forward {
+			result.NextAfterSequence = messages[len(messages)-1].Sequence
+		} else {
+			result.NextBeforeSequence = messages[len(messages)-1].Sequence
+		}
 	}
 	for _, message := range messages {
 		if message == nil || message.Scope != scope || message.ConversationID != conversationID || !CanViewChannelMessage(message, viewer) {

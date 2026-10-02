@@ -95,10 +95,12 @@ func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
 }
 
 type ExternalConversationInboxWorkerConfig struct {
-	WorkerID      string
-	LeaseDuration time.Duration
-	BaseRetry     time.Duration
-	MaximumRetry  time.Duration
+	WorkerID       string
+	LeaseDuration  time.Duration
+	BaseRetry      time.Duration
+	MaximumRetry   time.Duration
+	ContextHost    ExternalConversationContextHost
+	ContextCatalog ExternalConversationAdapterResolver
 }
 
 func (c ExternalConversationInboxWorkerConfig) normalize() (ExternalConversationInboxWorkerConfig, error) {
@@ -191,11 +193,18 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *Exter
 	if err != nil {
 		return err
 	}
-	participant, err := w.ensureParticipant(ctx, endpoint, item.Event)
+	// Keep the durable, verified ingress event immutable for lease validation.
+	// Provider labels enrich the applied message, not the original event.
+	contextualItem := *item
+	mapping, contextState, err := w.hydrateContext(ctx, endpoint, conversation, mapping, &contextualItem)
 	if err != nil {
 		return err
 	}
-	message, err := w.ensureInboundMessage(ctx, endpoint, conversation, mapping, participant, item.Event)
+	participant, err := w.ensureParticipant(ctx, endpoint, contextualItem.Event)
+	if err != nil {
+		return err
+	}
+	message, err := w.ensureInboundMessage(ctx, endpoint, conversation, mapping, participant, contextualItem.Event, contextState)
 	if err != nil {
 		return err
 	}
@@ -207,6 +216,11 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *Exter
 		if err != nil {
 			return err
 		}
+	}
+	// A message already imported as provider history is context, not a new
+	// instruction. A delayed provider event must not wake obsolete work.
+	if message.Historical {
+		return w.complete(ctx, item, conversation.ID, message.ID, "")
 	}
 	event := externalConversationEventEnvelope(item, endpoint, conversation, message)
 	dispatch, err := w.dispatcher.DispatchExternalConversation(ctx, ExternalConversationDispatchRequest{
@@ -330,7 +344,7 @@ func (w *ExternalConversationInboxWorker) ensureParticipant(
 		}
 		return candidate, nil
 	}
-	if current.DisplayName != strings.TrimSpace(event.ParticipantDisplayName) {
+	if name := strings.TrimSpace(event.ParticipantDisplayName); name != "" && current.DisplayName != name {
 		next := cloneExternalParticipantMapping(current)
 		next.DisplayName = strings.TrimSpace(event.ParticipantDisplayName)
 		next.Revision++
@@ -353,6 +367,7 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 	thread *ExternalConversationMapping,
 	participant *ExternalParticipantMapping,
 	event NormalizedExternalConversationEvent,
+	contextState *ExternalConversationContextState,
 ) (*ChannelMessage, error) {
 	if existing, err := w.store.GetExternalMessageMapping(
 		ctx, endpoint.Scope, endpoint.ID, ExternalMessageInbound, event.ExternalMessageID,
@@ -365,6 +380,24 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 		return w.conversations.GetChannelMessage(ctx, endpoint.Scope, conversation.ID, existing.ChannelMessageID)
 	}
 	key := stableExternalConversationID(endpoint.Scope, endpoint.ID, "message", event.ExternalMessageID)
+	// The previous attempt may have committed the message and crashed before
+	// writing its provider mapping. Keep the original context snapshot intact.
+	if existing, err := w.store.FindChannelMessageByIdempotencyKey(ctx, endpoint.Scope, conversation.ID, key); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
+	references := []ConversationReference{{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}}
+	if contextState != nil {
+		references = append(references, externalConversationContextReference(endpoint.ID, contextState))
+		if origin := externalConversationContextOriginReference(endpoint.ID, contextState); origin != nil {
+			references = append(references, *origin)
+		}
+		if code := normalizeExternalConversationContextErrorCode(contextState.ErrorCode); code != "" {
+			references = append(references, ConversationReference{Kind: ConversationReferenceExternalSource,
+				ID: externalConversationContextErrorPrefix(endpoint.ID) + code})
+		}
+	}
 	for attempts := 0; attempts < 32; attempts++ {
 		current, err := w.conversations.GetConversation(ctx, endpoint.Scope, conversation.ID)
 		if err != nil {
@@ -374,13 +407,14 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 		if thread != nil {
 			replyTo = thread.ThreadRootMessageID
 		}
+		source := externalMessageSource(endpoint, event)
+		source.ParticipantDisplayName = sourceLabel(participant.DisplayName, 160)
 		result, postErr := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 			Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 			Sender: participant.Participant, SenderDisplayName: participant.DisplayName,
-			Intent: MessageIntentQuestion, Content: event.Text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-			ReplyToMessageID: replyTo, References: []ConversationReference{{
-				Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision,
-			}},
+			ExternalSource: source,
+			Intent:         MessageIntentQuestion, Content: event.Text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			ReplyToMessageID: replyTo, References: references,
 			RequiresResponse: true, IdempotencyKey: key,
 		})
 		if errors.Is(postErr, ErrRevisionConflict) {
