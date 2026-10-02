@@ -433,6 +433,9 @@ func decodeAgentRun(payload string) (*AgentRun, error) {
 	if err := json.Unmarshal([]byte(payload), &run); err != nil {
 		return nil, fmt.Errorf("decode agent run: %w", err)
 	}
+	if err := restoreRunEventWaitCheckpoint([]byte(payload), &run); err != nil {
+		return nil, fmt.Errorf("decode event wait checkpoint: %w", err)
+	}
 	if run.Revision == 0 {
 		run.Revision = 1
 	}

@@ -274,46 +274,9 @@ func runbookStepReachable(definition *runbook.Definition, entrypoint, target str
 		if !ok {
 			continue
 		}
-		switch step.Kind {
-		case runbook.StepAction:
-			if step.Action != nil {
-				queue = append(queue, step.Action.Next)
-			}
-		case runbook.StepDelegate:
-			if step.Delegate != nil {
-				queue = append(queue, step.Delegate.Next)
-			}
-		case runbook.StepDecision:
-			if step.Decision != nil {
-				queue = append(queue, step.Decision.Default)
-				for _, decisionCase := range step.Decision.Cases {
-					queue = append(queue, decisionCase.Next)
-				}
-			}
-		case runbook.StepTransform:
-			if step.Transform != nil {
-				queue = append(queue, step.Transform.Next)
-			}
-		case runbook.StepWait:
-			if step.Wait != nil {
-				queue = append(queue, step.Wait.Next)
-			}
-		case runbook.StepFork:
-			if step.Fork != nil {
-				queue = append(queue, step.Fork.Join)
-				for _, branch := range step.Fork.Branches {
-					queue = append(queue, branch)
-				}
-			}
-		case runbook.StepJoin:
-			if step.Join != nil {
-				queue = append(queue, step.Join.Next)
-			}
-		case runbook.StepForEach:
-			if step.ForEach != nil {
-				queue = append(queue, step.ForEach.Body, step.ForEach.Next)
-			}
-		}
+		// Budget and action dataflow validation must traverse the same graph,
+		// including timeout paths and bounded loop returns.
+		queue = append(queue, runbookStepTargets(step)...)
 	}
 	return false
 }

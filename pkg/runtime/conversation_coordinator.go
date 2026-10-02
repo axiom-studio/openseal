@@ -86,13 +86,15 @@ type ParticipationProposalContext struct {
 	HistorySummary    string
 	HistoryCompaction *ConversationCompactionRequest
 	Budget            *ParticipationProposalBudget
-	Conversation      *Conversation
-	Trigger           *ChannelMessage
-	RecentMessages    []*ChannelMessage
-	OpenMessages      []*ChannelMessage
-	Participant       ConversationParticipant
-	SemanticRoles     []string
-	Priority          int
+	// RunID is the host-owned conversation Run linked to this coordination round.
+	RunID          string
+	Conversation   *Conversation
+	Trigger        *ChannelMessage
+	RecentMessages []*ChannelMessage
+	OpenMessages   []*ChannelMessage
+	Participant    ConversationParticipant
+	SemanticRoles  []string
+	Priority       int
 }
 
 // ParticipationProposalProvider asks one Agent whether it has new,
@@ -259,6 +261,13 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 			return nil, err
 		}
 	}
+	runID := ""
+	for _, reference := range req.MessageReferences {
+		if reference.Kind == ConversationReferenceRun {
+			runID = reference.ID
+			break
+		}
+	}
 	policy, err := req.Policy.normalize()
 	if err != nil {
 		return nil, err
@@ -403,6 +412,7 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 				leases[index] = presence
 				proposalCtx, proposalCancel := context.WithTimeout(workerCtx, c.config.ProposalTimeout)
 				proposalInput := ParticipationProposalContext{
+					RunID:        runID,
 					Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(visibleTrigger),
 					RecentMessages: cloneChannelMessages(visibleRecent), Participant: binding.Participant,
 					OpenMessages:  cloneChannelMessages(visibleOpen),
