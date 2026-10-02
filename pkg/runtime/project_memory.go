@@ -18,7 +18,10 @@ func (s *MemoryStore) CreateProject(_ context.Context, i *Project) error {
 	if _, ok := s.projects[k]; ok {
 		return ErrProjectConflict
 	}
-	s.projects[k] = cloneProject(i)
+	if err := s.validateProjectSkillReferenceAdmissionLocked(nil, i); err != nil {
+		return err
+	}
+	s.saveProjectSkillReferencesLocked(i)
 	return nil
 }
 func (s *MemoryStore) CreateProjectWithEvent(_ context.Context, i *Project, e *ActivityEvent) (*ActivityEvent, error) {
@@ -41,7 +44,10 @@ func (s *MemoryStore) CreateProjectWithEvent(_ context.Context, i *Project, e *A
 			}
 		}
 	}
-	s.projects[k] = cloneProject(i)
+	if err := s.validateProjectSkillReferenceAdmissionLocked(nil, i); err != nil {
+		return nil, err
+	}
+	s.saveProjectSkillReferencesLocked(i)
 	p := appendMemoryActivityLocked(s, e)
 	return cloneActivityEvent(p), nil
 }
@@ -93,7 +99,12 @@ func (s *MemoryStore) ListProjects(_ context.Context, f ProjectFilter) ([]*Proje
 		}
 		out = append(out, cloneProject(i))
 	}
-	sort.Slice(out, func(a, b int) bool { return out[a].UpdatedAt.After(out[b].UpdatedAt) })
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].UpdatedAt.Equal(out[b].UpdatedAt) {
+			return out[a].ID < out[b].ID
+		}
+		return out[a].UpdatedAt.After(out[b].UpdatedAt)
+	})
 	start := f.Offset
 	if start > len(out) {
 		start = len(out)
@@ -121,7 +132,10 @@ func (s *MemoryStore) UpdateProjectWithEvent(_ context.Context, i *Project, expe
 	if cur.Revision != expected || i.Revision != expected+1 {
 		return nil, ErrProjectConflict
 	}
-	s.projects[k] = cloneProject(i)
+	if err := s.validateProjectSkillReferenceAdmissionLocked(cur, i); err != nil {
+		return nil, err
+	}
+	s.saveProjectSkillReferencesLocked(i)
 	p := appendMemoryActivityLocked(s, e)
 	return cloneActivityEvent(p), nil
 }
@@ -139,7 +153,10 @@ func (s *MemoryStore) UpdateProject(_ context.Context, i *Project, expected int6
 	if current.Revision != expected || i.Revision != expected+1 {
 		return ErrProjectConflict
 	}
-	s.projects[k] = cloneProject(i)
+	if err := s.validateProjectSkillReferenceAdmissionLocked(current, i); err != nil {
+		return err
+	}
+	s.saveProjectSkillReferencesLocked(i)
 	return nil
 }
 func projectContainsString(v []string, w string) bool {

@@ -39,11 +39,20 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		return nil, err
 	}
 	value.ApplyReceipt.Activation = application.activation
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer tx.Close()
+	if _, err = tx.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return nil, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = tx.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
 	var status string
 	var revision int64
 	var currentPayload string
@@ -61,6 +70,9 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 	}
 	if status != string(authoring.ChangeSetReady) || revision != expectedRevision {
 		return nil, authoring.ErrChangeSetRevision
+	}
+	if err = fenceSQLiteWorkforceMaintenance(ctx, tx, value, application.skillBindings); err != nil {
+		return nil, err
 	}
 	for index, definition := range application.agentDefinitions {
 		payload, _ := json.Marshal(definition)
@@ -239,13 +251,14 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return nil, authoring.ErrChangeSetRevision
 	}
-	if err = tx.Commit(); err != nil {
+	if _, err = tx.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err
 	}
+	committed = true
 	return decodeChangeSet(string(payload))
 }
 
-func applySQLiteWorkforceRunbookActivations(ctx context.Context, tx *sql.Tx, value *authoring.ChangeSet, application *workforceApplication) error {
+func applySQLiteWorkforceRunbookActivations(ctx context.Context, tx workforceSQLQuery, value *authoring.ChangeSet, application *workforceApplication) error {
 	desiredByAgent := map[string]map[string]bool{}
 	for _, desired := range application.runbookActivations {
 		item := desired.value
@@ -328,7 +341,7 @@ func applySQLiteWorkforceRunbookActivations(ctx context.Context, tx *sql.Tx, val
 
 func applySQLiteWorkforceConversationEndpoints(
 	ctx context.Context,
-	tx *sql.Tx,
+	tx workforceSQLQuery,
 	value *authoring.ChangeSet,
 	application *workforceApplication,
 ) error {
@@ -451,7 +464,7 @@ func applySQLiteWorkforceConversationEndpoints(
 
 func applySQLiteWorkforceCallbackRegistrations(
 	ctx context.Context,
-	tx *sql.Tx,
+	tx workforceSQLQuery,
 	value *authoring.ChangeSet,
 	application *workforceApplication,
 ) error {
@@ -507,7 +520,7 @@ func applySQLiteWorkforceCallbackRegistrations(
 	return retireSQLiteWorkforceCallbacks(ctx, tx, value, application, desiredIDs)
 }
 
-func retireSQLiteWorkforceCallbacks(ctx context.Context, tx *sql.Tx, value *authoring.ChangeSet, application *workforceApplication, desiredIDs map[string]bool) error {
+func retireSQLiteWorkforceCallbacks(ctx context.Context, tx workforceSQLQuery, value *authoring.ChangeSet, application *workforceApplication, desiredIDs map[string]bool) error {
 	reconciled := workforceBindingReconciliationDeployments(value)
 	if len(reconciled) == 0 {
 		return nil
@@ -562,7 +575,7 @@ func sqliteUniqueConstraint(err error) bool {
 		sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
 }
 
-func applySQLiteWorkforceProject(ctx context.Context, tx *sql.Tx, project *Project, expectedRevision int64) error {
+func applySQLiteWorkforceProject(ctx context.Context, tx workforceSQLQuery, project *Project, expectedRevision int64) error {
 	if project == nil {
 		return nil
 	}
@@ -600,17 +613,10 @@ func applySQLiteWorkforceProject(ctx context.Context, tx *sql.Tx, project *Proje
 	return nil
 }
 
-func applySQLiteWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, value *authoring.ChangeSet, desired []*capability.Binding) error {
+func applySQLiteWorkforceSkillBindings(ctx context.Context, tx workforceSQLQuery, value *authoring.ChangeSet, desired []*capability.Binding) error {
 	existing := map[string]*capability.Binding{}
-	desiredIDs := make(map[string]bool, len(desired))
-	for _, binding := range desired {
-		if binding != nil {
-			desiredIDs[binding.ID] = true
-		}
-	}
-	reconciledDeployments := workforceBindingReconciliationDeployments(value)
-	if len(reconciledDeployments) > 0 {
-		rows, err := tx.QueryContext(ctx, `SELECT payload FROM skill_bindings WHERE scope_kind=? AND scope_id=?`, value.Scope.Kind, value.Scope.ID)
+	if predicate, args := workforceReconciledBindingPredicate(value, desired, false); predicate != "" {
+		rows, err := tx.QueryContext(ctx, `SELECT payload FROM skill_bindings WHERE `+predicate+` ORDER BY deployment_id,id`, args...)
 		if err != nil {
 			return err
 		}
@@ -620,8 +626,7 @@ func applySQLiteWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, value *a
 			if err := rows.Scan(&payload); err != nil {
 				return err
 			}
-			if json.Unmarshal([]byte(payload), &binding) == nil && reconciledDeployments[binding.DeploymentID] &&
-				(strings.HasPrefix(binding.ID, "workforce:") || desiredIDs[binding.ID]) {
+			if json.Unmarshal([]byte(payload), &binding) == nil {
 				existing[binding.ID] = &binding
 			}
 		}
@@ -674,7 +679,7 @@ func applySQLiteWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, value *a
 	return nil
 }
 
-func resolveSQLiteWorkforceSkillDefinition(ctx context.Context, tx *sql.Tx, binding *capability.Binding) (string, error) {
+func resolveSQLiteWorkforceSkillDefinition(ctx context.Context, tx workforceSQLQuery, binding *capability.Binding) (string, error) {
 	query := `SELECT source_identity,payload FROM skill_definitions WHERE id=? AND version=?`
 	arguments := []interface{}{binding.SkillID, binding.SkillVersion}
 	if binding.SourceIdentity != "" {

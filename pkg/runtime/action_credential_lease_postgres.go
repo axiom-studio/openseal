@@ -71,8 +71,24 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	}
 	defer tx.Rollback()
 
-	// Keep this lock order stable with action execution: ActionCall, AgentRun,
-	// then the independently managed SkillBinding.
+	// Submission and upgrade also lock the binding first. Read authority under
+	// a shared lock so unrelated calls using the same grant can proceed while
+	// binding changes still wait for every authority check to commit.
+	var bindingPayload string
+	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`
+		WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 FOR SHARE`,
+		request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.BindingOwnerID, request.Lease.BindingID).Scan(&bindingPayload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrActionCredentialLeaseMismatch
+	}
+	if err != nil {
+		return err
+	}
+	var binding skill.Binding
+	if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
+		return err
+	}
+	// The remaining stable order is ActionCall, then its owning AgentRun.
 	call, err := s.getActionByID(ctx, tx, request.Lease.Scope, request.Lease.ActionCallID, true)
 	if errors.Is(err, ErrActionNotFound) {
 		return ErrActionCredentialLeaseMismatch
@@ -93,21 +109,6 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	if err != nil {
 		return err
 	}
-	var bindingPayload string
-	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`
-		WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 FOR UPDATE`,
-		call.Scope.Kind, call.Scope.ID, call.DeploymentID, call.BindingID).Scan(&bindingPayload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrActionCredentialLeaseMismatch
-	}
-	if err != nil {
-		return err
-	}
-	var binding skill.Binding
-	if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
-		return err
-	}
-
 	// Read the database clock only after acquiring every authority lock so time
 	// spent waiting for another transaction can never extend a signed lease.
 	var now time.Time

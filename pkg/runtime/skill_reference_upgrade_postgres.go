@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -18,6 +19,21 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 		return err
 	}
 	defer tx.Rollback()
+	// First accepted typed Run pins take the shared logical fence. Cutover is
+	// exclusive so an old invocation either becomes visible to drain checks or
+	// observes the new binding and cannot be admitted with its obsolete version.
+	for _, skillID := range projectSkillUpgradeLockIDs(application) {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, skillRuntimeMaintenanceLockKey(application.Plan.Scope, skillID)); err != nil {
+			return err
+		}
+	}
+	gate, err := s.postgresSkillRuntimeMaintenanceActiveTx(ctx, tx, application.Plan.Scope, application.Plan.From.ID)
+	if err != nil {
+		return err
+	}
+	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+		return err
+	}
 	var bindingPayload string
 	if err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`
 		WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 AND revision=$5 FOR UPDATE`,
@@ -29,10 +45,30 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 		return err
 	}
 	var currentBinding skill.Binding
-	if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil ||
+	if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil || currentBinding.Disabled ||
 		currentBinding.SkillID != application.Plan.From.ID || currentBinding.SkillVersion != application.Plan.From.Version ||
 		currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
 		return ErrSkillReferenceUpgradeConflict
+	}
+	// The locked binding is also the proposal fence. A concurrent proposal
+	// either commits first and is visible here, or waits and fails its old pin.
+	busy, err := hasSkillRuntimeUsage(ctx, tx, skillBindingUpgradeUsageFilter(application), s.table("action_calls"), s.table("agent_runs"), true)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return ErrSkillReferenceUpgradeBusy
+	}
+	if err := validateProjectSkillUpgradeReferencesSQL(ctx, tx, application, s.table("project_skill_references"), true); err != nil {
+		return err
+	}
+	if err := applySkillUpgradeTeamAuthoritySQL(ctx, tx, application.TeamAuthority, s.table("team_definitions"), s.table("team_deployments"), s.table("team_definition_activations"), true); err != nil {
+		return err
+	}
+	// Binding and Team locks can wait behind another transaction. The logical
+	// fence prevents ownership changes; the current clock still fences expiry.
+	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+		return err
 	}
 	encodedBinding, err := json.Marshal(application.Binding)
 	if err != nil {

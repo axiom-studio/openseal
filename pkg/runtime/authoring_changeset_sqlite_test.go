@@ -198,6 +198,7 @@ func TestSQLiteWorkforceApplyMaterializesObjectiveOwnedScheduledRunbook(t *testi
 		Scope: Scope{Kind: value.Scope.Kind, ID: value.Scope.ID}, ObjectiveID: objective.ID,
 		Owner: objective.Owner, AssignedAgentID: "agent-live", Entrypoint: activations[0].Trigger.Entrypoint,
 		Goal: objective.Goal, Source: RunSourceSchedule,
+		Context: map[string]any{"runbookDefinitionId": activations[0].DefinitionID, "runbookDefinitionVersion": activations[0].DefinitionVersion},
 	})
 	if err != nil {
 		t.Fatal(err)
