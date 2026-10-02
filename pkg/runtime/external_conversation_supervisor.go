@@ -149,7 +149,7 @@ func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 		// reconciliation can include model work and may complete a short run before
 		// a later acknowledgement pass ever observes it as active.
 		if s.acknowledgements != nil {
-			if _, err := s.acknowledgements.ProcessScope(ctx, scope); err != nil {
+			if _, err := s.acknowledgements.ProcessCommentaryScope(ctx, scope); err != nil {
 				reconcileErrors = append(reconcileErrors, err)
 			}
 		}
