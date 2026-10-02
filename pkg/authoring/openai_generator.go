@@ -187,6 +187,107 @@ func (g *OpenAICompatibleGenerator) GenerateIntent(ctx context.Context, request 
 	})
 }
 
+// GenerateProfile authors only the identity used by ordinary Agent creation.
+// It makes one provider request; capability discovery and workflow authoring
+// remain separate runtime conversations rather than creation-time planning.
+func (g *OpenAICompatibleGenerator) GenerateProfile(ctx context.Context, request GenerateRequest) (IdentityProfile, error) {
+	input, err := promptIdentityProfileRequest(request)
+	if err != nil {
+		return IdentityProfile{}, err
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		return IdentityProfile{}, err
+	}
+	payload, err := g.completeContract(ctx, request.InvocationKey, []map[string]string{
+		{"role": "system", "content": identityProfileSystemPrompt},
+		{"role": "user", "content": string(encoded)},
+	}, identityProfileContract())
+	if err != nil {
+		return IdentityProfile{}, err
+	}
+	return decodeIdentityProfile(payload)
+}
+
+type identityProfileRequest struct {
+	Prompt             string                            `json:"prompt"`
+	AgentName          string                            `json:"agentName,omitempty"`
+	ExistingAgentNames []string                          `json:"existingAgentNames,omitempty"`
+	Existing           *IdentityProfile                  `json:"existing,omitempty"`
+	Answers            []identityProfileRefinementAnswer `json:"answers,omitempty"`
+}
+
+type identityProfileRefinementAnswer struct {
+	Field    string `json:"field"`
+	Question string `json:"question,omitempty"`
+	Text     string `json:"text"`
+}
+
+func promptIdentityProfileRequest(request GenerateRequest) (identityProfileRequest, error) {
+	input := identityProfileRequest{
+		Prompt: request.Prompt, AgentName: request.AgentName,
+		ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...),
+	}
+	if request.Existing != nil {
+		if err := ValidateProfileCandidate(request.Existing); err != nil {
+			return identityProfileRequest{}, err
+		}
+		profile := profileFromAgent(request.Existing.Agents[0])
+		input.Existing = &profile
+	}
+	if request.Refinement != nil {
+		questions := make(map[string]string)
+		for _, question := range request.Refinement.Questions {
+			if err := validateProfileQuestions([]RefinementQuestion{question}); err == nil {
+				questions[question.ID] = question.Prompt
+			}
+		}
+		for _, answer := range request.Refinement.Answers {
+			field := strings.TrimPrefix(answer.QuestionID, "profile-")
+			question, known := questions[answer.QuestionID]
+			if !known || !profileIdentityField(field) || strings.TrimSpace(answer.Value.Text) == "" {
+				continue
+			}
+			input.Answers = append(input.Answers, identityProfileRefinementAnswer{
+				Field: field, Question: question, Text: answer.Value.Text,
+			})
+		}
+	}
+	return input, nil
+}
+
+func identityProfileContract() authoringProviderContract {
+	return authoringProviderContract{
+		Name: "submit_agent_profile", Description: "Submit one Agent's name, purpose, behavior and personality.",
+		Schema: func() (map[string]interface{}, error) {
+			text := func(minimum, maximum int) map[string]interface{} {
+				return map[string]interface{}{"type": "string", "minLength": minimum, "maxLength": maximum}
+			}
+			return map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"required": []string{"name", "purpose", "behavior", "personality", "operatingPrinciples", "clarifications"},
+				"properties": map[string]interface{}{
+					"name": text(1, 16384), "purpose": text(1, 16384), "behavior": text(1, 16384), "personality": text(0, 16384),
+					"operatingPrinciples": map[string]interface{}{
+						"type": "array", "maxItems": 16, "items": text(1, 2048),
+					},
+					"clarifications": map[string]interface{}{
+						"type": "array", "maxItems": 4,
+						"items": map[string]interface{}{
+							"type": "object", "additionalProperties": false,
+							"required": []string{"field", "question", "whyNeeded"},
+							"properties": map[string]interface{}{
+								"field":    map[string]interface{}{"type": "string", "enum": []string{"name", "purpose", "behavior", "personality"}},
+								"question": text(1, 2048), "whyNeeded": text(1, 2048),
+							},
+						},
+					},
+				},
+			}, nil
+		},
+	}
+}
+
 func (g *OpenAICompatibleGenerator) RepairIntent(ctx context.Context, request GenerateRequest, invalid AuthoringIntent, validationErr error) (AuthoringIntent, error) {
 	if validationErr == nil {
 		return AuthoringIntent{}, errors.New("authoring intent repair requires a validation error")
