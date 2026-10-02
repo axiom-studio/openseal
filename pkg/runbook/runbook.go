@@ -404,9 +404,35 @@ type TransformStep struct {
 }
 
 type WaitStep struct {
-	Duration time.Duration `json:"duration,omitempty"`
-	Event    string        `json:"event,omitempty"`
-	Next     string        `json:"next"`
+	Duration    time.Duration `json:"duration,omitempty"`
+	Event       string        `json:"event,omitempty"`
+	Match       *EventMatch   `json:"match,omitempty"`
+	ResultPath  JSONPointer   `json:"resultPath,omitempty"`
+	TimeoutNext string        `json:"timeoutNext,omitempty"`
+	Next        string        `json:"next"`
+}
+
+func (WaitStep) ContractObjectVariants() []domaincontract.ObjectVariant {
+	return []domaincontract.ObjectVariant{
+		{Name: "duration", Required: []string{"duration"}, Forbidden: []string{"event", "match", "resultPath", "timeoutNext"}},
+		{Name: "event", Required: []string{"event"}, Forbidden: []string{"duration", "match", "resultPath", "timeoutNext"}},
+		{Name: "match", Required: []string{"match"}, Forbidden: []string{"duration", "event"}},
+	}
+}
+
+// EventMatch describes an exact, bounded expectation against authenticated
+// connector events. Values resolve once when this visit enters the wait; a
+// resumed execution keeps the persisted selector and deadline. After is an
+// optional RFC3339 timestamp, defaulting to the Run's creation time so a reply
+// arriving during the preceding action is still eligible. ResultPath receives
+// the normalized event, or null when TimeoutNext is selected.
+type EventMatch struct {
+	Type            string           `json:"type"`
+	Source          Value            `json:"source"`
+	Subject         Value            `json:"subject"`
+	Attributes      map[string]Value `json:"attributes,omitempty"`
+	After           *Value           `json:"after,omitempty"`
+	TimeoutDuration time.Duration    `json:"timeoutDuration"`
 }
 
 type ForkStep struct {

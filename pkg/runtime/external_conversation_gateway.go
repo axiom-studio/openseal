@@ -96,11 +96,12 @@ func (g *ExternalConversationGatewayRegistration) Validate() error {
 }
 
 type ExternalConversationGatewayFilter struct {
-	Scope    Scope
-	Provider string
-	Statuses []ExternalConversationGatewayStatus
-	Limit    int
-	Offset   int
+	Scope        Scope
+	Provider     string
+	DeploymentID string
+	Statuses     []ExternalConversationGatewayStatus
+	Limit        int
+	Offset       int
 }
 
 type CreateExternalConversationGatewayRequest struct {
@@ -181,6 +182,9 @@ func (s *ExternalConversationGatewayService) Create(
 		return nil, err
 	}
 	if err := s.resolveGateway(ctx, value.Gateway); err != nil {
+		return nil, err
+	}
+	if err := s.prepareGatewayAuthority(ctx, &value.Gateway); err != nil {
 		return nil, err
 	}
 	if err := s.store.CreateExternalConversationGateway(ctx, value); err != nil {
@@ -286,6 +290,9 @@ func (s *ExternalConversationGatewayService) Update(
 	// pausing/retiring an unchanged stale gateway remains available.
 	if request.Gateway != nil || current.Status == ExternalConversationGatewayActive {
 		if err := s.resolveGateway(ctx, current.Gateway); err != nil {
+			return nil, err
+		}
+		if err := s.prepareGatewayAuthority(ctx, &current.Gateway); err != nil {
 			return nil, err
 		}
 	}

@@ -384,7 +384,11 @@ func runbookStepTargets(step runbook.Step) []string {
 	case step.Transform != nil:
 		return []string{step.Transform.Next}
 	case step.Wait != nil:
-		return []string{step.Wait.Next}
+		result := []string{step.Wait.Next}
+		if step.Wait.TimeoutNext != "" {
+			result = append(result, step.Wait.TimeoutNext)
+		}
+		return result
 	case step.Fork != nil:
 		result := make([]string, 0, len(step.Fork.Branches)+1)
 		for _, branch := range step.Fork.Branches {

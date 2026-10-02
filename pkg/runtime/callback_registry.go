@@ -186,11 +186,12 @@ func validateCallbackConfiguration(value map[string]interface{}) error {
 }
 
 type CallbackRegistrationFilter struct {
-	Scope    Scope
-	Provider string
-	Statuses []CallbackRegistrationStatus
-	Limit    int
-	Offset   int
+	Scope        Scope
+	DeploymentID string
+	Provider     string
+	Statuses     []CallbackRegistrationStatus
+	Limit        int
+	Offset       int
 }
 
 type CreateCallbackRegistrationRequest struct {

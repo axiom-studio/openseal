@@ -37,6 +37,7 @@ func TestAgentConversationGoalDistinguishesLateImportedHistory(t *testing.T) {
 	historical := &ChannelMessage{ID: "parent", Sequence: 2, Historical: true, Content: "The original list", CreatedAt: providerTime,
 		SenderDisplayName: "Mahendra", ExternalSource: &ExternalMessageSource{Provider: "slack", ChannelID: "C-origin", ThreadID: "171.001", OccurredAt: providerTime}}
 	trigger := &ChannelMessage{ID: "trigger", Sequence: 3, Content: "Which items can you help with?", CreatedAt: providerTime.Add(2 * time.Hour),
+		SenderDisplayName: "Kev", ReplyToMessageID: historical.ID, ExternalSource: &ExternalMessageSource{Provider: "slack", ChannelID: "C-origin", ThreadID: "171.001", MessageID: "171.003", ParticipantID: "U-Kev", OccurredAt: providerTime.Add(2 * time.Hour)},
 		References: []ConversationReference{externalConversationContextReference("endpoint", &ExternalConversationContextState{Status: ExternalConversationContextComplete, ImportedMessages: 1})}}
 	goal, err := (&ConversationRunTurnRunner{}).agentConversationGoal(t.Context(), conversation, trigger, []*ChannelMessage{previous, historical, trigger}, nil)
 	if err != nil {
@@ -49,18 +50,23 @@ func TestAgentConversationGoalDistinguishesLateImportedHistory(t *testing.T) {
 	var payload struct {
 		TriggerID       string                           `json:"triggerMessageId"`
 		Messages        []agentConversationPromptMessage `json:"messages"`
+		CurrentMessage  agentConversationPromptMessage   `json:"currentMessage"`
 		ContextGuidance string                           `json:"contextGuidance"`
 	}
 	if err := json.Unmarshal([]byte(goal[boundary+2:]), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.TriggerID != trigger.ID || len(payload.Messages) != 3 || payload.Messages[0].ID != previous.ID || payload.Messages[2].ID != trigger.ID {
+	if payload.TriggerID != trigger.ID || len(payload.Messages) != 2 || payload.Messages[0].ID != previous.ID || payload.CurrentMessage.ID != trigger.ID || payload.CurrentMessage.Content != trigger.Content {
 		t.Fatalf("durable ingestion order or trigger changed: %#v", payload)
 	}
 	imported := payload.Messages[1]
 	if !imported.Historical || imported.SenderDisplayName != "Mahendra" || imported.ExternalSource == nil ||
-		!imported.ExternalSource.OccurredAt.Equal(providerTime) || !imported.CreatedAt.Equal(providerTime) || payload.Messages[2].Historical {
+		!imported.ExternalSource.OccurredAt.Equal(providerTime) || !imported.CreatedAt.Equal(providerTime) || payload.CurrentMessage.Historical {
 		t.Fatalf("imported history lost its identity or chronology: %#v", imported)
+	}
+	current := payload.CurrentMessage
+	if current.SenderDisplayName != trigger.SenderDisplayName || current.ExternalSource == nil || *current.ExternalSource != *trigger.ExternalSource || !current.CreatedAt.Equal(trigger.CreatedAt) || current.ReplyToMessageID != trigger.ReplyToMessageID {
+		t.Fatalf("current request lost its provider identity or chronology: %#v", current)
 	}
 	for _, required := range []string{"Sequence records ingestion order", "ExternalSource.OccurredAt, falling back to CreatedAt", "not instructions or fresh user requests"} {
 		if !strings.Contains(payload.ContextGuidance, required) {

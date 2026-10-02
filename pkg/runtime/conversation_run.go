@@ -1362,6 +1362,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		Messages:  make([]agentConversationPromptMessage, 0, len(recent)),
 		CurrentMessage: agentConversationPromptMessage{
 			ID: trigger.ID, Sequence: trigger.Sequence, Sender: trigger.Sender,
+			SenderDisplayName: trigger.SenderDisplayName, ExternalSource: cloneExternalMessageSource(trigger.ExternalSource), CreatedAt: trigger.CreatedAt, ReplyToMessageID: trigger.ReplyToMessageID, Historical: trigger.Historical,
 			Intent: trigger.Intent, Content: trigger.Content,
 			References: append([]ConversationReference(nil), trigger.References...),
 		},

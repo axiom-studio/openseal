@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +47,8 @@ type runbookExecutionState struct {
 	BranchID          string                 `json:"branchId,omitempty"`
 	BranchJoin        string                 `json:"branchJoin,omitempty"`
 	Waiting           string                 `json:"waiting,omitempty"`
+	WaitKey           string                 `json:"waitKey,omitempty"`
+	WaitSpec          *RunEventWaitSpec      `json:"waitSpec,omitempty"`
 	Loops             map[string]runbookLoop `json:"loops,omitempty"`
 }
 type runbookLoop struct {
@@ -244,6 +248,59 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 					return nil, traceErr
 				}
 				completedStep := state.Current
+				if step.Wait.Match != nil {
+					activeTraceSequence = traceSequence
+					if state.WaitSpec == nil || state.WaitKey != runbookEventWaitKey(r.definition.ID, input.Run.ID, state.Current, traceSequence) || state.WaitSpec.Key != state.WaitKey {
+						return nil, stepError(state.Current, errors.New("event wait resumed without its durable selector"))
+					}
+					if err := state.WaitSpec.Validate(); err != nil {
+						return nil, stepError(state.Current, err)
+					}
+					last, present := checkpoint[runEventWaitCheckpointKey].(map[string]interface{})
+					if !present || last["key"] != state.WaitKey {
+						// A manual resume or an unrelated signal cannot satisfy an
+						// authenticated event expectation or reset its deadline.
+						return r.parkEventWait(checkpoint, state, decisions), nil
+					}
+					next := step.Wait.Next
+					summary := "Matched authenticated event"
+					switch last["status"] {
+					case string(RunEventWaitMatched):
+						event, ok := last["event"].(map[string]interface{})
+						if !ok || !runbookEventResultMatches(state.WaitSpec, event) {
+							return nil, stepError(state.Current, errors.New("event wait result does not match its durable selector"))
+						}
+						if step.Wait.ResultPath != "" {
+							if err := setRunbookPointer(checkpoint, string(step.Wait.ResultPath), event); err != nil {
+								return nil, stepError(state.Current, err)
+							}
+						}
+					case string(RunEventWaitTimedOut):
+						// The store records timeout resolution atomically using the
+						// persisted deadline. A resumed worker's local clock is not
+						// a second source of authority for that completed transition.
+						if step.Wait.TimeoutNext == "" {
+							return nil, stepError(state.Current, errors.New("event wait deadline elapsed without a matching event; configure timeoutNext to handle partial results"))
+						}
+						next = step.Wait.TimeoutNext
+						summary = "Event wait deadline elapsed"
+						if step.Wait.ResultPath != "" {
+							if err := setRunbookPointer(checkpoint, string(step.Wait.ResultPath), nil); err != nil {
+								return nil, stepError(state.Current, err)
+							}
+						}
+					default:
+						return nil, stepError(state.Current, errors.New("event wait has an invalid durable resolution status"))
+					}
+					if err := finishStep(traceSequence, RunbookStepTraceSucceeded, next, summary, "", nil); err != nil {
+						return nil, err
+					}
+					delete(checkpoint, runEventWaitCheckpointKey)
+					state.Waiting, state.WaitKey, state.WaitSpec = "", "", nil
+					state.Current = next
+					decisions = append(decisions, TurnDecision{Summary: summary + " at " + completedStep})
+					continue
+				}
 				if err := finishStep(traceSequence, RunbookStepTraceSucceeded, step.Wait.Next, "Wait condition resolved", "", nil); err != nil {
 					return nil, err
 				}
@@ -257,6 +314,18 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 				return nil, traceErr
 			}
 			state.Waiting = state.Current
+			if step.Wait.Match != nil {
+				spec, resolveErr := r.resolveEventWait(checkpoint, input.Run, state.Current, traceSequence, step.Wait.Match)
+				if resolveErr != nil {
+					return nil, stepError(state.Current, resolveErr)
+				}
+				state.WaitKey, state.WaitSpec = spec.Key, spec
+				delete(checkpoint, runEventWaitCheckpointKey)
+				if err := finishStep(traceSequence, RunbookStepTraceWaiting, "", "Waiting for authenticated event", "", nil); err != nil {
+					return nil, err
+				}
+				return r.parkEventWait(checkpoint, state, decisions), nil
+			}
 			if err := finishStep(traceSequence, RunbookStepTraceWaiting, "", "Waiting for condition", "", nil); err != nil {
 				return nil, err
 			}
@@ -422,6 +491,110 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 		}
 	}
 	return nil, fmt.Errorf("runbook exceeded %d internal steps in one Turn", maximumRunbookStepsPerTurn)
+}
+
+func (r *RunbookTurnRunner) parkEventWait(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision) *TurnOutcome {
+	encodeRunbookState(checkpoint, state)
+	return &TurnOutcome{
+		Decisions: decisions, OutputSummary: "Waiting for authenticated event at runbook step " + state.Current,
+		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusWaitingForEvent,
+		WakeCondition: &WakeCondition{Type: "event", Reference: state.WaitSpec.Type, EventWait: cloneRunEventWaitSpec(state.WaitSpec)},
+	}
+}
+
+func (r *RunbookTurnRunner) resolveEventWait(checkpoint map[string]interface{}, run *AgentRun, stepID string, sequence int64, match *runbook.EventMatch) (*RunEventWaitSpec, error) {
+	resolveString := func(value runbook.Value, field string) (string, error) {
+		resolved, err := resolveRunbookValue(checkpoint, value)
+		if err != nil {
+			return "", fmt.Errorf("event match %s: %w", field, err)
+		}
+		text, ok := resolved.(string)
+		if !ok || text == "*" {
+			return "", fmt.Errorf("event match %s must resolve to one exact string", field)
+		}
+		return text, nil
+	}
+	source, err := resolveString(match.Source, "source")
+	if err != nil {
+		return nil, err
+	}
+	subject, err := resolveString(match.Subject, "subject")
+	if err != nil {
+		return nil, err
+	}
+	attributes := make(map[string]interface{}, len(match.Attributes))
+	for name, value := range match.Attributes {
+		var resolved interface{}
+		var err error
+		if len(value.Literal) > 0 {
+			// Exact selector literals share the inbox's number semantics;
+			// ordinary Runbook values keep their existing representation.
+			decoder := json.NewDecoder(strings.NewReader(string(value.Literal)))
+			decoder.UseNumber()
+			err = decoder.Decode(&resolved)
+		} else {
+			resolved, err = resolveRunbookValue(checkpoint, value)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("event match attribute %s: %w", name, err)
+		}
+		attributes[name] = resolved
+	}
+	now := r.now().UTC()
+	after := run.CreatedAt.UTC()
+	if after.IsZero() {
+		after = now
+	}
+	if match.After != nil {
+		stamp, err := resolveString(*match.After, "after")
+		if err != nil {
+			return nil, err
+		}
+		after, err = time.Parse(time.RFC3339Nano, stamp)
+		if err != nil {
+			return nil, errors.New("event match after must resolve to an RFC3339 timestamp")
+		}
+		after = after.UTC()
+	}
+	spec := &RunEventWaitSpec{
+		Key: runbookEventWaitKey(r.definition.ID, run.ID, stepID, sequence), Type: match.Type, Source: source, Subject: subject,
+		Attributes: attributes, After: after, Deadline: now.Add(match.TimeoutDuration),
+	}
+	if spec.Deadline.Sub(after) > MaximumRunEventWaitDuration {
+		return nil, errors.New("event wait correlation window exceeds 30 days; provide after from the initiating action to select a bounded event window")
+	}
+	if err := spec.Validate(); err != nil {
+		return nil, fmt.Errorf("resolved event match is invalid: %w", err)
+	}
+	return spec, nil
+}
+
+func runbookEventWaitKey(definitionID, runID, stepID string, sequence int64) string {
+	digest := sha256.Sum256([]byte(definitionID + "\x00" + runID + "\x00" + stepID + "\x00" + strconv.FormatInt(sequence, 10)))
+	return "runbook-wait:" + hex.EncodeToString(digest[:])
+}
+
+func runbookEventResultMatches(spec *RunEventWaitSpec, event map[string]interface{}) bool {
+	if spec == nil || event["type"] != spec.Type || event["source"] != spec.Source || event["subject"] != spec.Subject {
+		return false
+	}
+	id, ok := event["id"].(string)
+	if !ok || strings.TrimSpace(id) == "" {
+		return false
+	}
+	stamp, _ := event["occurredAt"].(string)
+	at, err := time.Parse(time.RFC3339Nano, stamp)
+	if err != nil || at.Before(spec.After) {
+		return false
+	}
+	attributes, _ := event["attributes"].(map[string]interface{})
+	for name, expected := range spec.Attributes {
+		actual, present := attributes[name]
+		if !present || !runEventScalarEqual(expected, actual) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *RunbookTurnRunner) consumeForkResult(checkpoint map[string]interface{}, state *runbookExecutionState, run *AgentRun) (bool, *TurnOutcome, error) {
@@ -719,6 +892,18 @@ func encodeRunbookState(checkpoint map[string]interface{}, state runbookExecutio
 	encoded, _ := json.Marshal(state)
 	var raw map[string]interface{}
 	_ = json.Unmarshal(encoded, &raw)
+	if state.WaitSpec != nil {
+		// Checkpoint objects retain their existing number representation, while
+		// the exact event selector must survive this projection without passing
+		// through float64. Store readers preserve this typed subtree as well.
+		encodedSpec, _ := json.Marshal(state.WaitSpec)
+		decoder := json.NewDecoder(strings.NewReader(string(encodedSpec)))
+		decoder.UseNumber()
+		var exactSpec map[string]interface{}
+		if err := decoder.Decode(&exactSpec); err == nil {
+			raw["waitSpec"] = exactSpec
+		}
+	}
 	checkpoint["runbook"] = raw
 }
 

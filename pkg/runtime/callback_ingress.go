@@ -1,9 +1,11 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -133,6 +135,21 @@ type CallbackEventReceipt struct {
 	AppliedAt            *time.Time                 `json:"appliedAt,omitempty"`
 }
 
+// Preserve the exact signed provider data through callback receipt clones and
+// database reloads. Only this durable receipt contract opts in to json.Number;
+// unrelated kernel JSON decoding keeps its existing representation.
+func (r *CallbackEventReceipt) UnmarshalJSON(data []byte) error {
+	type plain CallbackEventReceipt
+	var value plain
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	*r = CallbackEventReceipt(value)
+	return nil
+}
+
 func (r *CallbackEventReceipt) Validate() error {
 	if r == nil || !validOpaqueIdentifier(r.ID, 256) || r.Scope.Validate() != nil ||
 		!validOpaqueIdentifier(r.RegistrationID, 256) || r.RegistrationRevision < 1 ||
@@ -191,11 +208,13 @@ type CallbackIngressService struct {
 		CallbackRegistrationStore
 		CallbackEventStore
 	}
-	resolver  CallbackAdapterResolver
-	consumers map[string]CallbackEventConsumer
-	now       func() time.Time
-	async     bool
-	wake      func()
+	resolver          CallbackAdapterResolver
+	consumers         map[string]CallbackEventConsumer
+	eventObserver     VerifiedRunEventObserver
+	atomicEventIntake CallbackRunEventIntakeStore
+	now               func() time.Time
+	async             bool
+	wake              func()
 }
 
 // SetDurableDispatcher makes ingress acknowledgement stop after signature
@@ -217,7 +236,9 @@ func NewCallbackIngressService(store interface {
 	for name, consumer := range consumers {
 		copyConsumers[strings.TrimSpace(name)] = consumer
 	}
-	return &CallbackIngressService{store: store, resolver: resolver, consumers: copyConsumers, now: time.Now}
+	service := &CallbackIngressService{store: store, resolver: resolver, consumers: copyConsumers, eventObserver: runEventObserverForStore(store), now: time.Now}
+	service.atomicEventIntake, _ = store.(CallbackRunEventIntakeStore)
+	return service
 }
 
 func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPublicRequest, host CallbackAdapterHost) (*CallbackIngressResult, error) {
@@ -246,6 +267,8 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 		ref.BindingID, ref.AdapterID,
 	)
 	if err != nil || adapter == nil || adapter.Binding == nil ||
+		adapter.Binding.SkillID != ref.SkillID || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
+		adapter.Binding.Revision < ref.BindingRevision ||
 		adapter.Adapter.Provider != registration.Provider {
 		return nil, fmt.Errorf("%w: exact callback Skill adapter is unavailable or stale", ErrCallbackRegistrationConflict)
 	}
@@ -264,11 +287,13 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 	for _, subscription := range registration.Subscriptions {
 		accepted[subscription.EventType] = true
 	}
-	result := &CallbackIngressResult{Response: hostResult, Receipts: make([]*CallbackEventReceipt, 0, len(hostResult.Events))}
 	for _, normalized := range hostResult.Events {
 		if !declared[normalized.Type] || !accepted[normalized.Type] {
 			return nil, fmt.Errorf("%w: callback emitted undeclared event type %q", ErrCallbackRegistrationConflict, normalized.Type)
 		}
+	}
+	result := &CallbackIngressResult{Response: hostResult, Receipts: make([]*CallbackEventReceipt, 0, len(hostResult.Events))}
+	for _, normalized := range hostResult.Events {
 		event := normalized.envelope(registration)
 		now := s.now().UTC()
 		receipt := &CallbackEventReceipt{
@@ -276,7 +301,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 			RegistrationID: registration.ID, RegistrationRevision: registration.Revision, Event: event,
 			Status: CallbackEventPending, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
-		stored, replayed, err := s.store.ReceiveCallbackEvent(ctx, receipt)
+		stored, replayed, err := s.receiveVerifiedCallbackEvent(ctx, registration, receipt)
 		if err != nil {
 			return nil, err
 		}
@@ -292,7 +317,7 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 			}
 			continue
 		}
-		if err := s.dispatch(ctx, registration, event); err != nil {
+		if err := s.dispatch(ctx, registration, event, stored.CreatedAt); err != nil {
 			stored.Attempts++
 			stored.LastError = boundedCallbackError(err)
 			stored.Revision++
@@ -316,7 +341,22 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 	return result, nil
 }
 
-func (s *CallbackIngressService) dispatch(ctx context.Context, registration *CallbackRegistration, event EventEnvelope) error {
+func (s *CallbackIngressService) dispatch(ctx context.Context, registration *CallbackRegistration, event EventEnvelope, receivedAt time.Time) error {
+	// A durable receipt may outlive its binding. Revalidate acquisition
+	// authority before an asynchronous worker publishes observations or
+	// invokes consumers, rather than treating the original ingress check as
+	// a permanent grant after disablement or revocation.
+	ref := registration.Adapter
+	adapter, err := s.resolver.ResolveCallbackAdapterBinding(ctx,
+		skill.ScopeReference{Kind: registration.Scope.Kind, ID: registration.Scope.ID}, registration.DeploymentID, ref.BindingID, ref.AdapterID)
+	if err != nil || adapter == nil || adapter.Binding == nil || adapter.Binding.Revision < ref.BindingRevision ||
+		adapter.Binding.SkillID != ref.SkillID || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
+		adapter.Adapter.Provider != registration.Provider {
+		return fmt.Errorf("%w: current callback binding authority is unavailable", ErrCallbackRegistrationConflict)
+	}
+	if err := publishVerifiedCallbackEvent(ctx, s.eventObserver, registration, event, receivedAt); err != nil {
+		return err
+	}
 	matched := 0
 	for _, subscription := range registration.Subscriptions {
 		if subscription.EventType != event.Type {

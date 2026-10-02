@@ -255,7 +255,7 @@ func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentR
 			}
 			return ErrRevisionConflict
 		}
-		return nil
+		return s.syncPostgresRunEventWaitTx(ctx, tx, run)
 	})
 }
 

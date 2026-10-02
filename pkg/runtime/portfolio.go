@@ -198,6 +198,7 @@ type WakeCondition struct {
 	WakeAt    *time.Time             `json:"wakeAt,omitempty"`
 	Reference string                 `json:"reference,omitempty"`
 	Predicate map[string]interface{} `json:"predicate,omitempty"`
+	EventWait *RunEventWaitSpec      `json:"eventWait,omitempty"`
 }
 
 // AgentRunIntervention is durable operator steering. It records an explicit
@@ -307,6 +308,16 @@ func (r *AgentRun) Validate() error {
 	}
 	if r.Priority < 0 {
 		return errors.New("run priority cannot be negative")
+	}
+	for _, condition := range []*WakeCondition{r.WakeCondition, r.PausedWakeCondition} {
+		if condition != nil && condition.EventWait != nil {
+			if condition.Type != "event" {
+				return ErrInvalidRunEventWait
+			}
+			if err := condition.EventWait.Validate(); err != nil {
+				return err
+			}
+		}
 	}
 	if r.Budget != nil {
 		if err := r.Budget.Validate(); err != nil {
@@ -824,6 +835,12 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
 		Budget: cloneBudgetPolicy(req.Budget), Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if req.WakeCondition != nil && req.WakeCondition.EventWait != nil {
+		if kind != RunKindAgentWork || req.WakeCondition.Type != "event" {
+			return nil, ErrInvalidRunEventWait
+		}
+		run.Status = AgentRunStatusWaitingForEvent
 	}
 	if run.Budget != nil {
 		run.BudgetState = BudgetStateActive

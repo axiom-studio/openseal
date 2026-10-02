@@ -67,10 +67,15 @@ func (s *MemoryStore) CreateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	if s.agentRuns[key] != nil {
 		return nil, ErrRunIdempotency
 	}
+	wait, err := s.prepareMemoryRunEventWaitLocked(run)
+	if err != nil {
+		return nil, err
+	}
 	if err := s.allocateMemoryObjectiveRunLocked(run); err != nil {
 		return nil, err
 	}
-	s.agentRuns[key] = cloneAgentRun(run)
+	s.saveMemoryAgentRunLocked(key, run)
+	s.syncMemoryRunEventWaitLocked(run, wait)
 	persisted := appendMemoryActivityLocked(s, event)
 	return cloneActivityEvent(persisted), nil
 }
@@ -98,8 +103,13 @@ func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	if lease != nil && (current.LeaseOwner != lease.WorkerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(lease.Now)) {
 		return nil, ErrLeaseLost
 	}
+	wait, err := s.prepareMemoryRunEventWaitLocked(run)
+	if err != nil {
+		return nil, err
+	}
 	persisted := appendMemoryActivityLocked(s, event)
-	s.agentRuns[key] = cloneAgentRun(run)
+	s.saveMemoryAgentRunLocked(key, run)
+	s.syncMemoryRunEventWaitLocked(run, wait)
 	return cloneActivityEvent(persisted), nil
 }
 
