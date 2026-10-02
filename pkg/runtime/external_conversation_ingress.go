@@ -234,8 +234,10 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 	if err != nil {
 		return nil, err
 	}
+	effectiveEndpoint := cloneExternalConversationEndpoint(endpoint)
+	effectiveEndpoint.Adapter = externalConversationResolvedAdapterReference(adapter)
 	result, err := host.NormalizeExternalConversation(ctx, ExternalConversationIngressHostRequest{
-		Endpoint: endpoint, Adapter: adapter, Request: &request,
+		Endpoint: effectiveEndpoint, Adapter: adapter, Request: &request,
 	})
 	if err != nil {
 		return nil, err
@@ -303,17 +305,22 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 		return nil, err
 	}
 	ref := gateway.Adapter
-	adapter, err := s.resolver.ResolveConversationAdapter(
+	adapter, err := s.resolver.ResolveConversationAdapterBinding(
 		ctx, skill.ScopeReference{Kind: gateway.Scope.Kind, ID: gateway.Scope.ID}, gateway.DeploymentID,
-		ref.SkillID, ref.SkillVersion, ref.AdapterID,
-		skill.BindingReference{ID: ref.BindingID, Revision: ref.BindingRevision},
+		ref.BindingID, ref.AdapterID,
 	)
-	if err != nil || adapter == nil || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
-		adapter.Adapter.Provider != gateway.Provider {
+	// A reviewed configuration save advances the same binding. Resolve its
+	// current revision just as endpoint ingress, delivery and callbacks do;
+	// keeping the creation revision here permanently disconnects the inbox.
+	if err != nil || adapter == nil || adapter.Binding == nil ||
+		adapter.Binding.SkillID != ref.SkillID ||
+		adapter.Binding.Revision < ref.BindingRevision || adapter.Adapter.Provider != gateway.Provider {
 		return nil, fmt.Errorf("%w: exact gateway Skill adapter is unavailable or stale", ErrExternalConversationConflict)
 	}
+	effectiveGateway := gateway
+	effectiveGateway.Adapter = externalConversationResolvedAdapterReference(adapter)
 	result, err := host.NormalizeExternalConversationGateway(ctx, ExternalConversationGatewayHostRequest{
-		Gateway: gateway, Adapter: adapter, Request: &request,
+		Gateway: effectiveGateway, Adapter: adapter, Request: &request,
 	})
 	if err != nil {
 		return nil, err
@@ -329,8 +336,8 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 	for index := range result.Events {
 		routed := result.Events[index]
 		route := ExternalConversationVerifiedRoute{
-			Provider: gateway.Provider, SkillID: ref.SkillID, SkillVersion: ref.SkillVersion,
-			SourceIdentity: ref.SourceIdentity, AdapterID: ref.AdapterID,
+			Provider: gateway.Provider, SkillID: adapter.Binding.SkillID, SkillVersion: adapter.Binding.SkillVersion,
+			SourceIdentity: adapter.Binding.SourceIdentity, AdapterID: ref.AdapterID,
 			InstallationID: routed.InstallationID, ApplicationID: routed.ApplicationID, Address: routed.Address,
 		}
 		if err := route.Validate(); err != nil {
@@ -351,7 +358,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 			}
 			if endpoint.ApplicationID == "" && (gateway.Scope.Kind == "platform" ||
 				endpoint.Scope != gateway.Scope || endpoint.DeploymentID != gateway.DeploymentID ||
-				endpoint.Adapter.BindingID != ref.BindingID || endpoint.Adapter.BindingRevision != ref.BindingRevision) {
+				endpoint.Adapter.BindingID != ref.BindingID) {
 				continue
 			}
 			bound = append(bound, endpoint)

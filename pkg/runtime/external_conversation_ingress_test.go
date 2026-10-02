@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -494,5 +495,64 @@ func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpoints
 		}, host)
 	if err != nil || string(result.Response.Body) != "verify-me" || len(result.Received) != 0 {
 		t.Fatalf("endpoint-free verification response = %#v, %v", result, err)
+	}
+}
+
+func TestConversationGatewayUsesCurrentReviewedBindingAfterSetupSave(t *testing.T) {
+	ctx := t.Context()
+	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
+	endpoint.InstallationID, endpoint.ApplicationID = "T123", ""
+	endpoint.Revision++
+	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, endpoint.Revision-1); err != nil {
+		t.Fatal(err)
+	}
+	gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
+	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{ID: "saved-setup", Name: "Saved setup", Gateway: gateway, Actor: ActivityActor{Type: "test", ID: "owner"}, Reason: "Reviewed inbox"})
+	bound, err := catalog.ResolveConversationAdapterBinding(ctx, skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := bound.Binding
+	host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{{InstallationID: "T123", ApplicationID: "A123", Address: endpoint.Address, Event: NormalizedExternalConversationEvent{ID: "new-event", Type: capability.ConversationEventMessageReceived, ExternalConversationID: endpoint.Address, ExternalMessageID: "171.004", ExternalParticipantID: "U123", Text: "hello", OrderingKey: "channel:171.004", OccurredAt: time.Now().UTC()}}}}}
+	service := NewExternalConversationTransportService(store, catalog)
+	request := ExternalConversationPublicIngressRequest{Route: registration.IngressRoute, Method: http.MethodPost, Body: []byte(`{}`)}
+	for revision := int64(2); revision <= 4; revision++ {
+		binding.Revision = revision
+		host.result.Events[0].Event.ID = fmt.Sprintf("event-%d", revision)
+		host.result.Events[0].Event.ExternalMessageID = fmt.Sprintf("171.%03d", revision)
+		if err := catalog.Bind(ctx, binding); err != nil {
+			t.Fatal(err)
+		}
+		result, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, request, host)
+		if err != nil || len(result.Received) != 1 || host.request.Adapter.Binding.Revision != revision || host.request.Gateway.Adapter.BindingRevision != revision {
+			t.Fatalf("setup revision %d disconnected ingress: %v %v", revision, result, err)
+		}
+		directHost := &externalConversationIngressHostStub{result: &ExternalConversationIngressHostResult{StatusCode: http.StatusOK}}
+		if _, err := service.NormalizeExternalConversationIngress(ctx, ExternalConversationIngressRequest{Scope: endpoint.Scope, EndpointID: endpoint.ID, Method: http.MethodPost, Body: []byte(`{}`)}, directHost); err != nil || directHost.request.Endpoint.Adapter.BindingRevision != revision {
+			t.Fatalf("direct ingress snapshot drifted: %v", err)
+		}
+		pending := &ExternalConversationDelivery{Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter, Operation: capability.ConversationDeliveryMessageSend}
+		worker := &ExternalConversationDeliveryWorker{store: store, resolver: catalog}
+		if _, resolved, err := worker.resolve(ctx, pending); err != nil || resolved.Binding.Revision != revision {
+			t.Fatalf("queued reply failed after setup save: %v", err)
+		}
+		if revision > 2 {
+			saved := host.result.Events[0].Event
+			host.result.Events[0].Event.ID = fmt.Sprintf("event-%d", revision-1)
+			host.result.Events[0].Event.ExternalMessageID = fmt.Sprintf("171.%03d", revision-1)
+			replayed, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, request, host)
+			if err != nil || len(replayed.Received) != 1 || !replayed.Received[0].Replayed || replayed.Received[0].Item.Adapter.BindingRevision != revision-1 {
+				t.Fatalf("provider retry after setup save: %v %v", replayed, err)
+			}
+			host.result.Events[0].Event = saved
+		}
+	}
+	binding.Disabled = true
+	binding.Revision++
+	if err := catalog.Bind(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.NormalizeExternalConversationRegisteredGatewayIngress(ctx, request, host); !errors.Is(err, ErrExternalConversationConflict) {
+		t.Fatalf("disabled binding accepted: %v", err)
 	}
 }
