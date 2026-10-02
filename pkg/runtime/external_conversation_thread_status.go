@@ -16,8 +16,8 @@ func (w *RunProgressAcknowledgementWorker) projectThreadStatus(ctx context.Conte
 		return nil, nil
 	}
 	run, err := w.store.GetAgentRun(ctx, item.Scope, item.RunID)
-	if err != nil || run == nil || run.Status == AgentRunStatusCompleted {
-		return nil, err // Completed replies clear state after their answer is delivered.
+	if err != nil || run == nil || run.Status == AgentRunStatusCompleted || run.Status == AgentRunStatusFailed {
+		return nil, err // Finished replies clear state after their answer or failure notice is delivered.
 	}
 	endpoint, adapter, err := w.resolveEndpoint(ctx, item)
 	if err != nil || endpoint == nil {
