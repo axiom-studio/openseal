@@ -177,7 +177,8 @@ func checkpointTurnContinuity(checkpoint map[string]interface{}, turn *AgentTurn
 // erase the authoritative journal or latest terminal ActionCall accumulated by
 // action workers. In particular, the model-visible lastAction result may be
 // compacted; accepting that projection back would discard observation elements
-// required to validate the next action proposal.
+// required to validate the next action proposal. Authenticated event-wait
+// outcomes are acquired evidence too, and share this protected merge boundary.
 func preserveKernelActionHistory(current, proposed map[string]interface{}) map[string]interface{} {
 	result := deepCloneCheckpointMap(proposed)
 	if result == nil {
@@ -187,6 +188,7 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, approvalRecoveryCheckpointKey)
 	delete(result, proposalRecoveryCheckpointKey)
 	delete(result, "lastAction")
+	delete(result, runEventWaitCheckpointKey)
 	if current != nil {
 		if history, ok := current[actionHistoryCheckpointKey]; ok {
 			result[actionHistoryCheckpointKey] = deepCloneCheckpointValue(history)
@@ -199,6 +201,9 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 		}
 		if lastAction, ok := current["lastAction"]; ok {
 			result["lastAction"] = deepCloneCheckpointValue(lastAction)
+		}
+		if eventWait, ok := current[runEventWaitCheckpointKey]; ok {
+			result[runEventWaitCheckpointKey] = deepCloneCheckpointValue(eventWait)
 		}
 	}
 	return result

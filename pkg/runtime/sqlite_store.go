@@ -31,6 +31,21 @@ func migrate(db *sql.DB) error {
 	if err := migratePortfolio(db); err != nil {
 		return err
 	}
+	if err := migrateRunTerminalReportingSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateRunEventWaitsSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateRunEventRetentionSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateScopedRunEventRetentionSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateRunEventNotificationsSQLite(db); err != nil {
+		return err
+	}
 	if err := migrateRunbookActivationsSQLite(db); err != nil {
 		return err
 	}
@@ -83,6 +98,9 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if err := migrateSkillBindingLifecycleRepairSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateExternalConversationGatewayAuthoritySQLite(db); err != nil {
 		return err
 	}
 	if err := migrateCallbackRegistrySQLite(db); err != nil {
