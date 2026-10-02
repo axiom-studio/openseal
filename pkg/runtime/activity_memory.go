@@ -67,6 +67,9 @@ func (s *MemoryStore) CreateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	if s.agentRuns[key] != nil {
 		return nil, ErrRunIdempotency
 	}
+	if err := s.validateMemoryRunSkillDependenciesLocked(run); err != nil {
+		return nil, err
+	}
 	wait, err := s.prepareMemoryRunEventWaitLocked(run)
 	if err != nil {
 		return nil, err
@@ -102,6 +105,9 @@ func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	}
 	if lease != nil && (current.LeaseOwner != lease.WorkerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(lease.Now)) {
 		return nil, ErrLeaseLost
+	}
+	if err := s.validateMemoryRunSkillDependenciesLocked(run); err != nil {
+		return nil, err
 	}
 	wait, err := s.prepareMemoryRunEventWaitLocked(run)
 	if err != nil {

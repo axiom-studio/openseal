@@ -422,7 +422,7 @@ func (s *PostgresStore) insertPostgresAgentRunTx(ctx context.Context, tx *sql.Tx
 		run.Status, run.Priority, run.Revision, run.Deadline, run.AvailableAt, run.QueueEnteredAt, run.LeaseOwner,
 		run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, run.CreatedAt, string(payload))
 	if err != nil {
-		return err
+		return normalizeRunSkillDependencyError(err)
 	}
 	if wait, err := runEventWaitForRun(run); err != nil || wait == nil {
 		return err
@@ -442,7 +442,7 @@ func (s *PostgresStore) updatePostgresAgentRunTx(ctx context.Context, tx *sql.Tx
 		run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, string(payload), run.Scope.Kind, run.Scope.ID,
 		run.ID, expectedRevision)
 	if err != nil {
-		return err
+		return normalizeRunSkillDependencyError(err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {

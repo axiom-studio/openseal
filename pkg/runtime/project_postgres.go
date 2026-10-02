@@ -29,8 +29,11 @@ func (s *PostgresStore) CreateProjectWithEvent(ctx context.Context, i *Project, 
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("projects")+`(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, i.IdempotencyKeyHash, string(b)); err != nil {
+	if err := s.prepareProjectSkillReferenceWrite(ctx, tx, i, nil); err != nil {
 		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("projects")+`(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, i.IdempotencyKeyHash, string(b)); err != nil {
+		return nil, projectSkillReferenceAdmissionError(err)
 	}
 	p, err := s.insertPostgresActivityTx(ctx, tx, e)
 	if err != nil {
@@ -62,8 +65,19 @@ func (s *PostgresStore) CreateProject(ctx context.Context, i *Project) error {
 	if e != nil {
 		return e
 	}
-	_, e = s.db.ExecContext(ctx, `INSERT INTO `+s.table("projects")+`(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, i.IdempotencyKeyHash, string(b))
-	return e
+	tx, e := s.db.BeginTx(ctx, nil)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback()
+	if e = s.prepareProjectSkillReferenceWrite(ctx, tx, i, nil); e != nil {
+		return e
+	}
+	_, e = tx.ExecContext(ctx, `INSERT INTO `+s.table("projects")+`(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload)VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, i.IdempotencyKeyHash, string(b))
+	if e != nil {
+		return projectSkillReferenceAdmissionError(e)
+	}
+	return tx.Commit()
 }
 func (s *PostgresStore) UpdateProjectWithEvent(ctx context.Context, i *Project, expected int64, e *ActivityEvent) (*ActivityEvent, error) {
 	b, err := json.Marshal(i)
@@ -75,9 +89,12 @@ func (s *PostgresStore) UpdateProjectWithEvent(ctx context.Context, i *Project, 
 		return nil, err
 	}
 	defer tx.Rollback()
-	r, err := tx.ExecContext(ctx, `UPDATE `+s.table("projects")+` SET status=$1,revision=$2,updated_at=$3,payload=$4::jsonb WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND revision=$8`, i.Status, i.Revision, i.UpdatedAt, string(b), i.Scope.Kind, i.Scope.ID, i.ID, expected)
-	if err != nil {
+	if err := s.prepareProjectSkillReferenceWrite(ctx, tx, i, &expected); err != nil {
 		return nil, err
+	}
+	r, err := tx.ExecContext(ctx, `UPDATE `+s.table("projects")+` SET owner_type=$1,owner_id=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, string(b), i.Scope.Kind, i.Scope.ID, i.ID, expected)
+	if err != nil {
+		return nil, projectSkillReferenceAdmissionError(err)
 	}
 	n, err := r.RowsAffected()
 	if err != nil || n != 1 {
@@ -173,9 +190,17 @@ func (s *PostgresStore) UpdateProject(ctx context.Context, i *Project, expected 
 	if e != nil {
 		return e
 	}
-	r, e := s.db.ExecContext(ctx, `UPDATE `+s.table("projects")+` SET owner_type=$1,owner_id=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, string(b), i.Scope.Kind, i.Scope.ID, i.ID, expected)
+	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
 		return e
+	}
+	defer tx.Rollback()
+	if e = s.prepareProjectSkillReferenceWrite(ctx, tx, i, &expected); e != nil {
+		return e
+	}
+	r, e := tx.ExecContext(ctx, `UPDATE `+s.table("projects")+` SET owner_type=$1,owner_id=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, string(b), i.Scope.Kind, i.Scope.ID, i.ID, expected)
+	if e != nil {
+		return projectSkillReferenceAdmissionError(e)
 	}
 	n, e := r.RowsAffected()
 	if e != nil {
@@ -184,7 +209,7 @@ func (s *PostgresStore) UpdateProject(ctx context.Context, i *Project, expected 
 	if n != 1 {
 		return ErrProjectConflict
 	}
-	return nil
+	return tx.Commit()
 }
 
 var _ ProjectStore = (*PostgresStore)(nil)

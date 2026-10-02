@@ -43,6 +43,12 @@ func (s *MemoryStore) CreateRunDependencyGroup(_ context.Context, record RunDepe
 		if s.agentRuns[key] != nil {
 			return nil, ErrRunIdempotency
 		}
+		if err := s.validateMemoryRunSkillDependenciesLocked(target); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.validateMemoryRunSkillDependenciesLocked(record.SourceRun); err != nil {
+		return nil, err
 	}
 	s.dependencyGroups[groupKey] = cloneRunDependencyGroup(record.Group)
 	s.dependencies[groupKey] = make(map[string]*RunDependency, len(record.Dependencies))
@@ -135,6 +141,9 @@ func (s *MemoryStore) ResolveRunDependency(_ context.Context, record RunDependen
 	result, err := applyRunDependencyResolution(group, edges, s.agentRuns[sourceKey], record)
 	if err != nil || result.Replayed {
 		return result, err
+	}
+	if err := s.validateMemoryRunSkillDependenciesLocked(result.Source); err != nil {
+		return nil, err
 	}
 	s.dependencyGroups[groupKey] = cloneRunDependencyGroup(result.Group)
 	for _, edge := range result.Dependencies {

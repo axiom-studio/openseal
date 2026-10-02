@@ -132,7 +132,12 @@ func TestRunForkCoordinatorCarriesCallableRunbookEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := NewRunForkCoordinator(store).Create(t.Context(), CreateRunForkRequest{
+	coordinator := NewRunForkCoordinator(store)
+	coordinator.SetAcceptedRunExecutionPreparer(&acceptedRunInheritancePreparer{prepare: func(request *CreateAgentRunRequest) error {
+		setAcceptedRunInheritancePin(request)
+		return nil
+	}})
+	created, err := coordinator.Create(t.Context(), CreateRunForkRequest{
 		Scope: scope, SourceRunID: source.ID, ExpectedSourceRevision: claimed.Revision,
 		WorkerID: "worker", ForkID: "runbook-collect",
 		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},

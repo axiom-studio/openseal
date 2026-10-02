@@ -101,13 +101,17 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at
 	if at.IsZero() {
 		at = s.now()
 	}
+	maintenance, err := s.wakeCompletedSkillRuntimeMaintenances(ctx, scope, at)
+	if err != nil {
+		return nil, err
+	}
 	runs, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: scope, Statuses: []AgentRunStatus{AgentRunStatusSleeping},
 	})
 	if err != nil {
 		return nil, err
 	}
-	result := &WakeResult{Runs: make([]WokenRun, 0)}
+	result := maintenance
 	for _, run := range runs {
 		condition := run.WakeCondition
 		if condition == nil || condition.Type != "timer" || condition.WakeAt == nil || at.Before(*condition.WakeAt) {

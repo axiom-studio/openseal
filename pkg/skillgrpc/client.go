@@ -4,6 +4,7 @@ package skillgrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -17,12 +18,20 @@ import (
 
 // Client connects to external skill gRPC services
 type Client struct {
-	mu      sync.RWMutex
-	conn    *grpc.ClientConn
-	client  skillpb.SkillServiceClient
-	skillID string
-	address string
+	mu             sync.RWMutex
+	conn           *grpc.ClientConn
+	client         skillpb.SkillServiceClient
+	skillID        string
+	address        string
+	retired        bool
+	closed         bool
+	inFlight       int
+	closeCallbacks []func()
 }
+
+// ErrClientRetired means the client no longer accepts RPCs after replacement,
+// removal, or explicit closure. Callers should resolve the current registration.
+var ErrClientRetired = errors.New("skill client is retired")
 
 // ExecutionContext identifies the durable execution invoking a managed Skill.
 // Variables must contain non-secret metadata only. Credential material belongs
@@ -46,6 +55,9 @@ func (c *Client) Connect(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.retired || c.closed {
+		return ErrClientRetired
+	}
 	if c.conn != nil {
 		return nil
 	}
@@ -75,15 +87,95 @@ func (c *Client) Connect(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the connection
+// Close immediately closes the connection, including any in-flight RPCs.
+// Registry replacement and removal use Retire to allow active calls to drain.
 func (c *Client) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	action := c.detachConnectionLocked()
+	c.mu.Unlock()
+	return action.close()
+}
 
-	if c.conn != nil {
-		return c.conn.Close()
+// Retire rejects new RPCs and closes the connection after acquired RPCs finish.
+// A running RPC retains the connection only for its own caller-controlled
+// lifetime; retirement does not shorten its context deadline.
+func (c *Client) Retire() error {
+	return c.prepareRetirement(nil).close()
+}
+
+// prepareRetirement marks retirement before a registry publishes its replacement.
+// The returned action must run outside registry and client locks. Drain callbacks
+// likewise run outside both locks, after the underlying transport closes.
+func (c *Client) prepareRetirement(onClose func()) clientCloseAction {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		if onClose != nil {
+			return clientCloseAction{callbacks: []func(){onClose}}
+		}
+		return clientCloseAction{}
 	}
-	return nil
+	c.retired = true
+	if onClose != nil {
+		c.closeCallbacks = append(c.closeCallbacks, onClose)
+	}
+	if c.inFlight == 0 {
+		return c.detachConnectionLocked()
+	}
+	return clientCloseAction{}
+}
+
+func (c *Client) acquireRPC() (skillpb.SkillServiceClient, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.retired || c.closed {
+		return nil, ErrClientRetired
+	}
+	if c.client == nil {
+		return nil, fmt.Errorf("not connected to skill service")
+	}
+	c.inFlight++
+	return c.client, nil
+}
+
+func (c *Client) releaseRPC() {
+	c.mu.Lock()
+	c.inFlight--
+	var action clientCloseAction
+	if c.retired && c.inFlight == 0 {
+		action = c.detachConnectionLocked()
+	}
+	c.mu.Unlock()
+	_ = action.close()
+}
+
+func (c *Client) detachConnectionLocked() clientCloseAction {
+	if c.closed {
+		return clientCloseAction{}
+	}
+	c.closed = true
+	c.retired = true
+	action := clientCloseAction{conn: c.conn, callbacks: c.closeCallbacks}
+	c.conn = nil
+	c.client = nil
+	c.closeCallbacks = nil
+	return action
+}
+
+type clientCloseAction struct {
+	conn      *grpc.ClientConn
+	callbacks []func()
+}
+
+func (a clientCloseAction) close() error {
+	var err error
+	if a.conn != nil {
+		err = a.conn.Close()
+	}
+	for _, callback := range a.callbacks {
+		callback()
+	}
+	return err
 }
 
 // Execute executes a node on the skill service
@@ -99,13 +191,11 @@ func (c *Client) ExecuteWithContext(
 	resolver executor.TemplateResolver,
 	execution ExecutionContext,
 ) (*executor.StepResult, error) {
-	c.mu.RLock()
-	client := c.client
-	c.mu.RUnlock()
-
-	if client == nil {
-		return nil, fmt.Errorf("not connected to skill service")
+	client, err := c.acquireRPC()
+	if err != nil {
+		return nil, err
 	}
+	defer c.releaseRPC()
 
 	// Serialize config
 	config := make(map[string][]byte)
@@ -239,13 +329,11 @@ func cloneVariables(variables map[string]string) map[string]string {
 
 // GetNodeTypes returns the node types this skill provides
 func (c *Client) GetNodeTypes(ctx context.Context) ([]string, error) {
-	c.mu.RLock()
-	client := c.client
-	c.mu.RUnlock()
-
-	if client == nil {
-		return nil, fmt.Errorf("not connected to skill service")
+	client, err := c.acquireRPC()
+	if err != nil {
+		return nil, err
 	}
+	defer c.releaseRPC()
 
 	resp, err := client.GetNodeTypes(ctx, &skillpb.GetNodeTypesRequest{})
 	if err != nil {
@@ -257,13 +345,11 @@ func (c *Client) GetNodeTypes(ctx context.Context) ([]string, error) {
 
 // GetNodeSchema returns the schema for a node type
 func (c *Client) GetNodeSchema(ctx context.Context, nodeType string) ([]byte, error) {
-	c.mu.RLock()
-	client := c.client
-	c.mu.RUnlock()
-
-	if client == nil {
-		return nil, fmt.Errorf("not connected to skill service")
+	client, err := c.acquireRPC()
+	if err != nil {
+		return nil, err
 	}
+	defer c.releaseRPC()
 
 	resp, err := client.GetNodeSchema(ctx, &skillpb.GetNodeSchemaRequest{NodeType: nodeType})
 	if err != nil {
@@ -275,13 +361,11 @@ func (c *Client) GetNodeSchema(ctx context.Context, nodeType string) ([]byte, er
 
 // Health checks if the skill is healthy
 func (c *Client) Health(ctx context.Context) (*HealthInfo, error) {
-	c.mu.RLock()
-	client := c.client
-	c.mu.RUnlock()
-
-	if client == nil {
-		return nil, fmt.Errorf("not connected to skill service")
+	client, err := c.acquireRPC()
+	if err != nil {
+		return nil, err
 	}
+	defer c.releaseRPC()
 
 	resp, err := client.Health(ctx, &skillpb.HealthRequest{})
 	if err != nil {
