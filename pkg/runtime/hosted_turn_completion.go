@@ -22,6 +22,20 @@ func ValidateHostedTurnCompletion(request HostedTurnRequest, response *HostedTur
 	if response == nil || response.NextRunStatus != AgentRunStatusCompleted {
 		return nil
 	}
+	if len(response.EvidenceClaims) > 0 {
+		snapshot, err := evidenceSnapshotForGrounding(request.InputContext)
+		if err != nil {
+			return err
+		}
+		// A grounded draft uses durable repair/review instead of a terminal
+		// validation error when its human-readable report is incomplete.
+		if snapshot == nil {
+			report, ok := response.RunOutput["report"].(string)
+			if !ok || strings.TrimSpace(report) == "" {
+				return errors.New("evidence-backed completion requires the complete human-readable deliverable in runOutput.report; runOutput.summary, outputSummary, and evidenceClaims do not replace the report")
+			}
+		}
+	}
 	history := actionHistoryEntries(request.ContinuationCheckpoint)
 	succeeded := make(map[string]map[string]interface{}, len(history))
 	for _, entry := range history {

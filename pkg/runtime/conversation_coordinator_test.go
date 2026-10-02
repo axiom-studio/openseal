@@ -97,6 +97,7 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 	request := ConversationCoordinationRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: question.Conversation.Revision,
 		TriggerMessageID: question.Message.ID, MaximumConcurrency: 2, IdempotencyKey: "launch-round",
+		MessageReferences: []ConversationReference{{Kind: ConversationReferenceRun, ID: "conversation-run-1"}},
 	}
 	round, err := coordinator.Coordinate(ctx, request)
 	if err != nil {
@@ -104,6 +105,11 @@ func TestConversationCoordinatorRunsGovernedNaturalRound(t *testing.T) {
 	}
 	if sourceCalls.Load() != 1 || providerCalls.Load() != 3 || maximumActive.Load() != 2 {
 		t.Fatalf("source calls = %d, provider calls = %d, max concurrency = %d", sourceCalls.Load(), providerCalls.Load(), maximumActive.Load())
+	}
+	for participant, input := range contexts {
+		if input.RunID != "conversation-run-1" {
+			t.Fatalf("participant %s received run ID %q", participant, input.RunID)
+		}
 	}
 	if len(round.Messages) != 1 || round.Messages[0].Sender != developer || round.Messages[0].Content != "The launch is ready and the smoke evidence passed." {
 		t.Fatalf("coordinated messages = %#v", round.Messages)

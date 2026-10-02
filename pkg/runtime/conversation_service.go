@@ -47,6 +47,7 @@ type PostChannelMessageRequest struct {
 	ExternalSource      *ExternalMessageSource
 	Intent              ConversationMessageIntent
 	Content             string
+	ResponseMode        string
 	Audience            ConversationAudience
 	ReplyToMessageID    string
 	BroadcastToChannel  bool
@@ -355,7 +356,7 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 		Intent:         req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
 		ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), BroadcastToChannel: req.BroadcastToChannel,
 		Mentions:   cloneParticipants(req.Mentions),
-		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse,
+		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
 		ResolvesMessageID: strings.TrimSpace(req.ResolvesMessageID), SupersedesMessageID: strings.TrimSpace(req.SupersedesMessageID),
 		IdempotencyKey: key, CreatedAt: now,
 	}
@@ -747,6 +748,9 @@ func stableConversationID(scope Scope, key, suffix string) string {
 }
 
 func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageRequest) bool {
+	if existing == nil || existing.ResponseMode != req.ResponseMode {
+		return false
+	}
 	return existing != nil && existing.Scope == req.Scope && existing.ConversationID == strings.TrimSpace(req.ConversationID) &&
 		existing.Sender == req.Sender && existing.SenderDisplayName == strings.TrimSpace(req.SenderDisplayName) &&
 		reflect.DeepEqual(existing.ExternalSource, req.ExternalSource) &&

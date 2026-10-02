@@ -547,7 +547,7 @@ func TestWorkforceAuthoringRejectsSkillRequirementsWithoutAuthorityBeforeApply(t
 		t.Fatal(err)
 	}
 	if len(issues) != 1 || issues[0].Code != "skill_binding_materialization_failed" ||
-		!strings.Contains(issues[0].Message, "must enable a prompt or explicitly allow actions") {
+		!strings.Contains(issues[0].Message, "must save credentials or enable a prompt") {
 		t.Fatalf("readiness issues = %#v", issues)
 	}
 	if _, err := materializeWorkforceSkillBindings(value, value.Result.Candidate.Agents[0], "agent-live", false); err == nil {
@@ -886,7 +886,7 @@ func TestSkillBindingStoresRejectMalformedAuthority(t *testing.T) {
 		SkillID: "skill-slack", SkillVersion: "1.0.0", MaximumRisk: skill.RiskLevelExternal, Revision: 1,
 	}
 	if err := store.SaveSkillBinding(context.Background(), binding, 0); err == nil ||
-		!strings.Contains(err.Error(), "must enable a prompt or explicitly allow actions") {
+		!strings.Contains(err.Error(), "must save credentials or enable a prompt") {
 		t.Fatalf("save malformed binding = %v", err)
 	}
 }

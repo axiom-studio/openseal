@@ -132,7 +132,8 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 		return nil, false, err
 	}
 	if current != nil {
-		// Preserve the receipt of already imported work when an event is replayed.
+		// Existing imported runs retain their original receipt and execution key.
+		// Replaying an event must not recreate or cancel already accepted work.
 		if externalChannelContext(conversation) {
 			return &AgentRunCommandResult{Run: current}, true, nil
 		}
@@ -178,7 +179,7 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 // message and its replacement Run are durable before cancellation, so a failed
 // cancellation can be retried by message reconciliation without losing input.
 func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx context.Context, conversation *Conversation, message *ChannelMessage, replacementID string) error {
-	if message.Sender.Type != ConversationParticipantUser || !message.RequiresResponse {
+	if externalChannelContext(conversation) || message.Sender.Type != ConversationParticipantUser || !message.RequiresResponse {
 		return nil
 	}
 	const pageSize = 100
@@ -301,6 +302,9 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 		request.Context["threadRootMessageId"] = root
 		request.ConcurrencyKey = conversation.ID + ":thread:" + root
 	}
+	if message.ResponseMode != "" {
+		request.Context["responseMode"] = message.ResponseMode
+	}
 	return request
 }
 
@@ -315,6 +319,7 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 	if err := s.reconcileConversationQuestions(ctx, scope, result); err != nil {
 		return result, err
 	}
+
 	for offset := 0; ; offset += s.config.ConversationPageSize {
 		conversations, err := s.conversations.ListConversations(ctx, ConversationFilter{
 			Scope: scope, Statuses: []ConversationStatus{ConversationStatusActive},
@@ -566,6 +571,10 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 	// not new work for the owning Agent. Scheduling them would let an approval
 	// request recursively trigger another governed action and another approval.
 	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == "approval-coordinator" {
+		return false
+	}
+	// Saved-artifact receipts project completed work; they are not new tasks.
+	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == conversationArtifactReceiptService {
 		return false
 	}
 	// The owning Agent's reply is the projection of the current conversation
@@ -1081,6 +1090,11 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
 		return participationStoppedOutcome(), nil
 	}
+	// Deliver committed files independently of the next model call. A failed
+	// continuation must not hide work that the action worker already saved.
+	if err := r.postConversationActionArtifacts(ctx, input.Run, conversation, trigger); err != nil {
+		return nil, err
+	}
 	recent, err := r.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: input.Run.Scope, ConversationID: conversation.ID, Limit: 100, Descending: true, Viewer: &viewer,
 		ThreadRootID: externalConversationThreadRoot(conversation, trigger),
@@ -1209,6 +1223,14 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		}
 	}
 	if outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted {
+		return outcome, nil
+	}
+	if silent, _ := outcome.RunOutput["silent"].(bool); silent {
+		if trigger.ResponseMode != "spoken" {
+			return nil, errors.New("silent completion requires a spoken response channel")
+		}
+		outcome.OutputSummary = "No spoken response needed"
+		outcome.RunOutput = map[string]interface{}{"silent": true, "conversationId": conversation.ID, "triggerMessageId": trigger.ID}
 		return outcome, nil
 	}
 	content := agentConversationResponseContent(outcome)
@@ -1642,6 +1664,9 @@ func agentConversationResponseContent(outcome *TurnOutcome) string {
 	if outcome == nil {
 		return ""
 	}
+	if report, ok := outcome.RunOutput["report"].(string); ok && strings.TrimSpace(report) != "" {
+		return strings.TrimSpace(report)
+	}
 	if summary, ok := outcome.RunOutput["summary"].(string); ok && strings.TrimSpace(summary) != "" {
 		return strings.TrimSpace(summary)
 	}
@@ -1656,41 +1681,48 @@ func conversationActionArtifactReferences(run *AgentRun) []ConversationReference
 	if run == nil {
 		return nil
 	}
-	last, ok := run.Checkpoint["lastAction"].(map[string]interface{})
-	if !ok || fmt.Sprint(last["status"]) != string(ActionCallStatusSucceeded) {
-		return nil
-	}
-	result, ok := last["result"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	if fmt.Sprint(result["truncated"]) == "true" {
-		result = conversationResultMap(result["value"])
-	}
-	encoded, err := json.Marshal(result["artifactRefs"])
-	if err != nil {
-		return nil
-	}
-	var artifacts []struct {
-		ID      string `json:"id"`
-		Version int64  `json:"version"`
-	}
-	if err := json.Unmarshal(encoded, &artifacts); err != nil {
-		return nil
-	}
-	references := make([]ConversationReference, 0, len(artifacts))
-	seen := make(map[string]struct{}, len(artifacts))
-	for _, artifact := range artifacts {
-		artifact.ID = strings.TrimSpace(artifact.ID)
-		key := fmt.Sprintf("%s\x00%d", artifact.ID, artifact.Version)
-		if !validOpaqueIdentifier(artifact.ID, 256) || artifact.Version < 1 {
-			continue
+	references := make([]ConversationReference, 0)
+	seen := make(map[string]struct{})
+	appendResult := func(action map[string]interface{}) {
+		if fmt.Sprint(action["status"]) != string(ActionCallStatusSucceeded) {
+			return
 		}
-		if _, duplicate := seen[key]; duplicate {
-			continue
+		result, ok := action["result"].(map[string]interface{})
+		if !ok {
+			return
 		}
-		seen[key] = struct{}{}
-		references = append(references, ConversationReference{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: artifact.Version})
+		if fmt.Sprint(result["truncated"]) == "true" {
+			result = conversationResultMap(result["value"])
+		}
+		encoded, err := json.Marshal(result["artifactRefs"])
+		if err != nil {
+			return
+		}
+		var artifacts []struct {
+			ID      string `json:"id"`
+			Version int64  `json:"version"`
+		}
+		if json.Unmarshal(encoded, &artifacts) != nil {
+			return
+		}
+		for _, artifact := range artifacts {
+			artifact.ID = strings.TrimSpace(artifact.ID)
+			key := fmt.Sprintf("%s\x00%d", artifact.ID, artifact.Version)
+			if !validOpaqueIdentifier(artifact.ID, 256) || artifact.Version < 1 {
+				continue
+			}
+			if _, duplicate := seen[key]; duplicate {
+				continue
+			}
+			seen[key] = struct{}{}
+			references = append(references, ConversationReference{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: artifact.Version})
+		}
+	}
+	for _, action := range actionHistoryEntries(run.Checkpoint) {
+		appendResult(action)
+	}
+	if last, ok := run.Checkpoint["lastAction"].(map[string]interface{}); ok {
+		appendResult(last)
 	}
 	return references
 }

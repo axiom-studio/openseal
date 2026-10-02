@@ -184,6 +184,7 @@ type ChangeSetApplyReceipt struct {
 // lifecycle. Apply is deliberately a later transition, never a side effect of
 // compilation or refinement.
 type ChangeSet struct {
+	ProfileOnly         bool                      `json:"profileOnly,omitempty"`
 	ExistingAgentNames  []string                  `json:"existingAgentNames,omitempty"`
 	AgentName           string                    `json:"agentName,omitempty"`
 	ID                  string                    `json:"id"`
@@ -374,6 +375,8 @@ type ChangeSetReadinessValidator interface {
 }
 
 type CreateChangeSetRequest struct {
+	// ProfileOnly creates one Agent identity; tools and setup are discovered in chat.
+	ProfileOnly bool `json:"profileOnly,omitempty"`
 	// ExistingAgentNames is populated by the host from authorized workspace context.
 	ExistingAgentNames []string                  `json:"-"`
 	AgentName          string                    `json:"agentName,omitempty"`
@@ -458,15 +461,15 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	if err := ValidateAuthoringPrompt(request.Prompt); err != nil {
 		return nil, false, err
 	}
-	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
-		return nil, false, fmt.Errorf("authoring capability catalog: %w", err)
-	}
 	mode := ModeCreate
 	var existing *WorkforceCandidate
 	inheritedRefinement := ChangeSetRefinement{}
 	if request.ParentID != "" {
 		parent, err := s.store.GetChangeSet(ctx, request.Scope, request.ParentID)
 		if err != nil {
+			return nil, false, err
+		}
+		if err := inheritProfileMode(&request, parent); err != nil {
 			return nil, false, err
 		}
 		existing = proposalContinuationCandidate(parent)
@@ -482,7 +485,13 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		}
 		inheritedRefinement = refinementForUnchangedParentPrompt(parent, request.Prompt)
 	}
-	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...)}
+	if err := normalizeProfileCreateRequest(&request); err != nil {
+		return nil, false, err
+	}
+	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
+		return nil, false, fmt.Errorf("authoring capability catalog: %w", err)
+	}
+	compileRequest := GenerateRequest{ProfileOnly: request.ProfileOnly, Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...)}
 	if len(inheritedRefinement.Answers) > 0 {
 		compileRequest.Refinement = providerRefinementContext(inheritedRefinement)
 	}
@@ -507,28 +516,34 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		return nil, false, err
 	}
 	reconcilePlacementToCandidate(&request.Placement, &result.Candidate)
-	seedExactCatalogSkillPlacement(&result.Candidate, request.Catalog, &request.Placement)
-	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, compileRequest)
-	result.Validation = validateCandidate(&result.Candidate, existing)
-	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, compileRequest)...)
-	result.Validation = append(result.Validation, materializationIssues...)
-	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, compileRequest)...)
-	result.Validation = append(result.Validation, validateObjectiveCapabilityInputs(&result.Candidate, request.Catalog, false)...)
-	result.Validation = append(result.Validation, validateHostedRunbookBudgets(&result.Candidate, request.Catalog)...)
-	if len(materializationIssues) == 0 {
-		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, compileRequest)...)
+	if compileRequest.ProfileOnly {
+		if err := finalizeProfileResult(result, compileRequest, request.Placement); err != nil {
+			return nil, false, err
+		}
+	} else {
+		seedExactCatalogSkillPlacement(&result.Candidate, request.Catalog, &request.Placement)
+		materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, compileRequest)
+		result.Validation = validateCandidate(&result.Candidate, existing)
+		result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, compileRequest)...)
+		result.Validation = append(result.Validation, materializationIssues...)
+		result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, compileRequest)...)
+		result.Validation = append(result.Validation, validateObjectiveCapabilityInputs(&result.Candidate, request.Catalog, false)...)
+		result.Validation = append(result.Validation, validateHostedRunbookBudgets(&result.Candidate, request.Catalog)...)
+		if len(materializationIssues) == 0 {
+			result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, compileRequest)...)
+		}
+		result.MissingRequirements = placementAwareMissingRequirements(&result.Candidate, request.Catalog, request.Placement)
+		result.UnresolvedQuestions = placementAwareUnresolvedQuestions(result.UnresolvedQuestions, result.MissingRequirements)
+		result.RiskChanges = riskChanges(existing, &result.Candidate)
+		result.Diff = workforceDiff(existing, &result.Candidate)
+		if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
+			result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+		}
+		if err := validateRefinementCatalog(result.UnresolvedQuestions, request.Catalog); err != nil {
+			result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+		}
+		result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	}
-	result.MissingRequirements = placementAwareMissingRequirements(&result.Candidate, request.Catalog, request.Placement)
-	result.UnresolvedQuestions = placementAwareUnresolvedQuestions(result.UnresolvedQuestions, result.MissingRequirements)
-	result.RiskChanges = riskChanges(existing, &result.Candidate)
-	result.Diff = workforceDiff(existing, &result.Candidate)
-	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
-		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
-	}
-	if err := validateRefinementCatalog(result.UnresolvedQuestions, request.Catalog); err != nil {
-		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
-	}
-	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	candidateDigest, err := digestJSON(result.Candidate)
 	if err != nil {
 		return nil, false, fmt.Errorf("digest workforce candidate: %w", err)
@@ -539,7 +554,7 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		status = ChangeSetBlocked
 	}
 	changeSet := &ChangeSet{
-		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...),
+		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode, ProfileOnly: request.ProfileOnly, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...),
 		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), CandidateDigest: candidateDigest,
 		Result: *result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement),
 		RequiredCredentials:        requiredCredentials(result.Candidate, request.Catalog),
@@ -549,6 +564,9 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 	}
 	changeSet.Refinement = reconcileRefinement(inheritedRefinement, result)
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: "candidate_compiled", Actor: request.Actor, At: now}}
+	if err := ValidateProfileChangeSet(changeSet); err != nil {
+		return nil, false, err
+	}
 	return s.store.CreateChangeSet(ctx, changeSet, request.IdempotencyKey, requestDigest)
 }
 
@@ -569,15 +587,15 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 	if err := ValidateAuthoringPrompt(request.Prompt); err != nil {
 		return nil, false, err
 	}
-	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
-		return nil, false, fmt.Errorf("authoring capability catalog: %w", err)
-	}
 	mode := ModeCreate
 	var existing *WorkforceCandidate
 	inheritedRefinement := ChangeSetRefinement{}
 	if request.ParentID != "" {
 		parent, err := s.store.GetChangeSet(ctx, request.Scope, request.ParentID)
 		if err != nil {
+			return nil, false, err
+		}
+		if err := inheritProfileMode(&request, parent); err != nil {
 			return nil, false, err
 		}
 		existing = proposalContinuationCandidate(parent)
@@ -593,7 +611,13 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 		}
 		inheritedRefinement = refinementForUnchangedParentPrompt(parent, request.Prompt)
 	}
-	compileRequest := GenerateRequest{Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...)}
+	if err := normalizeProfileCreateRequest(&request); err != nil {
+		return nil, false, err
+	}
+	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
+		return nil, false, fmt.Errorf("authoring capability catalog: %w", err)
+	}
+	compileRequest := GenerateRequest{ProfileOnly: request.ProfileOnly, Mode: mode, Prompt: request.Prompt, Existing: existing, Catalog: request.Catalog, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...)}
 	if len(inheritedRefinement.Answers) > 0 {
 		compileRequest.Refinement = providerRefinementContext(inheritedRefinement)
 	}
@@ -606,7 +630,7 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 	}
 	now := s.now().UTC()
 	changeSet := &ChangeSet{
-		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...),
+		ID: uuid.NewString(), Scope: request.Scope, ParentID: request.ParentID, Mode: mode, ProfileOnly: request.ProfileOnly, AgentName: request.AgentName, ExistingAgentNames: append([]string(nil), request.ExistingAgentNames...),
 		Prompt: request.Prompt, PromptDigest: digestString(request.Prompt), Catalog: cloneCapabilityCatalog(request.Catalog), Placement: clonePlacement(request.Placement),
 		Status: ChangeSetEvaluating, Actor: request.Actor, Generation: &ChangeSetGeneration{Request: compileRequest},
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -614,6 +638,9 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 	changeSet.Refinement = inheritedRefinement
 	changeSet.Generation.Request.InvocationKey = generationInvocationKey(changeSet.ID, 0)
 	changeSet.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: ChangeSetEvaluating, Reason: "candidate_generation_queued", Actor: request.Actor, At: now}}
+	if err := ValidateProfileChangeSet(changeSet); err != nil {
+		return nil, false, err
+	}
 	return s.store.CreateChangeSet(ctx, changeSet, request.IdempotencyKey, requestDigest)
 }
 
@@ -639,9 +666,6 @@ func (s *ChangeSetService) GeneratePrepared(ctx context.Context, scope capabilit
 // evaluating and uses revision CAS so concurrent workers cannot compile
 // different catalogs for the same attempt.
 func (s *ChangeSetService) RefreshPreparedCatalog(ctx context.Context, scope capability.ScopeReference, id string, expectedRevision int64, catalog CapabilityCatalog) (*ChangeSet, error) {
-	if err := ValidateCapabilityCatalog(catalog); err != nil {
-		return nil, fmt.Errorf("authoring capability catalog: %w", err)
-	}
 	changeSet, err := s.store.GetChangeSet(ctx, scope, strings.TrimSpace(id))
 	if err != nil {
 		return nil, err
@@ -649,9 +673,20 @@ func (s *ChangeSetService) RefreshPreparedCatalog(ctx context.Context, scope cap
 	if changeSet.Revision != expectedRevision || changeSet.Status != ChangeSetEvaluating || changeSet.Generation == nil {
 		return nil, ErrChangeSetRevision
 	}
+	if err := ValidateProfileChangeSet(changeSet); err != nil {
+		return nil, err
+	}
+	if profileOnlyChangeSet(changeSet) {
+		catalog = profileCapabilityCatalog(catalog)
+	}
+	if err := ValidateCapabilityCatalog(catalog); err != nil {
+		return nil, fmt.Errorf("authoring capability catalog: %w", err)
+	}
 	catalog = cloneCapabilityCatalog(catalog)
-	if err := retainAnsweredSkillSelections(changeSet, &catalog); err != nil {
-		return nil, fmt.Errorf("refresh authoring capability catalog: %w", err)
+	if !profileOnlyChangeSet(changeSet) {
+		if err := retainAnsweredSkillSelections(changeSet, &catalog); err != nil {
+			return nil, fmt.Errorf("refresh authoring capability catalog: %w", err)
+		}
 	}
 	if err := ValidateCapabilityCatalog(catalog); err != nil {
 		return nil, fmt.Errorf("refreshed authoring capability catalog: %w", err)
@@ -676,6 +711,9 @@ func (s *ChangeSetService) RefreshPreparedCatalog(ctx context.Context, scope cap
 		Revision: next.Revision, From: ChangeSetEvaluating, To: ChangeSetEvaluating,
 		Reason: "capability_catalog_resolved", Actor: next.Actor, At: next.UpdatedAt,
 	})
+	if err := ValidateProfileChangeSet(next); err != nil {
+		return nil, err
+	}
 	return s.store.UpdateChangeSet(ctx, next, expectedRevision)
 }
 
@@ -794,6 +832,9 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateProfileChangeSet(changeSet); err != nil {
+		return nil, err
+	}
 	if changeSet.Revision != expectedRevision || changeSet.Status != ChangeSetEvaluating || changeSet.Generation == nil {
 		return nil, ErrChangeSetRevision
 	}
@@ -835,28 +876,34 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 		return nil, err
 	}
 	reconcilePlacementToCandidate(&changeSet.Placement, &result.Candidate)
-	seedExactCatalogSkillPlacement(&result.Candidate, changeSet.Catalog, &changeSet.Placement)
-	materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, changeSet.Generation.Request)
-	result.Validation = validateCandidate(&result.Candidate, existing)
-	result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, changeSet.Generation.Request)...)
-	result.Validation = append(result.Validation, materializationIssues...)
-	result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, changeSet.Generation.Request)...)
-	result.Validation = append(result.Validation, validateObjectiveCapabilityInputs(&result.Candidate, changeSet.Catalog, false)...)
-	result.Validation = append(result.Validation, validateHostedRunbookBudgets(&result.Candidate, changeSet.Catalog)...)
-	if len(materializationIssues) == 0 {
-		result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, changeSet.Generation.Request)...)
+	if changeSet.Generation.Request.ProfileOnly {
+		if err := finalizeProfileResult(result, changeSet.Generation.Request, changeSet.Placement); err != nil {
+			return nil, err
+		}
+	} else {
+		seedExactCatalogSkillPlacement(&result.Candidate, changeSet.Catalog, &changeSet.Placement)
+		materializationIssues := materializeAnsweredCapabilitySourceScopes(&result.Candidate, changeSet.Generation.Request)
+		result.Validation = validateCandidate(&result.Candidate, existing)
+		result.Validation = append(result.Validation, validateConversationComposition(&result.Candidate, changeSet.Generation.Request)...)
+		result.Validation = append(result.Validation, materializationIssues...)
+		result.Validation = append(result.Validation, validateAnsweredCapabilityNeeds(&result.Candidate, changeSet.Generation.Request)...)
+		result.Validation = append(result.Validation, validateObjectiveCapabilityInputs(&result.Candidate, changeSet.Catalog, false)...)
+		result.Validation = append(result.Validation, validateHostedRunbookBudgets(&result.Candidate, changeSet.Catalog)...)
+		if len(materializationIssues) == 0 {
+			result.Validation = append(result.Validation, validateCapabilitySourceScopeFulfillment(&result.Candidate, changeSet.Generation.Request)...)
+		}
+		result.MissingRequirements = placementAwareMissingRequirements(&result.Candidate, changeSet.Catalog, changeSet.Placement)
+		result.UnresolvedQuestions = placementAwareUnresolvedQuestions(result.UnresolvedQuestions, result.MissingRequirements)
+		result.RiskChanges = riskChanges(existing, &result.Candidate)
+		result.Diff = workforceDiff(existing, &result.Candidate)
+		if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
+			result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
+		}
+		if err := validateRefinementCatalog(result.UnresolvedQuestions, changeSet.Catalog); err != nil {
+			result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
+		}
+		result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	}
-	result.MissingRequirements = placementAwareMissingRequirements(&result.Candidate, changeSet.Catalog, changeSet.Placement)
-	result.UnresolvedQuestions = placementAwareUnresolvedQuestions(result.UnresolvedQuestions, result.MissingRequirements)
-	result.RiskChanges = riskChanges(existing, &result.Candidate)
-	result.Diff = workforceDiff(existing, &result.Candidate)
-	if err := validateRefinementQuestions(result.UnresolvedQuestions); err != nil {
-		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_question", err.Error()))
-	}
-	if err := validateRefinementCatalog(result.UnresolvedQuestions, changeSet.Catalog); err != nil {
-		result.Validation = append(result.Validation, issue("unresolvedQuestions", "invalid_refinement_catalog", err.Error()))
-	}
-	result.Valid = len(result.Validation) == 0 && len(result.MissingRequirements) == 0 && len(result.UnresolvedQuestions) == 0
 	candidateDigest, err := digestJSON(result.Candidate)
 	if err != nil {
 		return nil, fmt.Errorf("digest workforce candidate: %w", err)
@@ -880,6 +927,9 @@ func (s *ChangeSetService) GeneratePreparedWithProgress(ctx context.Context, sco
 	changeSet.Lifecycle = append(changeSet.Lifecycle, ChangeSetLifecycleEvent{Revision: changeSet.Revision, From: ChangeSetEvaluating, To: status, Reason: "candidate_compiled", Actor: changeSet.Actor, At: now})
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
+	if err := ValidateProfileChangeSet(changeSet); err != nil {
+		return nil, err
+	}
 	return s.store.CompleteChangeSetGeneration(persistCtx, changeSet, expectedRevision)
 }
 
@@ -903,6 +953,9 @@ func (s *ChangeSetService) AnswerRefinement(ctx context.Context, request AnswerC
 	}
 	current, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := ValidateProfileChangeSet(current); err != nil {
 		return nil, false, err
 	}
 	request.Value = normalizeRefinementAnswerValue(request.Value)
@@ -993,13 +1046,16 @@ func (s *ChangeSetService) AnswerRefinement(ctx context.Context, request AnswerC
 		existingNames = append([]string(nil), current.Generation.Request.ExistingAgentNames...)
 	}
 	next.Generation = &ChangeSetGeneration{
-		Request: GenerateRequest{Mode: ModeAmend, Prompt: current.Prompt, Existing: &current.Result.Candidate,
+		Request: GenerateRequest{ProfileOnly: current.ProfileOnly, Mode: ModeAmend, Prompt: current.Prompt, Existing: &current.Result.Candidate,
 			AgentName: current.AgentName, ExistingAgentNames: existingNames,
 			Catalog: cloneCapabilityCatalog(current.Catalog), Refinement: providerRefinementContext(next.Refinement)},
 		Attempt: generationAttempt(current), PreviousCandidateDigest: current.CandidateDigest,
 	}
 	next.Generation.Request.InvocationKey = generationInvocationKey(next.ID, next.Generation.Attempt)
 	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetEvaluating, Reason: "refinement_answered", Actor: request.Actor, At: now})
+	if err := ValidateProfileChangeSet(next); err != nil {
+		return nil, false, err
+	}
 	updated, err := s.store.UpdateChangeSet(ctx, next, current.Revision)
 	if errors.Is(err, ErrChangeSetRevision) {
 		return s.AnswerRefinement(ctx, request)
@@ -1134,6 +1190,9 @@ func (s *ChangeSetService) RetryGeneration(ctx context.Context, request RetryCha
 	if err != nil {
 		return nil, false, err
 	}
+	if err := ValidateProfileChangeSet(current); err != nil {
+		return nil, false, err
+	}
 	retryDigest, err := digestJSON(struct {
 		Scope            capability.ScopeReference
 		ChangeSetID      string
@@ -1177,6 +1236,9 @@ func (s *ChangeSetService) RetryGeneration(ctx context.Context, request RetryCha
 		ExpectedRevision: request.ExpectedRevision, Reason: request.Reason, Actor: request.Actor, RequestedAt: now,
 	})
 	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{Revision: next.Revision, From: current.Status, To: ChangeSetEvaluating, Reason: request.Reason, Actor: request.Actor, At: now})
+	if err := ValidateProfileChangeSet(next); err != nil {
+		return nil, false, err
+	}
 	persisted, err := s.store.UpdateChangeSet(ctx, next, current.Revision)
 	if errors.Is(err, ErrChangeSetRevision) {
 		return s.RetryGeneration(ctx, request)
@@ -1244,12 +1306,18 @@ func (s *ChangeSetService) PrepareActivation(ctx context.Context, request Prepar
 		request.Actor.Type == "" || request.Actor.ID == "" || request.IdempotencyKey == "" {
 		return nil, false, errors.New("activation scope, change set, revision, candidate digest, reason, actor, and idempotency key are required")
 	}
-	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
-		return nil, false, fmt.Errorf("activation capability catalog: %w", err)
-	}
 	parent, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
 	if err != nil {
 		return nil, false, err
+	}
+	if err := ValidateProfileChangeSet(parent); err != nil {
+		return nil, false, err
+	}
+	if profileOnlyChangeSet(parent) {
+		request.Catalog = profileCapabilityCatalog(request.Catalog)
+	}
+	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
+		return nil, false, fmt.Errorf("activation capability catalog: %w", err)
 	}
 	requestDigest, err := digestJSON(struct {
 		ParentID         string
@@ -1309,7 +1377,7 @@ func (s *ChangeSetService) PrepareActivation(ctx context.Context, request Prepar
 		status = ChangeSetBlocked
 	}
 	child := &ChangeSet{
-		ID: uuid.NewString(), Scope: request.Scope, ParentID: parent.ID, Mode: ModeAmend, AgentName: parent.AgentName, ExistingAgentNames: append([]string(nil), parent.ExistingAgentNames...),
+		ID: uuid.NewString(), Scope: request.Scope, ParentID: parent.ID, Mode: ModeAmend, ProfileOnly: parent.ProfileOnly, AgentName: parent.AgentName, ExistingAgentNames: append([]string(nil), parent.ExistingAgentNames...),
 		Prompt: parent.Prompt, PromptDigest: parent.PromptDigest, CandidateDigest: candidateDigest,
 		Result: result, Catalog: cloneCapabilityCatalog(request.Catalog), Placement: placement,
 		RequiredCredentials:        requiredCredentials(result.Candidate, request.Catalog),
@@ -1317,6 +1385,9 @@ func (s *ChangeSetService) PrepareActivation(ctx context.Context, request Prepar
 		Status:                     status, Actor: request.Actor, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	child.Lifecycle = []ChangeSetLifecycleEvent{{Revision: 1, To: status, Reason: request.Reason, Actor: request.Actor, At: now}}
+	if err := ValidateProfileChangeSet(child); err != nil {
+		return nil, false, err
+	}
 	return s.store.CreateChangeSet(ctx, child, request.IdempotencyKey, requestDigest)
 }
 
@@ -1335,6 +1406,17 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	current, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
 	if err != nil {
 		return nil, false, err
+	}
+	if err := ValidateProfileChangeSet(current); err != nil {
+		return nil, false, err
+	}
+	if profileOnlyChangeSet(current) {
+		if err := ValidateProfilePlacement(request.Placement); err != nil {
+			return nil, false, err
+		}
+		if request.CredentialCatalog != nil {
+			return nil, false, errors.New("Agent profile creation does not require account setup")
+		}
 	}
 	if isActivationContinuation(current) {
 		request.Placement, err = activationPlacementUpdate(current.Placement, request.Placement)
@@ -1417,6 +1499,9 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	next.Lifecycle = append(next.Lifecycle, ChangeSetLifecycleEvent{
 		Revision: next.Revision, From: current.Status, To: next.Status, Reason: "placement_updated", Actor: request.Actor, At: now,
 	})
+	if err := ValidateProfileChangeSet(next); err != nil {
+		return nil, false, err
+	}
 	updated, err := s.store.UpdateChangeSet(ctx, next, current.Revision)
 	if errors.Is(err, ErrChangeSetRevision) {
 		return s.UpdatePlacement(ctx, request)
@@ -1671,6 +1756,9 @@ func (s *ChangeSetService) Apply(ctx context.Context, request ApplyChangeSetRequ
 	}
 	current, err := store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := ValidateProfileChangeSet(current); err != nil {
 		return nil, false, err
 	}
 	if current.ApplyReceipt != nil {
@@ -2848,6 +2936,9 @@ func (s *ChangeSetService) SubmitEvaluation(ctx context.Context, request SubmitC
 	if err != nil {
 		return nil, false, err
 	}
+	if err := ValidateProfileChangeSet(current); err != nil {
+		return nil, false, err
+	}
 	evaluationDigest, err := digestJSON(struct {
 		CandidateDigest string
 		Allowed         bool
@@ -2941,9 +3032,15 @@ func (s *ChangeSetService) validateReadiness(ctx context.Context, value *ChangeS
 	if !enabled {
 		return nil, nil
 	}
-	issues := conversationRoutingValidation(&value.Result.Candidate, value.Placement)
-	issues = append(issues, validateObjectiveCapabilityInputs(&value.Result.Candidate, value.Catalog, true)...)
-	issues = append(issues, validateHostedRunbookBudgets(&value.Result.Candidate, value.Catalog)...)
+	if err := ValidateProfileChangeSet(value); err != nil {
+		return nil, err
+	}
+	var issues []ValidationIssue
+	if !profileOnlyChangeSet(value) {
+		issues = conversationRoutingValidation(&value.Result.Candidate, value.Placement)
+		issues = append(issues, validateObjectiveCapabilityInputs(&value.Result.Candidate, value.Catalog, true)...)
+		issues = append(issues, validateHostedRunbookBudgets(&value.Result.Candidate, value.Catalog)...)
+	}
 	for _, validator := range s.readinessValidators {
 		result, err := validator.ValidateChangeSetReadiness(ctx, value)
 		if err != nil {
@@ -2997,6 +3094,9 @@ func (s *ChangeSetService) ResolveApproval(ctx context.Context, request ResolveC
 	}
 	current, err := s.store.GetChangeSet(ctx, request.Scope, request.ChangeSetID)
 	if err != nil {
+		return nil, false, err
+	}
+	if err := ValidateProfileChangeSet(current); err != nil {
 		return nil, false, err
 	}
 	decisionDigest, err := digestJSON(struct {
@@ -3120,16 +3220,17 @@ func approvalRequirementsSatisfied(requirements []ChangeSetApprovalRequirement, 
 
 func digestChangeSetRequest(request CreateChangeSetRequest, mode Mode, existing *WorkforceCandidate) (string, error) {
 	value := struct {
-		Scope     capability.ScopeReference
-		ParentID  string
-		Mode      Mode
-		Prompt    string
-		Catalog   CapabilityCatalog
-		Placement ChangeSetPlacement
-		Actor     ChangeSetActor
-		Existing  *WorkforceCandidate
-		AgentName string `json:",omitempty"`
-	}{request.Scope, request.ParentID, mode, request.Prompt, request.Catalog, request.Placement, request.Actor, existing, request.AgentName}
+		Scope       capability.ScopeReference
+		ParentID    string
+		Mode        Mode
+		Prompt      string
+		Catalog     CapabilityCatalog
+		Placement   ChangeSetPlacement
+		Actor       ChangeSetActor
+		Existing    *WorkforceCandidate
+		AgentName   string `json:",omitempty"`
+		ProfileOnly bool   `json:",omitempty"`
+	}{request.Scope, request.ParentID, mode, request.Prompt, request.Catalog, request.Placement, request.Actor, existing, request.AgentName, request.ProfileOnly}
 	return digestJSON(value)
 }
 

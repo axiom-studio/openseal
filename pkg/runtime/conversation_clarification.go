@@ -125,7 +125,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 	var pending []conversationQuestion
 	const pageSize = 100
 	for after := int64(0); ; {
-		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{Scope: conversation.Scope, ConversationID: conversation.ID, AfterSequence: after, BeforeSequence: answer.Sequence, Limit: pageSize})
+		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{Scope: conversation.Scope, ConversationID: conversation.ID, ThreadRootID: externalConversationThreadRoot(conversation, answer), AfterSequence: after, BeforeSequence: answer.Sequence, Limit: pageSize})
 		if err != nil {
 			return nil, false, err
 		}

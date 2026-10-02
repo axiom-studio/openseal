@@ -78,6 +78,25 @@ func TestHostedTurnCompletionRequiresAndAcceptsExternalReceipt(t *testing.T) {
 	}
 }
 
+func TestUngroundedEvidenceCompletionRequiresHumanReadableReport(t *testing.T) {
+	for _, report := range []interface{}{nil, "", "  ", map[string]interface{}{"summary": "Claims only"}, "Complete report"} {
+		response := &HostedTurnResponse{
+			NextRunStatus:  AgentRunStatusCompleted,
+			RunOutput:      map[string]interface{}{"summary": "Claims only", "report": report},
+			EvidenceClaims: []EvidenceClaim{{ID: "claim", Statement: "A finding", EvidenceRefs: []string{"observation"}}},
+		}
+		err := ValidateHostedTurnCompletion(HostedTurnRequest{}, response)
+		complete, _ := report.(string)
+		if strings.TrimSpace(complete) == "" {
+			if err == nil || !strings.Contains(err.Error(), "runOutput.report") {
+				t.Fatalf("claims-only completion accepted: %#v, %v", report, err)
+			}
+		} else if err != nil {
+			t.Fatalf("complete report rejected: %v", err)
+		}
+	}
+}
+
 func hostedContractContains(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

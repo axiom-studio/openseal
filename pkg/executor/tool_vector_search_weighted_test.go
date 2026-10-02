@@ -267,8 +267,8 @@ func TestWeightedAverage_DatabaseIntegration(t *testing.T) {
 	var exists bool
 	err = db.QueryRow(`
 		SELECT EXISTS (
-			SELECT FROM information_schema.columns 
-			WHERE table_name = 'catalog' 
+			SELECT FROM information_schema.columns
+			WHERE table_name = 'catalog'
 			AND column_name = 'embedding_metadata'
 		)
 	`).Scan(&exists)
@@ -285,8 +285,8 @@ func TestWeightedAverage_DatabaseIntegration(t *testing.T) {
 
 	var count int
 	err = db.QueryRow(`
-		SELECT COUNT(*) 
-		FROM catalog 
+		SELECT COUNT(*)
+		FROM catalog
 		WHERE embedding_metadata IS NOT NULL
 	`).Scan(&count)
 

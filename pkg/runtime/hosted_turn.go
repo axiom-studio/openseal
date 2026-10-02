@@ -658,8 +658,9 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
 	if input.Run.Context[DelegationModeContextKey] == "reason" {
-		request.SystemInstructions = append(request.SystemInstructions, "For a writing or reasoning task, put the actual deliverable in runOutput.summary. Once the requested draft or answer is ready, return nextRunStatus completed in that same response. An invitation for optional revisions does not require this Run to stay running or wait; a later user request can start a revision. Preserve the original request's explicit length and units. completionEvidenceRefs must be empty when no tool action ran: a written draft needs no ActionCall receipt. Never use a Run ID, message ID, or invented value as tool evidence. Return exactly one response object, not separate draft and completion objects.")
+		request.SystemInstructions = append(request.SystemInstructions, "For a writing or reasoning task, put the actual deliverable in runOutput.summary. Once the requested draft or answer is ready, return nextRunStatus completed in that same response. An invitation for optional revisions does not require this Run to stay running or wait; a later user request can start a revision. Do not take another turn just to finalize text already written. Preserve the original request's explicit length and units. completionEvidenceRefs must be empty when no tool action ran: a written draft needs no ActionCall receipt. Never use a Run ID, message ID, or invented value as tool evidence. Return exactly one response object, not separate draft and completion objects.")
 	}
+	appendResponseChannelInstructions(&request)
 	if len(request.Actions) > 0 && len(actionHistoryEntries(input.Run.Checkpoint)) == 0 {
 		if result, ok := input.Run.Checkpoint[runEventWaitCheckpointKey].(map[string]interface{}); ok && result["status"] == string(RunEventWaitMatched) && result["event"] != nil {
 			request.SystemInstructions = append(request.SystemInstructions,
