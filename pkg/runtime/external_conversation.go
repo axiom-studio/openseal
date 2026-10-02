@@ -361,6 +361,20 @@ func (s *ExternalConversationEndpointService) List(ctx context.Context, filter E
 }
 
 func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope Scope, id string, req UpdateExternalConversationEndpointRequest) (*ExternalConversationEndpoint, error) {
+	next, err := s.PrepareUpdate(ctx, scope, id, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.UpdateExternalConversationEndpoint(ctx, next, req.ExpectedRevision); err != nil {
+		return nil, err
+	}
+	return cloneExternalConversationEndpoint(next), nil
+}
+
+// PrepareUpdate applies the same lifecycle, adapter and policy validation as
+// Update without persisting anything. Callers must still compare the reviewed
+// revision when committing the returned state.
+func (s *ExternalConversationEndpointService) PrepareUpdate(ctx context.Context, scope Scope, id string, req UpdateExternalConversationEndpointRequest) (*ExternalConversationEndpoint, error) {
 	if s == nil || s.store == nil || s.resolver == nil || req.ExpectedRevision < 1 {
 		return nil, ErrInvalidExternalConversation
 	}
@@ -395,7 +409,7 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 	}
 	if req.Status != nil {
 		if current.Status == ExternalConversationEndpointRetired && *req.Status != ExternalConversationEndpointRetired {
-			return nil, ErrInvalidExternalConversation
+			return nil, fmt.Errorf("%w: retired endpoints cannot be reactivated; configure an active or paused endpoint", ErrInvalidExternalConversation)
 		}
 		next.Status = *req.Status
 	}
@@ -419,9 +433,6 @@ func (s *ExternalConversationEndpointService) Update(ctx context.Context, scope 
 		}
 	}
 	if err := next.Validate(); err != nil {
-		return nil, err
-	}
-	if err := s.store.UpdateExternalConversationEndpoint(ctx, next, req.ExpectedRevision); err != nil {
 		return nil, err
 	}
 	return cloneExternalConversationEndpoint(next), nil

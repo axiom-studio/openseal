@@ -196,6 +196,10 @@ func (s *SQLiteStore) UpdateAmendment(ctx context.Context, amendment *kernelagen
 }
 
 func (s *SQLiteStore) ActivateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation) error {
+	return s.activateAmendment(ctx, amendment, expectedAmendmentRevision, definition, deployment, expectedDeploymentRevision, activation, nil)
+}
+
+func (s *SQLiteStore) activateAmendment(ctx context.Context, amendment *kernelagent.DefinitionAmendment, expectedAmendmentRevision int64, definition *kernelagent.AgentDefinition, deployment *kernelagent.AgentDeployment, expectedDeploymentRevision int64, activation kernelagent.DefinitionActivation, materialize func(*sql.Tx) error) error {
 	definitionPayload, err := json.Marshal(definition)
 	if err != nil {
 		return err
@@ -243,6 +247,11 @@ func (s *SQLiteStore) ActivateAmendment(ctx context.Context, amendment *kernelag
 	}
 	if err := s.synchronizeAgentRunbookActivations(ctx, tx, definition, deployment); err != nil {
 		return err
+	}
+	if materialize != nil {
+		if err := materialize(tx); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
