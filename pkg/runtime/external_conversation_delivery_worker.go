@@ -197,8 +197,12 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	} else if strings.TrimSpace(deliveryEndpoint.Address) == "" {
 		return fmt.Errorf("%w: installation-wide endpoint delivery requires the originating conversation", ErrInvalidExternalConversation)
 	}
+	effectiveDelivery := cloneExternalConversationDelivery(delivery)
+	// Keep the durable intent and receipt intact; execution uses the currently
+	// reviewed connection, including when setup changed while this was queued.
+	effectiveDelivery.Adapter = externalConversationResolvedAdapterReference(adapter)
 	request := ExternalConversationDeliveryHostRequest{
-		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: cloneExternalConversationDelivery(delivery), Message: message,
+		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: effectiveDelivery, Message: message,
 	}
 	// Typing/progress indicators are ephemeral state, not durable messages.
 	// Provider message lookup cannot prove their delivery and can turn a harmless
@@ -254,12 +258,12 @@ func (w *ExternalConversationDeliveryWorker) resolve(
 		return nil, nil, ErrExternalConversationConflict
 	}
 	ref := delivery.Adapter
-	adapter, err := w.resolver.ResolveConversationAdapter(
+	adapter, err := w.resolver.ResolveConversationAdapterBinding(
 		ctx, skill.ScopeReference{Kind: delivery.Scope.Kind, ID: delivery.Scope.ID}, endpoint.DeploymentID,
-		ref.SkillID, ref.SkillVersion, ref.AdapterID, skill.BindingReference{ID: ref.BindingID, Revision: ref.BindingRevision},
+		ref.BindingID, ref.AdapterID,
 	)
 	if err != nil || adapter == nil || adapter.Binding == nil ||
-		adapter.Binding.SourceIdentity != ref.SourceIdentity || adapter.Adapter.Provider != endpoint.Provider {
+		adapter.Binding.Revision < ref.BindingRevision || adapter.Adapter.Provider != endpoint.Provider {
 		return nil, nil, ErrExternalConversationConflict
 	}
 	if !containsConversationDeliveryOperation(adapter.Adapter.Delivery.Operations, delivery.Operation) {
