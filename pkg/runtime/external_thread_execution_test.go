@@ -72,6 +72,11 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if err != nil || len(page.Messages) != 2 {
 		t.Fatalf("thread history=%#v %v", page, err)
 	}
+	after := int64(0)
+	forward, err := ReadConversationHistory(ctx, worker.conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{AfterSequence: &after, Limit: 1}, root)
+	if err != nil || len(forward.Messages) != 1 || forward.Messages[0].ID != root || forward.NextAfterSequence == 0 {
+		t.Fatalf("forward thread history=%#v %v", forward, err)
+	}
 	if _, err := ReadConversationHistory(ctx, worker.conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{MessageID: applied[1].ChannelMessageID}, root); err == nil {
 		t.Fatal("explicit message lookup escaped its thread")
 	}
