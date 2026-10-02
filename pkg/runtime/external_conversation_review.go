@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strconv"
+	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 type channelReviewStore interface {
+	ExternalConversationStore
 	ActionStore
 	ListPendingSkillSetupRequests(context.Context, Scope, int, int) ([]*SkillSetupRequest, error)
 }
@@ -59,6 +62,9 @@ func (w *RunProgressAcknowledgementWorker) projectReviewRequests(ctx context.Con
 			break
 		}
 	}
+	updates, err := w.syncReviewApprovalCards(ctx, scope)
+	result = append(result, updates...)
+	failures = append(failures, err)
 	return result, errors.Join(failures...)
 }
 func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, scope Scope, kind, id, runID, conversationID, triggerID, reason string) (*ExternalConversationDelivery, error) {
@@ -144,14 +150,98 @@ func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, sc
 	if thread == "" && endpoint.Policy.ReplyMode == ExternalConversationReplyThread {
 		thread = origin.Event.ExternalMessageID
 	}
+	review := map[string]interface{}{"kind": kind, "id": id, "label": title, "reason": reason, "url": link}
+	if kind == "approval" {
+		store := w.store.(channelReviewStore)
+		approval, err := store.GetApproval(ctx, scope, id)
+		if err != nil {
+			return nil, err
+		}
+		call, err := store.GetActionCall(ctx, scope, approval.ActionCallID)
+		if err != nil {
+			return nil, err
+		}
+		review["approval"] = channelReviewApprovalPayload(approval, call)
+	}
 	delivery, err := w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend, ConversationID: conversationID, ChannelMessageID: message.ID,
 		ExternalConversationID: origin.Event.ExternalConversationID, ExternalThreadID: thread,
-		Parameters:     map[string]interface{}{"reviewRequest": map[string]interface{}{"kind": kind, "id": id, "label": title, "reason": reason, "url": link}},
+		Parameters:     map[string]interface{}{"reviewRequest": review},
 		IdempotencyKey: key, Correlation: &ExternalConversationDeliveryCorrelation{Kind: "review_request", ID: kind + ":" + id, Phase: "request"},
 	})
 	if err != nil {
 		return nil, err
 	}
 	return delivery.Delivery, nil
+}
+
+// Decision metadata describes the exact reviewed invocation, never credentials.
+func channelReviewApprovalPayload(approval *ApprovalCheckpoint, call *ActionCall) map[string]interface{} {
+	return map[string]interface{}{"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID, "invocationDigest": call.InvocationDigest, "expiresAt": approval.ExpiresAt, "status": approval.Status}
+}
+
+func (w *RunProgressAcknowledgementWorker) syncReviewApprovalCards(ctx context.Context, scope Scope) ([]*ExternalConversationDelivery, error) {
+	store := w.store.(channelReviewStore)
+	var updates []*ExternalConversationDelivery
+	for offset := 0; ; offset += 100 {
+		originals, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: scope, CorrelationKind: "review_request", Statuses: []ExternalConversationDeliveryStatus{ExternalConversationDeliveryDelivered}, Limit: 100, Offset: offset})
+		if err != nil {
+			return updates, err
+		}
+		for _, original := range originals {
+			if original.Operation != capability.ConversationDeliveryMessageSend || original.Correlation == nil || original.Correlation.Phase != "request" || !strings.HasPrefix(original.Correlation.ID, "approval:") {
+				continue
+			}
+			id := strings.TrimPrefix(original.Correlation.ID, "approval:")
+			approval, err := store.GetApproval(ctx, scope, id)
+			if err != nil {
+				return updates, err
+			}
+			if approval.Status == ApprovalStatusPending {
+				continue
+			}
+			phase := "resolved:" + strconv.FormatInt(approval.Revision, 10)
+			existing, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: scope, EndpointID: original.EndpointID, CorrelationKind: "review_request", CorrelationID: original.Correlation.ID, Limit: 100})
+			if err != nil {
+				return updates, err
+			}
+			found := false
+			for _, delivery := range existing {
+				if delivery.Correlation != nil && delivery.Correlation.Phase == phase {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			endpoint, adapter, err := w.transport.resolveActiveEndpoint(ctx, scope, original.EndpointID)
+			if err != nil {
+				return updates, err
+			}
+			if !containsConversationDeliveryOperation(adapter.Adapter.Delivery.Operations, capability.ConversationDeliveryMessageUpdate) {
+				continue
+			}
+			call, err := store.GetActionCall(ctx, scope, approval.ActionCallID)
+			if err != nil {
+				return updates, err
+			}
+			parameters := cloneMap(original.Parameters)
+			review, ok := parameters["reviewRequest"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+			review["approval"] = channelReviewApprovalPayload(approval, call)
+			parameters["providerMessageId"] = original.ProviderMessageID
+			result, err := w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageUpdate, ConversationID: original.ConversationID, ChannelMessageID: original.ChannelMessageID, ExternalConversationID: original.ExternalConversationID, ExternalThreadID: original.ExternalThreadID, Parameters: parameters, IdempotencyKey: "review-card:" + id + ":" + endpoint.ID + ":" + phase, Correlation: &ExternalConversationDeliveryCorrelation{Kind: "review_request", ID: original.Correlation.ID, Phase: phase}})
+			if err != nil {
+				return updates, err
+			}
+			updates = append(updates, result.Delivery)
+		}
+		if len(originals) < 100 {
+			break
+		}
+	}
+	return updates, nil
 }
