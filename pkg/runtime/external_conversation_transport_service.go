@@ -76,15 +76,19 @@ func (s *ExternalConversationTransportService) Receive(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	if !containsConversationEventType(resolved.Adapter.InboundEventTypes, req.Event.Type) {
-		return nil, fmt.Errorf("%w: adapter does not declare event type %q", ErrInvalidExternalConversation, req.Event.Type)
-	}
 	if req.Event.Type == capability.ConversationEventApprovalDecided {
 		resolution, err := s.resolveExternalApprovalDecision(ctx, endpoint, req.Event)
 		if err != nil {
 			return nil, err
 		}
 		return &ReceiveExternalConversationEventResult{Approval: resolution, Accepted: true, Replayed: !resolution.Resolved}, nil
+	}
+	// Approval decisions are authenticated control-plane responses to canonical
+	// review cards, not messages routed to an Agent handler. Their authority is
+	// checked against the exact invocation and origin above, independently of
+	// the adapter's declared conversational inbound event types.
+	if !containsConversationEventType(resolved.Adapter.InboundEventTypes, req.Event.Type) {
+		return nil, fmt.Errorf("%w: adapter does not declare event type %q", ErrInvalidExternalConversation, req.Event.Type)
 	}
 	if endpoint.Mode == capability.ConversationEndpointDirect && !req.Event.Direct {
 		return nil, fmt.Errorf("%w: direct endpoint received a non-direct event", ErrInvalidExternalConversation)
