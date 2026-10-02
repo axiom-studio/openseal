@@ -274,21 +274,26 @@ func (w *ExternalConversationDeliveryWorker) markDelivered(
 	providerMessageID string,
 ) error {
 	now := w.now().UTC()
-	mapping := &ExternalMessageMapping{
-		Scope: delivery.Scope, EndpointID: delivery.EndpointID, Direction: ExternalMessageOutbound,
-		ExternalMessageID: providerMessageID, ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
-		Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	if err := w.store.SaveExternalMessageMapping(ctx, mapping, 0); err != nil {
-		if !errors.Is(err, ErrExternalConversationConflict) {
-			return err
+	// Ephemeral status acknowledgements identify a thread, not a message.
+	// Recording them as outbound messages collides with earlier progress or
+	// reply mappings that share the thread timestamp.
+	if delivery.Operation != capability.ConversationDeliveryTypingIndicator {
+		mapping := &ExternalMessageMapping{
+			Scope: delivery.Scope, EndpointID: delivery.EndpointID, Direction: ExternalMessageOutbound,
+			ExternalMessageID: providerMessageID, ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,
+			Revision: 1, CreatedAt: now, UpdatedAt: now,
 		}
-		current, getErr := w.store.GetExternalMessageMapping(
-			ctx, delivery.Scope, delivery.EndpointID, ExternalMessageOutbound, providerMessageID,
-		)
-		if getErr != nil || current == nil || current.ConversationID != delivery.ConversationID ||
-			current.ChannelMessageID != delivery.ChannelMessageID {
-			return ErrExternalConversationConflict
+		if err := w.store.SaveExternalMessageMapping(ctx, mapping, 0); err != nil {
+			if !errors.Is(err, ErrExternalConversationConflict) {
+				return err
+			}
+			current, getErr := w.store.GetExternalMessageMapping(
+				ctx, delivery.Scope, delivery.EndpointID, ExternalMessageOutbound, providerMessageID,
+			)
+			if getErr != nil || current == nil || current.ConversationID != delivery.ConversationID ||
+				current.ChannelMessageID != delivery.ChannelMessageID {
+				return ErrExternalConversationConflict
+			}
 		}
 	}
 	next := cloneExternalConversationDelivery(delivery)

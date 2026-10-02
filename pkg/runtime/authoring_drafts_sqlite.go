@@ -9,7 +9,7 @@ func (s *SQLiteStore) ListDraftChangeSets(ctx context.Context, q authoring.Draft
 	if err := q.Validate(); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM workforce_change_sets WHERE scope_kind=? AND scope_id=? AND json_extract(payload, '$.actor.type')=? AND json_extract(payload, '$.actor.id')=? AND status NOT IN ('applied','rejected') ORDER BY updated_at DESC, id LIMIT ? OFFSET ?`, q.Scope.Kind, q.Scope.ID, q.Actor.Type, q.Actor.ID, q.Limit, q.Offset)
+	rows, err := s.db.QueryContext(ctx, `SELECT d.payload FROM workforce_change_sets d WHERE d.scope_kind=? AND d.scope_id=? AND json_extract(d.payload, '$.actor.type')=? AND json_extract(d.payload, '$.actor.id')=? AND d.status NOT IN ('applied','rejected') AND NOT EXISTS (SELECT 1 FROM workforce_change_sets c WHERE c.scope_kind=d.scope_kind AND c.scope_id=d.scope_id AND c.parent_id=d.id AND json_extract(c.payload, '$.actor.type')=json_extract(d.payload, '$.actor.type') AND json_extract(c.payload, '$.actor.id')=json_extract(d.payload, '$.actor.id')) ORDER BY d.updated_at DESC, d.id LIMIT ? OFFSET ?`, q.Scope.Kind, q.Scope.ID, q.Actor.Type, q.Actor.ID, q.Limit, q.Offset)
 	if err != nil {
 		return nil, err
 	}

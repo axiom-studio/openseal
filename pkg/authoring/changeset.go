@@ -351,6 +351,9 @@ type UpdateChangeSetPlacementRequest struct {
 	Reason           string                    `json:"reason"`
 	Actor            ChangeSetActor            `json:"actor"`
 	IdempotencyKey   string                    `json:"idempotencyKey"`
+	// CredentialCatalog is supplied by the trusted host, never by JSON input.
+	// Only current credential availability and grant facts are refreshed.
+	CredentialCatalog *CapabilityCatalog `json:"-"`
 }
 
 // AtomicChangeSetStore is deliberately stronger than ChangeSetStore. Hosts
@@ -466,9 +469,10 @@ func (s *ChangeSetService) Create(ctx context.Context, request CreateChangeSetRe
 		if err != nil {
 			return nil, false, err
 		}
-		mode = ModeAmend
-		candidate := parent.Result.Candidate
-		existing = &candidate
+		existing = proposalContinuationCandidate(parent)
+		if existing != nil {
+			mode = ModeAmend
+		}
 		inheritParentPlacement(&request.Placement, parent)
 		if request.AgentName == "" {
 			request.AgentName = parent.AgentName
@@ -576,9 +580,10 @@ func (s *ChangeSetService) Prepare(ctx context.Context, request CreateChangeSetR
 		if err != nil {
 			return nil, false, err
 		}
-		mode = ModeAmend
-		candidate := parent.Result.Candidate
-		existing = &candidate
+		existing = proposalContinuationCandidate(parent)
+		if existing != nil {
+			mode = ModeAmend
+		}
 		inheritParentPlacement(&request.Placement, parent)
 		if request.AgentName == "" {
 			request.AgentName = parent.AgentName
@@ -1382,6 +1387,14 @@ func (s *ChangeSetService) UpdatePlacement(ctx context.Context, request UpdateCh
 	now := s.now().UTC()
 	next := cloneChangeSet(current)
 	next.Placement = clonePlacement(request.Placement)
+	if request.CredentialCatalog != nil {
+		facts := cloneCapabilityCatalog(*request.CredentialCatalog)
+		next.Catalog.AvailableCredentials = facts.AvailableCredentials
+		next.Catalog.AvailableCredentialGrants = facts.AvailableCredentialGrants
+		if err := ValidateCapabilityCatalog(next.Catalog); err != nil {
+			return nil, false, fmt.Errorf("refresh credential catalog: %w", err)
+		}
+	}
 	next.Result.MissingRequirements = placementAwareMissingRequirements(&next.Result.Candidate, next.Catalog, next.Placement)
 	next.Result.UnresolvedQuestions = placementAwareUnresolvedQuestions(next.Result.UnresolvedQuestions, next.Result.MissingRequirements)
 	// Readiness findings are derived from the exact placement. Clear the stale
@@ -3234,4 +3247,25 @@ func cloneCapabilityCatalog(value CapabilityCatalog) CapabilityCatalog {
 	var copy CapabilityCatalog
 	_ = json.Unmarshal(payload, &copy)
 	return copy
+}
+
+// A failed initial generation has no candidate to amend. Keep its setup lineage
+// while starting generation in create mode. Failed amendments retain the last
+// reviewed target from their durable generation request.
+func proposalContinuationCandidate(parent *ChangeSet) *WorkforceCandidate {
+	if parent == nil {
+		return nil
+	}
+	candidate := parent.Result.Candidate
+	if len(candidate.Agents) > 0 || candidate.Team != nil || candidate.Project != nil {
+		return &candidate
+	}
+	if parent.Generation != nil && parent.Generation.Request.Existing != nil {
+		payload, _ := json.Marshal(parent.Generation.Request.Existing)
+		var existing WorkforceCandidate
+		if json.Unmarshal(payload, &existing) == nil {
+			return &existing
+		}
+	}
+	return nil
 }

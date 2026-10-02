@@ -364,6 +364,7 @@ type (
 	Objective                            = runtime.Objective
 	ObjectiveExecutionPolicy             = runtime.ObjectiveExecutionPolicy
 	ObjectiveStatus                      = runtime.ObjectiveStatus
+	ScheduledAgentTask                   = runtime.ScheduledAgentTask
 	RunbookActivation                    = runtime.RunbookActivation
 	RunbookDetail                        = runtime.RunbookDetail
 	RunbookExecutionAudit                = runtime.RunbookExecutionAudit
@@ -1881,6 +1882,9 @@ const (
 	AgentActionConfigureChannel     = runtime.AgentActionConfigureChannel
 	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
 	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
+	RunbookActionCreateTask         = runtime.RunbookActionCreateTask
+	RunbookActionList               = runtime.RunbookActionList
+	RunbookActionSetStatus          = runtime.RunbookActionSetStatus
 	RunbookActionStart              = runtime.RunbookActionStart
 	RunbookActionReplaceSchedule    = runtime.RunbookActionReplaceSchedule
 	TeamManagementSkillID           = runtime.TeamManagementSkillID

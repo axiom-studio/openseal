@@ -75,8 +75,31 @@ func (s *MemoryStore) UpsertConnection(_ context.Context, connection *Connection
 	if current == nil && expectedRevision != 0 || current != nil && current.Revision != expectedRevision {
 		return ErrRevisionConflict
 	}
+	if connection.Status == ConnectionActive {
+		for otherKey, other := range s.connections {
+			if otherKey != key && SameAccountConnection(connection, other) && other.Status != ConnectionRevoked {
+				superseded := cloneConnection(other)
+				superseded.Status = ConnectionRevoked
+				superseded.Revision++
+				superseded.UpdatedAt = connection.UpdatedAt
+				s.connections[otherKey] = superseded
+			}
+		}
+	}
 	s.connections[key] = cloneConnection(connection)
 	return nil
+}
+
+func (s *MemoryStore) ListConnections(_ context.Context, scope capability.ScopeReference) ([]*Connection, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*Connection
+	for _, connection := range s.connections {
+		if connection.Scope == scope {
+			result = append(result, cloneConnection(connection))
+		}
+	}
+	return result, nil
 }
 
 func (s *MemoryStore) ClaimConnectionRefresh(_ context.Context, scope capability.ScopeReference, id string, expectedRevision int64, leaseID string, claimedAt, expiresAt time.Time) (*Connection, error) {

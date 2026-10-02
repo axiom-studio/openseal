@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -283,7 +284,13 @@ func (s *PostgresStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter
 		add(` AND objective_id = $%d`, filter.ObjectiveID)
 	}
 	if filter.ConversationID != "" {
-		add(` AND payload->'context'->>'conversationId' = $%d`, filter.ConversationID)
+		if filter.IncludeDescendants {
+			args = append(args, filter.ConversationID)
+			n := strconv.Itoa(len(args))
+			query += ` AND (payload->'context'->>'conversationId' = $` + n + ` OR root_run_id IN (SELECT id FROM ` + s.table("agent_runs") + ` WHERE scope_kind = $1 AND scope_id = $2 AND payload->'context'->>'conversationId' = $` + n + `))`
+		} else {
+			add(` AND payload->'context'->>'conversationId' = $%d`, filter.ConversationID)
+		}
 	}
 	if filter.ConcurrencyKey != "" {
 		add(` AND payload->>'concurrencyKey' = $%d`, filter.ConcurrencyKey)

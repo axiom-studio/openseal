@@ -161,6 +161,15 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A previous progress acknowledgement already owns this thread timestamp.
+	if err := store.SaveExternalMessageMapping(ctx, &ExternalMessageMapping{
+		Scope: endpoint.Scope, EndpointID: endpoint.ID, Direction: ExternalMessageOutbound,
+		ExternalMessageID: "thread-1", ConversationID: conversation.ID,
+		ChannelMessageID: "earlier-progress", Revision: 1,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
 	host := &ephemeralRetryHost{}
 	worker, err := NewExternalConversationDeliveryWorker(store, catalog, host, ExternalConversationDeliveryWorkerConfig{
 		WorkerID: "typing-worker", BaseRetry: time.Nanosecond, MaximumRetry: time.Second,
@@ -177,6 +186,10 @@ func TestExternalConversationDeliveryWorkerRetriesTypingWithoutMessageLookup(t *
 	delivered, err := worker.ProcessOne(ctx, endpoint.Scope)
 	if err != nil || delivered == nil || delivered.Status != ExternalConversationDeliveryDelivered {
 		t.Fatalf("retried typing delivery = %#v, %v", delivered, err)
+	}
+	mapping, err := store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, ExternalMessageOutbound, "thread-1")
+	if err != nil || mapping == nil || mapping.ChannelMessageID != "earlier-progress" {
+		t.Fatalf("typing changed the existing message mapping: %#v, %v", mapping, err)
 	}
 	if host.deliveries != 2 || host.lookups != 0 {
 		t.Fatalf("host calls: deliveries=%d lookups=%d", host.deliveries, host.lookups)

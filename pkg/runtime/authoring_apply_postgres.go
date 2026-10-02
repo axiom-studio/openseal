@@ -277,16 +277,26 @@ func applyPostgresWorkforceRunbookActivations(ctx context.Context, tx *sql.Tx, t
 		synchronizeWorkforceRunbookResource(application, item)
 	}
 	for _, deploymentID := range value.Placement.AgentDeploymentIDs {
-		rows, err := tx.QueryContext(ctx, `SELECT id FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 AND assigned_agent_id=$3 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, deploymentID)
+		rows, err := tx.QueryContext(ctx, `SELECT id, payload FROM `+table+` WHERE scope_kind=$1 AND scope_id=$2 AND assigned_agent_id=$3 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, deploymentID)
 		if err != nil {
 			return err
 		}
 		var obsolete []string
 		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
+			var id, payload string
+			if err := rows.Scan(&id, &payload); err != nil {
 				rows.Close()
 				return err
+			}
+			var existing RunbookActivation
+			if err := json.Unmarshal([]byte(payload), &existing); err != nil {
+				rows.Close()
+				return err
+			}
+			// Chat-authored tasks have their own owner-scoped lifecycle. They are
+			// not projections of the Agent's embedded Runbook definition.
+			if existing.Task != nil {
+				continue
 			}
 			if !desiredByAgent[deploymentID][id] {
 				obsolete = append(obsolete, id)

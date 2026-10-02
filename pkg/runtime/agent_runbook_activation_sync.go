@@ -22,7 +22,7 @@ func reconcileAgentRunbookActivations(current []*RunbookActivation, definition *
 	}
 	byTrigger := make(map[string]*RunbookActivation, len(current))
 	for _, activation := range current {
-		if activation == nil || activation.AssignedAgentID != deployment.ID {
+		if activation == nil || activation.Task != nil || activation.AssignedAgentID != deployment.ID {
 			continue
 		}
 		existing := byTrigger[activation.TriggerID]
@@ -84,7 +84,7 @@ func reconcileAgentRunbookActivations(current []*RunbookActivation, definition *
 	}
 
 	for _, activation := range current {
-		if activation == nil || activation.AssignedAgentID != deployment.ID || desiredTriggers[activation.TriggerID] {
+		if activation == nil || activation.Task != nil || activation.AssignedAgentID != deployment.ID || desiredTriggers[activation.TriggerID] {
 			continue
 		}
 		if activation.Status == RunbookActivationRetired {

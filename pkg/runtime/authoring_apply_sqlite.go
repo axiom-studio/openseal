@@ -289,16 +289,26 @@ func applySQLiteWorkforceRunbookActivations(ctx context.Context, tx *sql.Tx, val
 		synchronizeWorkforceRunbookResource(application, item)
 	}
 	for _, deploymentID := range value.Placement.AgentDeploymentIDs {
-		rows, err := tx.QueryContext(ctx, `SELECT id FROM runbook_activations WHERE scope_kind=? AND scope_id=? AND assigned_agent_id=?`, value.Scope.Kind, value.Scope.ID, deploymentID)
+		rows, err := tx.QueryContext(ctx, `SELECT id, payload FROM runbook_activations WHERE scope_kind=? AND scope_id=? AND assigned_agent_id=?`, value.Scope.Kind, value.Scope.ID, deploymentID)
 		if err != nil {
 			return err
 		}
 		var obsolete []string
 		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
+			var id, payload string
+			if err := rows.Scan(&id, &payload); err != nil {
 				rows.Close()
 				return err
+			}
+			var existing RunbookActivation
+			if err := json.Unmarshal([]byte(payload), &existing); err != nil {
+				rows.Close()
+				return err
+			}
+			// Chat-authored tasks have their own owner-scoped lifecycle. They are
+			// not projections of the Agent's embedded Runbook definition.
+			if existing.Task != nil {
+				continue
 			}
 			if !desiredByAgent[deploymentID][id] {
 				obsolete = append(obsolete, id)

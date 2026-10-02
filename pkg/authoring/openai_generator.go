@@ -32,6 +32,8 @@ Create a Team only when the user requested one or distinct collaborating roles r
 
 Clarifications contain only the natural question, why it blocks a sound proposal, and optional human-readable choices. OpenSeal owns the canonical question category, answer type, blocking scope, provenance, and validation.
 
+Choose a focused capability set: select only Skills needed for the requested outcomes, prefer ready capabilities when they can do the work, and combine general-purpose research, API, or browser capabilities when a dedicated integration is unavailable. Distinguish a working route from a route that still needs setup. Do not add optional integrations as blocking prerequisites.
+
 Keep creation concise. Do not interview the user about details already supplied or inputs they can provide when asking the Agent to do its work. Choose sensible reversible defaults and state them briefly as assumptions. Skill installation, credential selection, and connection setup are handled by the application's governed setup forms; select the needed capability but do not duplicate those forms with clarification questions. Never ask again for an answered decision. Return no clarifications when the request already supports a sound proposal.`
 
 const authoringSourceIdentityPrompt = " Treat sourceIdentity as exact immutable provenance whenever it is supplied; never substitute another publisher variant with the same id and version."
@@ -317,10 +319,14 @@ func promptGenerateRequest(request GenerateRequest) AuthoringIntentRequest {
 	// compiler refinement layer. They are not model instructions. The selected
 	// Skill reaches refinement-mode generation through the audited answer.
 	catalog := compactPromptCapabilityCatalog(request.Catalog)
+	// Semantic planning does not construct runtime graphs or connection forms.
+	// Keep those contracts for the compiler and the governed setup controls.
+	catalog.RuntimeComposition = nil
 	// The semantic planner selects capability identities and actions. Exact
 	// action schemas, hosted budgets, and runtime composition are compiler-owned.
 	for id, skill := range catalog.Skills {
 		skill.ActionContracts = nil
+		skill.BindingConfigSchema = nil
 		catalog.Skills[id] = skill
 	}
 	return AuthoringIntentRequest{
@@ -564,6 +570,9 @@ func (g *OpenAICompatibleGenerator) completeResponsesContract(ctx context.Contex
 		}
 		payload["tools"] = []interface{}{map[string]interface{}{
 			"type": "function", "name": contract.Name, "description": contract.Description,
+			// Preserve optional authoring fields; OpenSeal validates the full schema
+			// locally rather than letting Responses rewrite it into strict mode.
+			"strict":     false,
 			"parameters": schema,
 		}}
 		payload["tool_choice"] = map[string]string{"type": "function", "name": contract.Name}

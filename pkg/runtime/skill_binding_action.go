@@ -15,7 +15,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.4.0"
+	SkillManagementSkillVersion = "1.4.2"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -73,7 +73,7 @@ func SkillManagementSkill() *skill.Definition {
 			SkillActionListSetupRequests: skillListSetupRequestsAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
-				"Propose enabling or updating an exact registered Skill for this Agent. Credential values are never accepted; credentials must be opaque references.",
+				"Propose enabling or updating an exact registered Skill for this Agent. Use only after all required reviewed configuration and verified authorized credential references are available. If user configuration or authorization is needed, call request_setup instead. Discovery never supplies credential references, so never construct a reference from a credential kind or name. Credential values are never accepted; credentials must be opaque references.",
 				upsertProperties,
 				[]interface{}{"bindingId", "expectedRevision", "skillId", "skillVersion", "allowedActions", "enablePrompt", "maximumRisk"},
 			),
@@ -164,7 +164,7 @@ func skillDiscoveryAction() skill.Action {
 	}
 	return skill.Action{
 		Name:        SkillActionDiscoverBinding,
-		Description: "Find exact authorized Skills that could satisfy a capability request for the current Agent. Results contain no credential references or values and do not install or activate anything.",
+		Description: "Find exact authorized Skills that could satisfy a capability request for the current Agent. Query with the requested service or Skill name or concise task keywords. Omit maximumRisk for a connection request unless the user explicitly requested a catalog risk filter: read-only discovery does not execute the Skill, and an integration can include both read and destructive actions. Results contain no credential references or values and do not install or activate anything.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported,
 		Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{
@@ -172,7 +172,7 @@ func skillDiscoveryAction() skill.Action {
 			"properties": map[string]interface{}{
 				"query":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 512},
 				"requiredActions": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128}, "uniqueItems": true, "maxItems": 32},
-				"maximumRisk":     map[string]interface{}{"type": "string", "enum": riskValues},
+				"maximumRisk":     map[string]interface{}{"description": "Optional explicit catalog filter on the highest declared action risk across each whole Skill. Omit for ordinary connection discovery; execution risk is enforced separately.", "type": "string", "enum": riskValues},
 				"cursor":          map[string]interface{}{"type": "string", "maxLength": 1024},
 				"limit":           map[string]interface{}{"type": "integer", "minimum": 1, "maximum": skill.MaximumDiscoveryLimit},
 			},
