@@ -293,6 +293,8 @@ type (
 	WorkforceAuthoringGenerator               = authoring.Generator
 	WorkforceAuthoringIntent                  = authoring.AuthoringIntent
 	WorkforceAuthoringIntentGenerator         = authoring.IntentGenerator
+	WorkforceProfileGenerator                 = authoring.ProfileGenerator
+	WorkforceIdentityProfile                  = authoring.IdentityProfile
 	WorkforceAuthoringIntentRepairGenerator   = authoring.IntentRepairGenerator
 	WorkforceAuthoringResult                  = authoring.CompileResult
 	WorkforceAuthoringValidationIssue         = authoring.ValidationIssue
@@ -2421,6 +2423,14 @@ const (
 
 func ValidateWorkforceCandidateAuthority(candidate *WorkforceCandidate, constraint *WorkforceAuthorityConstraint) []WorkforceAuthoringValidationIssue {
 	return authoring.ValidateCandidateAuthorityConstraint(candidate, constraint)
+}
+
+func ValidateWorkforceProfileChangeSet(changeSet *WorkforceChangeSet) error {
+	return authoring.ValidateProfileChangeSet(changeSet)
+}
+
+func ValidateWorkforceProfilePlacement(placement WorkforceChangeSetPlacement) error {
+	return authoring.ValidateProfilePlacement(placement)
 }
 
 const (

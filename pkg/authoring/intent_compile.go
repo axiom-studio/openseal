@@ -23,6 +23,13 @@ var authoringIntentKeyPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 // Runbook edge, pointer, budget, and authority projection below is owned by
 // OpenSeal and is subsequently checked by the normal candidate validators.
 func CompileAuthoringIntent(intent AuthoringIntent, request GenerateRequest) (GenerationResponse, error) {
+	if request.ProfileOnly {
+		profile, err := profileFromAuthoringIntent(intent)
+		if err != nil {
+			return GenerationResponse{}, err
+		}
+		return compileIdentityProfile(profile, request)
+	}
 	if err := validateAuthoringIntent(intent, request.Catalog); err != nil {
 		return GenerationResponse{}, err
 	}

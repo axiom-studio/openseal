@@ -70,7 +70,9 @@ func NewCompiler(generator interface{}) (*Compiler, error) {
 	}
 	if _, intent := generator.(IntentGenerator); !intent {
 		if _, legacy := generator.(Generator); !legacy {
-			return nil, errors.New("workforce authoring generator must provide semantic intent")
+			if _, profile := generator.(ProfileGenerator); !profile {
+				return nil, errors.New("workforce authoring generator must provide semantic intent")
+			}
 		}
 	}
 	return &Compiler{generator: generator}, nil
@@ -97,8 +99,14 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 	if request.Mode == ModeAmend && request.Existing == nil {
 		return nil, errors.New("amend authoring requires the existing workforce candidate")
 	}
+	if request.ProfileOnly {
+		request.Catalog = profileCapabilityCatalog(request.Catalog)
+	}
 	if err := ValidateCapabilityCatalog(request.Catalog); err != nil {
 		return nil, fmt.Errorf("authoring capability catalog: %w", err)
+	}
+	if request.ProfileOnly {
+		return c.compileIdentityProfile(ctx, request, observe)
 	}
 	reportCompileProgress(observe, CompilePhaseCapabilityResolve, 1, 1)
 	request.CompositionRequirements = deriveRuntimeCompositionRequirements(request.Prompt, request.Catalog)
@@ -119,8 +127,10 @@ func (c *Compiler) CompileWithProgress(ctx context.Context, request GenerateRequ
 				payload, err = json.Marshal(compiled)
 			}
 		}
+	} else if generator, ok := c.generator.(Generator); ok {
+		payload, err = generator.Generate(ctx, request)
 	} else {
-		payload, err = c.generator.(Generator).Generate(ctx, request)
+		return nil, errors.New("workforce authoring requires a semantic or candidate generator")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("generate workforce candidate: %w", err)
