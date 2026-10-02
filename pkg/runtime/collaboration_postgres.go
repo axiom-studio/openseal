@@ -421,7 +421,13 @@ func (s *PostgresStore) insertPostgresAgentRunTx(ctx context.Context, tx *sql.Tx
 		run.ID, run.Scope.Kind, run.Scope.ID, run.ObjectiveID, run.ParentRunID, run.RootRunID, run.AssignedAgentID,
 		run.Status, run.Priority, run.Revision, run.Deadline, run.AvailableAt, run.QueueEnteredAt, run.LeaseOwner,
 		run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, run.CreatedAt, string(payload))
-	return err
+	if err != nil {
+		return err
+	}
+	if wait, err := runEventWaitForRun(run); err != nil || wait == nil {
+		return err
+	}
+	return s.syncPostgresRunEventWaitTx(ctx, tx, run)
 }
 
 func (s *PostgresStore) updatePostgresAgentRunTx(ctx context.Context, tx *sql.Tx, run *AgentRun, expectedRevision int64) error {
@@ -445,5 +451,5 @@ func (s *PostgresStore) updatePostgresAgentRunTx(ctx context.Context, tx *sql.Tx
 	if affected != 1 {
 		return ErrRevisionConflict
 	}
-	return nil
+	return s.syncPostgresRunEventWaitTx(ctx, tx, run)
 }

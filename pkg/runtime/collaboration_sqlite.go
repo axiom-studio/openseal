@@ -399,7 +399,10 @@ func insertSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun
 		run.ObjectiveID, run.ParentRunID, run.RootRunID, run.AssignedAgentID, run.Status, run.Priority, run.Revision,
 		run.Deadline, run.AvailableAt, run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt,
 		run.Attempt, run.CreatedAt, string(payload))
-	return err
+	if err != nil {
+		return err
+	}
+	return syncSQLiteRunEventWaitConn(ctx, conn, run)
 }
 
 func updateSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun, expectedRevision int64) error {
@@ -422,7 +425,7 @@ func updateSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun
 	if affected != 1 {
 		return ErrRevisionConflict
 	}
-	return nil
+	return syncSQLiteRunEventWaitConn(ctx, conn, run)
 }
 
 func decodeAgentRequest(payload string) (*AgentRequest, error) {

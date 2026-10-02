@@ -1356,6 +1356,10 @@ func AgentRunsCapability() KernelCapability {
 	return kernelapi.AgentRunsCapability()
 }
 
+func WorkspaceSearchCapability() KernelCapability {
+	return kernelapi.WorkspaceSearchCapability()
+}
+
 func ObjectivesCapability() KernelCapability {
 	return kernelapi.ObjectivesCapability()
 }
@@ -1883,6 +1887,9 @@ const (
 	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
 	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
 	RunbookActionCreateTask         = runtime.RunbookActionCreateTask
+	RunbookActionCreateWorkflow     = runtime.RunbookActionCreateWorkflow
+	RunbookActionWorkflowSources    = runtime.RunbookActionWorkflowSources
+	RunbookActionInspectWorkflows   = runtime.RunbookActionInspectWorkflows
 	RunbookActionList               = runtime.RunbookActionList
 	RunbookActionSetStatus          = runtime.RunbookActionSetStatus
 	RunbookActionStart              = runtime.RunbookActionStart
@@ -2022,6 +2029,7 @@ const (
 
 	AgentRunCommandPause                    = runtime.AgentRunCommandPause
 	AgentRunCommandResume                   = runtime.AgentRunCommandResume
+	AgentRunCommandRetry                    = runtime.AgentRunCommandRetry
 	AgentRunCommandCancel                   = runtime.AgentRunCommandCancel
 	AgentRunCommandIntervene                = runtime.AgentRunCommandIntervene
 	AgentRunCommandResolveHumanIntervention = runtime.AgentRunCommandResolveHumanIntervention
@@ -3483,12 +3491,16 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if err != nil {
 		return err
 	}
+	validator.SetWorkflowCatalog(e.skills)
+	validator.SetWorkflowTeams(e.teams)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
+		dispatcher.SetWorkflowCatalog(e.skills)
+		dispatcher.SetWorkflowTeams(e.teams)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3496,6 +3508,8 @@ func (e *Engine) configureRunbookManagementActions() error {
 		if dispatchErr != nil {
 			return dispatchErr
 		}
+		dispatcher.SetWorkflowCatalog(e.skills)
+		dispatcher.SetWorkflowTeams(e.teams)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil
@@ -4210,6 +4224,10 @@ func (e *Engine) ValidateAgentRunEntrypoint(ctx context.Context, scope runtime.S
 
 func (e *Engine) CommandAgentRun(ctx context.Context, req runtime.AgentRunCommandRequest) (*runtime.AgentRunCommandResult, error) {
 	return runtime.NewRunCommandService(e.store).CommandAgentRun(ctx, req)
+}
+
+func (e *Engine) ConversationRetryEligibility(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunRetryEligibility, error) {
+	return runtime.NewRunCommandService(e.store).ConversationRetryEligibility(ctx, scope, runID)
 }
 
 func (e *Engine) GetAgentRun(ctx context.Context, scope runtime.Scope, runID string) (*runtime.AgentRun, error) {

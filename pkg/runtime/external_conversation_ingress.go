@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -103,16 +104,25 @@ type ExternalConversationIngressHostRequest struct {
 // the endpoints selected from its verified routing claims remain tenant
 // scoped. Provider application secrets are supplied only by the Skill host.
 type ExternalConversationIngressGateway struct {
-	Scope        Scope                                `json:"scope"`
-	DeploymentID string                               `json:"deploymentId"`
-	Adapter      ExternalConversationAdapterReference `json:"adapter"`
-	Provider     string                               `json:"provider"`
+	Scope          Scope                                `json:"scope"`
+	DeploymentID   string                               `json:"deploymentId"`
+	Adapter        ExternalConversationAdapterReference `json:"adapter"`
+	Provider       string                               `json:"provider"`
+	InstallationID string                               `json:"installationId,omitempty"`
+	ApplicationID  string                               `json:"applicationId,omitempty"`
 }
 
 func (g ExternalConversationIngressGateway) Validate() error {
 	if g.Scope.Validate() != nil || !validAgentReference(strings.TrimSpace(g.DeploymentID), 256) ||
 		!validOpaqueIdentifier(strings.TrimSpace(g.Provider), 128) {
 		return ErrInvalidExternalConversation
+	}
+	if (g.InstallationID != "" && !validOpaqueIdentifier(g.InstallationID, 1024)) ||
+		(g.ApplicationID != "" && (!validOpaqueIdentifier(g.ApplicationID, 1024) || g.InstallationID == "")) {
+		return ErrInvalidExternalConversation
+	}
+	if g.Scope.Kind == "platform" && (g.InstallationID != "" || g.ApplicationID != "") {
+		return fmt.Errorf("%w: platform gateway authority comes from tenant endpoint mappings", ErrInvalidExternalConversation)
 	}
 	return g.Adapter.Validate()
 }
@@ -245,8 +255,23 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationIngr
 	if err := result.Validate(); err != nil {
 		return nil, err
 	}
+	for _, event := range result.Events {
+		if event.Type != capability.ConversationEventApprovalDecided {
+			if !containsConversationEventType(adapter.Adapter.InboundEventTypes, event.Type) ||
+				(endpoint.Mode == capability.ConversationEndpointDirect && !event.Direct) {
+				return nil, fmt.Errorf("%w: adapter emitted an event outside the endpoint contract", ErrInvalidExternalConversation)
+			}
+		}
+	}
 	received := make([]*ReceiveExternalConversationEventResult, 0, len(result.Events))
 	for index := range result.Events {
+		event := result.Events[index]
+		if event.Type != capability.ConversationEventApprovalDecided {
+			if err := publishVerifiedConversationEvent(ctx, s.eventObserver, endpoint.Scope, endpoint.DeploymentID,
+				effectiveEndpoint.Adapter, endpoint.Provider, endpoint.InstallationID, endpoint.ApplicationID, event); err != nil {
+				return nil, err
+			}
+		}
 		persisted, receiveErr := s.Receive(ctx, ReceiveExternalConversationEventRequest{
 			Scope: request.Scope, EndpointID: endpoint.ID, Event: result.Events[index],
 		})
@@ -313,7 +338,7 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 	// current revision just as endpoint ingress, delivery and callbacks do;
 	// keeping the creation revision here permanently disconnects the inbox.
 	if err != nil || adapter == nil || adapter.Binding == nil ||
-		adapter.Binding.SkillID != ref.SkillID ||
+		adapter.Binding.SkillID != ref.SkillID || adapter.Binding.SourceIdentity != ref.SourceIdentity ||
 		adapter.Binding.Revision < ref.BindingRevision || adapter.Adapter.Provider != gateway.Provider {
 		return nil, fmt.Errorf("%w: exact gateway Skill adapter is unavailable or stale", ErrExternalConversationConflict)
 	}
@@ -335,6 +360,10 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 	routes := make([]verifiedEventRoute, 0, len(result.Events))
 	for index := range result.Events {
 		routed := result.Events[index]
+		if (gateway.InstallationID != "" && gateway.InstallationID != routed.InstallationID) ||
+			(gateway.ApplicationID != "" && gateway.ApplicationID != routed.ApplicationID) {
+			continue
+		}
 		route := ExternalConversationVerifiedRoute{
 			Provider: gateway.Provider, SkillID: adapter.Binding.SkillID, SkillVersion: adapter.Binding.SkillVersion,
 			SourceIdentity: adapter.Binding.SourceIdentity, AdapterID: ref.AdapterID,
@@ -354,6 +383,10 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 		bound := endpoints[:0]
 		for _, endpoint := range endpoints {
 			if endpoint == nil {
+				continue
+			}
+			if endpoint.Scope == gateway.Scope && endpoint.DeploymentID == gateway.DeploymentID &&
+				endpoint.Adapter.BindingID == ref.BindingID && endpoint.Adapter.BindingRevision > adapter.Binding.Revision {
 				continue
 			}
 			if endpoint.ApplicationID == "" && (gateway.Scope.Kind == "platform" ||
@@ -403,14 +436,38 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 		}
 		routes = append(routes, verifiedEventRoute{event: routed, endpoints: endpoints})
 	}
+	for _, route := range routes {
+		if route.event.Event.Type != capability.ConversationEventApprovalDecided {
+			if !containsConversationEventType(adapter.Adapter.InboundEventTypes, route.event.Event.Type) {
+				return nil, fmt.Errorf("%w: adapter emitted undeclared event type %q", ErrInvalidExternalConversation, route.event.Event.Type)
+			}
+		}
+	}
 	received := make([]*ReceiveExternalConversationEventResult, 0, len(result.Events))
 	for _, route := range routes {
+		if route.event.Event.Type != capability.ConversationEventApprovalDecided {
+			if gateway.Scope.Kind != "platform" && gateway.InstallationID != "" {
+				if err := publishVerifiedConversationEvent(ctx, s.eventObserver, gateway.Scope, gateway.DeploymentID,
+					effectiveGateway.Adapter, gateway.Provider, route.event.InstallationID, route.event.ApplicationID, route.event.Event); err != nil {
+					return nil, err
+				}
+			}
+		}
 		for _, endpoint := range route.endpoints {
 			persisted, receiveErr := s.Receive(ctx, ReceiveExternalConversationEventRequest{
 				Scope: endpoint.Scope, EndpointID: endpoint.ID, Event: route.event.Event,
 			})
 			if receiveErr != nil {
 				return nil, receiveErr
+			}
+			if persisted.Item != nil && (gateway.Scope.Kind == "platform" || gateway.InstallationID == "") {
+				// Unpinned/platform gateways derive authority from a mapped
+				// endpoint's revalidated live binding. Disabled or stale target
+				// bindings must never acquire observations through another host.
+				if err := publishVerifiedConversationEvent(ctx, s.eventObserver, endpoint.Scope, endpoint.DeploymentID,
+					persisted.Item.Adapter, endpoint.Provider, route.event.InstallationID, route.event.ApplicationID, route.event.Event); err != nil {
+					return nil, err
+				}
 			}
 			received = append(received, persisted)
 		}

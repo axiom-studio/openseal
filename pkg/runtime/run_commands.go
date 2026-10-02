@@ -18,6 +18,7 @@ type AgentRunCommandKind string
 const (
 	AgentRunCommandPause                    AgentRunCommandKind = "pause"
 	AgentRunCommandResume                   AgentRunCommandKind = "resume"
+	AgentRunCommandRetry                    AgentRunCommandKind = "retry"
 	AgentRunCommandCancel                   AgentRunCommandKind = "cancel"
 	AgentRunCommandIntervene                AgentRunCommandKind = "intervene"
 	AgentRunCommandResolveHumanIntervention AgentRunCommandKind = "resolve_human_intervention"
@@ -172,6 +173,9 @@ func (s *RunCommandService) CommandAgentRun(ctx context.Context, req AgentRunCom
 }
 
 func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
+	if req.Kind == AgentRunCommandRetry {
+		return s.RetryConversationRun(ctx, req)
+	}
 	if s == nil || s.store == nil {
 		return nil, errors.New("run command store is not configured")
 	}

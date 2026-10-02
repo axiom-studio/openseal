@@ -311,6 +311,10 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	resolvedBinding := *binding
 	resolvedBinding.InputContextRefs = append([]string(nil), binding.InputContextRefs...)
 	binding = &resolvedBinding
+	if p.reportingStore != nil {
+		binding.Runner = conversationWorkTurnRunner{inner: binding.Runner, runs: p.portfolio, conversations: p.reportingStore}
+	}
+
 	if ref := evidenceSnapshotInputContextRef(run.Context); ref != "" && !containsString(binding.InputContextRefs, ref) {
 		binding.InputContextRefs = append(binding.InputContextRefs, ref)
 	}
@@ -1040,6 +1044,10 @@ func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause err
 }
 
 func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {
+	// Canonical stores already captured an immutable reporting intent with the
+	// terminal commit. This fast path improves latency; the durable reporting
+	// worker retries and acknowledges it independently using the same message
+	// idempotency key, including crashes immediately before or after this call.
 	if err := projectTerminalRunReporting(ctx, p.reportingStore, run); err != nil {
 		p.logger.Warnw("failed to project terminal Run milestone", "runId", run.ID, "error", err)
 	}

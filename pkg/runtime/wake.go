@@ -149,7 +149,7 @@ func (s *AgentRunWakeService) wakeOne(ctx context.Context, run *AgentRun, signal
 }
 
 func wakeConditionMatches(condition *WakeCondition, signal WakeSignal) bool {
-	if condition == nil || condition.Type != signal.Type {
+	if condition == nil || condition.EventWait != nil || condition.Type != signal.Type {
 		return false
 	}
 	if condition.WakeAt != nil && signal.At.Before(*condition.WakeAt) {

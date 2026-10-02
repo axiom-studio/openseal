@@ -34,6 +34,7 @@ func (s *PostgresStore) migrateArtifacts(ctx context.Context, tx *sql.Tx) error 
 		`CREATE INDEX IF NOT EXISTS artifacts_catalog_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, type, media_type, classification, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_provenance_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, producer_run_id, producer_request_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS artifacts_owner_page_idx ON ` + s.table("artifacts") + ` (scope_kind, scope_id, ((payload->'provenance'->'owner'->>'type')), ((payload->'provenance'->'owner'->>'id')), created_at DESC, id, version DESC)`,
+		`CREATE INDEX IF NOT EXISTS artifacts_search_idx ON ` + s.table("artifacts") + ` USING GIN (to_tsvector('simple', coalesce(payload->>'name', '') || ' ' || coalesce(payload->>'metadata', '')))`,
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {

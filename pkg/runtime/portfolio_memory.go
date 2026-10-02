@@ -105,10 +105,15 @@ func (s *MemoryStore) CreateAgentRun(_ context.Context, run *AgentRun) error {
 	if s.agentRuns[key] != nil {
 		return ErrRunIdempotency
 	}
+	wait, err := s.prepareMemoryRunEventWaitLocked(run)
+	if err != nil {
+		return err
+	}
 	if err := s.allocateMemoryObjectiveRunLocked(run); err != nil {
 		return err
 	}
-	s.agentRuns[key] = cloneAgentRun(run)
+	s.saveMemoryAgentRunLocked(key, run)
+	s.syncMemoryRunEventWaitLocked(run, wait)
 	return nil
 }
 
@@ -335,6 +340,7 @@ func cloneAgentRun(in *AgentRun) *AgentRun {
 	var out AgentRun
 	data, _ := json.Marshal(in)
 	_ = json.Unmarshal(data, &out)
+	_ = restoreRunEventWaitCheckpoint(data, &out)
 	out.Kind = normalizeRunKind(out.Kind)
 	return &out
 }

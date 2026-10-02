@@ -66,7 +66,7 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	if proposal.Approval != nil {
 		s.approvals[portfolioKey(call.Scope, proposal.Approval.ID)] = cloneApprovalCheckpoint(proposal.Approval)
 	}
-	s.agentRuns[runKey] = cloneAgentRun(proposal.Run)
+	s.saveMemoryAgentRunLocked(runKey, proposal.Run)
 	s.activity[runKey] = append(s.activity[runKey], event)
 	return &ActionProposalResult{
 		Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval),
@@ -239,7 +239,7 @@ func (s *MemoryStore) ResolveApproval(_ context.Context, resolution ApprovalReso
 	if currentCall.ExternalOperationDigest != "" && externalOperationProtects(currentCall.Status) && !externalOperationProtects(resolution.Call.Status) {
 		delete(s.externalOperationKeys, externalOperationStoreKey(currentCall.Scope, currentCall.ExternalOperationDigest))
 	}
-	s.agentRuns[runKey] = cloneAgentRun(resolution.Run)
+	s.saveMemoryAgentRunLocked(runKey, resolution.Run)
 	s.activity[runKey] = append(s.activity[runKey], event)
 	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolution.Run), Event: cloneActivityEvent(event), Resolved: true}, nil
 }
@@ -334,7 +334,7 @@ func (s *MemoryStore) PersistActionExecution(_ context.Context, execution Action
 		delete(s.externalOperationKeys, externalOperationStoreKey(currentCall.Scope, currentCall.ExternalOperationDigest))
 	}
 	if execution.Run != nil {
-		s.agentRuns[runKey] = cloneAgentRun(execution.Run)
+		s.saveMemoryAgentRunLocked(runKey, execution.Run)
 	}
 	s.activity[runKey] = append(s.activity[runKey], event)
 	return &ActionExecutionResult{Call: cloneActionCall(execution.Call), Run: cloneAgentRun(execution.Run), Event: cloneActivityEvent(event)}, nil

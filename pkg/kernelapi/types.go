@@ -18,6 +18,8 @@ const (
 	APIVersion                                 = "agent-kernel/v1"
 	AgentRunsCapabilityID                      = "agent-runs"
 	AgentRunsCapabilityVersion                 = "2"
+	WorkspaceSearchCapabilityID                = "workspace-search"
+	WorkspaceSearchCapabilityVersion           = "1"
 	ObjectivesCapabilityID                     = "objectives"
 	ObjectivesCapabilityVersion                = "1"
 	RunbooksCapabilityID                       = "runbooks"
@@ -470,6 +472,13 @@ func AgentRunsCapability(operations ...string) Capability {
 	return Capability{
 		ID: AgentRunsCapabilityID, Version: AgentRunsCapabilityVersion, Available: len(operations) > 0,
 		Operations: append([]string(nil), operations...),
+	}
+}
+
+func WorkspaceSearchCapability() Capability {
+	return Capability{
+		ID: WorkspaceSearchCapabilityID, Version: WorkspaceSearchCapabilityVersion, Available: true,
+		Operations: []string{OperationRead},
 	}
 }
 

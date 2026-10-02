@@ -17,6 +17,7 @@ type authoringSchemaProjection struct {
 	TriggerFields    []string                                 `json:"triggerFields"`
 	StepFields       []string                                 `json:"stepFields"`
 	StepKinds        map[StepKind]authoringStepKindProjection `json:"stepKinds"`
+	EventMatchFields []string                                 `json:"eventMatchFields"`
 	Value            authoringValueProjection                 `json:"value"`
 }
 
@@ -86,6 +87,7 @@ func buildAuthoringSchemaProjection() string {
 		TriggerFields:    jsonFieldNames(reflect.TypeOf(Trigger{})),
 		StepFields:       jsonFieldNames(reflect.TypeOf(Step{})),
 		StepKinds:        make(map[StepKind]authoringStepKindProjection, len(stepPayloadTypes)),
+		EventMatchFields: jsonFieldNames(reflect.TypeOf(EventMatch{})),
 		Value: authoringValueProjection{
 			Fields:           jsonFieldNames(reflect.TypeOf(Value{})),
 			ExactlyOneSource: true,

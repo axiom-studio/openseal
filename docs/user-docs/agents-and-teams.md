@@ -90,3 +90,11 @@ The terminal client defaults to `agent:operator`. Changing it changes who owns w
 - Give an owner something to pursue in [Objectives and Runs](objectives-and-runs.md).
 - Grant it governed capabilities in [Skills and Approvals](skills-and-approvals.md).
 - Generate a whole workforce from a prompt in [Workforces](workforces.md).
+
+### Answering questions from delegated work
+
+When an Agent delegates work to itself from a conversation and needs clarification, the runtime publishes its question in the originating chat. Choose **Answer** beneath the question to address that task; a single immediately preceding question can also receive an ordinary reply. With multiple pending tasks, use **Answer** so the reply reaches the intended task. Accepting an answer durably resumes the child Run without creating a duplicate conversation Run. The handoff is recovered after a restart, and existing stored clarification waits are projected automatically.
+
+The delegated Agent receives the original request wording, including length units and other constraints. Straightforward writing should use reasonable audience and tone defaults instead of requiring optional preferences before producing a draft.
+
+Completed conversation operations return their user-facing text output instead of only a success receipt. If a reasoning child saved a draft before a later turn failed, that draft is delivered with an explicit incomplete-output notice. Existing status-only replies can be recovered without rerunning the model; failed Runs remain failed. Tool completion claims still require real action receipts, while a text-only draft needs none.

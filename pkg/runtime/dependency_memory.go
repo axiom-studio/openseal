@@ -56,9 +56,9 @@ func (s *MemoryStore) CreateRunDependencyGroup(_ context.Context, record RunDepe
 		s.dependencyGroupKeys[dependencyGroupIdempotencyStoreKey(record.Group.Scope, record.Group.IdempotencyKey)] = record.Group.ID
 	}
 	for _, target := range record.TargetRuns {
-		s.agentRuns[portfolioKey(target.Scope, target.ID)] = cloneAgentRun(target)
+		s.saveMemoryAgentRunLocked(portfolioKey(target.Scope, target.ID), target)
 	}
-	s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
+	s.saveMemoryAgentRunLocked(sourceKey, record.SourceRun)
 	persisted := cloneActivityEvent(appendMemoryActivityLocked(s, record.Event))
 	edges := cloneDependencySlice(record.Dependencies)
 	evaluation, err := EvaluateRunDependencies(record.Group, edges)
@@ -140,7 +140,7 @@ func (s *MemoryStore) ResolveRunDependency(_ context.Context, record RunDependen
 	for _, edge := range result.Dependencies {
 		s.dependencies[groupKey][edge.ID] = cloneRunDependency(edge)
 	}
-	s.agentRuns[sourceKey] = cloneAgentRun(result.Source)
+	s.saveMemoryAgentRunLocked(sourceKey, result.Source)
 	persisted := make([]*ActivityEvent, 0, len(result.Events))
 	for _, event := range result.Events {
 		persisted = append(persisted, cloneActivityEvent(appendMemoryActivityLocked(s, event)))
