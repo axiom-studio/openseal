@@ -15,7 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func scheduledTaskFixture(t *testing.T, store KernelStore) (*AgentRun, *skill.Catalog, *skill.BoundAction, map[string]interface{}) {
+func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ...*skill.Definition) (*AgentRun, *skill.Catalog, *skill.BoundAction, map[string]interface{}) {
 	t.Helper()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "task-test"}
@@ -48,6 +48,9 @@ func scheduledTaskFixture(t *testing.T, store KernelStore) (*AgentRun, *skill.Ca
 	}
 	catalog := skill.NewCatalog()
 	def := RunbookManagementSkill()
+	if len(runbookDefinitions) == 1 {
+		def = runbookDefinitions[0]
+	}
 	if err := catalog.Register(ctx, def); err != nil {
 		t.Fatal(err)
 	}

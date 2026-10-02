@@ -710,6 +710,7 @@ type (
 	ConversationAdapterTransport         = capability.ConversationAdapterTransport
 	ConversationDestinationDiscovery     = capability.ConversationDestinationDiscovery
 	ConversationAdapter                  = capability.ConversationAdapter
+	ConversationSubjectEvidence          = capability.ConversationSubjectEvidence
 	BoundConversationAdapter             = capability.BoundConversationAdapter
 	CallbackAdapterTransport             = capability.CallbackAdapterTransport
 	CallbackAdapter                      = capability.CallbackAdapter
@@ -1547,6 +1548,7 @@ var (
 	NewRunActionValidator                  = runtime.NewRunActionValidator
 	NewRunActionDispatcher                 = runtime.NewRunActionDispatcher
 	RunbookManagementSkill                 = runtime.RunbookManagementSkill
+	RunbookManagementSkillLegacy130        = runtime.RunbookManagementSkillLegacy130
 	NewRunbookActionValidator              = runtime.NewRunbookActionValidator
 	NewRunbookActionDispatcher             = runtime.NewRunbookActionDispatcher
 	TeamManagementSkill                    = runtime.TeamManagementSkill
@@ -3477,8 +3479,10 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if !e.runbookManagementActions {
 		return nil
 	}
-	if err := e.skills.Register(context.Background(), runtime.RunbookManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
-		return err
+	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkill()} {
+		if err := e.skills.Register(context.Background(), definition); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+			return err
+		}
 	}
 	store, ok := e.store.(interface {
 		runtime.KernelStore
