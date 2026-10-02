@@ -27,7 +27,7 @@ func TestOperationsProjectFixedGitAuthority(t *testing.T) {
 	for _, operation := range operations {
 		names[operation.Name] = true
 	}
-	if !names[OperationGitClone] || !names[OperationGitPush] {
+	if !names[OperationGitClone] || !names[OperationGitCommit] || !names[OperationGitPush] {
 		t.Fatalf("Git operations=%#v", names)
 	}
 }
