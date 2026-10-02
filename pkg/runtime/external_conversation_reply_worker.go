@@ -158,6 +158,10 @@ func (w *ExternalConversationReplyWorker) project(
 	// Thread status is advisory and provider-capability dependent. Enqueueing it
 	// after the reply preserves thread ordering so providers clear "Thinking…"
 	// only after the durable answer has been accepted.
+	busy, busyErr := externalThreadHasActiveWork(ctx, w.store, run)
+	if busyErr != nil || busy {
+		return result.Delivery, nil
+	}
 	_, _ = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 		Scope: item.Scope, EndpointID: endpoint.ID,
 		Operation:      capability.ConversationDeliveryTypingIndicator,

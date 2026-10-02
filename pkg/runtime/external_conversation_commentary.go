@@ -43,7 +43,7 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 				return result, seen, ErrExternalConversationConflict
 			}
 			phase := "commentary-" + event.ID
-			message, err := w.post(ctx, item, endpoint, RunProgressAcknowledgement{RunID: run.ID, Phase: phase, Text: event.Summary, SourceEventID: event.ID, SourceRevision: run.Revision})
+			message, err := w.post(ctx, item, endpoint, RunProgressAcknowledgement{RunID: run.ID, Phase: phase, Text: event.Summary, SourceEventID: event.ID})
 			if err != nil {
 				return result, seen, err
 			}
