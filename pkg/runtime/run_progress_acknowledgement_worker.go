@@ -152,7 +152,16 @@ func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, sco
 			continue
 		}
 		result = append(result, updates...)
-		if hasCommentary || !renderStatus {
+		if !renderStatus {
+			status, statusErr := w.projectThreadStatus(ctx, item)
+			if statusErr != nil {
+				processErrors = append(processErrors, statusErr)
+			} else if status != nil {
+				result = append(result, status)
+			}
+			continue
+		}
+		if hasCommentary {
 			continue
 		}
 		delivery, processErr := w.process(ctx, item)
