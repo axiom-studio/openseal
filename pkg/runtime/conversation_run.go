@@ -132,6 +132,10 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 		return nil, false, err
 	}
 	if current != nil {
+		// Preserve the receipt of already imported work when an event is replayed.
+		if externalChannelContext(conversation) {
+			return &AgentRunCommandResult{Run: current}, true, nil
+		}
 		result, err := s.runs.CreateAgentRun(ctx, request)
 		return result, true, err
 	}
@@ -189,7 +193,7 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 		assignedAgentID = conversation.Owner.ID
 		visibility = ActivityVisibilityPrivate
 	}
-	return CreateAgentRunRequest{
+	request := CreateAgentRunRequest{
 		Scope: conversation.Scope, Kind: RunKindConversation, Owner: conversation.Owner,
 		AssignedAgentID: assignedAgentID, ConcurrencyKey: conversation.ID, Goal: goal, Source: RunSourceChat,
 		Context: map[string]interface{}{
@@ -201,6 +205,15 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 		Actor:          ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
 		Visibility:     visibility,
 	}
+	if externalChannelContext(conversation) {
+		root := message.ThreadRootID
+		if root == "" {
+			root = message.ID
+		}
+		request.Context["threadRootMessageId"] = root
+		request.ConcurrencyKey = conversation.ID + ":thread:" + root
+	}
+	return request
 }
 
 func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Scope) (*ConversationRunReconcileResult, error) {
@@ -968,11 +981,15 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	if err != nil {
 		return nil, err
 	}
+	if root, _ := input.Run.Context["threadRootMessageId"].(string); root != "" && root != externalConversationThreadRoot(conversation, trigger) {
+		return nil, fmt.Errorf("%w: thread does not match the canonical trigger", ErrInvalidAgentRun)
+	}
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
 		return participationStoppedOutcome(), nil
 	}
 	recent, err := r.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: input.Run.Scope, ConversationID: conversation.ID, Limit: 100, Descending: true, Viewer: &viewer,
+		ThreadRootID: externalConversationThreadRoot(conversation, trigger),
 	})
 	if err != nil {
 		return nil, err
@@ -1055,10 +1072,14 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		runbookOperations = binding.RunbookOperations
 	}
 	historyPlan := conversationHistoryPlan{Messages: recent}
-	saved := r.summaries.get(conversation.Scope, conversation.ID, conversationViewerKey(viewer))
-	history, historyErr := r.conversationHistoryForCompaction(ctx, conversation, viewer, recent, saved)
-	if historyErr == nil {
-		historyPlan = planConversationHistory(conversation, trigger.ID, viewer, history, saved)
+	// Channel summaries cover unrelated threads. Connector turns retain their
+	// own recent originals and recover older originals through bounded history.
+	if !externalChannelContext(conversation) {
+		saved := r.summaries.get(conversation.Scope, conversation.ID, conversationViewerKey(viewer))
+		history, historyErr := r.conversationHistoryForCompaction(ctx, conversation, viewer, recent, saved)
+		if historyErr == nil {
+			historyPlan = planConversationHistory(conversation, trigger.ID, viewer, history, saved)
+		}
 	}
 	attachments := r.conversationAttachments(ctx, conversation, trigger, recent)
 	goal, err := r.agentConversationGoalWithAttachments(ctx, conversation, trigger, historyPlan.Messages, runbookOperations, attachments, &historyPlan)
@@ -1964,8 +1985,16 @@ func validateConversationRun(run *AgentRun) error {
 	}
 	conversationID, conversationOK := run.Context[conversationRunContextConversationID].(string)
 	triggerID, triggerOK := run.Context[conversationRunContextTriggerID].(string)
+	root, _ := run.Context["threadRootMessageId"].(string)
+	key := conversationID
+	if root != "" {
+		if !validOpaqueIdentifier(root, 128) {
+			return ErrInvalidAgentRun
+		}
+		key += ":thread:" + root
+	}
 	if !conversationOK || !triggerOK || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) ||
-		run.ConcurrencyKey != conversationID {
+		run.ConcurrencyKey != key {
 		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
 	}
 	return nil
@@ -2044,4 +2073,16 @@ func participationStoppedOutcome() *TurnOutcome {
 // External provider messages never inherit the agent’s other private work.
 func externalChannelContext(conversation *Conversation) bool {
 	return conversation != nil && conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceExternalSource
+}
+
+// A provider thread remains inside its channel conversation. Its root scopes
+// model context and execution; ordinary application chats have no such scope.
+func externalConversationThreadRoot(conversation *Conversation, trigger *ChannelMessage) string {
+	if !externalChannelContext(conversation) || trigger == nil {
+		return ""
+	}
+	if trigger.ThreadRootID != "" {
+		return trigger.ThreadRootID
+	}
+	return trigger.ID
 }
