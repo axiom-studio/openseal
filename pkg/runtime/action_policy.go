@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/builtin"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -24,6 +25,13 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 		return ActionPolicyDecision{}, errors.New("bound action is required")
 	}
 	action := input.Bound.Action
+	// The host-native profile tool can only replace the executing Agent's
+	// picture. Keep its write classification and binding checks, but do not
+	// interrupt a requested cosmetic change with an approval checkpoint.
+	if input.Bound.Definition.ID == builtin.SkillID && action.Name == builtin.GenerateProfileImage &&
+		action.Risk == skill.RiskLevelWrite && action.SideEffect == skill.SideEffectWrite {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "self profile picture change"}, nil
+	}
 	if action.Risk == skill.RiskLevelRead && (action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only action"}, nil
 	}

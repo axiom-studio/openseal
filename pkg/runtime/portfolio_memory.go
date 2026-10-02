@@ -148,7 +148,15 @@ func (s *MemoryStore) ListAgentRuns(_ context.Context, filter AgentRunFilter) ([
 	defer s.mu.RUnlock()
 	result := make([]*AgentRun, 0)
 	for _, run := range s.agentRuns {
-		if run.Scope != filter.Scope || !matchesRunFilter(run, filter) {
+		matchFilter := filter
+		if filter.ConversationID != "" && filter.IncludeDescendants {
+			root := s.agentRuns[portfolioKey(filter.Scope, run.RootRunID)]
+			if run.Context[conversationRunContextConversationID] != filter.ConversationID && (root == nil || root.Context[conversationRunContextConversationID] != filter.ConversationID) {
+				continue
+			}
+			matchFilter.ConversationID = ""
+		}
+		if run.Scope != filter.Scope || !matchesRunFilter(run, matchFilter) {
 			continue
 		}
 		result = append(result, cloneAgentRun(run))

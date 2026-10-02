@@ -236,6 +236,32 @@ func TestProjectActivatedSkillsPrefersCanonicalKernelManagementBinding(t *testin
 	}
 }
 
+func TestProjectActivatedSkillsPreservesExplicitVersionOverChatDefaults(t *testing.T) {
+	action := func(binding, version, name string) capability.ModelAction {
+		return capability.ModelAction{Name: "openseal.builtin." + name, SkillID: "openseal.builtin", Version: version, Action: name, BindingID: binding, BindingRevision: 1}
+	}
+	bundled := skill.ActivatedSkill{BindingID: "bundled:builtin", SkillID: "openseal.builtin", SkillVersion: "1.5.0", Actions: []capability.ModelAction{action("bundled:builtin", "1.5.0", "read_attachment"), action("bundled:builtin", "1.5.0", "generate_image")}}
+	explicit := skill.ActivatedSkill{BindingID: "workforce:agent:openseal.builtin", SkillID: "openseal.builtin", SkillVersion: "1.4.4", Actions: []capability.ModelAction{action("workforce:agent:openseal.builtin", "1.4.4", "read_attachment")}}
+	for _, skills := range [][]skill.ActivatedSkill{{bundled, explicit}, {explicit, bundled}} {
+		_, actions, _, _ := projectActivatedSkills(&skill.ActivationSnapshot{DeploymentID: "agent", Skills: skills})
+		if len(actions) != 2 {
+			t.Fatalf("expected explicit overlap and default-only action, got %#v", actions)
+		}
+		for _, a := range actions {
+			if a.Action == "read_attachment" && (a.BindingID != explicit.BindingID || a.Version != "1.4.4") {
+				t.Fatalf("explicit version was replaced: %#v", a)
+			}
+		}
+	}
+	other := explicit
+	other.BindingID = "other-explicit"
+	other.Actions = []capability.ModelAction{action(other.BindingID, "1.4.4", "read_attachment")}
+	_, actions, _, _ := projectActivatedSkills(&skill.ActivationSnapshot{DeploymentID: "agent", Skills: []skill.ActivatedSkill{explicit, other}})
+	if len(actions) != 2 {
+		t.Fatal("distinct explicit bindings must retain their authority ambiguity")
+	}
+}
+
 func TestPinnedRunbookPlanPreventsDefinitionAndTriggerDrift(t *testing.T) {
 	definition := &runbook.Definition{
 		ID: "chat", Version: "2",
