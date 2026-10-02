@@ -18,8 +18,8 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			if updates, err := worker.ProcessCommentaryScope(t.Context(), fixture.endpoint.Scope); err != nil || len(updates) != 0 {
-				t.Fatalf("empty run synthesized an update: %#v %v", updates, err)
+			if updates, err := worker.ProcessCommentaryScope(t.Context(), fixture.endpoint.Scope); err != nil || len(updates) != 1 || updates[0].Operation != capability.ConversationDeliveryTypingIndicator {
+				t.Fatalf("initial working state missing: %#v %v", updates, err)
 			}
 			activity := NewRunActivityService(fixture.store, fixture.store)
 			for i, eventType := range []string{"turn.commentary", "turn.progress", "turn.commentary", "turn.commentary"} {
@@ -32,7 +32,7 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 					t.Fatal(err)
 				}
 			}
-			if updates, err := worker.ProcessCommentaryScope(t.Context(), fixture.endpoint.Scope); err != nil || len(updates) != 2 {
+			if updates, err := worker.ProcessCommentaryScope(t.Context(), fixture.endpoint.Scope); err != nil || len(updates) != 3 {
 				t.Fatalf("updates withheld until completion: %#v %v", updates, err)
 			}
 			// Even a quick completed run must keep its public updates before the answer.
@@ -51,7 +51,7 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 				}
 			}
 			outbox, err := fixture.store.ListExternalConversationDeliveries(t.Context(), ExternalConversationDeliveryFilter{Scope: fixture.endpoint.Scope, EndpointID: fixture.endpoint.ID, Limit: 100})
-			if err != nil || len(outbox) != 2 {
+			if err != nil || len(outbox) != 4 {
 				t.Fatalf("reconciliation duplicated updates: %#v %v", outbox, err)
 			}
 			messages, err := fixture.store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: fixture.endpoint.Scope, ConversationID: fixture.conversation.ID, Limit: 100})
@@ -59,5 +59,27 @@ func TestExternalCommentaryUsesSharedMessagesWithoutAnotherModelCall(t *testing.
 				t.Fatalf("public wording/order changed or private activity leaked: %#v %v", messages, err)
 			}
 		})
+	}
+}
+
+func TestExternalThreadStatusKeepsQueuedFollowupWorking(t *testing.T) {
+	fixture := newRunProgressWorkerFixture(t, "webchat", []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend, capability.ConversationDeliveryTypingIndicator})
+	_, err := NewRunCommandService(fixture.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+		Scope: fixture.run.Scope, Kind: RunKindConversation, Owner: fixture.run.Owner, AssignedAgentID: fixture.run.AssignedAgentID,
+		Goal: "Continue in the same thread", Source: RunSourceChat, ConcurrencyKey: "thread-a", IdempotencyKey: "thread-followup", Actor: ActivityActor{Type: "service", ID: "channel"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := *fixture.run
+	completed.ConcurrencyKey = "thread-a"
+	busy, err := externalThreadHasActiveWork(t.Context(), fixture.store, &completed)
+	if err != nil || !busy {
+		t.Fatalf("queued followup lost working indicator: %v %v", busy, err)
+	}
+	completed.ConcurrencyKey = "thread-b"
+	busy, err = externalThreadHasActiveWork(t.Context(), fixture.store, &completed)
+	if err != nil || busy {
+		t.Fatalf("another thread prevented clearing: %v %v", busy, err)
 	}
 }
