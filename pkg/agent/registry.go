@@ -566,6 +566,18 @@ func definitionAmendmentApproverEligible(principal, owner string, allowed []stri
 }
 
 func (r *Registry) ActivateAmendment(ctx context.Context, scope capability.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string) (*DefinitionAmendment, *AgentDeployment, *DefinitionActivation, error) {
+	return r.ActivateAmendmentWithCommit(ctx, scope, amendmentID, expectedRevision, actorType, actorID, reason, nil)
+}
+
+// AmendmentActivationCommit persists a validated activation and its associated
+// materializations atomically. Implementations must preserve the store's scope
+// and revision checks and must not commit only part of the supplied activation.
+type AmendmentActivationCommit func(context.Context, Store, *DefinitionAmendment, int64, *AgentDefinition, *AgentDeployment, int64, DefinitionActivation) error
+
+// ActivateAmendmentWithCommit uses the normal amendment governance and prepares
+// the normal activation, while allowing a materialization to join its commit.
+// A nil commit uses the registry store's standard activation transaction.
+func (r *Registry) ActivateAmendmentWithCommit(ctx context.Context, scope capability.ScopeReference, amendmentID string, expectedRevision int64, actorType, actorID, reason string, commit AmendmentActivationCommit) (*DefinitionAmendment, *AgentDeployment, *DefinitionActivation, error) {
 	current, err := r.store.GetAmendment(ctx, scope, amendmentID)
 	if err != nil {
 		return nil, nil, nil, err
@@ -613,7 +625,12 @@ func (r *Registry) ActivateAmendment(ctx context.Context, scope capability.Scope
 	updatedAmendment.ActivationID = activation.ID
 	updatedAmendment.Revision++
 	updatedAmendment.UpdatedAt = updatedDeployment.UpdatedAt
-	if err := r.store.ActivateAmendment(ctx, updatedAmendment, current.Revision, definition, updatedDeployment, deployment.Revision, activation); err != nil {
+	if commit == nil {
+		commit = func(ctx context.Context, store Store, amendment *DefinitionAmendment, amendmentRevision int64, definition *AgentDefinition, deployment *AgentDeployment, deploymentRevision int64, activation DefinitionActivation) error {
+			return store.ActivateAmendment(ctx, amendment, amendmentRevision, definition, deployment, deploymentRevision, activation)
+		}
+	}
+	if err := commit(ctx, r.store, updatedAmendment, current.Revision, definition, updatedDeployment, deployment.Revision, activation); err != nil {
 		return nil, nil, nil, err
 	}
 	copyActivation := activation
