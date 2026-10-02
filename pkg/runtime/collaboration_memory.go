@@ -51,7 +51,7 @@ func (s *MemoryStore) CreateAgentRequest(_ context.Context, record AgentRequestC
 		s.requestKeys[key] = record.Request.ID
 	}
 	if record.SourceRun != nil {
-		s.agentRuns[runKey] = cloneAgentRun(record.SourceRun)
+		s.saveMemoryAgentRunLocked(runKey, record.SourceRun)
 	}
 	s.requests[requestKey] = cloneAgentRequest(record.Request)
 	persisted := appendMemoryActivityLocked(s, record.Event)
@@ -142,14 +142,14 @@ func (s *MemoryStore) RespondAgentRequest(_ context.Context, record AgentRequest
 		if currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1 {
 			return nil, ErrRevisionConflict
 		}
-		s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
+		s.saveMemoryAgentRunLocked(sourceKey, record.SourceRun)
 	}
 	if record.ChildRun != nil {
 		childKey := portfolioKey(record.ChildRun.Scope, record.ChildRun.ID)
 		if s.agentRuns[childKey] != nil {
 			return nil, ErrInvalidAgentRequestState
 		}
-		s.agentRuns[childKey] = cloneAgentRun(record.ChildRun)
+		s.saveMemoryAgentRunLocked(childKey, record.ChildRun)
 	}
 	var dependencyEvents []*ActivityEvent
 	if record.DependencyResolution != nil {
@@ -172,7 +172,7 @@ func (s *MemoryStore) RespondAgentRequest(_ context.Context, record AgentRequest
 		for _, edge := range result.Dependencies {
 			s.dependencies[groupKey][edge.ID] = cloneRunDependency(edge)
 		}
-		s.agentRuns[sourceKey] = cloneAgentRun(result.Source)
+		s.saveMemoryAgentRunLocked(sourceKey, result.Source)
 		dependencyEvents = result.Events
 	}
 	s.requests[key] = cloneAgentRequest(record.Request)
@@ -232,7 +232,7 @@ func (s *MemoryStore) CompleteAgentRequest(_ context.Context, record AgentReques
 		for _, edge := range result.Dependencies {
 			s.dependencies[groupKey][edge.ID] = cloneRunDependency(edge)
 		}
-		s.agentRuns[sourceKey] = cloneAgentRun(result.Source)
+		s.saveMemoryAgentRunLocked(sourceKey, result.Source)
 		dependencyEvents = result.Events
 	} else if record.SourceRun != nil {
 		sourceKey := portfolioKey(record.SourceRun.Scope, record.SourceRun.ID)
@@ -243,10 +243,10 @@ func (s *MemoryStore) CompleteAgentRequest(_ context.Context, record AgentReques
 		if currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1 {
 			return nil, ErrRevisionConflict
 		}
-		s.agentRuns[sourceKey] = cloneAgentRun(record.SourceRun)
+		s.saveMemoryAgentRunLocked(sourceKey, record.SourceRun)
 	}
 	s.requests[requestKey] = cloneAgentRequest(record.Request)
-	s.agentRuns[childKey] = cloneAgentRun(record.ChildRun)
+	s.saveMemoryAgentRunLocked(childKey, record.ChildRun)
 	events := make([]*ActivityEvent, 0, 2+len(dependencyEvents))
 	for _, event := range []*ActivityEvent{record.SourceEvent, record.ChildEvent} {
 		events = append(events, cloneActivityEvent(appendMemoryActivityLocked(s, event)))

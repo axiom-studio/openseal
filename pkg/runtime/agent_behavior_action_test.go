@@ -32,11 +32,73 @@ func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
 }
 
 func TestAgentManagementExecutorAcceptsActivePreviousContractVersion(t *testing.T) {
-	definition := AgentManagementSkill()
-	definition.Version = agentManagementSkillVersionV1
-	action := definition.Actions[AgentActionAmendBehavior]
-	if !isAgentManagementAction(&skill.BoundAction{Definition: definition, Action: action}) {
-		t.Fatal("active 1.2.0 Agent management binding is no longer executable")
+	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", AgentManagementSkillVersion} {
+		t.Run(version, func(t *testing.T) {
+			definition := AgentManagementSkill()
+			definition.Version = version
+			action := definition.Actions[AgentActionAmendBehavior]
+			if !isAgentManagementAction(&skill.BoundAction{Definition: definition, Action: action}) {
+				t.Fatalf("active %s Agent management binding is no longer executable", version)
+			}
+		})
+	}
+}
+
+func TestAgentManagementPatchUpgradeKeepsLegacyWorkspaceActionExecutable(t *testing.T) {
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "tenant-a"}
+	store := NewMemoryStore()
+	agents := agentBehaviorActionRegistry(t, ctx, scope, nil)
+	catalog := skill.NewCatalog()
+	legacy := AgentManagementSkill()
+	legacy.Version = "1.3.0"
+	channelAction := legacy.Actions[AgentActionConfigureChannel]
+	channelAction.Description = "Propose changing how an existing authorized channel enters and leaves the current Agent's workflow. The endpoint remains an internal materialization; this operation governs its Runbook trigger, reply mode, and approval-delivery purpose together."
+	legacy.Actions[AgentActionConfigureChannel] = channelAction
+	for _, definition := range []*skill.Definition{legacy, AgentManagementSkill()} {
+		if err := catalog.Register(ctx, definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := catalog.Bind(ctx, &skill.Binding{
+		ID: "legacy-agents", Revision: 1, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "researcher",
+		SkillID: AgentManagementSkillID, SkillVersion: legacy.Version, AllowedActions: []string{AgentActionListWorkspace}, MaximumRisk: skill.RiskLevelRead,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
+		AssignedAgentID: "researcher", Goal: "Inspect existing repository permissions", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "conversation-worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+	})
+	proposal, err := NewActionCoordinator(store, store, catalog, policy, nil).Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
+		SkillID: legacy.ID, SkillVersion: legacy.Version, Action: AgentActionListWorkspace,
+		Arguments: map[string]interface{}{}, IdempotencyKey: "inspect-legacy-workspace", Summary: "Inspect workspace permissions",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher, err := NewAgentBehaviorActionDispatcher(store, agents, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatcher.SetWorkspaceCatalog(catalog)
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	if err != nil || executed == nil || executed.Call.Status != ActionCallStatusSucceeded || executed.Call.ID != proposal.Call.ID || executed.Call.SkillVersion != "1.3.0" || executed.Call.Output["resourceType"] != "agent_workspace" {
+		t.Fatalf("legacy action did not execute through the current dispatcher: %#v, %v", executed, err)
+	}
+	preserved, err := catalog.GetDefinition(ctx, legacy.ID, legacy.Version)
+	if err != nil || preserved.Actions[AgentActionConfigureChannel].Description != channelAction.Description {
+		t.Fatalf("immutable legacy definition changed: %#v, %v", preserved, err)
 	}
 }
 

@@ -316,6 +316,9 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 		return w.finishRun(ctx, run, AgentRunStatusFailed, nil, err.Error(), "run.failed")
 	}
 	if changeSet.Status != authoring.ChangeSetEvaluating {
+		if generationWasCanceled(changeSet) {
+			return w.finishRun(ctx, run, AgentRunStatusCanceled, nil, "Generation stopped at your request", "workforce.generation.canceled")
+		}
 		return w.finishRun(ctx, run, AgentRunStatusCompleted, map[string]interface{}{
 			"changeSetId": changeSet.ID, "changeSetStatus": changeSet.Status, "candidateDigest": changeSet.CandidateDigest,
 		}, "", "workforce.generation.reconciled")
@@ -343,6 +346,8 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	})
 	generationCtx, cancel := context.WithTimeout(ctx, w.config.GenerationTimeout)
 	defer cancel()
+	stopWatch := w.watchGenerationCancellation(generationCtx, cancel, scope, changeSet.ID, run.ID)
+	defer stopWatch()
 	if w.config.CatalogResolver != nil {
 		if progressErr := w.recordGenerationProgress(generationCtx, run, changeSet, authoring.CompileProgress{
 			Phase: authoring.CompilePhaseCapabilityResolve, Attempt: 1, MaximumAttempts: 1,
@@ -351,6 +356,9 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 		}
 		catalog, resolveErr := w.config.CatalogResolver.ResolveWorkforceAuthoringCatalog(generationCtx, cloneRuntimeChangeSetForAuthoring(changeSet))
 		if resolveErr != nil {
+			if current, getErr := w.service.changeSets.Get(ctx, scope, changeSet.ID); getErr == nil && generationWasCanceled(current) {
+				return w.finishRun(ctx, run, AgentRunStatusCanceled, nil, "Generation stopped at your request", "workforce.generation.canceled")
+			}
 			if ctx.Err() != nil {
 				settleCtx, settleCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 				defer settleCancel()
@@ -389,6 +397,9 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 		return errors.Join(context.Cause(ctx), settleErr)
 	}
 	if generateErr != nil {
+		if current, getErr := w.service.changeSets.Get(ctx, scope, changeSet.ID); getErr == nil && generationWasCanceled(current) {
+			return w.finishRun(ctx, run, AgentRunStatusCanceled, nil, "Generation stopped at your request", "workforce.generation.canceled")
+		}
 		if errors.Is(generateErr, authoring.ErrChangeSetRevision) {
 			current, getErr := w.service.changeSets.Get(ctx, scope, changeSet.ID)
 			if getErr == nil && current.Status != authoring.ChangeSetEvaluating {
@@ -408,6 +419,35 @@ func (w *WorkforceAuthoringWorker) execute(ctx context.Context, run *AgentRun) e
 	return w.finishRun(ctx, run, AgentRunStatusCompleted, map[string]interface{}{
 		"changeSetId": generated.ID, "changeSetStatus": generated.Status, "candidateDigest": generated.CandidateDigest,
 	}, "", "workforce.generation.completed")
+}
+
+func generationWasCanceled(value *authoring.ChangeSet) bool {
+	return value != nil && value.Generation != nil && value.Generation.FailureCode == "canceled" && value.Status != authoring.ChangeSetEvaluating
+}
+
+// Observe durable cancellation across replicas, including draft deletion. CAS
+// remains the final fence if a provider ignores context cancellation.
+func (w *WorkforceAuthoringWorker) watchGenerationCancellation(ctx context.Context, cancel context.CancelFunc, scope capability.ScopeReference, id, runID string) func() {
+	watchCtx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case <-ticker.C:
+				current, err := w.service.changeSets.Get(watchCtx, scope, id)
+				if err == nil && current != nil && (current.Status != authoring.ChangeSetEvaluating || current.Generation == nil || current.Generation.RunID != runID) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return func() { stop(); <-done }
 }
 
 // settleInterruptedRun releases the lease even when cancellation races the

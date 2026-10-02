@@ -15,7 +15,7 @@ import (
 
 const (
 	RunbookManagementSkillID      = "openseal.runbooks"
-	RunbookManagementSkillVersion = "1.2.0"
+	RunbookManagementSkillVersion = "1.3.0"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -28,12 +28,15 @@ const (
 func RunbookManagementSkill() *skill.Definition {
 	return &skill.Definition{
 		ID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
-		Name: "Routines and scheduled tasks", Description: "Create recurring scheduled Agent tasks, list routines, pause, resume or cancel schedules, start reviewed Runbooks and replace their timing. Scheduled tasks use the current Agent tools and report results back to this chat.",
+		Name: "Routines and workflows", Description: "Create scheduled tasks and durable event-driven follow-ups, inspect their state, start reviewed Runbooks and manage schedules. Work uses the current Agent tools and reports results back to the originating chat.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunbookManagementEndpoint},
 		Actions: map[string]skill.Action{
-			RunbookActionCreateTask: scheduledTaskCreateAction(),
-			RunbookActionList:       scheduledTaskListAction(),
-			RunbookActionSetStatus:  scheduledTaskStatusAction(),
+			RunbookActionCreateWorkflow:   workflowCreateAction(),
+			RunbookActionWorkflowSources:  workflowSourcesAction(),
+			RunbookActionInspectWorkflows: workflowInspectAction(),
+			RunbookActionCreateTask:       scheduledTaskCreateAction(),
+			RunbookActionList:             scheduledTaskListAction(),
+			RunbookActionSetStatus:        scheduledTaskStatusAction(),
 			RunbookActionStart: {
 				Name:        RunbookActionStart,
 				Description: "Start one reviewed Runbook now. Active activations and automatically exhausted scheduled activations remain callable on demand. Omit activationId when the current Objective channel has exactly one callable Runbook; otherwise use an activation ID from the conversation context.",
@@ -120,7 +123,23 @@ type runbookActionStore interface {
 // RunbookActionValidator resolves an omitted activation from the current
 // Objective channel, then proves that the activation is active and belongs to
 // the conversation owner before policy evaluation or approval persistence.
-type RunbookActionValidator struct{ store runbookActionStore }
+type RunbookActionValidator struct {
+	store           runbookActionStore
+	workflowCatalog WorkflowSourceCatalog
+	workflowTeams   WorkflowTeamCatalog
+}
+
+func (v *RunbookActionValidator) SetWorkflowCatalog(catalog WorkflowSourceCatalog) {
+	if v != nil {
+		v.workflowCatalog = catalog
+	}
+}
+
+func (v *RunbookActionValidator) SetWorkflowTeams(teams WorkflowTeamCatalog) {
+	if v != nil {
+		v.workflowTeams = teams
+	}
+}
 
 func NewRunbookActionValidator(store runbookActionStore) (*RunbookActionValidator, error) {
 	if store == nil {
@@ -134,7 +153,7 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		return nil, false, nil
 	}
 	arguments := cloneMap(input.Arguments)
-	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList {
+	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList || isWorkflowActionName(input.Bound.Action.Name) {
 		return arguments, true, nil
 	}
 	if id, _ := arguments["activationId"].(string); strings.TrimSpace(id) != "" {
@@ -202,6 +221,8 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 		return nil, errors.New("Runbook action validator is not configured")
 	}
 	switch input.Bound.Action.Name {
+	case RunbookActionCreateWorkflow, RunbookActionWorkflowSources, RunbookActionInspectWorkflows:
+		return validateWorkflowAction(ctx, v.store, v.workflowCatalog, v.workflowTeams, input)
 	case RunbookActionCreateTask, RunbookActionList, RunbookActionSetStatus:
 		return validateScheduledTaskAction(ctx, v.store, input)
 	case RunbookActionStart:
@@ -233,8 +254,22 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 }
 
 type RunbookActionDispatcher struct {
-	store    runbookActionStore
-	fallback ActionDispatcher
+	store           runbookActionStore
+	fallback        ActionDispatcher
+	workflowCatalog WorkflowSourceCatalog
+	workflowTeams   WorkflowTeamCatalog
+}
+
+func (d *RunbookActionDispatcher) SetWorkflowCatalog(catalog WorkflowSourceCatalog) {
+	if d != nil {
+		d.workflowCatalog = catalog
+	}
+}
+
+func (d *RunbookActionDispatcher) SetWorkflowTeams(teams WorkflowTeamCatalog) {
+	if d != nil {
+		d.workflowTeams = teams
+	}
 }
 
 func NewRunbookActionDispatcher(store runbookActionStore, fallback ActionDispatcher) (*RunbookActionDispatcher, error) {
@@ -253,6 +288,9 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input Acti
 	}
 	if d == nil || d.store == nil || input.Call == nil || input.Run == nil {
 		return nil, errors.New("Runbook action dispatcher is not configured")
+	}
+	if isWorkflowActionName(input.Bound.Action.Name) {
+		return dispatchWorkflowAction(ctx, d.store, d.workflowCatalog, d.workflowTeams, input)
 	}
 	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList || input.Bound.Action.Name == RunbookActionSetStatus {
 		return dispatchScheduledTaskAction(ctx, d.store, input)
@@ -448,6 +486,6 @@ func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, r
 
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.1.3") &&
-		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus)
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
+		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || isWorkflowActionName(bound.Action.Name))
 }

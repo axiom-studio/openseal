@@ -394,6 +394,12 @@ func ValidateHostedTurnLifecycle(status AgentRunStatus, wake *WakeCondition) err
 		if wake == nil || strings.TrimSpace(wake.Type) == "" {
 			return fmt.Errorf("hosted turn status %s requires a concrete wakeCondition", status)
 		}
+		if wake.EventWait != nil {
+			if status != AgentRunStatusWaitingForEvent || wake.Type != "event" {
+				return ErrInvalidRunEventWait
+			}
+			return wake.EventWait.Validate()
+		}
 		return nil
 	default:
 		return fmt.Errorf("hosted turn nextRunStatus %q is not a supported model outcome", status)

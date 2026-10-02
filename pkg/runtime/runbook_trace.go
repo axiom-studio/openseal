@@ -356,6 +356,17 @@ func runbookStepInputRefs(step runbook.Step) []string {
 		for _, value := range step.Transform.Assignments {
 			addValue(value)
 		}
+	case runbook.StepWait:
+		if step.Wait.Match != nil {
+			addValue(step.Wait.Match.Source)
+			addValue(step.Wait.Match.Subject)
+			for _, value := range step.Wait.Match.Attributes {
+				addValue(value)
+			}
+			if step.Wait.Match.After != nil {
+				addValue(*step.Wait.Match.After)
+			}
+		}
 	case runbook.StepForEach:
 		addValue(step.ForEach.Items)
 	case runbook.StepEnd:
@@ -373,6 +384,10 @@ func runbookStepOutputRefs(stepID string, step runbook.Step) []string {
 		refs = append(refs, string(step.Action.ResultPath))
 	case runbook.StepDelegate:
 		refs = append(refs, string(step.Delegate.ResultPath))
+	case runbook.StepWait:
+		if step.Wait.Match != nil && step.Wait.ResultPath != "" {
+			refs = append(refs, string(step.Wait.ResultPath))
+		}
 	case runbook.StepTransform:
 		for pointer := range step.Transform.Assignments {
 			refs = append(refs, pointer)
