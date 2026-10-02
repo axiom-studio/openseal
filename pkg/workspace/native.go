@@ -9,6 +9,7 @@ const (
 	OperationApplyPatch    = "workspace.apply_patch"
 	OperationRunCommand    = "workspace.run_command"
 	OperationGitClone      = "workspace.git_clone"
+	OperationGitCommit     = "workspace.git_commit"
 	OperationGitPush       = "workspace.git_push"
 )
 
@@ -40,7 +41,7 @@ func Operations(authority *Authority) []Operation {
 		result = append(result, Operation{Name: OperationRunCommand, Description: "Run one bounded executable with an explicit argument vector in the Workspace.", InputSchema: commandInput(authority.Workspace.Policy.Commands.MaxDurationSeconds)})
 	}
 	if authority.Workspace.Policy.Git.Enabled {
-		result = append(result, Operation{Name: OperationGitClone, Description: "Clone one repository from an explicitly allowed HTTPS host into the Workspace.", InputSchema: gitCloneInput()})
+		result = append(result, Operation{Name: OperationGitClone, Description: "Clone one repository from an explicitly allowed HTTPS host into the Workspace.", InputSchema: gitCloneInput()}, Operation{Name: OperationGitCommit, Description: "Stage explicitly selected repository files and create a local commit at the inspected HEAD, with an explicit author. Does not push or enable arbitrary commands.", InputSchema: gitCommitInput()})
 		if authority.Workspace.Policy.Git.PushEnabled {
 			result = append(result, Operation{Name: OperationGitPush, Description: "Push the current commit to one branch on an explicitly allowed HTTPS remote.", InputSchema: gitPushInput()})
 		}
@@ -113,4 +114,10 @@ func patchInput() map[string]interface{} {
 
 func commandInput(maximum int) map[string]interface{} {
 	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"executable"}, "properties": map[string]interface{}{"executable": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "pattern": `^[A-Za-z0-9._+/-]+$`}, "arguments": map[string]interface{}{"type": "array", "maxItems": 256, "items": map[string]interface{}{"type": "string", "maxLength": 8192}}, "workingDirectory": relativePathProperty(), "timeoutSeconds": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": maximum, "default": maximum}}}
+}
+
+func gitCommitInput() map[string]interface{} {
+	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "expectedHeadSha", "message", "authorName", "authorEmail", "paths"}, "properties": map[string]interface{}{
+		"path": relativePathProperty(), "expectedHeadSha": map[string]interface{}{"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "message": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 65536}, "authorName": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 200}, "authorEmail": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 254}, "paths": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 100, "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true},
+	}}
 }

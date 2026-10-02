@@ -514,9 +514,15 @@ func externalConversationDeliveryDeduplicationKey(scope Scope, endpointID, idemp
 }
 
 func sameExternalConversationInboxIntent(existing, candidate *ExternalConversationInboxItem) bool {
-	return existing != nil && candidate != nil && existing.Scope == candidate.Scope &&
-		existing.EndpointID == candidate.EndpointID && existing.EndpointRevision == candidate.EndpointRevision &&
-		existing.Adapter == candidate.Adapter && reflect.DeepEqual(existing.Event, candidate.Event)
+	if existing == nil || candidate == nil {
+		return false
+	}
+	before, after := existing.Adapter, candidate.Adapter
+	// A provider retry after a configuration save is still the same event.
+	// Replay the original receipt without replacing its execution snapshot.
+	before.BindingRevision, after.BindingRevision = 0, 0
+	return existing.Scope == candidate.Scope && existing.EndpointID == candidate.EndpointID &&
+		existing.EndpointRevision == candidate.EndpointRevision && before == after && reflect.DeepEqual(existing.Event, candidate.Event)
 }
 
 func sameExternalConversationDeliveryIntent(existing, candidate *ExternalConversationDelivery) bool {
