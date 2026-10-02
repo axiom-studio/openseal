@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 46
+const currentPostgresSchemaVersion int64 = 51
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -39,6 +39,10 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	down := map[int64][]string{
+		51: {"run_event_notifications"},
+		50: {"run_terminal_reports"},
+		49: {"run_event_retention_cursor"},
+		47: {"run_event_wait_scopes", "run_event_consumptions", "run_event_waits", "run_event_inbox"},
 		45: {"skill_setup_requests"},
 		43: {"embed_sessions", "embed_installations"},
 		39: {"callback_events", "callback_registrations"},
@@ -66,6 +70,17 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == 50 {
+			if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS agent_runs_terminal_reporting ON `+s.table("agent_runs")+`;
+				DROP FUNCTION IF EXISTS `+s.table("enqueue_run_terminal_report")+`()`); err != nil {
+				return err
+			}
+		}
+		if version == 49 {
+			if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table("run_event_inbox_received_idx")); err != nil {
+				return err
+			}
+		}
 		if version == 46 {
 			for _, name := range []string{"conversations_search_idx", "channel_messages_search_idx", "artifacts_search_idx", "projects_search_idx", "agent_runs_search_idx"} {
 				if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table(name)); err != nil {

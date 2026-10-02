@@ -1885,6 +1885,9 @@ const (
 	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
 	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
 	RunbookActionCreateTask         = runtime.RunbookActionCreateTask
+	RunbookActionCreateWorkflow     = runtime.RunbookActionCreateWorkflow
+	RunbookActionWorkflowSources    = runtime.RunbookActionWorkflowSources
+	RunbookActionInspectWorkflows   = runtime.RunbookActionInspectWorkflows
 	RunbookActionList               = runtime.RunbookActionList
 	RunbookActionSetStatus          = runtime.RunbookActionSetStatus
 	RunbookActionStart              = runtime.RunbookActionStart
@@ -3478,12 +3481,16 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if err != nil {
 		return err
 	}
+	validator.SetWorkflowCatalog(e.skills)
+	validator.SetWorkflowTeams(e.teams)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
+		dispatcher.SetWorkflowCatalog(e.skills)
+		dispatcher.SetWorkflowTeams(e.teams)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3491,6 +3498,8 @@ func (e *Engine) configureRunbookManagementActions() error {
 		if dispatchErr != nil {
 			return dispatchErr
 		}
+		dispatcher.SetWorkflowCatalog(e.skills)
+		dispatcher.SetWorkflowTeams(e.teams)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil

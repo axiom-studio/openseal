@@ -19,6 +19,8 @@ func migrateCallbackRegistrySQLite(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_callback_registrations_scope
 			ON callback_registrations(scope_kind,scope_id,provider,status,updated_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_callback_registrations_deployment
+			ON callback_registrations(scope_kind,scope_id,json_extract(payload,'$.deploymentId'),status,updated_at DESC,id);
 		CREATE TABLE IF NOT EXISTS callback_events (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
 			registration_id TEXT NOT NULL, event_source TEXT NOT NULL, event_id TEXT NOT NULL,
@@ -97,6 +99,10 @@ func (s *SQLiteStore) ListCallbackRegistrations(ctx context.Context, filter Call
 	}
 	query := `SELECT payload FROM callback_registrations WHERE scope_kind=? AND scope_id=?`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
+	if filter.DeploymentID != "" {
+		query += ` AND json_extract(payload,'$.deploymentId')=?`
+		args = append(args, filter.DeploymentID)
+	}
 	if filter.Provider != "" {
 		query += ` AND provider=?`
 		args = append(args, filter.Provider)
