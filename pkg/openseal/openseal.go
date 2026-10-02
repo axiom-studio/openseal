@@ -2536,6 +2536,7 @@ type Engine struct {
 	clawHub                       *clawhub.InstallManager
 	clawHubPreview                *clawhub.PreviewManager
 	clawHubRegistry               clawhub.Registry
+	clawHubCompilationValidator   clawhub.CompilationValidator
 	skillSources                  *sourceartifact.Service
 	clawHubSourceScope            skill.ScopeReference
 	agentPoolSpecs                []agentRunWorkerSpec
@@ -3640,6 +3641,20 @@ func WithDynamicActionCredentialLeaseWorkers(config runtime.DynamicActionWorkerC
 	}
 }
 
+// WithClawHubCompilationValidator lets an embedding host verify a compiled
+// candidate before an installation or update can replace live files. The host
+// check runs after canonical validation and does not gate restoring existing
+// installations or reading their lifecycle state.
+func WithClawHubCompilationValidator(validator clawhub.CompilationValidator) Option {
+	return func(e *Engine) error {
+		if validator == nil {
+			return errors.New("ClawHub compilation validator is required")
+		}
+		e.clawHubCompilationValidator = validator
+		return nil
+	}
+}
+
 func WithClawHubRegistry(registryID string, registry clawhub.Registry, workspace string) Option {
 	return func(e *Engine) error {
 		manager, err := clawhub.NewInstallManager(registryID, registry, workspace)
@@ -3788,6 +3803,16 @@ func (e *Engine) validateClawHubCompilation(compilation *skillopenclaw.Compilati
 	validationCatalog := skill.NewCatalog()
 	if err := validationCatalog.Register(context.Background(), definition); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (e *Engine) validateClawHubCandidateCompilation(compilation *skillopenclaw.Compilation) error {
+	if err := e.validateClawHubCompilation(compilation); err != nil {
+		return err
+	}
+	if e.clawHubCompilationValidator != nil {
+		return e.clawHubCompilationValidator(compilation)
 	}
 	return nil
 }
@@ -5607,14 +5632,14 @@ func (e *Engine) PreviewClawHubSkill(ctx context.Context, request clawhub.Previe
 	if e == nil || e.clawHubPreview == nil {
 		return nil, fmt.Errorf("ClawHub compilation preview is not configured")
 	}
-	return e.clawHubPreview.PreviewValidated(ctx, request, e.validateClawHubCompilation)
+	return e.clawHubPreview.PreviewValidated(ctx, request, e.validateClawHubCandidateCompilation)
 }
 
 func (e *Engine) InstallClawHubSkill(ctx context.Context, request clawhub.InstallRequest) (*clawhub.InstalledSkill, error) {
 	if e.clawHub == nil {
 		return nil, fmt.Errorf("ClawHub registry is not configured")
 	}
-	installed, err := e.clawHub.InstallValidated(ctx, request, e.validateClawHubCompilation)
+	installed, err := e.clawHub.InstallValidated(ctx, request, e.validateClawHubCandidateCompilation)
 	if err != nil {
 		return nil, err
 	}
@@ -5654,7 +5679,7 @@ func (e *Engine) UpdateClawHubSkill(ctx context.Context, slug string) (*clawhub.
 	if e.clawHub == nil {
 		return nil, fmt.Errorf("ClawHub registry is not configured")
 	}
-	installed, err := e.clawHub.UpdateValidated(ctx, slug, e.validateClawHubCompilation)
+	installed, err := e.clawHub.UpdateValidated(ctx, slug, e.validateClawHubCandidateCompilation)
 	if err != nil {
 		return nil, err
 	}
