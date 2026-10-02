@@ -16,7 +16,8 @@ import (
 
 const (
 	AgentManagementSkillID        = "openseal.agents"
-	AgentManagementSkillVersion   = "1.3.0"
+	AgentManagementSkillVersion   = "1.3.1"
+	agentManagementSkillVersionV4 = "1.3.0"
 	agentManagementSkillVersionV3 = "1.2.2"
 	agentManagementSkillVersionV1 = "1.2.0"
 	agentManagementSkillVersionV2 = "1.2.1"
@@ -1129,7 +1130,7 @@ func isAgentManagementAction(bound *skill.BoundAction) bool {
 }
 
 func isSupportedAgentManagementSkillVersion(version string) bool {
-	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
+	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
 }
 
 func isAgentMutationAction(bound *skill.BoundAction) bool {
