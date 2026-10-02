@@ -198,6 +198,10 @@ func (s *PostgresStore) ListExternalConversationEndpointsByVerifiedRoute(
 }
 
 func (s *PostgresStore) UpdateExternalConversationEndpoint(ctx context.Context, endpoint *ExternalConversationEndpoint, expectedRevision int64) error {
+	return s.updateExternalConversationEndpoint(ctx, s.db, endpoint, expectedRevision)
+}
+
+func (s *PostgresStore) updateExternalConversationEndpoint(ctx context.Context, executor endpointUpdateExecutor, endpoint *ExternalConversationEndpoint, expectedRevision int64) error {
 	if err := endpoint.Validate(); err != nil {
 		return err
 	}
@@ -205,7 +209,7 @@ func (s *PostgresStore) UpdateExternalConversationEndpoint(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("external_conversation_endpoints")+`
+	result, err := executor.ExecContext(ctx, `UPDATE `+s.table("external_conversation_endpoints")+`
 		SET status=$1,revision=$2,updated_at=$3,payload=$4::jsonb
 		WHERE scope_kind=$5 AND scope_id=$6 AND id=$7 AND ingress_route=$8 AND revision=$9`,
 		endpoint.Status, endpoint.Revision, endpoint.UpdatedAt, string(payload),
