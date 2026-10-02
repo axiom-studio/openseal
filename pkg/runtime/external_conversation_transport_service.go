@@ -154,8 +154,15 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 		return nil, err
 	}
 	replay := approval.Status != ApprovalStatusPending && approval.DecisionID == event.ID
+	destination := approvalHasDestination(approval, endpoint.ID)
+	if !destination {
+		destination, err = s.approvalOriginDestination(ctx, approval, endpoint)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if approval.ActionCallID != actionCallID || call.InvocationDigest != invocationDigest ||
-		(!replay && approval.Revision != revision) || !approvalHasDestination(approval, endpoint.ID) {
+		(!replay && approval.Revision != revision) || !destination {
 		return nil, fmt.Errorf("%w: approval decision does not match the reviewed action", ErrInvalidExternalConversation)
 	}
 	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
@@ -380,4 +387,58 @@ func containsConversationDeliveryOperation(values []capability.ConversationDeliv
 func stableExternalConversationID(scope Scope, endpointID, kind, key string) string {
 	seed := strings.Join([]string{"openseal", "external-conversation", scope.key(), endpointID, kind, key}, ":")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
+}
+
+// An originating chat is a review destination only when the durable provider
+// inbox proves which endpoint started this run. This never widens eligibility.
+func (s *ExternalConversationTransportService) approvalOriginDestination(ctx context.Context, approval *ApprovalCheckpoint, endpoint *ExternalConversationEndpoint) (bool, error) {
+	store := s.store.(interface {
+		ExternalConversationStore
+		ActionStore
+		PortfolioStore
+	})
+	run, err := store.GetAgentRun(ctx, approval.Scope, approval.RunID)
+	if err != nil {
+		return false, err
+	}
+	if run == nil || run.Owner != endpoint.Owner {
+		return false, nil
+	}
+	rootID := run.RootRunID
+	if rootID == "" {
+		rootID = run.ID
+	}
+	root, err := store.GetAgentRun(ctx, approval.Scope, rootID)
+	if err != nil {
+		return false, err
+	}
+	if root == nil {
+		return false, nil
+	}
+	conversationID, _ := root.Context["conversationId"].(string)
+	triggerID, _ := root.Context["triggerMessageId"].(string)
+	if conversationID == "" || triggerID == "" {
+		return false, nil
+	}
+	conversation, err := store.GetConversation(ctx, approval.Scope, conversationID)
+	if err != nil {
+		return false, err
+	}
+	if conversation == nil || conversation.Owner != endpoint.Owner || conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceExternalSource || conversation.Origin.ID != endpoint.ID {
+		return false, nil
+	}
+	for offset := 0; ; offset += 100 {
+		items, err := store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{Scope: approval.Scope, EndpointID: endpoint.ID, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, Limit: 100, Offset: offset})
+		if err != nil {
+			return false, err
+		}
+		for _, item := range items {
+			if item.ConversationID == conversationID && item.ChannelMessageID == triggerID && item.RunID == rootID {
+				return true, nil
+			}
+		}
+		if len(items) < 100 {
+			return false, nil
+		}
+	}
 }
