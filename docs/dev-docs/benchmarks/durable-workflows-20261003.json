@@ -1,0 +1,72 @@
+{
+  "measuredAtUtc": "2026-10-02T19:31:14Z",
+  "sdkCommit": "54d350057da1d7fa0e733b0afd81efd3558f7dc8",
+  "environment": {
+    "os": "linux",
+    "arch": "amd64",
+    "cpu": "AMD Ryzen 9 5900HX",
+    "availableCpuCount": 14,
+    "go": "go1.27.1-X:nodwarf5",
+    "gomaxprocs": 1,
+    "processParallelism": 1,
+    "backgroundMachineLoad": "Other workloads active; load average 5.94/4.66/4.30 during run"
+  },
+  "commands": [
+    "GOCACHE=/home/k/projects/axiom/.dev-bin/google-build-cache TMPDIR=/home/k/projects/axiom/.dev-bin GOMAXPROCS=1 go test -p 1 -parallel 1 ./pkg/runtime -run '^$' -bench '^BenchmarkRunEventWaitSQLite(PublishResolve|IdleDiscovery|Fanout100)$' -benchmem -benchtime=20x -count=1 -cpu=1 -timeout=10m",
+    "GOCACHE=/home/k/projects/axiom/.dev-bin/google-build-cache TMPDIR=/home/k/projects/axiom/.dev-bin GOMAXPROCS=1 go test -p 1 -parallel 1 ./pkg/runtime -run '^$' -bench '^BenchmarkMemoryRunEventPublishIndexedWaits$' -benchmem -benchtime=200x -count=1 -cpu=1 -timeout=2m"
+  ],
+  "sqlite": {
+    "iterations": 20,
+    "publishMatchAndQueue100Dormant": {
+      "meanMs": 3.635951,
+      "allocatedBytesPerOp": 395865,
+      "allocationsPerOp": 2086
+    },
+    "publishMatchAndQueue10000Dormant": {
+      "meanMs": 5.327134,
+      "allocatedBytesPerOp": 395784,
+      "allocationsPerOp": 2086
+    },
+    "idleDiscovery100Dormant": {
+      "meanMicroseconds": 20.123,
+      "allocatedBytesPerOp": 4560,
+      "allocationsPerOp": 32
+    },
+    "idleDiscovery10000Dormant": {
+      "meanMicroseconds": 21.616,
+      "allocatedBytesPerOp": 4560,
+      "allocationsPerOp": 32
+    },
+    "fanout100": {
+      "meanMsPer100Resolutions": 311.706707,
+      "processingBatches": 4,
+      "batchSize": 25,
+      "allocatedBytesPerOp": 8476962,
+      "allocationsPerOp": 105762
+    },
+    "exitCode": 0,
+    "totalGoTestSeconds": 157.089
+  },
+  "memoryIngestion": {
+    "iterations": 200,
+    "oneWaitMeanMicroseconds": 44.814,
+    "tenThousandUnrelatedWaitsMeanMicroseconds": 95.209,
+    "tenThousandMatchingWaitsMeanMicroseconds": 25.832,
+    "exitCode": 0,
+    "totalGoTestSeconds": 1.721,
+    "caution": "Times ingestion only, includes receipt construction/digests, leaves notifications unprocessed; no full continuation fanout."
+  },
+  "measuredSqliteWork": "Authentic event validation/digest, durable publication, notification matching, claim, receipt consumption, audit/checkpoint and canonical Run transition to queued.",
+  "excluded": [
+    "Migration/fixture setup and wait registration",
+    "Provider/webhook authentication",
+    "Host timer delay",
+    "Model and tool execution",
+    "Terminal report delivery",
+    "Retention cleanup",
+    "Live PostgreSQL contention",
+    "HTTP/chat latency and p95/p99",
+    "Before/after platform comparison"
+  ],
+  "interpretation": "100x dormant-wait count increased mean idle query time by 7.4% and mean event match/queue time by 46.5%, with unchanged allocations. Local storage measurements support indexed scaling, not a guarantee of no platform latency impact."
+}
