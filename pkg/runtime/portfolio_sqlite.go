@@ -340,6 +340,19 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) 
 	}
 	query := `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ?`
 	args := []any{filter.Scope.Kind, filter.Scope.ID}
+	if filter.ConversationID != "" {
+		if filter.IncludeDescendants {
+			query += ` AND (json_extract(payload, '$.context.conversationId') = ? OR root_run_id IN (SELECT id FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND json_extract(payload, '$.context.conversationId') = ?))`
+			args = append(args, filter.ConversationID, filter.Scope.Kind, filter.Scope.ID, filter.ConversationID)
+		} else {
+			query += ` AND json_extract(payload, '$.context.conversationId') = ?`
+			args = append(args, filter.ConversationID)
+		}
+	}
+	matchFilter := filter
+	if filter.IncludeDescendants {
+		matchFilter.ConversationID = ""
+	}
 	if filter.ConcurrencyKey != "" {
 		query += ` AND json_extract(payload, '$.concurrencyKey') = ?`
 		args = append(args, filter.ConcurrencyKey)
@@ -369,7 +382,7 @@ func (s *SQLiteStore) ListAgentRuns(ctx context.Context, filter AgentRunFilter) 
 		if err != nil {
 			return nil, err
 		}
-		if matchesRunFilter(run, filter) {
+		if matchesRunFilter(run, matchFilter) {
 			result = append(result, run)
 		}
 	}

@@ -46,9 +46,15 @@ func (s *MemoryChangeSetStore) ListDraftChangeSets(_ context.Context, q DraftCha
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	superseded := make(map[string]bool)
+	for _, child := range s.changeSets {
+		if child.Scope == q.Scope && child.Actor == q.Actor && child.ParentID != "" {
+			superseded[child.ParentID] = true
+		}
+	}
 	values := make([]*ChangeSet, 0)
 	for _, value := range s.changeSets {
-		if value.Scope == q.Scope && value.Actor == q.Actor && value.Status != ChangeSetApplied && value.Status != ChangeSetRejected {
+		if !superseded[value.ID] && value.Scope == q.Scope && value.Actor == q.Actor && value.Status != ChangeSetApplied && value.Status != ChangeSetRejected {
 			values = append(values, cloneChangeSet(value))
 		}
 	}

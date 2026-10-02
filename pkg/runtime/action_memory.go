@@ -152,13 +152,39 @@ func (s *MemoryStore) ListApprovals(_ context.Context, filter ApprovalFilter) ([
 			len(filter.Status) > 0 && !containsApprovalStatus(filter.Status, approval.Status) {
 			continue
 		}
-		if filter.Owner != nil {
-			run := s.agentRuns[portfolioKey(filter.Scope, approval.RunID)]
-			if run == nil || run.Owner != *filter.Owner {
+		item := cloneApprovalCheckpoint(approval)
+		run := s.agentRuns[portfolioKey(filter.Scope, approval.RunID)]
+		var root *AgentRun
+		if run != nil {
+			root = s.agentRuns[portfolioKey(filter.Scope, run.RootRunID)]
+		}
+		ownerRun := run
+		if filter.ConversationID != "" && root != nil {
+			ownerRun = root
+		}
+		if filter.Owner != nil && (ownerRun == nil || ownerRun.Owner != *filter.Owner) {
+			continue
+		}
+		if filter.ConversationID != "" {
+			context := &ApprovalConversationContext{}
+			if root != nil {
+				context.ConversationID, _ = root.Context["conversationId"].(string)
+				context.TriggerMessageID, _ = root.Context["triggerMessageId"].(string)
+			}
+			if run != nil {
+				if id, ok := run.Context["conversationId"].(string); ok && id != "" {
+					context.ConversationID = id
+				}
+				if id, ok := run.Context["triggerMessageId"].(string); ok && id != "" {
+					context.TriggerMessageID = id
+				}
+			}
+			if context.ConversationID != filter.ConversationID && !(filter.IncludeUnscoped && context.ConversationID == "") {
 				continue
 			}
+			item.ConversationContext = context
 		}
-		result = append(result, cloneApprovalCheckpoint(approval))
+		result = append(result, item)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].CreatedAt.Equal(result[j].CreatedAt) {

@@ -748,7 +748,7 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 				Code: "risk_increased", Message: fmt.Sprintf("%s risk changes from %s to %s", name, before.Risk, after.Risk),
 			})
 		}
-		if !reflect.DeepEqual(before.InputSchema, after.InputSchema) || !reflect.DeepEqual(before.OutputSchema, after.OutputSchema) ||
+		if !compatibleUpgradeInputSchema(before.InputSchema, after.InputSchema) || !reflect.DeepEqual(before.OutputSchema, after.OutputSchema) ||
 			!reflect.DeepEqual(before.Credentials, after.Credentials) || before.SideEffect != after.SideEffect ||
 			before.Idempotency != after.Idempotency {
 			findings = append(findings, SkillReferenceUpgradeFinding{
@@ -757,6 +757,53 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 		}
 	}
 	return findings
+}
+
+// Only optional properties added to a closed object are automatically compatible.
+// Existing constraints (including required fields and cross-field rules) must
+// remain identical. Open objects could previously accept values rejected by a
+// newly declared property, so they deliberately retain exact comparison.
+func compatibleUpgradeInputSchema(before, after map[string]interface{}) bool {
+	if reflect.DeepEqual(before, after) {
+		return true
+	}
+	if before["type"] != "object" || after["type"] != "object" || before["additionalProperties"] != false || after["additionalProperties"] != false {
+		return false
+	}
+	oldProps, ok := before["properties"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	newProps, ok := after["properties"].(map[string]interface{})
+	if !ok || len(newProps) < len(oldProps) {
+		return false
+	}
+	// Reject cross-property applicators; adding a named property can alter their
+	// meaning even when their JSON remains unchanged.
+	for key := range before {
+		switch key {
+		case "type", "properties", "required", "additionalProperties", "title", "description", "$comment", "minProperties", "maxProperties":
+		default:
+			return false
+		}
+	}
+	for key, value := range oldProps {
+		if !reflect.DeepEqual(value, newProps[key]) {
+			return false
+		}
+	}
+	oldRest, newRest := make(map[string]interface{}), make(map[string]interface{})
+	for key, value := range before {
+		if key != "properties" {
+			oldRest[key] = value
+		}
+	}
+	for key, value := range after {
+		if key != "properties" {
+			newRest[key] = value
+		}
+	}
+	return reflect.DeepEqual(oldRest, newRest)
 }
 
 func upgradeRiskRank(value capability.RiskLevel) int {

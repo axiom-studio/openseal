@@ -64,3 +64,51 @@ func TestDraftListingScopesOwnerTenantAndPagination(t *testing.T) {
 		})
 	}
 }
+
+func TestDraftListingShowsOnlyCurrentOwnerScopedProposalRevision(t *testing.T) {
+	sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "lineage.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlite.Close()
+	for name, store := range map[string]interface {
+		authoring.ChangeSetStore
+		authoring.DraftChangeSetStore
+	}{"memory": authoring.NewMemoryChangeSetStore(), "sqlite": sqlite} {
+		t.Run(name, func(t *testing.T) {
+			scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
+			actor := authoring.ChangeSetActor{Type: "user", ID: "7"}
+			add := func(id, parent string, status authoring.ChangeSetStatus, owner authoring.ChangeSetActor) {
+				t.Helper()
+				v := &authoring.ChangeSet{ID: id, ParentID: parent, Scope: scope, Actor: owner, Revision: 1, Status: status, UpdatedAt: time.Now().UTC()}
+				if _, _, err := store.CreateChangeSet(t.Context(), v, id, id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			add("original", "", authoring.ChangeSetBlocked, actor)
+			add("followup", "original", authoring.ChangeSetReady, actor)
+			q := authoring.DraftChangeSetQuery{Scope: scope, Actor: actor, Limit: 1}
+			got, err := store.ListDraftChangeSets(t.Context(), q)
+			if err != nil || len(got) != 1 || got[0].ID != "followup" {
+				t.Fatalf("lineage: %+v %v", got, err)
+			}
+			q.Offset = 1
+			got, err = store.ListDraftChangeSets(t.Context(), q)
+			if err != nil || len(got) != 0 {
+				t.Fatalf("superseded parent appeared on another page: %+v %v", got, err)
+			}
+			add("applied", "followup", authoring.ChangeSetApplied, actor)
+			q.Offset = 0
+			got, err = store.ListDraftChangeSets(t.Context(), q)
+			if err != nil || len(got) != 0 {
+				t.Fatalf("applied lineage resurrected: %+v %v", got, err)
+			}
+			add("independent", "", authoring.ChangeSetBlocked, actor)
+			add("foreign", "independent", authoring.ChangeSetReady, authoring.ChangeSetActor{Type: "user", ID: "8"})
+			got, err = store.ListDraftChangeSets(t.Context(), q)
+			if err != nil || len(got) != 1 || got[0].ID != "independent" {
+				t.Fatalf("foreign revision hid own draft: %+v %v", got, err)
+			}
+		})
+	}
+}
