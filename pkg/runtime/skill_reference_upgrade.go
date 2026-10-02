@@ -563,9 +563,14 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	return receipt, nil
 }
 
+// Connector references follow the stable binding within the same executable
+// identity. Account configuration updates can advance its revision before the
+// next Skill upgrade; those older references must move with it as well. The
+// caller verifies scope, deployment and adapter compatibility independently.
 func upgradeConversationReferenceMatches(ref ExternalConversationAdapterReference, binding *skill.Binding) bool {
 	return binding != nil && ref.SkillID == binding.SkillID && ref.SkillVersion == binding.SkillVersion &&
-		ref.SourceIdentity == binding.SourceIdentity && ref.BindingID == binding.ID && ref.BindingRevision == binding.Revision
+		ref.SourceIdentity == binding.SourceIdentity && ref.BindingID == binding.ID &&
+		ref.BindingRevision >= 1 && ref.BindingRevision <= binding.Revision
 }
 
 func bindingBeforeUpgrade(binding *skill.Binding, plan *SkillReferenceUpgradePlan) *skill.Binding {
@@ -578,7 +583,8 @@ func bindingBeforeUpgrade(binding *skill.Binding, plan *SkillReferenceUpgradePla
 
 func upgradeCallbackReferenceMatches(ref CallbackAdapterReference, binding *skill.Binding) bool {
 	return binding != nil && ref.SkillID == binding.SkillID && ref.SkillVersion == binding.SkillVersion &&
-		ref.SourceIdentity == binding.SourceIdentity && ref.BindingID == binding.ID && ref.BindingRevision == binding.Revision
+		ref.SourceIdentity == binding.SourceIdentity && ref.BindingID == binding.ID &&
+		ref.BindingRevision >= 1 && ref.BindingRevision <= binding.Revision
 }
 
 func callbackSubscriptionsSupported(subscriptions []CallbackSubscription, eventTypes []string) bool {

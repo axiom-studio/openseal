@@ -167,13 +167,14 @@ const (
 type ConversationAdapterFeature string
 
 const (
-	ConversationFeatureThreads     ConversationAdapterFeature = "threads"
-	ConversationFeatureMentions    ConversationAdapterFeature = "mentions"
-	ConversationFeatureAttachments ConversationAdapterFeature = "attachments"
-	ConversationFeatureReactions   ConversationAdapterFeature = "reactions"
-	ConversationFeatureEdits       ConversationAdapterFeature = "edits"
-	ConversationFeatureDeletes     ConversationAdapterFeature = "deletes"
-	ConversationFeatureTyping      ConversationAdapterFeature = "typing"
+	ConversationFeatureThreads        ConversationAdapterFeature = "threads"
+	ConversationFeatureMentions       ConversationAdapterFeature = "mentions"
+	ConversationFeatureAttachments    ConversationAdapterFeature = "attachments"
+	ConversationFeatureReactions      ConversationAdapterFeature = "reactions"
+	ConversationFeatureEdits          ConversationAdapterFeature = "edits"
+	ConversationFeatureDeletes        ConversationAdapterFeature = "deletes"
+	ConversationFeatureTyping         ConversationAdapterFeature = "typing"
+	ConversationFeatureContextHistory ConversationAdapterFeature = "context_history"
 )
 
 const ConversationAdapterProtocolV1 = "openseal.conversation.adapter/v1"
