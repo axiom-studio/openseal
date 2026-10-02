@@ -15,7 +15,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.4.2"
+	SkillManagementSkillVersion = "1.4.3"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -42,7 +42,7 @@ func SkillManagementSkill() *skill.Definition {
 		"sourceIdentity":   map[string]interface{}{"type": "string"},
 		"allowedActions": map[string]interface{}{
 			"type":        "array",
-			"description": "Exact action names from the selected Skill definition. Use an empty array for prompt-only access. Wildcards such as * are invalid and never grant authority.",
+			"description": "Exact action names from the selected Skill definition. Use an empty array for prompt-only access or account-only connection storage. Wildcards such as * are invalid and never grant authority.",
 			"items":       map[string]interface{}{"type": "string", "minLength": 1, "pattern": `^[^*]+$`},
 			"uniqueItems": true,
 		},
@@ -164,15 +164,15 @@ func skillDiscoveryAction() skill.Action {
 	}
 	return skill.Action{
 		Name:        SkillActionDiscoverBinding,
-		Description: "Find exact authorized Skills that could satisfy a capability request for the current Agent. Query with the requested service or Skill name or concise task keywords. Omit maximumRisk for a connection request unless the user explicitly requested a catalog risk filter: read-only discovery does not execute the Skill, and an integration can include both read and destructive actions. Results contain no credential references or values and do not install or activate anything.",
+		Description: "Find exact authorized Skills that could satisfy a capability request for the current Agent. Query with the requested service or Skill name or concise task keywords. Omit requiredActions on the initial lookup. After discovery, requiredActions may contain only exact actions[].name values copied from a result; never natural-language task descriptions. If a requiredActions filter fails, retry once without it to inspect the real names before reporting an access blocker. Omit maximumRisk for a connection request unless the user explicitly requested a catalog risk filter: read-only discovery does not execute the Skill, and an integration can include both read and destructive actions. Results contain no credential references or values and do not install or activate anything.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported,
 		Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]interface{}{
 				"query":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 512},
-				"requiredActions": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128}, "uniqueItems": true, "maxItems": 32},
-				"maximumRisk":     map[string]interface{}{"description": "Optional explicit catalog filter on the highest declared action risk across each whole Skill. Omit for ordinary connection discovery; execution risk is enforced separately.", "type": "string", "enum": riskValues},
+				"requiredActions": map[string]interface{}{"description": "Optional exact actions[].name values copied from a previous discovery result. Omit on the first lookup or when the exact names are unknown. Put natural-language tasks in query instead.", "type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128}, "uniqueItems": true, "maxItems": 32},
+				"maximumRisk":     map[string]interface{}{"description": "Optional catalog risk filter. With requiredActions, checks the highest risk among those exact operations; otherwise checks the whole Skill. Candidate actions and maximumRisk still describe the full Skill. Omit for ordinary connection discovery; execution risk is enforced separately.", "type": "string", "enum": riskValues},
 				"cursor":          map[string]interface{}{"type": "string", "maxLength": 1024},
 				"limit":           map[string]interface{}{"type": "integer", "minimum": 1, "maximum": skill.MaximumDiscoveryLimit},
 			},
@@ -542,7 +542,7 @@ func resolveSkillBindingDisable(ctx context.Context, catalog *skill.Catalog, sco
 }
 
 func validateSkillBindingArguments(definition *skill.Definition, args skillBindingUpsertArguments) error {
-	if len(args.AllowedActions) == 0 && !args.EnablePrompt && len(args.EnabledConversationAdapters) == 0 {
+	if len(args.AllowedActions) == 0 && !args.EnablePrompt && len(args.EnabledConversationAdapters) == 0 && len(args.AccessReferences) == 0 {
 		return errors.New("binding must enable a prompt or explicitly allow actions or conversation adapters")
 	}
 	if args.EnablePrompt && definition.Prompt == nil {
