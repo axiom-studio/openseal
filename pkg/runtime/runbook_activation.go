@@ -31,7 +31,7 @@ var (
 // into a second lifecycle.
 type RunbookDetail struct {
 	Activation   *RunbookActivation          `json:"activation"`
-	Definition   *runbook.Definition         `json:"definition"`
+	Definition   *runbook.Definition         `json:"definition,omitempty"`
 	Verification *runbook.VerificationReport `json:"verification,omitempty"`
 }
 
@@ -57,6 +57,12 @@ func ResolveRunbookDetail(ctx context.Context, store RunbookActivationReader, ca
 	}
 	if activation == nil {
 		return nil, ErrRunbookActivationNotFound
+	}
+	if activation.Task != nil {
+		if err := validateScheduledTaskTarget(ctx, store, catalog, activation); err != nil {
+			return nil, err
+		}
+		return &RunbookDetail{Activation: activation}, nil
 	}
 	deployment, err := catalog.GetDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, activation.AssignedAgentID)
 	if err != nil {
@@ -155,6 +161,8 @@ const (
 // binds its exact trigger, target, inputs, policy, and operational limits.
 // Scheduling state therefore belongs to the Runbook and never to the outcome.
 type RunbookActivation struct {
+	LifecycleActionID    string                  `json:"lifecycleActionId,omitempty"`
+	Task                 *ScheduledAgentTask     `json:"task,omitempty"`
 	ID                   string                  `json:"id"`
 	Scope                Scope                   `json:"scope"`
 	Owner                ObjectiveOwner          `json:"owner"`
@@ -208,13 +216,20 @@ func (a *RunbookActivation) Validate() error {
 	}
 	for field, value := range map[string]string{
 		"id": a.ID, "objectiveId": a.ObjectiveID, "assignedAgentId": a.AssignedAgentID,
-		"definitionId": a.DefinitionID, "definitionVersion": a.DefinitionVersion, "triggerId": a.TriggerID,
+		"triggerId": a.TriggerID,
 	} {
 		if strings.TrimSpace(value) == "" {
 			return fmt.Errorf("Runbook activation %s is required", field)
 		}
 	}
-	if strings.TrimSpace(a.Trigger.Entrypoint) == "" {
+	if a.Task != nil {
+		if err := a.Task.Validate(); err != nil {
+			return err
+		}
+		if a.Trigger.Kind != runbook.TriggerSchedule || a.Trigger.Entrypoint != "" || a.DefinitionID != "" || a.DefinitionVersion != "" {
+			return errors.New("scheduled Agent task cannot specify a Runbook definition or entrypoint")
+		}
+	} else if strings.TrimSpace(a.DefinitionID) == "" || strings.TrimSpace(a.DefinitionVersion) == "" || strings.TrimSpace(a.Trigger.Entrypoint) == "" {
 		return errors.New("Runbook activation trigger entrypoint is required")
 	}
 	switch a.Trigger.Kind {
@@ -300,6 +315,7 @@ type RunbookActivationStore interface {
 }
 
 type CreateRunbookActivationRequest struct {
+	Task              *ScheduledAgentTask
 	ID                string
 	Scope             Scope
 	Owner             ObjectiveOwner
@@ -322,6 +338,7 @@ type CreateRunbookActivationRequest struct {
 // require a newly reviewed activation; this command intentionally changes only
 // whether new Runs may be created.
 type UpdateRunbookActivationRequest struct {
+	ActionID         string                  `json:"-"`
 	ExpectedRevision int64                   `json:"expectedRevision"`
 	Status           RunbookActivationStatus `json:"status"`
 }
@@ -371,7 +388,7 @@ func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope,
 	contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
 	contextValues["runbookTriggerId"] = activation.TriggerID
 	idempotencyKey := strings.TrimSpace(request.IdempotencyKey)
-	if activation.Trigger.Reporting != nil && idempotencyKey == "" {
+	if (activation.Trigger.Reporting != nil || activation.Task != nil) && idempotencyKey == "" {
 		idempotencyKey = "runbook-manual:" + activation.ID + ":" + uuid.NewString()
 	}
 	var reportingStore ConversationStore
@@ -380,9 +397,9 @@ func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope,
 	}
 	var channel *Conversation
 	messageKey := ""
-	if activation.Trigger.Reporting != nil {
+	if activation.Trigger.Reporting != nil || activation.Task != nil {
 		var err error
-		channel, messageKey, err = prepareRunReporting(ctx, reportingStore, scope, activation.Owner, activation.Trigger.Reporting, runIDForIdempotencyKey(scope, idempotencyKey), contextValues)
+		channel, messageKey, err = prepareActivationReporting(ctx, reportingStore, activation, runIDForIdempotencyKey(scope, idempotencyKey), contextValues)
 		if err != nil {
 			return nil, err
 		}
@@ -390,7 +407,7 @@ func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope,
 	result, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 		Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
-		Goal: objective.Goal, Source: RunSourceManual, Priority: objective.Priority, Context: contextValues,
+		Goal: activationGoal(activation, objective), Source: RunSourceManual, Priority: objective.Priority, Context: contextValues,
 		Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
 		IdempotencyKey: idempotencyKey, Actor: request.Actor, Visibility: request.Visibility,
 	})
@@ -404,6 +421,9 @@ func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope,
 }
 
 func runbookActivationPlan(activation *RunbookActivation) map[string]interface{} {
+	if activation.Task != nil {
+		return nil
+	}
 	return map[string]interface{}{"runbook": map[string]interface{}{
 		"id": activation.DefinitionID, "version": activation.DefinitionVersion, "trigger": activation.TriggerID,
 	}}
@@ -455,7 +475,7 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 		status = RunbookActivationActive
 	}
 	activation := &RunbookActivation{
-		ID: id, Scope: request.Scope, Owner: request.Owner, ObjectiveID: strings.TrimSpace(request.ObjectiveID),
+		Task: cloneScheduledAgentTask(request.Task), ID: id, Scope: request.Scope, Owner: request.Owner, ObjectiveID: strings.TrimSpace(request.ObjectiveID),
 		AssignedAgentID: strings.TrimSpace(request.AssignedAgentID), DefinitionID: strings.TrimSpace(request.DefinitionID),
 		DefinitionVersion: strings.TrimSpace(request.DefinitionVersion), TriggerID: strings.TrimSpace(request.TriggerID), Trigger: request.Trigger,
 		Input: cloneMap(request.Input), Policy: cloneMap(request.Policy), Budget: cloneBudgetPolicy(request.Budget),
@@ -477,6 +497,17 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 			}
 			return current, nil
 		}
+	}
+	if activation.Task != nil && activation.Status == RunbookActivationActive {
+		base, err := activation.Trigger.Schedule.NextBase(now)
+		if err != nil {
+			return nil, err
+		}
+		due, err := activation.Trigger.Schedule.DueAt(runbookTriggerKey(activation), base)
+		if err != nil {
+			return nil, err
+		}
+		activation.NextOccurrenceBase, activation.NextRunAt = &base, &due
 	}
 	if err := activation.Validate(); err != nil {
 		return nil, err
@@ -544,6 +575,7 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 	}
 	next := cloneRunbookActivation(current)
 	next.Status = request.Status
+	next.LifecycleActionID = request.ActionID
 	next.NextOccurrenceBase = nil
 	next.NextRunAt = nil
 	next.Revision++
@@ -558,6 +590,14 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 }
 
 func (s *RunbookActivationService) ensureReportingChannel(ctx context.Context, activation *RunbookActivation) error {
+	if activation != nil && activation.Task != nil && activation.Status == RunbookActivationActive {
+		store, ok := s.store.(ConversationStore)
+		if !ok {
+			return errors.New("scheduled task reporting requires a conversation store")
+		}
+		_, err := scheduledTaskConversation(ctx, store, activation.Scope, activation.Owner, activation.Task)
+		return err
+	}
 	if activation == nil || activation.Status != RunbookActivationActive || activation.Trigger.Reporting == nil {
 		return nil
 	}
@@ -636,6 +676,7 @@ func cloneRunbookActivation(value *RunbookActivation) *RunbookActivation {
 		return nil
 	}
 	clone := *value
+	clone.Task = cloneScheduledAgentTask(value.Task)
 	clone.Input = cloneMap(value.Input)
 	clone.Policy = cloneMap(value.Policy)
 	clone.Budget = cloneBudgetPolicy(value.Budget)
