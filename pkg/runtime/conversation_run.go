@@ -132,11 +132,15 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 		return nil, false, err
 	}
 	if current != nil {
-		// Preserve the receipt of already imported work when an event is replayed.
+		// Existing imported runs retain their original receipt and execution key.
+		// Replaying an event must not recreate or cancel already accepted work.
 		if externalChannelContext(conversation) {
 			return &AgentRunCommandResult{Run: current}, true, nil
 		}
 		result, err := s.runs.CreateAgentRun(ctx, request)
+		if err == nil {
+			err = s.interruptSupersededConversationRuns(ctx, conversation, message, result.Run.ID)
+		}
 		return result, true, err
 	}
 	coordinated, err := s.coordinatedTriggerIDs(ctx, conversation)
@@ -154,6 +158,9 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	conversation *Conversation,
 	message *ChannelMessage,
 ) (*AgentRunCommandResult, bool, error) {
+	if resumed, handled, err := s.resumeConversationAnswer(ctx, conversation, message); err != nil || handled {
+		return resumed, resumed != nil && resumed.Event == nil, err
+	}
 	request, err := s.conversationAgentRunRequest(ctx, conversation, message)
 	if err != nil {
 		return nil, false, err
@@ -162,7 +169,89 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	if err != nil {
 		return nil, false, err
 	}
+	if err := s.interruptSupersededConversationRuns(ctx, conversation, message, result.Run.ID); err != nil {
+		return result, false, err
+	}
 	return result, result.Event == nil, nil
+}
+
+// A new human prompt supersedes unfinished replies in the same channel. The
+// message and its replacement Run are durable before cancellation, so a failed
+// cancellation can be retried by message reconciliation without losing input.
+func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx context.Context, conversation *Conversation, message *ChannelMessage, replacementID string) error {
+	if externalChannelContext(conversation) || message.Sender.Type != ConversationParticipantUser || !message.RequiresResponse {
+		return nil
+	}
+	const pageSize = 100
+	// Two HTTP posts can overlap: an older message may be scheduled after the
+	// newer one. In that case its own Run must be canceled as well.
+	supersedingSequence := message.Sequence
+	for after := message.Sequence; ; {
+		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+			Scope: conversation.Scope, ConversationID: conversation.ID, AfterSequence: after, Limit: pageSize,
+		})
+		if err != nil {
+			return err
+		}
+		for _, candidate := range messages {
+			if candidate.Sender.Type == ConversationParticipantUser && candidate.RequiresResponse {
+				supersedingSequence = candidate.Sequence
+			}
+		}
+		if len(messages) < pageSize {
+			break
+		}
+		after = messages[len(messages)-1].Sequence
+	}
+	for offset := 0; ; offset += pageSize {
+		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+			Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
+			ConcurrencyKey: conversation.ID, Limit: pageSize, Offset: offset,
+		})
+		if err != nil {
+			return err
+		}
+		for _, run := range runs {
+			if run == nil || (run.ID == replacementID && supersedingSequence == message.Sequence) || isTerminalAgentRunStatus(run.Status) {
+				continue
+			}
+			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+			if triggerID == "" {
+				continue
+			}
+			trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
+			if err != nil {
+				return err
+			}
+			if trigger.Sequence >= supersedingSequence {
+				continue
+			}
+			visibility := ActivityVisibilityPrivate
+			if conversation.Owner.Type == OwnerTypeTeam {
+				visibility = ActivityVisibilityTeam
+			}
+			for attempt := 0; attempt < 3; attempt++ {
+				_, err = s.runs.CommandAgentRun(ctx, AgentRunCommandRequest{
+					Scope: conversation.Scope, RunID: run.ID, ExpectedRevision: run.Revision,
+					Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
+					Summary: "Interrupted by a newer message", Visibility: visibility,
+				})
+				if !errors.Is(err, ErrRevisionConflict) {
+					break
+				}
+				run, err = s.runs.store.GetAgentRun(ctx, conversation.Scope, run.ID)
+				if err != nil || run == nil || isTerminalAgentRunStatus(run.Status) {
+					break
+				}
+			}
+			if err != nil && !(run != nil && isTerminalAgentRunStatus(run.Status)) {
+				return err
+			}
+		}
+		if len(runs) < pageSize {
+			return nil
+		}
+	}
 }
 
 func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *Conversation, message *ChannelMessage) (CreateAgentRunRequest, error) {
@@ -224,6 +313,10 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 		return nil, err
 	}
 	result := &ConversationRunReconcileResult{}
+	if err := s.reconcileConversationQuestions(ctx, scope, result); err != nil {
+		return result, err
+	}
+
 	for offset := 0; ; offset += s.config.ConversationPageSize {
 		conversations, err := s.conversations.ListConversations(ctx, ConversationFilter{
 			Scope: scope, Statuses: []ConversationStatus{ConversationStatusActive},
@@ -244,6 +337,9 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 		if len(conversations) < s.config.ConversationPageSize {
 			break
 		}
+	}
+	if err := s.reconcileConversationOperationOutputs(ctx, scope, result); err != nil {
+		return result, err
 	}
 	if err := s.reconcileCanceledConversationRuns(ctx, scope, result); err != nil {
 		return result, err
@@ -1523,6 +1619,11 @@ func (r *ConversationRunTurnRunner) governedConversationOperationOutcome(ctx con
 			content = label + " failed. Review the Run for the exact failed step and retry when ready."
 		case AgentRunStatusCanceled:
 			content = label + " was canceled."
+		}
+		if saved, err := conversationOperationSavedOutput(ctx, r.portfolio, child); err != nil {
+			return nil, false, err
+		} else if saved != "" {
+			content = saved
 		}
 		return &governedConversationCompletion{
 			Content: content, ResourceType: runResourceType, ResourceID: child.ID,

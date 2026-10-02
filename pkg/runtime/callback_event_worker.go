@@ -80,7 +80,7 @@ func (w *CallbackEventWorker) ProcessOne(ctx context.Context, scope Scope) (*Cal
 		err = fmt.Errorf("%w: callback registration is unavailable or changed", ErrCallbackRegistrationConflict)
 	}
 	if err == nil {
-		err = w.service.dispatch(ctx, registration, receipt.Event)
+		err = w.service.dispatch(ctx, registration, receipt.Event, receipt.CreatedAt)
 	}
 	finishedAt := w.now().UTC()
 	previousRevision := receipt.Revision

@@ -1222,8 +1222,18 @@ func validateBindingShape(binding *Binding) error {
 	if err := validateBindingManagementShape(binding); err != nil {
 		return err
 	}
-	if (len(binding.AllowedActions) == 0 && !binding.EnablePrompt && len(binding.EnabledConversationAdapters) == 0 && len(binding.EnabledCallbackAdapters) == 0) || !validRisk(binding.MaximumRisk) {
-		return fmt.Errorf("%w: binding must enable a prompt or explicitly allow actions, conversation adapters, or callback adapters and set maximum risk", ErrBindingInvalid)
+	if (bindingHasNoCapabilities(binding) && len(binding.Credentials) == 0) || !validRisk(binding.MaximumRisk) {
+		return fmt.Errorf("%w: binding must save credentials or enable a prompt, actions, conversation adapters, or callback adapters and set maximum risk", ErrBindingInvalid)
+	}
+	if bindingHasNoCapabilities(binding) {
+		if binding.MaximumRisk != RiskLevelRead {
+			return fmt.Errorf("%w: an account-only binding must use read maximum risk", ErrBindingInvalid)
+		}
+		for name, reference := range binding.Credentials {
+			if strings.TrimSpace(name) == "" || name != strings.TrimSpace(name) || strings.TrimSpace(reference.Kind) == "" || reference.Kind != strings.TrimSpace(reference.Kind) || strings.TrimSpace(reference.ID) == "" || reference.ID != strings.TrimSpace(reference.ID) {
+				return fmt.Errorf("%w: an account-only binding requires named opaque credential references", ErrBindingInvalid)
+			}
+		}
 	}
 	seenAdapters := make(map[string]bool, len(binding.EnabledConversationAdapters))
 	for _, adapterID := range binding.EnabledConversationAdapters {
@@ -1312,7 +1322,40 @@ func validateSourceIdentity(value string) error {
 	return nil
 }
 
+// Saving an account reference does not grant prompt, action or adapter access.
+func bindingHasNoCapabilities(binding *Binding) bool {
+	return len(binding.AllowedActions) == 0 && !binding.EnablePrompt && len(binding.EnabledConversationAdapters) == 0 && len(binding.EnabledCallbackAdapters) == 0
+}
+
 func validateBindingAgainstDefinition(binding *Binding, definition *Definition) error {
+	if bindingHasNoCapabilities(binding) {
+		requirements := make([]CredentialRequirement, 0)
+		if definition.Prompt != nil {
+			requirements = append(requirements, definition.Prompt.Credentials...)
+		}
+		for _, action := range definition.Actions {
+			requirements = append(requirements, action.Credentials...)
+		}
+		for _, adapter := range definition.ConversationAdapters {
+			requirements = append(requirements, adapter.Credentials...)
+		}
+		for _, adapter := range definition.CallbackAdapters {
+			requirements = append(requirements, adapter.Credentials...)
+		}
+		for name, reference := range binding.Credentials {
+			declared := false
+			for _, requirement := range requirements {
+				if requirement.Name == name && requirement.Kind == reference.Kind {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				return fmt.Errorf("account-only credential %s is not declared by the skill", name)
+			}
+		}
+	}
+
 	if definition.BindingConfigSchema == nil {
 		if len(binding.Config) != 0 {
 			return errors.New("binding config is not declared by the skill")

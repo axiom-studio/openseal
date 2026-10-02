@@ -83,6 +83,11 @@ func (s *PostgresStore) ListCallbackRegistrations(ctx context.Context, filter Ca
 	query := `SELECT payload FROM ` + s.table("callback_registrations") + ` WHERE scope_kind=$1 AND scope_id=$2`
 	args := []interface{}{filter.Scope.Kind, filter.Scope.ID}
 	placeholder := 3
+	if filter.DeploymentID != "" {
+		query += fmt.Sprintf(` AND payload->>'deploymentId'=$%d`, placeholder)
+		args = append(args, filter.DeploymentID)
+		placeholder++
+	}
 	if filter.Provider != "" {
 		query += fmt.Sprintf(` AND provider=$%d`, placeholder)
 		args = append(args, filter.Provider)
@@ -110,6 +115,14 @@ func (s *PostgresStore) ListCallbackRegistrations(ctx context.Context, filter Ca
 		result = append(result, value)
 	}
 	return result, rows.Err()
+}
+
+// migrateWorkflowSourceCallbackLookup is part of the workflow ingress authority
+// migration; keeping it separate avoids rewriting an already numbered migration.
+func (s *PostgresStore) migrateWorkflowSourceCallbackLookup(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS callback_registrations_deployment_idx
+		ON `+s.table("callback_registrations")+` (scope_kind,scope_id,(payload->>'deploymentId'),status,updated_at DESC,id)`)
+	return err
 }
 
 func (s *PostgresStore) UpdateCallbackRegistration(ctx context.Context, value *CallbackRegistration, expectedRevision int64) error {

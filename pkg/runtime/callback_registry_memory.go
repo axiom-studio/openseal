@@ -64,7 +64,7 @@ func (s *MemoryStore) ListCallbackRegistrations(_ context.Context, filter Callba
 	defer s.mu.RUnlock()
 	values := make([]*CallbackRegistration, 0)
 	for _, value := range s.callbackRegistrations {
-		if value.Scope != filter.Scope || (filter.Provider != "" && value.Provider != filter.Provider) ||
+		if value.Scope != filter.Scope || (filter.DeploymentID != "" && value.DeploymentID != filter.DeploymentID) || (filter.Provider != "" && value.Provider != filter.Provider) ||
 			(len(status) > 0 && !status[value.Status]) {
 			continue
 		}
