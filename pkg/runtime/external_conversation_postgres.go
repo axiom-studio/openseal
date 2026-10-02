@@ -721,7 +721,7 @@ func (s *PostgresStore) ClaimExternalConversationDelivery(ctx context.Context, s
 		  ON e.scope_kind=d.scope_kind AND e.scope_id=d.scope_id AND e.id=d.endpoint_id
 		WHERE d.scope_kind=$1 AND d.scope_id=$2 AND d.available_at<=$3
 		  AND (d.status=ANY($4) OR (d.status=$5 AND d.lease_expires_at<=$3))
-		  AND e.status=$6 AND e.revision=d.endpoint_revision
+		  AND e.status=$6 AND e.revision>=d.endpoint_revision
 		  AND NOT EXISTS (
 		    SELECT 1 FROM `+s.table("external_conversation_deliveries")+` active
 		    WHERE active.scope_kind=d.scope_kind AND active.scope_id=d.scope_id
