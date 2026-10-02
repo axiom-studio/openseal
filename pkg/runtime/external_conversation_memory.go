@@ -436,7 +436,7 @@ func (s *MemoryStore) ClaimExternalConversationDelivery(_ context.Context, scope
 			continue
 		}
 		endpoint := s.externalEndpoints[externalConversationEndpointKey(scope, delivery.EndpointID)]
-		if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision != delivery.EndpointRevision {
+		if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive || endpoint.Revision < delivery.EndpointRevision {
 			continue
 		}
 		if selected == nil || delivery.AvailableAt.Before(selected.AvailableAt) ||

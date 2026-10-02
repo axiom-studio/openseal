@@ -102,8 +102,35 @@ func (w *ExternalConversationReplyWorker) project(
 	if endpoint != nil && endpoint.Status != ExternalConversationEndpointActive {
 		return nil, nil
 	}
-	if endpoint == nil || endpoint.Revision != item.EndpointRevision ||
-		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, item.Adapter) {
+	if !externalConversationSnapshotMatchesEndpoint(endpoint, item.Scope, item.EndpointID, item.EndpointRevision, item.Adapter, item.Event.ExternalConversationID) {
+		return nil, ErrExternalConversationConflict
+	}
+	// Projection is already durable. Do not reinterpret an old item against a
+	// newer Skill version or enqueue another status clear while new work runs.
+	key := "external-conversation-reply-delivery:" + item.ID
+	existingID := stableExternalConversationID(item.Scope, item.EndpointID, "delivery", key)
+	existing, err := w.store.GetExternalConversationDelivery(ctx, item.Scope, existingID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		if existing.Scope != item.Scope || existing.EndpointID != item.EndpointID || existing.ConversationID != item.ConversationID ||
+			existing.Operation != capability.ConversationDeliveryMessageSend || existing.IdempotencyKey != key ||
+			(existing.ExternalConversationID != "" && existing.ExternalConversationID != item.Event.ExternalConversationID) ||
+			(item.Event.ExternalThreadID != "" && existing.ExternalThreadID != item.Event.ExternalThreadID) ||
+			existing.EndpointRevision < item.EndpointRevision || existing.Adapter.BindingRevision < item.Adapter.BindingRevision ||
+			existing.Adapter.SkillID != item.Adapter.SkillID || existing.Adapter.SourceIdentity != item.Adapter.SourceIdentity ||
+			!externalConversationAdapterBelongsToEndpoint(existing.Adapter, item.Adapter) {
+			return nil, ErrExternalConversationConflict
+		}
+		return existing, nil
+	}
+	_, adapter, err := w.transport.resolveActiveEndpoint(ctx, item.Scope, item.EndpointID)
+	if err != nil {
+		return nil, err
+	}
+	if !externalConversationSnapshotMatchesBinding(endpoint, item.Adapter, adapter) || endpoint.Owner != run.Owner ||
+		(endpoint.Handler.Kind == ExternalConversationHandlerAgent && endpoint.DeploymentID != run.AssignedAgentID) {
 		return nil, ErrExternalConversationConflict
 	}
 	message, err := w.findCanonicalReply(ctx, item, run)
