@@ -292,6 +292,12 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	})
 	binding, err := p.resolver.ResolveTurnRunner(ctx, cloneAgentRun(run))
 	if err != nil || binding == nil || binding.Runner == nil {
+		if p.parkAcceptedRunRecovery(ctx, workerID, run, nil, err) {
+			return
+		}
+		if p.parkSkillRuntimeMaintenance(ctx, workerID, run, nil, err) {
+			return
+		}
 		if err == nil {
 			err = errors.New("turn runner resolver returned no runner")
 		}
@@ -585,6 +591,16 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 	if sharedContext == nil {
 		sharedContext = make(map[string]interface{})
 	}
+	if proposal.Mode != "" {
+		sharedContext[DelegationModeContextKey] = string(proposal.Mode)
+	}
+	requestedEntrypoint, err := requestedAcceptedChildEntrypoint(sharedContext)
+	if err != nil {
+		return nil, err
+	}
+	if requestedEntrypoint != "" {
+		sharedContext["runbookEntrypoint"] = requestedEntrypoint
+	}
 	runbookOrigin := delegatedRunbookOrigin(run.Context)
 	if runbookOrigin != nil {
 		if entrypoint := strings.TrimSpace(run.Entrypoint); entrypoint != "" {
@@ -595,10 +611,14 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 	if invocation, ok := run.Context[RunbookInvocationContextKey].(map[string]interface{}); ok {
 		// Explicit model arguments remain shareable; an original chat message
 		// is retained only when the same Agent continues its own operation.
-		sharedContext[RunbookInvocationContextKey] = forwardRunbookInvocation(invocation, proposal.AssignedAgentID == run.AssignedAgentID)
-	}
-	if proposal.Mode != "" {
-		sharedContext[DelegationModeContextKey] = proposal.Mode
+		forwarded := forwardRunbookInvocation(invocation, proposal.AssignedAgentID == run.AssignedAgentID)
+		// The caller's invocation is task lineage. Only this proposal's explicit
+		// target method can select an entrypoint on the delegated Agent.
+		delete(forwarded, "entrypoint")
+		if requestedEntrypoint != "" {
+			forwarded["entrypoint"] = requestedEntrypoint
+		}
+		sharedContext[RunbookInvocationContextKey] = forwarded
 	}
 	key := strings.Join([]string{"delegation", run.ID, proposal.StepID}, ":")
 	requestID := stableCollaborationID(run.Scope, key, "request")
@@ -954,11 +974,20 @@ func selectTurnModelAction(actions []capability.ModelAction, request TurnAction)
 		}
 		selected = candidate
 	}
+	if request.ExpectedSkillVersion != "" && (selected == nil || selected.Version != request.ExpectedSkillVersion) {
+		return nil, fmt.Errorf("%w: requested capability %q version %q is not authorized by the current binding", ErrRunSkillDependencyUnavailable, request.Capability, request.ExpectedSkillVersion)
+	}
 	return selected, nil
 }
 
 func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, cause error) {
 	if run == nil {
+		return
+	}
+	if p.parkAcceptedRunRecovery(ctx, workerID, run, turn, cause) {
+		return
+	}
+	if p.parkSkillRuntimeMaintenance(ctx, workerID, run, turn, cause) {
 		return
 	}
 	status := AgentRunStatusFailed

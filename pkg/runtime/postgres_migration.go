@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 51
+const currentPostgresSchemaVersion int64 = 55
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -39,6 +39,9 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	down := map[int64][]string{
+		55: {"project_skill_references"},
+		54: {"run_skill_dependencies"},
+		53: {"skill_runtime_maintenance"},
 		51: {"run_event_notifications"},
 		50: {"run_terminal_reports"},
 		49: {"run_event_retention_cursor"},
@@ -70,6 +73,33 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == runSkillDependencyMigrationVersion {
+			if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS project_run_skill_dependencies ON `+s.table("agent_runs")+`; DROP FUNCTION IF EXISTS `+s.table("project_run_skill_dependencies")+`(); DROP INDEX IF EXISTS `+s.table("agent_runs_legacy_skill_dependency_page")); err != nil {
+				return err
+			}
+		}
+		if version == skillRuntimeMaintenanceMigrationVersion {
+			if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS fence_skill_runtime_maintenance ON `+s.table("action_calls")+`; DROP FUNCTION IF EXISTS `+s.table("fence_skill_runtime_maintenance")+`(); DROP INDEX IF EXISTS `+s.table("skill_bindings_maintenance_page")+`; DROP INDEX IF EXISTS `+s.table("agent_runs_skill_maintenance_wait")); err != nil {
+				return err
+			}
+		}
+		if version == skillUpgradeDrainMigrationVersion {
+			if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS project_skill_action_runtime_metadata ON `+s.table("action_calls")+`;
+				DROP FUNCTION IF EXISTS `+s.table("project_skill_action_runtime_metadata")+`()`); err != nil {
+				return err
+			}
+			for _, name := range []string{"action_calls_skill_runtime_active", "action_calls_skill_binding_active", "action_calls_skill_run_receipt", "agent_runs_skill_runtime_active"} {
+				if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table(name)); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE `+s.table("action_calls")+`
+				DROP COLUMN IF EXISTS deployment_id, DROP COLUMN IF EXISTS binding_id,
+				DROP COLUMN IF EXISTS binding_revision, DROP COLUMN IF EXISTS skill_id,
+				DROP COLUMN IF EXISTS skill_version`); err != nil {
+				return err
+			}
+		}
 		if version == 50 {
 			if _, err := tx.ExecContext(ctx, `DROP TRIGGER IF EXISTS agent_runs_terminal_reporting ON `+s.table("agent_runs")+`;
 				DROP FUNCTION IF EXISTS `+s.table("enqueue_run_terminal_report")+`()`); err != nil {

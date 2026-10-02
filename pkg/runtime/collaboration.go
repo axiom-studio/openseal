@@ -598,13 +598,14 @@ type collaborationAgentStore interface {
 }
 
 type CollaborationService struct {
-	store        CollaborationStore
-	runs         PortfolioStore
-	artifacts    ArtifactStore
-	dependencies *DependencyCoordinator
-	teams        collaborationTeamStore
-	now          func() time.Time
-	newID        func() string
+	store             CollaborationStore
+	runs              PortfolioStore
+	artifacts         ArtifactStore
+	dependencies      *DependencyCoordinator
+	teams             collaborationTeamStore
+	executionPreparer AcceptedRunExecutionPreparer
+	now               func() time.Time
+	newID             func() string
 }
 
 func NewCollaborationService(store CollaborationKernelStore) *CollaborationService {
@@ -1097,6 +1098,26 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			}
 		}
 		child := buildCollaborationChildRun(source, updated, now, s.newID())
+		entrypoint, err := requestedAcceptedChildEntrypoint(updated.SharedContext)
+		if err != nil {
+			return nil, err
+		}
+		childRequest := CreateAgentRunRequest{
+			Kind: child.Kind, Scope: child.Scope, ObjectiveID: child.ObjectiveID, ParentRunID: child.ParentRunID,
+			Owner: child.Owner, AssignedAgentID: child.AssignedAgentID, Entrypoint: entrypoint,
+			ConcurrencyKey: child.ConcurrencyKey, ResourceRequirements: cloneResourceQuantities(child.ResourceRequirements),
+			Goal: child.Goal, Source: child.Source, Priority: child.Priority, Deadline: child.Deadline,
+			Context: child.Context, Plan: child.Plan, Checkpoint: child.Checkpoint, WakeCondition: child.WakeCondition,
+			Budget: child.Budget, Policy: child.Policy,
+		}
+		inherit := entrypoint != "" && child.AssignedAgentID == source.AssignedAgentID && entrypoint == source.Entrypoint
+		if err := prepareAcceptedChildRun(ctx, source, &childRequest, s.executionPreparer, inherit); err != nil {
+			return nil, err
+		}
+		child.Entrypoint, child.Context, child.Plan = childRequest.Entrypoint, childRequest.Context, childRequest.Plan
+		if child.Entrypoint != "" {
+			child.Kind = RunKindAgentWork
+		}
 		if err := child.Validate(); err != nil {
 			return nil, err
 		}

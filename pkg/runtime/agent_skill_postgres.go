@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -581,11 +582,39 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 	if err != nil {
 		return err
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	maintenanceScope := Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
+	var previousSkillID string
+	lookupErr := tx.QueryRowContext(ctx, `SELECT skill_id FROM `+s.table("skill_bindings")+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID).Scan(&previousSkillID)
+	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		return lookupErr
+	}
+	skillIDs := []string{binding.SkillID}
+	if previousSkillID != "" && previousSkillID != binding.SkillID {
+		skillIDs = append(skillIDs, previousSkillID)
+	}
+	sort.Strings(skillIDs)
+	for _, skillID := range skillIDs {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, skillRuntimeMaintenanceLockKey(maintenanceScope, skillID)); err != nil {
+			return err
+		}
+		g, err := s.postgresSkillRuntimeMaintenanceActiveTx(ctx, tx, maintenanceScope, skillID)
+		if err != nil {
+			return err
+		}
+		if g != nil {
+			return &SkillRuntimeMaintenanceError{Maintenance: *g}
+		}
+	}
 	if expectedRevision == 0 {
 		if binding.Revision != 1 {
 			return skill.ErrBindingRevisionConflict
 		}
-		result, err := s.db.ExecContext(ctx, `INSERT INTO `+s.table("skill_bindings")+`
+		result, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("skill_bindings")+`
 			(scope_kind, scope_id, deployment_id, id, skill_id, skill_version, source_identity, revision, payload)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) ON CONFLICT DO NOTHING`, binding.Scope.Kind, binding.Scope.ID,
 			binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload))
@@ -598,12 +627,12 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 			}
 			return skill.ErrBindingRevisionConflict
 		}
-		return nil
+		return tx.Commit()
 	}
 	if binding.Revision != expectedRevision+1 {
 		return skill.ErrBindingRevisionConflict
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("skill_bindings")+` SET skill_id = $1, skill_version = $2, source_identity = $3, revision = $4, payload = $5::jsonb
+	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("skill_bindings")+` SET skill_id = $1, skill_version = $2, source_identity = $3, revision = $4, payload = $5::jsonb
 		WHERE scope_kind = $6 AND scope_id = $7 AND deployment_id = $8 AND id = $9 AND revision = $10`, binding.SkillID,
 		binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, expectedRevision)
 	if err != nil {
@@ -615,7 +644,7 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 		}
 		return skill.ErrBindingRevisionConflict
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *PostgresStore) ListSkillBindings(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {

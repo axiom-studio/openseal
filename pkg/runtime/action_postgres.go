@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/lib/pq"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func (s *PostgresStore) migrateActions(ctx context.Context, tx *sql.Tx) error {
@@ -57,6 +59,47 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 	}
 	defer tx.Rollback()
 	call := proposal.Call
+	if replay, err := s.actionProposalReplayTx(ctx, tx, call); err != nil {
+		return nil, err
+	} else if replay != nil {
+		return replay, tx.Commit()
+	}
+	// Runtime maintenance takes the exclusive side of this lock before its
+	// idle check. New submissions hold the shared side through insertion.
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 0))`,
+		skillRuntimeMaintenanceLockKey(call.Scope, call.SkillID)); err != nil {
+		return nil, err
+	}
+	// A receipt may have committed while the maintenance lock was acquired.
+	if replay, err := s.actionProposalReplayTx(ctx, tx, call); err != nil {
+		return nil, err
+	} else if replay != nil {
+		return replay, tx.Commit()
+	}
+	if gate, err := s.postgresSkillRuntimeMaintenanceActiveTx(ctx, tx, call.Scope, call.SkillID); err != nil {
+		return nil, err
+	} else if gate != nil {
+		return nil, &SkillRuntimeMaintenanceError{Maintenance: *gate}
+	}
+	if proposal.RequireBindingFence {
+		var bindingPayload string
+		err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`
+			WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 FOR SHARE`,
+			call.Scope.Kind, call.Scope.ID, call.DeploymentID, call.BindingID).Scan(&bindingPayload)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, skill.ErrBindingUnavailable
+		}
+		if err != nil {
+			return nil, err
+		}
+		var binding skill.Binding
+		if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
+			return nil, err
+		}
+		if err := validateActionSubmissionBinding(call, &binding); err != nil {
+			return nil, err
+		}
+	}
 	var currentRevision int64
 	var currentLeaseOwner string
 	var currentLeaseExpiry sql.NullTime
@@ -69,34 +112,19 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 	if err != nil {
 		return nil, err
 	}
-	if call.IdempotencyKey != "" {
-		existing, err := s.getActionByIdempotency(ctx, tx, call.Scope, call.RunID, call.IdempotencyKey)
-		if err != nil && !errors.Is(err, ErrActionNotFound) {
-			return nil, err
-		}
-		if existing != nil {
-			if existing.InvocationDigest != call.InvocationDigest {
-				return nil, ErrIdempotencyConflict
-			}
-			var approval *ApprovalCheckpoint
-			if existing.ApprovalID != "" {
-				approval, err = s.getApprovalByID(ctx, tx, call.Scope, existing.ApprovalID, false)
-				if err != nil {
-					return nil, err
-				}
-			}
-			if err := tx.Commit(); err != nil {
-				return nil, err
-			}
-			return &ActionProposalResult{Call: existing, Approval: approval, Created: false}, nil
-		}
+	// A concurrent proposal may have committed while we acquired the Run lock.
+	// Replay remains valid even after the mutable binding was upgraded.
+	if replay, err := s.actionProposalReplayTx(ctx, tx, call); err != nil {
+		return nil, err
+	} else if replay != nil {
+		return replay, tx.Commit()
 	}
 	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {
 		if _, lockErr := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
 			externalOperationLockKey(call.Scope, call.ExternalOperationDigest)); lockErr != nil {
 			return nil, lockErr
 		}
-		existing, lookupErr := s.getActionByExternalOperation(ctx, tx, call.Scope, call.ExternalOperationDigest, true)
+		existing, lookupErr := s.getActionByExternalOperation(ctx, tx, call.Scope, call.ExternalOperationDigest, false)
 		if lookupErr != nil && !errors.Is(lookupErr, ErrActionNotFound) {
 			return nil, lookupErr
 		}
@@ -116,10 +144,10 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("action_calls")+`
 		(id, scope_kind, scope_id, run_id, turn_id, status, idempotency_key, external_operation_digest, approval_id, available_at,
-		 lease_owner, lease_expires_at, revision, created_at, payload)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)`, call.ID, call.Scope.Kind, call.Scope.ID,
+		 lease_owner, lease_expires_at, revision, created_at, payload, deployment_id, binding_id, binding_revision, skill_id, skill_version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19,$20)`, call.ID, call.Scope.Kind, call.Scope.ID,
 		call.RunID, call.TurnID, call.Status, call.IdempotencyKey, externalOperationClaimDigest(call), call.ApprovalID, call.AvailableAt, call.LeaseOwner,
-		call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(callPayload)); err != nil {
+		call.LeaseExpiresAt, call.Revision, call.CreatedAt, string(callPayload), call.DeploymentID, call.BindingID, call.BindingRevision, call.SkillID, call.SkillVersion); err != nil {
 		return nil, err
 	}
 	if proposal.Approval != nil {
@@ -146,6 +174,30 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 		return nil, err
 	}
 	return &ActionProposalResult{Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval), Run: cloneAgentRun(proposal.Run), Event: event, Created: true}, nil
+}
+
+func (s *PostgresStore) actionProposalReplayTx(ctx context.Context, tx *sql.Tx, call *ActionCall) (*ActionProposalResult, error) {
+	if call.IdempotencyKey == "" {
+		return nil, nil
+	}
+	existing, err := s.getActionByIdempotency(ctx, tx, call.Scope, call.RunID, call.IdempotencyKey)
+	if errors.Is(err, ErrActionNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if existing.InvocationDigest != call.InvocationDigest {
+		return nil, ErrIdempotencyConflict
+	}
+	var approval *ApprovalCheckpoint
+	if existing.ApprovalID != "" {
+		approval, err = s.getApprovalByID(ctx, tx, call.Scope, existing.ApprovalID, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &ActionProposalResult{Call: existing, Approval: approval, Created: false}, nil
 }
 
 func (s *PostgresStore) GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error) {
@@ -400,9 +452,14 @@ func (s *PostgresStore) ClaimNextAction(ctx context.Context, claim ActionClaim) 
 	}
 	defer tx.Rollback()
 	var payload string
-	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("action_calls")+`
-		WHERE scope_kind=$1 AND scope_id=$2 AND ((status=$3 AND available_at <= $5) OR (status=$4 AND (lease_expires_at IS NULL OR lease_expires_at <= $5)))
-		ORDER BY available_at, created_at, id FOR UPDATE SKIP LOCKED LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
+	err = tx.QueryRowContext(ctx, `SELECT c.payload FROM `+s.table("action_calls")+` c
+		WHERE c.scope_kind=$1 AND c.scope_id=$2 AND ((c.status=$3 AND c.available_at <= $5) OR (c.status=$4 AND (c.lease_expires_at IS NULL OR c.lease_expires_at <= $5)))
+		AND NOT EXISTS (SELECT 1 FROM `+s.table("agent_runs")+` r WHERE r.scope_kind=c.scope_kind AND r.scope_id=c.scope_id AND r.id=c.run_id
+			AND r.status='paused' AND r.payload->>'pausedFrom'='waiting_for_dependency'
+			AND r.payload#>>'{pausedWakeCondition,type}'='action' AND r.payload#>>'{pausedWakeCondition,reference}'=c.id)
+		AND NOT EXISTS (SELECT 1 FROM `+s.table("skill_runtime_maintenance")+` m WHERE m.scope_kind=c.scope_kind AND m.scope_id=c.scope_id
+			AND m.skill_id=c.skill_id AND m.active)
+		ORDER BY c.available_at, c.created_at, c.id FOR UPDATE OF c SKIP LOCKED LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
 		ActionCallStatusReady, ActionCallStatusRunning, claim.Now).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
@@ -494,22 +551,23 @@ func (s *PostgresStore) PersistActionExecution(ctx context.Context, execution Ac
 	if err != nil {
 		return nil, err
 	}
+	if currentCall.RunID != execution.Call.RunID {
+		return nil, ErrInvalidScope
+	}
 	if currentCall.Revision != execution.ExpectedCallRevision || execution.Call.Revision != execution.ExpectedCallRevision+1 {
 		return nil, ErrRevisionConflict
 	}
 	if currentCall.Status != ActionCallStatusRunning || currentCall.LeaseOwner != execution.WorkerID || currentCall.LeaseExpiresAt == nil || !currentCall.LeaseExpiresAt.After(execution.Now) {
 		return nil, ErrLeaseLost
 	}
-	if execution.Run != nil {
-		var currentRunRevision int64
-		if err := tx.QueryRowContext(ctx, `SELECT revision FROM `+s.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, execution.Run.Scope.Kind, execution.Run.Scope.ID, execution.Run.ID).Scan(&currentRunRevision); errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrRunNotFound
-		} else if err != nil {
-			return nil, err
-		}
-		if currentRunRevision != execution.ExpectedRunRevision || execution.Run.Revision != execution.ExpectedRunRevision+1 {
-			return nil, ErrRevisionConflict
-		}
+	var currentRunRevision int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision FROM `+s.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, currentCall.Scope.Kind, currentCall.Scope.ID, currentCall.RunID).Scan(&currentRunRevision); errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRunNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	if currentRunRevision != execution.ExpectedRunRevision || execution.Run != nil && execution.Run.Revision != execution.ExpectedRunRevision+1 {
+		return nil, ErrRevisionConflict
 	}
 	callPayload, err := json.Marshal(execution.Call)
 	if err != nil {

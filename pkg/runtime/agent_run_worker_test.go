@@ -1091,6 +1091,7 @@ func TestAgentRunWorkerDoesNotLetModelBoundReviewedRunbookOperation(t *testing.T
 		Entrypoint: "engage-now", Summary: "Start the reviewed engagement operation",
 		Budget: &BudgetPolicy{MaxAttempts: 3},
 	}
+	pool.SetAcceptedRunExecutionPreparer(&acceptedCreationTestPreparer{id: "engagement", version: "1.0.0"})
 	waiting, err := pool.materializeTurnRunbook(t.Context(), "worker", claimed, &AgentTurn{ID: "turn", RequestedRunbook: proposal}, &TurnRunnerBinding{
 		RunbookOperations: []HostedRunbookOperation{{DefinitionID: "engagement", DefinitionVersion: "1.0.0", Entrypoint: "engage-now"}},
 	})
@@ -1151,6 +1152,7 @@ func TestAgentRunWorkerCarriesRunbookInvocationIntentIntoDelegatedWork(t *testin
 		Entrypoint: "engage-now", Summary: "Scout only the requested community for this invocation",
 		Arguments: map[string]interface{}{"community": "requested-community"},
 	}
+	pool.SetAcceptedRunExecutionPreparer(&acceptedCreationTestPreparer{id: "engagement", version: "1.0.0"})
 	waiting, err := pool.materializeTurnRunbook(t.Context(), "worker", claimed, &AgentTurn{
 		ID: "invoke", RequestedRunbook: proposal,
 	}, &TurnRunnerBinding{RunbookOperations: []HostedRunbookOperation{{

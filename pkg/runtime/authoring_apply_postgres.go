@@ -30,6 +30,24 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 	var status string
 	var revision int64
 	var currentPayload string
+	if err = tx.QueryRowContext(ctx, `SELECT status,revision,payload FROM `+s.table("workforce_change_sets")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3`, value.Scope.Kind, value.Scope.ID, value.ID).Scan(&status, &revision, &currentPayload); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, authoring.ErrChangeSetNotFound
+		}
+		return nil, err
+	}
+	if status == string(authoring.ChangeSetApplied) {
+		var current authoring.ChangeSet
+		if json.Unmarshal([]byte(currentPayload), &current) == nil && current.ApplyReceipt != nil && current.ApplyReceipt.IdempotencyKey == value.ApplyReceipt.IdempotencyKey {
+			return &current, nil
+		}
+	}
+	fencedSkills, err := s.fencePostgresWorkforceMaintenance(ctx, tx, value, a.skillBindings)
+	if err != nil {
+		return nil, err
+	}
+	// Logical Skill locks precede mutable ChangeSet, deployment and binding
+	// locks. Recheck the receipt after serialization to preserve exact replay.
 	if err = tx.QueryRowContext(ctx, `SELECT status,revision,payload FROM `+s.table("workforce_change_sets")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, value.Scope.Kind, value.Scope.ID, value.ID).Scan(&status, &revision, &currentPayload); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, authoring.ErrChangeSetNotFound
@@ -106,7 +124,7 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 			}
 		}
 	}
-	if err = applyPostgresWorkforceSkillBindings(ctx, tx, s.table("skill_bindings"), s.table("skill_definitions"), value, a.skillBindings); err != nil {
+	if err = applyPostgresWorkforceSkillBindings(ctx, tx, s.table("skill_bindings"), s.table("skill_definitions"), value, a.skillBindings, fencedSkills); err != nil {
 		return nil, err
 	}
 	if a.teamDefinition != nil {
@@ -586,17 +604,10 @@ func applyPostgresWorkforceProject(ctx context.Context, tx *sql.Tx, table string
 	return nil
 }
 
-func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindingTable, definitionTable string, value *authoring.ChangeSet, desired []*capability.Binding) error {
+func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindingTable, definitionTable string, value *authoring.ChangeSet, desired []*capability.Binding, fencedSkills map[string]struct{}) error {
 	existing := map[string]*capability.Binding{}
-	desiredIDs := make(map[string]bool, len(desired))
-	for _, binding := range desired {
-		if binding != nil {
-			desiredIDs[binding.ID] = true
-		}
-	}
-	reconciledDeployments := workforceBindingReconciliationDeployments(value)
-	if len(reconciledDeployments) > 0 {
-		rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+bindingTable+` WHERE scope_kind=$1 AND scope_id=$2 FOR UPDATE`, value.Scope.Kind, value.Scope.ID)
+	if predicate, args := workforceReconciledBindingPredicate(value, desired, true); predicate != "" {
+		rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+bindingTable+` WHERE `+predicate+` ORDER BY deployment_id,id FOR UPDATE`, args...)
 		if err != nil {
 			return err
 		}
@@ -606,8 +617,14 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindin
 			if err := rows.Scan(&payload); err != nil {
 				return err
 			}
-			if json.Unmarshal([]byte(payload), &binding) == nil && reconciledDeployments[binding.DeploymentID] &&
-				(strings.HasPrefix(binding.ID, "workforce:") || desiredIDs[binding.ID]) {
+			if json.Unmarshal([]byte(payload), &binding) == nil {
+				// A concurrent writer may have changed the reconciliation set
+				// before its rows were locked. Roll back instead of taking a new
+				// logical Skill lock out of order or deleting an unfenced grant.
+				if _, ok := fencedSkills[binding.SkillID]; !ok {
+					rows.Close()
+					return authoring.ErrChangeSetRevision
+				}
 				existing[binding.ID] = &binding
 			}
 		}

@@ -243,7 +243,7 @@ func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentR
 		}
 		result, err := tx.ExecContext(ctx, query, args...)
 		if err != nil {
-			return err
+			return normalizeRunSkillDependencyError(err)
 		}
 		affected, err := result.RowsAffected()
 		if err != nil {

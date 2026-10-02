@@ -152,11 +152,49 @@ func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Bindi
 	if err != nil {
 		return err
 	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	maintenanceScope := Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
+	for _, skillID := range []string{binding.SkillID} {
+		g, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, maintenanceScope, skillID)
+		if err != nil {
+			return err
+		}
+		if g != nil {
+			return &SkillRuntimeMaintenanceError{Maintenance: *g}
+		}
+	}
+	var previousSkillID string
+	lookupErr := conn.QueryRowContext(ctx, `SELECT skill_id FROM skill_bindings WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=?`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID).Scan(&previousSkillID)
+	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		return lookupErr
+	}
+	if previousSkillID != "" && previousSkillID != binding.SkillID {
+		g, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, maintenanceScope, previousSkillID)
+		if err != nil {
+			return err
+		}
+		if g != nil {
+			return &SkillRuntimeMaintenanceError{Maintenance: *g}
+		}
+	}
 	if expectedRevision == 0 {
 		if binding.Revision != 1 {
 			return skill.ErrBindingRevisionConflict
 		}
-		result, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO skill_bindings(scope_kind, scope_id, deployment_id, id, skill_id, skill_version, source_identity, revision, payload) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload))
+		result, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO skill_bindings(scope_kind, scope_id, deployment_id, id, skill_id, skill_version, source_identity, revision, payload) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload))
 		if err != nil {
 			return fmt.Errorf("persist initial skill binding: %w", err)
 		}
@@ -167,12 +205,14 @@ func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Bindi
 		if rows != 1 {
 			return skill.ErrBindingRevisionConflict
 		}
-		return nil
+		_, err = conn.ExecContext(ctx, "COMMIT")
+		committed = err == nil
+		return err
 	}
 	if binding.Revision != expectedRevision+1 {
 		return skill.ErrBindingRevisionConflict
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE skill_bindings SET skill_id = ?, skill_version = ?, source_identity = ?, revision = ?, payload = ? WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? AND id = ? AND revision = ?`, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, expectedRevision)
+	result, err := conn.ExecContext(ctx, `UPDATE skill_bindings SET skill_id = ?, skill_version = ?, source_identity = ?, revision = ?, payload = ? WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? AND id = ? AND revision = ?`, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload), binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, expectedRevision)
 	if err != nil {
 		return err
 	}
@@ -183,7 +223,9 @@ func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Bindi
 	if rows != 1 {
 		return skill.ErrBindingRevisionConflict
 	}
-	return nil
+	_, err = conn.ExecContext(ctx, "COMMIT")
+	committed = err == nil
+	return err
 }
 
 func (s *SQLiteStore) ListSkillBindings(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {

@@ -166,8 +166,9 @@ type RunForkResult struct {
 }
 
 type RunForkCoordinator struct {
-	store RunForkStore
-	now   func() time.Time
+	store             RunForkStore
+	executionPreparer AcceptedRunExecutionPreparer
+	now               func() time.Time
 }
 
 func NewRunForkCoordinator(store RunForkStore) *RunForkCoordinator {
@@ -251,6 +252,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	for _, branch := range req.Branches {
 		childID := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
 		assignedAgentID := strings.TrimSpace(branch.AssignedAgentID)
+		implicitAgent := assignedAgentID == ""
 		childContext := cloneMap(branch.Context)
 		var childPlan map[string]interface{}
 		if assignedAgentID == "" {
@@ -289,18 +291,30 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 				deadline = &candidate
 			}
 		}
+		entrypoint := strings.TrimSpace(branch.Entrypoint)
+		if branch.Mode == runbook.DelegateReason && entrypoint != "" {
+			return nil, ErrAcceptedRunExecution
+		}
+		if implicitAgent && entrypoint == "" && branch.Mode != runbook.DelegateReason {
+			entrypoint = source.Entrypoint
+		}
 		childKind := source.Kind
-		if strings.TrimSpace(branch.Entrypoint) != "" {
+		if entrypoint != "" {
 			childKind = RunKindAgentWork
 		}
-		child, err := buildAgentRun(ctx, c.store, CreateAgentRunRequest{
+		childRequest := CreateAgentRunRequest{
 			Kind: childKind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
-			Owner: source.Owner, AssignedAgentID: assignedAgentID, Entrypoint: strings.TrimSpace(branch.Entrypoint),
+			Owner: source.Owner, AssignedAgentID: assignedAgentID, Entrypoint: entrypoint,
 			ConcurrencyKey: "fork:" + groupID + ":" + branch.ID,
 			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: deadline,
 			Context: childContext, Plan: childPlan, Checkpoint: childCheckpoint,
 			Budget: cloneBudgetPolicy(branch.Budget), Policy: cloneMap(source.Policy),
-		}, childID, now)
+		}
+		inherit := entrypoint != "" && assignedAgentID == source.AssignedAgentID && entrypoint == source.Entrypoint
+		if err := prepareAcceptedChildRun(ctx, source, &childRequest, c.executionPreparer, inherit); err != nil {
+			return nil, err
+		}
+		child, err := buildAgentRun(ctx, c.store, childRequest, childID, now)
 		if err != nil {
 			return nil, err
 		}

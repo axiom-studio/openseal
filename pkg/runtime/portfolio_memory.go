@@ -105,6 +105,9 @@ func (s *MemoryStore) CreateAgentRun(_ context.Context, run *AgentRun) error {
 	if s.agentRuns[key] != nil {
 		return ErrRunIdempotency
 	}
+	if err := s.validateMemoryRunSkillDependenciesLocked(run); err != nil {
+		return err
+	}
 	wait, err := s.prepareMemoryRunEventWaitLocked(run)
 	if err != nil {
 		return err

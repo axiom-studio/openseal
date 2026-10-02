@@ -40,6 +40,9 @@ func (s *MemoryStore) CreateAgentRequest(_ context.Context, record AgentRequestC
 		}
 	}
 	requestKey := requestStoreKey(record.Request.Scope, record.Request.ID)
+	if err := s.validateMemoryRunSkillDependenciesLocked(record.SourceRun); err != nil {
+		return nil, err
+	}
 	if s.requests[requestKey] != nil {
 		return nil, ErrAgentRequestIdempotency
 	}
@@ -133,6 +136,11 @@ func (s *MemoryStore) RespondAgentRequest(_ context.Context, record AgentRequest
 	if current.Revision != record.ExpectedRequestRevision || record.Request.Revision != current.Revision+1 {
 		return nil, ErrRevisionConflict
 	}
+	for _, run := range []*AgentRun{record.SourceRun, record.ChildRun} {
+		if err := s.validateMemoryRunSkillDependenciesLocked(run); err != nil {
+			return nil, err
+		}
+	}
 	if record.SourceRun != nil {
 		sourceKey := portfolioKey(record.SourceRun.Scope, record.SourceRun.ID)
 		currentSource := s.agentRuns[sourceKey]
@@ -210,6 +218,11 @@ func (s *MemoryStore) CompleteAgentRequest(_ context.Context, record AgentReques
 	}
 	if currentChild.Revision != record.ExpectedChildRevision || record.ChildRun.Revision != currentChild.Revision+1 {
 		return nil, ErrRevisionConflict
+	}
+	for _, run := range []*AgentRun{record.SourceRun, record.ChildRun} {
+		if err := s.validateMemoryRunSkillDependenciesLocked(run); err != nil {
+			return nil, err
+		}
 	}
 	var dependencyEvents []*ActivityEvent
 	if record.DependencyResolution != nil {

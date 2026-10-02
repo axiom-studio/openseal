@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionProposalRecord) (*ActionProposalResult, error) {
@@ -27,6 +29,15 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 				Call: cloneActionCall(existing), Approval: cloneApprovalCheckpoint(s.approvals[portfolioKey(call.Scope, existing.ApprovalID)]),
 				Created: false,
 			}, nil
+		}
+	}
+	if gate := s.memorySkillRuntimeMaintenanceActiveLocked(call.Scope, call.SkillID); gate != nil {
+		return nil, &SkillRuntimeMaintenanceError{Maintenance: *gate}
+	}
+	if proposal.RequireBindingFence {
+		binding := s.skillBindings[memorySkillBindingKey(skill.ScopeReference{Kind: call.Scope.Kind, ID: call.Scope.ID}, call.DeploymentID, call.BindingID)]
+		if err := validateActionSubmissionBinding(call, binding); err != nil {
+			return nil, err
 		}
 	}
 	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {
@@ -54,9 +65,12 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	if proposal.Approval != nil && s.approvals[portfolioKey(call.Scope, proposal.Approval.ID)] != nil {
 		return nil, ErrRevisionConflict
 	}
+	if err := s.validateMemoryRunSkillDependenciesLocked(proposal.Run); err != nil {
+		return nil, err
+	}
 	event := cloneActivityEvent(proposal.Event)
 	event.Sequence = int64(len(s.activity[runKey]) + 1)
-	s.actions[portfolioKey(call.Scope, call.ID)] = cloneActionCall(call)
+	s.saveMemoryActionCallLocked(portfolioKey(call.Scope, call.ID), call)
 	if call.IdempotencyKey != "" {
 		s.actionKeys[actionIdempotencyKey(call.Scope, call.RunID, call.IdempotencyKey)] = call.ID
 	}
@@ -232,10 +246,13 @@ func (s *MemoryStore) ResolveApproval(_ context.Context, resolution ApprovalReso
 		resolution.Approval.Revision != resolution.ExpectedApprovalRevision+1 || resolution.Call.Revision != resolution.ExpectedCallRevision+1 || resolution.Run.Revision != resolution.ExpectedRunRevision+1 {
 		return nil, ErrRevisionConflict
 	}
+	if err := s.validateMemoryRunSkillDependenciesLocked(resolution.Run); err != nil {
+		return nil, err
+	}
 	event := cloneActivityEvent(resolution.Event)
 	event.Sequence = int64(len(s.activity[runKey]) + 1)
 	s.approvals[approvalKey] = cloneApprovalCheckpoint(resolution.Approval)
-	s.actions[callKey] = cloneActionCall(resolution.Call)
+	s.saveMemoryActionCallLocked(callKey, resolution.Call)
 	if currentCall.ExternalOperationDigest != "" && externalOperationProtects(currentCall.Status) && !externalOperationProtects(resolution.Call.Status) {
 		delete(s.externalOperationKeys, externalOperationStoreKey(currentCall.Scope, currentCall.ExternalOperationDigest))
 	}
@@ -252,7 +269,10 @@ func (s *MemoryStore) ClaimNextAction(_ context.Context, claim ActionClaim) (*Ac
 	defer s.mu.Unlock()
 	var selected *ActionCall
 	for _, call := range s.actions {
-		if call.Scope != claim.Scope || !actionEligible(call, claim.Now) {
+		if call.Scope != claim.Scope || !actionEligible(call, claim.Now) || runHasPausedActionDependency(s.agentRuns[portfolioKey(call.Scope, call.RunID)], call) {
+			continue
+		}
+		if s.memorySkillRuntimeMaintenanceActiveLocked(call.Scope, call.SkillID) != nil {
 			continue
 		}
 		if selected == nil || actionSchedulesBefore(call, selected) {
@@ -273,7 +293,7 @@ func (s *MemoryStore) ClaimNextAction(_ context.Context, claim ActionClaim) (*Ac
 	if updated.StartedAt == nil {
 		updated.StartedAt = &claim.Now
 	}
-	s.actions[portfolioKey(updated.Scope, updated.ID)] = cloneActionCall(updated)
+	s.saveMemoryActionCallLocked(portfolioKey(updated.Scope, updated.ID), updated)
 	return updated, nil
 }
 
@@ -298,7 +318,7 @@ func (s *MemoryStore) RenewActionLease(_ context.Context, scope Scope, actionID,
 	updated.LeaseExpiresAt = &expires
 	updated.UpdatedAt = now
 	updated.Revision++
-	s.actions[portfolioKey(scope, actionID)] = cloneActionCall(updated)
+	s.saveMemoryActionCallLocked(portfolioKey(scope, actionID), updated)
 	return updated, nil
 }
 
@@ -313,6 +333,9 @@ func (s *MemoryStore) PersistActionExecution(_ context.Context, execution Action
 	if currentCall == nil {
 		return nil, ErrActionNotFound
 	}
+	if currentCall.RunID != execution.Call.RunID {
+		return nil, ErrInvalidScope
+	}
 	if currentCall.Revision != execution.ExpectedCallRevision || execution.Call.Revision != execution.ExpectedCallRevision+1 {
 		return nil, ErrRevisionConflict
 	}
@@ -324,12 +347,17 @@ func (s *MemoryStore) PersistActionExecution(_ context.Context, execution Action
 	if currentRun == nil {
 		return nil, ErrRunNotFound
 	}
-	if execution.Run != nil && (currentRun.Revision != execution.ExpectedRunRevision || execution.Run.Revision != execution.ExpectedRunRevision+1) {
+	if currentRun.Revision != execution.ExpectedRunRevision || execution.Run != nil && execution.Run.Revision != execution.ExpectedRunRevision+1 {
 		return nil, ErrRevisionConflict
+	}
+	if execution.Run != nil {
+		if err := s.validateMemoryRunSkillDependenciesLocked(execution.Run); err != nil {
+			return nil, err
+		}
 	}
 	event := cloneActivityEvent(execution.Event)
 	event.Sequence = int64(len(s.activity[runKey]) + 1)
-	s.actions[callKey] = cloneActionCall(execution.Call)
+	s.saveMemoryActionCallLocked(callKey, execution.Call)
 	if currentCall.ExternalOperationDigest != "" && externalOperationProtects(currentCall.Status) && !externalOperationProtects(execution.Call.Status) {
 		delete(s.externalOperationKeys, externalOperationStoreKey(currentCall.Scope, currentCall.ExternalOperationDigest))
 	}
@@ -366,6 +394,16 @@ func validateActionProposalRecord(proposal ActionProposalRecord) error {
 	return nil
 }
 
+func validateActionSubmissionBinding(call *ActionCall, binding *skill.Binding) error {
+	if call == nil || binding == nil || binding.Disabled || call.BindingID == "" ||
+		binding.Scope.Kind != call.Scope.Kind || binding.Scope.ID != call.Scope.ID ||
+		binding.DeploymentID != call.DeploymentID || binding.ID != call.BindingID ||
+		binding.Revision != call.BindingRevision || binding.SkillID != call.SkillID || binding.SkillVersion != call.SkillVersion {
+		return skill.ErrBindingUnavailable
+	}
+	return nil
+}
+
 func validateApprovalResolutionRecord(resolution ApprovalResolutionRecord) error {
 	if err := resolution.Approval.Validate(); err != nil {
 		return err
@@ -397,8 +435,8 @@ func validateActionExecutionRecord(execution ActionExecutionRecord) error {
 	if err := execution.Event.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(execution.WorkerID) == "" || execution.Now.IsZero() {
-		return errors.New("action execution worker and current time are required")
+	if strings.TrimSpace(execution.WorkerID) == "" || execution.Now.IsZero() || execution.ExpectedRunRevision <= 0 {
+		return errors.New("action execution worker, current time, and observed Run revision are required")
 	}
 	if execution.Call.Status != ActionCallStatusReady && execution.Call.Status != ActionCallStatusSucceeded && execution.Call.Status != ActionCallStatusFailed && execution.Call.Status != ActionCallStatusCanceled {
 		return errors.New("persisted action execution must retry or finish")

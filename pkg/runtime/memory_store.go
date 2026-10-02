@@ -5,86 +5,98 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 // MemoryStore holds canonical kernel state in memory.
 type MemoryStore struct {
-	skillSetupRequests          map[string]*SkillSetupRequest
-	mu                          sync.RWMutex
-	objectives                  map[string]*Objective
-	runbookActivations          map[string]*RunbookActivation
-	projects                    map[string]*Project
-	sourceObservations          map[string]*SourceObservation
-	sourceObservationKeys       map[string]string
-	sourceMonitorCheckpoints    map[string]*SourceMonitorCheckpoint
-	eventSourceCheckpoints      map[string]*EventSourceCheckpoint
-	eventSourceSubscriptions    map[string]*EventSourceSubscription
-	eventSourceHealth           map[string]*EventSourceHealth
-	outreachThreads             map[string]*OutreachThread
-	outreachIdempotency         map[string]string
-	agentRuns                   map[string]*AgentRun
-	runTerminalReports          map[runTerminalReportKey]*RunTerminalReport
-	runTerminalReportQueue      memoryTerminalReportQueue
-	runEventWaits               map[memoryRunEventWaitKey]*RunEventWait
-	runEventWaitActive          map[memoryRunEventRunKey]memoryRunEventWaitKey
-	runEventWaitIndex           map[memoryRunEventSelector]map[memoryRunEventWaitKey]struct{}
-	runEventWaitSelectorOrder   map[memoryRunEventSelector]*memoryOrderedIndexNode[memoryRunEventWaitKey]
-	runEventWaitDueOrder        map[Scope]*memoryOrderedIndexNode[memoryRunEventWaitDueKey]
-	runEventWaitDueKeys         map[memoryRunEventWaitKey]memoryRunEventWaitDueKey
-	runEventWaitNotifications   map[memoryRunEventReceiptKey]runEventNotification
-	runEventNotificationOrder   map[Scope]*memoryOrderedIndexNode[memoryRunEventNotificationDueKey]
-	runEventWaitScopeWork       map[Scope]time.Time
-	runEventWaitScopeOrder      *memoryOrderedIndexNode[memoryRunEventScopeDueKey]
-	runEventReceipts            map[memoryRunEventReceiptKey]*RunEventReceipt
-	runEventReceiptIndex        map[memoryRunEventSelector]map[memoryRunEventReceiptKey]struct{}
-	runEventReceiptOrder        *memoryRunEventOrderNode
-	runEventReceiptScopeOrder   map[Scope]*memoryRunEventOrderNode
-	runEventRetentionCursor     *memoryRunEventOrderKey
-	runEventReceiptPruneCursors map[Scope]*memoryRunEventOrderKey
-	runEventConsumptions        map[memoryRunEventReceiptKey]map[memoryRunEventRunKey]struct{}
-	activity                    map[string][]*ActivityEvent
-	turns                       map[string]map[string]*AgentTurn
-	actions                     map[string]*ActionCall
-	approvals                   map[string]*ApprovalCheckpoint
-	actionKeys                  map[string]string
-	externalOperationKeys       map[string]string
-	requests                    map[string]*AgentRequest
-	requestKeys                 map[string]string
-	dependencyGroups            map[string]*RunDependencyGroup
-	dependencyGroupKeys         map[string]string
-	dependencies                map[string]map[string]*RunDependency
-	artifacts                   map[string]map[int64]*Artifact
-	conversations               map[string]*Conversation
-	conversationKeys            map[string]string
-	channelMessages             map[string][]*ChannelMessage
-	channelMessageIDs           map[string]*ChannelMessage
-	channelMessageKeys          map[string]string
-	participationRounds         map[string]*ParticipationRoundResult
-	participationKeys           map[string]string
-	conversationCursors         map[string]*ConversationCursor
-	conversationPresence        map[string]*ConversationPresence
-	embedInstallations          map[string]*EmbedInstallation
-	embedRoutes                 map[string]string
-	embedSessions               map[string]*EmbedSession
-	embedConversationSessions   map[string]string
-	externalEndpoints           map[string]*ExternalConversationEndpoint
-	externalGateways            map[string]*ExternalConversationGatewayRegistration
-	callbackRegistrations       map[string]*CallbackRegistration
-	callbackEvents              map[string]*CallbackEventReceipt
-	externalInbox               map[string]*ExternalConversationInboxItem
-	externalInboxKeys           map[string]string
-	externalMappings            map[string]*ExternalConversationMapping
-	externalParticipants        map[string]*ExternalParticipantMapping
-	externalMessages            map[string]*ExternalMessageMapping
-	externalDeliveries          map[string]*ExternalConversationDelivery
-	externalDeliveryKeys        map[string]string
-	skillDefinitions            map[string]*skill.Definition
-	skillBindings               map[string]*skill.Binding
+	*kernelteam.MemoryStore
+	skillSetupRequests                  map[string]*SkillSetupRequest
+	mu                                  sync.RWMutex
+	objectives                          map[string]*Objective
+	runbookActivations                  map[string]*RunbookActivation
+	projects                            map[string]*Project
+	projectSkillReferences              map[memoryProjectSkillReferenceKey]map[string]struct{}
+	sourceObservations                  map[string]*SourceObservation
+	sourceObservationKeys               map[string]string
+	sourceMonitorCheckpoints            map[string]*SourceMonitorCheckpoint
+	eventSourceCheckpoints              map[string]*EventSourceCheckpoint
+	eventSourceSubscriptions            map[string]*EventSourceSubscription
+	eventSourceHealth                   map[string]*EventSourceHealth
+	outreachThreads                     map[string]*OutreachThread
+	outreachIdempotency                 map[string]string
+	agentRuns                           map[string]*AgentRun
+	runTerminalReports                  map[runTerminalReportKey]*RunTerminalReport
+	runTerminalReportQueue              memoryTerminalReportQueue
+	runEventWaits                       map[memoryRunEventWaitKey]*RunEventWait
+	runEventWaitActive                  map[memoryRunEventRunKey]memoryRunEventWaitKey
+	runEventWaitIndex                   map[memoryRunEventSelector]map[memoryRunEventWaitKey]struct{}
+	runEventWaitSelectorOrder           map[memoryRunEventSelector]*memoryOrderedIndexNode[memoryRunEventWaitKey]
+	runEventWaitDueOrder                map[Scope]*memoryOrderedIndexNode[memoryRunEventWaitDueKey]
+	runEventWaitDueKeys                 map[memoryRunEventWaitKey]memoryRunEventWaitDueKey
+	runEventWaitNotifications           map[memoryRunEventReceiptKey]runEventNotification
+	runEventNotificationOrder           map[Scope]*memoryOrderedIndexNode[memoryRunEventNotificationDueKey]
+	runEventWaitScopeWork               map[Scope]time.Time
+	runEventWaitScopeOrder              *memoryOrderedIndexNode[memoryRunEventScopeDueKey]
+	runEventReceipts                    map[memoryRunEventReceiptKey]*RunEventReceipt
+	runEventReceiptIndex                map[memoryRunEventSelector]map[memoryRunEventReceiptKey]struct{}
+	runEventReceiptOrder                *memoryRunEventOrderNode
+	runEventReceiptScopeOrder           map[Scope]*memoryRunEventOrderNode
+	runEventRetentionCursor             *memoryRunEventOrderKey
+	runEventReceiptPruneCursors         map[Scope]*memoryRunEventOrderKey
+	runEventConsumptions                map[memoryRunEventReceiptKey]map[memoryRunEventRunKey]struct{}
+	activity                            map[string][]*ActivityEvent
+	turns                               map[string]map[string]*AgentTurn
+	actions                             map[string]*ActionCall
+	skillRuntimeUsage                   map[memorySkillRuntimeUsageKey]int
+	skillRuntimeMaintenance             map[string]*SkillRuntimeMaintenance
+	skillRuntimeMaintenanceWaiters      map[string]map[string]struct{}
+	skillRuntimeMaintenanceWaiterKeys   map[string]string
+	skillRuntimeUsageCalls              map[string]memorySkillRuntimeUsageEntry
+	skillRuntimeReceiptRuns             map[string]map[string]struct{}
+	skillRuntimeRunDependencies         map[string]map[memorySkillRuntimeUsageKey]struct{}
+	skillRuntimeUnqualifiedDependencies map[memorySkillRuntimeUsageKey]int
+	approvals                           map[string]*ApprovalCheckpoint
+	actionKeys                          map[string]string
+	externalOperationKeys               map[string]string
+	requests                            map[string]*AgentRequest
+	requestKeys                         map[string]string
+	dependencyGroups                    map[string]*RunDependencyGroup
+	dependencyGroupKeys                 map[string]string
+	dependencies                        map[string]map[string]*RunDependency
+	artifacts                           map[string]map[int64]*Artifact
+	conversations                       map[string]*Conversation
+	conversationKeys                    map[string]string
+	channelMessages                     map[string][]*ChannelMessage
+	channelMessageIDs                   map[string]*ChannelMessage
+	channelMessageKeys                  map[string]string
+	participationRounds                 map[string]*ParticipationRoundResult
+	participationKeys                   map[string]string
+	conversationCursors                 map[string]*ConversationCursor
+	conversationPresence                map[string]*ConversationPresence
+	embedInstallations                  map[string]*EmbedInstallation
+	embedRoutes                         map[string]string
+	embedSessions                       map[string]*EmbedSession
+	embedConversationSessions           map[string]string
+	externalEndpoints                   map[string]*ExternalConversationEndpoint
+	externalGateways                    map[string]*ExternalConversationGatewayRegistration
+	callbackRegistrations               map[string]*CallbackRegistration
+	callbackEvents                      map[string]*CallbackEventReceipt
+	externalInbox                       map[string]*ExternalConversationInboxItem
+	externalInboxKeys                   map[string]string
+	externalMappings                    map[string]*ExternalConversationMapping
+	externalParticipants                map[string]*ExternalParticipantMapping
+	externalMessages                    map[string]*ExternalMessageMapping
+	externalDeliveries                  map[string]*ExternalConversationDelivery
+	externalDeliveryKeys                map[string]string
+	skillDefinitions                    map[string]*skill.Definition
+	skillBindings                       map[string]*skill.Binding
 }
 
 // NewMemoryStore creates an in-memory canonical kernel store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
+		MemoryStore:                 kernelteam.NewMemoryStore(),
 		skillSetupRequests:          make(map[string]*SkillSetupRequest),
 		objectives:                  make(map[string]*Objective),
 		runbookActivations:          make(map[string]*RunbookActivation),
@@ -115,6 +127,10 @@ func NewMemoryStore() *MemoryStore {
 		activity:                    make(map[string][]*ActivityEvent),
 		turns:                       make(map[string]map[string]*AgentTurn),
 		actions:                     make(map[string]*ActionCall),
+		skillRuntimeUsage:           make(map[memorySkillRuntimeUsageKey]int),
+		skillRuntimeMaintenance:     make(map[string]*SkillRuntimeMaintenance),
+		skillRuntimeUsageCalls:      make(map[string]memorySkillRuntimeUsageEntry),
+		skillRuntimeReceiptRuns:     make(map[string]map[string]struct{}),
 		approvals:                   make(map[string]*ApprovalCheckpoint),
 		actionKeys:                  make(map[string]string),
 		externalOperationKeys:       make(map[string]string),

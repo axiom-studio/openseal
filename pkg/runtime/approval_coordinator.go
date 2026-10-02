@@ -107,6 +107,8 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	}
 	runWaiting := run.Status == AgentRunStatusWaitingForApproval && run.WakeCondition != nil &&
 		run.WakeCondition.Type == "approval" && run.WakeCondition.Reference == approval.ID
+	runPausedWaiting := run.Status == AgentRunStatusPaused && run.PausedFrom == AgentRunStatusWaitingForApproval &&
+		run.PausedWakeCondition != nil && run.PausedWakeCondition.Type == "approval" && run.PausedWakeCondition.Reference == approval.ID
 	callWaiting := call.Status == ActionCallStatusWaitingApproval && call.ApprovalID == approval.ID
 	waitingPair := runWaiting && callWaiting
 	if !expired && !runWaiting {
@@ -170,15 +172,22 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 			return nil, err
 		}
 	}
-	if waitingPair {
+	if waitingPair || runPausedWaiting && callWaiting {
 		if callStatus == ActionCallStatusReady {
 			updatedRun.Status = AgentRunStatusWaitingForDependency
 			updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
 		} else {
-			updatedRun.Status = AgentRunStatusQueued
-			updatedRun.WakeCondition = nil
-			updatedRun.AvailableAt = now
-			updatedRun.QueueEnteredAt = now
+			if runPausedWaiting {
+				// Expiry closes the saved dependency without overriding the
+				// operator's pause. Resume will consume the denied outcome.
+				updatedRun.PausedFrom = AgentRunStatusQueued
+				updatedRun.PausedWakeCondition = nil
+			} else {
+				updatedRun.Status = AgentRunStatusQueued
+				updatedRun.WakeCondition = nil
+				updatedRun.AvailableAt = now
+				updatedRun.QueueEnteredAt = now
+			}
 			metadata := map[string]interface{}{"approvalId": approval.ID, "approvalStatus": status}
 			if status == ApprovalStatusChangesRequested {
 				metadata["reviewerGuidance"] = strings.TrimSpace(req.Reason)

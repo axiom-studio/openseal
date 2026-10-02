@@ -217,6 +217,21 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 	if req.Kind == AgentRunCommandCancel && current.Status == AgentRunStatusWaitingForApproval {
 		return s.cancelWaitingApprovalRun(ctx, current, req)
 	}
+	if req.Kind == AgentRunCommandCancel && current.Status == AgentRunStatusPaused && current.PausedFrom == AgentRunStatusWaitingForApproval {
+		condition := current.PausedWakeCondition
+		if condition != nil && condition.Type == "approval" && condition.Reference != "" {
+			approval, err := s.store.GetApproval(ctx, current.Scope, condition.Reference)
+			if err != nil {
+				return nil, err
+			}
+			// Expired/rejected approvals already closed their ActionCall. A
+			// pending approval still needs the same atomic cancellation as an
+			// active approval wait so it cannot keep the grant alive forever.
+			if approval != nil && approval.Status == ApprovalStatusPending {
+				return s.cancelWaitingApprovalRun(ctx, current, req)
+			}
+		}
+	}
 	transition, err := commandTransition(current, req, s.now())
 	if err != nil {
 		return nil, err
@@ -309,10 +324,14 @@ func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *Ag
 // the waiting Run. A plain Run transition is insufficient because an approval
 // could still be accepted later and make the external action executable.
 func (s *RunCommandService) cancelWaitingApprovalRun(ctx context.Context, current *AgentRun, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
-	if current.WakeCondition == nil || current.WakeCondition.Type != "approval" || strings.TrimSpace(current.WakeCondition.Reference) == "" {
+	condition := current.WakeCondition
+	if current.Status == AgentRunStatusPaused && current.PausedFrom == AgentRunStatusWaitingForApproval {
+		condition = current.PausedWakeCondition
+	}
+	if condition == nil || condition.Type != "approval" || strings.TrimSpace(condition.Reference) == "" {
 		return nil, fmt.Errorf("%w: waiting approval run has no approval wake condition", ErrInvalidRunTransition)
 	}
-	approval, err := s.store.GetApproval(ctx, current.Scope, current.WakeCondition.Reference)
+	approval, err := s.store.GetApproval(ctx, current.Scope, condition.Reference)
 	if err != nil {
 		return nil, err
 	}
@@ -366,6 +385,8 @@ func (s *RunCommandService) cancelWaitingApprovalRun(ctx context.Context, curren
 	}
 	updatedRun.Status = AgentRunStatusCanceled
 	updatedRun.WakeCondition = nil
+	updatedRun.PausedFrom = ""
+	updatedRun.PausedWakeCondition = nil
 	updatedRun.LeaseOwner = ""
 	updatedRun.LeaseExpiresAt = nil
 	updatedRun.CompletedAt = &now
@@ -529,6 +550,22 @@ func resumedRunStatus(previous AgentRunStatus) AgentRunStatus {
 }
 
 func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
+	contextValues := req.Context
+	if _, present := contextValues[AcceptedRunExecutionContextKey]; present {
+		pin, err := AcceptedRunExecutionForRun(&AgentRun{Scope: req.Scope, AssignedAgentID: req.AssignedAgentID, Entrypoint: strings.TrimSpace(req.Entrypoint), Context: contextValues})
+		if err != nil {
+			return "", err
+		}
+		contextValues = cloneMap(contextValues)
+		delete(contextValues, AcceptedRunExecutionContextKey)
+		if pin.DerivedRunbookIdentity {
+			delete(contextValues, "runbookDefinitionId")
+			delete(contextValues, "runbookDefinitionVersion")
+		}
+		if len(contextValues) == 0 {
+			contextValues = nil
+		}
+	}
 	payload := struct {
 		Scope                Scope                  `json:"scope"`
 		Kind                 RunKind                `json:"kind"`
@@ -556,7 +593,7 @@ func runCreationFingerprint(req CreateAgentRunRequest) (string, error) {
 		ConcurrencyKey:       strings.TrimSpace(req.ConcurrencyKey),
 		ResourceRequirements: req.ResourceRequirements,
 		Goal:                 req.Goal, Source: req.Source, Priority: req.Priority, Deadline: req.Deadline,
-		AvailableAt: req.AvailableAt, Context: req.Context, Plan: req.Plan, Checkpoint: req.Checkpoint,
+		AvailableAt: req.AvailableAt, Context: contextValues, Plan: req.Plan, Checkpoint: req.Checkpoint,
 		WakeCondition: req.WakeCondition, Budget: req.Budget, Policy: req.Policy,
 	}
 	encoded, err := json.Marshal(payload)

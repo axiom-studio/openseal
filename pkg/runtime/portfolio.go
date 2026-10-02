@@ -300,6 +300,9 @@ func (r *AgentRun) Validate() error {
 	if err := r.Owner.Validate(); err != nil {
 		return err
 	}
+	if _, err := AcceptedRunExecutionForRun(r); err != nil {
+		return err
+	}
 	if strings.TrimSpace(r.Goal) == "" {
 		return errors.New("run goal is required")
 	}

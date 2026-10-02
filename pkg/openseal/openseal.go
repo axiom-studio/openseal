@@ -347,6 +347,9 @@ type (
 	ApplySkillReferenceUpgradeRequest         = runtime.ApplySkillReferenceUpgradeRequest
 	SkillReferenceUpgradeApproval             = runtime.SkillReferenceUpgradeApproval
 	SkillReferenceUpgradeReceipt              = runtime.SkillReferenceUpgradeReceipt
+	SkillRuntimeUsageFilter                   = runtime.SkillRuntimeUsageFilter
+	SkillRuntimeReference                     = runtime.SkillRuntimeReference
+	SkillRuntimeUsageStore                    = runtime.SkillRuntimeUsageStore
 	WorkforceAuthoringRunStore                = runtime.WorkforceAuthoringRunStore
 	WorkforceAuthoringRunService              = runtime.WorkforceAuthoringRunService
 	WorkforceAuthoringCatalogResolver         = runtime.WorkforceAuthoringCatalogResolver
@@ -2480,6 +2483,7 @@ var (
 	ErrSkillReferenceUpgradeConflict    = runtime.ErrSkillReferenceUpgradeConflict
 	ErrSkillReferenceUpgradeApproval    = runtime.ErrSkillReferenceUpgradeApproval
 	ErrSkillReferenceUpgradeInvalid     = runtime.ErrSkillReferenceUpgradeInvalid
+	ErrSkillReferenceUpgradeBusy        = runtime.ErrSkillReferenceUpgradeBusy
 )
 
 func ValidateWorkforceAuthoringPrompt(prompt string) error {
@@ -2642,11 +2646,12 @@ func New(opts ...Option) (*Engine, error) {
 		artifacts:                runtime.NewArtifactCatalog(store),
 		skills:                   skill.NewCatalogWithStore(store),
 		agents:                   agentRegistry,
-		teams:                    kernelteam.NewRegistry(agentRegistry),
+		teams:                    kernelteam.NewRegistryWithStore(store, agentRegistry),
 		actionPolicy:             nil,
 		approvalAuth:             runtime.EligibleApprovalAuthorizer{},
 		logger:                   sugar,
 	}
+	e.collaboration.SetAcceptedRunExecutionPreparer(e)
 	e.embeds, _ = runtime.NewEmbedSessionService(store, store)
 	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills, e.teams)
 	e.progression = progression.NewService(e.agents, e.teams)
@@ -2845,6 +2850,7 @@ func WithStore(store runtime.KernelStore) Option {
 		}
 		if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
 			e.collaboration = runtime.NewCollaborationService(collaborationStore)
+			e.collaboration.SetAcceptedRunExecutionPreparer(e)
 		} else {
 			e.collaboration = nil
 		}
@@ -3068,6 +3074,7 @@ func (e *Engine) rebuildExternalConversations() error {
 		return err
 	}
 	runbookDispatcher := runtime.NewExternalConversationRunbookEventDispatcher(e.store, runbookResolver)
+	runbookDispatcher.SetAcceptedRunExecutionPreparer(e)
 	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler, runbookDispatcher)
 	inboxConfig := e.externalConversations.config.Inbox
 	if contextHost, ok := e.externalConversations.host.(runtime.ExternalConversationContextHost); ok {
@@ -3132,9 +3139,11 @@ func (e *Engine) rebuildCallbacks() error {
 		return nil
 	}
 	e.callbacks.registry = runtime.NewCallbackRegistry(store, e.skills)
+	runbookEvents := runtime.NewRunbookEventRouter(store)
+	runbookEvents.SetAcceptedRunExecutionPreparer(e)
 	e.callbacks.ingress = runtime.NewCallbackIngressService(store, e.skills, map[string]runtime.CallbackEventConsumer{
 		"approvals": runtime.NewApprovalCallbackConsumer(store, e.externalConversations.transport),
-		"runbooks":  runtime.NewRunbookEventRouter(store),
+		"runbooks":  runbookEvents,
 	})
 	if e.externalConversations.supervisor != nil && e.externalConversations.config != nil {
 		callbackConfig := e.externalConversations.config.Callback
@@ -3505,6 +3514,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		}
 		dispatcher.SetWorkflowCatalog(e.skills)
 		dispatcher.SetWorkflowTeams(e.teams)
+		dispatcher.SetAcceptedRunExecutionPreparer(e)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3514,6 +3524,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		}
 		dispatcher.SetWorkflowCatalog(e.skills)
 		dispatcher.SetWorkflowTeams(e.teams)
+		dispatcher.SetAcceptedRunExecutionPreparer(e)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil
@@ -3831,6 +3842,7 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 			return err
 		}
 		pool.SetWorkerLimiter(e.workerLimiter)
+		pool.SetAcceptedRunExecutionPreparer(e)
 		pool.SetActionCoordinator(e.actions)
 		pool.SetRunTerminalFinalizer(finalizer)
 		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
@@ -3855,6 +3867,7 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 			return err
 		}
 		supervisor.SetWorkerLimiter(e.workerLimiter)
+		supervisor.SetAcceptedRunExecutionPreparer(e)
 		supervisor.SetActionCoordinator(e.actions)
 		supervisor.SetRunTerminalFinalizer(finalizer)
 		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
@@ -3960,7 +3973,7 @@ func (e *Engine) UpdateRunbookActivation(ctx context.Context, scope runtime.Scop
 }
 
 func (e *Engine) StartRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
-	return runtime.StartRunbookActivation(ctx, e.store, scope, activationID, req)
+	return runtime.StartRunbookActivationWithExecutionPreparer(ctx, e.store, scope, activationID, req, e)
 }
 
 func (e *Engine) CreateProject(ctx context.Context, req runtime.CreateProjectRequest) (*runtime.Project, *runtime.ActivityEvent, error) {
@@ -4154,11 +4167,15 @@ func (e *Engine) ReconcileOutreachAction(ctx context.Context, scope runtime.Scop
 }
 
 func (e *Engine) ReconcileRunbookSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.RunbookScheduleResult, error) {
-	return runtime.NewRunbookScheduler(e.store).ReconcileScope(ctx, scope, limit)
+	scheduler := runtime.NewRunbookScheduler(e.store)
+	scheduler.SetAcceptedRunExecutionPreparer(e)
+	return scheduler.ReconcileScope(ctx, scope, limit)
 }
 
 func (e *Engine) ReconcileAllRunbookSchedules(ctx context.Context, limitPerScope int) (*runtime.RunbookScheduleResult, error) {
-	return runtime.NewRunbookScheduler(e.store).ReconcileAll(ctx, limitPerScope)
+	scheduler := runtime.NewRunbookScheduler(e.store)
+	scheduler.SetAcceptedRunExecutionPreparer(e)
+	return scheduler.ReconcileAll(ctx, limitPerScope)
 }
 
 func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRun, error) {
@@ -4172,25 +4189,26 @@ func (e *Engine) CreateAgentRun(ctx context.Context, req runtime.CreateAgentRunR
 // CreateAgentRunCommand returns both the durable run and its creation event.
 // Idempotent replays return the existing run with a nil event.
 func (e *Engine) CreateAgentRunCommand(ctx context.Context, req runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
+	if err := req.Scope.Validate(); err != nil {
+		return nil, err
+	}
+	if err := req.Owner.Validate(); err != nil {
+		return nil, err
+	}
+	// An accepted delivery retry keeps its original immutable method even if
+	// the active deployment changed. Request-supplied snapshots are discarded.
+	req.Context = maps.Clone(req.Context)
+	delete(req.Context, runtime.AcceptedRunExecutionContextKey)
+	if strings.TrimSpace(req.IdempotencyKey) != "" {
+		if replay, err := runtime.NewRunCommandService(e.store).FindCreatedAgentRun(ctx, req); err != nil || replay != nil {
+			return replay, err
+		}
+	}
 	if err := e.ValidateAgentRunEntrypoint(ctx, req.Scope, req.AssignedAgentID, req.Entrypoint); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.Entrypoint) != "" {
-		deployment, err := e.GetAgentDeployment(ctx, skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, strings.TrimSpace(req.AssignedAgentID))
-		if err != nil || deployment == nil {
-			return nil, fmt.Errorf("resolve Agent Runbook identity: deployment is unavailable")
-		}
-		definition, err := e.GetAgentDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
-		if err != nil || definition == nil || definition.Runbook == nil {
-			return nil, fmt.Errorf("resolve Agent Runbook identity: active definition is unavailable")
-		}
-		if req.Context == nil {
-			req.Context = make(map[string]interface{})
-		} else {
-			req.Context = maps.Clone(req.Context)
-		}
-		req.Context["runbookDefinitionId"] = definition.Runbook.ID
-		req.Context["runbookDefinitionVersion"] = definition.Runbook.Version
+	if err := e.PrepareAcceptedRunExecution(ctx, &req); err != nil {
+		return nil, err
 	}
 	return runtime.NewRunCommandService(e.store).CreateAgentRun(ctx, req)
 }
@@ -4906,7 +4924,9 @@ func (e *Engine) RouteEvent(ctx context.Context, event runtime.EventEnvelope) (*
 	if e == nil || e.store == nil {
 		return nil, errors.New("Runbook event routing is unavailable")
 	}
-	return runtime.NewRunbookEventRouter(e.store).Route(ctx, event)
+	router := runtime.NewRunbookEventRouter(e.store)
+	router.SetAcceptedRunExecutionPreparer(e)
+	return router.Route(ctx, event)
 }
 
 func (e *Engine) RegisterSkill(ctx context.Context, definition *skill.Definition) error {
@@ -5002,6 +5022,32 @@ func (e *Engine) ApplySkillReferenceUpgrade(ctx context.Context, request runtime
 		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
 	}
 	return e.skillReferenceUpgrades.Apply(ctx, request)
+}
+
+// HasSkillRuntimeUsage reports whether replacing this executable version
+// would invalidate outstanding calls or receipts still owned by an active Run.
+func (e *Engine) HasSkillRuntimeUsage(ctx context.Context, filter runtime.SkillRuntimeUsageFilter) (bool, error) {
+	if e == nil {
+		return false, runtime.ErrSkillReferenceUpgradeUnavailable
+	}
+	store, ok := e.store.(runtime.SkillRuntimeUsageStore)
+	if !ok {
+		return false, runtime.ErrSkillReferenceUpgradeUnavailable
+	}
+	return store.HasSkillRuntimeUsage(ctx, filter)
+}
+
+// ListReferencedSkillRuntimeVersions provides tenant-scoped metadata for
+// retaining exact execution versions while newer versions are staged.
+func (e *Engine) ListReferencedSkillRuntimeVersions(ctx context.Context, scope runtime.Scope) ([]runtime.SkillRuntimeReference, error) {
+	if e == nil {
+		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
+	}
+	store, ok := e.store.(runtime.SkillRuntimeUsageStore)
+	if !ok {
+		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
+	}
+	return store.ListReferencedSkillRuntimeVersions(ctx, scope)
 }
 
 // ListTeamSkillBindings exposes the first-class Team-owned binding portfolio.

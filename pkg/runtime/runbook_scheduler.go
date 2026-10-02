@@ -32,8 +32,15 @@ type RunbookScheduler struct {
 		RunbookActivationStore
 		SourceMonitorStore
 	}
-	reportingStore ConversationStore
-	now            func() time.Time
+	reportingStore    ConversationStore
+	executionPreparer AcceptedRunExecutionPreparer
+	now               func() time.Time
+}
+
+func (s *RunbookScheduler) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+	if s != nil {
+		s.executionPreparer = preparer
+	}
 }
 
 func NewRunbookScheduler(store interface {
@@ -194,13 +201,13 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		if err != nil {
 			return result, fmt.Errorf("prepare Runbook activation %s reporting: %w", activation.ID, err)
 		}
-		created, err := NewRunCommandService(s.store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		created, err := createAgentRunWithAcceptedExecution(ctx, NewRunCommandService(s.store), CreateAgentRunRequest{
 			Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 			Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
 			Goal: activationGoal(activation, objective), Source: RunSourceSchedule, Priority: objective.Priority, Context: contextValues,
 			Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget), IdempotencyKey: idempotencyKey,
 			Actor: ActivityActor{Type: "service", ID: "runbook-scheduler"}, Visibility: runbookScheduleVisibility(activation),
-		})
+		}, s.executionPreparer)
 		if err != nil {
 			return result, fmt.Errorf("schedule Runbook activation %s: %w", activation.ID, err)
 		}

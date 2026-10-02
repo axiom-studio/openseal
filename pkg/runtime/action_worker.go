@@ -119,6 +119,29 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		return nil, err
 	}
 	executionCtx, stopLease := w.holdActionLease(ctx, call, workerID, leaseDuration)
+	// An ActionCall may outlive its parent dependency after cancellation or a
+	// replacement continuation. Reconcile it before touching provider authority.
+	sourceRun, executionErr := w.store.GetAgentRun(executionCtx, call.Scope, call.RunID)
+	if executionErr == nil && sourceRun == nil {
+		executionErr = ErrRunNotFound
+	}
+	if executionErr != nil || !runOwnsActionDependency(sourceRun, call) || runHasPausedActionDependency(sourceRun, call) {
+		call, leaseErr := stopLease()
+		if leaseErr != nil {
+			return nil, leaseErr
+		}
+		if executionErr != nil {
+			return nil, executionErr
+		}
+		return w.persistOutcome(ctx, call, nil, nil, nil, nil, workerID, false)
+	}
+	if executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID); executionErr != nil {
+		call, leaseErr := stopLease()
+		if leaseErr != nil {
+			return nil, leaseErr
+		}
+		return w.persistOutcome(ctx, call, nil, nil, nil, executionErr, workerID, false)
+	}
 	selection := []skill.BindingReference(nil)
 	if call.BindingID != "" || call.BindingRevision != 0 {
 		selection = append(selection, skill.BindingReference{ID: call.BindingID, Revision: call.BindingRevision})
@@ -126,13 +149,6 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	bound, executionErr := w.catalog.Resolve(executionCtx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
 	if executionErr == nil {
 		executionErr = w.catalog.ValidateInput(executionCtx, bound, call.Arguments)
-	}
-	var sourceRun *AgentRun
-	if executionErr == nil {
-		sourceRun, executionErr = w.store.GetAgentRun(executionCtx, call.Scope, call.RunID)
-		if executionErr == nil && sourceRun == nil {
-			executionErr = ErrRunNotFound
-		}
 	}
 	credentials := map[string]string(nil)
 	var credentialLease *SignedActionCredentialLease
@@ -169,26 +185,39 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		}
 	}
 	var output map[string]interface{}
+	dispatched := false
 	if executionErr == nil {
+		// Catalog or credential resolution can race a pause/cancel command. The
+		// second check keeps a known stale dependency out of the dispatcher.
+		sourceRun, executionErr = w.store.GetAgentRun(executionCtx, call.Scope, call.RunID)
+		if executionErr == nil && sourceRun == nil {
+			executionErr = ErrRunNotFound
+		}
+	}
+	if executionErr == nil {
+		executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID)
+	}
+	if executionErr == nil && runOwnsActionDependency(sourceRun, call) && !runHasPausedActionDependency(sourceRun, call) {
 		dispatchCtx := executionCtx
 		cancel := func() {}
 		if timeout := bound.Action.Timeout.Duration(); timeout > 0 {
 			dispatchCtx, cancel = context.WithTimeout(executionCtx, timeout)
 		}
+		dispatched = true
 		output, executionErr = w.dispatcher.DispatchAction(dispatchCtx, ActionDispatchInput{
 			Call: cloneActionCall(call), Run: cloneAgentRun(sourceRun), Bound: bound, Arguments: cloneMap(call.Arguments), Credentials: credentials,
 			CredentialLease: credentialLease, CredentialReferences: credentialReferences,
 		})
 		cancel()
 	}
-	if executionErr == nil {
+	if dispatched && executionErr == nil {
 		executionErr = w.catalog.ValidateOutput(executionCtx, bound, output)
 	}
 	call, leaseErr := stopLease()
 	if leaseErr != nil {
 		return nil, leaseErr
 	}
-	return w.persistOutcome(ctx, call, bound, credentials, output, executionErr, workerID)
+	return w.persistOutcome(ctx, call, bound, credentials, output, executionErr, workerID, dispatched)
 }
 
 func (w *ActionWorker) holdActionLease(parent context.Context, call *ActionCall, workerID string, leaseDuration time.Duration) (context.Context, func() (*ActionCall, error)) {
@@ -249,15 +278,91 @@ func (w *ActionWorker) holdActionLease(parent context.Context, call *ActionCall,
 	return executionCtx, stop
 }
 
-func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string) (*ActionExecutionResult, error) {
-	now := w.now().UTC()
-	sourceRun, err := w.store.GetAgentRun(ctx, call.Scope, call.RunID)
+// Action stores may expose maintenance without requiring every custom action
+// implementation to become a maintenance owner. Built-in stores additionally
+// fence submission and claims inside their authoritative transaction.
+func actionSkillRuntimeMaintenanceError(ctx context.Context, store interface{}, scope Scope, skillID string) error {
+	getter, ok := store.(interface {
+		GetSkillRuntimeMaintenance(context.Context, Scope, string) (*SkillRuntimeMaintenance, error)
+	})
+	if !ok {
+		return nil
+	}
+	gate, err := getter.GetSkillRuntimeMaintenance(ctx, scope, skillID)
+	if errors.Is(err, ErrSkillRuntimeMaintenanceNotFound) {
+		return nil
+	}
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if sourceRun == nil {
-		return nil, ErrRunNotFound
+	if gate != nil && gate.Active {
+		return &SkillRuntimeMaintenanceError{Maintenance: *gate}
 	}
+	return nil
+}
+
+// Both the active and paused continuation own the same durable dependency.
+// Checking identity prevents a late result from waking a newer continuation.
+func runOwnsActionDependency(run *AgentRun, call *ActionCall) bool {
+	if run == nil || call == nil || run.Scope != call.Scope || run.ID != call.RunID {
+		return false
+	}
+	condition := run.WakeCondition
+	if run.Status == AgentRunStatusPaused && run.PausedFrom == AgentRunStatusWaitingForDependency {
+		condition = run.PausedWakeCondition
+	} else if run.Status != AgentRunStatusWaitingForDependency {
+		return false
+	}
+	return condition != nil && condition.Type == "action" && condition.Reference == call.ID
+}
+
+func runHasPausedActionDependency(run *AgentRun, call *ActionCall) bool {
+	return run != nil && run.Status == AgentRunStatusPaused && runOwnsActionDependency(run, call)
+}
+
+func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string, dispatched bool) (*ActionExecutionResult, error) {
+	// Retry the outcome, not the external operation, when an operator updates
+	// the Run between our observation and its atomic completion transaction.
+	const maximumPersistenceAttempts = 8
+	humanInterventionID := ""
+	if dispatched && executionErr == nil {
+		if request := humanInterventionFromAction(&ActionCall{Output: output}, w.now().UTC(), w.newID); request != nil {
+			humanInterventionID = request.ID
+		}
+	}
+	eventID := w.newID()
+	for attempt := 0; attempt < maximumPersistenceAttempts; attempt++ {
+		sourceRun, err := w.store.GetAgentRun(ctx, call.Scope, call.RunID)
+		if err != nil {
+			return nil, err
+		}
+		if sourceRun == nil {
+			return nil, ErrRunNotFound
+		}
+		record, err := w.prepareActionOutcome(ctx, call, sourceRun, bound, credentials, output, executionErr, workerID, dispatched, eventID, humanInterventionID)
+		if err != nil {
+			return nil, err
+		}
+		result, err := w.store.PersistActionExecution(ctx, record)
+		if !errors.Is(err, ErrRevisionConflict) {
+			return result, err
+		}
+		currentCall, err := w.store.GetActionCall(ctx, call.Scope, call.ID)
+		if err != nil {
+			return nil, err
+		}
+		if currentCall == nil || currentCall.Status != ActionCallStatusRunning || currentCall.LeaseOwner != workerID || currentCall.Attempt != call.Attempt || currentCall.LeaseExpiresAt == nil || !currentCall.LeaseExpiresAt.After(w.now().UTC()) {
+			return nil, ErrLeaseLost
+		}
+		call = currentCall
+	}
+	return nil, ErrRevisionConflict
+}
+
+func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCall, sourceRun *AgentRun, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string, dispatched bool, eventID, humanInterventionID string) (ActionExecutionRecord, error) {
+	now := w.now().UTC()
+	ownsDependency := runOwnsActionDependency(sourceRun, call)
+	paused := runHasPausedActionDependency(sourceRun, call)
 	updatedCall := cloneActionCall(call)
 	updatedCall.Revision++
 	updatedCall.UpdatedAt = now
@@ -266,8 +371,21 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 	eventType := "action.succeeded"
 	summary := fmt.Sprintf("Completed %s.%s", call.SkillID, call.Action)
 	var updatedRun *AgentRun
-	var expectedRunRevision int64
-	if executionErr != nil && call.Attempt < call.MaxAttempts {
+	if !dispatched && !ownsDependency {
+		updatedCall.Status = ActionCallStatusCanceled
+		updatedCall.CompletedAt = &now
+		updatedCall.Error = "owning Run no longer waits for this action"
+		eventType = "action.canceled"
+		summary = fmt.Sprintf("Canceled stale %s.%s action", call.SkillID, call.Action)
+	} else if !dispatched && (paused || executionErr == nil || errors.Is(executionErr, ErrSkillRuntimeMaintenance)) {
+		updatedCall.Status = ActionCallStatusReady
+		updatedCall.AvailableAt = now
+		eventType = "action.deferred"
+		summary = fmt.Sprintf("Deferred %s.%s after its Run changed before dispatch", call.SkillID, call.Action)
+		if errors.Is(executionErr, ErrSkillRuntimeMaintenance) {
+			summary = fmt.Sprintf("Deferred %s.%s during runtime maintenance", call.SkillID, call.Action)
+		}
+	} else if executionErr != nil && ownsDependency && call.Attempt < call.MaxAttempts {
 		updatedCall.Status = ActionCallStatusReady
 		updatedCall.Error = sanitizeActionError(executionErr, credentials)
 		var retryPolicy skill.ActionRetryPolicy
@@ -282,7 +400,11 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 		updatedCall.CompletedAt = &completedAt
 		if executionErr == nil {
 			updatedCall.Status = ActionCallStatusSucceeded
-			updatedCall.Output = sanitizeActionOutput(annotateActionProgress(output, updatedCall, bound.Action.SemanticArguments), credentials)
+			var semanticArguments map[string]string
+			if bound != nil {
+				semanticArguments = bound.Action.SemanticArguments
+			}
+			updatedCall.Output = sanitizeActionOutput(annotateActionProgress(output, updatedCall, semanticArguments), credentials)
 			updatedCall.Error = ""
 		} else {
 			updatedCall.Status = ActionCallStatusFailed
@@ -290,28 +412,25 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 			eventType = "action.failed"
 			summary = fmt.Sprintf("Failed %s.%s after %d attempts", call.SkillID, call.Action, call.Attempt)
 		}
-		if sourceRun.Status != AgentRunStatusWaitingForDependency || sourceRun.WakeCondition == nil || sourceRun.WakeCondition.Type != "action" || sourceRun.WakeCondition.Reference != call.ID {
-			return nil, fmt.Errorf("%w: run is not waiting on action %s", ErrInvalidRunTransition, call.ID)
-		}
-		expectedRunRevision = sourceRun.Revision
+	}
+	terminalOutcome := updatedCall.Status == ActionCallStatusSucceeded || updatedCall.Status == ActionCallStatusFailed
+	if ownsDependency && terminalOutcome {
 		updatedRun = cloneAgentRun(sourceRun)
-		updatedRun.Status = AgentRunStatusQueued
-		updatedRun.WakeCondition = nil
-		updatedRun.AvailableAt = now
-		updatedRun.QueueEnteredAt = now
-		updatedRun.UpdatedAt = now
-		updatedRun.Revision++
-		if updatedRun.Budget != nil {
-			if err := settleRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID), BudgetUsage{Actions: 1}); err != nil {
-				return nil, err
-			}
+		if paused {
+			updatedRun.PausedFrom = AgentRunStatusQueued
+			updatedRun.PausedWakeCondition = nil
+		} else {
+			updatedRun.Status = AgentRunStatusQueued
+			updatedRun.WakeCondition = nil
+			updatedRun.AvailableAt = now
+			updatedRun.QueueEnteredAt = now
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
 		if updatedCall.Status == ActionCallStatusFailed && updatedCall.ApprovalID != "" {
 			approval, approvalErr := w.store.GetApproval(ctx, updatedCall.Scope, updatedCall.ApprovalID)
 			if approvalErr != nil {
-				return nil, approvalErr
+				return ActionExecutionRecord{}, approvalErr
 			}
 			updatedRun.Checkpoint = checkpointApprovedActionFailure(updatedRun.Checkpoint, approval, updatedCall)
 		} else if updatedCall.Status == ActionCallStatusSucceeded && updatedRun.Checkpoint[approvalRecoveryCheckpointKey] != nil {
@@ -321,33 +440,63 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 			updatedRun.Checkpoint = clearProposalFailure(updatedRun.Checkpoint)
 		}
 		if updatedCall.Status == ActionCallStatusSucceeded {
-			if request := humanInterventionFromAction(updatedCall, now, w.newID); request != nil {
-				updatedRun.Status = AgentRunStatusWaitingForEvent
-				updatedRun.WakeCondition = &WakeCondition{Type: "human_intervention", Reference: request.ID}
+			if request := humanInterventionFromAction(updatedCall, now, func() string { return humanInterventionID }); request != nil {
+				condition := &WakeCondition{Type: "human_intervention", Reference: request.ID}
+				if paused {
+					updatedRun.PausedFrom = AgentRunStatusWaitingForEvent
+					updatedRun.PausedWakeCondition = condition
+				} else {
+					updatedRun.Status = AgentRunStatusWaitingForEvent
+					updatedRun.WakeCondition = condition
+				}
 				updatedRun.HumanInterventions = append(updatedRun.HumanInterventions, *request)
 				eventType = "action.human_intervention_required"
 				summary = request.Summary
 			}
 		}
 	}
+	// Cancellation before dispatch releases unused capacity. A result obtained
+	// during cancellation settles its own reservation without changing the
+	// canceled status or replacing a newer continuation's checkpoint.
+	if sourceRun.Budget != nil && (terminalOutcome || updatedCall.Status == ActionCallStatusCanceled) {
+		_, reserved := sourceRun.BudgetReservations[actionBudgetReservationID(call.ID)]
+		if reserved || ownsDependency && terminalOutcome {
+			if updatedRun == nil {
+				updatedRun = cloneAgentRun(sourceRun)
+			}
+			var budgetErr error
+			if updatedCall.Status == ActionCallStatusCanceled {
+				budgetErr = releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID))
+			} else {
+				budgetErr = settleRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID), BudgetUsage{Actions: 1})
+			}
+			if budgetErr != nil {
+				return ActionExecutionRecord{}, budgetErr
+			}
+		}
+	}
+	if updatedRun != nil {
+		updatedRun.UpdatedAt = now
+		updatedRun.Revision++
+	}
 	event := &ActivityEvent{
-		ID: w.newID(), Scope: call.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
+		ID: eventID, Scope: call.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
 		AgentID: call.DeploymentID, ObjectiveID: sourceRun.ObjectiveID, TeamID: teamIDForRun(sourceRun), RunID: call.RunID, TurnID: call.TurnID, Actor: ActivityActor{Type: "worker", ID: workerID},
 		Summary: summary, Visibility: ActivityVisibilityScope, CausationID: call.ID, CreatedAt: now,
 		Payload: map[string]interface{}{"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "status": updatedCall.Status, "attempt": updatedCall.Attempt},
 	}
-	if updatedRun != nil && updatedRun.WakeCondition != nil && updatedRun.WakeCondition.Type == "human_intervention" {
+	if eventType == "action.human_intervention_required" {
 		event.Severity = ActivitySeverityWarning
-		event.Payload["humanInterventionId"] = updatedRun.WakeCondition.Reference
+		event.Payload["humanInterventionId"] = updatedRun.HumanInterventions[len(updatedRun.HumanInterventions)-1].ID
 		event.Payload["challenge"] = append([]string(nil), updatedRun.HumanInterventions[len(updatedRun.HumanInterventions)-1].Challenge...)
 	}
 	if updatedCall.Status == ActionCallStatusSucceeded || updatedCall.Status == ActionCallStatusFailed {
 		event.UsageDelta = &BudgetUsage{Actions: 1}
 	}
-	return w.store.PersistActionExecution(ctx, ActionExecutionRecord{
-		Call: updatedCall, ExpectedCallRevision: call.Revision, Run: updatedRun, ExpectedRunRevision: expectedRunRevision,
+	return ActionExecutionRecord{
+		Call: updatedCall, ExpectedCallRevision: call.Revision, Run: updatedRun, ExpectedRunRevision: sourceRun.Revision,
 		WorkerID: workerID, Now: now, Event: event,
-	})
+	}, nil
 }
 
 func humanInterventionFromAction(call *ActionCall, now time.Time, newID func() string) *HumanInterventionRequest {

@@ -160,6 +160,10 @@ func NewCatalogWithStore(store CatalogStore) *Catalog {
 	return catalog
 }
 
+// UsesDurableBindings tells the kernel whether action submission must fence
+// the selected binding against the shared durable control plane.
+func (c *Catalog) UsesDurableBindings() bool { return c != nil && c.store != nil }
+
 func (c *Catalog) Register(ctx context.Context, definition *Definition) error {
 	if c == nil {
 		return errors.New("skill catalog is not configured")

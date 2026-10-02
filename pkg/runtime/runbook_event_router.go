@@ -48,7 +48,14 @@ type RunbookEventRouter struct {
 		RunbookActivationStore
 		PortfolioStore
 	}
-	reportingStore ConversationStore
+	reportingStore    ConversationStore
+	executionPreparer AcceptedRunExecutionPreparer
+}
+
+func (r *RunbookEventRouter) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+	if r != nil {
+		r.executionPreparer = preparer
+	}
 }
 
 func NewRunbookEventRouter(store interface {
@@ -162,7 +169,7 @@ func (r *RunbookEventRouter) Route(ctx context.Context, event EventEnvelope) (*E
 		if strings.TrimSpace(actor.Type) == "" {
 			actor = ActivityActor{Type: "event", ID: event.Source}
 		}
-		created, err := commands.CreateAgentRun(ctx, CreateAgentRunRequest{
+		created, err := createAgentRunWithAcceptedExecution(ctx, commands, CreateAgentRunRequest{
 			Scope: event.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner,
 			AssignedAgentID: activation.AssignedAgentID, Entrypoint: activation.Trigger.Entrypoint,
 			ConcurrencyKey: "runbook:" + activation.ID, Goal: objective.Goal, Priority: objective.Priority,
@@ -170,7 +177,7 @@ func (r *RunbookEventRouter) Route(ctx context.Context, event EventEnvelope) (*E
 			Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
 			IdempotencyKey: idempotencyKey, Actor: actor,
 			Visibility: ActivityVisibilityScope,
-		})
+		}, r.executionPreparer)
 		if err != nil {
 			return nil, err
 		}

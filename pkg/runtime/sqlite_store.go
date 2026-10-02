@@ -76,6 +76,18 @@ func migrate(db *sql.DB) error {
 	if err := migrateSkillCatalog(db); err != nil {
 		return err
 	}
+	if err := migrateSkillUpgradeDrainSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateSkillRuntimeMaintenanceSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateRunSkillDependenciesSQLite(db); err != nil {
+		return err
+	}
+	if err := migrateProjectSkillReferencesSQLite(db); err != nil {
+		return err
+	}
 	if err := migrateSkillSourceArtifacts(db); err != nil {
 		return err
 	}

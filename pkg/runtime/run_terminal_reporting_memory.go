@@ -104,7 +104,14 @@ func (q *memoryTerminalReportQueue) remove(key runTerminalReportKey) {
 // MemoryStore.mu. Report enqueue is therefore atomic with specialized action,
 // approval, dependency and ordinary command transitions alike.
 func (s *MemoryStore) saveMemoryAgentRunLocked(key string, run *AgentRun) {
+	previous := s.agentRuns[key]
+	wasActive := previous != nil && !isTerminalAgentRunStatus(previous.Status)
 	s.agentRuns[key] = cloneAgentRun(run)
+	s.refreshMemorySkillRuntimeMaintenanceWaiterLocked(key)
+	s.refreshMemoryRunSkillDependenciesLocked(key, run)
+	if wasActive != !isTerminalAgentRunStatus(run.Status) {
+		s.refreshMemorySkillRuntimeReceiptsLocked(key)
+	}
 	if !runNeedsTerminalReporting(run) {
 		return
 	}

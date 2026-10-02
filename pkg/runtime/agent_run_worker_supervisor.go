@@ -78,15 +78,16 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 // Run pools. A transient scope-source failure leaves existing pools running so
 // already leased work is not interrupted.
 type AgentRunWorkerSupervisor struct {
-	store          KernelStore
-	resolver       TurnRunnerResolver
-	source         WorkerScopeSource
-	config         DynamicAgentRunWorkerConfig
-	logger         *zap.SugaredLogger
-	actions        *ActionCoordinator
-	actionObserver ActionProposalObserver
-	runFinalizer   RunTerminalFinalizer
-	limiter        *WorkerLimiter
+	store             KernelStore
+	resolver          TurnRunnerResolver
+	source            WorkerScopeSource
+	config            DynamicAgentRunWorkerConfig
+	logger            *zap.SugaredLogger
+	actions           *ActionCoordinator
+	actionObserver    ActionProposalObserver
+	runFinalizer      RunTerminalFinalizer
+	limiter           *WorkerLimiter
+	executionPreparer AcceptedRunExecutionPreparer
 
 	mu     sync.RWMutex
 	pools  map[string]*AgentRunWorkerPool
@@ -266,6 +267,7 @@ func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
 		pool.SetActionProposalObserver(s.actionObserver)
 		pool.SetRunTerminalFinalizer(s.runFinalizer)
 		pool.SetWorkerLimiter(s.limiter)
+		pool.SetAcceptedRunExecutionPreparer(s.executionPreparer)
 		s.pools[key] = pool
 		pool.Start(ctx)
 		s.logger.Infow("started agent run worker scope", "runKind", s.config.Kind, "scopeKind", scope.Kind, "scopeId", scope.ID, "concurrency", s.config.Concurrency)

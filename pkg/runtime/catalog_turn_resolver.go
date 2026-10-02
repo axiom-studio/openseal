@@ -64,9 +64,23 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if deployment.RolloutStatus != kernelagent.RolloutActive || strings.TrimSpace(deployment.ActiveVersion) == "" {
 		return nil, errors.New("assigned Agent deployment is not active")
 	}
-	definition, err := catalog.GetAgentDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	definitionID, definitionVersion := deployment.DefinitionID, deployment.ActiveVersion
+	accepted, err := AcceptedRunExecutionForRun(run)
+	if err != nil {
+		return nil, err
+	}
+	if accepted != nil {
+		definitionID, definitionVersion = accepted.DefinitionID, accepted.DefinitionVersion
+	}
+	definition, err := catalog.GetAgentDefinition(ctx, definitionID, definitionVersion)
 	if err != nil || definition == nil {
+		if accepted != nil || strings.TrimSpace(run.Entrypoint) != "" {
+			return nil, fmt.Errorf("%w: immutable Agent definition is unavailable", ErrAcceptedRunExecution)
+		}
 		return nil, fmt.Errorf("resolve active Agent definition: %w", err)
+	}
+	if accepted != nil && (definition.ID != accepted.DefinitionID || definition.Version != accepted.DefinitionVersion || definition.Runbook == nil || definition.Runbook.ID != accepted.RunbookID || definition.Runbook.Version != accepted.RunbookVersion) {
+		return nil, ErrAcceptedRunExecution
 	}
 	if _, requested := run.Context[AgentRequestCompletionReviewContextKey]; requested {
 		if config.Host == nil {
@@ -196,6 +210,19 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if len(runbookOperations) > 0 {
 		actions = withoutRunbookActivationStart(actions)
 	}
+	if accepted != nil {
+		allowed := make(map[string]bool, len(accepted.SkillDependencies))
+		for _, dependency := range accepted.SkillDependencies {
+			allowed[dependency.SkillID+"\x00"+dependency.SkillVersion] = true
+		}
+		filtered := make([]capability.ModelAction, 0, len(actions))
+		for _, action := range actions {
+			if allowed[action.SkillID+"\x00"+action.Version] {
+				filtered = append(filtered, action)
+			}
+		}
+		actions = filtered
+	}
 	base := TurnRunnerBinding{
 		DeploymentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		ModelActions: actions, PreparedRuntimes: prepared, InputContextRefs: contextRefs,
@@ -224,14 +251,17 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return &base, nil
 	}
 	delegationMode, _ := run.Context[DelegationModeContextKey].(string)
-	if definition.Runbook != nil && strings.TrimSpace(run.Entrypoint) != "" && delegationMode != string(runbook.DelegateReason) {
+	if strings.TrimSpace(run.Entrypoint) != "" && delegationMode != string(runbook.DelegateReason) {
+		if definition.Runbook == nil || (accepted == nil && legacyAcceptedRunExecution(run, deployment, definition) == nil) {
+			return nil, ErrAcceptedRunExecution
+		}
 		if err := validatePinnedRunbookPlan(definition.Runbook, run); err != nil {
-			return nil, fmt.Errorf("resolve governed runbook for Agent %s: %w", deployment.ID, err)
+			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, err)
 		}
 		entrypoint := catalogRunbookEntrypoint(definition, run)
 		runner, resolveErr := NewRunbookTurnRunner(definition.Runbook, entrypoint)
 		if resolveErr != nil {
-			return nil, fmt.Errorf("resolve governed runbook for Agent %s: %w", deployment.ID, resolveErr)
+			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, resolveErr)
 		}
 		base.Runner = runner
 		base.InputContextRefs = append(base.InputContextRefs, "runbook:"+definition.Runbook.ID+"@"+definition.Runbook.Version)

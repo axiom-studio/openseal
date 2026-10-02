@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -27,6 +28,13 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
+	gate, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, application.Plan.Scope, application.Plan.From.ID)
+	if err != nil {
+		return err
+	}
+	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+		return err
+	}
 	var bindingPayload string
 	if err = conn.QueryRowContext(ctx, `SELECT payload FROM skill_bindings
 		WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=? AND revision=?`,
@@ -38,10 +46,26 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 		return err
 	}
 	var currentBinding skill.Binding
-	if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil ||
+	if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil || currentBinding.Disabled ||
 		currentBinding.SkillID != application.Plan.From.ID || currentBinding.SkillVersion != application.Plan.From.Version ||
 		currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
 		return ErrSkillReferenceUpgradeConflict
+	}
+	busy, err := hasSkillRuntimeUsage(ctx, conn, skillBindingUpgradeUsageFilter(application), "action_calls", "agent_runs", false)
+	if err != nil {
+		return err
+	}
+	if busy {
+		return ErrSkillReferenceUpgradeBusy
+	}
+	if err := validateProjectSkillUpgradeReferencesSQL(ctx, conn, application, "project_skill_references", false); err != nil {
+		return err
+	}
+	if err := applySkillUpgradeTeamAuthoritySQL(ctx, conn, application.TeamAuthority, "team_definitions", "team_deployments", "team_definition_activations", false); err != nil {
+		return err
+	}
+	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
+		return err
 	}
 	encodedBinding, err := json.Marshal(application.Binding)
 	if err != nil {

@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 const SkillReferenceUpgradeAPIVersion = "openseal.io/skill-reference-upgrade/v1"
@@ -24,6 +25,7 @@ var (
 	ErrSkillReferenceUpgradeInvalid     = errors.New("skill reference upgrade is invalid")
 	ErrSkillReferenceUpgradeConflict    = errors.New("skill reference upgrade revision conflict")
 	ErrSkillReferenceUpgradeApproval    = errors.New("skill reference upgrade requires approval")
+	ErrSkillReferenceUpgradeBusy        = errors.New("skill reference upgrade is waiting for outstanding work to finish")
 )
 
 type SkillReferenceIdentity struct {
@@ -51,11 +53,14 @@ type SkillReferenceProjectImpact struct {
 }
 
 type SkillReferenceTeamAuthorityImpact struct {
-	DeploymentID      string   `json:"deploymentId"`
-	ExpectedRevision  int64    `json:"expectedRevision"`
-	DefinitionID      string   `json:"definitionId"`
-	DefinitionVersion string   `json:"definitionVersion"`
-	AuthorizedRoleIDs []string `json:"authorizedRoleIds"`
+	DeploymentID            string   `json:"deploymentId"`
+	ExpectedRevision        int64    `json:"expectedRevision"`
+	DefinitionID            string   `json:"definitionId"`
+	DefinitionVersion       string   `json:"definitionVersion"`
+	DefinitionDigest        string   `json:"definitionDigest"`
+	TargetDefinitionVersion string   `json:"targetDefinitionVersion"`
+	TargetDefinitionDigest  string   `json:"targetDefinitionDigest"`
+	AuthorizedRoleIDs       []string `json:"authorizedRoleIds"`
 }
 
 type SkillReferenceConversationEndpointImpact struct {
@@ -130,6 +135,7 @@ type SkillReferenceUpgradeReceipt struct {
 	Projects              []SkillReferenceProjectImpact              `json:"projects,omitempty"`
 	ConversationEndpoints []SkillReferenceConversationEndpointImpact `json:"conversationEndpoints,omitempty"`
 	CallbackRegistrations []SkillReferenceCallbackRegistrationImpact `json:"callbackRegistrations,omitempty"`
+	TeamAuthority         *SkillReferenceTeamAuthorityImpact         `json:"teamAuthority,omitempty"`
 	Actor                 ActivityActor                              `json:"actor"`
 	Reason                string                                     `json:"reason"`
 	Approval              *SkillReferenceUpgradeApproval             `json:"approval,omitempty"`
@@ -159,6 +165,14 @@ type SkillReferenceCallbackRegistrationMutation struct {
 	ExpectedRevision int64
 }
 
+type SkillReferenceTeamAuthorityMutation struct {
+	PreviousDeployment *kernelteam.Deployment
+	PreviousDefinition *kernelteam.Definition
+	Definition         *kernelteam.Definition
+	Deployment         *kernelteam.Deployment
+	Activation         *workforce.DefinitionActivation
+}
+
 // SkillReferenceUpgradeMutation is validated and materialized by the portable
 // service. Store implementations must apply all records in one transaction or
 // leave every record unchanged.
@@ -169,6 +183,7 @@ type SkillReferenceUpgradeMutation struct {
 	Projects              []SkillReferenceProjectMutation
 	ConversationEndpoints []SkillReferenceConversationEndpointMutation
 	CallbackRegistrations []SkillReferenceCallbackRegistrationMutation
+	TeamAuthority         *SkillReferenceTeamAuthorityMutation
 	Receipt               *SkillReferenceUpgradeReceipt
 }
 
@@ -197,6 +212,9 @@ func validateSkillReferenceUpgradeMutation(mutation *SkillReferenceUpgradeMutati
 		len(mutation.ConversationEndpoints) != len(mutation.Plan.ConversationEndpoints) ||
 		len(mutation.CallbackRegistrations) != len(mutation.Plan.CallbackRegistrations) {
 		return ErrSkillReferenceUpgradeInvalid
+	}
+	if err := validateSkillReferenceTeamAuthorityMutation(mutation); err != nil {
+		return err
 	}
 	objectiveRevisions := make(map[string]int64, len(mutation.Plan.Objectives))
 	for _, impact := range mutation.Plan.Objectives {
@@ -268,8 +286,10 @@ type SkillReferenceUpgradeService struct {
 
 func NewSkillReferenceUpgradeService(store SkillReferenceUpgradeStore, catalog *skill.Catalog, teams ...SkillReferenceUpgradeTeamAuthority) *SkillReferenceUpgradeService {
 	service := &SkillReferenceUpgradeService{store: store, catalog: catalog, now: time.Now}
-	if len(teams) > 0 {
+	if len(teams) > 0 && teams[0] != nil {
 		service.teams = teams[0]
+	} else if teamStore, ok := store.(kernelteam.Store); ok {
+		service.teams = kernelteam.NewRegistryWithStore(teamStore, nil)
 	}
 	return service
 }
@@ -380,7 +400,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 
 	objectiveImpacts := make([]SkillReferenceObjectiveImpact, 0)
 	referencedActions := make(map[string]bool)
-	projects, err := s.store.ListProjects(ctx, ProjectFilter{Scope: req.Scope})
+	projects, err := listUpgradeProjectSkillReferences(ctx, s.store, req.Scope, current)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +431,11 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	sort.Slice(callbackImpacts, func(i, j int) bool { return callbackImpacts[i].ID < callbackImpacts[j].ID })
 
 	findings := compareUpgradeContracts(previous, target, current.AllowedActions, referencedActions)
-	teamAuthority, err := s.planTeamSkillReferenceAuthority(ctx, req.Scope, req.DeploymentID, current, target)
+	findings = append(findings, compareUpgradeAdapterContracts(previous, target, current)...)
+	if current.SourceIdentity != targetSource {
+		findings = append(findings, SkillReferenceUpgradeFinding{Code: "source_identity_changed", Message: "Skill publisher identity changed"})
+	}
+	teamAuthority, err := s.planTeamSkillReferenceAuthority(ctx, req.Scope, req.DeploymentID, current, previous, target)
 	if err != nil {
 		return nil, err
 	}
@@ -455,6 +479,10 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 		}
 	}
 	now := s.now().UTC()
+	teamCandidate, err := s.materializeTeamSkillReferenceAuthority(ctx, current, req.Actor, req.Reason, now)
+	if err != nil {
+		return nil, err
+	}
 	scope := skill.ScopeReference{Kind: current.Scope.Kind, ID: current.Scope.ID}
 	bindings, err := s.store.ListSkillBindings(ctx, scope, current.DeploymentID)
 	if err != nil {
@@ -552,11 +580,12 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 		DeploymentID: current.DeploymentID, BindingID: current.BindingID, BindingRevision: binding.Revision,
 		From: current.From, To: current.To, Objectives: current.Objectives, Projects: current.Projects,
 		ConversationEndpoints: current.ConversationEndpoints, CallbackRegistrations: current.CallbackRegistrations,
-		Actor: req.Actor, Reason: req.Reason, Approval: req.Approval, ActivityIDs: activityIDs, AppliedAt: now,
+		TeamAuthority: current.TeamAuthority,
+		Actor:         req.Actor, Reason: req.Reason, Approval: req.Approval, ActivityIDs: activityIDs, AppliedAt: now,
 	}
 	if err := s.store.ApplySkillReferenceUpgrade(ctx, &SkillReferenceUpgradeMutation{
 		Plan: current, Binding: binding, Objectives: objectiveCandidates, Projects: projectCandidates,
-		ConversationEndpoints: conversationCandidates, CallbackRegistrations: callbackCandidates, Receipt: receipt,
+		ConversationEndpoints: conversationCandidates, CallbackRegistrations: callbackCandidates, TeamAuthority: teamCandidate, Receipt: receipt,
 	}); err != nil {
 		return nil, err
 	}
@@ -600,14 +629,82 @@ func callbackSubscriptionsSupported(subscriptions []CallbackSubscription, eventT
 	return true
 }
 
+// Every live reference must participate in the reviewed plan. A store's default
+// list limit is a UI page size, so it cannot bound canonical enumeration.
+func listUpgradeProjectSkillReferences(ctx context.Context, store ProjectStore, scope Scope, binding *skill.Binding) ([]*Project, error) {
+	indexed, ok := store.(ProjectSkillReferenceStore)
+	if !ok {
+		return listUpgradeProjects(ctx, store, scope)
+	}
+	const pageSize = 500
+	result := make([]*Project, 0)
+	afterID := ""
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		page, err := indexed.ListProjectSkillReferencesForUpgrade(ctx, scope, binding.DeploymentID, binding.SkillID, binding.SkillVersion, afterID, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) > pageSize {
+			return nil, fmt.Errorf("%w: Project reference page exceeds its requested limit", ErrSkillReferenceUpgradeInvalid)
+		}
+		for _, project := range page {
+			if project == nil || project.Scope != scope || project.ID <= afterID {
+				return nil, ErrSkillReferenceUpgradeConflict
+			}
+			afterID = project.ID
+		}
+		result = append(result, page...)
+		if len(page) < pageSize {
+			return result, nil
+		}
+	}
+}
+
+func listUpgradeProjects(ctx context.Context, store ProjectStore, scope Scope) ([]*Project, error) {
+	const pageSize = 500
+	result := make([]*Project, 0)
+	seen := make(map[string]bool)
+	for offset := 0; ; offset += pageSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		page, err := store.ListProjects(ctx, ProjectFilter{Scope: scope, Limit: pageSize, Offset: offset})
+		if err != nil {
+			return nil, err
+		}
+		if len(page) > pageSize {
+			return nil, fmt.Errorf("%w: Project reference page exceeds its requested limit", ErrSkillReferenceUpgradeInvalid)
+		}
+		for _, project := range page {
+			if project == nil || project.Scope != scope || project.ID == "" || seen[project.ID] {
+				return nil, ErrSkillReferenceUpgradeConflict
+			}
+			seen[project.ID] = true
+		}
+		result = append(result, page...)
+		if len(page) < pageSize {
+			return result, nil
+		}
+	}
+}
+
 func listUpgradeConversationEndpoints(ctx context.Context, store ExternalConversationEndpointStore, scope Scope) ([]*ExternalConversationEndpoint, error) {
 	result := make([]*ExternalConversationEndpoint, 0)
 	for offset := 0; ; offset += 500 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		page, err := store.ListExternalConversationEndpoints(ctx, ExternalConversationEndpointFilter{
 			Scope: scope, Statuses: []ExternalConversationEndpointStatus{ExternalConversationEndpointActive, ExternalConversationEndpointPaused}, Limit: 500, Offset: offset,
 		})
 		if err != nil {
 			return nil, err
+		}
+		if len(page) > 500 {
+			return nil, fmt.Errorf("%w: conversation reference page exceeds its requested limit", ErrSkillReferenceUpgradeInvalid)
 		}
 		result = append(result, page...)
 		if len(page) < 500 {
@@ -619,11 +716,17 @@ func listUpgradeConversationEndpoints(ctx context.Context, store ExternalConvers
 func listUpgradeCallbackRegistrations(ctx context.Context, store CallbackRegistrationStore, scope Scope) ([]*CallbackRegistration, error) {
 	result := make([]*CallbackRegistration, 0)
 	for offset := 0; ; offset += 500 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		page, err := store.ListCallbackRegistrations(ctx, CallbackRegistrationFilter{
 			Scope: scope, Statuses: []CallbackRegistrationStatus{CallbackRegistrationActive, CallbackRegistrationPaused}, Limit: 500, Offset: offset,
 		})
 		if err != nil {
 			return nil, err
+		}
+		if len(page) > 500 {
+			return nil, fmt.Errorf("%w: callback reference page exceeds its requested limit", ErrSkillReferenceUpgradeInvalid)
 		}
 		result = append(result, page...)
 		if len(page) < 500 {
@@ -659,6 +762,7 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 	scope Scope,
 	deploymentID string,
 	current *skill.Binding,
+	previous *skill.Definition,
 	target *skill.Definition,
 ) (*SkillReferenceTeamAuthorityImpact, error) {
 	if s == nil || s.teams == nil {
@@ -672,8 +776,13 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 	if err != nil {
 		return nil, err
 	}
-	if deployment == nil || deployment.Scope != teamScope || deployment.Status == kernelteam.DeploymentArchived {
+	if deployment == nil || deployment.Scope != teamScope || deployment.Status == kernelteam.DeploymentArchived || deployment.Activation != nil {
 		return nil, fmt.Errorf("%w: Team deployment is unavailable for a Skill upgrade", ErrSkillReferenceUpgradeInvalid)
+	}
+	canonical, ok := s.store.(kernelteam.Store)
+	shared, sharedOK := s.teams.(interface{ UsesStore(kernelteam.Store) bool })
+	if !ok || !sharedOK || !shared.UsesStore(canonical) {
+		return nil, fmt.Errorf("%w: Team authority must share the canonical Skill upgrade store", ErrSkillReferenceUpgradeUnavailable)
 	}
 	definition, err := s.teams.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	if err != nil || definition == nil {
@@ -682,49 +791,39 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 		}
 		return nil, fmt.Errorf("%w: active Team definition is unavailable", ErrSkillReferenceUpgradeInvalid)
 	}
+	prepared, err := kernelteam.PrepareDefinition(definition, definition.CreatedAt)
+	if err != nil || !skillUpgradeTeamDefinitionEqual(prepared, definition) {
+		return nil, fmt.Errorf("%w: active Team definition is not canonical", ErrSkillReferenceUpgradeInvalid)
+	}
 	fromIdentity := capability.NewSkillIdentity(current.SkillID, current.SkillVersion, current.SourceIdentity)
 	toIdentity := capability.NewSkillIdentity(target.ID, target.Version, skill.DefinitionSourceIdentity(target))
-	authorizedRoles := make([]string, 0)
 	for _, role := range definition.Roles {
-		var previous, next *kernelteam.RoleSkillGrant
-		for index := range role.SkillGrants {
-			grant := &role.SkillGrants[index]
-			switch {
-			case grant.ExactIdentity().Equal(fromIdentity):
-				previous = grant
-			case grant.ExactIdentity().Equal(toIdentity):
-				next = grant
+		for _, grant := range role.SkillGrants {
+			if !grant.ExactIdentity().Equal(fromIdentity) {
+				continue
 			}
-		}
-		if next != nil {
-			authorizedRoles = append(authorizedRoles, role.ID)
-		}
-		if previous == nil {
-			continue
-		}
-		if next == nil {
-			return nil, fmt.Errorf("%w: Team role %s must grant target Skill %s@%s before upgrading its binding",
-				ErrSkillReferenceUpgradeInvalid, role.ID, target.ID, target.Version)
-		}
-		if previous.EnablePrompt && !next.EnablePrompt {
-			return nil, fmt.Errorf("%w: Team role %s target grant removes prompt authority", ErrSkillReferenceUpgradeInvalid, role.ID)
-		}
-		for _, actionName := range previous.AllowedActions {
-			action, ok := target.Actions[actionName]
-			if !ok || !teamSkillGrantAllowsAction(*next, actionName, action.Risk) {
-				return nil, fmt.Errorf("%w: Team role %s target grant does not preserve action %s",
-					ErrSkillReferenceUpgradeInvalid, role.ID, actionName)
+			for _, actionName := range grant.AllowedActions {
+				action, exists := target.Actions[actionName]
+				if _, wasGranted := previous.Actions[actionName]; !wasGranted || !exists || !teamSkillGrantAllowsAction(grant, actionName, action.Risk) {
+					return nil, fmt.Errorf("%w: Team role %s target Skill does not preserve action %s", ErrSkillReferenceUpgradeInvalid, role.ID, actionName)
+				}
+			}
+			if len(compareUpgradeContracts(previous, target, grant.AllowedActions, nil)) > 0 {
+				return nil, fmt.Errorf("%w: Team role %s needs explicit review of changed Skill contracts", ErrSkillReferenceUpgradeInvalid, role.ID)
+			}
+			if grant.EnablePrompt && target.Prompt == nil {
+				return nil, fmt.Errorf("%w: Team role %s target Skill removes its prompt", ErrSkillReferenceUpgradeInvalid, role.ID)
 			}
 		}
 	}
-	if len(authorizedRoles) == 0 {
-		return nil, fmt.Errorf("%w: active Team definition must grant target Skill %s@%s before upgrading its binding",
-			ErrSkillReferenceUpgradeInvalid, target.ID, target.Version)
+	derived, authorizedRoles, err := deriveTeamSkillUpgradeDefinition(definition, fromIdentity, toIdentity, s.now().UTC())
+	if err != nil {
+		return nil, err
 	}
-	sort.Strings(authorizedRoles)
 	return &SkillReferenceTeamAuthorityImpact{
 		DeploymentID: deployment.ID, ExpectedRevision: deployment.Revision,
 		DefinitionID: deployment.DefinitionID, DefinitionVersion: deployment.ActiveVersion,
+		DefinitionDigest: definition.Digest, TargetDefinitionVersion: derived.Version, TargetDefinitionDigest: derived.Digest,
 		AuthorizedRoleIDs: authorizedRoles,
 	}, nil
 }
@@ -743,6 +842,11 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 	}
 	sort.Strings(names)
 	findings := make([]SkillReferenceUpgradeFinding, 0)
+	if len(previous.Requirements.Storage) != len(target.Requirements.Storage) || len(previous.Requirements.Storage) > 0 && !reflect.DeepEqual(previous.Requirements.Storage, target.Requirements.Storage) {
+		findings = append(findings, SkillReferenceUpgradeFinding{
+			Code: "storage_contract_changed", Message: "Skill storage requirements changed and need an explicit migration review",
+		})
+	}
 	for _, name := range names {
 		before, beforeOK := previous.Actions[name]
 		after, afterOK := target.Actions[name]
@@ -756,10 +860,39 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 		}
 		if !compatibleUpgradeInputSchema(before.InputSchema, after.InputSchema) || !reflect.DeepEqual(before.OutputSchema, after.OutputSchema) ||
 			!reflect.DeepEqual(before.Credentials, after.Credentials) || before.SideEffect != after.SideEffect ||
-			before.Idempotency != after.Idempotency {
+			before.Idempotency != after.Idempotency || before.ExternalOperationPolicy != after.ExternalOperationPolicy ||
+			!reflect.DeepEqual(before.Transport, after.Transport) || !reflect.DeepEqual(previous.Transport, target.Transport) {
 			findings = append(findings, SkillReferenceUpgradeFinding{
 				Code: "action_contract_changed", Message: fmt.Sprintf("%s action contract changed", name),
 			})
+		}
+	}
+	return findings
+}
+
+// Descriptive text can change without changing an adapter's authority. Every
+// executable adapter field, including receipt projections and credential
+// selection, must remain identical for an unattended upgrade.
+func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding *skill.Binding) []SkillReferenceUpgradeFinding {
+	findings := make([]SkillReferenceUpgradeFinding, 0)
+	conversationIDs := append([]string(nil), binding.EnabledConversationAdapters...)
+	sort.Strings(conversationIDs)
+	for _, id := range conversationIDs {
+		before, beforeOK := previous.ConversationAdapters[id]
+		after, afterOK := target.ConversationAdapters[id]
+		before.Name, before.Description, after.Name, after.Description = "", "", "", ""
+		if !beforeOK || !afterOK || !reflect.DeepEqual(before, after) {
+			findings = append(findings, SkillReferenceUpgradeFinding{Code: "conversation_adapter_contract_changed", Message: fmt.Sprintf("%s conversation adapter contract changed", id)})
+		}
+	}
+	callbackIDs := append([]string(nil), binding.EnabledCallbackAdapters...)
+	sort.Strings(callbackIDs)
+	for _, id := range callbackIDs {
+		before, beforeOK := previous.CallbackAdapters[id]
+		after, afterOK := target.CallbackAdapters[id]
+		before.Name, before.Description, after.Name, after.Description = "", "", "", ""
+		if !beforeOK || !afterOK || !reflect.DeepEqual(before, after) {
+			findings = append(findings, SkillReferenceUpgradeFinding{Code: "callback_adapter_contract_changed", Message: fmt.Sprintf("%s callback adapter contract changed", id)})
 		}
 	}
 	return findings

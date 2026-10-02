@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -42,6 +43,13 @@ func NewRegistry(agents AgentResolver) *Registry {
 
 func NewRegistryWithStore(store Store, agents AgentResolver) *Registry {
 	return &Registry{store: store, agents: agents, now: time.Now, newID: uuid.NewString}
+}
+
+// UsesStore reports whether Team authority and a canonical transaction share
+// the same store. Equivalent records in independent stores are not sufficient
+// authority for an atomic deployment upgrade.
+func (r *Registry) UsesStore(store Store) bool {
+	return r != nil && r.store != nil && store != nil && reflect.TypeOf(r.store).Comparable() && r.store == store
 }
 
 func (r *Registry) RegisterDefinition(ctx context.Context, definition *Definition) (*Definition, error) {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 func (s *SQLiteStore) CreateObjectiveWithEvent(ctx context.Context, objective *Objective, event *ActivityEvent) (*ActivityEvent, error) {
@@ -193,6 +194,27 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 		return nil, err
 	}
 	return s.withImmediateActivity(ctx, event, func(conn *sql.Conn) error {
+		if lease != nil {
+			// SQLite stores driver timestamps as text. Comparing them to a
+			// timestamp in a different offset is lexical rather than temporal.
+			// Verify the canonical expiry at full precision while this write
+			// transaction excludes any concurrent renewal or claim.
+			var owner string
+			var expiry sql.NullString
+			err := conn.QueryRowContext(ctx, `SELECT lease_owner, json_extract(payload, '$.leaseExpiresAt') FROM agent_runs
+				WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+				run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision).Scan(&owner, &expiry)
+			if err == sql.ErrNoRows {
+				return ErrLeaseLost
+			}
+			if err != nil {
+				return err
+			}
+			expires, err := time.Parse(time.RFC3339Nano, expiry.String)
+			if owner != lease.WorkerID || !expiry.Valid || err != nil || !expires.After(lease.Now) {
+				return ErrLeaseLost
+			}
+		}
 		query := `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
 			deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
 			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`
@@ -202,12 +224,12 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision,
 		}
 		if lease != nil {
-			query += ` AND lease_owner = ? AND lease_expires_at > ?`
-			args = append(args, lease.WorkerID, lease.Now)
+			query += ` AND lease_owner = ?`
+			args = append(args, lease.WorkerID)
 		}
 		result, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
-			return err
+			return normalizeRunSkillDependencyError(err)
 		}
 		affected, err := result.RowsAffected()
 		if err != nil {
