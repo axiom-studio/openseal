@@ -154,18 +154,30 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 		return nil, err
 	}
 	replay := approval.Status != ApprovalStatusPending && approval.DecisionID == event.ID
+	originReview := false
 	destination := approvalHasDestination(approval, endpoint.ID)
-	if !destination {
-		destination, err = s.approvalOriginDestination(ctx, approval, endpoint)
+	if !destination || principalType == "external_participant" {
+		originReview, err = s.approvalOriginDestination(ctx, approval, endpoint)
 		if err != nil {
 			return nil, err
 		}
+		destination = destination || originReview
 	}
 	if approval.ActionCallID != actionCallID || call.InvocationDigest != invocationDigest ||
 		(!replay && approval.Revision != revision) || !destination {
 		return nil, fmt.Errorf("%w: approval decision does not match the reviewed action", ErrInvalidExternalConversation)
 	}
-	coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
+	var authorizer ApprovalAuthorizer = EligibleApprovalAuthorizer{}
+	if originReview && principalType == "external_participant" {
+		if strings.TrimSpace(event.ExternalParticipantID) == "" || principalID != event.ExternalParticipantID {
+			return nil, fmt.Errorf("%w: approval participant does not match the source event", ErrInvalidExternalConversation)
+		}
+		// Source conversation members may decide without an app account mapping.
+		// The adapter authenticates the provider identity; the durable imported
+		// trigger above limits this authority to the originating conversation.
+		authorizer = ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil })
+	}
+	coordinator := NewApprovalCoordinator(store, store, authorizer)
 	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: endpoint.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,
 		DecisionID: event.ID, Decision: ApprovalDecision(decision),
@@ -390,7 +402,7 @@ func stableExternalConversationID(scope Scope, endpointID, kind, key string) str
 }
 
 // An originating chat is a review destination only when the durable provider
-// inbox proves which endpoint started this run. This never widens eligibility.
+// inbox proves which endpoint started this run.
 func (s *ExternalConversationTransportService) approvalOriginDestination(ctx context.Context, approval *ApprovalCheckpoint, endpoint *ExternalConversationEndpoint) (bool, error) {
 	store := s.store.(interface {
 		ExternalConversationStore
