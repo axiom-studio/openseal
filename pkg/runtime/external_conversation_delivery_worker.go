@@ -201,6 +201,8 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	// Keep the durable intent and receipt intact; execution uses the currently
 	// reviewed connection, including when setup changed while this was queued.
 	effectiveDelivery.Adapter = externalConversationResolvedAdapterReference(adapter)
+	effectiveDelivery.EndpointRevision = endpoint.Revision
+	deliveryEndpoint.Adapter = effectiveDelivery.Adapter
 	request := ExternalConversationDeliveryHostRequest{
 		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: effectiveDelivery, Message: message,
 	}
@@ -252,9 +254,8 @@ func (w *ExternalConversationDeliveryWorker) resolve(
 	if err != nil {
 		return nil, nil, err
 	}
-	if endpoint == nil || endpoint.Status != ExternalConversationEndpointActive ||
-		endpoint.Revision != delivery.EndpointRevision ||
-		!externalConversationAdapterBelongsToEndpoint(endpoint.Adapter, delivery.Adapter) {
+	if !externalConversationSnapshotMatchesEndpoint(endpoint, delivery.Scope, delivery.EndpointID, delivery.EndpointRevision,
+		delivery.Adapter, delivery.ExternalConversationID) {
 		return nil, nil, ErrExternalConversationConflict
 	}
 	ref := delivery.Adapter
@@ -262,8 +263,7 @@ func (w *ExternalConversationDeliveryWorker) resolve(
 		ctx, skill.ScopeReference{Kind: delivery.Scope.Kind, ID: delivery.Scope.ID}, endpoint.DeploymentID,
 		ref.BindingID, ref.AdapterID,
 	)
-	if err != nil || adapter == nil || adapter.Binding == nil ||
-		adapter.Binding.Revision < ref.BindingRevision || adapter.Adapter.Provider != endpoint.Provider {
+	if err != nil || !externalConversationSnapshotMatchesBinding(endpoint, ref, adapter) {
 		return nil, nil, ErrExternalConversationConflict
 	}
 	if !containsConversationDeliveryOperation(adapter.Adapter.Delivery.Operations, delivery.Operation) {
