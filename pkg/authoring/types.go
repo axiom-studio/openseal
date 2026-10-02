@@ -411,6 +411,9 @@ func EffectiveWorkforceActivationIntent(value WorkforceActivationIntent) (Workfo
 }
 
 type GenerateRequest struct {
+	// ProfileOnly creates one identity without selecting Skills or planning work.
+	// Capabilities and connections are discovered when the user talks to it.
+	ProfileOnly             bool                            `json:"profileOnly,omitempty"`
 	AgentName               string                          `json:"agentName,omitempty"`
 	ExistingAgentNames      []string                        `json:"existingAgentNames,omitempty"`
 	Mode                    Mode                            `json:"mode"`
