@@ -302,7 +302,8 @@ func normalizeConversationFeatures(values []ConversationAdapterFeature) ([]Conve
 	for _, value := range values {
 		switch value {
 		case ConversationFeatureThreads, ConversationFeatureMentions, ConversationFeatureAttachments,
-			ConversationFeatureReactions, ConversationFeatureEdits, ConversationFeatureDeletes, ConversationFeatureTyping:
+			ConversationFeatureReactions, ConversationFeatureEdits, ConversationFeatureDeletes, ConversationFeatureTyping,
+			ConversationFeatureContextHistory:
 		default:
 			return nil, errors.New("conversation adapter feature is invalid")
 		}

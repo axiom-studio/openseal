@@ -3049,7 +3049,12 @@ func (e *Engine) rebuildExternalConversations() error {
 	}
 	runbookDispatcher := runtime.NewExternalConversationRunbookEventDispatcher(e.store, runbookResolver)
 	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler, runbookDispatcher)
-	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, e.externalConversations.config.Inbox)
+	inboxConfig := e.externalConversations.config.Inbox
+	if contextHost, ok := e.externalConversations.host.(runtime.ExternalConversationContextHost); ok {
+		inboxConfig.ContextHost = contextHost
+		inboxConfig.ContextCatalog = e.skills
+	}
+	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, inboxConfig)
 	if err != nil {
 		return err
 	}
