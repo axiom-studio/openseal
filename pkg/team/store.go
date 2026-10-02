@@ -3,8 +3,10 @@ package team
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/workforce"
@@ -39,6 +41,58 @@ func NewMemoryStore() *MemoryStore {
 		definitions: make(map[string]*Definition), deployments: make(map[string]*Deployment),
 		activations: make(map[string][]workforce.DefinitionActivation), amendments: make(map[string]*DefinitionAmendment),
 	}
+}
+
+// CompareAndApplyDefinitionUpgrade joins a canonical in-memory transaction to
+// an immutable Team definition activation. The participant must validate all
+// of its records before changing state and must not call this Team store while
+// the callback is running. Failed validation leaves both participants intact.
+func (s *MemoryStore) CompareAndApplyDefinitionUpgrade(_ context.Context, previous *Deployment, previousDefinition *Definition,
+	definition *Definition, deployment *Deployment, activation *workforce.DefinitionActivation, apply func() error,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if previous == nil || previousDefinition == nil || apply == nil {
+		return ErrRevisionConflict
+	}
+	key := deploymentKey(previous.Scope, previous.ID)
+	current := s.deployments[key]
+	currentDefinition := s.definitions[definitionKey(previous.DefinitionID, previous.ActiveVersion)]
+	if current == nil || currentDefinition == nil || !reflect.DeepEqual(current, previous) || !reflect.DeepEqual(currentDefinition, previousDefinition) ||
+		current.Status == DeploymentArchived || current.Activation != nil {
+		return ErrRevisionConflict
+	}
+	if definition != nil {
+		if deployment == nil || activation == nil || deployment.Revision != current.Revision+1 ||
+			deployment.DefinitionID != current.DefinitionID || deployment.Scope != current.Scope || deployment.ID != current.ID ||
+			deployment.ActiveVersion != definition.Version || activation.DeploymentRevision != deployment.Revision ||
+			activation.Scope != current.Scope || activation.DeploymentID != current.ID || activation.DefinitionID != current.DefinitionID ||
+			activation.FromVersion != current.ActiveVersion || activation.ToVersion != definition.Version {
+			return ErrRevisionConflict
+		}
+		if err := deployment.Validate(definition); err != nil {
+			return err
+		}
+		if existing := s.definitions[definitionKey(definition.ID, definition.Version)]; existing != nil {
+			before, after := cloneDefinition(existing), cloneDefinition(definition)
+			before.CreatedAt, after.CreatedAt = time.Time{}, time.Time{}
+			if !reflect.DeepEqual(before, after) {
+				return ErrRevisionConflict
+			}
+		}
+	}
+	if err := apply(); err != nil {
+		return err
+	}
+	if definition != nil {
+		definitionStorageKey := definitionKey(definition.ID, definition.Version)
+		if s.definitions[definitionStorageKey] == nil {
+			s.definitions[definitionStorageKey] = cloneDefinition(definition)
+		}
+		s.deployments[key] = cloneDeployment(deployment)
+		s.activations[key] = append(s.activations[key], *activation)
+	}
+	return nil
 }
 
 func (s *MemoryStore) CreateTeamAmendment(_ context.Context, amendment *DefinitionAmendment) error {

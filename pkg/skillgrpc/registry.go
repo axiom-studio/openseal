@@ -14,7 +14,9 @@ import (
 // Registry manages connections to external skill services
 type Registry struct {
 	mu           sync.RWMutex
+	connect      func(context.Context, string) (*Client, error)
 	clients      map[string]*Client             // authority-scoped registration key -> client
+	retired      map[*Client]struct{}           // draining clients retained for explicit shutdown
 	typesBySkill map[string]map[string]struct{} // registration key -> node types
 	skillsByType map[string]map[string]struct{} // node type -> registration keys
 }
@@ -22,7 +24,9 @@ type Registry struct {
 // NewRegistry creates a new skill registry
 func NewRegistry() *Registry {
 	return &Registry{
+		connect:      connectSkillClient,
 		clients:      make(map[string]*Client),
+		retired:      make(map[*Client]struct{}),
 		typesBySkill: make(map[string]map[string]struct{}),
 		skillsByType: make(map[string]map[string]struct{}),
 	}
@@ -30,7 +34,7 @@ func NewRegistry() *Registry {
 
 // Register adds a skill to the registry
 func (r *Registry) Register(ctx context.Context, address string) (*Client, error) {
-	return r.register(ctx, "", address)
+	return r.register(ctx, "", address, nil)
 }
 
 // RegisterAs adds a Skill endpoint under an authority-scoped registration key.
@@ -41,12 +45,32 @@ func (r *Registry) RegisterAs(ctx context.Context, key, address string) (*Client
 	if key == "" {
 		return nil, fmt.Errorf("skill registration key is required")
 	}
-	return r.register(ctx, key, address)
+	return r.register(ctx, key, address, nil)
 }
 
-func (r *Registry) register(ctx context.Context, key, address string) (*Client, error) {
-	client := NewClient(address)
-	if err := client.Connect(ctx); err != nil {
+// RegisterAsVerified publishes an authority-scoped endpoint only after its
+// health response confirms the exact advertised Skill identity and version.
+// Failed verification leaves any existing registration and type mappings intact.
+func (r *Registry) RegisterAsVerified(ctx context.Context, key, address, expectedSkillID, expectedVersion string) (*Client, error) {
+	if key == "" || expectedSkillID == "" || expectedVersion == "" {
+		return nil, fmt.Errorf("skill registration key, identity, and version are required")
+	}
+	return r.register(ctx, key, address, func(client *Client) error {
+		health, err := client.Health(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to verify skill health: %w", err)
+		}
+		if health == nil || !health.Healthy || health.SkillID != expectedSkillID ||
+			health.Version != expectedVersion || client.SkillID() != expectedSkillID {
+			return fmt.Errorf("skill health does not match the healthy advertised identity and version")
+		}
+		return nil
+	})
+}
+
+func (r *Registry) register(ctx context.Context, key, address string, verify func(*Client) error) (*Client, error) {
+	client, err := r.connect(ctx, address)
+	if err != nil {
 		return nil, err
 	}
 
@@ -55,12 +79,22 @@ func (r *Registry) register(ctx context.Context, key, address string) (*Client, 
 		client.Close()
 		return nil, fmt.Errorf("failed to get node types: %w", err)
 	}
+	if verify != nil {
+		if err := verify(client); err != nil {
+			_ = client.Close()
+			return nil, err
+		}
+	}
 
 	if key == "" {
 		key = client.SkillID()
 	}
 	r.mu.Lock()
 	previous := r.clients[key]
+	var retirement clientCloseAction
+	if previous != nil && previous != client {
+		retirement = r.prepareRetirementLocked(previous)
+	}
 	r.removeMappingsLocked(key)
 	r.clients[key] = client
 	r.typesBySkill[key] = make(map[string]struct{}, len(types))
@@ -77,26 +111,48 @@ func (r *Registry) register(ctx context.Context, key, address string) (*Client, 
 		owners[key] = struct{}{}
 	}
 	r.mu.Unlock()
-	if previous != nil && previous != client {
-		_ = previous.Close()
-	}
+	_ = retirement.close()
 
+	return client, nil
+}
+
+func connectSkillClient(ctx context.Context, address string) (*Client, error) {
+	client := NewClient(address)
+	if err := client.Connect(ctx); err != nil {
+		return nil, err
+	}
 	return client, nil
 }
 
 // Unregister removes a skill from the registry
 func (r *Registry) Unregister(key string) error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	client, ok := r.clients[key]
 	if !ok {
+		r.mu.Unlock()
 		return nil
 	}
 
+	retirement := r.prepareRetirementLocked(client)
 	r.removeMappingsLocked(key)
 	delete(r.clients, key)
-	return client.Close()
+	r.mu.Unlock()
+	return retirement.close()
+}
+
+// prepareRetirementLocked prevents new acquisitions before a dispatch mapping
+// changes. The close action and its drain callback run after locks are released.
+func (r *Registry) prepareRetirementLocked(client *Client) clientCloseAction {
+	if r.retired == nil {
+		r.retired = make(map[*Client]struct{})
+	}
+	r.retired[client] = struct{}{}
+	return client.prepareRetirement(func() {
+		r.mu.Lock()
+		delete(r.retired, client)
+		r.mu.Unlock()
+	})
 }
 
 // GetClient returns the client for a skill ID
@@ -181,19 +237,25 @@ func (r *Registry) ListTypes() []string {
 // Close closes all connections
 func (r *Registry) Close() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
+	clients := make(map[*Client]struct{}, len(r.clients)+len(r.retired))
+	for _, client := range r.clients {
+		clients[client] = struct{}{}
+	}
+	for client := range r.retired {
+		clients[client] = struct{}{}
+	}
+	r.clients = make(map[string]*Client)
+	r.retired = make(map[*Client]struct{})
+	r.typesBySkill = make(map[string]map[string]struct{})
+	r.skillsByType = make(map[string]map[string]struct{})
+	r.mu.Unlock()
 
 	var errs []error
-	for _, client := range r.clients {
+	for client := range clients {
 		if err := client.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}
-
-	r.clients = make(map[string]*Client)
-	r.typesBySkill = make(map[string]map[string]struct{})
-	r.skillsByType = make(map[string]map[string]struct{})
-
 	if len(errs) > 0 {
 		return fmt.Errorf("errors closing connections: %v", errs)
 	}

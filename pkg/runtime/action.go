@@ -324,6 +324,10 @@ type ActionProposalRecord struct {
 	ExpectedRunRevision int64
 	Lease               *AgentRunLeaseGuard
 	Event               *ActivityEvent
+	// RequireBindingFence is supplied by the kernel's catalog configuration,
+	// never by model arguments. Durable catalogs share submission authority
+	// with the store and must serialize it against binding changes.
+	RequireBindingFence bool
 }
 
 type ActionProposalResult struct {
@@ -393,10 +397,12 @@ type ActionExecutionRecord struct {
 	Call                 *ActionCall
 	ExpectedCallRevision int64
 	Run                  *AgentRun
-	ExpectedRunRevision  int64
-	WorkerID             string
-	Now                  time.Time
-	Event                *ActivityEvent
+	// ExpectedRunRevision fences the observed owner even when Run is nil and
+	// execution only finishes a stale ActionCall without changing its owner.
+	ExpectedRunRevision int64
+	WorkerID            string
+	Now                 time.Time
+	Event               *ActivityEvent
 }
 
 type ActionExecutionResult struct {

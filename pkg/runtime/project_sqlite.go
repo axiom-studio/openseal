@@ -53,7 +53,7 @@ func (s *SQLiteStore) CreateProjectWithEvent(ctx context.Context, i *Project, e 
 	}
 	return s.withImmediateActivity(ctx, e, func(c *sql.Conn) error {
 		_, err := c.ExecContext(ctx, `INSERT INTO projects(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload)VALUES(?,?,?,?,?,?,?,?,?,?)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, i.IdempotencyKeyHash, string(b))
-		return err
+		return projectSkillReferenceAdmissionError(err)
 	})
 }
 func (s *SQLiteStore) GetProjectByIdempotency(ctx context.Context, scope Scope, key string) (*Project, error) {
@@ -78,7 +78,7 @@ func (s *SQLiteStore) CreateProject(ctx context.Context, i *Project) error {
 		return e
 	}
 	_, e = s.db.ExecContext(ctx, `INSERT INTO projects(id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,idempotency_key_hash,payload)VALUES(?,?,?,?,?,?,?,?,?,?)`, i.ID, i.Scope.Kind, i.Scope.ID, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, i.IdempotencyKeyHash, string(b))
-	return e
+	return projectSkillReferenceAdmissionError(e)
 }
 func (s *SQLiteStore) UpdateProjectWithEvent(ctx context.Context, i *Project, expected int64, e *ActivityEvent) (*ActivityEvent, error) {
 	b, err := json.Marshal(i)
@@ -88,7 +88,7 @@ func (s *SQLiteStore) UpdateProjectWithEvent(ctx context.Context, i *Project, ex
 	return s.withImmediateActivity(ctx, e, func(c *sql.Conn) error {
 		r, err := c.ExecContext(ctx, `UPDATE projects SET owner_type=?,owner_id=?,status=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, string(b), i.Scope.Kind, i.Scope.ID, i.ID, expected)
 		if err != nil {
-			return err
+			return projectSkillReferenceAdmissionError(err)
 		}
 		n, err := r.RowsAffected()
 		if err != nil {
@@ -174,7 +174,7 @@ func (s *SQLiteStore) UpdateProject(ctx context.Context, i *Project, expected in
 	}
 	r, e := s.db.ExecContext(ctx, `UPDATE projects SET owner_type=?,owner_id=?,status=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`, i.Owner.Type, i.Owner.ID, i.Status, i.Revision, i.UpdatedAt, string(b), i.Scope.Kind, i.Scope.ID, i.ID, expected)
 	if e != nil {
-		return e
+		return projectSkillReferenceAdmissionError(e)
 	}
 	n, e := r.RowsAffected()
 	if e != nil {

@@ -400,7 +400,7 @@ func insertSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun
 		run.Deadline, run.AvailableAt, run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt,
 		run.Attempt, run.CreatedAt, string(payload))
 	if err != nil {
-		return err
+		return normalizeRunSkillDependencyError(err)
 	}
 	return syncSQLiteRunEventWaitConn(ctx, conn, run)
 }
@@ -416,7 +416,7 @@ func updateSQLiteAgentRunConn(ctx context.Context, conn *sql.Conn, run *AgentRun
 		run.Revision, run.Deadline, run.AvailableAt, run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt,
 		run.Attempt, string(payload), run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision)
 	if err != nil {
-		return err
+		return normalizeRunSkillDependencyError(err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {

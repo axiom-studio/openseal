@@ -72,7 +72,16 @@ func (s *MemoryStore) SaveSkillBinding(_ context.Context, binding *skill.Binding
 	key := memorySkillBindingKey(binding.Scope, binding.DeploymentID, binding.ID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	maintenanceScope := Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
+	if g := s.memorySkillRuntimeMaintenanceActiveLocked(maintenanceScope, binding.SkillID); g != nil {
+		return &SkillRuntimeMaintenanceError{Maintenance: *g}
+	}
 	current := s.skillBindings[key]
+	if current != nil && current.SkillID != binding.SkillID {
+		if g := s.memorySkillRuntimeMaintenanceActiveLocked(maintenanceScope, current.SkillID); g != nil {
+			return &SkillRuntimeMaintenanceError{Maintenance: *g}
+		}
+	}
 	if current == nil && expectedRevision != 0 || current != nil && current.Revision != expectedRevision {
 		return skill.ErrBindingRevisionConflict
 	}

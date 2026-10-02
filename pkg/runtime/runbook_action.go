@@ -264,10 +264,17 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 }
 
 type RunbookActionDispatcher struct {
-	store           runbookActionStore
-	fallback        ActionDispatcher
-	workflowCatalog WorkflowSourceCatalog
-	workflowTeams   WorkflowTeamCatalog
+	store             runbookActionStore
+	fallback          ActionDispatcher
+	workflowCatalog   WorkflowSourceCatalog
+	workflowTeams     WorkflowTeamCatalog
+	executionPreparer AcceptedRunExecutionPreparer
+}
+
+func (d *RunbookActionDispatcher) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
+	if d != nil {
+		d.executionPreparer = preparer
+	}
 }
 
 func (d *RunbookActionDispatcher) SetWorkflowCatalog(catalog WorkflowSourceCatalog) {
@@ -347,11 +354,11 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input Acti
 	if input.Run.Owner.Type == OwnerTypeTeam {
 		visibility = ActivityVisibilityTeam
 	}
-	result, err := StartRunbookActivation(ctx, d.store, input.Run.Scope, activation.ID, StartRunbookActivationRequest{
+	result, err := StartRunbookActivationWithExecutionPreparer(ctx, d.store, input.Run.Scope, activation.ID, StartRunbookActivationRequest{
 		IdempotencyKey: "conversation-runbook-start:" + input.Call.ID,
 		Actor:          ActivityActor{Type: "agent", ID: activation.AssignedAgentID},
 		Visibility:     visibility,
-	})
+	}, d.executionPreparer)
 	if err != nil {
 		return nil, err
 	}

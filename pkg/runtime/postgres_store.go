@@ -328,6 +328,18 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateActions(ctx, tx); err != nil {
 		return err
 	}
+	if err := s.migrateSkillUpgradeDrain(ctx, tx); err != nil {
+		return err
+	}
+	if err := s.migrateSkillRuntimeMaintenance(ctx, tx); err != nil {
+		return err
+	}
+	if err := s.migrateRunSkillDependencies(ctx, tx); err != nil {
+		return err
+	}
+	if err := s.migrateProjectSkillReferences(ctx, tx); err != nil {
+		return err
+	}
 	if err := s.migrateActionCredentialLeaseRedemptions(ctx, tx); err != nil {
 		return err
 	}

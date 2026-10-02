@@ -353,6 +353,13 @@ type StartRunbookActivationRequest struct {
 // activation. Clients never manufacture the definition pin or execution
 // policy themselves.
 func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope, activationID string, request StartRunbookActivationRequest) (*AgentRunCommandResult, error) {
+	return StartRunbookActivationWithExecutionPreparer(ctx, store, scope, activationID, request, nil)
+}
+
+// StartRunbookActivationWithExecutionPreparer adds the host's authoritative
+// immutable execution snapshot to newly accepted manual work. Delivery replay
+// uses the accepted request before resolving a potentially changed deployment.
+func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store KernelStore, scope Scope, activationID string, request StartRunbookActivationRequest, preparer AcceptedRunExecutionPreparer) (*AgentRunCommandResult, error) {
 	if store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
 	}
@@ -404,13 +411,13 @@ func StartRunbookActivation(ctx context.Context, store KernelStore, scope Scope,
 			return nil, err
 		}
 	}
-	result, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+	result, err := createAgentRunWithAcceptedExecution(ctx, NewRunCommandService(store), CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 		Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
 		Goal: activationGoal(activation, objective), Source: RunSourceManual, Priority: objective.Priority, Context: contextValues,
 		Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
 		IdempotencyKey: idempotencyKey, Actor: request.Actor, Visibility: request.Visibility,
-	})
+	}, preparer)
 	if err != nil {
 		return nil, err
 	}
