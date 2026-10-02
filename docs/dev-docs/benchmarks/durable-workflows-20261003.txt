@@ -1,0 +1,25 @@
+SQLite storage/matching benchmark
+
+goos: linux
+goarch: amd64
+pkg: github.com/axiom-studio/openseal/pkg/runtime
+cpu: AMD Ryzen 9 5900HX with Radeon Graphics
+BenchmarkRunEventWaitSQLitePublishResolve/idle_100	20	3635951 ns/op	395865 B/op	2086 allocs/op
+BenchmarkRunEventWaitSQLitePublishResolve/idle_10000       	      20	   5327134 ns/op	  395784 B/op	    2086 allocs/op
+BenchmarkRunEventWaitSQLiteIdleDiscovery/idle_100          	      20	     20123 ns/op	    4560 B/op	      32 allocs/op
+BenchmarkRunEventWaitSQLiteIdleDiscovery/idle_10000        	      20	     21616 ns/op	    4560 B/op	      32 allocs/op
+BenchmarkRunEventWaitSQLiteFanout100                       	      20	 311706707 ns/op	       100.0 resolutions/op	 8476962 B/op	  105762 allocs/op
+PASS
+ok  	github.com/axiom-studio/openseal/pkg/runtime	157.089s
+
+Memory ingestion benchmark (does not process continuations)
+
+goos: linux
+goarch: amd64
+pkg: github.com/axiom-studio/openseal/pkg/runtime
+cpu: AMD Ryzen 9 5900HX with Radeon Graphics
+BenchmarkMemoryRunEventPublishIndexedWaits/waits=1/fanout=false         	     200	     44814 ns/op	   29116 B/op	     106 allocs/op
+BenchmarkMemoryRunEventPublishIndexedWaits/waits=10000/fanout=false     	     200	     95209 ns/op	   29113 B/op	     106 allocs/op
+BenchmarkMemoryRunEventPublishIndexedWaits/waits=10000/fanout=true      	     200	     25832 ns/op	   29099 B/op	     105 allocs/op
+PASS
+ok  	github.com/axiom-studio/openseal/pkg/runtime	1.721s
