@@ -12,6 +12,9 @@ const conversationAnswerEvent = "run.conversation_answer_received"
 // Resolve the channel through kernel-owned lineage, never model-supplied context
 // on a delegated child. Restrict this handoff to the owning Agent's own work.
 func conversationWorkOrigin(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun) (*AgentRun, *Conversation, *ChannelMessage, error) {
+	if run != nil && run.ParentRunID == "" && run.Context[deferredWorkflowContextKey] == true {
+		return deferredWorkflowConversationOrigin(ctx, runs, conversations, run)
+	}
 	if run == nil || run.Kind != RunKindAgentWork || run.Owner.Type != OwnerTypeAgent || run.ParentRunID == "" {
 		return nil, nil, nil, nil
 	}

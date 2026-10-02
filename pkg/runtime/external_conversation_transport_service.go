@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
 
@@ -53,13 +55,14 @@ type EnqueueExternalConversationDeliveryResult struct {
 }
 
 type ExternalConversationTransportService struct {
-	store    ExternalConversationStore
-	resolver ExternalConversationAdapterResolver
-	now      func() time.Time
+	store         ExternalConversationStore
+	resolver      ExternalConversationAdapterResolver
+	eventObserver VerifiedRunEventObserver
+	now           func() time.Time
 }
 
 func NewExternalConversationTransportService(store ExternalConversationStore, resolver ExternalConversationAdapterResolver) *ExternalConversationTransportService {
-	return &ExternalConversationTransportService{store: store, resolver: resolver, now: time.Now}
+	return &ExternalConversationTransportService{store: store, resolver: resolver, eventObserver: runEventObserverForStore(store), now: time.Now}
 }
 
 // Receive persists one already verified and normalized provider event. Policy
@@ -213,6 +216,15 @@ func integerAttribute(value interface{}) (int64, bool) {
 		return typed, true
 	case float64:
 		return int64(typed), typed == float64(int64(typed))
+	case json.Number:
+		if !runEventScalarBounded(typed) {
+			return 0, false
+		}
+		value, ok := new(big.Rat).SetString(string(typed))
+		if !ok || !value.IsInt() || !value.Num().IsInt64() {
+			return 0, false
+		}
+		return value.Num().Int64(), true
 	default:
 		return 0, false
 	}
@@ -338,6 +350,8 @@ func (s *ExternalConversationTransportService) resolveActiveEndpoint(ctx context
 		ref.BindingID, ref.AdapterID,
 	)
 	if err != nil || resolved == nil || resolved.Binding == nil ||
+		resolved.Binding.SkillID != ref.SkillID || resolved.Binding.SourceIdentity != ref.SourceIdentity ||
+		resolved.Binding.Revision < ref.BindingRevision ||
 		resolved.Adapter.Provider != endpoint.Provider ||
 		!containsConversationEndpointMode(resolved.Adapter.EndpointModes, endpoint.Mode) {
 		return nil, nil, fmt.Errorf("%w: current Skill adapter binding is unavailable or incompatible", ErrExternalConversationConflict)
