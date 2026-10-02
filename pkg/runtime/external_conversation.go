@@ -469,6 +469,7 @@ func (s *ExternalConversationEndpointService) resolveAdapter(ctx context.Context
 // the kernel. The Skill verifies provider requests and converts them into this
 // credential-free protocol before durable ingestion.
 type NormalizedExternalConversationEvent struct {
+	Source                 *ExternalMessageSource `json:"source,omitempty"`
 	ID                     string                 `json:"id"`
 	Type                   string                 `json:"type"`
 	ExternalConversationID string                 `json:"externalConversationId"`
@@ -939,6 +940,7 @@ func cloneExternalConversationInboxItem(value *ExternalConversationInboxItem) *E
 	}
 	copy := *value
 	copy.Event.Attributes = cloneMap(value.Event.Attributes)
+	copy.Event.Source = cloneExternalMessageSource(value.Event.Source)
 	return &copy
 }
 
