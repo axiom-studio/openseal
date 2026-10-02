@@ -13,9 +13,13 @@ import (
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
-func workflowActionFixture(t *testing.T, store KernelStore) (*AgentRun, *skill.Catalog, *skill.BoundAction, map[string]interface{}) {
+func workflowActionFixture(t *testing.T, store KernelStore, subjectEvidence ...bool) (*AgentRun, *skill.Catalog, *skill.BoundAction, map[string]interface{}) {
+	return workflowActionDefinitionFixture(t, store, RunbookManagementSkill(), len(subjectEvidence) > 0 && subjectEvidence[0])
+}
+
+func workflowActionDefinitionFixture(t *testing.T, store KernelStore, routinesDefinition *skill.Definition, subjectEvidence bool) (*AgentRun, *skill.Catalog, *skill.BoundAction, map[string]interface{}) {
 	t.Helper()
-	run, catalog, scheduledBound, _ := scheduledTaskFixture(t, store)
+	run, catalog, scheduledBound, _ := scheduledTaskFixture(t, store, routinesDefinition)
 	routines := *scheduledBound.Binding
 	routines.AllowedActions = append(routines.AllowedActions, RunbookActionCreateWorkflow, RunbookActionWorkflowSources, RunbookActionInspectWorkflows)
 	if _, err := catalog.UpsertBinding(t.Context(), skill.UpsertBindingRequest{Binding: &routines, ExpectedRevision: routines.Revision, Actor: skill.BindingActor{Type: "test", ID: "operator"}, Reason: "Enable workflow actions"}); err != nil {
@@ -27,10 +31,25 @@ func workflowActionFixture(t *testing.T, store KernelStore) (*AgentRun, *skill.C
 		Delivery:  capability.ConversationDeliveryCapabilities{Operations: []capability.ConversationDeliveryOperation{capability.ConversationDeliveryMessageSend}, Ordering: capability.ConversationDeliveryOrderConversation, Idempotency: skill.IdempotencyRequired},
 		Transport: skill.ConversationAdapterTransport{Kind: "plugin", IngressEndpoint: "test.ingress", DeliveryEndpoint: "test.deliver"},
 	}}}
+	if subjectEvidence {
+		definition.Transport = skill.TransportReference{Kind: "plugin", Endpoint: "test.actions"}
+		for _, name := range []string{"send_message", "read_conversation", "unrelated"} {
+			definition.Actions[name] = skill.Action{Name: name, Description: "Return a provider conversation receipt", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported,
+				InputSchema:  map[string]interface{}{"type": "object"},
+				OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"receipt": map[string]interface{}{"type": "object", "properties": map[string]interface{}{"conversationId": map[string]interface{}{"type": "string"}}}}},
+			}
+		}
+		adapter := definition.ConversationAdapters["messages"]
+		adapter.SubjectEvidence = []capability.ConversationSubjectEvidence{{Action: "read_conversation", SubjectPath: "receipt.conversationId"}, {Action: "send_message", SubjectPath: "receipt.conversationId"}}
+		definition.ConversationAdapters["messages"] = adapter
+	}
 	if err := catalog.Register(t.Context(), definition); err != nil {
 		t.Fatal(err)
 	}
 	binding := &skill.Binding{ID: "event-account", Scope: routines.Scope, DeploymentID: run.AssignedAgentID, SkillID: definition.ID, SkillVersion: definition.Version, Revision: 1, MaximumRisk: skill.RiskLevelRead, EnabledConversationAdapters: []string{"messages"}}
+	if subjectEvidence {
+		binding.AllowedActions = []string{"send_message", "read_conversation", "unrelated"}
+	}
 	if err := catalog.Bind(t.Context(), binding); err != nil {
 		t.Fatal(err)
 	}

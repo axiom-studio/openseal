@@ -254,6 +254,16 @@ type ConversationDestinationDiscovery struct {
 	NextCursorPath            string                   `json:"nextCursorPath,omitempty"`
 }
 
+// ConversationSubjectEvidence identifies the canonical externalConversationId
+// in one successful governed Skill action output. SubjectPath uses bounded,
+// dot-separated object keys relative to that output; it does not traverse arrays
+// or accept a projection supplied by the caller. This declaration grants no
+// permissions or credentials, and does not interpret opaque event subjects.
+type ConversationSubjectEvidence struct {
+	Action      string `json:"action"`
+	SubjectPath string `json:"subjectPath"`
+}
+
 // ConversationAdapter declares one provider adapter supplied by a Skill.
 // Inbound payload normalization and outbound delivery are not model tools.
 // Credentials are resolved out of band from the exact Skill binding.
@@ -267,6 +277,7 @@ type ConversationAdapter struct {
 	Features             []ConversationAdapterFeature       `json:"features,omitempty"`
 	Credentials          []CredentialRequirement            `json:"credentials,omitempty"`
 	DestinationDiscovery []ConversationDestinationDiscovery `json:"destinationDiscovery,omitempty"`
+	SubjectEvidence      []ConversationSubjectEvidence      `json:"subjectEvidence,omitempty"`
 	Delivery             ConversationDeliveryCapabilities   `json:"delivery"`
 	Transport            ConversationAdapterTransport       `json:"transport"`
 }
