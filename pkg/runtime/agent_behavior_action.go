@@ -103,7 +103,7 @@ func AgentManagementSkill() *skill.Definition {
 			},
 			AgentActionConfigureChannel: {
 				Name:        AgentActionConfigureChannel,
-				Description: "Propose changing how an existing authorized channel enters and leaves the current Agent's workflow. The endpoint remains an internal materialization; this operation governs its Runbook trigger, reply mode, and approval-delivery purpose together.",
+				Description: "Propose changing how an existing active or paused authorized channel enters and leaves the current Agent's workflow. Retired channels are historical and cannot be configured or reactivated. This operation governs the Runbook trigger, reply mode, and approval-delivery purpose together.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
@@ -427,6 +427,10 @@ func (d *AgentBehaviorActionDispatcher) listChannels(ctx context.Context, scope 
 			"mode": endpoint.Mode, "address": endpoint.Address, "status": endpoint.Status,
 			"revision": endpoint.Revision, "ingressRoute": endpoint.IngressRoute,
 			"adapter": endpoint.Adapter, "handler": endpoint.Handler, "policy": endpoint.Policy,
+			"configurable": endpoint.Status != ExternalConversationEndpointRetired,
+		}
+		if endpoint.Status == ExternalConversationEndpointRetired {
+			channel["configurationBlocker"] = "This channel is retired and cannot be configured or reactivated. Use an active or paused channel."
 		}
 		if route := findAgentChannelRoute(definition, endpoint.ID); route != nil {
 			channel["workflow"] = route
@@ -449,6 +453,14 @@ func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, in
 		return d.replayedChannelResult(ctx, input.Call, run)
 	}
 	candidate.Version = candidateVersion
+	updateRequest, err := agentChannelEndpointUpdate(endpoint, candidate, args)
+	if err != nil {
+		return nil, err
+	}
+	preparedEndpoint, err := d.endpoints.PrepareUpdate(ctx, endpoint.Scope, endpoint.ID, updateRequest)
+	if err != nil {
+		return nil, err
+	}
 	definitionChanges := map[string]interface{}{}
 	for key, value := range changes {
 		if key == "channels" || key == "authority.approvalDestinations" {
@@ -505,13 +517,15 @@ func (d *AgentBehaviorActionDispatcher) configureChannel(ctx context.Context, in
 		if amendment.Status != kernelagent.AmendmentReady && amendment.Status != kernelagent.AmendmentApproved {
 			return nil, fmt.Errorf("agent channel amendment is not ready after governed action approval: %s", amendment.Status)
 		}
-		amendment, deployment, activation, err = d.agents.ActivateAmendment(
+		amendment, deployment, activation, err = d.agents.ActivateAmendmentWithCommit(
 			ctx, capability.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}, amendment.ID, amendment.Revision,
 			actorType, actorID, "Approved Agent channel workflow change from conversation",
+			d.endpoints.channelActivationCommit(preparedEndpoint, endpoint.Revision, args.ExpectedDeploymentRevision),
 		)
 		if err != nil {
 			return nil, err
 		}
+		return agentChannelActionResult(amendment, deployment, activation, preparedEndpoint, false), nil
 	}
 	updated, err := d.convergeChannelEndpoint(ctx, endpoint, candidate, args)
 	if err != nil {
@@ -528,12 +542,27 @@ func agentDefinitionAmendmentField(change string) string {
 }
 
 func (d *AgentBehaviorActionDispatcher) convergeChannelEndpoint(ctx context.Context, endpoint *ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (*ExternalConversationEndpoint, error) {
+	request, err := agentChannelEndpointUpdate(endpoint, definition, args)
+	if err != nil {
+		return nil, err
+	}
+	if request.Handler == nil && request.Policy == nil && request.Status == nil {
+		return endpoint, nil
+	}
+	return d.endpoints.Update(ctx, endpoint.Scope, endpoint.ID, request)
+}
+
+func agentChannelEndpointUpdate(endpoint *ExternalConversationEndpoint, definition *kernelagent.AgentDefinition, args agentChannelActionArguments) (UpdateExternalConversationEndpointRequest, error) {
+	request := UpdateExternalConversationEndpointRequest{ExpectedRevision: endpoint.Revision}
 	route := findAgentChannelRoute(definition, endpoint.ID)
 	if route == nil {
-		return nil, errors.New("activated Agent definition does not contain the channel route")
+		return request, errors.New("Agent definition does not contain the channel route")
 	}
 	handler := ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: endpoint.DeploymentID}
 	if route.Trigger != "" {
+		if definition.Runbook == nil {
+			return request, errors.New("Agent channel trigger requires a Runbook")
+		}
 		handler = ExternalConversationHandler{
 			Kind: ExternalConversationHandlerRunbook, ID: definition.Runbook.ID, Version: definition.Runbook.Version,
 			Trigger: route.Trigger, AssignedAgentID: endpoint.DeploymentID,
@@ -547,12 +576,16 @@ func (d *AgentBehaviorActionDispatcher) convergeChannelEndpoint(ctx context.Cont
 	if args.Status != nil {
 		status = ExternalConversationEndpointStatus(strings.TrimSpace(*args.Status))
 	}
-	if endpoint.Handler == handler && endpoint.Policy == policy && endpoint.Status == status {
-		return endpoint, nil
+	if endpoint.Handler != handler {
+		request.Handler = &handler
 	}
-	return d.endpoints.Update(ctx, endpoint.Scope, endpoint.ID, UpdateExternalConversationEndpointRequest{
-		ExpectedRevision: endpoint.Revision, Handler: &handler, Policy: &policy, Status: &status,
-	})
+	if endpoint.Policy != policy {
+		request.Policy = &policy
+	}
+	if endpoint.Status != status {
+		request.Status = &status
+	}
+	return request, nil
 }
 
 func resolveAgentBehaviorAction(
@@ -643,6 +676,9 @@ func resolveAgentChannelAction(
 	if endpoint.DeploymentID != deploymentID || endpoint.Owner.Type != OwnerTypeAgent || endpoint.Owner.ID != deploymentID {
 		return args, nil, nil, nil, nil, nil, errors.New("agent channel endpoint is not owned by the current Agent")
 	}
+	if endpoint.Status == ExternalConversationEndpointRetired {
+		return args, nil, nil, nil, nil, nil, fmt.Errorf("%w: retired channels cannot be configured or reactivated; use an active or paused channel", ErrInvalidExternalConversation)
+	}
 	candidate := cloneAgentDefinitionForAction(definition)
 	route := findAgentChannelRoute(candidate, endpoint.ID)
 	if route == nil {
@@ -676,6 +712,13 @@ func resolveAgentChannelAction(
 		}
 	}
 	if err := candidate.Validate(); err != nil {
+		return args, nil, nil, nil, nil, nil, err
+	}
+	updateRequest, err := agentChannelEndpointUpdate(endpoint, candidate, args)
+	if err != nil {
+		return args, nil, nil, nil, nil, nil, err
+	}
+	if _, err := endpoints.PrepareUpdate(ctx, run.Scope, endpoint.ID, updateRequest); err != nil {
 		return args, nil, nil, nil, nil, nil, err
 	}
 	changes := map[string]interface{}{}
@@ -1021,9 +1064,17 @@ func (d *AgentBehaviorActionDispatcher) replayedChannelResult(ctx context.Contex
 	if err != nil {
 		return nil, err
 	}
-	endpoint, err = d.convergeChannelEndpoint(ctx, endpoint, definition, args)
+	if endpoint.Revision != args.ExpectedEndpointRevision+1 || endpoint.Status == ExternalConversationEndpointRetired || endpoint.DeploymentID != deploymentID || endpoint.Owner.Type != OwnerTypeAgent || endpoint.Owner.ID != deploymentID {
+		return nil, ErrExternalConversationConflict
+	}
+	request, err := agentChannelEndpointUpdate(endpoint, definition, args)
 	if err != nil {
 		return nil, err
+	}
+	// A replay reports the committed result. It must never overwrite channel
+	// changes made after approval or try to repair a legacy partial activation.
+	if request.Handler != nil || request.Policy != nil || request.Status != nil {
+		return nil, ErrExternalConversationConflict
 	}
 	return agentChannelActionResult(amendment, deployment, activation, endpoint, true), nil
 }
