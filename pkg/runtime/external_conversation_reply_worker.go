@@ -10,7 +10,7 @@ import (
 )
 
 // ExternalConversationReplyStore is the durable kernel view required to turn
-// a completed conversation Run into one canonical channel reply and one
+// a finished conversation Run into one canonical channel reply and one
 // provider delivery. It deliberately contains no provider-specific behavior.
 type ExternalConversationReplyStore interface {
 	ExternalConversationStore
@@ -18,7 +18,7 @@ type ExternalConversationReplyStore interface {
 }
 
 // ExternalConversationReplyWorker projects applied inbox work after its
-// canonical Run completes. Direct Agent/Team handlers normally already wrote
+// canonical Run finishes. Direct Agent/Team handlers normally already wrote
 // the reply; event Runbooks expose the reply as their typed "reply" output.
 // Both paths converge on the same idempotent Conversation message and outbox.
 type ExternalConversationReplyWorker struct {
@@ -88,7 +88,7 @@ func (w *ExternalConversationReplyWorker) project(
 	if err != nil {
 		return nil, err
 	}
-	if run == nil || run.Status != AgentRunStatusCompleted {
+	if run == nil || (run.Status != AgentRunStatusCompleted && run.Status != AgentRunStatusFailed) {
 		return nil, nil
 	}
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, item.Scope, item.EndpointID)
@@ -111,6 +111,15 @@ func (w *ExternalConversationReplyWorker) project(
 		return nil, err
 	}
 	if message == nil {
+		if run.Status == AgentRunStatusFailed {
+			superseded, checkErr := w.failureSuperseded(ctx, item, endpoint)
+			if checkErr != nil {
+				return nil, checkErr
+			}
+			if superseded {
+				return nil, nil
+			}
+		}
 		reply, ok := externalConversationRunReply(run)
 		if !ok {
 			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", ErrInvalidExternalConversation)
@@ -200,10 +209,75 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 }
 
 func externalConversationRunReply(run *AgentRun) (string, bool) {
-	if run == nil || run.Status != AgentRunStatusCompleted {
+	if run == nil {
+		return "", false
+	}
+	if run.Status == AgentRunStatusFailed {
+		// Failures may follow partially executed actions. Report only the reply
+		// interruption, without exposing internal errors or guessing whether
+		// those actions had external effects.
+		return "I couldn’t finish this reply. Your message is saved.", true
+	}
+	if run.Status != AgentRunStatusCompleted {
 		return "", false
 	}
 	reply, ok := run.Output["reply"].(string)
 	reply = strings.TrimSpace(reply)
 	return reply, ok && reply != "" && len(reply) <= 65536
+}
+
+// A later question or answer in the same thread makes an old failure notice
+// stale. Other threads in the channel must not suppress this reply. Canceled
+// runs are deliberately excluded by project: replacement turns handle them.
+func (w *ExternalConversationReplyWorker) failureSuperseded(
+	ctx context.Context,
+	item *ExternalConversationInboxItem,
+	endpoint *ExternalConversationEndpoint,
+) (bool, error) {
+	// Older workers acknowledged failed runs only by clearing thread status.
+	// Respect that durable terminal projection rather than replaying historical
+	// failures as new messages after an upgrade. New failed runs clear status
+	// through the reply path and therefore never create this legacy key.
+	legacyKey := "run-thread-status:" + item.ID + ":active:"
+	legacyID := stableExternalConversationID(item.Scope, endpoint.ID, "delivery", legacyKey)
+	legacy, err := w.store.GetExternalConversationDelivery(ctx, item.Scope, legacyID)
+	if err != nil {
+		return false, err
+	}
+	if legacy != nil && legacy.EndpointID == endpoint.ID && legacy.ConversationID == item.ConversationID &&
+		legacy.ChannelMessageID == item.ChannelMessageID && legacy.Operation == capability.ConversationDeliveryTypingIndicator &&
+		legacy.IdempotencyKey == legacyKey {
+		return true, nil
+	}
+	trigger, err := w.conversations.GetChannelMessage(ctx, item.Scope, item.ConversationID, item.ChannelMessageID)
+	if err != nil {
+		return false, err
+	}
+	threadRoot := trigger.ThreadRootID
+	if threadRoot == "" && (item.Event.ExternalThreadID != "" || endpoint.Policy.ReplyMode == ExternalConversationReplyThread) {
+		threadRoot = trigger.ID
+	}
+	filter := ChannelMessageFilter{
+		Scope: item.Scope, ConversationID: item.ConversationID,
+		ThreadRootID: threadRoot, AfterSequence: trigger.Sequence, Limit: 500,
+	}
+	for {
+		messages, err := w.store.ListChannelMessages(ctx, filter)
+		if err != nil {
+			return false, err
+		}
+		for _, message := range messages {
+			if message == nil || message.Historical ||
+				(threadRoot == "" && message.ThreadRootID != "" && message.ThreadRootID != trigger.ID) {
+				continue
+			}
+			if message.Sender.Type == ConversationParticipantUser || message.Intent == MessageIntentAnswer {
+				return true, nil
+			}
+		}
+		if len(messages) < filter.Limit {
+			return false, nil
+		}
+		filter.AfterSequence = messages[len(messages)-1].Sequence
+	}
 }
