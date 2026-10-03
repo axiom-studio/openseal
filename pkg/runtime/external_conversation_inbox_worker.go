@@ -290,11 +290,16 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 		return nil, nil, err
 	}
 	if thread == nil {
+		rootID, err := w.existingReplyThreadRoot(ctx, endpoint, conversation, event.ReplyToExternalMessageID)
+		if err != nil {
+			return nil, nil, err
+		}
 		now := w.now().UTC()
 		candidate := &ExternalConversationMapping{
 			Scope: endpoint.Scope, EndpointID: endpoint.ID, ExternalConversationID: event.ExternalConversationID,
 			ExternalThreadID: event.ExternalThreadID, ConversationID: conversation.ID,
-			Revision: 1, CreatedAt: now, UpdatedAt: now,
+			ThreadRootMessageID: rootID,
+			Revision:            1, CreatedAt: now, UpdatedAt: now,
 		}
 		if saveErr := w.store.SaveExternalConversationMapping(ctx, candidate, 0); saveErr != nil {
 			if !errors.Is(saveErr, ErrExternalConversationConflict) {
@@ -313,6 +318,50 @@ func (w *ExternalConversationInboxWorker) ensureConversation(
 		return nil, nil, ErrExternalConversationConflict
 	}
 	return conversation, thread, nil
+}
+
+// A provider may identify each reply chain by its immediate parent instead of
+// a stable thread ID. Reuse the canonical root only through the authorized
+// endpoint's message mapping, and never import a parent from another chat.
+func (w *ExternalConversationInboxWorker) existingReplyThreadRoot(
+	ctx context.Context,
+	endpoint *ExternalConversationEndpoint,
+	conversation *Conversation,
+	externalParentID string,
+) (string, error) {
+	if externalParentID == "" {
+		return "", nil
+	}
+	for _, direction := range []ExternalMessageDirection{ExternalMessageInbound, ExternalMessageOutbound} {
+		mapping, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, direction, externalParentID)
+		if err != nil {
+			return "", err
+		}
+		if mapping == nil || mapping.Scope != endpoint.Scope || mapping.EndpointID != endpoint.ID ||
+			mapping.ConversationID != conversation.ID {
+			continue
+		}
+		parent, err := w.store.GetChannelMessage(ctx, endpoint.Scope, conversation.ID, mapping.ChannelMessageID)
+		if err != nil {
+			return "", err
+		}
+		if parent == nil || parent.Scope != endpoint.Scope || parent.ConversationID != conversation.ID {
+			continue
+		}
+		rootID := parent.ID
+		if parent.ThreadRootID != "" {
+			rootID = parent.ThreadRootID
+			root, err := w.store.GetChannelMessage(ctx, endpoint.Scope, conversation.ID, rootID)
+			if err != nil {
+				return "", err
+			}
+			if root == nil || root.Scope != endpoint.Scope || root.ConversationID != conversation.ID {
+				continue
+			}
+		}
+		return rootID, nil
+	}
+	return "", nil
 }
 
 func (w *ExternalConversationInboxWorker) ensureParticipant(

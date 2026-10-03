@@ -42,6 +42,11 @@ func externalMessageSource(endpoint *ExternalConversationEndpoint, event Normali
 		source.ChannelType = "im"
 	}
 	if extra := event.Source; extra != nil && extra.ChannelID == source.ChannelID && extra.ParticipantID == source.ParticipantID {
+		if extra.Provider == source.Provider && validExternalConversationReference(extra.MessageID, 1024) {
+			// Provider-native IDs aid provenance and reply addressing. Canonical
+			// external mapping identity remains event.ExternalMessageID.
+			source.MessageID = extra.MessageID
+		}
 		source.ChannelName = sourceLabel(extra.ChannelName, 160)
 		if extra.ChannelType != "" {
 			source.ChannelType = sourceLabel(extra.ChannelType, 40)
