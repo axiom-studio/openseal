@@ -574,6 +574,23 @@ func (s *PostgresStore) ListSkillDefinitionVariants(ctx context.Context, id, ver
 	return definitions, rows.Err()
 }
 
+func (s *PostgresStore) ListSkillDefinitionIdentities(ctx context.Context, id, version string) ([]capability.SkillIdentity, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, version, source_identity FROM `+s.table("skill_definitions")+` WHERE id = $1 AND version = $2 ORDER BY source_identity`, id, version)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	identities := make([]capability.SkillIdentity, 0)
+	for rows.Next() {
+		var identity capability.SkillIdentity
+		if err := rows.Scan(&identity.ID, &identity.Version, &identity.SourceIdentity); err != nil {
+			return nil, err
+		}
+		identities = append(identities, identity)
+	}
+	return identities, rows.Err()
+}
+
 func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Binding, expectedRevision int64) error {
 	if err := skill.ValidateBindingShape(binding); err != nil {
 		return err
@@ -670,3 +687,4 @@ func (s *PostgresStore) ListSkillBindings(ctx context.Context, scope skill.Scope
 }
 
 var _ skill.CatalogStore = (*PostgresStore)(nil)
+var _ skill.CatalogDefinitionIdentityStore = (*PostgresStore)(nil)

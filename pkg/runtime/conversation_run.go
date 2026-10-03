@@ -457,10 +457,7 @@ func (s *ConversationRunScheduler) reconcileConversation(
 	result *ConversationRunReconcileResult,
 ) error {
 	participant := ConversationParticipant{Type: ConversationParticipantService, ID: conversationRunSchedulerParticipant}
-	coordinated, err := s.coordinatedTriggerIDs(ctx, conversation)
-	if err != nil {
-		return err
-	}
+	var coordinated map[string]bool
 	for {
 		cursor, err := s.conversations.GetCursor(ctx, conversation.Scope, conversation.ID, participant)
 		if err != nil {
@@ -469,6 +466,13 @@ func (s *ConversationRunScheduler) reconcileConversation(
 		afterSequence := int64(0)
 		if cursor != nil {
 			afterSequence = cursor.ReadSequence
+		}
+		// The canonical conversation snapshot and the current durable cursor
+		// prove this snapshot has no unread messages. A concurrent later post
+		// retains its sequence beyond the cursor and is handled immediately or
+		// by the next recovery pass; no delivery position is advanced here.
+		if conversation.LastSequence <= afterSequence {
+			return nil
 		}
 		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
 			Scope: conversation.Scope, ConversationID: conversation.ID,
@@ -479,6 +483,12 @@ func (s *ConversationRunScheduler) reconcileConversation(
 		}
 		if len(messages) == 0 {
 			return nil
+		}
+		if coordinated == nil {
+			coordinated, err = s.coordinatedTriggerIDs(ctx, conversation)
+			if err != nil {
+				return err
+			}
 		}
 		for _, message := range messages {
 			result.Messages++

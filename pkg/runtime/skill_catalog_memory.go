@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -64,6 +65,31 @@ func (s *MemoryStore) ListSkillDefinitionVariants(_ context.Context, id, version
 	})
 	return result, nil
 }
+
+func (s *MemoryStore) ListSkillDefinitionIdentities(ctx context.Context, id, version string) ([]capability.SkillIdentity, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]capability.SkillIdentity, 0)
+	prefix := id + "\x00" + version + "\x00"
+	for key := range s.skillDefinitions {
+		if strings.HasPrefix(key, prefix) {
+			result = append(result, capability.SkillIdentity{ID: id, Version: version, SourceIdentity: strings.TrimPrefix(key, prefix)})
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].SourceIdentity < result[j].SourceIdentity })
+	return result, nil
+}
+
+var _ skill.CatalogDefinitionIdentityStore = (*MemoryStore)(nil)
 
 func (s *MemoryStore) SaveSkillBinding(_ context.Context, binding *skill.Binding, expectedRevision int64) error {
 	if err := skill.ValidateBindingShape(binding); err != nil {
