@@ -758,8 +758,20 @@ func skillRiskRank(value skill.RiskLevel) int {
 }
 
 func isSkillBindingAction(bound *skill.BoundAction) bool {
-	if bound == nil || bound.Definition == nil || bound.Definition.ID != SkillManagementSkillID || bound.Definition.Version != SkillManagementSkillVersion {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != SkillManagementSkillID || skill.DefinitionSourceIdentity(bound.Definition) != "" {
 		return false
+	}
+	if bound.Definition.Version != SkillManagementSkillVersion {
+		current := SkillManagementSkill()
+		if _, ok := bound.Definition.Actions[bound.Action.Name]; !ok {
+			return false
+		}
+		if _, ok := current.Actions[bound.Action.Name]; !ok {
+			return false
+		}
+		if len(compareUpgradeContracts(bound.Definition, current, []string{bound.Action.Name}, nil)) != 0 {
+			return false
+		}
 	}
 	return bound.Action.Name == SkillActionListSetupRequests || bound.Action.Name == SkillActionRequestSetup || bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
 }
