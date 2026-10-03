@@ -614,6 +614,7 @@ type (
 	HostedTurnMedia                      = runtime.HostedTurnMedia
 	HostedTurnRequest                    = runtime.HostedTurnRequest
 	HostedTurnResponse                   = runtime.HostedTurnResponse
+	HostedTurnExecutionFailure           = runtime.HostedTurnExecutionFailure
 	HostedTurnForm                       = runtime.HostedTurnForm
 	HostedTurnFormAuthority              = runtime.HostedTurnFormAuthority
 	HostedWorkspaceOperationForm         = runtime.HostedWorkspaceOperationForm

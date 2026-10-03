@@ -518,7 +518,7 @@ func TestAgentRunWorkerRequeuesConversationMaterializationFailureForProjection(t
 	}
 }
 
-func TestAgentRunWorkerRequeuesAgentProposalFailureWithinBoundedRecovery(t *testing.T) {
+func TestAgentRunWorkerQueuesOneFinalProposalFailureExplanation(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "agent-proposal-recovery"}
@@ -568,21 +568,11 @@ func TestAgentRunWorkerRequeuesAgentProposalFailureWithinBoundedRecovery(t *test
 	if err != nil || arguments["target"] != "s4:e9" {
 		t.Fatalf("rejected action arguments were not retained: %#v, %v", arguments, err)
 	}
-	typed, ok := checkpointGovernedProposalFailure(requeued, turn, requiredActionEvidenceError{action: "camoufox-fill"}, "action requires successful camoufox-fill evidence from the same Run")
-	if !ok {
-		t.Fatal("typed evidence recovery was not accepted")
+	if !requiresFinalFailureExplanation(requeued.Checkpoint) {
+		t.Fatal("failed proposal has no final explanation boundary")
 	}
-	typedRecovery := typed[proposalRecoveryCheckpointKey].(map[string]interface{})
-	if typedRecovery["requiresActionAdvance"] != true || typedRecovery["prerequisiteAction"] != "camoufox-fill" {
-		t.Fatalf("typed evidence recovery = %#v", typedRecovery)
-	}
-	second, ok := checkpointGovernedProposalFailure(requeued, turn, errors.New("target still requires a current observation"), "target still requires a current observation")
-	if !ok || fmt.Sprint(second[proposalRecoveryCheckpointKey].(map[string]interface{})["attempt"]) != "2" {
-		t.Fatalf("second proposal recovery = %#v, ok=%v", second, ok)
-	}
-	requeued.Checkpoint = second
-	if _, ok = checkpointGovernedProposalFailure(requeued, turn, errors.New("target still invalid"), "target still invalid"); ok {
-		t.Fatal("proposal recovery exceeded its bounded allowance")
+	if _, ok := checkpointGovernedProposalFailure(requeued, turn, errors.New("target still invalid"), "target still invalid"); ok {
+		t.Fatal("failed proposal was accepted for another correction turn")
 	}
 }
 

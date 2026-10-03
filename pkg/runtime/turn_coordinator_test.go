@@ -119,7 +119,7 @@ func TestTurnCoordinatorPersistsRunnerFailure(t *testing.T) {
 	}
 }
 
-func TestTurnCoordinatorRequeuesSameTurnWhenHostIsUnavailable(t *testing.T) {
+func TestTurnCoordinatorStopsWhenHostIsUnavailable(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
@@ -129,71 +129,20 @@ func TestTurnCoordinatorRequeuesSameTurnWhenHostIsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := NewAgentRunScheduler(store).ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-1"})
-	if err != nil || claimed == nil {
-		t.Fatalf("claim=%#v err=%v", claimed, err)
-	}
 	calls := 0
-	var turnID string
-	runner := TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-		calls++
-		if turnID == "" {
-			turnID = input.Turn.ID
-		} else if input.Turn.ID != turnID {
-			t.Fatalf("retry created a different turn: first=%s retry=%s", turnID, input.Turn.ID)
-		}
-		if calls == 1 {
-			return nil, retryableTurnHostError{cause: errors.New("connection reset")}
-		}
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "done", ModelProvider: "failover-host", Model: "selected-model"}, nil
-	})
-	first, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker-1",
-	}, runner)
-	if !errors.Is(err, ErrTurnHostUnavailable) || first.Run.Status != AgentRunStatusSleeping || first.Run.WakeCondition == nil || first.Run.WakeCondition.Reference != "hosted-turn-retry" || first.Turn.Status != AgentTurnStatusRunning || first.Turn.LeaseOwner != "" || first.Event.EventType != "turn.retry_scheduled" || first.Event.TurnID != first.Turn.ID || first.Event.CausationID != first.Turn.ID {
-		t.Fatalf("retry result=%#v err=%v", first, err)
+	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		calls++
+		return nil, retryableTurnHostError{cause: errors.New("connection reset")}
+	}))
+	if !errors.Is(err, ErrTurnHostUnavailable) || result == nil || result.Run.Status != AgentRunStatusFailed ||
+		result.Run.WakeCondition != nil || result.Turn.Status != AgentTurnStatusFailed || calls != 1 {
+		t.Fatalf("host failure retried: result=%#v calls=%d err=%v", result, calls, err)
 	}
-	if got := first.Event.Payload["attempt"]; fmt.Sprint(got) != "1" {
-		t.Fatalf("retry attempt = %#v", got)
-	}
-	retryNow := first.Run.WakeCondition.WakeAt.Add(time.Second)
-	if _, err := NewAgentRunWakeService(store, store).WakeDueTimers(ctx, scope, retryNow); err != nil {
-		t.Fatal(err)
-	}
-	retryScheduler := NewAgentRunScheduler(store)
-	retryScheduler.now = func() time.Time { return retryNow }
-	claimed, err = retryScheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
-	if err != nil || claimed == nil || claimed.ID != run.ID {
-		t.Fatalf("retry claim=%#v err=%v", claimed, err)
-	}
-	second, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker-2",
-	}, runner)
-	if err != nil || second.Run.Status != AgentRunStatusCompleted || second.Run.LastAppliedTurn != 1 || calls != 2 {
-		t.Fatalf("completion=%#v calls=%d err=%v", second, calls, err)
-	}
-	turns, err := NewAgentTurnService(store, store).ListTurns(ctx, AgentTurnFilter{Scope: scope, RunID: run.ID, Limit: 10})
-	if err != nil || len(turns) != 1 || turns[0].ID != turnID || turns[0].ModelProvider != "failover-host" || turns[0].Model != "selected-model" {
-		t.Fatalf("turns=%#v err=%v", turns, err)
-	}
-}
-
-func TestHostedTurnRetryDelayIsBoundedExponential(t *testing.T) {
-	tests := []struct {
-		attempt int64
-		want    time.Duration
-	}{
-		{attempt: -1, want: 5 * time.Second},
-		{attempt: 1, want: 5 * time.Second},
-		{attempt: 2, want: 10 * time.Second},
-		{attempt: 3, want: 20 * time.Second},
-		{attempt: 4, want: 40 * time.Second},
-		{attempt: 20, want: 40 * time.Second},
-	}
-	for _, test := range tests {
-		if got := hostedTurnRetryDelay(test.attempt); got != test.want {
-			t.Fatalf("attempt %d delay = %s, want %s", test.attempt, got, test.want)
-		}
+	claimed, err := NewAgentRunScheduler(store).ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
+	if err != nil || claimed != nil {
+		t.Fatalf("failed run was claimable: %#v %v", claimed, err)
 	}
 }
 

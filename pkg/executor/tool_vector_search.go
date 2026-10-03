@@ -814,60 +814,64 @@ func parseToolFromFlatFields(config map[string]interface{}, resolver TemplateRes
 // ExecuteToolCalls executes a list of tool calls and returns results
 func ExecuteToolCalls(ctx context.Context, calls []*ToolCall, tools []*ToolDefinition, resolver TemplateResolver) ([]*ToolCallResult, error) {
 	registry := GetGlobalToolRegistry()
-
-	// Build tool lookup map
 	toolMap := make(map[string]*ToolDefinition)
 	for _, tool := range tools {
-		toolMap[tool.Name] = tool
+		if tool != nil {
+			toolMap[tool.Name] = tool
+		}
 	}
-
 	results := make([]*ToolCallResult, len(calls))
+	failed := false
 	for i, call := range calls {
+		if err := ctx.Err(); err != nil {
+			return results[:i], err
+		}
+		result := &ToolCallResult{}
+		if call != nil {
+			result.ToolCallID, result.Name = call.ID, call.Name
+		}
+		results[i] = result
+		if failed {
+			result.Error = "Not executed: this attempt stopped after an earlier tool failed."
+			continue
+		}
+		if call == nil {
+			result.Error = "Invalid tool call."
+			failed = true
+			continue
+		}
 		tool, ok := toolMap[call.Name]
 		if !ok {
-			results[i] = &ToolCallResult{
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Error:      fmt.Sprintf("unknown tool: %s", call.Name),
-			}
+			result.Error = fmt.Sprintf("unknown tool: %s", call.Name)
+			failed = true
 			continue
 		}
-
 		executor, err := registry.CreateExecutor(tool, resolver)
 		if err != nil {
-			results[i] = &ToolCallResult{
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Error:      fmt.Sprintf("failed to create executor: %v", err),
-			}
+			result.Error = fmt.Sprintf("failed to create executor: %v", err)
+			failed = true
 			continue
 		}
-
-		result, err := executor.Execute(ctx, call.Arguments)
+		if executor == nil {
+			result.Error = "Tool executor unavailable."
+			failed = true
+			continue
+		}
+		output, err := executor.Execute(ctx, call.Arguments)
 		if err != nil {
-			results[i] = &ToolCallResult{
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Error:      fmt.Sprintf("execution failed: %v", err),
-			}
+			result.Error = fmt.Sprintf("execution failed: %v", err)
+			failed = true
 			continue
 		}
-
-		if result.Error != "" {
-			results[i] = &ToolCallResult{
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Error:      result.Error,
-			}
+		if output == nil {
+			result.Error = "Tool returned no result."
+		} else if output.Error != "" {
+			result.Error = output.Error
 		} else {
-			results[i] = &ToolCallResult{
-				ToolCallID: call.ID,
-				Name:       call.Name,
-				Content:    result.Result,
-			}
+			result.Content = output.Result
 		}
+		failed = result.Error != ""
 	}
-
 	return results, nil
 }
 

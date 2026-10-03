@@ -215,24 +215,51 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 	item *ExternalConversationInboxItem,
 	run *AgentRun,
 ) (*ChannelMessage, error) {
-	messages, err := w.store.ListChannelMessages(ctx, ChannelMessageFilter{
-		Scope: item.Scope, ConversationID: item.ConversationID, Limit: 1000,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, message := range messages {
-		if message == nil || message.ReplyToMessageID != item.ChannelMessageID ||
-			message.Intent != MessageIntentAnswer || message.Sender.Type == ConversationParticipantUser || message.Historical {
-			continue
+	if messageID, _ := run.Output["messageId"].(string); strings.TrimSpace(messageID) != "" {
+		message, err := w.store.GetChannelMessage(ctx, item.Scope, item.ConversationID, messageID)
+		if err != nil && !errors.Is(err, ErrChannelMessageNotFound) {
+			return nil, err
 		}
-		for _, reference := range message.References {
-			if reference.Kind == ConversationReferenceRun && reference.ID == run.ID {
+		if message != nil && message.ID == messageID && canonicalExternalRunReply(message, item, run) {
+			return message, nil
+		}
+	}
+	// Older outputs may not carry messageId. Stores cap page sizes, so scan
+	// actual pages rather than assuming one large limit includes the answer.
+	filter := ChannelMessageFilter{Scope: item.Scope, ConversationID: item.ConversationID, Limit: 100}
+	for {
+		messages, err := w.store.ListChannelMessages(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		for _, message := range messages {
+			if canonicalExternalRunReply(message, item, run) {
 				return message, nil
 			}
 		}
+		if len(messages) < filter.Limit {
+			return nil, nil
+		}
+		last := messages[len(messages)-1]
+		if last == nil || last.Sequence <= filter.AfterSequence {
+			return nil, ErrExternalConversationConflict
+		}
+		filter.AfterSequence = last.Sequence
 	}
-	return nil, nil
+}
+
+func canonicalExternalRunReply(message *ChannelMessage, item *ExternalConversationInboxItem, run *AgentRun) bool {
+	if message == nil || message.Scope != item.Scope || message.ConversationID != item.ConversationID ||
+		message.ReplyToMessageID != item.ChannelMessageID || message.Intent != MessageIntentAnswer ||
+		message.Sender.Type == ConversationParticipantUser || message.Historical || strings.TrimSpace(message.Content) == "" {
+		return false
+	}
+	for _, reference := range message.References {
+		if reference.Kind == ConversationReferenceRun && reference.ID == run.ID {
+			return true
+		}
+	}
+	return false
 }
 
 func externalConversationRunReply(run *AgentRun) (string, bool) {
@@ -240,6 +267,13 @@ func externalConversationRunReply(run *AgentRun) (string, bool) {
 		return "", false
 	}
 	if run.Status == AgentRunStatusFailed {
+		if requiresFinalFailureExplanation(run.Checkpoint) {
+			failure := run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+			explained, _ := failure["explained"].(bool)
+			if summary := strings.TrimSpace(conversationResultString(run.Output, "summary")); explained && summary != "" && len(summary) <= 65536 {
+				return summary, true
+			}
+		}
 		// Failures may follow partially executed actions. Report only the reply
 		// interruption, without exposing internal errors or guessing whether
 		// those actions had external effects.

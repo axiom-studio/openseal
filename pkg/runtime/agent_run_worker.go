@@ -873,7 +873,36 @@ func (p *AgentRunWorkerPool) resumeReplayedTurnAction(ctx context.Context, worke
 	checkpoint := preserveKernelActionHistory(run.Checkpoint, turn.ContinuationCheckpoint)
 	switch call.Status {
 	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied, ActionCallStatusCanceled, ActionCallStatusCompensated:
-		checkpoint = checkpointTerminalAction(checkpoint, call, map[string]interface{}{"idempotentReplay": true})
+		metadata := map[string]interface{}{"idempotentReplay": true}
+		if call.Status == ActionCallStatusDenied && call.ApprovalID != "" {
+			getter, ok := p.portfolio.(interface {
+				GetApproval(context.Context, Scope, string) (*ApprovalCheckpoint, error)
+			})
+			if ok {
+				approval, err := getter.GetApproval(ctx, call.Scope, call.ApprovalID)
+				if err != nil {
+					return nil, err
+				}
+				if approval == nil || approval.Scope != call.Scope || approval.RunID != run.ID || approval.ActionCallID != call.ID {
+					return nil, errors.New("replayed action approval provenance is invalid")
+				}
+				metadata["approvalStatus"] = approval.Status
+				if approval.Status == ApprovalStatusChangesRequested {
+					metadata["reviewerGuidance"] = approval.DecisionReason
+					metadata["reviewedProposalRevision"] = approval.Revision - 1
+				}
+			} else if last, ok := run.Checkpoint["lastAction"].(map[string]interface{}); ok && last["actionCallId"] == call.ID && last["approvalId"] == call.ApprovalID {
+				for _, key := range []string{"approvalStatus", "reviewerGuidance", "reviewedProposalRevision"} {
+					if value, ok := last[key]; ok {
+						metadata[key] = value
+					}
+				}
+			}
+		}
+		checkpoint = checkpointTerminalAction(checkpoint, call, metadata)
+		if call.Status == ActionCallStatusFailed {
+			checkpoint = checkpointFinalFailureExplanation(checkpoint, "action", call.Error)
+		}
 	case ActionCallStatusReady, ActionCallStatusRunning, ActionCallStatusCompensating:
 		status = AgentRunStatusWaitingForDependency
 		wake = &WakeCondition{Type: "action", Reference: call.ID}
@@ -1039,8 +1068,14 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 }
 
 func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause error, safeCause string) (map[string]interface{}, bool) {
-	if run == nil || turn == nil || (run.Kind != RunKindAgentWork && run.Kind != RunKindConversation) || len(turn.RequestedActions) != 1 || strings.TrimSpace(safeCause) == "" {
+	if run == nil || turn == nil || (run.Kind != RunKindAgentWork && run.Kind != RunKindConversation) || strings.TrimSpace(safeCause) == "" || requiresFinalFailureExplanation(run.Checkpoint) {
 		return nil, false
+	}
+	if len(turn.RequestedActions) != 1 {
+		if turn.RequestedFork == nil && turn.RequestedDelegation == nil && turn.RequestedRunbook == nil {
+			return nil, false
+		}
+		return checkpointFinalFailureExplanation(run.Checkpoint, "proposal", safeCause), true
 	}
 	attempt := 1
 	if current, ok := run.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{}); ok {
@@ -1063,6 +1098,11 @@ func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause err
 	// for deterministic repair; invented action IDs or observations must not
 	// become recovery context beside the kernel-owned evidence journal.
 	checkpoint := preserveKernelActionHistory(run.Checkpoint, run.Checkpoint)
+	if run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam {
+		if participant, ok := turn.ContinuationCheckpoint[teamActionAssignedAgentCheckpointKey].(string); ok && validOpaqueIdentifier(participant, 256) {
+			checkpoint[teamActionAssignedAgentCheckpointKey] = participant
+		}
+	}
 	if arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, request.InputRef); err == nil {
 		pointer := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(request.InputRef, "#")), "/continuationCheckpoint")
 		if pointer != "" {
@@ -1087,7 +1127,7 @@ func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause err
 		}
 	}
 	checkpoint[proposalRecoveryCheckpointKey] = recovery
-	return checkpoint, true
+	return checkpointFinalFailureExplanation(checkpoint, "proposal", safeCause), true
 }
 
 func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {
