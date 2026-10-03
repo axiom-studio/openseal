@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"golang.org/x/mod/semver"
 	"slices"
 	"sort"
 	"strings"
@@ -27,7 +28,7 @@ type skillSetupArguments struct {
 
 func skillSetupAction() skill.Action {
 	return skill.Action{Name: SkillActionRequestSetup,
-		Description: "Ask the user to install, configure, or reauthorize an exact Skill through a durable in-chat setup form. Use discover first and copy the returned id, version, and sourceIdentity exactly. For a general connection request, omit requiredActions, enablePrompt, and bindingId unless the user requested specific operations or a verified existing binding. Compatibility requirements and configuration fields are not action names. A successful pending request is the result: ask the user to complete its form, then finish without polling. This action creates a request only; it does not grant access, install anything, or verify a connection. Never request secrets in chat or invent authorization URLs. Use reauthorize for an existing binding whose credentials need replacement. Use configure to connect an installed Skill or change its configuration. Use install for a verified discoverable Skill that needs installation.",
+		Description: "Ask the user to install, configure, or reauthorize an exact Skill through a durable in-chat setup form. Use discover first and copy the returned id and sourceIdentity exactly. Request skillVersion latest; the host resolves and records the authorized current version. Existing bindings retain their compatible verified executable identity. For a general connection request, omit requiredActions, enablePrompt, and bindingId unless the user requested specific operations or a verified existing binding. Compatibility requirements and configuration fields are not action names. A successful pending request is the result: ask the user to complete its form, then finish without polling. This action creates a request only; it does not grant access, install anything, or verify a connection. Never request secrets in chat or invent authorization URLs. Use reauthorize for an existing binding whose credentials need replacement. Use configure to connect an installed Skill or change its configuration. Use install for a verified discoverable Skill that needs installation.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"requiredActions": map[string]interface{}{"description": "Optional exact names from the discovered candidate actions[].name when specific provider operations are requested. Never put compatibility requirements, credential kinds, or configuration field names here. Omit for a general connection request.", "type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "maxItems": 32, "uniqueItems": true},
@@ -90,19 +91,35 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 			return nil, err
 		}
 		for _, item := range page.Items {
-			if item.ID == a.SkillID && item.Version == a.SkillVersion && item.SourceIdentity == a.SourceIdentity {
+			if item.ID == a.SkillID && (a.SkillVersion == "latest" || item.Version == a.SkillVersion) && item.SourceIdentity == a.SourceIdentity {
+				if a.SkillVersion == "latest" {
+					if !semver.IsValid("v" + strings.TrimPrefix(item.Version, "v")) {
+						return nil, errors.New("latest Skill selection requires valid versions")
+					}
+					if candidate != nil && semver.Compare("v"+strings.TrimPrefix(item.Version, "v"), "v"+strings.TrimPrefix(candidate.Version, "v")) <= 0 {
+						continue
+					}
+				}
 				copy := item
 				candidate = &copy
-				break
+				if a.SkillVersion != "latest" {
+					break
+				}
 			}
 		}
-		if candidate != nil || page.NextCursor == "" {
+		if candidate != nil && a.SkillVersion != "latest" || page.NextCursor == "" {
 			break
+		}
+		if pageNumber == 19 {
+			return nil, errors.New("Skill discovery exceeded the setup selection page limit")
 		}
 		if page.NextCursor == cursor {
 			return nil, errors.New("Skill discovery cursor did not advance")
 		}
 		cursor = page.NextCursor
+	}
+	if candidate != nil {
+		a.SkillVersion = candidate.Version
 	}
 	configurationSetup := skillCandidateNeedsConfigurationSetup(candidate) && a.Kind != "install"
 	if candidate == nil || (candidate.Readiness == skill.DiscoveryReadinessUnavailable && !configurationSetup) {

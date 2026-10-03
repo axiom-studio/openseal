@@ -140,3 +140,25 @@ func TestSkillReferenceUpgradeMovesConversationAndCallbackAdaptersAtomically(t *
 		t.Fatalf("upgraded adapters = endpoint %#v callback %#v", endpoint.Adapter, registration.Adapter)
 	}
 }
+
+func TestCompatibleAdapterFeatureAdditionPreservesAuthority(t *testing.T) {
+	before := &skill.Definition{ConversationAdapters: map[string]skill.ConversationAdapter{"chat": {Features: []capability.ConversationAdapterFeature{"threading"}}}}
+	after := &skill.Definition{ConversationAdapters: map[string]skill.ConversationAdapter{"chat": {Features: []capability.ConversationAdapterFeature{"threading", "attachments"}}}}
+	binding := &skill.Binding{EnabledConversationAdapters: []string{"chat"}}
+	if findings := compareUpgradeAdapterContracts(before, after, binding); len(findings) != 0 {
+		t.Fatalf("additive interface blocked: %#v", findings)
+	}
+	adapter := after.ConversationAdapters["chat"]
+	adapter.Features = []capability.ConversationAdapterFeature{"attachments"}
+	after.ConversationAdapters["chat"] = adapter
+	if len(compareUpgradeAdapterContracts(before, after, binding)) == 0 {
+		t.Fatal("removed feature accepted")
+	}
+	adapter = after.ConversationAdapters["chat"]
+	adapter.Features = before.ConversationAdapters["chat"].Features
+	adapter.Provider = "foreign"
+	after.ConversationAdapters["chat"] = adapter
+	if len(compareUpgradeAdapterContracts(before, after, binding)) == 0 {
+		t.Fatal("provider authority change accepted")
+	}
+}

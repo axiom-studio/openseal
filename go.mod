@@ -30,6 +30,8 @@ require (
 	sigs.k8s.io/yaml v1.5.0
 )
 
+require golang.org/x/mod v0.32.0 // indirect
+
 require (
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect

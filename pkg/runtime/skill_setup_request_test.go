@@ -174,3 +174,53 @@ func TestSkillSetupActionRunsThroughCanonicalProposalAndWorker(t *testing.T) {
 		t.Fatalf("durable request: %#v %v", records, err)
 	}
 }
+
+func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "a"}
+	deploymentID := "agent"
+	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
+		if r.Scope.ID != "a" || r.DeploymentID != "agent" {
+			t.Fatal("authority not derived from run")
+		}
+		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable, Actions: []skill.DiscoveryAction{{Name: "read", Risk: skill.RiskLevelRead}}}}}, nil
+	})
+	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
+	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
+	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Read the community", "requiredActions": []interface{}{"read"}}
+	input := ActionDispatchInput{Call: &ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}
+	result, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := result["setupRequest"].(map[string]interface{})
+	if request["status"] != "pending" {
+		t.Fatal(request)
+	}
+	input.Call.ID = "call-2"
+	repeated, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID)
+	if err != nil || repeated["setupRequest"].(map[string]interface{})["id"] != request["id"] {
+		t.Fatalf("duplicate not reused: %#v %v", repeated, err)
+	}
+	bindings, _ := catalog.ListBindings(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID)
+	if len(bindings) != 1 {
+		t.Fatalf("request granted access: %#v", bindings)
+	}
+	args["skillVersion"] = "forged"
+	input.Call.ID = "call-3"
+	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID); err == nil {
+		t.Fatal("unverified Skill accepted")
+	}
+	args["skillVersion"] = "1.0.0"
+	args["kind"] = "reauthorize"
+	args["bindingId"] = "foreign-binding"
+	if _, err := dispatcher.requestSkillSetup(ctx, input, run, deploymentID); err == nil {
+		t.Fatal("unbound reconnect accepted")
+	}
+}
