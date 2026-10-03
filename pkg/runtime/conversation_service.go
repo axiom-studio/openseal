@@ -63,12 +63,15 @@ type ChannelMessageFilter struct {
 	Scope          Scope
 	ConversationID string
 	ThreadRootID   string
-	AfterSequence  int64
-	BeforeSequence int64
-	Intents        []ConversationMessageIntent
-	Limit          int
-	Descending     bool
-	Viewer         *ConversationViewer
+	// ChannelTimeline lists roots and replies explicitly broadcast to the channel.
+	// It cannot be combined with ThreadRootID.
+	ChannelTimeline bool
+	AfterSequence   int64
+	BeforeSequence  int64
+	Intents         []ConversationMessageIntent
+	Limit           int
+	Descending      bool
+	Viewer          *ConversationViewer
 }
 
 type CoordinateParticipationRequest struct {
@@ -485,6 +488,9 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 }
 
 func (s *ConversationService) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
+	if err := validateChannelMessageViewFilter(filter); err != nil {
+		return nil, err
+	}
 	if filter.BeforeSequence < 0 || filter.AfterSequence < 0 || (filter.BeforeSequence > 0 && filter.AfterSequence >= filter.BeforeSequence) {
 		return nil, fmt.Errorf("%w: message sequence bounds are invalid", ErrInvalidConversation)
 	}
@@ -527,6 +533,13 @@ func (s *ConversationService) ListChannelMessages(ctx context.Context, filter Ch
 		result = result[:desired]
 	}
 	return result, nil
+}
+
+func validateChannelMessageViewFilter(filter ChannelMessageFilter) error {
+	if filter.ChannelTimeline && filter.ThreadRootID != "" {
+		return fmt.Errorf("%w: channel timeline and thread root filters cannot be combined", ErrInvalidConversation)
+	}
+	return nil
 }
 
 func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
