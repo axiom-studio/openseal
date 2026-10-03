@@ -90,8 +90,8 @@ func (r *agentRequestDecisionTurnRunner) RunTurn(ctx context.Context, input Turn
 	if err != nil || outcome == nil {
 		return outcome, err
 	}
-	if len(outcome.ProposedActions) > 0 || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil {
-		return nil, errors.New("AgentRequest decision turns cannot execute actions, fork, or delegate")
+	if len(outcome.ProposedActions) > 0 || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedTask != nil {
+		return nil, errors.New("AgentRequest decision turns cannot execute actions, fork, delegate, or start independent tasks")
 	}
 	if outcome.NextRunStatus == AgentRunStatusCompleted {
 		if _, _, err := parseAgentRequestDecisionOutput(outcome.RunOutput); err != nil {
@@ -116,8 +116,8 @@ func (r *agentRequestCompletionReviewTurnRunner) RunTurn(ctx context.Context, in
 	if err != nil || outcome == nil {
 		return outcome, err
 	}
-	if len(outcome.ProposedActions) > 0 || outcome.ProposedRunbook != nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil {
-		return nil, errors.New("AgentRequest completion review turns cannot execute actions, invoke runbooks, fork, or delegate")
+	if len(outcome.ProposedActions) > 0 || outcome.ProposedRunbook != nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedTask != nil {
+		return nil, errors.New("AgentRequest completion review turns cannot execute actions, invoke runbooks, fork, delegate, or start independent tasks")
 	}
 	if outcome.NextRunStatus == AgentRunStatusCompleted {
 		if _, _, err := parseAgentRequestCompletionReviewOutput(outcome.RunOutput); err != nil {

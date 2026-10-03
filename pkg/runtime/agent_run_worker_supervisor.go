@@ -17,20 +17,21 @@ import (
 // shortcut: Team-owned conversation Runs and ordinary Agent work never share a
 // claim stream.
 type DynamicAgentRunWorkerConfig struct {
-	Kind                       RunKind
-	AssignedAgentID            string
-	Concurrency                int
-	MaxActiveForAgent          int
-	MaxActiveForOwner          int
-	MaxActiveForObjective      int
-	MaxActiveForConcurrencyKey int
-	MaxTurnsPerClaim           int
-	LeaseDuration              time.Duration
-	TurnLeaseDuration          time.Duration
-	AgingInterval              time.Duration
-	PollInterval               time.Duration
-	ReconcileInterval          time.Duration
-	WorkerIDPrefix             string
+	Kind                              RunKind
+	AssignedAgentID                   string
+	Concurrency                       int
+	MaxActiveForAgent                 int
+	MaxActiveForOwner                 int
+	MaxActiveForObjective             int
+	MaxActiveForConcurrencyKey        int
+	ConversationTaskForegroundReserve int
+	MaxTurnsPerClaim                  int
+	LeaseDuration                     time.Duration
+	TurnLeaseDuration                 time.Duration
+	AgingInterval                     time.Duration
+	PollInterval                      time.Duration
+	ReconcileInterval                 time.Duration
+	WorkerIDPrefix                    string
 }
 
 func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
@@ -46,6 +47,9 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 	}
 	if c.MaxActiveForAgent <= 0 {
 		c.MaxActiveForAgent = c.Concurrency
+	}
+	if err := validateConversationTaskForegroundReserve(c.ConversationTaskForegroundReserve, c.MaxActiveForAgent); err != nil {
+		return err
 	}
 	if c.MaxActiveForOwner < 0 || c.MaxActiveForObjective < 0 || c.MaxActiveForConcurrencyKey < 0 {
 		return errors.New("agent run portfolio concurrency limits cannot be negative")
@@ -261,8 +265,9 @@ func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
 			Scope: scope, Kind: s.config.Kind, AssignedAgentID: s.config.AssignedAgentID,
 			Concurrency: s.config.Concurrency, MaxActiveForAgent: s.config.MaxActiveForAgent,
 			MaxActiveForOwner: s.config.MaxActiveForOwner, MaxActiveForObjective: s.config.MaxActiveForObjective,
-			MaxActiveForConcurrencyKey: s.config.MaxActiveForConcurrencyKey,
-			MaxTurnsPerClaim:           s.config.MaxTurnsPerClaim, LeaseDuration: s.config.LeaseDuration,
+			MaxActiveForConcurrencyKey:        s.config.MaxActiveForConcurrencyKey,
+			ConversationTaskForegroundReserve: s.config.ConversationTaskForegroundReserve,
+			MaxTurnsPerClaim:                  s.config.MaxTurnsPerClaim, LeaseDuration: s.config.LeaseDuration,
 			TurnLeaseDuration: s.config.TurnLeaseDuration, AgingInterval: s.config.AgingInterval,
 			PollInterval:   s.config.PollInterval,
 			WorkerIDPrefix: fmt.Sprintf("%s-%s-%s-%s", s.config.WorkerIDPrefix, s.config.Kind, scope.Kind, scope.ID),

@@ -65,6 +65,7 @@ type HostedTurnModelInput struct {
 	Images                    []HostedImageReference           `json:"images,omitempty"`
 	Goal                      string                           `json:"goal"`
 	InputContext              map[string]interface{}           `json:"inputContext,omitempty"`
+	ConversationTasks         *HostedConversationTaskContext   `json:"conversationTasks,omitempty"`
 	SystemInstructions        []string                         `json:"systemInstructions,omitempty"`
 	EligibleAgents            []HostedAgentTarget              `json:"eligibleAgents,omitempty"`
 	Workspace                 *HostedWorkspace                 `json:"workspace,omitempty"`
@@ -165,6 +166,9 @@ func effectiveExternalOperationPolicy(sideEffect capability.SideEffect, policy c
 }
 
 func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
+	if err := request.ConversationTasks.Validate(); err != nil {
+		return nil, err
+	}
 	images := make([]HostedImageReference, 0, len(request.ModelMedia))
 	for _, media := range request.ModelMedia {
 		images = append(images, HostedImageReference{MediaType: media.MediaType, SourceActionCallID: media.SourceActionCallID, SourceArtifactID: media.SourceArtifactID, SourceArtifactVersion: media.SourceArtifactVersion, SourceMessageID: media.SourceMessageID})
@@ -172,6 +176,7 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 	return json.Marshal(HostedTurnModelInput{
 		Images: images,
 		Goal:   request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
+		ConversationTasks:         cloneHostedConversationTaskContext(request.ConversationTasks),
 		EligibleAgents:            request.EligibleAgents,
 		Workspace:                 projectHostedWorkspace(request.Workspace),
 		WorkspaceOperations:       request.WorkspaceOperations,

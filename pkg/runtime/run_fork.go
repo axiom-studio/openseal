@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -245,6 +246,18 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	if err := validateGroupedBudgetAllocations(source, allocations); err != nil {
 		return nil, err
 	}
+	sourceTask, err := c.persistedForkTaskOrigin(ctx, source)
+	if err != nil {
+		return nil, err
+	}
+	if sourceTask != nil {
+		for _, branch := range req.Branches {
+			assignedAgentID := strings.TrimSpace(branch.AssignedAgentID)
+			if assignedAgentID != "" && assignedAgentID != source.AssignedAgentID {
+				return nil, ErrInvalidConversationTask
+			}
+		}
+	}
 	now := c.now().UTC()
 	groupID := stableForkIdentifier(source.ID, req.ForkID, "group")
 	children := make([]*AgentRun, 0, len(req.Branches))
@@ -259,17 +272,43 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			assignedAgentID = source.AssignedAgentID
 			childContext = cloneMap(source.Context)
 			childPlan = cloneMap(source.Plan)
-		} else if projectID, ok := source.Context["projectId"].(string); ok && strings.TrimSpace(projectID) != "" {
-			// Project identity is safe, canonical work lineage. Preserve it
-			// across Agent boundaries without copying the source Run's broader
-			// context, which may contain owner-private references.
+		}
+		if sourceTask != nil && assignedAgentID == source.AssignedAgentID {
+			childContext = cloneMap(source.Context)
+			childPlan = cloneMap(source.Plan)
 			if childContext == nil {
 				childContext = map[string]interface{}{}
 			}
-			if supplied, exists := childContext["projectId"]; exists && supplied != projectID {
-				return nil, errors.New("fork branch cannot replace its source Project lineage")
+			for key, value := range branch.Context {
+				if immutableForkTaskContextKey(key) {
+					if !reflect.DeepEqual(value, childContext[key]) {
+						return nil, ErrInvalidConversationTask
+					}
+					continue
+				}
+				childContext[key] = deepCloneCheckpointValue(value)
 			}
-			childContext["projectId"] = projectID
+			childContext[ConversationTaskContextKey] = sourceTask.ID
+		} else if !implicitAgent {
+			// Task lineage remains an authority checked through the persisted
+			// root. A branch cannot manufacture it in caller-owned context or
+			// transfer the source Agent's private context to another Agent.
+			delete(childContext, ConversationTaskContextKey)
+		}
+		if !implicitAgent && (sourceTask == nil || assignedAgentID != source.AssignedAgentID) {
+			projectID, ok := source.Context["projectId"].(string)
+			if ok && strings.TrimSpace(projectID) != "" {
+				// Project identity is safe, canonical work lineage. Preserve it
+				// across Agent boundaries without copying the source Run's broader
+				// context, which may contain owner-private references.
+				if childContext == nil {
+					childContext = map[string]interface{}{}
+				}
+				if supplied, exists := childContext["projectId"]; exists && supplied != projectID {
+					return nil, errors.New("fork branch cannot replace its source Project lineage")
+				}
+				childContext["projectId"] = projectID
+			}
 		}
 		if branch.Mode != "" {
 			if childContext == nil {
@@ -378,6 +417,73 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		}
 	}
 	return &RunForkResult{DependencyGroup: result, Children: children}, nil
+}
+
+func immutableForkTaskContextKey(key string) bool {
+	switch key {
+	case ConversationTaskContextKey, conversationRunContextConversationID, conversationRunContextTriggerID,
+		"threadRootMessageId", runReportingContextRootRunID, runReportingContextMilestones, "projectId":
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *RunForkCoordinator) persistedForkTaskOrigin(ctx context.Context, source *AgentRun) (*ConversationTask, error) {
+	return persistedTaskWorkOrigin(ctx, c.store, source)
+}
+
+func persistedTaskWorkOrigin(ctx context.Context, store PortfolioStore, source *AgentRun) (*ConversationTask, error) {
+	_, hinted := source.Context[ConversationTaskContextKey]
+	taskLike := hinted || strings.HasPrefix(source.ConcurrencyKey, "task:")
+	tasks, ok := store.(ConversationTaskStore)
+	if !ok {
+		if taskLike {
+			return nil, ErrInvalidConversationTask
+		}
+		return nil, nil
+	}
+	rootID := source.RootRunID
+	if rootID == "" {
+		rootID = source.ID
+	}
+	task, err := PersistedTaskOrigin(ctx, tasks, source.Scope, rootID)
+	if errors.Is(err, ErrConversationTaskNotFound) && !taskLike {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	root, err := store.GetAgentRun(ctx, source.Scope, task.WorkRunID)
+	if err != nil {
+		return nil, err
+	}
+	if !validConversationTaskAdmissionRoot(root, task) {
+		return nil, ErrInvalidConversationTask
+	}
+	current := source
+	seen := make(map[string]bool)
+	for depth := 0; depth < 64 && current != nil; depth++ {
+		if seen[current.ID] || current.Scope != task.Scope || current.Owner != task.Owner || current.AssignedAgentID != task.TargetAgentID ||
+			current.RootRunID != task.WorkRunID || current.Kind != RunKindAgentWork {
+			return nil, ErrInvalidConversationTask
+		}
+		if value, exists := current.Context[ConversationTaskContextKey]; exists && value != task.ID {
+			return nil, ErrInvalidConversationTask
+		}
+		if current.ID == task.WorkRunID {
+			return task, nil
+		}
+		if current.ParentRunID == "" || current.Source != RunSourceFork {
+			return nil, ErrInvalidConversationTask
+		}
+		seen[current.ID] = true
+		current, err = store.GetAgentRun(ctx, task.Scope, current.ParentRunID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return nil, ErrInvalidConversationTask
 }
 
 func (c *RunForkCoordinator) replay(ctx context.Context, source *AgentRun, group *RunDependencyGroup, req CreateRunForkRequest) (*RunForkResult, error) {

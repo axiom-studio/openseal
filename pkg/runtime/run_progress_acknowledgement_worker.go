@@ -378,7 +378,7 @@ func (r *hostedTurnProgressAcknowledgementRenderer) RenderRunProgressAcknowledge
 		return "", err
 	}
 	if outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || len(outcome.ProposedActions) > 0 ||
-		outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil {
+		outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil || outcome.ProposedTask != nil {
 		return "", errors.New("Agent returned a non-terminal or actionable progress acknowledgement")
 	}
 	content := strings.TrimSpace(outcome.OutputSummary)

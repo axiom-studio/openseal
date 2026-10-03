@@ -816,7 +816,10 @@ func TestAgentConversationGoalProjectsActiveWorkFromTheSameChannel(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	goal, err := runner.agentConversationGoal(ctx, conversation, &ChannelMessage{ID: "trigger"}, nil, nil)
+	goal, err := runner.agentConversationGoal(ctx, conversation, &ChannelMessage{
+		ID: "trigger", Scope: scope, ConversationID: conversation.ID,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"},
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

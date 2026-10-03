@@ -122,6 +122,7 @@ func (p *AgentRunWorkerPool) SetAcceptedRunExecutionPreparer(preparer AcceptedRu
 		p.forks.SetAcceptedRunExecutionPreparer(preparer)
 		p.collaboration.SetAcceptedRunExecutionPreparer(preparer)
 		p.requestInbox.SetAcceptedRunExecutionPreparer(preparer)
+		p.conversationTasks.SetAcceptedRunExecutionPreparer(preparer)
 	}
 }
 

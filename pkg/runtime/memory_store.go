@@ -67,6 +67,16 @@ type MemoryStore struct {
 	dependencies                        map[string]map[string]*RunDependency
 	artifacts                           map[string]map[int64]*Artifact
 	conversations                       map[string]*Conversation
+	conversationTasks                   map[string]*ConversationTask
+	conversationTaskWorkRuns            map[string]string
+	conversationTaskOrder               map[memoryConversationTaskIndexKey]*memoryOrderedIndexNode[memoryConversationTaskPageKey]
+	conversationTaskActiveOrder         map[memoryConversationTaskIndexKey]*memoryOrderedIndexNode[memoryConversationTaskPageKey]
+	conversationActiveRunOrder          map[memoryConversationActiveRunIndexKey]*memoryOrderedIndexNode[memoryConversationTaskPageKey]
+	conversationActiveRunMembership     map[string]memoryConversationActiveRunMembership
+	conversationActiveRunRoots          map[string]map[string]struct{}
+	conversationActiveRunRootKeys       map[string]string
+	conversationForegroundRunOrder      map[memoryConversationActiveRunIndexKey]*memoryOrderedIndexNode[memoryConversationTaskPageKey]
+	conversationForegroundRunMembership map[string]memoryConversationActiveRunMembership
 	conversationKeys                    map[string]string
 	channelMessages                     map[string][]*ChannelMessage
 	channelMessageIDs                   map[string]*ChannelMessage

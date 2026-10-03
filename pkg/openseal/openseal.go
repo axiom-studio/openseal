@@ -614,6 +614,21 @@ type (
 	HostedTurnMedia                      = runtime.HostedTurnMedia
 	HostedTurnRequest                    = runtime.HostedTurnRequest
 	HostedResponseContract               = runtime.HostedResponseContract
+	TurnTaskProposal                     = runtime.TurnTaskProposal
+	HostedConversationTaskContext        = runtime.HostedConversationTaskContext
+	ConversationTaskSnapshot             = runtime.ConversationTaskSnapshot
+	ConversationTask                     = runtime.ConversationTask
+	ConversationTaskStore                = runtime.ConversationTaskStore
+	ConversationActiveRunsReadStore      = runtime.ConversationActiveRunsReadStore
+	ConversationForegroundRunsReadStore  = runtime.ConversationForegroundRunsReadStore
+	ConversationTaskKernelStore          = runtime.ConversationTaskKernelStore
+	ConversationTaskCreateRecord         = runtime.ConversationTaskCreateRecord
+	GetConversationTaskRequest           = runtime.GetConversationTaskRequest
+	CancelConversationTaskRequest        = runtime.CancelConversationTaskRequest
+	ConversationTaskFilter               = runtime.ConversationTaskFilter
+	ConversationTaskService              = runtime.ConversationTaskService
+	StartConversationTaskRequest         = runtime.StartConversationTaskRequest
+	ConversationTaskResult               = runtime.ConversationTaskResult
 	HostedTurnResponse                   = runtime.HostedTurnResponse
 	HostedTurnExecutionFailure           = runtime.HostedTurnExecutionFailure
 	HostedTurnForm                       = runtime.HostedTurnForm
@@ -1013,6 +1028,7 @@ type (
 )
 
 const (
+	ConversationTaskContextKey          = runtime.ConversationTaskContextKey
 	AgentManifestAPIVersion             = kernelagent.ManifestAPIVersion
 	AgentManifestKind                   = kernelagent.ManifestKind
 	AgentBundleAPIVersion               = kernelagent.BundleAPIVersion
@@ -1522,6 +1538,9 @@ var (
 var AppendParticipationResponseChannelInstructions = runtime.AppendParticipationResponseChannelInstructions
 
 var (
+	ConversationTaskGoalSummary            = runtime.ConversationTaskGoalSummary
+	PersistedTaskOrigin                    = runtime.PersistedTaskOrigin
+	NewConversationTaskService             = runtime.NewConversationTaskService
 	NewHostedTurnRunner                    = runtime.NewHostedTurnRunner
 	NewTurnHostFailure                     = runtime.NewTurnHostFailure
 	MarshalHostedTurnModelInput            = runtime.MarshalHostedTurnModelInput
@@ -1539,6 +1558,9 @@ var (
 	NewOutreachActionProposalObserver      = runtime.NewOutreachActionProposalObserver
 	ResolveCatalogTurnRunner               = runtime.ResolveCatalogTurnRunner
 	NewArtifactRetentionService            = runtime.NewArtifactRetentionService
+	ErrInvalidConversationTask             = runtime.ErrInvalidConversationTask
+	ErrConversationTaskNotFound            = runtime.ErrConversationTaskNotFound
+	ErrConversationTaskConflict            = runtime.ErrConversationTaskConflict
 	ErrTurnHostUnavailable                 = runtime.ErrTurnHostUnavailable
 	ErrTurnHostConfiguration               = runtime.ErrTurnHostConfiguration
 	ValidateRunbook                        = runbook.Validate
@@ -2124,6 +2146,7 @@ const (
 	EmbedSessionExpired                 = runtime.EmbedSessionExpired
 	EmbedSessionRevoked                 = runtime.EmbedSessionRevoked
 	ConversationReferenceProject        = runtime.ConversationReferenceProject
+	ConversationReferenceTask           = runtime.ConversationReferenceTask
 	ConversationReferenceRun            = runtime.ConversationReferenceRun
 	ConversationReferenceRequest        = runtime.ConversationReferenceRequest
 	ConversationReferenceApproval       = runtime.ConversationReferenceApproval
@@ -4298,6 +4321,75 @@ func (e *Engine) CommandAgentRun(ctx context.Context, req runtime.AgentRunComman
 
 func (e *Engine) ConversationRetryEligibility(ctx context.Context, scope runtime.Scope, runID string) (*runtime.RunRetryEligibility, error) {
 	return runtime.NewRunCommandService(e.store).ConversationRetryEligibility(ctx, scope, runID)
+}
+
+// ConversationTasksAvailable reports whether this store implements the optional
+// durable conversation task contract.
+func (e *Engine) ConversationTasksAvailable() bool {
+	if e == nil {
+		return false
+	}
+	_, ok := e.store.(runtime.ConversationTaskKernelStore)
+	return ok
+}
+
+func (e *Engine) conversationTaskService() (*runtime.ConversationTaskService, error) {
+	if e == nil {
+		return nil, runtime.ErrInvalidConversationTask
+	}
+	store, ok := e.store.(runtime.ConversationTaskKernelStore)
+	if !ok {
+		return nil, errors.New("conversation task store is not configured")
+	}
+	service := runtime.NewConversationTaskService(store)
+	service.SetAcceptedRunExecutionPreparer(e)
+	return service, nil
+}
+
+func (e *Engine) GetConversationTask(ctx context.Context, scope runtime.Scope, id string) (*runtime.ConversationTask, error) {
+	if e == nil {
+		return nil, runtime.ErrInvalidConversationTask
+	}
+	store, ok := e.store.(runtime.ConversationTaskStore)
+	if !ok {
+		return nil, errors.New("conversation task store is not configured")
+	}
+	return store.GetConversationTask(ctx, scope, id)
+}
+
+func (e *Engine) FindConversationTaskByWorkRunID(ctx context.Context, scope runtime.Scope, id string) (*runtime.ConversationTask, error) {
+	if e == nil {
+		return nil, runtime.ErrInvalidConversationTask
+	}
+	store, ok := e.store.(runtime.ConversationTaskStore)
+	if !ok {
+		return nil, errors.New("conversation task store is not configured")
+	}
+	return store.FindConversationTaskByWorkRunID(ctx, scope, id)
+}
+
+func (e *Engine) GetConversationTaskSnapshot(ctx context.Context, request runtime.GetConversationTaskRequest) (*runtime.ConversationTaskResult, error) {
+	service, err := e.conversationTaskService()
+	if err != nil {
+		return nil, err
+	}
+	return service.Get(ctx, request)
+}
+
+func (e *Engine) ListConversationTasks(ctx context.Context, filter runtime.ConversationTaskFilter) ([]*runtime.ConversationTaskResult, error) {
+	service, err := e.conversationTaskService()
+	if err != nil {
+		return nil, err
+	}
+	return service.List(ctx, filter)
+}
+
+func (e *Engine) CancelConversationTask(ctx context.Context, request runtime.CancelConversationTaskRequest) (*runtime.ConversationTaskResult, error) {
+	service, err := e.conversationTaskService()
+	if err != nil {
+		return nil, err
+	}
+	return service.Cancel(ctx, request)
 }
 
 func (e *Engine) GetAgentRun(ctx context.Context, scope runtime.Scope, runID string) (*runtime.AgentRun, error) {

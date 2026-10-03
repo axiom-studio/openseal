@@ -32,6 +32,7 @@ type HostedTurnForm struct {
 	ProposedFork               *TurnForkProposal             `json:"proposedFork,omitempty"`
 	ProposedDelegation         *TurnDelegationProposal       `json:"proposedDelegation,omitempty"`
 	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
+	ProposedTask               *TurnTaskProposal             `json:"proposedTask,omitempty"`
 	OutputSummary              string                        `json:"outputSummary"`
 	ContinuationCheckpoint     map[string]interface{}        `json:"continuationCheckpoint"`
 	NextRunStatus              AgentRunStatus                `json:"nextRunStatus"`
@@ -66,6 +67,7 @@ type HostedTurnFormAuthority struct {
 	CanDelegate           bool
 	CanForkSelf           bool
 	CanInvokeRunbook      bool
+	CanStartTask          bool
 	SkillPromptReferences []string
 	WorkspaceOperations   []workspace.Operation
 }
@@ -85,6 +87,17 @@ func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capabilit
 	}
 	if form.ProposedAction != nil && form.ProposedWorkspaceOperation != nil {
 		return nil, errors.New("hosted turn form can propose only one governed action or native Workspace operation")
+	}
+	if form.ProposedTask != nil {
+		if form.ProposedAction != nil || form.ProposedWorkspaceOperation != nil || form.ProposedFork != nil || form.ProposedDelegation != nil || form.ProposedRunbook != nil {
+			return nil, errors.New("a task proposal cannot be combined with another proposal")
+		}
+		if strings.TrimSpace(form.ProgressSummary) != "" {
+			return nil, errors.New("a task acknowledgment cannot be streamed before durable admission")
+		}
+		if err := validateTaskProposalOutput(form.ProposedTask, form.NextRunStatus, form.WakeCondition, form.OutputSummary, form.RunOutput, form.RunError); err != nil {
+			return nil, err
+		}
 	}
 	decisions := append([]TurnDecision(nil), form.Decisions...)
 	// Models can request governed actions, but they cannot mint approval IDs or
@@ -107,7 +120,7 @@ func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capabilit
 	}
 	response := &HostedTurnResponse{
 		SkillSelections: form.SkillSelections, Decisions: decisions,
-		ProposedFork: form.ProposedFork, ProposedDelegation: form.ProposedDelegation, ProposedRunbook: form.ProposedRunbook,
+		ProposedFork: form.ProposedFork, ProposedDelegation: form.ProposedDelegation, ProposedRunbook: form.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(form.ProposedTask),
 		OutputSummary: form.OutputSummary, ContinuationCheckpoint: checkpoint, NextRunStatus: form.NextRunStatus,
 		WakeCondition: form.WakeCondition, RunOutput: form.RunOutput, RunError: form.RunError,
 		CompletionEvidenceRefs: form.CompletionEvidenceRefs, EvidenceClaims: form.EvidenceClaims,
@@ -210,7 +223,7 @@ func cloneHostedTurnObjectValue(value map[string]interface{}) map[string]interfa
 func HostedTurnFormFromResponse(response HostedTurnResponse) (HostedTurnForm, error) {
 	form := HostedTurnForm{
 		SchemaVersion: HostedTurnFormSchemaVersion, SkillSelections: response.SkillSelections, Decisions: response.Decisions,
-		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook,
+		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(response.ProposedTask),
 		OutputSummary: response.OutputSummary, ContinuationCheckpoint: response.ContinuationCheckpoint,
 		NextRunStatus: response.NextRunStatus, WakeCondition: response.WakeCondition, RunOutput: response.RunOutput,
 		RunError: response.RunError, CompletionEvidenceRefs: response.CompletionEvidenceRefs, EvidenceClaims: response.EvidenceClaims,
@@ -260,6 +273,19 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 	properties, ok := schema["properties"].(map[string]interface{})
 	if !ok {
 		return nil, errors.New("hosted turn form schema has no object properties")
+	}
+	properties["proposedTask"] = map[string]interface{}{
+		"type": "object", "additionalProperties": false,
+		"properties": map[string]interface{}{
+			"taskKey":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128},
+			"goal":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 16384},
+			"acknowledgment": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 600},
+			"budget": map[string]interface{}{
+				"type": "object", "additionalProperties": false,
+				"properties": hostedTaskBudgetProperties(),
+			},
+		},
+		"required": []string{"taskKey", "goal", "acknowledgment"},
 	}
 	properties["schemaVersion"] = map[string]interface{}{"type": "string", "const": HostedTurnFormSchemaVersion}
 	properties["nextRunStatus"] = map[string]interface{}{
@@ -367,6 +393,9 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 		if !authority[0].CanInvokeRunbook {
 			delete(properties, "proposedRunbook")
 		}
+		if !authority[0].CanStartTask {
+			delete(properties, "proposedTask")
+		}
 	}
 	return schema, nil
 }
@@ -467,4 +496,15 @@ func hostedTurnFormPointerObject(checkpoint map[string]interface{}, reference st
 		return nil, fmt.Errorf("action inputRef %q must resolve to an object", reference)
 	}
 	return object, nil
+}
+
+func hostedTaskBudgetProperties() map[string]interface{} {
+	properties := make(map[string]interface{})
+	for _, field := range budgetLimitFields(BudgetPolicy{}) {
+		properties[field.jsonName] = map[string]interface{}{
+			"type": "integer", "minimum": 1,
+		}
+	}
+	properties["warningPermille"] = map[string]interface{}{"type": "integer", "minimum": 0, "maximum": 1000}
+	return properties
 }

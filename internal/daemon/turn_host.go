@@ -57,7 +57,11 @@ func (h *ProviderTurnHost) ExecuteHostedTurn(ctx context.Context, request runtim
 	for _, p := range request.SkillPrompts {
 		refs = append(refs, p.Reference)
 	}
-	schema, err := runtime.HostedTurnFormJSONSchema(request.Actions, runtime.HostedTurnFormAuthority{CanDelegate: len(request.EligibleAgents) > 0, CanInvokeRunbook: len(request.RunbookOperations) > 0, SkillPromptReferences: refs})
+	schema, err := runtime.HostedTurnFormJSONSchema(request.Actions, runtime.HostedTurnFormAuthority{
+		CanDelegate: request.InputContext[runtime.ConversationTaskContextKey] == nil && len(request.EligibleAgents) > 0,
+		CanForkSelf: request.InputContext[runtime.ConversationTaskContextKey] != nil && request.AgentID != "", CanInvokeRunbook: len(request.RunbookOperations) > 0,
+		CanStartTask: request.ConversationTasks != nil && request.ConversationTasks.CanStart, SkillPromptReferences: refs,
+	})
 	if err != nil {
 		return fail("invalid_schema", "The task response contract could not be prepared.", false)
 	}

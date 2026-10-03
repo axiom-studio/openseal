@@ -37,7 +37,7 @@ func ValidateHostedTurnFinalFailureExplanation(request HostedTurnRequest, respon
 	}
 	if response == nil || response.NextRunStatus != AgentRunStatusCompleted || response.WakeCondition != nil ||
 		response.ProposedAction != nil || response.ProposedWorkspaceOperation != nil || response.ProposedFork != nil ||
-		response.ProposedDelegation != nil || response.ProposedRunbook != nil || response.EvidenceGrounding != nil {
+		response.ProposedDelegation != nil || response.ProposedRunbook != nil || response.ProposedTask != nil || response.EvidenceGrounding != nil {
 		return errors.New("a failed attempt requires one final explanation without actions or further work")
 	}
 	if silent, _ := response.RunOutput["silent"].(bool); silent {
@@ -57,7 +57,7 @@ func validateFinalFailureExplanationOutcome(run *AgentRun, outcome *TurnOutcome)
 		return nil
 	}
 	if outcome == nil || !isTerminalAgentRunStatus(outcome.NextRunStatus) || outcome.WakeCondition != nil ||
-		len(outcome.ProposedActions) != 0 || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil {
+		len(outcome.ProposedActions) != 0 || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil || outcome.ProposedTask != nil {
 		return errors.New("a failed attempt cannot continue or propose more work")
 	}
 	return nil
@@ -74,6 +74,7 @@ func projectFinalFailureExplanation(request *HostedTurnRequest) {
 	request.WorkspaceOperations = nil
 	request.WorkspaceCredentials = nil
 	request.RunbookOperations = nil
+	request.ConversationTasks = nil
 	request.SkillPrompts = nil
 	request.PendingInterventions = nil
 	request.ModelMedia = nil

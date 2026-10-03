@@ -77,6 +77,9 @@ func (s *SQLiteStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim A
 	if err := objectiveRows.Close(); err != nil {
 		return nil, err
 	}
+	if err := s.prepareConversationTaskAdmissionConn(ctx, conn, &claim, candidates); err != nil {
+		return nil, err
+	}
 	selected, decision := evaluateAgentRunAdmission(candidates, objectives, claim)
 	if selected == nil {
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
