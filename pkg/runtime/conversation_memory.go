@@ -172,6 +172,9 @@ func (s *MemoryStore) FindChannelMessageByIdempotencyKey(_ context.Context, scop
 }
 
 func (s *MemoryStore) ListChannelMessages(_ context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
+	if err := validateChannelMessageViewFilter(filter); err != nil {
+		return nil, err
+	}
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -185,6 +188,7 @@ func (s *MemoryStore) ListChannelMessages(_ context.Context, filter ChannelMessa
 	for _, message := range s.channelMessages[conversationKey] {
 		if message.Sequence <= filter.AfterSequence || (filter.BeforeSequence > 0 && message.Sequence >= filter.BeforeSequence) ||
 			(filter.ThreadRootID != "" && message.ThreadRootID != filter.ThreadRootID && message.ID != filter.ThreadRootID) ||
+			(filter.ChannelTimeline && message.ThreadRootID != "" && !message.BroadcastToChannel) ||
 			(len(filter.Intents) > 0 && !containsConversationIntent(filter.Intents, message.Intent)) {
 			continue
 		}

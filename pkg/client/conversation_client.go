@@ -82,8 +82,14 @@ func (c *KernelHTTPClient) PostChannelMessage(ctx context.Context, conversationI
 func (c *KernelHTTPClient) ListChannelMessages(ctx context.Context, filter runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "threadRootId", filter.ThreadRootID)
+	if filter.ChannelTimeline {
+		query.Set("channelTimeline", "true")
+	}
 	if filter.AfterSequence > 0 {
 		query.Set("afterSequence", strconv.FormatInt(filter.AfterSequence, 10))
+	}
+	if filter.BeforeSequence > 0 {
+		query.Set("beforeSequence", strconv.FormatInt(filter.BeforeSequence, 10))
 	}
 	for _, intent := range filter.Intents {
 		query.Add("intent", string(intent))
