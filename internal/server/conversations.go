@@ -222,6 +222,13 @@ func (s *Server) handleListChannelMessages(w http.ResponseWriter, r *http.Reques
 		Scope: scope, ConversationID: conversationID, ThreadRootID: strings.TrimSpace(r.URL.Query().Get("threadRootId")),
 		AfterSequence: int64(after), BeforeSequence: int64(before), Limit: limit, Descending: strings.EqualFold(r.URL.Query().Get("order"), "desc"),
 	}
+	if values, present := r.URL.Query()["channelTimeline"]; present {
+		if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+			s.respondError(w, http.StatusBadRequest, "channelTimeline must be true or false")
+			return
+		}
+		filter.ChannelTimeline = values[0] == "true"
+	}
 	for _, raw := range queryValues(r, "intent") {
 		intent := runtime.ConversationMessageIntent(raw)
 		if !validChannelIntent(intent) {

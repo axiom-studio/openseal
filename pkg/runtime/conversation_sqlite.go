@@ -267,6 +267,9 @@ func (s *SQLiteStore) FindChannelMessageByIdempotencyKey(ctx context.Context, sc
 }
 
 func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
+	if err := validateChannelMessageViewFilter(filter); err != nil {
+		return nil, err
+	}
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -286,6 +289,9 @@ func (s *SQLiteStore) ListChannelMessages(ctx context.Context, filter ChannelMes
 	if filter.ThreadRootID != "" {
 		query += ` AND (thread_root_id = ? OR id = ?)`
 		args = append(args, filter.ThreadRootID, filter.ThreadRootID)
+	}
+	if filter.ChannelTimeline {
+		query += ` AND (thread_root_id = '' OR json_extract(payload, '$.broadcastToChannel') = 1)`
 	}
 	intents := make([]string, 0, len(filter.Intents))
 	for _, intent := range filter.Intents {
