@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "repository": "axiom-studio/openseal",
+  "defaultBranch": "develop",
+  "candidatePrefix": "dependency-updates/",
+  "renovateImage": "ghcr.io/renovatebot/renovate:44.132.2-full",
+  "allowedPaths": [
+    "go.mod",
+    "go.sum",
+    "desktop/package.json",
+    "desktop/pnpm-lock.yaml",
+    "desktop/src-tauri/Cargo.toml",
+    "desktop/src-tauri/Cargo.lock",
+    "desktop/crates/daemon-host/Cargo.toml",
+    "desktop/crates/daemon-host/Cargo.lock",
+    "Dockerfile",
+    "THIRD_PARTY_NOTICES"
+  ],
+  "generatedInputs": [
+    "THIRD_PARTY_NOTICES"
+  ],
+  "goModule": "go.mod",
+  "canonicalVendorRequired": false,
+  "checks": [
+    {
+      "name": "Validate exact candidate",
+      "script": ".github/dependency-updates/checks.sh"
+    }
+  ],
+  "releaseWorkflow": ".github/workflows/release.yml",
+  "releaseMode": "tag-only",
+  "candidateRetentionLimit": 32
+}
