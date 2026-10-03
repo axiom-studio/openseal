@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -73,20 +74,21 @@ func (f ActionProposalObserverFunc) ObserveActionProposal(ctx context.Context, r
 }
 
 type AgentRunWorkerConfig struct {
-	Scope                      Scope
-	Kind                       RunKind
-	AssignedAgentID            string
-	WorkerIDPrefix             string
-	Concurrency                int
-	MaxActiveForAgent          int
-	MaxActiveForOwner          int
-	MaxActiveForObjective      int
-	MaxActiveForConcurrencyKey int
-	MaxTurnsPerClaim           int
-	LeaseDuration              time.Duration
-	TurnLeaseDuration          time.Duration
-	AgingInterval              time.Duration
-	PollInterval               time.Duration
+	Scope                             Scope
+	Kind                              RunKind
+	AssignedAgentID                   string
+	WorkerIDPrefix                    string
+	Concurrency                       int
+	MaxActiveForAgent                 int
+	MaxActiveForOwner                 int
+	MaxActiveForObjective             int
+	MaxActiveForConcurrencyKey        int
+	ConversationTaskForegroundReserve int
+	MaxTurnsPerClaim                  int
+	LeaseDuration                     time.Duration
+	TurnLeaseDuration                 time.Duration
+	AgingInterval                     time.Duration
+	PollInterval                      time.Duration
 }
 
 func (c *AgentRunWorkerConfig) applyDefaults() error {
@@ -101,6 +103,9 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 	}
 	if c.MaxActiveForAgent <= 0 {
 		c.MaxActiveForAgent = c.Concurrency
+	}
+	if err := validateConversationTaskForegroundReserve(c.ConversationTaskForegroundReserve, c.MaxActiveForAgent); err != nil {
+		return err
 	}
 	if c.MaxActiveForOwner < 0 || c.MaxActiveForObjective < 0 || c.MaxActiveForConcurrencyKey < 0 {
 		return errors.New("agent run portfolio concurrency limits cannot be negative")
@@ -144,6 +149,7 @@ type AgentRunWorkerPool struct {
 	dependencyCursor     string
 	forks                *RunForkCoordinator
 	collaboration        *CollaborationService
+	conversationTasks    *ConversationTaskService
 	requestInbox         *AgentRequestInboxReconciler
 	reportingStore       ConversationStore
 	resolver             TurnRunnerResolver
@@ -198,6 +204,9 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	}
 	if collaborationStore, ok := store.(CollaborationKernelStore); ok {
 		pool.collaboration = NewCollaborationService(collaborationStore)
+	}
+	if taskStore, ok := store.(ConversationTaskKernelStore); ok {
+		pool.conversationTasks = NewConversationTaskService(taskStore)
 	}
 	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
 		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore)
@@ -264,10 +273,11 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 		run, err := p.scheduler.ClaimNext(ctx, AgentRunClaimRequest{
 			Scope: p.config.Scope, Kind: p.config.Kind, WorkerID: workerID, AssignedAgentID: p.config.AssignedAgentID,
 			LeaseDuration: p.config.LeaseDuration, AgingInterval: p.config.AgingInterval,
-			MaxActiveForAgent:          p.config.MaxActiveForAgent,
-			MaxActiveForOwner:          p.config.MaxActiveForOwner,
-			MaxActiveForObjective:      p.config.MaxActiveForObjective,
-			MaxActiveForConcurrencyKey: p.config.MaxActiveForConcurrencyKey,
+			MaxActiveForAgent:                 p.config.MaxActiveForAgent,
+			MaxActiveForOwner:                 p.config.MaxActiveForOwner,
+			MaxActiveForObjective:             p.config.MaxActiveForObjective,
+			MaxActiveForConcurrencyKey:        p.config.MaxActiveForConcurrencyKey,
+			ConversationTaskForegroundReserve: p.config.ConversationTaskForegroundReserve,
 		})
 		if err != nil && ctx.Err() == nil {
 			p.logger.Errorw("failed to claim agent run", "workerId", workerID, "error", err)
@@ -340,6 +350,22 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		binding.InputContextRefs = append(binding.InputContextRefs, ref)
 	}
 	current := run
+	if recoveredTurn, recoveryErr := p.pendingAppliedTaskTurn(ctx, current); recoveryErr != nil {
+		p.logger.Warnw("failed to recover an applied conversation task proposal", "runId", current.ID, "error", recoveryErr)
+		return
+	} else if recoveredTurn != nil {
+		materialized, materializeErr := p.materializeTurnTask(ctx, workerID, current, recoveredTurn, binding)
+		if materializeErr != nil {
+			p.failMaterialization(ctx, workerID, current, recoveredTurn, materializeErr)
+			return
+		}
+		p.finalizeTerminalRun(ctx, materialized)
+		p.projectTerminalReporting(ctx, materialized)
+		p.resolveForkChild(ctx, materialized)
+		p.resolveCollaborationChild(ctx, materialized)
+		p.Wake()
+		return
+	}
 	for turnIndex := 0; turnIndex < p.config.MaxTurnsPerClaim; turnIndex++ {
 		advanceCtx, cancelAdvance := context.WithCancel(ctx)
 		heartbeatDone := make(chan error, 1)
@@ -361,6 +387,20 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		}
 		if advanceErr != nil {
 			p.logger.Warnw("agent turn returned an error", "runId", run.ID, "error", advanceErr)
+		}
+		if result != nil && result.Turn != nil && result.Turn.RequestedTask != nil {
+			materialized, materializeErr := p.materializeTurnTask(ctx, workerID, current, result.Turn, binding)
+			if materializeErr != nil {
+				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
+				return
+			}
+			current = materialized
+			p.finalizeTerminalRun(ctx, current)
+			p.projectTerminalReporting(ctx, current)
+			p.resolveForkChild(ctx, current)
+			p.resolveCollaborationChild(ctx, current)
+			p.Wake()
+			return
 		}
 		if result != nil && result.Turn != nil && len(result.Turn.RequestedActions) > 0 {
 			materialized, materializeErr := p.materializeTurnAction(ctx, workerID, current, result.Turn, binding)
@@ -423,12 +463,56 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	p.Wake()
 }
 
+func (p *AgentRunWorkerPool) pendingAppliedTaskTurn(ctx context.Context, run *AgentRun) (*AgentTurn, error) {
+	if p == nil || p.coordinator == nil || run == nil || run.Kind != RunKindConversation || run.Status != AgentRunStatusRunning || run.LastAppliedTurn < 1 {
+		return nil, nil
+	}
+	turns, err := p.coordinator.turns.turns.ListAgentTurns(ctx, AgentTurnFilter{
+		Scope: run.Scope, RunID: run.ID, AfterSequence: run.LastAppliedTurn - 1, Limit: 1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(turns) != 1 || turns[0] == nil || turns[0].Sequence != run.LastAppliedTurn || turns[0].Status != AgentTurnStatusCompleted ||
+		turns[0].RequestedTask == nil || !slices.Equal(turns[0].InputInterventionIDs, interventionIDs(run)) {
+		return nil, nil
+	}
+	return turns[0], nil
+}
+
+func (p *AgentRunWorkerPool) materializeTurnTask(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) (*AgentRun, error) {
+	if p == nil || p.conversationTasks == nil {
+		return nil, errors.New("durable conversation task admission is unavailable")
+	}
+	if run == nil || turn == nil || binding == nil || turn.RequestedTask == nil ||
+		len(turn.RequestedActions) != 0 || turn.RequestedRunbook != nil || turn.RequestedFork != nil || turn.RequestedDelegation != nil {
+		return nil, errors.New("a bounded Turn must request exactly one conversation task")
+	}
+	proposal := turn.RequestedTask
+	if err := validateTaskProposalOutput(proposal, turn.NextRunStatus, turn.WakeCondition, turn.OutputSummary, turn.RunOutput, turn.RunError); err != nil {
+		return nil, err
+	}
+	result, err := p.conversationTasks.Start(ctx, StartConversationTaskRequest{
+		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision,
+		WorkerID: workerID, TurnID: turn.ID, AssignedAgentID: binding.DeploymentID,
+		TaskKey: proposal.TaskKey, Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment,
+		Budget: cloneBudgetPolicy(proposal.Budget),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || result.Task == nil || result.WorkRun == nil || result.SourceRun == nil || result.SourceRun.Status != AgentRunStatusCompleted {
+		return nil, errors.New("conversation task admission returned no committed foreground completion")
+	}
+	return result.SourceRun, nil
+}
+
 func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) (*AgentRun, error) {
 	if p.forks == nil {
 		return nil, errors.New("durable runbook materialization is unavailable")
 	}
 	if run == nil || turn == nil || binding == nil || turn.RequestedRunbook == nil ||
-		len(turn.RequestedActions) != 0 || turn.RequestedFork != nil || turn.RequestedDelegation != nil {
+		len(turn.RequestedActions) != 0 || turn.RequestedFork != nil || turn.RequestedDelegation != nil || turn.RequestedTask != nil {
 		return nil, errors.New("a bounded Turn must request exactly one runbook")
 	}
 	proposal := turn.RequestedRunbook
@@ -602,6 +686,9 @@ func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ st
 		return nil, errors.New("a bounded Turn must request exactly one delegation")
 	}
 	proposal := turn.RequestedDelegation
+	if err := validateTaskDelegationSource(ctx, p.portfolio, run); err != nil {
+		return nil, err
+	}
 	sharedContext := cloneMap(proposal.Context)
 	if sharedContext == nil {
 		sharedContext = make(map[string]interface{})
@@ -1069,7 +1156,7 @@ func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause err
 		return nil, false
 	}
 	if len(turn.RequestedActions) != 1 {
-		if turn.RequestedFork == nil && turn.RequestedDelegation == nil && turn.RequestedRunbook == nil {
+		if turn.RequestedFork == nil && turn.RequestedDelegation == nil && turn.RequestedRunbook == nil && turn.RequestedTask == nil {
 			return nil, false
 		}
 		return checkpointFinalFailureExplanation(run.Checkpoint, "proposal", safeCause), true

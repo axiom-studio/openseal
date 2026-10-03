@@ -102,6 +102,7 @@ func TestFinalFailureExplanationRejectsEffectsAndContinuation(t *testing.T) {
 		{"fork", func(r *HostedTurnResponse) { r.ProposedFork = &TurnForkProposal{} }},
 		{"delegate", func(r *HostedTurnResponse) { r.ProposedDelegation = &TurnDelegationProposal{} }},
 		{"runbook", func(r *HostedTurnResponse) { r.ProposedRunbook = &TurnRunbookProposal{} }},
+		{"task", func(r *HostedTurnResponse) { r.ProposedTask = &TurnTaskProposal{} }},
 		{"wake", func(r *HostedTurnResponse) { r.WakeCondition = &WakeCondition{Type: "timer"} }},
 		{"continue", func(r *HostedTurnResponse) { r.NextRunStatus = AgentRunStatusRunning }},
 		{"silent", func(r *HostedTurnResponse) { r.RunOutput["silent"] = true }},

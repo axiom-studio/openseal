@@ -21,6 +21,12 @@ type AgentRunClaim struct {
 	MaxActiveForOwner          int
 	MaxActiveForObjective      int
 	MaxActiveForConcurrencyKey int
+	// ConversationTaskForegroundReserve leaves this many agent slots unavailable
+	// to canonical conversation task work. Zero preserves ordinary admission.
+	ConversationTaskForegroundReserve int
+	conversationTaskRuns              map[string]bool
+	conversationTaskActiveRuns        map[string]bool
+	invalidConversationTaskRuns       map[string]bool
 }
 
 func (c AgentRunClaim) Validate() error {
@@ -45,20 +51,24 @@ func (c AgentRunClaim) Validate() error {
 	if c.MaxActiveForConcurrencyKey < 0 {
 		return errors.New("max active runs per concurrency key cannot be negative")
 	}
+	if err := validateConversationTaskForegroundReserve(c.ConversationTaskForegroundReserve, c.MaxActiveForAgent); err != nil {
+		return err
+	}
 	return nil
 }
 
 type AgentRunClaimRequest struct {
-	Scope                      Scope
-	Kind                       RunKind
-	WorkerID                   string
-	AssignedAgentID            string
-	LeaseDuration              time.Duration
-	AgingInterval              time.Duration
-	MaxActiveForAgent          int
-	MaxActiveForOwner          int
-	MaxActiveForObjective      int
-	MaxActiveForConcurrencyKey int
+	Scope                             Scope
+	Kind                              RunKind
+	WorkerID                          string
+	AssignedAgentID                   string
+	LeaseDuration                     time.Duration
+	AgingInterval                     time.Duration
+	MaxActiveForAgent                 int
+	MaxActiveForOwner                 int
+	MaxActiveForObjective             int
+	MaxActiveForConcurrencyKey        int
+	ConversationTaskForegroundReserve int
 }
 
 type AgentRunAdmissionOutcome string
@@ -84,6 +94,8 @@ const (
 	AgentRunAdmissionReasonResourceCapacity       AgentRunAdmissionReason = "resource_capacity"
 	AgentRunAdmissionReasonConcurrencyCapacity    AgentRunAdmissionReason = "concurrency_key_capacity"
 	AgentRunAdmissionReasonAttemptBudgetExhausted AgentRunAdmissionReason = "attempt_budget_exhausted"
+	AgentRunAdmissionReasonTaskProvenance         AgentRunAdmissionReason = "conversation_task_provenance"
+	AgentRunAdmissionReasonTaskCapacity           AgentRunAdmissionReason = "conversation_task_capacity"
 )
 
 // AgentRunAdmissionBlock is safe operator-facing evidence for why one ready
@@ -161,6 +173,7 @@ func (s *AgentRunScheduler) ClaimNextDecision(ctx context.Context, req AgentRunC
 		Now: s.now(), LeaseDuration: req.LeaseDuration, AgingInterval: req.AgingInterval,
 		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForOwner: req.MaxActiveForOwner,
 		MaxActiveForObjective: req.MaxActiveForObjective, MaxActiveForConcurrencyKey: req.MaxActiveForConcurrencyKey,
+		ConversationTaskForegroundReserve: req.ConversationTaskForegroundReserve,
 	}
 	if store, ok := s.store.(AgentRunAdmissionStore); ok {
 		return store.ClaimNextAgentRunWithDecision(ctx, claim)
@@ -198,14 +211,19 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 		AgingInterval: req.AgingInterval, AssignedAgentID: req.AssignedAgentID,
 		MaxActiveForAgent: req.MaxActiveForAgent, MaxActiveForOwner: req.MaxActiveForOwner,
 		MaxActiveForObjective: req.MaxActiveForObjective, MaxActiveForConcurrencyKey: req.MaxActiveForConcurrencyKey,
+		ConversationTaskForegroundReserve: req.ConversationTaskForegroundReserve,
 	}
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
 	runs := make([]*AgentRun, 0)
+	filterKind := req.Kind
+	if claim.ConversationTaskForegroundReserve > 0 {
+		filterKind = "" // Capacity is shared with foreground conversation claims.
+	}
 	for offset := 0; ; offset += 500 {
 		page, err := portfolio.ListAgentRuns(ctx, AgentRunFilter{
-			Scope: req.Scope, Kind: req.Kind, AssignedAgentID: req.AssignedAgentID,
+			Scope: req.Scope, Kind: filterKind, AssignedAgentID: req.AssignedAgentID,
 			Statuses: []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusRunning}, Limit: 500, Offset: offset,
 		})
 		if err != nil {
@@ -214,6 +232,19 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 		runs = append(runs, page...)
 		if len(page) < 500 {
 			break
+		}
+	}
+	if claim.ConversationTaskForegroundReserve > 0 {
+		tasks, ok := s.store.(ConversationTaskStore)
+		conversations, conversationOK := s.store.(ConversationStore)
+		if !ok || !conversationOK {
+			return nil, errors.New("conversation task admission proof is unavailable")
+		}
+		if err := prepareConversationTaskAdmission(ctx, &claim, runs, conversationTaskAdmissionLookup{
+			task: tasks.FindConversationTaskByWorkRunID, run: portfolio.GetAgentRun,
+			conversation: conversations.GetConversation, message: conversations.GetChannelMessage,
+		}); err != nil {
+			return nil, err
 		}
 	}
 	objectives := make(map[string]*Objective)
@@ -258,6 +289,7 @@ func effectiveObjectiveConcurrencyLimit(runtimeLimit int, objective *Objective) 
 func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objective, claim AgentRunClaim) (*AgentRun, *AgentRunAdmissionDecision) {
 	decision := &AgentRunAdmissionDecision{Outcome: AgentRunAdmissionIdle, EvaluatedAt: claim.Now}
 	activeByAgent := make(map[string]int)
+	activeTasksByAgent := make(map[string]int)
 	activeByOwner := make(map[string]int)
 	activeByObjective := make(map[string]int)
 	activeByConcurrencyKey := make(map[string]int)
@@ -269,6 +301,9 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 			continue
 		}
 		activeByAgent[run.AssignedAgentID]++
+		if claim.conversationTaskActiveRuns[run.ID] {
+			activeTasksByAgent[run.AssignedAgentID]++
+		}
 		activeByOwner[agentRunOwnerSchedulingKey(run.Owner)]++
 		activeByObjective[run.ObjectiveID]++
 		activeByConcurrencyKey[run.ConcurrencyKey]++
@@ -303,9 +338,22 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 		if !agentRunEligible(run, claim) {
 			continue
 		}
-		if claim.MaxActiveForAgent > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= claim.MaxActiveForAgent {
+		if claim.invalidConversationTaskRuns[run.ID] {
 			block := base
-			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonAgentCapacity, activeByAgent[run.AssignedAgentID], claim.MaxActiveForAgent
+			block.Reason = AgentRunAdmissionReasonTaskProvenance
+			decision.Blocks = append(decision.Blocks, block)
+			continue
+		}
+		agentLimit := claim.MaxActiveForAgent
+		if agentLimit > 0 && run.AssignedAgentID != "" && activeByAgent[run.AssignedAgentID] >= agentLimit {
+			block := base
+			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonAgentCapacity, activeByAgent[run.AssignedAgentID], agentLimit
+			decision.Blocks = append(decision.Blocks, block)
+			continue
+		}
+		if claim.conversationTaskRuns[run.ID] && activeTasksByAgent[run.AssignedAgentID] >= agentLimit-claim.ConversationTaskForegroundReserve {
+			block := base
+			block.Reason, block.Active, block.Limit = AgentRunAdmissionReasonTaskCapacity, activeTasksByAgent[run.AssignedAgentID], agentLimit-claim.ConversationTaskForegroundReserve
 			decision.Blocks = append(decision.Blocks, block)
 			continue
 		}
@@ -370,7 +418,7 @@ func evaluateAgentRunAdmission(runs []*AgentRun, objectives map[string]*Objectiv
 	hasCapacity, hasNotDue, hasLease := false, false, false
 	for _, block := range decision.Blocks {
 		switch block.Reason {
-		case AgentRunAdmissionReasonAgentCapacity, AgentRunAdmissionReasonOwnerCapacity, AgentRunAdmissionReasonObjectiveCapacity, AgentRunAdmissionReasonResourceCapacity, AgentRunAdmissionReasonConcurrencyCapacity:
+		case AgentRunAdmissionReasonAgentCapacity, AgentRunAdmissionReasonOwnerCapacity, AgentRunAdmissionReasonObjectiveCapacity, AgentRunAdmissionReasonResourceCapacity, AgentRunAdmissionReasonConcurrencyCapacity, AgentRunAdmissionReasonTaskProvenance, AgentRunAdmissionReasonTaskCapacity:
 			hasCapacity = true
 		case AgentRunAdmissionReasonNotDue:
 			hasNotDue = true
