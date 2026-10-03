@@ -297,8 +297,8 @@ type CallbackAdapterTransport struct {
 }
 
 // CallbackAdapterConnectionTransport declares an optional long-lived,
-// Skill-owned provider connection used to receive callback payloads when the
-// provider cannot call a public HTTP route. The host materializes the
+// Skill-owned provider connection (websocket or polling) used to receive provider
+// payloads when the provider cannot call a public HTTP route. The host materializes the
 // connection and projects only the listed credentials into that isolated
 // runtime. SharedByCredential optionally lets the host pool registrations that
 // bind the same opaque provider-connection reference. Endpoint remains
@@ -312,7 +312,9 @@ type CallbackAdapterConnectionTransport struct {
 
 // CallbackAdapter declares one provider-neutral inbound callback surface.
 // EventTypes are the credential-free EventEnvelope types the adapter may emit
-// after it authenticates the raw provider request.
+// after it authenticates the raw provider request. An empty list is permitted
+// only for a managed Connection whose payloads use a separate ingress contract,
+// such as a signed conversation adapter, rather than callback event consumers.
 type CallbackAdapter struct {
 	ProtocolVersion string                   `json:"protocolVersion"`
 	Name            string                   `json:"name"`
