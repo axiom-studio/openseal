@@ -881,6 +881,11 @@ func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding 
 		before, beforeOK := previous.ConversationAdapters[id]
 		after, afterOK := target.ConversationAdapters[id]
 		before.Name, before.Description, after.Name, after.Description = "", "", "", ""
+		// Feature additions retain the old interface; removing one breaks it.
+		if featureSubset(before.Features, after.Features) {
+			before.Features, after.Features = nil, nil
+		}
+
 		if !beforeOK || !afterOK || !reflect.DeepEqual(before, after) {
 			findings = append(findings, SkillReferenceUpgradeFinding{Code: "conversation_adapter_contract_changed", Message: fmt.Sprintf("%s conversation adapter contract changed", id)})
 		}
@@ -896,6 +901,22 @@ func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding 
 		}
 	}
 	return findings
+}
+
+func featureSubset(before, after []capability.ConversationAdapterFeature) bool {
+	for _, feature := range before {
+		found := false
+		for _, candidate := range after {
+			if candidate == feature {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // Only optional properties added to a closed object are automatically compatible.
