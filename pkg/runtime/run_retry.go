@@ -50,7 +50,11 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	run.LeaseOwner, run.LeaseExpiresAt = "", nil
 	run.AvailableAt, run.QueueEnteredAt, run.UpdatedAt = now, now, now
 	run.Revision++
-	// Usage, turn cursor, plan, checkpoint and action identity remain intact.
+	// Explicit user retry clears the failure-only model boundary while preserving
+	// usage, turn cursor, plan and durable action evidence.
+	delete(run.Checkpoint, FinalFailureExplanationCheckpointKey)
+	delete(run.Checkpoint, proposalRecoveryCheckpointKey)
+	// Usage, turn cursor, plan and action identity remain intact.
 	// The normal worker budget admission still applies to the next attempt.
 	visibility := req.Visibility
 	if visibility == "" {
@@ -105,6 +109,11 @@ func (s *RunCommandService) ConversationRetryEligibility(ctx context.Context, sc
 func (s *RunCommandService) conversationRetryBlocker(ctx context.Context, run *AgentRun) (string, error) {
 	if run.Status != AgentRunStatusFailed {
 		return "not_failed", nil
+	}
+	if explanation, ok := run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{}); ok {
+		if explained, _ := explanation["explained"].(bool); explained {
+			return "This attempt already has a reply. Send a new message to try again.", nil
+		}
 	}
 	if run.Kind != RunKindConversation || run.ParentRunID != "" {
 		return "task_recovery_required", nil

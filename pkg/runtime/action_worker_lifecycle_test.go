@@ -119,7 +119,7 @@ func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossParentChanges(t *t
 	}{
 		{name: "paused_success", parentStatus: AgentRunStatusPaused, attempts: 1},
 		{name: "canceled_success", parentStatus: AgentRunStatusCanceled, attempts: 1},
-		{name: "paused_terminal_failure", parentStatus: AgentRunStatusPaused, fail: true, attempts: 3},
+		{name: "paused_terminal_failure", parentStatus: AgentRunStatusPaused, fail: true, attempts: 1},
 		{name: "canceled_retryable_failure", parentStatus: AgentRunStatusCanceled, fail: true, attempts: 1},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -182,7 +182,7 @@ func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossParentChanges(t *t
 	}
 }
 
-func TestActionWorkerLifecycleSuspendsRetryCreatedDuringPause(t *testing.T) {
+func TestActionWorkerLifecycleStopsFailedDispatchDuringPause(t *testing.T) {
 	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
 		now := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
 		catalog, proposal := createRunnableAction(t, store, now)
@@ -200,26 +200,26 @@ func TestActionWorkerLifecycleSuspendsRetryCreatedDuringPause(t *testing.T) {
 		}))
 		worker.now = func() time.Time { return clock }
 		first, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "lifecycle-worker", time.Minute)
-		if err != nil || first == nil || first.Call.Status != ActionCallStatusReady || first.Call.Attempt != 1 {
-			t.Fatalf("paused retry did not preserve its actual execution state: %#v, %v", first, err)
+		if err != nil || first == nil || first.Call.Status != ActionCallStatusFailed || first.Call.Attempt != 1 {
+			t.Fatalf("paused failure did not preserve execution state: %#v, %v", first, err)
 		}
 		paused := getActionLifecycleRun(t, store, proposal.Call)
-		if paused.Status != AgentRunStatusPaused || paused.PausedFrom != AgentRunStatusWaitingForDependency || paused.PausedWakeCondition == nil || paused.PausedWakeCondition.Reference != proposal.Call.ID {
-			t.Fatalf("paused retry lost its dependency: %#v", paused)
+		if paused.Status != AgentRunStatusPaused || paused.PausedFrom != AgentRunStatusQueued || paused.PausedWakeCondition != nil ||
+			!requiresFinalFailureExplanation(paused.Checkpoint) {
+			t.Fatalf("paused failure lost its final explanation: %#v", paused)
 		}
-		clock = first.Call.AvailableAt.Add(time.Minute)
+		clock = clock.Add(time.Minute)
 		blocked, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "lifecycle-worker", time.Minute)
 		if err != nil || blocked != nil || dispatches != 1 {
-			t.Fatalf("paused retry ran before resume: %#v, %v, dispatches=%d", blocked, err, dispatches)
+			t.Fatalf("paused failure retried: %#v %v", blocked, err)
 		}
-		persisted, err := store.GetActionCall(t.Context(), proposal.Call.Scope, proposal.Call.ID)
-		if err != nil || persisted.Attempt != 1 || persisted.Revision != first.Call.Revision {
-			t.Fatalf("paused retry consumed another attempt: %#v, %v", persisted, err)
+		resumed := transitionActionLifecycleRun(t, store, proposal.Call, paused.PausedFrom, paused.PausedWakeCondition, clock)
+		if !requiresFinalFailureExplanation(resumed.Checkpoint) {
+			t.Fatal("resume cleared the final-only boundary")
 		}
-		transitionActionLifecycleRun(t, store, proposal.Call, paused.PausedFrom, paused.PausedWakeCondition, clock)
 		completed, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "lifecycle-worker", time.Minute)
-		if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded || completed.Call.Attempt != 2 || dispatches != 2 {
-			t.Fatalf("resumed retry failed: %#v, %v, dispatches=%d", completed, err, dispatches)
+		if err != nil || completed != nil || dispatches != 1 {
+			t.Fatalf("resume retried failed action: %#v %v", completed, err)
 		}
 		assertActionLifecycleUnclaimable(t, store, proposal.Call, clock.Add(time.Minute))
 	})

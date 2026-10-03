@@ -93,6 +93,18 @@ func (e *MCPToolExecutor) Execute(ctx context.Context, args map[string]interface
 	if err != nil {
 		return nil, fmt.Errorf("MCP tool call failed: %w", err)
 	}
+	return mcpToolResult(toolName, result)
+}
+
+func mcpToolResult(toolName string, result *mcp.CallToolResult) (*ToolResult, error) {
+	if result == nil {
+		return nil, fmt.Errorf("MCP tool returned no result")
+	}
+	if result.IsError {
+		// Error content is arbitrary server output and can contain credentials or
+		// internal diagnostics. Do not surface it as a successful tool response.
+		return nil, fmt.Errorf("MCP tool reported a failure")
+	}
 
 	// Extract content from result
 	var output interface{}

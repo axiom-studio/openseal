@@ -777,7 +777,7 @@ func TestAgentRequestDecisionTurnFailsClosedOnWorkOrMalformedDecision(t *testing
 	}
 }
 
-func TestAcceptedAgentRequestExecutionRepairsOneRepeatedIntakeDecision(t *testing.T) {
+func TestAcceptedAgentRequestExecutionStopsOnFirstInvalidIntakeDecision(t *testing.T) {
 	outcome := &TurnOutcome{
 		NextRunStatus: AgentRunStatusCompleted,
 		RunOutput: map[string]interface{}{
@@ -791,16 +791,11 @@ func TestAcceptedAgentRequestExecutionRepairsOneRepeatedIntakeDecision(t *testin
 	runner := &acceptedAgentRequestExecutionTurnRunner{inner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 		return outcome, nil
 	})}
-	repaired, err := runner.RunTurn(t.Context(), TurnExecutionContext{
-		Run:  &AgentRun{ID: "execution", Checkpoint: map[string]interface{}{}},
-		Turn: &AgentTurn{ID: "turn"},
+	failed, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+		Run: &AgentRun{ID: "execution", Checkpoint: map[string]interface{}{}}, Turn: &AgentTurn{ID: "turn"},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repaired.NextRunStatus != AgentRunStatusRunning || repaired.RunOutput != nil ||
-		len(repaired.ProposedActions) != 0 || acceptedAgentRequestExecutionRecoveryAttempt(repaired.ContinuationCheckpoint) != 1 {
-		t.Fatalf("repaired execution = %#v", repaired)
+	if err == nil || failed != nil || !strings.Contains(err.Error(), "invalid intake decision") {
+		t.Fatalf("invalid execution was retried: %#v err=%v", failed, err)
 	}
 }
 
@@ -819,7 +814,7 @@ func TestAcceptedAgentRequestExecutionFailsAfterRepeatedIntakeDecision(t *testin
 		}},
 		Turn: &AgentTurn{ID: "turn"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "repeatedly emitted") {
+	if err == nil || !strings.Contains(err.Error(), "invalid intake decision") {
 		t.Fatalf("repeated intake decision error = %v", err)
 	}
 }
