@@ -261,6 +261,9 @@ func (s *CallbackIngressService) Receive(ctx context.Context, request CallbackPu
 	if registration.Status != CallbackRegistrationActive {
 		return nil, fmt.Errorf("%w: callback is not active", ErrCallbackRegistrationConflict)
 	}
+	if len(registration.Subscriptions) == 0 {
+		return nil, fmt.Errorf("%w: connection-only registration does not accept callback ingress", ErrCallbackRegistrationConflict)
+	}
 	ref := registration.Adapter
 	adapter, err := s.resolver.ResolveCallbackAdapterBinding(
 		ctx, skill.ScopeReference{Kind: registration.Scope.Kind, ID: registration.Scope.ID}, registration.DeploymentID,
