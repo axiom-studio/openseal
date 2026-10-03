@@ -224,3 +224,36 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 		t.Fatal("unbound reconnect accepted")
 	}
 }
+
+func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "a"}
+	catalog := skillActionCatalog(t, ctx, scope, "agent")
+	discoveries := 0
+	provider := skill.DiscoveryProviderFunc(func(context.Context, skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
+		discoveries++
+		return nil, errors.New("permanent catalog conflict")
+	})
+	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
+	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "connect"}
+	failed := &ActionCall{ID: "failed", Scope: scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, Action: SkillActionRequestSetup, Status: ActionCallStatusFailed, Arguments: args}
+	store.actions[portfolioKey(scope, failed.ID)] = failed
+	_, err = dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent")
+	if err == nil || discoveries != 0 {
+		t.Fatalf("repeated failed setup rediscovered: %v %d", err, discoveries)
+	}
+	run.ID = "later-user-run"
+	_, err = dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "later"}, Arguments: args}, run, "agent")
+	if err == nil || discoveries != 1 {
+		t.Fatalf("later run could not retry: %v %d", err, discoveries)
+	}
+	if skillSetupAction().Retry.MaxAttempts != 1 {
+		t.Fatal("setup automatically retries failures")
+	}
+}
