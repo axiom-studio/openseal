@@ -280,15 +280,19 @@ func (r ConversationReference) Validate() error {
 // stores hidden reasoning; explanations belong in concise content and linked
 // evidence, decisions, Runs, requests, approvals, and artifacts.
 type ChannelMessage struct {
-	ID                string                    `json:"id"`
-	Scope             Scope                     `json:"scope"`
-	ConversationID    string                    `json:"conversationId"`
-	Sequence          int64                     `json:"sequence"`
-	Sender            ConversationParticipant   `json:"sender"`
-	SenderDisplayName string                    `json:"senderDisplayName,omitempty"`
-	ExternalSource    *ExternalMessageSource    `json:"externalSource,omitempty"`
-	Intent            ConversationMessageIntent `json:"intent"`
-	Content           string                    `json:"content"`
+	ID                string                  `json:"id"`
+	Scope             Scope                   `json:"scope"`
+	ConversationID    string                  `json:"conversationId"`
+	Sequence          int64                   `json:"sequence"`
+	Sender            ConversationParticipant `json:"sender"`
+	SenderDisplayName string                  `json:"senderDisplayName,omitempty"`
+	// Initiator records the authenticated user who requested a host-generated
+	// service event. Hosts stamp it from verified identity, never client input.
+	// It preserves provenance without changing the service sender's authority.
+	Initiator      *ConversationParticipant  `json:"initiator,omitempty"`
+	ExternalSource *ExternalMessageSource    `json:"externalSource,omitempty"`
+	Intent         ConversationMessageIntent `json:"intent"`
+	Content        string                    `json:"content"`
 	// ResponseMode describes presentation only; it never changes sender authority.
 	ResponseMode string `json:"responseMode,omitempty"`
 	// ContributionKey is a privacy-safe, normalized semantic claim identifier
@@ -325,6 +329,14 @@ func (m *ChannelMessage) Validate() error {
 	}
 	if err := m.Sender.Validate(); err != nil {
 		return err
+	}
+	if m.Initiator != nil {
+		if m.Sender.Type != ConversationParticipantService || m.Initiator.Type != ConversationParticipantUser {
+			return fmt.Errorf("%w: only service events can record a user initiator", ErrInvalidConversation)
+		}
+		if err := m.Initiator.Validate(); err != nil {
+			return err
+		}
 	}
 	if len(m.SenderDisplayName) > 160 || strings.ContainsAny(m.SenderDisplayName, "\r\n") {
 		return fmt.Errorf("%w: sender display name cannot exceed 160 characters or contain line breaks", ErrInvalidConversation)
