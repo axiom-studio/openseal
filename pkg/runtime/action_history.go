@@ -116,7 +116,7 @@ const (
 	turnContinuityCheckpointKey        = "_opensealPreviousTurn"
 	approvalRecoveryCheckpointKey      = "_opensealApprovalRecovery"
 	proposalRecoveryCheckpointKey      = "_opensealProposalRecovery"
-	maximumProposalRecoveryAttempts    = 2
+	maximumProposalRecoveryAttempts    = 1
 	maximumActionHistoryEntries        = 16
 	maximumActionHistoryResultBytes    = 16 << 10
 	maximumCheckpointActionResultBytes = 64 << 10
@@ -187,9 +187,13 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, actionHistoryCheckpointKey)
 	delete(result, approvalRecoveryCheckpointKey)
 	delete(result, proposalRecoveryCheckpointKey)
+	delete(result, FinalFailureExplanationCheckpointKey)
 	delete(result, "lastAction")
 	delete(result, runEventWaitCheckpointKey)
 	if current != nil {
+		if explanation, ok := current[FinalFailureExplanationCheckpointKey]; ok {
+			result[FinalFailureExplanationCheckpointKey] = deepCloneCheckpointValue(explanation)
+		}
 		if history, ok := current[actionHistoryCheckpointKey]; ok {
 			result[actionHistoryCheckpointKey] = deepCloneCheckpointValue(history)
 		}
@@ -309,6 +313,13 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 		lastAction[key] = deepCloneCheckpointValue(value)
 	}
 	result["lastAction"] = lastAction
+	if call.Status == ActionCallStatusFailed || call.Status == ActionCallStatusDenied && fmt.Sprint(metadata["approvalStatus"]) != string(ApprovalStatusChangesRequested) {
+		message := call.Error
+		if strings.TrimSpace(message) == "" {
+			message = "The requested action did not complete."
+		}
+		result = checkpointFinalFailureExplanation(result, "action", message)
+	}
 	return result
 }
 

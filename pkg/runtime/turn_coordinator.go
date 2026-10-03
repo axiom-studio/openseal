@@ -381,37 +381,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 		return &AdvanceAgentRunResult{Run: run, Turn: released}, heartbeat.err
 	}
-	if errors.Is(runErr, ErrTurnHostUnavailable) && !durationExpired {
-		released, releaseErr := c.turns.ReleaseTurn(ctx, req.Scope, turn.ID, turn.Revision, req.WorkerID)
-		if releaseErr != nil {
-			return nil, releaseErr
-		}
-		retryAttempt := released.Revision / 2
-		if retryAttempt < 1 {
-			retryAttempt = 1
-		}
-		retryAt := c.activity.now().Add(hostedTurnRetryDelay(retryAttempt))
-		leaseOwner := ""
-		if run.LeaseOwner != "" {
-			leaseOwner = req.WorkerID
-		}
-		requeued, event, transitionErr := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-			ExpectedRevision: run.Revision, Status: AgentRunStatusSleeping, LeaseOwner: leaseOwner,
-			WakeCondition: &WakeCondition{Type: "timer", WakeAt: &retryAt, Reference: "hosted-turn-retry"},
-			Summary:       "Agent turn host unavailable; the bounded turn will retry", EventType: "turn.retry_scheduled",
-			Actor:       ActivityActor{Type: "worker", ID: req.WorkerID},
-			TurnID:      turn.ID,
-			CausationID: turn.ID,
-			Payload: map[string]interface{}{
-				"attempt": retryAttempt,
-				"retryAt": retryAt.UTC().Format(time.RFC3339Nano),
-			},
-		})
-		if transitionErr != nil {
-			return nil, transitionErr
-		}
-		return &AdvanceAgentRunResult{Run: requeued, Turn: released, Event: event}, runErr
-	}
+
 	executionErr := runErr
 	finish := FinishAgentTurnRequest{ExpectedRevision: turn.Revision, WorkerID: req.WorkerID}
 	if durationExpired {
@@ -438,7 +408,11 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		if outcome.Usage.DurationMS < executionDurationMS {
 			outcome.Usage.DurationMS = executionDurationMS
 		}
-		if err := validateTurnOutcome(run.Status, outcome); err != nil {
+		outcomeErr := validateTurnOutcome(run.Status, outcome)
+		if outcomeErr == nil {
+			outcomeErr = validateFinalFailureExplanationOutcome(run, outcome)
+		}
+		if err := outcomeErr; err != nil {
 			executionErr = err
 			finish.Status = AgentTurnStatusFailed
 			finish.Error = err.Error()
@@ -489,6 +463,28 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 	}
 	if finish.Status == AgentTurnStatusCompleted {
+		if requiresFinalFailureExplanation(run.Checkpoint) || requiresFinalFailureExplanation(finish.ContinuationCheckpoint) {
+			// Completing the explanation does not turn failed execution into a
+			// successful child/delegation result. Keep the delivered text while
+			// preserving the attempt's terminal failure for dependency consumers.
+			failure, _ := finish.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+			if requiresFinalFailureExplanation(run.Checkpoint) {
+				failure, _ = run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+			}
+			finish.NextRunStatus = AgentRunStatusFailed
+			finish.RunError, _ = failure["message"].(string)
+			if finish.RunError == "" {
+				finish.RunError = "The requested work did not complete."
+			}
+		}
+		if requiresFinalFailureExplanation(run.Checkpoint) {
+			finish.ContinuationCheckpoint = checkpointFinalFailureExplanation(finish.ContinuationCheckpoint, "", "")
+			finish.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey] = deepCloneCheckpointValue(run.Checkpoint[FinalFailureExplanationCheckpointKey])
+		}
+		if requiresFinalFailureExplanation(finish.ContinuationCheckpoint) {
+			failure := finish.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+			failure["explained"] = true
+		}
 		finish.ContinuationCheckpoint = checkpointTurnContinuity(finish.ContinuationCheckpoint, &AgentTurn{
 			Sequence: turn.Sequence, Status: finish.Status, OutputSummary: finish.OutputSummary,
 			RequestedActions: finish.RequestedActions, RequestedFork: finish.RequestedFork,
@@ -566,16 +562,6 @@ func (c *TurnCoordinator) heartbeatTurnLease(ctx context.Context, cancel context
 	}
 }
 
-func hostedTurnRetryDelay(attempt int64) time.Duration {
-	if attempt < 1 {
-		attempt = 1
-	}
-	if attempt > 4 {
-		attempt = 4
-	}
-	return 5 * time.Second * time.Duration(1<<(attempt-1))
-}
-
 func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID string, reconciled bool, publishers ...TurnOutputPublisher) (*AdvanceAgentRunResult, error) {
 	if turn.Sequence <= run.LastAppliedTurn {
 		return &AdvanceAgentRunResult{Run: run, Turn: turn, Reconciled: reconciled}, nil
@@ -585,7 +571,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	}
 	// An instruction arriving during execution (or before crash recovery) must
 	// be considered before any old proposals or completion can be applied.
-	superseded := turn.Status == AgentTurnStatusCompleted && !slices.Equal(turn.InputInterventionIDs, interventionIDs(run))
+	superseded := turn.Status == AgentTurnStatusCompleted && !requiresFinalFailureExplanation(turn.ContinuationCheckpoint) && !slices.Equal(turn.InputInterventionIDs, interventionIDs(run))
 	if superseded {
 		turn = cloneAgentTurn(turn)
 		turn.RequestedActions = nil

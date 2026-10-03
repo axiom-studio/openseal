@@ -1259,7 +1259,7 @@ func TestGovernedConversationAgentBehaviorDenialResolvesWithoutModelRetry(t *tes
 	}
 }
 
-func TestGovernedConversationProposalFailureEntersBoundedRepair(t *testing.T) {
+func TestGovernedConversationProposalFailureQueuesFinalExplanation(t *testing.T) {
 	run := &AgentRun{
 		ID: "run-pause", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},
 		Checkpoint: map[string]interface{}{"phase": "before-pause"},
@@ -1353,7 +1353,7 @@ func TestConversationRunReconciliationDoesNotReplayLegacyCoordinatedMessages(t *
 	}
 }
 
-func TestConversationRunTurnRunnerRetriesWithoutPersistingProviderErrors(t *testing.T) {
+func TestConversationRunTurnRunnerStopsWithoutPersistingProviderErrors(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "retry"}
@@ -1393,13 +1393,15 @@ func TestConversationRunTurnRunnerRetriesWithoutPersistingProviderErrors(t *test
 	}
 	runner.now = func() time.Time { return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC) }
 	outcome, err := runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
-	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusSleeping || outcome.WakeCondition == nil ||
-		outcome.ContinuationCheckpoint["lastRetryReason"] != "participant_runtime_unavailable" {
-		t.Fatalf("retry outcome = %#v, %v", outcome, err)
+	if err == nil || outcome != nil || err.Error() != "participant_runtime_unavailable" {
+		t.Fatalf("coordination scheduled another attempt: %#v err=%v", outcome, err)
 	}
-	encoded := outcome.OutputSummary + outcome.ContinuationCheckpoint["lastRetryReason"].(string)
-	if strings.Contains(encoded, "sk-never-persist") || strings.Contains(encoded, "provider unavailable") {
-		t.Fatalf("provider error leaked into durable retry state: %q", encoded)
+	if strings.Contains(err.Error(), "sk-never-persist") || strings.Contains(err.Error(), "provider unavailable") {
+		t.Fatalf("provider error leaked: %v", err)
+	}
+	config, err := (ConversationRunTurnRunnerConfig{}).normalize()
+	if err != nil || config.MaximumRetries != 0 {
+		t.Fatalf("default retries=%d err=%v", config.MaximumRetries, err)
 	}
 }
 

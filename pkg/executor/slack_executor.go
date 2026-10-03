@@ -115,34 +115,41 @@ func (e *SlackExecutor) Execute(ctx context.Context, step *StepDefinition, resol
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read Slack response: %w", err)
+	}
 
 	success := resp.StatusCode >= 200 && resp.StatusCode < 300
+	var reportedResult map[string]interface{}
+	if json.Unmarshal(respBody, &reportedResult) == nil {
+		for _, key := range []string{"ok", "success"} {
+			if value, present := reportedResult[key].(bool); present && !value {
+				success = false
+			}
+		}
+	}
 	slackLogger.Debugw("slack response received",
 		"statusCode", resp.StatusCode,
 		"success", success,
-		"responseBody", string(respBody),
 	)
 
-	if !success {
-		slackLogger.Warnw("slack webhook returned non-success status",
-			"statusCode", resp.StatusCode,
-			"response", string(respBody),
-		)
-	}
-
-	return &StepResult{
+	result := &StepResult{
 		Output: map[string]interface{}{
 			"success":    success,
 			"statusCode": resp.StatusCode,
 			"response":   string(respBody),
 		},
-	}, nil
+	}
+	if !success {
+		return result, fmt.Errorf("Slack did not accept the message (HTTP %d)", resp.StatusCode)
+	}
+	return result, nil
 }
 
 // maskWebhookURL masks the webhook URL for safe logging
 func maskWebhookURL(url string) string {
-	if len(url) < 20 {
+	if len(url) < 40 {
 		return "***"
 	}
 	// Show first 30 chars and last 10 chars

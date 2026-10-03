@@ -35,6 +35,9 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 			if result.Run.Checkpoint["saved"] != "context" || result.Run.LastAppliedTurn != failed.LastAppliedTurn || result.Run.BudgetUsage != failed.BudgetUsage || result.Run.Attempt != failed.Attempt {
 				t.Fatal("retry lost checkpoint, cursor or usage")
 			}
+			if requiresFinalFailureExplanation(result.Run.Checkpoint) || result.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil {
+				t.Fatal("explicit retry retained the failure-only boundary")
+			}
 			if result.Event.EventType != "run.retried" {
 				t.Fatal("missing retry audit")
 			}
@@ -54,11 +57,15 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 }
 
 func failedReplyFixture(t *testing.T, store RunCommandStore) (*RunCommandService, *AgentRun) {
+	return failedReplyFixtureWithExplanation(t, store, false)
+}
+
+func failedReplyFixtureWithExplanation(t *testing.T, store RunCommandStore, explained bool) (*RunCommandService, *AgentRun) {
 	t.Helper()
 	ctx := t.Context()
 	service := NewRunCommandService(store)
 	scope := Scope{Kind: "tenant", ID: "one"}
-	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Reply", Source: RunSourceChat, Checkpoint: map[string]interface{}{"saved": "context"}})
+	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Reply", Source: RunSourceChat, Checkpoint: map[string]interface{}{"saved": "context", FinalFailureExplanationCheckpointKey: map[string]interface{}{"kind": "proposal", "message": "invalid input", "explained": explained}, proposalRecoveryCheckpointKey: map[string]interface{}{"attempt": 1}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +79,40 @@ func failedReplyFixture(t *testing.T, store RunCommandStore) (*RunCommandService
 		t.Fatal(err)
 	}
 	return service, failed
+}
+
+func TestRetryConversationRunRejectsAnAlreadyExplainedProposalFailure(t *testing.T) {
+	for _, backend := range []string{"memory", "sqlite"} {
+		t.Run(backend, func(t *testing.T) {
+			var store RunCommandStore = NewMemoryStore()
+			if backend == "sqlite" {
+				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "explained-retry.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = db.Close() })
+				store = db
+			}
+			service, failed := failedReplyFixtureWithExplanation(t, store, true)
+			actions, err := store.ListActionCalls(t.Context(), ActionFilter{Scope: failed.Scope, RunID: failed.ID})
+			if err != nil || len(actions) != 0 {
+				t.Fatalf("proposal failure unexpectedly dispatched actions: %#v %v", actions, err)
+			}
+			const reason = "This attempt already has a reply. Send a new message to try again."
+			eligibility, err := service.ConversationRetryEligibility(t.Context(), failed.Scope, failed.ID)
+			if err != nil || eligibility.Available || eligibility.Reason != reason {
+				t.Fatalf("answered failure retry eligibility = %#v, %v", eligibility, err)
+			}
+			_, err = service.RetryConversationRun(t.Context(), AgentRunCommandRequest{Scope: failed.Scope, RunID: failed.ID, ExpectedRevision: failed.Revision})
+			if !errors.Is(err, ErrInvalidRunCommand) {
+				t.Fatalf("answered proposal failure admitted same-run retry: %v", err)
+			}
+			current, err := store.GetAgentRun(t.Context(), failed.Scope, failed.ID)
+			if err != nil || current.Status != AgentRunStatusFailed || current.Revision != failed.Revision {
+				t.Fatalf("rejected retry changed the completed attempt: %#v, %v", current, err)
+			}
+		})
+	}
 }
 
 type retryGuardStore struct {
