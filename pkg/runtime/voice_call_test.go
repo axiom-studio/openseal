@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 )
@@ -174,6 +175,9 @@ func TestParticipationResponseChannelDerivesOnlyCanonicalTrigger(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			request := HostedTurnRequest{InputContext: map[string]interface{}{"teamId": "team", "responseMode": "spoken", "voiceCallStarted": true}}
 			AppendParticipationResponseChannelInstructions(&request, test.trigger)
+			if request.ResponseContract != HostedResponseContractParticipation {
+				t.Fatal("Team assessment lost its structured response contract")
+			}
 			if (request.InputContext["responseMode"] == "spoken") != test.spoken ||
 				(request.InputContext["voiceCallStarted"] == true) != test.call || request.InputContext["teamId"] != "team" {
 				t.Fatalf("context did not follow canonical trigger: %#v", request.InputContext)
@@ -193,6 +197,25 @@ func TestParticipationResponseChannelDerivesOnlyCanonicalTrigger(t *testing.T) {
 		t.Fatal("nil context did not receive canonical call metadata")
 	}
 	AppendParticipationResponseChannelInstructions(nil, &valid)
+}
+
+func TestHostedResponseContractRoundTripAndValidation(t *testing.T) {
+	for _, contract := range []HostedResponseContract{HostedResponseContractDefault, HostedResponseContractParticipation} {
+		if err := contract.Validate(); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(HostedTurnRequest{ResponseContract: contract})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var request HostedTurnRequest
+		if err := json.Unmarshal(encoded, &request); err != nil || request.ResponseContract != contract {
+			t.Fatalf("response contract transport = %#v, %v", request, err)
+		}
+	}
+	if err := HostedResponseContract("unknown").Validate(); err == nil {
+		t.Fatal("unsupported response contract accepted")
+	}
 }
 
 func TestTeamVoiceCallReachesNormalParticipationWithCanonicalTrigger(t *testing.T) {

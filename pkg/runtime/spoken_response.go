@@ -44,6 +44,7 @@ func AppendParticipationResponseChannelInstructions(request *HostedTurnRequest, 
 	if request == nil {
 		return
 	}
+	request.ResponseContract = HostedResponseContractParticipation
 	delete(request.InputContext, "responseMode")
 	delete(request.InputContext, "voiceCallStarted")
 	if trigger == nil || trigger.ResponseMode != "spoken" {

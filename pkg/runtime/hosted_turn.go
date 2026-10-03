@@ -146,6 +146,22 @@ type HostedRunBudget struct {
 	MinimumChild BudgetPolicy `json:"minimumChild,omitempty"`
 }
 
+// HostedResponseContract identifies a host-owned response schema. Presentation
+// mode alone must never replace a structured assessment with an ordinary answer.
+type HostedResponseContract string
+
+const (
+	HostedResponseContractDefault       HostedResponseContract = ""
+	HostedResponseContractParticipation HostedResponseContract = "participation"
+)
+
+func (c HostedResponseContract) Validate() error {
+	if c != HostedResponseContractDefault && c != HostedResponseContractParticipation {
+		return fmt.Errorf("unsupported hosted response contract %q", c)
+	}
+	return nil
+}
+
 // HostedTurnRequest is the portable execution envelope sent to an Agent host.
 // OpenSeal remains authoritative for leases, Turns, actions and state changes;
 // the host performs one bounded proposal-only model invocation.
@@ -159,6 +175,7 @@ type HostedTurnRequest struct {
 	DefinitionID           string                                    `json:"definitionId"`
 	DefinitionVersion      string                                    `json:"definitionVersion"`
 	Goal                   string                                    `json:"goal"`
+	ResponseContract       HostedResponseContract                    `json:"responseContract,omitempty"`
 	InputContext           map[string]interface{}                    `json:"inputContext,omitempty"`
 	SystemInstructions     []string                                  `json:"systemInstructions,omitempty"`
 	EligibleAgents         []HostedAgentTarget                       `json:"eligibleAgents,omitempty"`

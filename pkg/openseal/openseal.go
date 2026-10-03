@@ -613,6 +613,7 @@ type (
 	HostedRunbookOperation               = runtime.HostedRunbookOperation
 	HostedTurnMedia                      = runtime.HostedTurnMedia
 	HostedTurnRequest                    = runtime.HostedTurnRequest
+	HostedResponseContract               = runtime.HostedResponseContract
 	HostedTurnResponse                   = runtime.HostedTurnResponse
 	HostedTurnExecutionFailure           = runtime.HostedTurnExecutionFailure
 	HostedTurnForm                       = runtime.HostedTurnForm
@@ -1198,6 +1199,8 @@ type (
 const (
 	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
 	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
+	HostedResponseContractDefault           = runtime.HostedResponseContractDefault
+	HostedResponseContractParticipation     = runtime.HostedResponseContractParticipation
 	HostedTurnFormSchemaVersion             = runtime.HostedTurnFormSchemaVersion
 	HostedTurnProtocolInputReserveTokens    = runtime.HostedTurnProtocolInputReserveTokens
 	HostedTurnBudgetEnvelopeReserveTokens   = runtime.HostedTurnBudgetEnvelopeReserveTokens
