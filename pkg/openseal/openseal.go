@@ -3082,6 +3082,10 @@ func (e *Engine) rebuildExternalConversations() error {
 		inboxConfig.ContextHost = contextHost
 		inboxConfig.ContextCatalog = e.skills
 	}
+	if attachmentHost, ok := e.externalConversations.host.(runtime.ExternalConversationAttachmentHost); ok {
+		inboxConfig.AttachmentHost = attachmentHost
+		inboxConfig.ContextCatalog = e.skills
+	}
 	inbox, err := runtime.NewExternalConversationInboxWorker(store, dispatcher, inboxConfig)
 	if err != nil {
 		return err

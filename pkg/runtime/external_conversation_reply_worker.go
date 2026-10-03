@@ -168,7 +168,7 @@ func (w *ExternalConversationReplyWorker) project(
 			Intent: MessageIntentAnswer, Content: reply,
 			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: item.ChannelMessageID, ResolvesMessageID: item.ChannelMessageID,
-			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+			References:     append([]ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, conversationActionArtifactReferences(run)...),
 			IdempotencyKey: "external-conversation-reply:" + item.ID,
 		})
 		if postErr != nil {

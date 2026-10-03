@@ -13,6 +13,8 @@ import (
 	"mime"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/attachments"
 )
 
 const conversationAttachmentBudget = 64 * 1024
@@ -119,12 +121,12 @@ func readConversationAttachment(ctx context.Context, store ArtifactContentStore,
 	}
 	switch mediaType {
 	case "text/plain", "text/csv", "text/tab-separated-values", "text/markdown", "application/json":
-	case spreadsheetMediaType:
+	case spreadsheetMediaType, "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
 	default:
 		return "unsupported_format", ""
 	}
 	byteLimit := remaining
-	if mediaType == spreadsheetMediaType {
+	if mediaType == spreadsheetMediaType || mediaType == "application/pdf" || mediaType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
 		byteLimit = 4 << 20
 	}
 	if artifact.SizeBytes < 0 || artifact.SizeBytes > int64(byteLimit) || remaining <= 0 {
@@ -148,6 +150,19 @@ func readConversationAttachment(ctx context.Context, store ArtifactContentStore,
 	if mediaType == spreadsheetMediaType {
 		return spreadsheetAttachmentText(ctx, content, remaining)
 	}
+	if mediaType == "application/pdf" || mediaType == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		var status, text string
+		if mediaType == "application/pdf" {
+			status, text = attachments.PDFText(ctx, content)
+		} else {
+			status, text = attachments.DOCXText(ctx, content)
+		}
+		if len(text) > remaining {
+			return "size_limit", ""
+		}
+		return status, text
+	}
+
 	if !utf8.Valid(content) || strings.ContainsRune(string(content), '\x00') {
 		return "unsupported_encoding", ""
 	}

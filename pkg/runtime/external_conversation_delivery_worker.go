@@ -12,10 +12,11 @@ import (
 )
 
 type ExternalConversationDeliveryHostRequest struct {
-	Endpoint *ExternalConversationEndpoint   `json:"endpoint"`
-	Adapter  *skill.BoundConversationAdapter `json:"adapter"`
-	Delivery *ExternalConversationDelivery   `json:"delivery"`
-	Message  *ChannelMessage                 `json:"message"`
+	Attachments []ExternalConversationAttachmentContent `json:"attachments,omitempty"`
+	Endpoint    *ExternalConversationEndpoint           `json:"endpoint"`
+	Adapter     *skill.BoundConversationAdapter         `json:"adapter"`
+	Delivery    *ExternalConversationDelivery           `json:"delivery"`
+	Message     *ChannelMessage                         `json:"message"`
 }
 
 type ExternalConversationAcknowledgementStatus string
@@ -59,6 +60,7 @@ const (
 )
 
 type ExternalConversationDeliveryHostResult struct {
+	Progress          map[string]interface{}              `json:"progress,omitempty"`
 	Outcome           ExternalConversationDeliveryOutcome `json:"outcome"`
 	ProviderMessageID string                              `json:"providerMessageId,omitempty"`
 	RetryAfter        time.Duration                       `json:"retryAfter,omitempty"`
@@ -70,6 +72,9 @@ func (r *ExternalConversationDeliveryHostResult) Validate() error {
 	if r == nil || r.RetryAfter < 0 || len(r.ErrorCode) > 128 || len(r.Summary) > 1024 ||
 		strings.ContainsAny(r.ErrorCode, "\r\n") || strings.ContainsAny(r.Summary, "\r\n") {
 		return fmt.Errorf("%w: invalid delivery host result", ErrInvalidExternalConversation)
+	}
+	if err := validateExternalConversationConfiguration(r.Progress); err != nil {
+		return err
 	}
 	switch r.Outcome {
 	case ExternalConversationDeliveryOutcomeDelivered:
@@ -106,10 +111,11 @@ type ExternalConversationAdapterHost interface {
 }
 
 type ExternalConversationDeliveryWorkerConfig struct {
-	WorkerID      string
-	LeaseDuration time.Duration
-	BaseRetry     time.Duration
-	MaximumRetry  time.Duration
+	AttachmentContent ArtifactContentStore
+	WorkerID          string
+	LeaseDuration     time.Duration
+	BaseRetry         time.Duration
+	MaximumRetry      time.Duration
 }
 
 func (c ExternalConversationDeliveryWorkerConfig) normalize() (ExternalConversationDeliveryWorkerConfig, error) {
@@ -206,6 +212,12 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	request := ExternalConversationDeliveryHostRequest{
 		Endpoint: deliveryEndpoint, Adapter: adapter, Delivery: effectiveDelivery, Message: message,
 	}
+	if containsConversationFeature(adapter.Adapter.Features, capability.ConversationFeatureAttachments) && delivery.Operation == capability.ConversationDeliveryMessageSend {
+		request.Attachments, err = externalDeliveryAttachments(ctx, w.store, w.config.AttachmentContent, delivery.Scope, message)
+		if err != nil {
+			return err
+		}
+	}
 	// Typing/progress indicators are ephemeral state, not durable messages.
 	// Provider message lookup cannot prove their delivery and can turn a harmless
 	// retry into a permanent endpoint conflict, so replay them directly with the
@@ -230,6 +242,9 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	}
 	if err := result.Validate(); err != nil {
 		return err
+	}
+	if result.Progress != nil {
+		delivery.Progress = cloneMap(result.Progress)
 	}
 	switch result.Outcome {
 	case ExternalConversationDeliveryOutcomeDelivered:
