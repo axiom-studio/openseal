@@ -21,6 +21,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	github.com/zclconf/go-cty v1.13.2
 	go.uber.org/zap v1.27.0
+	golang.org/x/mod v0.32.0
 	golang.org/x/sys v0.40.0
 	google.golang.org/grpc v1.75.1
 	gopkg.in/yaml.v3 v3.0.1
