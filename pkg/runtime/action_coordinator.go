@@ -248,7 +248,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		PreparedRuntime:   clonePreparedRuntime(req.PreparedRuntime),
 		CredentialRefs:    boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		ExternalOperationDigest: externalOperationDigest,
-		MaxAttempts:             max(1, bound.Action.Retry.MaxAttempts), AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		MaxAttempts:             1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
 	call.SemanticDigest = ComputeActionSemanticDigest(call)

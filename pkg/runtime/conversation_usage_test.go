@@ -94,11 +94,11 @@ func TestMeteredParticipationRetainsUsageWhenPublicationConflicts(t *testing.T) 
 		t.Fatal(err)
 	}
 	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "worker"}, runner)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || err.Error() != "conversation_changed" {
+		t.Fatalf("expected terminal publication conflict, got %v", err)
 	}
-	if result.Run.Status != AgentRunStatusSleeping || result.Turn.Usage.InputTokens != 19 || result.Turn.Usage.OutputTokens != 7 || result.Run.BudgetUsage.InputTokens != 19 || result.Run.BudgetUsage.OutputTokens != 7 {
-		t.Fatalf("retry lost usage: %#v", result)
+	if result.Run.Status != AgentRunStatusFailed || result.Turn.Usage.InputTokens != 19 || result.Turn.Usage.OutputTokens != 7 || result.Run.BudgetUsage.InputTokens != 19 || result.Run.BudgetUsage.OutputTokens != 7 {
+		t.Fatalf("failed turn lost usage: %#v", result)
 	}
 	messages, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: channel.ID})
 	if err != nil || len(messages) != 1 {

@@ -217,6 +217,9 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		cancel()
 	}
 	if dispatched && executionErr == nil {
+		executionErr = explicitActionResultFailure(output)
+	}
+	if dispatched && executionErr == nil {
 		executionErr = w.catalog.ValidateOutput(executionCtx, bound, output)
 	}
 	call, leaseErr := stopLease()
@@ -391,16 +394,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		if errors.Is(executionErr, ErrSkillRuntimeMaintenance) {
 			summary = fmt.Sprintf("Deferred %s.%s during runtime maintenance", call.SkillID, call.Action)
 		}
-	} else if executionErr != nil && ownsDependency && call.Attempt < call.MaxAttempts {
-		updatedCall.Status = ActionCallStatusReady
-		updatedCall.Error = sanitizeActionError(executionErr, credentials)
-		var retryPolicy skill.ActionRetryPolicy
-		if bound != nil {
-			retryPolicy = bound.Action.Retry
-		}
-		updatedCall.AvailableAt = now.Add(actionRetryDelay(retryPolicy, call.Attempt))
-		eventType = "action.retry_scheduled"
-		summary = fmt.Sprintf("Scheduled retry %d of %d for %s.%s", call.Attempt+1, call.MaxAttempts, call.SkillID, call.Action)
+
 	} else {
 		completedAt := now
 		updatedCall.CompletedAt = &completedAt
@@ -433,6 +427,9 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
+		if updatedCall.Status == ActionCallStatusFailed {
+			updatedRun.Checkpoint = checkpointFinalFailureExplanation(updatedRun.Checkpoint, "action", updatedCall.Error)
+		}
 		if updatedCall.Status == ActionCallStatusFailed && updatedCall.ApprovalID != "" {
 			approval, approvalErr := w.store.GetApproval(ctx, updatedCall.Scope, updatedCall.ApprovalID)
 			if approvalErr != nil {
@@ -550,23 +547,6 @@ func boundedChallengeKinds(raw interface{}) []string {
 		}
 	}
 	return values
-}
-
-func actionRetryDelay(policy skill.ActionRetryPolicy, attempt int) time.Duration {
-	delay := policy.InitialBackoff.Duration()
-	if delay <= 0 {
-		delay = time.Second
-	}
-	for current := 1; current < attempt; current++ {
-		if delay > (1<<62)/2 {
-			break
-		}
-		delay *= 2
-	}
-	if maximum := policy.MaxBackoff.Duration(); maximum > 0 && delay > maximum {
-		return maximum
-	}
-	return delay
 }
 
 func sanitizeActionError(err error, credentials map[string]string) string {

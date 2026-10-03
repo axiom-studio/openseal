@@ -584,7 +584,7 @@ func (h *retryingHostedTurnHost) ExecuteHostedTurn(_ context.Context, request Ho
 	}, nil
 }
 
-func TestHostedTurnBudgetRetryReusesAndSettlesOneReservation(t *testing.T) {
+func TestHostedTurnBudgetFailureSettlesWithoutRetry(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "retry-budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
@@ -599,44 +599,21 @@ func TestHostedTurnBudgetRetryReusesAndSettlesOneReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker-1",
-	}, runner)
-	if !errors.Is(err, ErrTurnHostUnavailable) || first == nil || first.Run.Status != AgentRunStatusSleeping || len(first.Run.BudgetReservations) != 1 || first.Run.BudgetUsage != (BudgetUsage{}) {
-		t.Fatalf("retry scheduling = %#v, %v", first, err)
+	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "worker-1"}, runner)
+	if !errors.Is(err, ErrTurnHostUnavailable) || result == nil || result.Run.Status != AgentRunStatusFailed || len(result.Run.BudgetReservations) != 0 || result.Run.BudgetUsage.Turns != 1 || host.calls != 1 {
+		t.Fatalf("failure did not settle once: %#v calls=%d err=%v", result, host.calls, err)
 	}
-	retryAt := first.Run.WakeCondition.WakeAt.Add(time.Second)
-	if _, err := NewAgentRunWakeService(store, store).WakeDueTimers(t.Context(), scope, retryAt); err != nil {
-		t.Fatal(err)
-	}
-	scheduler := NewAgentRunScheduler(store)
-	scheduler.now = func() time.Time { return retryAt }
-	claimed, err := scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
-	if err != nil || claimed == nil {
-		t.Fatalf("retry claim = %#v, %v", claimed, err)
-	}
-	second, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker-2",
-	}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if host.calls != 2 || len(host.invocations) != 2 || host.invocations[0] != host.invocations[1] ||
-		host.reservations[1].InputTokens < host.reservations[0].InputTokens {
-		t.Fatalf("host retry calls=%d invocations=%#v reservations=%#v", host.calls, host.invocations, host.reservations)
-	}
-	if second.Run.Status != AgentRunStatusCompleted || second.Run.BudgetUsage.Turns != 1 || second.Run.BudgetUsage.InputTokens != 100 || second.Run.BudgetUsage.OutputTokens != 20 || len(second.Run.BudgetReservations) != 0 {
-		t.Fatalf("settled retry = %#v", second.Run)
+	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "another"})
+	if err != nil || claimed != nil {
+		t.Fatalf("provider failure remained claimable: %#v %v", claimed, err)
 	}
 }
 
-func TestHostedTurnBudgetRetryReconcilesReservationAfterIntervention(t *testing.T) {
+func TestHostedTurnBudgetExplicitRetryUsesANewReservation(t *testing.T) {
 	store := NewMemoryStore()
-	scope := Scope{Kind: "tenant", ID: "retry-budget-intervention"}
-	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 32000, MaxOutputTokens: 2000, MaxTotalTokens: 34000},
-	})
+	scope := Scope{Kind: "tenant", ID: "explicit-retry-budget"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Source: RunSourceChat,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Do bounded work", Budget: &BudgetPolicy{MaxInputTokens: 32000, MaxOutputTokens: 2000, MaxTotalTokens: 34000}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -646,42 +623,16 @@ func TestHostedTurnBudgetRetryReconcilesReservationAfterIntervention(t *testing.
 		t.Fatal(err)
 	}
 	coordinator := NewTurnCoordinator(store, store, store)
-	first, err := coordinator.Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker-1",
-	}, runner)
-	if !errors.Is(err, ErrTurnHostUnavailable) || first == nil || len(first.Run.BudgetReservations) != 1 {
-		t.Fatalf("retry scheduling = %#v, %v", first, err)
+	first, err := coordinator.Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "first"}, runner)
+	if !errors.Is(err, ErrTurnHostUnavailable) || first == nil || len(first.Run.BudgetReservations) != 0 {
+		t.Fatalf("first failure: %#v %v", first, err)
 	}
-	intervened, err := NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{
-		Scope: scope, RunID: run.ID, ExpectedRevision: first.Run.Revision, Kind: AgentRunCommandIntervene,
-		Actor:       ActivityActor{Type: "user", ID: "operator"},
-		Instruction: "Use the latest durable evidence and continue with the authorized bounded operation.",
-	})
+	_, err = NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: first.Run.Revision, Kind: AgentRunCommandRetry, Actor: ActivityActor{Type: "user", ID: "operator"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if intervened.Run.Status != AgentRunStatusQueued || intervened.Run.WakeCondition != nil {
-		t.Fatalf("intervention did not wake retrying run: %#v", intervened.Run)
-	}
-	scheduler := NewAgentRunScheduler(store)
-	claimed, err := scheduler.ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
-	if err != nil || claimed == nil {
-		t.Fatalf("retry claim = %#v, %v", claimed, err)
-	}
-	second, err := coordinator.Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker-2",
-	}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if host.calls != 2 || len(host.reservations) != 2 || host.reservations[1].InputTokens <= host.reservations[0].InputTokens {
-		t.Fatalf("reservation was not reconciled after intervention: %#v", host.reservations)
-	}
-	if second.Run.Status != AgentRunStatusCompleted || second.Run.BudgetUsage.Turns != 1 || len(second.Run.BudgetReservations) != 0 {
-		t.Fatalf("settled retry = %#v", second.Run)
-	}
-	events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{"budget.reservation_reconciled"}})
-	if err != nil || len(events) != 1 {
-		t.Fatalf("reservation reconciliation events = %#v, %v", events, err)
+	second, err := coordinator.Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "second"}, runner)
+	if err != nil || second == nil || second.Run.Status != AgentRunStatusCompleted || second.Run.BudgetUsage.Turns != 2 || len(second.Run.BudgetReservations) != 0 || host.calls != 2 || host.invocations[0] == host.invocations[1] {
+		t.Fatalf("explicit retry failed: %#v calls=%d err=%v", second, host.calls, err)
 	}
 }

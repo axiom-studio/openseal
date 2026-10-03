@@ -18,7 +18,8 @@ var (
 )
 
 // TurnHostFailure is a safe, stable failure disposition returned by a hosted
-// turn boundary. Retryable failures participate in bounded backoff; terminal
+// turn boundary. Retryable describes provider classification only; automatic
+// model retries are disabled. Terminal
 // failures end the Run immediately so operator action is not misrepresented as
 // an unavailable worker. Message must never contain provider credentials or a
 // raw provider response.
@@ -181,7 +182,15 @@ type HostedTurnRequest struct {
 	Model           string                          `json:"model,omitempty"`
 }
 
+// HostedTurnExecutionFailure is emitted by the trusted host after a native
+// operation fails. It is intentionally absent from model response forms.
+type HostedTurnExecutionFailure struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+}
+
 type HostedTurnResponse struct {
+	ExecutionFailure           *HostedTurnExecutionFailure   `json:"executionFailure,omitempty"`
 	APIVersion                 string                        `json:"apiVersion"`
 	InvocationID               string                        `json:"invocationId"`
 	ModelProvider              string                        `json:"modelProvider"`
@@ -207,9 +216,9 @@ type HostedTurnResponse struct {
 
 // ValidateHostedSkillSelections verifies that a host returned exactly one
 // operator-visible disposition for every authorized prompt Skill and no other
-// Skill. Hosts can call this before returning a response so mechanically
-// repairable model output is corrected inside the bounded invocation rather
-// than failing later in the durable Run lifecycle.
+// Skill. Hosts can call this before returning a response to reject invalid
+// model output within the bounded invocation. Validation failures never
+// authorize an automatic model retry.
 func ValidateHostedSkillSelections(prompts []HostedSkillPrompt, selections []HostedSkillSelection) error {
 	allowed := make(map[string]struct{}, len(prompts))
 	for _, prompt := range prompts {
@@ -322,14 +331,16 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if groundingState != nil && groundingState.SnapshotID != evidenceSnapshotID(snapshot) {
 		return nil, errors.New("evidence grounding checkpoint does not match the immutable Run snapshot")
 	}
-	if groundingState != nil && groundingState.Status == evidenceGroundingPendingReview {
+	if groundingState != nil && groundingState.Status == evidenceGroundingPendingReview && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		return r.runEvidenceGroundingReview(ctx, input, snapshot, groundingState)
 	}
 	request, err := r.buildRequest(input)
 	if err != nil {
 		return nil, err
 	}
-	applyEvidenceGroundingDraftInstruction(&request, snapshot)
+	if !requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		applyEvidenceGroundingDraftInstruction(&request, snapshot)
+	}
 	response, err := r.host.ExecuteHostedTurn(ctx, request)
 	if err != nil {
 		if errors.Is(err, ErrTurnHostConfiguration) {
@@ -343,6 +354,16 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
 		return nil, errors.New("turn host returned a mismatched response envelope")
+	}
+	validationRequest := request
+	if failure := response.ExecutionFailure; failure != nil {
+		if failure.Kind != "workspace" || len(request.WorkspaceOperations) == 0 || strings.TrimSpace(failure.Message) == "" || len(failure.Message) > 4096 {
+			return nil, errors.New("turn host returned an invalid native execution failure")
+		}
+		validationRequest.ContinuationCheckpoint = checkpointFinalFailureExplanation(request.ContinuationCheckpoint, failure.Kind, failure.Message)
+	}
+	if err := ValidateHostedTurnFinalFailureExplanation(validationRequest, response); err != nil {
+		return nil, err
 	}
 	if response.ProposedWorkspaceOperation != nil {
 		return nil, errors.New("turn host returned an unconsumed native Workspace operation")
@@ -411,6 +432,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	response.ContinuationCheckpoint = preserveKernelActionHistory(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
 	response.ContinuationCheckpoint = preserveKernelEvidenceGrounding(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
+	if response.ExecutionFailure != nil {
+		response.ContinuationCheckpoint = checkpointFinalFailureExplanation(response.ContinuationCheckpoint, response.ExecutionFailure.Kind, response.ExecutionFailure.Message)
+	}
 	if response.ProposedAction != nil {
 		if reused, reuseErr := r.reuseSucceededAction(*response.ProposedAction, response.ContinuationCheckpoint); reuseErr != nil {
 			return nil, reuseErr
@@ -549,7 +573,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			}
 		}
 	}
-	if snapshot != nil && response.NextRunStatus == AgentRunStatusCompleted {
+	if snapshot != nil && response.NextRunStatus == AgentRunStatusCompleted && !requiresFinalFailureExplanation(response.ContinuationCheckpoint) {
 		stageEvidenceGrounding(response, snapshot)
 	}
 	proposedActions := []TurnAction(nil)
@@ -661,6 +685,10 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		request.SystemInstructions = append(request.SystemInstructions, "For a writing or reasoning task, put the actual deliverable in runOutput.summary. Once the requested draft or answer is ready, return nextRunStatus completed in that same response. An invitation for optional revisions does not require this Run to stay running or wait; a later user request can start a revision. Do not take another turn just to finalize text already written. Preserve the original request's explicit length and units. completionEvidenceRefs must be empty when no tool action ran: a written draft needs no ActionCall receipt. Never use a Run ID, message ID, or invented value as tool evidence. Return exactly one response object, not separate draft and completion objects.")
 	}
 	appendResponseChannelInstructions(&request)
+	if requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		projectFinalFailureExplanation(&request)
+		return request, nil
+	}
 	if len(request.Actions) > 0 && len(actionHistoryEntries(input.Run.Checkpoint)) == 0 {
 		if result, ok := input.Run.Checkpoint[runEventWaitCheckpointKey].(map[string]interface{}); ok && result["status"] == string(RunEventWaitMatched) && result["event"] != nil {
 			request.SystemInstructions = append(request.SystemInstructions,

@@ -16,12 +16,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-const (
-	StepTypePGVector    = "pgvector"
-	maxEmbeddingRetries = 3
-	initialRetryDelay   = 1 * time.Second
-	maxRetryDelay       = 30 * time.Second
-)
+const StepTypePGVector = "pgvector"
 
 type PGVectorExecutor struct {
 	client         *http.Client
@@ -781,94 +776,29 @@ func (e *PGVectorExecutor) generateBatchEmbeddings(ctx context.Context, texts []
 	if len(texts) == 0 {
 		return nil, nil
 	}
-
-	var embeddings [][]float64
-	var lastErr error
-
-	for attempt := 0; attempt < maxEmbeddingRetries; attempt++ {
-		if attempt > 0 {
-			// Calculate exponential backoff delay
-			delay := initialRetryDelay * time.Duration(1<<uint(attempt-1))
-			if delay > maxRetryDelay {
-				delay = maxRetryDelay
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Provider failures end this attempt. Retryability is opt-in, not inferred
+	// from an error's text or HTTP status.
+	switch cfg.Provider {
+	case "openai", "openai-compatible", "":
+		return e.generateBatchOpenAIEmbeddings(ctx, texts, cfg)
+	case "cohere":
+		return e.generateBatchCohereEmbeddings(ctx, texts, cfg)
+	case "gemini":
+		return e.generateBatchGeminiEmbeddings(ctx, texts, cfg)
+	default:
+		embeddings := make([][]float64, len(texts))
+		for i, text := range texts {
+			emb, err := e.generateEmbedding(ctx, text, cfg)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate embedding for item %d: %w", i, err)
 			}
-
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(delay):
-			}
+			embeddings[i] = emb
 		}
-
-		var err error
-		switch cfg.Provider {
-		case "openai", "openai-compatible", "":
-			embeddings, err = e.generateBatchOpenAIEmbeddings(ctx, texts, cfg)
-		case "cohere":
-			embeddings, err = e.generateBatchCohereEmbeddings(ctx, texts, cfg)
-		case "gemini":
-			embeddings, err = e.generateBatchGeminiEmbeddings(ctx, texts, cfg)
-		default:
-			embeddings = make([][]float64, len(texts))
-			for i, text := range texts {
-				emb, err := e.generateEmbedding(ctx, text, cfg)
-				if err != nil {
-					return nil, fmt.Errorf("failed to generate embedding for item %d: %w", i, err)
-				}
-				embeddings[i] = emb
-			}
-			return embeddings, nil
-		}
-
-		if err == nil {
-			return embeddings, nil
-		}
-
-		lastErr = err
-
-		// Check if error is retryable
-		if !isRetryableError(err) {
-			return nil, err
-		}
+		return embeddings, nil
 	}
-
-	return nil, fmt.Errorf("failed after %d retries: %w", maxEmbeddingRetries, lastErr)
-}
-
-// isRetryableError determines if an error should trigger a retry
-func isRetryableError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errMsg := err.Error()
-
-	// Retryable errors:
-	// - Rate limit (429)
-	// - Timeout
-	// - Temporary network errors
-	// - Server errors (500, 502, 503, 504)
-	retryablePatterns := []string{
-		"429",
-		"rate limit",
-		"timeout",
-		"temporary",
-		"500",
-		"502",
-		"503",
-		"504",
-		"connection reset",
-		"connection refused",
-		"too many requests",
-	}
-
-	for _, pattern := range retryablePatterns {
-		if strings.Contains(strings.ToLower(errMsg), strings.ToLower(pattern)) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func (e *PGVectorExecutor) generateBatchOpenAIEmbeddings(ctx context.Context, texts []string, cfg embeddingConfig) ([][]float64, error) {

@@ -348,7 +348,7 @@ func TestActionBudgetReservationSettlesOnceAndPausesNextProposal(t *testing.T) {
 	}
 }
 
-func TestActionWorkerRetriesWithoutLeakingCredentials(t *testing.T) {
+func TestActionWorkerStopsWithoutLeakingCredentials(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	catalog, proposal := createRunnableAction(t, store, now)
@@ -369,20 +369,14 @@ func TestActionWorkerRetriesWithoutLeakingCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Call.Status != ActionCallStatusReady || first.Run != nil || !strings.Contains(first.Call.Error, "[REDACTED]") || strings.Contains(first.Call.Error, "raw-secret-value") {
-		t.Fatalf("retry result mismatch: %#v", first)
+	if first.Call.Status != ActionCallStatusFailed || first.Run == nil || first.Run.Status != AgentRunStatusQueued ||
+		!requiresFinalFailureExplanation(first.Run.Checkpoint) || !strings.Contains(first.Call.Error, "[REDACTED]") || strings.Contains(first.Call.Error, "raw-secret-value") {
+		t.Fatalf("failure result mismatch: %#v", first)
 	}
-	persistedRun, err := store.GetAgentRun(context.Background(), proposal.Call.Scope, proposal.Call.RunID)
-	if err != nil || persistedRun.Status != AgentRunStatusWaitingForDependency {
-		t.Fatalf("run resumed during retry: %#v, %v", persistedRun, err)
-	}
-	current = first.Call.AvailableAt.Add(time.Millisecond)
+	current = current.Add(time.Hour)
 	second, err := worker.RunOnce(context.Background(), proposal.Call.Scope, "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Call.Status != ActionCallStatusSucceeded || second.Call.Attempt != 2 || second.Run.Status != AgentRunStatusQueued {
-		t.Fatalf("retry did not complete: %#v", second)
+	if err != nil || second != nil || attempts != 1 {
+		t.Fatalf("failed action was retried: %#v attempts=%d err=%v", second, attempts, err)
 	}
 }
 
