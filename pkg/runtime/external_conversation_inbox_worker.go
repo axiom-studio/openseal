@@ -95,12 +95,14 @@ func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
 }
 
 type ExternalConversationInboxWorkerConfig struct {
-	WorkerID       string
-	LeaseDuration  time.Duration
-	BaseRetry      time.Duration
-	MaximumRetry   time.Duration
-	ContextHost    ExternalConversationContextHost
-	ContextCatalog ExternalConversationAdapterResolver
+	AttachmentHost    ExternalConversationAttachmentHost
+	AttachmentContent ArtifactContentStore
+	WorkerID          string
+	LeaseDuration     time.Duration
+	BaseRetry         time.Duration
+	MaximumRetry      time.Duration
+	ContextHost       ExternalConversationContextHost
+	ContextCatalog    ExternalConversationAdapterResolver
 }
 
 func (c ExternalConversationInboxWorkerConfig) normalize() (ExternalConversationInboxWorkerConfig, error) {
@@ -398,6 +400,18 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 				ID: externalConversationContextErrorPrefix(endpoint.ID) + code})
 		}
 	}
+	attachmentRefs, notices, err := w.importAttachments(ctx, endpoint, conversation, event)
+	if err != nil {
+		return nil, err
+	}
+	references = append(references, attachmentRefs...)
+	text := strings.TrimSpace(event.Text)
+	if text == "" {
+		text = "Please look at the attached files."
+	}
+	if len(notices) > 0 {
+		text += "\n\nAttachment access: " + strings.Join(notices, "; ")
+	}
 	for attempts := 0; attempts < 32; attempts++ {
 		current, err := w.conversations.GetConversation(ctx, endpoint.Scope, conversation.ID)
 		if err != nil {
@@ -413,7 +427,7 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 			Scope: endpoint.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 			Sender: participant.Participant, SenderDisplayName: participant.DisplayName,
 			ExternalSource: source,
-			Intent:         MessageIntentQuestion, Content: event.Text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Intent:         MessageIntentQuestion, Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: replyTo, References: references,
 			RequiresResponse: true, IdempotencyKey: key,
 		})
