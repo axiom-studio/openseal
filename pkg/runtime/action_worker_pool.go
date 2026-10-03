@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -49,7 +50,8 @@ type ActionWorkerPool struct {
 	mu      sync.Mutex
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
-	limiter *WorkerLimiter
+	limiter atomic.Pointer[WorkerLimiter]
+	poll    *workerPollSignal
 }
 
 func NewActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
@@ -77,7 +79,9 @@ func newActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, cred
 	if issuer != nil {
 		worker = NewActionWorkerWithCredentialLeaseIssuer(store, catalog, issuer, dispatcher)
 	}
-	return &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1)}, nil
+	pool := &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1), poll: newWorkerPollSignal()}
+	worker.onClaim = pool.requestClaim
+	return pool, nil
 }
 
 func (p *ActionWorkerPool) Start(parent context.Context) {
@@ -92,35 +96,64 @@ func (p *ActionWorkerPool) Start(parent context.Context) {
 		p.wg.Add(1)
 		go p.run(ctx, fmt.Sprintf("%s-%d", p.config.WorkerIDPrefix, index+1))
 	}
+	p.wg.Add(1)
+	go p.pollClaims(ctx)
+	p.requestClaim()
 }
 
 func (p *ActionWorkerPool) Stop() {
 	p.mu.Lock()
-	cancel := p.cancel
-	p.cancel = nil
-	p.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	defer p.mu.Unlock()
+	if p.cancel != nil {
+		p.cancel()
 		p.wg.Wait()
+		p.cancel = nil
 	}
 }
 
 func (p *ActionWorkerPool) Wake() {
+	p.poll.notify()
+	p.requestClaim()
+}
+
+func (p *ActionWorkerPool) WakeScope(scope Scope) {
+	if scope == p.config.Scope {
+		p.Wake()
+	}
+}
+
+func (p *ActionWorkerPool) requestClaim() {
 	select {
 	case p.wake <- struct{}{}:
 	default:
 	}
 }
 
+// One timer per scope recovers missed or cross-process notifications. Empty
+// claims retain the configured latency without multiplying reads by the
+// worker concurrency. Successful claims hand off before provider execution.
+func (p *ActionWorkerPool) pollClaims(ctx context.Context) {
+	defer p.wg.Done()
+	for waitForWorkerPoll(ctx, nil, workerPollDelay(p.config.PollInterval, 0, p.config.WorkerIDPrefix+"-poll")) {
+		p.requestClaim()
+	}
+}
+
 func (p *ActionWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
-	p.limiter = limiter
+	p.limiter.Store(limiter)
 }
 
 func (p *ActionWorkerPool) run(ctx context.Context, workerID string) {
 	defer p.wg.Done()
 	consecutiveFailures := 0
 	for {
-		release, acquireErr := p.limiter.acquire(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.wake:
+		}
+		_, observedWake := p.poll.snapshot()
+		release, acquireErr := p.limiter.Load().acquire(ctx)
 		if acquireErr != nil {
 			return
 		}
@@ -136,9 +169,13 @@ func (p *ActionWorkerPool) run(ctx context.Context, workerID string) {
 			return
 		}
 		if result != nil {
+			p.requestClaim()
 			continue
 		}
-		if !waitForWorkerPoll(ctx, p.wake, workerPollDelay(p.config.PollInterval, consecutiveFailures, workerID)) {
+		if err == nil {
+			continue
+		}
+		if !waitForWorkerPoll(ctx, observedWake, workerPollDelay(p.config.PollInterval, consecutiveFailures, workerID)) {
 			return
 		}
 	}
