@@ -2219,6 +2219,13 @@ func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now t
 	updated.LeaseOwner = ""
 	updated.LeaseExpiresAt = nil
 	updated.Output = collaborationResolutionOutput(updated.Output, request)
+	if request.Status == AgentRequestStatusFailed {
+		message := strings.TrimSpace(request.ResolutionReason)
+		if message == "" {
+			message = "The requested delegated work did not complete."
+		}
+		updated.Checkpoint = checkpointFinalFailureExplanation(updated.Checkpoint, "delegation", message)
+	}
 	return updated, nil
 }
 

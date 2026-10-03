@@ -628,9 +628,6 @@ type ConversationRunTurnRunnerConfig struct {
 }
 
 func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerConfig, error) {
-	if c.MaximumRetries == 0 {
-		c.MaximumRetries = 5
-	}
 	if c.InitialRetryDelay == 0 {
 		c.InitialRetryDelay = time.Second
 	}
@@ -652,7 +649,7 @@ func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerC
 // ConversationRunTurnRunner executes one governed participation round as a
 // bounded Run turn. The round idempotency key closes the crash gap after round
 // commit; optimistic channel drift and transient proposal failures sleep and
-// retry without occupying the per-channel concurrency lease.
+// fail without scheduling another model attempt.
 type ConversationRunTurnRunner struct {
 	summaries     conversationSummaryCache
 	conversations *ConversationService
@@ -694,6 +691,44 @@ func NewConversationRunTurnRunner(
 	return runner, nil
 }
 
+// Only a current, authorized Team roster member may explain its failed proposal.
+// Attribution is kernel-owned and rechecked before resolving an Agent model.
+func (r *ConversationRunTurnRunner) finalExplanationParticipant(ctx context.Context, run *AgentRun) (string, error) {
+	participant := strings.TrimSpace(run.AssignedAgentID)
+	if participant == "" {
+		participant, _ = run.Checkpoint[teamActionAssignedAgentCheckpointKey].(string)
+	}
+	if !validOpaqueIdentifier(participant, 256) {
+		return "", errors.New("failed Team action is missing Agent attribution")
+	}
+	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+	conversation, err := r.conversations.GetConversation(ctx, run.Scope, conversationID)
+	if err != nil {
+		return "", err
+	}
+	if conversation.Scope != run.Scope || conversation.Owner != run.Owner {
+		return "", ErrInvalidAgentRun
+	}
+	trigger, err := r.conversations.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
+	if err != nil {
+		return "", err
+	}
+	bindings, err := r.coordinator.participants.ResolveConversationParticipants(ctx, ConversationParticipantQuery{Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger)})
+	if err != nil {
+		return "", err
+	}
+	for _, binding := range bindings {
+		if binding.Participant.Type == ConversationParticipantAgent && binding.Participant.ID == participant {
+			if err := binding.Validate(); err != nil {
+				return "", err
+			}
+			return participant, nil
+		}
+	}
+	return "", errors.New("failed Team action Agent is no longer authorized in this conversation")
+}
+
 func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 	if r == nil || r.coordinator == nil || r.conversations == nil {
 		return nil, ErrConversationCoordinationUnavailable
@@ -707,14 +742,22 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 		return &TurnRunnerBinding{Runner: r, DefinitionID: "openseal.conversation-coordinator", DefinitionVersion: "1", ModelProvider: "host", Model: "participation-disabled"}, nil
 	}
 	pinnedRunbook := run.Plan != nil && run.Plan["runbook"] != nil
-	if (run.Owner.Type == OwnerTypeAgent || pinnedRunbook) && r.agentTurns == nil {
+	finalExplanation := requiresFinalFailureExplanation(run.Checkpoint)
+	if (run.Owner.Type == OwnerTypeAgent || pinnedRunbook || finalExplanation) && r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
-	if run.Owner.Type == OwnerTypeAgent || pinnedRunbook {
+	if run.Owner.Type == OwnerTypeAgent || pinnedRunbook || finalExplanation {
 		hostedRun := cloneAgentRun(run)
 		hostedRun.Kind = RunKindAgentWork
-		if !pinnedRunbook {
+		if !pinnedRunbook && run.Owner.Type == OwnerTypeAgent {
 			hostedRun.AssignedAgentID = run.Owner.ID
+		}
+		if finalExplanation && run.Owner.Type == OwnerTypeTeam {
+			participant, err := r.finalExplanationParticipant(ctx, run)
+			if err != nil {
+				return nil, err
+			}
+			hostedRun.AssignedAgentID = participant
 		}
 		agentBinding, err := r.agentTurns.ResolveTurnRunner(ctx, hostedRun)
 		if err != nil {
@@ -878,7 +921,16 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	if conversation.Owner.Type == OwnerTypeAgent {
 		return r.runAgentTurn(ctx, input, conversation, triggerID, nil, nil)
 	}
-	if outcome, ok := governedConversationActionOutcome(input.Run); ok {
+	if requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		participant, err := r.finalExplanationParticipant(ctx, input.Run)
+		if err != nil {
+			return nil, err
+		}
+		input.Run = cloneAgentRun(input.Run)
+		input.Run.AssignedAgentID = participant
+		return r.runAgentTurn(ctx, input, conversation, triggerID, nil, nil)
+	}
+	if outcome, ok := governedConversationActionOutcome(input.Run); ok && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		trigger, getErr := r.conversations.GetChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID)
 		if getErr != nil {
 			return nil, getErr
@@ -930,6 +982,13 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		participationUsage = measuredUsage
 	}
 	if err != nil {
+		if r.config.RequireParticipationOptIn {
+			if stopped, checkErr := r.participationStopped(ctx, input.Run); checkErr != nil {
+				return nil, checkErr
+			} else if stopped {
+				return participationStoppedOutcome(), nil
+			}
+		}
 		if ctx.Err() != nil || permanentConversationRunError(err) {
 			return nil, err
 		}
@@ -1086,6 +1145,15 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		return nil, ErrConversationCoordinationUnavailable
 	}
 	participantID := strings.TrimSpace(input.Run.AssignedAgentID)
+	if input.Run.Owner.Type == OwnerTypeTeam && requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		var participantErr error
+		participantID, participantErr = r.finalExplanationParticipant(ctx, input.Run)
+		if participantErr != nil {
+			return nil, participantErr
+		}
+		input.Run = cloneAgentRun(input.Run)
+		input.Run.AssignedAgentID = participantID
+	}
 	if participantID == "" {
 		participantID = conversation.Owner.ID
 	}
@@ -1123,7 +1191,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	}, latestConversationSequence(recent)); err != nil {
 		return nil, err
 	}
-	if completion, ok := governedConversationActionOutcome(input.Run); ok {
+	if completion, ok := governedConversationActionOutcome(input.Run); ok && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References, false)
 		if err != nil {
 			return nil, err
@@ -1140,7 +1208,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	}
 	if completion, ok, completionErr := r.governedConversationOperationOutcome(ctx, input.Run); completionErr != nil {
 		return nil, completionErr
-	} else if ok {
+	} else if ok && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		message, replayed, postErr := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References, false)
 		if postErr != nil {
 			return nil, postErr
@@ -1163,7 +1231,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		return nil, err
 	}
 	if operation, arguments, requested := resolveExplicitConversationOperation(trigger.Content, runbookOperations, automaticEntrypoints); requested &&
-		!activeConversationOperationExists(activeRuns, operation.Entrypoint) {
+		!activeConversationOperationExists(activeRuns, operation.Entrypoint) && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		return &TurnOutcome{
 			NextRunStatus: AgentRunStatusRunning,
 			OutputSummary: "Started: " + operation.Name,
@@ -2122,26 +2190,10 @@ func conversationResultString(value map[string]interface{}, key string) string {
 	return strings.TrimSpace(result)
 }
 
+// Coordination failures are terminal. Retriability is intentionally disabled
+// until a specific error can be opted in under a reviewed policy.
 func (r *ConversationRunTurnRunner) retryOutcome(run *AgentRun, cause error) (*TurnOutcome, error) {
-	retries := conversationRunRetryCount(run.Checkpoint)
-	if retries >= r.config.MaximumRetries {
-		return nil, errors.New("conversation coordination exhausted its retry budget")
-	}
-	retries++
-	delay := time.Duration(float64(r.config.InitialRetryDelay) * math.Pow(2, float64(retries-1)))
-	if delay > r.config.MaximumRetryDelay {
-		delay = r.config.MaximumRetryDelay
-	}
-	wakeAt := r.now().UTC().Add(delay)
-	return &TurnOutcome{
-		NextRunStatus: AgentRunStatusSleeping,
-		OutputSummary: "Conversation coordination retry scheduled",
-		ContinuationCheckpoint: map[string]interface{}{
-			"conversationRetryCount": retries,
-			"lastRetryReason":        publicConversationRetryReason(cause),
-		},
-		WakeCondition: &WakeCondition{Type: "timer", WakeAt: &wakeAt, Reference: "conversation-retry"},
-	}, nil
+	return nil, errors.New(publicConversationRetryReason(cause))
 }
 
 func validateConversationRun(run *AgentRun) error {
@@ -2166,22 +2218,6 @@ func validateConversationRun(run *AgentRun) error {
 		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
 	}
 	return nil
-}
-
-func conversationRunRetryCount(checkpoint map[string]interface{}) int {
-	value, ok := checkpoint["conversationRetryCount"]
-	if !ok {
-		return 0
-	}
-	switch count := value.(type) {
-	case int:
-		return max(count, 0)
-	case float64:
-		if count >= 0 && count <= 1_000_000 && count == math.Trunc(count) {
-			return int(count)
-		}
-	}
-	return 0
 }
 
 func permanentConversationRunError(err error) bool {
