@@ -124,6 +124,9 @@ func (v *RunActionValidator) ValidateActionProposal(ctx context.Context, input A
 	if target.Owner != input.Run.Owner {
 		return nil, errors.New("Run is not owned by the conversation Agent or Team")
 	}
+	if err := validateConversationTaskControl(ctx, v.store, input.Run, target); err != nil {
+		return nil, err
+	}
 	if target.ID == input.Run.ID || target.Kind == RunKindConversation {
 		return nil, errors.New("a conversation cannot control its own coordination Run")
 	}
@@ -142,6 +145,7 @@ func (v *RunActionValidator) ValidateActionProposal(ctx context.Context, input A
 
 type RunActionDispatcher struct {
 	commands *RunCommandService
+	store    RunCommandStore
 	fallback ActionDispatcher
 }
 
@@ -149,7 +153,7 @@ func NewRunActionDispatcher(store RunCommandStore, fallback ActionDispatcher) (*
 	if store == nil {
 		return nil, errors.New("Run command store is required")
 	}
-	return &RunActionDispatcher{commands: NewRunCommandService(store), fallback: fallback}, nil
+	return &RunActionDispatcher{commands: NewRunCommandService(store), store: store, fallback: fallback}, nil
 }
 
 func (d *RunActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
@@ -163,6 +167,13 @@ func (d *RunActionDispatcher) DispatchAction(ctx context.Context, input ActionDi
 	revision, ok := runControlPositiveInt64(input.Call.Arguments["expectedRevision"])
 	if runID == "" || !ok {
 		return nil, errors.New("Run control requires a current Run and revision")
+	}
+	target, err := d.store.GetAgentRun(ctx, input.Call.Scope, runID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateConversationTaskControl(ctx, d.store, input.Run, target); err != nil {
+		return nil, err
 	}
 	result, err := d.commands.CommandAgentRun(ctx, AgentRunCommandRequest{
 		Scope: input.Call.Scope, RunID: runID, ExpectedRevision: revision,

@@ -111,6 +111,7 @@ type AgentTurn struct {
 	RequestedFork          *TurnForkProposal        `json:"requestedFork,omitempty"`
 	RequestedDelegation    *TurnDelegationProposal  `json:"requestedDelegation,omitempty"`
 	RequestedRunbook       *TurnRunbookProposal     `json:"requestedRunbook,omitempty"`
+	RequestedTask          *TurnTaskProposal        `json:"requestedTask,omitempty"`
 	OutputSummary          string                   `json:"outputSummary,omitempty"`
 	Usage                  TurnUsage                `json:"usage,omitempty"`
 	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
@@ -195,6 +196,7 @@ type FinishAgentTurnRequest struct {
 	RequestedFork          *TurnForkProposal
 	RequestedDelegation    *TurnDelegationProposal
 	RequestedRunbook       *TurnRunbookProposal
+	RequestedTask          *TurnTaskProposal
 	OutputSummary          string
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
@@ -300,6 +302,7 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	turn.RequestedFork = req.RequestedFork
 	turn.RequestedDelegation = req.RequestedDelegation
 	turn.RequestedRunbook = req.RequestedRunbook
+	turn.RequestedTask = cloneTurnTaskProposal(req.RequestedTask)
 	turn.OutputSummary = req.OutputSummary
 	turn.Usage = req.Usage
 	turn.ContinuationCheckpoint = req.ContinuationCheckpoint

@@ -185,6 +185,7 @@ type HostedTurnRequest struct {
 	RunbookOperations      []HostedRunbookOperation                  `json:"runbookOperations,omitempty"`
 	SkillPrompts           []HostedSkillPrompt                       `json:"skillPrompts,omitempty"`
 	Actions                []capability.ModelAction                  `json:"actions,omitempty"`
+	ConversationTasks      *HostedConversationTaskContext            `json:"conversationTasks,omitempty"`
 	Budget                 *HostedRunBudget                          `json:"budget,omitempty"`
 	DependencyResults      map[string]interface{}                    `json:"dependencyResults,omitempty"`
 	CollaborationResults   map[string]interface{}                    `json:"collaborationResults,omitempty"`
@@ -219,6 +220,7 @@ type HostedTurnResponse struct {
 	ProposedFork               *TurnForkProposal             `json:"proposedFork,omitempty"`
 	ProposedDelegation         *TurnDelegationProposal       `json:"proposedDelegation,omitempty"`
 	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
+	ProposedTask               *TurnTaskProposal             `json:"proposedTask,omitempty"`
 	OutputSummary              string                        `json:"outputSummary"`
 	Usage                      TurnUsage                     `json:"usage,omitempty"`
 	ContinuationCheckpoint     map[string]interface{}        `json:"continuationCheckpoint,omitempty"`
@@ -277,6 +279,7 @@ type HostedTurnRunnerConfig struct {
 	WorkspaceCredentials map[string]capability.CredentialReference
 	RunbookOperations    []HostedRunbookOperation
 	SkillPrompts         []HostedSkillPrompt
+	ConversationTasks    *HostedConversationTaskContext
 	Actions              []capability.ModelAction
 	ModelCredential      *capability.CredentialReference
 	ModelProvider        string
@@ -294,6 +297,9 @@ func NewHostedTurnRunner(host TurnHost, config HostedTurnRunnerConfig) (*HostedT
 	}
 	if config.ModelCredential != nil && (strings.TrimSpace(config.ModelCredential.Kind) == "" || strings.TrimSpace(config.ModelCredential.ID) == "") {
 		return nil, errors.New("model credential reference requires kind and id")
+	}
+	if err := config.ConversationTasks.Validate(); err != nil {
+		return nil, err
 	}
 	seenPromptReferences := make(map[string]bool, len(config.SkillPrompts))
 	for _, prompt := range config.SkillPrompts {
@@ -371,6 +377,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
 		return nil, errors.New("turn host returned a mismatched response envelope")
+	}
+	if response.ProposedTask != nil && (response.ProposedAction != nil || response.ProposedWorkspaceOperation != nil || response.ProposedFork != nil || response.ProposedDelegation != nil || response.ProposedRunbook != nil) {
+		return nil, errors.New("a task proposal cannot be combined with another proposal")
 	}
 	validationRequest := request
 	if failure := response.ExecutionFailure; failure != nil {
@@ -464,6 +473,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			response.ProposedFork = nil
 			response.ProposedDelegation = nil
 			response.ProposedRunbook = nil
+			response.ProposedTask = nil
 			response.NextRunStatus = AgentRunStatusRunning
 			response.WakeCondition = nil
 			response.ContinuationCheckpoint["lastAction"] = deepCloneCheckpointMap(reused)
@@ -514,6 +524,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response.ProposedDelegation != nil {
 		proposalCount++
+		if input.Run.Kind == RunKindAgentWork && input.Run.Context[ConversationTaskContextKey] != nil {
+			return nil, errors.New("independent task work cannot delegate; use a same-agent fork")
+		}
 		response.ProposedDelegation.AssignedAgentID, err = resolveHostedAgentTarget(
 			response.ProposedDelegation.AssignedAgentID, request.EligibleAgents,
 		)
@@ -556,8 +569,24 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			return nil, fmt.Errorf("invalid hosted runbook budget: %w", err)
 		}
 	}
+	if response.ProposedTask != nil {
+		proposalCount++
+		if err := validateHostedTaskAuthority(hostedTaskForegroundSource(input), request.ConversationTasks); err != nil {
+			return nil, err
+		}
+		if err := validateTaskProposalOutput(response.ProposedTask, response.NextRunStatus, response.WakeCondition, response.OutputSummary, response.RunOutput, response.RunError); err != nil {
+			return nil, fmt.Errorf("invalid hosted task proposal: %w", err)
+		}
+		response.ProposedTask.Budget = completeHostedTaskBudget(response.ProposedTask.Budget, request.Budget)
+		if err := validateHostedChildBudgetFloor(response.ProposedTask.Budget, request.Budget); err != nil {
+			return nil, fmt.Errorf("invalid hosted task budget: %w", err)
+		}
+		if err := validateHostedChildBudgetCapacity([]*BudgetPolicy{response.ProposedTask.Budget}, request.Budget); err != nil {
+			return nil, fmt.Errorf("invalid hosted task budget: %w", err)
+		}
+	}
 	if proposalCount > 1 {
-		return nil, errors.New("a bounded hosted Turn can propose only one action, fork, delegation, or runbook")
+		return nil, errors.New("a bounded hosted Turn can propose only one action, fork, delegation, runbook, or task")
 	}
 	if proposalCount == 1 && response.NextRunStatus != AgentRunStatusRunning {
 		return nil, errors.New("a hosted Turn proposal must remain running until the kernel materializes it")
@@ -604,7 +633,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		ModelProvider: response.ModelProvider, Model: response.Model,
 		SkillSelections: append([]HostedSkillSelection(nil), response.SkillSelections...),
 		Decisions:       append(selectionDecisions, response.Decisions...), ProposedActions: proposedActions,
-		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook,
+		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(response.ProposedTask),
 		OutputSummary: response.OutputSummary, Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
@@ -667,6 +696,9 @@ func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint 
 }
 
 func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnRequest, error) {
+	if err := r.config.ConversationTasks.Validate(); err != nil {
+		return HostedTurnRequest{}, err
+	}
 	budget, err := projectHostedRunBudget(input.Run, input.Turn.ID)
 	if err != nil {
 		return HostedTurnRequest{}, err
@@ -691,6 +723,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		WorkspaceCredentials:   cloneHostedCredentialReferences(r.config.WorkspaceCredentials),
 		RunbookOperations:      cloneHostedRunbookOperations(r.config.RunbookOperations),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
+		ConversationTasks:      cloneHostedConversationTaskContext(r.config.ConversationTasks),
 		Actions:                cloneHostedModelActions(r.config.Actions),
 		Budget:                 budget,
 		DependencyResults:      dependencyResults,
@@ -700,6 +733,29 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		ModelMedia:             append(hostedTurnMediaFromCheckpoint(input.Run.Checkpoint), input.ModelMedia...),
 		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
+	}
+	if input.Run.Kind == RunKindAgentWork && input.Run.Context[ConversationTaskContextKey] != nil {
+		// A context hint can only reduce the offered targets. The fork
+		// coordinator still verifies persisted task identity and lineage.
+		eligible := request.EligibleAgents[:0]
+		for _, target := range request.EligibleAgents {
+			if target.ID == input.Run.AssignedAgentID {
+				eligible = append(eligible, target)
+			}
+		}
+		request.EligibleAgents = eligible
+		request.SystemInstructions = append(request.SystemInstructions, "Continue this independent task using the current Agent's existing grants. For parallel work, use proposedFork with the current Agent or omit assignedAgentId to retain it. Do not use proposedDelegation, transfer the task to another Agent, or start another independent task from this worker. Work requiring another Agent must use the existing foreground conversation delegation flow.")
+	}
+	if request.ConversationTasks != nil {
+		if input.Run.Context["voiceCallStarted"] == true {
+			request.ConversationTasks.CanStart = false
+		}
+		if validateHostedTaskAuthority(hostedTaskForegroundSource(input), request.ConversationTasks) != nil {
+			request.ConversationTasks.CanStart = false
+		}
+		if request.ConversationTasks.CanStart {
+			request.SystemInstructions = append(request.SystemInstructions, "conversationTasks is the authoritative durable task context; use its task status rather than historical acknowledgments. When conversationTasks.canStart is true, you may propose independent background work with proposedTask when this foreground conversation needs work to continue after its reply. Put the acknowledgment only in proposedTask.acknowledgment; leave outputSummary, runOutput, and runError empty, do not stream an acknowledgment in progressSummary, and keep nextRunStatus running without a wakeCondition. The kernel admits the task before delivering its acknowledgment. Choose a bounded goal and a stable taskKey for this request. A task worker cannot detach itself again; continue existing tasks through their durable work Runs.")
+		}
 	}
 	if input.Run.Context[DelegationModeContextKey] == "reason" {
 		request.SystemInstructions = append(request.SystemInstructions, "For a writing or reasoning task, put the actual deliverable in runOutput.summary. Once the requested draft or answer is ready, return nextRunStatus completed in that same response. An invitation for optional revisions does not require this Run to stay running or wait; a later user request can start a revision. Do not take another turn just to finalize text already written. Preserve the original request's explicit length and units. completionEvidenceRefs must be empty when no tool action ran: a written draft needs no ActionCall receipt. Never use a Run ID, message ID, or invented value as tool evidence. Return exactly one response object, not separate draft and completion objects.")
@@ -803,7 +859,41 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	if err := applyHostedMinimumChildBudget(&request); err != nil {
 		return HostedTurnRequest{}, err
 	}
+	if request.ConversationTasks != nil && request.ConversationTasks.CanStart && request.Budget != nil &&
+		validateHostedChildBudgetCapacity([]*BudgetPolicy{&request.Budget.MinimumChild}, request.Budget) != nil {
+		request.ConversationTasks.CanStart = false
+	}
 	return request, nil
+}
+
+// Omitted child dimensions inherit the hosted remaining capacity. Explicit
+// dimensions remain visible to the same floor and capacity checks as forks.
+func completeHostedTaskBudget(allocation *BudgetPolicy, budget *HostedRunBudget) *BudgetPolicy {
+	completed := cloneBudgetPolicy(allocation)
+	if completed == nil {
+		completed = &BudgetPolicy{}
+	}
+	if budget == nil {
+		return completed
+	}
+	for _, dimension := range []struct {
+		limit, remaining int64
+		value            *int64
+	}{
+		{budget.Policy.MaxAttempts, budget.Remaining.MaxAttempts, &completed.MaxAttempts},
+		{budget.Policy.MaxTurns, budget.Remaining.MaxTurns, &completed.MaxTurns},
+		{budget.Policy.MaxInputTokens, budget.Remaining.MaxInputTokens, &completed.MaxInputTokens},
+		{budget.Policy.MaxOutputTokens, budget.Remaining.MaxOutputTokens, &completed.MaxOutputTokens},
+		{budget.Policy.MaxTotalTokens, budget.Remaining.MaxTotalTokens, &completed.MaxTotalTokens},
+		{budget.Policy.MaxCostMicros, budget.Remaining.MaxCostMicros, &completed.MaxCostMicros},
+		{budget.Policy.MaxDurationMS, budget.Remaining.MaxDurationMS, &completed.MaxDurationMS},
+		{budget.Policy.MaxActions, budget.Remaining.MaxActions, &completed.MaxActions},
+	} {
+		if dimension.limit > 0 && *dimension.value == 0 {
+			*dimension.value = dimension.remaining
+		}
+	}
+	return completed
 }
 
 func hostedTurnMediaFromCheckpoint(checkpoint map[string]interface{}) []HostedTurnMedia {

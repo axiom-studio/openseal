@@ -13,7 +13,7 @@ func (s *MemoryStore) ClaimNextAgentRun(ctx context.Context, claim AgentRunClaim
 	return decision.Run, nil
 }
 
-func (s *MemoryStore) ClaimNextAgentRunWithDecision(_ context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
+func (s *MemoryStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim AgentRunClaim) (*AgentRunAdmissionDecision, error) {
 	if err := claim.Validate(); err != nil {
 		return nil, err
 	}
@@ -22,6 +22,9 @@ func (s *MemoryStore) ClaimNextAgentRunWithDecision(_ context.Context, claim Age
 	runs := make([]*AgentRun, 0, len(s.agentRuns))
 	for _, run := range s.agentRuns {
 		runs = append(runs, run)
+	}
+	if err := s.prepareConversationTaskAdmissionLocked(ctx, &claim, runs); err != nil {
+		return nil, err
 	}
 	objectives := make(map[string]*Objective, len(s.objectives))
 	for _, objective := range s.objectives {

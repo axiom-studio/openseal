@@ -134,15 +134,9 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		}
 	}
 
-	runs, err := s.listConversationRuns(ctx, conversation)
+	runs, err := s.listConversationRuns(ctx, conversation, req.Viewer)
 	if err != nil {
 		return nil, err
-	}
-	if req.Viewer != nil {
-		runs, err = s.filterVisibleRuns(ctx, req.Scope, conversationID, runs, *req.Viewer)
-		if err != nil {
-			return nil, err
-		}
 	}
 	runDigest, err := conversationRunProjectionDigest(runs)
 	if err != nil {
@@ -265,6 +259,32 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 		}
 		visibleRoots[run.ID] = true
 	}
+	if tasks, ok := s.portfolio.(ConversationTaskStore); ok {
+		for _, run := range runs {
+			if run.Kind != RunKindAgentWork || run.ParentRunID != "" || run.RootRunID != run.ID {
+				continue
+			}
+			task, err := tasks.FindConversationTaskByWorkRunID(ctx, scope, run.ID)
+			if errors.Is(err, ErrConversationTaskNotFound) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			if task == nil {
+				continue
+			}
+			conversation, err := s.conversations.GetConversation(ctx, scope, conversationID)
+			if err != nil {
+				return nil, err
+			}
+			if source, err := s.proveConversationTaskRun(ctx, conversation, task, run, &viewer); err != nil {
+				return nil, err
+			} else if source != nil {
+				visibleRoots[run.ID] = true
+			}
+		}
+	}
 	visible := make([]*AgentRun, 0, len(runs))
 	for _, run := range runs {
 		if visibleRoots[run.ID] || visibleRoots[run.RootRunID] {
@@ -341,19 +361,45 @@ func (s *ConversationChangeService) listRoundsAfter(
 	return all, hasMore, nextRevision, nil
 }
 
-func (s *ConversationChangeService) listConversationRuns(ctx context.Context, conversation *Conversation) ([]*AgentRun, error) {
+func (s *ConversationChangeService) listConversationRuns(ctx context.Context, conversation *Conversation, viewers ...*ConversationViewer) ([]*AgentRun, error) {
 	const pageSize = 500
 	all := make([]*AgentRun, 0)
 	for offset := 0; ; offset += pageSize {
-		page, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-			Scope: conversation.Scope, Kind: RunKindConversation, Owner: &conversation.Owner, Limit: pageSize, Offset: offset,
-			ConcurrencyKey: conversation.ID,
-		})
+		var page []*AgentRun
+		var err error
+		if indexed, ok := s.portfolio.(ConversationForegroundRunsReadStore); ok {
+			page, err = indexed.ListConversationForegroundRuns(ctx, conversation.Scope, conversation.Owner, conversation.ID, pageSize, offset)
+		} else {
+			page, err = s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
+				Scope: conversation.Scope, Kind: RunKindConversation, Owner: &conversation.Owner, Limit: pageSize, Offset: offset,
+				ConcurrencyKey: conversation.ID,
+			})
+		}
 		if err != nil {
 			return nil, err
 		}
 		for _, run := range page {
+			if run == nil {
+				continue
+			}
 			if run.ConcurrencyKey == conversation.ID {
+				all = append(all, run)
+				continue
+			}
+			if run.Scope != conversation.Scope || run.Owner != conversation.Owner || run.Kind != RunKindConversation ||
+				run.Context[conversationRunContextConversationID] != conversation.ID || s.conversations == nil {
+				continue
+			}
+			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+			trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
+			if err != nil {
+				if errors.Is(err, ErrChannelMessageNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			thread := externalConversationThreadRoot(conversation, trigger)
+			if thread != "" && run.Context["threadRootMessageId"] == thread && run.ConcurrencyKey == conversation.ID+":thread:"+thread {
 				all = append(all, run)
 			}
 		}
@@ -390,6 +436,31 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 			}
 		}
 	}
+	var viewer *ConversationViewer
+	if len(viewers) > 0 {
+		viewer = viewers[0]
+	}
+	taskRuns, taskSources, err := s.listConversationTaskRuns(ctx, conversation, viewer)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]*AgentRun, len(all)+len(taskRuns))
+	for _, run := range all {
+		byID[run.ID] = run
+	}
+	for _, run := range taskRuns {
+		byID[run.ID] = run
+	}
+	all = all[:0]
+	for _, run := range byID {
+		all = append(all, run)
+	}
+	if viewer != nil {
+		all, err = s.filterVisibleRuns(ctx, conversation.Scope, conversation.ID, all, *viewer)
+		if err != nil {
+			return nil, err
+		}
+	}
 	sort.Slice(all, func(i, j int) bool {
 		if !all[i].UpdatedAt.Equal(all[j].UpdatedAt) {
 			return all[i].UpdatedAt.After(all[j].UpdatedAt)
@@ -415,13 +486,143 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 		included[run.ID] = true
 	}
 	for _, run := range append([]*AgentRun(nil), result...) {
-		if root := rootByID[run.RootRunID]; root != nil && !included[root.ID] {
+		root := rootByID[run.RootRunID]
+		if source := taskSources[run.ID]; source != nil {
+			root = source
+		}
+		if root != nil && !included[root.ID] {
 			result = append(result, root)
 			included[root.ID] = true
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result, nil
+}
+
+func (s *ConversationChangeService) listConversationTaskRuns(ctx context.Context, conversation *Conversation, viewer *ConversationViewer) ([]*AgentRun, map[string]*AgentRun, error) {
+	sources := make(map[string]*AgentRun)
+	tasks, ok := s.portfolio.(ConversationTaskStore)
+	if !ok || s.conversations == nil {
+		return nil, sources, nil
+	}
+	filter := ConversationTaskFilter{Scope: conversation.Scope, Owner: conversation.Owner, ConversationID: conversation.ID, Limit: conversationRunProjectionLimit}
+	if viewer != nil && viewer.Participant.Type == ConversationParticipantUser {
+		filter.AuthenticatedActor = viewer.Participant
+	}
+	// A recent terminal window must not displace older active work. Both reads
+	// use the exact conversation/actor index, and neither walks task history.
+	activeFilter := filter
+	activeFilter.ActiveOnly = true
+	active, err := tasks.ListConversationTasks(ctx, activeFilter)
+	if err != nil {
+		return nil, nil, err
+	}
+	recent, err := tasks.ListConversationTasks(ctx, filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	runs := make([]*AgentRun, 0, len(active)+len(recent))
+	seen := make(map[string]bool, len(active)+len(recent))
+	for _, result := range append(active, recent...) {
+		if result == nil || result.Task == nil || result.WorkRun == nil || seen[result.WorkRun.ID] {
+			continue
+		}
+		source, err := s.proveConversationTaskRun(ctx, conversation, result.Task, result.WorkRun, viewer)
+		if err != nil {
+			return nil, nil, err
+		}
+		if source == nil {
+			continue
+		}
+		seen[result.WorkRun.ID] = true
+		runs = append(runs, result.WorkRun)
+		sources[result.WorkRun.ID] = source
+	}
+	return runs, sources, nil
+}
+
+type conversationChangeTaskProofStore struct {
+	ConversationStore
+	ConversationTaskStore
+}
+
+// A task is its own run root. Its source, actor, thread, and message visibility
+// must therefore be proven from persisted task identity rather than inferred
+// from a copied conversation/task context on arbitrary work.
+func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context, conversation *Conversation, task *ConversationTask, work *AgentRun, viewer *ConversationViewer) (*AgentRun, error) {
+	if task == nil || work == nil || task.Validate() != nil || task.Scope != conversation.Scope || task.Owner != conversation.Owner ||
+		task.ConversationID != conversation.ID || task.WorkRunID != work.ID || work.Goal != task.Goal ||
+		work.Source != RunSourceChat || work.Context["threadRootMessageId"] != task.ThreadRootID ||
+		viewer != nil && viewer.Participant.Type == ConversationParticipantUser && viewer.Participant != task.AuthenticatedActor {
+		return nil, nil
+	}
+	tasks, ok := s.portfolio.(ConversationTaskStore)
+	if !ok {
+		return nil, nil
+	}
+	proofStore := conversationChangeTaskProofStore{ConversationStore: s.conversations.store, ConversationTaskStore: tasks}
+	workTask, sourceReport, err := conversationTaskForReport(ctx, proofStore, work)
+	if errors.Is(err, ErrInvalidConversationTask) || errors.Is(err, ErrConversationTaskNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if workTask == nil || sourceReport || !sameConversationTask(task, workTask) {
+		return nil, nil
+	}
+	source, err := s.portfolio.GetAgentRun(ctx, task.Scope, task.SourceRunID)
+	if errors.Is(err, ErrRunNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if source == nil || source.Status != AgentRunStatusCompleted || source.ParentRunID != "" || source.RootRunID != source.ID ||
+		source.LastAppliedTurn != task.SourceTurnNumber || validateConversationRun(source) != nil {
+		return nil, nil
+	}
+	sourceTask, sourceReport, err := conversationTaskForReport(ctx, proofStore, source)
+	if errors.Is(err, ErrInvalidConversationTask) || errors.Is(err, ErrConversationTaskNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if sourceTask == nil || !sourceReport || !sameConversationTask(task, sourceTask) {
+		return nil, nil
+	}
+	var message *ChannelMessage
+	if viewer != nil {
+		message, err = s.conversations.GetVisibleChannelMessage(ctx, task.Scope, task.ConversationID, task.SourceMessageID, *viewer)
+	} else {
+		message, err = s.conversations.GetChannelMessage(ctx, task.Scope, task.ConversationID, task.SourceMessageID)
+	}
+	if errors.Is(err, ErrChannelMessageNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if message == nil || message.ID != task.SourceMessageID || message.Scope != task.Scope || message.ConversationID != task.ConversationID {
+		return nil, nil
+	}
+	sourceThread, _ := source.Context["threadRootMessageId"].(string)
+	if sourceThread != externalConversationThreadRoot(conversation, message) {
+		return nil, nil
+	}
+	actor := message.Sender
+	if actor.Type == ConversationParticipantService && message.Initiator != nil {
+		actor = *message.Initiator
+	}
+	thread := message.ThreadRootID
+	if thread == "" {
+		thread = message.ID
+	}
+	if actor != task.AuthenticatedActor || thread != task.ThreadRootID {
+		return nil, nil
+	}
+	return source, nil
 }
 
 func (s *ConversationChangeService) listConversationActivity(ctx context.Context, runs []*AgentRun) ([]ActivityProjection, error) {
