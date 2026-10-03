@@ -185,7 +185,7 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 		if r.Scope.ID != "a" || r.DeploymentID != "agent" {
 			t.Fatal("authority not derived from run")
 		}
-		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "1.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable, Actions: []skill.DiscoveryAction{{Name: "read", Risk: skill.RiskLevelRead}}}}}, nil
+		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "reddit.reader", Version: "2.0.0", Name: "Reddit", Readiness: skill.DiscoveryReadinessBindable, Actions: []skill.DiscoveryAction{{Name: "read", Risk: skill.RiskLevelRead}}}}}, nil
 	})
 	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
 	if err != nil {
@@ -200,7 +200,7 @@ func TestSkillSetupLatestResolvesExactAuthorizedIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := result["setupRequest"].(map[string]interface{})
-	if request["status"] != "pending" {
+	if request["status"] != "pending" || request["skillVersion"] != "2.0.0" {
 		t.Fatal(request)
 	}
 	input.Call.ID = "call-2"
