@@ -1,0 +1,28 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabledManagers": ["gomod", "npm", "cargo", "pip_requirements", "pep621", "dockerfile", "helmv3"],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Source dependency candidates (direct promotion)",
+  "dependencyDashboardHeader": "Passing candidates are tested and advanced directly by the dependency workflow. Do not approve PR creation here; this App has no PR write permission. Held candidates require diagnosis or a new verified source change.",
+  "prCreation": "approval",
+  "automerge": false,
+  "platformAutomerge": false,
+  "configMigration": false,
+  "vulnerabilityAlerts": {"enabled": false},
+  "osvVulnerabilityAlerts": false,
+  "branchConcurrentLimit": 1,
+  "prConcurrentLimit": 1,
+  "prHourlyLimit": 1,
+  "rebaseWhen": "never",
+  "ignoreScripts": true,
+  "ignoreUnstable": true,
+  "respectLatest": true,
+  "rangeStrategy": "auto",
+  "lockFileMaintenance": {"enabled": false},
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {"description": "Stable compatible dependency updates only", "matchUpdateTypes": ["major", "replacement", "rollback", "bump"], "enabled": false},
+    {"description": "Pre-1.0 minor versions require explicit compatibility review", "matchCurrentVersion": "/^v?0\\./", "matchUpdateTypes": ["minor"], "enabled": false},
+    {"description": "Base image minor streams require explicit runtime review", "matchManagers": ["dockerfile"], "matchUpdateTypes": ["minor"], "enabled": false}
+  ]
+}
