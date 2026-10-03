@@ -50,7 +50,7 @@ func (s *MemoryStore) CreateRunDependencyGroup(_ context.Context, record RunDepe
 	if err := s.validateMemoryRunSkillDependenciesLocked(record.SourceRun); err != nil {
 		return nil, err
 	}
-	s.dependencyGroups[groupKey] = cloneRunDependencyGroup(record.Group)
+	s.saveMemoryDependencyGroupLocked(groupKey, record.Group)
 	s.dependencies[groupKey] = make(map[string]*RunDependency, len(record.Dependencies))
 	for _, edge := range record.Dependencies {
 		if s.dependencies[groupKey][edge.ID] != nil {
@@ -142,14 +142,18 @@ func (s *MemoryStore) ResolveRunDependency(_ context.Context, record RunDependen
 	if err != nil || result.Replayed {
 		return result, err
 	}
-	if err := s.validateMemoryRunSkillDependenciesLocked(result.Source); err != nil {
-		return nil, err
+	if result.Source.Revision != s.agentRuns[sourceKey].Revision {
+		if err := s.validateMemoryRunSkillDependenciesLocked(result.Source); err != nil {
+			return nil, err
+		}
 	}
-	s.dependencyGroups[groupKey] = cloneRunDependencyGroup(result.Group)
+	s.saveMemoryDependencyGroupLocked(groupKey, result.Group)
 	for _, edge := range result.Dependencies {
 		s.dependencies[groupKey][edge.ID] = cloneRunDependency(edge)
 	}
-	s.saveMemoryAgentRunLocked(sourceKey, result.Source)
+	if result.Source.Revision != s.agentRuns[sourceKey].Revision {
+		s.saveMemoryAgentRunLocked(sourceKey, result.Source)
+	}
 	persisted := make([]*ActivityEvent, 0, len(result.Events))
 	for _, event := range result.Events {
 		persisted = append(persisted, cloneActivityEvent(appendMemoryActivityLocked(s, event)))

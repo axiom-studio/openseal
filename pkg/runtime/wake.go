@@ -25,7 +25,8 @@ type WokenRun struct {
 }
 
 type WakeResult struct {
-	Runs []WokenRun
+	Runs       []WokenRun
+	NextWakeAt *time.Time
 }
 
 type AgentRunWakeService struct {
@@ -114,7 +115,14 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at
 	result := maintenance
 	for _, run := range runs {
 		condition := run.WakeCondition
-		if condition == nil || condition.Type != "timer" || condition.WakeAt == nil || at.Before(*condition.WakeAt) {
+		if condition == nil || condition.Type != "timer" || condition.WakeAt == nil {
+			continue
+		}
+		if at.Before(*condition.WakeAt) {
+			if result.NextWakeAt == nil || condition.WakeAt.Before(*result.NextWakeAt) {
+				next := *condition.WakeAt
+				result.NextWakeAt = &next
+			}
 			continue
 		}
 		signal := WakeSignal{

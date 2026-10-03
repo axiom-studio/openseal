@@ -62,6 +62,7 @@ type MemoryStore struct {
 	requests                            map[string]*AgentRequest
 	requestKeys                         map[string]string
 	dependencyGroups                    map[string]*RunDependencyGroup
+	dependencyWaitingGroups             map[Scope]*memoryOrderedIndexNode[string]
 	dependencyGroupKeys                 map[string]string
 	dependencies                        map[string]map[string]*RunDependency
 	artifacts                           map[string]map[int64]*Artifact

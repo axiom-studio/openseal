@@ -29,6 +29,8 @@ func migrateRunDependencies(db *sql.DB) error {
 			ON run_dependency_groups(scope_kind, scope_id, idempotency_key) WHERE idempotency_key <> '';
 		CREATE INDEX IF NOT EXISTS idx_run_dependency_groups_source
 			ON run_dependency_groups(scope_kind, scope_id, source_run_id, status, updated_at DESC);
+		CREATE INDEX IF NOT EXISTS idx_run_dependency_groups_waiting_page
+			ON run_dependency_groups(scope_kind, scope_id, id) WHERE status = 'waiting';
 
 		CREATE TABLE IF NOT EXISTS run_dependencies (
 			scope_kind TEXT NOT NULL,
@@ -218,24 +220,9 @@ func (s *SQLiteStore) resolveSQLiteDependencyConn(ctx context.Context, conn *sql
 	if err != nil || result.Replayed {
 		return result, err
 	}
-	if err := updateSQLiteDependency(ctx, conn, result.Dependency, record.ExpectedDependencyRevision); err != nil {
+	if err := persistSQLiteDependencyResult(ctx, conn, group, edges, source, result); err != nil {
 		return nil, err
 	}
-	if err := updateSQLiteDependencyGroup(ctx, conn, result.Group, group.Revision); err != nil {
-		return nil, err
-	}
-	if err := updateSQLiteAgentRunConn(ctx, conn, result.Source, source.Revision); err != nil {
-		return nil, err
-	}
-	persisted := make([]*ActivityEvent, 0, len(result.Events))
-	for _, event := range result.Events {
-		stored, err := insertSQLiteActivityConn(ctx, conn, event)
-		if err != nil {
-			return nil, err
-		}
-		persisted = append(persisted, stored)
-	}
-	result.Events = persisted
 	return result, nil
 }
 

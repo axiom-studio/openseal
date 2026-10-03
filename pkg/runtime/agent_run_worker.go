@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -140,6 +141,7 @@ type AgentRunWorkerPool struct {
 	runCommands          *RunCommandService
 	lastFinalizationScan time.Time
 	finalizationOffset   int
+	dependencyCursor     string
 	forks                *RunForkCoordinator
 	collaboration        *CollaborationService
 	requestInbox         *AgentRequestInboxReconciler
@@ -147,12 +149,13 @@ type AgentRunWorkerPool struct {
 	resolver             TurnRunnerResolver
 	logger               *zap.SugaredLogger
 	wake                 chan struct{}
+	maintenanceWake      *workerPollSignal
 	poolID               string
 	cancel               context.CancelFunc
 	wg                   sync.WaitGroup
 	startOnce            sync.Once
 	stopOnce             sync.Once
-	limiter              *WorkerLimiter
+	limiter              atomic.Pointer[WorkerLimiter]
 }
 
 // SetActionCoordinator enables atomic materialization of one proposal-only
@@ -170,7 +173,7 @@ func (p *AgentRunWorkerPool) SetRunTerminalFinalizer(finalizer RunTerminalFinali
 }
 
 func (p *AgentRunWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
-	p.limiter = limiter
+	p.limiter.Store(limiter)
 }
 
 func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig) (*AgentRunWorkerPool, error) {
@@ -187,7 +190,7 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 		config: config, scheduler: NewAgentRunScheduler(store), portfolio: store, coordinator: NewTurnCoordinator(store, store, store),
 		wakeService: NewAgentRunWakeService(store, store), activity: NewRunActivityService(store, store),
 		runCommands: NewRunCommandService(store),
-		resolver:    resolver, logger: logger, wake: make(chan struct{}, 1),
+		resolver:    resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: newWorkerPollSignal(),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}
 	if forkStore, ok := store.(RunForkStore); ok {
@@ -229,9 +232,20 @@ func (p *AgentRunWorkerPool) Stop() {
 }
 
 func (p *AgentRunWorkerPool) Wake() {
+	p.maintenanceWake.notify()
+	p.requestClaim()
+}
+
+func (p *AgentRunWorkerPool) requestClaim() {
 	select {
 	case p.wake <- struct{}{}:
 	default:
+	}
+}
+
+func (p *AgentRunWorkerPool) WakeScope(scope Scope) {
+	if scope == p.config.Scope {
+		p.Wake()
 	}
 }
 
@@ -243,7 +257,7 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			return
 		case <-p.wake:
 		}
-		release, acquireErr := p.limiter.acquire(ctx)
+		release, acquireErr := p.limiter.Load().acquire(ctx)
 		if acquireErr != nil {
 			return
 		}
@@ -262,8 +276,9 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			// Hand the next claim opportunity to another worker before this one
 			// executes. This drains runnable work up to the configured concurrency
 			// without making every idle worker poll durable storage independently.
-			p.Wake()
+			p.requestClaim()
 			p.executeClaim(ctx, workerID, run)
+			p.maintenanceWake.notify()
 		}
 		release()
 	}
@@ -736,8 +751,11 @@ func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun
 	if p.forks == nil || run == nil || run.ParentRunID == "" || run.Checkpoint["forkChild"] == nil {
 		return
 	}
-	if _, err := p.forks.CompleteChild(ctx, run, ActivityActor{Type: "worker", ID: p.poolID}); err != nil && !errors.Is(err, ErrDependencyConflict) {
+	result, err := p.forks.CompleteChild(ctx, run, ActivityActor{Type: "worker", ID: p.poolID})
+	if err != nil && !errors.Is(err, ErrDependencyConflict) {
 		p.logger.Warnw("failed to resolve terminal fork child", "runId", run.ID, "error", err)
+	} else if result != nil && !result.Replayed && result.Evaluation.Wake {
+		p.Wake()
 	}
 }
 
@@ -1132,29 +1150,42 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 	consecutiveFailures := 0
 	seed := p.poolID + "-timer-wake"
 	for {
-		if !waitForWorkerPoll(ctx, nil, workerPollDelay(p.config.PollInterval, consecutiveFailures, seed)) {
-			return
-		}
-		release, acquireErr := p.limiter.acquire(ctx)
+		// Capture before reconciliation so a committed enqueue during the scan
+		// remains visible when this loop subsequently waits.
+		_, observedWake := p.maintenanceWake.snapshot()
+		release, acquireErr := p.limiter.Load().acquire(ctx)
 		if acquireErr != nil {
 			return
 		}
-		_, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, time.Now())
+		result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, time.Now())
 		if err != nil {
 			consecutiveFailures++
 			release()
 			p.logger.Warnw("failed to wake due agent runs", "error", err)
-			continue
+		} else {
+			consecutiveFailures = 0
+			// One timer per scope probes for work created by another process.
+			// Internal claim hints do not retrigger the maintenance scan.
+			p.requestClaim()
+			p.reconcileAgentRequestInbox(ctx)
+			p.reconcileForkChildren(ctx)
+			p.reconcileTerminalRunFinalizers(ctx)
+			release()
 		}
-		consecutiveFailures = 0
-		// One timer per scope probes for work created by another process. Once a
-		// worker claims a Run it fans the wake token out, retaining parallelism
-		// while coalescing the idle database polling for all other workers.
-		p.Wake()
-		p.reconcileAgentRequestInbox(ctx)
-		p.reconcileForkChildren(ctx)
-		p.reconcileTerminalRunFinalizers(ctx)
-		release()
+		delay := workerPollDelay(p.config.PollInterval, consecutiveFailures, seed)
+		if err == nil && result != nil && result.NextWakeAt != nil {
+			if due := time.Until(*result.NextWakeAt); due < delay {
+				delay = max(due, 0)
+			}
+		}
+		if err != nil {
+			// Timer-store failures retain their existing backoff even if another
+			// worker publishes a latency hint while the store is unavailable.
+			observedWake = nil
+		}
+		if !waitForWorkerPoll(ctx, observedWake, delay) {
+			return
+		}
 	}
 }
 
@@ -1187,6 +1218,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 			"runKind", p.config.Kind, "candidates", len(newest))
 	}
 	for _, run := range newest {
+		p.resolveForkChild(ctx, run)
 		p.resolveCollaborationChild(ctx, run)
 		p.finalizeTerminalRun(ctx, run)
 	}
@@ -1208,6 +1240,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		return
 	}
 	for _, run := range historical {
+		p.resolveForkChild(ctx, run)
 		p.resolveCollaborationChild(ctx, run)
 		p.finalizeTerminalRun(ctx, run)
 	}
@@ -1236,6 +1269,35 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) {
 	if p.forks == nil {
 		return
 	}
+	if _, ok := p.forks.store.(RunDependencyReconciliationStore); ok {
+		const pageSize = 32
+		work, err := NewDependencyCoordinator(p.forks.store).ListWaitingRunDependencyGroups(ctx, p.config.Scope, p.dependencyCursor, pageSize)
+		if err != nil {
+			p.logger.Warnw("failed to list waiting dependency groups", "error", err)
+			return
+		}
+		for _, candidate := range work {
+			p.dependencyCursor = candidate.GroupID
+			if !candidate.Ready {
+				continue
+			}
+			result, err := p.forks.ReconcileRunDependencyGroup(ctx, ReconcileRunDependencyGroupRequest{
+				Scope: candidate.Scope, GroupID: candidate.GroupID, ExpectedGroupRevision: candidate.GroupRevision,
+				ExpectedSourceRevision: candidate.SourceRevision, Actor: ActivityActor{Type: "worker", ID: p.poolID}, Visibility: ActivityVisibilityScope,
+			})
+			if err != nil && !errors.Is(err, ErrRevisionConflict) {
+				p.logger.Warnw("failed to reconcile waiting dependency group", "groupId", candidate.GroupID, "error", err)
+			} else if result != nil && !result.Replayed && result.Evaluation.Wake {
+				p.Wake()
+			}
+		}
+		if len(work) < pageSize {
+			p.dependencyCursor = ""
+		}
+		return
+	}
+	// Custom stores without the optional indexed contract retain their existing
+	// terminal-child recovery behavior.
 	runs, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: p.config.Scope, Statuses: []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled}, Limit: 100,
 	})

@@ -200,6 +200,14 @@ func (s *AgentRunWorkerSupervisor) Wake() {
 	}
 }
 
+func (s *AgentRunWorkerSupervisor) WakeScope(scope Scope) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if pool := s.pools[workerScopeKey(scope)]; pool != nil {
+		pool.Wake()
+	}
+}
+
 func (s *AgentRunWorkerSupervisor) ScopeCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
