@@ -44,6 +44,7 @@ type PostChannelMessageRequest struct {
 	ExpectedRevision    int64
 	Sender              ConversationParticipant
 	SenderDisplayName   string
+	Initiator           *ConversationParticipant
 	ExternalSource      *ExternalMessageSource
 	Intent              ConversationMessageIntent
 	Content             string
@@ -355,6 +356,7 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	message := &ChannelMessage{
 		ID: id, Scope: req.Scope, ConversationID: conversation.ID, Sequence: conversation.LastSequence + 1,
 		Sender: req.Sender, SenderDisplayName: strings.TrimSpace(req.SenderDisplayName),
+		Initiator:      cloneConversationParticipant(req.Initiator),
 		ExternalSource: cloneExternalMessageSource(req.ExternalSource),
 		Intent:         req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
 		ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), BroadcastToChannel: req.BroadcastToChannel,
@@ -769,6 +771,7 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 	}
 	return existing != nil && existing.Scope == req.Scope && existing.ConversationID == strings.TrimSpace(req.ConversationID) &&
 		existing.Sender == req.Sender && existing.SenderDisplayName == strings.TrimSpace(req.SenderDisplayName) &&
+		reflect.DeepEqual(existing.Initiator, req.Initiator) &&
 		reflect.DeepEqual(existing.ExternalSource, req.ExternalSource) &&
 		existing.Intent == req.Intent && existing.Content == strings.TrimSpace(req.Content) &&
 		existing.Audience.Kind == req.Audience.Kind && reflect.DeepEqual(existing.Audience.Participants, req.Audience.Participants) &&
@@ -818,11 +821,20 @@ func cloneChannelMessage(in *ChannelMessage) *ChannelMessage {
 		return nil
 	}
 	out := *in
+	out.Initiator = cloneConversationParticipant(in.Initiator)
 	out.ExternalSource = cloneExternalMessageSource(in.ExternalSource)
 	out.Audience.Participants = cloneParticipants(in.Audience.Participants)
 	out.Audience.Roles = append([]string(nil), in.Audience.Roles...)
 	out.Mentions = cloneParticipants(in.Mentions)
 	out.References = cloneConversationReferences(in.References)
+	return &out
+}
+
+func cloneConversationParticipant(in *ConversationParticipant) *ConversationParticipant {
+	if in == nil {
+		return nil
+	}
+	out := *in
 	return &out
 }
 

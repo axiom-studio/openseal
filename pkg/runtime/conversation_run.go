@@ -305,6 +305,9 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 	if message.ResponseMode != "" {
 		request.Context["responseMode"] = message.ResponseMode
 	}
+	if voiceCallStartedMessage(message) {
+		request.Context["voiceCallStarted"] = true
+	}
 	return request
 }
 

@@ -1516,6 +1516,8 @@ var (
 	NormalizeCallbackAdapter     = capability.NormalizeCallbackAdapter
 )
 
+var AppendParticipationResponseChannelInstructions = runtime.AppendParticipationResponseChannelInstructions
+
 var (
 	NewHostedTurnRunner                    = runtime.NewHostedTurnRunner
 	NewTurnHostFailure                     = runtime.NewTurnHostFailure
@@ -2083,10 +2085,11 @@ const (
 	ConversationStatusActive   = runtime.ConversationStatusActive
 	ConversationStatusArchived = runtime.ConversationStatusArchived
 
-	ConversationParticipantUser    = runtime.ConversationParticipantUser
-	ConversationParticipantAgent   = runtime.ConversationParticipantAgent
-	ConversationParticipantTeam    = runtime.ConversationParticipantTeam
-	ConversationParticipantService = runtime.ConversationParticipantService
+	ConversationParticipantUser       = runtime.ConversationParticipantUser
+	ConversationParticipantAgent      = runtime.ConversationParticipantAgent
+	ConversationParticipantTeam       = runtime.ConversationParticipantTeam
+	ConversationParticipantService    = runtime.ConversationParticipantService
+	VoiceCallCoordinatorParticipantID = runtime.VoiceCallCoordinatorParticipantID
 
 	MessageIntentQuestion        = runtime.MessageIntentQuestion
 	MessageIntentAnswer          = runtime.MessageIntentAnswer
