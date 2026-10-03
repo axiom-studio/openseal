@@ -93,6 +93,9 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		for _, item := range page.Items {
 			if item.ID == a.SkillID && (a.SkillVersion == "latest" || item.Version == a.SkillVersion) && item.SourceIdentity == a.SourceIdentity {
 				if a.SkillVersion == "latest" {
+					if a.Kind != "install" && item.Readiness != skill.DiscoveryReadinessBindable && !skillCandidateNeedsConfigurationSetup(&item) {
+						continue
+					}
 					if !semver.IsValid("v" + strings.TrimPrefix(item.Version, "v")) {
 						return nil, errors.New("latest Skill selection requires valid versions")
 					}
