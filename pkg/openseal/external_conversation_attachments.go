@@ -1,0 +1,10 @@
+package openseal
+
+import "github.com/axiom-studio/openseal/pkg/runtime"
+
+type ExternalConversationAttachment = runtime.ExternalConversationAttachment
+type ExternalConversationAttachmentContent = runtime.ExternalConversationAttachmentContent
+type ExternalConversationAttachmentHost = runtime.ExternalConversationAttachmentHost
+type ExternalConversationAttachmentHostRequest = runtime.ExternalConversationAttachmentHostRequest
+
+const MaximumExternalConversationAttachmentBytes = runtime.MaximumExternalConversationAttachmentBytes
