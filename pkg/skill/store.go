@@ -3,6 +3,8 @@ package skill
 import (
 	"context"
 	"errors"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 var (
@@ -23,4 +25,14 @@ type CatalogStore interface {
 	ListSkillDefinitionVariants(context.Context, string, string) ([]*Definition, error)
 	SaveSkillBinding(context.Context, *Binding, int64) error
 	ListSkillBindings(context.Context, ScopeReference, string) ([]*Binding, error)
+}
+
+// CatalogDefinitionIdentityStore optionally projects the current immutable
+// definition keys without hydrating their payloads. It must return every exact
+// ID/version/source variant for the requested ID and version on each call;
+// source-less builtins have an empty SourceIdentity. Definitions remain global
+// capabilities: this projection does not replace scoped binding authorization.
+// Stores that omit this interface retain full definition loading and validation.
+type CatalogDefinitionIdentityStore interface {
+	ListSkillDefinitionIdentities(context.Context, string, string) ([]capability.SkillIdentity, error)
 }
