@@ -1,0 +1,199 @@
+name: Tested source dependency updates
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+  push:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+# One orchestration at a time. Renovate uses lease-fenced pushes only inside a
+# checked-unused run/attempt candidate namespace. Default promotion never forces.
+concurrency:
+  group: source-dependencies-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: Prepare compatible candidate
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    outputs:
+      baseline: ${{ steps.candidate.outputs.baseline }}
+      candidate: ${{ steps.candidate.outputs.candidate }}
+      branch: ${{ steps.candidate.outputs.branch }}
+      canonicalVendor: ${{ steps.candidate.outputs.canonicalVendor }}
+    steps:
+      - name: Fetch exact trusted workflow baseline
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git fetch --no-tags origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Verify and install official toolchains
+        run: python3 .github/dependency-updates/driver.py tools
+      - name: Read-only internal module access
+        id: read
+        env:
+          DEPENDENCY_UPDATE_READ_APP_ID: ${{ vars.DEPENDENCY_UPDATE_READ_APP_ID }}
+          DEPENDENCY_UPDATE_READ_APP_PRIVATE_KEY: ${{ secrets.DEPENDENCY_UPDATE_READ_APP_PRIVATE_KEY }}
+        run: python3 .github/dependency-updates/driver.py token-read
+      - name: Restricted candidate and dashboard token (no PR write)
+        id: writer
+        env:
+          DEPENDENCY_UPDATE_APP_ID: ${{ vars.DEPENDENCY_UPDATE_APP_ID }}
+          DEPENDENCY_UPDATE_APP_PRIVATE_KEY: ${{ secrets.DEPENDENCY_UPDATE_APP_PRIVATE_KEY }}
+        run: python3 .github/dependency-updates/driver.py token-candidate
+      - name: Validate pinned Renovate configuration and generate one candidate
+        id: candidate
+        env:
+          RENOVATE_TOKEN: ${{ steps.writer.outputs.token }}
+          DEPENDENCY_READ_TOKEN: ${{ steps.read.outputs.token }}
+        run: |
+          set -euo pipefail
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$DEPENDENCY_READ_TOKEN" | base64 -w0)"
+          python3 .github/dependency-updates/driver.py generate
+
+  validate:
+    name: Validate exact candidate
+    needs: generate
+    if: needs.generate.outputs.candidate != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Fetch trusted orchestration and exact candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASELINE: ${{ needs.generate.outputs.baseline }}
+          CANDIDATE: ${{ needs.generate.outputs.candidate }}
+          BRANCH: ${{ needs.generate.outputs.branch }}
+          CANONICAL_VENDOR: ${{ needs.generate.outputs.canonicalVendor }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git fetch --no-tags origin "$BASELINE" "$CANDIDATE"
+          git checkout -q --detach "$BASELINE"
+          cp -rf .github/dependency-updates "$RUNNER_TEMP/trusted-dependency-updates"
+          python3 "$RUNNER_TEMP/trusted-dependency-updates/driver.py" inspect --baseline "$BASELINE" --candidate "$CANDIDATE" --branch "$BRANCH" --canonical-vendor "$CANONICAL_VENDOR" --receipt "$RUNNER_TEMP/receipt.json"
+          git checkout -q --detach "$CANDIDATE"
+      - name: Verify and install candidate official toolchains
+        run: python3 "$RUNNER_TEMP/trusted-dependency-updates/driver.py" tools
+      - name: Offline orchestration safety fixtures
+        run: python3 -B "$RUNNER_TEMP/trusted-dependency-updates/test_driver.py"
+      - name: Read-only internal module token
+        id: read
+        env:
+          DEPENDENCY_UPDATE_READ_APP_ID: ${{ vars.DEPENDENCY_UPDATE_READ_APP_ID }}
+          DEPENDENCY_UPDATE_READ_APP_PRIVATE_KEY: ${{ secrets.DEPENDENCY_UPDATE_READ_APP_PRIVATE_KEY }}
+        run: python3 "$RUNNER_TEMP/trusted-dependency-updates/driver.py" token-read
+      - name: Required tests and real builds (no write credentials)
+        env:
+          DEPENDENCY_READ_TOKEN: ${{ steps.read.outputs.token }}
+          BASELINE: ${{ needs.generate.outputs.baseline }}
+          CANDIDATE: ${{ needs.generate.outputs.candidate }}
+          BRANCH: ${{ needs.generate.outputs.branch }}
+          CANONICAL_VENDOR: ${{ needs.generate.outputs.canonicalVendor }}
+        run: |
+          set -euo pipefail
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$DEPENDENCY_READ_TOKEN" | base64 -w0)"
+          python3 "$RUNNER_TEMP/trusted-dependency-updates/driver.py" verify-candidate-vendor --baseline "$BASELINE" --candidate "$CANDIDATE" --branch "$BRANCH" --canonical-vendor "$CANONICAL_VENDOR"
+          timeout --signal=TERM --kill-after=30s 50m bash "$RUNNER_TEMP/trusted-dependency-updates/checks.sh"
+      - name: Require the tested checkout and all inputs to remain exact
+        env:
+          CANDIDATE: ${{ needs.generate.outputs.candidate }}
+        run: python3 "$RUNNER_TEMP/trusted-dependency-updates/driver.py" clean --candidate "$CANDIDATE"
+
+  promote:
+    name: Advance tested default without a PR
+    needs: [generate, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Fresh trusted checkout, authoritative evidence and non-force advancement
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          BASELINE: ${{ needs.generate.outputs.baseline }}
+          CANDIDATE: ${{ needs.generate.outputs.candidate }}
+          BRANCH: ${{ needs.generate.outputs.branch }}
+          CANONICAL_VENDOR: ${{ needs.generate.outputs.canonicalVendor }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git fetch --no-tags origin "$BASELINE" "$CANDIDATE"
+          git checkout -q --detach "$BASELINE"
+          python3 .github/dependency-updates/driver.py promote --baseline "$BASELINE" --candidate "$CANDIDATE" --branch "$BRANCH" --canonical-vendor "$CANONICAL_VENDOR" --receipt "$RUNNER_TEMP/promoted-receipt.json"
+      - name: Clean only this run's unchanged promoted candidate
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          python3 .github/dependency-updates/driver.py cleanup --receipt "$RUNNER_TEMP/promoted-receipt.json"
+
+  default-ci:
+    name: Check direct default branch pushes
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - name: Fetch exact pushed source (read-only)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init -q .
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)"
+          git fetch --no-tags origin "$GITHUB_SHA"
+          git checkout -q --detach FETCH_HEAD
+      - name: Verify and install official toolchains
+        run: python3 .github/dependency-updates/driver.py tools
+      - name: Offline orchestration safety fixtures
+        run: python3 -B .github/dependency-updates/test_driver.py
+      - name: Existing tests and real builds
+        env:
+          DEPENDENCY_UPDATE_READ_APP_ID: ${{ vars.DEPENDENCY_UPDATE_READ_APP_ID }}
+          DEPENDENCY_UPDATE_READ_APP_PRIVATE_KEY: ${{ secrets.DEPENDENCY_UPDATE_READ_APP_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DEPENDENCY_UPDATE_READ_APP_ID" ] && [ -n "$DEPENDENCY_UPDATE_READ_APP_PRIVATE_KEY" ]; then
+            dependency_token_output="$RUNNER_TEMP/dependency-read-token"
+            GITHUB_OUTPUT="$dependency_token_output" python3 .github/dependency-updates/driver.py token-read
+            dependency_read_token="$(sed -n 's/^token=//p' "$dependency_token_output")"
+            rm -f "$dependency_token_output"
+            export GIT_CONFIG_COUNT=1
+            export GIT_CONFIG_KEY_0=http.https://github.com/.extraHeader
+            export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$dependency_read_token" | base64 -w0)"
+          fi
+          unset DEPENDENCY_UPDATE_READ_APP_ID DEPENDENCY_UPDATE_READ_APP_PRIVATE_KEY dependency_read_token
+          timeout --signal=TERM --kill-after=30s 50m bash .github/dependency-updates/checks.sh
