@@ -392,9 +392,13 @@ func (g *RunDependencyGroup) Validate() error {
 		if g.SealedAt == nil || g.ResolvedAt != nil || g.WakeSignalID != "" {
 			return fmt.Errorf("%w: waiting dependency group must be sealed but unresolved", ErrInvalidRunDependency)
 		}
-	case RunDependencyGroupSatisfied, RunDependencyGroupFailed, RunDependencyGroupCanceled:
+	case RunDependencyGroupSatisfied, RunDependencyGroupFailed:
 		if g.SealedAt == nil || g.ResolvedAt == nil || strings.TrimSpace(g.WakeSignalID) == "" {
 			return fmt.Errorf("%w: terminal dependency group requires seal, resolution, and wake signal", ErrInvalidRunDependency)
+		}
+	case RunDependencyGroupCanceled:
+		if g.SealedAt == nil || g.ResolvedAt == nil {
+			return fmt.Errorf("%w: canceled dependency group requires seal and resolution", ErrInvalidRunDependency)
 		}
 	default:
 		return fmt.Errorf("%w: invalid dependency group status %q", ErrInvalidRunDependency, g.Status)
@@ -648,10 +652,22 @@ func applyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 	if current == nil {
 		return nil, ErrRunDependencyNotFound
 	}
+	if group.Status == RunDependencyGroupCanceled && isTerminalAgentRunStatus(source.Status) {
+		evaluation, err := EvaluateRunDependencies(group, clonedEdges)
+		return &RunDependencyResult{Group: cloneRunDependencyGroup(group), Dependency: cloneRunDependency(current), Dependencies: clonedEdges,
+			Source: cloneAgentRun(source), Evaluation: evaluation, Replayed: true}, err
+	}
 	if current.State == RunDependencyStateSatisfied || current.State == RunDependencyStateFailed || current.State == RunDependencyStateCanceled {
 		if current.State != record.State || !reflect.DeepEqual(current.Result, record.Result) ||
 			!reflect.DeepEqual(current.Artifacts, record.Artifacts) || current.Error != record.Error {
 			return nil, ErrDependencyConflict
+		}
+		if group.Status == RunDependencyGroupWaiting && isTerminalAgentRunStatus(source.Status) {
+			result, err := retireDependencyGroup(group, clonedEdges, source, record.Actor, record.Visibility, record.OccurredAt)
+			if result != nil {
+				result.Dependency = cloneRunDependency(current)
+			}
+			return result, err
 		}
 		evaluation, err := EvaluateRunDependencies(group, clonedEdges)
 		return &RunDependencyResult{
@@ -661,6 +677,18 @@ func applyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 	}
 	if current.Revision != record.ExpectedDependencyRevision {
 		return nil, ErrRevisionConflict
+	}
+	if group.Status == RunDependencyGroupWaiting && isTerminalAgentRunStatus(source.Status) {
+		result, err := retireDependencyGroup(group, clonedEdges, source, record.Actor, record.Visibility, record.OccurredAt)
+		if result != nil {
+			for _, edge := range result.Dependencies {
+				if edge.ID == current.ID {
+					result.Dependency = cloneRunDependency(edge)
+					break
+				}
+			}
+		}
+		return result, err
 	}
 	current.State = record.State
 	current.Result = cloneMap(record.Result)
@@ -686,17 +714,26 @@ func applyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 		updatedGroup.WakeSignalID = fmt.Sprintf("dependency-group:%s:%d", group.ID, updatedGroup.Revision)
 	}
 	updatedSource := cloneAgentRun(source)
+	paused := false
 	if group.Status == RunDependencyGroupWaiting {
-		if source.Status != AgentRunStatusWaitingForDependency || source.WakeCondition == nil ||
-			source.WakeCondition.Type != "run_dependencies" || source.WakeCondition.Reference != group.ID {
+		waiting, sourcePaused := sourceWaitsForDependencyGroup(source, group.ID)
+		if !waiting {
 			return nil, fmt.Errorf("%w: source run is not waiting on dependency group %s", ErrInvalidRunTransition, group.ID)
 		}
+		paused = sourcePaused
 	}
-	updatedSource.Output = dependencyGroupOutput(updatedSource.Output, updatedGroup, current, evaluation)
-	updatedSource.Revision++
-	updatedSource.UpdatedAt = record.OccurredAt
-	if evaluation.Wake {
-		updatedSource.Status = AgentRunStatusQueued
+	if !isTerminalAgentRunStatus(source.Status) {
+		updatedSource.Output = dependencyGroupOutput(updatedSource.Output, updatedGroup, current, evaluation)
+		updatedSource.Revision++
+		updatedSource.UpdatedAt = record.OccurredAt
+	}
+	if evaluation.Wake && !isTerminalAgentRunStatus(source.Status) {
+		if paused {
+			updatedSource.PausedFrom = AgentRunStatusQueued
+			updatedSource.PausedWakeCondition = nil
+		} else {
+			updatedSource.Status = AgentRunStatusQueued
+		}
 		updatedSource.AvailableAt = record.OccurredAt
 		updatedSource.QueueEnteredAt = record.OccurredAt
 		updatedSource.WakeCondition = nil
@@ -714,6 +751,9 @@ func applyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 	events := []*ActivityEvent{edgeEvent}
 	if evaluation.Wake {
 		events = append(events, dependencyGroupResolvedEvent(updatedSource, updatedGroup, evaluation, record.Actor, record.Visibility, record.OccurredAt))
+	}
+	if paused || isTerminalAgentRunStatus(source.Status) {
+		evaluation.Wake = false
 	}
 	return &RunDependencyResult{
 		Group: updatedGroup, Dependency: cloneRunDependency(current), Dependencies: clonedEdges,
