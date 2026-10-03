@@ -270,6 +270,9 @@ func (s *PostgresStore) FindChannelMessageByIdempotencyKey(ctx context.Context, 
 }
 
 func (s *PostgresStore) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {
+	if err := validateChannelMessageViewFilter(filter); err != nil {
+		return nil, err
+	}
 	if err := filter.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -292,6 +295,9 @@ func (s *PostgresStore) ListChannelMessages(ctx context.Context, filter ChannelM
 		query += fmt.Sprintf(` AND (thread_root_id = $%d OR id = $%d)`, placeholder, placeholder)
 		args = append(args, filter.ThreadRootID)
 		placeholder++
+	}
+	if filter.ChannelTimeline {
+		query += ` AND (thread_root_id = '' OR payload->>'broadcastToChannel' = 'true')`
 	}
 	if len(filter.Intents) > 0 {
 		intents := make([]string, len(filter.Intents))
