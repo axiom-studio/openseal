@@ -713,14 +713,53 @@ func (c *Catalog) definitionFor(ctx context.Context, id, version, sourceIdentity
 			return cached, nil
 		}
 	}
+	var probedIdentity *capability.SkillIdentity
+	if sourceIdentity == "" {
+		if store, ok := c.store.(CatalogDefinitionIdentityStore); ok {
+			identities, err := store.ListSkillDefinitionIdentities(ctx, id, version)
+			if err != nil {
+				return nil, err
+			}
+			for _, identity := range identities {
+				if identity.ID != id || identity.Version != version || identity.SourceIdentity != strings.TrimSpace(identity.SourceIdentity) {
+					return nil, errors.New("stored skill definition identity does not match its exact lookup")
+				}
+				if err := validateSourceIdentity(identity.SourceIdentity); err != nil {
+					return nil, fmt.Errorf("stored skill definition identity is invalid: %w", err)
+				}
+			}
+			if len(identities) == 0 {
+				return nil, nil
+			}
+			if len(identities) > 1 {
+				// Even duplicate metadata rows cannot prove a unique variant.
+				return nil, ErrDefinitionAmbiguous
+			}
+			probedIdentity = &identities[0]
+			if cached := c.cachedDefinition(id, version, probedIdentity.SourceIdentity); cached != nil {
+				return cached, nil
+			}
+		}
+	}
 	definitions, err := c.store.ListSkillDefinitionVariants(ctx, id, version)
 	if err != nil {
 		return nil, err
+	}
+	if probedIdentity != nil {
+		if len(definitions) > 1 {
+			return nil, ErrDefinitionAmbiguous
+		}
+		if len(definitions) != 1 || definitions[0] == nil || definitions[0].ID != id || definitions[0].Version != version || DefinitionSourceIdentity(definitions[0]) != probedIdentity.SourceIdentity {
+			return nil, errors.New("stored skill definition payload does not match its live identity projection")
+		}
 	}
 	validated := make([]*Definition, 0, len(definitions))
 	for _, definition := range definitions {
 		if definition == nil {
 			continue
+		}
+		if definition.ID != id || definition.Version != version {
+			return nil, errors.New("stored skill definition does not match its exact lookup")
 		}
 		identity := DefinitionSourceIdentity(definition)
 		if cached := c.cachedDefinition(id, version, identity); cached != nil {
