@@ -476,16 +476,21 @@ type NormalizedExternalConversationEvent struct {
 	ExternalConversationID string                           `json:"externalConversationId"`
 	ExternalThreadID       string                           `json:"externalThreadId,omitempty"`
 	ExternalMessageID      string                           `json:"externalMessageId,omitempty"`
-	ExternalParticipantID  string                           `json:"externalParticipantId,omitempty"`
-	ParticipantDisplayName string                           `json:"participantDisplayName,omitempty"`
-	ParticipantIsBot       bool                             `json:"participantIsBot,omitempty"`
-	Text                   string                           `json:"text,omitempty"`
-	MentionsEndpoint       bool                             `json:"mentionsEndpoint,omitempty"`
-	Direct                 bool                             `json:"direct,omitempty"`
-	OrderingKey            string                           `json:"orderingKey"`
-	Cursor                 string                           `json:"cursor,omitempty"`
-	OccurredAt             time.Time                        `json:"occurredAt"`
-	Attributes             map[string]interface{}           `json:"attributes,omitempty"`
+	// ReplyToExternalMessageID identifies an immediate provider parent using the
+	// same endpoint-scoped external ID contract as message mappings. It links a
+	// new opaque provider thread alias to an existing canonical root; explicit
+	// provider topics can omit it to retain their independent thread identity.
+	ReplyToExternalMessageID string                 `json:"replyToExternalMessageId,omitempty"`
+	ExternalParticipantID    string                 `json:"externalParticipantId,omitempty"`
+	ParticipantDisplayName   string                 `json:"participantDisplayName,omitempty"`
+	ParticipantIsBot         bool                   `json:"participantIsBot,omitempty"`
+	Text                     string                 `json:"text,omitempty"`
+	MentionsEndpoint         bool                   `json:"mentionsEndpoint,omitempty"`
+	Direct                   bool                   `json:"direct,omitempty"`
+	OrderingKey              string                 `json:"orderingKey"`
+	Cursor                   string                 `json:"cursor,omitempty"`
+	OccurredAt               time.Time              `json:"occurredAt"`
+	Attributes               map[string]interface{} `json:"attributes,omitempty"`
 }
 
 func (e *NormalizedExternalConversationEvent) Validate() error {
@@ -523,6 +528,9 @@ func (e *NormalizedExternalConversationEvent) Validate() error {
 		return ErrInvalidExternalConversation
 	}
 	if e.ExternalThreadID != "" && !validExternalConversationReference(e.ExternalThreadID, 1024) {
+		return ErrInvalidExternalConversation
+	}
+	if e.ReplyToExternalMessageID != "" && !validExternalConversationReference(e.ReplyToExternalMessageID, 1024) {
 		return ErrInvalidExternalConversation
 	}
 	if err := validateExternalAttachments(e.Attachments); err != nil {
