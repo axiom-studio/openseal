@@ -761,6 +761,9 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if !requesterControlsRun(req.Requester, source) {
 		return nil, ErrAgentRequestUnauthorized
 	}
+	if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
+		return nil, err
+	}
 	delegationPolicy, err := s.resolveSourceDelegationPolicy(ctx, source)
 	if err != nil {
 		return nil, err
@@ -903,6 +906,9 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		if err := spec.Recipient.Validate(); err != nil {
 			return nil, fmt.Errorf("request %d recipient: %w", index+1, err)
 		}
+		if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
+			return nil, err
+		}
 		if strings.TrimSpace(spec.Goal) == "" {
 			return nil, fmt.Errorf("request %d goal is required", index+1)
 		}
@@ -962,6 +968,17 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		result.Events = append(result.Events, created.Events...)
 	}
 	return result, nil
+}
+
+func validateTaskDelegationSource(ctx context.Context, store PortfolioStore, source *AgentRun) error {
+	task, err := persistedTaskWorkOrigin(ctx, store, source)
+	if err != nil {
+		return err
+	}
+	if task != nil {
+		return ErrInvalidConversationTask
+	}
+	return nil
 }
 
 func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req RespondAgentRequestRequest) (*AgentRequestResult, error) {

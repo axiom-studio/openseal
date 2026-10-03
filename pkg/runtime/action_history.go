@@ -149,6 +149,11 @@ func checkpointTurnContinuity(checkpoint map[string]interface{}, turn *AgentTurn
 			"capability": strings.TrimSpace(turn.RequestedActions[0].Capability),
 			"summary":    strings.TrimSpace(turn.RequestedActions[0].Summary),
 		}
+	case turn.RequestedTask != nil:
+		continuity["proposal"] = map[string]interface{}{
+			"kind":    "task",
+			"taskKey": strings.TrimSpace(turn.RequestedTask.TaskKey),
+		}
 	case turn.RequestedRunbook != nil:
 		continuity["proposal"] = map[string]interface{}{
 			"kind":       "runbook",

@@ -407,86 +407,63 @@ func (s *PostgresStore) ClaimNextAgentRunWithDecision(ctx context.Context, claim
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "openseal:agent-claim:"+claim.Scope.Kind+":"+claim.Scope.ID); err != nil {
 		return nil, err
 	}
-	agingSeconds := claim.AgingInterval.Seconds()
-	var payload string
-	err = tx.QueryRowContext(ctx, `SELECT candidate.payload FROM `+s.table("agent_runs")+` AS candidate
-		LEFT JOIN `+s.table("objectives")+` AS objective
-		ON objective.scope_kind = candidate.scope_kind AND objective.scope_id = candidate.scope_id AND objective.id = candidate.objective_id
-		WHERE candidate.scope_kind = $1 AND candidate.scope_id = $2
-		AND ($3 = '' OR candidate.assigned_agent_id = $3)
-		AND ($9 = '' OR COALESCE(candidate.payload->>'kind', 'agent_work') = $9)
-		AND ((candidate.status = $4 AND candidate.available_at <= $6 AND (candidate.lease_expires_at IS NULL OR candidate.lease_expires_at <= $6))
-		  OR (candidate.status = $5 AND (candidate.lease_expires_at IS NULL OR candidate.lease_expires_at <= $6)))
-		AND ($7 = 0 OR candidate.assigned_agent_id = '' OR (
-			SELECT COUNT(*) FROM `+s.table("agent_runs")+` AS active
-			WHERE active.scope_kind = candidate.scope_kind AND active.scope_id = candidate.scope_id
-			AND active.assigned_agent_id = candidate.assigned_agent_id AND active.status = $5
-			AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
-		) < $7)
-		AND ($10 = 0 OR COALESCE(candidate.payload->>'concurrencyKey', '') = '' OR (
-			SELECT COUNT(*) FROM `+s.table("agent_runs")+` AS active
-			WHERE active.scope_kind = candidate.scope_kind AND active.scope_id = candidate.scope_id
-			AND COALESCE(active.payload->>'concurrencyKey', '') = COALESCE(candidate.payload->>'concurrencyKey', '')
-			AND active.status = $5 AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
-		) < $10)
-		AND ($11 = 0 OR (
-			SELECT COUNT(*) FROM `+s.table("agent_runs")+` AS active
-			WHERE active.scope_kind = candidate.scope_kind AND active.scope_id = candidate.scope_id
-			AND active.payload->'owner' = candidate.payload->'owner'
-			AND active.status = $5 AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
-		) < $11)
-		AND (candidate.objective_id = '' OR
-			(CASE
-				WHEN $12 > 0 AND COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0) > 0
-					THEN LEAST($12, (objective.payload->'executionPolicy'->>'maximumConcurrentRuns')::integer)
-				WHEN $12 > 0 THEN $12
-				ELSE COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0)
-			END) = 0 OR (
-			SELECT COUNT(*) FROM `+s.table("agent_runs")+` AS active
-			WHERE active.scope_kind = candidate.scope_kind AND active.scope_id = candidate.scope_id
-			AND active.objective_id = candidate.objective_id
-			AND active.status = $5 AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
-		) < (CASE
-			WHEN $12 > 0 AND COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0) > 0
-				THEN LEAST($12, (objective.payload->'executionPolicy'->>'maximumConcurrentRuns')::integer)
-			WHEN $12 > 0 THEN $12
-			ELSE COALESCE(NULLIF(objective.payload->'executionPolicy'->>'maximumConcurrentRuns', '')::integer, 0)
-		END))
-		AND NOT EXISTS (
-			SELECT 1
-			FROM jsonb_each_text(COALESCE(candidate.payload->'resourceRequirements', '{}'::jsonb)) AS requirement(resource, quantity)
-			WHERE COALESCE(objective.payload->'executionPolicy'->'resourceCapacities', '{}'::jsonb) ? requirement.resource
-			AND COALESCE((
-				SELECT SUM(COALESCE(NULLIF(active.payload->'resourceRequirements'->>requirement.resource, '')::integer, 0))
-				FROM `+s.table("agent_runs")+` AS active
-				WHERE active.scope_kind = candidate.scope_kind AND active.scope_id = candidate.scope_id
-				AND active.objective_id = candidate.objective_id
-				AND active.status = $5 AND active.lease_expires_at IS NOT NULL AND active.lease_expires_at > $6
-			), 0) + requirement.quantity::integer >
-				COALESCE(NULLIF(objective.payload->'executionPolicy'->'resourceCapacities'->>requirement.resource, '')::integer, 0)
-		)
-		ORDER BY candidate.priority + FLOOR(GREATEST(EXTRACT(EPOCH FROM ($6 - candidate.queue_entered_at)), 0) / $8) DESC,
-			candidate.deadline ASC NULLS LAST, candidate.queue_entered_at ASC, candidate.id ASC
-		FOR UPDATE OF candidate SKIP LOCKED LIMIT 1`,
-		claim.Scope.Kind, claim.Scope.ID, claim.AssignedAgentID, AgentRunStatusQueued, AgentRunStatusRunning,
-		claim.Now, claim.MaxActiveForAgent, agingSeconds, claim.Kind, claim.MaxActiveForConcurrencyKey,
-		claim.MaxActiveForOwner, claim.MaxActiveForObjective).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		decision, explainErr := s.explainPostgresAgentRunAdmission(ctx, tx, claim)
-		if explainErr != nil {
-			return nil, explainErr
+	var selected *AgentRun
+	excluded := make([]string, 0)
+	provenanceBlocks := make([]AgentRunAdmissionBlock, 0)
+	for selection := 0; selection < 32; selection++ {
+		taskAdmissionSQL := ""
+		claimArgs := []interface{}{claim.Scope.Kind, claim.Scope.ID, claim.AssignedAgentID, AgentRunStatusQueued, AgentRunStatusRunning,
+			claim.Now, claim.MaxActiveForAgent, claim.AgingInterval.Seconds(), claim.Kind, claim.MaxActiveForConcurrencyKey,
+			claim.MaxActiveForOwner, claim.MaxActiveForObjective}
+		if claim.ConversationTaskForegroundReserve > 0 {
+			taskAdmissionSQL = s.conversationTaskAdmissionSQL()
+			claimArgs = append(claimArgs, claim.MaxActiveForAgent-claim.ConversationTaskForegroundReserve, pq.Array(excluded))
 		}
+		var payload string
+		err = tx.QueryRowContext(ctx, s.agentRunAdmissionSQL(taskAdmissionSQL),
+			claimArgs...).Scan(&payload)
+		if errors.Is(err, sql.ErrNoRows) {
+			var decision *AgentRunAdmissionDecision
+			var explainErr error
+			if claim.ConversationTaskForegroundReserve > 0 {
+				decision, explainErr = s.explainPostgresConversationTaskAdmission(ctx, tx, claim)
+			} else {
+				decision, explainErr = s.explainPostgresAgentRunAdmission(ctx, tx, claim)
+			}
+			if explainErr != nil {
+				return nil, explainErr
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return decision, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		selected, err = decodeAgentRun(payload)
+		if err != nil {
+			return nil, err
+		}
+		if claim.ConversationTaskForegroundReserve == 0 {
+			break
+		}
+		if err := s.preparePostgresConversationTaskAdmission(ctx, tx, &claim, []*AgentRun{selected}); err != nil {
+			return nil, err
+		}
+		if !claim.invalidConversationTaskRuns[selected.ID] {
+			break
+		}
+		provenanceBlocks = append(provenanceBlocks, AgentRunAdmissionBlock{RunID: selected.ID, ObjectiveID: selected.ObjectiveID,
+			AssignedAgentID: selected.AssignedAgentID, Owner: selected.Owner, ConcurrencyKey: selected.ConcurrencyKey, Reason: AgentRunAdmissionReasonTaskProvenance})
+		excluded = append(excluded, selected.ID)
+		selected = nil
+	}
+	if selected == nil {
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return decision, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	selected, err := decodeAgentRun(payload)
-	if err != nil {
-		return nil, err
+		return &AgentRunAdmissionDecision{Outcome: AgentRunAdmissionBackpressured, Blocks: provenanceBlocks, EvaluatedAt: claim.Now}, nil
 	}
 	previousRevision := selected.Revision
 	if err := applyAgentRunClaim(selected, claim); err != nil {

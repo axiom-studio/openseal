@@ -107,6 +107,10 @@ func (s *MemoryStore) saveMemoryAgentRunLocked(key string, run *AgentRun) {
 	previous := s.agentRuns[key]
 	wasActive := previous != nil && !isTerminalAgentRunStatus(previous.Status)
 	s.agentRuns[key] = cloneAgentRun(run)
+	s.refreshMemoryConversationTaskRunLocked(run)
+	s.refreshMemoryConversationActiveRunLocked(run)
+	s.refreshMemoryConversationActiveRootLocked(key, previous, run)
+	s.refreshMemoryConversationForegroundRunLocked(run)
 	s.refreshMemorySkillRuntimeMaintenanceWaiterLocked(key)
 	s.refreshMemoryRunSkillDependenciesLocked(key, run)
 	if wasActive != !isTerminalAgentRunStatus(run.Status) {

@@ -85,13 +85,18 @@ func TestPostgresRepairsActivityProjectionWhenLedgerIsAheadOfSchema(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.db.ExecContext(ctx, `
-		DROP INDEX IF EXISTS `+store.table("run_activity_project_feed_idx")+`;
-		ALTER TABLE `+store.table("run_activity")+` DROP COLUMN project_id;
-		DELETE FROM `+store.table("schema_migrations")+` WHERE version=$1
-	`, activityProjectionRepairMigrationVersion); err != nil {
-		store.Close()
-		t.Fatal(err)
+	for _, statement := range []struct {
+		query string
+		args  []interface{}
+	}{
+		{query: `DROP INDEX IF EXISTS ` + store.table("run_activity_project_feed_idx")},
+		{query: `ALTER TABLE ` + store.table("run_activity") + ` DROP COLUMN project_id`},
+		{query: `DELETE FROM ` + store.table("schema_migrations") + ` WHERE version=$1`, args: []interface{}{activityProjectionRepairMigrationVersion}},
+	} {
+		if _, err = store.db.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			store.Close()
+			t.Fatal(err)
+		}
 	}
 	store.Close()
 

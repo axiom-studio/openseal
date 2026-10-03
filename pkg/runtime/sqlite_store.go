@@ -118,6 +118,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateCallbackRegistrySQLite(db); err != nil {
 		return err
 	}
+	if err := migrateConversationTasksSQLite(db); err != nil {
+		return err
+	}
 	return migrateEmbedInstallationsSQLite(db)
 }
 

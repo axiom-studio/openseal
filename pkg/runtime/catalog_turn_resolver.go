@@ -29,6 +29,9 @@ type CatalogTurnResolverConfig struct {
 	Host       TurnHost
 	SkillHost  skill.HostCapabilityState
 	SkillHosts SkillHostCapabilityResolver
+	// ConversationTasks is optional canonical storage for hosted task context.
+	// A model or copied Run context cannot supply task admission authority.
+	ConversationTasks ConversationTaskKernelStore
 }
 
 // SkillHostCapabilityResolver lets an embedding runtime project the exact
@@ -295,6 +298,10 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, fmt.Errorf("resolve eligible Agent delegation targets: %w", err)
 	}
 	instructions := hostedAgentInstructions(definition)
+	conversationTasks, err := resolveCatalogConversationTaskContext(ctx, catalog, run, config.ConversationTasks)
+	if err != nil {
+		return nil, fmt.Errorf("resolve canonical conversation task context: %w", err)
+	}
 	acceptedRequestExecution := run.Source == RunSourceRequest || run.Source == RunSourceHandoff || run.Source == RunSourceEscalation
 	if acceptedRequestExecution {
 		if _, ok := run.Context["collaboration"]; ok {
@@ -310,6 +317,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		SystemInstructions: instructions, EligibleAgents: eligibleAgents, Workspace: workspaceAuthority, WorkspaceCredentials: workspaceCredentials, SkillPrompts: prompts, Actions: actions,
 		RunbookOperations: base.RunbookOperations,
+		ConversationTasks: conversationTasks,
 		ModelCredential:   deploymentModelCredential(deployment),
 	})
 	if err != nil {

@@ -187,6 +187,62 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	if !runReportsMilestone(run, milestone) {
 		return nil
 	}
+	task, sourceTaskReport, taskErr := conversationTaskForReport(ctx, store, run)
+	if taskErr != nil {
+		return taskErr
+	}
+	intent := MessageIntentUpdate
+	audience := ConversationAudience{Kind: ConversationAudienceChannel}
+	broadcast := true
+	resolvesMessageID := ""
+	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
+	if task != nil {
+		if !sourceTaskReport {
+			portfolio, ok := store.(PortfolioStore)
+			if !ok {
+				return ErrInvalidConversationTask
+			}
+			sourceRun, err := portfolio.GetAgentRun(ctx, task.Scope, task.SourceRunID)
+			if err != nil {
+				return err
+			}
+			if sourceRun == nil || sourceRun.Status != AgentRunStatusCompleted {
+				return ErrInvalidConversationTask
+			}
+			verified, sourceReport, err := conversationTaskForReport(ctx, store, sourceRun)
+			if err != nil || verified == nil || verified.ID != task.ID || !sourceReport {
+				if err != nil {
+					return err
+				}
+				return ErrInvalidConversationTask
+			}
+			// Source and work share the existing outbox, whose concurrent claims
+			// may arrive in either order. Commit the idempotent acknowledgment
+			// before the final result so a fast task cannot speak in reverse.
+			if err := projectTerminalRunReporting(ctx, store, sourceRun); err != nil {
+				return err
+			}
+		}
+		source, err := store.GetChannelMessage(ctx, task.Scope, task.ConversationID, task.SourceMessageID)
+		if err != nil {
+			return err
+		}
+		if source == nil {
+			return ErrChannelMessageNotFound
+		}
+		// Visibility inherits the canonical source and its thread ancestors.
+		// Channel here preserves the original sender's implicit access to a
+		// directed question without widening access past those ancestors.
+		audience = ConversationAudience{Kind: ConversationAudienceChannel}
+		broadcast = source.ThreadRootID == "" || source.BroadcastToChannel
+		content = conversationTaskReportContent(task, sourceTaskReport, run, content)
+		intent = MessageIntentAnswer
+		references = append(references, ConversationReference{Kind: ConversationReferenceTask, ID: task.ID})
+		if sourceTaskReport {
+			resolvesMessageID = task.SourceMessageID
+			references = append(references, ConversationReference{Kind: ConversationReferenceRun, ID: task.WorkRunID})
+		}
+	}
 	service := NewConversationService(store)
 	channel, err := service.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
@@ -195,9 +251,9 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	_, err = service.PostChannelMessage(ctx, PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision,
 		Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
-		SenderDisplayName: "Agent", Intent: MessageIntentUpdate, Content: content,
-		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootMessageID, BroadcastToChannel: true,
-		References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+		SenderDisplayName: "Agent", Intent: intent, Content: content, ResolvesMessageID: resolvesMessageID,
+		Audience: audience, ReplyToMessageID: rootMessageID, BroadcastToChannel: broadcast,
+		References:     references,
 		IdempotencyKey: "run-reporting-terminal:" + run.ID + ":" + string(run.Status),
 	})
 	if errors.Is(err, ErrRevisionConflict) {
@@ -208,9 +264,9 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		_, err = service.PostChannelMessage(ctx, PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: latest.ID, ExpectedRevision: latest.Revision,
 			Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
-			SenderDisplayName: "Agent", Intent: MessageIntentUpdate, Content: content,
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: rootMessageID, BroadcastToChannel: true,
-			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+			SenderDisplayName: "Agent", Intent: intent, Content: content, ResolvesMessageID: resolvesMessageID,
+			Audience: audience, ReplyToMessageID: rootMessageID, BroadcastToChannel: broadcast,
+			References:     references,
 			IdempotencyKey: "run-reporting-terminal:" + run.ID + ":" + string(run.Status),
 		})
 	}

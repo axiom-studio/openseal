@@ -16,6 +16,10 @@ type TurnExecutionContext struct {
 	// ModelMedia is trusted, ephemeral input loaded from scoped message artifacts.
 	// It must never be copied into durable run context or model checkpoints.
 	ModelMedia []HostedTurnMedia
+	// ForegroundConversation is the trusted source envelope retained while a
+	// conversation adapter invokes an Agent runner with a lowered execution kind.
+	// It is ephemeral and never copied into hosted model input or durable state.
+	ForegroundConversation *AgentRun
 }
 
 // TurnRunner performs one bounded, proposal-only reasoning step. External side
@@ -45,6 +49,7 @@ type TurnOutcome struct {
 	ProposedFork           *TurnForkProposal
 	ProposedDelegation     *TurnDelegationProposal
 	ProposedRunbook        *TurnRunbookProposal
+	ProposedTask           *TurnTaskProposal
 	OutputSummary          string
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
@@ -432,6 +437,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.RequestedFork = outcome.ProposedFork
 			finish.RequestedDelegation = outcome.ProposedDelegation
 			finish.RequestedRunbook = outcome.ProposedRunbook
+			finish.RequestedTask = cloneTurnTaskProposal(outcome.ProposedTask)
 			finish.OutputSummary = outcome.OutputSummary
 			finish.Usage = outcome.Usage
 			finish.ContinuationCheckpoint = outcome.ContinuationCheckpoint
@@ -466,7 +472,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		if usageErr != nil {
 			return nil, usageErr
 		}
-		if state == BudgetStateExhausted && !isTerminalAgentRunStatus(finish.NextRunStatus) && len(finish.RequestedActions) == 0 {
+		if state == BudgetStateExhausted && !isTerminalAgentRunStatus(finish.NextRunStatus) && len(finish.RequestedActions) == 0 && finish.RequestedTask == nil {
 			finish.NextRunStatus = AgentRunStatusPaused
 			finish.OutputSummary = "Run paused after reaching its autonomous budget"
 		}
@@ -501,7 +507,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		finish.ContinuationCheckpoint = checkpointTurnContinuity(finish.ContinuationCheckpoint, &AgentTurn{
 			Sequence: turn.Sequence, Status: finish.Status, OutputSummary: finish.OutputSummary,
 			RequestedActions: finish.RequestedActions, RequestedFork: finish.RequestedFork,
-			RequestedDelegation: finish.RequestedDelegation, RequestedRunbook: finish.RequestedRunbook,
+			RequestedDelegation: finish.RequestedDelegation, RequestedRunbook: finish.RequestedRunbook, RequestedTask: finish.RequestedTask,
 			NextRunStatus: finish.NextRunStatus,
 		})
 	}
@@ -591,6 +597,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		turn.RequestedFork = nil
 		turn.RequestedDelegation = nil
 		turn.RequestedRunbook = nil
+		turn.RequestedTask = nil
 		turn.RunOutput = nil
 		turn.RunError = ""
 		turn.NextRunStatus = AgentRunStatusRunning
@@ -656,6 +663,9 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 	if turn.RequestedRunbook != nil {
 		activityPayload["requestedRunbook"] = turn.RequestedRunbook
 	}
+	if turn.RequestedTask != nil {
+		activityPayload["requestedTask"] = turn.RequestedTask
+	}
 	eventType := ""
 	if superseded {
 		eventType = "turn.guidance_changed"
@@ -669,7 +679,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		activityPayload["budgetState"] = BudgetStateExhausted
 	}
 	output := turn.RunOutput
-	if turn.Status == AgentTurnStatusCompleted && len(publishers) > 0 && publishers[0] != nil {
+	if turn.Status == AgentTurnStatusCompleted && turn.RequestedTask == nil && len(publishers) > 0 && publishers[0] != nil {
 		var err error
 		output, err = publishers[0].PublishTurnOutput(ctx, run, turn)
 		if err != nil {
@@ -786,8 +796,14 @@ func validateTurnOutcome(current AgentRunStatus, outcome *TurnOutcome) error {
 	if outcome.ProposedRunbook != nil {
 		proposalCount++
 	}
+	if outcome.ProposedTask != nil {
+		proposalCount++
+		if err := validateTaskProposalOutput(outcome.ProposedTask, outcome.NextRunStatus, outcome.WakeCondition, outcome.OutputSummary, outcome.RunOutput, outcome.RunError); err != nil {
+			return err
+		}
+	}
 	if proposalCount > 1 {
-		return errors.New("a bounded Turn can propose only one action, fork, delegation, or runbook")
+		return errors.New("a bounded Turn can propose only one action, fork, delegation, runbook, or task")
 	}
 	if outcome.ProposedDelegation != nil {
 		if err := outcome.ProposedDelegation.Validate(); err != nil {
