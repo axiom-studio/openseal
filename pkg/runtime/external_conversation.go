@@ -469,22 +469,23 @@ func (s *ExternalConversationEndpointService) resolveAdapter(ctx context.Context
 // the kernel. The Skill verifies provider requests and converts them into this
 // credential-free protocol before durable ingestion.
 type NormalizedExternalConversationEvent struct {
-	Source                 *ExternalMessageSource `json:"source,omitempty"`
-	ID                     string                 `json:"id"`
-	Type                   string                 `json:"type"`
-	ExternalConversationID string                 `json:"externalConversationId"`
-	ExternalThreadID       string                 `json:"externalThreadId,omitempty"`
-	ExternalMessageID      string                 `json:"externalMessageId,omitempty"`
-	ExternalParticipantID  string                 `json:"externalParticipantId,omitempty"`
-	ParticipantDisplayName string                 `json:"participantDisplayName,omitempty"`
-	ParticipantIsBot       bool                   `json:"participantIsBot,omitempty"`
-	Text                   string                 `json:"text,omitempty"`
-	MentionsEndpoint       bool                   `json:"mentionsEndpoint,omitempty"`
-	Direct                 bool                   `json:"direct,omitempty"`
-	OrderingKey            string                 `json:"orderingKey"`
-	Cursor                 string                 `json:"cursor,omitempty"`
-	OccurredAt             time.Time              `json:"occurredAt"`
-	Attributes             map[string]interface{} `json:"attributes,omitempty"`
+	Attachments            []ExternalConversationAttachment `json:"attachments,omitempty"`
+	Source                 *ExternalMessageSource           `json:"source,omitempty"`
+	ID                     string                           `json:"id"`
+	Type                   string                           `json:"type"`
+	ExternalConversationID string                           `json:"externalConversationId"`
+	ExternalThreadID       string                           `json:"externalThreadId,omitempty"`
+	ExternalMessageID      string                           `json:"externalMessageId,omitempty"`
+	ExternalParticipantID  string                           `json:"externalParticipantId,omitempty"`
+	ParticipantDisplayName string                           `json:"participantDisplayName,omitempty"`
+	ParticipantIsBot       bool                             `json:"participantIsBot,omitempty"`
+	Text                   string                           `json:"text,omitempty"`
+	MentionsEndpoint       bool                             `json:"mentionsEndpoint,omitempty"`
+	Direct                 bool                             `json:"direct,omitempty"`
+	OrderingKey            string                           `json:"orderingKey"`
+	Cursor                 string                           `json:"cursor,omitempty"`
+	OccurredAt             time.Time                        `json:"occurredAt"`
+	Attributes             map[string]interface{}           `json:"attributes,omitempty"`
 }
 
 func (e *NormalizedExternalConversationEvent) Validate() error {
@@ -498,7 +499,7 @@ func (e *NormalizedExternalConversationEvent) Validate() error {
 	switch e.Type {
 	case capability.ConversationEventMessageReceived:
 		if !validExternalConversationReference(e.ExternalMessageID, 1024) || !validExternalConversationReference(e.ExternalParticipantID, 1024) ||
-			strings.TrimSpace(e.Text) == "" || len(e.Text) > 64*1024 {
+			(strings.TrimSpace(e.Text) == "" && len(e.Attachments) == 0) || len(e.Text) > 64*1024 {
 			return ErrInvalidExternalConversation
 		}
 	case capability.ConversationEventMessageUpdated, capability.ConversationEventMessageDeleted:
@@ -523,6 +524,9 @@ func (e *NormalizedExternalConversationEvent) Validate() error {
 	}
 	if e.ExternalThreadID != "" && !validExternalConversationReference(e.ExternalThreadID, 1024) {
 		return ErrInvalidExternalConversation
+	}
+	if err := validateExternalAttachments(e.Attachments); err != nil {
+		return err
 	}
 	if err := ValidateCredentialFreeContext(e.Attributes); err != nil {
 		return fmt.Errorf("%w: event attributes: %v", ErrInvalidExternalConversation, err)
@@ -724,6 +728,7 @@ func (c ExternalConversationDeliveryCorrelation) Validate() error {
 // is loaded from the canonical ChannelMessage at dispatch time, so this record
 // cannot drift into a second source of conversational truth.
 type ExternalConversationDelivery struct {
+	Progress               map[string]interface{}                   `json:"progress,omitempty"`
 	ID                     string                                   `json:"id"`
 	Scope                  Scope                                    `json:"scope"`
 	EndpointID             string                                   `json:"endpointId"`
@@ -768,6 +773,9 @@ func (d *ExternalConversationDelivery) Validate() error {
 		if value != "" && !validExternalConversationReference(value, 1024) {
 			return ErrInvalidExternalConversation
 		}
+	}
+	if err := validateExternalConversationConfiguration(d.Progress); err != nil {
+		return err
 	}
 	if err := validateExternalConversationConfiguration(d.Parameters); err != nil {
 		return err
@@ -939,6 +947,7 @@ func cloneExternalConversationInboxItem(value *ExternalConversationInboxItem) *E
 		return nil
 	}
 	copy := *value
+	copy.Event.Attachments = append([]ExternalConversationAttachment(nil), value.Event.Attachments...)
 	copy.Event.Attributes = cloneMap(value.Event.Attributes)
 	copy.Event.Source = cloneExternalMessageSource(value.Event.Source)
 	return &copy
@@ -974,6 +983,7 @@ func cloneExternalConversationDelivery(value *ExternalConversationDelivery) *Ext
 	}
 	copy := *value
 	copy.Parameters = cloneMap(value.Parameters)
+	copy.Progress = cloneMap(value.Progress)
 	if value.Correlation != nil {
 		correlation := *value.Correlation
 		copy.Correlation = &correlation
