@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"errors"
+	"net/mail"
 	"net/url"
 	"strings"
+	"unicode"
 )
 
 var ErrExternalOperationClaimed = errors.New("external operation is already claimed")
@@ -31,6 +33,7 @@ func (i ExternalOperationIdentity) Validate() error {
 }
 
 func canonicalExternalOperationResource(value string) (string, error) {
+	rawValue := value
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 2048 || strings.ContainsAny(value, "\r\n") {
 		return "", errors.New("external operation resource must be between 1 and 2048 characters")
@@ -61,8 +64,27 @@ func canonicalExternalOperationResource(value string) (string, error) {
 		parsed.RawQuery = parsed.Query().Encode()
 		return parsed.String(), nil
 	}
+	// A single mailbox is a stable target for externally delivered messages.
+	// Consume every mailto prefix here so malformed mailto values cannot fall
+	// through to the intentionally broader opaque-identifier grammar.
+	if strings.HasPrefix(strings.ToLower(value), "mailto:") || strings.ContainsRune(value, '@') {
+		mailbox := value
+		if strings.HasPrefix(strings.ToLower(mailbox), "mailto:") {
+			mailbox = mailbox[len("mailto:"):]
+		}
+		invalid := errors.New("external operation resource must be an HTTP(S) URL, a single email address, or opaque identifier")
+		if len(mailbox)+len("mailto:") > 2048 || strings.ContainsAny(mailbox, "%?#/\\") || strings.IndexFunc(rawValue, unicode.IsControl) >= 0 || strings.IndexFunc(mailbox, unicode.IsSpace) >= 0 {
+			return "", invalid
+		}
+		address, err := mail.ParseAddress(mailbox)
+		if err != nil || address.Name != "" || address.Address != mailbox {
+			return "", invalid
+		}
+		at := strings.LastIndexByte(mailbox, '@')
+		return "mailto:" + mailbox[:at+1] + strings.ToLower(mailbox[at+1:]), nil
+	}
 	if !validOpaqueIdentifier(value, 2048) {
-		return "", errors.New("external operation resource must be an HTTP(S) URL or opaque identifier")
+		return "", errors.New("external operation resource must be an HTTP(S) URL, a single email address, or opaque identifier")
 	}
 	return value, nil
 }
