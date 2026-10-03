@@ -141,6 +141,16 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		}
 		return w.persistOutcome(ctx, call, nil, nil, nil, nil, workerID, false)
 	}
+	if call.RecoveredRunning && call.SideEffect != skill.SideEffectRead && call.SideEffect != skill.SideEffectNone {
+		// The expired worker may have already dispatched this mutation. A new
+		// lease does not prove that nothing happened, even with MaxAttempts=1.
+		call, leaseErr := stopLease()
+		if leaseErr != nil {
+			return nil, leaseErr
+		}
+		return w.persistOutcome(ctx, call, nil, nil, nil,
+			errors.New("The previous operation may already have taken effect. It was not sent again."), workerID, true)
+	}
 	if executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID); executionErr != nil {
 		call, leaseErr := stopLease()
 		if leaseErr != nil {
@@ -409,6 +419,10 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		} else {
 			updatedCall.Status = ActionCallStatusFailed
 			updatedCall.Error = sanitizeActionError(executionErr, credentials)
+			updatedCall.FailurePhase = ActionFailureBeforeDispatch
+			if dispatched {
+				updatedCall.FailurePhase = ActionFailureAfterDispatch
+			}
 			eventType = "action.failed"
 			summary = fmt.Sprintf("Failed %s.%s after %d attempts", call.SkillID, call.Action, call.Attempt)
 		}
@@ -427,9 +441,6 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
-		if updatedCall.Status == ActionCallStatusFailed {
-			updatedRun.Checkpoint = checkpointFinalFailureExplanation(updatedRun.Checkpoint, "action", updatedCall.Error)
-		}
 		if updatedCall.Status == ActionCallStatusFailed && updatedCall.ApprovalID != "" {
 			approval, approvalErr := w.store.GetApproval(ctx, updatedCall.Scope, updatedCall.ApprovalID)
 			if approvalErr != nil {
