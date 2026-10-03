@@ -284,6 +284,10 @@ func (s *MemoryStore) ClaimNextAction(_ context.Context, claim ActionClaim) (*Ac
 	}
 	updated := cloneActionCall(selected)
 	expires := claim.Now.Add(claim.LeaseDuration)
+	// A recovered Running call may already have reached its provider. Preserve
+	// that provenance through subsequent Ready deferrals; Attempt also counts
+	// claims deferred before dispatch and cannot establish recovery on its own.
+	updated.RecoveredRunning = selected.RecoveredRunning || selected.Status == ActionCallStatusRunning
 	updated.Status = ActionCallStatusRunning
 	updated.LeaseOwner = claim.WorkerID
 	updated.LeaseExpiresAt = &expires

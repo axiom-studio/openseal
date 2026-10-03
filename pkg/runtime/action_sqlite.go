@@ -552,6 +552,7 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*
 	}
 	previousRevision := selected.Revision
 	expires := claim.Now.Add(claim.LeaseDuration)
+	selected.RecoveredRunning = selected.RecoveredRunning || selected.Status == ActionCallStatusRunning
 	selected.Status = ActionCallStatusRunning
 	selected.LeaseOwner = claim.WorkerID
 	selected.LeaseExpiresAt = &expires

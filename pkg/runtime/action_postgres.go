@@ -476,6 +476,7 @@ func (s *PostgresStore) ClaimNextAction(ctx context.Context, claim ActionClaim) 
 	}
 	previousRevision := selected.Revision
 	expires := claim.Now.Add(claim.LeaseDuration)
+	selected.RecoveredRunning = selected.RecoveredRunning || selected.Status == ActionCallStatusRunning
 	selected.Status, selected.LeaseOwner, selected.LeaseExpiresAt = ActionCallStatusRunning, claim.WorkerID, &expires
 	selected.Attempt++
 	selected.Revision++

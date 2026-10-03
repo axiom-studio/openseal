@@ -188,9 +188,13 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, approvalRecoveryCheckpointKey)
 	delete(result, proposalRecoveryCheckpointKey)
 	delete(result, FinalFailureExplanationCheckpointKey)
+	delete(result, ToolFeedbackCorrectionCheckpointKey)
 	delete(result, "lastAction")
 	delete(result, runEventWaitCheckpointKey)
 	if current != nil {
+		if correction, ok := current[ToolFeedbackCorrectionCheckpointKey]; ok {
+			result[ToolFeedbackCorrectionCheckpointKey] = deepCloneCheckpointValue(correction)
+		}
 		if explanation, ok := current[FinalFailureExplanationCheckpointKey]; ok {
 			result[FinalFailureExplanationCheckpointKey] = deepCloneCheckpointValue(explanation)
 		}
@@ -259,6 +263,9 @@ func appendActionHistory(checkpoint map[string]interface{}, call *ActionCall) ma
 		"action": call.Action, "arguments": deepCloneCheckpointMap(call.Arguments),
 		"status": call.Status,
 	}
+	if call.FailurePhase != "" {
+		entry["failurePhase"] = call.FailurePhase
+	}
 	if call.ExternalOperationDigest != "" {
 		entry["externalOperationDigest"] = call.ExternalOperationDigest
 	}
@@ -269,6 +276,12 @@ func appendActionHistory(checkpoint map[string]interface{}, call *ActionCall) ma
 		entry["result"] = compactActionResult(actionResultWithoutModelMedia(call.Output), maximumActionHistoryResultBytes)
 	} else if call.Error != "" {
 		entry["error"] = call.Error
+	}
+	for index, previous := range entries {
+		if previous["actionCallId"] == call.ID {
+			entries = append(entries[:index], entries[index+1:]...)
+			break
+		}
 	}
 	entries = append(entries, entry)
 	if len(entries) > maximumActionHistoryEntries {
@@ -288,12 +301,22 @@ func appendActionHistory(checkpoint map[string]interface{}, call *ActionCall) ma
 // and disposition. Keeping this projection shared prevents approval and policy
 // denials from disappearing between Turns and being proposed again.
 func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCall, metadata map[string]interface{}) map[string]interface{} {
+	recorded := false
+	for _, entry := range actionHistoryEntries(checkpoint) {
+		if entry["actionCallId"] == call.ID {
+			recorded = true
+			break
+		}
+	}
 	result := appendActionHistory(checkpoint, call)
 	lastAction := map[string]interface{}{
 		"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision,
 		"skillId": call.SkillID, "skillVersion": call.SkillVersion,
 		"action": call.Action, "status": call.Status,
 		"arguments": deepCloneCheckpointMap(call.Arguments),
+	}
+	if call.FailurePhase != "" {
+		lastAction["failurePhase"] = call.FailurePhase
 	}
 	if call.ExternalOperationDigest != "" {
 		lastAction["externalOperationDigest"] = call.ExternalOperationDigest
@@ -313,12 +336,18 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 		lastAction[key] = deepCloneCheckpointValue(value)
 	}
 	result["lastAction"] = lastAction
-	if call.Status == ActionCallStatusFailed || call.Status == ActionCallStatusDenied && fmt.Sprint(metadata["approvalStatus"]) != string(ApprovalStatusChangesRequested) {
-		message := call.Error
-		if strings.TrimSpace(message) == "" {
-			message = "The requested action did not complete."
+	if !recorded && call.Status == ActionCallStatusFailed {
+		if replay, _ := metadata["idempotentReplay"].(bool); replay {
+			// A durable failed receipt reused in a later Turn is not fresh tool
+			// feedback and cannot grant another correction allowance.
+			result = checkpointFinalFailureExplanation(result, "action", toolFeedbackMessage(call.Error))
+		} else {
+			result = checkpointToolFeedbackFailure(result, call)
 		}
-		result = checkpointFinalFailureExplanation(result, "action", message)
+	} else if call.Status == ActionCallStatusSucceeded {
+		result = checkpointToolFeedbackSuccess(result, call)
+	} else if call.Status == ActionCallStatusDenied && fmt.Sprint(metadata["approvalStatus"]) != string(ApprovalStatusChangesRequested) {
+		result = checkpointToolFeedbackDenied(result, call)
 	}
 	return result
 }

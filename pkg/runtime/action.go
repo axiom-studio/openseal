@@ -33,6 +33,15 @@ const (
 	ActionCallStatusCompensated     ActionCallStatus = "compensated"
 )
 
+// ActionFailurePhase is trusted execution provenance retained in the durable
+// ActionCall payload. Missing legacy provenance never proves a mutation safe.
+type ActionFailurePhase string
+
+const (
+	ActionFailureBeforeDispatch ActionFailurePhase = "before_dispatch"
+	ActionFailureAfterDispatch  ActionFailurePhase = "after_dispatch"
+)
+
 type ActionCall struct {
 	ID                      string                               `json:"id"`
 	Scope                   Scope                                `json:"scope"`
@@ -65,6 +74,8 @@ type ActionCall struct {
 	LeaseExpiresAt          *time.Time                           `json:"leaseExpiresAt,omitempty"`
 	Output                  map[string]interface{}               `json:"output,omitempty"`
 	Error                   string                               `json:"error,omitempty"`
+	FailurePhase            ActionFailurePhase                   `json:"failurePhase,omitempty"`
+	RecoveredRunning        bool                                 `json:"recoveredRunning,omitempty"`
 	Revision                int64                                `json:"revision"`
 	CreatedAt               time.Time                            `json:"createdAt"`
 	UpdatedAt               time.Time                            `json:"updatedAt"`
@@ -96,6 +107,9 @@ func (c *ActionCall) Validate() error {
 	}
 	if !validActionCallStatus(c.Status) || c.Revision < 1 || c.MaxAttempts < 1 || c.Attempt < 0 {
 		return errors.New("action call lifecycle metadata is invalid")
+	}
+	if c.FailurePhase != "" && (c.Status != ActionCallStatusFailed || c.FailurePhase != ActionFailureBeforeDispatch && c.FailurePhase != ActionFailureAfterDispatch) {
+		return errors.New("action failure phase is invalid")
 	}
 	if c.IdempotencyKey != "" && c.InvocationDigest == "" {
 		return errors.New("idempotent action calls require an invocation digest")

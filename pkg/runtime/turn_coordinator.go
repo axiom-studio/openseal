@@ -412,6 +412,9 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		if outcomeErr == nil {
 			outcomeErr = validateFinalFailureExplanationOutcome(run, outcome)
 		}
+		if outcomeErr == nil {
+			outcomeErr = validateToolFeedbackCorrectionOutcome(run, outcome)
+		}
 		if err := outcomeErr; err != nil {
 			executionErr = err
 			finish.Status = AgentTurnStatusFailed
@@ -440,6 +443,12 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.EvidenceGrounding = outcome.EvidenceGrounding
 		}
 	}
+	if finish.Status == AgentTurnStatusFailed {
+		if cause := recordedToolFailure(run.Checkpoint); cause != "" {
+			finish.RunError = cause
+			finish.ContinuationCheckpoint = preserveKernelActionHistory(run.Checkpoint, run.Checkpoint)
+		}
+	}
 	// Provider work is chargeable even if its outcome fails validation, the
 	// runner returns an error, or the duration deadline discards its output.
 	// Preserve only independently valid usage; never accept failed side effects.
@@ -463,6 +472,10 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 	}
 	if finish.Status == AgentTurnStatusCompleted {
+		if feedback, active := ReadToolFeedbackCorrection(run.Checkpoint); active && isTerminalAgentRunStatus(finish.NextRunStatus) && len(finish.RequestedActions) == 0 {
+			finish.ContinuationCheckpoint = checkpointFinalFailureExplanation(
+				preserveKernelActionHistory(run.Checkpoint, finish.ContinuationCheckpoint), feedback.Kind, feedback.Message)
+		}
 		if requiresFinalFailureExplanation(run.Checkpoint) || requiresFinalFailureExplanation(finish.ContinuationCheckpoint) {
 			// Completing the explanation does not turn failed execution into a
 			// successful child/delegation result. Keep the delivered text while

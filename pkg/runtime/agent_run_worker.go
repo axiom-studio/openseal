@@ -900,9 +900,6 @@ func (p *AgentRunWorkerPool) resumeReplayedTurnAction(ctx context.Context, worke
 			}
 		}
 		checkpoint = checkpointTerminalAction(checkpoint, call, metadata)
-		if call.Status == ActionCallStatusFailed {
-			checkpoint = checkpointFinalFailureExplanation(checkpoint, "action", call.Error)
-		}
 	case ActionCallStatusReady, ActionCallStatusRunning, ActionCallStatusCompensating:
 		status = AgentRunStatusWaitingForDependency
 		wake = &WakeCondition{Type: "action", Reference: call.ID}
@@ -1092,6 +1089,9 @@ func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause err
 		return nil, false
 	}
 	request := turn.RequestedActions[0]
+	if feedback, active := ReadToolFeedbackCorrection(run.Checkpoint); active {
+		return checkpointFinalFailureExplanation(run.Checkpoint, "action", feedback.Message+" The corrected request could not be admitted: "+toolFeedbackMessage(safeCause)), true
+	}
 	// A proposal rejected before materialization has not committed any of the
 	// model-authored state emitted with that proposal. Resume from the last
 	// committed checkpoint and retain only the exact rejected arguments needed

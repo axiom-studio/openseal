@@ -244,7 +244,7 @@ func TestFailedExplanationModelStopsWithoutAnotherCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker"}, runner)
-	if err == nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.WakeCondition != nil || host.calls != 1 {
+	if err == nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.WakeCondition != nil || host.calls != 1 || result.Run.Error != "Service rejected the action." {
 		t.Fatalf("explanation retried: %#v calls=%d err=%v", result, host.calls, err)
 	}
 	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: run.Scope, WorkerID: "again"})
