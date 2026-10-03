@@ -96,6 +96,9 @@ type ActionWorker struct {
 	dispatcher  ActionDispatcher
 	now         func() time.Time
 	newID       func() string
+	// onClaim is an immutable pool hook that hands off another claim before
+	// this worker starts hydrating authority or waiting on the provider.
+	onClaim func()
 }
 
 func NewActionWorker(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher) *ActionWorker {
@@ -117,6 +120,9 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	call, err := w.store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: workerID, Now: now, LeaseDuration: leaseDuration})
 	if err != nil || call == nil {
 		return nil, err
+	}
+	if w.onClaim != nil {
+		w.onClaim()
 	}
 	executionCtx, stopLease := w.holdActionLease(ctx, call, workerID, leaseDuration)
 	// An ActionCall may outlive its parent dependency after cancellation or a

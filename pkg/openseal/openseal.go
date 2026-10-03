@@ -466,6 +466,8 @@ type (
 	RunDependencyEvaluation              = runtime.RunDependencyEvaluation
 	CreateRunDependencyGroupRequest      = runtime.CreateRunDependencyGroupRequest
 	ResolveRunDependencyRequest          = runtime.ResolveRunDependencyRequest
+	ReconcileRunDependencyGroupRequest   = runtime.ReconcileRunDependencyGroupRequest
+	RunDependencyGroupWork               = runtime.RunDependencyGroupWork
 	RunDependencyResult                  = runtime.RunDependencyResult
 	ConversationStore                    = runtime.ConversationStore
 	Conversation                         = runtime.Conversation
@@ -3931,6 +3933,15 @@ func (e *Engine) WakeAgentWorkers() {
 	}
 }
 
+func (e *Engine) wakeAgentWorkersForScope(scope runtime.Scope) {
+	for _, pool := range e.agentPools {
+		pool.WakeScope(scope)
+	}
+	for _, supervisor := range e.agentSupervisors {
+		supervisor.WakeScope(scope)
+	}
+}
+
 func (e *Engine) WakeActionWorkers() {
 	for _, pool := range e.actionPools {
 		pool.Wake()
@@ -4813,14 +4824,22 @@ func (e *Engine) CreateRunDependencyGroup(ctx context.Context, request runtime.C
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
-	return e.dependencies.CreateRunDependencyGroup(ctx, request)
+	result, err := e.dependencies.CreateRunDependencyGroup(ctx, request)
+	if err == nil && result != nil && !result.Replayed {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) ResolveRunDependency(ctx context.Context, request runtime.ResolveRunDependencyRequest) (*runtime.RunDependencyResult, error) {
 	if e.dependencies == nil {
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
-	return e.dependencies.ResolveRunDependency(ctx, request)
+	result, err := e.dependencies.ResolveRunDependency(ctx, request)
+	if err == nil && result != nil && !result.Replayed && result.Evaluation.Wake {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) GetRunDependencyGroup(ctx context.Context, scope runtime.Scope, groupID string) (*runtime.RunDependencyGroup, error) {
@@ -4828,6 +4847,24 @@ func (e *Engine) GetRunDependencyGroup(ctx context.Context, scope runtime.Scope,
 		return nil, fmt.Errorf("run dependency store is not configured")
 	}
 	return e.dependencies.GetRunDependencyGroup(ctx, scope, groupID)
+}
+
+func (e *Engine) ListWaitingRunDependencyGroups(ctx context.Context, scope runtime.Scope, afterID string, limit int) ([]runtime.RunDependencyGroupWork, error) {
+	if e.dependencies == nil {
+		return nil, fmt.Errorf("run dependency store is not configured")
+	}
+	return e.dependencies.ListWaitingRunDependencyGroups(ctx, scope, afterID, limit)
+}
+
+func (e *Engine) ReconcileRunDependencyGroup(ctx context.Context, request runtime.ReconcileRunDependencyGroupRequest) (*runtime.RunDependencyResult, error) {
+	if e.dependencies == nil {
+		return nil, fmt.Errorf("run dependency store is not configured")
+	}
+	result, err := e.dependencies.ReconcileRunDependencyGroup(ctx, request)
+	if err == nil && result != nil && !result.Replayed && result.Evaluation.Wake {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) FindRunDependencyGroupByIdempotencyKey(ctx context.Context, scope runtime.Scope, key string) (*runtime.RunDependencyGroup, error) {
@@ -4848,42 +4885,66 @@ func (e *Engine) CreateAgentRequest(ctx context.Context, request runtime.CreateA
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
-	return e.collaboration.CreateAgentRequest(ctx, request)
+	result, err := e.collaboration.CreateAgentRequest(ctx, request)
+	if err == nil && result != nil && len(result.Events) > 0 {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) CreateAgentRequestGroup(ctx context.Context, request runtime.CreateAgentRequestGroupRequest) (*runtime.AgentRequestGroupResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
-	return e.collaboration.CreateAgentRequestGroup(ctx, request)
+	result, err := e.collaboration.CreateAgentRequestGroup(ctx, request)
+	if err == nil && result != nil && result.Group != nil && !result.Group.Replayed {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) RespondAgentRequest(ctx context.Context, request runtime.RespondAgentRequestRequest) (*runtime.AgentRequestResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
-	return e.collaboration.RespondAgentRequest(ctx, request)
+	result, err := e.collaboration.RespondAgentRequest(ctx, request)
+	if err == nil && result != nil && len(result.Events) > 0 {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) SubmitAgentRequestBid(ctx context.Context, request runtime.SubmitAgentRequestBidRequest) (*runtime.AgentRequestResult, error) {
 	if e == nil || e.collaboration == nil {
 		return nil, errors.New("agent request collaboration is not configured")
 	}
-	return e.collaboration.SubmitAgentRequestBid(ctx, request)
+	result, err := e.collaboration.SubmitAgentRequestBid(ctx, request)
+	if err == nil && result != nil && len(result.Events) > 0 {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) CompleteAgentRequest(ctx context.Context, request runtime.CompleteAgentRequestRequest) (*runtime.AgentRequestResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
-	return e.collaboration.CompleteAgentRequest(ctx, request)
+	result, err := e.collaboration.CompleteAgentRequest(ctx, request)
+	if err == nil && result != nil && len(result.Events) > 0 {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) ReviewAgentRequestCompletion(ctx context.Context, request runtime.ReviewAgentRequestCompletionRequest) (*runtime.AgentRequestResult, error) {
 	if e.collaboration == nil {
 		return nil, fmt.Errorf("collaboration store is not configured")
 	}
-	return e.collaboration.ReviewAgentRequestCompletion(ctx, request)
+	result, err := e.collaboration.ReviewAgentRequestCompletion(ctx, request)
+	if err == nil && result != nil && len(result.Events) > 0 {
+		e.wakeAgentWorkersForScope(request.Scope)
+	}
+	return result, err
 }
 
 func (e *Engine) GetAgentRequest(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRequest, error) {

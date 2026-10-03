@@ -703,6 +703,16 @@ func (c *Catalog) definitionFor(ctx context.Context, id, version, sourceIdentity
 		c.mu.RUnlock()
 		return selectDefinitionVariant(variants, sourceIdentity)
 	}
+	// Durable definitions are immutable at the exact ID, version, and source
+	// identity. Once validated, a positive qualified lookup can reuse both the
+	// definition and its compiled schemas without rereading the control plane.
+	// Unqualified lookups must still read the current publisher variants: another
+	// catalog may have installed a colliding source since the previous lookup.
+	if sourceIdentity != "" {
+		if cached := c.cachedDefinition(id, version, sourceIdentity); cached != nil {
+			return cached, nil
+		}
+	}
 	definitions, err := c.store.ListSkillDefinitionVariants(ctx, id, version)
 	if err != nil {
 		return nil, err
@@ -712,6 +722,11 @@ func (c *Catalog) definitionFor(ctx context.Context, id, version, sourceIdentity
 		if definition == nil {
 			continue
 		}
+		identity := DefinitionSourceIdentity(definition)
+		if cached := c.cachedDefinition(id, version, identity); cached != nil {
+			validated = append(validated, cached)
+			continue
+		}
 		if err := validateDefinition(definition); err != nil {
 			return nil, fmt.Errorf("stored skill definition %s@%s is invalid: %w", id, version, err)
 		}
@@ -719,7 +734,6 @@ func (c *Catalog) definitionFor(ctx context.Context, id, version, sourceIdentity
 		if err != nil {
 			return nil, err
 		}
-		identity := DefinitionSourceIdentity(definition)
 		key := definitionKey(id, version, identity)
 		c.mu.Lock()
 		if c.skills[key] == nil {
@@ -732,6 +746,16 @@ func (c *Catalog) definitionFor(ctx context.Context, id, version, sourceIdentity
 		c.mu.Unlock()
 	}
 	return selectDefinitionVariant(validated, sourceIdentity)
+}
+
+func (c *Catalog) cachedDefinition(id, version, sourceIdentity string) *Definition {
+	c.mu.RLock()
+	definition := c.skills[definitionKey(id, version, sourceIdentity)]
+	c.mu.RUnlock()
+	// Cache entries are installed atomically with all their compiled action
+	// schemas and never mutated. Clone after releasing the lock so callers and
+	// host adapters cannot change the cache or hold up unrelated lookups.
+	return cloneDefinition(definition)
 }
 
 func (c *Catalog) cachedDefinitionVariants(id, version, sourceIdentity string) []*Definition {

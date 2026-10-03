@@ -234,24 +234,9 @@ func (s *PostgresStore) resolvePostgresDependencyTx(ctx context.Context, tx *sql
 	if err != nil || result.Replayed {
 		return result, err
 	}
-	if err := s.updatePostgresDependencyTx(ctx, tx, result.Dependency, record.ExpectedDependencyRevision); err != nil {
+	if err := s.persistPostgresDependencyResult(ctx, tx, group, edges, source, result); err != nil {
 		return nil, err
 	}
-	if err := s.updatePostgresDependencyGroupTx(ctx, tx, result.Group, group.Revision); err != nil {
-		return nil, err
-	}
-	if err := s.updatePostgresAgentRunTx(ctx, tx, result.Source, source.Revision); err != nil {
-		return nil, err
-	}
-	persisted := make([]*ActivityEvent, 0, len(result.Events))
-	for _, event := range result.Events {
-		stored, err := s.insertPostgresActivityTx(ctx, tx, event)
-		if err != nil {
-			return nil, err
-		}
-		persisted = append(persisted, stored)
-	}
-	result.Events = persisted
 	return result, nil
 }
 

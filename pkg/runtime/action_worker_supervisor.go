@@ -161,6 +161,14 @@ func (s *ActionWorkerSupervisor) Wake() {
 	}
 }
 
+func (s *ActionWorkerSupervisor) WakeScope(scope Scope) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if pool := s.pools[workerScopeKey(scope)]; pool != nil {
+		pool.Wake()
+	}
+}
+
 func (s *ActionWorkerSupervisor) SetWorkerLimiter(limiter *WorkerLimiter) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

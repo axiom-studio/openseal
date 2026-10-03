@@ -423,6 +423,10 @@ func stableForkIdentifier(runID, forkID, suffix string) string {
 // state. For join_any it also cancels and resolves every losing child so no
 // second wake or unnecessary background work survives the winner.
 func (c *RunForkCoordinator) CompleteChild(ctx context.Context, child *AgentRun, actor ActivityActor) (*RunDependencyResult, error) {
+	return c.completeChild(ctx, child, actor, true)
+}
+
+func (c *RunForkCoordinator) completeChild(ctx context.Context, child *AgentRun, actor ActivityActor, cancelLosers bool) (*RunDependencyResult, error) {
 	if c == nil || c.store == nil || child == nil || !isTerminalAgentRunStatus(child.Status) {
 		return nil, errors.New("terminal fork child is required")
 	}
@@ -457,6 +461,9 @@ func (c *RunForkCoordinator) CompleteChild(ctx context.Context, child *AgentRun,
 	if edge == nil {
 		return nil, ErrRunDependencyNotFound
 	}
+	if !ownedForkChild(group, edge, child) {
+		return nil, ErrInvalidRunDependency
+	}
 	state := RunDependencyStateSatisfied
 	errorMessage := ""
 	if child.Status == AgentRunStatusFailed {
@@ -476,12 +483,77 @@ func (c *RunForkCoordinator) CompleteChild(ctx context.Context, child *AgentRun,
 	if err != nil {
 		return nil, err
 	}
-	if result.Evaluation.Wake && result.Group.Policy.Mode == FanInModeAny && result.Group.Status == RunDependencyGroupSatisfied {
+	if cancelLosers && state == RunDependencyStateSatisfied && result.Source != nil && !isTerminalAgentRunStatus(result.Source.Status) &&
+		result.Group.Policy.Mode == FanInModeAny && result.Group.Status == RunDependencyGroupSatisfied {
 		if err := c.cancelLosingChildren(ctx, result, child.ID, actor); err != nil {
 			return nil, err
 		}
 	}
 	return result, nil
+}
+
+// ReconcileRunDependencyGroup preserves typed fork cancellation before generic
+// fan-in repair. Terminal-source retirement never mutates target Runs. Only a
+// terminal child with exact kernel-created fork lineage can use CompleteChild.
+func (c *RunForkCoordinator) ReconcileRunDependencyGroup(ctx context.Context, req ReconcileRunDependencyGroupRequest) (*RunDependencyResult, error) {
+	if c == nil || c.store == nil {
+		return nil, errors.New("run fork store is not configured")
+	}
+	coordinator := NewDependencyCoordinator(c.store)
+	group, err := c.store.GetRunDependencyGroup(ctx, req.Scope, req.GroupID)
+	if err != nil || group == nil {
+		if err == nil {
+			err = ErrDependencyGroupNotFound
+		}
+		return nil, err
+	}
+	if group.Policy.Mode != FanInModeAny {
+		return coordinator.ReconcileRunDependencyGroup(ctx, req)
+	}
+	source, err := c.store.GetAgentRun(ctx, req.Scope, group.SourceRunID)
+	if err != nil || source == nil {
+		if err == nil {
+			err = ErrRunNotFound
+		}
+		return nil, err
+	}
+	if group.Revision != req.ExpectedGroupRevision || source.Revision != req.ExpectedSourceRevision {
+		return nil, ErrRevisionConflict
+	}
+	if waiting, _ := sourceWaitsForDependencyGroup(source, group.ID); waiting && group.Status == RunDependencyGroupWaiting {
+		edges, err := c.store.ListRunDependencies(ctx, req.Scope, group.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, edge := range edges {
+			if edge.Kind != RunDependencyKindRun || edge.State != RunDependencyStatePending && edge.State != RunDependencyStateRunning {
+				continue
+			}
+			child, err := c.store.GetAgentRun(ctx, req.Scope, edge.TargetRunID)
+			if err != nil {
+				return nil, err
+			}
+			if child != nil && isTerminalAgentRunStatus(child.Status) && ownedForkChild(group, edge, child) {
+				return c.CompleteChild(ctx, child, req.Actor)
+			}
+		}
+	}
+	return coordinator.ReconcileRunDependencyGroup(ctx, req)
+}
+
+func ownedForkChild(group *RunDependencyGroup, edge *RunDependency, child *AgentRun) bool {
+	if group == nil || edge == nil || child == nil || edge.Kind != RunDependencyKindRun || child.Source != RunSourceFork ||
+		child.Scope != group.Scope || edge.Scope != group.Scope || child.ParentRunID != group.SourceRunID ||
+		edge.GroupID != group.ID || edge.SourceRunID != group.SourceRunID || edge.TargetRunID != child.ID {
+		return false
+	}
+	metadata, ok := child.Checkpoint["forkChild"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	forkID, _ := metadata["forkId"].(string)
+	return forkID != "" && metadata["sourceRunId"] == group.SourceRunID && metadata["groupId"] == group.ID && metadata["dependencyId"] == edge.ID &&
+		group.ID == stableForkIdentifier(group.SourceRunID, forkID, "group") && child.ID == stableForkIdentifier(group.SourceRunID, forkID, "child:"+edge.ID)
 }
 
 func (c *RunForkCoordinator) cancelLosingChildren(ctx context.Context, winner *RunDependencyResult, winnerID string, actor ActivityActor) error {
@@ -490,18 +562,18 @@ func (c *RunForkCoordinator) cancelLosingChildren(ctx context.Context, winner *R
 		if edge.TargetRunID == winnerID || edge.State == RunDependencyStateSatisfied || edge.State == RunDependencyStateFailed || edge.State == RunDependencyStateCanceled {
 			continue
 		}
-		child, err := c.cancelLosingChild(ctx, activity, edge, winner.Group.ID, actor)
+		child, err := c.cancelLosingChild(ctx, activity, edge, winner.Group, actor)
 		if err != nil {
 			return err
 		}
-		if _, err := c.CompleteChild(ctx, child, actor); err != nil && !errors.Is(err, ErrDependencyConflict) {
+		if _, err := c.completeChild(ctx, child, actor, false); err != nil && !errors.Is(err, ErrDependencyConflict) {
 			return err
 		}
 	}
 	return nil
 }
 
-func (c *RunForkCoordinator) cancelLosingChild(ctx context.Context, activity *RunActivityService, edge *RunDependency, groupID string, actor ActivityActor) (*AgentRun, error) {
+func (c *RunForkCoordinator) cancelLosingChild(ctx context.Context, activity *RunActivityService, edge *RunDependency, group *RunDependencyGroup, actor ActivityActor) (*AgentRun, error) {
 	const revisionRetries = 8
 	for attempt := 0; attempt < revisionRetries; attempt++ {
 		child, err := c.store.GetAgentRun(ctx, edge.Scope, edge.TargetRunID)
@@ -514,10 +586,13 @@ func (c *RunForkCoordinator) cancelLosingChild(ctx context.Context, activity *Ru
 		if isTerminalAgentRunStatus(child.Status) {
 			return child, nil
 		}
+		if !ownedForkChild(group, edge, child) {
+			return nil, ErrInvalidRunDependency
+		}
 		child, _, err = activity.TransitionRun(ctx, child.Scope, child.ID, RunTransitionRequest{
 			ExpectedRevision: child.Revision, Status: AgentRunStatusCanceled,
 			Error: "canceled after another fork branch satisfied join_any", Actor: actor,
-			EventType: "run.fork_loser_canceled", Summary: "Canceled losing join_any branch", CorrelationID: groupID,
+			EventType: "run.fork_loser_canceled", Summary: "Canceled losing join_any branch", CorrelationID: group.ID,
 		})
 		if errors.Is(err, ErrRevisionConflict) {
 			continue

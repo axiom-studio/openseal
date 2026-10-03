@@ -546,6 +546,9 @@ func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, 
 	if err := viewer.Validate(); err != nil {
 		return nil, err
 	}
+	if batch, ok := s.store.(ChannelMessageBatchStore); ok {
+		return filterChannelMessagesWithBatchParents(ctx, batch, scope, conversationID, messages, viewer)
+	}
 	visible := make([]*ChannelMessage, 0, len(messages))
 	for _, message := range messages {
 		if !CanViewChannelMessage(message, viewer) {

@@ -176,7 +176,7 @@ func (s *MemoryStore) RespondAgentRequest(_ context.Context, record AgentRequest
 			}
 			return nil, ErrInvalidAgentRequestState
 		}
-		s.dependencyGroups[groupKey] = cloneRunDependencyGroup(result.Group)
+		s.saveMemoryDependencyGroupLocked(groupKey, result.Group)
 		for _, edge := range result.Dependencies {
 			s.dependencies[groupKey][edge.ID] = cloneRunDependency(edge)
 		}
@@ -241,7 +241,7 @@ func (s *MemoryStore) CompleteAgentRequest(_ context.Context, record AgentReques
 		if result.Replayed {
 			return nil, ErrInvalidAgentRequestState
 		}
-		s.dependencyGroups[groupKey] = cloneRunDependencyGroup(result.Group)
+		s.saveMemoryDependencyGroupLocked(groupKey, result.Group)
 		for _, edge := range result.Dependencies {
 			s.dependencies[groupKey][edge.ID] = cloneRunDependency(edge)
 		}
