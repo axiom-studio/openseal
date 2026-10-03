@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -79,9 +78,7 @@ type CallbackRegistrationLifecycleEntry struct {
 // CallbackRegistration is one durable, host-owned public callback route. The
 // route is an opaque locator, never an authentication secret. Authenticity is
 // established only by the exact Skill adapter and binding revision pinned
-// here. Subscriptions may be empty for a managed provider connection that sends
-// payloads through a separate ingress contract; the registry verifies this
-// against the authoritative bound adapter before accepting that registration.
+// here.
 type CallbackRegistration struct {
 	ID            string                               `json:"id"`
 	IngressRoute  string                               `json:"ingressRoute"`
@@ -147,8 +144,8 @@ func (r *CallbackRegistration) Validate() error {
 }
 
 func validateCallbackSubscriptions(values []CallbackSubscription) error {
-	if len(values) > 64 {
-		return fmt.Errorf("%w: subscriptions must be bounded", ErrInvalidCallbackRegistration)
+	if len(values) == 0 || len(values) > 64 {
+		return fmt.Errorf("%w: subscriptions are required", ErrInvalidCallbackRegistration)
 	}
 	seen := make(map[string]bool, len(values))
 	previous := ""
@@ -341,8 +338,7 @@ func (r *CallbackRegistry) Update(ctx context.Context, scope Scope, id string, r
 	if err := current.Validate(); err != nil {
 		return nil, err
 	}
-	if current.Status == CallbackRegistrationActive ||
-		(len(current.Subscriptions) == 0 && (request.Adapter != nil || request.Subscriptions != nil)) {
+	if current.Status == CallbackRegistrationActive {
 		if err := r.resolve(ctx, current); err != nil {
 			return nil, err
 		}
@@ -362,14 +358,6 @@ func (r *CallbackRegistry) resolve(ctx context.Context, value *CallbackRegistrat
 	if err != nil || bound == nil || bound.Binding == nil ||
 		bound.Adapter.Provider != value.Provider || strings.TrimSpace(bound.Adapter.Transport.IngressEndpoint) == "" {
 		return fmt.Errorf("%w: exact callback Skill adapter is unavailable or stale", ErrInvalidCallbackRegistration)
-	}
-	// An empty subscription list is not an ordinary webhook registration. Only
-	// an authenticated managed connection can use this lifecycle without events.
-	if len(value.Subscriptions) == 0 {
-		normalized, err := capability.NormalizeCallbackAdapter(bound.Adapter)
-		if err != nil || normalized.Transport.Connection == nil {
-			return fmt.Errorf("%w: subscriptions are required without a managed connection", ErrInvalidCallbackRegistration)
-		}
 	}
 	accepted := make(map[string]bool, len(bound.Adapter.EventTypes))
 	for _, eventType := range bound.Adapter.EventTypes {

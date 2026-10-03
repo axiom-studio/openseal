@@ -34,7 +34,7 @@ func NormalizeCallbackAdapter(value CallbackAdapter) (CallbackAdapter, error) {
 		!validConversationAdapterIdentifier(value.Transport.IngressEndpoint, 256) {
 		return CallbackAdapter{}, errors.New("callback adapter transport and entrypoint are invalid")
 	}
-	if len(value.EventTypes) > 64 || (len(value.EventTypes) == 0 && value.Transport.Connection == nil) {
+	if len(value.EventTypes) == 0 || len(value.EventTypes) > 64 {
 		return CallbackAdapter{}, errors.New("callback adapter requires bounded event types")
 	}
 	eventTypes := make([]string, 0, len(value.EventTypes))
@@ -88,7 +88,7 @@ func NormalizeCallbackAdapter(value CallbackAdapter) (CallbackAdapter, error) {
 	}
 	if value.Transport.Connection != nil {
 		connection := value.Transport.Connection
-		if (connection.Kind != "websocket" && connection.Kind != "polling") ||
+		if connection.Kind != "websocket" ||
 			!validConversationAdapterIdentifier(connection.Endpoint, 256) {
 			return CallbackAdapter{}, errors.New("callback adapter connection transport is invalid")
 		}

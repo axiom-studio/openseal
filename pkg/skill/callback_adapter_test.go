@@ -2,7 +2,6 @@ package skill
 
 import (
 	"context"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -141,66 +140,6 @@ func TestCallbackAdapterRejectsUnusedConnectionCredential(t *testing.T) {
 	err := NewCatalog().Register(context.Background(), definition)
 	if err == nil || !strings.Contains(err.Error(), "ingress or connection use") {
 		t.Fatalf("unused connection credential error = %v", err)
-	}
-}
-
-func TestCallbackAdapterPollingManifestRoundTripAndBinding(t *testing.T) {
-	adapter, err := capability.NormalizeCallbackAdapter(CallbackAdapter{
-		ProtocolVersion: CallbackAdapterProtocolV1, Name: "Telegram updates",
-		Description: "Receive Telegram updates through the signed conversation gateway.", Provider: "telegram",
-		EventTypes: []string{}, Credentials: []capability.CredentialRequirement{{Name: "bot_token", Kind: "telegram_bot_token"}},
-		Transport: CallbackAdapterTransport{
-			Kind: "http", IngressEndpoint: "telegram.callback.ingress",
-			Connection: &capability.CallbackAdapterConnectionTransport{
-				Kind: "polling", Endpoint: "telegram.callback.polling", Credentials: []string{"bot_token"}, SharedByCredential: "bot_token",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	definition := &Definition{
-		ID: "skill-telegram", Version: "1.0.0", Name: "Telegram", Actions: map[string]Action{},
-		CallbackAdapters: map[string]CallbackAdapter{"updates": adapter},
-	}
-	manifest, err := NewManifest(definition)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encoded, err := EncodeManifestYAML(manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := DecodeManifestYAML(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(decoded.Definition.CallbackAdapters["updates"], adapter) {
-		t.Fatalf("manifest altered polling contract: %#v", decoded.Definition.CallbackAdapters["updates"])
-	}
-	ctx := context.Background()
-	catalog := NewCatalog()
-	if err := catalog.Register(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	binding := &Binding{
-		ID: "telegram", Scope: ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "agent-one",
-		SkillID: definition.ID, SkillVersion: definition.Version, EnabledCallbackAdapters: []string{"updates"},
-		MaximumRisk: RiskLevelRead, Revision: 1,
-		Credentials: map[string]CredentialReference{"bot_token": {Kind: "telegram_bot_token", ID: "vault://telegram.bot_token"}},
-	}
-	if err := catalog.Bind(ctx, binding); err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := catalog.ResolveCallbackAdapterBinding(ctx, binding.Scope, binding.DeploymentID, binding.ID, "updates")
-	if err != nil || !reflect.DeepEqual(resolved.Adapter, adapter) {
-		t.Fatalf("resolved polling adapter = %#v, %v", resolved, err)
-	}
-	missingCredential := *binding
-	missingCredential.ID = "telegram-without-token"
-	missingCredential.Credentials = nil
-	if err := catalog.Bind(ctx, &missingCredential); err == nil || !strings.Contains(err.Error(), "bot_token") {
-		t.Fatalf("missing polling credential error = %v", err)
 	}
 }
 
