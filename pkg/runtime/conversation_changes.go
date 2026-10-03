@@ -209,6 +209,40 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 // hidden work cannot leak through either payloads or change notifications.
 func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope Scope, conversationID string, runs []*AgentRun, viewer ConversationViewer) ([]*AgentRun, error) {
 	visibleRoots := make(map[string]bool)
+	var batchedMessages map[string]bool
+	if batch, ok := s.conversations.store.(ChannelMessageBatchStore); ok {
+		ids := make([]string, 0, len(runs))
+		for _, run := range runs {
+			if run.Kind == RunKindConversation {
+				if triggerID, _ := run.Context[conversationRunContextTriggerID].(string); strings.TrimSpace(triggerID) != "" {
+					ids = append(ids, triggerID)
+				}
+			}
+		}
+		messages, err := loadChannelMessageBatches(ctx, batch, scope, conversationID, ids)
+		if err != nil {
+			return nil, err
+		}
+		// Missing provenance still excludes a Run. Preserve the point-read
+		// path's viewer validation only when a trigger message exists.
+		batchedMessages = make(map[string]bool, len(messages))
+		if len(messages) > 0 {
+			selected := make([]*ChannelMessage, 0, len(messages))
+			for _, id := range ids {
+				if message := messages[id]; message != nil {
+					selected = append(selected, message)
+					delete(messages, id)
+				}
+			}
+			visible, err := s.conversations.filterVisibleChannelMessages(ctx, scope, conversationID, selected, viewer)
+			if err != nil {
+				return nil, err
+			}
+			for _, message := range visible {
+				batchedMessages[message.ID] = true
+			}
+		}
+	}
 	for _, run := range runs {
 		if run.Kind != RunKindConversation {
 			continue
@@ -216,6 +250,12 @@ func (s *ConversationChangeService) filterVisibleRuns(ctx context.Context, scope
 		triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
 		if strings.TrimSpace(triggerID) == "" {
 			continue // Unknown provenance is not evidence of viewer access.
+		}
+		if batchedMessages != nil {
+			if batchedMessages[triggerID] {
+				visibleRoots[run.ID] = true
+			}
+			continue
 		}
 		if _, err := s.conversations.GetVisibleChannelMessage(ctx, scope, conversationID, triggerID, viewer); err != nil {
 			if errors.Is(err, ErrChannelMessageNotFound) {
