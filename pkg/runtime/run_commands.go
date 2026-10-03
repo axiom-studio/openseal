@@ -248,7 +248,8 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 // parent. Descendants are visited leaf-first so a waiting parent never keeps a
 // child lease, approval, or capability resource alive after its owner has
 // stopped. The operation is replay-safe and is used both by direct commands
-// and terminal reconciliation after process restarts.
+// and terminal reconciliation after process restarts. An accepted handoff
+// retains parent lineage but transfers cancellation ownership to its recipient.
 func (s *RunCommandService) CascadeTerminalRun(ctx context.Context, parent *AgentRun) error {
 	if s == nil || s.store == nil {
 		return errors.New("run command store is not configured")
@@ -256,7 +257,17 @@ func (s *RunCommandService) CascadeTerminalRun(ctx context.Context, parent *Agen
 	if parent == nil || !isTerminalAgentRunStatus(parent.Status) {
 		return errors.New("only terminal Runs can cascade descendant cancellation")
 	}
-	return s.cancelRunDescendants(ctx, parent, map[string]struct{}{parent.ID: {}})
+	current, err := s.store.GetAgentRun(ctx, parent.Scope, parent.ID)
+	if err != nil {
+		return err
+	}
+	if current == nil {
+		return ErrRunNotFound
+	}
+	if current.Scope != parent.Scope || current.ID != parent.ID || !isTerminalAgentRunStatus(current.Status) {
+		return fmt.Errorf("%w: persisted parent Run is not terminal", ErrInvalidRunTransition)
+	}
+	return s.cancelRunDescendants(ctx, current, map[string]struct{}{current.ID: {}})
 }
 
 func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *AgentRun, visited map[string]struct{}) error {
@@ -274,10 +285,33 @@ func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *Ag
 			break
 		}
 	}
+	// Acceptance commits the completed source, receipt, and child together.
+	// Reload after discovering children so a handoff accepted concurrently
+	// cannot be judged from the ancestor traversal's earlier source snapshot.
+	currentParent, err := s.store.GetAgentRun(ctx, parent.Scope, parent.ID)
+	if err != nil {
+		return err
+	}
+	if currentParent == nil {
+		return ErrRunNotFound
+	}
+	if currentParent.ID != parent.ID || currentParent.Scope != parent.Scope {
+		return fmt.Errorf("%w: persisted parent Run identity changed", ErrInvalidRunTransition)
+	}
+	parent = currentParent
+	transfer, err := s.acceptedHandoffTransfer(ctx, parent)
+	if err != nil {
+		return err
+	}
 
 	var cascadeErrors []error
 	for _, child := range children {
 		if child == nil {
+			continue
+		}
+		if handoffOwnsChild(transfer, parent, child) {
+			// The recipient owns this entire branch after accepting the
+			// handoff. ParentRunID remains the immutable historical lineage.
 			continue
 		}
 		if _, seen := visited[child.ID]; seen {

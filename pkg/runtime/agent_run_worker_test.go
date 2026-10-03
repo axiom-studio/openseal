@@ -235,6 +235,12 @@ func TestAgentRunWorkerCompletesArtifactFreeHandoffFromTerminalChild(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Terminal maintenance can observe the completed source before the
+	// recipient claims its child. Acceptance transfers cancellation ownership
+	// even though the child's historical parent lineage remains unchanged.
+	if err := NewRunCommandService(store).CascadeTerminalRun(t.Context(), accepted.Source); err != nil {
+		t.Fatal(err)
+	}
 	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return &TurnRunnerBinding{DefinitionID: "marketing", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
