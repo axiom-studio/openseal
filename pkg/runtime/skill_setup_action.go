@@ -28,8 +28,8 @@ type skillSetupArguments struct {
 
 func skillSetupAction() skill.Action {
 	return skill.Action{Name: SkillActionRequestSetup,
-		Description: "Ask the user to install, configure, or reauthorize an exact Skill through a durable in-chat setup form. Use discover first and copy the returned id and sourceIdentity exactly. Request skillVersion latest; the host resolves and records the authorized current version. Existing bindings retain their compatible verified executable identity. For a general connection request, omit requiredActions, enablePrompt, and bindingId unless the user requested specific operations or a verified existing binding. Compatibility requirements and configuration fields are not action names. A successful pending request is the result: ask the user to complete its form, then finish without polling. This action creates a request only; it does not grant access, install anything, or verify a connection. Never request secrets in chat or invent authorization URLs. Use reauthorize for an existing binding whose credentials need replacement. Use configure to connect an installed Skill or change its configuration. Use install for a verified discoverable Skill that needs installation.",
-		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
+		Description: "Ask the user to install, configure, or reauthorize an exact Skill through a durable in-chat setup form. Use discover first and copy the returned id and sourceIdentity exactly. Request skillVersion latest; the host resolves and records the authorized current version. Existing bindings retain their compatible verified executable identity. For a general connection request, omit requiredActions, enablePrompt, and bindingId unless the user requested specific operations or a verified existing binding. Compatibility requirements and configuration fields are not action names. A successful pending request is the result: ask the user to complete its form, then finish without polling. If setup fails, explain the failure and finish; do not repeat the same setup in this reply. This action creates a request only; it does not grant access, install anything, or verify a connection. Never request secrets in chat or invent authorization URLs. Use reauthorize for an existing binding whose credentials need replacement. Use configure to connect an installed Skill or change its configuration. Use install for a verified discoverable Skill that needs installation.",
+		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"requiredActions": map[string]interface{}{"description": "Optional exact names from the discovered candidate actions[].name when specific provider operations are requested. Never put compatibility requirements, credential kinds, or configuration field names here. Omit for a general connection request.", "type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "maxItems": 32, "uniqueItems": true},
 			"enablePrompt":    map[string]interface{}{"description": "Optional; only true when discovered promptAvailable is true and instructions are needed.", "type": "boolean"},
@@ -73,6 +73,21 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 	}
 	if existing != nil {
 		return skillSetupResult(existing)
+	}
+	// A new model turn must not restart an identical failed setup operation
+	// inside the same reply. A later user-triggered run can retry after repair.
+	failed, err := d.store.ListActionCalls(ctx, ActionFilter{Scope: run.Scope, RunID: run.ID, Status: []ActionCallStatus{ActionCallStatusFailed}})
+	if err != nil {
+		return nil, err
+	}
+	for _, call := range failed {
+		if call.ID == input.Call.ID || call.DeploymentID != deploymentID || call.Action != SkillActionRequestSetup || call.SkillID != SkillManagementSkillID {
+			continue
+		}
+		previous, decodeErr := decodeSkillSetupArguments(call.Arguments)
+		if decodeErr == nil && previous.SkillID == a.SkillID && previous.SourceIdentity == a.SourceIdentity && previous.SkillVersion == a.SkillVersion && previous.Kind == a.Kind && previous.BindingID == a.BindingID {
+			return nil, errors.New("this setup already failed in this reply; explain the failure and wait for the user to retry after it is fixed")
+		}
 	}
 	// Resolve exact identity against the host's authorized catalog, never model prose.
 	if d.discovery == nil {
