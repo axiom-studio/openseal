@@ -122,7 +122,7 @@ func ProjectHostedActionInvocationContracts(actions []capability.ModelAction) []
 		case capability.ExternalOperationRequired:
 			fields = append(fields, "externalOperation")
 			external.RequiredFields = []string{"resource", "operation"}
-			external.Instruction = "Required on proposedAction. resource is the stable canonical target URL or opaque resource ID; operation is the stable semantic effect. Never use a DOM reference, session ID, Run ID, timestamp, credential, or model wording."
+			external.Instruction = "Required on proposedAction. resource is the stable HTTP(S) target URL, a single email address (bare or mailto: without headers), or opaque resource ID; operation is the stable semantic effect. Never use a DOM reference, session ID, Run ID, timestamp, credential, or model wording."
 			external.Example = &ExternalOperationIdentity{Resource: "https://service.example/resources/42", Operation: "resource:update"}
 		case capability.ExternalOperationForbidden:
 			external.Instruction = "Forbidden. Omit externalOperation from proposedAction because this action does not commit a durable external business operation."
