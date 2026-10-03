@@ -143,28 +143,9 @@ func (r *acceptedAgentRequestExecutionTurnRunner) RunTurn(ctx context.Context, i
 		return outcome, err
 	}
 	if _, decisionOnly := outcome.RunOutput[AgentRequestDecisionOutputKey]; decisionOnly {
-		if acceptedAgentRequestExecutionRecoveryAttempt(input.Run.Checkpoint) > 0 {
-			return nil, errors.New("accepted AgentRequest execution repeatedly emitted an intake decision")
-		}
-		checkpoint := cloneMap(outcome.ContinuationCheckpoint)
-		if checkpoint == nil {
-			checkpoint = map[string]interface{}{}
-		}
-		checkpoint[acceptedAgentRequestExecutionRecoveryKey] = map[string]interface{}{
-			"attempt": 1,
-			"error":   "The AgentRequest was already accepted; continue with its requested work.",
-		}
-		outcome.ContinuationCheckpoint = checkpoint
-		outcome.NextRunStatus = AgentRunStatusRunning
-		outcome.WakeCondition = nil
-		outcome.RunOutput = nil
-		outcome.RunError = ""
-		outcome.ProposedActions = nil
-		outcome.ProposedFork = nil
-		outcome.ProposedDelegation = nil
-		outcome.ProposedRunbook = nil
-		outcome.OutputSummary = "Discarded a repeated intake decision and continued accepted work"
+		return nil, errors.New("accepted AgentRequest execution emitted an invalid intake decision")
 	}
+
 	return outcome, nil
 }
 

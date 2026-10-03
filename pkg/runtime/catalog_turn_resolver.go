@@ -82,6 +82,26 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if accepted != nil && (definition.ID != accepted.DefinitionID || definition.Version != accepted.DefinitionVersion || definition.Runbook == nil || definition.Runbook.ID != accepted.RunbookID || definition.Runbook.Version != accepted.RunbookVersion) {
 		return nil, ErrAcceptedRunExecution
 	}
+	if requiresFinalFailureExplanation(run.Checkpoint) {
+		if config.Host == nil {
+			return nil, ErrTurnHostUnavailable
+		}
+		// Explaining a stopped attempt needs the verified Agent identity and
+		// model, but no Skill activation, Workspace access or runtime setup.
+		runner, runnerErr := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
+			AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
+			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+			SystemInstructions: hostedAgentInstructions(definition), ModelCredential: deploymentModelCredential(deployment),
+		})
+		if runnerErr != nil {
+			return nil, runnerErr
+		}
+		return &TurnRunnerBinding{
+			Runner: runner, DeploymentID: deployment.ID, ActionDeploymentID: deployment.ID,
+			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+			BudgetReservation: BudgetUsage{Turns: 1},
+		}, nil
+	}
 	if _, requested := run.Context[AgentRequestCompletionReviewContextKey]; requested {
 		if config.Host == nil {
 			return nil, ErrTurnHostUnavailable

@@ -45,6 +45,25 @@ type AIExecutor struct {
 // Maximum number of tool call iterations to prevent infinite loops
 const maxToolIterations = 10
 
+// A failed tool ends execution. The next provider request can only explain the
+// result to the user, even when there is no room left in the normal tool budget.
+const toolFailureExplanationInstruction = "A tool failed and this attempt has stopped. Explain the confirmed failure and any completed work to the user in your normal voice. Do not retry, call another tool, claim success, or invent a cause. Give a concise final response."
+
+// executeToolCallsUntilFailure stops the batch at its first failure. Every call
+// still receives a result so providers can consume the complete tool response.
+func executeToolCallsUntilFailure(ctx context.Context, calls []*ToolCall, tools []*ToolDefinition, resolver TemplateResolver) ([]*ToolCallResult, bool, error) {
+	results, err := ExecuteToolCalls(ctx, calls, tools, resolver)
+	if err != nil {
+		return results, false, err
+	}
+	for _, result := range results {
+		if result.Error != "" {
+			return results, true, nil
+		}
+	}
+	return results, false, nil
+}
+
 func NewAIExecutor() *AIExecutor {
 	return &AIExecutor{
 		client: &http.Client{
@@ -645,8 +664,9 @@ func (p *ChatCompletionsProvider) ExecuteToolLoop(ctx context.Context, model, pr
 
 	var toolCallHistory []map[string]interface{}
 	var lastFullResponse map[string]interface{}
+	failureExplanation := false
 
-	for iteration := 0; iteration < maxToolIter; iteration++ {
+	for iteration := 0; iteration < maxToolIter || failureExplanation; iteration++ {
 		select {
 		case <-ctx.Done():
 			return "", nil, toolCallHistory, ctx.Err()
@@ -658,7 +678,12 @@ func (p *ChatCompletionsProvider) ExecuteToolLoop(ctx context.Context, model, pr
 			"messages":              messages,
 			"temperature":           temperature,
 			"max_completion_tokens": maxTokens,
-			"tools":                 openAITools,
+		}
+		if failureExplanation {
+			reqBody["tool_choice"] = "none"
+			reqBody["messages"] = append(messages, map[string]string{"role": "system", "content": toolFailureExplanationInstruction})
+		} else {
+			reqBody["tools"] = openAITools
 		}
 
 		bodyBytes, err := json.Marshal(reqBody)
@@ -726,6 +751,10 @@ func (p *ChatCompletionsProvider) ExecuteToolLoop(ctx context.Context, model, pr
 			return content, lastFullResponse, toolCallHistory, nil
 		}
 
+		if failureExplanation {
+			return "", lastFullResponse, toolCallHistory, fmt.Errorf("provider requested a tool after this attempt stopped")
+		}
+
 		// Add assistant message with tool calls to conversation
 		messages = append(messages, map[string]interface{}{
 			"role":       "assistant",
@@ -761,10 +790,12 @@ func (p *ChatCompletionsProvider) ExecuteToolLoop(ctx context.Context, model, pr
 			toolCalls = append(toolCalls, toolCall)
 		}
 
-		results, err := ExecuteToolCalls(ctx, toolCalls, tools, resolver)
+		results, failed, err := executeToolCallsUntilFailure(ctx, toolCalls, tools, resolver)
 		if err != nil {
 			return "", nil, toolCallHistory, fmt.Errorf("failed to execute tool calls: %w", err)
 		}
+
+		failureExplanation = failed
 
 		// Record tool call history
 		for i, tc := range toolCalls {
@@ -799,10 +830,11 @@ func (p *ResponsesProvider) ExecuteToolLoop(ctx context.Context, model, prompt, 
 
 	var toolCallHistory []map[string]interface{}
 	var lastFullResponse map[string]interface{}
+	failureExplanation := false
 	var previousResponseID string
 	var pendingToolResults []map[string]interface{}
 
-	for iteration := 0; iteration < maxToolIter; iteration++ {
+	for iteration := 0; iteration < maxToolIter || failureExplanation; iteration++ {
 		select {
 		case <-ctx.Done():
 			return "", nil, toolCallHistory, ctx.Err()
@@ -836,7 +868,10 @@ func (p *ResponsesProvider) ExecuteToolLoop(ctx context.Context, model, prompt, 
 		}
 
 		// Add tools
-		if len(openAITools) > 0 {
+		if failureExplanation {
+			reqBody["tool_choice"] = "none"
+			reqBody["instructions"] = systemPrompt + "\n\n" + toolFailureExplanationInstruction
+		} else if len(openAITools) > 0 {
 			reqBody["tools"] = openAITools
 		}
 
@@ -936,6 +971,10 @@ func (p *ResponsesProvider) ExecuteToolLoop(ctx context.Context, model, prompt, 
 			return content, lastFullResponse, toolCallHistory, nil
 		}
 
+		if failureExplanation {
+			return "", lastFullResponse, toolCallHistory, fmt.Errorf("provider requested a tool after this attempt stopped")
+		}
+
 		// Parse tool calls
 		var toolCalls []*ToolCall
 		for _, tc := range rawToolCalls {
@@ -969,10 +1008,12 @@ func (p *ResponsesProvider) ExecuteToolLoop(ctx context.Context, model, prompt, 
 			toolCalls = append(toolCalls, toolCall)
 		}
 
-		results, err := ExecuteToolCalls(ctx, toolCalls, tools, resolver)
+		results, failed, err := executeToolCallsUntilFailure(ctx, toolCalls, tools, resolver)
 		if err != nil {
 			return "", nil, toolCallHistory, fmt.Errorf("failed to execute tool calls: %w", err)
 		}
+
+		failureExplanation = failed
 
 		// Record tool call history
 		for i, tc := range toolCalls {
@@ -1023,8 +1064,9 @@ func (e *AIExecutor) executeAnthropicToolLoop(ctx context.Context, model, prompt
 
 	var toolCallHistory []map[string]interface{}
 	var lastFullResponse map[string]interface{}
+	failureExplanation := false
 
-	for iteration := 0; iteration < maxToolIter; iteration++ {
+	for iteration := 0; iteration < maxToolIter || failureExplanation; iteration++ {
 		select {
 		case <-ctx.Done():
 			return "", nil, toolCallHistory, ctx.Err()
@@ -1035,11 +1077,15 @@ func (e *AIExecutor) executeAnthropicToolLoop(ctx context.Context, model, prompt
 			"model":      model,
 			"messages":   messages,
 			"max_tokens": maxTokens,
-			"tools":      anthropicTools,
 		}
 
-		if systemPrompt != "" {
+		if failureExplanation {
+			reqBody["system"] = systemPrompt + "\n\n" + toolFailureExplanationInstruction
+		} else if systemPrompt != "" {
 			reqBody["system"] = systemPrompt
+		}
+		if !failureExplanation {
+			reqBody["tools"] = anthropicTools
 		}
 
 		bodyBytes, err := json.Marshal(reqBody)
@@ -1116,6 +1162,10 @@ func (e *AIExecutor) executeAnthropicToolLoop(ctx context.Context, model, prompt
 			return textContent.String(), lastFullResponse, toolCallHistory, nil
 		}
 
+		if failureExplanation {
+			return "", lastFullResponse, toolCallHistory, fmt.Errorf("provider requested a tool after this attempt stopped")
+		}
+
 		// Add assistant message with tool use to conversation
 		// Must ensure "input" field is always present for tool_use blocks (Anthropic requirement)
 		assistantContent := make([]map[string]interface{}, len(result.Content))
@@ -1142,10 +1192,12 @@ func (e *AIExecutor) executeAnthropicToolLoop(ctx context.Context, model, prompt
 		})
 
 		// Execute tool calls
-		results, err := ExecuteToolCalls(ctx, toolCalls, tools, resolver)
+		results, failed, err := executeToolCallsUntilFailure(ctx, toolCalls, tools, resolver)
 		if err != nil {
 			return "", nil, toolCallHistory, fmt.Errorf("failed to execute tool calls: %w", err)
 		}
+
+		failureExplanation = failed
 
 		// Record tool call history
 		for i, tc := range toolCalls {
@@ -1203,8 +1255,9 @@ func (e *AIExecutor) executeGeminiToolLoop(ctx context.Context, model, prompt, s
 
 	var toolCallHistory []map[string]interface{}
 	var lastFullResponse map[string]interface{}
+	failureExplanation := false
 
-	for iteration := 0; iteration < maxToolIter; iteration++ {
+	for iteration := 0; iteration < maxToolIter || failureExplanation; iteration++ {
 		select {
 		case <-ctx.Done():
 			return "", nil, toolCallHistory, ctx.Err()
@@ -1213,17 +1266,22 @@ func (e *AIExecutor) executeGeminiToolLoop(ctx context.Context, model, prompt, s
 
 		reqBody := map[string]interface{}{
 			"contents": contents,
-			"tools":    []interface{}{geminiTools},
 			"generationConfig": map[string]interface{}{
 				"temperature":     temperature,
 				"maxOutputTokens": maxTokens,
 			},
 		}
 
-		if systemPrompt != "" {
+		requestSystemPrompt := systemPrompt
+		if failureExplanation {
+			requestSystemPrompt += "\n\n" + toolFailureExplanationInstruction
+		} else {
+			reqBody["tools"] = []interface{}{geminiTools}
+		}
+		if requestSystemPrompt != "" {
 			reqBody["system_instruction"] = map[string]interface{}{
 				"parts": []map[string]string{
-					{"text": systemPrompt},
+					{"text": requestSystemPrompt},
 				},
 			}
 		}
@@ -1314,6 +1372,10 @@ func (e *AIExecutor) executeGeminiToolLoop(ctx context.Context, model, prompt, s
 			return strings.Join(textParts, ""), lastFullResponse, toolCallHistory, nil
 		}
 
+		if failureExplanation {
+			return "", lastFullResponse, toolCallHistory, fmt.Errorf("provider requested a tool after this attempt stopped")
+		}
+
 		// Add model response to contents
 		contents = append(contents, map[string]interface{}{
 			"role":  "model",
@@ -1321,10 +1383,12 @@ func (e *AIExecutor) executeGeminiToolLoop(ctx context.Context, model, prompt, s
 		})
 
 		// Execute tool calls
-		results, err := ExecuteToolCalls(ctx, toolCalls, tools, resolver)
+		results, failed, err := executeToolCallsUntilFailure(ctx, toolCalls, tools, resolver)
 		if err != nil {
 			return "", nil, toolCallHistory, fmt.Errorf("failed to execute tool calls: %w", err)
 		}
+
+		failureExplanation = failed
 
 		// Record tool call history
 		for i, tc := range toolCalls {
@@ -1361,8 +1425,9 @@ func (e *AIExecutor) executePromptToolLoop(ctx context.Context, provider, model,
 
 	var toolCallHistory []map[string]interface{}
 	currentPrompt := prompt
+	failureExplanation := false
 
-	for iteration := 0; iteration < maxToolIter; iteration++ {
+	for iteration := 0; iteration < maxToolIter || failureExplanation; iteration++ {
 		select {
 		case <-ctx.Done():
 			return "", nil, toolCallHistory, ctx.Err()
@@ -1372,10 +1437,14 @@ func (e *AIExecutor) executePromptToolLoop(ctx context.Context, provider, model,
 		// Call the provider
 		var response string
 		var err error
+		requestSystemPrompt := augmentedSystemPrompt
+		if failureExplanation {
+			requestSystemPrompt = systemPrompt + "\n\n" + toolFailureExplanationInstruction
+		}
 
 		switch provider {
 		case "ollama":
-			response, _, err = e.callOllama(ctx, model, currentPrompt, augmentedSystemPrompt, temperature, ollamaUrl, nil)
+			response, _, err = e.callOllama(ctx, model, currentPrompt, requestSystemPrompt, temperature, ollamaUrl, nil)
 		default:
 			return "", nil, nil, fmt.Errorf("unsupported provider for prompt-based tool calling: %s", provider)
 		}
@@ -1395,11 +1464,17 @@ func (e *AIExecutor) executePromptToolLoop(ctx context.Context, provider, model,
 			return response, nil, toolCallHistory, nil
 		}
 
+		if failureExplanation {
+			return "", nil, toolCallHistory, fmt.Errorf("provider requested a tool after this attempt stopped")
+		}
+
 		// Execute tool calls
-		results, err := ExecuteToolCalls(ctx, toolCalls, tools, resolver)
+		results, failed, err := executeToolCallsUntilFailure(ctx, toolCalls, tools, resolver)
 		if err != nil {
 			return "", nil, toolCallHistory, fmt.Errorf("failed to execute tool calls: %w", err)
 		}
+
+		failureExplanation = failed
 
 		// Record tool call history
 		for i, tc := range toolCalls {
@@ -1429,7 +1504,11 @@ func (e *AIExecutor) executePromptToolLoop(ctx context.Context, provider, model,
 				resultText.WriteString(fmt.Sprintf("- %s: %s\n", result.Name, string(resultBytes)))
 			}
 		}
-		resultText.WriteString("\nPlease continue your response based on these results.")
+		if failed {
+			resultText.WriteString("\n" + toolFailureExplanationInstruction)
+		} else {
+			resultText.WriteString("\nPlease continue your response based on these results.")
+		}
 
 		currentPrompt = resultText.String()
 	}
