@@ -829,6 +829,7 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 }
 
 func compareUpgradeContracts(previous, target *skill.Definition, bindingActions []string, referenced map[string]bool) []SkillReferenceUpgradeFinding {
+	occurrenceLimitUpgrade := compatibleRunbookOccurrenceLimitUpgrade(previous, target)
 	actions := make(map[string]bool, len(bindingActions)+len(referenced))
 	for _, action := range bindingActions {
 		actions[action] = true
@@ -858,7 +859,8 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 				Code: "risk_increased", Message: fmt.Sprintf("%s risk changes from %s to %s", name, before.Risk, after.Risk),
 			})
 		}
-		if !compatibleUpgradeInputSchema(before.InputSchema, after.InputSchema) || !reflect.DeepEqual(before.OutputSchema, after.OutputSchema) ||
+		inputCompatible := compatibleUpgradeInputSchema(before.InputSchema, after.InputSchema) || (name == RunbookActionCreateTask && occurrenceLimitUpgrade)
+		if !inputCompatible || !reflect.DeepEqual(before.OutputSchema, after.OutputSchema) ||
 			!reflect.DeepEqual(before.Credentials, after.Credentials) || before.SideEffect != after.SideEffect ||
 			before.Idempotency != after.Idempotency || before.ExternalOperationPolicy != after.ExternalOperationPolicy ||
 			!reflect.DeepEqual(before.Transport, after.Transport) || !reflect.DeepEqual(previous.Transport, target.Transport) {
@@ -868,6 +870,32 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 		}
 	}
 	return findings
+}
+
+// Only these complete, published builtin descriptors have the audited behavior
+// that a null create_task occurrence limit is identical to its already permitted
+// omission. This is not a general nullable-schema compatibility rule. Hashing
+// every field also excludes external sources and descriptors spoofing the same
+// ID/version, and all other action/authority checks still run normally.
+func compatibleRunbookOccurrenceLimitUpgrade(previous, target *skill.Definition) bool {
+	if previous == nil || target == nil || previous.ID != RunbookManagementSkillID || target.ID != RunbookManagementSkillID || target.Version != "1.3.2" {
+		return false
+	}
+	var previousDigest string
+	switch previous.Version {
+	case "1.3.0":
+		previousDigest = "54b02b77d43c735d4aeb5523cec033241c70df8b5e5ca685d2c1743ba528fd0b"
+	case "1.3.1":
+		previousDigest = "25e4b88d8a2046005db74696ea2f085956a1b5cf9ecd44157c704592ceb17313"
+	default:
+		return false
+	}
+	const targetDigest = "98de6212b5340284dcd896f2bb75e8e6951b275cc5707dd549218a0c5ba4967d"
+	matches := func(definition *skill.Definition, digest string) bool {
+		encoded, err := json.Marshal(definition)
+		return err == nil && fmt.Sprintf("%x", sha256.Sum256(encoded)) == digest
+	}
+	return matches(previous, previousDigest) && matches(target, targetDigest)
 }
 
 // Descriptive text can change without changing an adapter's authority. Every

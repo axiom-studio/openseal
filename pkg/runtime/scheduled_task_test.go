@@ -86,104 +86,117 @@ func dispatchTaskForTest(t *testing.T, store KernelStore, run *AgentRun, bound *
 }
 func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T) {
 	for _, kind := range []string{"memory", "sqlite"} {
-		t.Run(kind, func(t *testing.T) {
-			var store KernelStore = NewMemoryStore()
-			if kind == "sqlite" {
-				s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "tasks.db"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer s.Close()
-				store = s
-			}
-			run, catalog, bound, args := scheduledTaskFixture(t, store)
-			if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
-				t.Fatal(err)
-			}
-			validator, _ := NewRunbookActionValidator(store.(runbookActionStore))
-			if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err != nil {
-				t.Fatal(err)
-			}
-			result := dispatchTaskForTest(t, store, run, bound, args, "create-task")
-			a := result["activation"].(*RunbookActivation)
-			if a.Task == nil || a.Task.ConversationID != run.Context[conversationRunContextConversationID] || a.NextRunAt == nil || a.DefinitionID != "" {
-				t.Fatalf("activation=%#v", a)
-			}
-			replay := dispatchTaskForTest(t, store, run, bound, args, "create-task")
-			if replay["activation"].(*RunbookActivation).ID != a.ID || replay["replayed"] != true {
-				t.Fatal("duplicate task creation")
-			}
-			reader := store.(ConversationStore)
-			for occurrence := 0; occurrence < 2; occurrence++ {
-				current, _ := store.GetRunbookActivation(t.Context(), run.Scope, a.ID)
-				now := current.NextRunAt.Add(time.Second)
-				scheduler := NewRunbookScheduler(store)
-				scheduler.now = func() time.Time { return now }
-				r, err := scheduler.ReconcileScope(t.Context(), run.Scope, 20)
-				if err != nil || r.Scheduled != 1 {
-					t.Fatalf("schedule=%#v,%v", r, err)
-				}
-				// A different scheduler instance sees the durable cursor, never a private timer.
-				if r, err := NewRunbookScheduler(store).ReconcileScope(t.Context(), run.Scope, 20); err != nil || r.Scheduled != 0 {
-					t.Fatalf("restart replay=%#v,%v", r, err)
-				}
-				work, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: run.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
-				if err != nil {
-					t.Fatal(err)
-				}
-				var scheduled *AgentRun
-				for _, w := range work {
-					if w.Status == AgentRunStatusQueued {
-						scheduled = w
-						break
-					}
-				}
-				if scheduled == nil || scheduled.Goal != a.Task.Goal || scheduled.Source != RunSourceSchedule || scheduled.Entrypoint != "" || scheduled.Plan["runbook"] != nil {
-					t.Fatalf("work=%#v", scheduled)
-				}
-				// Reporting projects the actual result into the original channel exactly once.
-				scheduled.Status = AgentRunStatusCompleted
-				scheduled.Output = map[string]interface{}{"summary": "Forecast result from the requested source"}
-				scheduled.Revision++
-				scheduled.UpdatedAt = now
-				scheduled.CompletedAt = &now
-				activity := NewRunActivityService(store, store)
-				started, _, err := activity.TransitionRun(t.Context(), scheduled.Scope, scheduled.ID, RunTransitionRequest{ExpectedRevision: scheduled.Revision - 1, Status: AgentRunStatusRunning, Summary: "Execute scheduled task", Actor: ActivityActor{Type: "service", ID: "worker"}, Visibility: ActivityVisibilityScope})
-				if err != nil {
-					t.Fatal(err)
-				}
-				scheduled, _, err = activity.TransitionRun(t.Context(), started.Scope, started.ID, RunTransitionRequest{ExpectedRevision: started.Revision, Status: AgentRunStatusCompleted, Summary: "Finished task", Output: scheduled.Output, Actor: ActivityActor{Type: "service", ID: "worker"}, Visibility: ActivityVisibilityScope})
-				if err != nil {
-					t.Fatal(err)
-				}
-				for i := 0; i < 2; i++ {
-					if err := projectTerminalRunReporting(t.Context(), reader, scheduled); err != nil {
+		for _, limit := range []string{"bounded", "omitted", "null"} {
+			t.Run(kind+"/"+limit, func(t *testing.T) {
+				var store KernelStore = NewMemoryStore()
+				if kind == "sqlite" {
+					s, err := NewSQLiteStore(filepath.Join(t.TempDir(), "tasks.db"))
+					if err != nil {
 						t.Fatal(err)
 					}
+					defer s.Close()
+					store = s
 				}
-			}
-			terminal, _ := store.GetRunbookActivation(t.Context(), run.Scope, a.ID)
-			if terminal.Status != RunbookActivationRetired || terminal.OccurrencesProcessed != 2 {
-				t.Fatalf("terminal=%#v", terminal)
-			}
-			messages, err := reader.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: a.Task.ConversationID, Limit: 50})
-			if err != nil {
-				t.Fatal(err)
-			}
-			reports := 0
-			for _, m := range messages {
-				if m.Content == "Forecast result from the requested source" {
-					reports++
+				run, catalog, bound, args := scheduledTaskFixture(t, store)
+				occurrences, maximum, status := 2, int64(2), RunbookActivationRetired
+				if limit != "bounded" {
+					occurrences, maximum, status = 3, 0, RunbookActivationActive
+					delete(args, "maximumOccurrences")
+					if limit == "null" {
+						args["maximumOccurrences"] = nil
+					}
 				}
-			}
-			if reports != 2 {
-				t.Fatalf("reports=%d", reports)
-			}
-			completion, ok := scheduledTaskConversationCompletion(run, conversationResultMap(result))
-			if !ok || !strings.Contains(completion.Content, "active") {
-				t.Fatalf("completion=%#v", completion)
-			}
-		})
+				if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
+					t.Fatal(err)
+				}
+				validator, _ := NewRunbookActionValidator(store.(runbookActionStore))
+				if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err != nil {
+					t.Fatal(err)
+				}
+				result := dispatchTaskForTest(t, store, run, bound, args, "create-task")
+				a := result["activation"].(*RunbookActivation)
+				if a.Task == nil || a.Task.ConversationID != run.Context[conversationRunContextConversationID] || a.NextRunAt == nil || a.DefinitionID != "" {
+					t.Fatalf("activation=%#v", a)
+				}
+				if a.Trigger.Schedule == nil || a.Trigger.Schedule.MaximumOccurrences != maximum {
+					t.Fatalf("persisted occurrence limit=%#v", a.Trigger.Schedule)
+				}
+				replay := dispatchTaskForTest(t, store, run, bound, args, "create-task")
+				if replay["activation"].(*RunbookActivation).ID != a.ID || replay["replayed"] != true {
+					t.Fatal("duplicate task creation")
+				}
+				reader := store.(ConversationStore)
+				for occurrence := 0; occurrence < occurrences; occurrence++ {
+					current, _ := store.GetRunbookActivation(t.Context(), run.Scope, a.ID)
+					now := current.NextRunAt.Add(time.Second)
+					scheduler := NewRunbookScheduler(store)
+					scheduler.now = func() time.Time { return now }
+					r, err := scheduler.ReconcileScope(t.Context(), run.Scope, 20)
+					if err != nil || r.Scheduled != 1 {
+						t.Fatalf("schedule=%#v,%v", r, err)
+					}
+					// A different scheduler instance sees the durable cursor, never a private timer.
+					if r, err := NewRunbookScheduler(store).ReconcileScope(t.Context(), run.Scope, 20); err != nil || r.Scheduled != 0 {
+						t.Fatalf("restart replay=%#v,%v", r, err)
+					}
+					work, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: run.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
+					if err != nil {
+						t.Fatal(err)
+					}
+					var scheduled *AgentRun
+					for _, w := range work {
+						if w.Status == AgentRunStatusQueued {
+							scheduled = w
+							break
+						}
+					}
+					if scheduled == nil || scheduled.Goal != a.Task.Goal || scheduled.Source != RunSourceSchedule || scheduled.Entrypoint != "" || scheduled.Plan["runbook"] != nil {
+						t.Fatalf("work=%#v", scheduled)
+					}
+					// Reporting projects the actual result into the original channel exactly once.
+					scheduled.Status = AgentRunStatusCompleted
+					scheduled.Output = map[string]interface{}{"summary": "Forecast result from the requested source"}
+					scheduled.Revision++
+					scheduled.UpdatedAt = now
+					scheduled.CompletedAt = &now
+					activity := NewRunActivityService(store, store)
+					started, _, err := activity.TransitionRun(t.Context(), scheduled.Scope, scheduled.ID, RunTransitionRequest{ExpectedRevision: scheduled.Revision - 1, Status: AgentRunStatusRunning, Summary: "Execute scheduled task", Actor: ActivityActor{Type: "service", ID: "worker"}, Visibility: ActivityVisibilityScope})
+					if err != nil {
+						t.Fatal(err)
+					}
+					scheduled, _, err = activity.TransitionRun(t.Context(), started.Scope, started.ID, RunTransitionRequest{ExpectedRevision: started.Revision, Status: AgentRunStatusCompleted, Summary: "Finished task", Output: scheduled.Output, Actor: ActivityActor{Type: "service", ID: "worker"}, Visibility: ActivityVisibilityScope})
+					if err != nil {
+						t.Fatal(err)
+					}
+					for i := 0; i < 2; i++ {
+						if err := projectTerminalRunReporting(t.Context(), reader, scheduled); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				terminal, _ := store.GetRunbookActivation(t.Context(), run.Scope, a.ID)
+				if terminal.Status != status || terminal.OccurrencesProcessed != int64(occurrences) || (maximum == 0 && terminal.NextRunAt == nil) {
+					t.Fatalf("terminal=%#v", terminal)
+				}
+				messages, err := reader.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: a.Task.ConversationID, Limit: 50})
+				if err != nil {
+					t.Fatal(err)
+				}
+				reports := 0
+				for _, m := range messages {
+					if m.Content == "Forecast result from the requested source" {
+						reports++
+					}
+				}
+				if reports != occurrences {
+					t.Fatalf("reports=%d", reports)
+				}
+				completion, ok := scheduledTaskConversationCompletion(run, conversationResultMap(result))
+				if !ok || !strings.Contains(completion.Content, "active") {
+					t.Fatalf("completion=%#v", completion)
+				}
+			})
+		}
 	}
 }
 func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion(t *testing.T) {
@@ -217,6 +230,62 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 			}
 			if _, err := v.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: candidate, Bound: &b, Arguments: a}); err == nil {
 				t.Fatal("invalid task accepted")
+			}
+		})
+	}
+}
+
+func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
+	for _, kind := range []string{"memory", "sqlite"} {
+		t.Run(kind, func(t *testing.T) {
+			store := workflowEvidenceStore(t, kind)
+			run, catalog, bound, args := scheduledTaskFixture(t, store)
+			now := time.Now().Add(time.Second)
+			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+			if err != nil || claimed == nil {
+				t.Fatalf("claim=%#v,%v", claimed, err)
+			}
+			validator, _ := NewRunbookActionValidator(store.(runbookActionStore))
+			policyCalls := 0
+			coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+				policyCalls++
+				return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
+			}), validator)
+			coordinator.now = func() time.Time { return now }
+			invalid := []struct {
+				name  string
+				value interface{}
+			}{
+				{"zero", 0}, {"negative", -1}, {"fraction", 1.5}, {"above-maximum", 1000001},
+				{"string", "2"}, {"boolean", true}, {"array", []interface{}{}}, {"object", map[string]interface{}{}},
+			}
+			for _, value := range invalid {
+				t.Run(value.name, func(t *testing.T) {
+					candidate := cloneMap(args)
+					candidate["maximumOccurrences"] = value.value
+					if err := catalog.ValidateInput(t.Context(), bound, candidate); err == nil {
+						t.Fatal("invalid occurrence limit accepted by the tool contract")
+					}
+					if _, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: RunbookActionCreateTask, Arguments: candidate, IdempotencyKey: value.name, Summary: "Create recurring research"}); err == nil {
+						t.Fatal("invalid occurrence limit persisted")
+					}
+				})
+			}
+			for _, required := range []string{"title", "goal", "cron", "timezone"} {
+				candidate := cloneMap(args)
+				candidate[required] = nil
+				if err := catalog.ValidateInput(t.Context(), bound, candidate); err == nil {
+					t.Fatalf("required %s became nullable", required)
+				}
+			}
+			if policyCalls != 0 {
+				t.Fatal("invalid limits reached action policy")
+			}
+			if values, err := store.ListRunbookActivations(t.Context(), RunbookActivationFilter{Scope: run.Scope}); err != nil || len(values) != 0 {
+				t.Fatalf("invalid input created a routine: %#v, %v", values, err)
+			}
+			if values, err := store.ListObjectives(t.Context(), ObjectiveFilter{Scope: run.Scope}); err != nil || len(values) != 0 {
+				t.Fatalf("invalid input created an objective: %#v, %v", values, err)
 			}
 		})
 	}
@@ -264,37 +333,47 @@ func TestScheduledTaskLifecycleRequiresExactRevisionAndReplaysItsOwnAction(t *te
 }
 
 func TestScheduledTaskCreationUsesNormalApprovalBeforePersistence(t *testing.T) {
-	store := NewMemoryStore()
-	run, catalog, bound, args := scheduledTaskFixture(t, store)
-	now := time.Now().Add(time.Second)
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil {
-		t.Fatalf("claim=%#v,%v", claimed, err)
-	}
-	validator, _ := NewRunbookActionValidator(store)
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
-	}), validator)
-	coordinator.now = func() time.Time { return now }
-	result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Approval == nil || result.Call.Status != ActionCallStatusWaitingApproval {
-		t.Fatal("creation bypassed approval")
-	}
-	values, err := store.ListRunbookActivations(t.Context(), RunbookActivationFilter{Scope: run.Scope})
-	if err != nil || len(values) != 0 {
-		t.Fatal("schedule executed before approval")
-	}
-	binding := *bound.Binding
-	binding.ID = "read-only"
-	binding.MaximumRisk = skill.RiskLevelRead
-	binding.Revision++
-	if err := catalog.Bind(t.Context(), &binding); err == nil {
-		if _, err := catalog.Resolve(t.Context(), binding.Scope, binding.DeploymentID, binding.SkillID, binding.SkillVersion, RunbookActionCreateTask); err == nil {
-			t.Fatal("read-only binding allowed schedule creation")
-		}
+	for _, limit := range []string{"bounded", "omitted", "null"} {
+		t.Run(limit, func(t *testing.T) {
+			store := NewMemoryStore()
+			run, catalog, bound, args := scheduledTaskFixture(t, store)
+			if limit != "bounded" {
+				delete(args, "maximumOccurrences")
+				if limit == "null" {
+					args["maximumOccurrences"] = nil
+				}
+			}
+			now := time.Now().Add(time.Second)
+			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+			if err != nil || claimed == nil {
+				t.Fatalf("claim=%#v,%v", claimed, err)
+			}
+			validator, _ := NewRunbookActionValidator(store)
+			coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+				return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review recurring work", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: time.Hour}, nil
+			}), validator)
+			coordinator.now = func() time.Time { return now }
+			result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: bound.Definition.ID, SkillVersion: bound.Definition.Version, Action: RunbookActionCreateTask, Arguments: args, IdempotencyKey: "user-schedule", Summary: "Create recurring research", Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Approval == nil || result.Call.Status != ActionCallStatusWaitingApproval {
+				t.Fatal("creation bypassed approval")
+			}
+			values, err := store.ListRunbookActivations(t.Context(), RunbookActivationFilter{Scope: run.Scope})
+			if err != nil || len(values) != 0 {
+				t.Fatal("schedule executed before approval")
+			}
+			binding := *bound.Binding
+			binding.ID = "read-only"
+			binding.MaximumRisk = skill.RiskLevelRead
+			binding.Revision++
+			if err := catalog.Bind(t.Context(), &binding); err == nil {
+				if _, err := catalog.Resolve(t.Context(), binding.Scope, binding.DeploymentID, binding.SkillID, binding.SkillVersion, RunbookActionCreateTask); err == nil {
+					t.Fatal("read-only binding allowed schedule creation")
+				}
+			}
+		})
 	}
 }
 

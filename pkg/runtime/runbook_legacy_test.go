@@ -12,6 +12,69 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
+func TestRunbookManagementSkillPreservesPublished131Definition(t *testing.T) {
+	// Hash of the complete published definition before nullable occurrence limits.
+	const published131SHA256 = "25e4b88d8a2046005db74696ea2f085956a1b5cf9ecd44157c704592ceb17313"
+	legacy := RunbookManagementSkillLegacy131()
+	encoded, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published131SHA256 {
+		t.Fatalf("published 1.3.1 definition changed: got %s", got)
+	}
+	current := RunbookManagementSkill()
+	if legacy.Version != "1.3.1" || current.Version != "1.3.2" {
+		t.Fatalf("versions legacy=%s current=%s", legacy.Version, current.Version)
+	}
+	encoded, err = json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const reviewed132SHA256 = "98de6212b5340284dcd896f2bb75e8e6951b275cc5707dd549218a0c5ba4967d"
+	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != reviewed132SHA256 {
+		t.Fatalf("reviewed 1.3.2 descriptor changed: got %s", got)
+	}
+	catalog := skill.NewCatalog()
+	for _, definition := range []*skill.Definition{RunbookManagementSkillLegacy130(), legacy, current} {
+		if err := catalog.Register(t.Context(), definition); err != nil {
+			t.Fatal(err)
+		}
+		bound := &skill.BoundAction{Definition: definition, Action: definition.Actions[RunbookActionCreateTask], Binding: &skill.Binding{}}
+		if !isRunbookAction(bound) {
+			t.Fatalf("version %s is not dispatched", definition.Version)
+		}
+		args := map[string]interface{}{"title": "Daily research", "goal": "Summarize the public forecast", "cron": "0 0 9 * * *", "timezone": "UTC"}
+		if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
+			t.Fatalf("version %s rejected omitted limit: %v", definition.Version, err)
+		}
+		args["maximumOccurrences"] = float64(2)
+		if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
+			t.Fatalf("version %s rejected bounded limit: %v", definition.Version, err)
+		}
+		args["maximumOccurrences"] = nil
+		if err := catalog.ValidateInput(t.Context(), bound, args); (err == nil) != (definition.Version == current.Version) {
+			t.Fatalf("version %s nullable contract error=%v", definition.Version, err)
+		}
+	}
+}
+
+func TestScheduledTaskExecutesPublished131AfterHostUpgradeAcrossStores(t *testing.T) {
+	for _, kind := range []string{"memory", "sqlite"} {
+		t.Run(kind, func(t *testing.T) {
+			store := workflowEvidenceStore(t, kind)
+			run, catalog, bound, args := scheduledTaskFixture(t, store, RunbookManagementSkillLegacy131())
+			if err := catalog.Register(t.Context(), RunbookManagementSkill()); err != nil {
+				t.Fatal(err)
+			}
+			activation := dispatchTaskForTest(t, store, run, bound, args, "published-131")["activation"].(*RunbookActivation)
+			if activation.Status != RunbookActivationActive || activation.Trigger.Schedule.MaximumOccurrences != 2 {
+				t.Fatalf("legacy task dispatch=%#v", activation)
+			}
+		})
+	}
+}
+
 func TestRunbookManagementSkillPreservesPublished130Definition(t *testing.T) {
 	// Snapshot of the complete definition before adding subject evidence. This
 	// includes every action description and input/output schema, not just version.
@@ -25,7 +88,7 @@ func TestRunbookManagementSkillPreservesPublished130Definition(t *testing.T) {
 		t.Fatalf("published 1.3.0 definition changed: got %s", got)
 	}
 	current := RunbookManagementSkill()
-	if legacy.Version != "1.3.0" || current.Version != "1.3.1" {
+	if legacy.Version != "1.3.0" || current.Version != "1.3.2" {
 		t.Fatalf("versions legacy=%s current=%s", legacy.Version, current.Version)
 	}
 	catalog := skill.NewCatalog()

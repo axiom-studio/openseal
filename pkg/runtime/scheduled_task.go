@@ -117,8 +117,17 @@ func scheduledTaskCreateAction() skill.Action {
 	return skill.Action{Name: RunbookActionCreateTask, Description: "Create and activate a recurring scheduled task when the user requests future or repeated work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. Use a six-field cron including seconds and an explicit IANA timezone; clarify ambiguous timing. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"title", "goal", "cron", "timezone"}, "properties": map[string]interface{}{
 			"title": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 240}, "goal": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 16000, "description": "Self-contained work to perform on every occurrence, including the source to use and requested result. Do not include credentials or request another schedule."},
-			"cron": map[string]interface{}{"type": "string", "pattern": `^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+$`, "description": "Six-field cron: seconds minutes hours day-of-month month weekday."}, "timezone": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 100}, "maximumOccurrences": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 1000000, "description": "Omit for an ongoing routine; supply only when the user requested a bounded number of executions."},
+			"cron": map[string]interface{}{"type": "string", "pattern": `^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+$`, "description": "Six-field cron: seconds minutes hours day-of-month month weekday."}, "timezone": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 100}, "maximumOccurrences": map[string]interface{}{"type": []interface{}{"integer", "null"}, "minimum": 1, "maximum": 1000000, "description": "Omit or supply null for an ongoing routine; supply a positive integer only when the user requested a bounded number of executions."},
 		}}, OutputSchema: scheduledTaskResultSchema(RunbookActionCreateTask)}
+}
+
+func scheduledTaskCreateActionLegacy131() skill.Action {
+	action := scheduledTaskCreateAction()
+	action.InputSchema["properties"].(map[string]interface{})["maximumOccurrences"] = map[string]interface{}{
+		"type": "integer", "minimum": 1, "maximum": 1000000,
+		"description": "Omit for an ongoing routine; supply only when the user requested a bounded number of executions.",
+	}
+	return action
 }
 func scheduledTaskListAction() skill.Action {
 	return skill.Action{Name: RunbookActionList, Description: "List routines owned by this Agent or Team, including exact activation IDs, schedules, status, revisions, next occurrence and originating chat. Use these IDs to start, pause, resume, cancel or replace a schedule.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"offset": map[string]interface{}{"type": "integer", "minimum": 0}}}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"activations": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}, "nextOffset": map[string]interface{}{"type": "integer"}}, "required": []interface{}{"activations"}}}
