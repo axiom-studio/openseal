@@ -255,6 +255,15 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	updatedRun := cloneAgentRun(run)
 	updatedRun.Revision++
 	updatedRun.UpdatedAt = now
+	correctionCheckpoint := preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
+	if decision.Disposition != ActionDispositionDeny {
+		var correctionDenied string
+		correctionCheckpoint, correctionDenied = admitToolFeedbackCorrection(correctionCheckpoint, call)
+		if correctionDenied != "" {
+			decision.Disposition = ActionDispositionDeny
+			decision.Reason = correctionDenied
+		}
+	}
 	budgetDenied := false
 	if updatedRun.Budget != nil && decision.Disposition != ActionDispositionDeny {
 		err := reserveRunBudget(updatedRun, BudgetReservation{
@@ -280,7 +289,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		call.Status = ActionCallStatusReady
 		updatedRun.Status = AgentRunStatusWaitingForDependency
 		updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
-		updatedRun.Checkpoint = preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
+		updatedRun.Checkpoint = correctionCheckpoint
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
 	case ActionDispositionDeny:
@@ -292,7 +301,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			updatedRun.Status = AgentRunStatusPaused
 		}
 		updatedRun.WakeCondition = nil
-		updatedRun.Checkpoint = checkpointTerminalAction(preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint), call, map[string]interface{}{
+		updatedRun.Checkpoint = checkpointTerminalAction(correctionCheckpoint, call, map[string]interface{}{
 			"denialSource": "policy",
 		})
 		updatedRun.AvailableAt = now
@@ -322,7 +331,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		}
 		updatedRun.Status = AgentRunStatusWaitingForApproval
 		updatedRun.WakeCondition = &WakeCondition{Type: "approval", Reference: approvalID}
-		updatedRun.Checkpoint = preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
+		updatedRun.Checkpoint = correctionCheckpoint
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
 		eventType = "action.approval_requested"

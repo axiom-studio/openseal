@@ -456,6 +456,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		if reused, reuseErr := r.reuseSucceededAction(*response.ProposedAction, response.ContinuationCheckpoint); reuseErr != nil {
 			return nil, reuseErr
 		} else if reused != nil {
+			if _, correcting := ReadToolFeedbackCorrection(response.ContinuationCheckpoint); correcting {
+				return nil, errors.New("a historical success receipt is not a newly executed tool feedback correction")
+			}
 			changed, _, _, hasProgress := actionProgress(reused["result"])
 			response.ProposedAction = nil
 			response.ProposedFork = nil
@@ -706,6 +709,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		projectFinalFailureExplanation(&request)
 		return request, nil
 	}
+	projectToolFeedbackCorrection(&request)
 	if len(request.Actions) > 0 && len(actionHistoryEntries(input.Run.Checkpoint)) == 0 {
 		if result, ok := input.Run.Checkpoint[runEventWaitCheckpointKey].(map[string]interface{}); ok && result["status"] == string(RunEventWaitMatched) && result["event"] != nil {
 			request.SystemInstructions = append(request.SystemInstructions,

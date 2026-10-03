@@ -35,7 +35,7 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 			if result.Run.Checkpoint["saved"] != "context" || result.Run.LastAppliedTurn != failed.LastAppliedTurn || result.Run.BudgetUsage != failed.BudgetUsage || result.Run.Attempt != failed.Attempt {
 				t.Fatal("retry lost checkpoint, cursor or usage")
 			}
-			if requiresFinalFailureExplanation(result.Run.Checkpoint) || result.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil {
+			if requiresFinalFailureExplanation(result.Run.Checkpoint) || result.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil || result.Run.Checkpoint[ToolFeedbackCorrectionCheckpointKey] != nil {
 				t.Fatal("explicit retry retained the failure-only boundary")
 			}
 			if result.Event.EventType != "run.retried" {
@@ -65,7 +65,7 @@ func failedReplyFixtureWithExplanation(t *testing.T, store RunCommandStore, expl
 	ctx := t.Context()
 	service := NewRunCommandService(store)
 	scope := Scope{Kind: "tenant", ID: "one"}
-	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Reply", Source: RunSourceChat, Checkpoint: map[string]interface{}{"saved": "context", FinalFailureExplanationCheckpointKey: map[string]interface{}{"kind": "proposal", "message": "invalid input", "explained": explained}, proposalRecoveryCheckpointKey: map[string]interface{}{"attempt": 1}}})
+	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Reply", Source: RunSourceChat, Checkpoint: map[string]interface{}{"saved": "context", FinalFailureExplanationCheckpointKey: map[string]interface{}{"kind": "proposal", "message": "invalid input", "explained": explained}, proposalRecoveryCheckpointKey: map[string]interface{}{"attempt": 1}, ToolFeedbackCorrectionCheckpointKey: map[string]interface{}{"correctionsUsed": MaximumToolFeedbackCorrections, "message": "invalid input"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

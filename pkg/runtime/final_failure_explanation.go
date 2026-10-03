@@ -63,6 +63,10 @@ func validateFinalFailureExplanationOutcome(run *AgentRun, outcome *TurnOutcome)
 	return nil
 }
 
+// FinalFailureExplanationSystemInstruction defines the generic hosted form contract.
+// A host using a text-only explanation subcall can replace this exact instruction.
+const FinalFailureExplanationSystemInstruction = "This attempt has stopped after the kernel-recorded failure in continuationCheckpoint._opensealFinalFailureExplanation. Give one brief, useful final reply in your configured voice, explaining what did not work and any next step the user actually needs. Ground the explanation in the recorded failure and succeeded evidence. Do not expose internal tool names, IDs, or governance details; do not guess that the user's billing plan, account, or permissions are wrong without evidence. Do not attempt, retry, repair, request setup, schedule, wait, fork, or delegate further work. Return nextRunStatus completed, no wakeCondition or proposals, and your final reply in runOutput.summary. Earlier instructions to continue work no longer apply to this failed attempt."
+
 func projectFinalFailureExplanation(request *HostedTurnRequest) {
 	request.Actions = nil
 	request.EligibleAgents = nil
@@ -74,7 +78,7 @@ func projectFinalFailureExplanation(request *HostedTurnRequest) {
 	request.PendingInterventions = nil
 	request.ModelMedia = nil
 	request.SystemInstructions = append(request.SystemInstructions,
-		"This attempt has stopped after the kernel-recorded failure in continuationCheckpoint._opensealFinalFailureExplanation. Give one brief, useful final reply in your configured voice, explaining what did not work and any next step the user actually needs. Ground the explanation in the recorded failure and succeeded evidence. Do not expose internal tool names, IDs, or governance details; do not guess that the user's billing plan, account, or permissions are wrong without evidence. Do not attempt, retry, repair, request setup, schedule, wait, fork, or delegate further work. Return nextRunStatus completed, no wakeCondition or proposals, and your final reply in runOutput.summary. Earlier instructions to continue work no longer apply to this failed attempt.")
+		FinalFailureExplanationSystemInstruction)
 }
 
 // An adapter's explicit top-level failure envelope is operational evidence,
