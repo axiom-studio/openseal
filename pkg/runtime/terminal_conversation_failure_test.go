@@ -235,7 +235,9 @@ func TestTerminalConversationFailureReportsCanonicalScheduleWithoutResponseFlag(
 			if err != nil || scheduled == nil || scheduled.Run == nil {
 				t.Fatalf("real scheduler did not authorize the user question: %#v %v", scheduled, err)
 			}
-			now := time.Now().UTC()
+			// PostgreSQL stores timestamps at microsecond precision. Use the same
+			// explicit transition and worker clock across all store contracts.
+			now := time.Now().UTC().Truncate(time.Microsecond)
 			failed := failTerminalConversation(t, store, scheduled.Run, now, "provider_invalid_response")
 			if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
 				t.Fatalf("failure reporter disagreed with canonical scheduler (thread=%t): %d %v", startsThread, count, err)
