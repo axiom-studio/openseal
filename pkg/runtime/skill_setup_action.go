@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const SkillActionRequestSetup = "request_setup"
@@ -28,7 +29,7 @@ type skillSetupArguments struct {
 
 func skillSetupAction() skill.Action {
 	return skill.Action{Name: SkillActionRequestSetup,
-		Description: "Ask the user to install, configure, or reauthorize an exact Skill through a durable in-chat setup form. Use discover first and copy the returned id and sourceIdentity exactly. Request skillVersion latest; the host resolves and records the authorized current version. Existing bindings retain their compatible verified executable identity. For a general connection request, omit requiredActions, enablePrompt, and bindingId unless the user requested specific operations or a verified existing binding. Compatibility requirements and configuration fields are not action names. A successful pending request is the result: ask the user to complete its form, then finish without polling. If setup fails, explain the failure and finish; do not repeat the same setup in this reply. This action creates a request only; it does not grant access, install anything, or verify a connection. Never request secrets in chat or invent authorization URLs. Use reauthorize for an existing binding whose credentials need replacement. Use configure to connect an installed Skill or change its configuration. Use install for a verified discoverable Skill that needs installation.",
+		Description: "Ask the user to install, configure, or reauthorize an exact Skill through a durable in-chat setup form. Use discover first and copy the returned id and sourceIdentity exactly; publisher namespace spelling does not authorize a target. Request skillVersion latest; the host resolves and records the authorized current version. A verified existing account retains its binding ID and revision, while an older executable version requires a separately reviewed canonical binding upgrade before configuration or reauthorization can be completed. For example, configure the discovered Skill with skillVersion latest and omit requiredActions for a general account connection. For a general connection request, omit requiredActions, enablePrompt, and bindingId unless the user requested specific operations or a verified existing binding. Compatibility requirements and configuration fields are not action names. A successful pending request is the result: ask the user to complete its form, then finish without polling. If setup fails, explain the failure and finish; do not repeat the same setup in this reply. This action creates a request only; it does not grant access, install anything, or verify a connection. Never request secrets in chat or invent authorization URLs. Use reauthorize for an existing binding whose credentials need replacement. Use configure to connect an installed Skill or change its configuration. Use install for a verified discoverable Skill that needs installation.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"requiredActions": map[string]interface{}{"description": "Optional exact names from the discovered candidate actions[].name when specific provider operations are requested. Never put compatibility requirements, credential kinds, or configuration field names here. Omit for a general connection request.", "type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1}, "maxItems": 32, "uniqueItems": true},
@@ -42,15 +43,21 @@ func skillSetupAction() skill.Action {
 func decodeSkillSetupArguments(arguments map[string]interface{}) (skillSetupArguments, error) {
 	var a skillSetupArguments
 	if err := decodeSkillBindingArguments(arguments, &a); err != nil {
-		return a, err
+		return a, invalidSkillSetupField("arguments", "must match the setup action schema")
 	}
-	if a.SkillID == "" || a.SkillVersion == "" || strings.TrimSpace(a.Reason) == "" || len(a.Reason) > 1000 || strings.HasPrefix(a.SkillID, "openseal.") {
-		return a, ErrInvalidSkillSetup
+	if !validOpaqueIdentifier(a.SkillID, 256) {
+		return a, invalidSkillSetupField("skillId", "must be copied from authorized discovery")
+	}
+	if !validOpaqueIdentifier(a.SkillVersion, 256) {
+		return a, invalidSkillSetupField("skillVersion", "must be an exact discovered version or latest")
+	}
+	if strings.TrimSpace(a.Reason) == "" || utf8.RuneCountInString(a.Reason) > 1000 {
+		return a, invalidSkillSetupField("reason", "must contain between 1 and 1000 characters")
 	}
 	switch a.Kind {
 	case "install", "configure", "reauthorize":
 	default:
-		return a, ErrInvalidSkillSetup
+		return a, invalidSkillSetupField("kind", "must be install, configure, or reauthorize")
 	}
 	sort.Strings(a.RequiredActions)
 	a.RequiredActions = slices.Compact(a.RequiredActions)
@@ -61,10 +68,9 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 	if err != nil {
 		return nil, err
 	}
-	conversationID, _ := run.Context["conversationId"].(string)
-	messageID, _ := run.Context["triggerMessageId"].(string)
-	if run.Kind != RunKindConversation || conversationID == "" || messageID == "" {
-		return nil, errors.New("Skill setup requests require an Agent conversation")
+	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, deploymentID)
+	if err != nil {
+		return nil, err
 	}
 	id := "skill-setup:" + input.Call.ID
 	existing, err := d.store.GetSkillSetupRequest(ctx, run.Scope, id)
@@ -88,6 +94,38 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		if decodeErr == nil && previous.SkillID == a.SkillID && previous.SourceIdentity == a.SourceIdentity && previous.SkillVersion == a.SkillVersion && previous.Kind == a.Kind && previous.BindingID == a.BindingID {
 			return nil, errors.New("this setup already failed in this reply; explain the failure and wait for the user to retry after it is fixed")
 		}
+	}
+	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
+	// Account identity and the prospective executable target are separate.
+	// Resolve an existing account before choosing latest so retained versions
+	// never look like a missing account or silently create another connection.
+	var currentBinding *skill.Binding
+	if a.BindingID != "" {
+		currentBinding, err = d.catalog.GetBinding(ctx, scope, deploymentID, a.BindingID)
+		if err != nil {
+			return nil, err
+		}
+		if currentBinding == nil || currentBinding.SkillID != a.SkillID || currentBinding.SourceIdentity != a.SourceIdentity {
+			return nil, errors.New("setup account does not match this Agent's exact Skill source")
+		}
+	} else {
+		bindings, listErr := d.catalog.ListBindings(ctx, scope, deploymentID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		for _, binding := range bindings {
+			if binding.SkillID != a.SkillID || binding.SourceIdentity != a.SourceIdentity || binding.Disabled {
+				continue
+			}
+			if currentBinding != nil {
+				return nil, errors.New("more than one account matches; choose the exact bindingId")
+			}
+			currentBinding = binding
+			a.BindingID = binding.ID
+		}
+	}
+	if a.Kind == "reauthorize" && currentBinding == nil {
+		return nil, errors.New("no current binding exists; request configuration first")
 	}
 	// Resolve exact identity against the host's authorized catalog, never model prose.
 	if d.discovery == nil {
@@ -161,33 +199,18 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 	if a.EnablePrompt && !candidate.PromptAvailable {
 		return nil, errors.New("selected Skill does not supply prompt instructions")
 	}
-	if a.BindingID == "" {
-		bindings, err := d.catalog.ListBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, deploymentID)
-		if err != nil {
-			return nil, err
-		}
-		for _, binding := range bindings {
-			if binding.SkillID == a.SkillID && binding.SkillVersion == a.SkillVersion && binding.SourceIdentity == a.SourceIdentity && !binding.Disabled {
-				if a.BindingID != "" {
-					return nil, errors.New("more than one account matches; choose the exact bindingId")
-				}
-				a.BindingID = binding.ID
-			}
-		}
-	}
-	if a.Kind == "reauthorize" && a.BindingID == "" {
-		return nil, errors.New("no current binding exists; request configuration first")
-	}
+	phase := SkillSetupPhaseConfiguration
 	var bindingRevision int64
-	if a.BindingID != "" {
-		binding, err := d.catalog.GetBinding(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, deploymentID, a.BindingID)
-		if err != nil {
-			return nil, err
+	bindingVersion := ""
+	if currentBinding != nil {
+		bindingRevision = currentBinding.Revision
+		bindingVersion = currentBinding.SkillVersion
+		if currentBinding.SkillVersion != a.SkillVersion {
+			if currentBinding.Disabled {
+				return nil, errors.New("a disabled account cannot be upgraded; enable its exact binding before selecting a new Skill version")
+			}
+			phase = SkillSetupPhaseBindingUpgrade
 		}
-		if binding == nil || binding.SkillID != a.SkillID || binding.SkillVersion != a.SkillVersion || binding.SourceIdentity != a.SourceIdentity {
-			return nil, errors.New("setup target does not match this Agent's binding")
-		}
-		bindingRevision = binding.Revision
 	}
 	// Repeated model requests for the same pending interaction reuse its identity.
 	pending, err := d.store.ListSkillSetupRequests(ctx, run.Scope, deploymentID, conversationID)
@@ -195,7 +218,7 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		return nil, err
 	}
 	for _, r := range pending {
-		if r.Status == "pending" && r.Kind == a.Kind && r.SkillID == a.SkillID && r.SkillVersion == a.SkillVersion && r.SourceIdentity == a.SourceIdentity && r.BindingID == a.BindingID && r.BindingRevision == bindingRevision && slices.Equal(r.RequiredActions, a.RequiredActions) && r.EnablePrompt == a.EnablePrompt {
+		if r.Status == "pending" && r.Kind == a.Kind && r.SkillID == a.SkillID && r.SkillVersion == a.SkillVersion && r.SourceIdentity == a.SourceIdentity && r.BindingID == a.BindingID && r.BindingRevision == bindingRevision && (r.Phase == phase || (r.Phase == "" && phase == SkillSetupPhaseConfiguration)) && (r.BindingVersion == bindingVersion || (r.BindingVersion == "" && phase == SkillSetupPhaseConfiguration)) && slices.Equal(r.RequiredActions, a.RequiredActions) && r.EnablePrompt == a.EnablePrompt {
 			return skillSetupResult(r)
 		}
 	}
@@ -214,7 +237,7 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		}
 	}
 	now := time.Now().UTC()
-	r := &SkillSetupRequest{InstallationReference: reference, SourceDigest: digest, RequiredActions: a.RequiredActions, EnablePrompt: a.EnablePrompt, ID: id, Scope: run.Scope, DeploymentID: deploymentID, ConversationID: conversationID, TriggerMessageID: messageID, RunID: run.ID, ActionCallID: input.Call.ID, Kind: a.Kind, SkillID: a.SkillID, SkillVersion: a.SkillVersion, SourceIdentity: a.SourceIdentity, SkillName: candidate.Name, BindingID: a.BindingID, BindingRevision: bindingRevision, Reason: a.Reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
+	r := &SkillSetupRequest{InstallationReference: reference, SourceDigest: digest, RequiredActions: a.RequiredActions, EnablePrompt: a.EnablePrompt, ID: id, Scope: run.Scope, DeploymentID: deploymentID, ConversationID: conversationID, TriggerMessageID: messageID, RunID: run.ID, ActionCallID: input.Call.ID, Kind: a.Kind, SkillID: a.SkillID, SkillVersion: a.SkillVersion, SourceIdentity: a.SourceIdentity, SkillName: candidate.Name, BindingID: a.BindingID, BindingRevision: bindingRevision, Phase: phase, BindingVersion: bindingVersion, Reason: a.Reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := d.store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
 		if errors.Is(err, ErrSkillSetupConflict) {
 			if replay, readErr := d.store.GetSkillSetupRequest(ctx, run.Scope, id); readErr == nil && replay != nil {
@@ -241,9 +264,9 @@ func skillListSetupRequestsAction() skill.Action {
 	return skill.Action{Name: SkillActionListSetupRequests, Description: "Read the current conversation's durable Skill setup requests and their pending, resolved, or dismissed status. Use this once after the user reports completing setup; resolved means account configuration was saved, not that provider actions were authorized or verified. Inspect bindingAccess.enabledActions before choosing an operation. If discovery declares an action that is not enabled on the saved binding, request setup for that exact action and explain the access needed; do not call this a missing account or missing credential. A pending request needs user input: finish the reply and do not poll it. Retry the requested provider operation through its normal authorized action to verify it.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2}, InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "additionalProperties": false}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"requests": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}}, "required": []interface{}{"requests"}, "additionalProperties": false}}
 }
 func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Context, run *AgentRun, deploymentID string) (map[string]interface{}, error) {
-	conversationID, _ := run.Context["conversationId"].(string)
-	if run.Kind != RunKindConversation || conversationID == "" {
-		return nil, errors.New("Skill setup requests require an Agent conversation")
+	conversationID, _, err := d.skillSetupConversationOrigin(ctx, run, deploymentID)
+	if err != nil {
+		return nil, err
 	}
 	requests, err := d.store.ListSkillSetupRequests(ctx, run.Scope, deploymentID, conversationID)
 	if err != nil {

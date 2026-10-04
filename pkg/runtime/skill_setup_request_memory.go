@@ -37,8 +37,11 @@ func (s *MemoryStore) ListSkillSetupRequests(_ context.Context, scope Scope, dep
 	return result, nil
 }
 func (s *MemoryStore) SaveSkillSetupRequest(_ context.Context, r *SkillSetupRequest, expected int64) error {
-	if r.Validate() != nil || r.Revision != expected+1 {
-		return ErrInvalidSkillSetup
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if r.Revision != expected+1 {
+		return invalidSkillSetupField("revision", "must advance the expected request revision by one")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

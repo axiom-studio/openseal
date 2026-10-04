@@ -85,6 +85,9 @@ func (c *Catalog) UpsertBinding(ctx context.Context, request UpsertBindingReques
 	if current == nil && request.ExpectedRevision != 0 || current != nil && current.Revision != request.ExpectedRevision {
 		return nil, ErrBindingRevisionConflict
 	}
+	if current != nil && (current.SkillID != candidate.SkillID || current.SkillVersion != candidate.SkillVersion || current.SourceIdentity != candidate.SourceIdentity) {
+		return nil, errors.New("an existing binding's Skill identity can change only through a canonical Skill reference upgrade")
+	}
 	now := time.Now().UTC()
 	action := BindingLifecycleCreated
 	candidate.Revision = 1

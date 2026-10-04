@@ -10,12 +10,23 @@ import (
 )
 
 type SkillSetupRequest = runtime.SkillSetupRequest
+type SkillSetupPhase = runtime.SkillSetupPhase
+type SkillSetupValidationError = runtime.SkillSetupValidationError
+
+const SkillSetupPhaseConfiguration = runtime.SkillSetupPhaseConfiguration
+const SkillSetupPhaseBindingUpgrade = runtime.SkillSetupPhaseBindingUpgrade
 
 const SkillActionRequestSetup = runtime.SkillActionRequestSetup
 const SkillActionListSetupRequests = runtime.SkillActionListSetupRequests
 
 var ErrSkillSetupConflict = runtime.ErrSkillSetupConflict
 var ErrInvalidSkillSetup = runtime.ErrInvalidSkillSetup
+
+// RebaseSkillSetupRequestAfterBindingUpgrade verifies durable migration proof
+// without completing the separate configuration or reauthorization step.
+func RebaseSkillSetupRequestAfterBindingUpgrade(request *SkillSetupRequest, expected int64, binding *skill.Binding) (*SkillSetupRequest, error) {
+	return runtime.RebaseSkillSetupRequestAfterBindingUpgrade(request, expected, binding)
+}
 
 func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope, deploymentID, conversationID string) ([]*runtime.SkillSetupRequest, error) {
 	conversation, err := e.GetConversation(ctx, scope, conversationID)
@@ -37,7 +48,7 @@ func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope
 	// evidence as one saved in the chat form. Reconcile from canonical state so
 	// closing a tab or losing a completion response cannot strand the request.
 	for index, request := range requests {
-		if request.Status != "pending" {
+		if request.Status != "pending" || request.Phase == runtime.SkillSetupPhaseBindingUpgrade {
 			continue
 		}
 		for _, binding := range bindings {
@@ -100,6 +111,9 @@ func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Sco
 	if dismiss {
 		r.Status = "dismissed"
 	} else {
+		if r.Phase == runtime.SkillSetupPhaseBindingUpgrade {
+			return nil, errors.New("the requested Skill binding upgrade must be completed before saving configuration")
+		}
 		binding, err := e.skills.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, bindingID)
 		if err != nil {
 			return nil, err
