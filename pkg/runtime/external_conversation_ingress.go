@@ -167,6 +167,9 @@ type ExternalConversationGatewayHostRequest struct {
 	Gateway ExternalConversationIngressGateway        `json:"gateway"`
 	Adapter *skill.BoundConversationAdapter           `json:"adapter"`
 	Request *ExternalConversationPublicIngressRequest `json:"request"`
+	// VerificationOnly is internal authority to answer a provider setup
+	// challenge without accepting events. It cannot be supplied over JSON.
+	VerificationOnly bool `json:"-"`
 }
 
 type ExternalConversationGatewayHostResult struct {
@@ -201,6 +204,18 @@ func (r *ExternalConversationGatewayHostResult) Validate() error {
 
 type ExternalConversationGatewayAdapterHost interface {
 	NormalizeExternalConversationGateway(
+		context.Context,
+		ExternalConversationGatewayHostRequest,
+	) (*ExternalConversationGatewayHostResult, error)
+}
+
+// ExternalConversationGatewayVerificationAdapterHost explicitly opts in to
+// verification while a saved gateway is paused. Implementations must admit
+// only supported setup challenges and must not process ordinary events or
+// perform provider mutations. The kernel rejects any emitted events before
+// route lookup, observation publication, or durable intake.
+type ExternalConversationGatewayVerificationAdapterHost interface {
+	VerifyExternalConversationGateway(
 		context.Context,
 		ExternalConversationGatewayHostRequest,
 	) (*ExternalConversationGatewayHostResult, error)
@@ -320,8 +335,26 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 	request ExternalConversationPublicIngressRequest,
 	host ExternalConversationGatewayAdapterHost,
 ) (*ExternalConversationGatewayIngressResult, error) {
+	return s.normalizeExternalConversationGatewayIngress(ctx, gateway, request, host, false)
+}
+
+func (s *ExternalConversationTransportService) normalizeExternalConversationGatewayIngress(
+	ctx context.Context,
+	gateway ExternalConversationIngressGateway,
+	request ExternalConversationPublicIngressRequest,
+	host ExternalConversationGatewayAdapterHost,
+	verificationOnly bool,
+) (*ExternalConversationGatewayIngressResult, error) {
 	if s == nil || s.store == nil || s.resolver == nil || host == nil {
 		return nil, errors.New("external conversation gateway ingress is not configured")
+	}
+	normalize := host.NormalizeExternalConversationGateway
+	if verificationOnly {
+		verifier, ok := host.(ExternalConversationGatewayVerificationAdapterHost)
+		if !ok {
+			return nil, fmt.Errorf("%w: gateway verification while paused is unavailable", ErrExternalConversationConflict)
+		}
+		normalize = verifier.VerifyExternalConversationGateway
 	}
 	if err := gateway.Validate(); err != nil {
 		return nil, err
@@ -344,14 +377,20 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationGate
 	}
 	effectiveGateway := gateway
 	effectiveGateway.Adapter = externalConversationResolvedAdapterReference(adapter)
-	result, err := host.NormalizeExternalConversationGateway(ctx, ExternalConversationGatewayHostRequest{
-		Gateway: effectiveGateway, Adapter: adapter, Request: &request,
+	result, err := normalize(ctx, ExternalConversationGatewayHostRequest{
+		Gateway: effectiveGateway, Adapter: adapter, Request: &request, VerificationOnly: verificationOnly,
 	})
 	if err != nil {
 		return nil, err
 	}
 	if err := result.Validate(); err != nil {
 		return nil, err
+	}
+	if verificationOnly {
+		if len(result.Events) != 0 {
+			return nil, fmt.Errorf("%w: paused gateway verification cannot accept events", ErrExternalConversationConflict)
+		}
+		return &ExternalConversationGatewayIngressResult{Response: result}, nil
 	}
 	type verifiedEventRoute struct {
 		event     ExternalConversationGatewayEvent
@@ -502,8 +541,8 @@ func (s *ExternalConversationTransportService) NormalizeExternalConversationRegi
 	if err := registration.Validate(); err != nil {
 		return nil, err
 	}
-	if registration.Status != ExternalConversationGatewayActive {
+	if registration.Status != ExternalConversationGatewayActive && registration.Status != ExternalConversationGatewayPaused {
 		return nil, fmt.Errorf("%w: gateway is not active", ErrExternalConversationConflict)
 	}
-	return s.NormalizeExternalConversationGatewayIngress(ctx, registration.Gateway, request, host)
+	return s.normalizeExternalConversationGatewayIngress(ctx, registration.Gateway, request, host, registration.Status == ExternalConversationGatewayPaused)
 }
