@@ -13,6 +13,7 @@ import (
 	"github.com/axiom-studio/skills.sdk/executor"
 	skillpb "github.com/axiom-studio/skills.sdk/grpc/skillpb"
 	"google.golang.org/grpc"
+	_ "google.golang.org/grpc/balancer/roundrobin" // Register the opt-in balancing policy.
 	"google.golang.org/grpc/credentials/insecure"
 )
 
@@ -23,10 +24,20 @@ type Client struct {
 	client         skillpb.SkillServiceClient
 	skillID        string
 	address        string
+	options        ClientOptions
 	retired        bool
 	closed         bool
 	inFlight       int
 	closeCallbacks []func()
+}
+
+// ClientOptions controls the transport for a skill endpoint.
+// The zero value preserves the default gRPC connection behavior.
+type ClientOptions struct {
+	// RoundRobin distributes RPCs across the ready addresses returned by the
+	// target's resolver. Use a DNS target for a headless Service to resolve each
+	// worker; a ClusterIP target still resolves only one address.
+	RoundRobin bool
 }
 
 // ErrClientRetired means the client no longer accepts RPCs after replacement,
@@ -45,8 +56,14 @@ type ExecutionContext struct {
 
 // NewClient creates a new gRPC skill client
 func NewClient(address string) *Client {
+	return NewClientWithOptions(address, ClientOptions{})
+}
+
+// NewClientWithOptions creates a gRPC skill client with explicit transport options.
+func NewClientWithOptions(address string, options ClientOptions) *Client {
 	return &Client{
 		address: address,
+		options: options,
 	}
 }
 
@@ -62,11 +79,20 @@ func (c *Client) Connect(ctx context.Context) error {
 		return nil
 	}
 
-	conn, err := grpc.DialContext(ctx, c.address,
+	options := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
-		grpc.WithTimeout(5*time.Second),
-	)
+		grpc.WithTimeout(5 * time.Second),
+	}
+	if c.options.RoundRobin {
+		options = append(options,
+			// Keep the caller's explicit policy independent of resolver-supplied
+			// service configuration, including DNS TXT records.
+			grpc.WithDisableServiceConfig(),
+			grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`),
+		)
+	}
+	conn, err := grpc.DialContext(ctx, c.address, options...)
 	if err != nil {
 		return fmt.Errorf("failed to connect to skill at %s: %w", c.address, err)
 	}
