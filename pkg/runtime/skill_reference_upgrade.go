@@ -512,6 +512,11 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	binding.Lifecycle = append(binding.Lifecycle, capability.BindingLifecycleEntry{
 		Revision: binding.Revision, Action: capability.BindingLifecycleUpdated,
 		Actor: capability.BindingActor{Type: req.Actor.Type, ID: req.Actor.ID}, Reason: req.Reason, At: now,
+		SkillUpgrade: &capability.BindingSkillUpgradeProvenance{
+			From:                    capability.NewSkillIdentity(current.From.ID, current.From.Version, current.From.SourceIdentity),
+			To:                      capability.NewSkillIdentity(current.To.ID, current.To.Version, current.To.SourceIdentity),
+			ExpectedBindingRevision: current.ExpectedBindingRevision, PlanDigest: current.Digest,
+		},
 	})
 
 	objectiveCandidates := make([]SkillReferenceObjectiveMutation, 0, len(current.Objectives))

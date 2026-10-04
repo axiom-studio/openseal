@@ -15,7 +15,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.4.4"
+	SkillManagementSkillVersion = "1.4.5"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -73,7 +73,7 @@ func SkillManagementSkill() *skill.Definition {
 			SkillActionListSetupRequests: skillListSetupRequestsAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
-				"Propose enabling or updating an exact registered Skill for this Agent. Use only after all required reviewed configuration and verified authorized credential references are available. If user configuration or authorization is needed, call request_setup instead. Discovery never supplies credential references, so never construct a reference from a credential kind or name. Credential values are never accepted; credentials must be opaque references.",
+				"Propose enabling or updating configuration on an exact registered Skill for this Agent. An existing binding retains its exact Skill ID, source and version; use the canonical Skill reference upgrade flow before changing executable versions. Use only after all required reviewed configuration and verified authorized credential references are available. If user configuration or authorization is needed, call request_setup instead. Discovery never supplies credential references, so never construct a reference from a credential kind or name. Credential values are never accepted; credentials must be opaque references.",
 				upsertProperties,
 				[]interface{}{"bindingId", "expectedRevision", "skillId", "skillVersion", "allowedActions", "enablePrompt", "maximumRisk"},
 			),
@@ -509,6 +509,9 @@ func resolveSkillBindingUpsert(ctx context.Context, catalog *skill.Catalog, scop
 	}
 	if current == nil && args.ExpectedRevision != 0 || current != nil && current.Revision != args.ExpectedRevision {
 		return args, definition, current, skill.ErrBindingRevisionConflict
+	}
+	if current != nil && (current.SkillID != args.SkillID || current.SkillVersion != args.SkillVersion || current.SourceIdentity != args.SourceIdentity) {
+		return args, definition, current, errors.New("an existing binding's Skill identity requires a canonical Skill reference upgrade before configuration")
 	}
 	if err := validateSkillBindingArguments(definition, args); err != nil {
 		return args, definition, current, err
