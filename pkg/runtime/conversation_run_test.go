@@ -1262,7 +1262,7 @@ func TestGovernedConversationAgentBehaviorDenialResolvesWithoutModelRetry(t *tes
 	}
 }
 
-func TestGovernedConversationProposalFailureQueuesFinalExplanation(t *testing.T) {
+func TestGovernedConversationProposalFailureDoesNotGrantAutomaticRepair(t *testing.T) {
 	run := &AgentRun{
 		ID: "run-pause", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},
 		Checkpoint: map[string]interface{}{"phase": "before-pause"},
@@ -1273,26 +1273,22 @@ func TestGovernedConversationProposalFailureQueuesFinalExplanation(t *testing.T)
 		Type: "skill_action", Capability: "openseal.objectives.pause", InputRef: "/actionInputs/call",
 		BindingID: "bundled:objectives", BindingRevision: 1,
 	}}}
-	checkpoint, ok := checkpointGovernedConversationProposalFailure(run, turn, fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition))
-	if !ok || checkpoint["phase"] != "before-pause" {
-		t.Fatalf("proposal failure checkpoint = %#v, ok=%v", checkpoint, ok)
-	}
-	recovery, _ := checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{})
-	inputs, _ := checkpoint["actionInputs"].(map[string]interface{})
-	call, _ := inputs["call"].(map[string]interface{})
-	if fmt.Sprint(recovery["capability"]) != "openseal.objectives.pause" ||
-		fmt.Sprint(recovery["error"]) != "invalid objective transition: draft -> paused" ||
-		fmt.Sprint(call["objectiveId"]) != "objective-draft" {
-		t.Fatalf("proposal repair checkpoint = %#v", checkpoint)
-	}
-	run.Checkpoint = checkpoint
-	if outcome, projected := governedConversationActionOutcome(run); projected {
-		t.Fatalf("pre-materialization failure was projected instead of repaired: %#v", outcome)
-	}
-	ordinary := cloneAgentRun(run)
-	ordinary.Kind = RunKindAgentWork
-	if _, accepted := checkpointGovernedConversationProposalFailure(ordinary, turn, errors.New("invalid")); accepted {
-		t.Fatal("ordinary Agent work materialization failure entered the conversation-specific repair gate")
+	for _, kind := range []RunKind{RunKindConversation, RunKindAgentWork} {
+		current := cloneAgentRun(run)
+		current.Kind = kind
+		checkpoint, accepted := checkpointGovernedConversationProposalFailure(current, turn, fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition))
+		if accepted || checkpoint != nil {
+			t.Fatalf("rejected proposal granted an automatic repair checkpoint: %#v accepted=%v", checkpoint, accepted)
+		}
+		if current.Checkpoint["phase"] != "before-pause" || current.Checkpoint["actionInputs"] != nil ||
+			current.Checkpoint[proposalRecoveryCheckpointKey] != nil || requiresFinalFailureExplanation(current.Checkpoint) {
+			t.Fatalf("legacy repair helper copied rejected model state or mutated trusted checkpoint: %#v", current.Checkpoint)
+		}
+		// The worker persists the terminal failure separately. A proposal
+		// which never materialized cannot fabricate a completed mutation.
+		if outcome, projected := governedConversationActionOutcome(current); projected {
+			t.Fatalf("unexecuted proposal was reported as a governed mutation: %#v", outcome)
+		}
 	}
 }
 

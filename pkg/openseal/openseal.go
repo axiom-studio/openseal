@@ -1569,6 +1569,7 @@ var (
 	NewConversationTaskService             = runtime.NewConversationTaskService
 	NewHostedTurnRunner                    = runtime.NewHostedTurnRunner
 	NewTurnHostFailure                     = runtime.NewTurnHostFailure
+	TerminalFailureReply                   = runtime.TerminalFailureReply
 	MarshalHostedTurnModelInput            = runtime.MarshalHostedTurnModelInput
 	ProjectHostedActionInvocationContracts = runtime.ProjectHostedActionInvocationContracts
 	CompileHostedTurnForm                  = runtime.CompileHostedTurnForm
