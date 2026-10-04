@@ -163,6 +163,16 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	if store == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
 		return nil
 	}
+	if run.Kind == RunKindConversation && run.Context[ConversationTaskContextKey] != nil {
+		task, sourceReport, err := conversationTaskForReport(ctx, store, run)
+		if err != nil {
+			return err
+		}
+		if task == nil || sourceReport || task.Mode != ConversationTaskModeContinuation {
+			return ErrInvalidConversationTask
+		}
+		return projectConversationTaskContinuationResult(ctx, store, task, run)
+	}
 	rootRunID, _ := run.Context[runReportingContextRootRunID].(string)
 	if strings.TrimSpace(rootRunID) == "" || strings.TrimSpace(rootRunID) != run.ID {
 		return nil

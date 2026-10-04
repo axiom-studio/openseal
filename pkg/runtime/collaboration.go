@@ -1115,6 +1115,13 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 			}
 		}
 		child := buildCollaborationChildRun(source, updated, now, s.newID())
+		task, err := persistedConversationTaskSchedulingOrigin(ctx, s.runs, source, s.store.GetAgentRequest)
+		if err != nil {
+			return nil, err
+		}
+		if task != nil && task.Mode == ConversationTaskModeContinuation {
+			child.Kind = RunKindAgentWork
+		}
 		entrypoint, err := requestedAcceptedChildEntrypoint(updated.SharedContext)
 		if err != nil {
 			return nil, err

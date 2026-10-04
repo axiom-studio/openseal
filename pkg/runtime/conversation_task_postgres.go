@@ -124,6 +124,13 @@ func (s *PostgresStore) CreateConversationTask(ctx context.Context, record Conve
 	if err != nil {
 		return nil, err
 	}
+	continuation, err := s.getPostgresConversationTaskByWorkRun(ctx, tx, record.Task.Scope, record.Task.SourceRunID)
+	if err != nil {
+		return nil, err
+	}
+	if continuation != nil && continuation.Mode == ConversationTaskModeContinuation {
+		return replayConversationTaskContinuation(continuation, current)
+	}
 	if err := validateConversationTaskSourceUpdate(current, record); err != nil {
 		return nil, err
 	}

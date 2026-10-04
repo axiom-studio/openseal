@@ -87,6 +87,9 @@ func (s *MemoryStore) CreateConversationTask(ctx context.Context, record Convers
 			SourceRun: cloneAgentRun(s.agentRuns[portfolioKey(task.Scope, task.SourceRunID)]), Replayed: true}, nil
 	}
 	sourceKey := portfolioKey(record.Task.Scope, record.Task.SourceRunID)
+	if continuation := s.conversationTasks[s.conversationTaskWorkRuns[sourceKey]]; continuation != nil && continuation.Mode == ConversationTaskModeContinuation {
+		return replayConversationTaskContinuation(continuation, s.agentRuns[sourceKey])
+	}
 	if err := validateConversationTaskSourceUpdate(s.agentRuns[sourceKey], record); err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -150,6 +151,7 @@ type AgentRunWorkerPool struct {
 	forks                *RunForkCoordinator
 	collaboration        *CollaborationService
 	conversationTasks    *ConversationTaskService
+	continuations        *ConversationTaskContinuationReconciler
 	requestInbox         *AgentRequestInboxReconciler
 	reportingStore       ConversationStore
 	resolver             TurnRunnerResolver
@@ -208,6 +210,9 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	if taskStore, ok := store.(ConversationTaskKernelStore); ok {
 		pool.conversationTasks = NewConversationTaskService(taskStore)
 	}
+	if continuationStore, ok := store.(ConversationTaskContinuationStore); ok && (config.Kind == "" || config.Kind == RunKindConversation) {
+		pool.continuations, _ = NewConversationTaskContinuationReconciler(continuationStore)
+	}
 	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
 		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore)
 	}
@@ -227,6 +232,10 @@ func (p *AgentRunWorkerPool) Start(ctx context.Context) {
 		}
 		p.wg.Add(1)
 		go p.timerWakeLoop(workerCtx)
+		if p.continuations != nil {
+			p.wg.Add(1)
+			go p.conversationTaskDeadlineLoop(workerCtx)
+		}
 		p.Wake()
 	})
 }
@@ -310,12 +319,36 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	if run.Status != AgentRunStatusRunning {
 		return
 	}
+	stopDeadline := p.observeConversationTaskDeadline(ctx, run)
+	defer stopDeadline()
 	_, _ = p.activity.AppendActivity(ctx, &ActivityEvent{
 		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
 		EventType: "run.claimed", Summary: "Run claimed by autonomous worker",
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
 	})
-	binding, err := p.resolver.ResolveTurnRunner(ctx, cloneAgentRun(run))
+	// Resolution can itself involve slow hosted setup. Keep the existing claim
+	// alive across that work so promotion never causes another worker to resolve
+	// or invoke a second copy while the first one is still in flight.
+	resolutionCtx, cancelResolution := context.WithCancel(ctx)
+	resolutionHeartbeatDone := make(chan error, 1)
+	go p.heartbeatRunLease(resolutionCtx, cancelResolution, workerID, run, resolutionHeartbeatDone)
+	binding, err := p.resolver.ResolveTurnRunner(resolutionCtx, cloneAgentRun(run))
+	cancelResolution()
+	if heartbeatErr := <-resolutionHeartbeatDone; heartbeatErr != nil {
+		p.logger.Warnw("agent Run lease was lost during runner resolution", "runId", run.ID, "error", heartbeatErr)
+		return
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if latest, refreshErr := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID); refreshErr != nil {
+		p.logger.Warnw("failed to refresh agent Run after runner resolution", "runId", run.ID, "error", refreshErr)
+		return
+	} else if latest == nil || latest.Status != AgentRunStatusRunning || latest.LeaseOwner != workerID {
+		return
+	} else {
+		run = latest
+	}
 	if err != nil || binding == nil || binding.Runner == nil {
 		if p.parkAcceptedRunRecovery(ctx, workerID, run, nil, err) {
 			return
@@ -359,12 +392,15 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			p.failMaterialization(ctx, workerID, current, recoveredTurn, materializeErr)
 			return
 		}
-		p.finalizeTerminalRun(ctx, materialized)
-		p.projectTerminalReporting(ctx, materialized)
-		p.resolveForkChild(ctx, materialized)
-		p.resolveCollaborationChild(ctx, materialized)
-		p.Wake()
-		return
+		current = materialized
+		if isTerminalAgentRunStatus(current.Status) {
+			p.finalizeTerminalRun(ctx, current)
+			p.projectTerminalReporting(ctx, current)
+			p.resolveForkChild(ctx, current)
+			p.resolveCollaborationChild(ctx, current)
+			p.Wake()
+			return
+		}
 	}
 	for turnIndex := 0; turnIndex < p.config.MaxTurnsPerClaim; turnIndex++ {
 		advanceCtx, cancelAdvance := context.WithCancel(ctx)
@@ -395,12 +431,17 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 				return
 			}
 			current = materialized
-			p.finalizeTerminalRun(ctx, current)
-			p.projectTerminalReporting(ctx, current)
-			p.resolveForkChild(ctx, current)
-			p.resolveCollaborationChild(ctx, current)
-			p.Wake()
-			return
+			if isTerminalAgentRunStatus(current.Status) {
+				p.finalizeTerminalRun(ctx, current)
+				p.projectTerminalReporting(ctx, current)
+				p.resolveForkChild(ctx, current)
+				p.resolveCollaborationChild(ctx, current)
+				p.Wake()
+				return
+			}
+			// A deadline may have already promoted this same Run. Consume the
+			// redundant proposal and continue its existing Turn lineage.
+			continue
 		}
 		if result != nil && result.Turn != nil && len(result.Turn.RequestedActions) > 0 {
 			materialized, materializeErr := p.materializeTurnAction(ctx, workerID, current, result.Turn, binding)
@@ -492,6 +533,18 @@ func (p *AgentRunWorkerPool) materializeTurnTask(ctx context.Context, workerID s
 	if err := validateTaskProposalOutput(proposal, turn.NextRunStatus, turn.WakeCondition, turn.OutputSummary, turn.RunOutput, turn.RunError); err != nil {
 		return nil, err
 	}
+	canonical, err := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	if canonical == nil {
+		return nil, ErrRunNotFound
+	}
+	if task, proofErr := canonicalConversationTaskContinuation(ctx, p.portfolio, canonical); proofErr != nil {
+		return nil, proofErr
+	} else if task != nil {
+		return canonical, nil
+	}
 	result, err := p.conversationTasks.Start(ctx, StartConversationTaskRequest{
 		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision,
 		WorkerID: workerID, TurnID: turn.ID, AssignedAgentID: binding.DeploymentID,
@@ -500,6 +553,9 @@ func (p *AgentRunWorkerPool) materializeTurnTask(ctx context.Context, workerID s
 	})
 	if err != nil {
 		return nil, err
+	}
+	if result != nil && result.Task != nil && result.WorkRun != nil && result.Task.Mode == ConversationTaskModeContinuation && ConversationTaskMatchesWorkRun(result.Task, result.WorkRun) {
+		return result.WorkRun, nil
 	}
 	if result == nil || result.Task == nil || result.WorkRun == nil || result.SourceRun == nil || result.SourceRun.Status != AgentRunStatusCompleted {
 		return nil, errors.New("conversation task admission returned no committed foreground completion")
@@ -906,7 +962,7 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 			return nil, errors.New("Team action proposal is missing its trusted roster Agent attribution")
 		}
 	}
-	proposal, err := p.actions.Propose(ctx, ProposeActionRequest{
+	proposalRequest := ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: actionDeploymentID,
 		AssignedAgentID: assignedAgentID,
 		BindingID:       selected.BindingID, BindingRevision: selected.BindingRevision,
@@ -918,7 +974,27 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		Actor:             ActivityActor{Type: "worker", ID: workerID}, EvidenceRefs: append([]string(nil), request.EvidenceRefs...),
 		ContinuationCheckpoint: turn.ContinuationCheckpoint,
 		CausationID:            turn.ID,
-	})
+	}
+	var proposal *ActionProposalResult
+	for attempt := 0; attempt < 4; attempt++ {
+		proposal, err = p.actions.Propose(ctx, proposalRequest)
+		if !errors.Is(err, ErrRevisionConflict) || attempt == 3 {
+			break
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		latest, retryErr := p.continuationActionProposalRetry(ctx, workerID, run, turn)
+		if retryErr != nil {
+			return nil, retryErr
+		}
+		if latest == nil {
+			break
+		}
+		// Revalidate the same accepted action against the adopted canonical
+		// Run. The model, Turn, arguments and idempotency key remain unchanged.
+		run = latest
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -937,6 +1013,68 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		}
 	}
 	return proposal.Run, nil
+}
+
+func (p *AgentRunWorkerPool) continuationActionProposalRetry(ctx context.Context, workerID string, before *AgentRun, turn *AgentTurn) (*AgentRun, error) {
+	if before == nil || turn == nil || p.coordinator == nil || before.LastAppliedTurn != turn.Sequence || turn.Status != AgentTurnStatusCompleted {
+		return nil, nil
+	}
+	latest, err := p.portfolio.GetAgentRun(ctx, before.Scope, before.ID)
+	if err != nil {
+		return nil, err
+	}
+	if latest == nil || latest.Status != AgentRunStatusRunning || latest.LeaseOwner != workerID ||
+		latest.LeaseExpiresAt == nil || !latest.LeaseExpiresAt.After(time.Now()) || latest.LastAppliedTurn != turn.Sequence {
+		return nil, nil
+	}
+	task, err := canonicalConversationTaskContinuation(ctx, p.portfolio, latest)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil || before.Context[ConversationTaskContextKey] != nil && before.Context[ConversationTaskContextKey] != task.ID {
+		return nil, nil
+	}
+	// Only the committed handoff and a same-worker lease heartbeat may have
+	// changed the source. New guidance, budgets, status and pending governance
+	// remain ordinary conflicts and cannot be rebased by this retry.
+	expected := cloneAgentRun(before)
+	expected.ConcurrencyKey = latest.ConcurrencyKey
+	if expected.Context == nil {
+		expected.Context = make(map[string]interface{})
+	}
+	expected.Context[ConversationTaskContextKey] = task.ID
+	expected.Revision, expected.UpdatedAt = latest.Revision, latest.UpdatedAt
+	expected.LeaseExpiresAt = cloneAdmissionTime(latest.LeaseExpiresAt)
+	expectedJSON, err := json.Marshal(expected)
+	if err != nil {
+		return nil, err
+	}
+	latestJSON, err := json.Marshal(latest)
+	if err != nil {
+		return nil, err
+	}
+	if string(expectedJSON) != string(latestJSON) {
+		return nil, nil
+	}
+	persistedTurn, err := p.coordinator.turns.turns.GetAgentTurn(ctx, before.Scope, turn.ID)
+	if err != nil {
+		return nil, err
+	}
+	if persistedTurn == nil || persistedTurn.RunID != latest.ID || persistedTurn.Sequence != turn.Sequence || persistedTurn.Status != AgentTurnStatusCompleted {
+		return nil, nil
+	}
+	providedJSON, err := json.Marshal(turn)
+	if err != nil {
+		return nil, err
+	}
+	persistedJSON, err := json.Marshal(persistedTurn)
+	if err != nil {
+		return nil, err
+	}
+	if string(providedJSON) != string(persistedJSON) {
+		return nil, nil
+	}
+	return latest, nil
 }
 
 func turnActionIdempotencyKey(proposed string, sideEffect capability.SideEffect, turnID string) string {
@@ -1268,6 +1406,55 @@ func (p *AgentRunWorkerPool) heartbeatRunLease(ctx context.Context, cancel conte
 				done <- err
 				return
 			}
+		}
+	}
+}
+
+func (p *AgentRunWorkerPool) observeConversationTaskDeadline(ctx context.Context, run *AgentRun) context.CancelFunc {
+	deadlineCtx, cancel := context.WithCancel(ctx)
+	if p.continuations == nil || run.Kind != RunKindConversation {
+		return cancel
+	}
+	// Start before runner resolution. Commentary, model Turns, queueing and
+	// action waits all retain this same canonical creation-time deadline.
+	deadline := run.CreatedAt.Add(ConversationTaskForegroundTimeout)
+	go func() {
+		timer := time.NewTimer(max(time.Until(deadline), 0))
+		defer timer.Stop()
+		select {
+		case <-deadlineCtx.Done():
+			return
+		case <-timer.C:
+		}
+		result, err := p.continuations.store.PromoteConversationTask(deadlineCtx, ConversationTaskPromotionRequest{
+			Scope: run.Scope, RunID: run.ID, Now: time.Now().UTC(), MinimumAge: ConversationTaskForegroundTimeout,
+		})
+		if err != nil && deadlineCtx.Err() == nil {
+			p.logger.Warnw("failed to promote conversation Run at its foreground deadline", "runId", run.ID, "error", err)
+		} else if result != nil {
+			p.Wake()
+		}
+	}()
+	return cancel
+}
+
+func (p *AgentRunWorkerPool) conversationTaskDeadlineLoop(ctx context.Context) {
+	defer p.wg.Done()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		// This maintenance must remain independent of the worker limiter: every
+		// available execution slot may be occupied by a long hosted invocation.
+		results, err := p.continuations.ReconcileScope(ctx, p.config.Scope, time.Now().UTC())
+		if err != nil && ctx.Err() == nil {
+			p.logger.Warnw("failed to reconcile conversation task deadlines", "error", err)
+		} else if len(results) > 0 {
+			p.Wake()
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }

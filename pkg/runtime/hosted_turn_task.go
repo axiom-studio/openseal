@@ -41,13 +41,14 @@ func cloneTurnTaskProposal(proposal *TurnTaskProposal) *TurnTaskProposal {
 // ConversationTaskSnapshot is the small model-visible projection of one
 // durable task, without source authority or credentials.
 type ConversationTaskSnapshot struct {
-	TaskID            string         `json:"taskId"`
-	WorkRunID         string         `json:"workRunId"`
-	Goal              string         `json:"goal"`
-	Status            AgentRunStatus `json:"status"`
-	Revision          int64          `json:"revision"`
-	AvailableControls []string       `json:"availableControls,omitempty"`
-	CreatedAt         time.Time      `json:"createdAt"`
+	TaskID            string               `json:"taskId"`
+	Mode              ConversationTaskMode `json:"mode,omitempty"`
+	WorkRunID         string               `json:"workRunId"`
+	Goal              string               `json:"goal"`
+	Status            AgentRunStatus       `json:"status"`
+	Revision          int64                `json:"revision"`
+	AvailableControls []string             `json:"availableControls,omitempty"`
+	CreatedAt         time.Time            `json:"createdAt"`
 }
 
 // HostedConversationTaskContext is supplied by the trusted host after resolving
@@ -70,6 +71,7 @@ func (value *HostedConversationTaskContext) Validate() error {
 	seen := make(map[string]bool, len(value.Tasks))
 	for _, snapshot := range value.Tasks {
 		if !validOpaqueIdentifier(snapshot.TaskID, 128) || !validOpaqueIdentifier(snapshot.WorkRunID, 128) ||
+			(snapshot.Mode != ConversationTaskModeIndependent && snapshot.Mode != ConversationTaskModeContinuation) ||
 			strings.TrimSpace(snapshot.Goal) == "" || !utf8.ValidString(snapshot.Goal) || utf8.RuneCountInString(snapshot.Goal) > 512 ||
 			!validConversationTaskSnapshotStatus(snapshot.Status) || snapshot.Revision < 1 || snapshot.CreatedAt.IsZero() || seen[snapshot.TaskID] {
 			return errors.New("hosted conversation task snapshot is invalid or exceeds its bounded goal summary")
@@ -113,7 +115,7 @@ func validateTaskProposalOutput(proposal *TurnTaskProposal, status AgentRunStatu
 
 func validateHostedTaskAuthority(run *AgentRun, taskContext *HostedConversationTaskContext) error {
 	if run == nil || run.Kind != RunKindConversation || strings.TrimSpace(run.ParentRunID) != "" ||
-		taskContext == nil || !taskContext.CanStart || !validOpaqueIdentifier(taskContext.ConversationID, 256) {
+		run.Context[ConversationTaskContextKey] != nil || taskContext == nil || !taskContext.CanStart || !validOpaqueIdentifier(taskContext.ConversationID, 256) {
 		return errors.New("independent task admission is not available to this hosted Turn")
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)

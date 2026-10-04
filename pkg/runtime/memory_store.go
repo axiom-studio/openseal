@@ -77,6 +77,8 @@ type MemoryStore struct {
 	conversationActiveRunRootKeys       map[string]string
 	conversationForegroundRunOrder      map[memoryConversationActiveRunIndexKey]*memoryOrderedIndexNode[memoryConversationTaskPageKey]
 	conversationForegroundRunMembership map[string]memoryConversationActiveRunMembership
+	conversationTaskDueOrder            map[Scope]*memoryOrderedIndexNode[memoryConversationTaskPageKey]
+	conversationTaskDueMembership       map[string]memoryConversationTaskPageKey
 	conversationKeys                    map[string]string
 	channelMessages                     map[string][]*ChannelMessage
 	channelMessageIDs                   map[string]*ChannelMessage

@@ -354,7 +354,7 @@ func TestConversationTaskSQLPostgresMigrationRollbackAndReapply(t *testing.T) {
 			t.Skip("PostgreSQL migration ledger and rollback")
 		}
 		current, version, err := store.postgresSchemaCurrent(t.Context(), store.db)
-		if err != nil || !current || version != conversationTaskMigrationVersion {
+		if err != nil || !current || version != currentPostgresSchemaVersion {
 			t.Fatalf("fresh migration ledger = current:%v version:%d err:%v", current, version, err)
 		}
 		legacyScope := Scope{Kind: "tenant", ID: "migration-backfill"}
@@ -381,7 +381,7 @@ func TestConversationTaskSQLPostgresMigrationRollbackAndReapply(t *testing.T) {
 		}
 		restarted := fixture.reopen(t).(*PostgresStore)
 		current, version, err = restarted.postgresSchemaCurrent(t.Context(), restarted.db)
-		if err != nil || !current || version != conversationTaskMigrationVersion {
+		if err != nil || !current || version != currentPostgresSchemaVersion {
 			t.Fatalf("reapplied migration ledger = current:%v version:%d err:%v", current, version, err)
 		}
 		legacy, err := restarted.ListConversationActiveRuns(t.Context(), legacyScope, legacyOwner, "pre-upgrade-conversation", 100)

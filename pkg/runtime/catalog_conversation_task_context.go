@@ -48,8 +48,10 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		}
 	}
 	foreground := canonical.Kind == RunKindConversation && canonical.Source == RunSourceChat && canonical.ParentRunID == "" && canonical.RootRunID == canonical.ID
-	if !foreground {
-		if canonical.Kind != RunKindAgentWork {
+	var origin *ConversationTask
+	_, markedTask := canonical.Context[ConversationTaskContextKey]
+	if !foreground || markedTask {
+		if canonical.Kind != RunKindAgentWork && !foreground {
 			return nil, nil
 		}
 		marker, marked := canonical.Context[ConversationTaskContextKey].(string)
@@ -66,6 +68,8 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		if task == nil {
 			return nil, nil
 		}
+		origin = task
+		foreground = false
 	}
 	conversation, err := store.GetConversation(ctx, canonical.Scope, conversationID)
 	if err != nil {
@@ -87,6 +91,19 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	}
 	if actor.Type != ConversationParticipantUser || actor.Validate() != nil {
 		return nil, nil
+	}
+	if origin != nil {
+		root, err := store.GetAgentRun(ctx, canonical.Scope, origin.WorkRunID)
+		if err != nil {
+			return nil, err
+		}
+		valid, err := VerifyConversationTaskWorkRun(ctx, store, origin, root)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, nil
+		}
 	}
 	viewer := ConversationViewer{Participant: actor}
 	if _, err := NewConversationService(store).GetVisibleChannelMessage(ctx, canonical.Scope, conversation.ID, message.ID, viewer); err != nil {
@@ -143,7 +160,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 			continue
 		}
 		result.Tasks = append(result.Tasks, ConversationTaskSnapshot{
-			TaskID: row.Task.ID, WorkRunID: row.WorkRun.ID, Goal: ConversationTaskGoalSummary(row.Task.Goal),
+			TaskID: row.Task.ID, Mode: row.Task.Mode, WorkRunID: row.WorkRun.ID, Goal: ConversationTaskGoalSummary(row.Task.Goal),
 			Status: row.WorkRun.Status, Revision: row.WorkRun.Revision, AvailableControls: applicableAgentRunCommands(row.WorkRun), CreatedAt: row.Task.CreatedAt,
 		})
 		if len(result.Tasks) == 10 {

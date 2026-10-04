@@ -582,6 +582,53 @@ func (c *TurnCoordinator) heartbeatTurnLease(ctx context.Context, cancel context
 }
 
 func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID string, reconciled bool, publishers ...TurnOutputPublisher) (*AdvanceAgentRunResult, error) {
+	// Promotion and lease heartbeats can update the Run between finishing its
+	// Turn and committing the result. Retry the already committed Turn against
+	// that revision; executing its runner again would duplicate tool effects.
+	if len(publishers) > 0 && publishers[0] != nil {
+		publishers = []TurnOutputPublisher{&cachedTurnOutputPublisher{inner: publishers[0]}}
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		result, err := c.applyFinishedTurnOnce(ctx, run, turn, workerID, reconciled, publishers...)
+		if !errors.Is(err, ErrRevisionConflict) {
+			return result, err
+		}
+		if ctx.Err() != nil {
+			return result, ctx.Err()
+		}
+		run, err = c.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		if run == nil {
+			return nil, ErrRunNotFound
+		}
+		if turn.Sequence <= run.LastAppliedTurn {
+			return &AdvanceAgentRunResult{Run: run, Turn: turn, Reconciled: reconciled}, nil
+		}
+		if run.Status != AgentRunStatusRunning || run.LeaseOwner != "" && run.LeaseOwner != workerID {
+			return &AdvanceAgentRunResult{Run: run, Turn: turn, Reconciled: reconciled}, ErrLeaseLost
+		}
+	}
+	return &AdvanceAgentRunResult{Run: run, Turn: turn, Reconciled: reconciled}, ErrRevisionConflict
+}
+
+type cachedTurnOutputPublisher struct {
+	inner     TurnOutputPublisher
+	published bool
+	output    map[string]interface{}
+	err       error
+}
+
+func (p *cachedTurnOutputPublisher) PublishTurnOutput(ctx context.Context, run *AgentRun, turn *AgentTurn) (map[string]interface{}, error) {
+	if !p.published {
+		p.output, p.err = p.inner.PublishTurnOutput(ctx, run, turn)
+		p.published = true
+	}
+	return cloneMap(p.output), p.err
+}
+
+func (c *TurnCoordinator) applyFinishedTurnOnce(ctx context.Context, run *AgentRun, turn *AgentTurn, workerID string, reconciled bool, publishers ...TurnOutputPublisher) (*AdvanceAgentRunResult, error) {
 	if turn.Sequence <= run.LastAppliedTurn {
 		return &AdvanceAgentRunResult{Run: run, Turn: turn, Reconciled: reconciled}, nil
 	}
@@ -679,7 +726,7 @@ func (c *TurnCoordinator) applyFinishedTurn(ctx context.Context, run *AgentRun, 
 		activityPayload["budgetState"] = BudgetStateExhausted
 	}
 	output := turn.RunOutput
-	if turn.Status == AgentTurnStatusCompleted && turn.RequestedTask == nil && len(publishers) > 0 && publishers[0] != nil {
+	if !superseded && turn.Status == AgentTurnStatusCompleted && turn.RequestedTask == nil && len(publishers) > 0 && publishers[0] != nil {
 		var err error
 		output, err = publishers[0].PublishTurnOutput(ctx, run, turn)
 		if err != nil {

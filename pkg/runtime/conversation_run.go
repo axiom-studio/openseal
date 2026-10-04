@@ -237,6 +237,14 @@ func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx conte
 				visibility = ActivityVisibilityTeam
 			}
 			for attempt := 0; attempt < 3; attempt++ {
+				if task, proofErr := canonicalConversationTaskContinuation(ctx, s.runs.store, run); proofErr != nil {
+					return proofErr
+				} else if task != nil {
+					// A promotion can race the foreground lookup. Recheck after
+					// every revision conflict before superseding this old lane.
+					err = nil
+					break
+				}
 				_, err = s.runs.CommandAgentRun(ctx, AgentRunCommandRequest{
 					Scope: conversation.Scope, RunID: run.ID, ExpectedRevision: run.Revision,
 					Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
@@ -738,7 +746,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	if r == nil || r.coordinator == nil || r.conversations == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
-	if err := validateConversationRun(run); err != nil {
+	if err := r.validateConversationRun(ctx, run); err != nil {
 		return nil, err
 	}
 	if stopped, err := r.participationStopped(ctx, run); err != nil {
@@ -788,7 +796,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 		boundAgentRunner := agentBinding.Runner
 		return &TurnRunnerBinding{
 			Runner: TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-				if err := validateConversationRun(input.Run); err != nil {
+				if err := r.validateConversationRun(ctx, input.Run); err != nil {
 					return nil, err
 				}
 				if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
@@ -842,7 +850,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 // The provider receives its per-participant allowance independently of model
 // content; a changed roster remains bounded by MaximumParticipants.
 func (r *ConversationRunTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
-	if err := validateConversationRun(input.Run); err != nil {
+	if err := r.validateConversationRun(ctx, input.Run); err != nil {
 		return BudgetUsage{}, err
 	}
 	if input.Run.Owner.Type != OwnerTypeTeam {
@@ -888,7 +896,7 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		}
 		outcome.Usage = participationUsage
 	}()
-	if err := validateConversationRun(input.Run); err != nil {
+	if err := r.validateConversationRun(ctx, input.Run); err != nil {
 		return nil, err
 	}
 	// Recover a committed round's charge only for its original unfinished
@@ -981,11 +989,16 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	if input.Turn != nil {
 		usageTurnID = input.Turn.ID
 	}
+	messageReferences, err := r.conversationTaskResponseReferences(ctx, input.Run, []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}})
+	if err != nil {
+		return nil, err
+	}
 	result, measuredUsage, err := r.coordinator.CoordinateWithUsage(ctx, ConversationCoordinationRequest{
-		UsageTurnID: usageTurnID,
-		Scope:       input.Run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
+		conversationSnapshot: cloneConversation(conversation),
+		UsageTurnID:          usageTurnID,
+		Scope:                input.Run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		TriggerMessageID: triggerID, Policy: policy, MaximumConcurrency: r.config.MaximumConcurrency,
-		MessageReferences: []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}},
+		MessageReferences: messageReferences,
 		IdempotencyKey:    key,
 	})
 	if measuredUsage != (TurnUsage{}) {
@@ -1129,13 +1142,17 @@ func (r *ConversationRunTurnRunner) postTeamActionOutcome(
 		if err != nil {
 			return nil, false, err
 		}
+		references, err := r.conversationTaskResponseReferences(ctx, run, outcome.References)
+		if err != nil {
+			return nil, false, err
+		}
 		request := PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
 			Sender: participant, Intent: MessageIntentAnswer, Content: outcome.Content,
 			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
 			ResponseMode:   trigger.ResponseMode,
-			References:     outcome.References,
+			References:     references,
 			IdempotencyKey: key,
 		}
 		result, err := r.conversations.PostChannelMessage(ctx, request)
@@ -1692,10 +1709,22 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 		}
 		task, work := result.Task, result.WorkRun
 		if task.Scope != conversation.Scope || task.Owner != conversation.Owner || task.ConversationID != conversation.ID ||
-			threadID != "" && task.ThreadRootID != threadID || task.AuthenticatedActor != actor || task.WorkRunID != work.ID || work.Scope != task.Scope ||
-			work.Owner != task.Owner || work.Kind != RunKindAgentWork || work.ParentRunID != "" || work.RootRunID != work.ID ||
-			work.Context[ConversationTaskContextKey] != task.ID || isTerminalAgentRunStatus(work.Status) || seen[work.ID] {
+			threadID != "" && task.ThreadRootID != threadID || task.AuthenticatedActor != actor ||
+			!ConversationTaskMatchesWorkRun(task, work) || isTerminalAgentRunStatus(work.Status) || seen[work.ID] {
 			continue
+		}
+		if task.Mode == ConversationTaskModeContinuation {
+			proof, ok := r.portfolio.(ConversationTaskProofStore)
+			if !ok {
+				continue
+			}
+			verified, err := VerifyConversationTaskWorkRun(ctx, proof, task, work)
+			if err != nil {
+				return nil, err
+			}
+			if !verified {
+				continue
+			}
 		}
 		active = append(active, agentConversationActiveRun{
 			ID: work.ID, RootRunID: work.RootRunID, Entrypoint: work.Entrypoint, Status: work.Status, Goal: ConversationTaskGoalSummary(work.Goal), Source: work.Source,
@@ -1951,6 +1980,10 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		if r.config.RequireParticipationOptIn && !conversationParticipationAllows(current, trigger) {
 			return nil, false, errConversationParticipationStopped
 		}
+		responseReferences, err := r.conversationTaskResponseReferences(ctx, run, references)
+		if err != nil {
+			return nil, false, err
+		}
 		participantID := strings.TrimSpace(run.AssignedAgentID)
 		if participantID == "" {
 			participantID = current.Owner.ID
@@ -1962,7 +1995,7 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 			ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
 			ResponseMode:       trigger.ResponseMode,
 			BroadcastToChannel: broadcastToChannel,
-			References:         append([]ConversationReference(nil), references...),
+			References:         responseReferences,
 			IdempotencyKey:     key,
 		}
 		result, err := r.conversations.PostChannelMessage(ctx, request)
@@ -2300,6 +2333,65 @@ func conversationResultString(value map[string]interface{}, key string) string {
 // until a specific error can be opted in under a reviewed policy.
 func (r *ConversationRunTurnRunner) retryOutcome(run *AgentRun, cause error) (*TurnOutcome, error) {
 	return nil, errors.New(publicConversationRetryReason(cause))
+}
+
+func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context, run *AgentRun) error {
+	if run == nil {
+		return ErrInvalidAgentRun
+	}
+	if taskID, _ := run.Context[ConversationTaskContextKey].(string); taskID != "" {
+		task, err := canonicalConversationTaskContinuation(ctx, r.portfolio, run)
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return ErrInvalidConversationTask
+		}
+		// Reuse the ordinary envelope validation only after proving the new
+		// lane against the canonical Task ledger.
+		run = cloneAgentRun(run)
+		run.ConcurrencyKey = task.ConversationID
+		if root, _ := run.Context["threadRootMessageId"].(string); root != "" {
+			run.ConcurrencyKey += ":thread:" + root
+		}
+	}
+	return validateConversationRun(run)
+}
+
+func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx context.Context, run *AgentRun, references []ConversationReference) ([]ConversationReference, error) {
+	result := append([]ConversationReference(nil), references...)
+	if r.portfolio == nil {
+		return result, nil
+	}
+	// The provider may have started before promotion. Reload the current Run
+	// while publishing its response so the original invocation gains Task refs.
+	current, err := r.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		if taskID, _ := run.Context[ConversationTaskContextKey].(string); taskID != "" || strings.HasPrefix(run.ConcurrencyKey, "task:") {
+			return nil, ErrRunNotFound
+		}
+		return result, nil
+	}
+	task, err := canonicalConversationTaskContinuation(ctx, r.portfolio, current)
+	if err != nil || task == nil {
+		return result, err
+	}
+	for _, reference := range []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}, {Kind: ConversationReferenceTask, ID: task.ID}} {
+		found := false
+		for _, existing := range result {
+			if existing.Kind == reference.Kind && existing.ID == reference.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			result = append(result, reference)
+		}
+	}
+	return result, nil
 }
 
 func validateConversationRun(run *AgentRun) error {

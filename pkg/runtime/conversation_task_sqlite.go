@@ -77,7 +77,10 @@ func migrateConversationTasksSQLite(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	return migrateConversationActiveRunsSQLite(db)
+	if err := migrateConversationActiveRunsSQLite(db); err != nil {
+		return err
+	}
+	return migrateConversationTaskContinuationsSQLite(db)
 }
 
 func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record ConversationTaskCreateRecord) (*ConversationTaskResult, error) {
@@ -118,6 +121,13 @@ func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record Convers
 	current, err := getSQLiteAgentRun(ctx, conn, record.Task.Scope, record.Task.SourceRunID)
 	if err != nil {
 		return nil, err
+	}
+	continuation, err := getSQLiteConversationTaskByWorkRun(ctx, conn, record.Task.Scope, record.Task.SourceRunID)
+	if err != nil {
+		return nil, err
+	}
+	if continuation != nil && continuation.Mode == ConversationTaskModeContinuation {
+		return replayConversationTaskContinuation(continuation, current)
 	}
 	if err := validateConversationTaskSourceUpdate(current, record); err != nil {
 		return nil, err

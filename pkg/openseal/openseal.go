@@ -1027,8 +1027,30 @@ type (
 	ActionCredentialLeaseValidator         = runtime.ActionCredentialLeaseValidator
 )
 
+type (
+	ConversationTaskMode                   = runtime.ConversationTaskMode
+	ConversationTaskProofStore             = runtime.ConversationTaskProofStore
+	ConversationTaskPromotionStore         = runtime.ConversationTaskPromotionStore
+	ConversationTaskPromotionRequest       = runtime.ConversationTaskPromotionRequest
+	ConversationTaskDueStore               = runtime.ConversationTaskDueStore
+	ConversationTaskDueFilter              = runtime.ConversationTaskDueFilter
+	ConversationTaskContinuationStore      = runtime.ConversationTaskContinuationStore
+	ConversationTaskContinuationReconciler = runtime.ConversationTaskContinuationReconciler
+)
+
+var (
+	NewConversationTaskContinuationReconciler = runtime.NewConversationTaskContinuationReconciler
+	ConversationTaskMatchesWorkRun            = runtime.ConversationTaskMatchesWorkRun
+	VerifyConversationTaskWorkRun             = runtime.VerifyConversationTaskWorkRun
+	ConversationTaskAcknowledgmentMessageID   = runtime.ConversationTaskAcknowledgmentMessageID
+	FindConversationTaskResultMessage         = runtime.FindConversationTaskResultMessage
+)
+
 const (
 	ConversationTaskContextKey          = runtime.ConversationTaskContextKey
+	ConversationTaskModeIndependent     = runtime.ConversationTaskModeIndependent
+	ConversationTaskModeContinuation    = runtime.ConversationTaskModeContinuation
+	ConversationTaskForegroundTimeout   = runtime.ConversationTaskForegroundTimeout
 	AgentManifestAPIVersion             = kernelagent.ManifestAPIVersion
 	AgentManifestKind                   = kernelagent.ManifestKind
 	AgentBundleAPIVersion               = kernelagent.BundleAPIVersion
@@ -4553,6 +4575,13 @@ func (e *Engine) GetChannelMessage(ctx context.Context, scope runtime.Scope, con
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.GetChannelMessage(ctx, scope, conversationID, messageID)
+}
+
+func (e *Engine) FindParticipationRoundByIdempotencyKey(ctx context.Context, scope runtime.Scope, conversationID, key string) (*runtime.ParticipationRoundResult, error) {
+	if e.conversations == nil {
+		return nil, fmt.Errorf("conversation store is not configured")
+	}
+	return e.conversations.FindParticipationRoundByIdempotencyKey(ctx, scope, conversationID, key)
 }
 
 func (e *Engine) ListChannelMessages(ctx context.Context, filter runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error) {
