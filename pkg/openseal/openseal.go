@@ -1007,6 +1007,10 @@ type (
 	CatalogExternalConversationRunbookResolver      = runtime.CatalogExternalConversationRunbookResolver
 )
 
+// ExternalConversationGatewayVerificationAdapterHost opts in to handling
+// provider setup challenges while a saved gateway remains paused.
+type ExternalConversationGatewayVerificationAdapterHost = runtime.ExternalConversationGatewayVerificationAdapterHost
+
 // Credential lease aliases are kept in their own group so extending the
 // security protocol does not reformat the facade's much larger alias catalog.
 type (
