@@ -7,6 +7,13 @@ import (
 )
 
 type runTerminalReportKey struct {
+	Scope            Scope
+	RunID            string
+	Status           AgentRunStatus
+	TerminalRevision int64
+}
+
+type runTerminalReportFamily struct {
 	Scope  Scope
 	RunID  string
 	Status AgentRunStatus
@@ -39,7 +46,10 @@ func (h memoryTerminalReportHeap) Less(i, j int) bool {
 	if left.key.RunID != right.key.RunID {
 		return left.key.RunID < right.key.RunID
 	}
-	return left.key.Status < right.key.Status
+	if left.key.Status != right.key.Status {
+		return left.key.Status < right.key.Status
+	}
+	return left.key.TerminalRevision < right.key.TerminalRevision
 }
 func (h memoryTerminalReportHeap) Swap(i, j int) {
 	h.items[i], h.items[j] = h.items[j], h.items[i]
@@ -117,10 +127,13 @@ func (s *MemoryStore) saveMemoryAgentRunLocked(key string, run *AgentRun) {
 	if wasActive != !isTerminalAgentRunStatus(run.Status) {
 		s.refreshMemorySkillRuntimeReceiptsLocked(key)
 	}
+	if previous != nil && previous.Status == run.Status && isTerminalAgentRunStatus(run.Status) {
+		return
+	}
 	if !runNeedsTerminalReporting(run) {
 		return
 	}
-	reportKey := runTerminalReportKey{Scope: run.Scope, RunID: run.ID, Status: run.Status}
+	reportKey := runTerminalReportKey{Scope: run.Scope, RunID: run.ID, Status: run.Status, TerminalRevision: run.Revision}
 	if s.runTerminalReports[reportKey] != nil {
 		return
 	}
@@ -131,7 +144,11 @@ func (s *MemoryStore) saveMemoryAgentRunLocked(key string, run *AgentRun) {
 	if available.IsZero() {
 		available = run.CreatedAt
 	}
-	s.runTerminalReports[reportKey] = &RunTerminalReport{Scope: run.Scope, RunID: run.ID, Status: run.Status, Run: cloneAgentRun(run), AvailableAt: available}
+	s.runTerminalReports[reportKey] = &RunTerminalReport{Scope: run.Scope, RunID: run.ID, Status: run.Status, TerminalRevision: run.Revision, Run: cloneAgentRun(run), AvailableAt: available}
+	if s.runTerminalReportLatest == nil {
+		s.runTerminalReportLatest = make(map[runTerminalReportFamily]runTerminalReportKey)
+	}
+	s.runTerminalReportLatest[runTerminalReportFamily{Scope: run.Scope, RunID: run.ID, Status: run.Status}] = reportKey
 	s.runTerminalReportQueue.set(reportKey, available)
 }
 
@@ -174,7 +191,7 @@ func (s *MemoryStore) CompleteRunTerminalReport(ctx context.Context, request Run
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := runTerminalReportKey{Scope: request.Scope, RunID: request.RunID, Status: request.Status}
+	key := runTerminalReportKey{Scope: request.Scope, RunID: request.RunID, Status: request.Status, TerminalRevision: request.TerminalRevision}
 	report, err := s.leasedMemoryTerminalReportLocked(key, request)
 	if err != nil {
 		return err
@@ -195,7 +212,7 @@ func (s *MemoryStore) RetryRunTerminalReport(ctx context.Context, request RunTer
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := runTerminalReportKey{Scope: request.Scope, RunID: request.RunID, Status: request.Status}
+	key := runTerminalReportKey{Scope: request.Scope, RunID: request.RunID, Status: request.Status, TerminalRevision: request.TerminalRevision}
 	report, err := s.leasedMemoryTerminalReportLocked(key, request.RunTerminalReportingCompletion)
 	if err != nil {
 		return err
@@ -226,7 +243,7 @@ func (s *MemoryStore) GetRunTerminalReport(ctx context.Context, scope Scope, run
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	report := s.runTerminalReports[runTerminalReportKey{Scope: scope, RunID: runID, Status: status}]
+	report := s.runTerminalReports[s.runTerminalReportLatest[runTerminalReportFamily{Scope: scope, RunID: runID, Status: status}]]
 	if report == nil {
 		return nil, ErrRunTerminalReportNotFound
 	}
