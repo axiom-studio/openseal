@@ -420,6 +420,9 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		if outcomeErr == nil {
 			outcomeErr = validateToolFeedbackCorrectionOutcome(run, outcome)
 		}
+		if outcomeErr == nil {
+			outcomeErr = validateConversationTaskSetupWait(ctx, c.portfolio, run, outcome)
+		}
 		if err := outcomeErr; err != nil {
 			executionErr = err
 			finish.Status = AgentTurnStatusFailed
