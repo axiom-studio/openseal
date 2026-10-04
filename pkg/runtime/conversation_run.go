@@ -175,12 +175,30 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	return result, result.Event == nil, nil
 }
 
-// A new human prompt supersedes unfinished replies in the same local thread.
+// conversationMessageInitiatingUser resolves only the canonical scoped human
+// identity. A host-owned voice-call start may name its authenticated initiator;
+// arbitrary service metadata and copied Run context never grant that authority.
+func conversationMessageInitiatingUser(conversation *Conversation, message *ChannelMessage) (ConversationParticipant, bool) {
+	if conversation == nil || message == nil || message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
+		return ConversationParticipant{}, false
+	}
+	actor := message.Sender
+	if voiceCallStartedMessage(message) && message.Initiator != nil {
+		actor = *message.Initiator
+	}
+	return actor, actor.Type == ConversationParticipantUser && actor.Validate() == nil
+}
+
+// A new human prompt supersedes only that human's unfinished replies in the same local thread.
 // Unthreaded application prompts share their conversation execution lane. The
 // message and its replacement Run are durable before cancellation, so a failed
 // cancellation can be retried by message reconciliation without losing input.
 func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx context.Context, conversation *Conversation, message *ChannelMessage, replacementID string) error {
 	if externalChannelContext(conversation) || message.Sender.Type != ConversationParticipantUser || !message.RequiresResponse {
+		return nil
+	}
+	actor, ok := conversationMessageInitiatingUser(conversation, message)
+	if !ok {
 		return nil
 	}
 	threadRoot := externalConversationThreadRoot(conversation, message)
@@ -200,7 +218,8 @@ func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx conte
 			return err
 		}
 		for _, candidate := range messages {
-			if candidate.Sender.Type == ConversationParticipantUser && candidate.RequiresResponse && externalConversationThreadRoot(conversation, candidate) == threadRoot {
+			candidateActor, valid := conversationMessageInitiatingUser(conversation, candidate)
+			if valid && candidateActor == actor && candidate.Sender.Type == ConversationParticipantUser && candidate.RequiresResponse && externalConversationThreadRoot(conversation, candidate) == threadRoot {
 				supersedingSequence = candidate.Sequence
 			}
 		}
@@ -229,7 +248,8 @@ func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx conte
 			if err != nil {
 				return err
 			}
-			if trigger.Sequence >= supersedingSequence {
+			triggerActor, valid := conversationMessageInitiatingUser(conversation, trigger)
+			if !valid || triggerActor != actor || trigger.Sequence >= supersedingSequence {
 				continue
 			}
 			visibility := ActivityVisibilityPrivate
