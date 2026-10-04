@@ -23,6 +23,7 @@ type TurnExecutionContext struct {
 	// Verified only by the canonical conversation origin resolver. This is a
 	// host transport capability, never model-authored input or a user grant.
 	canAskConversationQuestion bool
+	sourceAccessChallenge      *SourceAccessChallengeInteraction
 }
 
 // TurnRunner performs one bounded, proposal-only reasoning step. External side
@@ -421,7 +422,12 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			outcomeErr = validateFinalFailureExplanationOutcome(run, outcome)
 		}
 		if outcomeErr == nil {
-			outcomeErr = validateToolFeedbackCorrectionOutcome(run, outcome)
+			interaction, interactionErr := resolveSourceAccessChallengeInteraction(ctx, c.portfolio, run)
+			if interactionErr != nil {
+				outcomeErr = interactionErr
+			} else {
+				outcomeErr = validateToolFeedbackCorrectionOutcome(run, outcome, interaction)
+			}
 		}
 		if outcomeErr == nil {
 			outcomeErr = validateConversationTaskSetupWait(ctx, c.portfolio, run, outcome)
@@ -484,6 +490,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 	}
 	if finish.Status == AgentTurnStatusCompleted {
+		checkpointSourceAccessChallengeTurn(run, turn, &finish)
 		if feedback, active := ReadToolFeedbackCorrection(run.Checkpoint); active && isTerminalAgentRunStatus(finish.NextRunStatus) && len(finish.RequestedActions) == 0 {
 			finish.ContinuationCheckpoint = checkpointFinalFailureExplanation(
 				preserveKernelActionHistory(run.Checkpoint, finish.ContinuationCheckpoint), feedback.Kind, feedback.Message)
