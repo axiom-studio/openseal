@@ -96,12 +96,14 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 		initiator := ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}
 		rootOne := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 			IdempotencyKey: "call-one", StartThread: true, RequiresResponse: true,
-			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "calls"}, Initiator: &initiator,
+			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: VoiceCallCoordinatorParticipantID}, Initiator: &initiator,
+			Intent: MessageIntentUpdate, ResponseMode: "spoken",
 		})
 		rootOneRun := schedule(rootOne, rootOne.ID)
 		rootTwo := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{
 			IdempotencyKey: "call-two", StartThread: true, ReplyToMessageID: rootOne.ID, RequiresResponse: true,
-			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "calls"}, Initiator: &initiator,
+			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: VoiceCallCoordinatorParticipantID}, Initiator: &initiator,
+			Intent: MessageIntentUpdate, ResponseMode: "spoken",
 		})
 		rootTwoRun := schedule(rootTwo, rootTwo.ID)
 		if !rootOne.StartsThread || !rootTwo.StartsThread || rootOne.ThreadRootID != "" || rootTwo.ThreadRootID != "" || rootTwo.ReplyToMessageID != rootOne.ID {

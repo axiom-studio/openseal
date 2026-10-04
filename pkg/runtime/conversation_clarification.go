@@ -12,6 +12,12 @@ const conversationAnswerEvent = "run.conversation_answer_received"
 // Resolve the channel through kernel-owned lineage, never model-supplied context
 // on a delegated child. Restrict this handoff to the owning Agent's own work.
 func conversationWorkOrigin(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun) (*AgentRun, *Conversation, *ChannelMessage, error) {
+	return conversationWorkOriginForState(ctx, runs, conversations, run, false)
+}
+
+// Accepted-answer receipts may outlive a completed or paused parent. Resolve
+// their immutable initiating identity without treating it as a fresh Run grant.
+func conversationWorkOriginForState(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun, includeInactiveParents bool) (*AgentRun, *Conversation, *ChannelMessage, error) {
 	if run != nil && run.ParentRunID == "" && run.Context[deferredWorkflowContextKey] == true {
 		return deferredWorkflowConversationOrigin(ctx, runs, conversations, run)
 	}
@@ -25,7 +31,7 @@ func conversationWorkOrigin(ctx context.Context, runs PortfolioStore, conversati
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if parent == nil || seen[parent.ID] || parent.Owner != run.Owner || isTerminalAgentRunStatus(parent.Status) || parent.Status == AgentRunStatusPaused {
+		if parent == nil || seen[parent.ID] || parent.Owner != run.Owner || !includeInactiveParents && (isTerminalAgentRunStatus(parent.Status) || parent.Status == AgentRunStatusPaused) {
 			return nil, nil, nil, nil
 		}
 		seen[parent.ID] = true
@@ -122,6 +128,10 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 	if conversation.Owner.Type != OwnerTypeAgent || answer.Sender.Type != ConversationParticipantUser {
 		return nil, false, nil
 	}
+	actor, valid := conversationMessageInitiatingUser(conversation, answer)
+	if !valid {
+		return nil, false, nil
+	}
 	var pending []conversationQuestion
 	const pageSize = 100
 	for after := int64(0); ; {
@@ -144,6 +154,14 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if run == nil {
 					continue
 				}
+				_, origin, trigger, err := conversationWorkOriginForState(ctx, s.runs.store, s.conversations.store, run, true)
+				if err != nil {
+					return nil, false, err
+				}
+				originalActor, valid := conversationMessageInitiatingUser(conversation, trigger)
+				if origin == nil || origin.ID != conversation.ID || !valid || originalActor != actor {
+					continue
+				}
 				// Read the atomic transition receipt before testing current status. A worker
 				// may already have finished or asked another question after accepting this answer.
 				accepted, err := s.conversationAnswerAccepted(ctx, run, answer.ID)
@@ -156,7 +174,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if !isConversationQuestionWait(run) || clarificationQuestionKey(run) != question.IdempotencyKey {
 					continue
 				}
-				_, origin, _, err := conversationWorkOrigin(ctx, s.runs.store, s.conversations.store, run)
+				_, origin, _, err = conversationWorkOrigin(ctx, s.runs.store, s.conversations.store, run)
 				if err != nil {
 					return nil, false, err
 				}
