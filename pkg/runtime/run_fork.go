@@ -338,7 +338,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			entrypoint = source.Entrypoint
 		}
 		childKind := source.Kind
-		if entrypoint != "" {
+		if entrypoint != "" || sourceTask != nil {
 			childKind = RunKindAgentWork
 		}
 		childRequest := CreateAgentRunRequest{
@@ -461,20 +461,36 @@ func persistedTaskWorkOrigin(ctx context.Context, store PortfolioStore, source *
 	if !validConversationTaskAdmissionRoot(root, task) {
 		return nil, ErrInvalidConversationTask
 	}
+	if task.Mode == ConversationTaskModeContinuation {
+		proof, ok := store.(ConversationTaskProofStore)
+		if !ok {
+			return nil, ErrInvalidConversationTask
+		}
+		valid, err := VerifyConversationTaskWorkRun(ctx, proof, task, root)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, ErrInvalidConversationTask
+		}
+	}
 	current := source
 	seen := make(map[string]bool)
 	for depth := 0; depth < 64 && current != nil; depth++ {
-		if seen[current.ID] || current.Scope != task.Scope || current.Owner != task.Owner || current.AssignedAgentID != task.TargetAgentID ||
-			current.RootRunID != task.WorkRunID || current.Kind != RunKindAgentWork {
+		if seen[current.ID] || current.Scope != task.Scope || current.Owner != task.Owner || current.AssignedAgentID != root.AssignedAgentID ||
+			current.RootRunID != task.WorkRunID {
 			return nil, ErrInvalidConversationTask
 		}
 		if value, exists := current.Context[ConversationTaskContextKey]; exists && value != task.ID {
 			return nil, ErrInvalidConversationTask
 		}
 		if current.ID == task.WorkRunID {
+			if !ConversationTaskMatchesWorkRun(task, current) {
+				return nil, ErrInvalidConversationTask
+			}
 			return task, nil
 		}
-		if current.ParentRunID == "" || current.Source != RunSourceFork {
+		if current.Kind != RunKindAgentWork || current.ParentRunID == "" || current.Source != RunSourceFork {
 			return nil, ErrInvalidConversationTask
 		}
 		seen[current.ID] = true

@@ -243,6 +243,21 @@ func (s *AgentRunScheduler) Inspect(ctx context.Context, req AgentRunClaimReques
 		if err := prepareConversationTaskAdmission(ctx, &claim, runs, conversationTaskAdmissionLookup{
 			task: tasks.FindConversationTaskByWorkRunID, run: portfolio.GetAgentRun,
 			conversation: conversations.GetConversation, message: conversations.GetChannelMessage,
+			request: func(ctx context.Context, scope Scope, id string) (*AgentRequest, error) {
+				if requests, ok := s.store.(interface {
+					GetAgentRequest(context.Context, Scope, string) (*AgentRequest, error)
+				}); ok {
+					return requests.GetAgentRequest(ctx, scope, id)
+				}
+				return nil, nil
+			},
+			round: func(ctx context.Context, scope Scope, conversationID, key string) (*ParticipationRound, error) {
+				result, err := conversations.FindParticipationRoundByIdempotencyKey(ctx, scope, conversationID, key)
+				if err != nil || result == nil {
+					return nil, err
+				}
+				return result.Round, nil
+			},
 		}); err != nil {
 			return nil, err
 		}
