@@ -1,0 +1,224 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/skillerror"
+)
+
+type taskFailureReportingStore interface {
+	KernelStore
+	ConversationTaskKernelStore
+	terminalReportingContractStore
+}
+
+func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore, threaded bool) (*ConversationTaskResult, *ChannelMessage) {
+	t.Helper()
+	scope := Scope{Kind: "tenant", ID: "safe-task-failure"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Private task", IdempotencyKey: "failure-thread"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}
+	target := ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent"}
+	audience := ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{target}}
+	root := ""
+	if threaded {
+		parent, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: MessageIntentQuestion, Content: "Private thread", Audience: audience, IdempotencyKey: "thread"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		conversation, root = parent.Conversation, parent.Message.ID
+		audience = ConversationAudience{Kind: ConversationAudienceChannel}
+	}
+	posted, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Sender: actor, Intent: MessageIntentQuestion, Content: "Prepare the requested result", Audience: audience, ReplyToMessageID: root, RequiresResponse: true, IdempotencyKey: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := scheduler.ScheduleMessage(t.Context(), scope, conversation.ID, posted.Message.ID); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil {
+		t.Fatalf("source claim: %#v %v", claimed, err)
+	}
+	proposal := &TurnTaskProposal{TaskKey: "private-work", Goal: "GOAL_SECRET prepare the complete result", Acknowledgment: "I will prepare the result."}
+	settled, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: claimed.ID, WorkerID: "worker"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: proposal}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(settled.Run, settled.Turn))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return accepted, posted.Message
+}
+
+func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testing.T) {
+	for _, outcome := range []string{"review rejected", "review rejected rate limited", "review rejected mixed batch", "unknown failure", "completed", "completed rate limited", "direct rate limited", "direct mixed batch", "direct proxy rejected", "direct proxy unavailable", "direct unclassified", "stale rate limited", "unproven rate limited", "unrelated terminal failure"} {
+		for _, threaded := range []bool{false, true} {
+			t.Run(outcome+map[bool]string{false: "/direct", true: "/thread"}[threaded], func(t *testing.T) {
+				eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+					store := fixture.store.(taskFailureReportingStore)
+					accepted, trigger := admittedFailureReportingTask(t, store, threaded)
+					activity := NewRunActivityService(store, store)
+					running, _, err := activity.TransitionRun(t.Context(), accepted.WorkRun.Scope, accepted.WorkRun.ID, RunTransitionRequest{ExpectedRevision: accepted.WorkRun.Revision, Status: AgentRunStatusRunning})
+					if err != nil {
+						t.Fatal(err)
+					}
+					status, checkpoint, expected := AgentRunStatusFailed, rejectedTaskReviewCheckpoint(), TerminalFailureReply("task_completion_rejected")
+					terminalError := "ERROR_SECRET provider argument and private response"
+					if outcome == "review rejected rate limited" || outcome == "review rejected mixed batch" || outcome == "completed rate limited" {
+						failure := skillerror.NewActionError("source_rate_limited", "ERROR_SECRET", nil)
+						if outcome == "review rejected mixed batch" {
+							failure = skillerror.NewActionError("source_reads_failed", "ERROR_SECRET", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_unavailable"}]`, "failedCount": "2", "totalCount": "2"})
+						}
+						checkpoint = checkpointTerminalAction(checkpoint, &ActionCall{ID: "browser-call", Status: ActionCallStatusFailed, Error: failure.Error(), ErrorCode: failure.Code(), ErrorDetails: failure.Details()}, nil)
+						expected += " Some sources rate-limited requests (HTTP 429). Try those sources again later."
+					}
+					if outcome == "unknown failure" {
+						checkpoint["_atlasTaskCompletionReview"].(map[string]interface{})["failureCode"] = "VERDICT_SECRET"
+						expected = TerminalFailureReply("execution_failed")
+					} else if outcome == "completed" || outcome == "completed rate limited" {
+						status, expected = AgentRunStatusCompleted, "Completed fixture result."
+					}
+					if strings.HasPrefix(outcome, "direct ") || outcome == "stale rate limited" || outcome == "unproven rate limited" || outcome == "unrelated terminal failure" {
+						code := "source_rate_limited"
+						var details map[string]string
+						switch outcome {
+						case "direct mixed batch":
+							code, details = "source_reads_failed", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_unavailable"}]`}
+						case "direct proxy rejected":
+							code = "browser_proxy_authentication_failed"
+						case "direct proxy unavailable":
+							code = "browser_proxy_unavailable"
+						}
+						failure := skillerror.NewActionError(code, "ERROR_SECRET", details)
+						checkpoint = checkpointTerminalAction(nil, &ActionCall{ID: "browser-call", Status: ActionCallStatusFailed, Error: failure.Error(), ErrorCode: failure.Code(), ErrorDetails: failure.Details()}, nil)
+						terminalError = failure.Error()
+						expected = "I couldn't finish this request because one or more sources rate-limited requests (HTTP 429). I stopped this attempt. Try again later."
+						switch outcome {
+						case "direct proxy rejected":
+							expected = "I couldn't finish this request because the platform's browser connection was rejected. I stopped this attempt. Try again later."
+						case "direct proxy unavailable":
+							expected = "I couldn't finish this request because the platform's browser connection was unavailable. I stopped this attempt. Try again later."
+						case "direct unclassified":
+							delete(checkpoint, ToolFeedbackCorrectionCheckpointKey)
+							delete(checkpoint, FinalFailureExplanationCheckpointKey)
+						case "stale rate limited":
+							checkpoint = checkpointTerminalAction(checkpoint, &ActionCall{ID: "latest-call", Status: ActionCallStatusFailed, Error: "Different operation failed."}, nil)
+							terminalError, expected = "Different operation failed.", TerminalFailureReply("action_failed")
+						case "unproven rate limited":
+							delete(checkpoint, actionHistoryCheckpointKey)
+							expected = TerminalFailureReply("action_failed")
+						case "unrelated terminal failure":
+							terminalError, expected = "ERROR_SECRET unrelated terminal failure", TerminalFailureReply("action_failed")
+						}
+					}
+					output := map[string]interface{}{"summary": "OUTPUT_SECRET"}
+					if status == AgentRunStatusCompleted {
+						output["summary"] = expected
+					}
+					work, _, err := activity.TransitionRun(t.Context(), running.Scope, running.ID, RunTransitionRequest{ExpectedRevision: running.Revision, Status: status, Checkpoint: checkpoint, Output: output, Error: terminalError})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if fixture.reopen != nil {
+						fixture.store = fixture.reopen()
+						store = fixture.store.(taskFailureReportingStore)
+					}
+					// Deliver work first, then replay through the actual durable outbox.
+					// The original source acknowledgment must still be published first.
+					if err := projectTerminalRunReporting(t.Context(), store, work); err != nil {
+						t.Fatal(err)
+					}
+					worker := terminalReportingContractWorker(t, store, time.Now().Add(time.Second))
+					if _, err := worker.ProcessBatch(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+					for range 2 {
+						if err := projectTerminalRunReporting(t.Context(), store, work); err != nil {
+							t.Fatal(err)
+						}
+						if err := projectTerminalRunReporting(t.Context(), store, accepted.SourceRun); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if n, err := worker.ProcessBatch(t.Context()); err != nil || n != 0 {
+						t.Fatalf("delivered outbox replayed: %d %v", n, err)
+					}
+					messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: work.Scope, ConversationID: accepted.Task.ConversationID, Limit: 100})
+					if err != nil {
+						t.Fatal(err)
+					}
+					answers := []*ChannelMessage{}
+					for _, message := range messages {
+						if message.Intent == MessageIntentAnswer {
+							answers = append(answers, message)
+						}
+					}
+					if len(answers) != 2 || answers[0].Content != accepted.Task.Acknowledgment || answers[1].Content != expected {
+						t.Fatalf("wrong acknowledgment/final sequence: %#v", answers)
+					}
+					service := NewConversationService(store)
+					for _, message := range answers {
+						if message.Scope != work.Scope || message.ReplyToMessageID != trigger.ID || message.ThreadRootID != accepted.Task.ThreadRootID || message.BroadcastToChannel == threaded {
+							t.Fatalf("failure widened origin: %#v", message)
+						}
+						for _, secret := range []string{"GOAL_SECRET", "ERROR_SECRET", "VERDICT_SECRET", "CANDIDATE_SECRET", "OUTPUT_SECRET"} {
+							if strings.Contains(message.Content, secret) {
+								t.Fatalf("private failure data published: %q", message.Content)
+							}
+						}
+						if _, err := service.GetVisibleChannelMessage(t.Context(), work.Scope, accepted.Task.ConversationID, message.ID, ConversationViewer{Participant: trigger.Sender}); err != nil {
+							t.Fatalf("source actor lost access: %v", err)
+						}
+						if _, err := service.GetVisibleChannelMessage(t.Context(), work.Scope, accepted.Task.ConversationID, message.ID, ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantUser, ID: "stranger"}}); !errors.Is(err, ErrChannelMessageNotFound) {
+							t.Fatalf("private thread widened: %v", err)
+						}
+					}
+					for _, mutate := range []func(*AgentRun){func(r *AgentRun) { r.Scope.ID = "foreign" }, func(r *AgentRun) { r.Owner.ID = "foreign" }, func(r *AgentRun) { r.Context[conversationRunContextTriggerID] = "foreign" }} {
+						forged := cloneAgentRun(work)
+						mutate(forged)
+						if err := projectTerminalRunReporting(t.Context(), store, forged); !errors.Is(err, ErrInvalidConversationTask) {
+							t.Fatalf("forged origin accepted: %v", err)
+						}
+					}
+					intent, err := store.GetRunTerminalReport(t.Context(), work.Scope, work.ID, work.Status)
+					if err != nil || intent.DeliveredAt == nil {
+						t.Fatalf("failure outbox not settled: %#v %v", intent, err)
+					}
+					canonical, err := store.GetAgentRun(t.Context(), work.Scope, work.ID)
+					if err != nil || canonical.Status != work.Status || canonical.Revision != work.Revision {
+						t.Fatalf("reporting changed execution: %#v %v", canonical, err)
+					}
+				})
+			})
+		}
+	}
+}
+
+func TestConversationTaskContinuationFailureUsesSanitizedReply(t *testing.T) {
+	store, result, _, _ := promotedContinuationAuthorityFixture(t, "safe-continuation-failure")
+	run := finishContinuationAuthorityRun(t, store, result.WorkRun, AgentRunStatusFailed)
+	for range 2 {
+		if err := projectTerminalRunReporting(t.Context(), store, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	message, err := FindConversationTaskResultMessage(t.Context(), store, result.Task, run)
+	if err != nil || message == nil || message.Content != TerminalFailureReply("execution_failed") {
+		t.Fatalf("legacy failure lost safe reply: %#v %v", message, err)
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -40,6 +41,33 @@ func TestSkillSetupTaskOriginSupportsIndependentWorkAndExactForkLineage(t *testi
 					t.Fatal(err)
 				}
 				run = child
+			}
+			if !fork {
+				// Independent roots require a persisted request_setup action. The
+				// end-to-end wait tests cover proposal and worker admission; seed its
+				// running state here to keep this test focused on origin resolution.
+				now := time.Now().UTC()
+				expires := now.Add(time.Minute)
+				call := &ActionCall{
+					ID: "task-setup-call", Scope: run.Scope, RunID: run.ID, DeploymentID: "agent",
+					SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
+					Status: ActionCallStatusRunning, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone,
+					Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect the account"},
+					Attempt:   1, MaxAttempts: 1, LeaseOwner: "setup-action-worker", LeaseExpiresAt: &expires,
+					AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: &now,
+				}
+				next := cloneAgentRun(run)
+				next.Revision++
+				next.Status, next.WakeCondition = AgentRunStatusWaitingForDependency, &WakeCondition{Type: "action", Reference: call.ID}
+				next.UpdatedAt = now
+				created, err := store.CreateActionProposal(t.Context(), ActionProposalRecord{
+					Call: call, Run: next, ExpectedRunRevision: run.Revision,
+					Event: &ActivityEvent{ID: "setup-origin-action", Scope: run.Scope, RunID: run.ID, EventType: "action.started", Summary: "Execute setup request", CreatedAt: now},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				run = created.Run
 			}
 			// Copied presentation hints must never redirect the persisted task.
 			run = cloneAgentRun(run)

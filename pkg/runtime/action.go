@@ -74,6 +74,8 @@ type ActionCall struct {
 	LeaseExpiresAt          *time.Time                           `json:"leaseExpiresAt,omitempty"`
 	Output                  map[string]interface{}               `json:"output,omitempty"`
 	Error                   string                               `json:"error,omitempty"`
+	ErrorCode               string                               `json:"errorCode,omitempty"`
+	ErrorDetails            map[string]string                    `json:"errorDetails,omitempty"`
 	FailurePhase            ActionFailurePhase                   `json:"failurePhase,omitempty"`
 	RecoveredRunning        bool                                 `json:"recoveredRunning,omitempty"`
 	Revision                int64                                `json:"revision"`
