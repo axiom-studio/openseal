@@ -34,9 +34,10 @@ type ConversationCompactionRequest struct {
 }
 
 type conversationHistoryPlan struct {
-	Messages []*ChannelMessage
-	Summary  *conversationSummary
-	Request  *ConversationCompactionRequest
+	Messages        []*ChannelMessage
+	ContextBackdrop []*ChannelMessage
+	Summary         *conversationSummary
+	Request         *ConversationCompactionRequest
 }
 
 func conversationViewerKey(viewer ConversationViewer) string {

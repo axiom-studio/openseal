@@ -12,7 +12,7 @@ const MaximumChannelMessageBatchSize = 200
 // ChannelMessageBatchStore is an optional extension to ConversationStore.
 // Reads return only the exact scope, conversation and message IDs requested;
 // missing messages are omitted, and result order is unspecified. Callers still
-// apply the current viewer's audience and direct-parent visibility checks.
+// apply the current viewer's audience and canonical ancestry visibility checks.
 type ChannelMessageBatchStore interface {
 	GetChannelMessagesByIDs(context.Context, Scope, string, []string) ([]*ChannelMessage, error)
 }
@@ -59,8 +59,9 @@ func loadChannelMessageBatches(ctx context.Context, store ChannelMessageBatchSto
 }
 
 // Visibility is recomputed for every request. Parent reads are staged so a
-// hidden or missing thread root never causes its reply parent to be read, and
-// parents are deliberately checked only one level deep.
+// hidden or missing thread root never causes its reply parent to be read.
+// Ordinary parents retain one-level checks. StartsThread anchors additionally
+// preserve their bounded ancestor restrictions without walking transcripts.
 func filterChannelMessagesWithBatchParents(ctx context.Context, store ChannelMessageBatchStore, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
 	threadIDs := make([]string, 0, len(messages))
 	for _, message := range messages {
@@ -97,5 +98,40 @@ func filterChannelMessagesWithBatchParents(ctx context.Context, store ChannelMes
 		}
 		visible = append(visible, message)
 	}
-	return visible, nil
+	hasThreadStart := false
+	for _, message := range visible {
+		if message.StartsThread {
+			hasThreadStart = true
+			break
+		}
+		for _, id := range [2]string{message.ThreadRootID, message.ReplyToMessageID} {
+			parent := threads[id]
+			if parent == nil {
+				parent = replies[id]
+			}
+			if parent != nil && parent.StartsThread {
+				hasThreadStart = true
+				break
+			}
+		}
+	}
+	if !hasThreadStart {
+		return visible, nil
+	}
+	known := make(map[string]*ChannelMessage, len(messages)+len(threads)+len(replies))
+	for _, message := range messages {
+		if message != nil {
+			known[message.ID] = message
+		}
+	}
+	for id, message := range threads {
+		known[id] = message
+	}
+	for id, message := range replies {
+		known[id] = message
+	}
+	return filterChannelMessageThreadStarts(ctx, scope, conversationID, visible, known,
+		func(ctx context.Context, ids []string) (map[string]*ChannelMessage, error) {
+			return loadChannelMessageBatches(ctx, store, scope, conversationID, ids)
+		}, viewer)
 }

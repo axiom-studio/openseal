@@ -299,8 +299,11 @@ type ChannelMessage struct {
 	// ContributionKey is a privacy-safe, normalized semantic claim identifier
 	// used to suppress paraphrased pile-ons (for example rollout-owner:agent-37).
 	// It is user-visible metadata, never hidden reasoning.
-	ContributionKey      string                    `json:"contributionKey,omitempty"`
-	Audience             ConversationAudience      `json:"audience"`
+	ContributionKey string               `json:"contributionKey,omitempty"`
+	Audience        ConversationAudience `json:"audience"`
+	// StartsThread marks a host-created thread root without turning that root
+	// into a reply. It affects conversation routing, never sender authority.
+	StartsThread         bool                      `json:"startsThread,omitempty"`
 	ThreadRootID         string                    `json:"threadRootId,omitempty"`
 	ReplyToMessageID     string                    `json:"replyToMessageId,omitempty"`
 	BroadcastToChannel   bool                      `json:"broadcastToChannel,omitempty"`
@@ -358,6 +361,9 @@ func (m *ChannelMessage) Validate() error {
 	}
 	if m.BroadcastToChannel && m.ThreadRootID == "" {
 		return fmt.Errorf("%w: only a thread reply can be broadcast to its channel", ErrInvalidConversation)
+	}
+	if m.StartsThread && m.ThreadRootID != "" {
+		return fmt.Errorf("%w: a new thread root cannot belong to another thread", ErrInvalidConversation)
 	}
 	seenMentions := make(map[ConversationParticipant]struct{}, len(m.Mentions))
 	for _, mention := range m.Mentions {

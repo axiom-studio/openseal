@@ -91,10 +91,13 @@ type ParticipationProposalContext struct {
 	Conversation   *Conversation
 	Trigger        *ChannelMessage
 	RecentMessages []*ChannelMessage
-	OpenMessages   []*ChannelMessage
-	Participant    ConversationParticipant
-	SemanticRoles  []string
-	Priority       int
+	// ContextBackdrop is bounded, viewer-authorized discussion from before a
+	// canonical thread start. It is prompt-only history, never pending input.
+	ContextBackdrop []*ChannelMessage
+	OpenMessages    []*ChannelMessage
+	Participant     ConversationParticipant
+	SemanticRoles   []string
+	Priority        int
 }
 
 // ParticipationProposalProvider asks one Agent whether it has new,
@@ -420,24 +423,34 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 				}
 				viewer := ConversationViewer{Participant: binding.Participant, Roles: append([]string(nil), binding.SemanticRoles...)}
 				historyPlan := conversationHistoryPlan{Messages: visibleRecent}
-				saved := c.summaries.get(conversation.Scope, conversation.ID, conversationViewerKey(viewer))
-				history, historyErr := loadConversationCompactionHistory(proposalCtx, c.conversations, conversation, viewer, visibleRecent, saved)
-				if historyErr == nil {
-					triggerID := ""
-					if visibleTrigger != nil {
-						triggerID = visibleTrigger.ID
-					}
-					historyPlan = planConversationHistory(conversation, triggerID, viewer, history, saved)
-					proposalInput.RecentMessages = cloneChannelMessages(historyPlan.Messages)
-					if historyPlan.Summary != nil {
-						proposalInput.HistorySummary = historyPlan.Summary.Text
-					}
-					if historyPlan.Request != nil {
-						request := *historyPlan.Request
-						request.SourceMessageIDs = append([]string(nil), request.SourceMessageIDs...)
-						proposalInput.HistoryCompaction = &request
+				if externalConversationThreadRoot(conversation, visibleTrigger) == "" {
+					saved := c.summaries.get(conversation.Scope, conversation.ID, conversationViewerKey(viewer))
+					history, historyErr := loadConversationCompactionHistory(proposalCtx, c.conversations, conversation, viewer, visibleRecent, saved)
+					if historyErr == nil {
+						triggerID := ""
+						if visibleTrigger != nil {
+							triggerID = visibleTrigger.ID
+						}
+						historyPlan = planConversationHistory(conversation, triggerID, viewer, history, saved)
+						proposalInput.RecentMessages = cloneChannelMessages(historyPlan.Messages)
+						if historyPlan.Summary != nil {
+							proposalInput.HistorySummary = historyPlan.Summary.Text
+						}
+						if historyPlan.Request != nil {
+							request := *historyPlan.Request
+							request.SourceMessageIDs = append([]string(nil), request.SourceMessageIDs...)
+							proposalInput.HistoryCompaction = &request
+						}
 					}
 				}
+				backdrop, backdropErr := loadConversationThreadBackdrop(proposalCtx, c.conversations, conversation, visibleTrigger, viewer)
+				if backdropErr != nil {
+					errs[index] = backdropErr
+					proposalCancel()
+					cancel()
+					continue
+				}
+				proposalInput.ContextBackdrop = backdrop
 				if c.config.ProposalBudget != (ParticipationProposalBudget{}) {
 					budget := c.config.ProposalBudget
 					proposalInput.Budget = &budget
