@@ -25,6 +25,10 @@ type ToolInvocation struct {
 	ExecutionDeploymentID string
 	SkillID               string
 	SkillVersion          string
+	// SkillSourceIdentity and SkillDefinitionDigest identify the trusted bound
+	// definition independently of model arguments and binding configuration.
+	SkillSourceIdentity   string
+	SkillDefinitionDigest string
 	Action                string
 	ActionCallID          string
 	RunID                 string
@@ -63,12 +67,22 @@ func NewToolActionDispatcher(invoker ToolInvoker) (*ToolActionDispatcher, error)
 }
 
 func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionDispatchInput) (map[string]interface{}, error) {
-	if d == nil || d.invoker == nil || input.Bound == nil || input.Bound.Definition == nil {
+	if d == nil || d.invoker == nil || input.Bound == nil || input.Bound.Definition == nil || input.Bound.Binding == nil {
 		return nil, errors.New("tool action dispatcher is not configured")
 	}
 	transportEndpoint, transportErr := boundActionToolTransport(input.Bound)
 	if transportErr != nil {
 		return nil, transportErr
+	}
+	sourceIdentity := skill.DefinitionSourceIdentity(input.Bound.Definition)
+	// A legacy unqualified binding may resolve to one unique source through
+	// the Catalog. The resolved definition remains authoritative in that case.
+	if input.Bound.Binding.SourceIdentity != "" && input.Bound.Binding.SourceIdentity != sourceIdentity {
+		return nil, errors.New("Skill binding source does not match its bound definition")
+	}
+	definitionDigest, err := skill.DefinitionDigest(input.Bound.Definition)
+	if err != nil {
+		return nil, fmt.Errorf("identify bound Skill definition: %w", err)
 	}
 	if len(input.Credentials) > 0 && input.CredentialLease != nil {
 		return nil, errors.New("plaintext credentials and an opaque credential lease are mutually exclusive")
@@ -105,6 +119,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		Name: transportEndpoint, Scope: input.Bound.Binding.Scope, DeploymentID: input.Bound.Binding.DeploymentID,
 		ExecutionDeploymentID: executionDeploymentID,
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
+		SkillSourceIdentity: sourceIdentity, SkillDefinitionDigest: definitionDigest,
 		Action: input.Bound.Action.Name, Arguments: arguments, BindingConfig: cloneMap(input.Bound.Binding.Config), Credentials: input.Credentials,
 		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: cloneCredentialReferences(input.CredentialReferences),
 	}
