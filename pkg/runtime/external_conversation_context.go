@@ -41,14 +41,15 @@ type ExternalConversationContextHostRequest struct {
 }
 
 type ExternalConversationContextMessage struct {
-	Source                 *ExternalMessageSource `json:"source,omitempty"`
-	ExternalConversationID string                 `json:"externalConversationId"`
-	ExternalThreadID       string                 `json:"externalThreadId,omitempty"`
-	ExternalMessageID      string                 `json:"externalMessageId"`
-	ExternalParticipantID  string                 `json:"externalParticipantId"`
-	ParticipantDisplayName string                 `json:"participantDisplayName,omitempty"`
-	Text                   string                 `json:"text"`
-	OccurredAt             time.Time              `json:"occurredAt"`
+	Source                 *ExternalMessageSource           `json:"source,omitempty"`
+	ExternalConversationID string                           `json:"externalConversationId"`
+	ExternalThreadID       string                           `json:"externalThreadId,omitempty"`
+	ExternalMessageID      string                           `json:"externalMessageId"`
+	ExternalParticipantID  string                           `json:"externalParticipantId"`
+	ParticipantDisplayName string                           `json:"participantDisplayName,omitempty"`
+	Text                   string                           `json:"text"`
+	Attachments            []ExternalConversationAttachment `json:"attachments,omitempty"`
+	OccurredAt             time.Time                        `json:"occurredAt"`
 }
 
 type ExternalConversationContextResult struct {
@@ -274,20 +275,20 @@ func normalizeExternalConversationContext(result *ExternalConversationContextRes
 	status := result.Status
 	seen := make(map[string]ExternalConversationContextMessage, len(result.Messages))
 	messages := make([]ExternalConversationContextMessage, 0, len(result.Messages))
-	bytes := 0
+	bytes, attachmentCount := 0, 0
 	for _, message := range result.Messages {
 		if message.ExternalConversationID != event.ExternalConversationID ||
 			(message.ExternalThreadID != event.ExternalThreadID && !(message.ExternalThreadID == "" && message.ExternalMessageID == event.ExternalThreadID)) ||
 			!validExternalConversationReference(message.ExternalMessageID, 1024) ||
 			!validExternalConversationReference(message.ExternalParticipantID, 1024) ||
 			message.OccurredAt.IsZero() || len(message.ParticipantDisplayName) > 160 || strings.ContainsAny(message.ParticipantDisplayName, "\r\n") ||
-			strings.TrimSpace(message.Text) == "" || len(message.Text) > 64*1024 {
+			(strings.TrimSpace(message.Text) == "" && len(message.Attachments) == 0) || len(message.Text) > 64*1024 || validateExternalAttachments(message.Attachments) != nil {
 			return nil, "", false
 		}
 		if message.ExternalMessageID == event.ExternalMessageID {
 			continue
 		}
-		if !message.OccurredAt.Before(event.OccurredAt) {
+		if message.OccurredAt.After(event.OccurredAt) || (message.OccurredAt.Equal(event.OccurredAt) && message.ExternalMessageID != event.ReplyToExternalMessageID) {
 			status = ExternalConversationContextPartial
 			continue
 		}
@@ -297,6 +298,10 @@ func normalizeExternalConversationContext(result *ExternalConversationContextRes
 				return nil, "", false
 			}
 			continue
+		}
+		attachmentCount += len(message.Attachments)
+		if attachmentCount > 8 {
+			return nil, "", false
 		}
 		bytes += len(message.Text)
 		if bytes > maximumExternalConversationContextBytes {
@@ -346,6 +351,24 @@ func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Conte
 			return message, nil
 		}
 	}
+	// Quoted files belong to the historical message, not the user's new reply.
+	attachmentRefs, notices, err := w.importAttachments(ctx, endpoint, conversation, NormalizedExternalConversationEvent{
+		ID:   stableExternalConversationID(endpoint.Scope, endpoint.ID, "context-attachment", historical.ExternalMessageID),
+		Type: capability.ConversationEventMessageReceived, OrderingKey: historical.ExternalMessageID, Text: historical.Text,
+		ExternalConversationID: historical.ExternalConversationID, ExternalThreadID: historical.ExternalThreadID,
+		ExternalMessageID: historical.ExternalMessageID, ExternalParticipantID: historical.ExternalParticipantID,
+		Attachments: historical.Attachments, OccurredAt: historical.OccurredAt,
+	})
+	if err != nil {
+		return nil, err
+	}
+	text := strings.TrimSpace(historical.Text)
+	if text == "" && len(historical.Attachments) > 0 {
+		text = "Shared attached files."
+	}
+	if len(notices) > 0 {
+		text += "\n\nAttachment access: " + strings.Join(notices, "; ")
+	}
 	key := stableExternalConversationID(endpoint.Scope, endpoint.ID, "message", historical.ExternalMessageID)
 	for attempts := 0; attempts < 32; attempts++ {
 		if existing, err := w.store.FindChannelMessageByIdempotencyKey(ctx, endpoint.Scope, conversation.ID, key); err != nil {
@@ -376,9 +399,9 @@ func (w *ExternalConversationInboxWorker) ensureContextMessage(ctx context.Conte
 			ID: stableConversationID(endpoint.Scope, key, "message"), Scope: endpoint.Scope, ConversationID: conversation.ID,
 			Sequence: current.LastSequence + 1, Sender: participant.Participant, SenderDisplayName: participant.DisplayName,
 			ExternalSource: externalMessageSource(endpoint, NormalizedExternalConversationEvent{ExternalConversationID: historical.ExternalConversationID, ExternalThreadID: historical.ExternalThreadID, ExternalMessageID: historical.ExternalMessageID, ExternalParticipantID: historical.ExternalParticipantID, ParticipantDisplayName: historical.ParticipantDisplayName, OccurredAt: historical.OccurredAt, Source: historical.Source}),
-			Intent:         MessageIntentUpdate, Content: strings.TrimSpace(historical.Text), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Intent:         MessageIntentUpdate, Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 			Historical: true, IdempotencyKey: key, CreatedAt: historical.OccurredAt.UTC(),
-			References: []ConversationReference{{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}},
+			References: append([]ConversationReference{{Kind: ConversationReferenceExternalSource, ID: endpoint.ID, Version: endpoint.Revision}}, attachmentRefs...),
 		}
 		if thread.ExternalThreadID != "" && thread.ThreadRootMessageID != "" {
 			message.ThreadRootID, message.ReplyToMessageID = thread.ThreadRootMessageID, thread.ThreadRootMessageID
