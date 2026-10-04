@@ -1,6 +1,10 @@
 package runtime
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/skillerror"
+)
 
 // TerminalFailureReply renders only kernel-classified facts. Provider messages,
 // tool arguments, identifiers and command output are never public reply text.
@@ -120,6 +124,35 @@ func terminalFailureCodeFromCheckpoint(checkpoint map[string]interface{}) string
 		return "action_failed"
 	}
 	return "execution_failed"
+}
+
+func terminalFailureReplyFromCheckpoint(checkpoint map[string]interface{}) string {
+	code := terminalFailureCodeFromCheckpoint(checkpoint)
+	reply := TerminalFailureReply(code)
+	if code != "task_completion_rejected" {
+		return reply
+	}
+	// Action history is kernel-owned execution evidence. Report a bounded
+	// contributing cause without presenting it as the completion review's
+	// terminal verdict, or copying arbitrary tool output into a public reply.
+	for _, entry := range actionHistoryEntries(checkpoint) {
+		failed := entry["status"] == ActionCallStatusFailed || entry["status"] == string(ActionCallStatusFailed)
+		errorCode, _ := entry["errorCode"].(string)
+		raw, _ := entry["errorDetails"].(map[string]interface{})
+		if !failed || errorCode == "" || entry["failureKind"] != errorCode || raw["failureKind"] != errorCode || raw["retryable"] != "false" {
+			continue
+		}
+		details := map[string]string{}
+		for key, value := range raw {
+			if text, ok := value.(string); ok {
+				details[key] = text
+			}
+		}
+		if failure := skillerror.NewActionError(errorCode, "", details); failure != nil && failure.HasRateLimitedSource() {
+			return reply + " Some sources rate-limited requests (HTTP 429). Try those sources again later."
+		}
+	}
+	return reply
 }
 
 // Accept the in-memory and persisted JSON number forms without coercing
