@@ -120,7 +120,7 @@ func readConversationAttachment(ctx context.Context, store ArtifactContentStore,
 		return "unsupported_format", ""
 	}
 	switch mediaType {
-	case "text/plain", "text/csv", "text/tab-separated-values", "text/markdown", "application/json":
+	case "text/html", "text/plain", "text/csv", "text/tab-separated-values", "text/markdown", "application/json":
 	case spreadsheetMediaType, "application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
 	default:
 		return "unsupported_format", ""

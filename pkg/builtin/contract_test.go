@@ -77,3 +77,27 @@ func TestSiteContractsAcceptReactAndHtmlWithoutMixingSources(t *testing.T) {
 		}
 	}
 }
+
+func TestPageAndSheetContractsAreBuiltinAndRequireRevision(t *testing.T) {
+	catalog, definition := builtinContractCatalog(t)
+	if len(definition.Installers) != 0 {
+		t.Fatal("builtin creation must not install a service")
+	}
+	for _, action := range []string{CreatePage, CreateSheet} {
+		input := map[string]interface{}{"artifactId": "brief", "expectedLatestVersion": 0, "title": "Brief", "requirementName": "brief"}
+		if action == CreatePage {
+			input["filename"] = "brief.html"
+			input["html"] = "<html><body>Brief</body></html>"
+		} else {
+			input["filename"] = "brief.xlsx"
+			input["sheets"] = []interface{}{map[string]interface{}{"name": "Budget", "rows": []interface{}{[]interface{}{"Item", 12.5, true, nil}}}}
+		}
+		if err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), action, input); err != nil {
+			t.Fatal(err)
+		}
+		delete(input, "expectedLatestVersion")
+		if err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), action, input); err == nil {
+			t.Fatal("missing revision accepted")
+		}
+	}
+}

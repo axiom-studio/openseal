@@ -5,7 +5,7 @@ import "testing"
 func TestBuiltinAttachmentReadIsReferenceOnly(t *testing.T) {
 	d := SkillDefinition()
 	a := d.Actions[ReadAttachment]
-	if d.ID != SkillID || len(d.Actions) != 9 || string(a.Risk) != "read" || string(a.SideEffect) != "read" {
+	if d.ID != SkillID || len(d.Actions) != 11 || string(a.Risk) != "read" || string(a.SideEffect) != "read" {
 		t.Fatal("built-in attachment action must grant read-only access")
 	}
 	props := a.InputSchema["properties"].(map[string]interface{})
