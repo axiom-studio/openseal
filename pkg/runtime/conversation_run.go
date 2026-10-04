@@ -1356,6 +1356,10 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	}
 	hostedInput.canAskConversationQuestion = questionConversation != nil && questionTrigger != nil &&
 		questionConversation.Owner.Type == OwnerTypeAgent && hostedRun.AssignedAgentID == questionConversation.Owner.ID
+	hostedInput.sourceAccessChallenge, questionErr = resolveSourceAccessChallengeInteraction(ctx, r.portfolio, input.Run)
+	if questionErr != nil {
+		return nil, questionErr
+	}
 	for _, attachment := range attachments {
 		if attachment.media != nil {
 			hostedInput.ModelMedia = append(hostedInput.ModelMedia, *attachment.media)

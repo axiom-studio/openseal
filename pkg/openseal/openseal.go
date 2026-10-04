@@ -423,6 +423,7 @@ type (
 	AgentRun                             = runtime.AgentRun
 	AgentRunIntervention                 = runtime.AgentRunIntervention
 	ConversationAnswerReceipt            = runtime.ConversationAnswerReceipt
+	SourceAccessChallengeInteraction     = runtime.SourceAccessChallengeInteraction
 	HumanInterventionRequest             = runtime.HumanInterventionRequest
 	HumanInterventionStatus              = runtime.HumanInterventionStatus
 	BudgetPolicy                         = runtime.BudgetPolicy
