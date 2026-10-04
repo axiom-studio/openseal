@@ -1,5 +1,14 @@
 # OpenSeal source dependency updates
 
+## Paused
+
+This workflow is disabled in GitHub Actions and its YAML is archived at
+`workflow.disabled.yml`, outside `.github/workflows`. Automatic dependency
+updates and the direct-push checks bundled with this workflow are paused.
+To restore it, move the YAML to `.github/workflows/dependency-updates.yml`,
+complete the dedicated App setup described below, and enable the workflow
+in GitHub Actions. The following sections describe the retained configuration.
+
 Passing candidates advance `develop` directly. The trusted gate runs existing
 Go vet/tests/builds, regenerates third-party notices, installs the exact pnpm
 lockfile, builds the desktop frontend, runs Playwright tests, runs daemon-host
