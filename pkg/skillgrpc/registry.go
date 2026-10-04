@@ -34,7 +34,7 @@ func NewRegistry() *Registry {
 
 // Register adds a skill to the registry
 func (r *Registry) Register(ctx context.Context, address string) (*Client, error) {
-	return r.register(ctx, "", address, nil)
+	return r.register(ctx, "", address, ClientOptions{}, nil)
 }
 
 // RegisterAs adds a Skill endpoint under an authority-scoped registration key.
@@ -45,17 +45,25 @@ func (r *Registry) RegisterAs(ctx context.Context, key, address string) (*Client
 	if key == "" {
 		return nil, fmt.Errorf("skill registration key is required")
 	}
-	return r.register(ctx, key, address, nil)
+	return r.register(ctx, key, address, ClientOptions{}, nil)
 }
 
 // RegisterAsVerified publishes an authority-scoped endpoint only after its
 // health response confirms the exact advertised Skill identity and version.
 // Failed verification leaves any existing registration and type mappings intact.
 func (r *Registry) RegisterAsVerified(ctx context.Context, key, address, expectedSkillID, expectedVersion string) (*Client, error) {
+	return r.RegisterAsVerifiedWithOptions(ctx, key, address, expectedSkillID, expectedVersion, ClientOptions{})
+}
+
+// RegisterAsVerifiedWithOptions verifies and publishes an endpoint using explicit
+// transport options. Health verification samples the endpoint selected for each
+// RPC; it does not verify every backend behind a balanced target. The trusted
+// discovery boundary must ensure all resolved workers serve the same artifact.
+func (r *Registry) RegisterAsVerifiedWithOptions(ctx context.Context, key, address, expectedSkillID, expectedVersion string, options ClientOptions) (*Client, error) {
 	if key == "" || expectedSkillID == "" || expectedVersion == "" {
 		return nil, fmt.Errorf("skill registration key, identity, and version are required")
 	}
-	return r.register(ctx, key, address, func(client *Client) error {
+	return r.register(ctx, key, address, options, func(client *Client) error {
 		health, err := client.Health(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to verify skill health: %w", err)
@@ -68,8 +76,14 @@ func (r *Registry) RegisterAsVerified(ctx context.Context, key, address, expecte
 	})
 }
 
-func (r *Registry) register(ctx context.Context, key, address string, verify func(*Client) error) (*Client, error) {
-	client, err := r.connect(ctx, address)
+func (r *Registry) register(ctx context.Context, key, address string, options ClientOptions, verify func(*Client) error) (*Client, error) {
+	connect := r.connect
+	if options.RoundRobin {
+		connect = func(ctx context.Context, address string) (*Client, error) {
+			return connectSkillClientWithOptions(ctx, address, options)
+		}
+	}
+	client, err := connect(ctx, address)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +131,11 @@ func (r *Registry) register(ctx context.Context, key, address string, verify fun
 }
 
 func connectSkillClient(ctx context.Context, address string) (*Client, error) {
-	client := NewClient(address)
+	return connectSkillClientWithOptions(ctx, address, ClientOptions{})
+}
+
+func connectSkillClientWithOptions(ctx context.Context, address string, options ClientOptions) (*Client, error) {
+	client := NewClientWithOptions(address, options)
 	if err := client.Connect(ctx); err != nil {
 		return nil, err
 	}

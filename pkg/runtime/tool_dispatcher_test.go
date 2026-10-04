@@ -28,7 +28,8 @@ Publish the requested release.
 		Definition: definition, Action: definition.Actions["invoke"],
 		Binding: &skill.Binding{
 			ID: "publisher", Scope: skill.ScopeReference{Kind: "test", ID: "one"}, DeploymentID: "agent",
-			Config: map[string]interface{}{"provider": "openai-compatible", "base_url": "https://llm.example/v1", "model": "reasoner"},
+			SourceIdentity: skill.DefinitionSourceIdentity(definition),
+			Config:         map[string]interface{}{"provider": "openai-compatible", "base_url": "https://llm.example/v1", "model": "reasoner"},
 		},
 	}
 	var invokedName string
@@ -68,6 +69,65 @@ Publish the requested release.
 	}
 	if invocation.PreparedRuntime == nil || invocation.PreparedRuntime.RuntimeID != "oci://runtime.test/publisher@sha256:"+strings.Repeat("b", 64) {
 		t.Fatalf("prepared runtime was not dispatched: %#v", invocation.PreparedRuntime)
+	}
+}
+
+func TestToolActionDispatcherUsesOnlyBoundDefinitionIdentity(t *testing.T) {
+	definition := &skill.Definition{
+		ID: "fetch", Version: "1", Name: "Fetch", Transport: skill.TransportReference{Kind: "tool", Endpoint: "fetch"},
+		Source:  &skill.SourceProvenance{Identity: "https://example.com/skills::fetch", Format: "openseal.dev/v1alpha1"},
+		Actions: map[string]skill.Action{"run": {Name: "run", Description: "Fetch", InputSchema: map[string]interface{}{"type": "object"}, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported}},
+	}
+	digest, err := skill.DefinitionDigest(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoofed := map[string]interface{}{"skillSourceIdentity": "https://foreign.example/skills::fetch", "skillDefinitionDigest": "sha256:" + strings.Repeat("f", 64)}
+	binding := &skill.Binding{SourceIdentity: definition.Source.Identity, Config: spoofed}
+	var invocation ToolInvocation
+	var calls int
+	dispatcher, err := NewToolActionDispatcher(ToolInvokerFunc(func(_ context.Context, value ToolInvocation) (map[string]interface{}, error) {
+		calls++
+		invocation = value
+		return map[string]interface{}{"ok": true}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := ActionDispatchInput{
+		Bound:     &skill.BoundAction{Definition: definition, Action: definition.Actions["run"], Binding: binding},
+		Arguments: spoofed,
+	}
+	if _, err := dispatcher.DispatchAction(t.Context(), input); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || invocation.SkillSourceIdentity != definition.Source.Identity || invocation.SkillDefinitionDigest != digest {
+		t.Fatalf("trusted identity was overwritten: source %q, digest %q, calls %d", invocation.SkillSourceIdentity, invocation.SkillDefinitionDigest, calls)
+	}
+	// Legacy unqualified bindings are resolved uniquely by the Catalog. Their
+	// trusted resolved definition still supplies the exact dispatch identity.
+	binding.SourceIdentity = ""
+	if _, err := dispatcher.DispatchAction(t.Context(), input); err != nil {
+		t.Fatalf("uniquely resolved legacy binding was rejected: %v", err)
+	}
+	if invocation.SkillSourceIdentity != definition.Source.Identity || invocation.SkillDefinitionDigest != digest {
+		t.Fatal("legacy binding lost its resolved definition identity")
+	}
+	binding.SourceIdentity = "https://foreign.example/skills::fetch"
+	if _, err := dispatcher.DispatchAction(t.Context(), input); err == nil || !strings.Contains(err.Error(), "source does not match") {
+		t.Fatalf("conflicting binding source was accepted: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("mismatched source reached invoker: %d calls", calls)
+	}
+	binding.SourceIdentity = definition.Source.Identity
+	definition.Name = ""
+	if _, err := dispatcher.DispatchAction(t.Context(), input); err == nil {
+		t.Fatal("invalid bound definition reached invoker")
+	}
+	input.Bound.Binding = nil
+	if _, err := dispatcher.DispatchAction(t.Context(), input); err == nil {
+		t.Fatal("missing binding reached invoker")
 	}
 }
 
