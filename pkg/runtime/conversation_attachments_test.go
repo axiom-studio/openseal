@@ -86,6 +86,7 @@ func TestConversationAttachmentContent(t *testing.T) {
 		limit                     int
 		tamper                    bool
 	}{
+		{"page", "text/html", `<html><body>Original source</body></html>`, "supplied", 100, false},
 		{"csv", "text/csv", "name,total\nAcme,42", "supplied", 100, false},
 		{"json", "application/json; charset=utf-8", `{"total":42}`, "supplied", 100, false},
 		{"image", "image/png", "binary", "unsupported_format", 100, false},
