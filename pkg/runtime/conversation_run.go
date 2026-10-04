@@ -220,6 +220,13 @@ func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx conte
 		for _, candidate := range messages {
 			candidateActor, valid := conversationMessageInitiatingUser(conversation, candidate)
 			if valid && candidateActor == actor && candidate.Sender.Type == ConversationParticipantUser && candidate.RequiresResponse && externalConversationThreadRoot(conversation, candidate) == threadRoot {
+				clarification, err := s.isForegroundClarificationAnswer(ctx, conversation, candidate, replacementID)
+				if err != nil {
+					return err
+				}
+				if clarification {
+					continue
+				}
 				supersedingSequence = candidate.Sequence
 			}
 		}
@@ -1343,6 +1350,12 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	hostedInput := input
 	hostedInput.ForegroundConversation = cloneAgentRun(input.Run)
 	hostedInput.Run = hostedRun
+	_, questionConversation, questionTrigger, questionErr := conversationWorkOrigin(ctx, r.portfolio, r.conversations.store, input.Run)
+	if questionErr != nil {
+		return nil, questionErr
+	}
+	hostedInput.canAskConversationQuestion = questionConversation != nil && questionTrigger != nil &&
+		questionConversation.Owner.Type == OwnerTypeAgent && hostedRun.AssignedAgentID == questionConversation.Owner.ID
 	for _, attachment := range attachments {
 		if attachment.media != nil {
 			hostedInput.ModelMedia = append(hostedInput.ModelMedia, *attachment.media)
