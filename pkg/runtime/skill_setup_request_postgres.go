@@ -57,8 +57,11 @@ func (s *PostgresStore) ListSkillSetupRequests(ctx context.Context, scope Scope,
 	return result, rows.Err()
 }
 func (s *PostgresStore) SaveSkillSetupRequest(ctx context.Context, r *SkillSetupRequest, expected int64) error {
-	if r.Validate() != nil || r.Revision != expected+1 {
-		return ErrInvalidSkillSetup
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if r.Revision != expected+1 {
+		return invalidSkillSetupField("revision", "must advance the expected request revision by one")
 	}
 	payload, err := json.Marshal(r)
 	if err != nil {

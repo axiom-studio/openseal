@@ -35,7 +35,15 @@ func TestSetupListReportsSavedBindingAccessWithoutCredentials(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		run := &AgentRun{ID: r.RunID, Scope: r.Scope, Kind: RunKindConversation, Context: map[string]interface{}{"conversationId": r.ConversationID}}
+		run := &AgentRun{ID: r.RunID, Scope: r.Scope, Kind: RunKindConversation,
+			Context: map[string]interface{}{conversationRunContextConversationID: r.ConversationID, conversationRunContextTriggerID: r.TriggerMessageID}}
+		for _, missing := range []string{conversationRunContextConversationID, conversationRunContextTriggerID} {
+			unproved := cloneAgentRun(run)
+			delete(unproved.Context, missing)
+			if result, err := d.listSkillSetupRequests(ctx, unproved, r.DeploymentID); err == nil || result != nil {
+				t.Fatalf("setup access escaped an incomplete conversation origin (%s): %#v %v", missing, result, err)
+			}
+		}
 		result, err := d.listSkillSetupRequests(ctx, run, r.DeploymentID)
 		if err != nil {
 			t.Fatal(err)

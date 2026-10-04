@@ -8,7 +8,7 @@ Agents are instructed to apply relevant Skills proactively and look at what acti
 
 For example, graphing the S&P 500 for the last month may use a dedicated data integration, a documented service learned through the generic API Skill, a verified MCP service, or an accessible browser source, followed by an available chart capability. These are routes to investigate, not a guarantee that every deployment has the tools or source access needed.
 
-Agents should try a suitable authorized alternative after a recoverable failure, explain useful progress, and ask focused questions when a decision or setup prerequisite is missing. When blocked, they should report the specific obstacle, what they checked, and the next step that would enable progress. This guidance does not grant bindings, bypass approvals, or supply credentials, and it does not guarantee model compliance.
+Agents can continue successful authorized tool chains. A failed operation ends the current reply with a clear explanation of what failed, why, and how the user can retry after correcting the problem. They do not automatically retry the failed operation or run repeated discovery and setup loops. When setup or a decision is missing, they should identify that prerequisite. This guidance does not grant bindings, bypass approvals, or supply credentials, and it does not guarantee model compliance.
 
 ## Skills and Bindings
 
@@ -34,6 +34,18 @@ upgrade-plan → upgrade
 `upgrade-plan` computes what the reference change would do; `upgrade` applies it. Both steps exist for Agent deployments and Team deployments. Both are withdrawn from the advertised capability when the configured store does not implement the upgrade contract.
 
 An upgrade that requires review before it can be applied is refused with `428 Precondition Required` rather than being applied silently.
+
+### Setup from a conversation
+
+`request_setup` selects an exact authorized discovery result. Copy its Skill ID and source identity; a publisher's namespace spelling is not an access rule. A general account connection can request `skillVersion: "latest"` without selecting individual actions. Discovery and a pending form grant no access.
+
+Independent conversation tasks and their same-Agent fork children can open the form in the original Agent conversation after the immutable task ledger, source turn, actor, message, thread and work lineage are verified. The setup still records the actual work Run and action call. Copied conversation fields on unrelated background work never authorize a form or reveal pending setup requests.
+
+An existing account keeps its scoped binding ID and revision even when its executable is older than the current installed version. Such a request enters `binding_upgrade` first. The user reviews the canonical upgrade plan and applies it; accepted work using the old version must finish before the upgrade can proceed. A failed or blocked operation reports its reason and waits for the user to retry. It does not repeatedly run setup or poll for completion in the same reply.
+
+After the canonical upgrade commits, the host verifies its persisted lifecycle provenance and rebases the request to `configuration` using the account's new revision. The user must then save configuration or complete reauthorization. Changing the executable version alone never completes setup, and ordinary binding saves cannot change a binding's Skill ID, source, or version.
+
+The optional setup fields `phase` and `bindingVersion`, and the optional binding lifecycle field `skillUpgrade`, persist in existing JSON records. Records without a phase retain the previous configuration semantics. Hosts and clients that support the upgrade phase must exchange these fields together; older clients must not treat an upgrade as configuration completion. Credential references contain no grant freshness evidence: the host's credential and OAuth policy must validate renewal before a reauthorization save. This flow does not extend credential expiry, scopes, or permissions.
 
 ## Action Calls
 
