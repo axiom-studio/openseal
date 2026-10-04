@@ -80,7 +80,7 @@ func (f *clarificationFixture) answer(t *testing.T, target string) *ChannelMessa
 	if err != nil {
 		t.Fatal(err)
 	}
-	posted, err := f.service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: f.root.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentAnswer, Content: "General readers, conversational tone. Keep it to 1000 characters.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ResolvesMessageID: target, IdempotencyKey: "answer"})
+	posted, err := f.service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: f.root.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, Sender: f.trigger.Sender, Intent: MessageIntentAnswer, Content: "General readers, conversational tone. Keep it to 1000 characters.", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ResolvesMessageID: target, IdempotencyKey: "answer"})
 	if err != nil {
 		t.Fatal(err)
 	}
