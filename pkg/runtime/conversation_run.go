@@ -1388,6 +1388,20 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		return nil, err
 	}
 	reverseChannelMessages(recent)
+	// An explicit reply may point beyond the recent-history window. Resolve it
+	// through the same scoped visibility checks, so its text and media survive.
+	if trigger.ReplyToMessageID != "" {
+		parent, err := r.conversations.GetVisibleChannelMessage(ctx, conversation.Scope, conversation.ID, trigger.ReplyToMessageID, viewer)
+		if err == nil && parent != nil && parent.Sequence < trigger.Sequence {
+			found := false
+			for _, message := range recent {
+				found = found || message.ID == parent.ID
+			}
+			if !found {
+				recent = append([]*ChannelMessage{parent}, recent...)
+			}
+		}
+	}
 	// The direct Agent has now received and read the visible channel context
 	// that will be supplied to its turn. Persist that shared workplace fact
 	// before model execution so receipts remain truthful even if generation
@@ -2624,6 +2638,13 @@ func externalChannelContext(conversation *Conversation) bool {
 // context and execution; unthreaded application chats have no such scope.
 func externalConversationThreadRoot(conversation *Conversation, trigger *ChannelMessage) string {
 	if trigger == nil {
+		return ""
+	}
+	// Telegram DM reply IDs identify quoted messages, not separate conversations.
+	// Keep real Telegram topics isolated, and retain Slack's thread semantics.
+	if source := trigger.ExternalSource; externalChannelContext(conversation) && source != nil &&
+		source.Provider == "telegram" && source.ChannelType == "private" &&
+		!strings.HasPrefix(source.ThreadID, "topic:") && !strings.HasPrefix(source.ThreadID, "direct-topic:") {
 		return ""
 	}
 	if trigger.ThreadRootID != "" {

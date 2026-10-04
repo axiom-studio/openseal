@@ -37,6 +37,14 @@ func (r *ConversationRunTurnRunner) conversationAttachments(ctx context.Context,
 		return nil
 	}
 	messages := []*ChannelMessage{trigger}
+	if trigger != nil && trigger.ReplyToMessageID != "" {
+		for _, message := range recent {
+			if message != nil && message.ID == trigger.ReplyToMessageID {
+				messages = append(messages, message)
+				break
+			}
+		}
+	}
 	for i := len(recent) - 1; i >= 0; i-- {
 		messages = append(messages, recent[i])
 	}

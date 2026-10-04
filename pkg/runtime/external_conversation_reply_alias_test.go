@@ -94,7 +94,7 @@ func TestExternalConversationReplyAliasesKeepUserAndBotRepliesInOriginalThread(t
 	}
 	other := receiveReplyAliasEvent(t, store, worker, endpoint, "chat-A", "chat-A:104", "", "", "Unrelated conversation topic")
 	continued := receiveReplyAliasEvent(t, store, worker, endpoint, "chat-A", "chat-A:103", "reply:102", "chat-A:102", "Make that hat blue")
-	if continued.ThreadRootID != root.ID || continued.ReplyToMessageID != root.ID || continued.ConversationID != root.ConversationID {
+	if continued.ThreadRootID != root.ID || continued.ReplyToMessageID != posted.Message.ID || continued.ConversationID != root.ConversationID {
 		t.Fatalf("reply to bot forked thread: root=%#v, continued=%#v", root, continued)
 	}
 	for _, alias := range []string{"reply:100", "reply:102"} {
