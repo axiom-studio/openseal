@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
 )
 
@@ -141,7 +142,7 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		}
 		return w.persistOutcome(ctx, call, nil, nil, nil, nil, workerID, false)
 	}
-	if terminalFailureCheckpointActive(sourceRun.Checkpoint) {
+	if terminalFailureCheckpointActive(sourceRun.Checkpoint) && !sourceAccessChallengeActionAdmitted(executionCtx, w.store, sourceRun, call) {
 		// An admitted legacy correction cannot cross the upgrade boundary.
 		// Stop before catalog hydration, credential resolution or dispatch.
 		call, leaseErr := stopLease()
@@ -223,7 +224,7 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if executionErr == nil {
 		executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID)
 	}
-	if executionErr == nil && terminalFailureCheckpointActive(sourceRun.Checkpoint) {
+	if executionErr == nil && terminalFailureCheckpointActive(sourceRun.Checkpoint) && !sourceAccessChallengeActionAdmitted(executionCtx, w.store, sourceRun, call) {
 		executionErr = errors.New("A previous operation failed. Automatic corrections are disabled for this attempt.")
 	}
 	if executionErr == nil && runOwnsActionDependency(sourceRun, call) && !runHasPausedActionDependency(sourceRun, call) {
@@ -429,9 +430,18 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			}
 			updatedCall.Output = sanitizeActionOutput(annotateActionProgress(output, updatedCall, semanticArguments), credentials)
 			updatedCall.Error = ""
+			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
 		} else {
 			updatedCall.Status = ActionCallStatusFailed
 			updatedCall.Error = sanitizeActionError(executionErr, credentials)
+			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
+			var failure *skillerror.ActionError
+			if errors.As(executionErr, &failure) && failure != nil {
+				if safe := skillerror.NewActionError(failure.Code(), "", failure.Details()); safe != nil {
+					updatedCall.Error = safe.Error()
+					updatedCall.ErrorCode, updatedCall.ErrorDetails = safe.Code(), safe.Details()
+				}
+			}
 			updatedCall.FailurePhase = ActionFailureBeforeDispatch
 			if dispatched {
 				updatedCall.FailurePhase = ActionFailureAfterDispatch
@@ -455,12 +465,15 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
 		if updatedCall.Status == ActionCallStatusFailed && !paused {
-			// A failed dispatch ends this attempt. Successful receipt chains
-			// still requeue; paused work remains under the user's control.
-			updatedRun.Status = AgentRunStatusFailed
-			updatedRun.Error = updatedCall.Error
-			updatedRun.CompletedAt = &now
-			updatedRun.LeaseOwner, updatedRun.LeaseExpiresAt = "", nil
+			interaction, interactionErr := resolveSourceAccessChallengeInteraction(ctx, w.store, updatedRun)
+			if interactionErr != nil || interaction == nil {
+				// A failed dispatch ends this attempt unless its exact typed
+				// challenge has a proven conversation for the bounded question.
+				updatedRun.Status = AgentRunStatusFailed
+				updatedRun.Error = updatedCall.Error
+				updatedRun.CompletedAt = &now
+				updatedRun.LeaseOwner, updatedRun.LeaseExpiresAt = "", nil
+			}
 		}
 		if updatedCall.Status == ActionCallStatusFailed && updatedCall.ApprovalID != "" {
 			approval, approvalErr := w.store.GetApproval(ctx, updatedCall.Scope, updatedCall.ApprovalID)

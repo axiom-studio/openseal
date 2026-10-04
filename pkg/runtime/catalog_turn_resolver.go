@@ -85,7 +85,11 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if accepted != nil && (definition.ID != accepted.DefinitionID || definition.Version != accepted.DefinitionVersion || definition.Runbook == nil || definition.Runbook.ID != accepted.RunbookID || definition.Runbook.Version != accepted.RunbookVersion) {
 		return nil, ErrAcceptedRunExecution
 	}
-	if outcome, stopped := terminalFailureOutcome(run); stopped {
+	interaction, interactionErr := resolveCatalogSourceAccessChallenge(ctx, catalog, run, config.ConversationTasks)
+	if interactionErr != nil {
+		return nil, interactionErr
+	}
+	if outcome, stopped := terminalFailureOutcome(run); stopped && interaction == nil {
 		return &TurnRunnerBinding{
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 				return outcome, nil
