@@ -1090,7 +1090,10 @@ class SourceConfigurationFixture(unittest.TestCase):
 
     @staticmethod
     def _workflow(checkout: Path) -> str:
-        return (checkout / driver.WORKFLOW).read_text()
+        workflow = checkout / driver.WORKFLOW
+        if not workflow.is_file():
+            workflow = checkout / ".github/dependency-updates/workflow.disabled.yml"
+        return workflow.read_text()
 
     def _jobs(self, checkout: Path) -> dict[str, str]:
         workflow = self._workflow(checkout)
