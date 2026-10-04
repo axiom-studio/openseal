@@ -531,6 +531,16 @@ type BindingLifecycleEntry struct {
 	Actor    BindingActor           `json:"actor"`
 	Reason   string                 `json:"reason"`
 	At       time.Time              `json:"at"`
+	// SkillUpgrade is written by the canonical atomic reference upgrade. A
+	// normal configuration write never creates this executable migration proof.
+	SkillUpgrade *BindingSkillUpgradeProvenance `json:"skillUpgrade,omitempty"`
+}
+
+type BindingSkillUpgradeProvenance struct {
+	From                    SkillIdentity `json:"from"`
+	To                      SkillIdentity `json:"to"`
+	ExpectedBindingRevision int64         `json:"expectedBindingRevision"`
+	PlanDigest              string        `json:"planDigest"`
 }
 
 type ModelAction struct {
