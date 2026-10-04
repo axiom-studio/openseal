@@ -141,6 +141,9 @@ func (f MeteredParticipationProposalProviderFunc) ProposeParticipation(ctx conte
 }
 
 type ConversationCoordinationRequest struct {
+	// The conversation Run adapter supplies its saved settings envelope so a
+	// committed handoff can be rebased without trusting a caller's revision.
+	conversationSnapshot *Conversation
 	// UsageTurnID is the durable host turn that will settle this invocation.
 	UsageTurnID      string
 	Scope            Scope
@@ -294,7 +297,15 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 		return nil, ErrInvalidConversation
 	}
 	if conversation.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		task, rebaseErr := conversationTaskCoordinationRebase(ctx, c.conversations.store, req.conversationSnapshot, conversation, runID, strings.TrimSpace(req.TriggerMessageID))
+		if rebaseErr != nil {
+			return nil, rebaseErr
+		}
+		if task == nil || req.conversationSnapshot.Revision != req.ExpectedRevision {
+			return nil, ErrRevisionConflict
+		}
+		req.ExpectedRevision = conversation.Revision
+		req.MessageReferences = mergeConversationReferences(req.MessageReferences, []ConversationReference{{Kind: ConversationReferenceTask, ID: task.ID}})
 	}
 
 	var trigger *ChannelMessage
@@ -397,11 +408,17 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 				current, checkErr := c.conversations.GetConversation(workerCtx, req.Scope, conversation.ID)
 				if checkErr != nil || current.Revision != conversation.Revision {
 					if checkErr == nil {
-						checkErr = ErrRevisionConflict
+						task, rebaseErr := conversationTaskCoordinationRebase(workerCtx, c.conversations.store, conversation, current, runID, strings.TrimSpace(req.TriggerMessageID))
+						checkErr = rebaseErr
+						if checkErr == nil && task == nil {
+							checkErr = ErrRevisionConflict
+						}
 					}
-					errs[index] = checkErr
-					cancel()
-					continue
+					if checkErr != nil {
+						errs[index] = checkErr
+						cancel()
+						continue
+					}
 				}
 				presence, presenceErr := c.conversations.SetPresence(workerCtx, SetConversationPresenceRequest{
 					Scope: req.Scope, ConversationID: conversation.ID, Participant: binding.Participant,
@@ -547,11 +564,35 @@ queue:
 		return nil, err
 	}
 
-	return c.conversations.CoordinateParticipation(ctx, CoordinateParticipationRequest{
-		Scope: req.Scope, ConversationID: conversation.ID, ExpectedRevision: req.ExpectedRevision,
-		TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Policy: policy, Proposals: proposals, IdempotencyKey: key,
-		Usage: *usage, UsageTurnID: req.UsageTurnID,
-	})
+	for attempt := 0; attempt < 3; attempt++ {
+		current, err := c.conversations.GetConversation(ctx, req.Scope, conversation.ID)
+		if err != nil {
+			return nil, err
+		}
+		if current.Revision != conversation.Revision {
+			task, err := conversationTaskCoordinationRebase(ctx, c.conversations.store, conversation, current, runID, strings.TrimSpace(req.TriggerMessageID))
+			if err != nil {
+				return nil, err
+			}
+			if task == nil {
+				return nil, ErrRevisionConflict
+			}
+			for index := range proposals {
+				if proposals[index].WantsToSpeak {
+					proposals[index].References = mergeConversationReferences(proposals[index].References, []ConversationReference{{Kind: ConversationReferenceTask, ID: task.ID}})
+				}
+			}
+		}
+		result, err := c.conversations.CoordinateParticipation(ctx, CoordinateParticipationRequest{
+			Scope: req.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
+			TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Policy: policy, Proposals: proposals, IdempotencyKey: key,
+			Usage: *usage, UsageTurnID: req.UsageTurnID,
+		})
+		if !errors.Is(err, ErrRevisionConflict) {
+			return result, err
+		}
+	}
+	return nil, ErrRevisionConflict
 }
 
 func mergeConversationReferences(left, right []ConversationReference) []ConversationReference {

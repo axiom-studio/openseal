@@ -17,6 +17,14 @@ import (
 
 const ConversationTaskContextKey = "openseal.conversationTaskId"
 
+type ConversationTaskMode string
+
+const (
+	// Empty mode preserves the existing independently admitted work contract.
+	ConversationTaskModeIndependent  ConversationTaskMode = ""
+	ConversationTaskModeContinuation ConversationTaskMode = "continuation"
+)
+
 // ConversationTaskGoalSummary bounds model-visible status context without
 // modifying the original work goal or breaking UTF-8 characters.
 func ConversationTaskGoalSummary(goal string) string {
@@ -41,6 +49,8 @@ var (
 // or cancels that run through the parent/child lifecycle.
 type ConversationTask struct {
 	ID                 string                  `json:"id"`
+	Mode               ConversationTaskMode    `json:"mode,omitempty"`
+	ForegroundDeadline *time.Time              `json:"foregroundDeadline,omitempty"`
 	Scope              Scope                   `json:"scope"`
 	Owner              ObjectiveOwner          `json:"owner"`
 	ConversationID     string                  `json:"conversationId"`
@@ -71,12 +81,27 @@ func (t *ConversationTask) Validate() error {
 	if err := t.Owner.Validate(); err != nil {
 		return err
 	}
-	for _, value := range []string{t.ID, t.ConversationID, t.SourceMessageID, t.ThreadRootID, t.SourceRunID, t.SourceTurnID, t.TargetAgentID, t.WorkRunID, t.TaskKey} {
+	for _, value := range []string{t.ID, t.ConversationID, t.SourceMessageID, t.ThreadRootID, t.SourceRunID, t.WorkRunID, t.TaskKey} {
 		if !validOpaqueIdentifier(value, 128) {
 			return ErrInvalidConversationTask
 		}
 	}
-	if t.SourceRunID == t.WorkRunID || t.SourceTurnNumber < 1 || t.Revision != 1 || t.CreatedAt.IsZero() ||
+	if t.Mode != ConversationTaskModeIndependent && t.Mode != ConversationTaskModeContinuation {
+		return ErrInvalidConversationTask
+	}
+	if t.Mode == ConversationTaskModeContinuation {
+		if t.ForegroundDeadline == nil || t.ForegroundDeadline.IsZero() || t.CreatedAt.Before(*t.ForegroundDeadline) || t.SourceRunID != t.WorkRunID || (t.SourceTurnID == "") != (t.SourceTurnNumber == 0) || t.SourceTurnNumber < 0 ||
+			t.SourceTurnID != "" && !validOpaqueIdentifier(t.SourceTurnID, 128) ||
+			t.TargetAgentID == "" && t.Owner.Type != OwnerTypeTeam {
+			return ErrInvalidConversationTask
+		}
+	} else if t.ForegroundDeadline != nil || t.SourceRunID == t.WorkRunID || !validOpaqueIdentifier(t.SourceTurnID, 128) || t.SourceTurnNumber < 1 || !validOpaqueIdentifier(t.TargetAgentID, 128) {
+		return ErrInvalidConversationTask
+	}
+	if t.TargetAgentID != "" && !validOpaqueIdentifier(t.TargetAgentID, 128) {
+		return ErrInvalidConversationTask
+	}
+	if t.Revision != 1 || t.CreatedAt.IsZero() ||
 		t.AuthenticatedActor.Type != ConversationParticipantUser || t.AuthenticatedActor.Validate() != nil ||
 		strings.TrimSpace(t.Goal) == "" || len(t.Goal) > 16384 || strings.TrimSpace(t.Acknowledgment) == "" || len(t.Acknowledgment) > 600 {
 		return ErrInvalidConversationTask
@@ -91,6 +116,31 @@ func (t *ConversationTask) Validate() error {
 		return ErrInvalidConversationTask
 	}
 	return nil
+}
+
+// ConversationTaskMatchesWorkRun checks the exact execution identity of an
+// already loaded canonical Task. A caller-provided context marker alone never
+// establishes this proof; callers must retrieve the ledger first. An initially
+// unassigned Team continuation additionally needs the persisted selected-round
+// attribution proof when the kernel later assigns its Agent.
+func ConversationTaskMatchesWorkRun(task *ConversationTask, run *AgentRun) bool {
+	if task == nil || run == nil || task.Validate() != nil || task.ID != conversationTaskID(task.Scope, task.SourceRunID, task.TaskKey) ||
+		run.Scope != task.Scope || run.ID != task.WorkRunID || run.Owner != task.Owner ||
+		run.Source != RunSourceChat || run.ParentRunID != "" || run.RootRunID != run.ID || run.ConcurrencyKey != "task:"+task.ID ||
+		run.Context[ConversationTaskContextKey] != task.ID || run.Context[conversationRunContextConversationID] != task.ConversationID ||
+		run.Context[conversationRunContextTriggerID] != task.SourceMessageID {
+		return false
+	}
+	if run.AssignedAgentID != task.TargetAgentID && !(task.Mode == ConversationTaskModeContinuation && task.Owner.Type == OwnerTypeTeam &&
+		task.TargetAgentID == "" && validOpaqueIdentifier(run.AssignedAgentID, 128)) {
+		return false
+	}
+	if task.Mode == ConversationTaskModeContinuation {
+		thread, _ := run.Context["threadRootMessageId"].(string)
+		return run.Kind == RunKindConversation && task.SourceRunID == run.ID && task.ForegroundDeadline.Equal(run.CreatedAt.Add(ConversationTaskForegroundTimeout)) &&
+			(thread == task.ThreadRootID || thread == "" && task.ThreadRootID == task.SourceMessageID)
+	}
+	return run.Kind == RunKindAgentWork && run.Goal == task.Goal
 }
 
 func conversationTaskDigest(task *ConversationTask) (string, error) {
@@ -114,6 +164,10 @@ func cloneConversationTask(task *ConversationTask) *ConversationTask {
 		return nil
 	}
 	copy := *task
+	if task.ForegroundDeadline != nil {
+		deadline := *task.ForegroundDeadline
+		copy.ForegroundDeadline = &deadline
+	}
 	copy.RequestedBudget = cloneBudgetPolicy(task.RequestedBudget)
 	return &copy
 }
@@ -127,6 +181,7 @@ type ConversationTaskResult struct {
 	WorkRun                 *AgentRun         `json:"workRun"`
 	SourceRun               *AgentRun         `json:"sourceRun,omitempty"`
 	Replayed                bool              `json:"replayed,omitempty"`
+	AcknowledgmentMessageID string            `json:"acknowledgmentMessageId,omitempty"`
 	TerminalReportMessageID string            `json:"terminalReportMessageId,omitempty"`
 }
 
@@ -257,6 +312,24 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 	if source == nil {
 		return nil, ErrRunNotFound
 	}
+	// A timeout may adopt this exact Run while an already-started model call
+	// is proposing independent work. Reuse the committed continuation before
+	// preparing a fresh budget or admitting a second execution identity.
+	existing, taskErr := s.store.FindConversationTaskByWorkRunID(ctx, source.Scope, source.ID)
+	if taskErr != nil && !errors.Is(taskErr, ErrConversationTaskNotFound) {
+		return nil, taskErr
+	}
+	if existing != nil {
+		verified, sourceReport, err := conversationTaskForReport(ctx, s.store, source)
+		if err != nil {
+			return nil, err
+		}
+		if existing.Mode != ConversationTaskModeContinuation || verified == nil || sourceReport || !sameConversationTask(existing, verified) {
+			return nil, ErrConversationTaskConflict
+		}
+		return &ConversationTaskResult{Task: existing, SourceRun: source, WorkRun: cloneAgentRun(source), Replayed: true,
+			AcknowledgmentMessageID: ConversationTaskAcknowledgmentMessageID(existing)}, nil
+	}
 	conversationID, _ := source.Context[conversationRunContextConversationID].(string)
 	messageID, _ := source.Context[conversationRunContextTriggerID].(string)
 	conversation, err := s.store.GetConversation(ctx, req.Scope, conversationID)
@@ -353,7 +426,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 	if err != nil {
 		return nil, err
 	}
-	existing, err := s.store.GetConversationTask(ctx, req.Scope, id)
+	existing, err = s.store.GetConversationTask(ctx, req.Scope, id)
 	if err != nil {
 		return nil, err
 	}
@@ -553,8 +626,7 @@ func (s *ConversationTaskService) Get(ctx context.Context, req GetConversationTa
 	}
 	result := &ConversationTaskResult{Task: task, WorkRun: work}
 	if isTerminalAgentRunStatus(work.Status) {
-		messageID := stableConversationID(task.Scope, "run-reporting-terminal:"+work.ID+":"+string(work.Status), "message")
-		message, getErr := s.store.GetChannelMessage(ctx, task.Scope, task.ConversationID, messageID)
+		message, getErr := FindConversationTaskResultMessage(ctx, s.store, task, work)
 		if getErr != nil {
 			return nil, getErr
 		}
