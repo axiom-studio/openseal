@@ -21,6 +21,9 @@ func conversationWorkOriginForState(ctx context.Context, runs PortfolioStore, co
 	if run != nil && run.ParentRunID == "" && run.Context[ConversationTaskContextKey] != nil {
 		return conversationTaskWorkOrigin(ctx, runs, conversations, run)
 	}
+	if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
+		return foregroundConversationWorkOrigin(ctx, runs, conversations, run)
+	}
 	if run != nil && run.ParentRunID == "" && run.Context[deferredWorkflowContextKey] == true {
 		return deferredWorkflowConversationOrigin(ctx, runs, conversations, run)
 	}
@@ -72,9 +75,18 @@ func isConversationQuestionWait(run *AgentRun) bool {
 
 // Reconciliation also repairs questions produced before this projection existed.
 func (s *ConversationRunScheduler) reconcileConversationQuestions(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
+	for _, kind := range []RunKind{RunKindAgentWork, RunKindConversation} {
+		if err := s.reconcileConversationQuestionsForKind(ctx, scope, result, kind); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx context.Context, scope Scope, result *ConversationRunReconcileResult, kind RunKind) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
-		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindAgentWork, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: pageSize, Offset: offset})
+		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: kind, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return err
 		}
@@ -130,7 +142,7 @@ type conversationQuestion struct {
 // answer may address the single immediately preceding pending question. Never
 // broadcast an answer across concurrent tasks.
 func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context, conversation *Conversation, answer *ChannelMessage) (*AgentRunCommandResult, bool, error) {
-	taskTargeted, err := s.targetsIndependentTaskQuestion(ctx, conversation, answer)
+	taskTargeted, err := s.targetsRootClarificationQuestion(ctx, conversation, answer)
 	if err != nil {
 		return nil, false, err
 	}
@@ -174,7 +186,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if origin == nil || origin.ID != conversation.ID || !valid || originalActor != actor {
 					continue
 				}
-				if !conversationTaskClarificationMatches(run, trigger, question, answer) {
+				if !conversationClarificationMatches(run, trigger, question, answer) {
 					continue
 				}
 				// Read the atomic transition receipt before testing current status. A worker
@@ -314,10 +326,12 @@ type conversationWorkTurnRunner struct {
 }
 
 func (r conversationWorkTurnRunner) input(ctx context.Context, input TurnExecutionContext) (TurnExecutionContext, error) {
+	input.canAskConversationQuestion = false
 	_, conversation, trigger, err := conversationWorkOrigin(ctx, r.runs, r.conversations, input.Run)
 	if err != nil || conversation == nil || trigger == nil {
 		return input, err
 	}
+	input.canAskConversationQuestion = conversation.Owner.Type == OwnerTypeAgent && input.Run.AssignedAgentID == conversation.Owner.ID
 	input.Run = cloneAgentRun(input.Run)
 	if input.Run.Context == nil {
 		input.Run.Context = map[string]interface{}{}
