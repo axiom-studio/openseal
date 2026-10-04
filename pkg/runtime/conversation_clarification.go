@@ -21,11 +21,11 @@ func conversationWorkOriginForState(ctx context.Context, runs PortfolioStore, co
 	if run != nil && run.ParentRunID == "" && run.Context[ConversationTaskContextKey] != nil {
 		return conversationTaskWorkOrigin(ctx, runs, conversations, run)
 	}
-	if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
-		return foregroundConversationWorkOrigin(ctx, runs, conversations, run)
-	}
 	if run != nil && run.ParentRunID == "" && run.Context[deferredWorkflowContextKey] == true {
 		return deferredWorkflowConversationOrigin(ctx, runs, conversations, run)
+	}
+	if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
+		return foregroundConversationWorkOrigin(ctx, runs, conversations, run)
 	}
 	if run == nil || run.Kind != RunKindAgentWork || run.Owner.Type != OwnerTypeAgent || run.ParentRunID == "" {
 		return nil, nil, nil, nil
