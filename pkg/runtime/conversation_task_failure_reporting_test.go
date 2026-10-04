@@ -66,7 +66,7 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 }
 
 func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testing.T) {
-	for _, outcome := range []string{"review rejected", "review rejected rate limited", "review rejected mixed batch", "unknown failure", "completed"} {
+	for _, outcome := range []string{"review rejected", "review rejected rate limited", "review rejected mixed batch", "unknown failure", "completed", "completed rate limited", "direct rate limited", "direct mixed batch", "direct proxy rejected", "direct proxy unavailable", "direct unclassified", "stale rate limited", "unproven rate limited", "unrelated terminal failure"} {
 		for _, threaded := range []bool{false, true} {
 			t.Run(outcome+map[bool]string{false: "/direct", true: "/thread"}[threaded], func(t *testing.T) {
 				eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
@@ -78,7 +78,8 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 						t.Fatal(err)
 					}
 					status, checkpoint, expected := AgentRunStatusFailed, rejectedTaskReviewCheckpoint(), TerminalFailureReply("task_completion_rejected")
-					if outcome == "review rejected rate limited" || outcome == "review rejected mixed batch" {
+					terminalError := "ERROR_SECRET provider argument and private response"
+					if outcome == "review rejected rate limited" || outcome == "review rejected mixed batch" || outcome == "completed rate limited" {
 						failure := skillerror.NewActionError("source_rate_limited", "ERROR_SECRET", nil)
 						if outcome == "review rejected mixed batch" {
 							failure = skillerror.NewActionError("source_reads_failed", "ERROR_SECRET", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_unavailable"}]`, "failedCount": "2", "totalCount": "2"})
@@ -89,14 +90,47 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 					if outcome == "unknown failure" {
 						checkpoint["_atlasTaskCompletionReview"].(map[string]interface{})["failureCode"] = "VERDICT_SECRET"
 						expected = TerminalFailureReply("execution_failed")
-					} else if outcome == "completed" {
+					} else if outcome == "completed" || outcome == "completed rate limited" {
 						status, expected = AgentRunStatusCompleted, "Completed fixture result."
+					}
+					if strings.HasPrefix(outcome, "direct ") || outcome == "stale rate limited" || outcome == "unproven rate limited" || outcome == "unrelated terminal failure" {
+						code := "source_rate_limited"
+						var details map[string]string
+						switch outcome {
+						case "direct mixed batch":
+							code, details = "source_reads_failed", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_unavailable"}]`}
+						case "direct proxy rejected":
+							code = "browser_proxy_authentication_failed"
+						case "direct proxy unavailable":
+							code = "browser_proxy_unavailable"
+						}
+						failure := skillerror.NewActionError(code, "ERROR_SECRET", details)
+						checkpoint = checkpointTerminalAction(nil, &ActionCall{ID: "browser-call", Status: ActionCallStatusFailed, Error: failure.Error(), ErrorCode: failure.Code(), ErrorDetails: failure.Details()}, nil)
+						terminalError = failure.Error()
+						expected = "I couldn't finish this request because one or more sources rate-limited requests (HTTP 429). I stopped this attempt. Try again later."
+						switch outcome {
+						case "direct proxy rejected":
+							expected = "I couldn't finish this request because the platform's browser connection was rejected. I stopped this attempt. Try again later."
+						case "direct proxy unavailable":
+							expected = "I couldn't finish this request because the platform's browser connection was unavailable. I stopped this attempt. Try again later."
+						case "direct unclassified":
+							delete(checkpoint, ToolFeedbackCorrectionCheckpointKey)
+							delete(checkpoint, FinalFailureExplanationCheckpointKey)
+						case "stale rate limited":
+							checkpoint = checkpointTerminalAction(checkpoint, &ActionCall{ID: "latest-call", Status: ActionCallStatusFailed, Error: "Different operation failed."}, nil)
+							terminalError, expected = "Different operation failed.", TerminalFailureReply("action_failed")
+						case "unproven rate limited":
+							delete(checkpoint, actionHistoryCheckpointKey)
+							expected = TerminalFailureReply("action_failed")
+						case "unrelated terminal failure":
+							terminalError, expected = "ERROR_SECRET unrelated terminal failure", TerminalFailureReply("action_failed")
+						}
 					}
 					output := map[string]interface{}{"summary": "OUTPUT_SECRET"}
 					if status == AgentRunStatusCompleted {
 						output["summary"] = expected
 					}
-					work, _, err := activity.TransitionRun(t.Context(), running.Scope, running.ID, RunTransitionRequest{ExpectedRevision: running.Revision, Status: status, Checkpoint: checkpoint, Output: output, Error: "ERROR_SECRET provider argument and private response"})
+					work, _, err := activity.TransitionRun(t.Context(), running.Scope, running.ID, RunTransitionRequest{ExpectedRevision: running.Revision, Status: status, Checkpoint: checkpoint, Output: output, Error: terminalError})
 					if err != nil {
 						t.Fatal(err)
 					}

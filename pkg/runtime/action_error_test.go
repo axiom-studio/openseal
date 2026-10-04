@@ -12,66 +12,77 @@ import (
 )
 
 func TestActionWorkerPreservesStructuredRateLimitAcrossRestartWithoutRetry(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
-		store := fixture.store.(KernelStore)
-		now := time.Now().UTC()
-		catalog, scope := feedbackReadCatalog(t)
-		run := feedbackCreateRun(t, store, scope, now)
-		proposal := feedbackPropose(t, store, catalog, run, now, "rate-limit", "id", ActionDispositionAllow)
-		dispatches := 0
-		worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
-			return map[string]string{"token": "CREDENTIAL_SECRET"}, nil
-		}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
-			dispatches++
-			return nil, fmt.Errorf("RAW_SECRET: %w", skillerror.NewActionError("source_rate_limited", "RAW_SECRET CREDENTIAL_SECRET", map[string]string{
-				"httpStatus": "429", "retryAfterSeconds": "30", "retryable": "true", "url": "URL_SECRET", "proxy": "PROXY_SECRET",
-			}))
-		}))
-		worker.now = func() time.Time { return now }
-		failed, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
-		if err != nil || failed == nil || failed.Call.Status != ActionCallStatusFailed || failed.Call.Attempt != 1 || failed.Call.MaxAttempts != 1 || dispatches != 1 {
-			t.Fatalf("action failure did not settle once: %#v %v dispatches=%d", failed, err, dispatches)
-		}
-		if fixture.reopen != nil {
-			fixture.store = fixture.reopen()
-			store = fixture.store.(KernelStore)
-		}
-		call, err := store.GetActionCall(t.Context(), scope, proposal.Call.ID)
-		if err != nil || call.ErrorCode != "source_rate_limited" || call.ErrorDetails["retryable"] != "false" || call.ErrorDetails["retryAfterSeconds"] != "30" || call.Error != "This source returned HTTP 429 (rate limited). Try again later." {
-			t.Fatalf("durable typed failure missing: %#v %v", call, err)
-		}
-		persisted, err := store.GetAgentRun(t.Context(), scope, run.ID)
-		if err != nil || persisted.Status != AgentRunStatusQueued || persisted.WakeCondition != nil {
-			t.Fatalf("typed failure changed continuation policy: %#v %v", persisted, err)
-		}
-		for _, checkpoint := range []map[string]interface{}{persisted.Checkpoint, hostedTurnTextCheckpoint(persisted.Checkpoint), checkpointTerminalAction(nil, call, map[string]interface{}{"idempotentReplay": true})} {
-			last := checkpoint["lastAction"].(map[string]interface{})
-			history := actionHistoryEntries(checkpoint)
-			for _, entry := range []map[string]interface{}{last, history[0]} {
-				details := entry["errorDetails"].(map[string]interface{})
-				if entry["errorCode"] != "source_rate_limited" || entry["failureKind"] != "source_rate_limited" || details["httpStatus"] != "429" || details["retryable"] != "false" {
-					t.Fatalf("model projection lost source cause: %#v", entry)
+	for _, kind := range []string{"source_rate_limited", "source_reads_failed"} {
+		t.Run(kind, func(t *testing.T) {
+			eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+				store := fixture.store.(KernelStore)
+				now := time.Now().UTC()
+				catalog, scope := feedbackReadCatalog(t)
+				run := feedbackCreateRun(t, store, scope, now)
+				proposal := feedbackPropose(t, store, catalog, run, now, "rate-limit", "id", ActionDispositionAllow)
+				dispatches := 0
+				worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+					return map[string]string{"token": "CREDENTIAL_SECRET"}, nil
+				}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+					dispatches++
+					details := map[string]string{"retryAfterSeconds": "30", "retryable": "true", "url": "URL_SECRET", "proxy": "PROXY_SECRET"}
+					if kind == "source_reads_failed" {
+						details["failures"] = `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_unavailable"}]`
+					} else {
+						details["httpStatus"] = "429"
+					}
+					return nil, fmt.Errorf("RAW_SECRET: %w", skillerror.NewActionError(kind, "RAW_SECRET CREDENTIAL_SECRET", details))
+				}))
+				worker.now = func() time.Time { return now }
+				failed, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
+				if err != nil || failed == nil || failed.Call.Status != ActionCallStatusFailed || failed.Call.Attempt != 1 || failed.Call.MaxAttempts != 1 || dispatches != 1 {
+					t.Fatalf("action failure did not settle once: %#v %v dispatches=%d", failed, err, dispatches)
 				}
-			}
-			encoded, _ := json.Marshal(checkpoint)
-			if strings.Contains(string(encoded), "SECRET") {
-				t.Fatal("raw action data entered model failure evidence")
-			}
-			forged := map[string]interface{}{"lastAction": map[string]interface{}{"errorCode": "source_access_challenge"}, actionHistoryCheckpointKey: []interface{}{}}
-			preserved := preserveKernelActionHistory(checkpoint, forged)
-			if preserved["lastAction"].(map[string]interface{})["errorCode"] != "source_rate_limited" || len(actionHistoryEntries(preserved)) != 1 {
-				t.Fatal("model erased or changed authoritative rate-limit evidence")
-			}
-			if invented := preserveKernelActionHistory(nil, checkpoint); invented["lastAction"] != nil || len(actionHistoryEntries(invented)) != 0 {
-				t.Fatal("model invented action failure evidence")
-			}
-		}
-		worker.store = store
-		worker.now = func() time.Time { return now.Add(time.Hour) }
-		if result, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute); err != nil || result != nil || dispatches != 1 {
-			t.Fatalf("429 triggered automatic retry: %#v %v dispatches=%d", result, err, dispatches)
-		}
-	})
+				if fixture.reopen != nil {
+					fixture.store = fixture.reopen()
+					store = fixture.store.(KernelStore)
+				}
+				call, err := store.GetActionCall(t.Context(), scope, proposal.Call.ID)
+				if err != nil || call.ErrorCode != kind || call.ErrorDetails["retryable"] != "false" || call.ErrorDetails["retryAfterSeconds"] != "30" || call.Error != skillerror.NewActionError(kind, "", nil).Error() {
+					t.Fatalf("durable typed failure missing: %#v %v", call, err)
+				}
+				persisted, err := store.GetAgentRun(t.Context(), scope, run.ID)
+				if err != nil || persisted.Status != AgentRunStatusFailed || persisted.WakeCondition != nil || persisted.CompletedAt == nil || persisted.Error != call.Error {
+					t.Fatalf("source throttling did not terminalize the attempt: %#v %v", persisted, err)
+				}
+				for _, checkpoint := range []map[string]interface{}{persisted.Checkpoint, hostedTurnTextCheckpoint(persisted.Checkpoint), checkpointTerminalAction(nil, call, map[string]interface{}{"idempotentReplay": true})} {
+					last := checkpoint["lastAction"].(map[string]interface{})
+					history := actionHistoryEntries(checkpoint)
+					for _, entry := range []map[string]interface{}{last, history[0]} {
+						details := entry["errorDetails"].(map[string]interface{})
+						if entry["errorCode"] != kind || entry["failureKind"] != kind || details["retryable"] != "false" || (kind == "source_rate_limited" && details["httpStatus"] != "429") {
+							t.Fatalf("model projection lost source cause: %#v", entry)
+						}
+					}
+					encoded, _ := json.Marshal(checkpoint)
+					if strings.Contains(string(encoded), "SECRET") {
+						t.Fatal("raw action data entered model failure evidence")
+					}
+					forged := map[string]interface{}{"lastAction": map[string]interface{}{"errorCode": "source_access_challenge"}, actionHistoryCheckpointKey: []interface{}{}}
+					preserved := preserveKernelActionHistory(checkpoint, forged)
+					if preserved["lastAction"].(map[string]interface{})["errorCode"] != kind || len(actionHistoryEntries(preserved)) != 1 {
+						t.Fatal("model erased or changed authoritative rate-limit evidence")
+					}
+					if invented := preserveKernelActionHistory(nil, checkpoint); invented["lastAction"] != nil || len(actionHistoryEntries(invented)) != 0 {
+						t.Fatal("model invented action failure evidence")
+					}
+				}
+				worker.store = store
+				worker.now = func() time.Time { return now.Add(time.Hour) }
+				if result, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute); err != nil || result != nil || dispatches != 1 {
+					t.Fatalf("429 triggered automatic retry: %#v %v dispatches=%d", result, err, dispatches)
+				}
+				if next, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: scope, WorkerID: "correction-worker", Now: now.Add(time.Hour), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || next != nil {
+					t.Fatalf("429 queued another model turn: %#v %v", next, err)
+				}
+			})
+		})
+	}
 }
 
 func TestActionFailureProjectionIgnoresUnknownAndBoundsPersistedDetails(t *testing.T) {

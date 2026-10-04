@@ -451,6 +451,16 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
+		if updatedCall.Status == ActionCallStatusFailed && !paused {
+			if failure := skillerror.NewActionError(updatedCall.ErrorCode, "", updatedCall.ErrorDetails); failure != nil && failure.HasRateLimitedSource() {
+				// Source throttling cannot be corrected by another model turn,
+				// transport retry, or browser fallback in this attempt.
+				updatedRun.Status = AgentRunStatusFailed
+				updatedRun.Error = updatedCall.Error
+				updatedRun.CompletedAt = &now
+				updatedRun.LeaseOwner, updatedRun.LeaseExpiresAt = "", nil
+			}
+		}
 		if updatedCall.Status == ActionCallStatusFailed && updatedCall.ApprovalID != "" {
 			approval, approvalErr := w.store.GetApproval(ctx, updatedCall.Scope, updatedCall.ApprovalID)
 			if approvalErr != nil {
