@@ -195,6 +195,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	audience := ConversationAudience{Kind: ConversationAudienceChannel}
 	broadcast := true
 	resolvesMessageID := ""
+	responseMode := ""
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
 	if task != nil {
 		if !sourceTaskReport {
@@ -230,6 +231,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		if source == nil {
 			return ErrChannelMessageNotFound
 		}
+		responseMode = source.ResponseMode
 		// Visibility inherits the canonical source and its thread ancestors.
 		// Channel here preserves the original sender's implicit access to a
 		// directed question without widening access past those ancestors.
@@ -248,27 +250,30 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	if err != nil {
 		return err
 	}
-	_, err = service.PostChannelMessage(ctx, PostChannelMessageRequest{
+	request := PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision,
 		Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
 		SenderDisplayName: "Agent", Intent: intent, Content: content, ResolvesMessageID: resolvesMessageID,
 		Audience: audience, ReplyToMessageID: rootMessageID, BroadcastToChannel: broadcast,
+		ResponseMode:   responseMode,
 		References:     references,
 		IdempotencyKey: "run-reporting-terminal:" + run.ID + ":" + string(run.Status),
-	})
+	}
+	_, err = service.PostChannelMessage(ctx, request)
 	if errors.Is(err, ErrRevisionConflict) {
 		latest, getErr := service.GetConversation(ctx, run.Scope, conversationID)
 		if getErr != nil {
 			return getErr
 		}
-		_, err = service.PostChannelMessage(ctx, PostChannelMessageRequest{
-			Scope: run.Scope, ConversationID: latest.ID, ExpectedRevision: latest.Revision,
-			Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
-			SenderDisplayName: "Agent", Intent: intent, Content: content, ResolvesMessageID: resolvesMessageID,
-			Audience: audience, ReplyToMessageID: rootMessageID, BroadcastToChannel: broadcast,
-			References:     references,
-			IdempotencyKey: "run-reporting-terminal:" + run.ID + ":" + string(run.Status),
-		})
+		request.ExpectedRevision = latest.Revision
+		_, err = service.PostChannelMessage(ctx, request)
+	}
+	if errors.Is(err, ErrMessageConflict) {
+		if saved, replayErr := service.replayLegacySpokenResponse(ctx, request); replayErr != nil {
+			return replayErr
+		} else if saved != nil {
+			return nil
+		}
 	}
 	return err
 }
