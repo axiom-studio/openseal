@@ -258,7 +258,11 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	correctionCheckpoint := preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
 	if decision.Disposition != ActionDispositionDeny {
 		var correctionDenied string
-		correctionCheckpoint, correctionDenied = admitToolFeedbackCorrection(correctionCheckpoint, call)
+		if interactionErr := validateSourceAccessChallengeAction(ctx, c.portfolio, run, call); interactionErr != nil {
+			correctionDenied = interactionErr.Error()
+		} else {
+			correctionCheckpoint, correctionDenied = admitToolFeedbackCorrection(correctionCheckpoint, call)
+		}
 		if correctionDenied != "" {
 			decision.Disposition = ActionDispositionDeny
 			decision.Reason = correctionDenied
