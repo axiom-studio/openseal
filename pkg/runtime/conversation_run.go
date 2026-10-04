@@ -813,28 +813,8 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 		if err != nil {
 			return nil, err
 		}
-		boundAgentRunner := agentBinding.Runner
 		return &TurnRunnerBinding{
-			Runner: TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-				if err := r.validateConversationRun(ctx, input.Run); err != nil {
-					return nil, err
-				}
-				if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
-					return nil, err
-				} else if stopped {
-					return participationStoppedOutcome(), nil
-				}
-				conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
-				triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
-				conversation, err := r.conversations.GetConversation(ctx, input.Run.Scope, conversationID)
-				if err != nil {
-					return nil, err
-				}
-				if conversation.Owner != input.Run.Owner {
-					return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
-				}
-				return r.runAgentTurn(ctx, input, conversation, triggerID, boundAgentRunner, agentBinding.RunbookOperations)
-			}),
+			Runner:       conversationAgentTurnRunner{parent: r, bound: agentBinding.Runner, operations: cloneHostedRunbookOperations(agentBinding.RunbookOperations)},
 			DeploymentID: agentBinding.DeploymentID,
 			DefinitionID: agentBinding.DefinitionID, DefinitionVersion: agentBinding.DefinitionVersion,
 			ModelProvider: agentBinding.ModelProvider, Model: agentBinding.Model,
@@ -866,6 +846,113 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	return binding, nil
 }
 
+// conversationAgentTurnRunner keeps the bound Agent's admission planner while
+// adapting its model input to the canonical foreground conversation. A plain
+// TurnRunnerFunc loses this interface and dispatches bounded hosted work without
+// its durable input/output reservation.
+type conversationAgentTurnRunner struct {
+	parent     *ConversationRunTurnRunner
+	bound      TurnRunner
+	operations []HostedRunbookOperation
+}
+
+func (r conversationAgentTurnRunner) conversation(ctx context.Context, input TurnExecutionContext) (*Conversation, string, error) {
+	if err := r.parent.validateConversationRun(ctx, input.Run); err != nil {
+		return nil, "", err
+	}
+	if stopped, err := r.parent.participationStopped(ctx, input.Run); err != nil {
+		return nil, "", err
+	} else if stopped {
+		return nil, "", nil
+	}
+	conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
+	triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
+	conversation, err := r.parent.conversations.GetConversation(ctx, input.Run.Scope, conversationID)
+	if err != nil {
+		return nil, "", err
+	}
+	if conversation.Owner != input.Run.Owner {
+		return nil, "", fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
+	}
+	return conversation, triggerID, nil
+}
+
+func (r conversationAgentTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+	conversation, triggerID, err := r.conversation(ctx, input)
+	if err != nil {
+		return nil, err
+	}
+	if conversation == nil {
+		return participationStoppedOutcome(), nil
+	}
+	return r.parent.runAgentTurn(ctx, input, conversation, triggerID, r.bound, r.operations)
+}
+
+func (r conversationAgentTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
+	// The portable hosted planner reserves token capacity only. Ordinary chats
+	// with no token ceilings keep their existing execution-only projection;
+	// custom planners still receive their normal input below.
+	if _, hosted := r.bound.(*HostedTurnRunner); hosted && input.Run != nil {
+		budget := input.Run.Budget
+		if budget == nil || (budget.MaxInputTokens == 0 && budget.MaxOutputTokens == 0 && budget.MaxTotalTokens == 0) {
+			return BudgetUsage{}, nil
+		}
+	}
+	conversation, triggerID, err := r.conversation(ctx, input)
+	if err != nil || conversation == nil {
+		return BudgetUsage{}, err
+	}
+	planner, ok := r.bound.(TurnBudgetPlanner)
+	if !ok {
+		return BudgetUsage{}, nil
+	}
+	participantID, viewer, trigger, err := r.parent.agentConversationTurnContext(ctx, input, conversation, triggerID)
+	if err != nil {
+		return BudgetUsage{}, err
+	}
+	if r.parent.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
+		return BudgetUsage{}, nil
+	}
+	if input.Run.Owner.Type == OwnerTypeTeam && requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		input.Run = cloneAgentRun(input.Run)
+		input.Run.AssignedAgentID = participantID
+	}
+	// Deterministic completion and explicit runbook dispatch do not invoke the
+	// hosted runner and must still work after its model budget is exhausted.
+	if !requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		if _, completed := governedConversationActionOutcome(input.Run); completed {
+			return BudgetUsage{}, nil
+		}
+		if _, completed, err := r.parent.governedConversationOperationOutcome(ctx, input.Run); err != nil || completed {
+			return BudgetUsage{}, err
+		}
+		active, err := r.parent.activeConversationRuns(ctx, conversation, trigger)
+		if err != nil {
+			return BudgetUsage{}, err
+		}
+		automatic, err := r.parent.automaticConversationOperationEntrypoints(ctx, conversation)
+		if err != nil {
+			return BudgetUsage{}, err
+		}
+		if operation, _, requested := resolveExplicitConversationOperation(trigger.Content, r.operations, automatic); requested && !activeConversationOperationExists(active, operation.Entrypoint) {
+			return BudgetUsage{}, nil
+		}
+	}
+	recent, err := r.parent.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
+		Scope: input.Run.Scope, ConversationID: conversation.ID, Limit: 100, Descending: true, Viewer: &viewer,
+		ThreadRootID: externalConversationThreadRoot(conversation, trigger),
+	})
+	if err != nil {
+		return BudgetUsage{}, err
+	}
+	reverseChannelMessages(recent)
+	hostedInput, _, err := r.parent.prepareAgentConversationTurnInput(ctx, input, conversation, trigger, viewer, participantID, recent, r.operations)
+	if err != nil {
+		return BudgetUsage{}, err
+	}
+	return planner.PlanTurnBudget(ctx, hostedInput)
+}
+
 // PlanTurnBudget reserves the full permitted fan-out before any proposal call.
 // The provider receives its per-participant allowance independently of model
 // content; a changed roster remains bounded by MaximumParticipants.
@@ -873,12 +960,22 @@ func (r *ConversationRunTurnRunner) PlanTurnBudget(ctx context.Context, input Tu
 	if err := r.validateConversationRun(ctx, input.Run); err != nil {
 		return BudgetUsage{}, err
 	}
-	if input.Run.Owner.Type != OwnerTypeTeam {
-		return BudgetUsage{}, nil
-	}
 	if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
 		return BudgetUsage{}, err
 	} else if stopped {
+		return BudgetUsage{}, nil
+	}
+	if input.Run.Owner.Type == OwnerTypeAgent || (input.Run.Plan != nil && input.Run.Plan["runbook"] != nil) || requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		binding, err := r.ResolveTurnRunner(ctx, input.Run)
+		if err != nil {
+			return BudgetUsage{}, err
+		}
+		if planner, ok := binding.Runner.(TurnBudgetPlanner); ok {
+			return planner.PlanTurnBudget(ctx, input)
+		}
+		return BudgetUsage{}, nil
+	}
+	if input.Run.Owner.Type != OwnerTypeTeam {
 		return BudgetUsage{}, nil
 	}
 	if _, completed := governedConversationActionOutcome(input.Run); completed {
@@ -1193,6 +1290,69 @@ func (r *ConversationRunTurnRunner) postTeamActionOutcome(
 	return nil, false, ErrRevisionConflict
 }
 
+func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, input TurnExecutionContext, conversation *Conversation, triggerID string) (string, ConversationViewer, *ChannelMessage, error) {
+	participantID := strings.TrimSpace(input.Run.AssignedAgentID)
+	if input.Run.Owner.Type == OwnerTypeTeam && requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		var err error
+		participantID, err = r.finalExplanationParticipant(ctx, input.Run)
+		if err != nil {
+			return "", ConversationViewer{}, nil, err
+		}
+	}
+	if participantID == "" {
+		participantID = conversation.Owner.ID
+	}
+	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID}}
+	trigger, err := r.conversations.GetVisibleChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID, viewer)
+	if err != nil {
+		return "", viewer, nil, err
+	}
+	if root, _ := input.Run.Context["threadRootMessageId"].(string); root != "" && root != externalConversationThreadRoot(conversation, trigger) {
+		return "", viewer, nil, fmt.Errorf("%w: thread does not match the canonical trigger", ErrInvalidAgentRun)
+	}
+	return participantID, viewer, trigger, nil
+}
+
+// prepareAgentConversationTurnInput is read-only. Admission and execution must
+// estimate and dispatch the same lowered conversation history, goal and media;
+// cursor receipts, artifacts and accepted summaries are handled only by execution.
+func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx context.Context, input TurnExecutionContext, conversation *Conversation, trigger *ChannelMessage, viewer ConversationViewer, participantID string, recent []*ChannelMessage, operations []HostedRunbookOperation) (TurnExecutionContext, conversationHistoryPlan, error) {
+	historyPlan := conversationHistoryPlan{Messages: recent}
+	// Channel summaries cover unrelated threads. Connector turns retain their
+	// own recent originals and recover older originals through bounded history.
+	if !externalChannelContext(conversation) && externalConversationThreadRoot(conversation, trigger) == "" {
+		saved := r.summaries.get(conversation.Scope, conversation.ID, conversationViewerKey(viewer))
+		history, historyErr := r.conversationHistoryForCompaction(ctx, conversation, viewer, recent, saved)
+		if historyErr == nil {
+			historyPlan = planConversationHistory(conversation, trigger.ID, viewer, history, saved)
+		}
+	}
+	var err error
+	historyPlan.ContextBackdrop, err = loadConversationThreadBackdrop(ctx, r.conversations, conversation, trigger, viewer)
+	if err != nil {
+		return TurnExecutionContext{}, historyPlan, err
+	}
+	attachments := r.conversationAttachments(ctx, conversation, trigger, recent)
+	goal, err := r.agentConversationGoalWithAttachments(ctx, conversation, trigger, historyPlan.Messages, operations, attachments, &historyPlan)
+	if err != nil {
+		return TurnExecutionContext{}, historyPlan, err
+	}
+	hostedRun := cloneAgentRun(input.Run)
+	hostedRun.Kind = RunKindAgentWork
+	hostedRun.AssignedAgentID = participantID
+	hostedRun.Goal = goal
+	hostedInput := input
+	hostedInput.ForegroundConversation = cloneAgentRun(input.Run)
+	hostedInput.Run = hostedRun
+	hostedInput.ModelMedia = append([]HostedTurnMedia(nil), input.ModelMedia...)
+	for _, attachment := range attachments {
+		if attachment.media != nil {
+			hostedInput.ModelMedia = append(hostedInput.ModelMedia, *attachment.media)
+		}
+	}
+	return hostedInput, historyPlan, nil
+}
+
 func (r *ConversationRunTurnRunner) runAgentTurn(
 	ctx context.Context,
 	input TurnExecutionContext,
@@ -1204,26 +1364,13 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	if r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
-	participantID := strings.TrimSpace(input.Run.AssignedAgentID)
-	if input.Run.Owner.Type == OwnerTypeTeam && requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		var participantErr error
-		participantID, participantErr = r.finalExplanationParticipant(ctx, input.Run)
-		if participantErr != nil {
-			return nil, participantErr
-		}
-		input.Run = cloneAgentRun(input.Run)
-		input.Run.AssignedAgentID = participantID
-	}
-	if participantID == "" {
-		participantID = conversation.Owner.ID
-	}
-	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID}}
-	trigger, err := r.conversations.GetVisibleChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID, viewer)
+	participantID, viewer, trigger, err := r.agentConversationTurnContext(ctx, input, conversation, triggerID)
 	if err != nil {
 		return nil, err
 	}
-	if root, _ := input.Run.Context["threadRootMessageId"].(string); root != "" && root != externalConversationThreadRoot(conversation, trigger) {
-		return nil, fmt.Errorf("%w: thread does not match the canonical trigger", ErrInvalidAgentRun)
+	if input.Run.Owner.Type == OwnerTypeTeam && requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		input.Run = cloneAgentRun(input.Run)
+		input.Run.AssignedAgentID = participantID
 	}
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
 		return participationStoppedOutcome(), nil
@@ -1317,33 +1464,9 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		boundAgentRunner = binding.Runner
 		runbookOperations = binding.RunbookOperations
 	}
-	historyPlan := conversationHistoryPlan{Messages: recent}
-	// Channel summaries cover unrelated threads. Connector turns retain their
-	// own recent originals and recover older originals through bounded history.
-	if !externalChannelContext(conversation) && externalConversationThreadRoot(conversation, trigger) == "" {
-		saved := r.summaries.get(conversation.Scope, conversation.ID, conversationViewerKey(viewer))
-		history, historyErr := r.conversationHistoryForCompaction(ctx, conversation, viewer, recent, saved)
-		if historyErr == nil {
-			historyPlan = planConversationHistory(conversation, trigger.ID, viewer, history, saved)
-		}
-	}
-	historyPlan.ContextBackdrop, err = loadConversationThreadBackdrop(ctx, r.conversations, conversation, trigger, viewer)
+	hostedInput, historyPlan, err := r.prepareAgentConversationTurnInput(ctx, input, conversation, trigger, viewer, participantID, recent, runbookOperations)
 	if err != nil {
 		return nil, err
-	}
-	attachments := r.conversationAttachments(ctx, conversation, trigger, recent)
-	goal, err := r.agentConversationGoalWithAttachments(ctx, conversation, trigger, historyPlan.Messages, runbookOperations, attachments, &historyPlan)
-	if err != nil {
-		return nil, err
-	}
-	hostedRun.Goal = goal
-	hostedInput := input
-	hostedInput.ForegroundConversation = cloneAgentRun(input.Run)
-	hostedInput.Run = hostedRun
-	for _, attachment := range attachments {
-		if attachment.media != nil {
-			hostedInput.ModelMedia = append(hostedInput.ModelMedia, *attachment.media)
-		}
 	}
 	outcome, err := boundAgentRunner.RunTurn(ctx, hostedInput)
 	if err != nil {
