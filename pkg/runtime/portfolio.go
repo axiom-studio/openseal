@@ -205,11 +205,12 @@ type WakeCondition struct {
 // instruction without exposing private model reasoning or mutating the
 // agent's definition.
 type AgentRunIntervention struct {
-	ID                 string                     `json:"id"`
-	Actor              ActivityActor              `json:"actor"`
-	Instruction        string                     `json:"instruction"`
-	CreatedAt          time.Time                  `json:"createdAt"`
-	ConversationAnswer *ConversationAnswerReceipt `json:"conversationAnswer,omitempty"`
+	ID                   string                       `json:"id"`
+	Actor                ActivityActor                `json:"actor"`
+	Instruction          string                       `json:"instruction"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	ConversationAnswer   *ConversationAnswerReceipt   `json:"conversationAnswer,omitempty"`
+	SkillSetupResolution *SkillSetupResolutionReceipt `json:"skillSetupResolution,omitempty"`
 }
 
 // ConversationAnswerReceipt records the canonical question and authenticated
