@@ -188,6 +188,9 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	if run.Status != AgentRunStatusCompleted {
 		milestone = runbook.ReportingFailed
 		content = fmt.Sprintf("%s: %s", terminalRunStatusLabel(run.Status), strings.TrimSpace(run.Goal))
+		if run.Status == AgentRunStatusFailed {
+			content = TerminalFailureReply(terminalFailureCodeFromCheckpoint(run.Checkpoint))
+		}
 	}
 	if task, _ := run.Context[scheduledTaskContextKey].(bool); task && run.Status == AgentRunStatusCompleted {
 		if summary, _ := run.Output["summary"].(string); strings.TrimSpace(summary) != "" {
