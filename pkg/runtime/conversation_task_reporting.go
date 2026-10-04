@@ -220,7 +220,7 @@ func conversationTaskReportContent(task *ConversationTask, source bool, run *Age
 		return task.Acknowledgment
 	}
 	if run.Status == AgentRunStatusFailed {
-		return TerminalFailureReply(terminalFailureCodeFromCheckpoint(run.Checkpoint))
+		return terminalFailureReplyFromCheckpoint(run.Checkpoint)
 	}
 	if run.Status == AgentRunStatusCompleted {
 		for _, key := range []string{"report", "summary"} {

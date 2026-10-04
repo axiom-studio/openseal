@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
 
 type taskFailureReportingStore interface {
@@ -64,7 +66,7 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 }
 
 func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testing.T) {
-	for _, outcome := range []string{"review rejected", "unknown failure", "completed"} {
+	for _, outcome := range []string{"review rejected", "review rejected rate limited", "review rejected mixed batch", "unknown failure", "completed"} {
 		for _, threaded := range []bool{false, true} {
 			t.Run(outcome+map[bool]string{false: "/direct", true: "/thread"}[threaded], func(t *testing.T) {
 				eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
@@ -76,6 +78,14 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 						t.Fatal(err)
 					}
 					status, checkpoint, expected := AgentRunStatusFailed, rejectedTaskReviewCheckpoint(), TerminalFailureReply("task_completion_rejected")
+					if outcome == "review rejected rate limited" || outcome == "review rejected mixed batch" {
+						failure := skillerror.NewActionError("source_rate_limited", "ERROR_SECRET", nil)
+						if outcome == "review rejected mixed batch" {
+							failure = skillerror.NewActionError("source_reads_failed", "ERROR_SECRET", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_unavailable"}]`, "failedCount": "2", "totalCount": "2"})
+						}
+						checkpoint = checkpointTerminalAction(checkpoint, &ActionCall{ID: "browser-call", Status: ActionCallStatusFailed, Error: failure.Error(), ErrorCode: failure.Code(), ErrorDetails: failure.Details()}, nil)
+						expected += " Some sources rate-limited requests (HTTP 429). Try those sources again later."
+					}
 					if outcome == "unknown failure" {
 						checkpoint["_atlasTaskCompletionReview"].(map[string]interface{})["failureCode"] = "VERDICT_SECRET"
 						expected = TerminalFailureReply("execution_failed")
