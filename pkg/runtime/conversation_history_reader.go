@@ -69,8 +69,14 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 	if len(trustedThreadRoot) > 0 {
 		threadRoot = trustedThreadRoot[0]
 	}
-	if threadRoot != "" && !externalChannelContext(conversation) {
-		return nil, denied
+	if threadRoot != "" {
+		if !validOpaqueIdentifier(threadRoot, 128) {
+			return nil, denied
+		}
+		root, err := store.GetVisibleChannelMessage(ctx, scope, conversationID, threadRoot, viewer)
+		if err != nil || root == nil || root.ID != threadRoot || root.Scope != scope || root.ConversationID != conversationID || root.ThreadRootID != "" && root.ThreadRootID != root.ID {
+			return nil, denied
+		}
 	}
 	var messages []*ChannelMessage
 	limit := request.Limit

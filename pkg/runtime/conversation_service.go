@@ -38,18 +38,21 @@ type ConversationFilter struct {
 }
 
 type PostChannelMessageRequest struct {
-	ID                  string
-	Scope               Scope
-	ConversationID      string
-	ExpectedRevision    int64
-	Sender              ConversationParticipant
-	SenderDisplayName   string
-	Initiator           *ConversationParticipant
-	ExternalSource      *ExternalMessageSource
-	Intent              ConversationMessageIntent
-	Content             string
-	ResponseMode        string
-	Audience            ConversationAudience
+	ID                string
+	Scope             Scope
+	ConversationID    string
+	ExpectedRevision  int64
+	Sender            ConversationParticipant
+	SenderDisplayName string
+	Initiator         *ConversationParticipant
+	ExternalSource    *ExternalMessageSource
+	Intent            ConversationMessageIntent
+	Content           string
+	ResponseMode      string
+	Audience          ConversationAudience
+	// StartThread is a host option. The canonical root remains in the channel
+	// timeline while its responses are routed to its own durable thread.
+	StartThread         bool `json:"-"`
 	ReplyToMessageID    string
 	BroadcastToChannel  bool
 	Mentions            []ConversationParticipant
@@ -338,6 +341,9 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	if err != nil {
 		return nil, err
 	}
+	if req.StartThread {
+		threadRootID = ""
+	}
 	for _, linked := range []string{req.ResolvesMessageID, req.SupersedesMessageID} {
 		if linked != "" {
 			if message, err := s.store.GetChannelMessage(ctx, req.Scope, conversation.ID, linked); err != nil || message == nil {
@@ -359,7 +365,7 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 		Initiator:      cloneConversationParticipant(req.Initiator),
 		ExternalSource: cloneExternalMessageSource(req.ExternalSource),
 		Intent:         req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
-		ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), BroadcastToChannel: req.BroadcastToChannel,
+		StartsThread: req.StartThread, ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), BroadcastToChannel: req.BroadcastToChannel,
 		Mentions:   cloneParticipants(req.Mentions),
 		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
 		ResolvesMessageID: strings.TrimSpace(req.ResolvesMessageID), SupersedesMessageID: strings.TrimSpace(req.SupersedesMessageID),
@@ -367,6 +373,15 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	}
 	if err := message.Validate(); err != nil {
 		return nil, err
+	}
+	if message.StartsThread {
+		valid, err := s.validateThreadStartAncestry(ctx, message)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, fmt.Errorf("%w: thread ancestry is missing, cyclic, or too deep", ErrInvalidConversation)
+		}
 	}
 	updated := cloneConversation(conversation)
 	updated.LastSequence = message.Sequence
@@ -424,6 +439,7 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 		}
 		return nil, ErrInvalidConversation
 	}
+	responseMode := ""
 	if req.TriggerMessageID != "" {
 		trigger, err := s.store.GetChannelMessage(ctx, req.Scope, conversation.ID, req.TriggerMessageID)
 		if err != nil {
@@ -432,6 +448,7 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 		if trigger == nil {
 			return nil, ErrMessageConflict
 		}
+		responseMode = trigger.ResponseMode
 	}
 	recent, err := s.store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: req.Scope, ConversationID: conversation.ID, Limit: 100, Descending: true})
 	if err != nil {
@@ -459,6 +476,7 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 			ID: stableConversationID(req.Scope, key, "speaker:"+proposal.ID), Scope: req.Scope, ConversationID: conversation.ID,
 			Sequence: sequence, Sender: proposal.Participant, Intent: proposal.Intent, Content: strings.TrimSpace(proposal.Content),
 			ContributionKey: proposal.ContributionKey,
+			ResponseMode:    responseMode,
 			Audience:        proposal.Audience, ThreadRootID: threadRootID, ReplyToMessageID: proposal.ReplyToMessageID,
 			BroadcastToChannel: proposal.BroadcastToChannel,
 			Mentions:           cloneParticipants(proposal.Mentions), References: cloneConversationReferences(proposal.References),
@@ -552,9 +570,16 @@ func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, 
 		return filterChannelMessagesWithBatchParents(ctx, batch, scope, conversationID, messages, viewer)
 	}
 	visible := make([]*ChannelMessage, 0, len(messages))
+	var known map[string]*ChannelMessage
 	for _, message := range messages {
 		if !CanViewChannelMessage(message, viewer) {
 			continue
+		}
+		if message.StartsThread && known == nil {
+			known = make(map[string]*ChannelMessage)
+		}
+		if known != nil {
+			known[message.ID] = message
 		}
 		allowed := true
 		seen := map[string]bool{message.ID: true}
@@ -567,6 +592,13 @@ func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, 
 			if err != nil {
 				return nil, err
 			}
+			if parent != nil && parent.StartsThread && known == nil {
+				known = make(map[string]*ChannelMessage)
+				known[message.ID] = message
+			}
+			if known != nil {
+				known[linked] = parent
+			}
 			if !CanViewChannelMessage(parent, viewer) {
 				allowed = false
 				break
@@ -576,7 +608,10 @@ func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, 
 			visible = append(visible, message)
 		}
 	}
-	return visible, nil
+	if known == nil {
+		return visible, nil
+	}
+	return filterChannelMessageThreadStarts(ctx, scope, conversationID, visible, known, s.threadStartParentLoader(scope, conversationID), viewer)
 }
 
 func (s *ConversationService) GetVisibleChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string, viewer ConversationViewer) (*ChannelMessage, error) {
@@ -776,7 +811,7 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 		existing.Intent == req.Intent && existing.Content == strings.TrimSpace(req.Content) &&
 		existing.Audience.Kind == req.Audience.Kind && reflect.DeepEqual(existing.Audience.Participants, req.Audience.Participants) &&
 		reflect.DeepEqual(existing.Audience.Roles, req.Audience.Roles) && existing.ReplyToMessageID == strings.TrimSpace(req.ReplyToMessageID) &&
-		existing.BroadcastToChannel == req.BroadcastToChannel &&
+		existing.StartsThread == req.StartThread && existing.BroadcastToChannel == req.BroadcastToChannel &&
 		reflect.DeepEqual(existing.Mentions, req.Mentions) && reflect.DeepEqual(existing.References, req.References) &&
 		existing.RequiresResponse == req.RequiresResponse && existing.ResolvesMessageID == strings.TrimSpace(req.ResolvesMessageID) &&
 		existing.SupersedesMessageID == strings.TrimSpace(req.SupersedesMessageID)
