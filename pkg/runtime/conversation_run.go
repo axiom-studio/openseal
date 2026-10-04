@@ -349,6 +349,9 @@ func (s *ConversationRunScheduler) ReconcileScope(ctx context.Context, scope Sco
 		return nil, err
 	}
 	result := &ConversationRunReconcileResult{}
+	if err := s.reconcileSkillSetupTasks(ctx, scope, result); err != nil {
+		return result, err
+	}
 	if err := s.reconcileConversationQuestions(ctx, scope, result); err != nil {
 		return result, err
 	}

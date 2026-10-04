@@ -10,12 +10,27 @@ import (
 )
 
 type SkillSetupRequest = runtime.SkillSetupRequest
+type SkillSetupResolutionReceipt = runtime.SkillSetupResolutionReceipt
 
 const SkillActionRequestSetup = runtime.SkillActionRequestSetup
 const SkillActionListSetupRequests = runtime.SkillActionListSetupRequests
+const ConversationTaskSkillSetupWakeType = runtime.ConversationTaskSkillSetupWakeType
 
 var ErrSkillSetupConflict = runtime.ErrSkillSetupConflict
 var ErrInvalidSkillSetup = runtime.ErrInvalidSkillSetup
+
+// ReconcileSkillSetupTask delivers a saved setup result to the exact background
+// task. A handled result must not also schedule a foreground conversation reply.
+func (e *Engine) ReconcileSkillSetupTask(ctx context.Context, scope runtime.Scope, requestID string) (*runtime.AgentRunCommandResult, bool, error) {
+	if e == nil || e.conversationRunScheduler == nil {
+		return nil, false, errors.New("conversation run scheduling is unavailable")
+	}
+	result, handled, err := e.conversationRunScheduler.ReconcileSkillSetupTask(ctx, scope, requestID)
+	if err == nil && result != nil && result.Event != nil {
+		e.wakeAgentWorkersForScope(scope)
+	}
+	return result, handled, err
+}
 
 func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope, deploymentID, conversationID string) ([]*runtime.SkillSetupRequest, error) {
 	conversation, err := e.GetConversation(ctx, scope, conversationID)
