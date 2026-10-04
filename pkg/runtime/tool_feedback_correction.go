@@ -3,6 +3,8 @@ package runtime
 import (
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // ToolFeedbackCorrectionCheckpointKey is kernel-owned state for corrections
@@ -64,6 +66,20 @@ func toolFeedbackMessage(message string) string {
 }
 
 func checkpointToolFeedbackFailure(checkpoint map[string]interface{}, call *ActionCall) map[string]interface{} {
+	// Keep only a typed read challenge eligible for a bounded human exchange.
+	// The worker must prove its exact conversation origin before queuing it;
+	// every other failure retains the existing model-free terminal policy.
+	if !requiresFinalFailureExplanation(checkpoint) && (call.SideEffect == skill.SideEffectRead || call.SideEffect == skill.SideEffectNone) {
+		last, _ := checkpoint["lastAction"].(map[string]interface{})
+		if failure := latestCanonicalActionFailure(checkpoint); failure != nil && failure.Code() == "source_access_challenge" && last["actionCallId"] == call.ID {
+			result := deepCloneCheckpointMap(checkpoint)
+			result[ToolFeedbackCorrectionCheckpointKey] = map[string]interface{}{
+				"kind": "action", "message": failure.Error(), "lastFailureId": call.ID,
+				"correctionsUsed": 0, "failedSemanticDigests": []interface{}{ComputeActionSemanticDigest(call)},
+			}
+			return result
+		}
+	}
 	result := checkpointFinalFailureExplanation(checkpoint, "action", toolFeedbackMessage(call.Error))
 	return checkpointTerminalFailure(result, "action_failed")
 }
@@ -119,22 +135,39 @@ func projectToolFeedbackCorrection(request *HostedTurnRequest) {
 	if _, active := ReadToolFeedbackCorrection(request.ContinuationCheckpoint); !active {
 		return
 	}
-	request.Actions = nil
 	request.Workspace = nil
 	request.WorkspaceOperations = nil
 	request.WorkspaceCredentials = nil
 	request.EligibleAgents = nil
 	request.RunbookOperations = nil
+	if request.SourceAccessChallenge != nil {
+		// Atlas needs the canonical own-task snapshot to validate an independent
+		// worker. Preserve read context while removing new-task admission.
+		request.ConversationTasks = cloneHostedConversationTaskContext(request.ConversationTasks)
+		if request.ConversationTasks != nil {
+			request.ConversationTasks.CanStart = false
+		}
+		request.SystemInstructions = append(request.SystemInstructions, "The source returned a verified access challenge. This continuation may ask at most two visible conversation questions, with no actions before the saved answer is verified. A verified answer permits one private interpretation turn, then only an ordinarily authorized action or a truthful final explanation. The answer itself grants no action authority, browser choice, login permission, or retry. Do not schedule, fork, delegate, or repeat the failed request.")
+		return
+	}
 	request.ConversationTasks = nil
+	request.Actions = nil
 	request.SystemInstructions = append(request.SystemInstructions,
 		"A prior tool failed. This attempt has stopped; no correction or further operation is authorized. The kernel will deliver the failure reply without another model request.")
 }
 
-func validateToolFeedbackCorrectionOutcome(run *AgentRun, outcome *TurnOutcome) error {
+func validateToolFeedbackCorrectionOutcome(run *AgentRun, outcome *TurnOutcome, interactions ...*SourceAccessChallengeInteraction) error {
 	if _, active := ReadToolFeedbackCorrection(run.Checkpoint); !active || requiresFinalFailureExplanation(run.Checkpoint) {
 		return nil
 	}
-	if outcome == nil || outcome.WakeCondition != nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil {
+	if hasCanonicalSourceAccessChallenge(run) && (outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || len(outcome.ProposedActions) != 0) {
+		var interaction *SourceAccessChallengeInteraction
+		if len(interactions) == 1 {
+			interaction = interactions[0]
+		}
+		return validateSourceAccessChallengeOutcome(interaction, outcome)
+	}
+	if outcome == nil || outcome.WakeCondition != nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil || outcome.ProposedTask != nil {
 		return errors.New("tool feedback corrections cannot schedule, fork, or delegate more attempts")
 	}
 	if outcome.NextRunStatus != AgentRunStatusCompleted || len(outcome.ProposedActions) != 0 {
