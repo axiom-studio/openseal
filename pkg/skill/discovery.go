@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -155,7 +156,9 @@ func NormalizeDiscoveryRequest(request DiscoveryRequest) (DiscoveryRequest, erro
 
 // NormalizeDiscoveryPage rejects a provider response that could confuse the
 // model about exact identity, authorization state, pagination, or credentials.
-// It also returns stable ordering for replay and restart behavior.
+// Provider item order is relevance order and remains intact across pages.
+// Nested evidence is canonicalized on owned copies for stable replay without
+// changing the provider's catalog snapshot.
 func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*DiscoveryPage, error) {
 	if page == nil {
 		return nil, errors.New("discovery provider returned no page")
@@ -169,6 +172,10 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 	result := &DiscoveryPage{Items: make([]DiscoveryCandidate, 0, len(page.Items)), NextCursor: strings.TrimSpace(page.NextCursor)}
 	seen := make(map[string]struct{}, len(page.Items))
 	for index, value := range page.Items {
+		value.Actions = slices.Clone(value.Actions)
+		value.Credentials = slices.Clone(value.Credentials)
+		value.ConversationAdapters = slices.Clone(value.ConversationAdapters)
+		value.Compatibility = slices.Clone(value.Compatibility)
 		value.ID, value.Version = strings.TrimSpace(value.ID), strings.TrimSpace(value.Version)
 		value.SourceIdentity, value.Name = strings.TrimSpace(value.SourceIdentity), strings.TrimSpace(value.Name)
 		value.Description = strings.TrimSpace(value.Description)
@@ -222,6 +229,7 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 		adapterIDs := make(map[string]struct{}, len(value.ConversationAdapters))
 		for adapterIndex := range value.ConversationAdapters {
 			adapter := &value.ConversationAdapters[adapterIndex]
+			adapter.Credentials = slices.Clone(adapter.Credentials)
 			adapter.ID, adapter.Provider = strings.TrimSpace(adapter.ID), strings.TrimSpace(adapter.Provider)
 			if adapter.ID == "" || len(adapter.ID) > 128 {
 				return nil, fmt.Errorf("discovery candidate %d conversation adapter %d is invalid", index, adapterIndex)
@@ -287,12 +295,21 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 				return nil, fmt.Errorf("discovery candidate %d compatibility evidence %d is invalid", index, compatibilityIndex)
 			}
 		}
+		sort.Slice(value.Compatibility, func(i, j int) bool {
+			left, right := value.Compatibility[i], value.Compatibility[j]
+			if left.Requirement != right.Requirement {
+				return left.Requirement < right.Requirement
+			}
+			if left.Compatible != right.Compatible {
+				return !left.Compatible
+			}
+			if left.Evidence != right.Evidence {
+				return left.Evidence < right.Evidence
+			}
+			return left.Reference < right.Reference
+		})
 		result.Items = append(result.Items, value)
 	}
-	sort.Slice(result.Items, func(i, j int) bool {
-		left, right := result.Items[i], result.Items[j]
-		return left.ID+"\x00"+left.Version+"\x00"+left.SourceIdentity < right.ID+"\x00"+right.Version+"\x00"+right.SourceIdentity
-	})
 	return result, nil
 }
 
