@@ -100,6 +100,7 @@ func FindConversationTaskResultMessage(ctx context.Context, store ConversationSt
 		return nil, ErrInvalidConversationTask
 	}
 	keys := []string{
+		terminalConversationFailureReplyKey(run),
 		conversationTaskFinalResponseKey(run),
 		"team-action-outcome:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+task.SourceMessageID),
 		"conversation-run-canceled-result:" + run.ID,

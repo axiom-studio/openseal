@@ -450,10 +450,17 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		}
 	}
 	if finish.Status == AgentTurnStatusFailed {
+		code := "execution_failed"
+		var failure *TurnHostFailure
+		if errors.As(executionErr, &failure) {
+			code = failure.Code
+		}
+		finish.ContinuationCheckpoint = preserveKernelActionHistory(run.Checkpoint, run.Checkpoint)
 		if cause := recordedToolFailure(run.Checkpoint); cause != "" {
 			finish.RunError = cause
-			finish.ContinuationCheckpoint = preserveKernelActionHistory(run.Checkpoint, run.Checkpoint)
+			code = terminalFailureCodeFromCheckpoint(run.Checkpoint)
 		}
+		finish.ContinuationCheckpoint = checkpointTerminalFailure(finish.ContinuationCheckpoint, code)
 	}
 	// Provider work is chargeable even if its outcome fails validation, the
 	// runner returns an error, or the duration deadline discards its output.

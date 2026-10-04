@@ -153,7 +153,7 @@ func TestTerminalRunReportingContractCrashAfterPostBeforeAck(t *testing.T) {
 		}
 		now = now.Add(2 * time.Minute)
 		if err := store.CompleteRunTerminalReport(t.Context(), RunTerminalReportingCompletion{
-			Scope: run.Scope, RunID: run.ID, Status: run.Status, WorkerID: claims[0].LeaseOwner, LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now,
+			Scope: run.Scope, RunID: run.ID, Status: run.Status, TerminalRevision: claims[0].TerminalRevision, WorkerID: claims[0].LeaseOwner, LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now,
 		}); !errors.Is(err, ErrLeaseLost) {
 			t.Fatalf("expired delivery attempt was not fenced: %v", err)
 		}
@@ -352,7 +352,7 @@ func TestTerminalRunReportingContractImmutableSnapshotScopedClaimsAndFencing(t *
 		if err != nil || len(claims) != 1 || claims[0].RunID != first.ID || claims[0].Run.Output["summary"] != "The requested result is ready" {
 			t.Fatalf("scope isolation or immutable report snapshot was lost: %#v, %v", claims, err)
 		}
-		completion := RunTerminalReportingCompletion{Scope: first.Scope, RunID: first.ID, Status: first.Status, WorkerID: "wrong-worker", LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now}
+		completion := RunTerminalReportingCompletion{Scope: first.Scope, RunID: first.ID, Status: first.Status, TerminalRevision: claims[0].TerminalRevision, WorkerID: "wrong-worker", LeaseExpiresAt: *claims[0].LeaseExpiresAt, Now: now}
 		if err := store.CompleteRunTerminalReport(t.Context(), completion); !errors.Is(err, ErrLeaseLost) {
 			t.Fatalf("foreign worker acknowledged report: %v", err)
 		}
