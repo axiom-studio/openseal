@@ -151,7 +151,6 @@ type AgentRunWorkerPool struct {
 	forks                *RunForkCoordinator
 	collaboration        *CollaborationService
 	conversationTasks    *ConversationTaskService
-	continuations        *ConversationTaskContinuationReconciler
 	requestInbox         *AgentRequestInboxReconciler
 	reportingStore       ConversationStore
 	resolver             TurnRunnerResolver
@@ -210,9 +209,6 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	if taskStore, ok := store.(ConversationTaskKernelStore); ok {
 		pool.conversationTasks = NewConversationTaskService(taskStore)
 	}
-	if continuationStore, ok := store.(ConversationTaskContinuationStore); ok && (config.Kind == "" || config.Kind == RunKindConversation) {
-		pool.continuations, _ = NewConversationTaskContinuationReconciler(continuationStore)
-	}
 	if inboxStore, ok := store.(AgentRequestInboxStore); ok {
 		pool.requestInbox, _ = NewAgentRequestInboxReconciler(inboxStore)
 	}
@@ -232,10 +228,6 @@ func (p *AgentRunWorkerPool) Start(ctx context.Context) {
 		}
 		p.wg.Add(1)
 		go p.timerWakeLoop(workerCtx)
-		if p.continuations != nil {
-			p.wg.Add(1)
-			go p.conversationTaskDeadlineLoop(workerCtx)
-		}
 		p.Wake()
 	})
 }
@@ -319,16 +311,14 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	if run.Status != AgentRunStatusRunning {
 		return
 	}
-	stopDeadline := p.observeConversationTaskDeadline(ctx, run)
-	defer stopDeadline()
 	_, _ = p.activity.AppendActivity(ctx, &ActivityEvent{
 		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
 		EventType: "run.claimed", Summary: "Run claimed by autonomous worker",
 		Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
 	})
 	// Resolution can itself involve slow hosted setup. Keep the existing claim
-	// alive across that work so promotion never causes another worker to resolve
-	// or invoke a second copy while the first one is still in flight.
+	// alive across that work so another worker cannot resolve or invoke a second
+	// copy while the first one is still in flight.
 	resolutionCtx, cancelResolution := context.WithCancel(ctx)
 	resolutionHeartbeatDone := make(chan error, 1)
 	go p.heartbeatRunLease(resolutionCtx, cancelResolution, workerID, run, resolutionHeartbeatDone)
@@ -439,7 +429,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 				p.Wake()
 				return
 			}
-			// A deadline may have already promoted this same Run. Consume the
+			// A saved continuation may already own this same Run. Consume the
 			// redundant proposal and continue its existing Turn lineage.
 			continue
 		}
@@ -1406,55 +1396,6 @@ func (p *AgentRunWorkerPool) heartbeatRunLease(ctx context.Context, cancel conte
 				done <- err
 				return
 			}
-		}
-	}
-}
-
-func (p *AgentRunWorkerPool) observeConversationTaskDeadline(ctx context.Context, run *AgentRun) context.CancelFunc {
-	deadlineCtx, cancel := context.WithCancel(ctx)
-	if p.continuations == nil || run.Kind != RunKindConversation {
-		return cancel
-	}
-	// Start before runner resolution. Commentary, model Turns, queueing and
-	// action waits all retain this same canonical creation-time deadline.
-	deadline := run.CreatedAt.Add(ConversationTaskForegroundTimeout)
-	go func() {
-		timer := time.NewTimer(max(time.Until(deadline), 0))
-		defer timer.Stop()
-		select {
-		case <-deadlineCtx.Done():
-			return
-		case <-timer.C:
-		}
-		result, err := p.continuations.store.PromoteConversationTask(deadlineCtx, ConversationTaskPromotionRequest{
-			Scope: run.Scope, RunID: run.ID, Now: time.Now().UTC(), MinimumAge: ConversationTaskForegroundTimeout,
-		})
-		if err != nil && deadlineCtx.Err() == nil {
-			p.logger.Warnw("failed to promote conversation Run at its foreground deadline", "runId", run.ID, "error", err)
-		} else if result != nil {
-			p.Wake()
-		}
-	}()
-	return cancel
-}
-
-func (p *AgentRunWorkerPool) conversationTaskDeadlineLoop(ctx context.Context) {
-	defer p.wg.Done()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for {
-		// This maintenance must remain independent of the worker limiter: every
-		// available execution slot may be occupied by a long hosted invocation.
-		results, err := p.continuations.ReconcileScope(ctx, p.config.Scope, time.Now().UTC())
-		if err != nil && ctx.Err() == nil {
-			p.logger.Warnw("failed to reconcile conversation task deadlines", "error", err)
-		} else if len(results) > 0 {
-			p.Wake()
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
 		}
 	}
 }

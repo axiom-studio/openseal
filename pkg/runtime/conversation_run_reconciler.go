@@ -29,16 +29,15 @@ func (c *ConversationRunReconcilerConfig) applyDefaults() error {
 // scheduling call. One loop owns reconciliation to avoid local overlap;
 // idempotent Run creation and service cursors make multiple replicas safe.
 type ConversationRunReconciler struct {
-	scheduler     *ConversationRunScheduler
-	continuations *ConversationTaskContinuationReconciler
-	scopes        WorkerScopeSource
-	config        ConversationRunReconcilerConfig
-	logger        *zap.SugaredLogger
-	wake          chan struct{}
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	startOnce     sync.Once
-	stopOnce      sync.Once
+	scheduler *ConversationRunScheduler
+	scopes    WorkerScopeSource
+	config    ConversationRunReconcilerConfig
+	logger    *zap.SugaredLogger
+	wake      chan struct{}
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	startOnce sync.Once
+	stopOnce  sync.Once
 }
 
 func NewConversationRunReconciler(
@@ -58,9 +57,6 @@ func NewConversationRunReconciler(
 	}
 	reconciler := &ConversationRunReconciler{
 		scheduler: scheduler, scopes: scopes, config: config, logger: logger, wake: make(chan struct{}, 1),
-	}
-	if store, ok := scheduler.runs.store.(ConversationTaskContinuationStore); ok {
-		reconciler.continuations, _ = NewConversationTaskContinuationReconciler(store)
 	}
 	return reconciler, nil
 }
@@ -100,11 +96,6 @@ func (r *ConversationRunReconciler) Reconcile(ctx context.Context) error {
 	for _, scope := range scopes {
 		if _, err := r.scheduler.ReconcileScope(ctx, scope); err != nil {
 			return err
-		}
-		if r.continuations != nil {
-			if _, err := r.continuations.ReconcileScope(ctx, scope, time.Now().UTC()); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

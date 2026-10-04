@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -68,75 +69,90 @@ func TestConversationTaskContinuationReconcilesQueuedRunFromCreationTime(t *test
 	}
 }
 
-func TestAgentRunWorkerContinuationDeadlineIncludesRunnerResolution(t *testing.T) {
-	store := NewMemoryStore()
-	run, conversation, _ := continuationLifecycleFixture(t, store, "resolution-continuation")
-	run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-ConversationTaskForegroundTimeout+40*time.Millisecond))
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil {
-		t.Fatalf("claim: %#v %v", claimed, err)
-	}
-	entered, release, done := make(chan context.Context, 1), make(chan struct{}), make(chan struct{})
-	var releaseOnce sync.Once
-	closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
-	defer closeRelease()
-	var modelCalls atomic.Int32
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(ctx context.Context, _ *AgentRun) (*TurnRunnerBinding, error) {
-		entered <- ctx
-		<-release
-		return &TurnRunnerBinding{DeploymentID: "agent", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-			modelCalls.Add(1)
-			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Reviewed release"}}, nil
-		})}, nil
-	}), nil, AgentRunWorkerConfig{Scope: run.Scope, Kind: RunKindConversation})
-	if err != nil {
-		t.Fatal(err)
-	}
-	go func() { defer close(done); pool.executeClaim(t.Context(), "worker", claimed) }()
-	invocationCtx := <-entered
-	var task *ConversationTask
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		task, err = store.FindConversationTaskByWorkRunID(t.Context(), run.Scope, run.ID)
-		if err != nil || task != nil {
-			break
+func TestAgentRunWorkerKeepsForegroundDuringSlowResolution(t *testing.T) {
+	testAgentRunWorkerKeepsForegroundPastDeadline(t, true)
+}
+
+func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool) {
+	t.Helper()
+	synctest.Test(t, func(t *testing.T) {
+		store := NewMemoryStore()
+		run, conversation, trigger := continuationLifecycleFixture(t, store, "slow-foreground")
+		claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+		if err != nil || claimed == nil {
+			t.Fatalf("claim: %#v %v", claimed, err)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if err != nil || task == nil {
+		entered, release, done := make(chan context.Context, 1), make(chan struct{}), make(chan struct{})
+		var releaseOnce sync.Once
+		closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
+		var modelCalls atomic.Int32
+		runner := TurnRunnerFunc(func(ctx context.Context, _ TurnExecutionContext) (*TurnOutcome, error) {
+			modelCalls.Add(1)
+			if !resolving {
+				entered <- ctx
+				<-release
+			}
+			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Reviewed release"}}, ctx.Err()
+		})
+		pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(ctx context.Context, _ *AgentRun) (*TurnRunnerBinding, error) {
+			if resolving {
+				entered <- ctx
+				<-release
+			}
+			return &TurnRunnerBinding{DeploymentID: "agent", Runner: runner}, ctx.Err()
+		}), nil, AgentRunWorkerConfig{Scope: run.Scope, Kind: RunKindConversation, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute})
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() { defer close(done); pool.executeClaim(t.Context(), "worker", claimed) }()
+		defer func() { closeRelease(); <-done }()
+		invocationCtx := <-entered
+		// Advance the real worker's timers without a wall-clock sleep. Both
+		// runner resolution and an active model Turn cross the former deadline.
+		time.Sleep(ConversationTaskForegroundTimeout + time.Second)
+		synctest.Wait()
+		current := assertConversationRunStillForeground(t, store, run, conversation, trigger, AgentRunStatusRunning)
+		if current.LeaseOwner != "worker" || invocationCtx.Err() != nil {
+			t.Fatalf("elapsed time interrupted the original invocation: %#v ctx=%v", current, invocationCtx.Err())
+		}
+		turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: run.Scope, RunID: run.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolving && (len(turns) != 0 || modelCalls.Load() != 0) || !resolving && (len(turns) != 1 || turns[0].Status != AgentTurnStatusRunning || turns[0].LeaseOwner != "worker" || modelCalls.Load() != 1) {
+			t.Fatalf("elapsed time restarted work: turns=%#v calls=%d", turns, modelCalls.Load())
+		}
 		closeRelease()
 		<-done
-		t.Fatalf("resolution exceeded deadline without promotion: %#v %v", task, err)
+		finished, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
+		if err != nil || finished.Status != AgentRunStatusCompleted || finished.LastAppliedTurn != 1 || finished.Context[ConversationTaskContextKey] != nil || finished.Output["summary"] != "Reviewed release" || modelCalls.Load() != 1 {
+			t.Fatalf("foreground invocation did not finish once: %#v calls=%d err=%v", finished, modelCalls.Load(), err)
+		}
+	})
+}
+
+func assertConversationRunStillForeground(t *testing.T, store *MemoryStore, original *AgentRun, conversation *Conversation, trigger *ChannelMessage, status AgentRunStatus) *AgentRun {
+	t.Helper()
+	current, err := store.GetAgentRun(t.Context(), original.Scope, original.ID)
+	if err != nil || current == nil || current.Status != status || current.Kind != RunKindConversation || current.ConcurrencyKey != original.ConcurrencyKey || current.Context[ConversationTaskContextKey] != nil {
+		t.Fatalf("elapsed time changed the foreground execution lane: %#v %v", current, err)
 	}
-	current, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
-	if err != nil || current.LeaseOwner != "worker" || current.Status != AgentRunStatusRunning || invocationCtx.Err() != nil {
-		closeRelease()
-		<-done
-		t.Fatalf("promotion interrupted original invocation: %#v %v ctx=%v", current, err, invocationCtx.Err())
+	if task, err := store.FindConversationTaskByWorkRunID(t.Context(), original.Scope, original.ID); err != nil || task != nil {
+		t.Fatalf("elapsed time created a background task: %#v %v", task, err)
 	}
-	service := NewConversationService(store)
-	conversation, err = service.GetConversation(t.Context(), run.Scope, conversation.ID)
-	if err != nil {
-		t.Fatal(err)
+	foreground, err := store.ListConversationForegroundRuns(t.Context(), original.Scope, original.Owner, conversation.ID, 100, 0)
+	if err != nil || len(foreground) != 1 || foreground[0].ID != original.ID {
+		t.Fatalf("aged run disappeared from foreground restore: %#v %v", foreground, err)
 	}
-	next := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "What else is new?", "resolution-next-message")
-	if _, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(t.Context(), run.Scope, conversation.ID, next.ID); err != nil {
-		t.Fatal(err)
+	messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: original.Scope, ConversationID: conversation.ID, Limit: 10})
+	if err != nil || len(messages) != 1 || messages[0].ID != trigger.ID {
+		t.Fatalf("elapsed time published a background acknowledgment: %#v %v", messages, err)
 	}
-	current, err = store.GetAgentRun(t.Context(), run.Scope, run.ID)
-	if err != nil || current.Status != AgentRunStatusRunning || invocationCtx.Err() != nil {
-		t.Fatalf("new message superseded continuation: %#v %v", current, err)
+	events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: original.Scope, RunID: original.ID, EventTypes: []string{"conversation.task_continued"}})
+	if err != nil || len(events) != 0 {
+		t.Fatalf("elapsed time recorded a task handoff: %#v %v", events, err)
 	}
-	closeRelease()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("same invocation did not finish")
-	}
-	finished, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
-	if err != nil || finished.Status != AgentRunStatusCompleted || modelCalls.Load() != 1 || !ConversationTaskMatchesWorkRun(task, finished) {
-		t.Fatalf("same-Run completion: %#v calls=%d err=%v", finished, modelCalls.Load(), err)
-	}
+	return current
 }
 
 type promotionTurnPublisher struct {
@@ -218,94 +234,111 @@ func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
 	}
 }
 
-func TestAgentRunWorkerContinuationKeepsInflightTurnAlive(t *testing.T) {
-	store := NewMemoryStore()
-	run, _, _ := continuationLifecycleFixture(t, store, "inflight-continuation")
-	run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-ConversationTaskForegroundTimeout+100*time.Millisecond))
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil {
-		t.Fatalf("claim: %#v %v", claimed, err)
-	}
-	entered, release, done := make(chan context.Context, 1), make(chan struct{}), make(chan struct{})
-	var releaseOnce sync.Once
-	closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
-	defer closeRelease()
-	var calls atomic.Int32
-	pool := workerTaskPool(t, store, run.Scope, TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-		calls.Add(1)
-		entered <- ctx
-		<-release
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+func TestAgentRunWorkerKeepsForegroundDuringSlowTurn(t *testing.T) {
+	testAgentRunWorkerKeepsForegroundPastDeadline(t, false)
+}
+
+func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store := NewMemoryStore()
+		run, conversation, trigger := continuationLifecycleFixture(t, store, "limited-foreground")
+		var modelCalls atomic.Int32
+		pool := workerTaskPool(t, store, run.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+			modelCalls.Add(1)
+			return nil, errors.New("worker should remain queued behind limiter")
+		}))
+		limiter, err := NewWorkerLimiter(1)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Completed original invocation"}}, nil
-	}))
-	go func() { defer close(done); pool.executeClaim(t.Context(), "worker", claimed) }()
-	invocationCtx := <-entered
-	deadline := time.Now().Add(2 * time.Second)
-	var task *ConversationTask
-	for time.Now().Before(deadline) {
-		task, err = store.FindConversationTaskByWorkRunID(t.Context(), run.Scope, run.ID)
-		if err != nil || task != nil {
-			break
+		release, err := limiter.acquire(t.Context())
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if err != nil || task == nil {
-		closeRelease()
-		<-done
-		t.Fatalf("inflight Turn was not promoted: %#v %v", task, err)
-	}
-	turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: run.Scope, RunID: run.ID})
-	if err != nil || len(turns) != 1 || turns[0].Status != AgentTurnStatusRunning || turns[0].LeaseOwner != "worker" || invocationCtx.Err() != nil || calls.Load() != 1 {
-		t.Fatalf("promotion interrupted current Turn: %#v calls=%d ctx=%v err=%v", turns, calls.Load(), invocationCtx.Err(), err)
-	}
-	closeRelease()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("inflight Turn did not finish")
-	}
-	finished, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
-	if err != nil || finished.Status != AgentRunStatusCompleted || finished.LastAppliedTurn != 1 || calls.Load() != 1 || !ConversationTaskMatchesWorkRun(task, finished) {
-		t.Fatalf("inflight continuation restarted execution: %#v calls=%d err=%v", finished, calls.Load(), err)
+		defer release()
+		pool.SetWorkerLimiter(limiter)
+		pool.Start(t.Context())
+		defer pool.Stop()
+		time.Sleep(ConversationTaskForegroundTimeout + 2*time.Second)
+		synctest.Wait()
+		assertConversationRunStillForeground(t, store, run, conversation, trigger, AgentRunStatusQueued)
+		if modelCalls.Load() != 0 {
+			t.Fatalf("background maintenance invoked the model %d times behind the limiter", modelCalls.Load())
+		}
+	})
+}
+
+func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
+	for _, status := range []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusRunning} {
+		t.Run(string(status), func(t *testing.T) {
+			store := NewMemoryStore()
+			run, conversation, trigger := continuationLifecycleFixture(t, store, "reconcile-foreground")
+			run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-time.Minute))
+			if status == AgentRunStatusRunning {
+				claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+				if err != nil || claimed == nil {
+					t.Fatalf("claim: %#v %v", claimed, err)
+				}
+			}
+			reconciler, err := NewConversationRunReconciler(mustConversationRunScheduler(t, store), WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) {
+				return []Scope{run.Scope}, nil
+			}), nil, ConversationRunReconcilerConfig{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := reconciler.Reconcile(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				assertConversationRunStillForeground(t, store, run, conversation, trigger, status)
+			}
+		})
 	}
 }
 
-func TestAgentRunWorkerContinuationScanSurvivesSaturatedLimiter(t *testing.T) {
-	store := NewMemoryStore()
-	run, _, _ := continuationLifecycleFixture(t, store, "limited-continuation")
-	run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-ConversationTaskForegroundTimeout-time.Second))
-	pool := workerTaskPool(t, store, run.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return nil, errors.New("worker should remain queued behind limiter")
-	}))
-	limiter, err := NewWorkerLimiter(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	release, err := limiter.acquire(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer release()
-	pool.SetWorkerLimiter(limiter)
-	pool.Start(t.Context())
-	defer pool.Stop()
-	deadline := time.Now().Add(2 * time.Second)
-	var task *ConversationTask
-	for time.Now().Before(deadline) {
-		task, err = store.FindConversationTaskByWorkRunID(t.Context(), run.Scope, run.ID)
-		if err != nil || task != nil {
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if err != nil || task == nil {
-		t.Fatalf("limiter prevented durable deadline reconciliation: %#v %v", task, err)
-	}
-	current, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
-	if err != nil || current.Status != AgentRunStatusQueued || current.ID != task.WorkRunID {
-		t.Fatalf("deadline scan dispatched blocked work: %#v %v", current, err)
+func TestAgentRunWorkerStartsIndependentTaskWhenModelChoosesBackground(t *testing.T) {
+	for _, age := range []time.Duration{0, time.Minute} {
+		t.Run(age.String(), func(t *testing.T) {
+			store := NewMemoryStore()
+			run, conversation, trigger := continuationLifecycleFixture(t, store, "model-background")
+			if age > 0 {
+				run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-age))
+			}
+			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+			if err != nil || claimed == nil {
+				t.Fatalf("claim: %#v %v", claimed, err)
+			}
+			modelCalls := 0
+			proposal := taskProposalFixture()
+			pool := workerTaskPool(t, store, run.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				modelCalls++
+				return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: proposal}, nil
+			}))
+			pool.executeClaim(t.Context(), "worker", claimed)
+			completed, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
+			if err != nil || completed.Status != AgentRunStatusCompleted || completed.Output["summary"] != proposal.Acknowledgment || modelCalls != 1 {
+				t.Fatalf("model-selected task did not complete admission: %#v calls=%d err=%v", completed, modelCalls, err)
+			}
+			turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: run.Scope, RunID: run.ID})
+			if err != nil || len(turns) != 1 || turns[0].RequestedTask == nil {
+				t.Fatalf("model task decision was not durable: %#v %v", turns, err)
+			}
+			if _, err := pool.materializeTurnTask(t.Context(), "worker", completed, turns[0], &TurnRunnerBinding{DeploymentID: "agent"}); err != nil {
+				t.Fatalf("admission replay: %v", err)
+			}
+			tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: run.Scope, Owner: run.Owner, ConversationID: conversation.ID, Limit: 10})
+			if err != nil || len(tasks) != 1 {
+				t.Fatalf("model admission or replay duplicated background work: %#v %v", tasks, err)
+			}
+			task, work := tasks[0].Task, tasks[0].WorkRun
+			if task.Mode != ConversationTaskModeIndependent || task.SourceRunID != run.ID || task.WorkRunID == run.ID || task.AuthenticatedActor != trigger.Sender || work.ID != task.WorkRunID || work.Kind != RunKindAgentWork || work.ParentRunID != "" || work.RootRunID != work.ID || work.Status != AgentRunStatusQueued {
+				t.Fatalf("duration changed the model's independent task into a continuation: task=%#v work=%#v", task, work)
+			}
+			messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: conversation.ID, Limit: 10})
+			if err != nil || len(messages) != 2 || messages[0].ID != trigger.ID || messages[1].Content != proposal.Acknowledgment {
+				t.Fatalf("background acknowledgment did not commit exactly once: %#v %v", messages, err)
+			}
+		})
 	}
 }
 
