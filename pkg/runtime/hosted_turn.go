@@ -198,6 +198,10 @@ type HostedTurnRequest struct {
 	ModelCredential *capability.CredentialReference `json:"modelCredential,omitempty"`
 	ModelProvider   string                          `json:"modelProvider,omitempty"`
 	Model           string                          `json:"model,omitempty"`
+
+	// CanAskConversationQuestion is a kernel-proven delivery capability for the
+	// trusted host. It is absent from model input and never implies approval.
+	CanAskConversationQuestion bool `json:"canAskConversationQuestion,omitempty"`
 }
 
 // HostedTurnExecutionFailure is emitted by the trusted host after a native
@@ -729,11 +733,12 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		DependencyResults:      dependencyResults,
 		CollaborationResults:   collaborationResults,
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
-		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
+		PendingInterventions:   cloneAgentRun(input.Run).PendingInterventions,
 		ModelMedia:             append(hostedTurnMediaFromCheckpoint(input.Run.Checkpoint), input.ModelMedia...),
 		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
+	request.CanAskConversationQuestion = input.canAskConversationQuestion && input.Run.AssignedAgentID == r.config.AgentID
 	if input.Run.Kind == RunKindAgentWork && input.Run.Context[ConversationTaskContextKey] != nil {
 		// A context hint can only reduce the offered targets. The fork
 		// coordinator still verifies persisted task identity and lineage.

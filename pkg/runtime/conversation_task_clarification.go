@@ -64,10 +64,10 @@ func conversationClarificationReferences(run *AgentRun) []ConversationReference 
 	return references
 }
 
-// An explicit reply to a task's question is a clarification attempt, including
-// when its actor, thread or current task state prevents acceptance. Do not turn
+// An explicit reply to a root Run's question is a clarification attempt, including
+// when its actor, thread or current Run state prevents acceptance. Do not turn
 // such rejected answers into unrelated foreground work.
-func (s *ConversationRunScheduler) targetsIndependentTaskQuestion(ctx context.Context, conversation *Conversation, answer *ChannelMessage) (bool, error) {
+func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.Context, conversation *Conversation, answer *ChannelMessage) (bool, error) {
 	if conversation == nil || answer == nil || answer.Scope != conversation.Scope || answer.ConversationID != conversation.ID {
 		return false, nil
 	}
@@ -88,12 +88,25 @@ func (s *ConversationRunScheduler) targetsIndependentTaskQuestion(ctx context.Co
 	if question.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID}) || question.Intent != MessageIntentQuestion || !question.RequiresResponse || !strings.HasPrefix(question.IdempotencyKey, "conversation-clarification:") {
 		return false, nil
 	}
-	tasks, ok := s.runs.store.(ConversationTaskStore)
-	if !ok {
-		return false, nil
-	}
 	for _, reference := range question.References {
 		if reference.Kind != ConversationReferenceRun {
+			continue
+		}
+		run, err := s.runs.store.GetAgentRun(ctx, conversation.Scope, reference.ID)
+		if err != nil {
+			return false, err
+		}
+		if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
+			_, origin, _, err := foregroundConversationWorkOrigin(ctx, s.runs.store, s.conversations.store, run)
+			if err != nil {
+				return false, err
+			}
+			if origin != nil && origin.ID == conversation.ID {
+				return true, nil
+			}
+		}
+		tasks, ok := s.runs.store.(ConversationTaskStore)
+		if !ok {
 			continue
 		}
 		task, err := tasks.FindConversationTaskByWorkRunID(ctx, conversation.Scope, reference.ID)
@@ -107,11 +120,11 @@ func (s *ConversationRunScheduler) targetsIndependentTaskQuestion(ctx context.Co
 	return false, nil
 }
 
-func conversationTaskClarificationMatches(run *AgentRun, trigger, question, answer *ChannelMessage) bool {
+func conversationClarificationMatches(run *AgentRun, trigger, question, answer *ChannelMessage) bool {
 	if question.Validate() != nil {
 		return false
 	}
-	if run.Kind != RunKindAgentWork || run.ParentRunID != "" || run.Context[ConversationTaskContextKey] == nil {
+	if run.ParentRunID != "" {
 		return true
 	}
 	thread := trigger.ThreadRootID
@@ -123,6 +136,9 @@ func conversationTaskClarificationMatches(run *AgentRun, trigger, question, answ
 		!strings.HasPrefix(question.IdempotencyKey, "conversation-clarification:"+run.ID+":") ||
 		answer.ThreadRootID != "" && answer.ThreadRootID != thread {
 		return false
+	}
+	if run.Context[ConversationTaskContextKey] == nil {
+		return true
 	}
 	for _, reference := range question.References {
 		if reference.Kind == ConversationReferenceTask && reference.ID == run.Context[ConversationTaskContextKey] {

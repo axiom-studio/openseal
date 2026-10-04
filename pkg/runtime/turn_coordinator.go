@@ -20,6 +20,9 @@ type TurnExecutionContext struct {
 	// conversation adapter invokes an Agent runner with a lowered execution kind.
 	// It is ephemeral and never copied into hosted model input or durable state.
 	ForegroundConversation *AgentRun
+	// Verified only by the canonical conversation origin resolver. This is a
+	// host transport capability, never model-authored input or a user grant.
+	canAskConversationQuestion bool
 }
 
 // TurnRunner performs one bounded, proposal-only reasoning step. External side
