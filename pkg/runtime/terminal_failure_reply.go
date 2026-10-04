@@ -155,6 +155,30 @@ func terminalFailureReplyFromCheckpoint(checkpoint map[string]interface{}) strin
 	return reply
 }
 
+func terminalRunFailureReply(run *AgentRun) string {
+	if run == nil {
+		return TerminalFailureReply("execution_failed")
+	}
+	code := terminalFailureCodeFromCheckpoint(run.Checkpoint)
+	if run.Status == AgentRunStatusFailed && (code == "action_failed" || code == "execution_failed") {
+		// A prior failure is not necessarily why the Run stopped. Attribute a
+		// direct cause only when the current canonical failed receipt and exact
+		// terminal Run error agree; never infer one from raw error text.
+		if failure := latestCanonicalActionFailure(run.Checkpoint); failure != nil && run.Error == failure.Error() {
+			if failure.HasRateLimitedSource() {
+				return "I couldn't finish this request because one or more sources rate-limited requests (HTTP 429). I stopped this attempt. Try again later."
+			}
+			switch failure.Code() {
+			case "browser_proxy_authentication_failed":
+				return "I couldn't finish this request because the platform's browser connection was rejected. I stopped this attempt. Try again later."
+			case "browser_proxy_unavailable":
+				return "I couldn't finish this request because the platform's browser connection was unavailable. I stopped this attempt. Try again later."
+			}
+		}
+	}
+	return terminalFailureReplyFromCheckpoint(run.Checkpoint)
+}
+
 // Accept the in-memory and persisted JSON number forms without coercing
 // strings, booleans, fractional values or arbitrary host-supplied objects.
 func terminalFailureCounterIsOne(value interface{}) bool {
