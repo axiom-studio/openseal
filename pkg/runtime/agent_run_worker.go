@@ -1261,17 +1261,8 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	}
 	status := AgentRunStatusFailed
 	runError := "governed action materialization failed"
-	checkpoint := map[string]interface{}(nil)
 	safeCause := sanitizeActionError(cause, nil)
-	if conversationalCheckpoint, ok := checkpointGovernedConversationProposalFailure(run, turn, cause); ok {
-		status = AgentRunStatusQueued
-		runError = ""
-		checkpoint = conversationalCheckpoint
-	} else if recoveryCheckpoint, ok := checkpointGovernedProposalFailure(run, turn, cause, safeCause); ok {
-		status = AgentRunStatusQueued
-		runError = ""
-		checkpoint = recoveryCheckpoint
-	}
+	checkpoint := checkpointTerminalFailure(preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "action_admission_failed")
 	failed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, LeaseOwner: workerID, Checkpoint: checkpoint,
 		Error: runError, Summary: "Agent action proposal could not be governed",
@@ -1289,70 +1280,10 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	}
 }
 
+// Retained for deterministic validation callers; rejected proposals cannot
+// grant an automatic recovery turn or retain model-authored rejected state.
 func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause error, safeCause string) (map[string]interface{}, bool) {
-	if run == nil || turn == nil || (run.Kind != RunKindAgentWork && run.Kind != RunKindConversation) || strings.TrimSpace(safeCause) == "" || requiresFinalFailureExplanation(run.Checkpoint) {
-		return nil, false
-	}
-	if len(turn.RequestedActions) != 1 {
-		if turn.RequestedFork == nil && turn.RequestedDelegation == nil && turn.RequestedRunbook == nil && turn.RequestedTask == nil {
-			return nil, false
-		}
-		return checkpointFinalFailureExplanation(run.Checkpoint, "proposal", safeCause), true
-	}
-	attempt := 1
-	if current, ok := run.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{}); ok {
-		switch value := current["attempt"].(type) {
-		case int:
-			attempt = value + 1
-		case int64:
-			attempt = int(value) + 1
-		case float64:
-			attempt = int(value) + 1
-		}
-	}
-	if attempt > maximumProposalRecoveryAttempts {
-		return nil, false
-	}
-	request := turn.RequestedActions[0]
-	if feedback, active := ReadToolFeedbackCorrection(run.Checkpoint); active {
-		return checkpointFinalFailureExplanation(run.Checkpoint, "action", feedback.Message+" The corrected request could not be admitted: "+toolFeedbackMessage(safeCause)), true
-	}
-	// A proposal rejected before materialization has not committed any of the
-	// model-authored state emitted with that proposal. Resume from the last
-	// committed checkpoint and retain only the exact rejected arguments needed
-	// for deterministic repair; invented action IDs or observations must not
-	// become recovery context beside the kernel-owned evidence journal.
-	checkpoint := preserveKernelActionHistory(run.Checkpoint, run.Checkpoint)
-	if run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam {
-		if participant, ok := turn.ContinuationCheckpoint[teamActionAssignedAgentCheckpointKey].(string); ok && validOpaqueIdentifier(participant, 256) {
-			checkpoint[teamActionAssignedAgentCheckpointKey] = participant
-		}
-	}
-	if arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, request.InputRef); err == nil {
-		pointer := strings.TrimPrefix(strings.TrimSpace(strings.TrimPrefix(request.InputRef, "#")), "/continuationCheckpoint")
-		if pointer != "" {
-			_ = setRunbookPointer(checkpoint, pointer, arguments)
-		}
-	}
-	recovery := map[string]interface{}{
-		"attempt": attempt, "turnId": turn.ID, "capability": request.Capability,
-		"summary": strings.TrimSpace(request.Summary), "inputRef": request.InputRef, "error": safeCause,
-	}
-	if bindingID := strings.TrimSpace(request.BindingID); bindingID != "" {
-		recovery["bindingId"] = bindingID
-		recovery["bindingRevision"] = request.BindingRevision
-	}
-	var actionAdvance actionAdvanceRecoveryError
-	if errors.As(cause, &actionAdvance) {
-		if prerequisite, required := actionAdvance.actionAdvanceRecovery(); required {
-			recovery["requiresActionAdvance"] = true
-			if prerequisite = strings.TrimSpace(prerequisite); prerequisite != "" {
-				recovery["prerequisiteAction"] = prerequisite
-			}
-		}
-	}
-	checkpoint[proposalRecoveryCheckpointKey] = recovery
-	return checkpointFinalFailureExplanation(checkpoint, "proposal", safeCause), true
+	return nil, false
 }
 
 func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {

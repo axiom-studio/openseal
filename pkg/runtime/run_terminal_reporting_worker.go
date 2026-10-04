@@ -131,7 +131,7 @@ dispatch:
 }
 
 func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *RunTerminalReport) error {
-	if report == nil || report.Run == nil || report.LeaseExpiresAt == nil || report.Run.Scope != report.Scope || report.Run.ID != report.RunID || report.Run.Status != report.Status || !runNeedsTerminalReporting(report.Run) {
+	if report == nil || report.Run == nil || report.LeaseExpiresAt == nil || report.Run.Scope != report.Scope || report.Run.ID != report.RunID || report.Run.Status != report.Status || report.TerminalRevision != report.Run.Revision || !runNeedsTerminalReporting(report.Run) {
 		return ErrInvalidRunTerminalReport
 	}
 	var err error
@@ -147,7 +147,7 @@ func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *
 	}
 	now := w.now().UTC()
 	completion := RunTerminalReportingCompletion{
-		Scope: report.Scope, RunID: report.RunID, Status: report.Status, WorkerID: report.LeaseOwner,
+		Scope: report.Scope, RunID: report.RunID, Status: report.Status, TerminalRevision: report.TerminalRevision, WorkerID: report.LeaseOwner,
 		LeaseExpiresAt: *report.LeaseExpiresAt, Now: now,
 	}
 	if err != nil {

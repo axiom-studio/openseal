@@ -445,6 +445,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateConversationTaskContinuations(ctx, tx); err != nil {
 		return fmt.Errorf("conversation task continuations migration: %w", err)
 	}
+	if err := s.migrateTerminalConversationFailures(ctx, tx); err != nil {
+		return fmt.Errorf("terminal conversation failure reporting migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

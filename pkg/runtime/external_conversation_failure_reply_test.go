@@ -104,10 +104,12 @@ func TestExternalConversationFailureReplyIsSafeScopedAndIdempotent(t *testing.T)
 				t.Fatalf("canonical failure messages = %#v, %v", messages, err)
 			}
 			reply := messages[1]
-			if reply.Content != "I couldn’t finish this reply. Your message is saved." ||
+			if reply.Content != TerminalFailureReply("execution_failed") || reply.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID}) ||
+				reply.Scope != item.Scope || reply.ConversationID != item.ConversationID || reply.ThreadRootID != item.ChannelMessageID ||
 				reply.ReplyToMessageID != item.ChannelMessageID || reply.ResolvesMessageID != item.ChannelMessageID ||
-				len(reply.References) != 1 || reply.References[0].ID != item.RunID ||
-				strings.Contains(reply.Content, "action_1") || strings.Contains(reply.Content, "private-secret") {
+				len(reply.References) != 1 || reply.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: item.RunID}) ||
+				first[0].ChannelMessageID != reply.ID ||
+				strings.Contains(reply.Content, "action_1") || strings.Contains(reply.Content, "private-secret") || strings.Contains(reply.Content, "bot_token") {
 				t.Fatalf("unsafe or uncorrelated failure reply: %#v", reply)
 			}
 			deliveries, err := store.ListExternalConversationDeliveries(ctx, ExternalConversationDeliveryFilter{Scope: endpoint.Scope, ConversationID: item.ConversationID, Limit: 10})

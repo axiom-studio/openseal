@@ -27,6 +27,7 @@ type MemoryStore struct {
 	outreachIdempotency                 map[string]string
 	agentRuns                           map[string]*AgentRun
 	runTerminalReports                  map[runTerminalReportKey]*RunTerminalReport
+	runTerminalReportLatest             map[runTerminalReportFamily]runTerminalReportKey
 	runTerminalReportQueue              memoryTerminalReportQueue
 	runEventWaits                       map[memoryRunEventWaitKey]*RunEventWait
 	runEventWaitActive                  map[memoryRunEventRunKey]memoryRunEventWaitKey

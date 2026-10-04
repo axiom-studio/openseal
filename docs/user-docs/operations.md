@@ -57,6 +57,10 @@ Every process opening the same schema waits on the same advisory lock, so only o
 
 The store also exposes an explicit rollback call that removes schema objects introduced after a target version, intended for controlled release rollback.
 
+Schema version 59 changes the terminal-report queue identity to include the terminal Run revision. Stop all processes that can read or write the old queue before opening a version-59 store, then start only processes using the new contract. The advisory migration lock protects DDL execution; it does not make the version-58 queue statements compatible with the new primary key. Delivery intents and active leases are preserved, and a manual retry receives its own immutable intent. Rollback to 58 requires the same process barrier and refuses to discard multiple attempt receipts or pending conversation-failure replies that 58 cannot deliver.
+
+External reply delivery remains idempotent per incoming message. Once a reply delivery exists for that message, retrying its Run does not enqueue another external reply; send a fresh message in the external conversation to start a new attempt and receive a new delivery. Local failure replies retain a separate identity for each explicitly retried terminal attempt.
+
 Both stores implement the same kernel contracts — the agent registry, team registry, Skill catalog, conversations, projects, artifacts, outreach, source monitors, source policies, event-source subscriptions and checkpoints, and the authoring change-set contracts. A deployment does not lose capabilities by choosing PostgreSQL.
 
 ### Artifact Content

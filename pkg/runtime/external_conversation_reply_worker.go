@@ -133,6 +133,30 @@ func (w *ExternalConversationReplyWorker) project(
 		(endpoint.Handler.Kind == ExternalConversationHandlerAgent && endpoint.DeploymentID != run.AssignedAgentID) {
 		return nil, ErrExternalConversationConflict
 	}
+	if failedConversationReportCandidate(run) {
+		// Metadata-only updates are not new attempts. Resolve the captured
+		// terminal identity instead of minting a reply for a mutable revision.
+		if reports, ok := w.store.(interface {
+			GetRunTerminalReport(context.Context, Scope, string, AgentRunStatus) (*RunTerminalReport, error)
+		}); ok {
+			run, err = externalConversationFailureReportRun(ctx, reports, run)
+			if err != nil {
+				return nil, err
+			}
+		}
+		conversationID, conversationOK := run.Context[conversationRunContextConversationID].(string)
+		triggerID, triggerOK := run.Context[conversationRunContextTriggerID].(string)
+		if !conversationOK || !triggerOK || conversationID != item.ConversationID || triggerID != item.ChannelMessageID {
+			// An acknowledged report releases its snapshot. Its immutable
+			// inbox source still fences projection from mutable Run context.
+			return nil, ErrExternalConversationConflict
+		}
+		// Both workers publish through the same revision-specific failure key.
+		// The provider outbox then delivers that saved Agent answer once.
+		if err := projectFailedConversationReply(ctx, w.store, run); err != nil {
+			return nil, err
+		}
+	}
 	message, err := w.findCanonicalReply(ctx, item, run)
 	if err != nil {
 		return nil, err
@@ -215,6 +239,30 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 	item *ExternalConversationInboxItem,
 	run *AgentRun,
 ) (*ChannelMessage, error) {
+	// The canonical projector also prefers a committed normal answer. In
+	// particular, an older failed manual attempt must not win a history scan.
+	message, err := w.store.FindChannelMessageByIdempotencyKey(ctx, item.Scope, item.ConversationID, conversationTaskFinalResponseKey(run))
+	if err != nil && !errors.Is(err, ErrChannelMessageNotFound) {
+		return nil, err
+	}
+	if message != nil {
+		if !canonicalExternalRunReply(message, item, run) {
+			return nil, ErrExternalConversationConflict
+		}
+		return message, nil
+	}
+	if run.Status == AgentRunStatusFailed {
+		message, err := w.store.FindChannelMessageByIdempotencyKey(ctx, item.Scope, item.ConversationID, terminalConversationFailureReplyKey(run))
+		if err != nil && !errors.Is(err, ErrChannelMessageNotFound) {
+			return nil, err
+		}
+		if message != nil {
+			if !canonicalExternalRunReply(message, item, run) {
+				return nil, ErrExternalConversationConflict
+			}
+			return message, nil
+		}
+	}
 	if messageID, _ := run.Output["messageId"].(string); strings.TrimSpace(messageID) != "" {
 		message, err := w.store.GetChannelMessage(ctx, item.Scope, item.ConversationID, messageID)
 		if err != nil && !errors.Is(err, ErrChannelMessageNotFound) {
@@ -248,6 +296,53 @@ func (w *ExternalConversationReplyWorker) findCanonicalReply(
 	}
 }
 
+// Only the external mutable-Run read needs normalization. A reporting worker
+// must project its exact claimed snapshot even when a newer attempt exists.
+func externalConversationFailureReportRun(ctx context.Context, reports interface {
+	GetRunTerminalReport(context.Context, Scope, string, AgentRunStatus) (*RunTerminalReport, error)
+}, run *AgentRun) (*AgentRun, error) {
+	report, err := reports.GetRunTerminalReport(ctx, run.Scope, run.ID, run.Status)
+	if errors.Is(err, ErrRunTerminalReportNotFound) {
+		// Historical pre-59 failures may have no reporting intent.
+		return run, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if report == nil || report.Scope != run.Scope || report.RunID != run.ID || report.Status != run.Status || report.TerminalRevision < 0 || report.TerminalRevision > run.Revision {
+		return nil, ErrInvalidRunTerminalReport
+	}
+	if report.TerminalRevision == 0 && report.DeliveredAt != nil && report.Run == nil {
+		// Acknowledged schema58 rows released their snapshots before the
+		// terminal revision was recorded. Do not invent historical identity.
+		return run, nil
+	}
+	if report.Run != nil {
+		snapshot := report.Run
+		if snapshot.Scope != run.Scope || snapshot.ID != run.ID || snapshot.Status != run.Status || snapshot.Revision != report.TerminalRevision || snapshot.Owner != run.Owner || snapshot.AssignedAgentID != run.AssignedAgentID || snapshot.Kind != run.Kind || snapshot.ParentRunID != run.ParentRunID || snapshot.Source != run.Source {
+			return nil, ErrInvalidRunTerminalReport
+		}
+		for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, "threadRootMessageId"} {
+			left, leftString := snapshot.Context[key].(string)
+			right, rightString := run.Context[key].(string)
+			if key == "threadRootMessageId" && snapshot.Context[key] == nil && run.Context[key] == nil {
+				continue
+			}
+			if !leftString || !rightString || left != right {
+				return nil, ErrInvalidRunTerminalReport
+			}
+		}
+		return cloneAgentRun(snapshot), nil
+	}
+	if report.DeliveredAt == nil {
+		return nil, ErrInvalidRunTerminalReport
+	}
+	// Acknowledgment releases only the duplicated snapshot, never its key.
+	result := cloneAgentRun(run)
+	result.Revision = report.TerminalRevision
+	return result, nil
+}
+
 func canonicalExternalRunReply(message *ChannelMessage, item *ExternalConversationInboxItem, run *AgentRun) bool {
 	if message == nil || message.Scope != item.Scope || message.ConversationID != item.ConversationID ||
 		message.ReplyToMessageID != item.ChannelMessageID || message.Intent != MessageIntentAnswer ||
@@ -277,7 +372,7 @@ func externalConversationRunReply(run *AgentRun) (string, bool) {
 		// Failures may follow partially executed actions. Report only the reply
 		// interruption, without exposing internal errors or guessing whether
 		// those actions had external effects.
-		return "I couldn’t finish this reply. Your message is saved.", true
+		return TerminalFailureReply(terminalFailureCodeFromCheckpoint(run.Checkpoint)), true
 	}
 	if run.Status != AgentRunStatusCompleted {
 		return "", false

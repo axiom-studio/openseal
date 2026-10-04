@@ -16,15 +16,16 @@ var ErrRunTerminalReportNotFound = errors.New("terminal Run report not found")
 // transaction as a terminal Run. Reporting never re-executes a model or action.
 // Acknowledged rows retain their identity but release the duplicated snapshot.
 type RunTerminalReport struct {
-	Scope          Scope          `json:"scope"`
-	RunID          string         `json:"runId"`
-	Status         AgentRunStatus `json:"status"`
-	Run            *AgentRun      `json:"run,omitempty"`
-	AvailableAt    time.Time      `json:"availableAt"`
-	Attempts       int            `json:"attempts"`
-	LeaseOwner     string         `json:"-"`
-	LeaseExpiresAt *time.Time     `json:"-"`
-	DeliveredAt    *time.Time     `json:"deliveredAt,omitempty"`
+	Scope            Scope          `json:"scope"`
+	RunID            string         `json:"runId"`
+	TerminalRevision int64          `json:"terminalRevision"`
+	Status           AgentRunStatus `json:"status"`
+	Run              *AgentRun      `json:"run,omitempty"`
+	AvailableAt      time.Time      `json:"availableAt"`
+	Attempts         int            `json:"attempts"`
+	LeaseOwner       string         `json:"-"`
+	LeaseExpiresAt   *time.Time     `json:"-"`
+	DeliveredAt      *time.Time     `json:"deliveredAt,omitempty"`
 }
 
 // A nil Scope is reserved for trusted host workers draining the indexed global
@@ -50,19 +51,20 @@ func (r RunTerminalReportingClaim) Validate() error {
 }
 
 type RunTerminalReportingCompletion struct {
-	Scope          Scope
-	RunID          string
-	Status         AgentRunStatus
-	WorkerID       string
-	LeaseExpiresAt time.Time
-	Now            time.Time
+	Scope            Scope
+	RunID            string
+	TerminalRevision int64
+	Status           AgentRunStatus
+	WorkerID         string
+	LeaseExpiresAt   time.Time
+	Now              time.Time
 }
 
 func (r RunTerminalReportingCompletion) Validate() error {
 	if err := r.Scope.Validate(); err != nil {
 		return err
 	}
-	if !validOpaqueIdentifier(r.RunID, 128) || !isTerminalAgentRunStatus(r.Status) || !validOpaqueIdentifier(r.WorkerID, 256) || r.Now.IsZero() || r.LeaseExpiresAt.IsZero() {
+	if r.TerminalRevision < 0 || !validOpaqueIdentifier(r.RunID, 128) || !isTerminalAgentRunStatus(r.Status) || !validOpaqueIdentifier(r.WorkerID, 256) || r.Now.IsZero() || r.LeaseExpiresAt.IsZero() {
 		return ErrInvalidRunTerminalReport
 	}
 	return nil
@@ -96,6 +98,9 @@ type RunTerminalReportingStore interface {
 func runNeedsTerminalReporting(run *AgentRun) bool {
 	if run == nil || !isTerminalAgentRunStatus(run.Status) {
 		return false
+	}
+	if failedConversationReportCandidate(run) {
+		return true
 	}
 	rootID, _ := run.Context[runReportingContextRootRunID].(string)
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)

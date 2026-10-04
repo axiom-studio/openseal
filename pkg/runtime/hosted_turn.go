@@ -343,6 +343,11 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if r == nil || r.host == nil || input.Run == nil || input.Turn == nil {
 		return nil, errors.New("hosted turn requires a durable Run and Turn")
 	}
+	// Legacy failure checkpoints complete through kernel-owned text, never a
+	// correction proposal or an additional model request.
+	if outcome, stopped := terminalFailureOutcome(input.Run); stopped {
+		return outcome, nil
+	}
 	snapshot, err := evidenceSnapshotForGrounding(input.Run.Context)
 	if err != nil {
 		return nil, err

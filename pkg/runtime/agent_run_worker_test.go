@@ -464,7 +464,7 @@ func TestAgentRunWorkerResumesCompletedIdempotentActionReplay(t *testing.T) {
 	}
 }
 
-func TestAgentRunWorkerRequeuesConversationMaterializationFailureForProjection(t *testing.T) {
+func TestAgentRunWorkerStopsConversationMaterializationFailureWithoutModelRepair(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "proposal-failure"}
@@ -497,15 +497,16 @@ func TestAgentRunWorkerRequeuesConversationMaterializationFailureForProjection(t
 	}}}
 	pool.failMaterialization(ctx, workerID, claimed, turn, fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition))
 
-	requeued, err := store.GetAgentRun(ctx, scope, run.ID)
+	failed, err := store.GetAgentRun(ctx, scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recovery, _ := requeued.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{})
-	if requeued.Status != AgentRunStatusQueued || requeued.Error != "" || requeued.LeaseOwner != "" ||
-		fmt.Sprint(recovery["capability"]) != "openseal.objectives.pause" || fmt.Sprint(recovery["attempt"]) != "1" {
-		t.Fatalf("requeued proposal failure = %#v", requeued)
+	if failed.Status != AgentRunStatusFailed || failed.Error == "" || failed.LeaseOwner != "" || failed.CompletedAt == nil || failed.WakeCondition != nil ||
+		failed.Checkpoint[proposalRecoveryCheckpointKey] != nil || terminalFailureCodeFromCheckpoint(failed.Checkpoint) != "action_admission_failed" {
+		t.Fatalf("proposal failure authorized another attempt: %#v", failed)
 	}
+	feedbackAssertNotClaimable(t, store, scope, time.Now())
+	feedbackAssertKernelFailureReply(t, failed, "action_admission_failed")
 	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID})
 	if err != nil {
 		t.Fatal(err)
@@ -524,13 +525,15 @@ func TestAgentRunWorkerRequeuesConversationMaterializationFailureForProjection(t
 	}
 }
 
-func TestAgentRunWorkerQueuesOneFinalProposalFailureExplanation(t *testing.T) {
+func TestAgentRunWorkerProposalFailurePreservesEvidenceWithoutModelRepair(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "agent-proposal-recovery"}
 	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
 		AssignedAgentID: "agent", Goal: "Post one reviewed comment", Source: RunSourceManual,
+		Checkpoint: checkpointTerminalAction(nil, &ActionCall{ID: "committed-observation", Status: ActionCallStatusSucceeded,
+			SkillID: "browser", Action: "observe", Output: map[string]interface{}{"result": "saved-current-observation"}}, nil),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -557,29 +560,26 @@ func TestAgentRunWorkerQueuesOneFinalProposalFailureExplanation(t *testing.T) {
 	}}}
 	pool.failMaterialization(ctx, workerID, claimed, turn, errors.New("target requires a current observation"))
 
-	requeued, err := store.GetAgentRun(ctx, scope, run.ID)
+	failed, err := store.GetAgentRun(ctx, scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	recovery, _ := requeued.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{})
-	if requeued.Status != AgentRunStatusQueued || requeued.Error != "" || requeued.LeaseOwner != "" ||
-		fmt.Sprint(recovery["attempt"]) != "1" || recovery["capability"] != "skill-browser.camoufox-commit" ||
-		recovery["error"] != "target requires a current observation" {
-		t.Fatalf("requeued proposal recovery = %#v", requeued)
+	if failed.Status != AgentRunStatusFailed || failed.Error == "" || failed.LeaseOwner != "" || failed.CompletedAt == nil ||
+		failed.Checkpoint[proposalRecoveryCheckpointKey] != nil || terminalFailureCodeFromCheckpoint(failed.Checkpoint) != "action_admission_failed" {
+		t.Fatalf("failed proposal retained repair authority: %#v", failed)
 	}
-	if requeued.Checkpoint["inventedFillActionId"] != nil {
-		t.Fatalf("rejected model checkpoint state survived recovery: %#v", requeued.Checkpoint)
+	if failed.Checkpoint["inventedFillActionId"] != nil || failed.Checkpoint["actionInputs"] != nil {
+		t.Fatalf("rejected model proposal gained checkpoint authority: %#v", failed.Checkpoint)
 	}
-	arguments, err := resolveTurnActionInput(requeued.Checkpoint, "/actionInputs/call")
-	if err != nil || arguments["target"] != "s4:e9" {
-		t.Fatalf("rejected action arguments were not retained: %#v, %v", arguments, err)
+	entries := actionHistoryEntries(failed.Checkpoint)
+	if len(entries) != 1 || entries[0]["actionCallId"] != "committed-observation" {
+		t.Fatalf("materialization failure lost succeeded evidence: %#v", entries)
 	}
-	if !requiresFinalFailureExplanation(requeued.Checkpoint) {
-		t.Fatal("failed proposal has no final explanation boundary")
+	if _, ok := checkpointGovernedProposalFailure(failed, turn, errors.New("target still invalid"), "target still invalid"); ok {
+		t.Fatal("failed proposal was accepted for an automatic correction turn")
 	}
-	if _, ok := checkpointGovernedProposalFailure(requeued, turn, errors.New("target still invalid"), "target still invalid"); ok {
-		t.Fatal("failed proposal was accepted for another correction turn")
-	}
+	feedbackAssertNotClaimable(t, store, scope, time.Now())
+	feedbackAssertKernelFailureReply(t, failed, "action_admission_failed")
 }
 
 func TestAgentRunWorkerMaterializesDurableFork(t *testing.T) {

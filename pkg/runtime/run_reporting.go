@@ -163,6 +163,9 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	if store == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
 		return nil
 	}
+	if failedConversationReportCandidate(run) {
+		return projectFailedConversationReply(ctx, store, run)
+	}
 	if run.Kind == RunKindConversation && run.Context[ConversationTaskContextKey] != nil {
 		task, sourceReport, err := conversationTaskForReport(ctx, store, run)
 		if err != nil {
@@ -188,6 +191,9 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	if run.Status != AgentRunStatusCompleted {
 		milestone = runbook.ReportingFailed
 		content = fmt.Sprintf("%s: %s", terminalRunStatusLabel(run.Status), strings.TrimSpace(run.Goal))
+		if run.Status == AgentRunStatusFailed {
+			content = TerminalFailureReply(terminalFailureCodeFromCheckpoint(run.Checkpoint))
+		}
 	}
 	if task, _ := run.Context[scheduledTaskContextKey].(bool); task && run.Status == AgentRunStatusCompleted {
 		if summary, _ := run.Output["summary"].(string); strings.TrimSpace(summary) != "" {

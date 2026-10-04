@@ -141,6 +141,16 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		}
 		return w.persistOutcome(ctx, call, nil, nil, nil, nil, workerID, false)
 	}
+	if terminalFailureCheckpointActive(sourceRun.Checkpoint) {
+		// An admitted legacy correction cannot cross the upgrade boundary.
+		// Stop before catalog hydration, credential resolution or dispatch.
+		call, leaseErr := stopLease()
+		if leaseErr != nil {
+			return nil, leaseErr
+		}
+		return w.persistOutcome(ctx, call, nil, nil, nil,
+			errors.New("A previous operation failed. Automatic corrections are disabled for this attempt."), workerID, false)
+	}
 	if call.RecoveredRunning && call.SideEffect != skill.SideEffectRead && call.SideEffect != skill.SideEffectNone {
 		// The expired worker may have already dispatched this mutation. A new
 		// lease does not prove that nothing happened, even with MaxAttempts=1.
@@ -212,6 +222,9 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	}
 	if executionErr == nil {
 		executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID)
+	}
+	if executionErr == nil && terminalFailureCheckpointActive(sourceRun.Checkpoint) {
+		executionErr = errors.New("A previous operation failed. Automatic corrections are disabled for this attempt.")
 	}
 	if executionErr == nil && runOwnsActionDependency(sourceRun, call) && !runHasPausedActionDependency(sourceRun, call) {
 		dispatchCtx := executionCtx
@@ -441,6 +454,14 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
+		if updatedCall.Status == ActionCallStatusFailed && !paused {
+			// A failed dispatch ends this attempt. Successful receipt chains
+			// still requeue; paused work remains under the user's control.
+			updatedRun.Status = AgentRunStatusFailed
+			updatedRun.Error = updatedCall.Error
+			updatedRun.CompletedAt = &now
+			updatedRun.LeaseOwner, updatedRun.LeaseExpiresAt = "", nil
+		}
 		if updatedCall.Status == ActionCallStatusFailed && updatedCall.ApprovalID != "" {
 			approval, approvalErr := w.store.GetApproval(ctx, updatedCall.Scope, updatedCall.ApprovalID)
 			if approvalErr != nil {

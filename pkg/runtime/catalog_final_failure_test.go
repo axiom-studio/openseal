@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -34,9 +32,9 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				Goal: "Explain the stopped attempt", Context: map[string]interface{}{},
 				Checkpoint: checkpointFinalFailureExplanation(nil, "action", "The image service rejected the request."),
 			}
-			host := &recordingTurnHost{response: &HostedTurnResponse{
-				APIVersion: HostedTurnAPIVersion, InvocationID: "turn", ModelProvider: "test", Model: "model",
-				NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "The image request failed, so I stopped."},
+			host := &failureExplanationTestHost{respond: func(HostedTurnRequest) (*HostedTurnResponse, error) {
+				t.Fatal("catalog failure requested an explanatory model")
+				return nil, nil
 			}}
 			config := CatalogTurnResolverConfig{Host: host, SkillHosts: SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
 				t.Fatal("failure explanation attempted runtime preparation")
@@ -46,18 +44,17 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(catalog.activationDeployments) != 0 || len(binding.ModelActions) != 0 || len(binding.PreparedRuntimes) != 0 || len(binding.RunbookOperations) != 0 || binding.BudgetReservation.Turns != 1 {
-				t.Fatalf("failure explanation prepared executable work: %#v", binding)
+			if len(catalog.activationDeployments) != 0 || len(binding.ModelActions) != 0 || len(binding.PreparedRuntimes) != 0 || len(binding.RunbookOperations) != 0 ||
+				binding.BudgetReservation != (BudgetUsage{}) || binding.ModelProvider != "host" || binding.Model != "terminal-failure-report" {
+				t.Fatalf("failure report prepared executable work or model usage: %#v", binding)
 			}
-			if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
-				t.Fatal(err)
+			if binding.DeploymentID != "seal" || binding.ActionDeploymentID != "seal" || binding.DefinitionID != "seal" || binding.DefinitionVersion != "1" {
+				t.Fatalf("kernel failure report lost verified Agent identity: %#v", binding)
 			}
-			request := host.request
-			if request.ModelCredential == nil || request.ModelCredential.ID != "model-account" || request.AgentID != "seal" || request.DefinitionVersion != "1" || !strings.Contains(strings.Join(request.SystemInstructions, "\n"), "Friendly and bubbly") {
-				t.Fatalf("final answer lost verified identity, model or voice: %#v", request)
-			}
-			if len(request.Actions) != 0 || len(request.EligibleAgents) != 0 || request.Workspace != nil || len(request.WorkspaceCredentials) != 0 || len(request.WorkspaceOperations) != 0 || len(request.RunbookOperations) != 0 {
-				t.Fatal("final answer still has executable capabilities")
+			outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
+			if err != nil || outcome == nil || host.calls != 0 || outcome.OutputSummary != TerminalFailureReply("action_failed") ||
+				len(outcome.ProposedActions) != 0 || outcome.ProposedTask != nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil {
+				t.Fatalf("kernel report used model or granted new operations: %#v %v calls=%d", outcome, err, host.calls)
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutPaused
 			if _, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, config); err == nil {
@@ -65,8 +62,9 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutActive
 			config.Host = nil
-			if _, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, config); !errors.Is(err, ErrTurnHostUnavailable) {
-				t.Fatalf("missing model host = %v", err)
+			withoutHost, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, config)
+			if err != nil || withoutHost == nil || withoutHost.ModelProvider != "host" || withoutHost.Model != "terminal-failure-report" || host.calls != 0 {
+				t.Fatalf("kernel failure reply depended on model host: %#v %v", withoutHost, err)
 			}
 		})
 	}

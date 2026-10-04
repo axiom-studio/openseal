@@ -369,10 +369,14 @@ func TestActionWorkerStopsWithoutLeakingCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Call.Status != ActionCallStatusFailed || first.Run == nil || first.Run.Status != AgentRunStatusQueued ||
-		!requiresFinalFailureExplanation(first.Run.Checkpoint) || !strings.Contains(first.Call.Error, "[REDACTED]") || strings.Contains(first.Call.Error, "raw-secret-value") {
+	if first.Call.Status != ActionCallStatusFailed || first.Run == nil || first.Run.Status != AgentRunStatusFailed ||
+		!requiresFinalFailureExplanation(first.Run.Checkpoint) || first.Run.CompletedAt == nil || first.Run.WakeCondition != nil ||
+		first.Run.Error != first.Call.Error || !strings.Contains(first.Call.Error, "[REDACTED]") || strings.Contains(first.Call.Error, "raw-secret-value") ||
+		strings.Contains(fmt.Sprint(first.Run.Checkpoint), "raw-secret-value") {
 		t.Fatalf("failure result mismatch: %#v", first)
 	}
+	feedbackAssertNotClaimable(t, store, proposal.Call.Scope, current)
+	feedbackAssertKernelFailureReply(t, first.Run, "action_failed")
 	current = current.Add(time.Hour)
 	second, err := worker.RunOnce(context.Background(), proposal.Call.Scope, "worker", time.Minute)
 	if err != nil || second != nil || attempts != 1 {
