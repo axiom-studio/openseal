@@ -146,10 +146,17 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	if err != nil {
 		return nil, err
 	}
+	// The executing independent root needs its own verified task identity even
+	// when newer work fills the bounded active-task page. Forks and foreground
+	// conversations retain their ordinary status view and ordering.
+	if origin != nil && origin.Mode == ConversationTaskModeIndependent && canonical.ID == origin.WorkRunID {
+		rows = append([]*ConversationTaskResult{{Task: origin, WorkRun: canonical}}, rows...)
+	}
 	proof := &ConversationChangeService{conversations: NewConversationService(store), portfolio: store}
+	seen := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		if row == nil || row.Task == nil || row.WorkRun == nil || row.Task.AuthenticatedActor != actor ||
-			thread != "" && row.Task.ThreadRootID != thread || isTerminalAgentRunStatus(row.WorkRun.Status) {
+			seen[row.Task.ID] || thread != "" && row.Task.ThreadRootID != thread || isTerminalAgentRunStatus(row.WorkRun.Status) {
 			continue
 		}
 		source, err := proof.proveConversationTaskRun(ctx, conversation, row.Task, row.WorkRun, &viewer)
@@ -159,6 +166,7 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 		if source == nil {
 			continue
 		}
+		seen[row.Task.ID] = true
 		result.Tasks = append(result.Tasks, ConversationTaskSnapshot{
 			TaskID: row.Task.ID, Mode: row.Task.Mode, WorkRunID: row.WorkRun.ID, Goal: ConversationTaskGoalSummary(row.Task.Goal),
 			Status: row.WorkRun.Status, Revision: row.WorkRun.Revision, AvailableControls: applicableAgentRunCommands(row.WorkRun), CreatedAt: row.Task.CreatedAt,
