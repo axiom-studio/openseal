@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/google/uuid"
 )
 
@@ -416,9 +417,18 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			}
 			updatedCall.Output = sanitizeActionOutput(annotateActionProgress(output, updatedCall, semanticArguments), credentials)
 			updatedCall.Error = ""
+			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
 		} else {
 			updatedCall.Status = ActionCallStatusFailed
 			updatedCall.Error = sanitizeActionError(executionErr, credentials)
+			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
+			var failure *skillerror.ActionError
+			if errors.As(executionErr, &failure) && failure != nil {
+				if safe := skillerror.NewActionError(failure.Code(), "", failure.Details()); safe != nil {
+					updatedCall.Error = safe.Error()
+					updatedCall.ErrorCode, updatedCall.ErrorDetails = safe.Code(), safe.Details()
+				}
+			}
 			updatedCall.FailurePhase = ActionFailureBeforeDispatch
 			if dispatched {
 				updatedCall.FailurePhase = ActionFailureAfterDispatch

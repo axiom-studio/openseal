@@ -292,6 +292,9 @@ func (c *Client) ExecuteWithContext(
 
 	// Check for error
 	if resp.Error != nil {
+		if failure := NewActionError(resp.Error.Type, resp.Error.Message, resp.Error.Details); failure != nil {
+			return nil, failure
+		}
 		return nil, fmt.Errorf("%s: %s", resp.Error.Type, resp.Error.Message)
 	}
 
