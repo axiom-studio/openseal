@@ -470,6 +470,26 @@ func (w *ExternalConversationInboxWorker) ensureInboundMessage(
 		if thread != nil {
 			replyTo = thread.ThreadRootMessageID
 		}
+		if event.ReplyToExternalMessageID != "" {
+			for _, direction := range []ExternalMessageDirection{ExternalMessageInbound, ExternalMessageOutbound} {
+				parent, err := w.store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, direction, event.ReplyToExternalMessageID)
+				if err != nil {
+					return nil, err
+				}
+				if parent == nil || parent.Scope != endpoint.Scope || parent.EndpointID != endpoint.ID || parent.ConversationID != conversation.ID {
+					continue
+				}
+				message, err := w.conversations.GetChannelMessage(ctx, endpoint.Scope, conversation.ID, parent.ChannelMessageID)
+				if err != nil {
+					return nil, err
+				}
+				if message != nil && message.Scope == endpoint.Scope && message.ConversationID == conversation.ID &&
+					(replyTo == "" || message.ID == replyTo || message.ThreadRootID == replyTo) {
+					replyTo = message.ID
+					break
+				}
+			}
+		}
 		source := externalMessageSource(endpoint, event)
 		source.ParticipantDisplayName = sourceLabel(participant.DisplayName, 160)
 		result, postErr := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
