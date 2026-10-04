@@ -422,6 +422,7 @@ type (
 	OutreachActionProposalObserver       = runtime.OutreachActionProposalObserver
 	AgentRun                             = runtime.AgentRun
 	AgentRunIntervention                 = runtime.AgentRunIntervention
+	ConversationAnswerReceipt            = runtime.ConversationAnswerReceipt
 	HumanInterventionRequest             = runtime.HumanInterventionRequest
 	HumanInterventionStatus              = runtime.HumanInterventionStatus
 	BudgetPolicy                         = runtime.BudgetPolicy
