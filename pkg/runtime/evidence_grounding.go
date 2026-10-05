@@ -311,6 +311,21 @@ func buildEvidenceGroundingRequest(input TurnExecutionContext, snapshot *Evidenc
 	}
 }
 
+// ValidateEvidenceGroundingReview checks a review against the canonical evidence
+// ledger without normalizing or changing either caller-owned argument. It does
+// not run a reviewer or grant authority to the review.
+func ValidateEvidenceGroundingReview(review *EvidenceGroundingReview, request EvidenceGroundingRequest) error {
+	if review == nil {
+		return validateEvidenceGroundingReview(nil, request)
+	}
+	cloned := *review
+	cloned.Findings = append([]EvidenceGroundingFinding(nil), review.Findings...)
+	for index := range cloned.Findings {
+		cloned.Findings[index].EvidenceRefs = append([]string(nil), review.Findings[index].EvidenceRefs...)
+	}
+	return validateEvidenceGroundingReview(&cloned, request)
+}
+
 func validateEvidenceGroundingReview(review *EvidenceGroundingReview, request EvidenceGroundingRequest) error {
 	if review == nil || review.APIVersion != EvidenceGroundingAPIVersion || review.InvocationID != request.InvocationID || review.SnapshotID != request.Snapshot.ID || review.ClaimsDigest != request.ClaimsDigest {
 		return errors.New("evidence reviewer returned a mismatched response envelope")

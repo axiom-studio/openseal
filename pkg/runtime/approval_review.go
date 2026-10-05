@@ -13,32 +13,47 @@ const (
 	maxApprovalReviewFacts        = 32
 )
 
+// ErrInvalidApprovalReviewContext identifies a canonical review validation
+// failure without exposing review content or requiring consumers to parse text.
+var ErrInvalidApprovalReviewContext = errors.New("invalid approval review context")
+
+type approvalReviewValidationError struct{ cause error }
+
+func (e *approvalReviewValidationError) Error() string { return e.cause.Error() }
+func (e *approvalReviewValidationError) Unwrap() []error {
+	return []error{ErrInvalidApprovalReviewContext, e.cause}
+}
+
+func invalidApprovalReviewContext(message string) error {
+	return &approvalReviewValidationError{cause: errors.New(message)}
+}
+
 func validateApprovalReviewContext(review *ApprovalReviewContext) error {
 	if review == nil {
 		return nil
 	}
 	if strings.TrimSpace(review.Summary) == "" {
-		return errors.New("summary is required")
+		return invalidApprovalReviewContext("summary is required")
 	}
 	if len(review.Summary) > maxApprovalReviewSummary ||
 		len(review.Target) > maxApprovalReviewTarget ||
 		len(review.Audience) > maxApprovalReviewSummary ||
 		len(review.Purpose) > maxApprovalReviewSummary ||
 		len(review.Content) > maxApprovalReviewContent {
-		return errors.New("text exceeds the review context limit")
+		return invalidApprovalReviewContext("text exceeds the review context limit")
 	}
 	if len(review.Consequences) > maxApprovalReviewConsequences || len(review.Facts) > maxApprovalReviewFacts {
-		return errors.New("too many review context items")
+		return invalidApprovalReviewContext("too many review context items")
 	}
 	for _, consequence := range review.Consequences {
 		if strings.TrimSpace(consequence) == "" || len(consequence) > maxApprovalReviewSummary {
-			return errors.New("consequence must be non-empty and bounded")
+			return invalidApprovalReviewContext("consequence must be non-empty and bounded")
 		}
 	}
 	for _, fact := range review.Facts {
 		if strings.TrimSpace(fact.Label) == "" || strings.TrimSpace(fact.Value) == "" ||
 			len(fact.Label) > 200 || len(fact.Value) > maxApprovalReviewTarget {
-			return errors.New("review fact label and value must be non-empty and bounded")
+			return invalidApprovalReviewContext("review fact label and value must be non-empty and bounded")
 		}
 	}
 	return nil
