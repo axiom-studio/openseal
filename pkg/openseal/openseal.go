@@ -1570,6 +1570,7 @@ var (
 	NewHostedTurnRunner                    = runtime.NewHostedTurnRunner
 	NewTurnHostFailure                     = runtime.NewTurnHostFailure
 	TerminalFailureReply                   = runtime.TerminalFailureReply
+	ErrInvalidApprovalReviewContext        = runtime.ErrInvalidApprovalReviewContext
 	MarshalHostedTurnModelInput            = runtime.MarshalHostedTurnModelInput
 	ProjectHostedActionInvocationContracts = runtime.ProjectHostedActionInvocationContracts
 	CompileHostedTurnForm                  = runtime.CompileHostedTurnForm
@@ -1578,6 +1579,7 @@ var (
 	HostedTurnFormJSONSchema               = runtime.HostedTurnFormJSONSchema
 	ValidateHostedTurnCompletion           = runtime.ValidateHostedTurnCompletion
 	MarshalEvidenceGroundingModelInput     = runtime.MarshalEvidenceGroundingModelInput
+	ValidateEvidenceGroundingReview        = runtime.ValidateEvidenceGroundingReview
 	EstimateHostedTurnInputTokens          = runtime.EstimateHostedTurnInputTokens
 	ValidateHostedSkillSelections          = runtime.ValidateHostedSkillSelections
 	NewCapabilityInvocationTurnRunner      = runtime.NewCapabilityInvocationTurnRunner
