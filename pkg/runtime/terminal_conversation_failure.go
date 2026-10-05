@@ -27,6 +27,20 @@ func TerminalFailureReply(code string) string {
 		reason = "the model requested an operation that was not offered for this attempt"
 	case "provider_invalid_response":
 		reason = "the model returned a response that could not be safely executed"
+	case "provider_output_truncated":
+		reason = "the model provider stopped before completing its response"
+	case "tool_arguments_invalid":
+		reason = "the model supplied operation arguments that did not match the required format"
+	case "action_review_invalid":
+		reason = "the model supplied missing or invalid operation review details"
+	case "action_external_identity_invalid":
+		reason = "the model supplied missing or invalid identification for an external operation"
+	case "final_skill_identity_invalid":
+		reason = "the model's final answer cited an unavailable or repeated Skill reference"
+	case "conversation_task_review_invalid":
+		reason = "the task reviewer returned an invalid review response"
+	case "conversation_task_review_failed":
+		reason = "the task result did not meet the review requirements"
 	case "provider_continuation_failed":
 		reason = "the model provider did not supply valid continuation data"
 	case "provider_authentication_failed":
@@ -66,7 +80,9 @@ func terminalFailureCode(code string) string {
 	switch strings.TrimSpace(code) {
 	case "cap_lookup_not_available", "cap_lookup_duplicate", "cap_lookup_already_loaded", "tool_call_cardinality", "tool_call_identity_missing", "tool_call_not_authorized":
 		return strings.TrimSpace(code)
-	case "provider_invalid_turn_outcome", "provider_invalid_response", "provider_output_truncated":
+	case "provider_output_truncated", "tool_arguments_invalid", "action_review_invalid", "action_external_identity_invalid", "final_skill_identity_invalid", "conversation_task_review_invalid", "conversation_task_review_failed":
+		return strings.TrimSpace(code)
+	case "provider_invalid_turn_outcome", "provider_invalid_response":
 		return "provider_invalid_response"
 	case "provider_tool_continuation_missing", "provider_opaque_context_rejected", "provider_referenced_context_rejected", "provider_continuation_failed":
 		return "provider_continuation_failed"
@@ -80,7 +96,7 @@ func terminalFailureCode(code string) string {
 		return "workspace_daily_limit_reached"
 	case "model_credential_unavailable", "requires_model_credential", "model_configuration_failed":
 		return "model_configuration_failed"
-	case "turn_input_budget_exhausted", "turn_output_budget_exhausted", "workspace_turn_budget_exhausted", "workspace_action_budget_exhausted", "workspace_operation_limit", "budget_exhausted":
+	case "capability_input_budget_exhausted", "turn_input_budget_exhausted", "turn_output_budget_exhausted", "workspace_turn_budget_exhausted", "workspace_action_budget_exhausted", "workspace_operation_limit", "budget_exhausted":
 		return "budget_exhausted"
 	case "workspace_operation_failed", "workspace_host_unavailable":
 		return "workspace_operation_failed"
