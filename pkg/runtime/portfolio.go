@@ -205,10 +205,34 @@ type WakeCondition struct {
 // instruction without exposing private model reasoning or mutating the
 // agent's definition.
 type AgentRunIntervention struct {
-	ID          string        `json:"id"`
-	Actor       ActivityActor `json:"actor"`
-	Instruction string        `json:"instruction"`
-	CreatedAt   time.Time     `json:"createdAt"`
+	ID                   string                       `json:"id"`
+	Actor                ActivityActor                `json:"actor"`
+	Instruction          string                       `json:"instruction"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	ConversationAnswer   *ConversationAnswerReceipt   `json:"conversationAnswer,omitempty"`
+	SkillSetupResolution *SkillSetupResolutionReceipt `json:"skillSetupResolution,omitempty"`
+}
+
+// ConversationAnswerReceipt records the canonical question and authenticated
+// reply accepted by the conversation scheduler. Ordinary operator instructions
+// never create this receipt. It proves answer provenance, not action approval or
+// affirmative consent; the host must interpret the answer for its exact purpose.
+type ConversationAnswerReceipt struct {
+	Scope                Scope                   `json:"scope"`
+	RunID                string                  `json:"runId"`
+	AgentID              string                  `json:"agentId"`
+	ConversationTaskID   string                  `json:"conversationTaskId,omitempty"`
+	ConversationID       string                  `json:"conversationId"`
+	SourceRunID          string                  `json:"sourceRunId"`
+	SourceMessageID      string                  `json:"sourceMessageId"`
+	ThreadRootMessageID  string                  `json:"threadRootMessageId"`
+	QuestionMessageID    string                  `json:"questionMessageId"`
+	QuestionTurnID       string                  `json:"questionTurnId,omitempty"`
+	QuestionTurnSequence int64                   `json:"questionTurnSequence"`
+	QuestionContent      string                  `json:"questionContent"`
+	AnswerMessageID      string                  `json:"answerMessageId"`
+	AnswerContent        string                  `json:"answerContent"`
+	AuthenticatedActor   ConversationParticipant `json:"authenticatedActor"`
 }
 
 type HumanInterventionStatus string

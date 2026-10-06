@@ -18,8 +18,14 @@ func conversationWorkOrigin(ctx context.Context, runs PortfolioStore, conversati
 // Accepted-answer receipts may outlive a completed or paused parent. Resolve
 // their immutable initiating identity without treating it as a fresh Run grant.
 func conversationWorkOriginForState(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun, includeInactiveParents bool) (*AgentRun, *Conversation, *ChannelMessage, error) {
+	if run != nil && run.ParentRunID == "" && run.Context[ConversationTaskContextKey] != nil {
+		return conversationTaskWorkOrigin(ctx, runs, conversations, run)
+	}
 	if run != nil && run.ParentRunID == "" && run.Context[deferredWorkflowContextKey] == true {
 		return deferredWorkflowConversationOrigin(ctx, runs, conversations, run)
+	}
+	if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
+		return foregroundConversationWorkOrigin(ctx, runs, conversations, run)
 	}
 	if run == nil || run.Kind != RunKindAgentWork || run.Owner.Type != OwnerTypeAgent || run.ParentRunID == "" {
 		return nil, nil, nil, nil
@@ -69,9 +75,18 @@ func isConversationQuestionWait(run *AgentRun) bool {
 
 // Reconciliation also repairs questions produced before this projection existed.
 func (s *ConversationRunScheduler) reconcileConversationQuestions(ctx context.Context, scope Scope, result *ConversationRunReconcileResult) error {
+	for _, kind := range []RunKind{RunKindAgentWork, RunKindConversation} {
+		if err := s.reconcileConversationQuestionsForKind(ctx, scope, result, kind); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx context.Context, scope Scope, result *ConversationRunReconcileResult, kind RunKind) error {
 	const pageSize = 100
 	for offset := 0; ; offset += pageSize {
-		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindAgentWork, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: pageSize, Offset: offset})
+		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: kind, Statuses: []AgentRunStatus{AgentRunStatusWaitingForEvent}, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return err
 		}
@@ -97,7 +112,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestions(ctx context.Co
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID},
 				Intent: MessageIntentQuestion, Content: question, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-				ReplyToMessageID: trigger.ID, RequiresResponse: true, References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+				ReplyToMessageID: trigger.ID, RequiresResponse: true, References: conversationClarificationReferences(run),
 				IdempotencyKey: clarificationQuestionKey(run),
 			})
 			if errors.Is(postErr, ErrRevisionConflict) {
@@ -119,18 +134,27 @@ func (s *ConversationRunScheduler) reconcileConversationQuestions(ctx context.Co
 type conversationQuestion struct {
 	message *ChannelMessage
 	run     *AgentRun
+	source  *AgentRun
+	trigger *ChannelMessage
 }
 
 // Answers target an explicit question (or its unambiguous thread). An unthreaded
 // answer may address the single immediately preceding pending question. Never
 // broadcast an answer across concurrent tasks.
 func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context, conversation *Conversation, answer *ChannelMessage) (*AgentRunCommandResult, bool, error) {
+	taskTargeted, err := s.targetsRootClarificationQuestion(ctx, conversation, answer)
+	if err != nil {
+		return nil, false, err
+	}
 	if conversation.Owner.Type != OwnerTypeAgent || answer.Sender.Type != ConversationParticipantUser {
-		return nil, false, nil
+		return nil, taskTargeted, nil
 	}
 	actor, valid := conversationMessageInitiatingUser(conversation, answer)
 	if !valid {
-		return nil, false, nil
+		return nil, taskTargeted, nil
+	}
+	if err := answer.Validate(); err != nil {
+		return nil, taskTargeted, nil
 	}
 	var pending []conversationQuestion
 	const pageSize = 100
@@ -154,12 +178,15 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if run == nil {
 					continue
 				}
-				_, origin, trigger, err := conversationWorkOriginForState(ctx, s.runs.store, s.conversations.store, run, true)
+				source, origin, trigger, err := conversationWorkOriginForState(ctx, s.runs.store, s.conversations.store, run, true)
 				if err != nil {
 					return nil, false, err
 				}
 				originalActor, valid := conversationMessageInitiatingUser(conversation, trigger)
 				if origin == nil || origin.ID != conversation.ID || !valid || originalActor != actor {
+					continue
+				}
+				if !conversationClarificationMatches(run, trigger, question, answer) {
 					continue
 				}
 				// Read the atomic transition receipt before testing current status. A worker
@@ -181,7 +208,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if origin == nil || origin.ID != conversation.ID {
 					continue
 				}
-				pending = append(pending, conversationQuestion{question, run})
+				pending = append(pending, conversationQuestion{message: question, run: run, source: source, trigger: trigger})
 			}
 		}
 		if len(messages) < pageSize {
@@ -208,16 +235,43 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 		}
 	}
 	if len(matches) != 1 {
-		return nil, false, nil
+		return nil, taskTargeted, nil
 	}
 	q := matches[0]
+	questionTurnID, err := conversationClarificationTurnID(ctx, s.runs.store, q.run, q.message)
+	if err != nil {
+		return nil, false, err
+	}
+	receipt := &ConversationAnswerReceipt{
+		Scope: conversation.Scope, RunID: q.run.ID, AgentID: q.run.AssignedAgentID,
+		ConversationID: conversation.ID, SourceRunID: q.source.ID, SourceMessageID: q.trigger.ID,
+		ThreadRootMessageID: q.message.ThreadRootID, QuestionMessageID: q.message.ID,
+		QuestionTurnID: questionTurnID, QuestionTurnSequence: q.run.LastAppliedTurn, QuestionContent: q.message.Content,
+		AnswerMessageID: answer.ID, AnswerContent: answer.Content, AuthenticatedActor: actor,
+	}
+	payload := map[string]interface{}{"conversationId": conversation.ID, "questionMessageId": q.message.ID, "answerMessageId": answer.ID}
+	if q.run.Kind == RunKindAgentWork && q.run.ParentRunID == "" {
+		receipt.ConversationTaskID, _ = q.run.Context[ConversationTaskContextKey].(string)
+	}
+	if receipt.ConversationTaskID != "" {
+		payload["conversationTaskId"] = receipt.ConversationTaskID
+		payload["sourceRunId"] = receipt.SourceRunID
+		payload["sourceMessageId"] = receipt.SourceMessageID
+		payload["threadRootMessageId"] = receipt.ThreadRootMessageID
+		payload["authenticatedActorId"] = actor.ID
+		payload["agentId"] = receipt.AgentID
+		payload["questionTurnSequence"] = receipt.QuestionTurnSequence
+		if receipt.QuestionTurnID != "" {
+			payload["questionTurnId"] = receipt.QuestionTurnID
+		}
+	}
 	activity := NewRunActivityService(s.runs.store, s.runs.store)
 	run, event, err := activity.TransitionRun(ctx, conversation.Scope, q.run.ID, RunTransitionRequest{
 		ExpectedRevision: q.run.Revision, Status: AgentRunStatusQueued,
 		Summary: "Received the user's answer; continuing the task", EventType: conversationAnswerEvent,
 		Actor: ActivityActor{Type: "user", ID: answer.Sender.ID}, CorrelationID: answer.ID, CausationID: q.message.ID,
-		Payload:      map[string]interface{}{"conversationId": conversation.ID, "questionMessageId": q.message.ID, "answerMessageId": answer.ID},
-		Intervention: &AgentRunIntervention{ID: stableConversationID(conversation.Scope, "conversation-answer:"+answer.ID, "intervention"), Actor: ActivityActor{Type: "user", ID: answer.Sender.ID}, Instruction: "Answer to your clarification:\n" + answer.Content, CreatedAt: answer.CreatedAt},
+		Payload:      payload,
+		Intervention: &AgentRunIntervention{ID: stableConversationID(conversation.Scope, "conversation-answer:"+answer.ID, "intervention"), Actor: ActivityActor{Type: "user", ID: answer.Sender.ID}, Instruction: "Answer to your clarification:\n" + answer.Content, CreatedAt: answer.CreatedAt, ConversationAnswer: receipt},
 	})
 	if err != nil {
 		return nil, false, err
@@ -237,7 +291,7 @@ func (s *ConversationRunScheduler) conversationAnswerAccepted(ctx context.Contex
 			return false, err
 		}
 		for _, event := range events {
-			if event.CorrelationID == answerID {
+			if event.EventType == conversationAnswerEvent && event.CorrelationID == answerID {
 				return true, nil
 			}
 		}
@@ -256,7 +310,7 @@ func (s *ConversationRunScheduler) acknowledgeConversationAnswer(ctx context.Con
 		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID}, Intent: MessageIntentAcknowledgment,
 		Content: "Your answer has been passed to the task.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-		ReplyToMessageID: answer.ID, ResolvesMessageID: answer.ID, References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}},
+		ReplyToMessageID: answer.ID, ResolvesMessageID: answer.ID, References: conversationClarificationReferences(run),
 		IdempotencyKey: "conversation-answer-received:" + answer.ID,
 	})
 	return &AgentRunCommandResult{Run: run}, true, err
@@ -272,8 +326,15 @@ type conversationWorkTurnRunner struct {
 }
 
 func (r conversationWorkTurnRunner) input(ctx context.Context, input TurnExecutionContext) (TurnExecutionContext, error) {
+	input.canAskConversationQuestion = false
+	input.sourceAccessChallenge = nil
 	_, conversation, trigger, err := conversationWorkOrigin(ctx, r.runs, r.conversations, input.Run)
 	if err != nil || conversation == nil || trigger == nil {
+		return input, err
+	}
+	input.canAskConversationQuestion = conversation.Owner.Type == OwnerTypeAgent && input.Run.AssignedAgentID == conversation.Owner.ID
+	input.sourceAccessChallenge, err = resolveSourceAccessChallengeInteraction(ctx, r.runs, input.Run)
+	if err != nil {
 		return input, err
 	}
 	input.Run = cloneAgentRun(input.Run)

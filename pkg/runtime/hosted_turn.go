@@ -198,6 +198,12 @@ type HostedTurnRequest struct {
 	ModelCredential *capability.CredentialReference `json:"modelCredential,omitempty"`
 	ModelProvider   string                          `json:"modelProvider,omitempty"`
 	Model           string                          `json:"model,omitempty"`
+
+	// CanAskConversationQuestion is a kernel-proven delivery capability for the
+	// trusted host. It is absent from model input and never implies approval.
+	CanAskConversationQuestion bool `json:"canAskConversationQuestion,omitempty"`
+	// SourceAccessChallenge is a kernel-proven bounded interaction, not consent.
+	SourceAccessChallenge *SourceAccessChallengeInteraction `json:"sourceAccessChallenge,omitempty"`
 }
 
 // HostedTurnExecutionFailure is emitted by the trusted host after a native
@@ -345,8 +351,10 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	// Legacy failure checkpoints complete through kernel-owned text, never a
 	// correction proposal or an additional model request.
-	if outcome, stopped := terminalFailureOutcome(input.Run); stopped {
-		return outcome, nil
+	if input.sourceAccessChallenge == nil || !input.canAskConversationQuestion || input.Run.AssignedAgentID != r.config.AgentID || !hasCanonicalSourceAccessChallenge(input.Run) {
+		if outcome, stopped := terminalFailureOutcome(input.Run); stopped {
+			return outcome, nil
+		}
 	}
 	snapshot, err := evidenceSnapshotForGrounding(input.Run.Context)
 	if err != nil {
@@ -734,10 +742,15 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		DependencyResults:      dependencyResults,
 		CollaborationResults:   collaborationResults,
 		ContinuationCheckpoint: cloneMap(input.Run.Checkpoint),
-		PendingInterventions:   append([]AgentRunIntervention(nil), input.Run.PendingInterventions...),
+		PendingInterventions:   cloneAgentRun(input.Run).PendingInterventions,
 		ModelMedia:             append(hostedTurnMediaFromCheckpoint(input.Run.Checkpoint), input.ModelMedia...),
 		ModelCredential:        cloneHostedCredentialReference(r.config.ModelCredential),
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
+	}
+	request.CanAskConversationQuestion = input.canAskConversationQuestion && input.Run.AssignedAgentID == r.config.AgentID
+	if request.CanAskConversationQuestion && input.sourceAccessChallenge != nil {
+		interaction := *input.sourceAccessChallenge
+		request.SourceAccessChallenge = &interaction
 	}
 	if input.Run.Kind == RunKindAgentWork && input.Run.Context[ConversationTaskContextKey] != nil {
 		// A context hint can only reduce the offered targets. The fork
