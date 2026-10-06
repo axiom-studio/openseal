@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
 
 const actionProgressIntentRole = "intent"
@@ -281,6 +283,7 @@ func appendActionHistory(checkpoint map[string]interface{}, call *ActionCall) ma
 		entry["result"] = compactActionResult(actionResultWithoutModelMedia(call.Output), maximumActionHistoryResultBytes)
 	} else if call.Error != "" {
 		entry["error"] = call.Error
+		projectActionFailureDetails(entry, call)
 	}
 	for index, previous := range entries {
 		if previous["actionCallId"] == call.ID {
@@ -336,6 +339,7 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 		}
 	} else if call.Error != "" {
 		lastAction["error"] = call.Error
+		projectActionFailureDetails(lastAction, call)
 	}
 	for key, value := range metadata {
 		lastAction[key] = deepCloneCheckpointValue(value)
@@ -355,6 +359,24 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 		result = checkpointToolFeedbackDenied(result, call)
 	}
 	return result
+}
+
+// Classify only typed execution evidence, never text from a tool or model.
+// Revalidating persisted metadata also keeps older or malformed receipts safe.
+func projectActionFailureDetails(target map[string]interface{}, call *ActionCall) {
+	if call.Status != ActionCallStatusFailed {
+		return
+	}
+	failure := skillerror.NewActionError(call.ErrorCode, "", call.ErrorDetails)
+	if failure == nil {
+		return
+	}
+	target["errorCode"], target["failureKind"] = failure.Code(), failure.Code()
+	details := map[string]interface{}{}
+	for key, value := range failure.Details() {
+		details[key] = value
+	}
+	target["errorDetails"] = details
 }
 
 func actionResultWithoutModelMedia(output map[string]interface{}) map[string]interface{} {
