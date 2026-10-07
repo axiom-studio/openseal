@@ -33,8 +33,8 @@ type ConversationChangeRequest struct {
 // Runs, summary-first Activity projections, and leased presence are
 // authoritative current projections when their digest changes. Consumers
 // merge by stable identity and revision. Raw Activity payloads never travel on
-// the reconnecting channel stream; detail remains available from the bounded
-// canonical Activity feed.
+// the reconnecting channel stream (except the {from, to} of an approval mode
+// change); detail remains available from the bounded canonical Activity feed.
 type ConversationChangeSet struct {
 	Conversation    *Conversation               `json:"conversation"`
 	Messages        []*ChannelMessage           `json:"messages"`
@@ -147,7 +147,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	if !runsChanged {
 		projectedRuns = []*AgentRun{}
 	}
-	activity, err := s.listConversationActivity(ctx, runs)
+	activity, err := s.listConversationActivity(ctx, conversation, runs)
 	if err != nil {
 		return nil, err
 	}
@@ -658,22 +658,22 @@ func (s *ConversationChangeService) proveConversationTaskRun(ctx context.Context
 	return source, nil
 }
 
-func (s *ConversationChangeService) listConversationActivity(ctx context.Context, runs []*AgentRun) ([]ActivityProjection, error) {
-	if s.activity == nil {
+func (s *ConversationChangeService) listConversationActivity(ctx context.Context, conversation *Conversation, runs []*AgentRun) ([]ActivityProjection, error) {
+	if s.activity == nil || conversation == nil {
 		return []ActivityProjection{}, nil
 	}
-	runIDs := make([]string, 0, len(runs))
+	// The conversation's own activity stream (for example approval mode
+	// changes) is listed together with its Runs' activity.
+	runIDs := make([]string, 0, len(runs)+1)
+	runIDs = append(runIDs, activityStreamID(&ActivityEvent{ConversationRefs: []string{conversation.ID}}))
 	for _, run := range runs {
 		runIDs = append(runIDs, run.ID)
-	}
-	if len(runIDs) == 0 {
-		return []ActivityProjection{}, nil
 	}
 	byID := make(map[string]*ActivityEvent)
 	for start := 0; start < len(runIDs); start += conversationActivityRunBatchSize {
 		end := min(start+conversationActivityRunBatchSize, len(runIDs))
 		events, err := s.activity.ListActivity(ctx, ActivityFilter{
-			Scope: runs[0].Scope, RunIDs: runIDs[start:end], Descending: true, Limit: conversationRunProjectionLimit,
+			Scope: conversation.Scope, RunIDs: runIDs[start:end], Descending: true, Limit: conversationRunProjectionLimit,
 		})
 		if err != nil {
 			return nil, err
@@ -700,7 +700,13 @@ func (s *ConversationChangeService) listConversationActivity(ctx context.Context
 	}
 	projected := make([]ActivityProjection, 0, len(result))
 	for _, event := range result {
-		projected = append(projected, projectActivityEvent(event, false))
+		projection := projectActivityEvent(event, false)
+		// An approval mode change carries only the two mode names, which the
+		// conversation view renders; other payloads stay on the Activity feed.
+		if event.EventType == ConversationApprovalModeChangedEvent {
+			projection.Payload = map[string]interface{}{"from": event.Payload["from"], "to": event.Payload["to"]}
+		}
+		projected = append(projected, projection)
 	}
 	return projected, nil
 }
