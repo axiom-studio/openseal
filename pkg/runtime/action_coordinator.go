@@ -371,6 +371,8 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		approval.ProposedAction = c.enrichApprovalPreview(ctx, approval.ProposedAction, run, req.EvidenceRefs, req.ExternalOperation)
 		if req.ReviewContext != nil {
 			approval.ProposedAction["reviewContext"] = approvalReviewContextMap(req.ReviewContext)
+		} else if review := intentApprovalReviewContext(approval.ProposedAction, req.ExternalOperation); review != nil {
+			approval.ProposedAction["reviewContext"] = approvalReviewContextMap(review)
 		}
 	}
 	actor := req.Actor

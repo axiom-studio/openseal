@@ -103,7 +103,7 @@ const (
 	OperationReceipts             = "receipts"
 	OperationCoordinateAuto       = "coordinate-automatically"
 	OperationParticipation        = "configure-participation"
-	OperationApprovalMode         = "set-approval-mode"
+	OperationApprovalMode         = "update-approval-mode"
 	OperationStream               = "stream"
 	OperationDeploy               = "deploy"
 	OperationActivate             = "activate"

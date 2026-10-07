@@ -410,3 +410,80 @@ func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testin
 		t.Fatalf("stale revision error = %v", err)
 	}
 }
+
+func TestApprovalModeChangeAppearsInConversationChangeFeed(t *testing.T) {
+	ctx := context.Background()
+	for name, store := range map[string]interface {
+		ConversationApprovalModeKernelStore
+		RunActivityStore
+	}{"memory": NewMemoryStore(), "sqlite": mustSQLiteApprovalModeStore(t)} {
+		t.Run(name, func(t *testing.T) {
+			conversation, _, err := NewConversationService(store).CreateConversation(ctx, CreateConversationRequest{
+				Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, Title: "Chat", IdempotencyKey: "chat",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := NewConversationApprovalModeService(store).SetApprovalMode(ctx, SetConversationApprovalModeRequest{
+				Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalSkip, Actor: approvalModeActor,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			changes, err := NewConversationChangeService(store, store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			set, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: conversation.Scope, ConversationID: conversation.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if set.Conversation.ApprovalMode != ConversationApprovalSkip || len(set.Activity) != 1 || set.Activity[0].ID != result.Event.ID ||
+				set.Activity[0].EventType != ConversationApprovalModeChangedEvent || set.Activity[0].Payload["from"] != "auto" || set.Activity[0].Payload["to"] != "skip" {
+				t.Fatalf("change set = %#v", set)
+			}
+		})
+	}
+}
+
+func mustSQLiteApprovalModeStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "changes.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
+}
+
+func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	conversation := approvalModeConversation(t, store)
+	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), NewDefaultActionPolicy())
+	scope := conversation.Scope
+	now := time.Now().UTC()
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, AssignedAgentID: "assistant", Goal: "search", Source: RunSourceObjective,
+		Context: map[string]interface{}{"conversationId": conversation.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "assistant", SkillID: "workspace", SkillVersion: "1.0.0", Action: "send",
+		Arguments: map[string]interface{}{"intent": "Click 'Search' on google.com", "url": "https://www.google.com/"}, IdempotencyKey: "search",
+	})
+	if err != nil || result.Approval == nil {
+		t.Fatalf("proposal = %#v, %v", result, err)
+	}
+	review, _ := result.Approval.ProposedAction["reviewContext"].(map[string]interface{})
+	if review["summary"] != "Click 'Search' on google.com" || review["target"] != "https://www.google.com/" {
+		t.Fatalf("review context = %#v", result.Approval.ProposedAction)
+	}
+}
