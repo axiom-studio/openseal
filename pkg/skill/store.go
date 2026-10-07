@@ -25,6 +25,10 @@ type CatalogStore interface {
 	ListSkillDefinitionVariants(context.Context, string, string) ([]*Definition, error)
 	SaveSkillBinding(context.Context, *Binding, int64) error
 	ListSkillBindings(context.Context, ScopeReference, string) ([]*Binding, error)
+	// DeleteSkillBinding removes one exact binding row at its expected
+	// revision. It returns ErrBindingNotFound when no binding has that ID and
+	// ErrBindingRevisionConflict when the current revision differs.
+	DeleteSkillBinding(ctx context.Context, scope ScopeReference, deploymentID, bindingID string, expectedRevision int64) error
 }
 
 // CatalogDefinitionIdentityStore optionally projects the current immutable

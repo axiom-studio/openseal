@@ -690,6 +690,7 @@ type (
 	SkillBindingLifecycleEntry           = skill.BindingLifecycleEntry
 	UpsertSkillBindingRequest            = skill.UpsertBindingRequest
 	DisableSkillBindingRequest           = skill.DisableBindingRequest
+	DeleteSkillBindingRequest            = skill.DeleteBindingRequest
 	SkillScope                           = skill.ScopeReference
 	SkillIdentity                        = capability.SkillIdentity
 	SkillRiskLevel                       = skill.RiskLevel
@@ -2269,6 +2270,8 @@ const (
 	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
 	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
 	SkillBindingArgumentVerifiedClaim = skill.BindingArgumentVerifiedClaim
+	SkillBindingLifecycleDisabled     = skill.BindingLifecycleDisabled
+	SkillBindingLifecycleDeleted      = skill.BindingLifecycleDeleted
 
 	OAuth2SubjectInstallation = capability.OAuth2SubjectInstallation
 	OAuth2SubjectUser         = capability.OAuth2SubjectUser
@@ -5238,6 +5241,15 @@ func (e *Engine) DisableSkillBinding(ctx context.Context, request skill.DisableB
 	return e.skills.DisableBinding(ctx, request)
 }
 
+// DeleteSkillBinding permanently removes one Agent or Team binding at its
+// expected revision. Unlike DisableSkillBinding no row remains: every action,
+// prompt, adapter and credential lease that referenced the binding stops
+// resolving, and the ID can be reused for a different Skill identity. The
+// result is the deletion receipt carrying a final "deleted" lifecycle entry.
+func (e *Engine) DeleteSkillBinding(ctx context.Context, request skill.DeleteBindingRequest) (*skill.Binding, error) {
+	return e.skills.DeleteBinding(ctx, request)
+}
+
 func (e *Engine) PlanSkillReferenceUpgrade(ctx context.Context, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
 	if e == nil || e.skillReferenceUpgrades == nil {
 		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
@@ -5306,6 +5318,16 @@ func (e *Engine) DisableTeamSkillBinding(ctx context.Context, teamDeploymentID s
 		return nil, err
 	}
 	return e.skills.DisableBinding(ctx, request)
+}
+
+func (e *Engine) DeleteTeamSkillBinding(ctx context.Context, teamDeploymentID string, request skill.DeleteBindingRequest) (*skill.Binding, error) {
+	if request.DeploymentID != teamDeploymentID {
+		return nil, errors.New("Team Skill binding must identify the owning Team deployment")
+	}
+	if _, err := e.teams.GetDeployment(ctx, request.Scope, teamDeploymentID); err != nil {
+		return nil, err
+	}
+	return e.skills.DeleteBinding(ctx, request)
 }
 
 func (e *Engine) ListModelSkillActions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.ModelAction, error) {
