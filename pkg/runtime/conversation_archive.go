@@ -214,7 +214,7 @@ func (s *ConversationService) importArchiveConversation(
 	conversation := &Conversation{
 		ID: stableConversationID(req.Scope, key, "archive-conversation"), Scope: req.Scope, Owner: req.Owner,
 		Title: title, Origin: archiveConversationOrigin(req.Source), Status: ConversationStatusActive,
-		Revision: 1, CreatedAt: createdAt, UpdatedAt: createdAt,
+		ApprovalMode: DefaultConversationApprovalMode, Revision: 1, CreatedAt: createdAt, UpdatedAt: createdAt,
 	}
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err

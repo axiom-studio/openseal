@@ -231,6 +231,27 @@ messages. Archive disables participation; restore does not re-enable it. The
 setting persists across restart. Uncertain PATCH delivery must be checked with
 GET before another edit; it has no automatic replay contract.
 
+Every conversation carries `approvalMode`: `manual`, `auto` (the default for
+new and existing conversations), or `skip`. The kernel action policy applies it
+to every action proposed by a Run acting for the conversation (the Run's
+`conversationId` context, else its root Run's): `manual` requires approval for
+every side effect, `auto` allows read and write risk actions and still requires
+approval for external, production, and destructive ones, and `skip` allows every
+action. Agent behavior amendments keep their explicit review in every mode, and
+Runs acting for no conversation behave as `manual`.
+`PATCH /conversations/{id}/approval-mode` accepts `scope`, a positive
+`expectedRevision`, `mode`, and `actor` (the principal the host has authorized
+to execute the conversation's Agent). It returns
+`{conversation, changed, event, approvedApprovalIds, approvalSweepIncomplete}`.
+A change records the `conversation.approval_mode_changed` activity event with
+payload `{conversationId, from, to}` in the same transaction as the new
+revision. Setting a mode at least as loose as the previous one approves the
+conversation's pending approvals that the mode allows, as principal
+`system:approval-mode` with reason `approval mode <mode>`; tightening leaves
+pending approvals untouched. Setting the current mode again is a no-op that
+re-runs this sweep. Invalid modes return 400, stale revisions 409, and unknown
+conversations 404. The `channels` capability advertises `set-approval-mode`.
+
 `GET /conversations` optionally accepts `participantType` and `participantId`.
 With a valid reader, the response remains an array and each conversation includes
 `readPosition: { participant, readSequence, revision }`. An absent cursor yields

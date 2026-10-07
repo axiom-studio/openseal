@@ -226,7 +226,7 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 	now := s.now().UTC()
 	conversation := &Conversation{
 		ID: id, Scope: req.Scope, Owner: req.Owner, Title: strings.TrimSpace(req.Title), Status: ConversationStatusActive,
-		Origin: cloneConversationReference(req.Origin), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Origin: cloneConversationReference(req.Origin), ApprovalMode: DefaultConversationApprovalMode, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
