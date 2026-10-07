@@ -267,5 +267,57 @@ func (s *SQLiteStore) ListSkillBindings(ctx context.Context, scope skill.ScopeRe
 	return bindings, rows.Err()
 }
 
+// DeleteSkillBinding removes one binding row at its expected revision under the
+// same Skill maintenance fence as SaveSkillBinding.
+func (s *SQLiteStore) DeleteSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	var skillID string
+	var revision int64
+	err = conn.QueryRowContext(ctx, `SELECT skill_id, revision FROM skill_bindings WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=?`,
+		scope.Kind, scope.ID, deploymentID, bindingID).Scan(&skillID, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return skill.ErrBindingNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if revision != expectedRevision {
+		return skill.ErrBindingRevisionConflict
+	}
+	if g, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, Scope{Kind: scope.Kind, ID: scope.ID}, skillID); err != nil {
+		return err
+	} else if g != nil {
+		return &SkillRuntimeMaintenanceError{Maintenance: *g}
+	}
+	result, err := conn.ExecContext(ctx, `DELETE FROM skill_bindings WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=? AND revision=?`,
+		scope.Kind, scope.ID, deploymentID, bindingID, expectedRevision)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return skill.ErrBindingRevisionConflict
+	}
+	_, err = conn.ExecContext(ctx, "COMMIT")
+	committed = err == nil
+	return err
+}
+
 var _ skill.CatalogStore = (*SQLiteStore)(nil)
 var _ skill.CatalogDefinitionIdentityStore = (*SQLiteStore)(nil)

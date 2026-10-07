@@ -115,6 +115,24 @@ func (s *MemoryStore) SaveSkillBinding(_ context.Context, binding *skill.Binding
 	return nil
 }
 
+func (s *MemoryStore) DeleteSkillBinding(_ context.Context, scope skill.ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
+	key := memorySkillBindingKey(scope, deploymentID, bindingID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current := s.skillBindings[key]
+	if current == nil {
+		return skill.ErrBindingNotFound
+	}
+	if current.Revision != expectedRevision {
+		return skill.ErrBindingRevisionConflict
+	}
+	if g := s.memorySkillRuntimeMaintenanceActiveLocked(Scope{Kind: scope.Kind, ID: scope.ID}, current.SkillID); g != nil {
+		return &SkillRuntimeMaintenanceError{Maintenance: *g}
+	}
+	delete(s.skillBindings, key)
+	return nil
+}
+
 func (s *MemoryStore) ListSkillBindings(_ context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

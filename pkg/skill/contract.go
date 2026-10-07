@@ -119,6 +119,7 @@ const (
 	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated
 	BindingLifecycleEnabled  = capability.BindingLifecycleEnabled
 	BindingLifecycleDisabled = capability.BindingLifecycleDisabled
+	BindingLifecycleDeleted  = capability.BindingLifecycleDeleted
 
 	BindingArgumentLiteral       = capability.BindingArgumentLiteral
 	BindingArgumentSessionID     = capability.BindingArgumentSessionID
