@@ -86,6 +86,9 @@ func migratePortfolio(db *sql.DB) error {
 	if err := migrateConversations(db); err != nil {
 		return err
 	}
+	if err := migrateSQLiteConversationApprovalMode(db); err != nil {
+		return err
+	}
 	if err := migrateExternalConversations(db); err != nil {
 		return err
 	}

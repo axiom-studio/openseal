@@ -103,6 +103,7 @@ const (
 	OperationReceipts             = "receipts"
 	OperationCoordinateAuto       = "coordinate-automatically"
 	OperationParticipation        = "configure-participation"
+	OperationApprovalMode         = "update-approval-mode"
 	OperationStream               = "stream"
 	OperationDeploy               = "deploy"
 	OperationActivate             = "activate"
@@ -188,6 +189,9 @@ type ChannelCapabilityFeatures struct {
 	Receipts              bool
 	Changes               bool
 	Streaming             bool
+	// ApprovalMode advertises the governed per-conversation approval mode
+	// update (PATCH .../conversations/{id}/approval-mode).
+	ApprovalMode bool
 }
 
 type TeamDefinitionCapabilityFeatures struct {
@@ -705,6 +709,9 @@ func ChannelsCapability(features ChannelCapabilityFeatures) Capability {
 	if features.Streaming {
 		capability.Operations = append(capability.Operations, OperationStream)
 	}
+	if features.ApprovalMode {
+		capability.Operations = append(capability.Operations, OperationApprovalMode)
+	}
 	return capability
 }
 
@@ -1058,6 +1065,16 @@ type UpdateConversationRequest struct {
 	ExpectedRevision     int64                       `json:"expectedRevision"`
 	Title                *string                     `json:"title,omitempty"`
 	Status               *runtime.ConversationStatus `json:"status,omitempty"`
+}
+
+// SetConversationApprovalModeRequest changes a conversation's approval mode.
+// Mode is manual, auto, or skip; ExpectedRevision is the conversation revision
+// the caller last read. Actor is the authorized principal making the change.
+type SetConversationApprovalModeRequest struct {
+	Scope            runtime.Scope                    `json:"scope"`
+	ExpectedRevision int64                            `json:"expectedRevision"`
+	Mode             runtime.ConversationApprovalMode `json:"mode"`
+	Actor            runtime.ActivityActor            `json:"actor"`
 }
 
 type PostChannelMessageRequest struct {

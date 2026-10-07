@@ -161,6 +161,40 @@ func (s *Server) handleUpdateConversation(w http.ResponseWriter, r *http.Request
 	s.respondJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) conversationApprovalModeSupported() bool {
+	_, ok := s.store.(runtime.ConversationApprovalModeKernelStore)
+	return ok
+}
+
+// handleSetConversationApprovalMode is the governed approval mode update. The
+// embedding host authenticates the caller and authorizes it to execute the
+// conversation's Agent before forwarding the request with that actor.
+func (s *Server) handleSetConversationApprovalMode(w http.ResponseWriter, r *http.Request) {
+	store, ok := s.store.(runtime.ConversationApprovalModeKernelStore)
+	if !ok {
+		s.respondError(w, http.StatusNotImplemented, "conversation approval modes are unavailable")
+		return
+	}
+	var payload kernelapi.SetConversationApprovalModeRequest
+	if err := decodeStrictJSON(r, &payload); err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	actor := runtime.ConversationParticipant{Type: runtime.ConversationParticipantType(strings.TrimSpace(payload.Actor.Type)), ID: strings.TrimSpace(payload.Actor.ID)}
+	if !s.authorizeDesktopChannelWrite(w, payload.Scope, &actor) {
+		return
+	}
+	result, err := runtime.NewConversationApprovalModeService(store).SetApprovalMode(r.Context(), runtime.SetConversationApprovalModeRequest{
+		Scope: payload.Scope, ConversationID: strings.TrimSpace(r.PathValue("id")), ExpectedRevision: payload.ExpectedRevision,
+		Mode: payload.Mode, Actor: payload.Actor, CorrelationID: strings.TrimSpace(r.Header.Get("X-Correlation-ID")),
+	})
+	if err != nil {
+		s.respondConversationError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handlePostChannelMessage(w http.ResponseWriter, r *http.Request) {
 	service, _, conversationID, ok := s.conversationRequestContextFromBodyStore(w, r)
 	if !ok {

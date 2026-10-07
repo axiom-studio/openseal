@@ -68,6 +68,7 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
 	}
+	applyConversationDefaults(conversation)
 	key := strings.TrimSpace(idempotencyKey)
 	if key == "" {
 		return nil, false, ErrInvalidConversation
@@ -119,6 +120,7 @@ func (s *SQLiteStore) UpdateConversation(ctx context.Context, conversation *Conv
 	if err := conversation.Validate(); err != nil {
 		return nil, err
 	}
+	applyConversationDefaults(conversation)
 	conn, err := beginImmediateSQLite(ctx, s.db)
 	if err != nil {
 		return nil, err
@@ -133,6 +135,31 @@ func (s *SQLiteStore) UpdateConversation(ctx context.Context, conversation *Conv
 	}
 	committed = true
 	return cloneConversation(conversation), nil
+}
+
+func (s *SQLiteStore) UpdateConversationWithEvent(ctx context.Context, conversation *Conversation, expectedRevision int64, event *ActivityEvent) (*Conversation, *ActivityEvent, error) {
+	if err := validateConversationEvent(conversation, event); err != nil {
+		return nil, nil, err
+	}
+	applyConversationDefaults(conversation)
+	conn, err := beginImmediateSQLite(ctx, s.db)
+	if err != nil {
+		return nil, nil, err
+	}
+	committed := false
+	defer rollbackSQLiteConn(conn, &committed)
+	if err := updateSQLiteConversation(ctx, conn, conversation, expectedRevision); err != nil {
+		return nil, nil, err
+	}
+	persisted, err := insertSQLiteActivityConn(ctx, conn, event)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return nil, nil, err
+	}
+	committed = true
+	return cloneConversation(conversation), cloneActivityEvent(persisted), nil
 }
 
 func (s *SQLiteStore) GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error) {
@@ -894,6 +921,7 @@ func decodeConversation(payload string) (*Conversation, error) {
 	if err := json.Unmarshal([]byte(payload), &value); err != nil {
 		return nil, fmt.Errorf("decode conversation: %w", err)
 	}
+	applyConversationDefaults(&value)
 	return &value, nil
 }
 

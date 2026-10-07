@@ -179,7 +179,7 @@ func decodeActivityFeedCursor(value string) (*activityFeedCursor, error) {
 
 func matchesActivityFilter(event *ActivityEvent, filter ActivityFilter) bool {
 	if event == nil || event.Scope != filter.Scope || filter.RunID != "" && event.RunID != filter.RunID ||
-		len(filter.RunIDs) > 0 && !activityStringAllowed(event.RunID, filter.RunIDs) ||
+		len(filter.RunIDs) > 0 && !activityStringAllowed(activityStreamID(event), filter.RunIDs) ||
 		filter.AgentID != "" && event.AgentID != filter.AgentID || filter.ObjectiveID != "" && event.ObjectiveID != filter.ObjectiveID ||
 		filter.ProjectID != "" && event.ProjectID != filter.ProjectID ||
 		filter.TeamID != "" && event.TeamID != filter.TeamID || !activityStringAllowed(event.EventType, filter.EventTypes) ||
