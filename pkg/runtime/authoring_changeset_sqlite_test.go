@@ -718,6 +718,19 @@ func TestWorkforceApplyConvergesDuplicateManagementBindings(t *testing.T) {
 	if len(bindings) != 1 || bindings[0].ID != "bundled:agents" || bindings[0].Revision != 2 {
 		t.Fatalf("converged bindings = %#v", bindings)
 	}
+	// The removed duplicate leaves only its revision floor: a binding later
+	// created under that ID starts above every revision it had.
+	removed := "workforce:agent-live:" + AgentManagementSkillID
+	if floor, err := store.SkillBindingRevisionFloor(context.Background(), value.Scope, "agent-live", removed); err != nil || floor != 2 {
+		t.Fatalf("removed binding floor = %d, %v", floor, err)
+	}
+	recreated, err := catalog.UpsertBinding(context.Background(), skill.UpsertBindingRequest{Binding: &skill.Binding{
+		ID: removed, Scope: value.Scope, DeploymentID: "agent-live", SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
+		AllowedActions: []string{AgentActionAmendBehavior}, MaximumRisk: capability.RiskLevelWrite,
+	}, Actor: skill.BindingActor{Type: "user", ID: "admin"}, Reason: "recreate"})
+	if err != nil || recreated.Revision != 3 {
+		t.Fatalf("recreated binding = %#v, %v", recreated, err)
+	}
 }
 
 func TestInactiveWorkforceBindingDefersExactExecutionCredentialUntilActivation(t *testing.T) {

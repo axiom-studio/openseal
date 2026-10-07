@@ -654,6 +654,12 @@ func applySQLiteWorkforceSkillBindings(ctx context.Context, tx workforceSQLQuery
 		current := existing[binding.ID]
 		if current != nil {
 			binding.Revision = current.Revision + 1
+		} else {
+			floor, err := sqliteSkillBindingRevisionFloor(ctx, tx, binding.Scope, binding.DeploymentID, binding.ID)
+			if err != nil {
+				return err
+			}
+			binding.Revision = floor + 1
 		}
 		payload, _ := json.Marshal(binding)
 		if current == nil {
@@ -673,6 +679,9 @@ func applySQLiteWorkforceSkillBindings(ctx context.Context, tx workforceSQLQuery
 	}
 	for _, binding := range existing {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM skill_bindings WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=? AND revision=?`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.Revision); err != nil {
+			return err
+		}
+		if err := sqliteRecordSkillBindingTombstone(ctx, tx, binding.Scope, binding.DeploymentID, binding.ID, binding.Revision+1); err != nil {
 			return err
 		}
 	}
