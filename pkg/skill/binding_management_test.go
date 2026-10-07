@@ -190,10 +190,11 @@ type bindingManagementStore struct {
 	mu          sync.Mutex
 	definitions map[string][]*Definition
 	bindings    map[string]*Binding
+	floors      map[string]int64
 }
 
 func newBindingManagementStore() *bindingManagementStore {
-	return &bindingManagementStore{definitions: make(map[string][]*Definition), bindings: make(map[string]*Binding)}
+	return &bindingManagementStore{definitions: make(map[string][]*Definition), bindings: make(map[string]*Binding), floors: make(map[string]int64)}
 }
 
 func (s *bindingManagementStore) CreateSkillDefinition(_ context.Context, definition *Definition) error {
@@ -220,7 +221,7 @@ func (s *bindingManagementStore) SaveSkillBinding(_ context.Context, binding *Bi
 	defer s.mu.Unlock()
 	key := bindingKey(binding.Scope, binding.DeploymentID, binding.ID)
 	current := s.bindings[key]
-	if current == nil && expectedRevision != 0 || current != nil && current.Revision != expectedRevision || binding.Revision != expectedRevision+1 {
+	if current == nil && expectedRevision != s.floors[key] || current != nil && current.Revision != expectedRevision || binding.Revision != expectedRevision+1 {
 		return ErrBindingRevisionConflict
 	}
 	s.bindings[key] = cloneBinding(binding)
@@ -239,4 +240,89 @@ func (s *bindingManagementStore) ListSkillBindings(_ context.Context, scope Scop
 	return result, nil
 }
 
+func (s *bindingManagementStore) DeleteSkillBinding(_ context.Context, scope ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := bindingKey(scope, deploymentID, bindingID)
+	current := s.bindings[key]
+	if current == nil {
+		return ErrBindingNotFound
+	}
+	if current.Revision != expectedRevision {
+		return ErrBindingRevisionConflict
+	}
+	delete(s.bindings, key)
+	s.floors[key] = expectedRevision + 1
+	return nil
+}
+
+func (s *bindingManagementStore) SkillBindingRevisionFloor(_ context.Context, scope ScopeReference, deploymentID, bindingID string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.floors[bindingKey(scope, deploymentID, bindingID)], nil
+}
+
 var _ CatalogStore = (*bindingManagementStore)(nil)
+
+func TestCanonicalBindingManagementDeletesBindingsWithAndWithoutStore(t *testing.T) {
+	for name, catalog := range map[string]*Catalog{"memory": NewCatalog(), "store": NewCatalogWithStore(newBindingManagementStore())} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			definition := testSkillDefinition()
+			if err := catalog.Register(ctx, definition); err != nil {
+				t.Fatal(err)
+			}
+			scope := ScopeReference{Kind: "tenant", ID: "one"}
+			actor := BindingActor{Type: "user", ID: "admin"}
+			created, err := catalog.UpsertBinding(ctx, UpsertBindingRequest{
+				Binding: &Binding{ID: "git", Scope: scope, DeploymentID: "agent", SkillID: definition.ID, SkillVersion: definition.Version,
+					AllowedActions: []string{"deploy"}, MaximumRisk: RiskLevelProduction,
+					Credentials: map[string]CredentialReference{"git": {Kind: "git-token", ID: "credential://git"}}},
+				Actor: actor, Reason: "assign",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := catalog.DeleteBinding(ctx, DeleteBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "git", ExpectedRevision: created.Revision, Actor: actor}); err == nil {
+				t.Fatal("delete without a reason was accepted")
+			}
+			if _, err := catalog.DeleteBinding(ctx, DeleteBindingRequest{Scope: ScopeReference{Kind: "tenant", ID: "two"}, DeploymentID: "agent", BindingID: "git", ExpectedRevision: created.Revision, Actor: actor, Reason: "remove"}); !errors.Is(err, ErrBindingNotFound) {
+				t.Fatalf("cross-scope delete = %v", err)
+			}
+			receipt, err := catalog.DeleteBinding(ctx, DeleteBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "git", ExpectedRevision: created.Revision, Actor: actor, Reason: " remove "})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if receipt.Revision != 2 || !receipt.Disabled || receipt.Lifecycle[1].Action != BindingLifecycleDeleted || receipt.Lifecycle[1].Reason != "remove" {
+				t.Fatalf("receipt = %#v", receipt)
+			}
+			if current, err := catalog.GetBinding(ctx, scope, "agent", "git"); err != nil || current != nil {
+				t.Fatalf("deleted binding = %#v, %v", current, err)
+			}
+			if actions, err := catalog.ListModelActions(ctx, scope, "agent"); err != nil || len(actions) != 0 {
+				t.Fatalf("actions after delete = %#v, %v", actions, err)
+			}
+			if _, err := catalog.Resolve(ctx, scope, "agent", definition.ID, definition.Version, "deploy", BindingReference{ID: "git", Revision: created.Revision}); !errors.Is(err, ErrBindingUnavailable) {
+				t.Fatalf("deleted reference = %v", err)
+			}
+			if floor, err := catalog.BindingRevisionFloor(ctx, scope, "agent", "git"); err != nil || floor != receipt.Revision {
+				t.Fatalf("revision floor = %d, %v", floor, err)
+			}
+			stale := *created
+			stale.Lifecycle = nil
+			if err := catalog.Bind(ctx, &stale); !errors.Is(err, ErrBindingRevisionConflict) {
+				t.Fatalf("creation at the deleted revision = %v", err)
+			}
+			again, err := catalog.UpsertBinding(ctx, UpsertBindingRequest{Binding: created, Actor: actor, Reason: "reassign"})
+			if err != nil || again.Revision != receipt.Revision+1 {
+				t.Fatalf("recreated = %#v, %v", again, err)
+			}
+			if _, err := catalog.Resolve(ctx, scope, "agent", definition.ID, definition.Version, "deploy", BindingReference{ID: "git", Revision: created.Revision}); !errors.Is(err, ErrBindingUnavailable) {
+				t.Fatalf("old reference resolved against the new binding: %v", err)
+			}
+			if _, err := catalog.Resolve(ctx, scope, "agent", definition.ID, definition.Version, "deploy", BindingReference{ID: "git", Revision: again.Revision}); err != nil {
+				t.Fatalf("new reference = %v", err)
+			}
+		})
+	}
+}
