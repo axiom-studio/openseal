@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -39,6 +40,15 @@ func migrateSkillCatalog(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_skill_bindings_deployment
 			ON skill_bindings(scope_kind, scope_id, deployment_id, id);
+		CREATE TABLE IF NOT EXISTS skill_binding_tombstones (
+			scope_kind TEXT NOT NULL,
+			scope_id TEXT NOT NULL,
+			deployment_id TEXT NOT NULL,
+			id TEXT NOT NULL,
+			revision INTEGER NOT NULL,
+			deleted_at TEXT NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, deployment_id, id)
+		);
 	`); err != nil {
 		return err
 	}
@@ -199,6 +209,7 @@ func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Bindi
 	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
 		return lookupErr
 	}
+	exists := lookupErr == nil
 	if previousSkillID != "" && previousSkillID != binding.SkillID {
 		g, err := sqliteSkillRuntimeMaintenanceActiveTx(ctx, conn, maintenanceScope, previousSkillID)
 		if err != nil {
@@ -208,8 +219,12 @@ func (s *SQLiteStore) SaveSkillBinding(ctx context.Context, binding *skill.Bindi
 			return &SkillRuntimeMaintenanceError{Maintenance: *g}
 		}
 	}
-	if expectedRevision == 0 {
-		if binding.Revision != 1 {
+	if !exists {
+		floor, err := sqliteSkillBindingRevisionFloor(ctx, conn, binding.Scope, binding.DeploymentID, binding.ID)
+		if err != nil {
+			return err
+		}
+		if expectedRevision != floor || binding.Revision != floor+1 {
 			return skill.ErrBindingRevisionConflict
 		}
 		result, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO skill_bindings(scope_kind, scope_id, deployment_id, id, skill_id, skill_version, source_identity, revision, payload) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.SkillID, binding.SkillVersion, binding.SourceIdentity, binding.Revision, string(payload))
@@ -314,8 +329,42 @@ func (s *SQLiteStore) DeleteSkillBinding(ctx context.Context, scope skill.ScopeR
 	if rows != 1 {
 		return skill.ErrBindingRevisionConflict
 	}
+	if err := sqliteRecordSkillBindingTombstone(ctx, conn, scope, deploymentID, bindingID, expectedRevision+1); err != nil {
+		return err
+	}
 	_, err = conn.ExecContext(ctx, "COMMIT")
 	committed = err == nil
+	return err
+}
+
+func (s *SQLiteStore) SkillBindingRevisionFloor(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string) (int64, error) {
+	return sqliteSkillBindingRevisionFloor(ctx, s.db, scope, deploymentID, bindingID)
+}
+
+type sqliteRowQuerier interface {
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}
+
+type sqliteExecer interface {
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+}
+
+func sqliteSkillBindingRevisionFloor(ctx context.Context, query sqliteRowQuerier, scope skill.ScopeReference, deploymentID, bindingID string) (int64, error) {
+	var floor int64
+	err := query.QueryRowContext(ctx, `SELECT revision FROM skill_binding_tombstones WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=?`,
+		scope.Kind, scope.ID, deploymentID, bindingID).Scan(&floor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return floor, err
+}
+
+// sqliteRecordSkillBindingTombstone raises a deleted binding ID's revision
+// floor. The floor never decreases.
+func sqliteRecordSkillBindingTombstone(ctx context.Context, exec sqliteExecer, scope skill.ScopeReference, deploymentID, bindingID string, revision int64) error {
+	_, err := exec.ExecContext(ctx, `INSERT INTO skill_binding_tombstones(scope_kind, scope_id, deployment_id, id, revision, deleted_at) VALUES(?, ?, ?, ?, ?, ?)
+		ON CONFLICT(scope_kind, scope_id, deployment_id, id) DO UPDATE SET revision=MAX(revision, excluded.revision), deleted_at=excluded.deleted_at`,
+		scope.Kind, scope.ID, deploymentID, bindingID, revision, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 

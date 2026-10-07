@@ -610,6 +610,7 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
 		return lookupErr
 	}
+	exists := lookupErr == nil
 	skillIDs := []string{binding.SkillID}
 	if previousSkillID != "" && previousSkillID != binding.SkillID {
 		skillIDs = append(skillIDs, previousSkillID)
@@ -627,8 +628,13 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 			return &SkillRuntimeMaintenanceError{Maintenance: *g}
 		}
 	}
-	if expectedRevision == 0 {
-		if binding.Revision != 1 {
+	if !exists {
+		// Creation starts above the revision floor of a deleted binding ID.
+		floor, err := s.skillBindingRevisionFloor(ctx, tx, binding.Scope, binding.DeploymentID, binding.ID, true)
+		if err != nil {
+			return err
+		}
+		if expectedRevision != floor || binding.Revision != floor+1 {
 			return skill.ErrBindingRevisionConflict
 		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("skill_bindings")+`
@@ -727,6 +733,9 @@ func (s *PostgresStore) DeleteSkillBinding(ctx context.Context, scope skill.Scop
 			return err
 		}
 		return skill.ErrBindingRevisionConflict
+	}
+	if err := s.recordSkillBindingTombstone(ctx, tx, scope, deploymentID, bindingID, expectedRevision+1); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

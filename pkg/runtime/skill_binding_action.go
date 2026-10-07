@@ -715,7 +715,14 @@ func (d *SkillBindingActionDispatcher) replayedUpsert(ctx context.Context, scope
 		return nil, err
 	}
 	candidate := skillBindingCandidate(scope, deploymentID, args)
-	if current == nil || current.Revision != args.ExpectedRevision+1 || current.Disabled || !sameManagedSkillBinding(current, candidate) {
+	if current == nil || current.Disabled || !sameManagedSkillBinding(current, candidate) {
+		return nil, skill.ErrBindingRevisionConflict
+	}
+	// A creation under a deleted binding's ID starts above its revision floor,
+	// so a replayed creation is recognized by its single "created" entry.
+	created := args.ExpectedRevision == 0 && len(current.Lifecycle) == 1 &&
+		current.Lifecycle[0].Action == skill.BindingLifecycleCreated && current.Lifecycle[0].Revision == current.Revision
+	if current.Revision != args.ExpectedRevision+1 && !created {
 		return nil, skill.ErrBindingRevisionConflict
 	}
 	return skillBindingActionResult(SkillActionUpsertBinding, current, true), nil

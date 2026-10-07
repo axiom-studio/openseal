@@ -102,6 +102,15 @@ func (c *Catalog) UpsertBinding(ctx context.Context, request UpsertBindingReques
 	candidate.Revision = 1
 	candidate.CreatedAt = now
 	candidate.Lifecycle = nil
+	if current == nil {
+		// A binding created under a deleted binding's ID starts above every
+		// revision the deleted binding had.
+		floor, err := c.bindingRevisionFloor(ctx, candidate.Scope, candidate.DeploymentID, candidate.ID)
+		if err != nil {
+			return nil, err
+		}
+		candidate.Revision = floor + 1
+	}
 	if current != nil {
 		action = BindingLifecycleUpdated
 		if current.Disabled {
@@ -163,7 +172,9 @@ func (c *Catalog) DisableBinding(ctx context.Context, request DisableBindingRequ
 // works on enabled and disabled bindings alike. Afterwards nothing resolves
 // through the binding: model discovery, action resolution, adapter selection
 // and credential leases all require a stored row. The ID is free again, so a
-// binding with a different Skill identity can be created under it.
+// binding with a different Skill identity can be created under it. Only the
+// ID's revision floor is kept: a successor starts at the deletion's revision
+// plus one, so a reference to the deleted binding never matches it.
 //
 // The returned value is the deletion receipt: the last stored state, disabled,
 // with a final "deleted" lifecycle entry. It is never persisted.
@@ -197,6 +208,7 @@ func (c *Catalog) DeleteBinding(ctx context.Context, request DeleteBindingReques
 			return nil, ErrBindingRevisionConflict
 		}
 		delete(c.bindings, key)
+		c.floors[key] = request.ExpectedRevision + 1
 		c.mu.Unlock()
 	} else {
 		if err := c.store.DeleteSkillBinding(ctx, current.Scope, current.DeploymentID, current.ID, request.ExpectedRevision); err != nil {
@@ -216,6 +228,27 @@ func (c *Catalog) DeleteBinding(ctx context.Context, request DeleteBindingReques
 	receipt.UpdatedAt = now
 	receipt.Lifecycle = append(receipt.Lifecycle, bindingLifecycleEntry(receipt.Revision, BindingLifecycleDeleted, request.Actor, request.Reason, now))
 	return receipt, nil
+}
+
+// BindingRevisionFloor returns the revision of the last deletion of this
+// binding ID, or zero. A new binding under the ID starts at the floor plus one.
+func (c *Catalog) BindingRevisionFloor(ctx context.Context, scope ScopeReference, deploymentID, bindingID string) (int64, error) {
+	if c == nil {
+		return 0, errors.New("skill catalog is not configured")
+	}
+	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {
+		return 0, err
+	}
+	return c.bindingRevisionFloor(ctx, scope, strings.TrimSpace(deploymentID), strings.TrimSpace(bindingID))
+}
+
+func (c *Catalog) bindingRevisionFloor(ctx context.Context, scope ScopeReference, deploymentID, bindingID string) (int64, error) {
+	if c.store == nil {
+		c.mu.RLock()
+		defer c.mu.RUnlock()
+		return c.floors[bindingKey(scope, deploymentID, bindingID)], nil
+	}
+	return c.store.SkillBindingRevisionFloor(ctx, scope, deploymentID, bindingID)
 }
 
 func (c *Catalog) listBindingsWithoutDefinitions(ctx context.Context, scope ScopeReference, deploymentID string) ([]*Binding, error) {

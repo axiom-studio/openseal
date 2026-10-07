@@ -108,7 +108,9 @@ func (s *MemoryStore) SaveSkillBinding(_ context.Context, binding *skill.Binding
 			return &SkillRuntimeMaintenanceError{Maintenance: *g}
 		}
 	}
-	if current == nil && expectedRevision != 0 || current != nil && current.Revision != expectedRevision {
+	// Creation must start above a deleted binding's revision floor.
+	floor := s.skillBindingFloors[key]
+	if current == nil && (expectedRevision != floor || binding.Revision <= floor) || current != nil && current.Revision != expectedRevision {
 		return skill.ErrBindingRevisionConflict
 	}
 	s.skillBindings[key] = cloneMemorySkillBinding(binding)
@@ -130,7 +132,14 @@ func (s *MemoryStore) DeleteSkillBinding(_ context.Context, scope skill.ScopeRef
 		return &SkillRuntimeMaintenanceError{Maintenance: *g}
 	}
 	delete(s.skillBindings, key)
+	s.skillBindingFloors[key] = expectedRevision + 1
 	return nil
+}
+
+func (s *MemoryStore) SkillBindingRevisionFloor(_ context.Context, scope skill.ScopeReference, deploymentID, bindingID string) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.skillBindingFloors[memorySkillBindingKey(scope, deploymentID, bindingID)], nil
 }
 
 func (s *MemoryStore) ListSkillBindings(_ context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {
