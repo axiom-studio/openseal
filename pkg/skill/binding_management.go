@@ -27,9 +27,18 @@ type DisableBindingRequest struct {
 	Reason           string         `json:"reason"`
 }
 
-// ListBindings returns every binding for one exact deployment, including
-// disabled bindings, so management surfaces never confuse retirement with
-// deletion. Definitions are deliberately not required for audit visibility.
+// DeleteBindingRequest permanently removes one binding at ExpectedRevision.
+type DeleteBindingRequest struct {
+	Scope            ScopeReference `json:"scope"`
+	DeploymentID     string         `json:"deploymentId"`
+	BindingID        string         `json:"bindingId"`
+	ExpectedRevision int64          `json:"expectedRevision"`
+	Actor            BindingActor   `json:"actor"`
+	Reason           string         `json:"reason"`
+}
+
+// ListBindings returns every stored binding for one exact deployment,
+// including disabled bindings. Deleted bindings have no row. Definitions are deliberately not required for audit visibility.
 func (c *Catalog) ListBindings(ctx context.Context, scope ScopeReference, deploymentID string) ([]*Binding, error) {
 	if c == nil {
 		return nil, errors.New("skill catalog is not configured")
@@ -148,6 +157,65 @@ func (c *Catalog) DisableBinding(ctx context.Context, request DisableBindingRequ
 		return nil, err
 	}
 	return cloneBinding(updated), nil
+}
+
+// DeleteBinding permanently removes one binding at its expected revision. It
+// works on enabled and disabled bindings alike. Afterwards nothing resolves
+// through the binding: model discovery, action resolution, adapter selection
+// and credential leases all require a stored row. The ID is free again, so a
+// binding with a different Skill identity can be created under it.
+//
+// The returned value is the deletion receipt: the last stored state, disabled,
+// with a final "deleted" lifecycle entry. It is never persisted.
+func (c *Catalog) DeleteBinding(ctx context.Context, request DeleteBindingRequest) (*Binding, error) {
+	if c == nil {
+		return nil, errors.New("skill catalog is not configured")
+	}
+	if err := validateBindingManagementActor(request.Actor, request.Reason); err != nil {
+		return nil, err
+	}
+	current, err := c.GetBinding(ctx, request.Scope, request.DeploymentID, request.BindingID)
+	if err != nil {
+		return nil, err
+	}
+	if current == nil {
+		return nil, ErrBindingNotFound
+	}
+	if current.Revision != request.ExpectedRevision {
+		return nil, ErrBindingRevisionConflict
+	}
+	key := bindingKey(current.Scope, current.DeploymentID, current.ID)
+	if c.store == nil {
+		c.mu.Lock()
+		latest := c.bindings[key]
+		if latest == nil {
+			c.mu.Unlock()
+			return nil, ErrBindingNotFound
+		}
+		if latest.Revision != request.ExpectedRevision {
+			c.mu.Unlock()
+			return nil, ErrBindingRevisionConflict
+		}
+		delete(c.bindings, key)
+		c.mu.Unlock()
+	} else {
+		if err := c.store.DeleteSkillBinding(ctx, current.Scope, current.DeploymentID, current.ID, request.ExpectedRevision); err != nil {
+			return nil, err
+		}
+		c.mu.Lock()
+		delete(c.bindings, key)
+		c.mu.Unlock()
+	}
+	now := time.Now().UTC()
+	receipt := cloneBinding(current)
+	receipt.Disabled = true
+	receipt.Revision++
+	if receipt.CreatedAt.IsZero() {
+		receipt.CreatedAt = now
+	}
+	receipt.UpdatedAt = now
+	receipt.Lifecycle = append(receipt.Lifecycle, bindingLifecycleEntry(receipt.Revision, BindingLifecycleDeleted, request.Actor, request.Reason, now))
+	return receipt, nil
 }
 
 func (c *Catalog) listBindingsWithoutDefinitions(ctx context.Context, scope ScopeReference, deploymentID string) ([]*Binding, error) {
