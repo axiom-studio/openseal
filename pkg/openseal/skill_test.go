@@ -104,6 +104,16 @@ func TestEngineExposesCanonicalSkillBindingManagement(t *testing.T) {
 	if err != nil || !disabled.Disabled || disabled.Revision != 2 {
 		t.Fatalf("disabled binding = %#v, %v", disabled, err)
 	}
+	deleted, err := engine.DeleteSkillBinding(ctx, DeleteSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 2, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "remove reader"})
+	if err != nil || deleted.Lifecycle[len(deleted.Lifecycle)-1].Action != SkillBindingLifecycleDeleted {
+		t.Fatalf("deleted binding = %#v, %v", deleted, err)
+	}
+	if values, err := engine.ListSkillBindings(ctx, scope, "agent"); err != nil || len(values) != 0 {
+		t.Fatalf("bindings after delete = %#v, %v", values, err)
+	}
+	if _, err := engine.DeleteTeamSkillBinding(ctx, "team", DeleteSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "remove"}); err == nil {
+		t.Fatal("Team delete accepted another owner's binding")
+	}
 }
 
 func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {

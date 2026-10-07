@@ -124,7 +124,7 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 			}
 		}
 	}
-	if err = applyPostgresWorkforceSkillBindings(ctx, tx, s.table("skill_bindings"), s.table("skill_definitions"), value, a.skillBindings, fencedSkills); err != nil {
+	if err = applyPostgresWorkforceSkillBindings(ctx, tx, s, value, a.skillBindings, fencedSkills); err != nil {
 		return nil, err
 	}
 	if a.teamDefinition != nil {
@@ -604,7 +604,8 @@ func applyPostgresWorkforceProject(ctx context.Context, tx *sql.Tx, table string
 	return nil
 }
 
-func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindingTable, definitionTable string, value *authoring.ChangeSet, desired []*capability.Binding, fencedSkills map[string]struct{}) error {
+func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, s *PostgresStore, value *authoring.ChangeSet, desired []*capability.Binding, fencedSkills map[string]struct{}) error {
+	bindingTable, definitionTable := s.table("skill_bindings"), s.table("skill_definitions")
 	existing := map[string]*capability.Binding{}
 	if predicate, args := workforceReconciledBindingPredicate(value, desired, true); predicate != "" {
 		rows, err := tx.QueryContext(ctx, `SELECT payload FROM `+bindingTable+` WHERE `+predicate+` ORDER BY deployment_id,id FOR UPDATE`, args...)
@@ -652,6 +653,12 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindin
 		current := existing[binding.ID]
 		if current != nil {
 			binding.Revision = current.Revision + 1
+		} else {
+			floor, err := s.skillBindingRevisionFloor(ctx, tx, binding.Scope, binding.DeploymentID, binding.ID, true)
+			if err != nil {
+				return err
+			}
+			binding.Revision = floor + 1
 		}
 		payload, _ := json.Marshal(binding)
 		if current == nil {
@@ -671,6 +678,9 @@ func applyPostgresWorkforceSkillBindings(ctx context.Context, tx *sql.Tx, bindin
 	}
 	for _, binding := range existing {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM `+bindingTable+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 AND revision=$5`, binding.Scope.Kind, binding.Scope.ID, binding.DeploymentID, binding.ID, binding.Revision); err != nil {
+			return err
+		}
+		if err := s.recordSkillBindingTombstone(ctx, tx, binding.Scope, binding.DeploymentID, binding.ID, binding.Revision+1); err != nil {
 			return err
 		}
 	}
