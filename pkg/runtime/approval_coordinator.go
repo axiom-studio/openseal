@@ -43,8 +43,40 @@ func NewApprovalCoordinator(portfolio PortfolioStore, actions ActionStore, autho
 	return &ApprovalCoordinator{portfolio: portfolio, actions: actions, authorize: authorizer, now: time.Now, newID: uuid.NewString}
 }
 
+type approvalResolutionKind int
+
+const (
+	approvalResolutionPrincipal approvalResolutionKind = iota
+	approvalResolutionTimeout
+	approvalResolutionMode
+)
+
+// ApprovalModePrincipal is the system principal recorded when a conversation
+// approval mode change resolves a pending approval.
+var ApprovalModePrincipal = ApprovalPrincipal{Type: "system", ID: "approval-mode"}
+
+// ErrApprovalExpired reports that an approval can no longer be approved
+// because its deadline elapsed; only the timeout rule can resolve it.
+var ErrApprovalExpired = errors.New("approval has expired")
+
 func (c *ApprovalCoordinator) Resolve(ctx context.Context, req ResolveApprovalRequest) (*ApprovalResolutionResult, error) {
-	return c.resolve(ctx, req, false)
+	return c.resolve(ctx, req, approvalResolutionPrincipal)
+}
+
+// ResolveByApprovalMode approves a pending checkpoint because its
+// conversation's approval mode now allows the action without review. The
+// decision id is stable per approval, so concurrent or repeated sweeps converge
+// on one decision; revision checks make a racing human decision win cleanly.
+// The caller is responsible for proving the mode allows the action.
+func (c *ApprovalCoordinator) ResolveByApprovalMode(ctx context.Context, scope Scope, approvalID string, expectedRevision int64, mode ConversationApprovalMode, correlationID string) (*ApprovalResolutionResult, error) {
+	if !mode.Valid() {
+		return nil, fmt.Errorf("%w: invalid approval mode %q", ErrInvalidConversation, mode)
+	}
+	return c.resolve(ctx, ResolveApprovalRequest{
+		Scope: scope, ApprovalID: approvalID, ExpectedRevision: expectedRevision,
+		DecisionID: "approval-mode:" + approvalID, Decision: ApprovalDecisionApprove, Principal: ApprovalModePrincipal,
+		Reason: "approval mode " + string(mode), CorrelationID: correlationID,
+	}, approvalResolutionMode)
 }
 
 // ResolveTimeout applies only the timeout rule durably captured on the
@@ -55,13 +87,14 @@ func (c *ApprovalCoordinator) ResolveTimeout(ctx context.Context, scope Scope, a
 		Scope: scope, ApprovalID: approvalID, ExpectedRevision: expectedRevision,
 		DecisionID: "approval-timeout:" + approvalID, Principal: ApprovalPrincipal{Type: "system", ID: "approval-timeout-worker"},
 		Reason: "Approval deadline elapsed", CorrelationID: correlationID,
-	}, true)
+	}, approvalResolutionTimeout)
 }
 
-func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRequest, timeout bool) (*ApprovalResolutionResult, error) {
-	if c == nil || c.portfolio == nil || c.actions == nil || c.authorize == nil {
+func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRequest, kind approvalResolutionKind) (*ApprovalResolutionResult, error) {
+	if c == nil || c.portfolio == nil || c.actions == nil || kind == approvalResolutionPrincipal && c.authorize == nil {
 		return nil, errors.New("approval coordinator is not configured")
 	}
+	timeout := kind == approvalResolutionTimeout
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
@@ -105,6 +138,9 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	if timeout && !expired {
 		return nil, errors.New("approval timeout deadline has not elapsed")
 	}
+	if kind == approvalResolutionMode && expired {
+		return nil, ErrApprovalExpired
+	}
 	runWaiting := run.Status == AgentRunStatusWaitingForApproval && run.WakeCondition != nil &&
 		run.WakeCondition.Type == "approval" && run.WakeCondition.Reference == approval.ID
 	runPausedWaiting := run.Status == AgentRunStatusPaused && run.PausedFrom == AgentRunStatusWaitingForApproval &&
@@ -133,8 +169,10 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 			}
 		}
 	} else {
-		if err := c.authorize.AuthorizeApproval(ctx, req.Principal, cloneApprovalCheckpoint(approval)); err != nil {
-			return nil, fmt.Errorf("authorize approval: %w", err)
+		if kind == approvalResolutionPrincipal {
+			if err := c.authorize.AuthorizeApproval(ctx, req.Principal, cloneApprovalCheckpoint(approval)); err != nil {
+				return nil, fmt.Errorf("authorize approval: %w", err)
+			}
 		}
 		switch req.Decision {
 		case ApprovalDecisionApprove:
