@@ -13,7 +13,7 @@ import (
 )
 
 func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *testing.T) {
-	for _, invalidAuthority := range []string{"missing", "unqualified", "stale", "disabled", "foreign_scope", "foreign_deployment", "foreign_skill", "foreign_version"} {
+	for _, invalidAuthority := range []string{"missing", "unqualified", "stale", "disabled", "deleted", "foreign_scope", "foreign_deployment", "foreign_skill", "foreign_version"} {
 		t.Run(invalidAuthority, func(t *testing.T) {
 			forActionLifecycleStores(t, func(t *testing.T, kernel KernelStore) {
 				fixture := newActionBindingFenceFixture(t, kernel)
@@ -37,6 +37,10 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 						t.Fatal(err)
 					}
 					proposal.Call.BindingRevision = binding.Revision
+				case "deleted":
+					if err := fixture.store.DeleteSkillBinding(t.Context(), fixture.binding.Scope, fixture.binding.DeploymentID, fixture.binding.ID, fixture.binding.Revision); err != nil {
+						t.Fatal(err)
+					}
 				case "foreign_scope":
 					proposal.Call.Scope.ID += "-another-tenant"
 					proposal.Run.Scope = proposal.Call.Scope
