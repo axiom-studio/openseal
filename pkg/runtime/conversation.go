@@ -72,6 +72,10 @@ type Conversation struct {
 	UpdatedAt     time.Time                  `json:"updatedAt"`
 	ArchivedAt    *time.Time                 `json:"archivedAt,omitempty"`
 	Participation *ConversationParticipation `json:"participation,omitempty"`
+	// ApprovalMode is the review boundary the kernel applies to actions
+	// proposed for this conversation. Stores persist it explicitly; it
+	// defaults to auto for new and pre-existing conversations.
+	ApprovalMode ConversationApprovalMode `json:"approvalMode"`
 }
 
 // ConversationParticipation records an explicit host-authorized opt-in. The
@@ -101,6 +105,9 @@ func (c *Conversation) Validate() error {
 	}
 	if c.Revision <= 0 || c.LastSequence < 0 || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: positive revision, sequence, and timestamps are required", ErrInvalidConversation)
+	}
+	if c.ApprovalMode != "" && !c.ApprovalMode.Valid() {
+		return fmt.Errorf("%w: invalid approval mode %q", ErrInvalidConversation, c.ApprovalMode)
 	}
 	if c.Participation != nil && (c.Participation.AfterSequence < 0 || c.Participation.AfterSequence > c.LastSequence) {
 		return fmt.Errorf("%w: participation boundary must be within saved message history", ErrInvalidConversation)

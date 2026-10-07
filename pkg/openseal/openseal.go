@@ -517,6 +517,9 @@ type (
 	ConversationChangeSet                = runtime.ConversationChangeSet
 	CreateConversationRequest            = runtime.CreateConversationRequest
 	UpdateConversationRequest            = runtime.UpdateConversationRequest
+	ConversationApprovalMode             = runtime.ConversationApprovalMode
+	SetConversationApprovalModeRequest   = runtime.SetConversationApprovalModeRequest
+	SetConversationApprovalModeResult    = runtime.SetConversationApprovalModeResult
 	ConversationFilter                   = runtime.ConversationFilter
 	PostChannelMessageRequest            = runtime.PostChannelMessageRequest
 	ChannelMessageFilter                 = runtime.ChannelMessageFilter
@@ -2140,6 +2143,9 @@ const (
 	AgentRequestBidDecline = runtime.AgentRequestBidDecline
 
 	ConversationStatusActive   = runtime.ConversationStatusActive
+	ConversationApprovalManual = runtime.ConversationApprovalManual
+	ConversationApprovalAuto   = runtime.ConversationApprovalAuto
+	ConversationApprovalSkip   = runtime.ConversationApprovalSkip
 	ConversationStatusArchived = runtime.ConversationStatusArchived
 
 	ConversationParticipantUser       = runtime.ConversationParticipantUser
@@ -4494,6 +4500,18 @@ func (e *Engine) UpdateConversation(ctx context.Context, request runtime.UpdateC
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.UpdateConversation(ctx, request)
+}
+
+// SetConversationApprovalMode is the governed, revision-checked change of a
+// conversation's approval mode. The host must first authorize the caller as a
+// principal allowed to execute the conversation's Agent. Loosening the mode
+// approves pending checkpoints in the conversation that the new mode allows.
+func (e *Engine) SetConversationApprovalMode(ctx context.Context, request runtime.SetConversationApprovalModeRequest) (*runtime.SetConversationApprovalModeResult, error) {
+	store, ok := e.store.(runtime.ConversationApprovalModeKernelStore)
+	if !ok || e.conversations == nil {
+		return nil, fmt.Errorf("conversation approval modes are not supported by this store")
+	}
+	return runtime.NewConversationApprovalModeService(store).SetApprovalMode(ctx, request)
 }
 
 func (e *Engine) ListConversations(ctx context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {
