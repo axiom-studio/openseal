@@ -105,6 +105,7 @@ type MemoryStore struct {
 	externalDeliveryKeys                map[string]string
 	skillDefinitions                    map[string]*skill.Definition
 	skillBindings                       map[string]*skill.Binding
+	skillBindingFloors                  map[string]int64
 }
 
 // NewMemoryStore creates an in-memory canonical kernel store.
@@ -180,6 +181,7 @@ func NewMemoryStore() *MemoryStore {
 		externalDeliveryKeys:        make(map[string]string),
 		skillDefinitions:            make(map[string]*skill.Definition),
 		skillBindings:               make(map[string]*skill.Binding),
+		skillBindingFloors:          make(map[string]int64),
 	}
 }
 

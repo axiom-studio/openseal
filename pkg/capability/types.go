@@ -515,6 +515,9 @@ const (
 	BindingLifecycleUpdated  BindingLifecycleAction = "updated"
 	BindingLifecycleEnabled  BindingLifecycleAction = "enabled"
 	BindingLifecycleDisabled BindingLifecycleAction = "disabled"
+	// BindingLifecycleDeleted only appears on the receipt returned by a
+	// delete. A deleted binding has no stored row, so it is never persisted.
+	BindingLifecycleDeleted BindingLifecycleAction = "deleted"
 )
 
 // BindingActor identifies the principal responsible for a management change.

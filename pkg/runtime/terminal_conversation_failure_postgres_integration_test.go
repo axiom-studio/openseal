@@ -54,7 +54,7 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 		t.Fatal(err)
 	}
 	defer upgraded.Close()
-	if version, err := upgraded.PostgresSchemaVersion(t.Context()); err != nil || version != 59 {
+	if version, err := upgraded.PostgresSchemaVersion(t.Context()); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("ledger migration absent: %d %v", version, err)
 	}
 	intent, err := upgraded.GetRunTerminalReport(t.Context(), run.Scope, run.ID, run.Status)
@@ -89,7 +89,7 @@ func TestTerminalFailurePostgres59RollbackRejectsMultipleAttemptReceipts(t *test
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err == nil || !strings.Contains(err.Error(), "multiple attempt receipts") {
 		t.Fatalf("rollback silently discarded an immutable attempt: %v", err)
 	}
-	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != 59 {
+	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("rejected rollback changed ledger: %d %v", version, err)
 	}
 	latest, err := store.GetRunTerminalReport(t.Context(), second.Scope, second.ID, second.Status)
@@ -106,7 +106,7 @@ func TestTerminalFailurePostgres59RollbackRequiresNewFailureDelivery(t *testing.
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err == nil || !strings.Contains(err.Error(), "before new conversation failure replies are delivered") {
 		t.Fatalf("rollback abandoned an unsupported pending failure reply: %v", err)
 	}
-	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != 59 {
+	if version, err := store.PostgresSchemaVersion(t.Context()); err != nil || version != currentPostgresSchemaVersion {
 		t.Fatalf("rejected rollback changed ledger: %d %v", version, err)
 	}
 	if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {

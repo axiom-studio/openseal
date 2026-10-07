@@ -610,6 +610,7 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
 		return lookupErr
 	}
+	exists := lookupErr == nil
 	skillIDs := []string{binding.SkillID}
 	if previousSkillID != "" && previousSkillID != binding.SkillID {
 		skillIDs = append(skillIDs, previousSkillID)
@@ -627,8 +628,13 @@ func (s *PostgresStore) SaveSkillBinding(ctx context.Context, binding *skill.Bin
 			return &SkillRuntimeMaintenanceError{Maintenance: *g}
 		}
 	}
-	if expectedRevision == 0 {
-		if binding.Revision != 1 {
+	if !exists {
+		// Creation starts above the revision floor of a deleted binding ID.
+		floor, err := s.skillBindingRevisionFloor(ctx, tx, binding.Scope, binding.DeploymentID, binding.ID, true)
+		if err != nil {
+			return err
+		}
+		if expectedRevision != floor || binding.Revision != floor+1 {
 			return skill.ErrBindingRevisionConflict
 		}
 		result, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("skill_bindings")+`
@@ -684,6 +690,54 @@ func (s *PostgresStore) ListSkillBindings(ctx context.Context, scope skill.Scope
 		bindings = append(bindings, &binding)
 	}
 	return bindings, rows.Err()
+}
+
+// DeleteSkillBinding removes one binding row at its expected revision. It takes
+// the same Skill maintenance lock as SaveSkillBinding, and DELETE waits for
+// every action submission and credential lease that holds the row FOR SHARE.
+func (s *PostgresStore) DeleteSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var skillID string
+	var revision int64
+	err = tx.QueryRowContext(ctx, `SELECT skill_id, revision FROM `+s.table("skill_bindings")+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4`,
+		scope.Kind, scope.ID, deploymentID, bindingID).Scan(&skillID, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return skill.ErrBindingNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if revision != expectedRevision {
+		return skill.ErrBindingRevisionConflict
+	}
+	maintenanceScope := Scope{Kind: scope.Kind, ID: scope.ID}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, skillRuntimeMaintenanceLockKey(maintenanceScope, skillID)); err != nil {
+		return err
+	}
+	if g, err := s.postgresSkillRuntimeMaintenanceActiveTx(ctx, tx, maintenanceScope, skillID); err != nil {
+		return err
+	} else if g != nil {
+		return &SkillRuntimeMaintenanceError{Maintenance: *g}
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM `+s.table("skill_bindings")+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 AND revision=$5`,
+		scope.Kind, scope.ID, deploymentID, bindingID, expectedRevision)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		if err != nil {
+			return err
+		}
+		return skill.ErrBindingRevisionConflict
+	}
+	if err := s.recordSkillBindingTombstone(ctx, tx, scope, deploymentID, bindingID, expectedRevision+1); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 var _ skill.CatalogStore = (*PostgresStore)(nil)
