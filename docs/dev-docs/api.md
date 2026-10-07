@@ -250,7 +250,7 @@ conversation's pending approvals that the mode allows, as principal
 `system:approval-mode` with reason `approval mode <mode>`; tightening leaves
 pending approvals untouched. Setting the current mode again is a no-op that
 re-runs this sweep. Invalid modes return 400, stale revisions 409, and unknown
-conversations 404. The `channels` capability advertises `set-approval-mode`.
+conversations 404. The `channels` capability advertises `update-approval-mode`.
 
 `GET /conversations` optionally accepts `participantType` and `participantId`.
 With a valid reader, the response remains an array and each conversation includes

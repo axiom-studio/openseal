@@ -69,6 +69,14 @@ func TestPostgresApprovalModeMigrationAndGovernedUpdate(t *testing.T) {
 	if err != nil || len(events) != 1 || events[0].ID != result.Event.ID || events[0].Payload["from"] != "auto" {
 		t.Fatalf("approval mode events = %#v, %v", events, err)
 	}
+	changes, err := NewConversationChangeService(reopened, reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(set.Activity) != 1 || set.Activity[0].Payload["to"] != "manual" || set.Conversation.ApprovalMode != ConversationApprovalManual {
+		t.Fatalf("change set = %#v, %v", set, err)
+	}
 	if _, err := service.SetApprovalMode(ctx, SetConversationApprovalModeRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision, Mode: ConversationApprovalSkip, Actor: approvalModeActor,
 	}); !errors.Is(err, ErrRevisionConflict) {
