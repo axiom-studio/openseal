@@ -28,6 +28,7 @@ func (s *MemoryStore) CreateConversation(_ context.Context, conversation *Conver
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
 	}
+	applyConversationDefaults(conversation)
 	key := strings.TrimSpace(idempotencyKey)
 	if key == "" {
 		return nil, false, ErrInvalidConversation
@@ -56,6 +57,7 @@ func (s *MemoryStore) UpdateConversation(_ context.Context, conversation *Conver
 	if err := conversation.Validate(); err != nil {
 		return nil, err
 	}
+	applyConversationDefaults(conversation)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := conversationStoreKey(conversation.Scope, conversation.ID)
@@ -68,6 +70,26 @@ func (s *MemoryStore) UpdateConversation(_ context.Context, conversation *Conver
 	}
 	s.conversations[key] = cloneConversation(conversation)
 	return cloneConversation(conversation), nil
+}
+
+func (s *MemoryStore) UpdateConversationWithEvent(_ context.Context, conversation *Conversation, expectedRevision int64, event *ActivityEvent) (*Conversation, *ActivityEvent, error) {
+	if err := validateConversationEvent(conversation, event); err != nil {
+		return nil, nil, err
+	}
+	applyConversationDefaults(conversation)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := conversationStoreKey(conversation.Scope, conversation.ID)
+	current := s.conversations[key]
+	if current == nil {
+		return nil, nil, ErrConversationNotFound
+	}
+	if current.Revision != expectedRevision || conversation.Revision != expectedRevision+1 {
+		return nil, nil, ErrRevisionConflict
+	}
+	s.conversations[key] = cloneConversation(conversation)
+	persisted := appendMemoryActivityLocked(s, event)
+	return cloneConversation(conversation), cloneActivityEvent(persisted), nil
 }
 
 func (s *MemoryStore) GetConversation(_ context.Context, scope Scope, conversationID string) (*Conversation, error) {

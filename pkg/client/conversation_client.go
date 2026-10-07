@@ -71,6 +71,14 @@ func (c *KernelHTTPClient) UpdateConversation(ctx context.Context, conversationI
 	return &result, nil
 }
 
+func (c *KernelHTTPClient) SetConversationApprovalMode(ctx context.Context, conversationID string, request kernelapi.SetConversationApprovalModeRequest) (*runtime.SetConversationApprovalModeResult, error) {
+	var result runtime.SetConversationApprovalModeResult
+	if err := c.do(ctx, http.MethodPatch, conversationPath(conversationID)+"/approval-mode", request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (c *KernelHTTPClient) PostChannelMessage(ctx context.Context, conversationID string, request kernelapi.PostChannelMessageRequest, idempotencyKey string) (*runtime.ChannelMessageCommitResult, error) {
 	var result runtime.ChannelMessageCommitResult
 	if err := c.do(ctx, http.MethodPost, conversationPath(conversationID)+"/messages", request, idempotencyKey, &result); err != nil {

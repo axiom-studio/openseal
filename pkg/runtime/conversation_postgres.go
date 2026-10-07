@@ -79,6 +79,7 @@ func (s *PostgresStore) CreateConversation(ctx context.Context, conversation *Co
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
 	}
+	applyConversationDefaults(conversation)
 	key := strings.TrimSpace(idempotencyKey)
 	if key == "" {
 		return nil, false, ErrInvalidConversation
@@ -130,6 +131,7 @@ func (s *PostgresStore) UpdateConversation(ctx context.Context, conversation *Co
 	if err := conversation.Validate(); err != nil {
 		return nil, err
 	}
+	applyConversationDefaults(conversation)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -142,6 +144,29 @@ func (s *PostgresStore) UpdateConversation(ctx context.Context, conversation *Co
 		return nil, err
 	}
 	return cloneConversation(conversation), nil
+}
+
+func (s *PostgresStore) UpdateConversationWithEvent(ctx context.Context, conversation *Conversation, expectedRevision int64, event *ActivityEvent) (*Conversation, *ActivityEvent, error) {
+	if err := validateConversationEvent(conversation, event); err != nil {
+		return nil, nil, err
+	}
+	applyConversationDefaults(conversation)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	if err := s.updatePostgresConversationTx(ctx, tx, conversation, expectedRevision); err != nil {
+		return nil, nil, err
+	}
+	persisted, err := s.insertPostgresActivityTx(ctx, tx, event)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	return cloneConversation(conversation), cloneActivityEvent(persisted), nil
 }
 
 func (s *PostgresStore) GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error) {

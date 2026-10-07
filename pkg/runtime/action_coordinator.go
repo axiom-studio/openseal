@@ -26,6 +26,12 @@ type ActionPolicyInput struct {
 	ExternalOperation *ExternalOperationIdentity
 	Actor             ActivityActor
 	Summary           string
+	// ConversationID is the canonical conversation the Run acts for (its own
+	// context, else its root Run's); empty when it acts for none.
+	ConversationID string
+	// ApprovalMode is that conversation's approval mode. It is empty when the
+	// Run acts for no conversation, which policies treat as manual.
+	ApprovalMode ConversationApprovalMode
 }
 
 type ActionPolicyDecision struct {
@@ -103,19 +109,28 @@ type ProposeActionRequest struct {
 }
 
 type ActionCoordinator struct {
-	portfolio  PortfolioStore
-	actions    ActionStore
-	catalog    ActionCatalog
-	policy     ActionPolicyEvaluator
-	validators []ActionProposalValidator
-	now        func() time.Time
-	newID      func() string
+	portfolio     PortfolioStore
+	actions       ActionStore
+	conversations conversationReader
+	catalog       ActionCatalog
+	policy        ActionPolicyEvaluator
+	validators    []ActionProposalValidator
+	now           func() time.Time
+	newID         func() string
 }
 
 func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators ...ActionProposalValidator) *ActionCoordinator {
 	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, BindingActionArgumentResolver{}, EmbedSessionActionAuthorityValidator{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
 	portable = append(portable, validators...)
-	return &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: time.Now, newID: uuid.NewString}
+	coordinator := &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: time.Now, newID: uuid.NewString}
+	// Conversation approval modes are read from the same kernel store when it
+	// keeps conversations; a store without them has no modes (manual).
+	if conversations, ok := portfolio.(conversationReader); ok {
+		coordinator.conversations = conversations
+	} else if conversations, ok := actions.(conversationReader); ok {
+		coordinator.conversations = conversations
+	}
+	return coordinator
 }
 
 func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionRequest) (*ActionProposalResult, error) {
@@ -227,7 +242,14 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			return nil, &ExternalOperationConflictError{Prior: prior}
 		}
 	}
-	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), ExternalOperation: req.ExternalOperation, Actor: req.Actor, Summary: req.Summary})
+	conversationID, approvalMode, err := RunConversationApprovalMode(ctx, c.portfolio, c.conversations, run)
+	if err != nil {
+		return nil, fmt.Errorf("resolve conversation approval mode: %w", err)
+	}
+	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{
+		Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), ExternalOperation: req.ExternalOperation, Actor: req.Actor, Summary: req.Summary,
+		ConversationID: conversationID, ApprovalMode: approvalMode,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("evaluate action policy: %w", err)
 	}

@@ -35,6 +35,15 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	if action.Risk == skill.RiskLevelRead && (action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only action"}, nil
 	}
+	// The conversation's approval mode is the user's review boundary: auto
+	// allows read and write risk work, skip allows everything, and manual (or
+	// a Run acting for no conversation) keeps every side effect under review.
+	if !ApprovalModeExemptAction(input.Bound.Definition.ID, action.Name) && ApprovalModeAllowsAction(input.ApprovalMode, action.Risk, action.SideEffect) {
+		return ActionPolicyDecision{
+			Disposition: ActionDispositionAllow,
+			Reason:      fmt.Sprintf("approval mode %s allows %s risk action with %s side effects", input.ApprovalMode, action.Risk, action.SideEffect),
+		}, nil
+	}
 	if p == nil || len(p.Approvers) == 0 {
 		return ActionPolicyDecision{}, errors.New("side-effecting actions require configured approvers")
 	}
