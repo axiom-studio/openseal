@@ -23,8 +23,22 @@ var (
 type CatalogStore interface {
 	CreateSkillDefinition(context.Context, *Definition) error
 	ListSkillDefinitionVariants(context.Context, string, string) ([]*Definition, error)
+	// SaveSkillBinding writes one binding at expectedRevision. When no row
+	// exists the write is a creation: expectedRevision must equal the ID's
+	// revision floor (zero for an ID never deleted) and the binding's revision
+	// must be the floor plus one.
 	SaveSkillBinding(context.Context, *Binding, int64) error
 	ListSkillBindings(context.Context, ScopeReference, string) ([]*Binding, error)
+	// DeleteSkillBinding removes one exact binding row at its expected
+	// revision and raises the ID's revision floor to expectedRevision+1, the
+	// revision of the deletion itself. It returns ErrBindingNotFound when no
+	// binding has that ID and ErrBindingRevisionConflict when the current
+	// revision differs.
+	DeleteSkillBinding(ctx context.Context, scope ScopeReference, deploymentID, bindingID string, expectedRevision int64) error
+	// SkillBindingRevisionFloor returns the revision of the last deletion of
+	// this binding ID, or zero. A binding created under the ID starts above
+	// it, so a reference to a deleted binding never matches its successor.
+	SkillBindingRevisionFloor(ctx context.Context, scope ScopeReference, deploymentID, bindingID string) (int64, error)
 }
 
 // CatalogDefinitionIdentityStore optionally projects the current immutable

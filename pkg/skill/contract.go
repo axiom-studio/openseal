@@ -119,6 +119,7 @@ const (
 	BindingLifecycleUpdated  = capability.BindingLifecycleUpdated
 	BindingLifecycleEnabled  = capability.BindingLifecycleEnabled
 	BindingLifecycleDisabled = capability.BindingLifecycleDisabled
+	BindingLifecycleDeleted  = capability.BindingLifecycleDeleted
 
 	BindingArgumentLiteral       = capability.BindingArgumentLiteral
 	BindingArgumentSessionID     = capability.BindingArgumentSessionID
@@ -140,13 +141,15 @@ type Catalog struct {
 	mu       sync.RWMutex
 	skills   map[string]*Definition
 	bindings map[string]*Binding
-	schemas  map[string]*compiledActionSchemas
-	store    CatalogStore
+	// floors holds deleted binding revisions when there is no store.
+	floors  map[string]int64
+	schemas map[string]*compiledActionSchemas
+	store   CatalogStore
 }
 
 func NewCatalog() *Catalog {
 	return &Catalog{
-		skills: make(map[string]*Definition), bindings: make(map[string]*Binding),
+		skills: make(map[string]*Definition), bindings: make(map[string]*Binding), floors: make(map[string]int64),
 		schemas: make(map[string]*compiledActionSchemas),
 	}
 }
@@ -319,7 +322,7 @@ func (c *Catalog) Bind(ctx context.Context, binding *Binding) error {
 	key := bindingKey(normalized.Scope, normalized.DeploymentID, normalized.ID)
 	current := c.bindings[key]
 	if c.store == nil {
-		if (current == nil && normalized.Revision != 1) || (current != nil && normalized.Revision != current.Revision+1) {
+		if (current == nil && normalized.Revision != c.floors[key]+1) || (current != nil && normalized.Revision != current.Revision+1) {
 			return ErrBindingRevisionConflict
 		}
 	} else {
