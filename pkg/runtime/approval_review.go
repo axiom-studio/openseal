@@ -127,3 +127,27 @@ func withDescription(schema map[string]interface{}, description string) map[stri
 	schema["description"] = description
 	return schema
 }
+
+// intentApprovalReviewContext names an action awaiting review from its own
+// declared intent when the proposer supplied no review context, so a reviewer
+// sees "Click 'Search'" rather than a generic summary. It reads only the
+// secret-safe preview arguments; the target is the action's URL argument or
+// its external operation resource.
+func intentApprovalReviewContext(preview map[string]interface{}, operation *ExternalOperationIdentity) *ApprovalReviewContext {
+	arguments, _ := preview["arguments"].(map[string]interface{})
+	intent, _ := arguments["intent"].(string)
+	intent = strings.Join(strings.Fields(intent), " ")
+	if intent == "" {
+		return nil
+	}
+	if runes := []rune(intent); len(runes) > 280 {
+		intent = strings.TrimSpace(string(runes[:280])) + "…"
+	}
+	review := &ApprovalReviewContext{Summary: intent}
+	if target, _ := arguments["url"].(string); strings.HasPrefix(target, "https://") || strings.HasPrefix(target, "http://") {
+		review.Target = target
+	} else if operation != nil {
+		review.Target = strings.TrimSpace(operation.Resource)
+	}
+	return review
+}
