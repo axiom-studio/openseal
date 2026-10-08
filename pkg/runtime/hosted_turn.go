@@ -204,6 +204,12 @@ type HostedTurnRequest struct {
 	CanAskConversationQuestion bool `json:"canAskConversationQuestion,omitempty"`
 	// SourceAccessChallenge is a kernel-proven bounded interaction, not consent.
 	SourceAccessChallenge *SourceAccessChallengeInteraction `json:"sourceAccessChallenge,omitempty"`
+	// ConversationApprovalMode is a trusted host hint: the approval mode of the
+	// conversation this Run acts for, empty when it acts for none. Hosts may use
+	// it to shape guidance (skip means finish browser tasks end to end). It is
+	// absent from model input and never authorizes an action; the action policy
+	// re-resolves the mode, which may change between this turn and an action.
+	ConversationApprovalMode ConversationApprovalMode `json:"conversationApprovalMode,omitempty"`
 }
 
 // HostedTurnExecutionFailure is emitted by the trusted host after a native
@@ -748,6 +754,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		ModelProvider:          r.config.ModelProvider, Model: r.config.Model,
 	}
 	request.CanAskConversationQuestion = input.canAskConversationQuestion && input.Run.AssignedAgentID == r.config.AgentID
+	request.ConversationApprovalMode = input.approvalMode
 	if request.CanAskConversationQuestion && input.sourceAccessChallenge != nil {
 		interaction := *input.sourceAccessChallenge
 		request.SourceAccessChallenge = &interaction

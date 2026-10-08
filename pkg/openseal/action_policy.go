@@ -71,15 +71,11 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 		bindingOwnedByAgent = false
 	}
 
-	// Agent behavior amendments are proposals about the durable worker itself.
-	// Even when the Agent has broad standing authority for ordinary work, an
-	// amendment requested in chat must cross an explicit review checkpoint.
-	// This also lets the narrow management capability propose fields outside
-	// the Agent's autonomous self-amendment allowlist without silently widening
-	// what the Agent may change on its own.
-	requiresBehaviorReview := input.Bound.Definition.ID == runtime.AgentManagementSkillID &&
-		(input.Bound.Action.Name == runtime.AgentActionAmendBehavior || input.Bound.Action.Name == runtime.AgentActionConfigureChannel)
-	if !requiresBehaviorReview && bindingOwnedByAgent {
+	// A manifest-declared review: always action (for example an Agent behavior
+	// amendment or a payment) crosses an explicit review checkpoint even when
+	// the Agent has broad standing authority or a permissive threshold.
+	alwaysReview := input.Bound.Action.AlwaysReview()
+	if !alwaysReview && bindingOwnedByAgent {
 		if grant := matchingStandingGrant(definition.Authority.StandingGrants, input); grant != nil {
 			return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "standing authority " + grant.ID}, nil
 		}
@@ -88,7 +84,7 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	// that boundary may proceed without a checkpoint; actions at or above it
 	// are still handled by the default side-effect policy below. An omitted or
 	// invalid threshold retains the fail-closed default behavior.
-	if !requiresBehaviorReview && actionRiskBelowApprovalThreshold(input.Bound.Action.Risk, definition.Authority.RequireApprovalAt) {
+	if !alwaysReview && actionRiskBelowApprovalThreshold(input.Bound.Action.Risk, definition.Authority.RequireApprovalAt) {
 		return runtime.ActionPolicyDecision{
 			Disposition: runtime.ActionDispositionAllow,
 			Reason:      fmt.Sprintf("%s risk is below the Agent approval threshold %s", input.Bound.Action.Risk, definition.Authority.RequireApprovalAt),
@@ -97,9 +93,6 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	decision, err := e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
 	if err != nil {
 		return runtime.ActionPolicyDecision{}, err
-	}
-	if requiresBehaviorReview {
-		decision.Reason = "Agent behavior amendments require explicit review"
 	}
 	for _, destination := range definition.Authority.ApprovalDestinations {
 		decision.ApprovalDestinations = append(decision.ApprovalDestinations, runtime.ApprovalDestination{EndpointID: destination.EndpointID})
