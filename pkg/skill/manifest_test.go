@@ -74,3 +74,43 @@ func TestClaimsSkillManifestRequiresCanonicalIdentity(t *testing.T) {
 		t.Fatalf("malformed YAML error = %v", err)
 	}
 }
+
+func TestSkillManifestActionReviewRoundTripsAndValidates(t *testing.T) {
+	definition := testSkillDefinition()
+	action := definition.Actions["deploy"]
+	action.Review = ActionReviewAlways
+	definition.Actions["deploy"] = action
+	manifest, err := NewManifest(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := EncodeManifestYAML(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "review: always") {
+		t.Fatalf("manifest YAML omits the review floor:\n%s", data)
+	}
+	decoded, err := DecodeManifestYAML(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Definition.Actions["deploy"].AlwaysReview() {
+		t.Fatalf("round trip lost review: always: %#v", decoded.Definition.Actions["deploy"])
+	}
+	for name, mutate := range map[string]func(*Action){
+		"unknown value":   func(a *Action) { a.Review = "sometimes" },
+		"no side effects": func(a *Action) { a.SideEffect, a.Risk, a.Idempotency = SideEffectRead, RiskLevelRead, IdempotencyNone },
+	} {
+		t.Run(name, func(t *testing.T) {
+			invalid := testSkillDefinition()
+			action := invalid.Actions["deploy"]
+			action.Review = ActionReviewAlways
+			mutate(&action)
+			invalid.Actions["deploy"] = action
+			if err := validateDefinition(invalid); err == nil || !strings.Contains(err.Error(), "review") {
+				t.Fatalf("invalid review declaration error = %v", err)
+			}
+		})
+	}
+}

@@ -169,7 +169,7 @@ func workforceRunbookVerificationEnvironment(definition *agent.AgentDefinition, 
 				RequiredCredentials: append([]capability.CredentialRequirement(nil), action.Credentials...),
 				BoundCredentials:    cloneCredentialReferences(binding.Credentials), CompensationAction: action.CompensationAction,
 				FinalizerAction: action.FinalizerAction, RequiresApproval: requiresApproval,
-				ApprovalRoutePresent: !requiresApproval || approvalRoutes || standing[binding.SkillID+"\x00"+actionName],
+				ApprovalRoutePresent: !requiresApproval || approvalRoutes || standing[binding.SkillID+"\x00"+actionName] && !action.AlwaysReview(),
 			})
 		}
 	}
@@ -179,6 +179,9 @@ func workforceRunbookVerificationEnvironment(definition *agent.AgentDefinition, 
 func workforceActionRequiresApproval(definition *agent.AgentDefinition, skillID, actionName string, action capability.Action) bool {
 	if definition == nil || action.SideEffect == capability.SideEffectNone || action.SideEffect == capability.SideEffectRead {
 		return false
+	}
+	if action.AlwaysReview() {
+		return true
 	}
 	for _, grant := range definition.Authority.StandingGrants {
 		if grant.SkillID == skillID && grant.Action == actionName && strings.TrimSpace(grant.ExternalOperation) == "" && strings.TrimSpace(grant.ResourcePrefix) == "" {
