@@ -35,6 +35,16 @@ upgrade-plan → upgrade
 
 An upgrade that requires review before it can be applied is refused with `428 Precondition Required` rather than being applied silently.
 
+### Credentials from a conversation
+
+`request_credential` asks the user to save one credential in the host vault through a durable in-chat card. It is not Skill setup: built-in Skills such as the live browser are always installed, and nothing about a binding changes. Its input is `kind` (`website_login` with `website` set to the exact page origin, or `payment_card`) and a `reason` shown to the user. It never accepts or returns secret values.
+
+A pending request parks the Run with wake condition `credential_request`. The host verifies that a matching credential was saved after the request (or that the user dismissed the card), then calls `ResolveCredentialRequest`, which resumes the Run with guidance to retry the blocked step. When the Run has already ended, the result reports `continued: false` and the host starts a new reply. Requests appear on conversation change sets as `credentialRequests`.
+
+### Interaction requests never end a Run
+
+When `request_setup` or `request_credential` cannot create its card, the action still succeeds with a `refused` result whose message the model explains to the user. A failed interaction request is never a terminal action failure.
+
 ### Setup from a conversation
 
 `request_setup` selects an exact authorized discovery result. Copy its Skill ID and source identity; a publisher's namespace spelling is not an access rule. A general account connection can request `skillVersion: "latest"` without selecting individual actions. Discovery and a pending form grant no access.

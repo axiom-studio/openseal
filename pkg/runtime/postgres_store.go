@@ -454,6 +454,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateConversationApprovalMode(ctx, tx); err != nil {
 		return fmt.Errorf("conversation approval mode migration: %w", err)
 	}
+	if err := s.migrateCredentialRequests(ctx, tx); err != nil {
+		return fmt.Errorf("credential request migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

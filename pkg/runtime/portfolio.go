@@ -527,6 +527,7 @@ type ObjectiveScopeStore interface {
 // OpenSeal ships memory and SQLite implementations.
 type KernelStore interface {
 	SkillSetupRequestStore
+	CredentialRequestStore
 	PortfolioStore
 	RunbookActivationStore
 	SourceMonitorStore

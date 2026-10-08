@@ -12,6 +12,7 @@ import (
 type MemoryStore struct {
 	*kernelteam.MemoryStore
 	skillSetupRequests                  map[string]*SkillSetupRequest
+	credentialRequests                  map[string]*CredentialRequest
 	mu                                  sync.RWMutex
 	objectives                          map[string]*Objective
 	runbookActivations                  map[string]*RunbookActivation
@@ -113,6 +114,7 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		MemoryStore:                 kernelteam.NewMemoryStore(),
 		skillSetupRequests:          make(map[string]*SkillSetupRequest),
+		credentialRequests:          make(map[string]*CredentialRequest),
 		objectives:                  make(map[string]*Objective),
 		runbookActivations:          make(map[string]*RunbookActivation),
 		projects:                    make(map[string]*Project),
