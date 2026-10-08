@@ -22,7 +22,10 @@ const (
 	// ConversationApprovalAuto allows read and write risk actions; external,
 	// production, and destructive actions still require approval.
 	ConversationApprovalAuto ConversationApprovalMode = "auto"
-	// ConversationApprovalSkip allows every action without approval.
+	// ConversationApprovalSkip allows every action without approval. It also
+	// means the agent completes browser tasks end to end (signing in, checking
+	// out, placing orders, accepting terms, sending) instead of handing off.
+	// The action policy remains the authority for each action.
 	ConversationApprovalSkip ConversationApprovalMode = "skip"
 
 	DefaultConversationApprovalMode = ConversationApprovalAuto
