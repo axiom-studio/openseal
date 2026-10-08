@@ -19,3 +19,9 @@ func IsTurnCommentary(ctx context.Context) bool { return runtime.IsTurnCommentar
 func ReportTurnCommentary(ctx context.Context, summary string) error {
 	return runtime.ReportTurnCommentary(ctx, summary)
 }
+
+// IsSupportedAgentManagementSkillVersion reports the agent management contracts
+// the Agent action dispatcher still executes.
+func IsSupportedAgentManagementSkillVersion(version string) bool {
+	return runtime.IsSupportedAgentManagementSkillVersion(version)
+}
