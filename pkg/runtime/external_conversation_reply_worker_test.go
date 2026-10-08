@@ -95,8 +95,11 @@ func TestExternalConversationReplyWorkerProjectsRunbookReplyExactlyOnce(t *testi
 		t.Fatalf("first projection = %#v, %v", first, err)
 	}
 	second, err := worker.ProcessScope(ctx, endpoint.Scope, 10)
-	if err != nil || len(second) != 1 || second[0].ID != first[0].ID {
-		t.Fatalf("replayed projection = %#v, %v", second, err)
+	if err != nil || len(second) != 0 {
+		t.Fatalf("a projected inbox item must not be revisited: %#v, %v", second, err)
+	}
+	if replayed := reprojectAppliedExternalInbox(t, worker, store, endpoint.Scope); len(replayed) != 1 || replayed[0].ID != first[0].ID {
+		t.Fatalf("replayed projection = %#v", replayed)
 	}
 	messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: endpoint.Scope, ConversationID: conversation.ID, Limit: 10,
@@ -216,4 +219,28 @@ func TestExternalConversationReplyWorkerUsesExistingDirectHandlerMessage(t *test
 	if len(messages) != 2 {
 		t.Fatalf("direct handler response was duplicated: %#v", messages)
 	}
+}
+
+// reprojectAppliedExternalInbox projects every applied item directly,
+// bypassing the worker's terminal reply state, to prove projection itself
+// stays idempotent.
+func reprojectAppliedExternalInbox(t *testing.T, worker *ExternalConversationReplyWorker, store ExternalConversationStore, scope Scope) []*ExternalConversationDelivery {
+	t.Helper()
+	items, err := store.ListExternalConversationInbox(t.Context(), ExternalConversationInboxFilter{
+		Scope: scope, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, Limit: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var deliveries []*ExternalConversationDelivery
+	for _, item := range items {
+		delivery, _, err := worker.project(t.Context(), item)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if delivery != nil {
+			deliveries = append(deliveries, delivery)
+		}
+	}
+	return deliveries
 }
