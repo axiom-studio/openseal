@@ -1126,7 +1126,7 @@ func agentChannelActionResult(
 
 func isAgentManagementAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == AgentManagementSkillID &&
-		isSupportedAgentManagementSkillVersion(bound.Definition.Version) &&
+		IsSupportedAgentManagementSkillVersion(bound.Definition.Version) &&
 		(bound.Action.Name == AgentActionAmendBehavior || bound.Action.Name == AgentActionListChannels || bound.Action.Name == AgentActionConfigureChannel || bound.Action.Name == AgentActionListWorkspace || bound.Action.Name == AgentActionConfigureWorkspace)
 }
 
@@ -1144,7 +1144,10 @@ func canonicalActionReview(definition *skill.Definition, action skill.Action) sk
 	return action
 }
 
-func isSupportedAgentManagementSkillVersion(version string) bool {
+// IsSupportedAgentManagementSkillVersion reports the agent management contracts
+// the Agent action dispatcher still executes. Hosts use it instead of keeping
+// their own copy of the version list.
+func IsSupportedAgentManagementSkillVersion(version string) bool {
 	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV5 || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
 }
 
@@ -1163,6 +1166,6 @@ func isAgentConfigureChannelAction(bound *skill.BoundAction) bool {
 func isAgentBehaviorAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil &&
 		bound.Definition.ID == AgentManagementSkillID &&
-		isSupportedAgentManagementSkillVersion(bound.Definition.Version) &&
+		IsSupportedAgentManagementSkillVersion(bound.Definition.Version) &&
 		bound.Action.Name == AgentActionAmendBehavior
 }
