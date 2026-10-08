@@ -38,6 +38,7 @@ type BoundCallbackAdapter = capability.BoundCallbackAdapter
 type ActionRetryPolicy = capability.ActionRetryPolicy
 type ActionEvidenceRequirement = capability.ActionEvidenceRequirement
 type ExternalOperationPolicy = capability.ExternalOperationPolicy
+type ActionReview = capability.ActionReview
 type Duration = capability.Duration
 type Action = capability.Action
 type TransportReference = capability.TransportReference
@@ -76,6 +77,8 @@ const (
 	ExternalOperationForbidden = capability.ExternalOperationForbidden
 	ExternalOperationOptional  = capability.ExternalOperationOptional
 	ExternalOperationRequired  = capability.ExternalOperationRequired
+
+	ActionReviewAlways = capability.ActionReviewAlways
 
 	OAuth2SubjectInstallation = capability.OAuth2SubjectInstallation
 	OAuth2SubjectUser         = capability.OAuth2SubjectUser
@@ -1087,6 +1090,12 @@ func validateDefinition(definition *Definition) error {
 		}
 		if !validRisk(action.Risk) || !validSideEffect(action.SideEffect) || !validIdempotency(action.Idempotency) || !validExternalOperationPolicy(action.ExternalOperationPolicy) {
 			return fmt.Errorf("skill action %s has invalid policy metadata", name)
+		}
+		if action.Review != "" && action.Review != ActionReviewAlways {
+			return fmt.Errorf("skill action %s has an invalid review requirement", name)
+		}
+		if action.AlwaysReview() && (action.SideEffect == SideEffectNone || action.SideEffect == SideEffectRead) {
+			return fmt.Errorf("skill action %s requires review but declares no side effects", name)
 		}
 		if action.ExternalOperationPolicy == ExternalOperationRequired && action.SideEffect != SideEffectExternal {
 			return fmt.Errorf("skill action %s requires external side effects to require an external-operation receipt", name)

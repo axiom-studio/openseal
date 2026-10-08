@@ -24,6 +24,10 @@ type TurnExecutionContext struct {
 	// host transport capability, never model-authored input or a user grant.
 	canAskConversationQuestion bool
 	sourceAccessChallenge      *SourceAccessChallengeInteraction
+	// approvalMode is the conversation approval mode resolved by the same
+	// resolver the action policy uses. It is a host hint for this turn only;
+	// the action policy re-resolves the mode for every proposed action.
+	approvalMode ConversationApprovalMode
 }
 
 // TurnRunner performs one bounded, proposal-only reasoning step. External side

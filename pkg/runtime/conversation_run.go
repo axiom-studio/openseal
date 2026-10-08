@@ -1364,6 +1364,10 @@ func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx contex
 	if questionErr != nil {
 		return TurnExecutionContext{}, historyPlan, questionErr
 	}
+	_, hostedInput.approvalMode, err = RunConversationApprovalMode(ctx, r.portfolio, r.conversations.store, input.Run)
+	if err != nil {
+		return TurnExecutionContext{}, historyPlan, err
+	}
 	hostedInput.ModelMedia = append([]HostedTurnMedia(nil), input.ModelMedia...)
 	for _, attachment := range attachments {
 		if attachment.media != nil {

@@ -328,6 +328,11 @@ type conversationWorkTurnRunner struct {
 func (r conversationWorkTurnRunner) input(ctx context.Context, input TurnExecutionContext) (TurnExecutionContext, error) {
 	input.canAskConversationQuestion = false
 	input.sourceAccessChallenge = nil
+	_, approvalMode, err := RunConversationApprovalMode(ctx, r.runs, r.conversations, input.Run)
+	if err != nil {
+		return input, err
+	}
+	input.approvalMode = approvalMode
 	_, conversation, trigger, err := conversationWorkOrigin(ctx, r.runs, r.conversations, input.Run)
 	if err != nil || conversation == nil || trigger == nil {
 		return input, err
