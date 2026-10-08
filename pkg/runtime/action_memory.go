@@ -161,8 +161,10 @@ func (s *MemoryStore) ListApprovals(_ context.Context, filter ApprovalFilter) ([
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]*ApprovalCheckpoint, 0)
+	runIDs := approvalRunIDSet(filter.RunIDs)
 	for _, approval := range s.approvals {
 		if approval.Scope != filter.Scope || filter.RunID != "" && approval.RunID != filter.RunID ||
+			runIDs != nil && !runIDs[approval.RunID] ||
 			len(filter.Status) > 0 && !containsApprovalStatus(filter.Status, approval.Status) {
 			continue
 		}
@@ -552,4 +554,17 @@ func pageApprovals(values []*ApprovalCheckpoint, offset, limit int) []*ApprovalC
 		values = values[:limit]
 	}
 	return values
+}
+
+// approvalRunIDSet is nil when the filter does not restrict Runs. An empty
+// non-nil filter matches nothing.
+func approvalRunIDSet(ids []string) map[string]bool {
+	if ids == nil {
+		return nil
+	}
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set
 }
