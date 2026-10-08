@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -486,4 +487,97 @@ func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 	if review["summary"] != "Click 'Search' on google.com" || review["target"] != "https://www.google.com/" {
 		t.Fatalf("review context = %#v", result.Approval.ProposedAction)
 	}
+}
+
+func setFixtureApprovalMode(t *testing.T, store *MemoryStore, conversation *Conversation, mode ConversationApprovalMode) {
+	t.Helper()
+	current, err := store.GetConversation(t.Context(), conversation.Scope, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewConversationApprovalModeService(store).SetApprovalMode(t.Context(), SetConversationApprovalModeRequest{
+		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, Mode: mode, Actor: approvalModeActor,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertHostedApprovalModeHint(t *testing.T, input TurnExecutionContext, agentID string, want ConversationApprovalMode) {
+	t.Helper()
+	runner, err := NewHostedTurnRunner(&recordingTurnHost{}, HostedTurnRunnerConfig{AgentID: agentID, DefinitionID: "browser", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := runner.buildRequest(input)
+	if err != nil || request.ConversationApprovalMode != want {
+		t.Fatalf("hosted approval mode = %q want %q err=%v", request.ConversationApprovalMode, want, err)
+	}
+	request.ConversationApprovalMode = ConversationApprovalSkip
+	raw, err := MarshalHostedTurnModelInput(request)
+	var modelInput map[string]interface{}
+	if err != nil || json.Unmarshal(raw, &modelInput) != nil || modelInput["conversationApprovalMode"] != nil {
+		t.Fatalf("host-only approval mode leaked into model input: %s %v", raw, err)
+	}
+}
+
+func TestHostedTurnRequestCarriesConversationApprovalMode(t *testing.T) {
+	store := NewMemoryStore()
+	f := newForegroundClarificationFixture(t, store, false)
+	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalSkip)
+	wrapper := conversationWorkTurnRunner{runs: store, conversations: store}
+
+	input, err := wrapper.input(t.Context(), TurnExecutionContext{Run: f.run, Turn: &AgentTurn{ID: "skip-turn"}, approvalMode: ConversationApprovalManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHostedApprovalModeHint(t, input, f.run.AssignedAgentID, ConversationApprovalSkip)
+
+	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalManual)
+	input, err = wrapper.input(t.Context(), TurnExecutionContext{Run: f.run, Turn: &AgentTurn{ID: "manual-turn"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHostedApprovalModeHint(t, input, f.run.AssignedAgentID, ConversationApprovalManual)
+
+	// A Run that acts for no conversation carries no mode, even when a stale
+	// value arrives on the execution context.
+	detached := &AgentRun{ID: "detached", Kind: RunKindAgentWork, Scope: f.run.Scope, AssignedAgentID: "browser-agent",
+		Context: map[string]interface{}{"conversationApprovalMode": "skip"}}
+	input, err = wrapper.input(t.Context(), TurnExecutionContext{Run: detached, Turn: &AgentTurn{ID: "detached-turn"}, approvalMode: ConversationApprovalSkip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHostedApprovalModeHint(t, input, "browser-agent", "")
+}
+
+func TestForegroundConversationTurnCarriesApprovalMode(t *testing.T) {
+	store := NewMemoryStore()
+	f := newForegroundClarificationFixture(t, store, false)
+	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalSkip)
+	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: f.run.Scope, Kind: RunKindConversation, WorkerID: "foreground-worker",
+		Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != f.run.ID {
+		t.Fatalf("claim foreground: %#v %v", claimed, err)
+	}
+	var captured *TurnExecutionContext
+	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{DeploymentID: f.run.AssignedAgentID, DefinitionID: "browser", DefinitionVersion: "1",
+			Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+				captured = &input
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done.", RunOutput: map[string]interface{}{"summary": "Done."}}, nil
+			})}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, f.service), ConversationRunTurnRunnerConfig{AgentTurns: resolver})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+		Scope: f.run.Scope, RunID: f.run.ID, WorkerID: "foreground-worker", DefinitionID: "browser", DefinitionVersion: "1",
+	}, runner); err != nil {
+		t.Fatal(err)
+	}
+	if captured == nil {
+		t.Fatal("foreground adapter did not invoke the hosted runner")
+	}
+	assertHostedApprovalModeHint(t, *captured, captured.Run.AssignedAgentID, ConversationApprovalSkip)
 }
