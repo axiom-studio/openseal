@@ -184,6 +184,11 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		}
 		return nil, err
 	}
+	if canonical := canonicalActionReview(bound.Definition, bound.Action); canonical.Review != bound.Action.Review {
+		reviewed := *bound
+		reviewed.Action = canonical
+		bound = &reviewed
+	}
 	arguments := cloneMap(req.Arguments)
 	for _, validator := range c.validators {
 		resolver, ok := validator.(ActionProposalArgumentResolver)
