@@ -250,6 +250,15 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		if task != nil && (r.RunID != run.ID || r.TriggerMessageID != messageID) {
 			continue
 		}
+		// Setup the user already completed is not requested again while the
+		// saved account is unchanged and grants what is asked. The model sees
+		// the resolved request instead of a new card reappearing in the chat.
+		if r.Status == "resolved" && a.Kind != "reauthorize" && phase == SkillSetupPhaseConfiguration && currentBinding != nil &&
+			!currentBinding.Disabled && r.SkillID == a.SkillID && r.SkillVersion == a.SkillVersion && r.SourceIdentity == a.SourceIdentity &&
+			r.ResolvedBindingID == currentBinding.ID && r.ResolvedBindingRevision == currentBinding.Revision &&
+			(!a.EnablePrompt || currentBinding.EnablePrompt) && skillSetupActionsGranted(currentBinding, a.RequiredActions) {
+			return skillSetupResult(r)
+		}
 		if r.Status == "pending" && r.Kind == a.Kind && r.SkillID == a.SkillID && r.SkillVersion == a.SkillVersion && r.SourceIdentity == a.SourceIdentity && r.BindingID == a.BindingID && r.BindingRevision == bindingRevision && (r.Phase == phase || (r.Phase == "" && phase == SkillSetupPhaseConfiguration)) && (r.BindingVersion == bindingVersion || (r.BindingVersion == "" && phase == SkillSetupPhaseConfiguration)) && slices.Equal(r.RequiredActions, a.RequiredActions) && r.EnablePrompt == a.EnablePrompt {
 			return skillSetupResult(r)
 		}
@@ -280,6 +289,15 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 	}
 	return skillSetupResult(r)
 }
+func skillSetupActionsGranted(binding *skill.Binding, actions []string) bool {
+	for _, action := range actions {
+		if !slices.Contains(binding.AllowedActions, action) {
+			return false
+		}
+	}
+	return true
+}
+
 func skillSetupResult(r *SkillSetupRequest) (map[string]interface{}, error) {
 	data, err := json.Marshal(r)
 	if err != nil {
