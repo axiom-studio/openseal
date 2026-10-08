@@ -15,7 +15,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.4.6"
+	SkillManagementSkillVersion = "1.4.7"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -70,6 +70,7 @@ func SkillManagementSkill() *skill.Definition {
 		Actions: map[string]skill.Action{
 			SkillActionDiscoverBinding:   skillDiscoveryAction(),
 			SkillActionRequestSetup:      skillSetupAction(),
+			SkillActionRequestCredential: credentialRequestAction(),
 			SkillActionListSetupRequests: skillListSetupRequestsAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
@@ -307,9 +308,10 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 		"resourceType": "skill_binding", "operation": input.Bound.Action.Name, "deploymentId": deploymentID,
 	}
 	switch input.Bound.Action.Name {
-	case SkillActionRequestSetup:
-		_, err := decodeSkillSetupArguments(input.Arguments)
-		return nil, err
+	case SkillActionRequestSetup, SkillActionRequestCredential:
+		// Invalid interaction arguments are explained by the model from the
+		// action result; they never block the proposal or end the Run.
+		return nil, nil
 	case SkillActionDiscoverBinding, SkillActionListSetupRequests:
 		return nil, nil
 	case SkillActionUpsertBinding:
@@ -400,8 +402,17 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 	}
 	scope := skill.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}
 	switch input.Bound.Action.Name {
-	case SkillActionRequestSetup:
-		return d.requestSkillSetup(ctx, input, run, deploymentID)
+	case SkillActionRequestSetup, SkillActionRequestCredential:
+		var result map[string]interface{}
+		if input.Bound.Action.Name == SkillActionRequestSetup {
+			result, err = d.requestSkillSetup(ctx, input, run, deploymentID)
+		} else {
+			result, err = d.requestCredential(ctx, input, run, deploymentID)
+		}
+		if err != nil && ctx.Err() == nil {
+			return interactionRequestRefusalResult(err), nil
+		}
+		return result, err
 	case SkillActionListSetupRequests:
 		return d.listSkillSetupRequests(ctx, run, deploymentID)
 	case SkillActionDiscoverBinding:
@@ -783,5 +794,5 @@ func isSkillBindingAction(bound *skill.BoundAction) bool {
 			return false
 		}
 	}
-	return bound.Action.Name == SkillActionListSetupRequests || bound.Action.Name == SkillActionRequestSetup || bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
+	return bound.Action.Name == SkillActionListSetupRequests || bound.Action.Name == SkillActionRequestSetup || bound.Action.Name == SkillActionRequestCredential || bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
 }
