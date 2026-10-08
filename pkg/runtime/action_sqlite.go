@@ -339,6 +339,15 @@ func (s *SQLiteStore) ListApprovals(ctx context.Context, filter ApprovalFilter) 
 		}
 		query += ")"
 	}
+	if filter.RunIDs != nil {
+		if len(filter.RunIDs) == 0 {
+			return []*ApprovalCheckpoint{}, nil
+		}
+		query += ` AND a.run_id IN (?` + strings.Repeat(`,?`, len(filter.RunIDs)-1) + `)`
+		for _, id := range filter.RunIDs {
+			args = append(args, id)
+		}
+	}
 	if filter.NewestFirst {
 		query += ` ORDER BY a.created_at DESC, a.id DESC`
 	} else {

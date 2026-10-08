@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"slices"
 	"strings"
 	"time"
 )
@@ -52,29 +53,35 @@ func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope
 	if conversation == nil || conversation.Owner.Type != "agent" || conversation.Owner.ID != deploymentID {
 		return nil, runtime.ErrConversationNotFound
 	}
+	return e.reconciledSkillSetupRequests(ctx, scope, deploymentID, conversationID)
+}
+
+// reconciledSkillSetupRequests lists one conversation's requests after
+// resolving any pending request that a saved binding already satisfies.
+// A validated binding saved in Settings or an OAuth callback is the same
+// evidence as one saved in the chat form. Reconcile from canonical state so
+// closing a tab or losing a completion response cannot strand the request.
+func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope runtime.Scope, deploymentID, conversationID string) ([]*runtime.SkillSetupRequest, error) {
 	requests, err := e.store.ListSkillSetupRequests(ctx, scope, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
+	}
+	if !slices.ContainsFunc(requests, skillSetupReconcilable) {
+		return requests, nil
 	}
 	bindings, err := e.skills.ListBindings(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID)
 	if err != nil {
 		return nil, err
 	}
-	// A validated binding saved in Settings or an OAuth callback is the same
-	// evidence as one saved in the chat form. Reconcile from canonical state so
-	// closing a tab or losing a completion response cannot strand the request.
 	for index, request := range requests {
-		if request.Status != "pending" || request.Phase == runtime.SkillSetupPhaseBindingUpgrade {
+		if !skillSetupReconcilable(request) {
 			continue
 		}
 		for _, binding := range bindings {
-			if binding.Disabled || binding.SkillID != request.SkillID || binding.SkillVersion != request.SkillVersion || binding.SourceIdentity != request.SourceIdentity || binding.Revision <= request.BindingRevision || (request.BindingID != "" && binding.ID != request.BindingID) {
+			if !skillSetupBindingCandidate(request, binding) {
 				continue
 			}
-			if request.BindingID == "" && binding.CreatedAt.Before(request.CreatedAt) {
-				continue
-			}
-			resolved, resolveErr := e.ResolveSkillSetupRequest(ctx, scope, deploymentID, request.ID, request.Revision, binding.ID, "system:binding-reconciliation", false)
+			resolved, resolveErr := e.ResolveSkillSetupRequest(ctx, scope, deploymentID, request.ID, request.Revision, binding.ID, skillSetupReconciliationActor, false)
 			if resolveErr == nil {
 				requests[index] = resolved
 				break
@@ -92,6 +99,62 @@ func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope
 		}
 	}
 	return requests, nil
+}
+
+const skillSetupReconciliationActor = "system:binding-reconciliation"
+
+func skillSetupReconcilable(request *runtime.SkillSetupRequest) bool {
+	return request != nil && request.Status == "pending" && request.Phase != runtime.SkillSetupPhaseBindingUpgrade
+}
+
+// skillSetupBindingCandidate reports whether a binding is a save made for
+// this request. ResolveSkillSetupRequest still checks the requested access.
+func skillSetupBindingCandidate(request *runtime.SkillSetupRequest, binding *skill.Binding) bool {
+	if binding == nil || binding.Disabled || binding.SkillID != request.SkillID || binding.SkillVersion != request.SkillVersion ||
+		binding.SourceIdentity != request.SourceIdentity || binding.Revision <= request.BindingRevision ||
+		(request.BindingID != "" && binding.ID != request.BindingID) {
+		return false
+	}
+	return request.BindingID != "" || !binding.CreatedAt.Before(request.CreatedAt)
+}
+
+// reconcileSkillSetupRequestsForBinding resolves this deployment's pending
+// setup requests that a just-saved binding completes, wherever it was saved.
+// The saved binding is authoritative; failures leave the read-side
+// reconciliation to retry.
+func (e *Engine) reconcileSkillSetupRequestsForBinding(ctx context.Context, binding *skill.Binding) {
+	pending, ok := e.store.(interface {
+		ListPendingSkillSetupRequests(context.Context, runtime.Scope, int, int) ([]*runtime.SkillSetupRequest, error)
+	})
+	if !ok || binding == nil || binding.Disabled {
+		return
+	}
+	scope := runtime.Scope{Kind: binding.Scope.Kind, ID: binding.Scope.ID}
+	if scope.Validate() != nil {
+		return
+	}
+	const pageSize, maximumPages = 100, 20
+	var matches []*runtime.SkillSetupRequest
+	for page := 0; page < maximumPages; page++ {
+		requests, err := pending.ListPendingSkillSetupRequests(ctx, scope, pageSize, page*pageSize)
+		if err != nil {
+			return
+		}
+		for _, request := range requests {
+			if request.DeploymentID == binding.DeploymentID && skillSetupReconcilable(request) && skillSetupBindingCandidate(request, binding) {
+				matches = append(matches, request)
+			}
+		}
+		if len(requests) < pageSize {
+			break
+		}
+	}
+	for _, request := range matches {
+		resolved, err := e.ResolveSkillSetupRequest(ctx, scope, request.DeploymentID, request.ID, request.Revision, binding.ID, skillSetupReconciliationActor, false)
+		if err == nil && resolved.Status == "resolved" {
+			_, _, _ = e.ReconcileSkillSetupTask(ctx, scope, resolved.ID)
+		}
+	}
 }
 func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope runtime.Scope, deploymentID, id string) (*runtime.SkillSetupRequest, error) {
 	r, err := e.store.GetSkillSetupRequest(ctx, scope, id)

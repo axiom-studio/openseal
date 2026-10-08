@@ -30,24 +30,33 @@ type ConversationChangeRequest struct {
 
 // ConversationChangeSet is a portable, transport-neutral projection for
 // reconnect-safe channel observation. Messages and rounds are durable deltas;
-// Runs, summary-first Activity projections, and leased presence are
-// authoritative current projections when their digest changes. Consumers
+// Runs, summary-first Activity projections, leased presence, action approvals
+// and Skill setup requests are authoritative current projections when their
+// digest changes. Consumers
 // merge by stable identity and revision. Raw Activity payloads never travel on
 // the reconnecting channel stream (except the {from, to} of an approval mode
 // change); detail remains available from the bounded canonical Activity feed.
 type ConversationChangeSet struct {
-	Conversation    *Conversation               `json:"conversation"`
-	Messages        []*ChannelMessage           `json:"messages"`
-	Rounds          []*ParticipationRoundResult `json:"rounds"`
-	Runs            []*AgentRun                 `json:"runs"`
-	Activity        []ActivityProjection        `json:"activity"`
-	Presence        []*ConversationPresence     `json:"presence"`
-	RunsChanged     bool                        `json:"runsChanged"`
-	ActivityChanged bool                        `json:"activityChanged"`
-	PresenceChanged bool                        `json:"presenceChanged"`
-	Cursor          string                      `json:"cursor"`
-	HasChanges      bool                        `json:"hasChanges"`
-	HasMore         bool                        `json:"hasMore"`
+	Conversation *Conversation               `json:"conversation"`
+	Messages     []*ChannelMessage           `json:"messages"`
+	Rounds       []*ParticipationRoundResult `json:"rounds"`
+	Runs         []*AgentRun                 `json:"runs"`
+	Activity     []ActivityProjection        `json:"activity"`
+	Presence     []*ConversationPresence     `json:"presence"`
+	// Approvals are every pending approval for this conversation's Runs plus
+	// the most recently decided ones, each with a resolved ConversationContext.
+	Approvals []*ApprovalCheckpoint `json:"approvals"`
+	// SkillSetupRequests are every pending setup request for this
+	// conversation plus the most recently resolved or dismissed ones.
+	SkillSetupRequests        []*ConversationSkillSetupRequest `json:"skillSetupRequests"`
+	RunsChanged               bool                             `json:"runsChanged"`
+	ActivityChanged           bool                             `json:"activityChanged"`
+	PresenceChanged           bool                             `json:"presenceChanged"`
+	ApprovalsChanged          bool                             `json:"approvalsChanged"`
+	SkillSetupRequestsChanged bool                             `json:"skillSetupRequestsChanged"`
+	Cursor                    string                           `json:"cursor"`
+	HasChanges                bool                             `json:"hasChanges"`
+	HasMore                   bool                             `json:"hasMore"`
 }
 
 type conversationChangeCursor struct {
@@ -59,12 +68,16 @@ type conversationChangeCursor struct {
 	RunDigest            string `json:"runDigest,omitempty"`
 	ActivityDigest       string `json:"activityDigest,omitempty"`
 	PresenceDigest       string `json:"presenceDigest,omitempty"`
+	ApprovalDigest       string `json:"approvalDigest,omitempty"`
+	SkillSetupDigest     string `json:"skillSetupDigest,omitempty"`
 }
 
 type ConversationChangeService struct {
 	conversations *ConversationService
 	portfolio     PortfolioStore
 	activity      RunActivityStore
+	approvals     conversationApprovalStore
+	skillSetups   SkillSetupRequestReader
 	now           func() time.Time
 }
 
@@ -74,6 +87,10 @@ func NewConversationChangeService(conversationStore ConversationStore, portfolio
 	}
 	service := &ConversationChangeService{conversations: NewConversationService(conversationStore), portfolio: portfolio, now: time.Now}
 	service.activity, _ = portfolio.(RunActivityStore)
+	service.approvals, _ = portfolio.(conversationApprovalStore)
+	if store, ok := portfolio.(SkillSetupRequestStore); ok {
+		service.skillSetups = store.ListSkillSetupRequests
+	}
 	return service, nil
 }
 
@@ -161,6 +178,31 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		projectedActivity = []ActivityProjection{}
 	}
 
+	approvals, err := s.listConversationApprovals(ctx, conversation, runs)
+	if err != nil {
+		return nil, err
+	}
+	approvalDigest, err := conversationApprovalProjectionDigest(approvals)
+	if err != nil {
+		return nil, err
+	}
+	approvalsChanged := initial || approvalDigest != cursor.ApprovalDigest
+	if !approvalsChanged {
+		approvals = []*ApprovalCheckpoint{}
+	}
+	skillSetups, err := s.listConversationSkillSetupRequests(ctx, conversation, runs, req.Viewer)
+	if err != nil {
+		return nil, err
+	}
+	skillSetupDigest, err := conversationSkillSetupProjectionDigest(skillSetups)
+	if err != nil {
+		return nil, err
+	}
+	skillSetupsChanged := initial || skillSetupDigest != cursor.SkillSetupDigest
+	if !skillSetupsChanged {
+		skillSetups = []*ConversationSkillSetupRequest{}
+	}
+
 	activeAt := req.ActiveAt
 	if activeAt.IsZero() {
 		activeAt = s.now().UTC()
@@ -183,17 +225,20 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		Version: conversationChangeCursorVersion, ConversationID: conversationID,
 		ConversationRevision: conversation.Revision, MessageSequence: nextMessageSequence,
 		RoundRevision: nextRoundRevision, RunDigest: runDigest, ActivityDigest: activityDigest, PresenceDigest: presenceDigest,
+		ApprovalDigest: approvalDigest, SkillSetupDigest: skillSetupDigest,
 	}
 	encodedCursor, err := encodeConversationChangeCursor(next)
 	if err != nil {
 		return nil, err
 	}
 	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 ||
-		runsChanged || activityChanged || presenceChanged
+		runsChanged || activityChanged || presenceChanged || approvalsChanged || skillSetupsChanged
 	return &ConversationChangeSet{
 		Conversation: cloneConversation(conversation), Messages: cloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
 		Runs: cloneAgentRuns(projectedRuns), Activity: cloneConversationActivity(projectedActivity), Presence: cloneConversationPresences(projectedPresence),
+		Approvals: approvals, SkillSetupRequests: skillSetups,
 		RunsChanged: runsChanged, ActivityChanged: activityChanged, PresenceChanged: presenceChanged,
+		ApprovalsChanged: approvalsChanged, SkillSetupRequestsChanged: skillSetupsChanged,
 		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore,
 	}, nil
 }
