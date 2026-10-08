@@ -5493,28 +5493,28 @@ func (e *Engine) CreateAgentDeployment(ctx context.Context, deployment *kernelag
 	return created, activation, nil
 }
 
+// GetAgentDeployment and ListAgentDeployments are side-effect free. The
+// Agent control conversation is created when a deployment is created,
+// updated, activated, rolled back or applied from a workforce change set.
 func (e *Engine) GetAgentDeployment(ctx context.Context, scope skill.ScopeReference, deploymentID string) (*kernelagent.AgentDeployment, error) {
-	deployment, err := e.agents.GetDeployment(ctx, scope, deploymentID)
-	if err != nil {
-		return nil, err
-	}
-	if _, ensureErr := e.ensureAgentControlConversation(ctx, deployment); ensureErr != nil {
-		return nil, ensureErr
-	}
-	return deployment, nil
+	return e.agents.GetDeployment(ctx, scope, deploymentID)
 }
 
 func (e *Engine) ListAgentDeployments(ctx context.Context, filter AgentDeploymentFilter) ([]*kernelagent.AgentDeployment, error) {
-	deployments, err := e.agents.ListDeployments(ctx, filter)
-	if err != nil {
-		return nil, err
+	return e.agents.ListDeployments(ctx, filter)
+}
+
+// ensureAgentControlConversationAfterWrite runs after a deployment write has
+// committed. The conversation is idempotent and the write must not appear
+// to fail because of it, so a failure is logged and retried by the next
+// deployment write.
+func (e *Engine) ensureAgentControlConversationAfterWrite(ctx context.Context, deployment *kernelagent.AgentDeployment) {
+	if deployment == nil {
+		return
 	}
-	for _, deployment := range deployments {
-		if _, ensureErr := e.ensureAgentControlConversation(ctx, deployment); ensureErr != nil {
-			return nil, ensureErr
-		}
+	if _, err := e.ensureAgentControlConversation(ctx, deployment); err != nil && e.logger != nil {
+		e.logger.Warnw("failed to ensure Agent control conversation", "deploymentId", deployment.ID, "error", err)
 	}
-	return deployments, nil
 }
 
 func (e *Engine) ensureAgentControlConversation(ctx context.Context, deployment *kernelagent.AgentDeployment) (*runtime.Conversation, error) {
@@ -5545,15 +5545,27 @@ func AgentApprovalsConversationReferenceID(owner ObjectiveOwner) string {
 }
 
 func (e *Engine) UpdateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
-	return e.agents.UpdateDeployment(ctx, deployment, expectedRevision, actorType, actorID, reason)
+	updated, activation, err := e.agents.UpdateDeployment(ctx, deployment, expectedRevision, actorType, actorID, reason)
+	if err == nil {
+		e.ensureAgentControlConversationAfterWrite(ctx, updated)
+	}
+	return updated, activation, err
 }
 
 func (e *Engine) ActivateAgentDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID, version string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
-	return e.agents.ActivateDefinition(ctx, scope, deploymentID, version, expectedRevision, actorType, actorID, reason)
+	activated, activation, err := e.agents.ActivateDefinition(ctx, scope, deploymentID, version, expectedRevision, actorType, actorID, reason)
+	if err == nil {
+		e.ensureAgentControlConversationAfterWrite(ctx, activated)
+	}
+	return activated, activation, err
 }
 
 func (e *Engine) RollbackAgentDefinition(ctx context.Context, scope skill.ScopeReference, deploymentID string, expectedRevision int64, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
-	return e.agents.RollbackDefinition(ctx, scope, deploymentID, expectedRevision, actorType, actorID, reason)
+	rolledBack, activation, err := e.agents.RollbackDefinition(ctx, scope, deploymentID, expectedRevision, actorType, actorID, reason)
+	if err == nil {
+		e.ensureAgentControlConversationAfterWrite(ctx, rolledBack)
+	}
+	return rolledBack, activation, err
 }
 
 func (e *Engine) ListAgentDefinitionActivations(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]kernelagent.DefinitionActivation, error) {
@@ -5730,7 +5742,18 @@ func (e *Engine) ApplyWorkforceChangeSet(ctx context.Context, request authoring.
 	if e == nil || e.authoringChanges == nil {
 		return nil, false, errors.New("workforce change sets are not configured")
 	}
-	return e.authoringChanges.Apply(ctx, request)
+	applied, replayed, err := e.authoringChanges.Apply(ctx, request)
+	if err == nil && applied != nil && e.agents != nil {
+		// Workforce apply writes Agent deployments directly in its own
+		// transaction; give each one its control conversation here.
+		for _, deploymentID := range applied.Placement.AgentDeploymentIDs {
+			deployment, getErr := e.agents.GetDeployment(ctx, applied.Scope, deploymentID)
+			if getErr == nil {
+				e.ensureAgentControlConversationAfterWrite(ctx, deployment)
+			}
+		}
+	}
+	return applied, replayed, err
 }
 
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
