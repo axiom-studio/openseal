@@ -75,3 +75,57 @@ func TestSkillSetupResolutionRequiresExactSavedBindingAndPersists(t *testing.T) 
 	}
 
 }
+
+// Completing setup anywhere resolves the chat's request when the binding is
+// saved, and the conversation change set carries it as completed so the
+// setup card never reappears.
+func TestCompletedSkillSetupDoesNotReappearInConversationChanges(t *testing.T) {
+	ctx := context.Background()
+	store := runtime.NewMemoryStore()
+	e, err := New(WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: "tenant", ID: "one"}
+	skillScope := SkillScope{Kind: scope.Kind, ID: scope.ID}
+	definition := &SkillDefinition{ID: "github", Version: "1.0.0", Name: "GitHub", Transport: SkillTransportReference{Kind: "local"}, Actions: map[string]SkillAction{"read": {Name: "read", Description: "Read a repository", Risk: SkillRiskRead, SideEffect: SkillSideEffectRead, Idempotency: SkillIdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}}}
+	if err := e.RegisterSkill(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	binding := &SkillBinding{ID: "github", Scope: skillScope, DeploymentID: "agent", SkillID: "github", SkillVersion: "1.0.0", AllowedActions: []string{"read"}, MaximumRisk: SkillRiskRead, Revision: 1}
+	if err := e.BindSkill(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	conversation, _, err := e.CreateConversation(ctx, CreateConversationRequest{ID: "chat", Scope: scope, Owner: ObjectiveOwner{Type: "agent", ID: "agent"}, Title: "Setup", IdempotencyKey: "setup-chat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	request := &SkillSetupRequest{ID: "request", Scope: scope, DeploymentID: "agent", ConversationID: conversation.ID, TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: "reauthorize", SkillID: "github", SkillVersion: "1.0.0", SkillName: "GitHub", BindingID: "github", BindingRevision: 1, Reason: "Reconnect GitHub", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
+	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
+		t.Fatal(err)
+	}
+	initial, err := e.ListConversationChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(initial.SkillSetupRequests) != 1 || initial.SkillSetupRequests[0].Status != "pending" {
+		t.Fatalf("pending setup: %#v %v", initial, err)
+	}
+	if _, err := e.UpsertSkillBinding(ctx, UpsertSkillBindingRequest{Binding: binding, ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "user"}, Reason: "Reconnected in Settings"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := store.GetSkillSetupRequest(ctx, scope, request.ID)
+	if err != nil || stored.Status != "resolved" || stored.ResolvedBindingRevision != 2 {
+		t.Fatalf("saving the binding left setup pending: %#v %v", stored, err)
+	}
+	completed, err := e.ListConversationChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID, Cursor: initial.Cursor})
+	if err != nil || !completed.SkillSetupRequestsChanged || len(completed.SkillSetupRequests) != 1 || completed.SkillSetupRequests[0].Status != "resolved" {
+		t.Fatalf("completed setup: %#v %v", completed, err)
+	}
+	// The chat form's own confirmation after the save stays idempotent.
+	if confirmed, err := e.ResolveSkillSetupRequest(ctx, scope, "agent", request.ID, 1, "github", "user", false); err != nil || confirmed.Status != "resolved" {
+		t.Fatalf("form confirmation: %#v %v", confirmed, err)
+	}
+	fresh, err := e.ListConversationChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(fresh.SkillSetupRequests) != 1 || fresh.SkillSetupRequests[0].Status != "resolved" {
+		t.Fatalf("completed setup reappeared: %#v %v", fresh, err)
+	}
+}
