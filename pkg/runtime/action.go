@@ -272,6 +272,9 @@ type ApprovalDestination struct {
 type ApprovalConversationContext struct {
 	ConversationID   string `json:"conversationId,omitempty"`
 	TriggerMessageID string `json:"triggerMessageId,omitempty"`
+	// ThreadRootMessageID is set by conversation change projections so a
+	// thread view can place the card without reading the Run lineage.
+	ThreadRootMessageID string `json:"threadRootMessageId,omitempty"`
 }
 
 type ApprovalCheckpoint struct {
@@ -386,6 +389,7 @@ type ApprovalFilter struct {
 	Scope           Scope
 	Owner           *ObjectiveOwner
 	RunID           string
+	RunIDs          []string // When set, only approvals for these exact Runs.
 	Status          []ApprovalStatus
 	Limit           int
 	Offset          int
