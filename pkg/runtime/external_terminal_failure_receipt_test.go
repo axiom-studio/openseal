@@ -155,7 +155,7 @@ func TestExternalTerminalFailureAcknowledgedReceiptCannotRedirectInboxOrigin(t *
 	}
 	item := &ExternalConversationInboxItem{ID: "original-inbox", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter, Status: ExternalConversationInboxApplied, ConversationID: conversation.ID, ChannelMessageID: trigger.ID, RunID: run.ID,
 		Event: NormalizedExternalConversationEvent{ID: "original-event", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "C123", ExternalMessageID: "171.001", ExternalParticipantID: "kev", Text: "Check this request", OrderingKey: "C123:171.001", OccurredAt: now}}
-	if _, err := worker.project(t.Context(), item); !errors.Is(err, ErrExternalConversationConflict) {
+	if _, _, err := worker.project(t.Context(), item); !errors.Is(err, ErrExternalConversationConflict) {
 		t.Fatalf("mutable metadata redirected an acknowledged inbox reply: %v", err)
 	}
 	messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: foreign.ID, Limit: 10})
