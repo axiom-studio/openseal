@@ -159,7 +159,7 @@ func workforceRunbookVerificationEnvironment(definition *agent.AgentDefinition, 
 		}
 		sort.Strings(actionNames)
 		for _, actionName := range actionNames {
-			action := skillDefinition.Actions[actionName]
+			action := canonicalActionReview(skillDefinition, skillDefinition.Actions[actionName])
 			requiresApproval := workforceActionRequiresApproval(definition, binding.SkillID, actionName, action)
 			environment.Actions = append(environment.Actions, runbook.ResolvedAction{
 				SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
