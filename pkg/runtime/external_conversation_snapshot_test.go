@@ -217,9 +217,9 @@ func TestExternalConversationSnapshotQueuedOutboxUsesCurrentAuthorityAndOriginal
 	}
 	original := projected[0]
 	upgraded := upgradeSnapshotEndpoint(t, store, catalog, endpoint)
-	replayed, err := projector.ProcessScope(ctx, endpoint.Scope, 10)
-	if err != nil || len(replayed) != 1 || replayed[0].ID != original.ID || replayed[0].Adapter != original.Adapter || replayed[0].EndpointRevision != original.EndpointRevision {
-		t.Fatalf("upgrade replaced immutable receipt: %#v, %v", replayed, err)
+	replayed := reprojectAppliedExternalInbox(t, projector, store, endpoint.Scope)
+	if len(replayed) != 1 || replayed[0].ID != original.ID || replayed[0].Adapter != original.Adapter || replayed[0].EndpointRevision != original.EndpointRevision {
+		t.Fatalf("upgrade replaced immutable receipt: %#v", replayed)
 	}
 	host := &snapshotDeliveryHost{}
 	deliveryWorker, err := NewExternalConversationDeliveryWorker(store, catalog, host, ExternalConversationDeliveryWorkerConfig{WorkerID: "snapshot-delivery-worker"})
@@ -313,7 +313,7 @@ func TestExternalConversationSnapshotRejectsRedirectAndNewAuthority(t *testing.T
 						t.Fatalf("changed authority accepted: %v", err)
 					}
 				} else {
-					if _, err := projector.project(ctx, item); !errors.Is(err, ErrExternalConversationConflict) {
+					if _, _, err := projector.project(ctx, item); !errors.Is(err, ErrExternalConversationConflict) {
 						t.Fatalf("changed authority accepted: %v", err)
 					}
 				}

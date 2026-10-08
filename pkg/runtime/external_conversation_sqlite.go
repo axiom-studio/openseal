@@ -374,6 +374,10 @@ func (s *SQLiteStore) ListExternalConversationInbox(ctx context.Context, filter 
 		statuses = append(statuses, string(status))
 	}
 	query, args = appendSQLiteActivityStrings(query, args, "status", statuses)
+	if filter.ReplyDueAt != nil {
+		query += ` AND json_extract(payload,'$.replyState') IS NULL AND (json_extract(payload,'$.replyAvailableAt') IS NULL OR julianday(json_extract(payload,'$.replyAvailableAt')) <= julianday(?))`
+		args = append(args, filter.ReplyDueAt.UTC().Format(time.RFC3339Nano))
+	}
 	query += ` ORDER BY created_at DESC,id ASC LIMIT ? OFFSET ?`
 	limit, offset := normalizeExternalConversationPage(filter.Limit, filter.Offset)
 	args = append(args, limit, offset)
@@ -986,4 +990,38 @@ func validExternalConversationDeliverySave(current, next *ExternalConversationDe
 		current.Status == ExternalConversationDeliveryLeased && current.LeaseOwner == strings.TrimSpace(leaseOwner) &&
 		!next.UpdatedAt.Before(current.UpdatedAt) && !next.UpdatedAt.After(current.LeaseExpiresAt) &&
 		sameExternalConversationDeliveryIntent(current, next) && current.CreatedAt.Equal(next.CreatedAt)
+}
+
+func (s *SQLiteStore) SaveExternalConversationReplyProgress(ctx context.Context, scope Scope, id string, expectedRevision int64, progress ExternalConversationReplyProgress) error {
+	if scope.Validate() != nil {
+		return ErrInvalidExternalConversation
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	current, err := scanSQLiteExternalConversationInbox(tx.QueryRowContext(ctx, `SELECT payload FROM external_conversation_inbox
+		WHERE scope_kind=? AND scope_id=? AND id=?`, scope.Kind, scope.ID, strings.TrimSpace(id)))
+	if err != nil {
+		return err
+	}
+	next, err := applyExternalConversationReplyProgress(current, expectedRevision, progress)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE external_conversation_inbox SET revision=?,payload=?
+		WHERE scope_kind=? AND scope_id=? AND id=? AND revision=? AND status=?`,
+		next.Revision, string(payload), scope.Kind, scope.ID, next.ID, expectedRevision, ExternalConversationInboxApplied)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrExternalConversationConflict
+	}
+	return tx.Commit()
 }

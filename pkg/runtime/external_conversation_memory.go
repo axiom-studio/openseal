@@ -189,7 +189,8 @@ func (s *MemoryStore) ListExternalConversationInbox(_ context.Context, filter Ex
 	items := make([]*ExternalConversationInboxItem, 0)
 	for _, item := range s.externalInbox {
 		if item.Scope != filter.Scope || (filter.EndpointID != "" && item.EndpointID != filter.EndpointID) ||
-			!externalConversationInboxStatusMatches(item.Status, filter.Statuses) {
+			!externalConversationInboxStatusMatches(item.Status, filter.Statuses) ||
+			(filter.ReplyDueAt != nil && !externalConversationReplyDue(item, *filter.ReplyDueAt)) {
 			continue
 		}
 		items = append(items, cloneExternalConversationInboxItem(item))
@@ -725,4 +726,24 @@ func paginateExternalConversationDeliveries(values []*ExternalConversationDelive
 		end = offset + limit
 	}
 	return values[offset:end]
+}
+
+func (s *MemoryStore) SaveExternalConversationReplyProgress(_ context.Context, scope Scope, id string, expectedRevision int64, progress ExternalConversationReplyProgress) error {
+	if scope.Validate() != nil {
+		return ErrInvalidExternalConversation
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, item := range s.externalInbox {
+		if item.Scope != scope || item.ID != strings.TrimSpace(id) {
+			continue
+		}
+		next, err := applyExternalConversationReplyProgress(item, expectedRevision, progress)
+		if err != nil {
+			return err
+		}
+		s.externalInbox[key] = next
+		return nil
+	}
+	return ErrExternalConversationInboxNotFound
 }

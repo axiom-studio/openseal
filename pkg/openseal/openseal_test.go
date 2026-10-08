@@ -539,3 +539,63 @@ func TestConversationRunsRejectMismatchedParticipationPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineWakeAgentWorkersForScopeClaimsWithoutPolling(t *testing.T) {
+	var nilEngine *Engine
+	nilEngine.WakeAgentWorkersForScope(Scope{Kind: "local", ID: "x"})
+
+	store := runtime.NewMemoryStore()
+	scope := Scope{Kind: "local", ID: "wake"}
+	claimed := make(chan time.Time, 1)
+	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{
+			DefinitionID: "test-agent", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
+			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				select {
+				case claimed <- time.Now():
+				default:
+				}
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done"}, nil
+			}),
+		}, nil
+	})
+	engine, err := New(
+		WithStore(store),
+		// A poll far longer than the test proves the wake, not the poll, claimed.
+		WithAgentRunWorkers(AgentRunWorkerConfig{
+			Scope: scope, AssignedAgentID: "agent", PollInterval: time.Hour,
+			LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+		}, resolver),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	engine.Start(ctx)
+	defer engine.Stop()
+	time.Sleep(20 * time.Millisecond) // let the start-up claim pass find nothing
+	run, err := runtime.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "wake me", Source: RunSourceObjective,
+	})
+	if err != nil || run.Run == nil {
+		t.Fatal(err)
+	}
+	engine.WakeAgentWorkersForScope(Scope{Kind: "local", ID: "other"})
+	select {
+	case <-claimed:
+		t.Fatal("a wake for another scope must not claim this scope's Run")
+	case <-time.After(50 * time.Millisecond):
+	}
+	woke := time.Now()
+	engine.WakeAgentWorkersForScope(scope)
+	select {
+	case at := <-claimed:
+		if latency := at.Sub(woke); latency > 200*time.Millisecond {
+			t.Fatalf("wake to claim took %s", latency)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("scoped wake did not claim the Run")
+	}
+}

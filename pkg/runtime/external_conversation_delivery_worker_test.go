@@ -293,6 +293,20 @@ func externalConversationDeliveryFixtureWithOperations(
 ) (*MemoryStore, *skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
 	store := NewMemoryStore()
+	catalog, endpoint := externalConversationEndpointFixtureOn(t, ctx, store, provider, operations)
+	return store, catalog, endpoint
+}
+
+// externalConversationEndpointFixtureOn creates the fixture endpoint in any
+// endpoint store (memory, SQLite or PostgreSQL).
+func externalConversationEndpointFixtureOn(
+	t *testing.T,
+	ctx context.Context,
+	store ExternalConversationEndpointStore,
+	provider string,
+	operations []skill.ConversationDeliveryOperation,
+) (*skill.Catalog, *ExternalConversationEndpoint) {
+	t.Helper()
 	catalog := skill.NewCatalog()
 	definition := slackConversationSkillDefinition()
 	definition.ID, definition.Name = provider, provider
@@ -347,5 +361,5 @@ func externalConversationDeliveryFixtureWithOperations(
 	if err != nil {
 		t.Fatal(err)
 	}
-	return store, catalog, endpoint
+	return catalog, endpoint
 }

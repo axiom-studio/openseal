@@ -96,8 +96,11 @@ func TestExternalConversationFailureReplyIsSafeScopedAndIdempotent(t *testing.T)
 				t.Fatalf("failure projection = %#v, %v", first, err)
 			}
 			second, err := worker.ProcessScope(ctx, endpoint.Scope, 10)
-			if err != nil || len(second) != 1 || second[0].ID != first[0].ID {
-				t.Fatalf("failure replay = %#v, %v", second, err)
+			if err != nil || len(second) != 0 {
+				t.Fatalf("a projected failure must not be revisited: %#v, %v", second, err)
+			}
+			if replayed := reprojectAppliedExternalInbox(t, worker, store, endpoint.Scope); len(replayed) != 1 || replayed[0].ID != first[0].ID {
+				t.Fatalf("failure replay = %#v", replayed)
 			}
 			messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: endpoint.Scope, ConversationID: item.ConversationID, Limit: 10})
 			if err != nil || len(messages) != 2 {
