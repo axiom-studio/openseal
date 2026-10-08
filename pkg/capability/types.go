@@ -132,6 +132,26 @@ type Action struct {
 	// these roles to compose actions without guessing connector-specific fields.
 	SemanticArguments map[string]string           `json:"semanticArguments,omitempty"`
 	RequiredEvidence  []ActionEvidenceRequirement `json:"requiredEvidence,omitempty"`
+	// Review declares an action-level review floor. ActionReviewAlways keeps
+	// an explicit human approval for every invocation in every conversation
+	// approval mode, including skip, regardless of standing grants, approval
+	// thresholds, or approval-timeout auto-approval.
+	Review ActionReview `json:"review,omitempty"`
+}
+
+// ActionReview is a manifest-declared review floor for one Action. Empty
+// leaves review to the action policy and the conversation approval mode.
+type ActionReview string
+
+const (
+	// ActionReviewAlways requires explicit approval for every invocation.
+	ActionReviewAlways ActionReview = "always"
+)
+
+// AlwaysReview reports whether every invocation of the action must cross an
+// explicit approval checkpoint.
+func (a Action) AlwaysReview() bool {
+	return a.Review == ActionReviewAlways
 }
 
 type TransportReference struct {
