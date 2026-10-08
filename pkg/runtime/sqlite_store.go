@@ -28,6 +28,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateSkillSetupRequests(db); err != nil {
 		return err
 	}
+	if err := migrateCredentialRequests(db); err != nil {
+		return err
+	}
 	if err := migratePortfolio(db); err != nil {
 		return err
 	}
