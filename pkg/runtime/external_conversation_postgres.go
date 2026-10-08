@@ -307,6 +307,11 @@ func (s *PostgresStore) ListExternalConversationInbox(ctx context.Context, filte
 		statuses = append(statuses, string(status))
 	}
 	query, args, placeholder = appendPostgresActivityStrings(query, args, placeholder, "status", statuses)
+	if filter.ReplyDueAt != nil {
+		query += fmt.Sprintf(` AND payload->>'replyState' IS NULL AND (payload->>'replyAvailableAt' IS NULL OR (payload->>'replyAvailableAt')::timestamptz <= $%d)`, placeholder)
+		args = append(args, filter.ReplyDueAt.UTC())
+		placeholder++
+	}
 	query += fmt.Sprintf(` ORDER BY created_at DESC,id ASC LIMIT $%d OFFSET $%d`, placeholder, placeholder+1)
 	limit, offset := normalizeExternalConversationPage(filter.Limit, filter.Offset)
 	args = append(args, limit, offset)
@@ -819,3 +824,37 @@ var (
 	_ ExternalConversationEndpointStore  = (*SQLiteStore)(nil)
 	_ ExternalConversationTransportStore = (*SQLiteStore)(nil)
 )
+
+func (s *PostgresStore) SaveExternalConversationReplyProgress(ctx context.Context, scope Scope, id string, expectedRevision int64, progress ExternalConversationReplyProgress) error {
+	if scope.Validate() != nil {
+		return ErrInvalidExternalConversation
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	current, err := scanSQLiteExternalConversationInbox(tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("external_conversation_inbox")+`
+		WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`, scope.Kind, scope.ID, strings.TrimSpace(id)))
+	if err != nil {
+		return err
+	}
+	next, err := applyExternalConversationReplyProgress(current, expectedRevision, progress)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("external_conversation_inbox")+` SET revision=$1,payload=$2::jsonb
+		WHERE scope_kind=$3 AND scope_id=$4 AND id=$5 AND revision=$6 AND status=$7`,
+		next.Revision, string(payload), scope.Kind, scope.ID, next.ID, expectedRevision, ExternalConversationInboxApplied)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return ErrExternalConversationConflict
+	}
+	return tx.Commit()
+}

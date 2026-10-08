@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -25,6 +26,23 @@ type ExternalConversationReplyWorker struct {
 	store         ExternalConversationReplyStore
 	conversations *ConversationService
 	transport     *ExternalConversationTransportService
+	now           func() time.Time
+}
+
+const (
+	// A failed projection is retried with exponential backoff and abandoned
+	// (ReplyState failed) after this many attempts.
+	externalConversationReplyMaximumAttempts = 8
+	externalConversationReplyBaseRetry       = 2 * time.Second
+	externalConversationReplyMaximumRetry    = 5 * time.Minute
+)
+
+func externalConversationReplyRetryDelay(attempt int) time.Duration {
+	delay := externalConversationReplyBaseRetry
+	for i := 1; i < attempt && delay < externalConversationReplyMaximumRetry; i++ {
+		delay *= 2
+	}
+	return min(delay, externalConversationReplyMaximumRetry)
 }
 
 func NewExternalConversationReplyWorker(
@@ -37,12 +55,15 @@ func NewExternalConversationReplyWorker(
 	return &ExternalConversationReplyWorker{
 		store: store, conversations: NewConversationService(store),
 		transport: NewExternalConversationTransportService(store, resolver),
+		now:       time.Now,
 	}, nil
 }
 
-// ProcessScope projects up to limit applied inbound messages. Reprocessing is
-// expected: message and delivery idempotency keys make every successful pass a
-// no-op after the first commit, including across process restarts.
+// ProcessScope projects up to limit applied inbound messages. Message and
+// delivery idempotency keys make a repeated projection a no-op. When the
+// store records reply progress, a resolved item is marked terminal and a
+// failing one backs off, so idle scopes stop re-projecting every applied
+// item on every pass; other stores keep the original revisit behaviour.
 func (w *ExternalConversationReplyWorker) ProcessScope(
 	ctx context.Context,
 	scope Scope,
@@ -54,32 +75,79 @@ func (w *ExternalConversationReplyWorker) ProcessScope(
 	if limit <= 0 {
 		limit = 100
 	}
-	items, err := w.store.ListExternalConversationInbox(ctx, ExternalConversationInboxFilter{
+	progress, tracked := w.store.(ExternalConversationReplyStateStore)
+	now := w.now().UTC()
+	filter := ExternalConversationInboxFilter{
 		Scope: scope, Statuses: []ExternalConversationInboxStatus{ExternalConversationInboxApplied}, Limit: limit,
-	})
+	}
+	if tracked {
+		filter.ReplyDueAt = &now
+	}
+	items, err := w.store.ListExternalConversationInbox(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
 	deliveries := make([]*ExternalConversationDelivery, 0, len(items))
 	var projectErrors []error
 	for _, item := range items {
-		delivery, projectErr := w.project(ctx, item)
+		delivery, resolved, projectErr := w.project(ctx, item)
 		if projectErr != nil {
 			projectErrors = append(projectErrors, fmt.Errorf("project external conversation inbox item %s: %w", item.ID, projectErr))
+			if tracked {
+				w.recordFailure(ctx, progress, item, now, projectErr)
+			}
 			continue
 		}
 		if delivery != nil {
 			deliveries = append(deliveries, delivery)
 		}
+		if tracked && resolved {
+			// A lost race only means another worker recorded it first.
+			_ = progress.SaveExternalConversationReplyProgress(ctx, item.Scope, item.ID, item.Revision, ExternalConversationReplyProgress{
+				State: ExternalConversationReplyProjected, Attempts: item.ReplyAttempts, At: now,
+			})
+		}
 	}
 	return deliveries, errors.Join(projectErrors...)
 }
 
+func (w *ExternalConversationReplyWorker) recordFailure(ctx context.Context, progress ExternalConversationReplyStateStore, item *ExternalConversationInboxItem, now time.Time, cause error) {
+	attempts := item.ReplyAttempts + 1
+	next := ExternalConversationReplyProgress{Attempts: attempts, Error: cause.Error(), At: now}
+	if attempts >= externalConversationReplyMaximumAttempts {
+		next.State = ExternalConversationReplyFailed
+	} else {
+		retryAt := now.Add(externalConversationReplyRetryDelay(attempts))
+		next.AvailableAt = &retryAt
+	}
+	_ = progress.SaveExternalConversationReplyProgress(ctx, item.Scope, item.ID, item.Revision, next)
+}
+
+// project returns resolved=true when no further projection can ever be
+// needed for the item: its reply exists or was delivered, or no reply is
+// due (no Run, a canceled Run, a paused endpoint, a superseded failure).
 func (w *ExternalConversationReplyWorker) project(
 	ctx context.Context,
 	item *ExternalConversationInboxItem,
+) (*ExternalConversationDelivery, bool, error) {
+	delivery, err := w.projectItem(ctx, item)
+	if errors.Is(err, errExternalReplyPending) {
+		return nil, false, nil
+	}
+	return delivery, err == nil, err
+}
+
+// errExternalReplyPending marks an item whose Run has not finished yet.
+var errExternalReplyPending = errors.New("external conversation reply pending")
+
+func (w *ExternalConversationReplyWorker) projectItem(
+	ctx context.Context,
+	item *ExternalConversationInboxItem,
 ) (*ExternalConversationDelivery, error) {
-	if item == nil || item.Status != ExternalConversationInboxApplied ||
+	if item == nil {
+		return nil, nil
+	}
+	if item.Status != ExternalConversationInboxApplied ||
 		strings.TrimSpace(item.RunID) == "" || strings.TrimSpace(item.ConversationID) == "" ||
 		strings.TrimSpace(item.ChannelMessageID) == "" {
 		return nil, nil
@@ -88,8 +156,11 @@ func (w *ExternalConversationReplyWorker) project(
 	if err != nil {
 		return nil, err
 	}
-	if run == nil || (run.Status != AgentRunStatusCompleted && run.Status != AgentRunStatusFailed) {
+	if run == nil || run.Status == AgentRunStatusCanceled {
 		return nil, nil
+	}
+	if run.Status != AgentRunStatusCompleted && run.Status != AgentRunStatusFailed {
+		return nil, errExternalReplyPending
 	}
 	endpoint, err := w.store.GetExternalConversationEndpoint(ctx, item.Scope, item.EndpointID)
 	if err != nil {
