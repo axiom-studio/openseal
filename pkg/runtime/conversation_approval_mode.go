@@ -57,8 +57,12 @@ func (m ConversationApprovalMode) rank() int {
 
 // ApprovalModeAllowsAction reports whether mode lets an action with this
 // classification proceed without an approval checkpoint. An empty mode (a Run
-// that acts for no conversation) behaves like manual.
-func ApprovalModeAllowsAction(mode ConversationApprovalMode, risk skill.RiskLevel, sideEffect skill.SideEffect) bool {
+// that acts for no conversation) behaves like manual. An action whose manifest
+// declares review: always keeps its checkpoint in every mode, including skip.
+func ApprovalModeAllowsAction(mode ConversationApprovalMode, review skill.ActionReview, risk skill.RiskLevel, sideEffect skill.SideEffect) bool {
+	if review == skill.ActionReviewAlways {
+		return false
+	}
 	switch mode {
 	case ConversationApprovalSkip:
 		return true
@@ -68,13 +72,6 @@ func ApprovalModeAllowsAction(mode ConversationApprovalMode, risk skill.RiskLeve
 	default:
 		return false
 	}
-}
-
-// ApprovalModeExemptAction reports kernel actions that keep an explicit review
-// in every approval mode. Agent behavior amendments change the durable worker
-// for every conversation, so a conversation-scoped mode cannot waive them.
-func ApprovalModeExemptAction(skillID, action string) bool {
-	return skillID == AgentManagementSkillID && (action == AgentActionAmendBehavior || action == AgentActionConfigureChannel)
 }
 
 type agentRunReader interface {
@@ -307,15 +304,14 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 			incomplete = true
 			continue
 		}
-		if call.Status != ActionCallStatusWaitingApproval || ApprovalModeExemptAction(call.SkillID, call.Action) ||
-			!ApprovalModeAllowsAction(mode, call.Risk, call.SideEffect) {
+		if call.Status != ActionCallStatusWaitingApproval || !ApprovalModeAllowsAction(mode, call.Review, call.Risk, call.SideEffect) {
 			continue
 		}
 		current, err := s.conversations.GetConversation(ctx, scope, conversationID)
 		if err != nil || current == nil {
 			return approved, true
 		}
-		if !ApprovalModeAllowsAction(conversationApprovalModeOrDefault(current.ApprovalMode), call.Risk, call.SideEffect) {
+		if !ApprovalModeAllowsAction(conversationApprovalModeOrDefault(current.ApprovalMode), call.Review, call.Risk, call.SideEffect) {
 			continue
 		}
 		result, err := s.approvals.ResolveByApprovalMode(ctx, scope, approval.ID, approval.Revision, mode, correlationID)

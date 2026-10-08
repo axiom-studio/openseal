@@ -43,19 +43,22 @@ const (
 )
 
 type ActionCall struct {
-	ID                      string                               `json:"id"`
-	Scope                   Scope                                `json:"scope"`
-	RunID                   string                               `json:"runId"`
-	TurnID                  string                               `json:"turnId,omitempty"`
-	DeploymentID            string                               `json:"deploymentId"`
-	BindingID               string                               `json:"bindingId"`
-	BindingRevision         int64                                `json:"bindingRevision"`
-	SkillID                 string                               `json:"skillId"`
-	SkillVersion            string                               `json:"skillVersion"`
-	Action                  string                               `json:"action"`
-	Status                  ActionCallStatus                     `json:"status"`
-	Risk                    skill.RiskLevel                      `json:"risk"`
-	SideEffect              skill.SideEffect                     `json:"sideEffect"`
+	ID              string           `json:"id"`
+	Scope           Scope            `json:"scope"`
+	RunID           string           `json:"runId"`
+	TurnID          string           `json:"turnId,omitempty"`
+	DeploymentID    string           `json:"deploymentId"`
+	BindingID       string           `json:"bindingId"`
+	BindingRevision int64            `json:"bindingRevision"`
+	SkillID         string           `json:"skillId"`
+	SkillVersion    string           `json:"skillVersion"`
+	Action          string           `json:"action"`
+	Status          ActionCallStatus `json:"status"`
+	Risk            skill.RiskLevel  `json:"risk"`
+	SideEffect      skill.SideEffect `json:"sideEffect"`
+	// Review is the action's manifest review floor captured at proposal time,
+	// so later approval-mode sweeps cannot waive an always-reviewed action.
+	Review                  skill.ActionReview                   `json:"review,omitempty"`
 	Arguments               map[string]interface{}               `json:"arguments"`
 	ResolvedArguments       map[string]ResolvedActionArgument    `json:"resolvedArguments,omitempty"`
 	PreparedRuntime         *skill.PreparedRuntime               `json:"preparedRuntime,omitempty"`

@@ -32,13 +32,14 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 		action.Risk == skill.RiskLevelWrite && action.SideEffect == skill.SideEffectWrite {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "self profile picture change"}, nil
 	}
-	if action.Risk == skill.RiskLevelRead && (action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead) {
+	if !action.AlwaysReview() && action.Risk == skill.RiskLevelRead && (action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only action"}, nil
 	}
 	// The conversation's approval mode is the user's review boundary: auto
 	// allows read and write risk work, skip allows everything, and manual (or
 	// a Run acting for no conversation) keeps every side effect under review.
-	if !ApprovalModeExemptAction(input.Bound.Definition.ID, action.Name) && ApprovalModeAllowsAction(input.ApprovalMode, action.Risk, action.SideEffect) {
+	// A manifest-declared review: always action is reviewed in every mode.
+	if ApprovalModeAllowsAction(input.ApprovalMode, action.Review, action.Risk, action.SideEffect) {
 		return ActionPolicyDecision{
 			Disposition: ActionDispositionAllow,
 			Reason:      fmt.Sprintf("approval mode %s allows %s risk action with %s side effects", input.ApprovalMode, action.Risk, action.SideEffect),
@@ -51,9 +52,13 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
+	reason := fmt.Sprintf("%s risk action with %s side effects", action.Risk, action.SideEffect)
+	if action.AlwaysReview() {
+		reason = "action always requires explicit review"
+	}
 	return ActionPolicyDecision{
 		Disposition:       ActionDispositionRequireApproval,
-		Reason:            fmt.Sprintf("%s risk action with %s side effects", action.Risk, action.SideEffect),
+		Reason:            reason,
 		EligibleApprovers: append([]ApprovalPrincipal(nil), p.Approvers...), ApprovalTTL: ttl,
 		ApprovalTimeout: p.ApprovalTimeout,
 	}, nil
