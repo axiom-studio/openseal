@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -579,6 +580,87 @@ type ExternalConversationInboxItem struct {
 	CreatedAt        time.Time                            `json:"createdAt"`
 	UpdatedAt        time.Time                            `json:"updatedAt"`
 	AppliedAt        time.Time                            `json:"appliedAt,omitempty"`
+	// Reply projection bookkeeping for applied items. The reply worker sets
+	// ReplyState once the canonical reply is projected (or none is due) and
+	// backs off failed projections via ReplyAvailableAt, so applied items are
+	// not re-projected forever. Status stays "applied" for every other reader.
+	ReplyState       ExternalConversationReplyState `json:"replyState,omitempty"`
+	ReplyAttempts    int                            `json:"replyAttempts,omitempty"`
+	ReplyAvailableAt *time.Time                     `json:"replyAvailableAt,omitempty"`
+	ReplyError       string                         `json:"replyError,omitempty"`
+}
+
+// ExternalConversationReplyState is terminal once set.
+type ExternalConversationReplyState string
+
+const (
+	// ExternalConversationReplyProjected: the reply (or a deliberate no-op,
+	// such as a paused endpoint or a superseded failure) is resolved.
+	ExternalConversationReplyProjected ExternalConversationReplyState = "projected"
+	// ExternalConversationReplyFailed: projection kept failing and stopped.
+	ExternalConversationReplyFailed ExternalConversationReplyState = "failed"
+)
+
+// ExternalConversationReplyProgress is the only mutation the reply worker
+// may make to an applied inbox item.
+type ExternalConversationReplyProgress struct {
+	State       ExternalConversationReplyState
+	Attempts    int
+	AvailableAt *time.Time
+	Error       string
+	At          time.Time
+}
+
+// ExternalConversationReplyStateStore records reply projection progress with
+// a revision compare-and-set on applied items only.
+type ExternalConversationReplyStateStore interface {
+	SaveExternalConversationReplyProgress(ctx context.Context, scope Scope, id string, expectedRevision int64, progress ExternalConversationReplyProgress) error
+}
+
+// applyExternalConversationReplyProgress validates and applies progress to a
+// copy of current, touching nothing but the reply fields and revision.
+func applyExternalConversationReplyProgress(current *ExternalConversationInboxItem, expectedRevision int64, progress ExternalConversationReplyProgress) (*ExternalConversationInboxItem, error) {
+	if current == nil {
+		return nil, ErrExternalConversationInboxNotFound
+	}
+	if current.Status != ExternalConversationInboxApplied || current.Revision != expectedRevision || current.ReplyState != "" {
+		return nil, ErrExternalConversationConflict
+	}
+	if progress.At.IsZero() || progress.Attempts < 0 {
+		return nil, ErrInvalidExternalConversation
+	}
+	next := cloneExternalConversationInboxItem(current)
+	next.ReplyState, next.ReplyAttempts, next.ReplyError = progress.State, progress.Attempts, truncateExternalReplyError(progress.Error)
+	next.ReplyAvailableAt = nil
+	if progress.AvailableAt != nil {
+		at := progress.AvailableAt.UTC()
+		next.ReplyAvailableAt = &at
+	}
+	next.Revision++
+	if progress.At.After(next.UpdatedAt) {
+		next.UpdatedAt = progress.At.UTC()
+	}
+	if err := next.Validate(); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
+func truncateExternalReplyError(value string) string {
+	if len(value) <= 512 {
+		return value
+	}
+	value = value[:512]
+	for len(value) > 0 && !utf8.ValidString(value) {
+		value = value[:len(value)-1]
+	}
+	return value
+}
+
+// externalConversationReplyDue reports whether an applied item still needs
+// reply projection at now.
+func externalConversationReplyDue(item *ExternalConversationInboxItem, now time.Time) bool {
+	return item != nil && item.ReplyState == "" && (item.ReplyAvailableAt == nil || !item.ReplyAvailableAt.After(now))
 }
 
 func (i *ExternalConversationInboxItem) Validate() error {
@@ -588,7 +670,15 @@ func (i *ExternalConversationInboxItem) Validate() error {
 		i.Attempt < 0 || i.MaximumAttempts < 1 || i.MaximumAttempts > MaximumExternalConversationDeliveryAttempts ||
 		i.AvailableAt.IsZero() || i.Revision < 1 ||
 		i.CreatedAt.IsZero() || i.UpdatedAt.IsZero() || i.UpdatedAt.Before(i.CreatedAt) ||
-		len(i.ErrorCode) > 128 || len(i.Summary) > 1024 {
+		len(i.ErrorCode) > 128 || len(i.Summary) > 1024 || len(i.ReplyError) > 1024 || i.ReplyAttempts < 0 {
+		return ErrInvalidExternalConversation
+	}
+	switch i.ReplyState {
+	case "", ExternalConversationReplyProjected, ExternalConversationReplyFailed:
+	default:
+		return ErrInvalidExternalConversation
+	}
+	if (i.ReplyState != "" || i.ReplyAttempts > 0 || i.ReplyAvailableAt != nil) && i.Status != ExternalConversationInboxApplied {
 		return ErrInvalidExternalConversation
 	}
 	for _, value := range []string{i.ConversationID, i.ChannelMessageID, i.RunID} {
@@ -823,6 +913,9 @@ type ExternalConversationInboxFilter struct {
 	Scope      Scope
 	EndpointID string
 	Statuses   []ExternalConversationInboxStatus
+	// ReplyDueAt, when set, keeps only items whose reply is unresolved and
+	// whose reply backoff has elapsed at that instant.
+	ReplyDueAt *time.Time
 	Limit      int
 	Offset     int
 }
