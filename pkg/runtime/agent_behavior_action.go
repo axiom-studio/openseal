@@ -57,7 +57,7 @@ func AgentManagementSkill() *skill.Definition {
 			AgentActionAmendBehavior: {
 				Name:        AgentActionAmendBehavior,
 				Description: "Propose changing the current Agent's display name, purpose, system prompt, personality, operating principles, or approval-timeout policy. Supply at least one changed field and preserve unrelated current behavior. String and list values replace the corresponding field in full. Automatic approval is opt-in and requires an explicit timeout duration and approve decision. The kernel resolves the target and revision, then enforces amendment policy and the immutable activation lifecycle.",
-				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
+				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
 					"type": "object", "additionalProperties": false,
@@ -108,7 +108,7 @@ func AgentManagementSkill() *skill.Definition {
 			AgentActionConfigureChannel: {
 				Name:        AgentActionConfigureChannel,
 				Description: "Propose changing how an existing active or paused authorized channel enters and leaves the current Agent's workflow. Retired channels are historical and cannot be configured or reactivated. This operation governs the Runbook trigger, reply mode, and approval-delivery purpose together.",
-				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
+				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
 					"type": "object", "additionalProperties": false,

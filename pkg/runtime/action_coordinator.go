@@ -256,6 +256,17 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if !validActionDisposition(decision.Disposition) {
 		return nil, errors.New("action policy returned an invalid disposition")
 	}
+	// A manifest review floor is a kernel invariant, not a policy preference:
+	// no policy, standing grant, or approval mode may let the action proceed
+	// unreviewed, and its checkpoint never auto-approves on timeout.
+	if bound.Action.AlwaysReview() {
+		if decision.Disposition == ActionDispositionAllow {
+			return nil, fmt.Errorf("action policy allowed %s.%s, which always requires explicit review", req.SkillID, req.Action)
+		}
+		if decision.ApprovalTimeout == ApprovalTimeoutApprove {
+			decision.ApprovalTimeout = ApprovalTimeoutExpire
+		}
+	}
 	if decision.Disposition == ActionDispositionRequireApproval && len(decision.EligibleApprovers) == 0 {
 		return nil, errors.New("approval policy must identify at least one eligible approver")
 	}
@@ -265,7 +276,8 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		ID: callID, Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
-		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Arguments: persistedActionArguments(arguments, bound.Action.InputSchema),
+		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: bound.Action.Review,
+		Arguments:         persistedActionArguments(arguments, bound.Action.InputSchema),
 		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
 		PreparedRuntime:   clonePreparedRuntime(req.PreparedRuntime),
 		CredentialRefs:    boundCredentialReferences(bound), EvidenceRefs: append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
@@ -366,6 +378,15 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	if approval != nil && approval.ProposedAction == nil {
 		approval.ProposedAction = approvalPreview(bound, arguments)
+	}
+	if approval != nil && bound.Action.AlwaysReview() {
+		// The reviewer must see exactly what they consent to (for a payment:
+		// amount, currency, merchant) even when a validator supplied its own
+		// preview. Sensitive inputs remain redacted.
+		if _, ok := approval.ProposedAction["arguments"]; !ok {
+			approval.ProposedAction["arguments"] = sanitizeApprovalValue(arguments, bound.Action.InputSchema)
+		}
+		approval.ProposedAction["review"] = string(bound.Action.Review)
 	}
 	if approval != nil {
 		approval.ProposedAction = c.enrichApprovalPreview(ctx, approval.ProposedAction, run, req.EvidenceRefs, req.ExternalOperation)

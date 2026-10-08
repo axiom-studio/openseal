@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -53,25 +54,49 @@ func TestApprovalModeAutoStillReviewsExternalEffectsAndHigherRisk(t *testing.T) 
 		{skill.RiskLevelProduction, skill.SideEffectWrite},
 		{skill.RiskLevelDestructive, skill.SideEffectDestructive},
 	} {
-		if ApprovalModeAllowsAction(ConversationApprovalAuto, tc.risk, tc.effect) {
+		if ApprovalModeAllowsAction(ConversationApprovalAuto, "", tc.risk, tc.effect) {
 			t.Errorf("auto allowed %s risk with %s effect", tc.risk, tc.effect)
 		}
-		if !ApprovalModeAllowsAction(ConversationApprovalSkip, tc.risk, tc.effect) {
+		if !ApprovalModeAllowsAction(ConversationApprovalSkip, "", tc.risk, tc.effect) {
 			t.Errorf("skip required approval for %s risk with %s effect", tc.risk, tc.effect)
 		}
 	}
 }
 
 func TestApprovalModeNeverWaivesAgentBehaviorReview(t *testing.T) {
-	decision, err := NewDefaultActionPolicy().EvaluateAction(context.Background(), ActionPolicyInput{
-		ApprovalMode: ConversationApprovalSkip,
-		Bound: &skill.BoundAction{
-			Definition: &skill.Definition{ID: AgentManagementSkillID}, Binding: &skill.Binding{},
-			Action: skill.Action{Name: AgentActionAmendBehavior, Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite},
-		},
-	})
-	if err != nil || decision.Disposition != ActionDispositionRequireApproval {
-		t.Fatalf("behavior amendment decision = %#v, error = %v", decision, err)
+	definition := AgentManagementSkill()
+	for _, name := range []string{AgentActionAmendBehavior, AgentActionConfigureChannel} {
+		action := definition.Actions[name]
+		if !action.AlwaysReview() {
+			t.Fatalf("%s must declare review: always", name)
+		}
+		decision, err := NewDefaultActionPolicy().EvaluateAction(context.Background(), ActionPolicyInput{
+			ApprovalMode: ConversationApprovalSkip,
+			Bound:        &skill.BoundAction{Definition: definition, Binding: &skill.Binding{}, Action: action},
+		})
+		if err != nil || decision.Disposition != ActionDispositionRequireApproval {
+			t.Fatalf("%s decision = %#v, error = %v", name, decision, err)
+		}
+	}
+}
+
+func TestAlwaysReviewActionKeepsApprovalInEveryMode(t *testing.T) {
+	action := skill.Action{Name: "pay", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways}
+	for _, mode := range []ConversationApprovalMode{"", ConversationApprovalManual, ConversationApprovalAuto, ConversationApprovalSkip} {
+		if ApprovalModeAllowsAction(mode, action.Review, action.Risk, action.SideEffect) {
+			t.Fatalf("mode %q waived an always-reviewed action", mode)
+		}
+		decision, err := NewDefaultActionPolicy().EvaluateAction(context.Background(), ActionPolicyInput{
+			ApprovalMode: mode,
+			Bound:        &skill.BoundAction{Definition: &skill.Definition{ID: "skill-live-browser"}, Binding: &skill.Binding{}, Action: action},
+		})
+		if err != nil || decision.Disposition != ActionDispositionRequireApproval || decision.Reason != "action always requires explicit review" {
+			t.Fatalf("mode %q decision = %#v, error = %v", mode, decision, err)
+		}
+	}
+	action.Review = ""
+	if !ApprovalModeAllowsAction(ConversationApprovalSkip, action.Review, action.Risk, action.SideEffect) {
+		t.Fatal("skip must still allow an ordinary write action")
 	}
 }
 
@@ -302,6 +327,14 @@ func approvalModeCatalog(t *testing.T) *skill.Catalog {
 		Actions: map[string]skill.Action{
 			"note": {Name: "note", Description: "Write a note", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, InputSchema: object, Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationForbidden},
 			"send": {Name: "send", Description: "Send a message", Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, InputSchema: object, Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationOptional},
+			"pay": {Name: "pay", Description: "Pay for the checkout", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
+				Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationForbidden, InputSchema: map[string]interface{}{
+					"type": "object", "additionalProperties": false,
+					"properties": map[string]interface{}{
+						"amount": map[string]interface{}{"type": "string"}, "currency": map[string]interface{}{"type": "string"},
+						"merchant": map[string]interface{}{"type": "string"}, "cardToken": map[string]interface{}{"type": "string", "x-sensitive": true},
+					},
+				}},
 		},
 	}
 	if err := catalog.Register(ctx, definition); err != nil {
@@ -309,7 +342,7 @@ func approvalModeCatalog(t *testing.T) *skill.Catalog {
 	}
 	if err := catalog.Bind(ctx, &skill.Binding{
 		ID: "workspace-binding", Scope: skill.ScopeReference{Kind: "tenant", ID: "one"}, DeploymentID: "assistant",
-		SkillID: "workspace", SkillVersion: "1.0.0", AllowedActions: []string{"note", "send"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
+		SkillID: "workspace", SkillVersion: "1.0.0", AllowedActions: []string{"note", "send", "pay"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -335,6 +368,15 @@ func proposeForApprovalModeInConversation(t *testing.T, store *MemoryStore, coor
 
 func proposeResultForApprovalMode(t *testing.T, store *MemoryStore, coordinator *ActionCoordinator, conversationID, action, key string) *ActionProposalResult {
 	t.Helper()
+	result, err := proposeWithArgumentsForApprovalMode(t, store, coordinator, conversationID, action, key, map[string]interface{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func proposeWithArgumentsForApprovalMode(t *testing.T, store *MemoryStore, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, error) {
+	t.Helper()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
@@ -353,12 +395,9 @@ func proposeResultForApprovalMode(t *testing.T, store *MemoryStore, coordinator 
 	}
 	result, err := coordinator.Propose(ctx, ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "assistant",
-		SkillID: "workspace", SkillVersion: "1.0.0", Action: action, Arguments: map[string]interface{}{}, IdempotencyKey: key,
+		SkillID: "workspace", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result
+	return result, err
 }
 
 func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testing.T) {
@@ -485,5 +524,141 @@ func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 	review, _ := result.Approval.ProposedAction["reviewContext"].(map[string]interface{})
 	if review["summary"] != "Click 'Search' on google.com" || review["target"] != "https://www.google.com/" {
 		t.Fatalf("review context = %#v", result.Approval.ProposedAction)
+	}
+}
+
+func setFixtureApprovalMode(t *testing.T, store *MemoryStore, conversation *Conversation, mode ConversationApprovalMode) {
+	t.Helper()
+	current, err := store.GetConversation(t.Context(), conversation.Scope, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewConversationApprovalModeService(store).SetApprovalMode(t.Context(), SetConversationApprovalModeRequest{
+		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, Mode: mode, Actor: approvalModeActor,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertHostedApprovalModeHint(t *testing.T, input TurnExecutionContext, agentID string, want ConversationApprovalMode) {
+	t.Helper()
+	runner, err := NewHostedTurnRunner(&recordingTurnHost{}, HostedTurnRunnerConfig{AgentID: agentID, DefinitionID: "browser", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := runner.buildRequest(input)
+	if err != nil || request.ConversationApprovalMode != want {
+		t.Fatalf("hosted approval mode = %q want %q err=%v", request.ConversationApprovalMode, want, err)
+	}
+	request.ConversationApprovalMode = ConversationApprovalSkip
+	raw, err := MarshalHostedTurnModelInput(request)
+	var modelInput map[string]interface{}
+	if err != nil || json.Unmarshal(raw, &modelInput) != nil || modelInput["conversationApprovalMode"] != nil {
+		t.Fatalf("host-only approval mode leaked into model input: %s %v", raw, err)
+	}
+}
+
+func TestHostedTurnRequestCarriesConversationApprovalMode(t *testing.T) {
+	store := NewMemoryStore()
+	f := newForegroundClarificationFixture(t, store, false)
+	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalSkip)
+	wrapper := conversationWorkTurnRunner{runs: store, conversations: store}
+
+	input, err := wrapper.input(t.Context(), TurnExecutionContext{Run: f.run, Turn: &AgentTurn{ID: "skip-turn"}, approvalMode: ConversationApprovalManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHostedApprovalModeHint(t, input, f.run.AssignedAgentID, ConversationApprovalSkip)
+
+	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalManual)
+	input, err = wrapper.input(t.Context(), TurnExecutionContext{Run: f.run, Turn: &AgentTurn{ID: "manual-turn"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHostedApprovalModeHint(t, input, f.run.AssignedAgentID, ConversationApprovalManual)
+
+	// A Run that acts for no conversation carries no mode, even when a stale
+	// value arrives on the execution context.
+	detached := &AgentRun{ID: "detached", Kind: RunKindAgentWork, Scope: f.run.Scope, AssignedAgentID: "browser-agent",
+		Context: map[string]interface{}{"conversationApprovalMode": "skip"}}
+	input, err = wrapper.input(t.Context(), TurnExecutionContext{Run: detached, Turn: &AgentTurn{ID: "detached-turn"}, approvalMode: ConversationApprovalSkip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertHostedApprovalModeHint(t, input, "browser-agent", "")
+}
+
+func TestForegroundConversationTurnCarriesApprovalMode(t *testing.T) {
+	store := NewMemoryStore()
+	f := newForegroundClarificationFixture(t, store, false)
+	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalSkip)
+	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: f.run.Scope, Kind: RunKindConversation, WorkerID: "foreground-worker",
+		Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != f.run.ID {
+		t.Fatalf("claim foreground: %#v %v", claimed, err)
+	}
+	var captured *TurnExecutionContext
+	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{DeploymentID: f.run.AssignedAgentID, DefinitionID: "browser", DefinitionVersion: "1",
+			Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+				captured = &input
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done.", RunOutput: map[string]interface{}{"summary": "Done."}}, nil
+			})}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, f.service), ConversationRunTurnRunnerConfig{AgentTurns: resolver})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+		Scope: f.run.Scope, RunID: f.run.ID, WorkerID: "foreground-worker", DefinitionID: "browser", DefinitionVersion: "1",
+	}, runner); err != nil {
+		t.Fatal(err)
+	}
+	if captured == nil {
+		t.Fatal("foreground adapter did not invoke the hosted runner")
+	}
+	assertHostedApprovalModeHint(t, *captured, captured.Run.AssignedAgentID, ConversationApprovalSkip)
+}
+
+func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	conversation := approvalModeConversation(t, store)
+	service := NewConversationApprovalModeService(store)
+	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip).Conversation
+	policy := NewDefaultActionPolicy()
+	policy.ApprovalTimeout = ApprovalTimeoutApprove
+	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), policy)
+
+	arguments := map[string]interface{}{"amount": "1499.00", "currency": "INR", "merchant": "https://www.amazon.in", "cardToken": "tok-secret"}
+	result, err := proposeWithArgumentsForApprovalMode(t, store, coordinator, conversation.ID, "pay", "pay-run", arguments)
+	if err != nil || result.Approval == nil {
+		t.Fatalf("skip mode waived an always-reviewed action: %#v %v", result, err)
+	}
+	approval := result.Approval
+	if approval.TimeoutDecision != ApprovalTimeoutExpire || result.Call.Review != skill.ActionReviewAlways {
+		t.Fatalf("always-reviewed approval may auto-approve: timeout=%q review=%q", approval.TimeoutDecision, result.Call.Review)
+	}
+	shown, _ := approval.ProposedAction["arguments"].(map[string]interface{})
+	if approval.ProposedAction["review"] != "always" || shown["amount"] != "1499.00" || shown["currency"] != "INR" ||
+		shown["merchant"] != "https://www.amazon.in" || shown["cardToken"] != "[REDACTED]" {
+		t.Fatalf("approval card inputs = %#v", approval.ProposedAction)
+	}
+
+	// Re-entering skip re-runs the sweep, which must leave the checkpoint pending.
+	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalManual).Conversation
+	swept := setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip)
+	if len(swept.ApprovedApprovalIDs) != 0 {
+		t.Fatalf("skip sweep approved an always-reviewed action: %#v", swept.ApprovedApprovalIDs)
+	}
+	if pending, _ := store.GetApproval(ctx, conversation.Scope, approval.ID); pending.Status != ApprovalStatusPending {
+		t.Fatalf("always-reviewed approval = %#v", pending)
+	}
+
+	permissive := NewActionCoordinator(store, store, approvalModeCatalog(t), ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "test"}, nil
+	}))
+	if _, err := proposeWithArgumentsForApprovalMode(t, store, permissive, conversation.ID, "pay", "pay-allowed", arguments); err == nil {
+		t.Fatal("a policy allowed an always-reviewed action without review")
 	}
 }
