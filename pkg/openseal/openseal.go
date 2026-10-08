@@ -2725,6 +2725,7 @@ func New(opts ...Option) (*Engine, error) {
 		approvalAuth:             runtime.EligibleApprovalAuthorizer{},
 		logger:                   sugar,
 	}
+	conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
 	e.collaboration.SetAcceptedRunExecutionPreparer(e)
 	e.embeds, _ = runtime.NewEmbedSessionService(store, store)
 	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills, e.teams)
@@ -2912,6 +2913,7 @@ func WithStore(store runtime.KernelStore) Option {
 		if conversationStore, ok := store.(runtime.ConversationStore); ok {
 			e.conversations = runtime.NewConversationService(conversationStore)
 			e.conversationChanges, _ = runtime.NewConversationChangeService(conversationStore, store)
+			e.conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
 			if embedStore, supported := store.(runtime.EmbedStore); supported {
 				e.embeds, _ = runtime.NewEmbedSessionService(embedStore, conversationStore)
 			} else {
@@ -5252,7 +5254,13 @@ func (e *Engine) ResolveCallbackAdapterBinding(ctx context.Context, scope skill.
 }
 
 func (e *Engine) UpsertSkillBinding(ctx context.Context, request skill.UpsertBindingRequest) (*skill.Binding, error) {
-	return e.skills.UpsertBinding(ctx, request)
+	binding, err := e.skills.UpsertBinding(ctx, request)
+	if err == nil {
+		// Completing setup anywhere (Settings, an OAuth callback, the chat
+		// form) completes the chat's request, so it never shows again.
+		e.reconcileSkillSetupRequestsForBinding(ctx, binding)
+	}
+	return binding, err
 }
 
 func (e *Engine) DisableSkillBinding(ctx context.Context, request skill.DisableBindingRequest) (*skill.Binding, error) {

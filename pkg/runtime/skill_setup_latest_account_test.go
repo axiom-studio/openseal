@@ -365,3 +365,36 @@ func TestSkillSetupLatestAccountAllowsAdvertisedMarketplaceNamespace(t *testing.
 	}
 	f.assertRequestCount(t, 1)
 }
+
+// A model that asks again after the user completed setup must not put the
+// same setup card back in the chat while the saved account is unchanged.
+func TestSkillSetupCompletedSetupDoesNotReappear(t *testing.T) {
+	f := newLatestSetupTestFixture(t, "")
+	args := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect Reddit"}
+	first, _, err := f.request(t, "first", args)
+	if err != nil || first.Status != "pending" || first.BindingID != "" {
+		t.Fatalf("first request: %#v %v", first, err)
+	}
+	account := f.bindAccount(t, "saved", "2.0.0", "", f.locations[0], false)
+	resolved := cloneSkillSetupRequest(first)
+	resolved.Status, resolved.ResolvedBy, resolved.ResolvedBindingID, resolved.ResolvedBindingRevision = "resolved", "user", account.ID, account.Revision
+	resolved.Revision++
+	if err := f.store.SaveSkillSetupRequest(f.ctx, resolved, first.Revision); err != nil {
+		t.Fatal(err)
+	}
+	again, value, err := f.request(t, "second", args)
+	if err != nil || again.ID != first.ID || again.Status != "resolved" || value["status"] != "resolved" {
+		t.Fatalf("completed setup was requested again: %#v %#v %v", again, value, err)
+	}
+	f.assertRequestCount(t, 1)
+	// Asking for access the saved account does not grant is a new request.
+	wider := map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Read latest", "requiredActions": []interface{}{"read_latest"}}
+	if next, _, err := f.request(t, "third", wider); err != nil || next.ID == first.ID || next.Status != "pending" {
+		t.Fatalf("new access request: %#v %v", next, err)
+	}
+	// Credentials that need replacing are always a new request.
+	if next, _, err := f.request(t, "fourth", map[string]interface{}{"kind": "reauthorize", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Reconnect"}); err != nil || next.ID == first.ID || next.Status != "pending" {
+		t.Fatalf("reauthorization request: %#v %v", next, err)
+	}
+	f.assertRequestCount(t, 3)
+}
