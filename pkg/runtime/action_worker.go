@@ -500,6 +500,19 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 				updatedRun.HumanInterventions = append(updatedRun.HumanInterventions, *request)
 				eventType = "action.human_intervention_required"
 				summary = request.Summary
+			} else if request := pendingCredentialRequestFromAction(ctx, w.store, updatedCall); request != nil {
+				// The work continues only after the user saves the credential in
+				// the vault or dismisses the in-chat card.
+				condition := &WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID}
+				if paused {
+					updatedRun.PausedFrom = AgentRunStatusWaitingForEvent
+					updatedRun.PausedWakeCondition = condition
+				} else {
+					updatedRun.Status = AgentRunStatusWaitingForEvent
+					updatedRun.WakeCondition = condition
+				}
+				eventType = "action.credential_requested"
+				summary = "Waiting for the user to save a requested credential"
 			}
 		}
 	}
