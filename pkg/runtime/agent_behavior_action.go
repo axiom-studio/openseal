@@ -16,7 +16,8 @@ import (
 
 const (
 	AgentManagementSkillID        = "openseal.agents"
-	AgentManagementSkillVersion   = "1.3.1"
+	AgentManagementSkillVersion   = "1.3.2"
+	agentManagementSkillVersionV5 = "1.3.1"
 	agentManagementSkillVersionV4 = "1.3.0"
 	agentManagementSkillVersionV3 = "1.2.2"
 	agentManagementSkillVersionV1 = "1.2.0"
@@ -1129,8 +1130,22 @@ func isAgentManagementAction(bound *skill.BoundAction) bool {
 		(bound.Action.Name == AgentActionAmendBehavior || bound.Action.Name == AgentActionListChannels || bound.Action.Name == AgentActionConfigureChannel || bound.Action.Name == AgentActionListWorkspace || bound.Action.Name == AgentActionConfigureWorkspace)
 }
 
+// canonicalActionReview applies the current kernel contract's review floor to
+// an Agent management action bound at any supported version. Published
+// versions are immutable, so bindings pinned before review: always was
+// declared (1.2.0 through 1.3.1) still inherit it from AgentManagementSkill().
+func canonicalActionReview(definition *skill.Definition, action skill.Action) skill.Action {
+	if !isAgentManagementAction(&skill.BoundAction{Definition: definition, Action: action}) {
+		return action
+	}
+	if canonical, ok := AgentManagementSkill().Actions[action.Name]; ok && canonical.AlwaysReview() {
+		action.Review = canonical.Review
+	}
+	return action
+}
+
 func isSupportedAgentManagementSkillVersion(version string) bool {
-	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
+	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV5 || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
 }
 
 func isAgentMutationAction(bound *skill.BoundAction) bool {

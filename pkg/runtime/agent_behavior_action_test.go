@@ -32,7 +32,7 @@ func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
 }
 
 func TestAgentManagementExecutorAcceptsActivePreviousContractVersion(t *testing.T) {
-	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", AgentManagementSkillVersion} {
+	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", "1.3.1", AgentManagementSkillVersion} {
 		t.Run(version, func(t *testing.T) {
 			definition := AgentManagementSkill()
 			definition.Version = version
@@ -546,4 +546,74 @@ func agentBehaviorBoundAction(deploymentID string) *skill.BoundAction {
 			AllowedActions: []string{AgentActionAmendBehavior}, MaximumRisk: skill.RiskLevelWrite,
 		},
 	}
+}
+
+func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T) {
+	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", "1.3.1"} {
+		t.Run(version, func(t *testing.T) {
+			ctx := t.Context()
+			store := NewMemoryStore()
+			conversation := approvalModeConversation(t, store)
+			setApprovalModeForTest(t, NewConversationApprovalModeService(store), conversation, ConversationApprovalSkip)
+			// Published versions predate review: always, so their stored
+			// definitions carry no review floor.
+			legacy := AgentManagementSkill()
+			legacy.Version = version
+			for name, action := range legacy.Actions {
+				action.Review = ""
+				legacy.Actions[name] = action
+			}
+			catalog := skill.NewCatalog()
+			if err := catalog.Register(ctx, legacy); err != nil {
+				t.Fatal(err)
+			}
+			if err := catalog.Bind(ctx, &skill.Binding{
+				ID: "legacy-agents", Revision: 1, Scope: skill.ScopeReference{Kind: conversation.Scope.Kind, ID: conversation.Scope.ID}, DeploymentID: "assistant",
+				SkillID: AgentManagementSkillID, SkillVersion: version, AllowedActions: []string{AgentActionAmendBehavior, AgentActionConfigureChannel}, MaximumRisk: skill.RiskLevelWrite,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			for _, name := range []string{AgentActionAmendBehavior, AgentActionConfigureChannel} {
+				bound, err := catalog.Resolve(ctx, skill.ScopeReference{Kind: conversation.Scope.Kind, ID: conversation.Scope.ID}, "assistant", AgentManagementSkillID, version, name)
+				if err != nil || bound.Action.AlwaysReview() {
+					t.Fatalf("legacy %s binding = %#v, %v", name, bound, err)
+				}
+				var seen ActionPolicyInput
+				policy := ActionPolicyEvaluatorFunc(func(ctx context.Context, input ActionPolicyInput) (ActionPolicyDecision, error) {
+					seen = input
+					return NewDefaultActionPolicy().EvaluateAction(ctx, input)
+				})
+				run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+					Scope: conversation.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, AssignedAgentID: "assistant",
+					Goal: "Rename the agent", Source: RunSourceObjective, Context: map[string]interface{}{"conversationId": conversation.ID},
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: conversation.Scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || claimed == nil || claimed.ID != run.ID {
+					t.Fatalf("claim: %#v %v", claimed, err)
+				}
+				result, err := NewActionCoordinator(store, store, catalog, policy).Propose(ctx, ProposeActionRequest{
+					Scope: conversation.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "assistant",
+					SkillID: AgentManagementSkillID, SkillVersion: version, Action: name,
+					Arguments: legacyAgentManagementArguments[name], IdempotencyKey: "legacy-" + name,
+				})
+				if err != nil {
+					t.Fatalf("propose legacy %s: %v", name, err)
+				}
+				if seen.ApprovalMode != ConversationApprovalSkip || !seen.Bound.Action.AlwaysReview() {
+					t.Fatalf("%s policy input mode=%q review=%q err=%v", name, seen.ApprovalMode, seen.Bound.Action.Review, err)
+				}
+				if result.Approval == nil || result.Call.Review != skill.ActionReviewAlways {
+					t.Fatalf("skip mode waived legacy %s review: %#v", name, result)
+				}
+			}
+		})
+	}
+}
+
+var legacyAgentManagementArguments = map[string]map[string]interface{}{
+	AgentActionAmendBehavior: {"expectedDeploymentRevision": 1, "displayName": "Renamed", "rationale": "The user asked for a new name"},
+	AgentActionConfigureChannel: {"expectedDeploymentRevision": 1, "expectedEndpointRevision": 1, "endpointId": "slack", "status": "paused",
+		"rationale": "The user asked to pause the channel"},
 }
