@@ -4006,6 +4006,17 @@ func (e *Engine) WakeAgentWorkers() {
 	}
 }
 
+// WakeAgentWorkersForScope is a latency hint for hosts that observed newly
+// runnable work in one scope, for example a Run committed by another
+// process. Workers still claim through the durable store; a missed wake only
+// delays work until the next poll.
+func (e *Engine) WakeAgentWorkersForScope(scope runtime.Scope) {
+	if e == nil {
+		return
+	}
+	e.wakeAgentWorkersForScope(scope)
+}
+
 func (e *Engine) wakeAgentWorkersForScope(scope runtime.Scope) {
 	for _, pool := range e.agentPools {
 		pool.WakeScope(scope)
