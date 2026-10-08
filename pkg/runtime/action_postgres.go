@@ -313,6 +313,13 @@ func (s *PostgresStore) ListApprovals(ctx context.Context, filter ApprovalFilter
 		args = append(args, filter.RunID)
 		query += ` AND a.run_id = $` + strconv.Itoa(len(args))
 	}
+	if filter.RunIDs != nil {
+		if len(filter.RunIDs) == 0 {
+			return []*ApprovalCheckpoint{}, nil
+		}
+		args = append(args, pq.Array(filter.RunIDs))
+		query += ` AND a.run_id = ANY($` + strconv.Itoa(len(args)) + `)`
+	}
 	if len(filter.Status) > 0 {
 		statuses := make([]string, 0, len(filter.Status))
 		for _, status := range filter.Status {
