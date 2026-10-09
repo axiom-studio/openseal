@@ -353,7 +353,21 @@ type Requirements struct {
 	AlwaysAvailable  bool                 `json:"alwaysAvailable,omitempty"`
 	Storage          []StorageRequirement `json:"storage,omitempty"`
 	Compute          *ComputeRequirements `json:"compute,omitempty"`
+	Tenancy          Tenancy              `json:"tenancy,omitempty"`
 }
+
+// Tenancy declares whether one hosted runtime of a Skill version may serve
+// several tenants. A tenant Skill (the default) is hosted once per tenant. A
+// shared Skill keeps nothing tenant-specific between requests: every call
+// carries its own credentials, so the host may route all tenants to one
+// runtime. Shared Skills therefore cannot declare storage, environment or
+// configuration requirements.
+type Tenancy string
+
+const (
+	TenancyTenant Tenancy = "tenant"
+	TenancyShared Tenancy = "shared"
+)
 
 // StorageDurability describes whether a hosted Skill may lose workspace data
 // when its process or host is replaced. It is deliberately host-neutral: a
