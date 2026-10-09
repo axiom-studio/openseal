@@ -270,7 +270,7 @@ func TestHostedTurnFormSchemaOmitsUnavailableProposalFamilies(t *testing.T) {
 	}
 }
 
-func TestHostedTurnFormSchemaRequiresExactOfferedSkillDispositions(t *testing.T) {
+func TestHostedTurnFormSchemaOffersExactSkillDispositions(t *testing.T) {
 	schema, err := HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{
 		SkillPromptReferences: []string{"skill:summarize@1", "skill:research@2"},
 	})
@@ -278,7 +278,8 @@ func TestHostedTurnFormSchemaRequiresExactOfferedSkillDispositions(t *testing.T)
 		t.Fatal(err)
 	}
 	selections := schema["properties"].(map[string]interface{})["skillSelections"].(map[string]interface{})
-	if selections["minItems"] != 2 || selections["maxItems"] != 2 {
+	// Omitted dispositions are recorded as not applied by the kernel.
+	if _, bounded := selections["minItems"]; bounded || selections["maxItems"] != 2 {
 		t.Fatalf("selection cardinality = %#v", selections)
 	}
 	branches := selections["items"].(map[string]interface{})["oneOf"].([]interface{})
