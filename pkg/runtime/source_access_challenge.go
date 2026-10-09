@@ -24,9 +24,15 @@ func hasCanonicalSourceAccessChallenge(run *AgentRun) bool {
 	if run == nil || isTerminalAgentRunStatus(run.Status) || requiresFinalFailureExplanation(run.Checkpoint) {
 		return false
 	}
-	feedback, active := ReadToolFeedbackCorrection(run.Checkpoint)
-	failure := latestCanonicalActionFailure(run.Checkpoint)
-	last, _ := run.Checkpoint["lastAction"].(map[string]interface{})
+	return sourceAccessChallengeFeedback(run.Checkpoint)
+}
+
+// sourceAccessChallengeFeedback reports kernel failure feedback for the latest
+// receipt's typed source access challenge.
+func sourceAccessChallengeFeedback(checkpoint map[string]interface{}) bool {
+	feedback, active := ReadToolFeedbackCorrection(checkpoint)
+	failure := latestCanonicalActionFailure(checkpoint)
+	last, _ := checkpoint["lastAction"].(map[string]interface{})
 	return active && feedback.LastFailureID != "" && feedback.LastFailureID == last["actionCallId"] &&
 		failure != nil && failure.Code() == "source_access_challenge" && failure.Details()["failures"] == "" && !failure.HasRateLimitedSource()
 }
