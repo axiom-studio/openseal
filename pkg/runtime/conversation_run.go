@@ -2448,42 +2448,6 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	return &governedConversationCompletion{Content: content, ResourceType: resourceType, ResourceID: resourceID, References: references}, true
 }
 
-// checkpointGovernedConversationProposalFailure preserves a safe, typed
-// failure from the deterministic mutation validator and routes it through the
-// same bounded proposal-repair contract as other Agent work. A proposal that
-// never materialized is not a durable mutation outcome: the model receives the
-// exact rejected arguments and machine-readable error and must correct the
-// form before the conversation is resolved. Denial and execution failure after
-// materialization remain terminal conversation facts.
-func checkpointGovernedConversationProposalFailure(run *AgentRun, turn *AgentTurn, cause error) (map[string]interface{}, bool) {
-	if run == nil || run.Kind != RunKindConversation || turn == nil || cause == nil || len(turn.RequestedActions) != 1 {
-		return nil, false
-	}
-	requested := turn.RequestedActions[0]
-	parts := strings.Split(strings.TrimSpace(requested.Capability), ".")
-	if len(parts) < 3 {
-		return nil, false
-	}
-	action := parts[len(parts)-1]
-	skillID := strings.Join(parts[:len(parts)-1], ".")
-	switch skillID {
-	case RunbookManagementSkillID:
-	case AgentManagementSkillID:
-	case ObjectiveManagementSkillID:
-	case ProjectManagementSkillID:
-	case RunManagementSkillID:
-	default:
-		return nil, false
-	}
-	if action != ObjectiveActionCreate && action != ObjectiveActionUpdate && action != ObjectiveActionPause &&
-		action != AgentActionAmendBehavior && action != AgentActionConfigureChannel &&
-		action != RunbookActionStart && action != RunbookActionReplaceSchedule &&
-		action != RunActionPause && action != RunActionResume && action != RunActionCancel {
-		return nil, false
-	}
-	return checkpointGovernedProposalFailure(run, turn, cause, sanitizeActionError(cause, nil))
-}
-
 func conversationResultMap(value interface{}) map[string]interface{} {
 	if result, ok := value.(map[string]interface{}); ok {
 		return result

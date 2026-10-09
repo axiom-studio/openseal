@@ -36,7 +36,11 @@ func (ObservationRefActionProposalValidator) ValidateActionProposal(_ context.Co
 		if constraint == nil {
 			continue
 		}
-		ref, _ := input.Arguments[argument].(string)
+		raw, present := input.Arguments[argument]
+		if !present && !schemaRequires(input.Bound.Action.InputSchema, argument) {
+			continue
+		}
+		ref, _ := raw.(string)
 		ref = strings.TrimSpace(ref)
 		if ref == "" {
 			return nil, fmt.Errorf("action argument %s requires a current observation reference", argument)
@@ -47,6 +51,13 @@ func (ObservationRefActionProposalValidator) ValidateActionProposal(_ context.Co
 		}
 		if !observationRoleAllowed(fmt.Sprint(element["role"]), constraint["roles"]) {
 			return nil, fmt.Errorf("action argument %s reference %s has role %q, which is not allowed", argument, ref, element["role"])
+		}
+		// requireFlags names element fields the observing Skill sets to true,
+		// such as a browser's mark on a checkout's final pay button.
+		for _, flag := range observationConstraintStrings(constraint["requireFlags"]) {
+			if marked, _ := element[flag].(bool); !marked {
+				return nil, fmt.Errorf("action argument %s reference %s is not marked %s in the latest observation; take a new observation and use an element marked %s", argument, ref, flag, flag)
+			}
 		}
 		if requireEnabled, _ := constraint["requireEnabled"].(bool); requireEnabled {
 			state, _ := element["state"].(map[string]interface{})
@@ -92,17 +103,33 @@ func currentObservationElement(run *AgentRun, ref string) (map[string]interface{
 	return nil, errors.New("reference is absent from the latest observation; take a new observation")
 }
 
-func observationRoleAllowed(role string, raw interface{}) bool {
-	role = strings.TrimSpace(role)
+func observationConstraintStrings(raw interface{}) []string {
 	var values []string
 	switch typed := raw.(type) {
 	case []interface{}:
 		for _, value := range typed {
-			values = append(values, fmt.Sprint(value))
+			values = append(values, strings.TrimSpace(fmt.Sprint(value)))
 		}
 	case []string:
-		values = append(values, typed...)
+		for _, value := range typed {
+			values = append(values, strings.TrimSpace(value))
+		}
 	}
+	return values
+}
+
+func schemaRequires(schema map[string]interface{}, name string) bool {
+	for _, required := range observationConstraintStrings(schema["required"]) {
+		if required == name {
+			return true
+		}
+	}
+	return false
+}
+
+func observationRoleAllowed(role string, raw interface{}) bool {
+	role = strings.TrimSpace(role)
+	values := observationConstraintStrings(raw)
 	if len(values) == 0 {
 		return true
 	}
