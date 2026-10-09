@@ -221,7 +221,7 @@ func TestConversationClarificationReplayWithInactiveParent(t *testing.T) {
 	}
 }
 
-func TestConversationSupersessionSeparatesMembersIncludingDelayedScheduling(t *testing.T) {
+func TestConversationFollowUpsSeparateMembersIncludingDelayedScheduling(t *testing.T) {
 	for _, reverse := range []bool{false, true} {
 		name := "in-order"
 		if reverse {
@@ -252,18 +252,32 @@ func TestConversationSupersessionSeparatesMembersIncludingDelayedScheduling(t *t
 					runs[i] = f.schedule(t, messages[i])
 				}
 			}
-			for i, expected := range []AgentRunStatus{AgentRunStatusCanceled, AgentRunStatusQueued, AgentRunStatusQueued} {
-				current, err := f.store.GetAgentRun(t.Context(), f.conversation.Scope, runs[i].ID)
-				if err != nil || current.Status != expected || current.Context[conversationRunContextTriggerID] != messages[i].ID {
-					t.Fatalf("message %s run = %#v, %v; want %s", messages[i].IdempotencyKey, current, err, expected)
-				}
+			// Member A's two messages share one Run; member B keeps their own.
+			if runs[0].ID != runs[2].ID || runs[1].ID == runs[0].ID {
+				t.Fatalf("runs = %s, %s, %s", runs[0].ID, runs[1].ID, runs[2].ID)
 			}
-			// Replaying either old message must not cancel the other member's live work.
+			memberA, err := f.store.GetAgentRun(t.Context(), f.conversation.Scope, runs[0].ID)
+			if err != nil || memberA.Status != AgentRunStatusQueued || len(conversationRunFollowUps(memberA)) != 1 {
+				t.Fatalf("member A Run = %#v, %v", memberA, err)
+			}
+			first, second := messages[0], messages[2]
+			if reverse {
+				first, second = second, first
+			}
+			if memberA.Context[conversationRunContextTriggerID] != first.ID || !conversationRunHasFollowUp(memberA, second.ID) {
+				t.Fatalf("member A Run trigger/follow-up = %#v", memberA)
+			}
+			memberB, err := f.store.GetAgentRun(t.Context(), f.conversation.Scope, runs[1].ID)
+			if err != nil || memberB.Status != AgentRunStatusQueued || len(memberB.PendingInterventions) != 0 || memberB.Context[conversationRunContextTriggerID] != messages[1].ID {
+				t.Fatalf("member B Run = %#v, %v", memberB, err)
+			}
+			// Replaying any message changes neither member's Run.
 			f.scheduler = mustConversationRunScheduler(t, f.store)
-			f.schedule(t, messages[0])
-			f.schedule(t, messages[1])
-			f.assertRunUnchanged(t, runs[1])
-			f.assertRunUnchanged(t, runs[2])
+			for _, message := range messages {
+				f.schedule(t, message)
+			}
+			f.assertRunUnchanged(t, memberA)
+			f.assertRunUnchanged(t, memberB)
 		})
 	}
 }
@@ -303,12 +317,17 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 		t.Fatalf("member B changed pending action: %#v, %v", call, err)
 	}
 
-	// The requesting member still retains the established supersession behavior.
-	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "replacement-a"})
-	f.schedule(t, messageA)
+	// The requesting member's new message is delivered to their waiting Run.
+	// The approval stays pending; the Run sees the message once it resumes.
+	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "follow-up-a"})
+	delivered := f.schedule(t, messageA)
+	if delivered.ID != root.ID || delivered.Status != AgentRunStatusWaitingForApproval || delivered.WakeCondition == nil ||
+		!conversationRunHasFollowUp(delivered, messageA.ID) {
+		t.Fatalf("follow-up was not delivered to the waiting Run: %#v", delivered)
+	}
 	approval, err = f.store.GetApproval(t.Context(), scope, proposal.Approval.ID)
-	if err != nil || approval.Status != ApprovalStatusCanceled {
-		t.Fatalf("requesting member did not close their superseded approval: %#v, %v", approval, err)
+	if err != nil || approval.Status != ApprovalStatusPending {
+		t.Fatalf("follow-up changed the pending approval: %#v, %v", approval, err)
 	}
 	f.assertRunUnchanged(t, runB)
 }
@@ -356,7 +375,7 @@ func TestConversationClarificationUsesOnlyCanonicalVoiceInitiator(t *testing.T) 
 	}
 }
 
-func TestConversationSupersessionUsesVoiceInitiator(t *testing.T) {
+func TestConversationFollowUpUsesVoiceInitiator(t *testing.T) {
 	f := newConversationActorFixture(t, Scope{Kind: "organization", ID: "shared-voice"}, "writer")
 	a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
 	trigger := f.post(t, PostChannelMessageRequest{
@@ -370,8 +389,8 @@ func TestConversationSupersessionUsesVoiceInitiator(t *testing.T) {
 	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
 	f.schedule(t, messageA)
 	current, err := f.store.GetAgentRun(t.Context(), voice.Scope, voice.ID)
-	if err != nil || current.Status != AgentRunStatusCanceled {
-		t.Fatalf("call initiator did not supersede their greeting: %#v, %v", current, err)
+	if err != nil || current.Status != AgentRunStatusQueued || !conversationRunHasFollowUp(current, messageA.ID) {
+		t.Fatalf("call initiator's message was not delivered to their call Run: %#v, %v", current, err)
 	}
 	f.assertRunUnchanged(t, runB)
 }
