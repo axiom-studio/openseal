@@ -36,8 +36,10 @@ type ConversationCompactionRequest struct {
 type conversationHistoryPlan struct {
 	Messages        []*ChannelMessage
 	ContextBackdrop []*ChannelMessage
-	Summary         *conversationSummary
-	Request         *ConversationCompactionRequest
+	// FollowUps are messages delivered to this Run after its trigger.
+	FollowUps []*ChannelMessage
+	Summary   *conversationSummary
+	Request   *ConversationCompactionRequest
 }
 
 func conversationViewerKey(viewer ConversationViewer) string {
