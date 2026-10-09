@@ -830,53 +830,10 @@ func TestAgentConversationGoalProjectsActiveWorkFromTheSameChannel(t *testing.T)
 	}
 }
 
-func TestExplicitConversationOperationIgnoresTerminalNarrativeHistory(t *testing.T) {
-	operation := HostedRunbookOperation{
-		Entrypoint: "ondemand-engage", Name: "On-demand engagement",
-		Description: "Run one reviewed engagement cycle",
-		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
-	}
-	for _, command := range []string{
-		"Run the on-demand engagement operation now.",
-		"run it now",
-		"Please execute ondemand-engage.",
-	} {
-		selected, arguments, ok := resolveExplicitConversationOperation(command, []HostedRunbookOperation{operation}, nil)
-		if !ok || selected.Entrypoint != operation.Entrypoint || len(arguments) != 0 {
-			t.Fatalf("command %q resolved to %#v, %#v, %v", command, selected, arguments, ok)
-		}
-	}
-	if _, _, ok := resolveExplicitConversationOperation("What did the last run do?", []HostedRunbookOperation{operation}, nil); ok {
-		t.Fatal("historical Run question was treated as an invocation")
-	}
-	scheduled := HostedRunbookOperation{
-		Entrypoint: "publish-report", Name: "Publish report",
-		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
-	}
-	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{operation, scheduled}, nil); ok {
-		t.Fatal("ambiguous operation command was accepted")
-	}
-	selected, _, ok := resolveExplicitConversationOperation("run the workflow", []HostedRunbookOperation{operation, scheduled}, map[string]bool{scheduled.Entrypoint: true})
-	if !ok || selected.Entrypoint != operation.Entrypoint {
-		t.Fatalf("generic command did not prefer sole on-demand operation: %#v, %v", selected, ok)
-	}
-	requiresInput := operation
-	requiresInput.InputSchema = map[string]interface{}{
-		"type": "object", "required": []interface{}{"community"},
-		"properties": map[string]interface{}{"community": map[string]interface{}{"type": "string"}},
-	}
-	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{requiresInput}, nil); ok {
-		t.Fatal("operation with missing required input was started deterministically")
-	}
-	if activeConversationOperationExists([]agentConversationActiveRun{{Entrypoint: operation.Entrypoint, Status: AgentRunStatusRunning}}, operation.Entrypoint) != true {
-		t.Fatal("active matching operation was not detected")
-	}
-	if activeConversationOperationExists([]agentConversationActiveRun{{Entrypoint: "publish-report", Status: AgentRunStatusRunning}}, operation.Entrypoint) {
-		t.Fatal("unrelated active operation blocked the requested operation")
-	}
-}
-
-func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference(t *testing.T) {
+// Operation invocation is the model's decision through its runbook operation
+// tools. Ordinary wording such as "run it" must never start the Agent's sole
+// operation without a model turn.
+func TestAgentConversationLeavesOperationInvocationToTheModel(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "repeatable-operation"}
@@ -914,7 +871,7 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 		t.Fatal(err)
 	}
 	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion,
-		"run the workflow", "repeat-operation")
+		"Use my card ending with 1001 to buy it, don't run it in a background task", "repeat-operation")
 	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -934,7 +891,7 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 			RunbookOperations: []HostedRunbookOperation{operation, scheduledOperation},
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 				modelCalls++
-				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Refused stale duplicate"}, nil
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Buying it now", RunOutput: map[string]interface{}{"summary": "Buying it now"}}, nil
 			}),
 		}, nil
 	})
@@ -947,9 +904,8 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 		t.Fatal(err)
 	}
 	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
-	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusRunning || outcome.ProposedRunbook == nil ||
-		outcome.ProposedRunbook.Entrypoint != operation.Entrypoint || modelCalls != 0 {
-		t.Fatalf("repeatable operation outcome = %#v, modelCalls=%d, err=%v", outcome, modelCalls, err)
+	if err != nil || outcome == nil || outcome.ProposedRunbook != nil || modelCalls != 1 {
+		t.Fatalf("operation was started without the model: %#v, modelCalls=%d, err=%v", outcome, modelCalls, err)
 	}
 }
 

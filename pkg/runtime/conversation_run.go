@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 const (
@@ -931,25 +930,14 @@ func (r conversationAgentTurnRunner) PlanTurnBudget(ctx context.Context, input T
 		input.Run = cloneAgentRun(input.Run)
 		input.Run.AssignedAgentID = participantID
 	}
-	// Deterministic completion and explicit runbook dispatch do not invoke the
-	// hosted runner and must still work after its model budget is exhausted.
+	// Deterministic completion does not invoke the hosted runner and must
+	// still work after its model budget is exhausted.
 	if !requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		if _, completed := governedConversationActionOutcome(input.Run); completed {
 			return BudgetUsage{}, nil
 		}
 		if _, completed, err := r.parent.governedConversationOperationOutcome(ctx, input.Run); err != nil || completed {
 			return BudgetUsage{}, err
-		}
-		active, err := r.parent.activeConversationRuns(ctx, conversation, trigger)
-		if err != nil {
-			return BudgetUsage{}, err
-		}
-		automatic, err := r.parent.automaticConversationOperationEntrypoints(ctx, conversation)
-		if err != nil {
-			return BudgetUsage{}, err
-		}
-		if operation, _, requested := resolveExplicitConversationOperation(trigger.Content, r.operations, automatic); requested && !activeConversationOperationExists(active, operation.Entrypoint) {
-			return BudgetUsage{}, nil
 		}
 	}
 	recent, err := r.parent.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
@@ -1471,27 +1459,6 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 			},
 		}, nil
 	}
-	activeRuns, err := r.activeConversationRuns(ctx, conversation, trigger)
-	if err != nil {
-		return nil, err
-	}
-	automaticEntrypoints, err := r.automaticConversationOperationEntrypoints(ctx, conversation)
-	if err != nil {
-		return nil, err
-	}
-	if operation, arguments, requested := resolveExplicitConversationOperation(trigger.Content, runbookOperations, automaticEntrypoints); requested &&
-		!activeConversationOperationExists(activeRuns, operation.Entrypoint) && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		return &TurnOutcome{
-			NextRunStatus: AgentRunStatusRunning,
-			OutputSummary: "Started: " + operation.Name,
-			ProposedRunbook: &TurnRunbookProposal{
-				Entrypoint: operation.Entrypoint,
-				Summary:    "Run " + operation.Name + " from the Agent channel request",
-				Arguments:  arguments,
-			},
-			RunOutput: map[string]interface{}{"summary": "Started: " + operation.Name},
-		}, nil
-	}
 	hostedRun := cloneAgentRun(input.Run)
 	hostedRun.Kind = RunKindAgentWork
 	hostedRun.AssignedAgentID = participantID
@@ -1569,39 +1536,6 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	outcome.RunOutput["messageId"] = message.ID
 	outcome.RunOutput["replayed"] = replayed
 	return outcome, nil
-}
-
-// automaticConversationOperationEntrypoints projects durable schedule and
-// event ownership into command resolution. A generic "run the workflow"
-// request should prefer the one reviewed on-demand interface instead of
-// falling through to model inference merely because the same definition also
-// exposes schedule/event entrypoints. Retired activations remain relevant here:
-// they still describe the entrypoint's authored invocation role.
-func (r *ConversationRunTurnRunner) automaticConversationOperationEntrypoints(ctx context.Context, conversation *Conversation) (map[string]bool, error) {
-	result := make(map[string]bool)
-	if r == nil || r.runbooks == nil || conversation == nil || externalChannelContext(conversation) {
-		return result, nil
-	}
-	objectiveID := ""
-	if conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceObjective {
-		objectiveID = conversation.Origin.ID
-	}
-	activations, err := r.runbooks.ListRunbookActivations(ctx, RunbookActivationFilter{
-		Scope: conversation.Scope, Owner: &conversation.Owner, ObjectiveID: objectiveID, Limit: 100,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, activation := range activations {
-		if activation == nil {
-			continue
-		}
-		entrypoint := strings.TrimSpace(activation.Trigger.Entrypoint)
-		if entrypoint != "" {
-			result[entrypoint] = true
-		}
-	}
-	return result, nil
 }
 
 type agentConversationPromptMessage struct {
@@ -1918,65 +1852,6 @@ func (r *ConversationRunTurnRunner) activeConversationRuns(ctx context.Context, 
 		seen[work.ID] = true
 	}
 	return active, nil
-}
-
-// resolveExplicitConversationOperation recognizes a small, product-neutral
-// command grammar for reviewed operations. It does not infer an operation from
-// historical prose: the current user message must contain an invocation verb
-// and either name an offered operation or unambiguously refer to the sole
-// operation. Empty input is accepted only when the reviewed interface schema
-// accepts it; otherwise the normal hosted Turn gathers the required arguments.
-func resolveExplicitConversationOperation(content string, operations []HostedRunbookOperation, automaticEntrypoints map[string]bool) (HostedRunbookOperation, map[string]interface{}, bool) {
-	words := strings.FieldsFunc(strings.ToLower(content), func(value rune) bool {
-		return value < 'a' || value > 'z'
-	})
-	wordSet := make(map[string]bool, len(words))
-	for _, word := range words {
-		wordSet[word] = true
-	}
-	if !wordSet["run"] && !wordSet["start"] && !wordSet["execute"] && !wordSet["invoke"] && !wordSet["trigger"] {
-		return HostedRunbookOperation{}, nil, false
-	}
-	normalized := strings.Join(words, " ")
-	matches := make([]HostedRunbookOperation, 0, 1)
-	for _, operation := range operations {
-		entrypoint := strings.Join(strings.FieldsFunc(strings.ToLower(operation.Entrypoint), func(value rune) bool { return value < 'a' || value > 'z' }), " ")
-		name := strings.Join(strings.FieldsFunc(strings.ToLower(operation.Name), func(value rune) bool { return value < 'a' || value > 'z' }), " ")
-		if entrypoint != "" && strings.Contains(normalized, entrypoint) || name != "" && strings.Contains(normalized, name) {
-			matches = append(matches, operation)
-		}
-	}
-	if len(matches) == 0 && (wordSet["it"] || wordSet["operation"] || wordSet["workflow"] || wordSet["runbook"] || wordSet["now"]) {
-		manual := make([]HostedRunbookOperation, 0, len(operations))
-		for _, operation := range operations {
-			if !automaticEntrypoints[strings.TrimSpace(operation.Entrypoint)] {
-				manual = append(manual, operation)
-			}
-		}
-		if len(manual) == 1 {
-			matches = append(matches, manual[0])
-		} else if len(operations) == 1 {
-			matches = append(matches, operations[0])
-		}
-	}
-	if len(matches) != 1 {
-		return HostedRunbookOperation{}, nil, false
-	}
-	arguments := map[string]interface{}{}
-	if err := runbook.ValidateInterfaceInput(matches[0].InputSchema, arguments); err != nil {
-		return HostedRunbookOperation{}, nil, false
-	}
-	return matches[0], arguments, true
-}
-
-func activeConversationOperationExists(runs []agentConversationActiveRun, entrypoint string) bool {
-	entrypoint = strings.TrimSpace(entrypoint)
-	for _, run := range runs {
-		if strings.TrimSpace(run.Entrypoint) == entrypoint {
-			return true
-		}
-	}
-	return false
 }
 
 // constrainConversationRunActions turns the current durable Run snapshot into
