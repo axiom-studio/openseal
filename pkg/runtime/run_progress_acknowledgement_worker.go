@@ -197,7 +197,7 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 		return nil, err
 	}
 	now := w.now().UTC()
-	if run == nil || strings.TrimSpace(run.AssignedAgentID) == "" || isTerminalAgentRunStatus(run.Status) || now.Sub(run.CreatedAt) < w.config.MinimumRunAge {
+	if run == nil || strings.TrimSpace(run.AssignedAgentID) == "" || isTerminalAgentRunStatus(run.Status) || now.Sub(run.CreatedAt) < w.config.MinimumRunAge || externalInboxItemIsFollowUp(item, run) {
 		return nil, nil
 	}
 	events, err := w.store.ListActivity(ctx, ActivityFilter{Scope: item.Scope, RunID: run.ID, Descending: true, Limit: 1})
