@@ -484,9 +484,6 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		if reused, reuseErr := r.reuseSucceededAction(*response.ProposedAction, response.ContinuationCheckpoint); reuseErr != nil {
 			return nil, reuseErr
 		} else if reused != nil {
-			if _, correcting := ReadToolFeedbackCorrection(response.ContinuationCheckpoint); correcting {
-				return nil, errors.New("a historical success receipt is not a newly executed tool feedback correction")
-			}
 			changed, _, _, hasProgress := actionProgress(reused["result"])
 			response.ProposedAction = nil
 			response.ProposedFork = nil
@@ -693,6 +690,11 @@ func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint 
 	// prerequisite again; the successful action clears the recovery marker.
 	if checkpoint[proposalRecoveryCheckpointKey] != nil &&
 		(selected.SideEffect == capability.SideEffectRead || selected.SideEffect == capability.SideEffectNone) {
+		return nil, nil
+	}
+	// A correction after a failed action runs anew: a historical receipt is
+	// not fresh evidence of the state the failure left behind.
+	if _, correcting := ReadToolFeedbackCorrection(checkpoint); correcting {
 		return nil, nil
 	}
 	if entry := matchingNoProgressAction(checkpoint, computeActionProgressIntentDigest(call, selected.SemanticArguments)); entry != nil {

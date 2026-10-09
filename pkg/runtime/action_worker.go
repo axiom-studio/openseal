@@ -142,15 +142,14 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		}
 		return w.persistOutcome(ctx, call, nil, nil, nil, nil, workerID, false)
 	}
-	if terminalFailureCheckpointActive(sourceRun.Checkpoint) && !sourceAccessChallengeActionAdmitted(executionCtx, w.store, sourceRun, call) {
-		// An admitted legacy correction cannot cross the upgrade boundary.
-		// Stop before catalog hydration, credential resolution or dispatch.
+	if w.correctionBlocked(executionCtx, sourceRun, call) {
+		// Only the correction admitted for a returned failure may run; a stopped
+		// attempt runs nothing. Stop before catalog hydration, credentials or dispatch.
 		call, leaseErr := stopLease()
 		if leaseErr != nil {
 			return nil, leaseErr
 		}
-		return w.persistOutcome(ctx, call, nil, nil, nil,
-			errors.New("A previous operation failed. Automatic corrections are disabled for this attempt."), workerID, false)
+		return w.persistOutcome(ctx, call, nil, nil, nil, errActionNotAdmittedAfterFailure, workerID, false)
 	}
 	if call.RecoveredRunning && call.SideEffect != skill.SideEffectRead && call.SideEffect != skill.SideEffectNone {
 		// The expired worker may have already dispatched this mutation. A new
@@ -224,8 +223,8 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if executionErr == nil {
 		executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID)
 	}
-	if executionErr == nil && terminalFailureCheckpointActive(sourceRun.Checkpoint) && !sourceAccessChallengeActionAdmitted(executionCtx, w.store, sourceRun, call) {
-		executionErr = errors.New("A previous operation failed. Automatic corrections are disabled for this attempt.")
+	if executionErr == nil && w.correctionBlocked(executionCtx, sourceRun, call) {
+		executionErr = errActionNotAdmittedAfterFailure
 	}
 	if executionErr == nil && runOwnsActionDependency(sourceRun, call) && !runHasPausedActionDependency(sourceRun, call) {
 		dispatchCtx := executionCtx
@@ -465,10 +464,16 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
 		if updatedCall.Status == ActionCallStatusFailed && !paused {
-			interaction, interactionErr := resolveSourceAccessChallengeInteraction(ctx, w.store, updatedRun)
-			if interactionErr != nil || interaction == nil {
-				// A failed dispatch ends this attempt unless its exact typed
-				// challenge has a proven conversation for the bounded question.
+			// The failure is returned to the model as this action's result
+			// (bounded by checkpointToolFeedbackFailure). The attempt ends when
+			// that bound is reached, or for a typed source challenge without a
+			// proven conversation for its bounded question.
+			stop := requiresFinalFailureExplanation(updatedRun.Checkpoint)
+			if !stop && hasCanonicalSourceAccessChallenge(updatedRun) {
+				interaction, interactionErr := resolveSourceAccessChallengeInteraction(ctx, w.store, updatedRun)
+				stop = interactionErr != nil || interaction == nil
+			}
+			if stop {
 				updatedRun.Status = AgentRunStatusFailed
 				updatedRun.Error = updatedCall.Error
 				updatedRun.CompletedAt = &now
@@ -671,4 +676,10 @@ func cloneCredentialReferences(input map[string]skill.CredentialReference) map[s
 		result[name] = reference
 	}
 	return result
+}
+
+var errActionNotAdmittedAfterFailure = errors.New("This operation was not run: a previous operation failed and this one was not admitted as its correction.")
+
+func (w *ActionWorker) correctionBlocked(ctx context.Context, run *AgentRun, call *ActionCall) bool {
+	return toolFeedbackActionBlocked(run.Checkpoint, call) && !sourceAccessChallengeActionAdmitted(ctx, w.store, run, call)
 }

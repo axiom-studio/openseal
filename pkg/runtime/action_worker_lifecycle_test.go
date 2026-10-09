@@ -182,7 +182,7 @@ func TestActionWorkerLifecyclePreservesCompletedDispatchAcrossParentChanges(t *t
 	}
 }
 
-func TestActionWorkerLifecycleStopsFailedDispatchDuringPause(t *testing.T) {
+func TestActionWorkerLifecycleKeepsFailedDispatchFeedbackDuringPause(t *testing.T) {
 	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
 		now := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
 		catalog, proposal := createRunnableAction(t, store, now)
@@ -204,9 +204,9 @@ func TestActionWorkerLifecycleStopsFailedDispatchDuringPause(t *testing.T) {
 			t.Fatalf("paused failure did not preserve execution state: %#v, %v", first, err)
 		}
 		paused := getActionLifecycleRun(t, store, proposal.Call)
-		if paused.Status != AgentRunStatusPaused || paused.PausedFrom != AgentRunStatusQueued || paused.PausedWakeCondition != nil ||
-			!requiresFinalFailureExplanation(paused.Checkpoint) {
-			t.Fatalf("paused failure lost its final explanation: %#v", paused)
+		if _, returned := ReadToolFeedbackCorrection(paused.Checkpoint); paused.Status != AgentRunStatusPaused || paused.PausedFrom != AgentRunStatusQueued || paused.PausedWakeCondition != nil ||
+			!returned {
+			t.Fatalf("paused failure lost its feedback for the model: %#v", paused)
 		}
 		clock = clock.Add(time.Minute)
 		blocked, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "lifecycle-worker", time.Minute)
@@ -214,8 +214,8 @@ func TestActionWorkerLifecycleStopsFailedDispatchDuringPause(t *testing.T) {
 			t.Fatalf("paused failure retried: %#v %v", blocked, err)
 		}
 		resumed := transitionActionLifecycleRun(t, store, proposal.Call, paused.PausedFrom, paused.PausedWakeCondition, clock)
-		if !requiresFinalFailureExplanation(resumed.Checkpoint) {
-			t.Fatal("resume cleared the final-only boundary")
+		if _, returned := ReadToolFeedbackCorrection(resumed.Checkpoint); !returned {
+			t.Fatal("resume cleared the failure feedback")
 		}
 		completed, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "lifecycle-worker", time.Minute)
 		if err != nil || completed != nil || dispatches != 1 {
