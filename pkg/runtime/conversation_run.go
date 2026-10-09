@@ -626,6 +626,10 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == "approval-coordinator" {
 		return false
 	}
+	// Connector review requests project a pending approval or setup request.
+	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == ChannelReviewParticipantID {
+		return false
+	}
 	// Saved-artifact receipts project completed work; they are not new tasks.
 	if message.Sender.Type == ConversationParticipantService && message.Sender.ID == conversationArtifactReceiptService {
 		return false

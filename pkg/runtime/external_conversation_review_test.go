@@ -54,8 +54,25 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 				if delivery.ExternalThreadID != "thread" || delivery.ExternalConversationID != "conversation" {
 					t.Fatal("review escaped its origin")
 				}
-				if _, ok := delivery.Parameters["reviewRequest"]; !ok {
+				review, ok := delivery.Parameters["reviewRequest"].(map[string]interface{})
+				if !ok {
 					t.Fatal("missing portable review metadata")
+				}
+				if _, stale := review["reason"]; stale {
+					t.Fatal("review still carries the turn summary as its reason")
+				}
+				presentation, _ := review["presentation"].(map[string]interface{})
+				message, err := fixture.store.GetChannelMessage(t.Context(), delivery.Scope, delivery.ConversationID, delivery.ChannelMessageID)
+				if err != nil || message.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: ChannelReviewParticipantID}) ||
+					conversationMessageStartsRun(fixture.conversation, message) {
+					t.Fatalf("review message = %#v %v", message, err)
+				}
+				if delivery.Correlation.ID == "approval:"+approval.ID {
+					if presentation["title"] != "Review **this change**" || !strings.HasPrefix(message.Content, "Review **this change**\n\n[Review approval](") {
+						t.Fatalf("approval card = %#v %q", presentation, message.Content)
+					}
+				} else if presentation["title"] != request.Reason {
+					t.Fatalf("setup card = %#v", presentation)
 				}
 			}
 			for _, delivery := range deliveries {
@@ -80,6 +97,20 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			updates, err := fixture.store.ListExternalConversationDeliveries(t.Context(), ExternalConversationDeliveryFilter{Scope: fixture.run.Scope, CorrelationKind: "review_request", CorrelationID: "approval:" + approval.ID, Limit: 100})
 			if err != nil || len(updates) != 2 {
 				t.Fatalf("resolved card update missing: %v %v", updates, err)
+			}
+			decided := 0
+			for _, update := range updates {
+				if update.Operation != capability.ConversationDeliveryMessageUpdate {
+					continue
+				}
+				decided++
+				review := update.Parameters["reviewRequest"].(map[string]interface{})
+				if review["presentation"].(map[string]interface{})["title"] != "Approved: Review **this change**" {
+					t.Fatalf("decided card lost its description: %#v", review)
+				}
+			}
+			if decided != 1 {
+				t.Fatal("decided card update missing")
 			}
 			if len(fixture.store.externalDeliveries) != 4 {
 				t.Fatal("terminal requests generated duplicate notifications")

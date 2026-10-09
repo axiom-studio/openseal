@@ -591,7 +591,7 @@ func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall)
 		"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID,
 		"risk": approval.Risk, "summary": approval.Summary, "status": approval.Status,
 		"policyReason": approval.PolicyReason, "proposedAction": proposedAction,
-		"expiresAt": approval.ExpiresAt,
+		"expiresAt": approval.ExpiresAt, "presentation": PresentApproval(approval).Payload(),
 	}
 	if approval.TimeoutDecision != "" {
 		payload["timeoutDecision"] = approval.TimeoutDecision
