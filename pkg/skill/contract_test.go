@@ -420,6 +420,10 @@ func TestDefinitionRejectsUnsafeHostingRequirements(t *testing.T) {
 		"retained ephemeral":           {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityEphemeral, Retention: StorageRetentionRetain}}},
 		"invalid writable group":       {Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityEphemeral, WritableGroup: testInt64Pointer(0)}}},
 		"invalid compute":              {Compute: &ComputeRequirements{Limits: ComputeResources{Memory: "one-gigabyte"}}},
+		"unknown tenancy":              {Tenancy: "global"},
+		"shared with storage":          {Tenancy: TenancyShared, Storage: []StorageRequirement{{Name: "workspace", MountPath: "/workspace", Durability: StorageDurabilityEphemeral}}},
+		"shared with environment":      {Tenancy: TenancyShared, Environment: []string{"API_TOKEN"}},
+		"shared with configuration":    {Tenancy: TenancyShared, Configuration: []string{"workspace.url"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			definition := testSkillDefinition()
@@ -428,6 +432,26 @@ func TestDefinitionRejectsUnsafeHostingRequirements(t *testing.T) {
 				t.Fatalf("unsafe hosting requirements were accepted: %#v, %v", requirements, err)
 			}
 		})
+	}
+}
+
+func TestDefinitionAcceptsTenancy(t *testing.T) {
+	for _, tenancy := range []Tenancy{"", TenancyTenant, TenancyShared} {
+		definition := testSkillDefinition()
+		definition.Requirements = Requirements{Tenancy: tenancy, Compute: &ComputeRequirements{Requests: ComputeResources{CPU: "100m"}}}
+		if err := validateDefinition(definition); err != nil {
+			t.Fatalf("tenancy %q rejected: %v", tenancy, err)
+		}
+	}
+	definition := testSkillDefinition()
+	definition.Requirements = Requirements{Tenancy: TenancyShared}
+	catalog := NewCatalog()
+	if err := catalog.Register(t.Context(), definition); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := catalog.GetDefinition(t.Context(), definition.ID, definition.Version)
+	if err != nil || loaded.Requirements.Tenancy != TenancyShared {
+		t.Fatalf("shared tenancy was not preserved: %#v, %v", loaded.Requirements, err)
 	}
 }
 
