@@ -1336,6 +1336,7 @@ const (
 	KernelOperationDeliver                  = kernelapi.OperationDeliver
 	HostedSkillApplied                      = runtime.HostedSkillApplied
 	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
+	HostedSkillHostFilledSummary            = runtime.HostedSkillHostFilledSummary
 	RunbookAPIVersion                       = runbook.APIVersion
 	RunbookTriggerEvent                     = runbook.TriggerEvent
 	RunbookTriggerSchedule                  = runbook.TriggerSchedule
@@ -1588,6 +1589,7 @@ var (
 	ValidateEvidenceGroundingReview        = runtime.ValidateEvidenceGroundingReview
 	EstimateHostedTurnInputTokens          = runtime.EstimateHostedTurnInputTokens
 	ValidateHostedSkillSelections          = runtime.ValidateHostedSkillSelections
+	CompleteHostedSkillSelections          = runtime.CompleteHostedSkillSelections
 	NewCapabilityInvocationTurnRunner      = runtime.NewCapabilityInvocationTurnRunner
 	NewOutreachTurnRunner                  = runtime.NewOutreachTurnRunner
 	NewOutreachActionProposalObserver      = runtime.NewOutreachActionProposalObserver
