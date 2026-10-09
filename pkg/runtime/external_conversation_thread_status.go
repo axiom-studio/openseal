@@ -16,7 +16,7 @@ func (w *RunProgressAcknowledgementWorker) projectThreadStatus(ctx context.Conte
 		return nil, nil
 	}
 	run, err := w.store.GetAgentRun(ctx, item.Scope, item.RunID)
-	if err != nil || run == nil || run.Status == AgentRunStatusCompleted || run.Status == AgentRunStatusFailed {
+	if err != nil || run == nil || run.Status == AgentRunStatusCompleted || run.Status == AgentRunStatusFailed || externalInboxItemIsFollowUp(item, run) {
 		return nil, err // Finished replies clear state after their answer or failure notice is delivered.
 	}
 	endpoint, adapter, err := w.resolveEndpoint(ctx, item)
