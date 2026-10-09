@@ -75,6 +75,19 @@ An action call is the durable record of one Skill invocation, and its status cov
 
 Action calls are read-only over the API. They are created by the execution path, not by clients.
 
+### Failed and rejected actions
+
+A failed action, and a single action proposal rejected before it ran (input schema, required evidence or observation checks), is returned to the model as that action's result rather than ending the Run. The next Turn sees the exact arguments and error (`lastAction`, or `_opensealToolFeedbackCorrection.rejectedProposal` for a rejection) and answers with one corrected action or a final explanation in its own words. Bounds:
+
+- an unchanged failed request is never sent again: proposing it denies the call and stops the attempt;
+- at most `MaximumToolFeedbackCorrections` (2) corrected proposals per failure while they keep failing; a correction that succeeds ends that failure;
+- at most `MaximumRecoveredToolFailures` (4) failures per Run are returned to the model, counted by the kernel across successes;
+- the correction Turn cannot schedule, wait, fork or delegate, and every corrected proposal still passes policy, approval and budget checks.
+
+Beyond these bounds, and for platform conditions no correction can fix (a source rate limit, the platform's browser connection), the attempt stops with the kernel's failure reply. A failed change may already have taken effect, so the model is told to verify before doing it again.
+
+An input schema property can declare `x-openseal-observationRef: {roles, requireEnabled, requireFlags}`: the argument must be an element reference from the latest successful observation with an allowed role, enabled, and with each named flag set to `true` by the observing Skill. It is checked when the proposal is admitted, before any approval is created. An omitted optional argument is not checked.
+
 ## Approvals
 
 When policy requires review, the action call stops and a durable approval is created. Because the approval is a persisted record rather than a blocked goroutine, a Run waiting on a decision survives a daemon restart.
