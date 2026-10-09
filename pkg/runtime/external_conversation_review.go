@@ -34,7 +34,7 @@ func (w *RunProgressAcknowledgementWorker) projectReviewRequests(ctx context.Con
 			return result, err
 		}
 		for _, approval := range approvals {
-			delivery, err := w.projectReview(ctx, scope, "approval", approval.ID, approval.RunID, "", "", approval.Summary)
+			delivery, err := w.projectReview(ctx, scope, "approval", approval.ID, approval.RunID, "", "", PresentApproval(approval))
 			if err != nil {
 				failures = append(failures, err)
 			} else if delivery != nil {
@@ -51,7 +51,7 @@ func (w *RunProgressAcknowledgementWorker) projectReviewRequests(ctx context.Con
 			return result, err
 		}
 		for _, request := range requests {
-			delivery, err := w.projectReview(ctx, scope, "setup", request.ID, request.RunID, request.ConversationID, request.TriggerMessageID, request.Reason)
+			delivery, err := w.projectReview(ctx, scope, "setup", request.ID, request.RunID, request.ConversationID, request.TriggerMessageID, ApprovalPresentation{Title: request.Reason})
 			if err != nil {
 				failures = append(failures, err)
 			} else if delivery != nil {
@@ -67,7 +67,11 @@ func (w *RunProgressAcknowledgementWorker) projectReviewRequests(ctx context.Con
 	failures = append(failures, err)
 	return result, errors.Join(failures...)
 }
-func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, scope Scope, kind, id, runID, conversationID, triggerID, reason string) (*ExternalConversationDelivery, error) {
+
+// projectReview posts a review request into the connector thread that started
+// the Run. Seal Chat renders approvals and setup requests as its own cards, so
+// only connector-originated conversations get this projection.
+func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, scope Scope, kind, id, runID, conversationID, triggerID string, presentation ApprovalPresentation) (*ExternalConversationDelivery, error) {
 	run, err := w.store.GetAgentRun(ctx, scope, runID)
 	if err != nil || run == nil {
 		return nil, err
@@ -142,7 +146,11 @@ func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, sc
 	if kind == "setup" {
 		title = "Complete setup"
 	}
-	message, err := w.post(ctx, origin, endpoint, RunProgressAcknowledgement{RunID: rootID, Phase: key, Text: reason + "\n\n[" + title + "](" + link + ")"})
+	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: rootID}}
+	if kind == "approval" {
+		references = append(references, ConversationReference{Kind: ConversationReferenceApproval, ID: id})
+	}
+	message, err := w.postReview(ctx, origin, references, key, presentation.Text()+"\n\n["+title+"]("+link+")")
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +158,7 @@ func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, sc
 	if thread == "" && endpoint.Policy.ReplyMode == ExternalConversationReplyThread {
 		thread = origin.Event.ExternalMessageID
 	}
-	review := map[string]interface{}{"kind": kind, "id": id, "label": title, "reason": reason, "url": link}
+	review := map[string]interface{}{"kind": kind, "id": id, "label": title, "url": link, "presentation": presentation.Payload()}
 	if kind == "approval" {
 		store := w.store.(channelReviewStore)
 		approval, err := store.GetApproval(ctx, scope, id)
@@ -173,6 +181,34 @@ func (w *RunProgressAcknowledgementWorker) projectReview(ctx context.Context, sc
 		return nil, err
 	}
 	return delivery.Delivery, nil
+}
+
+// ChannelReviewParticipantID sends review-request projections. Seal Chat shows
+// its own approval and setup cards and hides these messages; they never wake
+// the owning Agent.
+const ChannelReviewParticipantID = "openseal.channel-review"
+
+func (w *RunProgressAcknowledgementWorker) postReview(ctx context.Context, item *ExternalConversationInboxItem, references []ConversationReference, key, text string) (*ChannelMessage, error) {
+	for range 3 {
+		conversation, err := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
+		if err != nil {
+			return nil, err
+		}
+		posted, err := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+			Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: conversation.Revision,
+			Sender: ConversationParticipant{Type: ConversationParticipantService, ID: ChannelReviewParticipantID},
+			Intent: MessageIntentUpdate, Content: text,
+			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: item.ChannelMessageID,
+			References: references, IdempotencyKey: "channel-review-message:" + item.ID + ":" + key,
+		})
+		if err == nil {
+			return posted.Message, nil
+		}
+		if !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrMessageConflict) {
+			return nil, err
+		}
+	}
+	return nil, ErrRevisionConflict
 }
 
 // Decision metadata describes the exact reviewed invocation, never credentials.
@@ -232,6 +268,7 @@ func (w *RunProgressAcknowledgementWorker) syncReviewApprovalCards(ctx context.C
 				continue
 			}
 			review["approval"] = channelReviewApprovalPayload(approval, call)
+			review["presentation"] = PresentApproval(approval).Payload()
 			parameters["providerMessageId"] = original.ProviderMessageID
 			result, err := w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{Scope: scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageUpdate, ConversationID: original.ConversationID, ChannelMessageID: original.ChannelMessageID, ExternalConversationID: original.ExternalConversationID, ExternalThreadID: original.ExternalThreadID, Parameters: parameters, IdempotencyKey: "review-card:" + id + ":" + endpoint.ID + ":" + phase, Correlation: &ExternalConversationDeliveryCorrelation{Kind: "review_request", ID: original.Correlation.ID, Phase: phase}})
 			if err != nil {
