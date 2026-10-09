@@ -9,6 +9,7 @@ type StorageDurability = capability.StorageDurability
 type StorageRetention = capability.StorageRetention
 type ComputeRequirements = capability.ComputeRequirements
 type ComputeResources = capability.ComputeResources
+type Tenancy = capability.Tenancy
 type Installer = capability.Installer
 type Resource = capability.Resource
 type SourceProvenance = capability.SourceProvenance
@@ -18,4 +19,6 @@ const (
 	StorageDurabilityPersistent = capability.StorageDurabilityPersistent
 	StorageRetentionDelete      = capability.StorageRetentionDelete
 	StorageRetentionRetain      = capability.StorageRetentionRetain
+	TenancyTenant               = capability.TenancyTenant
+	TenancyShared               = capability.TenancyShared
 )
