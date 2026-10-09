@@ -325,7 +325,7 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 			})
 		}
 		skillSelections := map[string]interface{}{
-			"type": "array", "minItems": len(promptBranches), "maxItems": len(promptBranches),
+			"type": "array", "maxItems": len(promptBranches),
 		}
 		if len(promptBranches) == 0 {
 			skillSelections["items"] = false

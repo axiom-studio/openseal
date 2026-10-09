@@ -119,9 +119,11 @@ const (
 	HostedSkillNotApplied HostedSkillDisposition = "not_applied"
 )
 
-// HostedSkillSelection is the exhaustive operator-facing disposition of one
-// prompt Skill offered to a hosted turn. It records capability choice without
-// storing hidden model reasoning.
+// HostedSkillSelection is the operator-facing disposition of one prompt Skill
+// offered to a hosted turn. It records capability choice without storing
+// hidden model reasoning. Dispositions are audit bookkeeping: a host should
+// disposition every offered Skill, and the kernel records any it omitted as
+// not applied (see CompleteHostedSkillSelections).
 type HostedSkillSelection struct {
 	SkillRef    string                 `json:"skillRef"`
 	Disposition HostedSkillDisposition `json:"disposition"`
@@ -245,35 +247,66 @@ type HostedTurnResponse struct {
 	EvidenceGrounding          *EvidenceGroundingReview      `json:"evidenceGrounding,omitempty"`
 }
 
-// ValidateHostedSkillSelections verifies that a host returned exactly one
-// operator-visible disposition for every authorized prompt Skill and no other
-// Skill. Hosts can call this before returning a response to reject invalid
-// model output within the bounded invocation. Validation failures never
-// authorize an automatic model retry.
+// HostedSkillHostFilledSummary is the summary recorded for an offered Skill
+// whose disposition the host or kernel filled because the model omitted it.
+// It is host-authored and identifies the disposition as host-filled.
+const HostedSkillHostFilledSummary = "Not applied in this turn (recorded by the host; the model gave no disposition)."
+
+// ValidateHostedSkillSelections verifies the Skill dispositions a host
+// returned: each names an offered Skill exactly once with a valid disposition
+// and a summary. Omitting an offered Skill is valid; dispositions are audit
+// bookkeeping and an omitted one is recorded as not applied. Hosts call this
+// to return an invalid disposition to the model as a correction; it never
+// authorizes ending a Run for omitted bookkeeping.
 func ValidateHostedSkillSelections(prompts []HostedSkillPrompt, selections []HostedSkillSelection) error {
+	_, err := checkHostedSkillSelections(prompts, selections)
+	return err
+}
+
+// CompleteHostedSkillSelections validates selections and returns them with a
+// not-applied, host-filled disposition (HostedSkillHostFilledSummary)
+// appended, in prompt order, for every offered Skill they omit. filled lists
+// the references it added. The input slice is not modified.
+func CompleteHostedSkillSelections(prompts []HostedSkillPrompt, selections []HostedSkillSelection) (complete []HostedSkillSelection, filled []string, err error) {
+	selected, err := checkHostedSkillSelections(prompts, selections)
+	if err != nil {
+		return nil, nil, err
+	}
+	complete = append([]HostedSkillSelection(nil), selections...)
+	for _, prompt := range prompts {
+		if _, ok := selected[prompt.Reference]; ok {
+			continue
+		}
+		selected[prompt.Reference] = struct{}{}
+		complete = append(complete, HostedSkillSelection{
+			SkillRef: prompt.Reference, Disposition: HostedSkillNotApplied, Summary: HostedSkillHostFilledSummary,
+		})
+		filled = append(filled, prompt.Reference)
+	}
+	return complete, filled, nil
+}
+
+func checkHostedSkillSelections(prompts []HostedSkillPrompt, selections []HostedSkillSelection) (map[string]struct{}, error) {
 	allowed := make(map[string]struct{}, len(prompts))
 	for _, prompt := range prompts {
 		allowed[prompt.Reference] = struct{}{}
-	}
-	if len(selections) != len(allowed) {
-		return errors.New("turn host must disposition every offered Skill")
 	}
 	selected := make(map[string]struct{}, len(selections))
 	for _, selection := range selections {
 		reference := strings.TrimSpace(selection.SkillRef)
 		if _, ok := allowed[reference]; !ok {
-			return fmt.Errorf("turn host dispositioned unauthorized Skill reference %q", reference)
+			return nil, fmt.Errorf("turn host dispositioned unauthorized Skill reference %q", reference)
 		}
 		if _, duplicate := selected[reference]; duplicate {
-			return errors.New("turn host dispositioned a Skill more than once")
+			return nil, errors.New("turn host dispositioned a Skill more than once")
 		}
 		if strings.TrimSpace(selection.Summary) == "" ||
 			(selection.Disposition != HostedSkillApplied && selection.Disposition != HostedSkillNotApplied) {
-			return errors.New("turn host returned an invalid Skill disposition")
+			return nil, errors.New("turn host returned an invalid Skill disposition")
 		}
 		selected[reference] = struct{}{}
 	}
-	return nil
+	return selected, nil
 }
 
 type TurnHost interface {
@@ -607,9 +640,13 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if proposalCount == 1 && response.NextRunStatus != AgentRunStatusRunning {
 		return nil, errors.New("a hosted Turn proposal must remain running until the kernel materializes it")
 	}
-	if err := ValidateHostedSkillSelections(request.SkillPrompts, response.SkillSelections); err != nil {
+	// Omitted dispositions are bookkeeping, never a reason to fail the Run:
+	// the kernel records each omitted offered Skill as not applied.
+	completeSelections, _, err := CompleteHostedSkillSelections(request.SkillPrompts, response.SkillSelections)
+	if err != nil {
 		return nil, err
 	}
+	response.SkillSelections = completeSelections
 	if err := ValidateHostedTurnCompletion(request, response); err != nil {
 		return nil, err
 	}

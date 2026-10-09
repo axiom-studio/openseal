@@ -1355,9 +1355,10 @@ func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
 	}
 }
 
-func TestHostedTurnRunnerRequiresExhaustiveSkillSelections(t *testing.T) {
+func TestHostedTurnRunnerRejectsInvalidSkillSelections(t *testing.T) {
 	for name, selections := range map[string][]HostedSkillSelection{
-		"missing": nil,
+		"malformed": {{SkillRef: "skill:summarize@1.0.0", Disposition: "maybe", Summary: "Unclear"}},
+		"empty summary": {{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillNotApplied}},
 		"duplicate": {
 			{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Used summarization"},
 			{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillNotApplied, Summary: "Duplicate"},
@@ -1383,6 +1384,82 @@ func TestHostedTurnRunnerRequiresExhaustiveSkillSelections(t *testing.T) {
 				t.Fatal("expected invalid Skill selection contract to be rejected")
 			}
 		})
+	}
+}
+
+// Runs 5560f9e2 and f5f1f1f5 failed on the bank OTP page: the host restarted
+// a turn stuck on a repeated model mistake and returned a running response
+// with no proposal and no Skill dispositions. Omitted dispositions are
+// bookkeeping; the kernel records them as host-filled not_applied and the Run
+// continues to its next turn.
+func TestHostedTurnRunnerFillsOmittedSkillDispositions(t *testing.T) {
+	prompts := []HostedSkillPrompt{
+		{SkillID: "live-browser", Version: "1.0.10", Instructions: "Drive the live browser."},
+		{SkillID: "summarize", Version: "1.0.0", Instructions: "Summarize faithfully."},
+	}
+	for name, selections := range map[string][]HostedSkillSelection{
+		"restarted turn without dispositions": nil,
+		"partial dispositions": {{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Summarized the page"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			host := &recordingTurnHost{response: &HostedTurnResponse{
+				APIVersion: HostedTurnAPIVersion, InvocationID: "turn-1", NextRunStatus: AgentRunStatusRunning,
+				ModelProvider: "test", Model: "test-model", SkillSelections: selections,
+				ContinuationCheckpoint: map[string]interface{}{"_atlasTurnRestart": " repeated capability lookup"},
+			}}
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{
+				AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1", SkillPrompts: prompts,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{
+				Run: &AgentRun{ID: "run-1", Scope: Scope{Kind: "tenant", ID: "7"}, Goal: "Pay for the order"}, Turn: &AgentTurn{ID: "turn-1"},
+			})
+			if err != nil {
+				t.Fatalf("omitted dispositions failed the turn: %v", err)
+			}
+			if outcome.NextRunStatus != AgentRunStatusRunning || len(outcome.SkillSelections) != 2 {
+				t.Fatalf("outcome = %#v", outcome)
+			}
+			byRef := map[string]HostedSkillSelection{}
+			for _, selection := range outcome.SkillSelections {
+				byRef[selection.SkillRef] = selection
+			}
+			browser := byRef["skill:live-browser@1.0.10"]
+			if browser.Disposition != HostedSkillNotApplied || browser.Summary != HostedSkillHostFilledSummary {
+				t.Fatalf("live-browser disposition = %#v", browser)
+			}
+			summarize := byRef["skill:summarize@1.0.0"]
+			if len(selections) > 0 && (summarize.Disposition != HostedSkillApplied || summarize.Summary != "Summarized the page") {
+				t.Fatalf("model disposition changed: %#v", summarize)
+			}
+			if len(selections) == 0 && summarize.Summary != HostedSkillHostFilledSummary {
+				t.Fatalf("summarize disposition = %#v", summarize)
+			}
+		})
+	}
+}
+
+func TestCompleteHostedSkillSelections(t *testing.T) {
+	prompts := []HostedSkillPrompt{{Reference: "skill:a@1"}, {Reference: "skill:b@1"}}
+	given := []HostedSkillSelection{{SkillRef: "skill:b@1", Disposition: HostedSkillApplied, Summary: "Used b"}}
+	complete, filled, err := CompleteHostedSkillSelections(prompts, given)
+	if err != nil || len(complete) != 2 || len(given) != 1 || fmt.Sprint(filled) != "[skill:a@1]" ||
+		complete[1].SkillRef != "skill:a@1" || complete[1].Disposition != HostedSkillNotApplied || complete[1].Summary != HostedSkillHostFilledSummary {
+		t.Fatalf("complete=%#v filled=%v err=%v", complete, filled, err)
+	}
+	if err := ValidateHostedSkillSelections(prompts, nil); err != nil {
+		t.Fatalf("omission must validate: %v", err)
+	}
+	for _, invalid := range [][]HostedSkillSelection{
+		{{SkillRef: "skill:c@1", Disposition: HostedSkillApplied, Summary: "x"}},
+		{{SkillRef: "skill:a@1", Disposition: HostedSkillApplied, Summary: "x"}, {SkillRef: "skill:a@1", Disposition: HostedSkillNotApplied, Summary: "y"}},
+		{{SkillRef: "skill:a@1", Disposition: "maybe", Summary: "x"}},
+	} {
+		if _, _, err := CompleteHostedSkillSelections(prompts, invalid); err == nil {
+			t.Fatalf("invalid selections accepted: %#v", invalid)
+		}
 	}
 }
 
