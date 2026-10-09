@@ -1255,10 +1255,18 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	status := AgentRunStatusFailed
 	runError := "governed action materialization failed"
 	safeCause := sanitizeActionError(cause, nil)
-	checkpoint := checkpointTerminalFailure(preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "action_admission_failed")
+	summary := "Agent action proposal could not be governed"
+	checkpoint, returned := checkpointProposalRejection(run, turn, safeCause)
+	if returned {
+		// The rejection is the proposal's result for the model, like a failed
+		// action: nothing ran, and it may correct the request or explain.
+		status, runError, summary = AgentRunStatusQueued, "", "Agent action proposal was rejected; the model may correct it"
+	} else {
+		checkpoint = checkpointTerminalFailure(preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "action_admission_failed")
+	}
 	failed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, LeaseOwner: workerID, Checkpoint: checkpoint,
-		Error: runError, Summary: "Agent action proposal could not be governed",
+		Error: runError, Summary: summary,
 		EventType: "action.materialization_failed", Actor: ActivityActor{Type: "worker", ID: workerID},
 		TurnID: turn.ID, CausationID: turn.ID, Payload: map[string]interface{}{"reason": safeCause},
 	})
@@ -1271,12 +1279,6 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	} else {
 		p.Wake()
 	}
-}
-
-// Retained for deterministic validation callers; rejected proposals cannot
-// grant an automatic recovery turn or retain model-authored rejected state.
-func checkpointGovernedProposalFailure(run *AgentRun, turn *AgentTurn, cause error, safeCause string) (map[string]interface{}, bool) {
-	return nil, false
 }
 
 func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {
