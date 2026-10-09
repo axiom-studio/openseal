@@ -196,11 +196,15 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, proposalRecoveryCheckpointKey)
 	delete(result, FinalFailureExplanationCheckpointKey)
 	delete(result, ToolFeedbackCorrectionCheckpointKey)
+	delete(result, toolFailureCountCheckpointKey)
 	delete(result, "lastAction")
 	delete(result, runEventWaitCheckpointKey)
 	if current != nil {
 		if correction, ok := current[ToolFeedbackCorrectionCheckpointKey]; ok {
 			result[ToolFeedbackCorrectionCheckpointKey] = deepCloneCheckpointValue(correction)
+		}
+		if failures, ok := current[toolFailureCountCheckpointKey]; ok {
+			result[toolFailureCountCheckpointKey] = deepCloneCheckpointValue(failures)
 		}
 		if explanation, ok := current[FinalFailureExplanationCheckpointKey]; ok {
 			result[FinalFailureExplanationCheckpointKey] = deepCloneCheckpointValue(explanation)

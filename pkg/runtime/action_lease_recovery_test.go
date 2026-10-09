@@ -139,12 +139,12 @@ func TestActionWorkerRecoveredMutationStopsBeforeProviderAuthority(t *testing.T)
 		if catalogCalls != 0 || credentialCalls != 0 || dispatches != 0 {
 			t.Fatalf("recovered mutation touched provider authority: catalog=%d credentials=%d dispatches=%d", catalogCalls, credentialCalls, dispatches)
 		}
-		if !strings.Contains(result.Call.Error, "may already have taken effect") || result.Run == nil ||
-			!requiresFinalFailureExplanation(result.Run.Checkpoint) {
-			t.Fatalf("uncertainty was not preserved for the final explanation = %#v", result)
-		}
-		if _, retryable := ReadToolFeedbackCorrection(result.Run.Checkpoint); retryable {
-			t.Fatal("ambiguous recovered mutation opened a fresh correction budget")
+		// The uncertainty is the action's result for the model, which must
+		// verify the state before doing the change again.
+		feedback, returned := ReadToolFeedbackCorrection(result.Run.Checkpoint)
+		if !strings.Contains(result.Call.Error, "may already have taken effect") || result.Run == nil || result.Run.Status != AgentRunStatusQueued ||
+			requiresFinalFailureExplanation(result.Run.Checkpoint) || !returned || !strings.Contains(feedback.Message, "may already have taken effect") {
+			t.Fatalf("uncertainty was not returned to the model = %#v", result)
 		}
 		assertActionLifecycleUnclaimable(t, store, first, worker.now().Add(2*time.Minute))
 	})

@@ -54,6 +54,7 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	// usage, turn cursor, plan and durable action evidence.
 	delete(run.Checkpoint, FinalFailureExplanationCheckpointKey)
 	delete(run.Checkpoint, ToolFeedbackCorrectionCheckpointKey)
+	delete(run.Checkpoint, toolFailureCountCheckpointKey)
 	delete(run.Checkpoint, proposalRecoveryCheckpointKey)
 	// Usage, turn cursor, plan and action identity remain intact.
 	// The normal worker budget admission still applies to the next attempt.

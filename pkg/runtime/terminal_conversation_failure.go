@@ -14,22 +14,13 @@ func checkpointTerminalFailure(checkpoint map[string]interface{}, code string) m
 	return result
 }
 
-func terminalFailureCheckpointActive(checkpoint map[string]interface{}) bool {
-	if requiresFinalFailureExplanation(checkpoint) {
-		return true
-	}
-	_, active := ReadToolFeedbackCorrection(checkpoint)
-	return active
-}
-
+// terminalFailureOutcome is the kernel-authored reply of a stopped attempt.
+// A failure returned to the model for correction is not stopped; a typed
+// source challenge continues only through its verified interaction, which
+// callers check before this.
 func terminalFailureOutcome(run *AgentRun) (*TurnOutcome, bool) {
-	if run == nil || !requiresFinalFailureExplanation(run.Checkpoint) {
-		if run == nil {
-			return nil, false
-		}
-		if _, active := ReadToolFeedbackCorrection(run.Checkpoint); !active {
-			return nil, false
-		}
+	if run == nil || (!requiresFinalFailureExplanation(run.Checkpoint) && !sourceAccessChallengeFeedback(run.Checkpoint)) {
+		return nil, false
 	}
 	code := terminalFailureCodeFromCheckpoint(run.Checkpoint)
 	checkpoint := checkpointTerminalFailure(run.Checkpoint, code)

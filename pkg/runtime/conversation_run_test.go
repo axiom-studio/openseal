@@ -1262,7 +1262,7 @@ func TestGovernedConversationAgentBehaviorDenialResolvesWithoutModelRetry(t *tes
 	}
 }
 
-func TestGovernedConversationProposalFailureDoesNotGrantAutomaticRepair(t *testing.T) {
+func TestGovernedConversationProposalRejectionIsReturnedWithoutAMutationOutcome(t *testing.T) {
 	run := &AgentRun{
 		ID: "run-pause", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "1"},
 		Checkpoint: map[string]interface{}{"phase": "before-pause"},
@@ -1276,16 +1276,16 @@ func TestGovernedConversationProposalFailureDoesNotGrantAutomaticRepair(t *testi
 	for _, kind := range []RunKind{RunKindConversation, RunKindAgentWork} {
 		current := cloneAgentRun(run)
 		current.Kind = kind
-		checkpoint, accepted := checkpointGovernedConversationProposalFailure(current, turn, fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition))
-		if accepted || checkpoint != nil {
-			t.Fatalf("rejected proposal granted an automatic repair checkpoint: %#v accepted=%v", checkpoint, accepted)
+		checkpoint, accepted := checkpointProposalRejection(current, turn, sanitizeActionError(fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition), nil))
+		feedback, active := ReadToolFeedbackCorrection(checkpoint)
+		if !accepted || !active || feedback.Kind != "proposal" || !strings.Contains(feedback.Message, "draft -> paused") || checkpoint["actionInputs"] != nil {
+			t.Fatalf("rejected proposal was not returned to the model: %#v accepted=%v", checkpoint, accepted)
 		}
-		if current.Checkpoint["phase"] != "before-pause" || current.Checkpoint["actionInputs"] != nil ||
-			current.Checkpoint[proposalRecoveryCheckpointKey] != nil || requiresFinalFailureExplanation(current.Checkpoint) {
-			t.Fatalf("legacy repair helper copied rejected model state or mutated trusted checkpoint: %#v", current.Checkpoint)
+		if current.Checkpoint["phase"] != "before-pause" || current.Checkpoint[ToolFeedbackCorrectionCheckpointKey] != nil || requiresFinalFailureExplanation(current.Checkpoint) {
+			t.Fatalf("rejection mutated the trusted checkpoint: %#v", current.Checkpoint)
 		}
-		// The worker persists the terminal failure separately. A proposal
-		// which never materialized cannot fabricate a completed mutation.
+		// A proposal which never materialized cannot fabricate a completed mutation.
+		current.Checkpoint = checkpoint
 		if outcome, projected := governedConversationActionOutcome(current); projected {
 			t.Fatalf("unexecuted proposal was reported as a governed mutation: %#v", outcome)
 		}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/skillerror"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -68,9 +69,9 @@ func feedbackCreateRun(t *testing.T, store KernelStore, scope Scope, now time.Ti
 	return feedbackClaim(t, store, scope, now)
 }
 
-// A manifest retry policy and a model-authored correction checkpoint cannot
-// create another dispatch or explanation request after the first failure.
-func TestToolFeedbackFirstFailureStopsAcrossStores(t *testing.T) {
+// A failed dispatch goes back to the model as the action's result. The manifest
+// retry policy never re-sends it, and only kernel state carries the allowance.
+func TestToolFeedbackFirstFailureReturnsToTheModelAcrossStores(t *testing.T) {
 	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
 		now := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
 		catalog, scope := feedbackReadCatalog(t)
@@ -86,28 +87,138 @@ func TestToolFeedbackFirstFailureStopsAcrossStores(t *testing.T) {
 			failed.Call.FailurePhase != ActionFailureAfterDispatch || dispatches != 1 {
 			t.Fatalf("first failed dispatch: %#v %v count=%d", failed, err, dispatches)
 		}
-		if failed.Run.Status != AgentRunStatusFailed || failed.Run.WakeCondition != nil || failed.Run.LeaseOwner != "" || failed.Run.CompletedAt == nil {
-			t.Fatalf("failed operation retained continuation authority: %#v", failed.Run)
+		feedback, active := ReadToolFeedbackCorrection(failed.Run.Checkpoint)
+		if failed.Run.Status != AgentRunStatusQueued || failed.Run.CompletedAt != nil || requiresFinalFailureExplanation(failed.Run.Checkpoint) ||
+			!active || feedback.CorrectionsRemaining != MaximumToolFeedbackCorrections || feedback.LastFailureID != failed.Call.ID ||
+			toolFeedbackInteger(failed.Run.Checkpoint[toolFailureCountCheckpointKey]) != 1 {
+			t.Fatalf("failure was not returned to the model: %#v", failed.Run)
 		}
-		if !requiresFinalFailureExplanation(failed.Run.Checkpoint) || terminalFailureCodeFromCheckpoint(failed.Run.Checkpoint) != "action_failed" {
-			t.Fatalf("first failure lacked a protected cause: %#v", failed.Run.Checkpoint)
+		if strings.Contains(fmt.Sprint(failed.Run.Checkpoint), "private-secret") {
+			t.Fatal("failure feedback exposed credentials")
 		}
-		if _, active := ReadToolFeedbackCorrection(failed.Run.Checkpoint); active || strings.Contains(fmt.Sprint(failed.Run.Checkpoint), "private-secret") {
-			t.Fatal("first failure created correction authority or exposed credentials")
-		}
-		feedbackAssertNotClaimable(t, store, scope, now)
 		again, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
 		if err != nil || again != nil || dispatches != 1 {
 			t.Fatalf("failed action retried: %#v %v dispatches=%d", again, err, dispatches)
 		}
-		// Even a stale caller directly invoking a hosted runner cannot spend a
-		// model request to explain, correct or resume a terminal checkpoint.
-		feedbackAssertKernelFailureReply(t, failed.Run, "action_failed")
-		replay := checkpointTerminalAction(failed.Run.Checkpoint, failed.Call, map[string]interface{}{"idempotentReplay": true})
-		if _, active := ReadToolFeedbackCorrection(replay); active || recordedToolFailure(replay) != failed.Call.Error {
-			t.Fatalf("durable receipt replay changed failure authority: %#v", replay)
+		// A durable failed receipt replayed in a later Turn is not fresh feedback.
+		replay := checkpointTerminalAction(nil, failed.Call, map[string]interface{}{"idempotentReplay": true})
+		if !requiresFinalFailureExplanation(replay) {
+			t.Fatalf("durable receipt replay granted another correction: %#v", replay)
 		}
 	})
+}
+
+func feedbackProposeCorrection(t *testing.T, store KernelStore, catalog *skill.Catalog, scope Scope, runID string, now time.Time, key, fields string) *ActionProposalResult {
+	t.Helper()
+	run := feedbackClaim(t, store, scope, now)
+	if run.ID != runID {
+		t.Fatalf("claimed %s, want %s", run.ID, runID)
+	}
+	return feedbackPropose(t, store, catalog, run, now, key, fields, ActionDispositionAllow)
+}
+
+// A corrected request runs once and a success ends the failure chain; the
+// unchanged failed request is never sent again.
+func TestToolFeedbackCorrectionRunsAndUnchangedRequestStopsAcrossStores(t *testing.T) {
+	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+		now := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
+		catalog, scope := feedbackReadCatalog(t)
+		run := feedbackCreateRun(t, store, scope, now)
+		feedbackPropose(t, store, catalog, run, now, "initial", "bad", ActionDispositionAllow)
+		dispatches := 0
+		if _, err := feedbackFailingWorker(store, catalog, now, &dispatches).RunOnce(t.Context(), scope, "action-worker", time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		corrected := feedbackProposeCorrection(t, store, catalog, scope, run.ID, now, "corrected", "id")
+		state, _ := corrected.Run.Checkpoint[ToolFeedbackCorrectionCheckpointKey].(map[string]interface{})
+		if corrected.Call.Status != ActionCallStatusReady || state["admittedActionCallId"] != corrected.Call.ID {
+			t.Fatalf("correction was not admitted: %#v", corrected)
+		}
+		worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+			return map[string]string{"token": "private-secret"}, nil
+		}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+			dispatches++
+			return map[string]interface{}{"records": []interface{}{"one"}}, nil
+		}))
+		worker.now = func() time.Time { return now }
+		succeeded, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
+		if err != nil || succeeded == nil || succeeded.Call.Status != ActionCallStatusSucceeded || dispatches != 2 {
+			t.Fatalf("correction did not run: %#v %v", succeeded, err)
+		}
+		if _, active := ReadToolFeedbackCorrection(succeeded.Run.Checkpoint); active || succeeded.Run.Status != AgentRunStatusQueued ||
+			toolFeedbackInteger(succeeded.Run.Checkpoint[toolFailureCountCheckpointKey]) != 1 {
+			t.Fatalf("successful correction did not end the chain or lost the Run count: %#v", succeeded.Run)
+		}
+
+		// Another Run repeats its failed request unchanged.
+		other := feedbackCreateRun(t, store, scope, now)
+		feedbackPropose(t, store, catalog, other, now, "other-initial", "bad", ActionDispositionAllow)
+		if _, err := feedbackFailingWorker(store, catalog, now, &dispatches).RunOnce(t.Context(), scope, "action-worker", time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		repeated := feedbackProposeCorrection(t, store, catalog, scope, other.ID, now, "other-repeat", "bad")
+		if repeated.Call.Status != ActionCallStatusDenied || !requiresFinalFailureExplanation(repeated.Run.Checkpoint) || dispatches != 3 {
+			t.Fatalf("unchanged failed request was admitted: %#v", repeated)
+		}
+	})
+}
+
+// Corrections that keep failing stop after MaximumToolFeedbackCorrections.
+func TestToolFeedbackFailingCorrectionsStopAtTheBoundAcrossStores(t *testing.T) {
+	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+		now := time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC)
+		catalog, scope := feedbackReadCatalog(t)
+		run := feedbackCreateRun(t, store, scope, now)
+		feedbackPropose(t, store, catalog, run, now, "initial", "bad", ActionDispositionAllow)
+		dispatches := 0
+		worker := feedbackFailingWorker(store, catalog, now, &dispatches)
+		failed, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for attempt := 1; attempt <= MaximumToolFeedbackCorrections; attempt++ {
+			feedbackProposeCorrection(t, store, catalog, scope, run.ID, now, fmt.Sprint("correction-", attempt), fmt.Sprint("fields-", attempt))
+			if failed, err = worker.RunOnce(t.Context(), scope, "action-worker", time.Minute); err != nil || failed == nil || failed.Call.Status != ActionCallStatusFailed {
+				t.Fatalf("correction %d: %#v %v", attempt, failed, err)
+			}
+		}
+		if failed.Run.Status != AgentRunStatusFailed || !requiresFinalFailureExplanation(failed.Run.Checkpoint) || dispatches != MaximumToolFeedbackCorrections+1 {
+			t.Fatalf("failing corrections did not stop at the bound: %#v dispatches=%d", failed.Run, dispatches)
+		}
+		feedbackAssertKernelFailureReply(t, failed.Run, "action_failed")
+		feedbackAssertNotClaimable(t, store, scope, now)
+	})
+}
+
+// Failures separated by successful corrections stop at the Run's bound.
+func TestToolFeedbackRunFailureBoundSurvivesSuccesses(t *testing.T) {
+	checkpoint := map[string]interface{}{}
+	for index := 1; index <= MaximumRecoveredToolFailures+1; index++ {
+		failed := &ActionCall{ID: fmt.Sprint("failed-", index), Status: ActionCallStatusFailed, SideEffect: skill.SideEffectWrite,
+			Action: "click", Arguments: map[string]interface{}{"target": index}, Error: "element moved"}
+		checkpoint = checkpointTerminalAction(checkpoint, failed, nil)
+		if stopped := requiresFinalFailureExplanation(checkpoint); stopped != (index > MaximumRecoveredToolFailures) {
+			t.Fatalf("failure %d stopped=%v: %#v", index, stopped, checkpoint)
+		}
+		if index > MaximumRecoveredToolFailures {
+			break
+		}
+		read := &ActionCall{ID: fmt.Sprint("read-", index), Status: ActionCallStatusReady, Action: "snapshot"}
+		var denied string
+		if checkpoint, denied = admitToolFeedbackCorrection(checkpoint, read); denied != "" {
+			t.Fatalf("read after failure %d denied: %s", index, denied)
+		}
+		read.Status = ActionCallStatusSucceeded
+		checkpoint = checkpointTerminalAction(checkpoint, read, nil)
+		// The model cannot reset the kernel count through its checkpoint.
+		checkpoint = preserveKernelActionHistory(checkpoint, map[string]interface{}{toolFailureCountCheckpointKey: 0})
+		if _, active := ReadToolFeedbackCorrection(checkpoint); active || toolFeedbackInteger(checkpoint[toolFailureCountCheckpointKey]) != index {
+			t.Fatalf("success after failure %d: %#v", index, checkpoint)
+		}
+	}
+	if terminalFailureCodeFromCheckpoint(checkpoint) != "action_failed" {
+		t.Fatalf("bounded stop lost its cause: %#v", checkpoint)
+	}
 }
 
 func feedbackFailingWorker(store KernelStore, catalog *skill.Catalog, now time.Time, dispatches *int) *ActionWorker {
@@ -116,6 +227,19 @@ func feedbackFailingWorker(store KernelStore, catalog *skill.Catalog, now time.T
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		(*dispatches)++
 		return nil, errors.New("invalid field selector private-secret")
+	}))
+	worker.now = func() time.Time { return now }
+	return worker
+}
+
+// feedbackPlatformFailingWorker fails with a platform condition no correction
+// can fix, which stops the attempt at once.
+func feedbackPlatformFailingWorker(store KernelStore, catalog *skill.Catalog, now time.Time, dispatches *int) *ActionWorker {
+	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+		return map[string]string{"token": "private-secret"}, nil
+	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		(*dispatches)++
+		return nil, skillerror.NewActionError("browser_proxy_unavailable", "", nil)
 	}))
 	worker.now = func() time.Time { return now }
 	return worker
@@ -170,21 +294,20 @@ func TestToolFeedbackFailurePreservesSucceededChain(t *testing.T) {
 	preserved := preserveKernelActionHistory(checkpoint, forged)
 	entries := actionHistoryEntries(preserved)
 	if len(entries) != 3 || entries[0]["actionCallId"] != first.ID || entries[1]["actionCallId"] != second.ID || entries[2]["actionCallId"] != failed.ID ||
-		recordedToolFailure(preserved) != "invalid fields" || terminalFailureCodeFromCheckpoint(preserved) != "action_failed" {
+		requiresFinalFailureExplanation(preserved) || recordedToolFailure(preserved) != "invalid fields" || terminalFailureCodeFromCheckpoint(preserved) != "action_failed" {
 		t.Fatalf("failure erased or forged committed evidence: %#v", preserved)
 	}
 	// A late success receipt does not clear a different operation's failure.
 	preserved = checkpointTerminalAction(preserved, first, map[string]interface{}{"idempotentReplay": true})
-	if !requiresFinalFailureExplanation(preserved) || recordedToolFailure(preserved) != "invalid fields" {
-		t.Fatal("replayed success reopened failed attempt")
+	if feedback, active := ReadToolFeedbackCorrection(preserved); !active || feedback.Message != "invalid fields" {
+		t.Fatal("replayed success cleared the failure feedback")
 	}
-	feedbackAssertKernelFailureReply(t, &AgentRun{Checkpoint: preserved}, "action_failed")
 }
 
-func TestToolFeedbackLegacyCounterSurvivesJSONWithoutCorrectionAuthority(t *testing.T) {
+func TestToolFeedbackKernelStateSurvivesJSONAndCannotBeForged(t *testing.T) {
 	for _, used := range []interface{}{0, 1, 2, -999, 999, float64(1)} {
 		trusted := map[string]interface{}{ToolFeedbackCorrectionCheckpointKey: map[string]interface{}{
-			"kind": "action", "message": "invalid fields", "correctionsUsed": used, "lastFailureId": "failed"}}
+			"kind": "action", "message": "invalid fields", "correctionsUsed": used, "lastFailureId": "failed"}, toolFailureCountCheckpointKey: 1}
 		encoded, err := json.Marshal(trusted)
 		if err != nil {
 			t.Fatal(err)
@@ -193,17 +316,17 @@ func TestToolFeedbackLegacyCounterSurvivesJSONWithoutCorrectionAuthority(t *test
 		if err := json.Unmarshal(encoded, &persisted); err != nil {
 			t.Fatal(err)
 		}
-		for _, proposed := range []map[string]interface{}{nil, {ToolFeedbackCorrectionCheckpointKey: map[string]interface{}{"correctionsUsed": -999, "message": "fake"}}} {
+		for _, proposed := range []map[string]interface{}{nil, {ToolFeedbackCorrectionCheckpointKey: map[string]interface{}{"correctionsUsed": -999, "message": "fake"}, toolFailureCountCheckpointKey: 0}} {
 			merged := preserveKernelActionHistory(persisted, proposed)
 			state, active := ReadToolFeedbackCorrection(merged)
-			if !active || state.CorrectionsRemaining != 0 || state.Message != "invalid fields" {
-				t.Fatalf("legacy/model checkpoint granted repair authority: %#v", merged)
+			want := MaximumToolFeedbackCorrections - min(MaximumToolFeedbackCorrections, max(0, toolFeedbackInteger(used)))
+			if !active || state.CorrectionsRemaining != want || state.Message != "invalid fields" || toolFeedbackInteger(merged[toolFailureCountCheckpointKey]) != 1 {
+				t.Fatalf("model checkpoint changed kernel feedback: %#v", merged)
 			}
 			_, denied := admitToolFeedbackCorrection(merged, &ActionCall{ID: "new-correction", Status: ActionCallStatusReady})
-			if denied == "" {
-				t.Fatal("legacy counter admitted a correction")
+			if (denied == "") != (want > 0) {
+				t.Fatalf("correction admission with %d remaining: %q", want, denied)
 			}
-			feedbackAssertKernelFailureReply(t, &AgentRun{Checkpoint: merged}, "action_failed")
 		}
 	}
 	forged := map[string]interface{}{ToolFeedbackCorrectionCheckpointKey: map[string]interface{}{"correctionsUsed": 0, "message": "fake"}}
@@ -219,7 +342,7 @@ func TestToolFeedbackFailedRunRejectsAnotherProposal(t *testing.T) {
 		run := feedbackCreateRun(t, store, scope, now)
 		feedbackPropose(t, store, catalog, run, now, "initial", "bad", ActionDispositionAllow)
 		dispatches := 0
-		worker := feedbackFailingWorker(store, catalog, now, &dispatches)
+		worker := feedbackPlatformFailingWorker(store, catalog, now, &dispatches)
 		failed, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
 		if err != nil || failed == nil {
 			t.Fatalf("failure: %#v %v", failed, err)
@@ -253,7 +376,7 @@ func TestToolFeedbackNewUserAttemptStillRequiresNormalApproval(t *testing.T) {
 		failedRun := feedbackCreateRun(t, store, scope, now)
 		feedbackPropose(t, store, catalog, failedRun, now, "first", "bad", ActionDispositionAllow)
 		dispatches := 0
-		failed, err := feedbackFailingWorker(store, catalog, now, &dispatches).RunOnce(t.Context(), scope, "action-worker", time.Minute)
+		failed, err := feedbackPlatformFailingWorker(store, catalog, now, &dispatches).RunOnce(t.Context(), scope, "action-worker", time.Minute)
 		if err != nil || failed == nil {
 			t.Fatalf("failure: %#v %v", failed, err)
 		}
@@ -277,16 +400,18 @@ func TestToolFeedbackNewUserAttemptStillRequiresNormalApproval(t *testing.T) {
 	})
 }
 
-func TestToolFeedbackMutationFailureAlwaysStopsAndPreservesPhase(t *testing.T) {
+// A failed change may already have taken effect: the model gets the failure
+// (and is told to verify before redoing it) rather than a blind retry.
+func TestToolFeedbackMutationFailureReturnsAndPreservesPhase(t *testing.T) {
 	for _, phase := range []ActionFailurePhase{ActionFailureBeforeDispatch, ActionFailureAfterDispatch, ""} {
 		t.Run(string(phase), func(t *testing.T) {
 			call := &ActionCall{ID: "write", Status: ActionCallStatusFailed, SideEffect: skill.SideEffectExternal, Error: "provider disconnected", FailurePhase: phase}
 			checkpoint := checkpointTerminalAction(nil, call, nil)
-			if !requiresFinalFailureExplanation(checkpoint) || terminalFailureCodeFromCheckpoint(checkpoint) != "action_failed" {
-				t.Fatalf("mutation failure retained retry authority: %#v", checkpoint)
+			if feedback, active := ReadToolFeedbackCorrection(checkpoint); requiresFinalFailureExplanation(checkpoint) || !active || feedback.Message != "provider disconnected" {
+				t.Fatalf("mutation failure was not returned: %#v", checkpoint)
 			}
-			if _, active := ReadToolFeedbackCorrection(checkpoint); active {
-				t.Fatal("mutation failure granted automatic correction")
+			if last, _ := checkpoint["lastAction"].(map[string]interface{}); phase != "" && last["failurePhase"] != phase {
+				t.Fatalf("failure phase lost: %#v", last)
 			}
 			encoded, err := json.Marshal(call)
 			if err != nil {
@@ -300,20 +425,22 @@ func TestToolFeedbackMutationFailureAlwaysStopsAndPreservesPhase(t *testing.T) {
 	}
 }
 
-func TestToolFeedbackLegacyFailurePublishesWithoutModelCallAcrossStores(t *testing.T) {
+func TestToolFeedbackStoppedAttemptPublishesWithoutModelCallAcrossStores(t *testing.T) {
 	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
 		now := time.Now().UTC()
 		_, scope := feedbackReadCatalog(t)
 		portfolio := NewPortfolioService(store)
 		portfolio.now = func() time.Time { return now }
+		stopped := checkpointTerminalAction(nil, &ActionCall{ID: "failed-read", Status: ActionCallStatusFailed, SideEffect: skill.SideEffectRead, Error: "invalid fields"}, nil)
+		stopped = checkpointTerminalFailure(checkpointFinalFailureExplanation(stopped, "action", "invalid fields"), "action_failed")
 		if _, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope,
 			Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reader-agent"}, AssignedAgentID: "reader-agent", Goal: "Read records",
-			Checkpoint: checkpointTerminalAction(nil, &ActionCall{ID: "legacy-read", Status: ActionCallStatusFailed, SideEffect: skill.SideEffectRead, Error: "invalid fields"}, nil)}); err != nil {
+			Checkpoint: stopped}); err != nil {
 			t.Fatal(err)
 		}
 		run := feedbackClaim(t, store, scope, now)
 		host := &failureExplanationTestHost{respond: func(HostedTurnRequest) (*HostedTurnResponse, error) {
-			t.Fatal("legacy failed attempt invoked an explanatory model")
+			t.Fatal("stopped attempt invoked an explanatory model")
 			return nil, nil
 		}}
 		runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "reader-agent", DefinitionID: "reader", DefinitionVersion: "1"})
@@ -323,7 +450,7 @@ func TestToolFeedbackLegacyFailurePublishesWithoutModelCallAcrossStores(t *testi
 		result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "agent-worker"}, runner)
 		if err != nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.Error != "invalid fields" ||
 			result.Run.Output["summary"] != TerminalFailureReply("action_failed") || host.calls != 0 || (result.Turn.Usage.InputTokens != 0 || result.Turn.Usage.OutputTokens != 0 || result.Turn.Usage.Cost != 0 || result.Turn.Usage.RepairAttempts != 0) {
-			t.Fatalf("legacy failure was not terminal without model usage: %#v %v calls=%d", result, err, host.calls)
+			t.Fatalf("stopped attempt was not terminal without model usage: %#v %v calls=%d", result, err, host.calls)
 		}
 		feedbackAssertNotClaimable(t, store, scope, now)
 	})
@@ -349,7 +476,7 @@ func TestToolFeedbackNewUserAttemptAdmissionConflictIsAtomic(t *testing.T) {
 		run := feedbackCreateRun(t, store, scope, now)
 		feedbackPropose(t, store, catalog, run, now, "first", "bad", ActionDispositionAllow)
 		dispatches := 0
-		failed, err := feedbackFailingWorker(store, catalog, now, &dispatches).RunOnce(t.Context(), scope, "action-worker", time.Minute)
+		failed, err := feedbackPlatformFailingWorker(store, catalog, now, &dispatches).RunOnce(t.Context(), scope, "action-worker", time.Minute)
 		if err != nil || failed == nil {
 			t.Fatalf("failure: %#v %v", failed, err)
 		}
@@ -422,31 +549,30 @@ func (c *feedbackExecutionCatalogProbe) Resolve(ctx context.Context, scope skill
 	return c.ActionExecutionCatalog.Resolve(ctx, scope, deploymentID, skillID, version, action, selection...)
 }
 
-func TestToolFeedbackLegacyAdmittedReadyCorrectionCannotDispatchAcrossStores(t *testing.T) {
+// Only the call correction admission recorded may run while a failure awaits
+// its correction.
+func TestToolFeedbackUnadmittedReadyCallCannotDispatchAcrossStores(t *testing.T) {
 	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
 		now := time.Now().UTC()
 		catalog, scope := feedbackReadCatalog(t)
 		run := feedbackCreateRun(t, store, scope, now)
-		proposal := feedbackPropose(t, store, catalog, run, now, "legacy-admitted-correction", "id", ActionDispositionAllow)
-		// Restore the durable, kernel-authored shape written before the
-		// zero-correction policy. The correction was already admitted Ready,
-		// so checking only new proposals cannot protect the dispatch boundary.
-		legacy := cloneAgentRun(proposal.Run)
-		legacy.Checkpoint = appendActionHistory(legacy.Checkpoint, &ActionCall{
-			ID: "legacy-failed-read", Scope: scope, RunID: run.ID, Status: ActionCallStatusFailed,
+		proposal := feedbackPropose(t, store, catalog, run, now, "unadmitted", "id", ActionDispositionAllow)
+		pending := cloneAgentRun(proposal.Run)
+		pending.Checkpoint = appendActionHistory(pending.Checkpoint, &ActionCall{
+			ID: "prior-failed-read", Scope: scope, RunID: run.ID, Status: ActionCallStatusFailed,
 			SkillID: "reader", SkillVersion: "1.0.0", Action: "list", SideEffect: skill.SideEffectRead,
 			Arguments: map[string]interface{}{"fields": "bad"}, Error: "invalid fields",
 		})
-		legacy.Checkpoint[ToolFeedbackCorrectionCheckpointKey] = map[string]interface{}{
+		pending.Checkpoint[ToolFeedbackCorrectionCheckpointKey] = map[string]interface{}{
 			"kind": "action", "message": "invalid fields", "correctionsUsed": 1,
-			"lastFailureId": "legacy-failed-read", "admittedActionCallId": proposal.Call.ID,
+			"lastFailureId": "prior-failed-read", "admittedActionCallId": "another-call",
 		}
-		legacy.Revision++
-		legacy.UpdatedAt = now
-		_, err := store.UpdateAgentRunWithEvent(t.Context(), legacy, proposal.Run.Revision, &ActivityEvent{
-			ID: "restore-legacy-ready", Scope: scope, RunID: run.ID, AgentID: "reader-agent",
-			EventType: "test.legacy_checkpoint_restored", Severity: ActivitySeverityInfo, Visibility: ActivityVisibilityScope,
-			Actor: ActivityActor{Type: "worker", ID: "fixture"}, Summary: "Restored a pre-upgrade correction checkpoint", CreatedAt: now,
+		pending.Revision++
+		pending.UpdatedAt = now
+		_, err := store.UpdateAgentRunWithEvent(t.Context(), pending, proposal.Run.Revision, &ActivityEvent{
+			ID: "restore-pending-feedback", Scope: scope, RunID: run.ID, AgentID: "reader-agent",
+			EventType: "test.feedback_checkpoint_restored", Severity: ActivitySeverityInfo, Visibility: ActivityVisibilityScope,
+			Actor: ActivityActor{Type: "worker", ID: "fixture"}, Summary: "Restored a pending correction checkpoint", CreatedAt: now,
 		}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -462,23 +588,21 @@ func TestToolFeedbackLegacyAdmittedReadyCorrectionCannotDispatchAcrossStores(t *
 		}))
 		worker.now = func() time.Time { return now }
 		stopped, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
-		if err != nil || stopped == nil || stopped.Run.Status != AgentRunStatusFailed || stopped.Call.Status != ActionCallStatusFailed ||
-			stopped.Call.FailurePhase != ActionFailureBeforeDispatch || !requiresFinalFailureExplanation(stopped.Run.Checkpoint) || executionCatalog.resolutions != 0 || credentialCalls != 0 || dispatches != 0 {
-			t.Fatalf("legacy correction crossed dispatch boundary: %#v %v catalogcalls=%d credentialcalls=%d dispatches=%d", stopped, err, executionCatalog.resolutions, credentialCalls, dispatches)
+		if err != nil || stopped == nil || stopped.Call.Status != ActionCallStatusFailed || stopped.Call.Error != errActionNotAdmittedAfterFailure.Error() ||
+			stopped.Call.FailurePhase != ActionFailureBeforeDispatch || executionCatalog.resolutions != 0 || credentialCalls != 0 || dispatches != 0 {
+			t.Fatalf("unadmitted call crossed dispatch boundary: %#v %v catalogcalls=%d credentialcalls=%d dispatches=%d", stopped, err, executionCatalog.resolutions, credentialCalls, dispatches)
 		}
 		foundPrior := false
 		for _, entry := range actionHistoryEntries(stopped.Run.Checkpoint) {
-			if entry["actionCallId"] == "legacy-failed-read" && entry["error"] == "invalid fields" {
+			if entry["actionCallId"] == "prior-failed-read" && entry["error"] == "invalid fields" {
 				foundPrior = true
 			}
 		}
 		if !foundPrior {
-			t.Fatalf("stopping legacy correction lost the original failure receipt: %#v", stopped.Run.Checkpoint)
+			t.Fatalf("blocked call lost the original failure receipt: %#v", stopped.Run.Checkpoint)
 		}
-		feedbackAssertKernelFailureReply(t, stopped.Run, "action_failed")
-		feedbackAssertNotClaimable(t, store, scope, now)
 		if again, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute); err != nil || again != nil || dispatches != 0 {
-			t.Fatalf("legacy correction was requeued: %#v %v dispatches=%d", again, err, dispatches)
+			t.Fatalf("blocked call was requeued: %#v %v dispatches=%d", again, err, dispatches)
 		}
 	})
 }
@@ -511,4 +635,25 @@ func TestToolFeedbackNormalSucceededActionsStillContinueAcrossStores(t *testing.
 			t.Fatalf("normal action chain dispatched %d times", dispatches)
 		}
 	})
+}
+
+func TestToolFeedbackOutcomeIsOneCorrectionOrAFinalExplanation(t *testing.T) {
+	failed := &ActionCall{ID: "failed", Status: ActionCallStatusFailed, SideEffect: skill.SideEffectWrite, Action: "pay", Error: "amount must be the order total"}
+	run := &AgentRun{Status: AgentRunStatusRunning, Checkpoint: checkpointTerminalAction(nil, failed, nil)}
+	action := TurnAction{Type: "skill", Capability: "browser.pay"}
+	for name, test := range map[string]struct {
+		outcome *TurnOutcome
+		valid   bool
+	}{
+		"correction":  {&TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedActions: []TurnAction{action}}, true},
+		"explanation": {&TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "The payment amount was wrong."}, true},
+		"two actions": {&TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedActions: []TurnAction{action, action}}, false},
+		"fork":        {&TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedFork: &TurnForkProposal{}}, false},
+		"wait":        {&TurnOutcome{NextRunStatus: AgentRunStatusWaitingForEvent, WakeCondition: &WakeCondition{Type: "timer"}}, false},
+		"silent":      {&TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"silent": true}}, false},
+	} {
+		if err := validateToolFeedbackCorrectionOutcome(run, test.outcome); (err == nil) != test.valid {
+			t.Errorf("%s: valid=%v err=%v", name, test.valid, err)
+		}
+	}
 }

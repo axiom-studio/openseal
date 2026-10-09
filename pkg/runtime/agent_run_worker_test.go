@@ -464,7 +464,9 @@ func TestAgentRunWorkerResumesCompletedIdempotentActionReplay(t *testing.T) {
 	}
 }
 
-func TestAgentRunWorkerStopsConversationMaterializationFailureWithoutModelRepair(t *testing.T) {
+// Only a single action proposal is returned to the model; a rejected Turn that
+// also proposed other work stops the attempt.
+func TestAgentRunWorkerStopsCombinedProposalMaterializationFailure(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "proposal-failure"}
@@ -494,7 +496,7 @@ func TestAgentRunWorkerStopsConversationMaterializationFailureWithoutModelRepair
 	}, RequestedActions: []TurnAction{{
 		Type: "skill_action", Capability: "openseal.objectives.pause", InputRef: "/actionInputs/call",
 		BindingID: "bundled:objectives", BindingRevision: 1,
-	}}}
+	}}, RequestedFork: &TurnForkProposal{ForkID: "parallel"}}
 	pool.failMaterialization(ctx, workerID, claimed, turn, fmt.Errorf("%w: draft -> paused", ErrInvalidObjectiveTransition))
 
 	failed, err := store.GetAgentRun(ctx, scope, run.ID)
@@ -525,7 +527,7 @@ func TestAgentRunWorkerStopsConversationMaterializationFailureWithoutModelRepair
 	}
 }
 
-func TestAgentRunWorkerProposalFailurePreservesEvidenceWithoutModelRepair(t *testing.T) {
+func TestAgentRunWorkerProposalRejectionReturnsToTheModelWithinBounds(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "agent-proposal-recovery"}
@@ -560,26 +562,44 @@ func TestAgentRunWorkerProposalFailurePreservesEvidenceWithoutModelRepair(t *tes
 	}}}
 	pool.failMaterialization(ctx, workerID, claimed, turn, errors.New("target requires a current observation"))
 
-	failed, err := store.GetAgentRun(ctx, scope, run.ID)
+	returned, err := store.GetAgentRun(ctx, scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Status != AgentRunStatusFailed || failed.Error == "" || failed.LeaseOwner != "" || failed.CompletedAt == nil ||
-		failed.Checkpoint[proposalRecoveryCheckpointKey] != nil || terminalFailureCodeFromCheckpoint(failed.Checkpoint) != "action_admission_failed" {
-		t.Fatalf("failed proposal retained repair authority: %#v", failed)
+	feedback, active := ReadToolFeedbackCorrection(returned.Checkpoint)
+	state, _ := returned.Checkpoint[ToolFeedbackCorrectionCheckpointKey].(map[string]interface{})
+	rejected, _ := state["rejectedProposal"].(map[string]interface{})
+	arguments, _ := rejected["arguments"].(map[string]interface{})
+	if returned.Status != AgentRunStatusQueued || returned.Error != "" || returned.LeaseOwner != "" || returned.CompletedAt != nil ||
+		!active || feedback.Kind != "proposal" || feedback.Message != "target requires a current observation" ||
+		rejected["capability"] != "skill-browser.camoufox-commit" || arguments["target"] != "s4:e9" || requiresFinalFailureExplanation(returned.Checkpoint) {
+		t.Fatalf("rejected proposal was not returned to the model: %#v", returned)
 	}
-	if failed.Checkpoint["inventedFillActionId"] != nil || failed.Checkpoint["actionInputs"] != nil {
-		t.Fatalf("rejected model proposal gained checkpoint authority: %#v", failed.Checkpoint)
+	if returned.Checkpoint["inventedFillActionId"] != nil || returned.Checkpoint["actionInputs"] != nil {
+		t.Fatalf("rejected model proposal gained checkpoint authority: %#v", returned.Checkpoint)
 	}
-	entries := actionHistoryEntries(failed.Checkpoint)
+	entries := actionHistoryEntries(returned.Checkpoint)
 	if len(entries) != 1 || entries[0]["actionCallId"] != "committed-observation" {
 		t.Fatalf("materialization failure lost succeeded evidence: %#v", entries)
 	}
-	if _, ok := checkpointGovernedProposalFailure(failed, turn, errors.New("target still invalid"), "target still invalid"); ok {
-		t.Fatal("failed proposal was accepted for an automatic correction turn")
+	// Rejected corrections spend the failure's corrections, then the attempt stops.
+	current := returned
+	for attempt := 1; attempt <= MaximumToolFeedbackCorrections; attempt++ {
+		current, err = store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, Kind: RunKindAgentWork, WorkerID: workerID, Now: time.Now(),
+			LeaseDuration: time.Minute, AgingInterval: time.Minute})
+		if err != nil || current == nil || current.ID != run.ID {
+			t.Fatalf("returned rejection was not claimable: %#v %v", current, err)
+		}
+		pool.failMaterialization(ctx, workerID, current, turn, errors.New("target still invalid"))
+		if current, err = store.GetAgentRun(ctx, scope, run.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if current.Status != AgentRunStatusFailed || current.CompletedAt == nil || terminalFailureCodeFromCheckpoint(current.Checkpoint) != "action_admission_failed" {
+		t.Fatalf("repeated rejections did not stop the attempt: %#v", current)
 	}
 	feedbackAssertNotClaimable(t, store, scope, time.Now())
-	feedbackAssertKernelFailureReply(t, failed, "action_admission_failed")
+	feedbackAssertKernelFailureReply(t, current, "action_admission_failed")
 }
 
 func TestAgentRunWorkerMaterializesDurableFork(t *testing.T) {
