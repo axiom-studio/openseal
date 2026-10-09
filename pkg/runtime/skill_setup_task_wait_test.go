@@ -358,7 +358,17 @@ func TestSkillSetupTaskResolutionPreservesOperatorPauseAndCancel(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				f.resolve(t, "resolved")
+				if command == AgentRunCommandCancel {
+					// Canceling closes the Run's open setup form; it can no longer
+					// be completed for this Run.
+					closed, err := store.GetSkillSetupRequest(t.Context(), f.request.Scope, f.request.ID)
+					if err != nil || closed == nil || closed.Status != "dismissed" || closed.ResolvedBy != TerminalRunInteractionCloser {
+						t.Fatalf("cancel left the setup form open: %#v %v", closed, err)
+					}
+					f.request = closed
+				} else {
+					f.resolve(t, "resolved")
+				}
 				f.store = restart()
 				result, handled, err := f.reconcile(t)
 				if err != nil || !handled || result == nil || !reflect.DeepEqual(result.Run, changed.Run) || skillSetupCompletionEvents(t, f.store, waiting) != 0 {
