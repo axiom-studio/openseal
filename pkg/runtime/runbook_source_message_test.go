@@ -10,7 +10,10 @@ type invocationMessageFixture struct {
 	message      *ChannelMessage
 }
 
-func (f invocationMessageFixture) GetConversation(context.Context, Scope, string) (*Conversation, error) {
+func (f invocationMessageFixture) GetConversation(_ context.Context, _ Scope, id string) (*Conversation, error) {
+	if f.conversation == nil || f.conversation.ID != id {
+		return nil, ErrConversationNotFound
+	}
 	return f.conversation, nil
 }
 func (f invocationMessageFixture) GetChannelMessage(context.Context, Scope, string, string) (*ChannelMessage, error) {
@@ -20,7 +23,7 @@ func (f invocationMessageFixture) GetChannelMessage(context.Context, Scope, stri
 func TestRunbookSourceMessagePreservesExactScopedInvocation(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "7"}
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-	run := &AgentRun{Kind: RunKindConversation, Scope: scope, Owner: owner, ConcurrencyKey: "chat", Context: map[string]interface{}{conversationRunContextTriggerID: "message"}}
+	run := &AgentRun{Kind: RunKindConversation, Scope: scope, Owner: owner, ConcurrencyKey: "chat", Context: map[string]interface{}{conversationRunContextConversationID: "chat", conversationRunContextTriggerID: "message"}}
 	f := invocationMessageFixture{&Conversation{ID: "chat", Scope: scope, Owner: owner}, &ChannelMessage{ID: "message", Scope: scope, ConversationID: "chat", Content: "Read https://example.org/report and summarize it", Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"}}}
 	got, err := runbookSourceMessage(t.Context(), f, run)
 	if err != nil || got["content"] != f.message.Content || got["messageId"] != "message" {
@@ -39,6 +42,13 @@ func TestRunbookSourceMessagePreservesExactScopedInvocation(t *testing.T) {
 		if _, err := runbookSourceMessage(t.Context(), invalid, run); err == nil {
 			t.Fatal("accepted foreign invocation")
 		}
+	}
+	// A threaded reply runs under "<conversation>:thread:<root>"; the source
+	// message still resolves through the Run's conversation.
+	threaded := *run
+	threaded.ConcurrencyKey = "chat:thread:root"
+	if got, err := runbookSourceMessage(t.Context(), f, &threaded); err != nil || got["conversationId"] != "chat" {
+		t.Fatalf("threaded source=%#v err=%v", got, err)
 	}
 	invocation := map[string]interface{}{"sourceMessage": got, "summary": "Read report", "arguments": map[string]interface{}{"format": "brief"}}
 	if forwardRunbookInvocation(invocation, true)["sourceMessage"] == nil {
