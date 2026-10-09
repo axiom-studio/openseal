@@ -73,7 +73,7 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			} else if existing != nil {
 				continue
 			}
-			oldKey := "agent-channel-response:" + hashString(scope.Kind+"\x00"+scope.ID+"\x00"+run.ID+"\x00"+triggerID)
+			oldKey := conversationRunResponseKey(run, triggerID)
 			old, err := s.conversations.store.FindChannelMessageByIdempotencyKey(ctx, scope, conversationID, oldKey)
 			if err != nil {
 				return err

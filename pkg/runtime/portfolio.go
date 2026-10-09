@@ -211,6 +211,10 @@ type AgentRunIntervention struct {
 	CreatedAt            time.Time                    `json:"createdAt"`
 	ConversationAnswer   *ConversationAnswerReceipt   `json:"conversationAnswer,omitempty"`
 	SkillSetupResolution *SkillSetupResolutionReceipt `json:"skillSetupResolution,omitempty"`
+	// ConversationMessage identifies a channel message delivered to the
+	// thread's active foreground conversation Run instead of starting a
+	// parallel Run. Instruction carries that message's text.
+	ConversationMessage *ConversationMessageDelivery `json:"conversationMessage,omitempty"`
 }
 
 // ConversationAnswerReceipt records the canonical question and authenticated

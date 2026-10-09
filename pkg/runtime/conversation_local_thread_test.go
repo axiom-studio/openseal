@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestLocalConversationThreadScopesSupersessionAndPreservesIndependentWork(t *testing.T) {
+func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "local-threads"}
@@ -57,30 +57,36 @@ func TestLocalConversationThreadScopesSupersessionAndPreservesIndependentWork(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	newOne := schedule(post("interrupt first call reply", rootOne.ID, ConversationParticipantUser))
+	followUp := post("follow up on first call reply", rootOne.ID, ConversationParticipantUser)
+	if delivered := schedule(followUp); delivered.ID != one.ID {
+		t.Fatalf("thread follow-up started another Run: %#v", delivered)
+	}
 	for _, expected := range []struct {
-		run    *AgentRun
-		status AgentRunStatus
+		run      *AgentRun
+		followUp string
 	}{
-		{ordinary, AgentRunStatusQueued}, {one, AgentRunStatusCanceled}, {two, AgentRunStatusQueued},
-		{newOne, AgentRunStatusQueued}, {independent, AgentRunStatusQueued},
+		{ordinary, ""}, {one, followUp.ID}, {two, ""}, {independent, ""},
 	} {
+		want := 0
+		if expected.followUp != "" {
+			want = 1
+		}
 		current, err := store.GetAgentRun(t.Context(), scope, expected.run.ID)
-		if err != nil || current.Status != expected.status {
-			t.Fatalf("wrong thread was interrupted: %#v expected=%s err=%v", current, expected.status, err)
+		if err != nil || current.Status != AgentRunStatusQueued || len(conversationRunFollowUps(current)) != want ||
+			want == 1 && !conversationRunHasFollowUp(current, expected.followUp) {
+			t.Fatalf("follow-up reached the wrong thread: %#v expected=%q err=%v", current, expected.followUp, err)
 		}
 	}
 	if one.Context["threadRootMessageId"] != rootOne.ID || one.ConcurrencyKey != conversation.ID+":thread:"+rootOne.ID || ordinary.ConcurrencyKey != conversation.ID {
 		t.Fatal("local roots did not become canonical foreground execution context")
 	}
-	schedule(post("replace ordinary request", "", ConversationParticipantUser))
-	current, err := store.GetAgentRun(t.Context(), scope, ordinary.ID)
-	if err != nil || current.Status != AgentRunStatusCanceled {
-		t.Fatal("ordinary unthreaded prompts stopped superseding their conversation lane")
+	unthreaded := post("refine ordinary request", "", ConversationParticipantUser)
+	if delivered := schedule(unthreaded); delivered.ID != ordinary.ID || !conversationRunHasFollowUp(delivered, unthreaded.ID) {
+		t.Fatalf("unthreaded follow-up was not delivered to the conversation lane Run: %#v", delivered)
 	}
-	current, err = store.GetAgentRun(t.Context(), scope, newOne.ID)
-	if err != nil || current.Status != AgentRunStatusQueued {
-		t.Fatal("ordinary unthreaded prompt canceled another call's reply")
+	current, err := store.GetAgentRun(t.Context(), scope, one.ID)
+	if err != nil || conversationRunHasFollowUp(current, unthreaded.ID) {
+		t.Fatal("unthreaded prompt reached another call's Run")
 	}
 }
 

@@ -42,14 +42,19 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	}
 	first, _ := store.GetAgentRun(ctx, endpoint.Scope, applied[0].RunID)
 	other, _ := store.GetAgentRun(ctx, endpoint.Scope, applied[1].RunID)
-	followup, _ := store.GetAgentRun(ctx, endpoint.Scope, applied[2].RunID)
-	if first.Status != AgentRunStatusQueued || other.Status != AgentRunStatusQueued || followup.Status != AgentRunStatusQueued {
+	if first.Status != AgentRunStatusQueued || other.Status != AgentRunStatusQueued {
 		t.Fatal("incoming message canceled previous work")
 	}
-	if first.ConcurrencyKey == other.ConcurrencyKey || first.ConcurrencyKey != followup.ConcurrencyKey {
+	// A follow-up in an active thread is delivered to that thread's Run
+	// instead of starting a parallel Run in the same lane.
+	if applied[2].RunID != first.ID || !conversationRunHasFollowUp(first, applied[2].ChannelMessageID) || len(first.PendingInterventions) != 1 ||
+		first.PendingInterventions[0].Instruction != "followup-one" {
+		t.Fatalf("follow-up was not delivered to the active thread Run: item=%#v run=%#v", applied[2], first)
+	}
+	if first.ConcurrencyKey == other.ConcurrencyKey {
 		t.Fatal("thread execution keys do not match canonical roots")
 	}
-	for _, run := range []*AgentRun{first, other, followup} {
+	for _, run := range []*AgentRun{first, other} {
 		if err := validateConversationRun(run); err != nil {
 			t.Fatal(err)
 		}
@@ -64,7 +69,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 		t.Fatalf("independent thread blocked=%#v %v", b, err)
 	}
 	if blocked, err := store.ClaimNextAgentRun(ctx, claim); err != nil || blocked != nil {
-		t.Fatalf("same thread ran concurrently: %#v %v", blocked, err)
+		t.Fatalf("thread follow-up created another Run: %#v %v", blocked, err)
 	}
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.Owner.ID}}
 	root, _ := first.Context["threadRootMessageId"].(string)
@@ -80,11 +85,31 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if _, err := ReadConversationHistory(ctx, worker.conversations, endpoint.Scope, endpoint.Owner, applied[0].ConversationID, viewer, ConversationHistoryReadRequest{MessageID: applied[1].ChannelMessageID}, root); err == nil {
 		t.Fatal("explicit message lookup escaped its thread")
 	}
-	// Explicit cancellation remains available even though new messages no longer cancel.
+	// Explicit cancellation remains available. A later message in the thread
+	// of a terminal Run starts a new Run rather than reviving the old one.
 	if _, err := scheduler.runs.CommandAgentRun(ctx, AgentRunCommandRequest{Scope: endpoint.Scope, RunID: a.ID, ExpectedRevision: a.Revision, Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "human"}}); err != nil {
 		t.Fatal(err)
 	}
-	if next, err := store.ClaimNextAgentRun(ctx, claim); err != nil || next == nil || next.ConcurrencyKey != a.ConcurrencyKey {
-		t.Fatalf("queued followup not released: %#v %v", next, err)
+	canceled, _ := store.GetAgentRun(ctx, endpoint.Scope, a.ID)
+	thread := "one"
+	if canceled.ConcurrencyKey != first.ConcurrencyKey {
+		thread = "two"
+	}
+	now := time.Now().UTC()
+	item := &ExternalConversationInboxItem{
+		ID: "after-cancel", Scope: endpoint.Scope, EndpointID: endpoint.ID, EndpointRevision: endpoint.Revision, Adapter: endpoint.Adapter,
+		Event: NormalizedExternalConversationEvent{ID: "after-cancel", Type: capability.ConversationEventMessageReceived, ExternalConversationID: "same-channel", ExternalThreadID: thread,
+			ExternalMessageID: "after-cancel", ExternalParticipantID: "human", Text: "start again", MentionsEndpoint: true, OrderingKey: "same-channel:" + thread, OccurredAt: now},
+		Status: ExternalConversationInboxPending, MaximumAttempts: 3, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err := store.ReceiveExternalConversationEvent(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := worker.ProcessOne(ctx, endpoint.Scope)
+	if err != nil || restarted == nil || restarted.RunID == a.ID {
+		t.Fatalf("message after a terminal Run = %#v, %v", restarted, err)
+	}
+	if next, err := store.ClaimNextAgentRun(ctx, claim); err != nil || next == nil || next.ConcurrencyKey != a.ConcurrencyKey || next.ID != restarted.RunID {
+		t.Fatalf("new thread Run not claimable: %#v %v", next, err)
 	}
 }
