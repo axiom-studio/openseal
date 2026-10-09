@@ -159,6 +159,9 @@ func (w *ExternalConversationReplyWorker) projectItem(
 	if run == nil || run.Status == AgentRunStatusCanceled {
 		return nil, nil
 	}
+	if externalInboxItemIsFollowUp(item, run) {
+		return nil, nil // The Run's own trigger item delivers its single reply.
+	}
 	if run.Status != AgentRunStatusCompleted && run.Status != AgentRunStatusFailed {
 		return nil, errExternalReplyPending
 	}

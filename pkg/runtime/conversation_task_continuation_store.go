@@ -98,7 +98,18 @@ func conversationTaskContinuationCandidate(run *AgentRun) bool {
 
 func conversationTaskFinalResponseKey(run *AgentRun) string {
 	trigger, _ := run.Context[conversationRunContextTriggerID].(string)
-	return "agent-channel-response:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+trigger)
+	return conversationRunResponseKey(run, trigger)
+}
+
+// conversationRunResponseKey names one Run's answer to its trigger and the
+// follow-ups it has received. A follow-up delivered after an answer was
+// posted makes the continued Run's next answer a distinct message.
+func conversationRunResponseKey(run *AgentRun, triggerID string) string {
+	material := run.Scope.Kind + "\x00" + run.Scope.ID + "\x00" + run.ID + "\x00" + triggerID
+	if followUps := conversationRunFollowUps(run); len(followUps) > 0 {
+		material += "\x00" + followUps[len(followUps)-1].MessageID
+	}
+	return "agent-channel-response:" + hashString(material)
 }
 
 func conversationTaskFinalResponseKeys(run *AgentRun) []string {

@@ -42,6 +42,9 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 			if run == nil || run.Owner != endpoint.Owner {
 				return result, seen, ErrExternalConversationConflict
 			}
+			if externalInboxItemIsFollowUp(item, run) {
+				return nil, false, nil // The trigger's item already forwards this Run's updates.
+			}
 			phase := "commentary-" + event.ID
 			message, err := w.post(ctx, item, endpoint, RunProgressAcknowledgement{RunID: run.ID, Phase: phase, Text: event.Summary, SourceEventID: event.ID})
 			if err != nil {

@@ -118,29 +118,35 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 		if one.StartsThread || two.StartsThread || nextOne.StartsThread || one.ThreadRootID != rootOne.ID || two.ThreadRootID != rootTwo.ID || nextOne.ThreadRootID != rootOne.ID {
 			t.Fatal("ordinary replies no longer inherit their canonical thread")
 		}
+		// Replies in each call thread are delivered to that thread's active Run.
+		if oneRun.ID != rootOneRun.ID || nextOneRun.ID != rootOneRun.ID || twoRun.ID != rootTwoRun.ID || ordinaryRun.ID == rootOneRun.ID {
+			t.Fatalf("thread replies started parallel Runs: %s %s %s %s", rootOneRun.ID, oneRun.ID, nextOneRun.ID, twoRun.ID)
+		}
 		for _, expected := range []struct {
-			run    *AgentRun
-			status AgentRunStatus
+			run       *AgentRun
+			followUps []string
 		}{
-			{ordinaryRun, AgentRunStatusQueued}, {rootOneRun, AgentRunStatusCanceled}, {rootTwoRun, AgentRunStatusCanceled},
-			{oneRun, AgentRunStatusCanceled}, {twoRun, AgentRunStatusQueued}, {nextOneRun, AgentRunStatusQueued},
+			{ordinaryRun, nil}, {rootOneRun, []string{one.ID, nextOne.ID}}, {rootTwoRun, []string{two.ID}},
 		} {
 			current, err := store.GetAgentRun(t.Context(), conversation.Scope, expected.run.ID)
-			if err != nil || current == nil || current.Status != expected.status {
-				t.Fatalf("wrong lane was superseded: run=%#v expected=%s err=%v", current, expected.status, err)
+			if err != nil || current == nil || current.Status != AgentRunStatusQueued || len(conversationRunFollowUps(current)) != len(expected.followUps) {
+				t.Fatalf("follow-ups reached the wrong lane: run=%#v expected=%v err=%v", current, expected.followUps, err)
+			}
+			for index, id := range expected.followUps {
+				if conversationRunFollowUps(current)[index].MessageID != id {
+					t.Fatalf("follow-ups out of order: %#v", conversationRunFollowUps(current))
+				}
 			}
 		}
 		newOrdinary := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "new-ordinary", RequiresResponse: true})
-		schedule(newOrdinary, "")
-		for _, run := range []*AgentRun{twoRun, nextOneRun} {
-			current, err := store.GetAgentRun(t.Context(), conversation.Scope, run.ID)
-			if err != nil || current == nil || current.Status != AgentRunStatusQueued {
-				t.Fatalf("ordinary prompt interrupted a call thread: %#v, %v", current, err)
-			}
+		if delivered := schedule(newOrdinary, ""); delivered.ID != ordinaryRun.ID {
+			t.Fatalf("ordinary follow-up started a parallel Run: %#v", delivered)
 		}
-		current, err := store.GetAgentRun(t.Context(), conversation.Scope, ordinaryRun.ID)
-		if err != nil || current.Status != AgentRunStatusCanceled {
-			t.Fatalf("legacy conversation lane stopped superseding: %#v, %v", current, err)
+		for _, run := range []*AgentRun{rootOneRun, rootTwoRun} {
+			current, err := store.GetAgentRun(t.Context(), conversation.Scope, run.ID)
+			if err != nil || current == nil || conversationRunHasFollowUp(current, newOrdinary.ID) {
+				t.Fatalf("ordinary prompt reached a call thread: %#v, %v", current, err)
+			}
 		}
 		timeline, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: conversation.Scope, ConversationID: conversation.ID, ChannelTimeline: true, Limit: 100})
 		if err != nil || !reflect.DeepEqual(conversationThreadStartMessageIDs(timeline), []string{ordinary.ID, rootOne.ID, rootTwo.ID, newOrdinary.ID}) {
