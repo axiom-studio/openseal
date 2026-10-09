@@ -57,3 +57,36 @@ func TestObservationRefActionProposalValidator(t *testing.T) {
 		})
 	}
 }
+
+func TestObservationRefRequiresFlagsAndHonorsOptionalReferences(t *testing.T) {
+	schema := func(required ...interface{}) *skill.BoundAction {
+		return &skill.BoundAction{Action: skill.Action{InputSchema: map[string]interface{}{
+			"type": "object", "required": required,
+			"properties": map[string]interface{}{"target": map[string]interface{}{"type": "string",
+				observationRefSchemaExtension: map[string]interface{}{"roles": []interface{}{"button"}, "requireFlags": []interface{}{"finalPay"}}}},
+		}}}
+	}
+	run := &AgentRun{Checkpoint: map[string]interface{}{"lastAction": map[string]interface{}{
+		"status": string(ActionCallStatusSucceeded),
+		"result": map[string]interface{}{"generation": 11, "elements": []interface{}{
+			map[string]interface{}{"ref": "s11:e5", "role": "button", "finalPay": true, "state": map[string]interface{}{}},
+			map[string]interface{}{"ref": "s11:e12", "role": "button", "state": map[string]interface{}{}},
+		}},
+	}}}
+	validate := func(bound *skill.BoundAction, arguments map[string]interface{}) error {
+		_, err := ObservationRefActionProposalValidator{}.ValidateActionProposal(context.Background(), ActionProposalValidationInput{Run: run, Bound: bound, Arguments: arguments})
+		return err
+	}
+	if err := validate(schema(), map[string]interface{}{"target": "s11:e5"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := validate(schema(), map[string]interface{}{"target": "s11:e12"}); err == nil || !strings.Contains(err.Error(), "not marked finalPay") {
+		t.Fatalf("unmarked element accepted: %v", err)
+	}
+	if err := validate(schema(), map[string]interface{}{}); err != nil {
+		t.Fatalf("optional reference required: %v", err)
+	}
+	if err := validate(schema("target"), map[string]interface{}{}); err == nil {
+		t.Fatal("required reference omitted")
+	}
+}
