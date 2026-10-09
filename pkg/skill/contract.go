@@ -1194,6 +1194,15 @@ var (
 )
 
 func validateHostingRequirements(requirements Requirements) error {
+	switch requirements.Tenancy {
+	case "", TenancyTenant:
+	case TenancyShared:
+		if len(requirements.Storage) != 0 || len(requirements.Environment) != 0 || len(requirements.Configuration) != 0 {
+			return errors.New("shared tenancy cannot declare storage, environment or configuration requirements")
+		}
+	default:
+		return fmt.Errorf("tenancy %q is invalid", requirements.Tenancy)
+	}
 	seenNames := make(map[string]bool, len(requirements.Storage))
 	seenMounts := make(map[string]bool, len(requirements.Storage))
 	for _, storage := range requirements.Storage {
