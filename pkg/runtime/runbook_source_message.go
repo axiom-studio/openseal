@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 )
 
 type runbookMessageReader interface {
@@ -31,7 +32,10 @@ func runbookSourceMessage(ctx context.Context, reader runbookMessageReader, run 
 	if reader == nil {
 		return nil, errors.New("runbook invocation message is unavailable")
 	}
-	conversation, err := reader.GetConversation(ctx, run.Scope, run.ConcurrencyKey)
+	// A threaded reply's concurrency key is "<conversation>:thread:<root>"; the
+	// conversation is the Run's own context, as everywhere else.
+	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	conversation, err := reader.GetConversation(ctx, run.Scope, strings.TrimSpace(conversationID))
 	if err != nil || conversation == nil || conversation.Scope != run.Scope || conversation.Owner != run.Owner {
 		return nil, errors.New("runbook invocation conversation is unavailable")
 	}
