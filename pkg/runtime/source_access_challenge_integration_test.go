@@ -119,9 +119,6 @@ func (f *sourceChallengeDispatchFixture) assertNoDispatch(t *testing.T, count in
 }
 
 func TestSourceAccessChallengeIntegrationDispatchesOnlyAfterCanonicalAnswer(t *testing.T) {
-	if MaximumToolFeedbackCorrections != 0 {
-		t.Fatal("integration must retain zero generic failed-action corrections")
-	}
 	for _, independent := range []bool{false, true} {
 		t.Run(fmt.Sprintf("independent=%v", independent), func(t *testing.T) {
 			forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
@@ -160,7 +157,7 @@ func TestSourceAccessChallengeIntegrationDispatchesOnlyAfterCanonicalAnswer(t *t
 					t.Fatalf("verified interaction could not dispatch once: %#v %v", result, err)
 				}
 				f.chat.run = result.Run
-				if _, active := ReadToolFeedbackCorrection(result.Run.Checkpoint); active || terminalFailureCheckpointActive(result.Run.Checkpoint) {
+				if _, active := ReadToolFeedbackCorrection(result.Run.Checkpoint); active || requiresFinalFailureExplanation(result.Run.Checkpoint) {
 					t.Fatal("successful selected action retained the old failed-attempt stop")
 				}
 				if len(f.dispatches) != 2 || f.dispatches[0] != "light" || f.dispatches[1] != "full" {
@@ -195,28 +192,37 @@ func TestSourceAccessChallengeIntegrationManualResumeCannotDispatchBeforeAnswer(
 	})
 }
 
-func TestSourceAccessChallengeIntegrationDoesNotContinueOtherFailures(t *testing.T) {
+func TestSourceAccessChallengeIntegrationLeavesOtherFailuresToTheirPolicy(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		failure error
+		// returned: an ordinary failure goes back to the model as its result;
+		// otherwise the platform failure stops the attempt.
+		returned bool
 	}{
-		{"source 429", skillerror.NewActionError("source_rate_limited", "", nil)},
-		{"challenge normalized to 429", skillerror.NewActionError("source_access_challenge", "", map[string]string{"httpStatus": "429"})},
-		{"mixed source throttling", skillerror.NewActionError("source_reads_failed", "", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_access_challenge"}]`})},
-		{"proxy authentication", skillerror.NewActionError("browser_proxy_authentication_failed", "", nil)},
-		{"untyped access challenge", errors.New("source_access_challenge: try another browser")},
+		{"source 429", skillerror.NewActionError("source_rate_limited", "", nil), false},
+		{"challenge normalized to 429", skillerror.NewActionError("source_access_challenge", "", map[string]string{"httpStatus": "429"}), false},
+		{"mixed source throttling", skillerror.NewActionError("source_reads_failed", "", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_access_challenge"}]`}), false},
+		{"proxy authentication", skillerror.NewActionError("browser_proxy_authentication_failed", "", nil), false},
+		{"untyped access challenge", errors.New("source_access_challenge: try another browser"), true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			forConversationTaskClarificationStores(t, func(t *testing.T, store conversationTaskClarificationStore) {
 				f := newSourceChallengeDispatchFixture(t, store, false, test.failure)
 				failed := f.initialFailure(t)
-				if failed.Run.Status != AgentRunStatusFailed || failed.Run.CompletedAt == nil || failed.Run.WakeCondition != nil {
-					t.Fatalf("ordinary failed action gained continuation: %#v", failed.Run)
-				}
 				if interaction, err := resolveSourceAccessChallengeInteraction(t.Context(), store, failed.Run); err != nil || interaction != nil {
 					t.Fatalf("ordinary failure gained interaction: %#v %v", interaction, err)
 				}
 				f.assertNoDispatch(t, 1)
+				if test.returned {
+					if _, active := ReadToolFeedbackCorrection(failed.Run.Checkpoint); failed.Run.Status != AgentRunStatusQueued || !active || requiresFinalFailureExplanation(failed.Run.Checkpoint) {
+						t.Fatalf("ordinary failure was not returned to the model: %#v", failed.Run)
+					}
+					return
+				}
+				if failed.Run.Status != AgentRunStatusFailed || failed.Run.CompletedAt == nil || failed.Run.WakeCondition != nil {
+					t.Fatalf("platform failure gained continuation: %#v", failed.Run)
+				}
 				if next, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: failed.Run.Scope, WorkerID: "unexpected-worker", Now: time.Now().Add(time.Hour), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || next != nil {
 					t.Fatalf("ordinary failure queued another turn: %#v %v", next, err)
 				}
