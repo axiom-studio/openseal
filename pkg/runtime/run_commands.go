@@ -267,7 +267,9 @@ func (s *RunCommandService) CascadeTerminalRun(ctx context.Context, parent *Agen
 	if current.Scope != parent.Scope || current.ID != parent.ID || !isTerminalAgentRunStatus(current.Status) {
 		return fmt.Errorf("%w: persisted parent Run is not terminal", ErrInvalidRunTransition)
 	}
-	return s.cancelRunDescendants(ctx, current, map[string]struct{}{current.ID: {}})
+	// Its open in-chat requests can no longer resume it: close their cards.
+	closeErr := closeTerminalRunInteractionRequests(ctx, s.store, current)
+	return errors.Join(closeErr, s.cancelRunDescendants(ctx, current, map[string]struct{}{current.ID: {}}))
 }
 
 func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *AgentRun, visited map[string]struct{}) error {
