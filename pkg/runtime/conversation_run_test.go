@@ -101,153 +101,6 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	}
 }
 
-func TestConversationRunSchedulerSteersWithNewestUserMessage(t *testing.T) {
-	for _, reverseSchedule := range []bool{false, true} {
-		t.Run(fmt.Sprint("reverse=", reverseSchedule), func(t *testing.T) {
-			store := NewMemoryStore()
-			service := NewConversationService(store)
-			scope := Scope{Kind: "tenant", ID: "steering"}
-			conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"},
-				Title: "Steering", IdempotencyKey: "steering-channel",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			post := func(content, key string) *ChannelMessage {
-				t.Helper()
-				current, getErr := service.GetConversation(t.Context(), scope, conversation.ID)
-				if getErr != nil {
-					t.Fatal(getErr)
-				}
-				result, postErr := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
-					Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-					Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"},
-					Intent: MessageIntentQuestion, Content: content, RequiresResponse: true,
-					Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: key,
-				})
-				if postErr != nil {
-					t.Fatal(postErr)
-				}
-				return result.Message
-			}
-			first := post("Draft a report", "first")
-			scheduler := mustConversationRunScheduler(t, store)
-			runs := map[string]string{}
-			schedule := func(message *ChannelMessage) {
-				t.Helper()
-				result, _, scheduleErr := scheduler.ScheduleMessage(t.Context(), scope, conversation.ID, message.ID)
-				if scheduleErr != nil || result == nil || result.Run == nil {
-					t.Fatalf("schedule %s: %#v, %v", message.ID, result, scheduleErr)
-				}
-				runs[message.ID] = result.Run.ID
-			}
-			if !reverseSchedule {
-				schedule(first)
-			}
-			second := post("Make it a one-page summary instead", "second")
-			schedule(second)
-			if reverseSchedule {
-				schedule(first)
-			}
-			oldRun, err := store.GetAgentRun(t.Context(), scope, runs[first.ID])
-			if err != nil || oldRun.Status != AgentRunStatusCanceled {
-				t.Fatalf("superseded run = %#v, %v", oldRun, err)
-			}
-			newRun, err := store.GetAgentRun(t.Context(), scope, runs[second.ID])
-			if err != nil || isTerminalAgentRunStatus(newRun.Status) {
-				t.Fatalf("newest request was interrupted: %#v, %v", newRun, err)
-			}
-		})
-	}
-}
-
-func TestNewUserMessageInterruptsEarlierConversationRun(t *testing.T) {
-	ctx := context.Background()
-	store := NewMemoryStore()
-	scope := Scope{Kind: "tenant", ID: "steering"}
-	service := NewConversationService(store)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
-		Title: "Research", IdempotencyKey: "steering-channel",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	postPrompt := func(current *Conversation, content, key string) *ChannelMessage {
-		t.Helper()
-		posted, postErr := service.PostChannelMessage(ctx, PostChannelMessageRequest{
-			Scope: scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "23"},
-			Intent: MessageIntentQuestion, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-			RequiresResponse: true, IdempotencyKey: key,
-		})
-		if postErr != nil {
-			t.Fatal(postErr)
-		}
-		return posted.Message
-	}
-	first := postPrompt(conversation, "Research Tanzania", "steering-first")
-	initial, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, first.ID)
-	if err != nil || initial == nil || initial.Run == nil {
-		t.Fatalf("first Run = %#v, %v", initial, err)
-	}
-	conversation, err = service.GetConversation(ctx, scope, conversation.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	second := postPrompt(conversation, "Focus on current population instead", "steering-second")
-	steered, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, second.ID)
-	if err != nil || steered == nil || steered.Run == nil {
-		t.Fatalf("steered Run = %#v, %v", steered, err)
-	}
-	previous, err := store.GetAgentRun(ctx, scope, initial.Run.ID)
-	if err != nil || previous.Status != AgentRunStatusCanceled {
-		t.Fatalf("previous Run = %#v, %v", previous, err)
-	}
-	current, err := store.GetAgentRun(ctx, scope, steered.Run.ID)
-	if err != nil || current.Status == AgentRunStatusCanceled || current.Context[conversationRunContextTriggerID] != second.ID {
-		t.Fatalf("replacement Run = %#v, %v", current, err)
-	}
-	if _, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, first.ID); err != nil {
-		t.Fatalf("replaying the old prompt: %v", err)
-	}
-	current, err = store.GetAgentRun(ctx, scope, steered.Run.ID)
-	if err != nil || current.Status == AgentRunStatusCanceled {
-		t.Fatalf("old prompt replay canceled replacement = %#v, %v", current, err)
-	}
-	conversation, err = service.GetConversation(ctx, scope, conversation.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	third := postPrompt(conversation, "One more detail", "steering-third")
-	conversation, err = service.GetConversation(ctx, scope, conversation.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fourth := postPrompt(conversation, "Actually use a table", "steering-fourth")
-	latest, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, fourth.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	late, _, err := scheduler.ScheduleMessage(ctx, scope, conversation.ID, third.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lateRun, err := store.GetAgentRun(ctx, scope, late.Run.ID)
-	if err != nil || lateRun.Status != AgentRunStatusCanceled {
-		t.Fatalf("late older Run = %#v, %v", lateRun, err)
-	}
-	latestRun, err := store.GetAgentRun(ctx, scope, latest.Run.ID)
-	if err != nil || latestRun.Status == AgentRunStatusCanceled {
-		t.Fatalf("latest Run = %#v, %v", latestRun, err)
-	}
-}
-
 func TestConversationMessageStartsRunSkipsApprovalCoordinatorProjections(t *testing.T) {
 	conversation := &Conversation{
 		ID: "approval-channel", Scope: Scope{Kind: "tenant", ID: "11"},
@@ -830,53 +683,10 @@ func TestAgentConversationGoalProjectsActiveWorkFromTheSameChannel(t *testing.T)
 	}
 }
 
-func TestExplicitConversationOperationIgnoresTerminalNarrativeHistory(t *testing.T) {
-	operation := HostedRunbookOperation{
-		Entrypoint: "ondemand-engage", Name: "On-demand engagement",
-		Description: "Run one reviewed engagement cycle",
-		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
-	}
-	for _, command := range []string{
-		"Run the on-demand engagement operation now.",
-		"run it now",
-		"Please execute ondemand-engage.",
-	} {
-		selected, arguments, ok := resolveExplicitConversationOperation(command, []HostedRunbookOperation{operation}, nil)
-		if !ok || selected.Entrypoint != operation.Entrypoint || len(arguments) != 0 {
-			t.Fatalf("command %q resolved to %#v, %#v, %v", command, selected, arguments, ok)
-		}
-	}
-	if _, _, ok := resolveExplicitConversationOperation("What did the last run do?", []HostedRunbookOperation{operation}, nil); ok {
-		t.Fatal("historical Run question was treated as an invocation")
-	}
-	scheduled := HostedRunbookOperation{
-		Entrypoint: "publish-report", Name: "Publish report",
-		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
-	}
-	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{operation, scheduled}, nil); ok {
-		t.Fatal("ambiguous operation command was accepted")
-	}
-	selected, _, ok := resolveExplicitConversationOperation("run the workflow", []HostedRunbookOperation{operation, scheduled}, map[string]bool{scheduled.Entrypoint: true})
-	if !ok || selected.Entrypoint != operation.Entrypoint {
-		t.Fatalf("generic command did not prefer sole on-demand operation: %#v, %v", selected, ok)
-	}
-	requiresInput := operation
-	requiresInput.InputSchema = map[string]interface{}{
-		"type": "object", "required": []interface{}{"community"},
-		"properties": map[string]interface{}{"community": map[string]interface{}{"type": "string"}},
-	}
-	if _, _, ok := resolveExplicitConversationOperation("run it now", []HostedRunbookOperation{requiresInput}, nil); ok {
-		t.Fatal("operation with missing required input was started deterministically")
-	}
-	if activeConversationOperationExists([]agentConversationActiveRun{{Entrypoint: operation.Entrypoint, Status: AgentRunStatusRunning}}, operation.Entrypoint) != true {
-		t.Fatal("active matching operation was not detected")
-	}
-	if activeConversationOperationExists([]agentConversationActiveRun{{Entrypoint: "publish-report", Status: AgentRunStatusRunning}}, operation.Entrypoint) {
-		t.Fatal("unrelated active operation blocked the requested operation")
-	}
-}
-
-func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference(t *testing.T) {
+// Operation invocation is the model's decision through its runbook operation
+// tools. Ordinary wording such as "run it" must never start the Agent's sole
+// operation without a model turn.
+func TestAgentConversationLeavesOperationInvocationToTheModel(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := t.Context()
 	scope := Scope{Kind: "tenant", ID: "repeatable-operation"}
@@ -914,7 +724,7 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 		t.Fatal(err)
 	}
 	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion,
-		"run the workflow", "repeat-operation")
+		"Use my card ending with 1001 to buy it, don't run it in a background task", "repeat-operation")
 	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -934,7 +744,7 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 			RunbookOperations: []HostedRunbookOperation{operation, scheduledOperation},
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 				modelCalls++
-				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Refused stale duplicate"}, nil
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Buying it now", RunOutput: map[string]interface{}{"summary": "Buying it now"}}, nil
 			}),
 		}, nil
 	})
@@ -947,9 +757,8 @@ func TestAgentConversationStartsExplicitRepeatableOperationWithoutModelInference
 		t.Fatal(err)
 	}
 	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
-	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusRunning || outcome.ProposedRunbook == nil ||
-		outcome.ProposedRunbook.Entrypoint != operation.Entrypoint || modelCalls != 0 {
-		t.Fatalf("repeatable operation outcome = %#v, modelCalls=%d, err=%v", outcome, modelCalls, err)
+	if err != nil || outcome == nil || outcome.ProposedRunbook != nil || modelCalls != 1 {
+		t.Fatalf("operation was started without the model: %#v, modelCalls=%d, err=%v", outcome, modelCalls, err)
 	}
 }
 
