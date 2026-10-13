@@ -92,6 +92,8 @@ type AgentRunWorkerSupervisor struct {
 	runFinalizer      RunTerminalFinalizer
 	limiter           *WorkerLimiter
 	executionPreparer AcceptedRunExecutionPreparer
+	signals           *WorkSignalStatus
+	discovery         *scopeDiscovery
 
 	mu     sync.RWMutex
 	pools  map[string]*AgentRunWorkerPool
@@ -155,7 +157,7 @@ func NewAgentRunWorkerSupervisor(
 	}
 	return &AgentRunWorkerSupervisor{
 		store: store, resolver: resolver, source: source, config: config, logger: logger,
-		pools: make(map[string]*AgentRunWorkerPool),
+		pools: make(map[string]*AgentRunWorkerPool), discovery: newScopeDiscovery(),
 	}, nil
 }
 
@@ -206,9 +208,31 @@ func (s *AgentRunWorkerSupervisor) Wake() {
 
 func (s *AgentRunWorkerSupervisor) WakeScope(scope Scope) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if pool := s.pools[workerScopeKey(scope)]; pool != nil {
+	pool, signals := s.pools[workerScopeKey(scope)], s.signals
+	s.mu.RUnlock()
+	if pool != nil {
 		pool.Wake()
+		return
+	}
+	if signals.Healthy() && scope.Validate() == nil {
+		// While scope listing is slow, a signal is how a new scope is found.
+		s.discovery.unknown(workerScopeKey(scope), time.Now(), s.config.ReconcileInterval)
+	}
+}
+
+// RefreshScopes lists worker scopes now instead of at the next interval.
+func (s *AgentRunWorkerSupervisor) RefreshScopes() {
+	s.discovery.request()
+}
+
+// SetWorkSignals lets pools sleep until wakes or durable deadlines and slows
+// scope listing while status is healthy. Call before Start.
+func (s *AgentRunWorkerSupervisor) SetWorkSignals(status *WorkSignalStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.signals = status
+	for _, pool := range s.pools {
+		pool.SetWorkSignals(status)
 	}
 }
 
@@ -228,12 +252,20 @@ func (s *AgentRunWorkerSupervisor) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reconcile(ctx)
+			s.mu.RLock()
+			healthy := s.signals.Healthy()
+			s.mu.RUnlock()
+			if !s.discovery.tickDue(healthy, time.Now()) {
+				continue
+			}
+		case <-s.discovery.requests:
 		}
+		s.reconcile(ctx)
 	}
 }
 
 func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
+	s.discovery.reconciled(time.Now())
 	scopes, err := s.source.ListWorkerScopes(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -281,6 +313,7 @@ func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
 		pool.SetRunTerminalFinalizer(s.runFinalizer)
 		pool.SetWorkerLimiter(s.limiter)
 		pool.SetAcceptedRunExecutionPreparer(s.executionPreparer)
+		pool.SetWorkSignals(s.signals)
 		s.pools[key] = pool
 		pool.Start(ctx)
 		s.logger.Infow("started agent run worker scope", "runKind", s.config.Kind, "scopeKind", scope.Kind, "scopeId", scope.ID, "concurrency", s.config.Concurrency)

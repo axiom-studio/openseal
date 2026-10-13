@@ -168,12 +168,13 @@ func acceptedAgentRequestExecutionRecoveryAttempt(checkpoint map[string]interfac
 // idempotency makes request review recoverable across process restarts without
 // leasing Agent identity to a human caller.
 type AgentRequestInboxReconciler struct {
-	collaboration  *CollaborationService
-	commands       *RunCommandService
-	projector      *AgentRequestConversationProjector
-	projectionMu   sync.Mutex
-	lastProjection time.Time
-	now            func() time.Time
+	collaboration      *CollaborationService
+	commands           *RunCommandService
+	projector          *AgentRequestConversationProjector
+	projectionMu       sync.Mutex
+	lastProjection     time.Time
+	projectionDeferred bool
+	now                func() time.Time
 }
 
 func NewAgentRequestInboxReconciler(store AgentRequestInboxStore) (*AgentRequestInboxReconciler, error) {
@@ -290,10 +291,26 @@ func (r *AgentRequestInboxReconciler) conversationProjectionDue(now time.Time) b
 	r.projectionMu.Lock()
 	defer r.projectionMu.Unlock()
 	if !r.lastProjection.IsZero() && now.Sub(r.lastProjection) < agentRequestConversationProjectionInterval {
+		r.projectionDeferred = true
 		return false
 	}
 	r.lastProjection = now
+	r.projectionDeferred = false
 	return true
+}
+
+// deferredProjectionAt reports when a projection skipped by throttling is
+// due, so signal-driven workers can schedule it instead of polling for it.
+func (r *AgentRequestInboxReconciler) deferredProjectionAt() *time.Time {
+	if r == nil {
+		return nil
+	}
+	r.projectionMu.Lock()
+	defer r.projectionMu.Unlock()
+	if !r.projectionDeferred {
+		return nil
+	}
+	return new(r.lastProjection.Add(agentRequestConversationProjectionInterval))
 }
 
 func (r *AgentRequestInboxReconciler) pendingRequests(ctx context.Context, scope Scope) ([]*AgentRequest, error) {
