@@ -1256,11 +1256,20 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	runError := "governed action materialization failed"
 	safeCause := sanitizeActionError(cause, nil)
 	summary := "Agent action proposal could not be governed"
-	checkpoint, returned := checkpointProposalRejection(run, turn, safeCause)
+	// A fixed Agent cannot amend itself under any correction, so its refusal
+	// ends the attempt with a dedicated reply instead of returning to the model.
+	behaviorFixed := errors.Is(cause, ErrAgentBehaviorFixed)
+	var checkpoint map[string]interface{}
+	returned := false
+	if !behaviorFixed {
+		checkpoint, returned = checkpointProposalRejection(run, turn, safeCause)
+	}
 	if returned {
 		// The rejection is the proposal's result for the model, like a failed
 		// action: nothing ran, and it may correct the request or explain.
 		status, runError, summary = AgentRunStatusQueued, "", "Agent action proposal was rejected; the model may correct it"
+	} else if behaviorFixed {
+		checkpoint = checkpointTerminalFailure(preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "agent_behavior_fixed")
 	} else {
 		checkpoint = checkpointTerminalFailure(preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "action_admission_failed")
 	}

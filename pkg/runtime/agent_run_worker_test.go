@@ -527,6 +527,56 @@ func TestAgentRunWorkerStopsCombinedProposalMaterializationFailure(t *testing.T)
 	}
 }
 
+func TestAgentRunWorkerFixedAgentBehaviorStopsWithFixedBehaviorReply(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "fixed-behavior"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "openseal-assistant"},
+		AssignedAgentID: "openseal-assistant", Goal: "Respond to an Agent channel message", Source: RunSourceChat,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const workerID = "conversation-worker"
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{
+		Scope: scope, Kind: RunKindConversation, WorkerID: workerID, Now: time.Now(),
+		LeaseDuration: time.Minute, AgingInterval: time.Minute,
+	})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claimed Run = %#v, %v", claimed, err)
+	}
+	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return nil, nil
+	}), nil, AgentRunWorkerConfig{Scope: scope})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := &AgentTurn{ID: "turn-amend", ContinuationCheckpoint: map[string]interface{}{
+		"actionInputs": map[string]interface{}{"proposed": map[string]interface{}{"systemPrompt": "You are a study assistant.", "rationale": "user request"}},
+	}, RequestedActions: []TurnAction{{
+		Type: "skill_action", Capability: "openseal.agents.amend_behavior", InputRef: "/actionInputs/proposed",
+		BindingID: "bundled:agents", BindingRevision: 1,
+	}}}
+	pool.failMaterialization(ctx, workerID, claimed, turn, ErrAgentBehaviorFixed)
+
+	failed, err := store.GetAgentRun(ctx, scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, correcting := ReadToolFeedbackCorrection(failed.Checkpoint); correcting {
+		t.Fatalf("fixed Agent behavior was returned to the model for correction: %#v", failed.Checkpoint)
+	}
+	if failed.Status != AgentRunStatusFailed || failed.CompletedAt == nil || terminalFailureCodeFromCheckpoint(failed.Checkpoint) != "agent_behavior_fixed" {
+		t.Fatalf("fixed Agent behavior did not stop the attempt: %#v", failed)
+	}
+	feedbackAssertNotClaimable(t, store, scope, time.Now())
+	feedbackAssertKernelFailureReply(t, failed, "agent_behavior_fixed")
+	if reply := terminalRunFailureReply(failed); !strings.Contains(reply, "can't change my own instructions") || strings.Contains(reply, "operation failed") {
+		t.Fatalf("fixed Agent behavior reply = %q", reply)
+	}
+}
+
 func TestAgentRunWorkerProposalRejectionReturnsToTheModelWithinBounds(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := t.Context()
