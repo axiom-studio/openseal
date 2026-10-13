@@ -30,6 +30,11 @@ const (
 	agentBehaviorCandidateVersion = ".action."
 )
 
+// ErrAgentBehaviorFixed rejects a self-amendment by an Agent whose definition
+// does not allow Agent-proposed amendments, such as the platform assistant.
+// No correction can change that policy, so the attempt ends with a fixed reply.
+var ErrAgentBehaviorFixed = errors.New("agent definition policy does not allow Agent-proposed amendments")
+
 // AgentManagementSkill exposes bounded, self-only behavior amendments to an
 // Agent conversation. The target deployment, active definition, and current
 // revision are kernel-owned facts and are never model-selected inputs.
@@ -650,7 +655,7 @@ func resolveAgentBehaviorAction(
 		return args, nil, nil, nil, err
 	}
 	if !definition.Amendments.AgentMayPropose {
-		return args, nil, nil, nil, errors.New("agent definition policy does not allow Agent-proposed amendments")
+		return args, nil, nil, nil, ErrAgentBehaviorFixed
 	}
 	candidate := cloneAgentDefinitionForAction(definition)
 	applyAgentBehaviorArguments(candidate, args)
@@ -696,7 +701,7 @@ func resolveAgentChannelAction(
 		return args, nil, nil, nil, nil, nil, err
 	}
 	if !definition.Amendments.AgentMayPropose {
-		return args, nil, nil, nil, nil, nil, errors.New("agent definition policy does not allow Agent-proposed amendments")
+		return args, nil, nil, nil, nil, nil, ErrAgentBehaviorFixed
 	}
 	endpoint, err := endpoints.Get(ctx, run.Scope, args.EndpointID)
 	if err != nil {
