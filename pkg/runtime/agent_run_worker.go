@@ -146,7 +146,6 @@ type AgentRunWorkerPool struct {
 	runFinalizer         RunTerminalFinalizer
 	runCommands          *RunCommandService
 	lastFinalizationScan time.Time
-	finalizationOffset   int
 	dependencyCursor     string
 	forks                *RunForkCoordinator
 	collaboration        *CollaborationService
@@ -164,9 +163,10 @@ type AgentRunWorkerPool struct {
 	stopOnce             sync.Once
 	limiter              atomic.Pointer[WorkerLimiter]
 	signals              atomic.Pointer[WorkSignalStatus]
-	// deadlines lets a signal-driven pool sleep until the next due Run or
-	// lease expiry instead of polling. Stores without it always poll.
+	// deadlines lets a queue-driven pool schedule its next due Run or lease
+	// expiry instead of polling. Stores without it always poll.
 	deadlines AgentRunDeadlineStore
+	usage     poolActivity
 }
 
 // SetActionCoordinator enables atomic materialization of one proposal-only
@@ -187,10 +187,16 @@ func (p *AgentRunWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
 	p.limiter.Store(limiter)
 }
 
-// SetWorkSignals lets the pool sleep until a wake or its next durable
-// deadline while status is healthy. Without it the pool polls.
+// SetWorkSignals lets the pool schedule its next durable deadline into the
+// work queue and sleep until woken while status is healthy. Without it the
+// pool polls.
 func (p *AgentRunWorkerPool) SetWorkSignals(status *WorkSignalStatus) {
 	p.signals.Store(status)
+}
+
+// idleFor reports how long the pool has neither run nor been woken.
+func (p *AgentRunWorkerPool) idleFor(now time.Time) time.Duration {
+	return p.usage.idleFor(now)
 }
 
 func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig) (*AgentRunWorkerPool, error) {
@@ -211,6 +217,7 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}
 	pool.deadlines, _ = store.(AgentRunDeadlineStore)
+	pool.usage.touch()
 	if forkStore, ok := store.(RunForkStore); ok {
 		pool.forks = NewRunForkCoordinator(forkStore)
 	}
@@ -253,6 +260,7 @@ func (p *AgentRunWorkerPool) Stop() {
 }
 
 func (p *AgentRunWorkerPool) Wake() {
+	p.usage.touch()
 	p.maintenanceWake.notify()
 	p.requestClaim()
 }
@@ -278,8 +286,10 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			return
 		case <-p.wake:
 		}
+		p.usage.begin()
 		release, acquireErr := p.limiter.Load().acquire(ctx)
 		if acquireErr != nil {
+			p.usage.end()
 			return
 		}
 		run, err := p.scheduler.ClaimNext(ctx, AgentRunClaimRequest{
@@ -293,6 +303,10 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 		})
 		if err != nil && ctx.Err() == nil {
 			p.logger.Errorw("failed to claim agent run", "workerId", workerID, "error", err)
+			if signals := p.signals.Load(); signals.Healthy() {
+				// No poll follows a failed claim while queue-driven.
+				signals.scheduleIn(WorkFamilyRunDue, p.config.Scope, workerPollDelay(p.config.PollInterval, 1, workerID))
+			}
 		}
 		if run != nil {
 			// Hand the next claim opportunity to another worker before this one
@@ -303,6 +317,7 @@ func (p *AgentRunWorkerPool) worker(ctx context.Context, workerID string) {
 			p.maintenanceWake.notify()
 		}
 		release()
+		p.usage.end()
 	}
 }
 
@@ -1364,9 +1379,12 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 		// Capture before reconciliation so a committed enqueue during the scan
 		// remains visible when this loop subsequently waits.
 		_, observedWake := p.maintenanceWake.snapshot()
-		healthy, healthChanged := p.signals.Load().watch()
+		signals := p.signals.Load()
+		healthy, healthChanged := signals.watch()
+		p.usage.begin()
 		release, acquireErr := p.limiter.Load().acquire(ctx)
 		if acquireErr != nil {
+			p.usage.end()
 			return
 		}
 		result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, time.Now())
@@ -1388,6 +1406,7 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 			maintenanceDue = earliestDeadline(inboxDue, forkDue, finalizerDue)
 			maintenanceFailed = inboxFailed || forkFailed
 		}
+		p.usage.end()
 		var wait idleWait
 		if !healthy || p.deadlines == nil || err != nil {
 			delay := workerPollDelay(p.config.PollInterval, consecutiveFailures, seed)
@@ -1400,31 +1419,41 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 				// Timer-store failures retain their existing backoff even if another
 				// worker publishes a latency hint while the store is unavailable.
 				observedWake = nil
+				if healthy {
+					// A retired pool would miss its local retry; keep it queued.
+					signals.scheduleIn(WorkFamilyRunDue, p.config.Scope, delay)
+				}
 			}
 			wait = pollWait(delay)
 		} else {
-			// Signal-driven: sleep until a wake or the earliest durable deadline.
-			// Claim and maintenance state only changes through committed writes,
-			// which signal this scope, or through time, which these deadlines cover.
+			// Queue-driven: schedule the earliest durable deadline and sleep
+			// until woken. Claim and maintenance state only changes through
+			// committed writes, which the outbox publishes, or through time,
+			// which these deadlines cover.
 			now := time.Now()
+			p.usage.begin()
 			deadline, deadlineErr := p.deadlines.NextAgentRunDeadline(ctx, p.config.Scope, p.config.Kind, p.config.AssignedAgentID, now.UTC())
+			p.usage.end()
+			var next *time.Time
 			if deadlineErr != nil {
 				if ctx.Err() != nil {
 					return
 				}
 				deadlineFailures++
 				p.logger.Warnw("agent run deadline lookup failed", "scopeKind", p.config.Scope.Kind, "scopeId", p.config.Scope.ID, "error", deadlineErr)
-				wait = pollWait(workerPollDelay(p.config.PollInterval, deadlineFailures, seed))
+				next = new(now.Add(workerPollDelay(p.config.PollInterval, deadlineFailures, seed)))
 			} else {
 				deadlineFailures = 0
-				wait = deadlineWait(now, earliestDeadline(deadline, result.NextWakeAt, maintenanceDue))
+				next = earliestDeadline(deadline, result.NextWakeAt, maintenanceDue)
 			}
 			if maintenanceFailed {
 				maintenanceFailures++
-				wait = wait.earliest(now, new(now.Add(workerPollDelay(p.config.PollInterval, maintenanceFailures, seed))))
+				next = earliestDeadline(next, new(now.Add(workerPollDelay(p.config.PollInterval, maintenanceFailures, seed))))
 			} else {
 				maintenanceFailures = 0
 			}
+			signals.schedule(WorkFamilyRunDue, p.config.Scope, next)
+			wait = waitForever()
 		}
 		if !waitIdle(ctx, observedWake, healthChanged, wait) {
 			return
@@ -1461,7 +1490,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		return next
 	}
 	if firstScan {
-		p.logger.Infow("started terminal Run resource reconciliation",
+		p.logger.Debugw("started terminal Run resource reconciliation",
 			"scopeKind", p.config.Scope.Kind, "scopeId", p.config.Scope.ID,
 			"runKind", p.config.Kind, "candidates", len(newest))
 	}
@@ -1470,18 +1499,23 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		p.resolveCollaborationChild(ctx, run)
 		p.finalizeTerminalRun(ctx, run)
 	}
+	key := p.finalizationKey()
 	if len(newest) < pageSize {
-		p.finalizationOffset = 0
+		terminalRunSweeps.finish(key, now)
 		return nil
 	}
-	if p.finalizationOffset == 0 {
-		p.finalizationOffset = pageSize
+	offset, due := terminalRunSweeps.next(key, now)
+	if !due {
+		return nil
+	}
+	if offset == 0 {
+		terminalRunSweeps.advance(key, pageSize)
 		return next
 	}
 	historical, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: p.config.Scope, Kind: p.config.Kind, Statuses: []AgentRunStatus{
 			AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCanceled,
-		}, Order: AgentRunOrderCreatedDesc, Limit: pageSize, Offset: p.finalizationOffset,
+		}, Order: AgentRunOrderCreatedDesc, Limit: pageSize, Offset: offset,
 	})
 	if err != nil {
 		p.logger.Warnw("failed to list historical terminal Runs for resource finalization", "error", err)
@@ -1493,11 +1527,72 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 		p.finalizeTerminalRun(ctx, run)
 	}
 	if len(historical) < pageSize {
-		p.finalizationOffset = 0
+		terminalRunSweeps.finish(key, now)
 		return nil
 	}
-	p.finalizationOffset += pageSize
+	terminalRunSweeps.advance(key, offset+pageSize)
 	return next
+}
+
+func (p *AgentRunWorkerPool) finalizationKey() string {
+	return p.config.Scope.Kind + "\x00" + p.config.Scope.ID + "\x00" + string(p.config.Kind) + "\x00" + p.config.AssignedAgentID
+}
+
+// terminalRunSweeps remembers, per process, how far each pool scope's sweep
+// over historical terminal Runs has got and when it last completed. Pools
+// come and go with their scope's work, so the cursor must outlive them, and
+// a completed sweep is not repeated on every wake: newly terminal Runs are
+// covered by the newest page, which every pass checks.
+var terminalRunSweeps = newTerminalRunSweepProgress()
+
+const (
+	terminalRunSweepRepeat = 6 * time.Hour
+	terminalRunSweepLimit  = 100000
+)
+
+type terminalRunSweepProgress struct {
+	mu      sync.Mutex
+	entries map[string]terminalRunSweep
+}
+
+type terminalRunSweep struct {
+	offset      int
+	completedAt time.Time
+}
+
+func newTerminalRunSweepProgress() *terminalRunSweepProgress {
+	return &terminalRunSweepProgress{entries: make(map[string]terminalRunSweep)}
+}
+
+// next returns the sweep offset, zero to start one, and whether a page is
+// due: a sweep completed within terminalRunSweepRepeat is not restarted.
+func (t *terminalRunSweepProgress) next(key string, now time.Time) (int, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry := t.entries[key]
+	if entry.offset == 0 && !entry.completedAt.IsZero() && now.Sub(entry.completedAt) < terminalRunSweepRepeat {
+		return 0, false
+	}
+	return entry.offset, true
+}
+
+func (t *terminalRunSweepProgress) advance(key string, offset int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.put(key, terminalRunSweep{offset: offset})
+}
+
+func (t *terminalRunSweepProgress) finish(key string, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.put(key, terminalRunSweep{completedAt: now})
+}
+
+func (t *terminalRunSweepProgress) put(key string, entry terminalRunSweep) {
+	if _, exists := t.entries[key]; !exists && len(t.entries) >= terminalRunSweepLimit {
+		clear(t.entries)
+	}
+	t.entries[key] = entry
 }
 
 // reconcileAgentRequestInbox returns when a throttled conversation projection
