@@ -165,8 +165,8 @@ func WithPostgresMigrationObserver(observer PostgresMigrationObserver) PostgresS
 // Additional kernel contracts are implemented on this type in focused slices.
 type PostgresStore struct {
 	db                        *sql.DB
-	dsn                       string
 	schema                    string
+	workCommitted             chan struct{}
 	migrationLockTimeout      time.Duration
 	migrationLockPollInterval time.Duration
 	migrationObserver         PostgresMigrationObserver
@@ -194,7 +194,14 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 			return nil, err
 		}
 	}
-	db, err := sql.Open("postgres", dsn)
+	workCommitted := make(chan struct{}, 1)
+	store := &PostgresStore{
+		schema: config.schema, workCommitted: workCommitted,
+		migrationLockTimeout:      config.migrationLockTimeout,
+		migrationLockPollInterval: config.migrationLockPollInterval,
+		migrationObserver:         config.migrationObserver,
+	}
+	db, err := openObservedPostgres(dsn, store.noteWorkCommitted)
 	if err != nil {
 		return nil, fmt.Errorf("open PostgreSQL: %w", err)
 	}
@@ -202,12 +209,7 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 	db.SetMaxIdleConns(config.pool.MaxIdleConnections)
 	db.SetConnMaxLifetime(config.pool.ConnectionLifetime)
 	db.SetConnMaxIdleTime(config.pool.ConnectionIdleTime)
-	store := &PostgresStore{
-		db: db, dsn: dsn, schema: config.schema,
-		migrationLockTimeout:      config.migrationLockTimeout,
-		migrationLockPollInterval: config.migrationLockPollInterval,
-		migrationObserver:         config.migrationObserver,
-	}
+	store.db = db
 	if err := db.PingContext(ctx); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("connect PostgreSQL: %w", err)
@@ -460,6 +462,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	}
 	if err := s.migrateWorkSignals(ctx, tx); err != nil {
 		return fmt.Errorf("work signal migration: %w", err)
+	}
+	if err := s.migrateWorkOutbox(ctx, tx); err != nil {
+		return fmt.Errorf("work outbox migration: %w", err)
 	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {

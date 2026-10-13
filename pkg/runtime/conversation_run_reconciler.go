@@ -96,8 +96,9 @@ func (r *ConversationRunReconciler) WakeScope(scope Scope) {
 	r.queue.wakeScope(scope)
 }
 
-// SetWorkSignals stops the fixed reconciliation tick while status is healthy:
-// the reconciler then runs only for signalled scopes. Call before Start.
+// SetWorkSignals stops the fixed reconciliation tick while the work queue is
+// healthy: the reconciler then runs only for scopes the queue delivers. Call
+// before Start.
 func (r *ConversationRunReconciler) SetWorkSignals(status *WorkSignalStatus) {
 	r.signals.Store(status)
 }
@@ -114,28 +115,25 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 	defer r.wg.Done()
 	ticker := time.NewTicker(r.config.Interval)
 	defer ticker.Stop()
+	signals := r.signals.Load()
 	known := newKnownWorkerScopes(r.scopes, r.config.Interval)
+	gate := newWorkScopeGate(r.scopes, r.config.Interval)
 	for {
-		healthy, healthChanged := r.signals.Load().watch()
-		retry := newDeadlineTimer(healthy, r.queue.nextDeadline())
-		full, skip := false, false
+		healthy, healthChanged := signals.watch()
+		full := false
 		select {
 		case <-ctx.Done():
-			retry.stop()
 			return
 		case <-r.wake:
-			full = true
+			// A bound queue rebuilds its schedule from the store, so a full
+			// scan is only the fallback while there is none.
+			full = !healthy && !signals.queueBound()
 		case <-ticker.C:
-			// While signals are healthy every change is signalled per scope,
-			// so the fixed tick is only the fallback for an unhealthy listener.
-			full, skip = true, healthy
+			// While the queue is healthy every change and deadline arrives
+			// per scope, so the fixed tick is only the fallback.
+			full = !healthy
 		case <-r.queue.signal:
-		case <-retry.channel():
 		case <-healthChanged:
-			skip = true
-		}
-		retry.stop()
-		if skip {
 			continue
 		}
 		spacing := time.Duration(0)
@@ -143,9 +141,11 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 			spacing = r.config.Interval
 		}
 		now := time.Now()
-		queuedFull, scopes := r.queue.take(now, spacing)
-		if full || queuedFull {
-			r.queue.clearDeadlines()
+		scopes, deferred := r.queue.take(now, spacing)
+		for scope, at := range deferred {
+			signals.schedule(WorkFamilyConversationDue, scope, &at)
+		}
+		if full {
 			listed, err := known.list(ctx)
 			if err == nil {
 				r.queue.ran(listed, now)
@@ -156,18 +156,26 @@ func (r *ConversationRunReconciler) loop(ctx context.Context) {
 			}
 			continue
 		}
-		scopes, err := known.filter(ctx, time.Now(), scopes)
+		allowed, err := gate.filter(ctx, scopes)
 		if err != nil && ctx.Err() == nil {
-			r.logger.Warnw("failed to list conversation Run scopes", "error", err)
+			r.logger.Warnw("failed to check conversation Run scopes", "error", err)
+			if healthy {
+				for _, scope := range scopes {
+					signals.scheduleIn(WorkFamilyConversationDue, scope, r.config.Interval)
+				}
+			}
 		}
-		for _, scope := range scopes {
+		for _, scope := range allowed {
 			_, err := r.scheduler.ReconcileScope(ctx, scope)
 			if ctx.Err() != nil {
 				return
 			}
-			// A signal-driven scope has no tick to retry it; back off instead.
-			if !r.queue.outcome(scope, err, r.config.Interval, time.Now()) {
+			// A queue-driven scope has no tick to retry it; back off instead.
+			if retry := r.queue.outcome(scope, err, r.config.Interval, time.Now()); retry != nil {
 				r.logger.Warnw("failed to reconcile conversation Runs", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
+				if healthy {
+					signals.schedule(WorkFamilyConversationDue, scope, retry)
+				}
 			}
 		}
 	}

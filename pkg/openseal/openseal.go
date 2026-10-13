@@ -13,6 +13,7 @@ import (
 	"maps"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -2634,8 +2635,14 @@ type Engine struct {
 	logger                        *zap.SugaredLogger
 	workerLimiter                 *runtime.WorkerLimiter
 	workSignals                   *runtime.WorkSignalStatus
-	workSignalCancel              context.CancelFunc
-	workSignalDone                chan struct{}
+	workQueue                     runtime.WorkQueue
+	workPublish                   func(context.Context)
+	workQueueCancel               context.CancelFunc
+	workQueueDone                 chan struct{}
+	workRelayRequests             chan struct{}
+	workRebuilds                  chan struct{}
+	workHandlersMu                sync.RWMutex
+	workHandlers                  map[runtime.WorkFamily][]func(runtime.Scope)
 }
 
 type agentRunWorkerSpec struct {
@@ -2819,11 +2826,12 @@ func New(opts ...Option) (*Engine, error) {
 	return e, nil
 }
 
-// Start begins configured background workers. When the store can stream
-// work signals (PostgreSQL LISTEN/NOTIFY), Start also listens for them: while
-// the listener is connected idle workers sleep until a signal or their next
-// durable deadline instead of polling, and fall back to their configured poll
-// intervals whenever it is not.
+// Start begins configured background workers. When the store keeps a work
+// outbox (PostgreSQL), workers are driven by a work queue: committed changes
+// are relayed from the outbox into the queue, loops schedule their next
+// durable deadline into it, and a scope's workers only exist while the queue
+// has work for it. Whenever the queue is not consuming, and for other
+// stores, workers fall back to their configured poll intervals.
 func (e *Engine) Start(ctx context.Context) {
 	e.applyWorkSignals()
 	if e.conversationRunReconciler != nil {
@@ -2844,12 +2852,12 @@ func (e *Engine) Start(ctx context.Context) {
 	for _, supervisor := range e.actionSupervisors {
 		supervisor.Start(ctx)
 	}
-	e.startWorkSignalListener(ctx)
+	e.startWorkQueue(ctx)
 }
 
 // Stop gracefully shuts down background goroutines.
 func (e *Engine) Stop() {
-	e.stopWorkSignalListener()
+	e.stopWorkQueue()
 	if e.externalConversations.supervisor != nil {
 		e.externalConversations.supervisor.Stop()
 	}

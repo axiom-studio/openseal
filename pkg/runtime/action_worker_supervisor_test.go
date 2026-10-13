@@ -45,19 +45,19 @@ func TestActionWorkerSupervisorReconcilesIsolatedScopes(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	supervisor.reconcile(ctx)
+	supervisor.pools.reconcile(ctx)
 	if got := supervisor.ScopeCount(); got != 2 {
 		t.Fatalf("expected two deduplicated scope pools, got %d", got)
 	}
 
 	source.set([]Scope{{Kind: "tenant", ID: "2"}, {Kind: "", ID: "invalid"}}, nil)
-	supervisor.reconcile(ctx)
+	supervisor.pools.reconcile(ctx)
 	if got := supervisor.ScopeCount(); got != 1 {
 		t.Fatalf("expected removed and invalid scopes to be absent, got %d pools", got)
 	}
 
 	source.set(nil, errors.New("temporary database failure"))
-	supervisor.reconcile(ctx)
+	supervisor.pools.reconcile(ctx)
 	if got := supervisor.ScopeCount(); got != 1 {
 		t.Fatalf("source failure must preserve existing pools, got %d", got)
 	}
