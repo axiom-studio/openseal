@@ -52,6 +52,11 @@ type ActionWorkerPool struct {
 	wg      sync.WaitGroup
 	limiter atomic.Pointer[WorkerLimiter]
 	poll    *workerPollSignal
+	signals atomic.Pointer[WorkSignalStatus]
+	// deadlines lets a signal-driven pool sleep until the next retry or lease
+	// expiry instead of polling. Stores without it always poll.
+	deadlines ActionDeadlineStore
+	now       func() time.Time
 }
 
 func NewActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher, logger *zap.SugaredLogger, config ActionWorkerConfig) (*ActionWorkerPool, error) {
@@ -79,7 +84,8 @@ func newActionWorkerPool(store KernelStore, catalog ActionExecutionCatalog, cred
 	if issuer != nil {
 		worker = NewActionWorkerWithCredentialLeaseIssuer(store, catalog, issuer, dispatcher)
 	}
-	pool := &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1), poll: newWorkerPollSignal()}
+	pool := &ActionWorkerPool{worker: worker, config: config, logger: logger, wake: make(chan struct{}, 1), poll: newWorkerPollSignal(), now: time.Now}
+	pool.deadlines, _ = store.(ActionDeadlineStore)
 	worker.onClaim = pool.requestClaim
 	return pool, nil
 }
@@ -129,12 +135,51 @@ func (p *ActionWorkerPool) requestClaim() {
 	}
 }
 
+// SetWorkSignals lets the pool sleep until a wake or its next durable
+// deadline while status is healthy. Without it the pool polls.
+func (p *ActionWorkerPool) SetWorkSignals(status *WorkSignalStatus) {
+	p.signals.Store(status)
+}
+
+// signalDriven reports whether idle waits may rely on wakes and deadlines.
+func (p *ActionWorkerPool) signalDriven() bool {
+	return p.deadlines != nil && p.signals.Load().Healthy()
+}
+
 // One timer per scope recovers missed or cross-process notifications. Empty
 // claims retain the configured latency without multiplying reads by the
 // worker concurrency. Successful claims hand off before provider execution.
+// While work signals are healthy the timer instead sleeps until a wake or the
+// next retry or lease expiry, so an idle scope issues no reads at all.
 func (p *ActionWorkerPool) pollClaims(ctx context.Context) {
 	defer p.wg.Done()
-	for waitForWorkerPoll(ctx, nil, workerPollDelay(p.config.PollInterval, 0, p.config.WorkerIDPrefix+"-poll")) {
+	seed := p.config.WorkerIDPrefix + "-poll"
+	failures := 0
+	for {
+		// Capture before reading the deadline so a commit during the read
+		// still ends the following wait.
+		_, observedWake := p.poll.snapshot()
+		healthy, healthChanged := p.signals.Load().watch()
+		wait := pollWait(workerPollDelay(p.config.PollInterval, 0, seed))
+		if healthy && p.deadlines != nil {
+			deadline, err := p.deadlines.NextActionDeadline(ctx, p.config.Scope, p.now().UTC())
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				failures++
+				p.logger.Warnw("action deadline lookup failed", "scopeKind", p.config.Scope.Kind, "scopeId", p.config.Scope.ID, "error", err)
+				wait, observedWake = pollWait(workerPollDelay(p.config.PollInterval, failures, seed)), nil
+			} else {
+				failures = 0
+				wait = deadlineWait(p.now(), deadline)
+			}
+		} else {
+			observedWake = nil
+		}
+		if !waitIdle(ctx, observedWake, healthChanged, wait) {
+			return
+		}
 		p.requestClaim()
 	}
 }
@@ -177,6 +222,11 @@ func (p *ActionWorkerPool) run(ctx context.Context, workerID string) {
 		}
 		if !waitForWorkerPoll(ctx, observedWake, workerPollDelay(p.config.PollInterval, consecutiveFailures, workerID)) {
 			return
+		}
+		if p.signalDriven() {
+			// No poll tick follows a failed claim while signal-driven, so retry
+			// after the backoff instead of waiting for a wake that may never come.
+			p.requestClaim()
 		}
 	}
 }
