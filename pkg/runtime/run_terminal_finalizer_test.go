@@ -237,8 +237,8 @@ func TestTerminalRunFinalizerReconciliationPagesNewestFirst(t *testing.T) {
 		finalized[10] != "run-205" || finalized[205] != "run-000" {
 		t.Fatalf("unexpected finalization order: first=%s newest=%s last=%s", finalized[0], finalized[10], finalized[205])
 	}
-	if pool.finalizationOffset != 0 {
-		t.Fatalf("finalization offset = %d, want reset after final page", pool.finalizationOffset)
+	if offset, due := terminalRunSweeps.next(pool.finalizationKey(), time.Now()); offset != 0 || due {
+		t.Fatalf("finalization sweep = offset %d due %t, want completed after final page", offset, due)
 	}
 }
 
