@@ -12,6 +12,8 @@ import (
 func TerminalFailureReply(code string) string {
 	reason := "this attempt encountered an execution failure"
 	switch terminalFailureCode(code) {
+	case "agent_behavior_fixed":
+		return "I can't change my own instructions or behavior. This Agent's setup is fixed. I can still help with your request as I am; to use custom instructions, create your own Agent with them."
 	case "cap_lookup_not_available":
 		reason = "the model requested a capability outside the available set"
 	case "cap_lookup_duplicate":
@@ -101,7 +103,7 @@ func terminalFailureCode(code string) string {
 		return "budget_exhausted"
 	case "workspace_operation_failed", "workspace_host_unavailable":
 		return "workspace_operation_failed"
-	case "action_admission_failed", "action_failed", "dependency_failed", "task_completion_rejected":
+	case "action_admission_failed", "action_failed", "dependency_failed", "task_completion_rejected", "agent_behavior_fixed":
 		return strings.TrimSpace(code)
 	default:
 		return "execution_failed"
