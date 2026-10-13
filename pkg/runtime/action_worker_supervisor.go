@@ -57,6 +57,8 @@ type ActionWorkerSupervisor struct {
 	config      DynamicActionWorkerConfig
 	logger      *zap.SugaredLogger
 	limiter     *WorkerLimiter
+	signals     *WorkSignalStatus
+	discovery   *scopeDiscovery
 
 	mu     sync.RWMutex
 	pools  map[string]*ActionWorkerPool
@@ -113,6 +115,7 @@ func newActionWorkerSupervisor(
 	return &ActionWorkerSupervisor{
 		store: store, catalog: catalog, credentials: credentials, leaseIssuer: issuer, dispatcher: dispatcher,
 		source: source, config: config, logger: logger, pools: make(map[string]*ActionWorkerPool),
+		discovery: newScopeDiscovery(),
 	}, nil
 }
 
@@ -163,9 +166,31 @@ func (s *ActionWorkerSupervisor) Wake() {
 
 func (s *ActionWorkerSupervisor) WakeScope(scope Scope) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if pool := s.pools[workerScopeKey(scope)]; pool != nil {
+	pool, signals := s.pools[workerScopeKey(scope)], s.signals
+	s.mu.RUnlock()
+	if pool != nil {
 		pool.Wake()
+		return
+	}
+	if signals.Healthy() && scope.Validate() == nil {
+		// While scope listing is slow, a signal is how a new scope is found.
+		s.discovery.unknown(workerScopeKey(scope), time.Now(), s.config.ReconcileInterval)
+	}
+}
+
+// RefreshScopes lists worker scopes now instead of at the next interval.
+func (s *ActionWorkerSupervisor) RefreshScopes() {
+	s.discovery.request()
+}
+
+// SetWorkSignals lets pools sleep until wakes or durable deadlines and slows
+// scope listing while status is healthy. Call before Start.
+func (s *ActionWorkerSupervisor) SetWorkSignals(status *WorkSignalStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.signals = status
+	for _, pool := range s.pools {
+		pool.SetWorkSignals(status)
 	}
 }
 
@@ -195,12 +220,20 @@ func (s *ActionWorkerSupervisor) run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reconcile(ctx)
+			s.mu.RLock()
+			healthy := s.signals.Healthy()
+			s.mu.RUnlock()
+			if !s.discovery.tickDue(healthy, time.Now()) {
+				continue
+			}
+		case <-s.discovery.requests:
 		}
+		s.reconcile(ctx)
 	}
 }
 
 func (s *ActionWorkerSupervisor) reconcile(ctx context.Context) {
+	s.discovery.reconciled(time.Now())
 	scopes, err := s.source.ListWorkerScopes(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
@@ -239,6 +272,7 @@ func (s *ActionWorkerSupervisor) reconcile(ctx context.Context) {
 			continue
 		}
 		pool.SetWorkerLimiter(s.limiter)
+		pool.SetWorkSignals(s.signals)
 		s.pools[key] = pool
 		pool.Start(ctx)
 		s.logger.Infow("started action worker scope", "scopeKind", scope.Kind, "scopeId", scope.ID, "concurrency", s.config.Concurrency)
