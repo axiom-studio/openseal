@@ -165,6 +165,7 @@ func WithPostgresMigrationObserver(observer PostgresMigrationObserver) PostgresS
 // Additional kernel contracts are implemented on this type in focused slices.
 type PostgresStore struct {
 	db                        *sql.DB
+	dsn                       string
 	schema                    string
 	migrationLockTimeout      time.Duration
 	migrationLockPollInterval time.Duration
@@ -202,7 +203,7 @@ func NewPostgresStore(ctx context.Context, dsn string, options ...PostgresStoreO
 	db.SetConnMaxLifetime(config.pool.ConnectionLifetime)
 	db.SetConnMaxIdleTime(config.pool.ConnectionIdleTime)
 	store := &PostgresStore{
-		db: db, schema: config.schema,
+		db: db, dsn: dsn, schema: config.schema,
 		migrationLockTimeout:      config.migrationLockTimeout,
 		migrationLockPollInterval: config.migrationLockPollInterval,
 		migrationObserver:         config.migrationObserver,
@@ -456,6 +457,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	}
 	if err := s.migrateCredentialRequests(ctx, tx); err != nil {
 		return fmt.Errorf("credential request migration: %w", err)
+	}
+	if err := s.migrateWorkSignals(ctx, tx); err != nil {
+		return fmt.Errorf("work signal migration: %w", err)
 	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {

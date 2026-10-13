@@ -163,6 +163,10 @@ type AgentRunWorkerPool struct {
 	startOnce            sync.Once
 	stopOnce             sync.Once
 	limiter              atomic.Pointer[WorkerLimiter]
+	signals              atomic.Pointer[WorkSignalStatus]
+	// deadlines lets a signal-driven pool sleep until the next due Run or
+	// lease expiry instead of polling. Stores without it always poll.
+	deadlines AgentRunDeadlineStore
 }
 
 // SetActionCoordinator enables atomic materialization of one proposal-only
@@ -183,6 +187,12 @@ func (p *AgentRunWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
 	p.limiter.Store(limiter)
 }
 
+// SetWorkSignals lets the pool sleep until a wake or its next durable
+// deadline while status is healthy. Without it the pool polls.
+func (p *AgentRunWorkerPool) SetWorkSignals(status *WorkSignalStatus) {
+	p.signals.Store(status)
+}
+
 func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logger *zap.SugaredLogger, config AgentRunWorkerConfig) (*AgentRunWorkerPool, error) {
 	if store == nil || resolver == nil {
 		return nil, errors.New("kernel store and turn runner resolver are required")
@@ -200,6 +210,7 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 		resolver:    resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: newWorkerPollSignal(),
 		poolID: strings.TrimSpace(config.WorkerIDPrefix) + "-" + uuid.NewString(),
 	}
+	pool.deadlines, _ = store.(AgentRunDeadlineStore)
 	if forkStore, ok := store.(RunForkStore); ok {
 		pool.forks = NewRunForkCoordinator(forkStore)
 	}
@@ -1338,17 +1349,20 @@ func (p *AgentRunWorkerPool) heartbeatRunLease(ctx context.Context, cancel conte
 
 func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 	defer p.wg.Done()
-	consecutiveFailures := 0
+	consecutiveFailures, maintenanceFailures, deadlineFailures := 0, 0, 0
 	seed := p.poolID + "-timer-wake"
 	for {
 		// Capture before reconciliation so a committed enqueue during the scan
 		// remains visible when this loop subsequently waits.
 		_, observedWake := p.maintenanceWake.snapshot()
+		healthy, healthChanged := p.signals.Load().watch()
 		release, acquireErr := p.limiter.Load().acquire(ctx)
 		if acquireErr != nil {
 			return
 		}
 		result, err := p.wakeService.WakeDueTimers(ctx, p.config.Scope, time.Now())
+		var maintenanceDue *time.Time
+		maintenanceFailed := false
 		if err != nil {
 			consecutiveFailures++
 			release()
@@ -1358,38 +1372,72 @@ func (p *AgentRunWorkerPool) timerWakeLoop(ctx context.Context) {
 			// One timer per scope probes for work created by another process.
 			// Internal claim hints do not retrigger the maintenance scan.
 			p.requestClaim()
-			p.reconcileAgentRequestInbox(ctx)
-			p.reconcileForkChildren(ctx)
-			p.reconcileTerminalRunFinalizers(ctx)
+			inboxDue, inboxFailed := p.reconcileAgentRequestInbox(ctx)
+			forkDue, forkFailed := p.reconcileForkChildren(ctx)
+			finalizerDue := p.reconcileTerminalRunFinalizers(ctx)
 			release()
+			maintenanceDue = earliestDeadline(inboxDue, forkDue, finalizerDue)
+			maintenanceFailed = inboxFailed || forkFailed
 		}
-		delay := workerPollDelay(p.config.PollInterval, consecutiveFailures, seed)
-		if err == nil && result != nil && result.NextWakeAt != nil {
-			if due := time.Until(*result.NextWakeAt); due < delay {
-				delay = max(due, 0)
+		var wait idleWait
+		if !healthy || p.deadlines == nil || err != nil {
+			delay := workerPollDelay(p.config.PollInterval, consecutiveFailures, seed)
+			if err == nil && result != nil && result.NextWakeAt != nil {
+				if due := time.Until(*result.NextWakeAt); due < delay {
+					delay = max(due, 0)
+				}
+			}
+			if err != nil {
+				// Timer-store failures retain their existing backoff even if another
+				// worker publishes a latency hint while the store is unavailable.
+				observedWake = nil
+			}
+			wait = pollWait(delay)
+		} else {
+			// Signal-driven: sleep until a wake or the earliest durable deadline.
+			// Claim and maintenance state only changes through committed writes,
+			// which signal this scope, or through time, which these deadlines cover.
+			now := time.Now()
+			deadline, deadlineErr := p.deadlines.NextAgentRunDeadline(ctx, p.config.Scope, p.config.Kind, p.config.AssignedAgentID, now.UTC())
+			if deadlineErr != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				deadlineFailures++
+				p.logger.Warnw("agent run deadline lookup failed", "scopeKind", p.config.Scope.Kind, "scopeId", p.config.Scope.ID, "error", deadlineErr)
+				wait = pollWait(workerPollDelay(p.config.PollInterval, deadlineFailures, seed))
+			} else {
+				deadlineFailures = 0
+				wait = deadlineWait(now, earliestDeadline(deadline, result.NextWakeAt, maintenanceDue))
+			}
+			if maintenanceFailed {
+				maintenanceFailures++
+				wait = wait.earliest(now, new(now.Add(workerPollDelay(p.config.PollInterval, maintenanceFailures, seed))))
+			} else {
+				maintenanceFailures = 0
 			}
 		}
-		if err != nil {
-			// Timer-store failures retain their existing backoff even if another
-			// worker publishes a latency hint while the store is unavailable.
-			observedWake = nil
-		}
-		if !waitForWorkerPoll(ctx, observedWake, delay) {
+		if !waitIdle(ctx, observedWake, healthChanged, wait) {
 			return
 		}
 	}
 }
 
-func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context) {
+// reconcileTerminalRunFinalizers returns when it next needs to run: after a
+// throttled pass, or while a historical sweep is still in progress. Nil means
+// it is caught up until the next signal.
+func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context) *time.Time {
 	if p.runCommands == nil && p.runFinalizer == nil && p.collaboration == nil && p.requestInbox == nil {
-		return
+		return nil
 	}
+	const interval = 10 * time.Second
 	now := time.Now().UTC()
 	firstScan := p.lastFinalizationScan.IsZero()
-	if !firstScan && now.Sub(p.lastFinalizationScan) < 10*time.Second {
-		return
+	if !firstScan && now.Sub(p.lastFinalizationScan) < interval {
+		return new(p.lastFinalizationScan.Add(interval))
 	}
 	p.lastFinalizationScan = now
+	next := new(now.Add(interval))
 	// Terminal cleanup is maintenance behind timer wakes. Keep each slice small
 	// so a large historical backlog cannot hold this pool's scheduler loop for
 	// minutes while it probes already-finalized Runs.
@@ -1401,7 +1449,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 	})
 	if err != nil {
 		p.logger.Warnw("failed to list terminal Runs for resource finalization", "error", err)
-		return
+		return next
 	}
 	if firstScan {
 		p.logger.Infow("started terminal Run resource reconciliation",
@@ -1415,11 +1463,11 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 	}
 	if len(newest) < pageSize {
 		p.finalizationOffset = 0
-		return
+		return nil
 	}
 	if p.finalizationOffset == 0 {
 		p.finalizationOffset = pageSize
-		return
+		return next
 	}
 	historical, err := p.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 		Scope: p.config.Scope, Kind: p.config.Kind, Statuses: []AgentRunStatus{
@@ -1428,7 +1476,7 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 	})
 	if err != nil {
 		p.logger.Warnw("failed to list historical terminal Runs for resource finalization", "error", err)
-		return
+		return next
 	}
 	for _, run := range historical {
 		p.resolveForkChild(ctx, run)
@@ -1437,14 +1485,17 @@ func (p *AgentRunWorkerPool) reconcileTerminalRunFinalizers(ctx context.Context)
 	}
 	if len(historical) < pageSize {
 		p.finalizationOffset = 0
-	} else {
-		p.finalizationOffset += pageSize
+		return nil
 	}
+	p.finalizationOffset += pageSize
+	return next
 }
 
-func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) {
+// reconcileAgentRequestInbox returns when a throttled conversation projection
+// is next due, and whether the pass failed and must be retried.
+func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) (*time.Time, bool) {
 	if p.requestInbox == nil || p.config.Kind != "" && p.config.Kind != RunKindAgentWork {
-		return
+		return nil, false
 	}
 	result, err := p.requestInbox.ReconcileWorker(ctx, p.config.Scope, p.config.AssignedAgentID)
 	if err != nil {
@@ -1454,18 +1505,22 @@ func (p *AgentRunWorkerPool) reconcileAgentRequestInbox(ctx context.Context) {
 		result.CompletionReviewsCreated > 0 || result.CompletionReviewsApplied > 0) {
 		p.Wake()
 	}
+	return p.requestInbox.deferredProjectionAt(), err != nil
 }
 
-func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) {
+// reconcileForkChildren returns when another dependency page is due, and
+// whether the pass failed and must be retried.
+func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) (*time.Time, bool) {
 	if p.forks == nil {
-		return
+		return nil, false
 	}
+	failed := false
 	if _, ok := p.forks.store.(RunDependencyReconciliationStore); ok {
 		const pageSize = 32
 		work, err := NewDependencyCoordinator(p.forks.store).ListWaitingRunDependencyGroups(ctx, p.config.Scope, p.dependencyCursor, pageSize)
 		if err != nil {
 			p.logger.Warnw("failed to list waiting dependency groups", "error", err)
-			return
+			return nil, true
 		}
 		for _, candidate := range work {
 			p.dependencyCursor = candidate.GroupID
@@ -1478,14 +1533,17 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) {
 			})
 			if err != nil && !errors.Is(err, ErrRevisionConflict) {
 				p.logger.Warnw("failed to reconcile waiting dependency group", "groupId", candidate.GroupID, "error", err)
+				failed = true
 			} else if result != nil && !result.Replayed && result.Evaluation.Wake {
 				p.Wake()
 			}
 		}
 		if len(work) < pageSize {
 			p.dependencyCursor = ""
+			return nil, failed
 		}
-		return
+		// More waiting groups remain beyond this page.
+		return new(time.Now()), failed
 	}
 	// Custom stores without the optional indexed contract retain their existing
 	// terminal-child recovery behavior.
@@ -1494,9 +1552,10 @@ func (p *AgentRunWorkerPool) reconcileForkChildren(ctx context.Context) {
 	})
 	if err != nil {
 		p.logger.Warnw("failed to list terminal fork children", "error", err)
-		return
+		return nil, true
 	}
 	for _, run := range runs {
 		p.resolveForkChild(ctx, run)
 	}
+	return nil, false
 }

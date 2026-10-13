@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -45,6 +46,9 @@ type ExternalConversationSupervisor struct {
 	config           ExternalConversationSupervisorConfig
 	logger           *zap.SugaredLogger
 	wake             chan struct{}
+	signals          atomic.Pointer[WorkSignalStatus]
+	queue            *scopeWakeQueue
+	deadlines        ExternalConversationDeadlineStore
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 	startOnce        sync.Once
@@ -81,10 +85,12 @@ func NewExternalConversationSupervisor(
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	return &ExternalConversationSupervisor{
+	supervisor := &ExternalConversationSupervisor{
 		inbox: inbox, replies: replies, delivery: delivery, approvals: approvals, scopes: scopes,
-		config: config, logger: logger, wake: make(chan struct{}, 1),
-	}, nil
+		config: config, logger: logger, wake: make(chan struct{}, 1), queue: newScopeWakeQueue(),
+	}
+	supervisor.deadlines, _ = inbox.store.(ExternalConversationDeadlineStore)
+	return supervisor, nil
 }
 
 func (s *ExternalConversationSupervisor) Start(ctx context.Context) {
@@ -113,75 +119,161 @@ func (s *ExternalConversationSupervisor) Wake() {
 	}
 }
 
+// WakeScope reconciles one scope promptly instead of every listed scope.
+func (s *ExternalConversationSupervisor) WakeScope(scope Scope) {
+	s.queue.wakeScope(scope)
+}
+
+// SetWorkSignals stops the fixed tick while status is healthy: the
+// supervisor then runs for signalled scopes and at each scope's next retry,
+// lease or approval deadline. Call before Start.
+func (s *ExternalConversationSupervisor) SetWorkSignals(status *WorkSignalStatus) {
+	s.signals.Store(status)
+}
+
 func (s *ExternalConversationSupervisor) Reconcile(ctx context.Context) error {
 	scopes, err := s.scopes.ListWorkerScopes(ctx)
 	if err != nil {
 		return err
 	}
+	return s.reconcileScopes(ctx, normalizedConversationRunScopes(scopes))
+}
+
+func (s *ExternalConversationSupervisor) reconcileScopes(ctx context.Context, scopes []Scope) error {
 	var reconcileErrors []error
-	for _, scope := range normalizedConversationRunScopes(scopes) {
-		if s.callbacks != nil {
-			for range s.config.BatchSize {
-				receipt, processErr := s.callbacks.ProcessOne(ctx, scope)
-				if processErr != nil {
-					reconcileErrors = append(reconcileErrors, processErr)
-					break
-				}
-				if receipt == nil {
-					break
-				}
-			}
-		}
-		if _, err := s.approvals.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
+	for _, scope := range scopes {
+		if err := s.reconcileScope(ctx, scope); err != nil {
 			reconcileErrors = append(reconcileErrors, err)
 		}
+	}
+	return errors.Join(reconcileErrors...)
+}
+
+func (s *ExternalConversationSupervisor) reconcileScope(ctx context.Context, scope Scope) error {
+	var reconcileErrors []error
+	if s.callbacks != nil {
 		for range s.config.BatchSize {
-			item, processErr := s.inbox.ProcessOne(ctx, scope)
+			receipt, processErr := s.callbacks.ProcessOne(ctx, scope)
 			if processErr != nil {
 				reconcileErrors = append(reconcileErrors, processErr)
 				break
 			}
-			if item == nil {
-				break
-			}
-		}
-		// Project progress immediately after ingress has created the run. Reply
-		// reconciliation can include model work and may complete a short run before
-		// a later acknowledgement pass ever observes it as active.
-		if s.acknowledgements != nil {
-			if _, err := s.acknowledgements.ProcessCommentaryScope(ctx, scope); err != nil {
-				reconcileErrors = append(reconcileErrors, err)
-			}
-		}
-		if _, err := s.replies.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
-			reconcileErrors = append(reconcileErrors, err)
-		}
-		for range s.config.BatchSize {
-			delivery, processErr := s.delivery.ProcessOne(ctx, scope)
-			if processErr != nil {
-				reconcileErrors = append(reconcileErrors, processErr)
-				break
-			}
-			if delivery == nil {
+			if receipt == nil {
 				break
 			}
 		}
 	}
+	if _, err := s.approvals.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
+		reconcileErrors = append(reconcileErrors, err)
+	}
+	for range s.config.BatchSize {
+		item, processErr := s.inbox.ProcessOne(ctx, scope)
+		if processErr != nil {
+			reconcileErrors = append(reconcileErrors, processErr)
+			break
+		}
+		if item == nil {
+			break
+		}
+	}
+	// Project progress immediately after ingress has created the run. Reply
+	// reconciliation can include model work and may complete a short run before
+	// a later acknowledgement pass ever observes it as active.
+	if s.acknowledgements != nil {
+		if _, err := s.acknowledgements.ProcessCommentaryScope(ctx, scope); err != nil {
+			reconcileErrors = append(reconcileErrors, err)
+		}
+	}
+	if _, err := s.replies.ProcessScope(ctx, scope, s.config.BatchSize); err != nil {
+		reconcileErrors = append(reconcileErrors, err)
+	}
+	for range s.config.BatchSize {
+		delivery, processErr := s.delivery.ProcessOne(ctx, scope)
+		if processErr != nil {
+			reconcileErrors = append(reconcileErrors, processErr)
+			break
+		}
+		if delivery == nil {
+			break
+		}
+	}
 	return errors.Join(reconcileErrors...)
+}
+
+// scheduleScope records when a signal-driven scope next needs a pass: its
+// earliest durable deadline, or a backed-off retry after a failed pass.
+func (s *ExternalConversationSupervisor) scheduleScope(ctx context.Context, scope Scope, failed error) {
+	next, err := s.deadlines.NextExternalConversationDeadline(ctx, scope, time.Now().UTC())
+	if err != nil && ctx.Err() == nil {
+		s.logger.Warnw("external conversation deadline lookup failed", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
+	}
+	s.queue.setDeadline(scope, next)
+	s.queue.outcome(scope, errors.Join(failed, err), s.config.Interval, time.Now())
 }
 
 func (s *ExternalConversationSupervisor) loop(ctx context.Context) {
 	defer s.wg.Done()
 	ticker := time.NewTicker(s.config.Interval)
 	defer ticker.Stop()
+	known := newKnownWorkerScopes(s.scopes, 10*s.config.Interval)
 	for {
+		healthy, healthChanged := s.signals.Load().watch()
+		signalDriven := healthy && s.deadlines != nil
+		due := newDeadlineTimer(signalDriven, s.queue.nextDeadline())
+		full, skip := false, false
 		select {
 		case <-ctx.Done():
+			due.stop()
 			return
 		case <-s.wake:
+			full = true
 		case <-ticker.C:
+			// While signals are healthy each scope runs when signalled or due,
+			// so the fixed tick is only the fallback for an unhealthy listener.
+			full, skip = true, signalDriven
+		case <-s.queue.signal:
+		case <-due.channel():
+		case <-healthChanged:
+			skip = true
 		}
-		if err := s.Reconcile(ctx); err != nil && ctx.Err() == nil {
+		due.stop()
+		if skip {
+			continue
+		}
+		spacing := time.Duration(0)
+		if signalDriven {
+			spacing = s.config.Interval
+		}
+		now := time.Now()
+		queuedFull, scopes := s.queue.take(now, spacing)
+		if full || queuedFull {
+			listed, err := known.list(ctx)
+			if err != nil {
+				if ctx.Err() == nil {
+					s.logger.Warnw("failed to reconcile external conversations", "error", err)
+				}
+				continue
+			}
+			scopes = listed
+			s.queue.clearDeadlines()
+			s.queue.ran(listed, now)
+		} else {
+			var err error
+			if scopes, err = known.filter(ctx, time.Now(), scopes); err != nil && ctx.Err() == nil {
+				s.logger.Warnw("failed to list external conversation scopes", "error", err)
+			}
+		}
+		var reconcileErrors []error
+		for _, scope := range scopes {
+			err := s.reconcileScope(ctx, scope)
+			if err != nil {
+				reconcileErrors = append(reconcileErrors, err)
+			}
+			if signalDriven && ctx.Err() == nil {
+				s.scheduleScope(ctx, scope, err)
+			}
+		}
+		if err := errors.Join(reconcileErrors...); err != nil && ctx.Err() == nil {
 			s.logger.Warnw("failed to reconcile external conversations", "error", err)
 		}
 	}
