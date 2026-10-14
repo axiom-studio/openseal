@@ -3,6 +3,8 @@ package runtime
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -186,7 +188,7 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 		ActionInvocationContracts: ProjectHostedActionInvocationContracts(request.Actions),
 		Budget:                    request.Budget,
 		DependencyResults:         request.DependencyResults, CollaborationResults: request.CollaborationResults,
-		ContinuationCheckpoint: hostedTurnTextCheckpoint(request.ContinuationCheckpoint),
+		ContinuationCheckpoint: hostedTurnModelCheckpoint(request.ContinuationCheckpoint),
 		PendingInterventions:   request.PendingInterventions,
 	})
 }
@@ -218,6 +220,87 @@ func hostedTurnTextCheckpoint(checkpoint map[string]interface{}) map[string]inte
 		"detail":    strings.TrimSpace(fmt.Sprint(media["detail"])),
 	}
 	return result
+}
+
+// Limits for action arguments shown in the model view of a checkpoint.
+const (
+	// HostedTurnElidedArgumentStringBytes is the longest argument string kept
+	// verbatim in model-visible action history; longer strings (file contents,
+	// documents) become a size and digest the model can still compare.
+	HostedTurnElidedArgumentStringBytes = 1 << 10
+	// HostedTurnFailedActionArgumentBytes keeps a failed last action's
+	// arguments whole up to this encoded size, so the model can correct the
+	// exact input that was rejected.
+	HostedTurnFailedActionArgumentBytes = 16 << 10
+)
+
+// hostedTurnModelCheckpoint is the checkpoint exactly as a hosted model sees
+// it: the text projection plus elided large action arguments. It always works
+// on a deep clone, so durable Run state and any projection stored in it (such
+// as approval recovery) are never altered. Action input pointers are resolved
+// against the durable checkpoint, never against this view.
+func hostedTurnModelCheckpoint(checkpoint map[string]interface{}) map[string]interface{} {
+	result := hostedTurnTextCheckpoint(checkpoint)
+	elideHostedTurnActionArguments(result)
+	return result
+}
+
+// elideHostedTurnActionArguments replaces long strings in historical and last
+// action arguments with {elided, bytes, sha256}. Paths and other short fields
+// stay, so a write[] or files[] entry keeps its path and loses only content.
+// Model-authored actionInputs and the proposal recovery marker are untouched,
+// and a failed last action keeps its arguments whole when they are small
+// enough to correct.
+func elideHostedTurnActionArguments(checkpoint map[string]interface{}) {
+	if checkpoint == nil {
+		return
+	}
+	if history, ok := checkpoint[actionHistoryCheckpointKey].([]interface{}); ok {
+		for _, value := range history {
+			if entry, ok := value.(map[string]interface{}); ok {
+				if arguments, exists := entry["arguments"]; exists {
+					entry["arguments"] = elideHostedTurnArgumentValue(arguments)
+				}
+			}
+		}
+	}
+	last, ok := checkpoint["lastAction"].(map[string]interface{})
+	if !ok {
+		return
+	}
+	arguments, exists := last["arguments"]
+	if !exists {
+		return
+	}
+	if status, _ := last["status"].(string); ActionCallStatus(status) == ActionCallStatusFailed {
+		if encoded, err := json.Marshal(arguments); err == nil && len(encoded) <= HostedTurnFailedActionArgumentBytes {
+			return
+		}
+	}
+	last["arguments"] = elideHostedTurnArgumentValue(arguments)
+}
+
+func elideHostedTurnArgumentValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case string:
+		if len(typed) <= HostedTurnElidedArgumentStringBytes {
+			return typed
+		}
+		digest := sha256.Sum256([]byte(typed))
+		return map[string]interface{}{"elided": true, "bytes": len(typed), "sha256": hex.EncodeToString(digest[:])}
+	case map[string]interface{}:
+		for key, child := range typed {
+			typed[key] = elideHostedTurnArgumentValue(child)
+		}
+		return typed
+	case []interface{}:
+		for index, child := range typed {
+			typed[index] = elideHostedTurnArgumentValue(child)
+		}
+		return typed
+	default:
+		return typed
+	}
 }
 
 func compactHostedTurnActionHistory(checkpoint map[string]interface{}) {
