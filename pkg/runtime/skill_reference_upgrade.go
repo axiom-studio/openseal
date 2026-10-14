@@ -921,6 +921,20 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 	}
 	fromIdentity := capability.NewSkillIdentity(current.SkillID, current.SkillVersion, current.SourceIdentity)
 	toIdentity := capability.NewSkillIdentity(target.ID, target.Version, skill.DefinitionSourceIdentity(target))
+	// A binding no Team role grants (such as the platform's bundled tools on
+	// a Team deployment) carries no Team authority, so its upgrade leaves the
+	// Team definition unchanged.
+	governed := false
+	for _, role := range definition.Roles {
+		for _, grant := range role.SkillGrants {
+			if grant.ExactIdentity().Equal(fromIdentity) || grant.ExactIdentity().Equal(toIdentity) {
+				governed = true
+			}
+		}
+	}
+	if !governed {
+		return nil, nil
+	}
 	for _, role := range definition.Roles {
 		for _, grant := range role.SkillGrants {
 			if !grant.ExactIdentity().Equal(fromIdentity) {
