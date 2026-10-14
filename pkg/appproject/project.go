@@ -221,7 +221,7 @@ func (p Project) Apply(title string, edits Edits) (Project, error) {
 		case change.Find == "":
 			reasons = append(reasons, "replace in "+clean+" needs non-empty find text")
 		case strings.Count(content, change.Find) != 1:
-			reasons = append(reasons, fmt.Sprintf("find text occurs %d times in %s; it must occur exactly once (read the file and include more surrounding text)", strings.Count(content, change.Find), clean))
+			reasons = append(reasons, replacementFeedback(content, change.Find, clean))
 		default:
 			next.Files[clean] = strings.Replace(content, change.Find, change.Replace, 1)
 		}
@@ -242,6 +242,115 @@ func (p Project) Apply(title string, edits Edits) (Project, error) {
 		return Project{}, invalid(reasons...)
 	}
 	return next, next.Validate()
+}
+
+// Limits on the context a failed replacement returns.
+const (
+	feedbackContextLines = 10
+	feedbackContextBytes = 1536
+	feedbackMatchLines   = 20
+)
+
+// replacementFeedback explains why find does not occur exactly once in
+// content, with enough of the file for an Agent to correct the edit without
+// re-reading it: the nearest context when nothing matched, or the line of each
+// match when several did.
+func replacementFeedback(content, find, file string) string {
+	count := strings.Count(content, find)
+	message := fmt.Sprintf("find text occurs %d times in %s; it must occur exactly once", count, file)
+	if count > 1 {
+		lines := matchLines(content, find)
+		shown := lines
+		if len(shown) > feedbackMatchLines {
+			shown = shown[:feedbackMatchLines]
+		}
+		numbers := make([]string, len(shown))
+		for i, line := range shown {
+			numbers[i] = fmt.Sprint(line)
+		}
+		listed := strings.Join(numbers, ", ")
+		if len(lines) > len(shown) {
+			listed += fmt.Sprintf(" and %d more", len(lines)-len(shown))
+		}
+		return message + fmt.Sprintf(" (matches start at lines %s; use a longer find that includes nearby unique text)", listed)
+	}
+	anchor := ""
+	for _, line := range strings.Split(find, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			anchor = trimmed
+			break
+		}
+	}
+	lines := strings.Split(content, "\n")
+	at := -1
+	if anchor != "" {
+		for i, line := range lines {
+			if strings.Contains(line, anchor) {
+				at = i
+				break
+			}
+		}
+	}
+	if at < 0 {
+		return message + fmt.Sprintf(" (no line of %s contains the first line of find; call read_app for %s and copy the exact current text)", file, file)
+	}
+	start, end := at-feedbackContextLines, at+feedbackContextLines+1
+	if start < 0 {
+		start = 0
+	}
+	if end > len(lines) {
+		end = len(lines)
+	}
+	rows := make([]string, 0, end-start)
+	size := 0
+	for i := start; i < end; i++ {
+		line := lines[i]
+		if i == at {
+			line = truncateUTF8(line, feedbackContextBytes-32)
+		}
+		rows = append(rows, fmt.Sprintf("%d: %s", i+1, line))
+		size += len(rows[len(rows)-1]) + 1
+	}
+	// Drop the line farthest from the anchor until the excerpt fits.
+	first, last := 0, len(rows)-1
+	for size > feedbackContextBytes && first < last {
+		if at-(start+first) >= (start+last)-at {
+			size -= len(rows[first]) + 1
+			first++
+		} else {
+			size -= len(rows[last]) + 1
+			last--
+		}
+	}
+	excerpt := strings.Join(rows[first:last+1], "\n")
+	return message + fmt.Sprintf(" (the first line of find appears at line %d, but the whole find text does not match exactly; copy it exactly, including whitespace and indentation, from these lines of %s:\n%s)", at+1, file, excerpt)
+}
+
+// matchLines returns the 1-based line on which each non-overlapping
+// occurrence of find starts.
+func matchLines(content, find string) []int {
+	var lines []int
+	offset, line := 0, 1
+	for {
+		index := strings.Index(content[offset:], find)
+		if index < 0 {
+			return lines
+		}
+		line += strings.Count(content[offset:offset+index], "\n")
+		lines = append(lines, line)
+		line += strings.Count(find, "\n")
+		offset += index + len(find)
+	}
+}
+
+func truncateUTF8(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	for limit > 0 && !utf8.RuneStart(value[limit]) {
+		limit--
+	}
+	return value[:limit] + "..."
 }
 
 // Marshal encodes a validated project for storage.
