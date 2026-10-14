@@ -26,6 +26,10 @@ var (
 	ErrSkillReferenceUpgradeConflict    = errors.New("skill reference upgrade revision conflict")
 	ErrSkillReferenceUpgradeApproval    = errors.New("skill reference upgrade requires approval")
 	ErrSkillReferenceUpgradeBusy        = errors.New("skill reference upgrade is waiting for outstanding work to finish")
+	// ErrSkillReferenceUpgradeCurrent reports that the binding already has the
+	// target identity, typically because a group upgrade moved it with a
+	// sibling. Callers converging on a version treat it as done.
+	ErrSkillReferenceUpgradeCurrent = errors.New("target identity is already active")
 )
 
 type SkillReferenceIdentity struct {
@@ -75,6 +79,13 @@ type SkillReferenceCallbackRegistrationImpact struct {
 	AdapterID        string `json:"adapterId"`
 }
 
+// SkillReferenceBindingRevision names another binding of the same Skill and
+// version that moves in the same upgrade as the plan's primary binding.
+type SkillReferenceBindingRevision struct {
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expectedRevision"`
+}
+
 type SkillReferenceUpgradeFinding struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -84,22 +95,27 @@ type SkillReferenceUpgradeFinding struct {
 // durable reference that must move together. Historical Runs and ActionCalls
 // are deliberately absent and remain immutable.
 type SkillReferenceUpgradePlan struct {
-	APIVersion              string                                     `json:"apiVersion"`
-	Scope                   Scope                                      `json:"scope"`
-	DeploymentID            string                                     `json:"deploymentId"`
-	BindingID               string                                     `json:"bindingId"`
-	ExpectedBindingRevision int64                                      `json:"expectedBindingRevision"`
-	From                    SkillReferenceIdentity                     `json:"from"`
-	To                      SkillReferenceIdentity                     `json:"to"`
-	Objectives              []SkillReferenceObjectiveImpact            `json:"objectives,omitempty"`
-	Projects                []SkillReferenceProjectImpact              `json:"projects,omitempty"`
-	ConversationEndpoints   []SkillReferenceConversationEndpointImpact `json:"conversationEndpoints,omitempty"`
-	CallbackRegistrations   []SkillReferenceCallbackRegistrationImpact `json:"callbackRegistrations,omitempty"`
-	TeamAuthority           *SkillReferenceTeamAuthorityImpact         `json:"teamAuthority,omitempty"`
-	Findings                []SkillReferenceUpgradeFinding             `json:"findings,omitempty"`
-	ApprovalRequired        bool                                       `json:"approvalRequired"`
-	Digest                  string                                     `json:"digest"`
-	GeneratedAt             time.Time                                  `json:"generatedAt"`
+	APIVersion              string `json:"apiVersion"`
+	Scope                   Scope  `json:"scope"`
+	DeploymentID            string `json:"deploymentId"`
+	BindingID               string `json:"bindingId"`
+	ExpectedBindingRevision int64  `json:"expectedBindingRevision"`
+	// Siblings are every other enabled binding of the deployment that grants
+	// the same Skill identity. Durable references name a Skill version, not a
+	// binding, so they can move only when every binding at that version moves
+	// with them; a single-binding upgrade would leave them unattributable.
+	Siblings              []SkillReferenceBindingRevision            `json:"siblings,omitempty"`
+	From                  SkillReferenceIdentity                     `json:"from"`
+	To                    SkillReferenceIdentity                     `json:"to"`
+	Objectives            []SkillReferenceObjectiveImpact            `json:"objectives,omitempty"`
+	Projects              []SkillReferenceProjectImpact              `json:"projects,omitempty"`
+	ConversationEndpoints []SkillReferenceConversationEndpointImpact `json:"conversationEndpoints,omitempty"`
+	CallbackRegistrations []SkillReferenceCallbackRegistrationImpact `json:"callbackRegistrations,omitempty"`
+	TeamAuthority         *SkillReferenceTeamAuthorityImpact         `json:"teamAuthority,omitempty"`
+	Findings              []SkillReferenceUpgradeFinding             `json:"findings,omitempty"`
+	ApprovalRequired      bool                                       `json:"approvalRequired"`
+	Digest                string                                     `json:"digest"`
+	GeneratedAt           time.Time                                  `json:"generatedAt"`
 }
 
 type PlanSkillReferenceUpgradeRequest struct {
@@ -129,6 +145,7 @@ type SkillReferenceUpgradeReceipt struct {
 	DeploymentID          string                                     `json:"deploymentId"`
 	BindingID             string                                     `json:"bindingId"`
 	BindingRevision       int64                                      `json:"bindingRevision"`
+	Siblings              []SkillReferenceBindingRevision            `json:"siblings,omitempty"`
 	From                  SkillReferenceIdentity                     `json:"from"`
 	To                    SkillReferenceIdentity                     `json:"to"`
 	Objectives            []SkillReferenceObjectiveImpact            `json:"objectives,omitempty"`
@@ -179,12 +196,29 @@ type SkillReferenceTeamAuthorityMutation struct {
 type SkillReferenceUpgradeMutation struct {
 	Plan                  *SkillReferenceUpgradePlan
 	Binding               *skill.Binding
+	Siblings              []*skill.Binding
 	Objectives            []SkillReferenceObjectiveMutation
 	Projects              []SkillReferenceProjectMutation
 	ConversationEndpoints []SkillReferenceConversationEndpointMutation
 	CallbackRegistrations []SkillReferenceCallbackRegistrationMutation
 	TeamAuthority         *SkillReferenceTeamAuthorityMutation
 	Receipt               *SkillReferenceUpgradeReceipt
+}
+
+// skillReferenceUpgradeMember is one binding an upgrade moves, with the
+// revision it must have before the upgrade.
+type skillReferenceUpgradeMember struct {
+	Binding          *skill.Binding
+	ExpectedRevision int64
+}
+
+// members lists the primary binding and its siblings in plan order.
+func (m *SkillReferenceUpgradeMutation) members() []skillReferenceUpgradeMember {
+	members := []skillReferenceUpgradeMember{{Binding: m.Binding, ExpectedRevision: m.Plan.ExpectedBindingRevision}}
+	for index, sibling := range m.Siblings {
+		members = append(members, skillReferenceUpgradeMember{Binding: sibling, ExpectedRevision: m.Plan.Siblings[index].ExpectedRevision})
+	}
+	return members
 }
 
 type SkillReferenceUpgradeStore interface {
@@ -210,8 +244,18 @@ func validateSkillReferenceUpgradeMutation(mutation *SkillReferenceUpgradeMutati
 		len(mutation.Objectives) != len(mutation.Plan.Objectives) ||
 		len(mutation.Projects) != len(mutation.Plan.Projects) ||
 		len(mutation.ConversationEndpoints) != len(mutation.Plan.ConversationEndpoints) ||
-		len(mutation.CallbackRegistrations) != len(mutation.Plan.CallbackRegistrations) {
+		len(mutation.CallbackRegistrations) != len(mutation.Plan.CallbackRegistrations) ||
+		len(mutation.Siblings) != len(mutation.Plan.Siblings) {
 		return ErrSkillReferenceUpgradeInvalid
+	}
+	for index, sibling := range mutation.Siblings {
+		expected := mutation.Plan.Siblings[index]
+		if sibling == nil || sibling.ID != expected.ID || sibling.ID == mutation.Plan.BindingID ||
+			sibling.DeploymentID != mutation.Plan.DeploymentID || sibling.Revision != expected.ExpectedRevision+1 ||
+			sibling.SkillID != mutation.Plan.To.ID || sibling.SkillVersion != mutation.Plan.To.Version ||
+			sibling.SourceIdentity != mutation.Plan.To.SourceIdentity {
+			return ErrSkillReferenceUpgradeInvalid
+		}
 	}
 	if err := validateSkillReferenceTeamAuthorityMutation(mutation); err != nil {
 		return err
@@ -327,7 +371,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		return nil, fmt.Errorf("%w: disabled binding cannot be upgraded", ErrSkillReferenceUpgradeInvalid)
 	}
 	if current.SkillVersion == req.ToVersion && current.SourceIdentity == req.ToSourceIdentity {
-		return nil, fmt.Errorf("%w: target identity is already active", ErrSkillReferenceUpgradeInvalid)
+		return nil, fmt.Errorf("%w: %w", ErrSkillReferenceUpgradeInvalid, ErrSkillReferenceUpgradeCurrent)
 	}
 	target, err := exactUpgradeDefinition(ctx, s.catalog, current.SkillID, req.ToVersion, req.ToSourceIdentity)
 	if err != nil {
@@ -337,19 +381,40 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		return nil, fmt.Errorf("%w: exact target Skill definition is not installed", ErrSkillReferenceUpgradeInvalid)
 	}
 	targetSource := skill.DefinitionSourceIdentity(target)
+	// Every enabled binding at the current identity moves together. A binding
+	// at the same version from another publisher cannot be told apart by
+	// version-keyed references, so that remains a refusal.
+	members := []*skill.Binding{current}
 	for _, candidate := range bindings {
-		if candidate == nil || candidate.Disabled || candidate.ID == current.ID || candidate.SkillID != current.SkillID {
+		if candidate == nil || candidate.Disabled || candidate.ID == current.ID || candidate.SkillID != current.SkillID ||
+			candidate.SkillVersion != current.SkillVersion {
 			continue
 		}
-		if candidate.SkillVersion == current.SkillVersion || candidate.SkillVersion == target.Version {
+		if candidate.SourceIdentity != current.SourceIdentity {
 			return nil, fmt.Errorf("%w: durable references are ambiguous across bindings %s and %s", ErrSkillReferenceUpgradeInvalid, current.ID, candidate.ID)
 		}
+		members = append(members, cloneUpgradeBinding(candidate))
 	}
-	candidateBinding := cloneUpgradeBinding(current)
-	candidateBinding.SkillVersion = target.Version
-	candidateBinding.SourceIdentity = targetSource
-	if err := s.catalog.ValidateBindingCandidate(ctx, candidateBinding); err != nil {
-		return nil, fmt.Errorf("%w: target binding contract: %v", ErrSkillReferenceUpgradeInvalid, err)
+	sort.Slice(members[1:], func(i, j int) bool { return members[1+i].ID < members[1+j].ID })
+	siblings := make([]SkillReferenceBindingRevision, 0, len(members)-1)
+	for _, member := range members[1:] {
+		siblings = append(siblings, SkillReferenceBindingRevision{ID: member.ID, ExpectedRevision: member.Revision})
+	}
+	unionActions := make([]string, 0)
+	seenActions := map[string]bool{}
+	for _, member := range members {
+		candidateBinding := cloneUpgradeBinding(member)
+		candidateBinding.SkillVersion = target.Version
+		candidateBinding.SourceIdentity = targetSource
+		if err := s.catalog.ValidateBindingCandidate(ctx, candidateBinding); err != nil {
+			return nil, fmt.Errorf("%w: target binding contract for %s: %v", ErrSkillReferenceUpgradeInvalid, member.ID, err)
+		}
+		for _, action := range member.AllowedActions {
+			if !seenActions[action] {
+				seenActions[action] = true
+				unionActions = append(unionActions, action)
+			}
+		}
 	}
 	previous, err := exactUpgradeDefinition(ctx, s.catalog, current.SkillID, current.SkillVersion, current.SourceIdentity)
 	if err != nil || previous == nil {
@@ -366,7 +431,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	conversationImpacts := make([]SkillReferenceConversationEndpointImpact, 0)
 	for _, endpoint := range conversationEndpoints {
 		if endpoint == nil || endpoint.DeploymentID != req.DeploymentID ||
-			!upgradeConversationReferenceMatches(endpoint.Adapter, current) {
+			!upgradeConversationReferenceMatchesAny(endpoint.Adapter, members) {
 			continue
 		}
 		adapter, ok := target.ConversationAdapters[endpoint.Adapter.AdapterID]
@@ -385,7 +450,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	callbackImpacts := make([]SkillReferenceCallbackRegistrationImpact, 0)
 	for _, registration := range callbackRegistrations {
 		if registration == nil || registration.DeploymentID != req.DeploymentID ||
-			!upgradeCallbackReferenceMatches(registration.Adapter, current) {
+			!upgradeCallbackReferenceMatchesAny(registration.Adapter, members) {
 			continue
 		}
 		adapter, ok := target.CallbackAdapters[registration.Adapter.AdapterID]
@@ -430,8 +495,10 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	sort.Slice(conversationImpacts, func(i, j int) bool { return conversationImpacts[i].ID < conversationImpacts[j].ID })
 	sort.Slice(callbackImpacts, func(i, j int) bool { return callbackImpacts[i].ID < callbackImpacts[j].ID })
 
-	findings := compareUpgradeContracts(previous, target, current.AllowedActions, referencedActions)
-	findings = append(findings, compareUpgradeAdapterContracts(previous, target, current)...)
+	findings := compareUpgradeContracts(previous, target, unionActions, referencedActions)
+	for _, member := range members {
+		findings = append(findings, compareUpgradeAdapterContracts(previous, target, member)...)
+	}
 	if current.SourceIdentity != targetSource {
 		findings = append(findings, SkillReferenceUpgradeFinding{Code: "source_identity_changed", Message: "Skill publisher identity changed"})
 	}
@@ -441,7 +508,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	}
 	plan := &SkillReferenceUpgradePlan{
 		APIVersion: SkillReferenceUpgradeAPIVersion, Scope: req.Scope, DeploymentID: req.DeploymentID,
-		BindingID: current.ID, ExpectedBindingRevision: current.Revision,
+		BindingID: current.ID, ExpectedBindingRevision: current.Revision, Siblings: siblings,
 		From:       SkillReferenceIdentity{ID: current.SkillID, Version: current.SkillVersion, SourceIdentity: current.SourceIdentity},
 		To:         SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
 		Objectives: objectiveImpacts, Projects: projectImpacts, ConversationEndpoints: conversationImpacts,
@@ -498,26 +565,26 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	if binding == nil || binding.Revision != current.ExpectedBindingRevision {
 		return nil, ErrSkillReferenceUpgradeConflict
 	}
-	binding.SkillVersion = current.To.Version
-	binding.SourceIdentity = current.To.SourceIdentity
-	binding.Revision++
-	// Bindings created by an atomic workforce apply predate the management
-	// lifecycle until their first explicit mutation. Establish the lifecycle
-	// clock at that boundary instead of persisting an updated entry alongside a
-	// zero creation timestamp, which would make the binding unreadable.
-	if binding.CreatedAt.IsZero() {
-		binding.CreatedAt = now
+	upgradeBinding(binding, current, current.ExpectedBindingRevision, req, now)
+	movedBindings := map[string]*skill.Binding{binding.ID: binding}
+	previousRevisions := map[string]int64{binding.ID: current.ExpectedBindingRevision}
+	siblingBindings := make([]*skill.Binding, 0, len(current.Siblings))
+	for _, expected := range current.Siblings {
+		var sibling *skill.Binding
+		for _, candidate := range bindings {
+			if candidate != nil && candidate.ID == expected.ID {
+				sibling = cloneUpgradeBinding(candidate)
+				break
+			}
+		}
+		if sibling == nil || sibling.Revision != expected.ExpectedRevision {
+			return nil, ErrSkillReferenceUpgradeConflict
+		}
+		upgradeBinding(sibling, current, expected.ExpectedRevision, req, now)
+		movedBindings[sibling.ID] = sibling
+		previousRevisions[sibling.ID] = expected.ExpectedRevision
+		siblingBindings = append(siblingBindings, sibling)
 	}
-	binding.UpdatedAt = now
-	binding.Lifecycle = append(binding.Lifecycle, capability.BindingLifecycleEntry{
-		Revision: binding.Revision, Action: capability.BindingLifecycleUpdated,
-		Actor: capability.BindingActor{Type: req.Actor.Type, ID: req.Actor.ID}, Reason: req.Reason, At: now,
-		SkillUpgrade: &capability.BindingSkillUpgradeProvenance{
-			From:                    capability.NewSkillIdentity(current.From.ID, current.From.Version, current.From.SourceIdentity),
-			To:                      capability.NewSkillIdentity(current.To.ID, current.To.Version, current.To.SourceIdentity),
-			ExpectedBindingRevision: current.ExpectedBindingRevision, PlanDigest: current.Digest,
-		},
-	})
 
 	objectiveCandidates := make([]SkillReferenceObjectiveMutation, 0, len(current.Objectives))
 	activityIDs := make([]string, 0, len(current.Objectives)+len(current.Projects))
@@ -525,14 +592,17 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	conversationCandidates := make([]SkillReferenceConversationEndpointMutation, 0, len(current.ConversationEndpoints))
 	for _, impact := range current.ConversationEndpoints {
 		endpoint, loadErr := s.store.GetExternalConversationEndpoint(ctx, current.Scope, impact.ID)
-		if loadErr != nil || endpoint == nil || endpoint.Revision != impact.ExpectedRevision ||
-			!upgradeConversationReferenceMatches(endpoint.Adapter, bindingBeforeUpgrade(binding, current)) {
+		if loadErr != nil || endpoint == nil || endpoint.Revision != impact.ExpectedRevision {
+			return nil, ErrSkillReferenceUpgradeConflict
+		}
+		owner := movedBindings[endpoint.Adapter.BindingID]
+		if owner == nil || !upgradeConversationReferenceMatches(endpoint.Adapter, bindingBeforeUpgrade(owner, current, previousRevisions[owner.ID])) {
 			return nil, ErrSkillReferenceUpgradeConflict
 		}
 		next := cloneExternalConversationEndpoint(endpoint)
 		next.Adapter.SkillVersion = current.To.Version
 		next.Adapter.SourceIdentity = current.To.SourceIdentity
-		next.Adapter.BindingRevision = binding.Revision
+		next.Adapter.BindingRevision = owner.Revision
 		next.Revision++
 		next.UpdatedAt = now
 		conversationCandidates = append(conversationCandidates, SkillReferenceConversationEndpointMutation{Value: next, ExpectedRevision: impact.ExpectedRevision})
@@ -540,14 +610,17 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	callbackCandidates := make([]SkillReferenceCallbackRegistrationMutation, 0, len(current.CallbackRegistrations))
 	for _, impact := range current.CallbackRegistrations {
 		registration, loadErr := s.store.GetCallbackRegistration(ctx, current.Scope, impact.ID)
-		if loadErr != nil || registration == nil || registration.Revision != impact.ExpectedRevision ||
-			!upgradeCallbackReferenceMatches(registration.Adapter, bindingBeforeUpgrade(binding, current)) {
+		if loadErr != nil || registration == nil || registration.Revision != impact.ExpectedRevision {
+			return nil, ErrSkillReferenceUpgradeConflict
+		}
+		owner := movedBindings[registration.Adapter.BindingID]
+		if owner == nil || !upgradeCallbackReferenceMatches(registration.Adapter, bindingBeforeUpgrade(owner, current, previousRevisions[owner.ID])) {
 			return nil, ErrSkillReferenceUpgradeConflict
 		}
 		next := cloneCallbackRegistration(registration)
 		next.Adapter.SkillVersion = current.To.Version
 		next.Adapter.SourceIdentity = current.To.SourceIdentity
-		next.Adapter.BindingRevision = binding.Revision
+		next.Adapter.BindingRevision = owner.Revision
 		next.Revision++
 		next.UpdatedAt = now
 		next.Lifecycle = append(next.Lifecycle, CallbackRegistrationLifecycleEntry{
@@ -582,14 +655,14 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	}
 	receipt := &SkillReferenceUpgradeReceipt{
 		APIVersion: SkillReferenceUpgradeAPIVersion, PlanDigest: current.Digest, Scope: current.Scope,
-		DeploymentID: current.DeploymentID, BindingID: current.BindingID, BindingRevision: binding.Revision,
+		DeploymentID: current.DeploymentID, BindingID: current.BindingID, BindingRevision: binding.Revision, Siblings: current.Siblings,
 		From: current.From, To: current.To, Objectives: current.Objectives, Projects: current.Projects,
 		ConversationEndpoints: current.ConversationEndpoints, CallbackRegistrations: current.CallbackRegistrations,
 		TeamAuthority: current.TeamAuthority,
 		Actor:         req.Actor, Reason: req.Reason, Approval: req.Approval, ActivityIDs: activityIDs, AppliedAt: now,
 	}
 	if err := s.store.ApplySkillReferenceUpgrade(ctx, &SkillReferenceUpgradeMutation{
-		Plan: current, Binding: binding, Objectives: objectiveCandidates, Projects: projectCandidates,
+		Plan: current, Binding: binding, Siblings: siblingBindings, Objectives: objectiveCandidates, Projects: projectCandidates,
 		ConversationEndpoints: conversationCandidates, CallbackRegistrations: callbackCandidates, TeamAuthority: teamCandidate, Receipt: receipt,
 	}); err != nil {
 		return nil, err
@@ -607,12 +680,55 @@ func upgradeConversationReferenceMatches(ref ExternalConversationAdapterReferenc
 		ref.BindingRevision >= 1 && ref.BindingRevision <= binding.Revision
 }
 
-func bindingBeforeUpgrade(binding *skill.Binding, plan *SkillReferenceUpgradePlan) *skill.Binding {
+func bindingBeforeUpgrade(binding *skill.Binding, plan *SkillReferenceUpgradePlan, expectedRevision int64) *skill.Binding {
 	previous := cloneUpgradeBinding(binding)
 	previous.SkillVersion = plan.From.Version
 	previous.SourceIdentity = plan.From.SourceIdentity
-	previous.Revision = plan.ExpectedBindingRevision
+	previous.Revision = expectedRevision
 	return previous
+}
+
+// upgradeBinding moves one binding to the plan's target identity and records
+// the upgrade in its lifecycle with that binding's own prior revision.
+func upgradeBinding(binding *skill.Binding, plan *SkillReferenceUpgradePlan, expectedRevision int64, req ApplySkillReferenceUpgradeRequest, now time.Time) {
+	binding.SkillVersion = plan.To.Version
+	binding.SourceIdentity = plan.To.SourceIdentity
+	binding.Revision++
+	// Bindings created by an atomic workforce apply predate the management
+	// lifecycle until their first explicit mutation. Establish the lifecycle
+	// clock at that boundary instead of persisting an updated entry alongside a
+	// zero creation timestamp, which would make the binding unreadable.
+	if binding.CreatedAt.IsZero() {
+		binding.CreatedAt = now
+	}
+	binding.UpdatedAt = now
+	binding.Lifecycle = append(binding.Lifecycle, capability.BindingLifecycleEntry{
+		Revision: binding.Revision, Action: capability.BindingLifecycleUpdated,
+		Actor: capability.BindingActor{Type: req.Actor.Type, ID: req.Actor.ID}, Reason: req.Reason, At: now,
+		SkillUpgrade: &capability.BindingSkillUpgradeProvenance{
+			From:                    capability.NewSkillIdentity(plan.From.ID, plan.From.Version, plan.From.SourceIdentity),
+			To:                      capability.NewSkillIdentity(plan.To.ID, plan.To.Version, plan.To.SourceIdentity),
+			ExpectedBindingRevision: expectedRevision, PlanDigest: plan.Digest,
+		},
+	})
+}
+
+func upgradeConversationReferenceMatchesAny(ref ExternalConversationAdapterReference, members []*skill.Binding) bool {
+	for _, member := range members {
+		if upgradeConversationReferenceMatches(ref, member) {
+			return true
+		}
+	}
+	return false
+}
+
+func upgradeCallbackReferenceMatchesAny(ref CallbackAdapterReference, members []*skill.Binding) bool {
+	for _, member := range members {
+		if upgradeCallbackReferenceMatches(ref, member) {
+			return true
+		}
+	}
+	return false
 }
 
 func upgradeCallbackReferenceMatches(ref CallbackAdapterReference, binding *skill.Binding) bool {

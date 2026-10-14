@@ -2560,6 +2560,7 @@ var (
 	ErrSkillReferenceUpgradeApproval    = runtime.ErrSkillReferenceUpgradeApproval
 	ErrSkillReferenceUpgradeInvalid     = runtime.ErrSkillReferenceUpgradeInvalid
 	ErrSkillReferenceUpgradeBusy        = runtime.ErrSkillReferenceUpgradeBusy
+	ErrSkillReferenceUpgradeCurrent     = runtime.ErrSkillReferenceUpgradeCurrent
 )
 
 func ValidateWorkforceAuthoringPrompt(prompt string) error {
