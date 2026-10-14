@@ -363,6 +363,10 @@ type ArtifactContentWrite struct {
 	Reader    io.Reader
 	SizeBytes int64
 	Digest    string
+	// Owner is the Artifact's owner, such as the Agent whose conversation
+	// produced it. A host may use it to place bytes; it is never part of the
+	// content reference contract.
+	Owner *ObjectiveOwner
 }
 
 type ArtifactStoredContent struct {
