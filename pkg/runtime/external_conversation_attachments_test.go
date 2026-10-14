@@ -14,12 +14,14 @@ import (
 type externalFileContentStore struct {
 	data  []byte
 	scope Scope
+	owner *ObjectiveOwner
 	opens int
 }
 
 func (s *externalFileContentStore) Put(_ context.Context, req ArtifactContentWrite) (ArtifactStoredContent, error) {
 	s.data, _ = io.ReadAll(req.Reader)
 	s.scope = req.Scope
+	s.owner = req.Owner
 	return ArtifactStoredContent{ContentRef: "opaque-file", SizeBytes: int64(len(s.data)), Digest: conversationTestDigest(string(s.data))}, nil
 }
 func (s *externalFileContentStore) Open(_ context.Context, scope Scope, _ string) (io.ReadCloser, error) {
@@ -80,7 +82,8 @@ func TestExternalConversationImportsFileOnceAndScopesArtifact(t *testing.T) {
 		t.Fatalf("import=%#v %#v %v", refs, notices, err)
 	}
 	artifact, err := store.GetArtifact(t.Context(), endpoint.Scope, refs[0].ID, 1)
-	if err != nil || artifact == nil || artifact.Provenance.Owner == nil || *artifact.Provenance.Owner != conversation.Owner || content.scope != endpoint.Scope {
+	if err != nil || artifact == nil || artifact.Provenance.Owner == nil || *artifact.Provenance.Owner != conversation.Owner || content.scope != endpoint.Scope ||
+		content.owner == nil || *content.owner != conversation.Owner {
 		t.Fatal("artifact authority lost")
 	}
 	if _, _, err := worker.importAttachments(t.Context(), endpoint, conversation, event); err != nil || host.calls != 1 {
