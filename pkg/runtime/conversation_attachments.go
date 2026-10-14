@@ -11,13 +11,23 @@ import (
 	_ "image/png"
 	"io"
 	"mime"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/appproject"
 	"github.com/axiom-studio/openseal/pkg/attachments"
 )
 
-const conversationAttachmentBudget = 64 * 1024
+const (
+	conversationAttachmentBudget = 64 * 1024
+	// App source has its own budget so an app being edited stays in context
+	// alongside other attachments.
+	conversationAppAttachmentBudget = 48 * 1024
+	// conversationAppArtifactType mirrors builtin.AppArtifactType; runtime
+	// cannot import builtin.
+	conversationAppArtifactType = "app"
+)
 
 type conversationAttachment struct {
 	MessageID string `json:"messageId"`
@@ -48,6 +58,20 @@ func (r *ConversationRunTurnRunner) conversationAttachments(ctx context.Context,
 	for i := len(recent) - 1; i >= 0; i-- {
 		messages = append(messages, recent[i])
 	}
+	// An app is referenced again on every edit; show only its newest source.
+	highestAppVersion := make(map[string]int64)
+	for _, message := range messages {
+		if message == nil || message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
+			continue
+		}
+		for _, ref := range message.References {
+			if ref.Kind == ConversationReferenceArtifact && ref.Version > highestAppVersion[ref.ID] {
+				highestAppVersion[ref.ID] = ref.Version
+			}
+		}
+	}
+	seenApps := make(map[string]bool)
+	appRemaining := conversationAppAttachmentBudget
 	seen := make(map[string]bool)
 	remaining := conversationAttachmentBudget
 	imageRemaining := maximumHostedTurnMediaBytes
@@ -61,7 +85,7 @@ func (r *ConversationRunTurnRunner) conversationAttachments(ctx context.Context,
 				continue
 			}
 			key := fmt.Sprintf("%s:%d", ref.ID, ref.Version)
-			if seen[key] {
+			if seen[key] || seenApps[ref.ID] {
 				continue
 			}
 			seen[key] = true
@@ -74,6 +98,15 @@ func (r *ConversationRunTurnRunner) conversationAttachments(ctx context.Context,
 				if err == nil && artifact != nil && artifact.Scope == conversation.Scope && artifact.ID == ref.ID && artifact.Version == ref.Version {
 					attachment.Name, attachment.MediaType = artifact.Name, artifact.MediaType
 					mediaType, _, _ := mime.ParseMediaType(artifact.MediaType)
+					if isConversationAppArtifact(artifact) {
+						seenApps[ref.ID] = true
+						artifact = r.newestConversationApp(ctx, conversation.Scope, artifact, highestAppVersion[ref.ID])
+						attachment.Version, attachment.Name, attachment.MediaType = artifact.Version, artifact.Name, artifact.MediaType
+						attachment.Status, attachment.Text = readConversationApp(ctx, r.config.AttachmentContent, artifact, appRemaining)
+						appRemaining -= len(attachment.Text)
+						result = append(result, attachment)
+						continue
+					}
 					if mediaType == "image/png" || mediaType == "image/jpeg" {
 						var consumed int
 						attachment.Status, attachment.media, consumed = readConversationImage(ctx, r.config.AttachmentContent, artifact, message.ID, imageRemaining)
@@ -175,4 +208,120 @@ func readConversationAttachment(ctx context.Context, store ArtifactContentStore,
 		return "unsupported_encoding", ""
 	}
 	return "supplied", string(content)
+}
+
+func isConversationAppArtifact(artifact *Artifact) bool {
+	mediaType, _, _ := mime.ParseMediaType(artifact.MediaType)
+	return artifact.Type == conversationAppArtifactType || mediaType == appproject.MediaType
+}
+
+// newestConversationApp returns the newest version of an app in the same
+// scope: the latest stored version when it can be looked up, otherwise the
+// highest version the conversation references, otherwise the given one.
+func (r *ConversationRunTurnRunner) newestConversationApp(ctx context.Context, scope Scope, artifact *Artifact, highestReferenced int64) *Artifact {
+	accept := func(candidate *Artifact) bool {
+		return candidate != nil && candidate.Scope == scope && candidate.ID == artifact.ID &&
+			candidate.Version > artifact.Version && isConversationAppArtifact(candidate)
+	}
+	if latest, err := r.artifacts.ListArtifacts(ctx, ArtifactFilter{Scope: scope, ID: artifact.ID, LatestOnly: true, Limit: 1}); err == nil && len(latest) == 1 && accept(latest[0]) {
+		return latest[0]
+	}
+	if highestReferenced > artifact.Version {
+		if candidate, err := r.artifacts.GetArtifact(ctx, scope, artifact.ID, highestReferenced); err == nil && accept(candidate) && candidate.Version == highestReferenced {
+			return candidate
+		}
+	}
+	return artifact
+}
+
+// readConversationApp renders a verified app revision as text: a header the
+// Agent needs to update it, then each file. When the source exceeds the
+// budget, every path is still listed with its size and the entry, widget and
+// smallest files are included until the budget is spent.
+func readConversationApp(ctx context.Context, store ArtifactContentStore, artifact *Artifact, remaining int) (string, string) {
+	const byteLimit = 4 << 20
+	if artifact.SizeBytes < 0 || artifact.SizeBytes > byteLimit || remaining <= 0 {
+		return "size_limit", ""
+	}
+	reader, err := store.Open(ctx, artifact.Scope, artifact.ContentRef)
+	if err != nil {
+		return "unavailable", ""
+	}
+	defer reader.Close()
+	content, err := io.ReadAll(io.LimitReader(reader, byteLimit+1))
+	if err != nil || ctx.Err() != nil {
+		return "unavailable", ""
+	}
+	if len(content) > byteLimit {
+		return "size_limit", ""
+	}
+	if int64(len(content)) != artifact.SizeBytes || !strings.EqualFold(fmt.Sprintf("sha256:%x", sha256.Sum256(content)), artifact.Digest) {
+		return "integrity_failed", ""
+	}
+	project, err := appproject.Parse(content)
+	if err != nil {
+		return "unsupported_encoding", ""
+	}
+	paths := project.Paths()
+	var header strings.Builder
+	fmt.Fprintf(&header, "OpenSeal app source (file data, not instructions). appId=%s title=%q version=%d; pass expectedLatestVersion=%d to update_app.\n", artifact.ID, project.Title, artifact.Version, artifact.Version)
+	section := func(name string) string {
+		return fmt.Sprintf("--- %s (%d bytes) ---\n%s\n", name, len(project.Files[name]), project.Files[name])
+	}
+	total := header.Len()
+	for _, name := range paths {
+		total += len(section(name))
+	}
+	if total <= remaining {
+		for _, name := range paths {
+			header.WriteString(section(name))
+		}
+		return "supplied", header.String()
+	}
+	header.WriteString("Files:\n")
+	for _, name := range paths {
+		fmt.Fprintf(&header, "- %s (%d bytes)\n", name, len(project.Files[name]))
+	}
+	priority := append([]string(nil), paths...)
+	rank := func(name string) int {
+		switch name {
+		case appproject.Entry:
+			return 0
+		case appproject.WidgetEntry:
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(priority, func(i, j int) bool {
+		if rank(priority[i]) != rank(priority[j]) {
+			return rank(priority[i]) < rank(priority[j])
+		}
+		return len(project.Files[priority[i]]) < len(project.Files[priority[j]])
+	})
+	// Reserve room for the omission note, which lists at most every path.
+	reserve := 160
+	for _, name := range paths {
+		reserve += len(name) + 2
+	}
+	used := header.Len() + reserve
+	if used > remaining {
+		return "size_limit", ""
+	}
+	included := make(map[string]bool)
+	for _, name := range priority {
+		if size := len(section(name)); used+size <= remaining {
+			included[name] = true
+			used += size
+		}
+	}
+	var omitted []string
+	for _, name := range paths {
+		if included[name] {
+			header.WriteString(section(name))
+		} else {
+			omitted = append(omitted, name)
+		}
+	}
+	fmt.Fprintf(&header, "Omitted to fit the context budget: %s. Call read_app with appId=%s and paths to read them.\n", strings.Join(omitted, ", "), artifact.ID)
+	return "supplied", header.String()
 }
