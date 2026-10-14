@@ -913,7 +913,10 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 		return nil, fmt.Errorf("%w: active Team definition is unavailable", ErrSkillReferenceUpgradeInvalid)
 	}
 	prepared, err := kernelteam.PrepareDefinition(definition, definition.CreatedAt)
-	if err != nil || !skillUpgradeTeamDefinitionEqual(prepared, definition) {
+	// Canonical content is what makes the derived definition valid. A digest
+	// recorded by an earlier digest computation does not change that content;
+	// the derived definition is stored with a freshly computed digest.
+	if err != nil || !teamDefinitionContentEqual(prepared, definition) {
 		return nil, fmt.Errorf("%w: active Team definition is not canonical", ErrSkillReferenceUpgradeInvalid)
 	}
 	fromIdentity := capability.NewSkillIdentity(current.SkillID, current.SkillVersion, current.SourceIdentity)
