@@ -44,7 +44,7 @@ func TestScheduledTaskNullableContractUpgradeUsesCanonicalPlanAndApplyAcrossStor
 				store := workflowEvidenceStore(t, kind)
 				run, catalog, before, args := scheduledTaskUpgradeFixture(t, store, previous, RunbookManagementSkill())
 				service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
-				plan, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: run.Scope, DeploymentID: run.AssignedAgentID, BindingID: before.ID, ToVersion: "1.3.2"})
+				plan, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: run.Scope, DeploymentID: run.AssignedAgentID, BindingID: before.ID, ToVersion: RunbookManagementSkillVersion})
 				if err != nil || plan.ApprovalRequired || len(plan.Findings) != 0 || plan.ExpectedBindingRevision != 7 {
 					t.Fatalf("audited nullable contract plan=%#v, %v", plan, err)
 				}
@@ -73,7 +73,7 @@ func TestScheduledTaskNullableContractUpgradeUsesCanonicalPlanAndApplyAcrossStor
 					!reflect.DeepEqual(after.Credentials, before.Credentials) || !reflect.DeepEqual(after.Config, before.Config) || !reflect.DeepEqual(after.ArgumentRestrictions, before.ArgumentRestrictions) {
 					t.Fatalf("upgrade changed reviewed authority: before=%#v after=%#v", before, after)
 				}
-				bound, err := catalog.Resolve(t.Context(), before.Scope, before.DeploymentID, before.SkillID, "1.3.2", RunbookActionCreateTask, skill.BindingReference{ID: before.ID, Revision: 8})
+				bound, err := catalog.Resolve(t.Context(), before.Scope, before.DeploymentID, before.SkillID, RunbookManagementSkillVersion, RunbookActionCreateTask, skill.BindingReference{ID: before.ID, Revision: 8})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -81,7 +81,7 @@ func TestScheduledTaskNullableContractUpgradeUsesCanonicalPlanAndApplyAcrossStor
 				if err := catalog.ValidateInput(t.Context(), bound, args); err != nil {
 					t.Fatalf("upgraded binding still rejects ongoing task: %v", err)
 				}
-				if _, err := catalog.Resolve(t.Context(), before.Scope, before.DeploymentID, before.SkillID, "1.3.2", RunbookActionReplaceSchedule); err == nil {
+				if _, err := catalog.Resolve(t.Context(), before.Scope, before.DeploymentID, before.SkillID, RunbookManagementSkillVersion, RunbookActionReplaceSchedule); err == nil {
 					t.Fatal("upgrade granted a previously prohibited action")
 				}
 				unauthorized := cloneMap(args)
@@ -89,7 +89,7 @@ func TestScheduledTaskNullableContractUpgradeUsesCanonicalPlanAndApplyAcrossStor
 				if err := catalog.ValidateInput(t.Context(), bound, unauthorized); err == nil {
 					t.Fatal("upgrade discarded reviewed argument restrictions")
 				}
-				if _, err := catalog.Resolve(t.Context(), before.Scope, before.DeploymentID, before.SkillID, "1.3.2", RunbookActionCreateTask, skill.BindingReference{ID: before.ID, Revision: 7}); err == nil {
+				if _, err := catalog.Resolve(t.Context(), before.Scope, before.DeploymentID, before.SkillID, RunbookManagementSkillVersion, RunbookActionCreateTask, skill.BindingReference{ID: before.ID, Revision: 7}); err == nil {
 					t.Fatal("upgrade accepted the stale binding revision")
 				}
 				preserved, err := catalog.GetDefinition(t.Context(), previous.ID, previous.Version)
@@ -105,7 +105,7 @@ func TestScheduledTaskNullableContractUpgradeDrainsAcceptedLegacyCalls(t *testin
 	for _, kind := range []string{"memory", "sqlite"} {
 		t.Run(kind, func(t *testing.T) {
 			store := workflowEvidenceStore(t, kind)
-			run, catalog, before, args := scheduledTaskUpgradeFixture(t, store, RunbookManagementSkillLegacy131(), RunbookManagementSkill())
+			run, catalog, before, args := scheduledTaskUpgradeFixture(t, store, RunbookManagementSkillLegacy131(), RunbookManagementSkillLegacy132())
 			now := time.Now().Add(time.Second)
 			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "chat-worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
 			if err != nil || claimed == nil {

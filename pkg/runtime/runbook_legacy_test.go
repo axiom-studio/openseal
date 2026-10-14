@@ -23,7 +23,7 @@ func TestRunbookManagementSkillPreservesPublished131Definition(t *testing.T) {
 	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published131SHA256 {
 		t.Fatalf("published 1.3.1 definition changed: got %s", got)
 	}
-	current := RunbookManagementSkill()
+	current := RunbookManagementSkillLegacy132()
 	if legacy.Version != "1.3.1" || current.Version != "1.3.2" {
 		t.Fatalf("versions legacy=%s current=%s", legacy.Version, current.Version)
 	}
@@ -87,7 +87,7 @@ func TestRunbookManagementSkillPreservesPublished130Definition(t *testing.T) {
 	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published130SHA256 {
 		t.Fatalf("published 1.3.0 definition changed: got %s", got)
 	}
-	current := RunbookManagementSkill()
+	current := RunbookManagementSkillLegacy132()
 	if legacy.Version != "1.3.0" || current.Version != "1.3.2" {
 		t.Fatalf("versions legacy=%s current=%s", legacy.Version, current.Version)
 	}

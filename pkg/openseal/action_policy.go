@@ -25,7 +25,7 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	// These host-owned actions create bounded conversation artifacts. Public
 	// app publication and all unrelated writes still follow approval policy.
 	if input.Bound.Definition.ID == builtin.SkillID && input.Bound.Definition.Version == builtin.SkillVersion &&
-		(input.Bound.Action.Name == builtin.GenerateImage || input.Bound.Action.Name == builtin.CreateApp || input.Bound.Action.Name == builtin.UpdateApp) ||
+		(input.Bound.Action.Name == builtin.GenerateImage || input.Bound.Action.Name == builtin.CreateApp || input.Bound.Action.Name == builtin.UpdateApp || input.Bound.Action.Name == builtin.SaveAppData) ||
 		input.Bound.Definition.ID == presentation.SkillID && input.Bound.Definition.Version == presentation.SkillVersion &&
 			(input.Bound.Action.Name == presentation.Publish || input.Bound.Action.Name == presentation.PlotChart) {
 		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "create bounded conversation artifact"}, nil
