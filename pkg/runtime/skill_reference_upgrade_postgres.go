@@ -38,7 +38,8 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 	members := application.members()
 	for _, member := range members {
 		var bindingPayload string
-		if err = tx.QueryRowContext(ctx, `SELECT payload FROM `,
+		if err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`
+			WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 AND revision=$5 FOR UPDATE`,
 			application.Plan.Scope.Kind, application.Plan.Scope.ID, application.Plan.DeploymentID,
 			member.Binding.ID, member.ExpectedRevision).Scan(&bindingPayload); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
@@ -79,7 +80,9 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 		if marshalErr != nil {
 			return marshalErr
 		}
-		result, err = tx.ExecContext(ctx, `UPDATE `,
+		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("skill_bindings")+`
+			SET skill_id=$1,skill_version=$2,source_identity=$3,revision=$4,payload=$5::jsonb
+			WHERE scope_kind=$6 AND scope_id=$7 AND deployment_id=$8 AND id=$9 AND revision=$10`,
 			member.Binding.SkillID, member.Binding.SkillVersion, member.Binding.SourceIdentity,
 			member.Binding.Revision, string(encodedBinding), member.Binding.Scope.Kind, member.Binding.Scope.ID,
 			member.Binding.DeploymentID, member.Binding.ID, member.ExpectedRevision)
