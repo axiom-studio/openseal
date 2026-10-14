@@ -47,7 +47,7 @@ func appActions() map[string]skill.Action {
 	})
 	return map[string]skill.Action{
 		CreateApp: {Name: CreateApp,
-			Description:  "Create an app: a TypeScript project shown live in the chat's canvas. src/App.tsx must export the default App component. Import react and @openseal/app; other packages are not available. Use it for websites, dashboards, forms and tools.",
+			Description:  "Create an app: a TypeScript project shown live in the chat's canvas. src/App.tsx must export the default App component. Import react, @openseal/app, and other packages by pinned URL such as https://esm.sh/canvas-confetti@1.9.3; stylesheets may @import web fonts. Use it for websites, dashboards, forms and tools.",
 			InputSchema:  object([]interface{}{"title", "files"}, map[string]interface{}{"title": title, "files": files(1)}),
 			OutputSchema: saved, SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{AppArtifactType}},
