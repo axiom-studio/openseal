@@ -18,6 +18,9 @@ import (
 const (
 	// Entry is the module whose default export the host renders.
 	Entry = "src/App.tsx"
+	// WidgetEntry is the optional glanceable view a Desk shows; its default
+	// export receives {size: "small" | "medium" | "large"}.
+	WidgetEntry = "src/Widget.tsx"
 	// MediaType identifies a stored project revision.
 	MediaType = "application/vnd.openseal.app+json"
 	// Schema is the stored revision format.

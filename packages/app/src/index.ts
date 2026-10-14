@@ -15,6 +15,13 @@ export type { AppErrorCode, DataSnapshot, Json, RunRequest, RunState, RunStatus 
 export { OpenSealAppError } from "./transport.ts";
 export type { HttpOptions } from "./transport.ts";
 
+/**
+ * The size a Desk shows an app's widget at. An app may add src/Widget.tsx,
+ * whose default export receives { size } and shows the app at a glance.
+ */
+export type WidgetSize = "small" | "medium" | "large";
+export interface WidgetProps { size: WidgetSize }
+
 let transport: Transport | undefined;
 let pollMs = 2_000;
 
