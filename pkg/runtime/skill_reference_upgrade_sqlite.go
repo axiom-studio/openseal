@@ -35,28 +35,32 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
 		return err
 	}
-	var bindingPayload string
-	if err = conn.QueryRowContext(ctx, `SELECT payload FROM skill_bindings
+	// Every binding the upgrade moves is locked and checked before any write.
+	members := application.members()
+	for _, member := range members {
+		var bindingPayload string
+		if err = conn.QueryRowContext(ctx, `SELECT payload FROM skill_bindings
 		WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=? AND revision=?`,
-		application.Plan.Scope.Kind, application.Plan.Scope.ID, application.Plan.DeploymentID,
-		application.Plan.BindingID, application.Plan.ExpectedBindingRevision).Scan(&bindingPayload); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+			application.Plan.Scope.Kind, application.Plan.Scope.ID, application.Plan.DeploymentID,
+			member.Binding.ID, member.ExpectedRevision).Scan(&bindingPayload); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrSkillReferenceUpgradeConflict
+			}
+			return err
+		}
+		var currentBinding skill.Binding
+		if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil || currentBinding.Disabled ||
+			currentBinding.SkillID != application.Plan.From.ID || currentBinding.SkillVersion != application.Plan.From.Version ||
+			currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
 			return ErrSkillReferenceUpgradeConflict
 		}
-		return err
-	}
-	var currentBinding skill.Binding
-	if json.Unmarshal([]byte(bindingPayload), &currentBinding) != nil || currentBinding.Disabled ||
-		currentBinding.SkillID != application.Plan.From.ID || currentBinding.SkillVersion != application.Plan.From.Version ||
-		currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
-		return ErrSkillReferenceUpgradeConflict
-	}
-	busy, err := hasSkillRuntimeUsage(ctx, conn, skillBindingUpgradeUsageFilter(application), "action_calls", "agent_runs", false)
-	if err != nil {
-		return err
-	}
-	if busy {
-		return ErrSkillReferenceUpgradeBusy
+		busy, err := hasSkillRuntimeUsage(ctx, conn, skillBindingUpgradeUsageFilter(application, member.Binding.ID), "action_calls", "agent_runs", false)
+		if err != nil {
+			return err
+		}
+		if busy {
+			return ErrSkillReferenceUpgradeBusy
+		}
 	}
 	if err := validateProjectSkillUpgradeReferencesSQL(ctx, conn, application, "project_skill_references", false); err != nil {
 		return err
@@ -67,21 +71,24 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
 		return err
 	}
-	encodedBinding, err := json.Marshal(application.Binding)
-	if err != nil {
-		return err
-	}
-	result, err := conn.ExecContext(ctx, `UPDATE skill_bindings
+	var result sql.Result
+	for _, member := range members {
+		encodedBinding, marshalErr := json.Marshal(member.Binding)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		result, err = conn.ExecContext(ctx, `UPDATE skill_bindings
 		SET skill_id=?,skill_version=?,source_identity=?,revision=?,payload=?
 		WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND id=? AND revision=?`,
-		application.Binding.SkillID, application.Binding.SkillVersion, application.Binding.SourceIdentity,
-		application.Binding.Revision, string(encodedBinding), application.Binding.Scope.Kind, application.Binding.Scope.ID,
-		application.Binding.DeploymentID, application.Binding.ID, application.Plan.ExpectedBindingRevision)
-	if err != nil {
-		return err
-	}
-	if rows, _ := result.RowsAffected(); rows != 1 {
-		return ErrSkillReferenceUpgradeConflict
+			member.Binding.SkillID, member.Binding.SkillVersion, member.Binding.SourceIdentity,
+			member.Binding.Revision, string(encodedBinding), member.Binding.Scope.Kind, member.Binding.Scope.ID,
+			member.Binding.DeploymentID, member.Binding.ID, member.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			return ErrSkillReferenceUpgradeConflict
+		}
 	}
 	for _, mutation := range application.Objectives {
 		encoded, marshalErr := json.Marshal(mutation.Value)

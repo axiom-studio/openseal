@@ -181,6 +181,6 @@ func scanReferencedSkillRuntimeVersions(rows *sql.Rows) ([]SkillRuntimeReference
 	return result, rows.Err()
 }
 
-func skillBindingUpgradeUsageFilter(application *SkillReferenceUpgradeMutation) SkillRuntimeUsageFilter {
-	return SkillRuntimeUsageFilter{Scope: application.Plan.Scope, SkillID: application.Plan.From.ID, SkillVersion: application.Plan.From.Version, DeploymentID: application.Plan.DeploymentID, BindingID: application.Plan.BindingID}
+func skillBindingUpgradeUsageFilter(application *SkillReferenceUpgradeMutation, bindingID string) SkillRuntimeUsageFilter {
+	return SkillRuntimeUsageFilter{Scope: application.Plan.Scope, SkillID: application.Plan.From.ID, SkillVersion: application.Plan.From.Version, DeploymentID: application.Plan.DeploymentID, BindingID: bindingID}
 }
