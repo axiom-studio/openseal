@@ -99,3 +99,41 @@ func TestMarshalAndParseRoundTrip(t *testing.T) {
 		t.Fatalf("paths not sorted: %v", paths)
 	}
 }
+
+func TestReplacementFeedbackListsTheLineOfEachMatch(t *testing.T) {
+	project := starter(t)
+	project.Files["src/styles.css"] = "a { color: teal; }\nb { color: red; }\nc { color: teal; }\n"
+	_, err := project.Apply("", Edits{Replace: []Replacement{{Path: "src/styles.css", Find: "teal", Replace: "navy"}}})
+	if !IsValidationError(err) || !strings.HasPrefix(err.Error(), "app not saved: find text occurs 2 times in src/styles.css") || !strings.Contains(err.Error(), "lines 1, 3") || !strings.Contains(err.Error(), "longer find") {
+		t.Fatalf("expected match lines, got %v", err)
+	}
+}
+
+func TestReplacementFeedbackShowsNearestContextForAMissedFind(t *testing.T) {
+	project := starter(t)
+	var file strings.Builder
+	for i := 1; i <= 40; i++ {
+		file.WriteString("const value_" + string(rune('a'+i%26)) + " = " + strings.Repeat("1", i%5+1) + ";\n")
+	}
+	file.WriteString("function render() {\n  return <div className=\"card\">hi</div>;\n}\n")
+	project.Files["src/view.tsx"] = file.String()
+	_, err := project.Apply("", Edits{Replace: []Replacement{{Path: "src/view.tsx", Find: "\n  function render() {\n    return <div className='card'>hi</div>;", Replace: "x"}}})
+	message := err.Error()
+	if !IsValidationError(err) || !strings.Contains(message, "find text occurs 0 times in src/view.tsx") || !strings.Contains(message, "line 41") || !strings.Contains(message, "41: function render() {") || !strings.Contains(message, "31: ") || strings.Contains(message, "30: ") || !strings.Contains(message, "exactly") {
+		t.Fatalf("expected numbered context around line 41, got %v", err)
+	}
+	if strings.Contains(message, "51: ") || strings.Contains(message, "\n52: ") {
+		t.Fatalf("context should stop at the end of the file: %v", err)
+	}
+
+	project.Files["src/big.ts"] = strings.Repeat(strings.Repeat("y", 300)+"\n", 30) + "anchor line\n" + strings.Repeat(strings.Repeat("z", 300)+"\n", 30)
+	_, err = project.Apply("", Edits{Replace: []Replacement{{Path: "src/big.ts", Find: "anchor line\nmissing", Replace: "x"}}})
+	if err == nil || !strings.Contains(err.Error(), "31: anchor line") || len(err.Error()) > 2048 {
+		t.Fatalf("context should keep the anchor within 1.5 KB, got %d bytes: %v", len(err.Error()), err)
+	}
+
+	_, err = project.Apply("", Edits{Replace: []Replacement{{Path: "src/styles.css", Find: "  \nnowhere to be found", Replace: "x"}}})
+	if err == nil || !strings.Contains(err.Error(), "read_app") || !strings.Contains(err.Error(), "occurs 0 times") {
+		t.Fatalf("expected a read_app suggestion, got %v", err)
+	}
+}
