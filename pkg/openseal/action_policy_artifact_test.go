@@ -20,11 +20,12 @@ func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
 		want       ActionDisposition
 	}{
 		{"generated image", builtin.SkillDefinition(), builtin.GenerateImage, ActionDispositionAllow},
-		{"private site", builtin.SkillDefinition(), builtin.CreateSite, ActionDispositionAllow},
-		{"site update", builtin.SkillDefinition(), builtin.UpdateSite, ActionDispositionAllow},
+		{"private app", builtin.SkillDefinition(), builtin.CreateApp, ActionDispositionAllow},
+		{"app update", builtin.SkillDefinition(), builtin.UpdateApp, ActionDispositionAllow},
+		{"app read", builtin.SkillDefinition(), builtin.ReadApp, ActionDispositionAllow},
 		{"chart", presentation.SkillDefinition(), presentation.PlotChart, ActionDispositionAllow},
 		{"conversation surface", presentation.SkillDefinition(), presentation.Publish, ActionDispositionAllow},
-		{"public site", builtin.SkillDefinition(), builtin.PublishSite, ActionDispositionRequireApproval},
+		{"public app", builtin.SkillDefinition(), builtin.PublishApp, ActionDispositionRequireApproval},
 		{"PDF", builtin.SkillDefinition(), builtin.CreatePDF, ActionDispositionRequireApproval},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

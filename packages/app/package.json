@@ -1,0 +1,23 @@
+{
+  "name": "@openseal/app",
+  "version": "0.1.0",
+  "description": "Lets an OpenSeal app start Agent runs and read its data, inside OpenSeal or self-hosted.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./react": { "types": "./dist/react.d.ts", "default": "./dist/react.js" },
+    "./protocol": { "types": "./dist/protocol.d.ts", "default": "./dist/protocol.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test src/*.test.ts"
+  },
+  "peerDependencies": { "react": ">=18" },
+  "peerDependenciesMeta": { "react": { "optional": true } },
+  "devDependencies": { "@types/react": "^19.2.14", "typescript": "^5.9.3" },
+  "engines": { "node": ">=22.18" }
+}
