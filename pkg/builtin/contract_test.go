@@ -68,6 +68,9 @@ func TestAppContractsAcceptProjectsAndRejectForeignInput(t *testing.T) {
 		{"read", ReadApp, map[string]interface{}{"appId": appID, "paths": []interface{}{"src/App.tsx"}}, true},
 		{"publish", PublishApp, map[string]interface{}{"appId": appID, "expectedLatestVersion": 2}, true},
 		{"publish without version", PublishApp, map[string]interface{}{"appId": appID}, false},
+		{"save data", SaveAppData, map[string]interface{}{"appId": appID, "name": "pipeline_by_stage", "value": []interface{}{map[string]interface{}{"stage": "Discovery", "value": 1620000}}}, true},
+		{"save data with a path name", SaveAppData, map[string]interface{}{"appId": appID, "name": "../secrets", "value": 1}, false},
+		{"save data without a value", SaveAppData, map[string]interface{}{"appId": appID, "name": "pipeline"}, false},
 	}
 	for _, tc := range cases {
 		err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), tc.action, tc.input)

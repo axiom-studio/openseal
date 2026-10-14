@@ -1007,7 +1007,10 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 				Code: "risk_increased", Message: fmt.Sprintf("%s risk changes from %s to %s", name, before.Risk, after.Risk),
 			})
 		}
-		inputCompatible := compatibleUpgradeInputSchema(before.InputSchema, after.InputSchema) || (name == RunbookActionCreateTask && occurrenceLimitUpgrade)
+		// The audited occurrence-limit change reaches 1.3.2; anything later must
+		// only add to the 1.3.2 contract.
+		inputCompatible := compatibleUpgradeInputSchema(before.InputSchema, after.InputSchema) || (name == RunbookActionCreateTask && occurrenceLimitUpgrade &&
+			compatibleUpgradeInputSchema(storedInputSchema(scheduledTaskCreateActionLegacy132().InputSchema), after.InputSchema))
 		if !inputCompatible || !reflect.DeepEqual(before.OutputSchema, after.OutputSchema) ||
 			!reflect.DeepEqual(before.Credentials, after.Credentials) || before.SideEffect != after.SideEffect ||
 			before.Idempotency != after.Idempotency || before.ExternalOperationPolicy != after.ExternalOperationPolicy ||
@@ -1026,7 +1029,8 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 // every field also excludes external sources and descriptors spoofing the same
 // ID/version, and all other action/authority checks still run normally.
 func compatibleRunbookOccurrenceLimitUpgrade(previous, target *skill.Definition) bool {
-	if previous == nil || target == nil || previous.ID != RunbookManagementSkillID || target.ID != RunbookManagementSkillID || target.Version != "1.3.2" {
+	if previous == nil || target == nil || previous.ID != RunbookManagementSkillID || target.ID != RunbookManagementSkillID ||
+		(target.Version != "1.3.2" && target.Version != RunbookManagementSkillVersion) {
 		return false
 	}
 	var previousDigest string
@@ -1038,10 +1042,18 @@ func compatibleRunbookOccurrenceLimitUpgrade(previous, target *skill.Definition)
 	default:
 		return false
 	}
-	const targetDigest = "98de6212b5340284dcd896f2bb75e8e6951b275cc5707dd549218a0c5ba4967d"
 	matches := func(definition *skill.Definition, digest string) bool {
 		encoded, err := json.Marshal(definition)
 		return err == nil && fmt.Sprintf("%x", sha256.Sum256(encoded)) == digest
+	}
+	targetDigest := "98de6212b5340284dcd896f2bb75e8e6951b275cc5707dd549218a0c5ba4967d"
+	if target.Version == RunbookManagementSkillVersion {
+		// The current descriptor is compiled in; only that exact one qualifies.
+		encoded, err := json.Marshal(RunbookManagementSkill())
+		if err != nil {
+			return false
+		}
+		targetDigest = fmt.Sprintf("%x", sha256.Sum256(encoded))
 	}
 	return matches(previous, previousDigest) && matches(target, targetDigest)
 }
@@ -1099,6 +1111,20 @@ func featureSubset(before, after []capability.ConversationAdapterFeature) bool {
 // Existing constraints (including required fields and cross-field rules) must
 // remain identical. Open objects could previously accept values rejected by a
 // newly declared property, so they deliberately retain exact comparison.
+// storedInputSchema gives a compiled schema the shape it has after the
+// catalog stores it (JSON numbers and arrays), so it compares with stored ones.
+func storedInputSchema(schema map[string]interface{}) map[string]interface{} {
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return nil
+	}
+	var stored map[string]interface{}
+	if json.Unmarshal(encoded, &stored) != nil {
+		return nil
+	}
+	return stored
+}
+
 func compatibleUpgradeInputSchema(before, after map[string]interface{}) bool {
 	if reflect.DeepEqual(before, after) {
 		return true
