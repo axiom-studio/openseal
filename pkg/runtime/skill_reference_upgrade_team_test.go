@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -322,7 +323,17 @@ func TestTeamSkillReferenceUpgradeOfUngrantedBindingLeavesTeamAuthority(t *testi
 		t.Fatal(err)
 	}
 	service := NewSkillReferenceUpgradeService(store, catalog)
-	plan, err := service.Plan(ctx, PlanSkillReferenceUpgradeRequest{Scope: Scope(scope), DeploymentID: deployment.ID, BindingID: "bundled:tools", ToVersion: "1.1.0"})
+	request := PlanSkillReferenceUpgradeRequest{Scope: Scope(scope), DeploymentID: deployment.ID, BindingID: "bundled:tools", ToVersion: "1.1.0"}
+	if _, err := service.Plan(ctx, request); !errors.Is(err, ErrSkillReferenceUpgradeInvalid) {
+		t.Fatalf("without the host's claim an ungranted Team binding is a revoked grant: %v", err)
+	}
+	request.HostManaged = true
+	encoded, _ := json.Marshal(request)
+	var decoded PlanSkillReferenceUpgradeRequest
+	if json.Unmarshal([]byte(strings.Replace(string(encoded), "}", `,"hostManaged":true,"HostManaged":true}`, 1)), &decoded) != nil || decoded.HostManaged || strings.Contains(string(encoded), "ostManaged") {
+		t.Fatalf("host management must not travel through JSON: %s %#v", encoded, decoded)
+	}
+	plan, err := service.Plan(ctx, request)
 	if err != nil || plan.TeamAuthority != nil {
 		t.Fatalf("ungranted binding plan = %#v %v", plan, err)
 	}

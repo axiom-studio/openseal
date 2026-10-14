@@ -114,8 +114,10 @@ type SkillReferenceUpgradePlan struct {
 	TeamAuthority         *SkillReferenceTeamAuthorityImpact         `json:"teamAuthority,omitempty"`
 	Findings              []SkillReferenceUpgradeFinding             `json:"findings,omitempty"`
 	ApprovalRequired      bool                                       `json:"approvalRequired"`
-	Digest                string                                     `json:"digest"`
-	GeneratedAt           time.Time                                  `json:"generatedAt"`
+	// HostManaged carries the in-process request flag to Apply; never JSON.
+	HostManaged bool      `json:"-"`
+	Digest      string    `json:"digest"`
+	GeneratedAt time.Time `json:"generatedAt"`
 }
 
 type PlanSkillReferenceUpgradeRequest struct {
@@ -124,6 +126,12 @@ type PlanSkillReferenceUpgradeRequest struct {
 	BindingID        string `json:"bindingId"`
 	ToVersion        string `json:"toVersion"`
 	ToSourceIdentity string `json:"toSourceIdentity,omitempty"`
+	// HostManaged is set only by an in-process host for bindings it owns
+	// (such as its bundled tools). On a Team deployment, such a binding that
+	// no Team role grants upgrades without Team authority; any other binding
+	// that no role grants is a revoked Team grant and is refused. It is never
+	// read from or written to JSON, so no API caller can claim it.
+	HostManaged bool `json:"-"`
 }
 
 type SkillReferenceUpgradeApproval struct {
@@ -502,7 +510,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	if current.SourceIdentity != targetSource {
 		findings = append(findings, SkillReferenceUpgradeFinding{Code: "source_identity_changed", Message: "Skill publisher identity changed"})
 	}
-	teamAuthority, err := s.planTeamSkillReferenceAuthority(ctx, req.Scope, req.DeploymentID, current, previous, target)
+	teamAuthority, err := s.planTeamSkillReferenceAuthority(ctx, req.Scope, req.DeploymentID, current, previous, target, req.HostManaged)
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +521,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		To:         SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
 		Objectives: objectiveImpacts, Projects: projectImpacts, ConversationEndpoints: conversationImpacts,
 		CallbackRegistrations: callbackImpacts, TeamAuthority: teamAuthority, Findings: findings,
-		ApprovalRequired: len(findings) > 0, GeneratedAt: s.now().UTC(),
+		ApprovalRequired: len(findings) > 0, HostManaged: req.HostManaged, GeneratedAt: s.now().UTC(),
 	}
 	plan.Digest, err = skillReferenceUpgradeDigest(plan)
 	if err != nil {
@@ -531,7 +539,7 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	}
 	current, err := s.Plan(ctx, PlanSkillReferenceUpgradeRequest{
 		Scope: req.Plan.Scope, DeploymentID: req.Plan.DeploymentID, BindingID: req.Plan.BindingID,
-		ToVersion: req.Plan.To.Version, ToSourceIdentity: req.Plan.To.SourceIdentity,
+		ToVersion: req.Plan.To.Version, ToSourceIdentity: req.Plan.To.SourceIdentity, HostManaged: req.Plan.HostManaged,
 	})
 	if err != nil {
 		return nil, err
@@ -885,6 +893,7 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 	current *skill.Binding,
 	previous *skill.Definition,
 	target *skill.Definition,
+	hostManaged bool,
 ) (*SkillReferenceTeamAuthorityImpact, error) {
 	if s == nil || s.teams == nil {
 		return nil, nil
@@ -921,10 +930,11 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 	}
 	fromIdentity := capability.NewSkillIdentity(current.SkillID, current.SkillVersion, current.SourceIdentity)
 	toIdentity := capability.NewSkillIdentity(target.ID, target.Version, skill.DefinitionSourceIdentity(target))
-	// A binding no Team role grants (such as the platform's bundled tools on
-	// a Team deployment) carries no Team authority, so its upgrade leaves the
-	// Team definition unchanged.
-	governed := false
+	// A host-managed binding no Team role grants (such as the platform's
+	// bundled tools on a Team deployment) carries no Team authority, so its
+	// upgrade leaves the Team definition unchanged. Without the host's claim,
+	// an ungranted binding is a revoked grant and the derivation below refuses.
+	governed := !hostManaged
 	for _, role := range definition.Roles {
 		for _, grant := range role.SkillGrants {
 			if grant.ExactIdentity().Equal(fromIdentity) || grant.ExactIdentity().Equal(toIdentity) {
