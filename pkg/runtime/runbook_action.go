@@ -15,7 +15,7 @@ import (
 
 const (
 	RunbookManagementSkillID      = "openseal.runbooks"
-	RunbookManagementSkillVersion = "1.3.2"
+	RunbookManagementSkillVersion = "1.4.0"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -27,6 +27,12 @@ const (
 // the model cannot manufacture a definition, execution policy, or authority.
 func RunbookManagementSkill() *skill.Definition {
 	return runbookManagementSkill(RunbookManagementSkillVersion, workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateAction())
+}
+
+// RunbookManagementSkillLegacy132 preserves the immutable published 1.3.2
+// contract (routines without an app) for bindings not yet upgraded.
+func RunbookManagementSkillLegacy132() *skill.Definition {
+	return runbookManagementSkill("1.3.2", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy132())
 }
 
 // RunbookManagementSkillLegacy131 preserves the immutable published 1.3.1
@@ -509,6 +515,6 @@ func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, r
 
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.3.1" || bound.Definition.Version == "1.3.0" || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.3.2" || bound.Definition.Version == "1.3.1" || bound.Definition.Version == "1.3.0" || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
 		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || isWorkflowActionName(bound.Action.Name))
 }

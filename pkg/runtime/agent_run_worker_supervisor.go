@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -78,63 +77,51 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 	return nil
 }
 
-// AgentRunWorkerSupervisor reconciles active scopes into isolated, kind-aware
-// Run pools. A transient scope-source failure leaves existing pools running so
-// already leased work is not interrupted.
+// AgentRunWorkerSupervisor runs an isolated, kind-aware Run pool per scope
+// with Run work. See scopePools for when a scope has a pool.
 type AgentRunWorkerSupervisor struct {
-	store             KernelStore
-	resolver          TurnRunnerResolver
-	source            WorkerScopeSource
-	config            DynamicAgentRunWorkerConfig
-	logger            *zap.SugaredLogger
+	store    KernelStore
+	resolver TurnRunnerResolver
+	config   DynamicAgentRunWorkerConfig
+	logger   *zap.SugaredLogger
+	pools    *scopePools[*AgentRunWorkerPool]
+
+	mu                sync.RWMutex
 	actions           *ActionCoordinator
 	actionObserver    ActionProposalObserver
 	runFinalizer      RunTerminalFinalizer
 	limiter           *WorkerLimiter
 	executionPreparer AcceptedRunExecutionPreparer
-
-	mu     sync.RWMutex
-	pools  map[string]*AgentRunWorkerPool
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
 }
 
 func (s *AgentRunWorkerSupervisor) SetActionProposalObserver(observer ActionProposalObserver) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.actionObserver = observer
-	for _, pool := range s.pools {
-		pool.SetActionProposalObserver(observer)
-	}
+	s.mu.Unlock()
+	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetActionProposalObserver(observer) })
 }
 
 func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer RunTerminalFinalizer) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.runFinalizer = finalizer
-	for _, pool := range s.pools {
-		pool.SetRunTerminalFinalizer(finalizer)
-	}
+	s.mu.Unlock()
+	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetRunTerminalFinalizer(finalizer) })
 }
 
 // SetActionCoordinator supplies the shared governed action lifecycle to every
 // scope pool created by this supervisor.
 func (s *AgentRunWorkerSupervisor) SetActionCoordinator(actions *ActionCoordinator) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.actions = actions
-	for _, pool := range s.pools {
-		pool.SetActionCoordinator(actions)
-	}
+	s.mu.Unlock()
+	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetActionCoordinator(actions) })
 }
 
 func (s *AgentRunWorkerSupervisor) SetWorkerLimiter(limiter *WorkerLimiter) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.limiter = limiter
-	for _, pool := range s.pools {
-		pool.SetWorkerLimiter(limiter)
-	}
+	s.mu.Unlock()
+	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetWorkerLimiter(limiter) })
 }
 
 func NewAgentRunWorkerSupervisor(
@@ -153,148 +140,50 @@ func NewAgentRunWorkerSupervisor(
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	return &AgentRunWorkerSupervisor{
-		store: store, resolver: resolver, source: source, config: config, logger: logger,
-		pools: make(map[string]*AgentRunWorkerPool),
-	}, nil
+	supervisor := &AgentRunWorkerSupervisor{store: store, resolver: resolver, config: config, logger: logger}
+	supervisor.pools = newScopePools("run:"+string(config.Kind), source, config.ReconcileInterval, WorkFamilyRunDue, logger, supervisor.newPool)
+	return supervisor, nil
 }
 
-func (s *AgentRunWorkerSupervisor) Start(parent context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cancel != nil {
-		return
-	}
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithCancel(parent)
-	s.cancel = cancel
-	s.wg.Add(1)
-	go s.run(ctx)
-}
-
-func (s *AgentRunWorkerSupervisor) Stop() {
-	s.mu.Lock()
-	cancel := s.cancel
-	s.cancel = nil
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
-		s.wg.Wait()
-	}
-
-	s.mu.Lock()
-	pools := make([]*AgentRunWorkerPool, 0, len(s.pools))
-	for key, pool := range s.pools {
-		pools = append(pools, pool)
-		delete(s.pools, key)
-	}
-	s.mu.Unlock()
-	for _, pool := range pools {
-		pool.Stop()
-	}
-}
-
-func (s *AgentRunWorkerSupervisor) Wake() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, pool := range s.pools {
-		pool.Wake()
-	}
-}
-
-func (s *AgentRunWorkerSupervisor) WakeScope(scope Scope) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if pool := s.pools[workerScopeKey(scope)]; pool != nil {
-		pool.Wake()
-	}
-}
-
-func (s *AgentRunWorkerSupervisor) ScopeCount() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.pools)
-}
-
-func (s *AgentRunWorkerSupervisor) run(ctx context.Context) {
-	defer s.wg.Done()
-	s.reconcile(ctx)
-	ticker := time.NewTicker(s.config.ReconcileInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.reconcile(ctx)
-		}
-	}
-}
-
-func (s *AgentRunWorkerSupervisor) reconcile(ctx context.Context) {
-	scopes, err := s.source.ListWorkerScopes(ctx)
+func (s *AgentRunWorkerSupervisor) newPool(scope Scope) (*AgentRunWorkerPool, error) {
+	pool, err := NewAgentRunWorkerPool(s.store, s.resolver, s.logger, AgentRunWorkerConfig{
+		Scope: scope, Kind: s.config.Kind, AssignedAgentID: s.config.AssignedAgentID,
+		Concurrency: s.config.Concurrency, MaxActiveForAgent: s.config.MaxActiveForAgent,
+		MaxActiveForOwner: s.config.MaxActiveForOwner, MaxActiveForObjective: s.config.MaxActiveForObjective,
+		MaxActiveForConcurrencyKey:        s.config.MaxActiveForConcurrencyKey,
+		ConversationTaskForegroundReserve: s.config.ConversationTaskForegroundReserve,
+		MaxTurnsPerClaim:                  s.config.MaxTurnsPerClaim, LeaseDuration: s.config.LeaseDuration,
+		TurnLeaseDuration: s.config.TurnLeaseDuration, AgingInterval: s.config.AgingInterval,
+		PollInterval:   s.config.PollInterval,
+		WorkerIDPrefix: fmt.Sprintf("%s-%s-%s-%s", s.config.WorkerIDPrefix, s.config.Kind, scope.Kind, scope.ID),
+	})
 	if err != nil {
-		if ctx.Err() == nil {
-			s.logger.Warnw("agent run worker scope reconciliation failed", "runKind", s.config.Kind, "error", err)
-		}
-		return
+		return nil, err
 	}
-	desired := make(map[string]Scope, len(scopes))
-	for _, scope := range scopes {
-		if err := scope.Validate(); err != nil {
-			s.logger.Warnw("ignoring invalid agent run worker scope", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
-			continue
-		}
-		desired[workerScopeKey(scope)] = scope
-	}
-	keys := make([]string, 0, len(desired))
-	for key := range desired {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	s.mu.Lock()
-	for _, key := range keys {
-		if s.pools[key] != nil {
-			continue
-		}
-		scope := desired[key]
-		pool, err := NewAgentRunWorkerPool(s.store, s.resolver, s.logger, AgentRunWorkerConfig{
-			Scope: scope, Kind: s.config.Kind, AssignedAgentID: s.config.AssignedAgentID,
-			Concurrency: s.config.Concurrency, MaxActiveForAgent: s.config.MaxActiveForAgent,
-			MaxActiveForOwner: s.config.MaxActiveForOwner, MaxActiveForObjective: s.config.MaxActiveForObjective,
-			MaxActiveForConcurrencyKey:        s.config.MaxActiveForConcurrencyKey,
-			ConversationTaskForegroundReserve: s.config.ConversationTaskForegroundReserve,
-			MaxTurnsPerClaim:                  s.config.MaxTurnsPerClaim, LeaseDuration: s.config.LeaseDuration,
-			TurnLeaseDuration: s.config.TurnLeaseDuration, AgingInterval: s.config.AgingInterval,
-			PollInterval:   s.config.PollInterval,
-			WorkerIDPrefix: fmt.Sprintf("%s-%s-%s-%s", s.config.WorkerIDPrefix, s.config.Kind, scope.Kind, scope.ID),
-		})
-		if err != nil {
-			s.logger.Warnw("failed to create agent run worker pool", "runKind", s.config.Kind, "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
-			continue
-		}
-		pool.SetActionCoordinator(s.actions)
-		pool.SetActionProposalObserver(s.actionObserver)
-		pool.SetRunTerminalFinalizer(s.runFinalizer)
-		pool.SetWorkerLimiter(s.limiter)
-		pool.SetAcceptedRunExecutionPreparer(s.executionPreparer)
-		s.pools[key] = pool
-		pool.Start(ctx)
-		s.logger.Infow("started agent run worker scope", "runKind", s.config.Kind, "scopeKind", scope.Kind, "scopeId", scope.ID, "concurrency", s.config.Concurrency)
-	}
-	removed := make([]*AgentRunWorkerPool, 0)
-	for key, pool := range s.pools {
-		if _, ok := desired[key]; ok {
-			continue
-		}
-		removed = append(removed, pool)
-		delete(s.pools, key)
-	}
-	s.mu.Unlock()
-	for _, pool := range removed {
-		pool.Stop()
-	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	pool.SetActionCoordinator(s.actions)
+	pool.SetActionProposalObserver(s.actionObserver)
+	pool.SetRunTerminalFinalizer(s.runFinalizer)
+	pool.SetWorkerLimiter(s.limiter)
+	pool.SetAcceptedRunExecutionPreparer(s.executionPreparer)
+	return pool, nil
 }
+
+func (s *AgentRunWorkerSupervisor) Start(parent context.Context) { s.pools.start(parent) }
+
+func (s *AgentRunWorkerSupervisor) Stop() { s.pools.stop() }
+
+func (s *AgentRunWorkerSupervisor) Wake() { s.pools.wake() }
+
+func (s *AgentRunWorkerSupervisor) WakeScope(scope Scope) { s.pools.wakeScope(scope) }
+
+// RefreshScopes lists worker scopes now while polling.
+func (s *AgentRunWorkerSupervisor) RefreshScopes() { s.pools.request() }
+
+// SetWorkSignals binds the work queue status. Call before Start.
+func (s *AgentRunWorkerSupervisor) SetWorkSignals(status *WorkSignalStatus) {
+	s.pools.setSignals(status)
+}
+
+func (s *AgentRunWorkerSupervisor) ScopeCount() int { return s.pools.count() }

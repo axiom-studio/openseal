@@ -17,15 +17,17 @@ func (s *MemoryStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 	if err := validateSkillUpgradeMaintenance(ctx, s.memorySkillRuntimeMaintenanceActiveLocked(application.Plan.Scope, application.Plan.From.ID), application, time.Now().UTC()); err != nil {
 		return err
 	}
-	bindingKey := memorySkillBindingKey(application.Binding.Scope, application.Binding.DeploymentID, application.Binding.ID)
-	currentBinding := s.skillBindings[bindingKey]
-	if currentBinding == nil || currentBinding.Disabled || currentBinding.Revision != application.Plan.ExpectedBindingRevision ||
-		application.Binding.Revision != currentBinding.Revision+1 || currentBinding.SkillID != application.Plan.From.ID ||
-		currentBinding.SkillVersion != application.Plan.From.Version || currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
-		return ErrSkillReferenceUpgradeConflict
-	}
-	if s.hasMemorySkillRuntimeUsageLocked(skillBindingUpgradeUsageFilter(application)) {
-		return ErrSkillReferenceUpgradeBusy
+	members := application.members()
+	for _, member := range members {
+		currentBinding := s.skillBindings[memorySkillBindingKey(member.Binding.Scope, member.Binding.DeploymentID, member.Binding.ID)]
+		if currentBinding == nil || currentBinding.Disabled || currentBinding.Revision != member.ExpectedRevision ||
+			member.Binding.Revision != currentBinding.Revision+1 || currentBinding.SkillID != application.Plan.From.ID ||
+			currentBinding.SkillVersion != application.Plan.From.Version || currentBinding.SourceIdentity != application.Plan.From.SourceIdentity {
+			return ErrSkillReferenceUpgradeConflict
+		}
+		if s.hasMemorySkillRuntimeUsageLocked(skillBindingUpgradeUsageFilter(application, member.Binding.ID)) {
+			return ErrSkillReferenceUpgradeBusy
+		}
 	}
 	if err := s.validateProjectSkillUpgradeReferencesLocked(application); err != nil {
 		return err
@@ -60,7 +62,9 @@ func (s *MemoryStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 		if err := validateSkillUpgradeMaintenance(ctx, s.memorySkillRuntimeMaintenanceActiveLocked(application.Plan.Scope, application.Plan.From.ID), application, time.Now().UTC()); err != nil {
 			return err
 		}
-		s.skillBindings[bindingKey] = cloneMemorySkillBinding(application.Binding)
+		for _, member := range members {
+			s.skillBindings[memorySkillBindingKey(member.Binding.Scope, member.Binding.DeploymentID, member.Binding.ID)] = cloneMemorySkillBinding(member.Binding)
+		}
 		for _, mutation := range application.Objectives {
 			s.objectives[portfolioKey(mutation.Value.Scope, mutation.Value.ID)] = cloneObjective(mutation.Value)
 			appendMemoryActivityLocked(s, mutation.Event)

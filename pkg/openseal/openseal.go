@@ -13,6 +13,7 @@ import (
 	"maps"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -1618,6 +1619,7 @@ var (
 	NewRunActionValidator                  = runtime.NewRunActionValidator
 	NewRunActionDispatcher                 = runtime.NewRunActionDispatcher
 	RunbookManagementSkill                 = runtime.RunbookManagementSkill
+	RunbookManagementSkillLegacy132        = runtime.RunbookManagementSkillLegacy132
 	RunbookManagementSkillLegacy131        = runtime.RunbookManagementSkillLegacy131
 	RunbookManagementSkillLegacy130        = runtime.RunbookManagementSkillLegacy130
 	NewRunbookActionValidator              = runtime.NewRunbookActionValidator
@@ -2559,6 +2561,7 @@ var (
 	ErrSkillReferenceUpgradeApproval    = runtime.ErrSkillReferenceUpgradeApproval
 	ErrSkillReferenceUpgradeInvalid     = runtime.ErrSkillReferenceUpgradeInvalid
 	ErrSkillReferenceUpgradeBusy        = runtime.ErrSkillReferenceUpgradeBusy
+	ErrSkillReferenceUpgradeCurrent     = runtime.ErrSkillReferenceUpgradeCurrent
 )
 
 func ValidateWorkforceAuthoringPrompt(prompt string) error {
@@ -2633,6 +2636,15 @@ type Engine struct {
 	authoringRuns                 *runtime.WorkforceAuthoringRunService
 	logger                        *zap.SugaredLogger
 	workerLimiter                 *runtime.WorkerLimiter
+	workSignals                   *runtime.WorkSignalStatus
+	workQueue                     runtime.WorkQueue
+	workPublish                   func(context.Context)
+	workQueueCancel               context.CancelFunc
+	workQueueDone                 chan struct{}
+	workRelayRequests             chan struct{}
+	workRebuilds                  chan struct{}
+	workHandlersMu                sync.RWMutex
+	workHandlers                  map[runtime.WorkFamily][]func(runtime.Scope)
 }
 
 type agentRunWorkerSpec struct {
@@ -2704,6 +2716,7 @@ func New(opts ...Option) (*Engine, error) {
 	agentRegistry := kernelagent.NewRegistry()
 	e := &Engine{
 		store:                    store,
+		workSignals:              runtime.NewWorkSignalStatus(),
 		portfolio:                runtime.NewPortfolioService(store),
 		projects:                 runtime.NewProjectService(store, store),
 		sourceMonitors:           runtime.NewSourceMonitorService(store, store, store, store),
@@ -2815,8 +2828,14 @@ func New(opts ...Option) (*Engine, error) {
 	return e, nil
 }
 
-// Start begins configured background workers.
+// Start begins configured background workers. When the store keeps a work
+// outbox (PostgreSQL), workers are driven by a work queue: committed changes
+// are relayed from the outbox into the queue, loops schedule their next
+// durable deadline into it, and a scope's workers only exist while the queue
+// has work for it. Whenever the queue is not consuming, and for other
+// stores, workers fall back to their configured poll intervals.
 func (e *Engine) Start(ctx context.Context) {
+	e.applyWorkSignals()
 	if e.conversationRunReconciler != nil {
 		e.conversationRunReconciler.Start(ctx)
 	}
@@ -2835,10 +2854,12 @@ func (e *Engine) Start(ctx context.Context) {
 	for _, supervisor := range e.actionSupervisors {
 		supervisor.Start(ctx)
 	}
+	e.startWorkQueue(ctx)
 }
 
 // Stop gracefully shuts down background goroutines.
 func (e *Engine) Stop() {
+	e.stopWorkQueue()
 	if e.externalConversations.supervisor != nil {
 		e.externalConversations.supervisor.Stop()
 	}
@@ -3570,7 +3591,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if !e.runbookManagementActions {
 		return nil
 	}
-	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkillLegacy131(), runtime.RunbookManagementSkill()} {
+	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkillLegacy131(), runtime.RunbookManagementSkillLegacy132(), runtime.RunbookManagementSkill()} {
 		if err := e.skills.Register(context.Background(), definition); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 			return err
 		}
@@ -4034,6 +4055,25 @@ func (e *Engine) WakeActionWorkers() {
 	}
 	for _, supervisor := range e.actionSupervisors {
 		supervisor.Wake()
+	}
+}
+
+// WakeActionWorkersForScope is a latency hint for hosts that observed newly
+// claimable ActionCalls in one scope. Workers still claim through the durable
+// store.
+func (e *Engine) WakeActionWorkersForScope(scope runtime.Scope) {
+	if e == nil {
+		return
+	}
+	e.wakeActionWorkersForScope(scope)
+}
+
+func (e *Engine) wakeActionWorkersForScope(scope runtime.Scope) {
+	for _, pool := range e.actionPools {
+		pool.WakeScope(scope)
+	}
+	for _, supervisor := range e.actionSupervisors {
+		supervisor.WakeScope(scope)
 	}
 }
 
@@ -4610,7 +4650,7 @@ func (e *Engine) PostChannelMessage(ctx context.Context, request runtime.PostCha
 		result.Run = scheduled.Run
 	}
 	if e.conversationRunReconciler != nil {
-		e.conversationRunReconciler.Wake()
+		e.conversationRunReconciler.WakeScope(result.Message.Scope)
 	}
 	return result, nil
 }
@@ -4695,7 +4735,7 @@ func (e *Engine) ReceiveExternalConversationEvent(
 	}
 	result, err := e.externalConversations.transport.Receive(ctx, request)
 	if err == nil && e.externalConversations.supervisor != nil {
-		e.externalConversations.supervisor.Wake()
+		e.externalConversations.supervisor.WakeScope(request.Scope)
 	}
 	return result, err
 }
@@ -4709,8 +4749,8 @@ func (e *Engine) NormalizeExternalConversationIngress(
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
 	result, err := e.externalConversations.transport.NormalizeExternalConversationIngress(ctx, request, host)
-	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
-		e.externalConversations.supervisor.Wake()
+	if err == nil && len(result.Received) > 0 {
+		e.wakeExternalConversationsForReceived(result.Received)
 	}
 	return result, err
 }
@@ -4724,8 +4764,8 @@ func (e *Engine) NormalizeExternalConversationPublicIngress(
 		return nil, fmt.Errorf("external conversation transport is not configured")
 	}
 	result, err := e.externalConversations.transport.NormalizeExternalConversationPublicIngress(ctx, request, host)
-	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
-		e.externalConversations.supervisor.Wake()
+	if err == nil && len(result.Received) > 0 {
+		e.wakeExternalConversationsForReceived(result.Received)
 	}
 	return result, err
 }
@@ -4742,8 +4782,8 @@ func (e *Engine) NormalizeExternalConversationGatewayIngress(
 	result, err := e.externalConversations.transport.NormalizeExternalConversationGatewayIngress(
 		ctx, gateway, request, host,
 	)
-	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
-		e.externalConversations.supervisor.Wake()
+	if err == nil && len(result.Received) > 0 {
+		e.wakeExternalConversationsForReceived(result.Received)
 	}
 	return result, err
 }
@@ -4759,8 +4799,8 @@ func (e *Engine) NormalizeExternalConversationRegisteredGatewayIngress(
 	result, err := e.externalConversations.transport.NormalizeExternalConversationRegisteredGatewayIngress(
 		ctx, request, host,
 	)
-	if err == nil && len(result.Received) > 0 && e.externalConversations.supervisor != nil {
-		e.externalConversations.supervisor.Wake()
+	if err == nil && len(result.Received) > 0 {
+		e.wakeExternalConversationsForReceived(result.Received)
 	}
 	return result, err
 }
@@ -4925,7 +4965,7 @@ func (e *Engine) EnqueueExternalConversationDelivery(
 	}
 	result, err := e.externalConversations.transport.Enqueue(ctx, request)
 	if err == nil && e.externalConversations.supervisor != nil {
-		e.externalConversations.supervisor.Wake()
+		e.externalConversations.supervisor.WakeScope(request.Scope)
 	}
 	return result, err
 }

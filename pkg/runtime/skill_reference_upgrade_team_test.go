@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,5 +211,137 @@ func TestTeamSkillReferenceUpgradeRequiresSharedCanonicalAuthority(t *testing.T)
 	service := NewSkillReferenceUpgradeService(store, skill.NewCatalogWithStore(store), kernelteam.NewRegistryWithStore(separate, nil))
 	if _, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: plan.Scope, DeploymentID: plan.DeploymentID, BindingID: plan.BindingID, ToVersion: plan.To.Version}); !errors.Is(err, ErrSkillReferenceUpgradeUnavailable) {
 		t.Fatalf("equivalent separate Team store was treated as atomic: %v", err)
+	}
+}
+
+// A Team whose definition was stored with a digest from an earlier digest
+// computation has canonical content and must still be upgradable; the derived
+// definition is stored with a freshly computed digest.
+func TestTeamSkillReferenceUpgradeAcceptsLegacyDefinitionDigest(t *testing.T) {
+	ctx := t.Context()
+	store := NewMemoryStore()
+	catalog := skill.NewCatalogWithStore(store)
+	for _, version := range []string{"1.0.0", "1.1.0"} {
+		if err := catalog.Register(ctx, &skill.Definition{
+			ID: "reader", Version: version, Name: "Reader", Requirements: skill.Requirements{AlwaysAvailable: true},
+			Transport: skill.TransportReference{Kind: "tool", Endpoint: "reader"},
+			Actions: map[string]skill.Action{"read": {Name: "read", Description: "Read", Risk: skill.RiskLevelRead,
+				SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "legacy-team"}
+	if err := catalog.Bind(ctx, &skill.Binding{ID: "account", Scope: scope, DeploymentID: "team", SkillID: "reader", SkillVersion: "1.0.0",
+		AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := kernelteam.PrepareDefinition(&kernelteam.Definition{
+		ID: "legacy-design", Version: "1", DisplayName: "Team", Purpose: "Read sources",
+		Roles: []kernelteam.RoleSlot{{ID: "reader", DisplayName: "Reader", Purpose: "Read",
+			SkillGrants: []kernelteam.RoleSkillGrant{{SkillID: "reader", SkillVersion: "1.0.0", CatalogID: "native-reader", AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead}}}},
+		Coordination: kernelteam.CoordinationPolicy{QuietByDefault: true, SuppressDuplicateContent: true},
+		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+	}, eventWaitContractEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonicalDigest := definition.Digest
+	definition.Digest = "sha256:" + strings.Repeat("0", 64) // recorded by an earlier digest computation
+	if err := store.CreateTeamDefinition(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	deployment := &kernelteam.Deployment{ID: "team", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		Status: kernelteam.DeploymentActive, Revision: 1, CreatedAt: eventWaitContractEpoch, UpdatedAt: eventWaitContractEpoch}
+	if err := store.CreateTeamDeployment(ctx, deployment, workforce.DefinitionActivation{ID: "initial-team", Scope: scope, DeploymentID: deployment.ID,
+		DefinitionID: definition.ID, ToVersion: definition.Version, DeploymentRevision: 1, ActorType: "system", ActorID: "fixture", CreatedAt: eventWaitContractEpoch}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewSkillReferenceUpgradeService(store, catalog)
+	service.now = func() time.Time { return eventWaitContractEpoch.Add(time.Minute) }
+	plan, err := service.Plan(ctx, PlanSkillReferenceUpgradeRequest{Scope: Scope(scope), DeploymentID: deployment.ID, BindingID: "account", ToVersion: "1.1.0"})
+	if err != nil || plan.TeamAuthority == nil {
+		t.Fatalf("a legacy digest must not hold the Team: %#v %v", plan, err)
+	}
+	if _, err := service.Apply(ctx, ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "upgrader"}, Reason: "Adopt compatible latest Skill"}); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := store.GetTeamDeployment(ctx, scope, deployment.ID)
+	if err != nil || upgraded.ActiveVersion == definition.Version {
+		t.Fatalf("Team did not move to a derived definition: %#v %v", upgraded, err)
+	}
+	derived, err := store.GetTeamDefinition(ctx, definition.ID, upgraded.ActiveVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recomputed, err := kernelteam.PrepareDefinition(derived, derived.CreatedAt)
+	if err != nil || recomputed.Digest != derived.Digest || derived.Digest == canonicalDigest {
+		t.Fatalf("derived definition digest = %s, recomputed %s, err %v", derived.Digest, recomputed.Digest, err)
+	}
+}
+
+// Platform bindings on a Team deployment that no role grants upgrade without
+// deriving a new Team definition.
+func TestTeamSkillReferenceUpgradeOfUngrantedBindingLeavesTeamAuthority(t *testing.T) {
+	ctx := t.Context()
+	store := NewMemoryStore()
+	catalog := skill.NewCatalogWithStore(store)
+	for _, id := range []string{"reader", "tools"} {
+		for _, version := range []string{"1.0.0", "1.1.0"} {
+			if err := catalog.Register(ctx, &skill.Definition{
+				ID: id, Version: version, Name: id, Requirements: skill.Requirements{AlwaysAvailable: true},
+				Transport: skill.TransportReference{Kind: "tool", Endpoint: id},
+				Actions: map[string]skill.Action{"read": {Name: "read", Description: "Read", Risk: skill.RiskLevelRead,
+					SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object"}}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "platform-team"}
+	if err := catalog.Bind(ctx, &skill.Binding{ID: "bundled:tools", Scope: scope, DeploymentID: "team", SkillID: "tools", SkillVersion: "1.0.0",
+		AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead, Revision: 1}); err != nil {
+		t.Fatal(err)
+	}
+	definition, err := kernelteam.PrepareDefinition(&kernelteam.Definition{
+		ID: "platform-design", Version: "1", DisplayName: "Team", Purpose: "Read sources",
+		Roles: []kernelteam.RoleSlot{{ID: "reader", DisplayName: "Reader", Purpose: "Read",
+			SkillGrants: []kernelteam.RoleSkillGrant{{SkillID: "reader", SkillVersion: "1.0.0", CatalogID: "native-reader", AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead}}}},
+		Coordination: kernelteam.CoordinationPolicy{QuietByDefault: true, SuppressDuplicateContent: true},
+		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+	}, eventWaitContractEpoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateTeamDefinition(ctx, definition); err != nil {
+		t.Fatal(err)
+	}
+	deployment := &kernelteam.Deployment{ID: "team", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+		Status: kernelteam.DeploymentActive, Revision: 1, CreatedAt: eventWaitContractEpoch, UpdatedAt: eventWaitContractEpoch}
+	if err := store.CreateTeamDeployment(ctx, deployment, workforce.DefinitionActivation{ID: "initial-team", Scope: scope, DeploymentID: deployment.ID,
+		DefinitionID: definition.ID, ToVersion: definition.Version, DeploymentRevision: 1, ActorType: "system", ActorID: "fixture", CreatedAt: eventWaitContractEpoch}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewSkillReferenceUpgradeService(store, catalog)
+	request := PlanSkillReferenceUpgradeRequest{Scope: Scope(scope), DeploymentID: deployment.ID, BindingID: "bundled:tools", ToVersion: "1.1.0"}
+	if _, err := service.Plan(ctx, request); !errors.Is(err, ErrSkillReferenceUpgradeInvalid) {
+		t.Fatalf("without the host's claim an ungranted Team binding is a revoked grant: %v", err)
+	}
+	request.HostManaged = true
+	encoded, _ := json.Marshal(request)
+	var decoded PlanSkillReferenceUpgradeRequest
+	if json.Unmarshal([]byte(strings.Replace(string(encoded), "}", `,"hostManaged":true,"HostManaged":true}`, 1)), &decoded) != nil || decoded.HostManaged || strings.Contains(string(encoded), "ostManaged") {
+		t.Fatalf("host management must not travel through JSON: %s %#v", encoded, decoded)
+	}
+	plan, err := service.Plan(ctx, request)
+	if err != nil || plan.TeamAuthority != nil {
+		t.Fatalf("ungranted binding plan = %#v %v", plan, err)
+	}
+	if _, err := service.Apply(ctx, ApplySkillReferenceUpgradeRequest{Plan: plan, Actor: ActivityActor{Type: "system", ID: "upgrader"}, Reason: "Adopt tools 1.1.0"}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.GetTeamDeployment(ctx, scope, deployment.ID)
+	if err != nil || current.ActiveVersion != definition.Version || current.Revision != deployment.Revision {
+		t.Fatalf("Team authority changed for an ungranted binding: %#v %v", current, err)
 	}
 }

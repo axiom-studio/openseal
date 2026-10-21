@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -30,11 +31,20 @@ type ScheduledAgentTask struct {
 	Goal            string `json:"goal"`
 	ConversationID  string `json:"conversationId"`
 	SourceMessageID string `json:"sourceMessageId"`
+	// AppID is the app this routine keeps up to date. It belongs to the same
+	// conversation and owner; each occurrence is told to save the app's data.
+	AppID string `json:"appId,omitempty"`
 }
+
+// scheduledTaskAppID matches host-assigned app identifiers.
+var scheduledTaskAppID = regexp.MustCompile(`^app-[a-f0-9]{64}$`)
 
 func (t *ScheduledAgentTask) Validate() error {
 	if t == nil || strings.TrimSpace(t.Goal) == "" || len(t.Goal) > 16000 || !validOpaqueIdentifier(t.ConversationID, 256) || !validOpaqueIdentifier(t.SourceMessageID, 256) {
 		return errors.New("scheduled task requires bounded work and an originating conversation message")
+	}
+	if t.AppID != "" && !scheduledTaskAppID.MatchString(t.AppID) {
+		return errors.New("scheduled task app must be an app ID from this chat")
 	}
 	return authoring.ValidateAuthoringPrompt(t.Goal)
 }
@@ -47,6 +57,9 @@ func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
 }
 func activationGoal(a *RunbookActivation, o *Objective) string {
 	if a.Task != nil {
+		if a.Task.AppID != "" {
+			return a.Task.Goal + "\n\nThis routine keeps app " + a.Task.AppID + " up to date: save its results with save_app_data for that appId so the app shows them."
+		}
 		return a.Task.Goal
 	}
 	return o.Goal
@@ -113,7 +126,17 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 	return c, "", nil
 }
 
+// scheduledTaskCreateAction adds an optional app to keep up to date.
 func scheduledTaskCreateAction() skill.Action {
+	action := scheduledTaskCreateActionLegacy132()
+	action.Description += " To keep an app's data fresh, pass its appId; each occurrence then saves results to that app with save_app_data."
+	action.InputSchema["properties"].(map[string]interface{})["appId"] = map[string]interface{}{
+		"type": "string", "pattern": `^app-[a-f0-9]{64}$`, "description": "Optional app from this chat that each occurrence updates.",
+	}
+	return action
+}
+
+func scheduledTaskCreateActionLegacy132() skill.Action {
 	return skill.Action{Name: RunbookActionCreateTask, Description: "Create and activate a recurring scheduled task when the user requests future or repeated work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. Use a six-field cron including seconds and an explicit IANA timezone; clarify ambiguous timing. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"title", "goal", "cron", "timezone"}, "properties": map[string]interface{}{
 			"title": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 240}, "goal": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 16000, "description": "Self-contained work to perform on every occurrence, including the source to use and requested result. Do not include credentials or request another schedule."},
@@ -122,7 +145,7 @@ func scheduledTaskCreateAction() skill.Action {
 }
 
 func scheduledTaskCreateActionLegacy131() skill.Action {
-	action := scheduledTaskCreateAction()
+	action := scheduledTaskCreateActionLegacy132()
 	action.InputSchema["properties"].(map[string]interface{})["maximumOccurrences"] = map[string]interface{}{
 		"type": "integer", "minimum": 1, "maximum": 1000000,
 		"description": "Omit for an ongoing routine; supply only when the user requested a bounded number of executions.",
@@ -145,6 +168,7 @@ type scheduledTaskCreateArguments struct {
 	Cron               string `json:"cron"`
 	Timezone           string `json:"timezone"`
 	MaximumOccurrences int64  `json:"maximumOccurrences,omitempty"`
+	AppID              string `json:"appId,omitempty"`
 }
 type scheduledTaskStatusArguments struct {
 	ActivationID     string                  `json:"activationId"`
@@ -180,9 +204,14 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, r
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	messageID, _ := run.Context[conversationRunContextTriggerID].(string)
-	task := &ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID}
+	task := &ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID)}
 	if _, err := scheduledTaskConversation(ctx, store, run.Scope, run.Owner, task); err != nil {
 		return nil, nil, nil, err
+	}
+	if task.AppID != "" {
+		if err := validateScheduledTaskApp(ctx, store, run, task); err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	schedule := &runbook.Schedule{Cron: a.Cron, Timezone: a.Timezone, MaximumOccurrences: a.MaximumOccurrences}
 	if err := schedule.Validate(); err != nil {
@@ -342,4 +371,21 @@ func scheduledTaskConversationCompletion(run *AgentRun, result map[string]interf
 		}
 	}
 	return &governedConversationCompletion{Content: content, ResourceType: runbookActivationResourceType, ResourceID: id, References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}}, true
+}
+
+// validateScheduledTaskApp proves the app exists, belongs to the routine's
+// owner and was made in the routine's conversation.
+func validateScheduledTaskApp(ctx context.Context, store runbookActionStore, run *AgentRun, task *ScheduledAgentTask) error {
+	artifacts, ok := store.(interface {
+		GetArtifact(context.Context, Scope, string, int64) (*Artifact, error)
+	})
+	if !ok {
+		return errors.New("apps are unavailable for routines on this host")
+	}
+	app, err := artifacts.GetArtifact(ctx, run.Scope, task.AppID, 0)
+	if err != nil || app == nil || app.Type != "app" || app.Provenance.Owner == nil || *app.Provenance.Owner != run.Owner ||
+		app.Metadata["conversationId"] != task.ConversationID {
+		return errors.New("scheduled task app must be an app from this chat")
+	}
+	return nil
 }

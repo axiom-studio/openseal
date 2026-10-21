@@ -113,6 +113,17 @@ func skillUpgradeTeamDefinitionEqual(left, right *kernelteam.Definition) bool {
 	return reflect.DeepEqual(before, after)
 }
 
+// teamDefinitionContentEqual compares definitions ignoring their recorded
+// digest and creation time.
+func teamDefinitionContentEqual(left, right *kernelteam.Definition) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	before, after := cloneUpgradeTeamDefinition(left), cloneUpgradeTeamDefinition(right)
+	before.Digest, after.Digest = "", ""
+	return skillUpgradeTeamDefinitionEqual(before, after)
+}
+
 func validateCurrentSkillUpgradeTeamAuthority(deployment *kernelteam.Deployment, definition *kernelteam.Definition, mutation *SkillReferenceTeamAuthorityMutation) error {
 	if mutation == nil || deployment == nil || definition == nil || !reflect.DeepEqual(deployment, mutation.PreviousDeployment) ||
 		!skillUpgradeTeamDefinitionEqual(definition, mutation.PreviousDefinition) || deployment.Status == kernelteam.DeploymentArchived || deployment.Activation != nil {

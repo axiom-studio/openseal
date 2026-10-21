@@ -4,9 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -44,24 +43,18 @@ func (c *DynamicActionWorkerConfig) applyDefaults() error {
 	return nil
 }
 
-// ActionWorkerSupervisor reconciles active scopes into isolated worker pools.
-// A source failure leaves existing pools running so a transient control-plane
-// read cannot interrupt already leased work.
+// ActionWorkerSupervisor runs an isolated worker pool per scope with
+// ActionCall work. See scopePools for when a scope has a pool.
 type ActionWorkerSupervisor struct {
 	store       KernelStore
 	catalog     ActionExecutionCatalog
 	credentials CredentialResolver
 	leaseIssuer ActionCredentialLeaseIssuer
 	dispatcher  ActionDispatcher
-	source      WorkerScopeSource
 	config      DynamicActionWorkerConfig
 	logger      *zap.SugaredLogger
-	limiter     *WorkerLimiter
-
-	mu     sync.RWMutex
-	pools  map[string]*ActionWorkerPool
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	limiter     atomic.Pointer[WorkerLimiter]
+	pools       *scopePools[*ActionWorkerPool]
 }
 
 func NewActionWorkerSupervisor(
@@ -110,149 +103,45 @@ func newActionWorkerSupervisor(
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
-	return &ActionWorkerSupervisor{
+	supervisor := &ActionWorkerSupervisor{
 		store: store, catalog: catalog, credentials: credentials, leaseIssuer: issuer, dispatcher: dispatcher,
-		source: source, config: config, logger: logger, pools: make(map[string]*ActionWorkerPool),
-	}, nil
+		config: config, logger: logger,
+	}
+	supervisor.pools = newScopePools("action", source, config.ReconcileInterval, WorkFamilyAction, logger, supervisor.newPool)
+	return supervisor, nil
 }
 
-func (s *ActionWorkerSupervisor) Start(parent context.Context) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.cancel != nil {
-		return
+func (s *ActionWorkerSupervisor) newPool(scope Scope) (*ActionWorkerPool, error) {
+	pool, err := newActionWorkerPool(s.store, s.catalog, s.credentials, s.leaseIssuer, s.dispatcher, s.logger, ActionWorkerConfig{
+		Scope: scope, Concurrency: s.config.Concurrency, PollInterval: s.config.PollInterval,
+		LeaseDuration:  s.config.LeaseDuration,
+		WorkerIDPrefix: fmt.Sprintf("%s-%s-%s", s.config.WorkerIDPrefix, scope.Kind, scope.ID),
+	})
+	if err != nil {
+		return nil, err
 	}
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithCancel(parent)
-	s.cancel = cancel
-	s.wg.Add(1)
-	go s.run(ctx)
+	pool.SetWorkerLimiter(s.limiter.Load())
+	return pool, nil
 }
 
-func (s *ActionWorkerSupervisor) Stop() {
-	s.mu.Lock()
-	cancel := s.cancel
-	s.cancel = nil
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
-		s.wg.Wait()
-	}
+func (s *ActionWorkerSupervisor) Start(parent context.Context) { s.pools.start(parent) }
 
-	s.mu.Lock()
-	pools := make([]*ActionWorkerPool, 0, len(s.pools))
-	for key, pool := range s.pools {
-		pools = append(pools, pool)
-		delete(s.pools, key)
-	}
-	s.mu.Unlock()
-	for _, pool := range pools {
-		pool.Stop()
-	}
-}
+func (s *ActionWorkerSupervisor) Stop() { s.pools.stop() }
 
-func (s *ActionWorkerSupervisor) Wake() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, pool := range s.pools {
-		pool.Wake()
-	}
-}
+func (s *ActionWorkerSupervisor) Wake() { s.pools.wake() }
 
-func (s *ActionWorkerSupervisor) WakeScope(scope Scope) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if pool := s.pools[workerScopeKey(scope)]; pool != nil {
-		pool.Wake()
-	}
-}
+func (s *ActionWorkerSupervisor) WakeScope(scope Scope) { s.pools.wakeScope(scope) }
+
+// RefreshScopes lists worker scopes now while polling.
+func (s *ActionWorkerSupervisor) RefreshScopes() { s.pools.request() }
+
+// SetWorkSignals binds the work queue status. Call before Start.
+func (s *ActionWorkerSupervisor) SetWorkSignals(status *WorkSignalStatus) { s.pools.setSignals(status) }
 
 func (s *ActionWorkerSupervisor) SetWorkerLimiter(limiter *WorkerLimiter) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.limiter = limiter
-	for _, pool := range s.pools {
-		pool.SetWorkerLimiter(limiter)
-	}
+	s.limiter.Store(limiter)
+	s.pools.each(func(pool *ActionWorkerPool) { pool.SetWorkerLimiter(limiter) })
 }
 
 // ScopeCount exposes bounded operational state without revealing queued work.
-func (s *ActionWorkerSupervisor) ScopeCount() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.pools)
-}
-
-func (s *ActionWorkerSupervisor) run(ctx context.Context) {
-	defer s.wg.Done()
-	s.reconcile(ctx)
-	ticker := time.NewTicker(s.config.ReconcileInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.reconcile(ctx)
-		}
-	}
-}
-
-func (s *ActionWorkerSupervisor) reconcile(ctx context.Context) {
-	scopes, err := s.source.ListWorkerScopes(ctx)
-	if err != nil {
-		if ctx.Err() == nil {
-			s.logger.Warnw("action worker scope reconciliation failed", "error", err)
-		}
-		return
-	}
-	desired := make(map[string]Scope, len(scopes))
-	for _, scope := range scopes {
-		if err := scope.Validate(); err != nil {
-			s.logger.Warnw("ignoring invalid action worker scope", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
-			continue
-		}
-		desired[workerScopeKey(scope)] = scope
-	}
-
-	keys := make([]string, 0, len(desired))
-	for key := range desired {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	s.mu.Lock()
-	for _, key := range keys {
-		if s.pools[key] != nil {
-			continue
-		}
-		scope := desired[key]
-		pool, err := newActionWorkerPool(s.store, s.catalog, s.credentials, s.leaseIssuer, s.dispatcher, s.logger, ActionWorkerConfig{
-			Scope: scope, Concurrency: s.config.Concurrency, PollInterval: s.config.PollInterval,
-			LeaseDuration:  s.config.LeaseDuration,
-			WorkerIDPrefix: fmt.Sprintf("%s-%s-%s", s.config.WorkerIDPrefix, scope.Kind, scope.ID),
-		})
-		if err != nil {
-			s.logger.Warnw("failed to create action worker pool", "scopeKind", scope.Kind, "scopeId", scope.ID, "error", err)
-			continue
-		}
-		pool.SetWorkerLimiter(s.limiter)
-		s.pools[key] = pool
-		pool.Start(ctx)
-		s.logger.Infow("started action worker scope", "scopeKind", scope.Kind, "scopeId", scope.ID, "concurrency", s.config.Concurrency)
-	}
-	removed := make([]*ActionWorkerPool, 0)
-	for key, pool := range s.pools {
-		if _, ok := desired[key]; ok {
-			continue
-		}
-		removed = append(removed, pool)
-		delete(s.pools, key)
-	}
-	s.mu.Unlock()
-	for _, pool := range removed {
-		pool.Stop()
-	}
-}
+func (s *ActionWorkerSupervisor) ScopeCount() int { return s.pools.count() }

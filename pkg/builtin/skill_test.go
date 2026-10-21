@@ -5,7 +5,7 @@ import "testing"
 func TestBuiltinAttachmentReadIsReferenceOnly(t *testing.T) {
 	d := SkillDefinition()
 	a := d.Actions[ReadAttachment]
-	if d.ID != SkillID || len(d.Actions) != 11 || string(a.Risk) != "read" || string(a.SideEffect) != "read" {
+	if d.ID != SkillID || len(d.Actions) != 13 || string(a.Risk) != "read" || string(a.SideEffect) != "read" {
 		t.Fatal("built-in attachment action must grant read-only access")
 	}
 	props := a.InputSchema["properties"].(map[string]interface{})
@@ -19,13 +19,16 @@ func TestBuiltinAttachmentReadIsReferenceOnly(t *testing.T) {
 
 func TestBuiltinCreativeActionsStayBounded(t *testing.T) {
 	d := SkillDefinition()
-	for _, name := range []string{GenerateImage, CreatePDF, CreateSlides, CreateSite, UpdateSite, PublishSite} {
+	for _, name := range []string{GenerateImage, CreatePDF, CreateSlides, CreateApp, UpdateApp, PublishApp, SaveAppData} {
 		a, ok := d.Actions[name]
 		if !ok || a.InputSchema["additionalProperties"] != false || a.Retry.MaxAttempts != 1 || string(a.Idempotency) != "required" {
 			t.Fatalf("%s must have a closed input and no automatic retry", name)
 		}
 	}
-	if string(d.Actions[PublishSite].SideEffect) != "external" || string(d.Actions[GenerateImage].SideEffect) != "write" {
+	if read := d.Actions[ReadApp]; read.InputSchema["additionalProperties"] != false || string(read.Risk) != "read" || string(read.SideEffect) != "read" || read.Retry.MaxAttempts != 1 {
+		t.Fatal("read_app must be a closed, read-only action")
+	}
+	if string(d.Actions[PublishApp].SideEffect) != "external" || string(d.Actions[GenerateImage].SideEffect) != "write" {
 		t.Fatal("publication and image generation must retain distinct side effects")
 	}
 	pdf := d.Actions[CreatePDF]
