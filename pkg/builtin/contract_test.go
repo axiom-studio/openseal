@@ -50,30 +50,32 @@ func TestHistoryContractValidatesForwardCursorAndRejectsForeignFields(t *testing
 	}
 }
 
-func TestSiteContractsAcceptReactAndHtmlWithoutMixingSources(t *testing.T) {
+func TestAppContractsAcceptProjectsAndRejectForeignInput(t *testing.T) {
 	catalog, definition := builtinContractCatalog(t)
-	for _, action := range []string{CreateSite, UpdateSite} {
-		for _, source := range []string{"react", "html", "both", "missing", "foreign"} {
-			input := map[string]interface{}{"title": "Seal"}
-			if action == UpdateSite {
-				input["siteId"] = "site-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-				input["expectedLatestVersion"] = 1
-			}
-			if source == "react" || source == "both" || source == "foreign" {
-				input["reactSource"] = "export default function App() { return <p>Seal</p>; }"
-				input["css"] = "p { color: red; }"
-			}
-			if source == "html" || source == "both" {
-				input["html"] = "<!doctype html><p>Seal</p>"
-			}
-			if source == "foreign" {
-				input["provider"] = "caller-chosen"
-			}
-			err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), action, input)
-			valid := source == "react" || source == "html"
-			if valid && err != nil || !valid && err == nil {
-				t.Fatalf("%s/%s schema validation: %v", action, source, err)
-			}
+	appID := "app-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	entry := map[string]interface{}{"path": "src/App.tsx", "content": "export default function App() { return <p>Seal</p>; }"}
+	cases := []struct {
+		name   string
+		action string
+		input  map[string]interface{}
+		valid  bool
+	}{
+		{"create", CreateApp, map[string]interface{}{"title": "Seal", "files": []interface{}{entry}}, true},
+		{"create without files", CreateApp, map[string]interface{}{"title": "Seal", "files": []interface{}{}}, false},
+		{"create with foreign field", CreateApp, map[string]interface{}{"title": "Seal", "files": []interface{}{entry}, "provider": "caller-chosen"}, false},
+		{"update", UpdateApp, map[string]interface{}{"appId": appID, "expectedLatestVersion": 1, "replace": []interface{}{map[string]interface{}{"path": "src/App.tsx", "find": "Seal", "replace": "Otter"}}, "delete": []interface{}{"src/old.ts"}}, true},
+		{"update with site id", UpdateApp, map[string]interface{}{"appId": "site-0123", "expectedLatestVersion": 1}, false},
+		{"read", ReadApp, map[string]interface{}{"appId": appID, "paths": []interface{}{"src/App.tsx"}}, true},
+		{"publish", PublishApp, map[string]interface{}{"appId": appID, "expectedLatestVersion": 2}, true},
+		{"publish without version", PublishApp, map[string]interface{}{"appId": appID}, false},
+		{"save data", SaveAppData, map[string]interface{}{"appId": appID, "name": "pipeline_by_stage", "value": []interface{}{map[string]interface{}{"stage": "Discovery", "value": 1620000}}}, true},
+		{"save data with a path name", SaveAppData, map[string]interface{}{"appId": appID, "name": "../secrets", "value": 1}, false},
+		{"save data without a value", SaveAppData, map[string]interface{}{"appId": appID, "name": "pipeline"}, false},
+	}
+	for _, tc := range cases {
+		err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), tc.action, tc.input)
+		if tc.valid && err != nil || !tc.valid && err == nil {
+			t.Fatalf("%s: schema validation: %v", tc.name, err)
 		}
 	}
 }

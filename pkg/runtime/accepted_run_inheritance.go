@@ -128,9 +128,7 @@ func (p *AgentRunWorkerPool) SetAcceptedRunExecutionPreparer(preparer AcceptedRu
 
 func (s *AgentRunWorkerSupervisor) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.executionPreparer = preparer
-	for _, pool := range s.pools {
-		pool.SetAcceptedRunExecutionPreparer(preparer)
-	}
+	s.mu.Unlock()
+	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetAcceptedRunExecutionPreparer(preparer) })
 }

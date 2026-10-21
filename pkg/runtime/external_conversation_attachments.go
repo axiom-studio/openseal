@@ -138,11 +138,11 @@ func (w *ExternalConversationInboxWorker) importAttachments(ctx context.Context,
 			return nil, nil, errors.New("attachment media type is invalid")
 		}
 		digest := fmt.Sprintf("sha256:%x", sha256.Sum256(content.Data))
-		stored, err := w.config.AttachmentContent.Put(ctx, ArtifactContentWrite{Scope: endpoint.Scope, MediaType: mediaType, Reader: bytes.NewReader(content.Data), SizeBytes: int64(len(content.Data)), Digest: digest})
+		owner := conversation.Owner
+		stored, err := w.config.AttachmentContent.Put(ctx, ArtifactContentWrite{Scope: endpoint.Scope, MediaType: mediaType, Reader: bytes.NewReader(content.Data), SizeBytes: int64(len(content.Data)), Digest: digest, Owner: &owner})
 		if err != nil {
 			return nil, nil, err
 		}
-		owner := conversation.Owner
 		_, err = catalog.Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{ID: id, Version: 1, Scope: endpoint.Scope, Name: file.Name, MediaType: mediaType, ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationConfidential, CreatedAt: event.OccurredAt,
 			Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "service", ID: externalConversationActorID}, Owner: &owner}, Metadata: map[string]interface{}{"provider": endpoint.Provider, "providerFileId": file.ID, "externalMessageId": event.ExternalMessageID}}})
 		if err != nil {
