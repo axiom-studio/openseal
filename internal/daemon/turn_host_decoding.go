@@ -75,11 +75,15 @@ func hostedTurnDecodingSchema(schema map[string]interface{}, completionEvidenceR
 		} else {
 			// generatedFiles() rejects the key off completion whatever its
 			// value, and a grammar cannot exclude one key of an open object,
-			// so runOutput is closed to its declared fields here. Every
-			// documented runOutput key the kernel reads (agentRequestDecision,
-			// participationProposal, report, ...) belongs to a completing turn.
+			// so runOutput is closed to its declared fields here. It declares
+			// the keys the kernel reads before completion: summary carries a
+			// waiting run's clarification question, silent a quiet source
+			// challenge. Other documented keys belong to completing turns.
 			runOutput := branchProperties["runOutput"].(map[string]interface{})
-			delete(runOutput["properties"].(map[string]interface{}), "generatedFiles")
+			outputProperties := runOutput["properties"].(map[string]interface{})
+			delete(outputProperties, "generatedFiles")
+			outputProperties["summary"] = map[string]interface{}{"type": "string"}
+			outputProperties["silent"] = map[string]interface{}{"type": "boolean"}
 			runOutput["additionalProperties"] = false
 		}
 		return branch, nil

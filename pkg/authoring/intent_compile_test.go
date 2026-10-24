@@ -234,6 +234,46 @@ func TestCompilerAppliesTheLatestScheduleAnswerAcrossEveryStage(t *testing.T) {
 	}
 }
 
+func TestOnDemandAnswerKeepsInstructionsThatOnlyMentionAFrequency(t *testing.T) {
+	const prompt = "Create an Agent that summarizes my notes into a short daily digest. Do not disclose daily access codes or personal information."
+	for _, test := range []struct {
+		behavior, keep, drop string
+	}{
+		{behavior: "Summarize the notes. Do not disclose daily access codes or personal information. Run daily at 09:00 UTC.", keep: "do not disclose daily access codes", drop: "run daily at 09:00"},
+		{behavior: "Summarize my notes into a short daily digest.", keep: "short daily digest"},
+		{behavior: "Summarize the notes. Run daily.", keep: "summarize the notes", drop: "run daily"},
+	} {
+		intent := AuthoringIntent{
+			SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent, Name: "Digest", Purpose: "Summarize notes",
+			Agents: []AuthoringAgentIntent{{
+				Key: "digest", Name: "Digest", Purpose: "Summarize notes", Behavior: test.behavior,
+				OperatingPrinciples: []string{"Never share daily access codes"},
+			}},
+		}
+		compiler, err := NewCompiler(semanticIntentGenerator{intent: intent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := compiler.Compile(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: prompt, Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: "on demand"},
+		}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Valid || len(result.Candidate.Agents) != 1 {
+			t.Fatalf("behavior %q: valid=%t validation=%#v", test.behavior, result.Valid, result.Validation)
+		}
+		definition := result.Candidate.Agents[0]
+		instructions := strings.ToLower(definition.SystemPrompt + " " + strings.Join(definition.OperatingPrinciples, " "))
+		if !strings.Contains(instructions, test.keep) || !strings.Contains(instructions, "never share daily access codes") {
+			t.Fatalf("behavior %q lost an instruction: %q", test.behavior, instructions)
+		}
+		if test.drop != "" && strings.Contains(instructions, test.drop) {
+			t.Fatalf("behavior %q kept the timing claim %q: %q", test.behavior, test.drop, instructions)
+		}
+	}
+}
+
 func TestCompileAuthoringIntentBuildsTeamRolesAndAssignments(t *testing.T) {
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceTeam,

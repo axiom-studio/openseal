@@ -79,6 +79,8 @@ func TestHostedTurnDecodingSchemaRejectsOnlyWhatTheTurnChecksReject(t *testing.T
 		{name: "running", request: plain, document: turn(`"nextRunStatus":"running","outputSummary":"Working","runOutput":{}`), valid: true},
 		{name: "sleeping with timer", request: plain, document: turn(`"nextRunStatus":"sleeping","outputSummary":"Later","runOutput":{},"wakeCondition":{"type":"timer","wakeAt":"2030-01-01T09:00:00Z"}`), valid: true},
 		{name: "waiting for a user message", request: plain, document: turn(`"nextRunStatus":"waiting_for_event","outputSummary":"Asked","runOutput":{},"wakeCondition":{"type":"user_message"}`), valid: true},
+		{name: "waiting with a clarification question", request: plain, document: turn(`"nextRunStatus":"waiting_for_event","outputSummary":"Asked","runOutput":{"summary":"Which repository should I review?"},"wakeCondition":{"type":"user_message"}`), valid: true},
+		{name: "quiet waiting challenge", request: plain, document: turn(`"nextRunStatus":"waiting_for_event","outputSummary":"Waiting","runOutput":{"silent":true},"wakeCondition":{"type":"user_message"}`), valid: true},
 		{name: "approval without wake", request: plain, document: turn(`"nextRunStatus":"waiting_for_approval","outputSummary":"Needs approval","runOutput":{}`), valid: true},
 		{name: "task proposal", request: task, document: turn(`"nextRunStatus":"running","outputSummary":"","runOutput":{},"proposedTask":{"taskKey":"digest","goal":"Write the digest","acknowledgment":"I will write the digest."}`), valid: true},
 		{name: "completed with wake", request: plain, document: turn(`"nextRunStatus":"completed","outputSummary":"Done","runOutput":{"reply":"Four"},"wakeCondition":{"type":"manual"}`)},

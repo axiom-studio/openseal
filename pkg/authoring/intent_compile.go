@@ -172,6 +172,9 @@ func applyAuthoringScheduleAuthority(intent AuthoringIntent, request GenerateReq
 	return intent
 }
 
+// removeAuthoringScheduleClaims drops sentences that claim when the Agent
+// runs. When every sentence would go, the text is kept: the compiler-owned
+// on-demand principle already overrides it, and an empty behavior is invalid.
 func removeAuthoringScheduleClaims(value string) string {
 	parts := strings.FieldsFunc(value, func(r rune) bool { return r == '.' || r == '\n' })
 	kept := make([]string, 0, len(parts))
@@ -185,16 +188,26 @@ func removeAuthoringScheduleClaims(value string) string {
 		}
 		kept = append(kept, trimmed)
 	}
+	if len(kept) == 0 {
+		return value
+	}
 	return strings.Join(kept, ". ")
 }
 
+// looksLikeAuthoringScheduleClaim reports whether a sentence claims when the
+// Agent runs: a concrete cadence, or a frequency together with a run verb.
+// Sentences that only mention a frequency as content ("a daily digest",
+// "daily access codes") are instructions, not timing claims, and are kept.
 func looksLikeAuthoringScheduleClaim(value string) bool {
 	parsed := parseScheduleIntent(value)
-	if parsed.kind == scheduleIntentExact || parsed.kind == scheduleIntentAmbiguous {
+	if parsed.kind == scheduleIntentExact {
 		return true
 	}
 	lower := strings.ToLower(value)
-	if containsAnyScheduleWord(lower, "schedule", "scheduled", "recurring", "hourly", "daily", "weekly", "cadence") {
+	if !containsAnyScheduleWord(lower, "run", "runs", "running", "execute", "executes", "trigger", "triggers", "triggered", "schedule", "scheduled") {
+		return false
+	}
+	if parsed.kind == scheduleIntentAmbiguous || containsAnyScheduleWord(lower, "recurring", "hourly", "daily", "weekly", "cadence") {
 		return true
 	}
 	if !containsWord(lower, "every") && !containsWord(lower, "each") {
