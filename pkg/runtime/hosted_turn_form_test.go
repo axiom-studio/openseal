@@ -290,3 +290,36 @@ func TestHostedTurnFormSchemaOffersExactSkillDispositions(t *testing.T) {
 		t.Fatal("duplicate Skill prompt references were accepted")
 	}
 }
+
+func TestHostedTurnFormSchemaAvoidsBooleanSubschemas(t *testing.T) {
+	for _, references := range [][]string{nil, {"skill:notes"}} {
+		schema, err := HostedTurnFormJSONSchema(nil, HostedTurnFormAuthority{SkillPromptReferences: references})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A boolean is a subschema where a schema is expected: under a
+		// subschema keyword or as an entry of properties/$defs.
+		subschemaKeys := map[string]bool{"items": true, "not": true, "contains": true, "additionalItems": true}
+		var walk func(path string, schemaMap bool, value interface{})
+		walk = func(path string, schemaMap bool, value interface{}) {
+			switch node := value.(type) {
+			case map[string]interface{}:
+				for key, child := range node {
+					if _, boolean := child.(bool); boolean && (schemaMap || subschemaKeys[key]) {
+						t.Errorf("%d skill prompts: boolean subschema at %s.%s", len(references), path, key)
+					}
+					walk(path+"."+key, !schemaMap && (key == "properties" || key == "$defs"), child)
+				}
+			case []interface{}:
+				for _, child := range node {
+					walk(path+"[]", false, child)
+				}
+			}
+		}
+		walk("", false, schema)
+		selections := schema["properties"].(map[string]interface{})["skillSelections"].(map[string]interface{})
+		if selections["maxItems"] != len(references) {
+			t.Fatalf("skillSelections maxItems = %v for %d prompts", selections["maxItems"], len(references))
+		}
+	}
+}
