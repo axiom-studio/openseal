@@ -41,6 +41,8 @@ type StandaloneAuthoringContext struct {
 	// StructuredOutput selects how the provider returns structured replies;
 	// the daemon validates it when it configures the provider.
 	StructuredOutput string `yaml:"structuredOutput,omitempty"`
+	// Timeout is a Go duration bounding one model request.
+	Timeout string `yaml:"timeout,omitempty"`
 }
 
 type StandaloneCredential struct {
@@ -125,6 +127,7 @@ func (c *StandaloneContext) Validate() error {
 		c.Authoring.BaseURL = strings.TrimSpace(c.Authoring.BaseURL)
 		c.Authoring.Model = strings.TrimSpace(c.Authoring.Model)
 		c.Authoring.StructuredOutput = strings.TrimSpace(c.Authoring.StructuredOutput)
+		c.Authoring.Timeout = strings.TrimSpace(c.Authoring.Timeout)
 		c.Authoring.Credential.Kind = strings.TrimSpace(c.Authoring.Credential.Kind)
 		c.Authoring.Credential.ID = strings.TrimSpace(c.Authoring.Credential.ID)
 		if c.Authoring.BaseURL == "" || c.Authoring.Model == "" || c.Authoring.Credential.Kind == "" || c.Authoring.Credential.ID == "" {

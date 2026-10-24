@@ -155,9 +155,10 @@ Options:
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	model := strings.TrimSpace(os.Getenv("OPENSEAL_LLM_MODEL"))
 	structuredOutput := os.Getenv("OPENSEAL_LLM_STRUCTURED_OUTPUT")
+	timeout := os.Getenv("OPENSEAL_LLM_TIMEOUT")
 	if standaloneContext.Authoring != nil {
 		endpoint, model = standaloneContext.Authoring.BaseURL, standaloneContext.Authoring.Model
-		structuredOutput = standaloneContext.Authoring.StructuredOutput
+		structuredOutput, timeout = standaloneContext.Authoring.StructuredOutput, standaloneContext.Authoring.Timeout
 		apiKey, err = standaloneContext.ResolveReference(scope, standaloneContext.Authoring.Credential)
 		if err != nil {
 			sugar.Fatalf("resolve standalone authoring credential: %v", err)
@@ -176,6 +177,10 @@ Options:
 	if err != nil {
 		sugar.Fatalf("configure model structured output: %v", err)
 	}
+	requestTimeout, err := daemonModelRequestTimeout(timeout)
+	if err != nil {
+		sugar.Fatalf("configure model request timeout: %v", err)
+	}
 	contentStore, contentPath, err := daemon.OpenArtifactContentStore(cfg.Storage, filepath.Dir(*configPath))
 	if err != nil {
 		sugar.Fatalf("failed to open artifact content store: %v", err)
@@ -183,7 +188,7 @@ Options:
 	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: runtime.NewArtifactCatalog(store)}
 	var taskHost *daemon.ProviderTurnHost
 	if *desktopOperator && configured == 3 {
-		taskHost, err = daemon.NewProviderTurnHostWithOptions(endpoint, apiKey, model, daemon.ProviderTurnHostOptions{StructuredOutput: taskOutput})
+		taskHost, err = daemon.NewProviderTurnHostWithOptions(endpoint, apiKey, model, daemon.ProviderTurnHostOptions{StructuredOutput: taskOutput, RequestTimeout: requestTimeout})
 		if err != nil {
 			sugar.Fatalf("configure desktop task provider: %v", err)
 		}
@@ -363,7 +368,7 @@ Options:
 	apiServer.SetArtifactContentStore(contentStore)
 	sugar.Infow("artifact content store opened", "path", contentPath)
 	if configured == 3 {
-		generator, generatorErr := authoring.NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, nil, authoring.OpenAICompatibleGeneratorOptions{StructuredOutputMode: authoringOutput})
+		generator, generatorErr := authoring.NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, &http.Client{Timeout: requestTimeout}, authoring.OpenAICompatibleGeneratorOptions{StructuredOutputMode: authoringOutput})
 		if generatorErr != nil {
 			sugar.Fatalf("configure workforce authoring: %v", generatorErr)
 		}
@@ -503,3 +508,24 @@ func daemonStructuredOutputModes(value string, agentTurns bool) (authoring.OpenA
 	}
 	return mode, daemon.ProviderStructuredOutputMode(mode), nil
 }
+
+// daemonModelRequestTimeout parses the per-request model timeout. A request
+// may not outlive the authoring worker's generation deadline, so longer
+// values could never take effect.
+func daemonModelRequestTimeout(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 90 * time.Second, nil
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil {
+		return 0, fmt.Errorf("model request timeout %q is not a duration such as 5m: %w", value, err)
+	}
+	if timeout <= 0 || timeout > maximumModelRequestTimeout {
+		return 0, fmt.Errorf("model request timeout %s must be positive and at most %s", timeout, maximumModelRequestTimeout)
+	}
+	return timeout, nil
+}
+
+// maximumModelRequestTimeout matches the authoring worker's generation timeout.
+const maximumModelRequestTimeout = 10 * time.Minute

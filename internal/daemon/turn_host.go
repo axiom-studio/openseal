@@ -36,6 +36,9 @@ const (
 
 type ProviderTurnHostOptions struct {
 	StructuredOutput ProviderStructuredOutputMode
+	// RequestTimeout bounds one provider request; zero keeps the 90 second
+	// default. Slow local models may need longer.
+	RequestTimeout time.Duration
 }
 
 func NewProviderTurnHost(endpoint, key, model string) (*ProviderTurnHost, error) {
@@ -54,11 +57,17 @@ func NewProviderTurnHostWithOptions(endpoint, key, model string, options Provide
 	default:
 		return nil, fmt.Errorf("unsupported task provider structured output mode %q", options.StructuredOutput)
 	}
+	if options.RequestTimeout < 0 {
+		return nil, fmt.Errorf("task provider request timeout %s must be positive", options.RequestTimeout)
+	}
+	if options.RequestTimeout == 0 {
+		options.RequestTimeout = 90 * time.Second
+	}
 	endpoint = strings.TrimRight(u.String(), "/")
 	if !strings.HasSuffix(endpoint, "/chat/completions") {
 		endpoint += "/chat/completions"
 	}
-	return &ProviderTurnHost{endpoint: endpoint, key: key, model: strings.TrimSpace(model), structuredOutput: options.StructuredOutput, client: &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &ProviderTurnHost{endpoint: endpoint, key: key, model: strings.TrimSpace(model), structuredOutput: options.StructuredOutput, client: &http.Client{Timeout: options.RequestTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 // providerChoice is one Chat Completions choice in either structured transport.
