@@ -24,6 +24,9 @@ func jsonSchemaTransportRequest(t *testing.T, r *http.Request, name, schemaPrope
 	format, _ := body["response_format"].(map[string]interface{})
 	jsonSchema, _ := format["json_schema"].(map[string]interface{})
 	schema, _ := jsonSchema["schema"].(map[string]interface{})
+	if branches, ok := schema["oneOf"].([]interface{}); ok {
+		schema, _ = branches[0].(map[string]interface{})
+	}
 	properties, _ := schema["properties"].(map[string]interface{})
 	if format["type"] != "json_schema" || jsonSchema["name"] != name || properties[schemaProperty] == nil {
 		t.Errorf("response_format = %#v", format)
