@@ -153,6 +153,9 @@ func TestOpenAICompatibleIntentJSONSchemaTransportConstrainsDecodingToSemanticSc
 				if format["type"] != "json_schema" || jsonSchema["name"] != "submit_authoring_intent" {
 					t.Fatalf("response_format=%#v", format)
 				}
+				if jsonSchema["schema"].(map[string]interface{})["oneOf"] == nil {
+					t.Fatal("json_schema transport sent the combinator-free schema instead of the decoding schema")
+				}
 				schema, _ := json.Marshal(jsonSchema["schema"])
 				for _, required := range []string{AuthoringIntentSchemaVersion, `"title"`, `"priority"`, `"additionalProperties":false`} {
 					if !strings.Contains(string(schema), required) {

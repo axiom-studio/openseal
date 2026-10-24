@@ -491,6 +491,16 @@ type authoringProviderContract struct {
 	Name        string
 	Description string
 	Schema      func() (map[string]interface{}, error)
+	// DecodingSchema optionally strengthens Schema for transports that
+	// constrain decoding token by token. Local validation never uses it.
+	DecodingSchema func() (map[string]interface{}, error)
+}
+
+func (c authoringProviderContract) decodingSchema() (map[string]interface{}, error) {
+	if c.DecodingSchema != nil {
+		return c.DecodingSchema()
+	}
+	return c.Schema()
 }
 
 func authoringResultContract() authoringProviderContract {
@@ -558,7 +568,7 @@ func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invoca
 	} else if mode == OpenAICompatibleStructuredOutputJSON {
 		payload["response_format"] = map[string]string{"type": "json_object"}
 	} else if mode == OpenAICompatibleStructuredOutputJSONSchema {
-		schema, err := contract.Schema()
+		schema, err := contract.decodingSchema()
 		if err != nil {
 			return nil, err
 		}
@@ -691,7 +701,7 @@ func (g *OpenAICompatibleGenerator) completeResponsesContract(ctx context.Contex
 	} else if mode == OpenAICompatibleStructuredOutputJSON {
 		payload["text"] = map[string]interface{}{"format": map[string]string{"type": "json_object"}}
 	} else if mode == OpenAICompatibleStructuredOutputJSONSchema {
-		schema, err := contract.Schema()
+		schema, err := contract.decodingSchema()
 		if err != nil {
 			return nil, err
 		}
