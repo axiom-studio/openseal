@@ -22,6 +22,7 @@ kind: StandaloneContext
 authoring:
   baseURL: https://models.example/v1
   model: example-model
+  structuredOutput: " json_schema "
   credential:
     kind: api-key
     id: model
@@ -44,6 +45,9 @@ credentials:
 	configured, err := LoadStandaloneContext(contextPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if configured.Authoring.StructuredOutput != "json_schema" {
+		t.Fatalf("authoring structured output = %q", configured.Authoring.StructuredOutput)
 	}
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	if got, err := configured.ResolveReference(scope, capability.CredentialReference{Kind: "api-key", ID: "model"}); err != nil || got != "environment-secret" {

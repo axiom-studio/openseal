@@ -38,6 +38,9 @@ type StandaloneAuthoringContext struct {
 	BaseURL    string                         `yaml:"baseURL"`
 	Model      string                         `yaml:"model"`
 	Credential capability.CredentialReference `yaml:"credential"`
+	// StructuredOutput selects how the provider returns structured replies;
+	// the daemon validates it when it configures the provider.
+	StructuredOutput string `yaml:"structuredOutput,omitempty"`
 }
 
 type StandaloneCredential struct {
@@ -121,6 +124,7 @@ func (c *StandaloneContext) Validate() error {
 	if c.Authoring != nil {
 		c.Authoring.BaseURL = strings.TrimSpace(c.Authoring.BaseURL)
 		c.Authoring.Model = strings.TrimSpace(c.Authoring.Model)
+		c.Authoring.StructuredOutput = strings.TrimSpace(c.Authoring.StructuredOutput)
 		c.Authoring.Credential.Kind = strings.TrimSpace(c.Authoring.Credential.Kind)
 		c.Authoring.Credential.ID = strings.TrimSpace(c.Authoring.Credential.ID)
 		if c.Authoring.BaseURL == "" || c.Authoring.Model == "" || c.Authoring.Credential.Kind == "" || c.Authoring.Credential.ID == "" {
