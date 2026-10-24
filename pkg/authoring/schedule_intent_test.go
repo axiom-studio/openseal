@@ -237,6 +237,31 @@ func TestScheduleIntentAuditedAnswerAuthorizesExactTrigger(t *testing.T) {
 	}
 }
 
+func TestScheduleIntentOnDemandAnswerOverridesAFrequencyWordInThePrompt(t *testing.T) {
+	for _, answers := range [][]string{{"on demand"}, {"daily at a varied time, 10 times between 08:00 and 20:00", "on demand"}} {
+		refinement := &RefinementContext{}
+		for index, text := range answers {
+			id := scheduleIntentQuestionID
+			if index > 0 {
+				id = scheduleIntentClarificationQuestionIDPrefix + strconv.Itoa(index)
+			}
+			refinement.Answers = append(refinement.Answers, RefinementResolvedAnswer{QuestionID: id, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: text}})
+		}
+		result := compileScheduledCandidate(t, "Create an Agent that summarizes my notes into a short daily digest.", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), refinement, nil)
+		if hasScheduleIntentQuestion(result.UnresolvedQuestions) || candidateSchedule(result) != nil {
+			t.Fatalf("answers %q: on demand did not resolve the schedule question: %#v", answers, result)
+		}
+	}
+	// Without an answer the frequency word still asks, and an exact answer still schedules.
+	if result := compileScheduledCandidate(t, "Create an Agent that summarizes my notes into a short daily digest.", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), nil, nil); !hasScheduleIntentQuestion(result.UnresolvedQuestions) {
+		t.Fatalf("unanswered daily prompt = %#v", result)
+	}
+	exact := &RefinementContext{Answers: []RefinementResolvedAnswer{{QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: "daily at 09:00 UTC"}}}}
+	if result := compileScheduledCandidate(t, "Create an Agent that summarizes my notes into a short daily digest.", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), exact, nil); !result.Valid || candidateSchedule(result) == nil {
+		t.Fatalf("exact answer = %#v", result)
+	}
+}
+
 func TestScheduleIntentAmbiguousAnswerProducesANewBlockingClarification(t *testing.T) {
 	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
 		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
