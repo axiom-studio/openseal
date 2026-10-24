@@ -79,7 +79,9 @@ type providerChoice struct {
 // requestStructuredReply adds the named reply contract to payload in the
 // host's transport. A JSON schema transport cannot show the model a tool
 // definition, so the schema is also stated in the first system message.
-func (h *ProviderTurnHost) requestStructuredReply(payload map[string]interface{}, name, description string, schema map[string]interface{}) error {
+// decodingSchema, when set, replaces schema only for constrained decoding;
+// the prompt keeps the smaller canonical schema.
+func (h *ProviderTurnHost) requestStructuredReply(payload map[string]interface{}, name, description string, schema, decodingSchema map[string]interface{}) error {
 	if h.structuredOutput != ProviderStructuredOutputJSONSchema {
 		payload["tools"] = []interface{}{map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": name, "description": description, "parameters": schema}}}
 		payload["tool_choice"] = map[string]interface{}{"type": "function", "function": map[string]string{"name": name}}
@@ -91,7 +93,10 @@ func (h *ProviderTurnHost) requestStructuredReply(payload map[string]interface{}
 	}
 	system := payload["messages"].([]map[string]string)[0]
 	system["content"] += "\n\nReturn the " + name + " reply as exactly one JSON object matching this JSON Schema, with no other text.\n" + string(encoded)
-	payload["response_format"] = map[string]interface{}{"type": "json_schema", "json_schema": map[string]interface{}{"name": name, "schema": schema}}
+	if decodingSchema == nil {
+		decodingSchema = schema
+	}
+	payload["response_format"] = map[string]interface{}{"type": "json_schema", "json_schema": map[string]interface{}{"name": name, "schema": decodingSchema}}
 	return nil
 }
 
@@ -145,7 +150,13 @@ func (h *ProviderTurnHost) ExecuteHostedTurn(ctx context.Context, request runtim
 		limit = int(request.Budget.TurnReservation.OutputTokens)
 	}
 	payload := map[string]interface{}{"model": h.model, "max_completion_tokens": limit, "messages": []map[string]string{{"role": "system", "content": "Perform one governed agent turn. Follow the supplied system instructions and goal. Return submit_agent_turn using the provided schema. Propose only offered capabilities; never invent tools, access, action receipts, or successful external effects. Do not claim filesystem or media access. Disposition every offered skill; the kernel records an omitted one as not applied. For a completed text task put the user-facing answer in runOutput.reply. When the user requests a file, provide its complete text in runOutput.generatedFiles using name, mediaType and text. Supported formats are plain text, Markdown, CSV and JSON; use at most eight files with 256 KiB total UTF-8 text, within your output token budget. Generated files are output drafts stored by the kernel after accepting this turn, not writes to the user filesystem. Never supply artifactRefs or claim publication before it occurs. Generated files are allowed only with nextRunStatus completed. Preserve continuation context when more work remains. The kernel owns execution, approval, and state transitions."}, {"role": "user", "content": string(input)}}}
-	if err := h.requestStructuredReply(payload, "submit_agent_turn", "Propose the next governed agent turn", schema); err != nil {
+	var decoding map[string]interface{}
+	if h.structuredOutput == ProviderStructuredOutputJSONSchema {
+		if decoding, err = hostedTurnDecodingSchema(schema, runtime.HostedTurnCompletionEvidenceRefs(request.ContinuationCheckpoint)); err != nil {
+			return fail("invalid_schema", "The task response contract could not be prepared.", false)
+		}
+	}
+	if err := h.requestStructuredReply(payload, "submit_agent_turn", "Propose the next governed agent turn", schema, decoding); err != nil {
 		return fail("invalid_schema", "The task response contract could not be prepared.", false)
 	}
 	body, err := json.Marshal(payload)
