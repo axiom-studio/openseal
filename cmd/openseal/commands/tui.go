@@ -47,7 +47,9 @@ Options:
   --poll <duration>  Refresh interval (default: 5s; negative disables polling)
   --help             Print this help message
 
-OPENSEAL_API_URL can set the default endpoint.`)
+OPENSEAL_API_URL can set the default endpoint. OPENSEAL_API_TOKEN sends a
+bearer token to a daemon started with the same variable; the environment
+keeps the token out of the process argument list.`)
 		return
 	}
 
@@ -70,10 +72,24 @@ OPENSEAL_API_URL can set the default endpoint.`)
 		Actor: runtime.ActivityActor{Type: "user", ID: "local"}, DownloadDir: strings.TrimSpace(*downloadDir),
 		PollInterval: pollInterval,
 	}
-	kernelClient := client.NewKernelHTTPClient(config.Endpoint, nil, client.WithRequestHeaders(http.Header(requestHeaders)))
+	kernelClient := client.NewKernelHTTPClient(config.Endpoint, nil, client.WithRequestHeaders(tuiRequestHeaders(requestHeaders, os.Getenv("OPENSEAL_API_TOKEN"))))
 	if err := tui.Run(context.Background(), kernelClient, config); err != nil {
 		fmt.Fprintf(os.Stderr, "OpenSeal TUI failed: %v\n", err)
 	}
+}
+
+// tuiRequestHeaders adds the daemon bearer token to the selector headers. An
+// explicit Authorization header flag still takes precedence, as flags do over
+// the environment elsewhere.
+func tuiRequestHeaders(flags requestHeaderFlags, token string) http.Header {
+	headers := http.Header(flags).Clone()
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	if token = strings.TrimSpace(token); token != "" && headers.Get("Authorization") == "" {
+		headers.Set("Authorization", "Bearer "+token)
+	}
+	return headers
 }
 
 type requestHeaderFlags http.Header
