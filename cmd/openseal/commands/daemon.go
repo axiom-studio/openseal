@@ -154,8 +154,10 @@ Options:
 	endpoint := strings.TrimSpace(os.Getenv("OPENSEAL_LLM_BASE_URL"))
 	apiKey := strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
 	model := strings.TrimSpace(os.Getenv("OPENSEAL_LLM_MODEL"))
+	structuredOutput := os.Getenv("OPENSEAL_LLM_STRUCTURED_OUTPUT")
 	if standaloneContext.Authoring != nil {
 		endpoint, model = standaloneContext.Authoring.BaseURL, standaloneContext.Authoring.Model
+		structuredOutput = standaloneContext.Authoring.StructuredOutput
 		apiKey, err = standaloneContext.ResolveReference(scope, standaloneContext.Authoring.Credential)
 		if err != nil {
 			sugar.Fatalf("resolve standalone authoring credential: %v", err)
@@ -170,6 +172,10 @@ Options:
 	if configured != 0 && configured != 3 {
 		sugar.Fatal("workforce authoring requires OPENSEAL_LLM_BASE_URL, OPENAI_API_KEY, and OPENSEAL_LLM_MODEL together")
 	}
+	authoringOutput, taskOutput, err := daemonStructuredOutputModes(structuredOutput, *desktopOperator && configured == 3)
+	if err != nil {
+		sugar.Fatalf("configure model structured output: %v", err)
+	}
 	contentStore, contentPath, err := daemon.OpenArtifactContentStore(cfg.Storage, filepath.Dir(*configPath))
 	if err != nil {
 		sugar.Fatalf("failed to open artifact content store: %v", err)
@@ -177,7 +183,7 @@ Options:
 	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: runtime.NewArtifactCatalog(store)}
 	var taskHost *daemon.ProviderTurnHost
 	if *desktopOperator && configured == 3 {
-		taskHost, err = daemon.NewProviderTurnHost(endpoint, apiKey, model)
+		taskHost, err = daemon.NewProviderTurnHostWithOptions(endpoint, apiKey, model, daemon.ProviderTurnHostOptions{StructuredOutput: taskOutput})
 		if err != nil {
 			sugar.Fatalf("configure desktop task provider: %v", err)
 		}
@@ -357,7 +363,7 @@ Options:
 	apiServer.SetArtifactContentStore(contentStore)
 	sugar.Infow("artifact content store opened", "path", contentPath)
 	if configured == 3 {
-		generator, generatorErr := authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, nil)
+		generator, generatorErr := authoring.NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, nil, authoring.OpenAICompatibleGeneratorOptions{StructuredOutputMode: authoringOutput})
 		if generatorErr != nil {
 			sugar.Fatalf("configure workforce authoring: %v", generatorErr)
 		}
@@ -478,4 +484,22 @@ func validateDesktopOperator(listen, token string, scope runtime.Scope) error {
 		return fmt.Errorf("--desktop-operator requires a local workspace scope")
 	}
 	return nil
+}
+
+// daemonStructuredOutputModes maps the one structured-output setting onto
+// workforce authoring and the desktop task provider. The task provider
+// supports only the tool and json_schema transports, so the authoring-only
+// modes are rejected when it is enabled.
+func daemonStructuredOutputModes(value string, agentTurns bool) (authoring.OpenAICompatibleStructuredOutputMode, daemon.ProviderStructuredOutputMode, error) {
+	mode := authoring.OpenAICompatibleStructuredOutputMode(strings.TrimSpace(value))
+	switch mode {
+	case authoring.OpenAICompatibleStructuredOutputDefault, authoring.OpenAICompatibleStructuredOutputTool, authoring.OpenAICompatibleStructuredOutputJSONSchema:
+	case authoring.OpenAICompatibleStructuredOutputJSON, authoring.OpenAICompatibleStructuredOutputPlain:
+		if agentTurns {
+			return "", "", fmt.Errorf("structured output %q applies only to workforce authoring; desktop agent turns support tool or json_schema", mode)
+		}
+	default:
+		return "", "", fmt.Errorf("unsupported structured output %q; use tool, json_schema, json or plain", mode)
+	}
+	return mode, daemon.ProviderStructuredOutputMode(mode), nil
 }

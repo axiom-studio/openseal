@@ -3,8 +3,11 @@ package commands
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/internal/daemon"
+	"github.com/axiom-studio/openseal/pkg/authoring"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/outreach"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -115,5 +118,33 @@ func TestDesktopOperatorRequiresAuthenticatedLocalWorkspace(t *testing.T) {
 				t.Fatalf("validation=%v, valid=%v", err, tc.valid)
 			}
 		})
+	}
+}
+
+func TestDaemonStructuredOutputModesMapOneSettingOntoBothProviders(t *testing.T) {
+	for _, test := range []struct {
+		value      string
+		agentTurns bool
+		authoring  authoring.OpenAICompatibleStructuredOutputMode
+		turns      daemon.ProviderStructuredOutputMode
+		wantError  string
+	}{
+		{value: "", agentTurns: true},
+		{value: " json_schema ", agentTurns: true, authoring: authoring.OpenAICompatibleStructuredOutputJSONSchema, turns: daemon.ProviderStructuredOutputJSONSchema},
+		{value: "tool", agentTurns: true, authoring: authoring.OpenAICompatibleStructuredOutputTool, turns: daemon.ProviderStructuredOutputTool},
+		{value: "json", authoring: authoring.OpenAICompatibleStructuredOutputJSON, turns: "json"},
+		{value: "plain", agentTurns: true, wantError: "applies only to workforce authoring"},
+		{value: "json-schema", wantError: `unsupported structured output "json-schema"`},
+	} {
+		authoringMode, turnMode, err := daemonStructuredOutputModes(test.value, test.agentTurns)
+		if test.wantError != "" {
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Errorf("%q: error = %v, want %q", test.value, err, test.wantError)
+			}
+			continue
+		}
+		if err != nil || authoringMode != test.authoring || turnMode != test.turns {
+			t.Errorf("%q: modes = %q, %q, %v", test.value, authoringMode, turnMode, err)
+		}
 	}
 }
