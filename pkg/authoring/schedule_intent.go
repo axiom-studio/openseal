@@ -322,7 +322,7 @@ func upsertScheduleIntentQuestion(generated *GenerationResponse, request Generat
 }
 
 func sourceCapabilityRequiresDurableAction(request GenerateRequest) bool {
-	switch parseScheduleIntent(scheduleIntentAuthorityText(request)).kind {
+	switch scheduleIntentAuthority(request).kind {
 	case scheduleIntentAmbiguous, scheduleIntentExact:
 		return true
 	default:

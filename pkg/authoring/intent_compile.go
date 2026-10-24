@@ -148,7 +148,7 @@ func applyAuthoringApprovalDeliveryAuthority(intent AuthoringIntent, catalog Cap
 // otherwise Studio can truthfully show no Trigger while the Agent definition
 // continues to claim that automatic work exists.
 func applyAuthoringScheduleAuthority(intent AuthoringIntent, request GenerateRequest) AuthoringIntent {
-	if parseScheduleIntent(scheduleIntentAuthorityText(request)).kind != scheduleIntentManual {
+	if scheduleIntentAuthority(request).kind != scheduleIntentManual {
 		return intent
 	}
 	for index := range intent.Agents {
@@ -490,7 +490,7 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 		Name: answer.Name + " operations", Description: "Compiler-owned execution methods for " + answer.Purpose,
 		Entrypoints: map[string]string{}, Interfaces: map[string]runbook.Interface{}, Triggers: map[string]runbook.Trigger{}, Steps: map[string]runbook.Step{},
 	}
-	authorizedSchedule := parseScheduleIntent(scheduleIntentAuthorityText(request))
+	authorizedSchedule := scheduleIntentAuthority(request)
 	for _, operation := range answer.Operations {
 		stepID, endID := operation.Key, operation.Key+"-done"
 		result.Entrypoints[operation.Key] = stepID

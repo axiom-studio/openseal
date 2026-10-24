@@ -181,6 +181,59 @@ func TestCompileAuthoringIntentOnDemandAnswerRemovesScheduledOperationAndClaims(
 	}
 }
 
+func TestCompilerAppliesTheLatestScheduleAnswerAcrossEveryStage(t *testing.T) {
+	// The prompt's frequency word ("daily") must not outvote the user's
+	// conclusive answer in any stage: the authority check, the semantic form
+	// and the compiled Runbook.
+	const prompt = "Create an Agent that summarizes my notes into a short daily digest."
+	digest := func(schedule string) AuthoringIntent {
+		return AuthoringIntent{
+			SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent, Name: "Digest", Purpose: "Summarize notes",
+			Agents: []AuthoringAgentIntent{{
+				Key: "digest", Name: "Digest", Purpose: "Summarize notes",
+				Behavior:   "Summarize the notes. Run daily at 09:00 UTC.",
+				Objectives: []AuthoringObjectiveIntent{{Key: "digest", Title: "Digest", Outcome: "A digest exists", Priority: 1}},
+				Operations: []AuthoringOperationIntent{{Key: "send-digest", Name: "Send digest", Goal: "Write the digest", ObjectiveKey: "digest", Wake: AuthoringWakeSchedule, Schedule: schedule, Approval: AuthoringApprovalByPolicy}},
+			}},
+		}
+	}
+	compile := func(intent AuthoringIntent, answer string) *CompileResult {
+		t.Helper()
+		compiler, err := NewCompiler(semanticIntentGenerator{intent: intent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := compiler.Compile(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: prompt, Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: answer},
+		}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	manual := compile(digest("daily at 09:00 UTC"), "on demand")
+	if hasScheduleIntentQuestion(manual.UnresolvedQuestions) || len(manual.Candidate.Agents) != 1 {
+		t.Fatalf("on-demand result = %#v", manual)
+	}
+	definition := manual.Candidate.Agents[0]
+	if definition.Runbook != nil && (len(definition.Runbook.Triggers) != 0 || definition.Runbook.Entrypoints["send-digest"] != "") {
+		t.Fatalf("on-demand answer kept the scheduled operation: %#v", definition.Runbook)
+	}
+	if strings.Contains(strings.ToLower(definition.SystemPrompt), "daily at 09:00") {
+		t.Fatalf("on-demand answer kept the schedule claim: %q", definition.SystemPrompt)
+	}
+
+	weekly := compile(digest("weekly on monday at 09:00 UTC"), "weekly on monday at 09:00 UTC")
+	if !weekly.Valid || hasScheduleIntentQuestion(weekly.UnresolvedQuestions) || len(weekly.Candidate.Agents) != 1 {
+		t.Fatalf("weekly result: valid=%t validation=%#v questions=%#v", weekly.Valid, weekly.Validation, weekly.UnresolvedQuestions)
+	}
+	trigger := weekly.Candidate.Agents[0].Runbook.Triggers["send-digest"]
+	if trigger.Schedule == nil || trigger.Schedule.Cron != "0 0 9 * * 1" || trigger.Schedule.Timezone != "UTC" {
+		t.Fatalf("weekly trigger = %#v", trigger.Schedule)
+	}
+}
+
 func TestCompileAuthoringIntentBuildsTeamRolesAndAssignments(t *testing.T) {
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceTeam,
