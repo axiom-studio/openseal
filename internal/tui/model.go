@@ -44,6 +44,10 @@ type Config struct {
 	Actor        runtime.ActivityActor
 	DownloadDir  string
 	PollInterval time.Duration
+	// AdoptSoleAgent makes the workspace's only active Agent deployment the
+	// work owner, so an Agent created in this session can start work. It is
+	// set when no owner was chosen explicitly.
+	AdoptSoleAgent bool
 }
 
 type authoringAutomationFocus struct {
@@ -749,7 +753,27 @@ func Run(ctx context.Context, kernelClient client.KernelClient, config Config) e
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(m.loadCapabilities(), m.poll())
+	return tea.Batch(m.loadCapabilities(), m.poll(), m.adoptSoleAgent())
+}
+
+type soleAgentResolved struct{ deployment *kernelagent.AgentDeployment }
+
+// adoptSoleAgent resolves the work owner to the only active Agent deployment
+// in scope. With none or several, the configured owner stays.
+func (m *Model) adoptSoleAgent() tea.Cmd {
+	if !m.config.AdoptSoleAgent {
+		return nil
+	}
+	scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
+	return func() tea.Msg {
+		list, err := m.client.ListAgentDeployments(m.ctx, kernelagent.AgentDeploymentFilter{Scope: scope, ExcludeStatuses: []kernelagent.RolloutStatus{kernelagent.RolloutRetired}})
+		// A host without Agent deployments, or a failed lookup, keeps the
+		// configured owner; work creation then reports the real error.
+		if err != nil || list == nil || len(list.Items) != 1 || list.Items[0].Deployment == nil {
+			return soleAgentResolved{}
+		}
+		return soleAgentResolved{deployment: list.Items[0].Deployment}
+	}
 }
 
 func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
@@ -1011,6 +1035,16 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.section = sectionAuthoring
 		m.focusPanelList()
 		return m, m.loadCapabilities()
+	case soleAgentResolved:
+		if msg.deployment != nil && m.config.Owner != (runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: msg.deployment.ID}) {
+			m.config.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: msg.deployment.ID}
+			name := strings.TrimSpace(msg.deployment.DisplayName)
+			if name == "" {
+				name = msg.deployment.ID
+			}
+			m.status = "New work now goes to Agent " + name + "."
+		}
+		return m, nil
 	case workforceGoverned:
 		m.busy = false
 		if msg.err != nil {
@@ -1031,6 +1065,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetComposerMode()
 		m.status = msg.action + " recorded in the durable workforce audit."
 		m.focusPanelList()
+		if msg.changeSet != nil && msg.changeSet.ApplyReceipt != nil {
+			return m, tea.Batch(m.loadCapabilities(), m.adoptSoleAgent())
+		}
 		return m, m.loadCapabilities()
 	case workforceSkillsSearched:
 		m.busy = false
