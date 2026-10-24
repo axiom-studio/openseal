@@ -20,18 +20,106 @@ import (
 type ProviderTurnHost struct {
 	endpoint, key, model string
 	client               *http.Client
+	structuredOutput     ProviderStructuredOutputMode
+}
+
+// ProviderStructuredOutputMode selects how the provider transports the single
+// structured reply. JSON schema mode is for providers that ignore tool_choice
+// but constrain decoding to a supplied schema (for example Ollama). Both modes
+// decode the reply with the same strict local contract.
+type ProviderStructuredOutputMode string
+
+const (
+	ProviderStructuredOutputTool       ProviderStructuredOutputMode = "tool"
+	ProviderStructuredOutputJSONSchema ProviderStructuredOutputMode = "json_schema"
+)
+
+type ProviderTurnHostOptions struct {
+	StructuredOutput ProviderStructuredOutputMode
+	// RequestTimeout bounds one provider request; zero keeps the 90 second
+	// default. Slow local models may need longer.
+	RequestTimeout time.Duration
 }
 
 func NewProviderTurnHost(endpoint, key, model string) (*ProviderTurnHost, error) {
+	return NewProviderTurnHostWithOptions(endpoint, key, model, ProviderTurnHostOptions{})
+}
+
+func NewProviderTurnHostWithOptions(endpoint, key, model string, options ProviderTurnHostOptions) (*ProviderTurnHost, error) {
 	u, err := url.Parse(strings.TrimSpace(endpoint))
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.TrimSpace(key) == "" || strings.TrimSpace(model) == "" {
 		return nil, errors.New("task provider requires a valid HTTP API URL, credential, and model")
+	}
+	switch options.StructuredOutput {
+	case "":
+		options.StructuredOutput = ProviderStructuredOutputTool
+	case ProviderStructuredOutputTool, ProviderStructuredOutputJSONSchema:
+	default:
+		return nil, fmt.Errorf("unsupported task provider structured output mode %q", options.StructuredOutput)
+	}
+	if options.RequestTimeout < 0 {
+		return nil, fmt.Errorf("task provider request timeout %s must be positive", options.RequestTimeout)
+	}
+	if options.RequestTimeout == 0 {
+		options.RequestTimeout = 90 * time.Second
 	}
 	endpoint = strings.TrimRight(u.String(), "/")
 	if !strings.HasSuffix(endpoint, "/chat/completions") {
 		endpoint += "/chat/completions"
 	}
-	return &ProviderTurnHost{endpoint: endpoint, key: key, model: strings.TrimSpace(model), client: &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &ProviderTurnHost{endpoint: endpoint, key: key, model: strings.TrimSpace(model), structuredOutput: options.StructuredOutput, client: &http.Client{Timeout: options.RequestTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+}
+
+// providerChoice is one Chat Completions choice in either structured transport.
+type providerChoice struct {
+	FinishReason string `json:"finish_reason"`
+	Message      struct {
+		Content   string `json:"content"`
+		ToolCalls []struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function"`
+		} `json:"tool_calls"`
+	} `json:"message"`
+}
+
+// requestStructuredReply adds the named reply contract to payload in the
+// host's transport. A JSON schema transport cannot show the model a tool
+// definition, so the schema is also stated in the first system message.
+// decodingSchema, when set, replaces schema only for constrained decoding;
+// the prompt keeps the smaller canonical schema.
+func (h *ProviderTurnHost) requestStructuredReply(payload map[string]interface{}, name, description string, schema, decodingSchema map[string]interface{}) error {
+	if h.structuredOutput != ProviderStructuredOutputJSONSchema {
+		payload["tools"] = []interface{}{map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": name, "description": description, "parameters": schema}}}
+		payload["tool_choice"] = map[string]interface{}{"type": "function", "function": map[string]string{"name": name}}
+		return nil
+	}
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		return fmt.Errorf("encode %s schema: %w", name, err)
+	}
+	system := payload["messages"].([]map[string]string)[0]
+	system["content"] += "\n\nReturn the " + name + " reply as exactly one JSON object matching this JSON Schema, with no other text.\n" + string(encoded)
+	if decodingSchema == nil {
+		decodingSchema = schema
+	}
+	payload["response_format"] = map[string]interface{}{"type": "json_schema", "json_schema": map[string]interface{}{"name": name, "schema": decodingSchema}}
+	return nil
+}
+
+// structuredReply returns the reply document of a complete choice in the
+// host's transport, or false when the choice is incomplete or unsupported.
+func (h *ProviderTurnHost) structuredReply(choice providerChoice, name string) (string, bool) {
+	if h.structuredOutput == ProviderStructuredOutputJSONSchema {
+		return choice.Message.Content, choice.FinishReason == "stop" && strings.TrimSpace(choice.Message.Content) != ""
+	}
+	calls := choice.Message.ToolCalls
+	if choice.FinishReason != "tool_calls" || len(calls) != 1 || calls[0].Type != "function" || calls[0].Function.Name != name {
+		return "", false
+	}
+	return calls[0].Function.Arguments, true
 }
 
 func (h *ProviderTurnHost) ExecuteHostedTurn(ctx context.Context, request runtime.HostedTurnRequest) (*runtime.HostedTurnResponse, error) {
@@ -70,7 +158,16 @@ func (h *ProviderTurnHost) ExecuteHostedTurn(ctx context.Context, request runtim
 	if request.Budget != nil && request.Budget.TurnReservation.OutputTokens > 0 && request.Budget.TurnReservation.OutputTokens < int64(limit) {
 		limit = int(request.Budget.TurnReservation.OutputTokens)
 	}
-	payload := map[string]interface{}{"model": h.model, "max_completion_tokens": limit, "messages": []map[string]string{{"role": "system", "content": "Perform one governed agent turn. Follow the supplied system instructions and goal. Return submit_agent_turn using the provided schema. Propose only offered capabilities; never invent tools, access, action receipts, or successful external effects. Do not claim filesystem or media access. Disposition every offered skill; the kernel records an omitted one as not applied. For a completed text task put the user-facing answer in runOutput.reply. When the user requests a file, provide its complete text in runOutput.generatedFiles using name, mediaType and text. Supported formats are plain text, Markdown, CSV and JSON; use at most eight files with 256 KiB total UTF-8 text, within your output token budget. Generated files are output drafts stored by the kernel after accepting this turn, not writes to the user filesystem. Never supply artifactRefs or claim publication before it occurs. Generated files are allowed only with nextRunStatus completed. Preserve continuation context when more work remains. The kernel owns execution, approval, and state transitions."}, {"role": "user", "content": string(input)}}, "tools": []interface{}{map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": "submit_agent_turn", "description": "Propose the next governed agent turn", "parameters": schema}}}, "tool_choice": map[string]interface{}{"type": "function", "function": map[string]string{"name": "submit_agent_turn"}}}
+	payload := map[string]interface{}{"model": h.model, "max_completion_tokens": limit, "messages": []map[string]string{{"role": "system", "content": "Perform one governed agent turn. Follow the supplied system instructions and goal. Return submit_agent_turn using the provided schema. Propose only offered capabilities; never invent tools, access, action receipts, or successful external effects. Do not claim filesystem or media access. Disposition every offered skill; the kernel records an omitted one as not applied. For a completed text task put the user-facing answer in runOutput.reply. When the user requests a file, provide its complete text in runOutput.generatedFiles using name, mediaType and text. Supported formats are plain text, Markdown, CSV and JSON; use at most eight files with 256 KiB total UTF-8 text, within your output token budget. Generated files are output drafts stored by the kernel after accepting this turn, not writes to the user filesystem. Never supply artifactRefs or claim publication before it occurs. Generated files are allowed only with nextRunStatus completed. Preserve continuation context when more work remains. The kernel owns execution, approval, and state transitions."}, {"role": "user", "content": string(input)}}}
+	var decoding map[string]interface{}
+	if h.structuredOutput == ProviderStructuredOutputJSONSchema {
+		if decoding, err = hostedTurnDecodingSchema(schema, runtime.HostedTurnCompletionEvidenceRefs(request.ContinuationCheckpoint)); err != nil {
+			return fail("invalid_schema", "The task response contract could not be prepared.", false)
+		}
+	}
+	if err := h.requestStructuredReply(payload, "submit_agent_turn", "Propose the next governed agent turn", schema, decoding); err != nil {
+		return fail("invalid_schema", "The task response contract could not be prepared.", false)
+	}
 	body, err := json.Marshal(payload)
 	if err != nil || len(body) > 4<<20 {
 		return fail("input_too_large", "The task context exceeds the desktop provider limit.", false)
@@ -98,19 +195,8 @@ func (h *ProviderTurnHost) ExecuteHostedTurn(ctx context.Context, request runtim
 		return fail("invalid_response", "The task provider response was unreadable or exceeded the size limit.", false)
 	}
 	var envelope struct {
-		Choices []struct {
-			FinishReason string `json:"finish_reason"`
-			Message      struct {
-				ToolCalls []struct {
-					Type     string `json:"type"`
-					Function struct {
-						Name      string `json:"name"`
-						Arguments string `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-			} `json:"message"`
-		} `json:"choices"`
-		Usage struct {
+		Choices []providerChoice `json:"choices"`
+		Usage   struct {
 			Input  int `json:"prompt_tokens"`
 			Output int `json:"completion_tokens"`
 		} `json:"usage"`
@@ -118,12 +204,12 @@ func (h *ProviderTurnHost) ExecuteHostedTurn(ctx context.Context, request runtim
 	if json.Unmarshal(raw, &envelope) != nil || len(envelope.Choices) != 1 {
 		return fail("invalid_response", "The task provider did not return one structured turn.", false)
 	}
-	choice := envelope.Choices[0]
-	if choice.FinishReason != "tool_calls" || len(choice.Message.ToolCalls) != 1 || choice.Message.ToolCalls[0].Type != "function" || choice.Message.ToolCalls[0].Function.Name != "submit_agent_turn" {
+	reply, complete := h.structuredReply(envelope.Choices[0], "submit_agent_turn")
+	if !complete {
 		return fail("incomplete_response", "The task provider returned an incomplete or unsupported turn.", false)
 	}
 	var form runtime.HostedTurnForm
-	decoder := json.NewDecoder(strings.NewReader(choice.Message.ToolCalls[0].Function.Arguments))
+	decoder := json.NewDecoder(strings.NewReader(reply))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&form) != nil || decoder.Decode(new(interface{})) != io.EOF {
 		return fail("invalid_turn", "The task provider returned an invalid turn form.", false)
@@ -156,7 +242,7 @@ func (h *ProviderTurnHost) ExecuteHostedTurn(ctx context.Context, request runtim
 		result.Usage.InputTokens = int(estimate)
 	}
 	if result.Usage.OutputTokens == 0 {
-		result.Usage.OutputTokens = len(choice.Message.ToolCalls[0].Function.Arguments)
+		result.Usage.OutputTokens = len(reply)
 	}
 	return result, nil
 }

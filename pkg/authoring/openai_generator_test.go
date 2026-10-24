@@ -95,6 +95,78 @@ func TestOpenAICompatibleIntentJSONTransportIncludesExactSemanticSchema(t *testi
 	}
 }
 
+func TestOpenAICompatibleIntentJSONSchemaTransportConstrainsDecodingToSemanticSchema(t *testing.T) {
+	valid := `{"schemaVersion":"openseal.authoring-intent/v4","kind":"agent","name":"Analyst","purpose":"Analyze evidence","agents":[{"key":"analyst","name":"Analyst","purpose":"Analyze evidence","behavior":"Analyze evidence accurately.","objectives":[{"key":"review","title":"Review pull requests","outcome":"Pull requests receive actionable reviews.","priority":1}]}]}`
+	contentReply := func(content string) map[string]interface{} {
+		return map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+			"finish_reason": "stop", "message": map[string]interface{}{"content": content},
+		}}}
+	}
+	toolReply := map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+		"finish_reason": "tool_calls", "message": map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{
+			"type": "function", "function": map[string]interface{}{"name": "submit_authoring_intent", "arguments": valid},
+		}}},
+	}}}
+	for _, test := range []struct {
+		name      string
+		replies   []map[string]interface{}
+		requests  int
+		wantError string
+	}{
+		{name: "content with stop", replies: []map[string]interface{}{contentReply(valid)}, requests: 1},
+		{name: "invalid JSON is repaired", replies: []map[string]interface{}{contentReply(`{"schemaVersion":`), contentReply(valid)}, requests: 2},
+		{name: "tool call without content", replies: []map[string]interface{}{toolReply}, requests: 1, wantError: "finish reason: tool_calls"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var observed []map[string]interface{}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				var payload map[string]interface{}
+				if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+					t.Error(err)
+				}
+				observed = append(observed, payload)
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(test.replies[len(observed)-1])
+			}))
+			defer server.Close()
+			generator, err := NewOpenAICompatibleGeneratorWithOptions(server.URL, "secret", "model", server.Client(), OpenAICompatibleGeneratorOptions{StructuredOutputMode: OpenAICompatibleStructuredOutputJSONSchema})
+			if err != nil {
+				t.Fatal(err)
+			}
+			intent, err := generator.GenerateIntent(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: "Create a reviewer"})
+			if len(observed) != test.requests {
+				t.Fatalf("provider requests=%d want %d", len(observed), test.requests)
+			}
+			if test.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("error=%v want %q", err, test.wantError)
+				}
+			} else if err != nil || intent.Agents[0].Objectives[0].Title != "Review pull requests" {
+				t.Fatalf("intent=%#v err=%v", intent, err)
+			}
+			for _, payload := range observed {
+				if payload["tools"] != nil || payload["tool_choice"] != nil {
+					t.Fatalf("json_schema transport sent tools: %#v", payload)
+				}
+				format := payload["response_format"].(map[string]interface{})
+				jsonSchema := format["json_schema"].(map[string]interface{})
+				if format["type"] != "json_schema" || jsonSchema["name"] != "submit_authoring_intent" {
+					t.Fatalf("response_format=%#v", format)
+				}
+				if jsonSchema["schema"].(map[string]interface{})["oneOf"] == nil {
+					t.Fatal("json_schema transport sent the combinator-free schema instead of the decoding schema")
+				}
+				schema, _ := json.Marshal(jsonSchema["schema"])
+				for _, required := range []string{AuthoringIntentSchemaVersion, `"title"`, `"priority"`, `"additionalProperties":false`} {
+					if !strings.Contains(string(schema), required) {
+						t.Fatalf("constrained decoding schema omitted %q", required)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestOpenAICompatibleGeneratorEmitsExplicitThinkingMode(t *testing.T) {
 	var observed map[string]interface{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

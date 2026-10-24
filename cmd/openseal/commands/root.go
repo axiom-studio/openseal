@@ -5,7 +5,10 @@ import (
 	"os"
 )
 
-const version = "0.1.0"
+// version is stamped by release builds with
+// -ldflags "-X github.com/axiom-studio/openseal/cmd/openseal/commands.version=<semver>".
+// Local builds report the dev version, which sorts before every release.
+var version = "0.0.0-dev"
 
 // Execute dispatches to the appropriate subcommand.
 // Args should be os.Args[1:].

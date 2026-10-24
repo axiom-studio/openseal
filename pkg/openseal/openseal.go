@@ -3405,10 +3405,11 @@ const (
 	OpenAICompatibleWorkforceThinkingEnabled  = authoring.OpenAICompatibleThinkingEnabled
 	OpenAICompatibleWorkforceThinkingDisabled = authoring.OpenAICompatibleThinkingDisabled
 
-	OpenAICompatibleWorkforceStructuredOutputDefault = authoring.OpenAICompatibleStructuredOutputDefault
-	OpenAICompatibleWorkforceStructuredOutputTool    = authoring.OpenAICompatibleStructuredOutputTool
-	OpenAICompatibleWorkforceStructuredOutputJSON    = authoring.OpenAICompatibleStructuredOutputJSON
-	OpenAICompatibleWorkforceStructuredOutputPlain   = authoring.OpenAICompatibleStructuredOutputPlain
+	OpenAICompatibleWorkforceStructuredOutputDefault    = authoring.OpenAICompatibleStructuredOutputDefault
+	OpenAICompatibleWorkforceStructuredOutputTool       = authoring.OpenAICompatibleStructuredOutputTool
+	OpenAICompatibleWorkforceStructuredOutputJSON       = authoring.OpenAICompatibleStructuredOutputJSON
+	OpenAICompatibleWorkforceStructuredOutputJSONSchema = authoring.OpenAICompatibleStructuredOutputJSONSchema
+	OpenAICompatibleWorkforceStructuredOutputPlain      = authoring.OpenAICompatibleStructuredOutputPlain
 )
 
 // NewOpenAICompatibleWorkforceGeneratorWithOptions creates the portable

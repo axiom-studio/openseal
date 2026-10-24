@@ -42,12 +42,14 @@ Options:
   --endpoint <url>   Kernel origin or explicit versioned API root (default: http://127.0.0.1:8080)
   --header <n=v>     Non-secret host selector header; may be repeated
   --scope <kind:id>  Workspace scope (default: local:default)
-  --owner <type:id>  Agent or Team that owns new work (default: agent:operator)
+  --owner <type:id>  Agent or Team that owns new work (default: the workspace's only Agent, else agent:operator)
   --download-dir     Directory for verified artifact downloads (default: artifacts)
   --poll <duration>  Refresh interval (default: 5s; negative disables polling)
   --help             Print this help message
 
-OPENSEAL_API_URL can set the default endpoint.`)
+OPENSEAL_API_URL can set the default endpoint. OPENSEAL_API_TOKEN sends a
+bearer token to a daemon started with the same variable; the environment
+keeps the token out of the process argument list.`)
 		return
 	}
 
@@ -65,15 +67,31 @@ OPENSEAL_API_URL can set the default endpoint.`)
 	if pollInterval < 0 {
 		pollInterval = time.Duration(-1)
 	}
+	ownerChosen := false
+	fs.Visit(func(set *flag.Flag) { ownerChosen = ownerChosen || set.Name == "owner" })
 	config := tui.Config{
 		Endpoint: strings.TrimSpace(*endpoint), Scope: scopeValue, Owner: ownerValue,
 		Actor: runtime.ActivityActor{Type: "user", ID: "local"}, DownloadDir: strings.TrimSpace(*downloadDir),
-		PollInterval: pollInterval,
+		PollInterval: pollInterval, AdoptSoleAgent: !ownerChosen,
 	}
-	kernelClient := client.NewKernelHTTPClient(config.Endpoint, nil, client.WithRequestHeaders(http.Header(requestHeaders)))
+	kernelClient := client.NewKernelHTTPClient(config.Endpoint, nil, client.WithRequestHeaders(tuiRequestHeaders(requestHeaders, os.Getenv("OPENSEAL_API_TOKEN"))))
 	if err := tui.Run(context.Background(), kernelClient, config); err != nil {
 		fmt.Fprintf(os.Stderr, "OpenSeal TUI failed: %v\n", err)
 	}
+}
+
+// tuiRequestHeaders adds the daemon bearer token to the selector headers. An
+// explicit Authorization header flag still takes precedence, as flags do over
+// the environment elsewhere.
+func tuiRequestHeaders(flags requestHeaderFlags, token string) http.Header {
+	headers := http.Header(flags).Clone()
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	if token = strings.TrimSpace(token); token != "" && headers.Get("Authorization") == "" {
+		headers.Set("Authorization", "Bearer "+token)
+	}
+	return headers
 }
 
 type requestHeaderFlags http.Header
