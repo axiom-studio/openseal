@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -194,25 +195,59 @@ func removeAuthoringScheduleClaims(value string) string {
 	return strings.Join(kept, ". ")
 }
 
-// looksLikeAuthoringScheduleClaim reports whether a sentence affirmatively
-// states when the Agent runs: an exact cadence ("Run daily at 09:00 UTC") or a
-// recurrence interval ("every three hours"). A frequency word alone is often
-// content ("a daily digest", "daily access codes") and a negated sentence is a
-// limit or prohibition, so both are kept; the compiler-owned on-demand
-// principle governs timing either way.
+// looksLikeAuthoringScheduleClaim reports whether a sentence is an
+// instruction about when the Agent runs: its leading verb is a run verb
+// ("Run daily at 09:00 UTC", "The agent runs every hour", "Every 3 hours,
+// check the feed") and it states a cadence. Any other sentence that mentions
+// a frequency is content or a constraint ("Redact hourly access codes",
+// "Include an entry for every day") and a negated sentence is a limit, so
+// both are kept; the compiler-owned on-demand principle governs timing.
 func looksLikeAuthoringScheduleClaim(value string) bool {
 	lower := strings.ToLower(value)
 	// The tokenizer splits contractions, so "don't" arrives as "don" + "t".
 	if containsAnyScheduleWord(lower, "not", "never", "no", "cannot", "don", "doesn", "won", "shouldn", "mustn") {
 		return false
 	}
+	if !authoringScheduleClaimLeadsWithRunVerb(lower) {
+		return false
+	}
 	if parseScheduleIntent(value).kind == scheduleIntentExact {
+		return true
+	}
+	if containsAnyScheduleWord(lower, "hourly", "daily", "nightly", "weekly", "monthly") {
 		return true
 	}
 	if !containsWord(lower, "every") && !containsWord(lower, "each") {
 		return false
 	}
-	return containsAnyScheduleWord(lower, "second", "seconds", "minute", "minutes", "hour", "hours", "day", "days", "week", "weeks")
+	return containsAnyScheduleWord(lower, "second", "seconds", "minute", "minutes", "hour", "hours", "day", "days", "week", "weeks", "morning", "evening", "night")
+}
+
+var (
+	authoringRunVerbs       = []string{"run", "runs", "execute", "executes", "trigger", "triggers", "wake", "wakes", "poll", "polls", "check", "checks", "scan", "scans", "repeat", "repeats", "fire", "fires", "operate", "operates"}
+	authoringClaimSubjects  = []string{"it", "this", "the", "agent", "will", "should", "must", "always", "automatically", "then"}
+	authoringCadenceOpeners = []string{"every", "each", "hourly", "daily", "nightly", "weekly", "monthly", "once", "at", "on"}
+)
+
+// authoringScheduleClaimLeadsWithRunVerb finds the sentence's leading verb,
+// skipping a subject or modal ("The agent will run …") or an opening cadence
+// clause ("Every 3 hours, check …"), and reports whether it is a run verb.
+func authoringScheduleClaimLeadsWithRunVerb(lower string) bool {
+	clause := lower
+	if opener := commitmentTokens(lower); len(opener) > 0 && slices.Contains(authoringCadenceOpeners, opener[0]) {
+		comma := strings.Index(lower, ",")
+		if comma < 0 {
+			return false
+		}
+		clause = lower[comma+1:]
+	}
+	for _, token := range commitmentTokens(clause) {
+		if slices.Contains(authoringClaimSubjects, token) {
+			continue
+		}
+		return slices.Contains(authoringRunVerbs, token)
+	}
+	return false
 }
 
 // ProjectAuthoringIntent is the struct-to-form half of the semantic codec. It
