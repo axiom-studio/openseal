@@ -194,20 +194,19 @@ func removeAuthoringScheduleClaims(value string) string {
 	return strings.Join(kept, ". ")
 }
 
-// looksLikeAuthoringScheduleClaim reports whether a sentence claims when the
-// Agent runs: a concrete cadence, or a frequency together with a run verb.
-// Sentences that only mention a frequency as content ("a daily digest",
-// "daily access codes") are instructions, not timing claims, and are kept.
+// looksLikeAuthoringScheduleClaim reports whether a sentence affirmatively
+// states when the Agent runs: an exact cadence ("Run daily at 09:00 UTC") or a
+// recurrence interval ("every three hours"). A frequency word alone is often
+// content ("a daily digest", "daily access codes") and a negated sentence is a
+// limit or prohibition, so both are kept; the compiler-owned on-demand
+// principle governs timing either way.
 func looksLikeAuthoringScheduleClaim(value string) bool {
-	parsed := parseScheduleIntent(value)
-	if parsed.kind == scheduleIntentExact {
-		return true
-	}
 	lower := strings.ToLower(value)
-	if !containsAnyScheduleWord(lower, "run", "runs", "running", "execute", "executes", "trigger", "triggers", "triggered", "schedule", "scheduled") {
+	// The tokenizer splits contractions, so "don't" arrives as "don" + "t".
+	if containsAnyScheduleWord(lower, "not", "never", "no", "cannot", "don", "doesn", "won", "shouldn", "mustn") {
 		return false
 	}
-	if parsed.kind == scheduleIntentAmbiguous || containsAnyScheduleWord(lower, "recurring", "hourly", "daily", "weekly", "cadence") {
+	if parseScheduleIntent(value).kind == scheduleIntentExact {
 		return true
 	}
 	if !containsWord(lower, "every") && !containsWord(lower, "each") {
