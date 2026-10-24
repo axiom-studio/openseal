@@ -121,3 +121,16 @@ func TestProviderTurnHostRejectsOversizedResponseAndHonorsCancellation(t *testin
 		t.Fatalf("cancellation lost: %v", err)
 	}
 }
+
+func TestDesktopWorkRequestTreatsAnOmittedKindAsAgentWork(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	request := runtime.CreateAgentRunRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Summarize", IdempotencyKey: "request"}
+	canonical, err := DesktopWorkRequest(scope, request)
+	if err != nil || canonical.Kind != runtime.RunKindAgentWork {
+		t.Fatalf("omitted kind: canonical=%#v err=%v", canonical, err)
+	}
+	request.Kind = runtime.RunKindConversation
+	if _, err := DesktopWorkRequest(scope, request); err == nil {
+		t.Fatal("desktop work accepted a non-agent-work kind")
+	}
+}
