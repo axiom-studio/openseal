@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -898,79 +899,85 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.ready = false
 			return m, nil
 		}
+		// Capabilities reload on every poll while a proposal is open and after
+		// every governed action. Only the first load (or a section that is no
+		// longer advertised) chooses where the user is; later loads keep it.
+		placed := m.ready && slices.Contains(m.availableSections(), m.section)
 		m.ready = true
 		m.unavailable = ""
 		m.err = nil
-		if m.authoringCapability.Available {
-			m.section = sectionAuthoring
-			// A full standalone workspace starts on the guided Home page.
-			// Narrow embedded clients still open directly on their one useful
-			// capability, preserving focused and backwards-compatible behavior.
-			if len(m.availableSections()) >= 7 {
-				m.section = sectionOverview
-			}
-			m.mode = modeWorkforceAuthoring
-			if m.authoringResult != nil {
-				m.editor.Placeholder = "Describe what should change…"
-			} else {
-				m.editor.Placeholder = "Describe the Agents and Team you need…"
-			}
-		} else if m.workforceBundleCapability.Available {
-			m.section = sectionBundles
-			m.mode = modeWorkforceBundleInspect
-			m.editor.Placeholder = "Path to a signed workforce bundle…"
-		} else if m.objectiveCapability.Available {
-			m.section = sectionObjectives
-			m.mode = modeObjectiveCreate
-			m.editor.Placeholder = "Describe the objective and desired outcome…"
-		} else if m.eventSourceCapability.Available {
-			m.section = sectionSources
-			m.mode = modeEventSourceCreate
-			m.editor.Placeholder = "Press n or Tab to configure a durable event source."
-		} else if m.projectCapability.Available {
-			m.section = sectionProjects
-			m.mode = modeProjectCreate
-			m.editor.Placeholder = "Describe the Project outcome…"
-		} else if m.conversationGatewayCapability.Available {
-			m.section = sectionIntegrations
-			m.focusPanelList()
-		} else if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
-			m.section = sectionSkills
-			if m.clawHubCapability.Available {
-				m.mode = modeSkillInstall
-				m.editor.Placeholder = "Enter @owner/skill to install…"
-			} else {
+		if !placed {
+			if m.authoringCapability.Available {
+				m.section = sectionAuthoring
+				// A full standalone workspace starts on the guided Home page.
+				// Narrow embedded clients still open directly on their one useful
+				// capability, preserving focused and backwards-compatible behavior.
+				if len(m.availableSections()) >= 7 {
+					m.section = sectionOverview
+				}
+				m.mode = modeWorkforceAuthoring
+				if m.authoringResult != nil {
+					m.editor.Placeholder = "Describe what should change…"
+				} else {
+					m.editor.Placeholder = "Describe the Agents and Team you need…"
+				}
+			} else if m.workforceBundleCapability.Available {
+				m.section = sectionBundles
+				m.mode = modeWorkforceBundleInspect
+				m.editor.Placeholder = "Path to a signed workforce bundle…"
+			} else if m.objectiveCapability.Available {
+				m.section = sectionObjectives
+				m.mode = modeObjectiveCreate
+				m.editor.Placeholder = "Describe the objective and desired outcome…"
+			} else if m.eventSourceCapability.Available {
+				m.section = sectionSources
+				m.mode = modeEventSourceCreate
+				m.editor.Placeholder = "Press n or Tab to configure a durable event source."
+			} else if m.projectCapability.Available {
+				m.section = sectionProjects
+				m.mode = modeProjectCreate
+				m.editor.Placeholder = "Describe the Project outcome…"
+			} else if m.conversationGatewayCapability.Available {
+				m.section = sectionIntegrations
+				m.focusPanelList()
+			} else if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
+				m.section = sectionSkills
+				if m.clawHubCapability.Available {
+					m.mode = modeSkillInstall
+					m.editor.Placeholder = "Enter @owner/skill to install…"
+				} else {
+					m.focusPanelList()
+				}
+			} else if !m.objectiveCapability.Available && m.runCapability.Available {
+				m.section = sectionRuns
+				m.mode = modeCreate
+			} else if m.requestCapability.Available {
+				m.section = sectionRequests
+				m.focusPanelList()
+			} else if m.approvalCapability.Available {
+				m.section = sectionApprovals
+				m.focusPanelList()
+			} else if m.activityCapability.Available {
+				m.section = sectionActivity
+				m.focusPanelList()
+			} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.channelCapability.Available {
+				m.section = sectionChannels
+				m.focusPanelList()
+			} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.artifactCapability.Available {
+				m.section = sectionArtifacts
+				m.focusPanelList()
+			} else if m.agentDefinitionCapability.Available {
+				m.section = sectionReadiness
+				m.focusPanelList()
+			} else if m.teamDefinitionCapability.Available {
+				m.section = sectionTeams
 				m.focusPanelList()
 			}
-		} else if !m.objectiveCapability.Available && m.runCapability.Available {
-			m.section = sectionRuns
-			m.mode = modeCreate
-		} else if m.requestCapability.Available {
-			m.section = sectionRequests
-			m.focusPanelList()
-		} else if m.approvalCapability.Available {
-			m.section = sectionApprovals
-			m.focusPanelList()
-		} else if m.activityCapability.Available {
-			m.section = sectionActivity
-			m.focusPanelList()
-		} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.channelCapability.Available {
-			m.section = sectionChannels
-			m.focusPanelList()
-		} else if !m.objectiveCapability.Available && !m.runCapability.Available && m.artifactCapability.Available {
-			m.section = sectionArtifacts
-			m.focusPanelList()
-		} else if m.agentDefinitionCapability.Available {
-			m.section = sectionReadiness
-			m.focusPanelList()
-		} else if m.teamDefinitionCapability.Available {
-			m.section = sectionTeams
-			m.focusPanelList()
-		}
-		if m.authoringChangeSet == nil && len(m.availableSections()) >= 7 {
-			m.section = sectionOverview
-			m.focusPanelList()
-			m.resetComposerMode()
+			if m.authoringChangeSet == nil && len(m.availableSections()) >= 7 {
+				m.section = sectionOverview
+				m.focusPanelList()
+				m.resetComposerMode()
+			}
 		}
 		m.activateReadyRefinement()
 		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadProjects(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())

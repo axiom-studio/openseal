@@ -1464,6 +1464,46 @@ func TestTUIInspectsPortableWorkforceBundleThroughAdvertisedKernelCapability(t *
 	}
 }
 
+func TestCapabilityReloadsKeepTheUsersSectionInAFullWorkspace(t *testing.T) {
+	full := func(authoring bool) kernelapi.CapabilityDocument {
+		capabilities := []kernelapi.Capability{
+			kernelapi.AgentDefinitionsCapability(),
+			kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
+			kernelapi.AgentRunsCapability(kernelapi.OperationList),
+			kernelapi.ObjectivesCapability(),
+			kernelapi.ProjectsCapability(),
+			kernelapi.AgentRequestsCapability(),
+		}
+		if authoring {
+			capabilities = append(capabilities, kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true}))
+		}
+		return kernelapi.NewCapabilityDocument(capabilities...)
+	}
+	fake := &fakeKernelClient{document: full(true)}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionOverview {
+		t.Fatalf("first load section = %v, want the guided Home page", model.section)
+	}
+	model.authoringChangeSet = &authoring.ChangeSet{ID: "change-1", Scope: capability.ScopeReference{Kind: "local", ID: "default"}, Status: authoring.ChangeSetReview, Revision: 3, CandidateDigest: "digest"}
+	model.focusPanelList()
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if model.section != sectionAuthoring {
+		t.Fatalf("Create section = %v", model.section)
+	}
+	for reload := 0; reload < 3; reload++ {
+		applyCommand(t, model, model.loadCapabilities())
+		if model.section != sectionAuthoring {
+			t.Fatalf("reload %d moved the user to section %v", reload, model.section)
+		}
+	}
+	fake.document = full(false)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section == sectionAuthoring {
+		t.Fatal("a section that is no longer advertised was kept")
+	}
+}
+
 func TestFullStandaloneWorkspaceStartsAtGuidedHomeWithDiscoverableNavigationAndHelp(t *testing.T) {
 	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(
 		kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{}),
