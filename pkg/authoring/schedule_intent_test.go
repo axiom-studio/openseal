@@ -312,3 +312,37 @@ func TestScheduleIntentAmendmentPreservesExistingAndRemovesWidening(t *testing.T
 		t.Fatalf("non-schedule amendment = %#v", result)
 	}
 }
+
+func TestScheduleAuthorityFollowsAnswerOrderNotQuestionOrder(t *testing.T) {
+	// Reconciliation places a follow-up question ahead of the original, and a
+	// revision appends an event without moving its question. The authority
+	// must read the most recently given answer, reached through the same
+	// projection the ChangeSet service uses.
+	followUp := scheduleIntentClarificationQuestionIDPrefix + "1"
+	answer := func(questionID, text string) RefinementAnswerEvent {
+		return RefinementAnswerEvent{QuestionID: questionID, Source: RefinementAnswerSourceUser, Value: RefinementAnswerValue{Text: text}}
+	}
+	refinement := ChangeSetRefinement{
+		Questions: []RefinementQuestion{{ID: followUp}, {ID: scheduleIntentQuestionID}},
+		Answers: []RefinementAnswerEvent{
+			answer(scheduleIntentQuestionID, "at a varied time"),
+			answer(followUp, "daily at 09:00 UTC"),
+			answer(scheduleIntentQuestionID, "weekly on monday at 10:00 UTC"),
+			answer(followUp, "daily at 11:00 UTC"),
+		},
+	}
+	request := GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent that summarizes my notes into a short daily digest.", Refinement: providerRefinementContext(refinement)}
+	if got, want := scheduleIntentAuthority(request), parseScheduleIntent("daily at 11:00 UTC"); got != want {
+		t.Fatalf("authority = %#v, want the latest answer %#v", got, want)
+	}
+
+	// Revising the original question last makes it the latest decision.
+	refinement.Answers = append(refinement.Answers, answer(scheduleIntentQuestionID, "on demand"))
+	request.Refinement = providerRefinementContext(refinement)
+	if got := scheduleIntentAuthority(request); got.kind != scheduleIntentManual {
+		t.Fatalf("authority after revising the original = %#v, want manual", got)
+	}
+	if answers := request.Refinement.Answers; len(answers) != 2 || answers[0].QuestionID != followUp || answers[1].Value.Text != "on demand" {
+		t.Fatalf("projected answers = %#v", answers)
+	}
+}
