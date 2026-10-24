@@ -2392,6 +2392,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareAgentAmendmentComposer(modeAgentAmendmentEvaluate, agentEvaluationPlaceholder(m.agentDeployment))
 			} else if m.section == sectionTeams && m.canEvaluateSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentEvaluate, teamEvaluationPlaceholder(m.selectedTeamDeploymentRecord()))
+			} else if m.section == sectionAuthoring && m.canRequestWorkforceEvaluation() {
+				return m, m.submitWorkforceEvaluation()
 			} else if m.section == sectionAuthoring && m.canApplyWorkforce() {
 				m.prepareWorkforceGovernanceComposer(modeWorkforceApply, "Why should this reviewed workforce be created now?…")
 			} else if m.section == sectionAuthoring && m.canPrepareWorkforceActivation() {
@@ -2733,6 +2735,30 @@ func (m *Model) parseRefinementAnswer(question authoring.RefinementQuestion, inp
 		}
 	}
 	return authoring.RefinementAnswerValue{}, errors.New("credential reference is not advertised for this proposal")
+}
+
+// submitWorkforceEvaluation asks the host to evaluate the exact reviewed
+// candidate. The host computes the decision; the request carries none.
+func (m *Model) submitWorkforceEvaluation() tea.Cmd {
+	if !m.canRequestWorkforceEvaluation() || m.busy {
+		return nil
+	}
+	changeSet := m.authoringChangeSet
+	intent := fmt.Sprintf("evaluate\x00%s\x00%d\x00%s", changeSet.ID, changeSet.Revision, changeSet.CandidateDigest)
+	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
+		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
+	}
+	request := authoring.SubmitChangeSetEvaluationRequest{
+		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
+		CandidateDigest: changeSet.CandidateDigest, Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
+	}
+	key := m.pendingGovernanceKey
+	m.busy, m.err = true, nil
+	m.status = "Checking the reviewed workforce against host policy…"
+	return func() tea.Msg {
+		result, err := m.client.EvaluateWorkforceChangeSet(m.ctx, request, key)
+		return workforceGoverned{changeSet: result, action: "Workforce Evaluation", err: err}
+	}
 }
 
 func (m *Model) submitWorkforceApply() tea.Cmd {
@@ -5130,6 +5156,17 @@ func (m *Model) canResolveWorkforceApproval() bool {
 		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
 		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationApprove) &&
 		len(m.authoringCapability.Context.EligibleApprovalRequirements) > 0
+}
+
+// canRequestWorkforceEvaluation is true only when the host computes the
+// policy decision itself; an external evaluator's decision is never
+// submitted from the TUI.
+func (m *Model) canRequestWorkforceEvaluation() bool {
+	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetReview &&
+		strings.TrimSpace(m.authoringChangeSet.CandidateDigest) != "" &&
+		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
+		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision &&
+		m.authoringCapability.Context.HostPolicyEvaluation && m.supportsAuthoring(kernelapi.OperationEvaluate)
 }
 
 func (m *Model) canApplyWorkforce() bool {

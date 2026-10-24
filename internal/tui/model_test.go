@@ -118,6 +118,8 @@ type fakeKernelClient struct {
 	changeSetRequests          []authoring.CreateChangeSetRequest
 	changeSetKeys              []string
 	changeSetErrors            []error
+	evaluationRequests         []authoring.SubmitChangeSetEvaluationRequest
+	evaluationKeys             []string
 	approvalRequests           []authoring.ResolveChangeSetApprovalRequest
 	approvalKeys               []string
 	applyRequests              []authoring.ApplyChangeSetRequest
@@ -788,8 +790,10 @@ func (f *fakeKernelClient) AnswerWorkforceChangeSetRefinement(_ context.Context,
 	return f.nextGovernanceResult()
 }
 
-func (f *fakeKernelClient) EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error) {
-	return nil, errors.New("policy evaluation is not initiated by the TUI")
+func (f *fakeKernelClient) EvaluateWorkforceChangeSet(_ context.Context, request authoring.SubmitChangeSetEvaluationRequest, key string) (*authoring.ChangeSet, error) {
+	f.evaluationRequests = append(f.evaluationRequests, request)
+	f.evaluationKeys = append(f.evaluationKeys, key)
+	return f.nextGovernanceResult()
 }
 
 func (f *fakeKernelClient) ResolveWorkforceChangeSetApproval(_ context.Context, request authoring.ResolveChangeSetApprovalRequest, key string) (*authoring.ChangeSet, error) {
@@ -2613,6 +2617,52 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 		fake.activationRequests[0].Reason != "Start the reviewed workforce" || fake.activationKeys[0] == "" ||
 		model.authoringChangeSet.ID != activation.ID || model.authoringChangeSet.ParentID != applied.ID {
 		t.Fatalf("activation requests=%#v keys=%#v changeSet=%#v", fake.activationRequests, fake.activationKeys, model.authoringChangeSet)
+	}
+}
+
+func TestWorkforceEvaluationIsRequestedOnlyWhenTheHostComputesPolicy(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	review := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetReview, Revision: 3, CandidateDigest: "digest-1", Result: authoring.CompileResult{Valid: true}}
+	awaiting := *review
+	awaiting.Status, awaiting.Revision = authoring.ChangeSetAwaitingApproval, 4
+	for _, host := range []bool{false, true} {
+		evaluate := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+		evaluate.Operations = append(evaluate.Operations, kernelapi.OperationEvaluate)
+		evaluate.Context = &kernelapi.CapabilityContext{ChangeSetID: review.ID, Revision: review.Revision, HostPolicyEvaluation: host}
+		fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(evaluate), governanceResults: []*authoring.ChangeSet{&awaiting}}
+		model := newTestModel(t, fake)
+		model.section = sectionAuthoring
+		model.authoringChangeSet, model.authoringResult = review, &review.Result
+		applyCommand(t, model, model.loadCapabilities())
+		model.focusPanelList()
+		if !host {
+			if model.canRequestWorkforceEvaluation() || !strings.Contains(model.View(), "Waiting for the configured policy evaluator") {
+				t.Fatalf("external evaluator decision offered to the TUI:\n%s", model.View())
+			}
+			if _, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter}); command != nil {
+				applyCommand(t, model, command)
+			}
+			if len(fake.evaluationRequests) != 0 {
+				t.Fatalf("TUI submitted an external policy decision: %#v", fake.evaluationRequests)
+			}
+			continue
+		}
+		if !strings.Contains(model.View(), "Enter check this exact reviewed workforce") {
+			t.Fatalf("host evaluation not offered:\n%s", model.View())
+		}
+		_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		applyCommand(t, model, command)
+		if len(fake.evaluationRequests) != 1 || fake.evaluationKeys[0] == "" {
+			t.Fatalf("evaluation requests = %#v keys = %#v", fake.evaluationRequests, fake.evaluationKeys)
+		}
+		request := fake.evaluationRequests[0]
+		if request.ChangeSetID != review.ID || request.ExpectedRevision != review.Revision || request.CandidateDigest != review.CandidateDigest ||
+			request.Allowed || len(request.Findings) != 0 || len(request.ApprovalRequirements) != 0 {
+			t.Fatalf("evaluation request carried a client decision or wrong candidate: %#v", request)
+		}
+		if model.authoringChangeSet.Status != authoring.ChangeSetAwaitingApproval {
+			t.Fatalf("change set after evaluation = %#v", model.authoringChangeSet)
+		}
 	}
 }
 
