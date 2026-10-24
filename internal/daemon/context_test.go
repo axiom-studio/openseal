@@ -23,6 +23,7 @@ authoring:
   baseURL: https://models.example/v1
   model: example-model
   structuredOutput: " json_schema "
+  timeout: " 5m "
   credential:
     kind: api-key
     id: model
@@ -46,8 +47,8 @@ credentials:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if configured.Authoring.StructuredOutput != "json_schema" {
-		t.Fatalf("authoring structured output = %q", configured.Authoring.StructuredOutput)
+	if configured.Authoring.StructuredOutput != "json_schema" || configured.Authoring.Timeout != "5m" {
+		t.Fatalf("authoring structured output = %q, timeout = %q", configured.Authoring.StructuredOutput, configured.Authoring.Timeout)
 	}
 	scope := runtime.Scope{Kind: "local", ID: "default"}
 	if got, err := configured.ResolveReference(scope, capability.CredentialReference{Kind: "api-key", ID: "model"}); err != nil || got != "environment-secret" {

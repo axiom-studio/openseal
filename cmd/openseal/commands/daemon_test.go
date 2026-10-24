@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/internal/daemon"
 	"github.com/axiom-studio/openseal/pkg/authoring"
@@ -145,6 +146,33 @@ func TestDaemonStructuredOutputModesMapOneSettingOntoBothProviders(t *testing.T)
 		}
 		if err != nil || authoringMode != test.authoring || turnMode != test.turns {
 			t.Errorf("%q: modes = %q, %q, %v", test.value, authoringMode, turnMode, err)
+		}
+	}
+}
+
+func TestDaemonModelRequestTimeoutDefaultsAndBounds(t *testing.T) {
+	for _, test := range []struct {
+		value     string
+		want      time.Duration
+		wantError string
+	}{
+		{value: "", want: 90 * time.Second},
+		{value: " 5m ", want: 5 * time.Minute},
+		{value: "10m", want: 10 * time.Minute},
+		{value: "10m1s", wantError: "at most 10m0s"},
+		{value: "0s", wantError: "must be positive"},
+		{value: "-1m", wantError: "must be positive"},
+		{value: "300", wantError: "not a duration"},
+	} {
+		timeout, err := daemonModelRequestTimeout(test.value)
+		if test.wantError != "" {
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Errorf("%q: error = %v, want %q", test.value, err, test.wantError)
+			}
+			continue
+		}
+		if err != nil || timeout != test.want {
+			t.Errorf("%q: timeout = %s, %v", test.value, timeout, err)
 		}
 	}
 }

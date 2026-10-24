@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
@@ -112,5 +113,29 @@ func TestNewProviderTurnHostRejectsUnknownStructuredOutput(t *testing.T) {
 	host, err := NewProviderTurnHost("http://127.0.0.1:1/v1", "key", "model")
 	if err != nil || host.structuredOutput != ProviderStructuredOutputTool {
 		t.Fatalf("default transport = %v err=%v", host, err)
+	}
+}
+
+func TestProviderTurnHostHonoursConfiguredRequestTimeout(t *testing.T) {
+	release := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-release }))
+	defer provider.Close()
+	defer close(release)
+	host, err := NewProviderTurnHostWithOptions(provider.URL, "key", "model", ProviderTurnHostOptions{RequestTimeout: 50 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, err = host.ExecuteHostedTurn(t.Context(), runtime.HostedTurnRequest{APIVersion: runtime.HostedTurnAPIVersion, InvocationID: "turn", Goal: "Answer"})
+	var failure *runtime.TurnHostFailure
+	if !errors.As(err, &failure) || failure.Code != "provider_unavailable" || time.Since(started) > 5*time.Second {
+		t.Fatalf("error = %v after %s", err, time.Since(started))
+	}
+	defaults, err := NewProviderTurnHost(provider.URL, "key", "model")
+	if err != nil || defaults.client.Timeout != 90*time.Second {
+		t.Fatalf("default timeout = %v err=%v", defaults.client.Timeout, err)
+	}
+	if _, err := NewProviderTurnHostWithOptions(provider.URL, "key", "model", ProviderTurnHostOptions{RequestTimeout: -time.Second}); err == nil {
+		t.Fatal("negative request timeout accepted")
 	}
 }
