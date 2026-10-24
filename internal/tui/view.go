@@ -1046,6 +1046,8 @@ func (m *Model) renderAuthoringContent(width int) string {
 				lines = append(lines, style.Render(fmt.Sprintf("%s%s / %s · evaluation %s", prefix, reference.PolicyID, reference.Role, compact(reference.EvaluationID, 12))))
 			}
 			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("y approve · x reject selected requirement"))
+		} else if m.canRequestWorkforceEvaluation() {
+			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter check this exact reviewed workforce against host policy"))
 		} else if m.canApplyWorkforce() {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter create this exact reviewed workforce"))
 		} else if m.canPrepareWorkforceActivation() {
