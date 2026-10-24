@@ -61,16 +61,19 @@ const (
 )
 
 // OpenAICompatibleStructuredOutputMode selects how the provider transports the
-// same canonical AuthoringResult JSON document. Plain mode is for compatible
-// gateways that reject both tools and response_format; OpenSeal still applies
-// the identical strict local schema and semantic validation.
+// same canonical AuthoringResult JSON document. JSON schema mode is for
+// providers that ignore tool_choice but constrain decoding to a supplied
+// schema (for example Ollama). Plain mode is for compatible gateways that
+// reject both tools and response_format; OpenSeal still applies the identical
+// strict local schema and semantic validation.
 type OpenAICompatibleStructuredOutputMode string
 
 const (
-	OpenAICompatibleStructuredOutputDefault OpenAICompatibleStructuredOutputMode = ""
-	OpenAICompatibleStructuredOutputTool    OpenAICompatibleStructuredOutputMode = "tool"
-	OpenAICompatibleStructuredOutputJSON    OpenAICompatibleStructuredOutputMode = "json"
-	OpenAICompatibleStructuredOutputPlain   OpenAICompatibleStructuredOutputMode = "plain"
+	OpenAICompatibleStructuredOutputDefault    OpenAICompatibleStructuredOutputMode = ""
+	OpenAICompatibleStructuredOutputTool       OpenAICompatibleStructuredOutputMode = "tool"
+	OpenAICompatibleStructuredOutputJSON       OpenAICompatibleStructuredOutputMode = "json"
+	OpenAICompatibleStructuredOutputJSONSchema OpenAICompatibleStructuredOutputMode = "json_schema"
+	OpenAICompatibleStructuredOutputPlain      OpenAICompatibleStructuredOutputMode = "plain"
 )
 
 // OpenAICompatibleGeneratorOptions contains optional, provider-negotiated
@@ -129,7 +132,7 @@ func NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model string, htt
 		return nil, fmt.Errorf("unsupported OpenAI-compatible thinking mode %q", options.ThinkingMode)
 	}
 	switch options.StructuredOutputMode {
-	case OpenAICompatibleStructuredOutputDefault, OpenAICompatibleStructuredOutputTool, OpenAICompatibleStructuredOutputJSON, OpenAICompatibleStructuredOutputPlain:
+	case OpenAICompatibleStructuredOutputDefault, OpenAICompatibleStructuredOutputTool, OpenAICompatibleStructuredOutputJSON, OpenAICompatibleStructuredOutputJSONSchema, OpenAICompatibleStructuredOutputPlain:
 	default:
 		return nil, fmt.Errorf("unsupported OpenAI-compatible structured output mode %q", options.StructuredOutputMode)
 	}
@@ -554,6 +557,14 @@ func (g *OpenAICompatibleGenerator) completeContract(ctx context.Context, invoca
 		}
 	} else if mode == OpenAICompatibleStructuredOutputJSON {
 		payload["response_format"] = map[string]string{"type": "json_object"}
+	} else if mode == OpenAICompatibleStructuredOutputJSONSchema {
+		schema, err := contract.Schema()
+		if err != nil {
+			return nil, err
+		}
+		payload["response_format"] = map[string]interface{}{
+			"type": "json_schema", "json_schema": map[string]interface{}{"name": contract.Name, "schema": schema},
+		}
 	}
 	if g.options.ThinkingMode != OpenAICompatibleThinkingDefault {
 		payload["thinking"] = map[string]string{"type": string(g.options.ThinkingMode)}
@@ -679,6 +690,14 @@ func (g *OpenAICompatibleGenerator) completeResponsesContract(ctx context.Contex
 		payload["tool_choice"] = map[string]string{"type": "function", "name": contract.Name}
 	} else if mode == OpenAICompatibleStructuredOutputJSON {
 		payload["text"] = map[string]interface{}{"format": map[string]string{"type": "json_object"}}
+	} else if mode == OpenAICompatibleStructuredOutputJSONSchema {
+		schema, err := contract.Schema()
+		if err != nil {
+			return nil, err
+		}
+		payload["text"] = map[string]interface{}{"format": map[string]interface{}{
+			"type": "json_schema", "name": contract.Name, "strict": false, "schema": schema,
+		}}
 	}
 	if g.options.ThinkingMode == OpenAICompatibleThinkingDisabled {
 		payload["reasoning"] = map[string]string{"effort": "none"}
