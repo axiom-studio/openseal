@@ -4795,3 +4795,51 @@ func testDigest(value string) string {
 	digest := sha256.Sum256([]byte(value))
 	return "sha256:" + hex.EncodeToString(digest[:])
 }
+
+func TestImplicitOwnerAdoptsTheWorkspacesOnlyAgentDeployment(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	deployment := func(id string, status kernelagent.RolloutStatus) kernelapi.AgentDeploymentCatalogEntry {
+		return kernelapi.AgentDeploymentCatalogEntry{Deployment: &kernelagent.AgentDeployment{ID: id, DisplayName: "Summarizer " + id, Scope: scope, RolloutStatus: status}}
+	}
+	operator := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	for _, test := range []struct {
+		name        string
+		deployments []kernelapi.AgentDeploymentCatalogEntry
+		adopt       bool
+		want        string
+	}{
+		{name: "sole agent", deployments: []kernelapi.AgentDeploymentCatalogEntry{deployment("summarizer", kernelagent.RolloutActive)}, adopt: true, want: "summarizer"},
+		{name: "retired ignored", deployments: []kernelapi.AgentDeploymentCatalogEntry{deployment("summarizer", kernelagent.RolloutActive), deployment("old", kernelagent.RolloutRetired)}, adopt: true, want: "summarizer"},
+		{name: "several agents keep the owner", deployments: []kernelapi.AgentDeploymentCatalogEntry{deployment("one", kernelagent.RolloutActive), deployment("two", kernelagent.RolloutActive)}, adopt: true, want: "operator"},
+		{name: "no agents keep the owner", adopt: true, want: "operator"},
+		{name: "explicit owner wins", deployments: []kernelapi.AgentDeploymentCatalogEntry{deployment("summarizer", kernelagent.RolloutActive)}, want: "operator"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := newTestModel(t, &fakeKernelClient{agentDeployments: test.deployments})
+			model.config.Owner, model.config.AdoptSoleAgent = operator, test.adopt
+			if command := model.adoptSoleAgent(); command != nil {
+				applyCommand(t, model, command)
+			} else if test.adopt {
+				t.Fatal("adoption requested but no lookup was made")
+			}
+			if model.config.Owner.Type != runtime.OwnerTypeAgent || model.config.Owner.ID != test.want {
+				t.Fatalf("owner = %#v, want agent:%s", model.config.Owner, test.want)
+			}
+		})
+	}
+}
+
+func TestApplyingAWorkforceAdoptsItsAgentForNewWork(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	fake := &fakeKernelClient{}
+	model := newTestModel(t, fake)
+	model.config.AdoptSoleAgent = true
+	fake.agentDeployments = []kernelapi.AgentDeploymentCatalogEntry{{Deployment: &kernelagent.AgentDeployment{ID: "summarizer", DisplayName: "Summarizer", Scope: scope, RolloutStatus: kernelagent.RolloutActive}}}
+	applied := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetApplied, Revision: 6, CandidateDigest: "digest",
+		ApplyReceipt: &authoring.ChangeSetApplyReceipt{ID: "receipt", Resources: []authoring.AppliedResourceReference{{Kind: "agent_deployment", ID: "summarizer", Revision: 1}}}}
+	_, command := model.Update(workforceGoverned{changeSet: applied, action: "Workforce Apply"})
+	applyCommand(t, model, command)
+	if model.config.Owner.ID != "summarizer" || !strings.Contains(model.status, "New work now goes to Agent Summarizer") {
+		t.Fatalf("owner = %#v status = %q", model.config.Owner, model.status)
+	}
+}
