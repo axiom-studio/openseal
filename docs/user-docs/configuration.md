@@ -132,7 +132,7 @@ credential scopes + outreach-enabled policy scopes → worker scopes → Run and
 | `OPENAI_API_KEY` | Workforce authoring credential |
 | `OPENSEAL_LLM_STRUCTURED_OUTPUT` | How the model returns structured replies for authoring and desktop agent turns: `tool` (default, a forced tool call), `json_schema` (schema-constrained `response_format`, for providers that ignore `tool_choice` such as Ollama), or the authoring-only `json` and `plain` |
 | `OPENSEAL_LLM_TIMEOUT` | Per-request timeout for authoring and desktop agent turns as a Go duration such as `5m`; default `90s`, maximum `10m`. Raise it for slow local models |
-| `OPENSEAL_API_TOKEN` | Optional bearer token required on every daemon API route; required by `--desktop-operator`. `openseal tui` sends it as `Authorization: Bearer` |
+| `OPENSEAL_API_TOKEN` | Optional bearer token required on every daemon API route except `GET /api/v1/health`; required by `--desktop-operator`. `openseal tui` sends it as `Authorization: Bearer` |
 | `CLAWHUB_REGISTRY` | ClawHub registry base URL; defaults to `https://clawhub.ai` |
 | `OPENSEAL_API_URL` | Default endpoint for the terminal client |
 

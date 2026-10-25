@@ -38,9 +38,11 @@ state transition.
   do not invent client-side pagination.
 
 Use `GET /api/v1/health` for a process liveness check. If
-`OPENSEAL_API_TOKEN` is set, every route, including health and capability
-discovery, requires `Authorization: Bearer <token>` and returns `401` without
-it. This shared token does not provide per-user or per-scope authorization.
+`OPENSEAL_API_TOKEN` is set, every other route, including capability discovery,
+requires `Authorization: Bearer <token>` and returns `401` without it. `GET` on
+the exact health path stays open so container and orchestrator probes work; it
+returns only `{"status":"ok"}`. This shared token does not provide per-user or
+per-scope authorization.
 
 ## Runtime and work
 
