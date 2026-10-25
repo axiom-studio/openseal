@@ -24,20 +24,21 @@ concurrency:
 # Checkout and Go toolchain setup run as plain shell.
 
 jobs:
-  # Self-hosted. This repository is public and the trigger is `pull_request`
-  # with no fork guard, so the job checks out a PR head from any fork and runs
-  # `make test` and `make build` over it — arbitrary code execution by
-  # construction, on a host shared with other repositories' jobs. The gate is
-  # the repository's Actions setting "Require approval for all external
-  # contributors": no fork PR from outside the organization runs until someone
-  # with write access approves it, so read the diff before approving.
+  # GitHub-hosted, and that is a requirement rather than a preference. This
+  # repository is public and the trigger is `pull_request` with no fork guard, so
+  # the job checks out a PR head from any fork and runs `make test` and
+  # `make build` over it — arbitrary code execution by construction. On a
+  # self-hosted runner that lands on a persistent host shared with other
+  # repositories' jobs running as the same user. A hosted runner is a fresh VM
+  # discarded afterwards, so there is no host to compromise and nothing to
+  # persist into the next run.
   #
   # A fork guard was the alternative and was rejected: it would leave fork PRs
   # with no CI at all, which removes the gate from exactly the contributions that
   # most need it.
   go:
     name: vet, test, build
-    runs-on: self-hosted
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
 
     steps:
