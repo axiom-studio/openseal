@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"slices"
@@ -4842,4 +4843,79 @@ func TestApplyingAWorkforceAdoptsItsAgentForNewWork(t *testing.T) {
 	if model.config.Owner.ID != "summarizer" || !strings.Contains(model.status, "New work now goes to Agent Summarizer") {
 		t.Fatalf("owner = %#v status = %q", model.config.Owner, model.status)
 	}
+}
+
+func TestSoleAgentAdoptionShowsTheAgentRuntimeInEitherStartupOrder(t *testing.T) {
+	// Init loads capabilities for the default owner and looks up the sole
+	// Agent concurrently. Whichever finishes first, the adopted Agent's
+	// runtime section must end up visible, and late results for the default
+	// owner (whose deployment does not exist) must not hide it again.
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	operator := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	missingOperator := compilationsLoaded{owner: operator, err: &client.APIError{StatusCode: http.StatusNotFound, Message: "deployment not found"}}
+	newModel := func() *Model {
+		fake := &fakeKernelClient{
+			document: kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability()),
+			agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{
+				Deployment: &kernelagent.AgentDeployment{ID: "summarizer", DisplayName: "Summarizer", Scope: scope, DefinitionID: "summarizer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1},
+				Definition: &kernelagent.AgentDefinition{ID: "summarizer", Version: "1", DisplayName: "Summarizer", Purpose: "Summarize notes"},
+			}},
+		}
+		model := newTestModel(t, fake)
+		model.config.Owner, model.config.AdoptSoleAgent = operator, true
+		return model
+	}
+	assertRuntimeVisible := func(t *testing.T, model *Model) {
+		t.Helper()
+		if model.config.Owner.ID != "summarizer" || !model.agentDefinitionCapability.Available || model.agentDeployment == nil || model.agentDeployment.Deployment.ID != "summarizer" {
+			t.Fatalf("owner=%#v capability=%t deployment=%#v err=%v", model.config.Owner, model.agentDefinitionCapability.Available, model.agentDeployment, model.err)
+		}
+		model.section = sectionReadiness
+		view := model.View()
+		for _, expected := range []string{"Agent runtime & placement", "Summarizer", "p pause/resume"} {
+			if !strings.Contains(view, expected) {
+				t.Fatalf("runtime view missing %q:\n%s", expected, view)
+			}
+		}
+	}
+
+	t.Run("capabilities first", func(t *testing.T) {
+		model := newModel()
+		model.Update(model.loadCapabilities()())
+		model.Update(missingOperator)
+		if model.agentDefinitionCapability.Available {
+			t.Fatal("precondition: the default owner's 404 should hide the runtime section")
+		}
+		_, reload := model.Update(model.adoptSoleAgent()())
+		if reload == nil {
+			t.Fatal("adopting the sole Agent did not reload its capabilities")
+		}
+		applyCommand(t, model, reload)
+		assertRuntimeVisible(t, model)
+		// The default owner's lookup can still be in flight; it is stale.
+		model.Update(missingOperator)
+		assertRuntimeVisible(t, model)
+	})
+
+	t.Run("adoption first", func(t *testing.T) {
+		model := newModel()
+		initial := model.loadCapabilities()
+		_, reload := model.Update(model.adoptSoleAgent()())
+		applyCommand(t, model, reload)
+		assertRuntimeVisible(t, model)
+		// The initial request for the default owner returns last.
+		if _, followup := model.Update(initial()); followup != nil {
+			t.Fatal("a superseded capability document started new loads")
+		}
+		model.Update(missingOperator)
+		assertRuntimeVisible(t, model)
+	})
+
+	t.Run("several agents keep the configured owner without a reload", func(t *testing.T) {
+		model := newModel()
+		model.Update(model.loadCapabilities()())
+		if _, followup := model.Update(soleAgentResolved{}); followup != nil || model.config.Owner != operator {
+			t.Fatalf("owner=%#v followup=%v", model.config.Owner, followup != nil)
+		}
+	})
 }

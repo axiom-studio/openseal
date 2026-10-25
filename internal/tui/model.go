@@ -365,6 +365,9 @@ type Model struct {
 }
 
 type capabilitiesLoaded struct {
+	// owner is the work owner the document was requested for; a document for
+	// a superseded owner is dropped.
+	owner    runtime.ObjectiveOwner
 	document kernelapi.CapabilityDocument
 	err      error
 }
@@ -484,6 +487,7 @@ type activityDetailLoaded struct {
 }
 
 type compilationsLoaded struct {
+	owner        runtime.ObjectiveOwner
 	compilations []*kernelagent.DefinitionCompilation
 	deployment   *kernelapi.AgentDeploymentCatalogEntry
 	amendments   []*kernelagent.DefinitionAmendment
@@ -783,6 +787,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.editor.SetWidth(max(m.composerWidth()-6, 24))
 		return m, nil
 	case capabilitiesLoaded:
+		if msg.owner != m.config.Owner {
+			// The owner changed while this request was in flight; the reload
+			// issued for the new owner decides what is available.
+			return m, nil
+		}
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
@@ -1043,6 +1052,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 				name = msg.deployment.ID
 			}
 			m.status = "New work now goes to Agent " + name + "."
+			// Agent capabilities and runtime readiness are owner-specific, and
+			// the first load may already have used the default owner.
+			return m, m.loadCapabilities()
 		}
 		return m, nil
 	case workforceGoverned:
@@ -1571,6 +1583,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case compilationsLoaded:
+		if msg.owner != m.config.Owner {
+			// A 404 for the superseded default owner must not hide the
+			// adopted Agent's runtime section.
+			return m, nil
+		}
 		m.loading = false
 		if msg.err != nil {
 			if isHTTPStatus(msg.err, http.StatusNotFound) {
@@ -2534,17 +2551,18 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m *Model) loadCapabilities() tea.Cmd {
 	m.loading = true
+	owner := m.config.Owner
 	return func() tea.Msg {
 		var document kernelapi.CapabilityDocument
 		var err error
 		if m.authoringChangeSet != nil {
 			document, err = m.client.WorkforceChangeSetCapabilities(m.ctx, m.authoringChangeSet.Scope, m.authoringChangeSet.ID)
-		} else if m.config.Owner.Type == runtime.OwnerTypeAgent && m.agentCapabilityClient != nil {
-			document, err = m.agentCapabilityClient.AgentDefinitionCapabilities(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, m.config.Owner.ID)
+		} else if owner.Type == runtime.OwnerTypeAgent && m.agentCapabilityClient != nil {
+			document, err = m.agentCapabilityClient.AgentDefinitionCapabilities(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, owner.ID)
 		} else {
 			document, err = m.client.Capabilities(m.ctx)
 		}
-		return capabilitiesLoaded{document: document, err: err}
+		return capabilitiesLoaded{owner: owner, document: document, err: err}
 	}
 }
 
@@ -3307,25 +3325,26 @@ func (m *Model) loadCompilations() tea.Cmd {
 		return nil
 	}
 	m.loading = true
+	owner := m.config.Owner
 	return func() tea.Msg {
 		scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
-		deployment, err := m.client.GetAgentDeployment(m.ctx, scope, m.config.Owner.ID)
+		deployment, err := m.client.GetAgentDeployment(m.ctx, scope, owner.ID)
 		if err != nil {
-			return compilationsLoaded{err: err}
+			return compilationsLoaded{owner: owner, err: err}
 		}
 		var values []*kernelagent.DefinitionCompilation
 		if m.supportsAgentDefinition(kernelapi.OperationListCompilations) {
-			values, err = m.client.ListAgentDefinitionCompilations(m.ctx, scope, m.config.Owner.ID)
+			values, err = m.client.ListAgentDefinitionCompilations(m.ctx, scope, owner.ID)
 		}
 		var amendments []*kernelagent.DefinitionAmendment
 		if err == nil && m.supportsAgentDefinition(kernelapi.OperationListAmendments) && m.agentLifecycleClient != nil {
 			var result *kernelapi.AgentDefinitionAmendmentList
-			result, err = m.agentLifecycleClient.ListAgentDefinitionAmendments(m.ctx, scope, m.config.Owner.ID)
+			result, err = m.agentLifecycleClient.ListAgentDefinitionAmendments(m.ctx, scope, owner.ID)
 			if result != nil {
 				amendments = result.Items
 			}
 		}
-		return compilationsLoaded{compilations: values, deployment: deployment, amendments: amendments, err: err}
+		return compilationsLoaded{owner: owner, compilations: values, deployment: deployment, amendments: amendments, err: err}
 	}
 }
 
