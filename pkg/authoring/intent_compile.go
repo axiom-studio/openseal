@@ -389,6 +389,41 @@ func validateAuthoringIntent(intent AuthoringIntent, catalog CapabilityCatalog) 
 			}
 		}
 	}
+	return validateAuthoringIntentConversationReferences(intent, seenAgents)
+}
+
+// validateAuthoringIntentConversationReferences checks the conversation
+// cross-references that compilation would otherwise reject after the
+// semantic repair loop has ended. Each check reads only keys the model
+// authored, so its message is safe to return to the model for repair; the
+// adapter and endpoint checks that depend on the private catalog stay in
+// compilation.
+func validateAuthoringIntentConversationReferences(intent AuthoringIntent, agentKeys map[string]bool) error {
+	owners := make(map[string]string, len(intent.Conversations))
+	for _, conversation := range intent.Conversations {
+		isTeam := intent.Team != nil && conversation.OwnerKey == intent.Team.Key
+		if !agentKeys[conversation.OwnerKey] && !isTeam {
+			return fmt.Errorf("conversation %s references unknown owner %q", conversation.Key, conversation.OwnerKey)
+		}
+		owners[conversation.Key] = conversation.OwnerKey
+	}
+	for _, answer := range intent.Agents {
+		for _, operation := range answer.Operations {
+			if operation.ApprovalDelivery != AuthoringApprovalDeliveryChannels {
+				continue
+			}
+			for _, channelKey := range operation.ApprovalChannelKeys {
+				owner, ok := owners[strings.TrimSpace(channelKey)]
+				if !ok {
+					return fmt.Errorf("operation %s references unknown approval channel %q", operation.Key, channelKey)
+				}
+				// Compilation resolves an owner key to an Agent before the Team.
+				if owner != answer.Key {
+					return fmt.Errorf("operation %s approval channel %q does not belong to Agent %s", operation.Key, strings.TrimSpace(channelKey), answer.Key)
+				}
+			}
+		}
+	}
 	return nil
 }
 

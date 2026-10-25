@@ -2,6 +2,9 @@ package authoring
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -427,5 +430,125 @@ func TestSemanticIntentRoundTripsAmendmentIdentityWithoutRuntimeJSON(t *testing.
 	}
 	if trigger := definition.Runbook.Triggers["scan-and-report"]; trigger.ObjectiveID != "agent:tenant/example/researcher:research" {
 		t.Fatalf("amended trigger = %#v", trigger)
+	}
+}
+
+func TestCompilerRepairsAnUnknownApprovalChannelThroughTheSemanticLoop(t *testing.T) {
+	// The approval-channel cross-reference used to fail only at compilation,
+	// after the semantic repair loop had ended, so a model that named a
+	// channel it never declared could not correct it.
+	catalog := slackChatbotCatalog()
+	addSlackApprovalCallbackCapability(&catalog)
+	slack := catalog.Skills["slack"]
+	slack.Actions = []string{"slack-read-messages", "slack-send-message"}
+	slack.ActionRisks = map[string]capability.RiskLevel{"slack-read-messages": capability.RiskLevelRead, "slack-send-message": capability.RiskLevelExternal}
+	catalog.Skills["slack"] = slack
+	answer := func(channelKey string) string {
+		encoded, err := json.Marshal(AuthoringIntent{
+			SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent, Name: "Slack Helper", Purpose: "Help in a Slack channel",
+			Agents: []AuthoringAgentIntent{{
+				Key: "slack-helper", Name: "Slack Helper", Purpose: "Help in Slack", Behavior: "Answer channel questions accurately.",
+				Skills:     []AuthoringSkillIntent{{CatalogID: "slack", Actions: []string{"slack-read-messages", "slack-send-message"}, Required: true}},
+				Objectives: []AuthoringObjectiveIntent{{Key: "help", Title: "Help people", Outcome: "Answer questions", Priority: 1}},
+				Operations: []AuthoringOperationIntent{{
+					Key: "answer", Name: "Answer", Goal: "Answer a question", ObjectiveKey: "help", Wake: AuthoringWakeOnDemand, SkillCatalogIDs: []string{"slack"},
+					Approval: AuthoringApprovalRequired, ApprovalDelivery: AuthoringApprovalDeliveryChannels, ApprovalChannelKeys: []string{channelKey},
+				}},
+			}},
+			Conversations: []AuthoringChannelIntent{{Key: "slack-help", Name: "Slack help channel", OwnerKey: "slack-helper", Provider: "slack", Destination: "#help", ReceiveMessages: true, ReplyInThread: true}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var payload struct {
+			Messages []map[string]string `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		arguments := answer("slack-alerts")
+		if requests > 1 {
+			feedback := payload.Messages[len(payload.Messages)-1]["content"]
+			if !strings.Contains(feedback, `references unknown approval channel \"slack-alerts\"`) {
+				t.Errorf("repair feedback lacks the cross-reference error: %s", feedback)
+			}
+			// The feedback names only model-authored keys, never private
+			// adapter or endpoint identifiers from the catalog.
+			if strings.Contains(feedback, "interactions") {
+				t.Errorf("repair feedback leaked a catalog adapter: %s", feedback)
+			}
+			arguments = answer("slack-help")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+			"finish_reason": "stop", "message": map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{
+				"type": "function", "function": map[string]interface{}{"name": "submit_authoring_intent", "arguments": arguments},
+			}}},
+		}}})
+	}))
+	defer server.Close()
+	generator, err := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, err := NewCompiler(generator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.Compile(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: slackChatbotPrompt, Catalog: catalog})
+	if err != nil {
+		t.Fatalf("compile after %d provider requests: %v", requests, err)
+	}
+	if requests != 2 {
+		t.Fatalf("provider requests = %d, want 2", requests)
+	}
+	if len(result.Candidate.ConversationEndpoints) != 1 || len(result.Candidate.Agents) != 1 || len(result.Candidate.Agents[0].Authority.ApprovalDestinations) != 1 {
+		t.Fatalf("repaired candidate = endpoints %#v agents %#v", result.Candidate.ConversationEndpoints, result.Candidate.Agents)
+	}
+}
+
+func TestValidateAuthoringIntentRejectsConversationReferencesCompilationRejects(t *testing.T) {
+	base := func() AuthoringIntent {
+		return AuthoringIntent{
+			SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceTeam, Name: "Crew", Purpose: "Help",
+			Agents: []AuthoringAgentIntent{
+				{Key: "helper", Name: "Helper", Purpose: "Help", Behavior: "Help.", Objectives: []AuthoringObjectiveIntent{{Key: "help", Title: "Help", Outcome: "Helped", Priority: 1}},
+					Operations: []AuthoringOperationIntent{{Key: "answer", Name: "Answer", Goal: "Answer", ObjectiveKey: "help", Wake: AuthoringWakeOnDemand, Approval: AuthoringApprovalRequired, ApprovalDelivery: AuthoringApprovalDeliveryChannels, ApprovalChannelKeys: []string{"help"}}}},
+				{Key: "other", Name: "Other", Purpose: "Help", Behavior: "Help."},
+			},
+			Team:          &AuthoringTeamIntent{Key: "crew", Name: "Crew", Purpose: "Help", Roles: []AuthoringRoleIntent{{Key: "lead", Name: "Lead", Purpose: "Lead", AgentKeys: []string{"helper", "other"}}}},
+			Conversations: []AuthoringChannelIntent{{Key: "help", Name: "Help", OwnerKey: "helper", Provider: "slack"}},
+		}
+	}
+	if err := validateAuthoringIntent(base(), CapabilityCatalog{}); err != nil {
+		t.Fatalf("valid conversation references rejected: %v", err)
+	}
+	teamOwned := base()
+	teamOwned.Conversations = append(teamOwned.Conversations, AuthoringChannelIntent{Key: "crew-room", Name: "Crew room", OwnerKey: "crew", Provider: "slack"})
+	if err := validateAuthoringIntent(teamOwned, CapabilityCatalog{}); err != nil {
+		t.Fatalf("Team-owned conversation rejected: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*AuthoringIntent)
+		want   string
+	}{
+		{name: "unknown approval channel", change: func(intent *AuthoringIntent) { intent.Agents[0].Operations[0].ApprovalChannelKeys = []string{"alerts"} }, want: `references unknown approval channel "alerts"`},
+		{name: "channel owned by another Agent", change: func(intent *AuthoringIntent) { intent.Conversations[0].OwnerKey = "other" }, want: `approval channel "help" does not belong to Agent helper`},
+		{name: "channel owned by the Team", change: func(intent *AuthoringIntent) { intent.Conversations[0].OwnerKey = "crew" }, want: `approval channel "help" does not belong to Agent helper`},
+		{name: "unknown conversation owner", change: func(intent *AuthoringIntent) { intent.Conversations[0].OwnerKey = "ghost" }, want: `conversation help references unknown owner "ghost"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			intent := base()
+			test.change(&intent)
+			if err := validateAuthoringIntent(intent, CapabilityCatalog{}); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
