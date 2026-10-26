@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -985,9 +986,29 @@ func bindingKey(scope ScopeReference, deploymentID, bindingID string) string {
 	return scope.Kind + ":" + scope.ID + ":" + deploymentID + ":" + bindingID
 }
 
+// Size limits for the Skill metadata that discovery shows a model. A
+// definition is refused when it exceeds them, and NormalizeDiscoveryPage
+// checks the same limits, so every registered Skill can be discovered.
+const (
+	MaxSkillIdentityBytes       = 256
+	MaxSkillNameBytes           = 256
+	MaxSkillDescriptionBytes    = 2048
+	MaxSourceIdentityBytes      = 2048
+	MaxActionNameBytes          = 128
+	MaxActionDescriptionBytes   = 4096
+	MaxCredentialFieldBytes     = 128
+	MaxBindingConfigSchemaBytes = 64 << 10
+)
+
 func validateDefinition(definition *Definition) error {
 	if definition == nil || strings.TrimSpace(definition.ID) == "" || strings.TrimSpace(definition.Version) == "" || strings.TrimSpace(definition.Name) == "" {
 		return errors.New("skill id, version, and name are required")
+	}
+	if len(strings.TrimSpace(definition.ID)) > MaxSkillIdentityBytes || len(strings.TrimSpace(definition.Version)) > MaxSkillIdentityBytes {
+		return fmt.Errorf("skill id and version must be at most %d bytes", MaxSkillIdentityBytes)
+	}
+	if len(strings.TrimSpace(definition.Name)) > MaxSkillNameBytes || len(strings.TrimSpace(definition.Description)) > MaxSkillDescriptionBytes {
+		return fmt.Errorf("skill name must be at most %d bytes and its description at most %d bytes", MaxSkillNameBytes, MaxSkillDescriptionBytes)
 	}
 	if len(definition.Actions) == 0 && definition.Prompt == nil && len(definition.ConversationAdapters) == 0 && len(definition.CallbackAdapters) == 0 {
 		return errors.New("skill must declare at least one action, prompt module, conversation adapter, or callback adapter")
@@ -1011,6 +1032,9 @@ func validateDefinition(definition *Definition) error {
 		}
 	}
 	if definition.BindingConfigSchema != nil {
+		if encoded, err := json.Marshal(definition.BindingConfigSchema); err != nil || len(encoded) > MaxBindingConfigSchemaBytes {
+			return fmt.Errorf("skill binding config schema must encode to at most %d bytes", MaxBindingConfigSchemaBytes)
+		}
 		if _, err := compileSchema(definition.ID+"-"+definition.Version+"-binding-config.json", definition.BindingConfigSchema); err != nil {
 			return fmt.Errorf("skill binding config schema is invalid: %w", err)
 		}
@@ -1087,6 +1111,9 @@ func validateDefinition(definition *Definition) error {
 	for name, action := range definition.Actions {
 		if name == "" || action.Name != name || strings.TrimSpace(action.Description) == "" || action.InputSchema == nil {
 			return fmt.Errorf("skill action %s is incomplete", name)
+		}
+		if len(strings.TrimSpace(name)) > MaxActionNameBytes || len(strings.TrimSpace(action.Description)) > MaxActionDescriptionBytes {
+			return fmt.Errorf("skill action %s: name must be at most %d bytes and description at most %d bytes (description is %d)", name, MaxActionNameBytes, MaxActionDescriptionBytes, len(strings.TrimSpace(action.Description)))
 		}
 		if !validRisk(action.Risk) || !validSideEffect(action.SideEffect) || !validIdempotency(action.Idempotency) || !validExternalOperationPolicy(action.ExternalOperationPolicy) {
 			return fmt.Errorf("skill action %s has invalid policy metadata", name)
@@ -1435,8 +1462,8 @@ func validateBindingLifecycle(binding *Binding) error {
 
 func validateSourceIdentity(value string) error {
 	value = strings.TrimSpace(value)
-	if len(value) > 2048 {
-		return errors.New("must be at most 2048 bytes")
+	if len(value) > MaxSourceIdentityBytes {
+		return fmt.Errorf("must be at most %d bytes", MaxSourceIdentityBytes)
 	}
 	for _, character := range value {
 		if character == 0 || character < 0x20 || character == 0x7f {
@@ -1658,6 +1685,9 @@ func validateCredentialRequirements(requirements []CredentialRequirement) error 
 		name := strings.TrimSpace(requirement.Name)
 		if name == "" || strings.TrimSpace(requirement.Kind) == "" || seen[name] {
 			return errors.New("credential name and kind must be unique and non-empty")
+		}
+		if len(name) > MaxCredentialFieldBytes || len(strings.TrimSpace(requirement.Kind)) > MaxCredentialFieldBytes {
+			return fmt.Errorf("credential name and kind must be at most %d bytes", MaxCredentialFieldBytes)
 		}
 		normalized, err := capability.NormalizeOAuth2Requirement(requirement.OAuth2)
 		if err != nil {
