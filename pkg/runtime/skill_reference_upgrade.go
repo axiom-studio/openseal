@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1094,18 +1095,11 @@ func compareUpgradeConfigContracts(previous, target *skill.Definition) []SkillRe
 	findings := make([]SkillReferenceUpgradeFinding, 0)
 	var beforeScopes, afterScopes []skill.SkillConfigScope
 	var beforeFields, afterFields []skill.SkillConfigField
-	beforeHealth, afterHealth := "", ""
 	if previous.Config != nil {
 		beforeScopes, beforeFields = previous.Config.Scopes, previous.Config.Fields
-		if previous.Config.Health != nil {
-			beforeHealth = previous.Config.Health.Action
-		}
 	}
 	if target.Config != nil {
 		afterScopes, afterFields = target.Config.Scopes, target.Config.Fields
-		if target.Config.Health != nil {
-			afterHealth = target.Config.Health.Action
-		}
 	}
 	changed := func(subject, from, to, message string) {
 		findings = append(findings, SkillReferenceUpgradeFinding{Code: "config_contract_changed", Subject: subject, From: from, To: to, Message: message})
@@ -1145,8 +1139,17 @@ func compareUpgradeConfigContracts(previous, target *skill.Definition) []SkillRe
 			if old.Type != updated.Type {
 				changed(key, string(old.Type), string(updated.Type), fmt.Sprintf("config field %s type changes from %s to %s", key, old.Type, updated.Type))
 			}
-			if !reflect.DeepEqual(old.Enum, updated.Enum) {
-				changed(key, strings.Join(old.Enum, ","), strings.Join(updated.Enum, ","), fmt.Sprintf("config field %s enum values changed", key))
+			if removed := removedConfigEnumValues(old.Enum, updated.Enum); len(removed) > 0 {
+				changed(key, strings.Join(old.Enum, ","), strings.Join(updated.Enum, ","), fmt.Sprintf("config field %s enum values removed: %s", key, strings.Join(removed, ",")))
+			}
+			if !configBoundEqual(old.Min, updated.Min) {
+				changed(key+".min", configBoundString(old.Min), configBoundString(updated.Min), fmt.Sprintf("config field %s minimum changed", key))
+			}
+			if !configBoundEqual(old.Max, updated.Max) {
+				changed(key+".max", configBoundString(old.Max), configBoundString(updated.Max), fmt.Sprintf("config field %s maximum changed", key))
+			}
+			if old.Pattern != updated.Pattern {
+				changed(key+".pattern", old.Pattern, updated.Pattern, fmt.Sprintf("config field %s pattern changed", key))
 			}
 			oldScopes := configScopeStrings(old.EffectiveScopes(beforeScopes))
 			newScopes := configScopeStrings(updated.EffectiveScopes(afterScopes))
@@ -1162,10 +1165,37 @@ func compareUpgradeConfigContracts(previous, target *skill.Definition) []SkillRe
 			}
 		}
 	}
-	if beforeHealth != afterHealth {
-		changed("config.health.action", beforeHealth, afterHealth, "Skill config health action changed")
-	}
 	return findings
+}
+
+// removedConfigEnumValues returns values of before that after no longer
+// accepts. Adding values keeps every stored value valid.
+func removedConfigEnumValues(before, after []string) []string {
+	kept := make(map[string]bool, len(after))
+	for _, value := range after {
+		kept[value] = true
+	}
+	removed := make([]string, 0)
+	for _, value := range before {
+		if !kept[value] {
+			removed = append(removed, value)
+		}
+	}
+	return removed
+}
+
+func configBoundEqual(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func configBoundString(bound *int64) string {
+	if bound == nil {
+		return ""
+	}
+	return strconv.FormatInt(*bound, 10)
 }
 
 func configFieldMandatory(field skill.SkillConfigField) bool {

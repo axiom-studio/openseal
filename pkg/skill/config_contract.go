@@ -30,7 +30,7 @@ const (
 var skillConfigKeyPattern = regexp.MustCompile(`^[a-z][A-Za-z0-9]{0,63}$`)
 
 // validateSkillConfig enforces the operator-config contract: field shapes,
-// cross-field references, the health action, setup steps, and that no config
+// cross-field references, setup steps, and that no config
 // key can also be set as an action argument, binding configuration key, or
 // credential.
 func validateSkillConfig(definition *Definition) error {
@@ -90,15 +90,6 @@ func validateSkillConfig(definition *Definition) error {
 			if err := capability.ValidateSkillConfigValue(referenced, field.RequiredWhen[key]); err != nil {
 				return fmt.Errorf("field %s requiredWhen value for %s is invalid: %w", field.Key, key, err)
 			}
-		}
-	}
-	if config.Health != nil {
-		action, ok := definition.Actions[config.Health.Action]
-		if !ok {
-			return fmt.Errorf("health action %q is not an action of this Skill", config.Health.Action)
-		}
-		if action.SideEffect != SideEffectRead {
-			return fmt.Errorf("health action %s must declare sideEffect read", config.Health.Action)
 		}
 	}
 	if len(config.Setup) > MaxSkillSetupSteps {

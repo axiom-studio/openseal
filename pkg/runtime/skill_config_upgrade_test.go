@@ -15,19 +15,22 @@ func configUpgradeBase() *skill.Definition {
 	return &skill.Definition{
 		ID: "skill-browser", Version: "1.0.0", Name: "Browser",
 		Transport: skill.TransportReference{Kind: "grpc", Endpoint: "skill-browser:50051"},
-		Actions:   map[string]skill.Action{"search": readAction("search"), "config-check": readAction("config-check"), "config-check-v2": readAction("config-check-v2")},
+		Actions:   map[string]skill.Action{"search": readAction("search")},
 		Config: &skill.SkillConfig{
 			Scopes: []skill.SkillConfigScope{"global", "tenant"},
 			Fields: []skill.SkillConfigField{
 				{Key: "searchProvider", Label: "Search provider", Type: "enum", Enum: []string{"yahoo", "tavily"}, Default: "yahoo"},
 				{Key: "tavilyApiKey", Label: "Tavily API key", Type: "secret", RequiredWhen: map[string]interface{}{"searchProvider": "tavily"}},
 				{Key: "fallbackToYahoo", Label: "Fall back to Yahoo", Type: "bool", Default: false},
+				{Key: "maxResults", Label: "Max results", Type: "int", Default: 10, Min: int64Ptr(1), Max: int64Ptr(50)},
+				{Key: "locale", Label: "Locale", Type: "string", Pattern: "^[a-z]{2}$"},
 			},
-			Health: &skill.SkillConfigHealth{Action: "config-check"},
-			Setup:  []skill.SkillSetupStep{{Title: "Get a Tavily key", Links: []skill.SkillSetupLink{{Label: "Tavily", URL: "https://tavily.com"}}}},
+			Setup: []skill.SkillSetupStep{{Title: "Get a Tavily key", Links: []skill.SkillSetupLink{{Label: "Tavily", URL: "https://tavily.com"}}}},
 		},
 	}
 }
+
+func int64Ptr(value int64) *int64 { return &value }
 
 func TestSkillUpgradeConfigContractFindings(t *testing.T) {
 	base := configUpgradeBase()
@@ -44,16 +47,20 @@ func TestSkillUpgradeConfigContractFindings(t *testing.T) {
 		{"added conditionally required", func(d *skill.Definition) {
 			d.Config.Fields = append(d.Config.Fields, skill.SkillConfigField{Key: "tavilyRegion", Label: "Region", Type: "string", RequiredWhen: map[string]interface{}{"searchProvider": "tavily"}})
 		}, "tavilyRegion", "", "string"},
-		{"removed field", func(d *skill.Definition) { d.Config.Fields = d.Config.Fields[:2] }, "fallbackToYahoo", "bool", ""},
+		{"removed field", func(d *skill.Definition) { d.Config.Fields = append(d.Config.Fields[:2:2], d.Config.Fields[3:]...) }, "fallbackToYahoo", "bool", ""},
 		{"removed config", func(d *skill.Definition) { d.Config = nil }, "config.scopes", "global,tenant", ""},
 		{"type", func(d *skill.Definition) { d.Config.Fields[2].Type, d.Config.Fields[2].Default = "string", "no" }, "fallbackToYahoo", "bool", "string"},
-		{"enum", func(d *skill.Definition) { d.Config.Fields[0].Enum = []string{"yahoo", "tavily", "bing"} }, "searchProvider", "yahoo,tavily", "yahoo,tavily,bing"},
+		{"enum value removed", func(d *skill.Definition) {
+			d.Config.Fields[0].Enum, d.Config.Fields[0].Default = []string{"yahoo", "bing"}, "yahoo"
+		}, "searchProvider", "yahoo,tavily", "yahoo,bing"},
+		{"min", func(d *skill.Definition) { d.Config.Fields[3].Min = int64Ptr(5) }, "maxResults.min", "1", "5"},
+		{"min loosened", func(d *skill.Definition) { d.Config.Fields[3].Min = nil }, "maxResults.min", "1", ""},
+		{"max", func(d *skill.Definition) { d.Config.Fields[3].Max = int64Ptr(100) }, "maxResults.max", "50", "100"},
+		{"pattern", func(d *skill.Definition) { d.Config.Fields[4].Pattern = "^[a-z]{2,3}$" }, "locale.pattern", "^[a-z]{2}$", "^[a-z]{2,3}$"},
 		{"field scopes", func(d *skill.Definition) { d.Config.Fields[1].Scopes = []skill.SkillConfigScope{"global"} }, "tavilyApiKey", "global,tenant", "global"},
 		{"section scopes", func(d *skill.Definition) { d.Config.Scopes = []skill.SkillConfigScope{"global"} }, "config.scopes", "global,tenant", "global"},
 		{"audience", func(d *skill.Definition) { d.Config.Fields[1].Audience = "host" }, "tavilyApiKey", "skill", "host"},
 		{"became required", func(d *skill.Definition) { d.Config.Fields[2].Default, d.Config.Fields[2].Required = nil, true }, "fallbackToYahoo", "", ""},
-		{"health action", func(d *skill.Definition) { d.Config.Health.Action = "config-check-v2" }, "config.health.action", "config-check", "config-check-v2"},
-		{"health removed", func(d *skill.Definition) { d.Config.Health = nil }, "config.health.action", "config-check", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			target := cloneUpgradeTestDefinition(t, base)
@@ -71,7 +78,7 @@ func TestSkillUpgradeConfigContractFindings(t *testing.T) {
 	added := cloneUpgradeTestDefinition(t, base)
 	added.Config = nil
 	if findings := compareUpgradeContracts(added, base, []string{"search"}, nil); len(findings) == 0 {
-		t.Fatal("adding a config section with a health action needs review")
+		t.Fatal("adding a config section needs review")
 	}
 }
 
@@ -82,14 +89,16 @@ func TestSkillUpgradeConfigCompatibleChangesNeedNoApproval(t *testing.T) {
 			d.Config.Fields = append(d.Config.Fields, skill.SkillConfigField{Key: "safeSearch", Label: "Safe search", Type: "bool"})
 		},
 		"required field with default": func(d *skill.Definition) {
-			d.Config.Fields = append(d.Config.Fields, skill.SkillConfigField{Key: "maxResults", Label: "Max results", Type: "int", Required: true, Default: 10})
+			d.Config.Fields = append(d.Config.Fields, skill.SkillConfigField{Key: "pageSize", Label: "Page size", Type: "int", Required: true, Default: 10})
 		},
 		"text and setup": func(d *skill.Definition) {
 			d.Config.Fields[0].Label, d.Config.Fields[0].Description, d.Config.Fields[0].Summary = "Provider", "Which engine to use.", true
 			d.Config.Setup = append(d.Config.Setup, skill.SkillSetupStep{Title: "Copy the callback", Copy: &skill.SkillSetupCopy{Platform: "oauthCallbackUrl"}})
 			d.Config.Setup[0].Title = "Create a Tavily API key"
 		},
-		"default changed": func(d *skill.Definition) { d.Config.Fields[2].Default = true },
+		"default changed":  func(d *skill.Definition) { d.Config.Fields[2].Default = true },
+		"enum value added": func(d *skill.Definition) { d.Config.Fields[0].Enum = []string{"yahoo", "tavily", "bing"} },
+		"enum reordered":   func(d *skill.Definition) { d.Config.Fields[0].Enum = []string{"tavily", "yahoo"} },
 		"explicit default scopes": func(d *skill.Definition) {
 			d.Config.Fields[0].Scopes = []skill.SkillConfigScope{"tenant", "global"}
 			d.Config.Fields[1].Audience = "skill"

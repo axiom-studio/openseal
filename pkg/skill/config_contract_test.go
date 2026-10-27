@@ -79,8 +79,6 @@ definition:
         label: Home page
         type: url
         default: "https://example.com/"
-    health:
-      action: config-check
     setup:
       - title: Create an OAuth client
         description: Web application type, in Google Cloud Console.
@@ -107,8 +105,7 @@ func configExampleDefinition(t *testing.T) *Definition {
 
 func TestSkillConfigFullExampleIsValidAndRoundTrips(t *testing.T) {
 	definition := configExampleDefinition(t)
-	if definition.Config == nil || len(definition.Config.Fields) != 7 || len(definition.Config.Setup) != 4 ||
-		definition.Config.Health == nil || definition.Config.Health.Action != "config-check" {
+	if definition.Config == nil || len(definition.Config.Fields) != 7 || len(definition.Config.Setup) != 4 {
 		t.Fatalf("config was not decoded: %#v", definition.Config)
 	}
 	if definition.Config.Setup[2].Copy.Platform != capability.SkillSetupPlatformOAuthCallbackURL || definition.Config.Fields[4].EffectiveAudience() != capability.SkillConfigAudienceHost {
@@ -196,21 +193,15 @@ func TestSkillConfigValidationRejectsEachRule(t *testing.T) {
 		"min above max":            {func(d *Definition) { d.Config.Fields[3].Min = int64p(60) }, "must not exceed max"},
 		"pattern on enum":          {func(d *Definition) { d.Config.Fields[0].Pattern = "^y" }, "only allowed for type string"},
 		"pattern does not compile": {func(d *Definition) { d.Config.Fields[4].Pattern = "([a-z" }, "does not compile"},
-		"health missing action":    {func(d *Definition) { d.Config.Health.Action = "check" }, "not an action of this Skill"},
-		"health side effect": {func(d *Definition) {
-			a := d.Actions["config-check"]
-			a.SideEffect = SideEffectNone
-			d.Actions["config-check"] = a
-		}, "sideEffect read"},
-		"setup missing title":   {func(d *Definition) { d.Config.Setup[0].Title = "" }, "title is required"},
-		"setup link no label":   {func(d *Definition) { d.Config.Setup[0].Links[0].Label = "" }, "label is required"},
-		"setup link http":       {func(d *Definition) { d.Config.Setup[0].Links[0].URL = "http://console.cloud.google.com" }, "https URL"},
-		"setup link relative":   {func(d *Definition) { d.Config.Setup[0].Links[0].URL = "/apis/credentials" }, "https URL"},
-		"copy undeclared field": {func(d *Definition) { d.Config.Setup[3].Copy.Field = "callbackUrl" }, "not a declared config field"},
-		"copy secret field":     {func(d *Definition) { d.Config.Setup[3].Copy.Field = "oauthClientSecret" }, "is a secret"},
-		"copy unknown platform": {func(d *Definition) { d.Config.Setup[2].Copy.Platform = "tenantUrl" }, "must be one of oauthCallbackUrl"},
-		"copy both":             {func(d *Definition) { d.Config.Setup[2].Copy.Field = "oauthClientId" }, "not both"},
-		"copy neither":          {func(d *Definition) { d.Config.Setup[2].Copy = &SkillSetupCopy{} }, "exactly one of field or platform"},
+		"setup missing title":      {func(d *Definition) { d.Config.Setup[0].Title = "" }, "title is required"},
+		"setup link no label":      {func(d *Definition) { d.Config.Setup[0].Links[0].Label = "" }, "label is required"},
+		"setup link http":          {func(d *Definition) { d.Config.Setup[0].Links[0].URL = "http://console.cloud.google.com" }, "https URL"},
+		"setup link relative":      {func(d *Definition) { d.Config.Setup[0].Links[0].URL = "/apis/credentials" }, "https URL"},
+		"copy undeclared field":    {func(d *Definition) { d.Config.Setup[3].Copy.Field = "callbackUrl" }, "not a declared config field"},
+		"copy secret field":        {func(d *Definition) { d.Config.Setup[3].Copy.Field = "oauthClientSecret" }, "is a secret"},
+		"copy unknown platform":    {func(d *Definition) { d.Config.Setup[2].Copy.Platform = "tenantUrl" }, "must be one of oauthCallbackUrl"},
+		"copy both":                {func(d *Definition) { d.Config.Setup[2].Copy.Field = "oauthClientId" }, "not both"},
+		"copy neither":             {func(d *Definition) { d.Config.Setup[2].Copy = &SkillSetupCopy{} }, "exactly one of field or platform"},
 	}
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {

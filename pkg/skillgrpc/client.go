@@ -52,6 +52,10 @@ type ExecutionContext struct {
 	AgentID   string
 	Namespace string
 	Variables map[string]string
+	// TenantID is the authenticated tenant of the call, set by the host from
+	// the caller's identity and never from action arguments. Skills scope
+	// operator config to it.
+	TenantID string
 }
 
 // NewClient creates a new gRPC skill client
@@ -273,6 +277,7 @@ func (c *Client) ExecuteWithContext(
 		Namespace: strings.TrimSpace(execution.Namespace),
 		Variables: cloneVariables(execution.Variables),
 	}
+	setExecutionContextTenant(execCtx, execution.TenantID)
 
 	// Build request
 	req := &skillpb.ExecuteRequest{

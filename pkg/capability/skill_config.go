@@ -16,7 +16,6 @@ import (
 type SkillConfig struct {
 	Scopes []SkillConfigScope `json:"scopes"`
 	Fields []SkillConfigField `json:"fields"`
-	Health *SkillConfigHealth `json:"health,omitempty"`
 	Setup  []SkillSetupStep   `json:"setup,omitempty"`
 }
 
@@ -85,12 +84,6 @@ func (f SkillConfigField) EffectiveAudience() SkillConfigAudience {
 		return SkillConfigAudienceSkill
 	}
 	return f.Audience
-}
-
-// SkillConfigHealth names an optional read-only action of the same Skill that
-// checks the effective configuration.
-type SkillConfigHealth struct {
-	Action string `json:"action"`
 }
 
 // SkillSetupStep is operator guidance rendered generically by hosts.

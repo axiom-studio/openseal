@@ -50,7 +50,6 @@ type SkillConfigScope = capability.SkillConfigScope
 type SkillConfigFieldType = capability.SkillConfigFieldType
 type SkillConfigAudience = capability.SkillConfigAudience
 type SkillConfigField = capability.SkillConfigField
-type SkillConfigHealth = capability.SkillConfigHealth
 type SkillSetupStep = capability.SkillSetupStep
 type SkillSetupLink = capability.SkillSetupLink
 type SkillSetupCopy = capability.SkillSetupCopy
