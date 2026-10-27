@@ -236,3 +236,71 @@ func TestANewChatIsOnboardedEmpty(t *testing.T) {
 		t.Fatalf("new chat = v%d %v", head.Version, err)
 	}
 }
+
+type conversations []*runtime.Conversation
+
+func (c conversations) GetConversation(_ context.Context, scope runtime.Scope, id string) (*runtime.Conversation, error) {
+	for _, conversation := range c {
+		if conversation.Scope == scope && conversation.ID == id {
+			return conversation, nil
+		}
+	}
+	return nil, runtime.ErrConversationNotFound
+}
+
+func (c conversations) ListConversations(_ context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {
+	var found []*runtime.Conversation
+	for _, conversation := range c {
+		if conversation.Scope == filter.Scope && (filter.Owner == nil || conversation.Owner == *filter.Owner) {
+			found = append(found, conversation)
+		}
+	}
+	return found, nil
+}
+
+func TestAnAgentReadsAndCopiesFromItsOtherChatsOnly(t *testing.T) {
+	store, chat, author := newTestStore(t)
+	earlier := Chat{Scope: chat.Scope, Owner: chat.Owner, ConversationID: "c0"}
+	foreign := Chat{Scope: chat.Scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "other-agent"}, ConversationID: "x1"}
+	now := time.Now().UTC()
+	store.Conversations = conversations{
+		{ID: "c1", Scope: chat.Scope, Owner: chat.Owner, Title: "Today", UpdatedAt: now},
+		{ID: "c0", Scope: chat.Scope, Owner: chat.Owner, Title: "Quarterly review", UpdatedAt: now.Add(-time.Hour)},
+		{ID: "x1", Scope: chat.Scope, Owner: foreign.Owner, Title: "Someone else's", UpdatedAt: now},
+	}
+	store.Private = func(name string) bool { return strings.HasSuffix(name, "/.marker") }
+	run(t, store, earlier, author, workspace.OperationWriteFile, map[string]interface{}{"path": "docs/q3-deck.html", "content": "<h1>Q3</h1>"})
+	run(t, store, earlier, author, workspace.OperationWriteFile, map[string]interface{}{"path": "apps/board/index.html", "content": "<p>board</p>"})
+	run(t, store, earlier, author, workspace.OperationWriteFile, map[string]interface{}{"path": "apps/board/.marker", "content": "app-1"})
+	run(t, store, foreign, author, workspace.OperationWriteFile, map[string]interface{}{"path": "secret.md", "content": "no"})
+
+	listed := run(t, store, chat, author, workspace.OperationListChats, map[string]interface{}{"query": "deck"})
+	chats := listed["chats"].([]interface{})
+	if len(chats) != 1 || chats[0].(map[string]interface{})["id"] != "c0" || strings.Join(chats[0].(map[string]interface{})["files"].([]string), ",") != "docs/q3-deck.html" {
+		t.Fatalf("list_chats = %#v", listed)
+	}
+	read := run(t, store, chat, author, workspace.OperationReadFile, map[string]interface{}{"path": "docs/q3-deck.html", "chat": "c0"})
+	if read["content"] != "<h1>Q3</h1>" {
+		t.Fatalf("read another chat = %#v", read)
+	}
+	for _, args := range []map[string]interface{}{{"path": "secret.md", "chat": "x1"}, {"path": "secret.md", "chat": "missing"}} {
+		if denied := run(t, store, chat, author, workspace.OperationReadFile, args); denied["isError"] != true {
+			t.Fatalf("read a chat of another Agent: %#v", denied)
+		}
+	}
+	if changed := run(t, store, chat, author, workspace.OperationWriteFile, map[string]interface{}{"path": "a.md", "content": "x", "chat": "c0"}); changed["isError"] != true {
+		t.Fatalf("wrote to another chat: %#v", changed)
+	}
+
+	copied := run(t, store, chat, author, workspace.OperationCopyFromChat, map[string]interface{}{"chat": "c0", "path": "apps/board", "destination": "apps/board-v2"})
+	if strings.Join(copied["copied"].([]string), ",") != "apps/board-v2/index.html" {
+		t.Fatalf("copy = %#v", copied)
+	}
+	mine := run(t, store, chat, author, workspace.OperationReadFile, map[string]interface{}{"path": "apps/board-v2/index.html"})
+	if mine["content"] != "<p>board</p>" {
+		t.Fatalf("copied file = %#v", mine)
+	}
+	if theirs := run(t, store, earlier, author, workspace.OperationReadFile, map[string]interface{}{"path": "apps/board-v2/index.html"}); theirs["isError"] != true {
+		t.Fatal("copy changed the other chat")
+	}
+}

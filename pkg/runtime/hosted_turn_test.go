@@ -11,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/workspace"
-
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
@@ -1490,29 +1488,5 @@ func TestHostedTurnRunnerRejectsMismatchedReplayEnvelope(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "mismatched") {
 		t.Fatalf("error = %v", err)
-	}
-}
-
-func TestAChatsFilesReplaceAPlainVolumeButNotAWorkingOne(t *testing.T) {
-	run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Chart this", Context: map[string]interface{}{"conversationId": "chat-1"}}
-	plain := &workspace.Authority{Workspace: workspace.DefaultSpec()}
-	working := &workspace.Authority{Workspace: workspace.DefaultSpec()}
-	working.Workspace.Policy.Commands = workspace.CommandPolicy{Enabled: true, Network: workspace.NetworkDenied, MaxDurationSeconds: 60, AllowedExecutables: []string{"go"}}
-	for _, tc := range []struct {
-		name      string
-		authority *workspace.Authority
-		chat      bool
-	}{{"no volume", nil, true}, {"plain volume", plain, true}, {"working volume", working, false}} {
-		runner, err := NewHostedTurnRunner(&recordingTurnHost{}, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1", Workspace: tc.authority})
-		if err != nil {
-			t.Fatal(err)
-		}
-		request, err := runner.buildRequest(TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := request.Workspace != nil && request.Workspace.ConversationID == "chat-1"; got != tc.chat {
-			t.Fatalf("%s: chat files = %v, want %v", tc.name, got, tc.chat)
-		}
 	}
 }

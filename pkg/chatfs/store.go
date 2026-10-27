@@ -57,6 +57,12 @@ type Store struct {
 	Content   runtime.ArtifactContentStore
 	// Onboard, when set, gives a chat that has no snapshot yet its first one.
 	Onboard Onboarder
+	// Conversations, when set, lets a turn read and copy from the other
+	// chats of its Agent.
+	Conversations Conversations
+	// Private, when set, names files that stay with their chat when copied to
+	// another, such as a marker tying a directory to something the chat owns.
+	Private func(name string) bool
 	now     func() time.Time
 }
 

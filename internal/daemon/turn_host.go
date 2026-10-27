@@ -48,7 +48,6 @@ func (h *ProviderTurnHost) ExecuteHostedTurn(ctx context.Context, request runtim
 	}
 	request.WorkspaceOperations = nil
 	request.Workspace = nil
-	request.WorkspaceCredentials = nil
 	input, err := runtime.MarshalHostedTurnModelInput(request)
 	if err != nil {
 		return fail("invalid_input", "The task context could not be prepared.", false)

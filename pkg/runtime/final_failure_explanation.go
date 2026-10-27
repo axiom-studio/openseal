@@ -72,7 +72,6 @@ func projectFinalFailureExplanation(request *HostedTurnRequest) {
 	request.EligibleAgents = nil
 	request.Workspace = nil
 	request.WorkspaceOperations = nil
-	request.WorkspaceCredentials = nil
 	request.RunbookOperations = nil
 	request.ConversationTasks = nil
 	request.SkillPrompts = nil

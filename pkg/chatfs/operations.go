@@ -35,6 +35,25 @@ func (s *Store) Execute(ctx context.Context, chat Chat, author Author, operation
 		result map[string]interface{}
 		err    error
 	)
+	// A read that names another chat reads that chat's files.
+	if _, other := args[workspace.ChatArgument]; other && operation != workspace.OperationCopyFromChat {
+		switch operation {
+		case workspace.OperationListDirectory, workspace.OperationReadFile, workspace.OperationSearchFiles:
+		default:
+			return failure("only list_directory, read_file and search_files can look at another chat; copy a file here with copy_from_chat to change it"), nil
+		}
+		source, err := s.otherChat(ctx, chat, text(args, workspace.ChatArgument))
+		if err != nil {
+			return failure(err.Error()), nil
+		}
+		rest := make(map[string]interface{}, len(args))
+		for key, value := range args {
+			if key != workspace.ChatArgument {
+				rest[key] = value
+			}
+		}
+		return s.Execute(ctx, source, author, operation, rest)
+	}
 	switch operation {
 	case workspace.OperationListDirectory:
 		result, err = s.list(ctx, chat, args)
@@ -52,10 +71,14 @@ func (s *Store) Execute(ctx context.Context, chat Chat, author Author, operation
 		result, err = s.remove(ctx, chat, author, args)
 	case workspace.OperationMoveFile:
 		result, err = s.move(ctx, chat, author, args)
+	case workspace.OperationListChats:
+		result, err = s.listChats(ctx, chat, args)
+	case workspace.OperationCopyFromChat:
+		result, err = s.copyFromChat(ctx, chat, author, args)
 	default:
 		return nil, fmt.Errorf("unsupported chat files operation %q", operation)
 	}
-	if err != nil && (errors.Is(err, ErrPath) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrConflict) || errors.Is(err, errInput)) {
+	if err != nil && (errors.Is(err, ErrPath) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrConflict) || errors.Is(err, errInput) || errors.Is(err, ErrOtherChat)) {
 		return failure(err.Error()), nil
 	}
 	return result, err

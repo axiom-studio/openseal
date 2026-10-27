@@ -70,7 +70,6 @@ type HostedTurnModelInput struct {
 	ConversationTasks         *HostedConversationTaskContext   `json:"conversationTasks,omitempty"`
 	SystemInstructions        []string                         `json:"systemInstructions,omitempty"`
 	EligibleAgents            []HostedAgentTarget              `json:"eligibleAgents,omitempty"`
-	Workspace                 *HostedWorkspace                 `json:"workspace,omitempty"`
 	WorkspaceOperations       []workspace.Operation            `json:"workspaceOperations,omitempty"`
 	RunbookOperations         []HostedRunbookOperation         `json:"runbookOperations,omitempty"`
 	SkillPrompts              []HostedSkillPrompt              `json:"skillPrompts,omitempty"`
@@ -180,7 +179,6 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 		Goal:   request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
 		ConversationTasks:         cloneHostedConversationTaskContext(request.ConversationTasks),
 		EligibleAgents:            request.EligibleAgents,
-		Workspace:                 projectHostedWorkspace(request.Workspace),
 		WorkspaceOperations:       request.WorkspaceOperations,
 		RunbookOperations:         request.RunbookOperations,
 		SkillPrompts:              request.SkillPrompts,
@@ -191,13 +189,6 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 		ContinuationCheckpoint: hostedTurnModelCheckpoint(request.ContinuationCheckpoint),
 		PendingInterventions:   request.PendingInterventions,
 	})
-}
-
-func projectHostedWorkspace(authority *workspace.Authority) *HostedWorkspace {
-	if authority == nil {
-		return nil
-	}
-	return &HostedWorkspace{ID: authority.Workspace.ID, DisplayName: authority.Workspace.DisplayName, Policy: authority.Workspace.Policy}
 }
 
 func hostedTurnTextCheckpoint(checkpoint map[string]interface{}) map[string]interface{} {

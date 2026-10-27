@@ -256,7 +256,6 @@ func projectToolFeedbackCorrection(request *HostedTurnRequest) {
 	}
 	request.Workspace = nil
 	request.WorkspaceOperations = nil
-	request.WorkspaceCredentials = nil
 	request.EligibleAgents = nil
 	request.RunbookOperations = nil
 	if request.SourceAccessChallenge != nil {

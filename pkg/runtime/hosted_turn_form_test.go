@@ -10,8 +10,12 @@ import (
 )
 
 func TestHostedTurnFormCompilesOnlyAuthorizedNativeWorkspaceOperations(t *testing.T) {
-	authority := &workspace.Authority{Workspace: workspace.DefaultSpec()}
-	operations := workspace.Operations(authority)
+	var operations []workspace.Operation
+	for _, operation := range workspace.Operations(workspace.ChatAuthority("chat")) {
+		if operation.Name != workspace.OperationRunCommand {
+			operations = append(operations, operation)
+		}
+	}
 	form := HostedTurnForm{
 		SchemaVersion: HostedTurnFormSchemaVersion, SkillSelections: []HostedSkillSelection{}, Decisions: []TurnDecision{},
 		ProposedWorkspaceOperation: &HostedWorkspaceOperationForm{Operation: workspace.OperationReadFile, Summary: "Inspect config", Arguments: map[string]interface{}{"path": "config.yaml"}},

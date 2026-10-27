@@ -60,7 +60,6 @@ func TestFailedDispatchReturnsToTheModelAcrossStores(t *testing.T) {
 		}}
 		runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "release-agent", DefinitionID: "agent", DefinitionVersion: "1",
 			SystemInstructions: []string{"Speak warmly as Finn."}, Actions: []capability.ModelAction{{Name: "release.deploy"}},
-			Workspace: &workspace.Authority{Workspace: workspace.DefaultSpec()}, WorkspaceCredentials: map[string]capability.CredentialReference{"token": {Kind: "vault", ID: "credential"}},
 			EligibleAgents: []HostedAgentTarget{{ID: "other", DisplayName: "Other"}}, RunbookOperations: []HostedRunbookOperation{{Entrypoint: "work", Name: "Work", Description: "Do work", InputSchema: map[string]interface{}{"type": "object"}}},
 		})
 		if err != nil {
@@ -142,15 +141,15 @@ func TestNativeWorkspaceFailureIsTrustedHostMetadata(t *testing.T) {
 					ExecutionFailure: &HostedTurnExecutionFailure{Kind: "workspace", Message: "The command exited unsuccessfully."},
 				}, nil
 			}}
-			config := HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"}
-			if valid {
-				config.Workspace = &workspace.Authority{Workspace: workspace.DefaultSpec()}
-			}
-			runner, err := NewHostedTurnRunner(host, config)
+			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}}, Turn: &AgentTurn{ID: "turn"}})
+			run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}}
+			if valid {
+				run.Context = map[string]interface{}{"conversationId": "chat"}
+			}
+			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
 			if valid && (err != nil || outcome == nil || !requiresFinalFailureExplanation(outcome.ContinuationCheckpoint)) {
 				t.Fatalf("native failure lost: %#v %v", outcome, err)
 			}
@@ -376,7 +375,7 @@ func TestFailedTeamActionRepliesWithoutModelOrParticipationRound(t *testing.T) {
 
 func TestNativeFailureFinalTextPersistsAsFailedRunWithAcceptedProof(t *testing.T) {
 	store := NewMemoryStore()
-	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: Scope{Kind: "tenant", ID: "native"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Run the command."})
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: Scope{Kind: "tenant", ID: "native"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Run the command.", Context: map[string]interface{}{"conversationId": "chat"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +383,7 @@ func TestNativeFailureFinalTextPersistsAsFailedRunWithAcceptedProof(t *testing.T
 		return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model", NextRunStatus: AgentRunStatusCompleted,
 			OutputSummary: "The command failed.", RunOutput: map[string]interface{}{"summary": "The command failed."}, ExecutionFailure: &HostedTurnExecutionFailure{Kind: "workspace", Message: "The command was rejected."}}, nil
 	}}
-	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1", Workspace: &workspace.Authority{Workspace: workspace.DefaultSpec()}})
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
 	if err != nil {
 		t.Fatal(err)
 	}

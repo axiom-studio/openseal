@@ -136,20 +136,8 @@ type (
 	AgentDeploymentRestrictions               = kernelagent.DeploymentRestrictions
 	AgentDeploymentCapacity                   = kernelagent.DeploymentCapacity
 	AgentDeploymentHealth                     = kernelagent.DeploymentHealth
-	WorkspaceSpec                             = workspace.Spec
-	WorkspaceStorageProfile                   = workspace.StorageProfile
-	WorkspaceComputeProfile                   = workspace.ComputeProfile
-	WorkspaceAcceleratorProfile               = workspace.AcceleratorProfile
-	WorkspaceStorageDurability                = workspace.StorageDurability
-	WorkspaceStorageRetention                 = workspace.StorageRetention
-	WorkspaceAccess                           = workspace.Access
 	WorkspaceAuthority                        = workspace.Authority
 	WorkspaceOperation                        = workspace.Operation
-	WorkspacePolicy                           = workspace.Policy
-	WorkspaceCommandPolicy                    = workspace.CommandPolicy
-	WorkspaceGitPolicy                        = workspace.GitPolicy
-	WorkspaceNetworkAccess                    = workspace.NetworkAccess
-	HostedWorkspace                           = runtime.HostedWorkspace
 	AgentDefinitionActivation                 = kernelagent.DefinitionActivation
 	AgentRolloutStatus                        = kernelagent.RolloutStatus
 	AgentDefinitionAmendment                  = kernelagent.DefinitionAmendment
@@ -1187,12 +1175,6 @@ func NewSkillIdentity(id, version, sourceIdentity string) SkillIdentity {
 	return capability.NewSkillIdentity(id, version, sourceIdentity)
 }
 
-func DefaultWorkspaceSpec() WorkspaceSpec { return workspace.DefaultSpec() }
-
-func EnsureDefaultAgentWorkspace(deployment *AgentDeployment) {
-	kernelagent.EnsureDefaultWorkspace(deployment)
-}
-
 type ProjectSourceMonitorDeduplication = runtime.SourceMonitorDeduplication
 
 type (
@@ -1956,8 +1938,6 @@ const (
 	RunActionCancel                 = runtime.RunActionCancel
 	AgentActionAmendBehavior        = runtime.AgentActionAmendBehavior
 	AgentActionListChannels         = runtime.AgentActionListChannels
-	AgentActionListWorkspace        = runtime.AgentActionListWorkspace
-	AgentActionConfigureWorkspace   = runtime.AgentActionConfigureWorkspace
 	AgentActionConfigureChannel     = runtime.AgentActionConfigureChannel
 	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
 	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
@@ -2260,23 +2240,11 @@ const (
 	SkillRiskProduction  = skill.RiskLevelProduction
 	SkillRiskDestructive = skill.RiskLevelDestructive
 
-	WorkspaceDefaultID                = workspace.DefaultID
-	WorkspaceDurabilityPersistent     = workspace.StorageDurabilityPersistent
-	WorkspaceDurabilityEphemeral      = workspace.StorageDurabilityEphemeral
-	WorkspaceRetentionRetain          = workspace.StorageRetentionRetain
-	WorkspaceRetentionDelete          = workspace.StorageRetentionDelete
-	WorkspaceAccessReadOnly           = workspace.AccessReadOnly
-	WorkspaceAccessReadWrite          = workspace.AccessReadWrite
-	WorkspaceNetworkDenied            = workspace.NetworkDenied
-	WorkspaceNetworkEgress            = workspace.NetworkEgress
 	WorkspaceOperationListDirectory   = workspace.OperationListDirectory
 	WorkspaceOperationReadFile        = workspace.OperationReadFile
 	WorkspaceOperationSearchFiles     = workspace.OperationSearchFiles
 	WorkspaceOperationWriteFile       = workspace.OperationWriteFile
-	WorkspaceOperationApplyPatch      = workspace.OperationApplyPatch
 	WorkspaceOperationRunCommand      = workspace.OperationRunCommand
-	WorkspaceOperationGitClone        = workspace.OperationGitClone
-	WorkspaceOperationGitPush         = workspace.OperationGitPush
 	SkillBindingArgumentLiteral       = skill.BindingArgumentLiteral
 	SkillBindingArgumentSessionID     = skill.BindingArgumentSessionID
 	SkillBindingArgumentVerifiedClaim = skill.BindingArgumentVerifiedClaim
@@ -3566,14 +3534,12 @@ func (e *Engine) configureAgentManagementActions() error {
 	if err != nil {
 		return err
 	}
-	validator.SetWorkspaceCatalog(e.skills)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionPoolSpecs[index].dispatcher, e.externalConversations.endpoints)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
-		dispatcher.SetWorkspaceCatalog(e.skills)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3581,7 +3547,6 @@ func (e *Engine) configureAgentManagementActions() error {
 		if dispatchErr != nil {
 			return dispatchErr
 		}
-		dispatcher.SetWorkspaceCatalog(e.skills)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil

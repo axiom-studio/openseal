@@ -77,15 +77,6 @@ type HostedAgentTarget struct {
 	Purpose     string `json:"purpose,omitempty"`
 }
 
-// HostedWorkspace is the small model-facing projection of framework-owned
-// Workspace authority. Native Workspace tools are supplied by the trusted
-// Agent host automatically; there is no Skill, binding, or catalog identity.
-type HostedWorkspace struct {
-	ID          string           `json:"id"`
-	DisplayName string           `json:"displayName,omitempty"`
-	Policy      workspace.Policy `json:"policy"`
-}
-
 // HostedRunbookOperation is one immutable deterministic operation the current
 // cognitive Agent may invoke. It contains no graph internals or credentials;
 // the kernel resolves the exact active definition again at materialization.
@@ -168,32 +159,31 @@ func (c HostedResponseContract) Validate() error {
 // OpenSeal remains authoritative for leases, Turns, actions and state changes;
 // the host performs one bounded proposal-only model invocation.
 type HostedTurnRequest struct {
-	APIVersion             string                                    `json:"apiVersion"`
-	InvocationID           string                                    `json:"invocationId"`
-	Scope                  Scope                                     `json:"scope"`
-	RunID                  string                                    `json:"runId"`
-	TurnID                 string                                    `json:"turnId"`
-	AgentID                string                                    `json:"agentId"`
-	DefinitionID           string                                    `json:"definitionId"`
-	DefinitionVersion      string                                    `json:"definitionVersion"`
-	Goal                   string                                    `json:"goal"`
-	ResponseContract       HostedResponseContract                    `json:"responseContract,omitempty"`
-	InputContext           map[string]interface{}                    `json:"inputContext,omitempty"`
-	SystemInstructions     []string                                  `json:"systemInstructions,omitempty"`
-	EligibleAgents         []HostedAgentTarget                       `json:"eligibleAgents,omitempty"`
-	Workspace              *workspace.Authority                      `json:"workspace,omitempty"`
-	WorkspaceOperations    []workspace.Operation                     `json:"workspaceOperations,omitempty"`
-	WorkspaceCredentials   map[string]capability.CredentialReference `json:"workspaceCredentials,omitempty"`
-	RunbookOperations      []HostedRunbookOperation                  `json:"runbookOperations,omitempty"`
-	SkillPrompts           []HostedSkillPrompt                       `json:"skillPrompts,omitempty"`
-	Actions                []capability.ModelAction                  `json:"actions,omitempty"`
-	ConversationTasks      *HostedConversationTaskContext            `json:"conversationTasks,omitempty"`
-	Budget                 *HostedRunBudget                          `json:"budget,omitempty"`
-	DependencyResults      map[string]interface{}                    `json:"dependencyResults,omitempty"`
-	CollaborationResults   map[string]interface{}                    `json:"collaborationResults,omitempty"`
-	ContinuationCheckpoint map[string]interface{}                    `json:"continuationCheckpoint,omitempty"`
-	PendingInterventions   []AgentRunIntervention                    `json:"pendingInterventions,omitempty"`
-	ModelMedia             []HostedTurnMedia                         `json:"modelMedia,omitempty"`
+	APIVersion             string                         `json:"apiVersion"`
+	InvocationID           string                         `json:"invocationId"`
+	Scope                  Scope                          `json:"scope"`
+	RunID                  string                         `json:"runId"`
+	TurnID                 string                         `json:"turnId"`
+	AgentID                string                         `json:"agentId"`
+	DefinitionID           string                         `json:"definitionId"`
+	DefinitionVersion      string                         `json:"definitionVersion"`
+	Goal                   string                         `json:"goal"`
+	ResponseContract       HostedResponseContract         `json:"responseContract,omitempty"`
+	InputContext           map[string]interface{}         `json:"inputContext,omitempty"`
+	SystemInstructions     []string                       `json:"systemInstructions,omitempty"`
+	EligibleAgents         []HostedAgentTarget            `json:"eligibleAgents,omitempty"`
+	Workspace              *workspace.Authority           `json:"workspace,omitempty"`
+	WorkspaceOperations    []workspace.Operation          `json:"workspaceOperations,omitempty"`
+	RunbookOperations      []HostedRunbookOperation       `json:"runbookOperations,omitempty"`
+	SkillPrompts           []HostedSkillPrompt            `json:"skillPrompts,omitempty"`
+	Actions                []capability.ModelAction       `json:"actions,omitempty"`
+	ConversationTasks      *HostedConversationTaskContext `json:"conversationTasks,omitempty"`
+	Budget                 *HostedRunBudget               `json:"budget,omitempty"`
+	DependencyResults      map[string]interface{}         `json:"dependencyResults,omitempty"`
+	CollaborationResults   map[string]interface{}         `json:"collaborationResults,omitempty"`
+	ContinuationCheckpoint map[string]interface{}         `json:"continuationCheckpoint,omitempty"`
+	PendingInterventions   []AgentRunIntervention         `json:"pendingInterventions,omitempty"`
+	ModelMedia             []HostedTurnMedia              `json:"modelMedia,omitempty"`
 	// ModelCredential is an opaque, host-resolved binding. It crosses only the
 	// trusted TurnHost transport boundary and is deliberately excluded from
 	// HostedTurnModelInput, durable checkpoints, and model-visible context.
@@ -309,36 +299,27 @@ func checkHostedSkillSelections(prompts []HostedSkillPrompt, selections []Hosted
 	return selected, nil
 }
 
-// workingVolume reports an Agent's own Workspace that runs commands or works
-// with Git. A plain volume offers nothing a chat's files do not, so in a chat
-// the chat's files take its place.
-func workingVolume(authority *workspace.Authority) bool {
-	return authority != nil && (authority.Workspace.Policy.Commands.Enabled || authority.Workspace.Policy.Git.Enabled)
-}
-
 // ChatFilesInstruction tells a turn how its chat's files work.
-const ChatFilesInstruction = "This chat has its own files, which you can read and change freely with the Workspace tools: everything people attached (uploads/), everything made here, and anything you write. Read a file before editing it and change only what is needed. Every change is kept, so earlier versions can be restored."
+const ChatFilesInstruction = "This chat has its own files, which you can read and change freely with the Workspace tools: everything people attached (uploads/), everything made here, and anything you write. Read a file before editing it and change only what is needed. Every change is kept, so earlier versions can be restored. To reuse work from your earlier chats, find it with list_chats, read it by passing the chat's id, and copy it here with copy_from_chat."
 
 type TurnHost interface {
 	ExecuteHostedTurn(context.Context, HostedTurnRequest) (*HostedTurnResponse, error)
 }
 
 type HostedTurnRunnerConfig struct {
-	AgentID              string
-	ActionDeploymentID   string
-	DefinitionID         string
-	DefinitionVersion    string
-	SystemInstructions   []string
-	EligibleAgents       []HostedAgentTarget
-	Workspace            *workspace.Authority
-	WorkspaceCredentials map[string]capability.CredentialReference
-	RunbookOperations    []HostedRunbookOperation
-	SkillPrompts         []HostedSkillPrompt
-	ConversationTasks    *HostedConversationTaskContext
-	Actions              []capability.ModelAction
-	ModelCredential      *capability.CredentialReference
-	ModelProvider        string
-	Model                string
+	AgentID            string
+	ActionDeploymentID string
+	DefinitionID       string
+	DefinitionVersion  string
+	SystemInstructions []string
+	EligibleAgents     []HostedAgentTarget
+	RunbookOperations  []HostedRunbookOperation
+	SkillPrompts       []HostedSkillPrompt
+	ConversationTasks  *HostedConversationTaskContext
+	Actions            []capability.ModelAction
+	ModelCredential    *capability.CredentialReference
+	ModelProvider      string
+	Model              string
 }
 
 type HostedTurnRunner struct {
@@ -786,9 +767,6 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		AgentID: r.config.AgentID, DefinitionID: r.config.DefinitionID, DefinitionVersion: r.config.DefinitionVersion,
 		Goal: input.Run.Goal, InputContext: inputContext, SystemInstructions: append([]string(nil), r.config.SystemInstructions...),
 		EligibleAgents:         cloneHostedAgentTargets(r.config.EligibleAgents),
-		Workspace:              cloneHostedWorkspaceAuthority(r.config.Workspace),
-		WorkspaceOperations:    cloneHostedWorkspaceOperations(workspace.Operations(r.config.Workspace)),
-		WorkspaceCredentials:   cloneHostedCredentialReferences(r.config.WorkspaceCredentials),
 		RunbookOperations:      cloneHostedRunbookOperations(r.config.RunbookOperations),
 		SkillPrompts:           cloneHostedSkillPrompts(r.config.SkillPrompts),
 		ConversationTasks:      cloneHostedConversationTaskContext(r.config.ConversationTasks),
@@ -804,10 +782,8 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	}
 	request.CanAskConversationQuestion = input.canAskConversationQuestion && input.Run.AssignedAgentID == r.config.AgentID
 	request.ConversationApprovalMode = input.approvalMode
-	// A chat's own files are every conversation turn's Workspace, unless the
-	// Agent brings a Workspace that does more than hold files: one that runs
-	// commands or works with Git repositories.
-	if conversationID, _ := input.Run.Context["conversationId"].(string); !workingVolume(request.Workspace) && strings.TrimSpace(conversationID) != "" {
+	// A chat's own files are every conversation turn's Workspace.
+	if conversationID, _ := input.Run.Context["conversationId"].(string); strings.TrimSpace(conversationID) != "" {
 		request.Workspace = workspace.ChatAuthority(conversationID)
 		request.WorkspaceOperations = workspace.Operations(request.Workspace)
 		request.SystemInstructions = append(request.SystemInstructions, ChatFilesInstruction)
@@ -1315,18 +1291,6 @@ func cloneHostedAgentTargets(values []HostedAgentTarget) []HostedAgentTarget {
 	return append([]HostedAgentTarget(nil), values...)
 }
 
-func cloneHostedWorkspaceAuthority(value *workspace.Authority) *workspace.Authority {
-	if value == nil {
-		return nil
-	}
-	copy := *value
-	if value.Workspace.Compute.Accelerator != nil {
-		accelerator := *value.Workspace.Compute.Accelerator
-		copy.Workspace.Compute.Accelerator = &accelerator
-	}
-	return &copy
-}
-
 func cloneHostedWorkspaceOperations(values []workspace.Operation) []workspace.Operation {
 	if values == nil {
 		return nil
@@ -1335,17 +1299,6 @@ func cloneHostedWorkspaceOperations(values []workspace.Operation) []workspace.Op
 	for index := range values {
 		result[index] = values[index]
 		result[index].InputSchema = cloneMap(values[index].InputSchema)
-	}
-	return result
-}
-
-func cloneHostedCredentialReferences(values map[string]capability.CredentialReference) map[string]capability.CredentialReference {
-	if values == nil {
-		return nil
-	}
-	result := make(map[string]capability.CredentialReference, len(values))
-	for name, reference := range values {
-		result[name] = reference
 	}
 	return result
 }
