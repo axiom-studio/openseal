@@ -51,16 +51,21 @@ type ConversationChangeSet struct {
 	SkillSetupRequests []*ConversationSkillSetupRequest `json:"skillSetupRequests"`
 	// CredentialRequests are every pending in-chat credential request for
 	// this conversation plus the most recently settled ones.
-	CredentialRequests        []*ConversationCredentialRequest `json:"credentialRequests"`
-	RunsChanged               bool                             `json:"runsChanged"`
-	ActivityChanged           bool                             `json:"activityChanged"`
-	PresenceChanged           bool                             `json:"presenceChanged"`
-	ApprovalsChanged          bool                             `json:"approvalsChanged"`
-	SkillSetupRequestsChanged bool                             `json:"skillSetupRequestsChanged"`
-	CredentialRequestsChanged bool                             `json:"credentialRequestsChanged"`
-	Cursor                    string                           `json:"cursor"`
-	HasChanges                bool                             `json:"hasChanges"`
-	HasMore                   bool                             `json:"hasMore"`
+	CredentialRequests []*ConversationCredentialRequest `json:"credentialRequests"`
+	// SurfaceInteractions are durable deltas like Messages: interactions
+	// stored after the cursor, in Sequence order. SurfaceInteractionsChanged
+	// is set when the page carries any, and on the initial page.
+	SurfaceInteractions        []*SurfaceInteraction `json:"surfaceInteractions"`
+	RunsChanged                bool                  `json:"runsChanged"`
+	ActivityChanged            bool                  `json:"activityChanged"`
+	PresenceChanged            bool                  `json:"presenceChanged"`
+	ApprovalsChanged           bool                  `json:"approvalsChanged"`
+	SkillSetupRequestsChanged  bool                  `json:"skillSetupRequestsChanged"`
+	CredentialRequestsChanged  bool                  `json:"credentialRequestsChanged"`
+	SurfaceInteractionsChanged bool                  `json:"surfaceInteractionsChanged"`
+	Cursor                     string                `json:"cursor"`
+	HasChanges                 bool                  `json:"hasChanges"`
+	HasMore                    bool                  `json:"hasMore"`
 }
 
 type conversationChangeCursor struct {
@@ -69,6 +74,7 @@ type conversationChangeCursor struct {
 	ConversationRevision int64  `json:"conversationRevision"`
 	MessageSequence      int64  `json:"messageSequence"`
 	RoundRevision        int64  `json:"roundRevision"`
+	InteractionSequence  int64  `json:"interactionSequence,omitempty"`
 	RunDigest            string `json:"runDigest,omitempty"`
 	ActivityDigest       string `json:"activityDigest,omitempty"`
 	PresenceDigest       string `json:"presenceDigest,omitempty"`
@@ -146,6 +152,23 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		nextMessageSequence = rawMessages[len(rawMessages)-1].Sequence
 	}
 	messageHasMore := len(rawMessages) == limit && nextMessageSequence < conversation.LastSequence
+
+	// Read one past the page to learn whether more interactions remain.
+	interactions, err := s.conversations.store.ListSurfaceInteractions(ctx, SurfaceInteractionFilter{
+		Scope: req.Scope, ConversationID: conversationID, AfterSequence: cursor.InteractionSequence, Limit: limit + 1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	interactionHasMore := len(interactions) > limit
+	if interactionHasMore {
+		interactions = interactions[:limit]
+	}
+	nextInteractionSequence := cursor.InteractionSequence
+	if len(interactions) > 0 {
+		nextInteractionSequence = interactions[len(interactions)-1].Sequence
+	}
+	interactionsChanged := initial || len(interactions) > 0
 
 	rounds, roundHasMore, nextRoundRevision, err := s.listRoundsAfter(ctx, req.Scope, conversationID, cursor.RoundRevision, limit)
 	if err != nil {
@@ -243,22 +266,23 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	next := conversationChangeCursor{
 		Version: conversationChangeCursorVersion, ConversationID: conversationID,
 		ConversationRevision: conversation.Revision, MessageSequence: nextMessageSequence,
-		RoundRevision: nextRoundRevision, RunDigest: runDigest, ActivityDigest: activityDigest, PresenceDigest: presenceDigest,
+		RoundRevision: nextRoundRevision, InteractionSequence: nextInteractionSequence, RunDigest: runDigest, ActivityDigest: activityDigest, PresenceDigest: presenceDigest,
 		ApprovalDigest: approvalDigest, SkillSetupDigest: skillSetupDigest, CredentialDigest: credentialDigest,
 	}
 	encodedCursor, err := encodeConversationChangeCursor(next)
 	if err != nil {
 		return nil, err
 	}
-	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 ||
+	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 || len(interactions) > 0 ||
 		runsChanged || activityChanged || presenceChanged || approvalsChanged || skillSetupsChanged || credentialsChanged
 	return &ConversationChangeSet{
 		Conversation: cloneConversation(conversation), Messages: cloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
 		Runs: cloneAgentRuns(projectedRuns), Activity: cloneConversationActivity(projectedActivity), Presence: cloneConversationPresences(projectedPresence),
 		Approvals: approvals, SkillSetupRequests: skillSetups, CredentialRequests: credentialRequests,
+		SurfaceInteractions: interactions, SurfaceInteractionsChanged: interactionsChanged,
 		RunsChanged: runsChanged, ActivityChanged: activityChanged, PresenceChanged: presenceChanged,
 		ApprovalsChanged: approvalsChanged, SkillSetupRequestsChanged: skillSetupsChanged, CredentialRequestsChanged: credentialsChanged,
-		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore,
+		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore || interactionHasMore,
 	}, nil
 }
 
@@ -851,7 +875,7 @@ func decodeConversationChangeCursor(value, conversationID string) (conversationC
 	}
 	var cursor conversationChangeCursor
 	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.Version != conversationChangeCursorVersion ||
-		cursor.ConversationID != conversationID || cursor.ConversationRevision < 0 || cursor.MessageSequence < 0 || cursor.RoundRevision < 0 {
+		cursor.ConversationID != conversationID || cursor.ConversationRevision < 0 || cursor.MessageSequence < 0 || cursor.RoundRevision < 0 || cursor.InteractionSequence < 0 {
 		return conversationChangeCursor{}, false, fmt.Errorf("%w: invalid conversation change cursor", ErrInvalidConversation)
 	}
 	return cursor, false, nil
