@@ -193,6 +193,8 @@ func terminalRunFailureReply(run *AgentRun) string {
 				return "I couldn't finish this request because the platform's browser connection was rejected. I stopped this attempt. Try again later."
 			case "browser_proxy_unavailable":
 				return "I couldn't finish this request because the platform's browser connection was unavailable. I stopped this attempt. Try again later."
+			case "file_too_large":
+				return fileTooLargeReply(failure.Details())
 			}
 		}
 	}
@@ -212,4 +214,14 @@ func terminalFailureCounterIsOne(value interface{}) bool {
 	default:
 		return false
 	}
+}
+
+// fileTooLargeReply says how large the file was and how large a file an
+// action can be given, from the failure's bounded sizes.
+func fileTooLargeReply(details map[string]string) string {
+	size, limit := details["fileMegabytes"], details["limitMegabytes"]
+	if size == "" || limit == "" {
+		return "I couldn't finish this because the file is too large to hand to another app. Make it smaller, then ask me again."
+	}
+	return "I couldn't finish this because the file is " + size + " MB, and I can hand files of up to " + limit + " MB to another app. Make it smaller, for example by compressing it or splitting it into parts, then ask me again."
 }

@@ -9,7 +9,7 @@ import (
 )
 
 func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
-	for _, code := range []string{"source_rate_limited", "source_reads_failed", "browser_proxy_authentication_failed", "browser_proxy_unavailable", "stale rate limit", "raw error"} {
+	for _, code := range []string{"source_rate_limited", "source_reads_failed", "browser_proxy_authentication_failed", "browser_proxy_unavailable", "file_too_large", "stale rate limit", "raw error"} {
 		t.Run(code, func(t *testing.T) {
 			eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
 				store := terminalReportingContractFixture(t, fixture)
@@ -20,6 +20,9 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 					kind = "source_rate_limited"
 				}
 				details := map[string]string{"url": "PRIVATE_URL", "token": "PRIVATE_TOKEN"}
+				if code == "file_too_large" {
+					details["fileMegabytes"], details["limitMegabytes"] = "140", "100"
+				}
 				if code == "source_reads_failed" {
 					details["failures"] = `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_http_error","httpStatus":503}]`
 				}
@@ -64,6 +67,10 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 				} else if strings.HasPrefix(code, "browser_proxy") {
 					if !strings.Contains(message.Content, "platform's browser connection") || strings.Contains(message.Content, "HTTP 429") {
 						t.Fatalf("proxy cause misattributed: %q", message.Content)
+					}
+				} else if code == "file_too_large" {
+					if !strings.Contains(message.Content, "the file is 140 MB") || !strings.Contains(message.Content, "up to 100 MB") {
+						t.Fatalf("file size limit hidden: %q", message.Content)
 					}
 				} else if message.Content != TerminalFailureReply("action_failed") {
 					t.Fatalf("stale or raw evidence attributed: %q", message.Content)
