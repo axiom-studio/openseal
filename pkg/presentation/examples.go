@@ -28,7 +28,6 @@ func text(id, value string) Component { return Component{ID: id, Type: "text", T
 // VisualExamples returns the worked examples, visual answers first, then
 // replies that should stay text.
 func VisualExamples() []Example {
-	years := []string{"0", "5", "10", "15", "20"}
 	gbp := func(value float64, per string) *Price {
 		return &Price{Amount: Amount{Value: value, Format: StatCurrency, Currency: "GBP"}, Per: per}
 	}
@@ -50,19 +49,6 @@ func VisualExamples() []Example {
 			}}},
 		),
 	}, {
-		Name: "compound-interest", Prompt: "How does compound interest work?",
-		Lead: "Your interest earns interest too, so growth speeds up over time.",
-		Visual: visual("£1,000 at 5% a year",
-			Component{ID: "growth", Type: "chart", Summary: "£1,000 grows to about £2,653 in 20 years at 5%, faster each year.", Chart: &Chart{
-				Kind: "line", XLabel: "Years", YLabel: "Balance", Format: StatCurrency, Currency: "GBP",
-				Series:    []ChartSeries{series("Compound", years, 1000, 1276, 1629, 2079, 2653), series("Simple", years, 1000, 1250, 1500, 1750, 2000)},
-				Highlight: &ChartHighlight{Series: "Compound"},
-			}},
-			Component{ID: "result", Type: "stat_row", Summary: "After 20 years compounding earns £653 more than simple interest.", StatRow: &StatRow{Stats: []Stat{
-				{Label: "After 20 years", Value: 2653, Format: StatCurrency, Currency: "GBP"}, {Label: "Extra from compounding", Value: 653, Format: StatCurrency, Currency: "GBP", Trend: "up", GoodDirection: "up"},
-			}}},
-		),
-	}, {
 		Name: "money", Prompt: "Where is my money going?",
 		Lead: "Rent and food are most of it, and three streaming services add up.",
 		Visual: visual("Last month's spending",
@@ -81,6 +67,14 @@ func VisualExamples() []Example {
 		Name: "cells", Prompt: "Explain how cells make energy",
 		Lead: "Cells turn glucose into ATP, mostly inside the mitochondria.",
 		Visual: visual("How cells make energy",
+			Component{ID: "parts", Type: "labeled_image", Summary: "The cell illustration with the cytoplasm, mitochondria and nucleus marked.", LabeledImage: &LabeledImage{
+				Image: ImageRef{ArtifactID: "img-cell", Version: 1},
+				Markers: []ImageMarker{
+					{ID: "cytoplasm", X: 0.25, Y: 0.6, Label: "Cytoplasm", Detail: "Where glucose is first split (glycolysis)."},
+					{ID: "mitochondria", X: 0.68, Y: 0.32, Label: "Mitochondria", Detail: "The cell's power stations, where most ATP is made."},
+					{ID: "nucleus", X: 0.48, Y: 0.5, Label: "Nucleus", Detail: "Holds the DNA; it makes no energy."},
+				},
+			}},
 			Component{ID: "how", Type: "steps", Summary: "Glucose is split, broken down further, then turned into most of the ATP in the mitochondria.", Steps: &Steps{Items: []Step{
 				{ID: "glycolysis", Title: "Glycolysis", Detail: "Glucose splits into two pyruvate, making **2 ATP**.", Icon: "flask-conical"},
 				{ID: "krebs", Title: "Krebs cycle", Detail: "Pyruvate is broken down in the mitochondria, making **2 ATP**.", Icon: "refresh-cw"},
@@ -108,20 +102,6 @@ func VisualExamples() []Example {
 			}}},
 		),
 	}, {
-		Name: "weekend", Prompt: "Plan a long weekend somewhere with a beach, four of us",
-		Lead: "Three beach towns within a few hours, from cheapest to closest.",
-		Visual: visual("Beach weekend options",
-			Component{ID: "options", Type: "comparison", Summary: "Tenby is cheapest at £540, Camber closest at 2 hours, Whitby in between.", Comparison: &Comparison{
-				Attributes: []ComparisonAttribute{{Key: "drive", Label: "Drive"}, {Key: "beach", Label: "Beach"}},
-				Options: []ComparisonOption{
-					{ID: "tenby", Name: "Tenby", Badge: "Cheapest", Price: gbp(540, "once"), Values: map[string]string{"drive": "4 hours", "beach": "Sandy, sheltered"}},
-					{ID: "whitby", Name: "Whitby", Price: gbp(620, "once"), Values: map[string]string{"drive": "3 hours", "beach": "Sandy, with an abbey above"}},
-					{ID: "camber", Name: "Camber", Badge: "Closest", Price: gbp(710, "once"), Values: map[string]string{"drive": "2 hours", "beach": "Big dunes"}},
-				},
-				Pickable: true,
-			}},
-		),
-	}, {
 		Name: "french-revolution", Prompt: "What happened in the French Revolution?",
 		Lead: "France overthrew its king and tried to rebuild itself between 1789 and 1799.",
 		Visual: visual("The French Revolution",
@@ -134,6 +114,43 @@ func VisualExamples() []Example {
 				}}}}},
 			}},
 			Component{ID: "why", Type: "callout", Summary: "Why the revolution still matters.", Callout: &Callout{Icon: "lightbulb", Body: "It spread the idea that power comes from the people, not a king."}},
+		),
+	}, {
+		Name: "fractions", Prompt: "Is 3/4 bigger than 2/3?",
+		Lead: "Yes. Cut both into twelfths and 3/4 is 9/12 while 2/3 is only 8/12.",
+		Visual: visual("3/4 against 2/3",
+			Component{ID: "bars", Type: "quantity_visual", Summary: "Bars for 3/4 and 2/3, then both cut into twelfths: 9/12 is more than 8/12.", QuantityVisual: &QuantityVisual{
+				Kind:           "fraction_bars",
+				QuantityValues: QuantityValues{Fractions: []Fraction{{Numerator: 3, Denominator: 4, Label: "3/4"}, {Numerator: 2, Denominator: 3, Label: "2/3"}}},
+				Steps: []QuantityStep{{Label: "Cut both into twelfths", QuantityValues: QuantityValues{Fractions: []Fraction{
+					{Numerator: 9, Denominator: 12, Label: "9/12"}, {Numerator: 8, Denominator: 12, Label: "8/12"},
+				}}}},
+			}},
+		),
+	}, {
+		Name: "french-words", Prompt: "Teach me the French words for food",
+		Lead: "Here are six everyday food words. Flip each card, mark how you did, and tap Done when you're through.",
+		Visual: visual("French food words",
+			Component{ID: "deck", Type: "flashcards", Title: "French food words", Summary: "Six French words for everyday food.", Flashcards: &Flashcards{Cards: []Flashcard{
+				{ID: "pain", Front: "le pain", Back: "bread"}, {ID: "fromage", Front: "le fromage", Back: "cheese"},
+				{ID: "pomme", Front: "la pomme", Back: "apple"}, {ID: "poulet", Front: "le poulet", Back: "chicken"},
+				{ID: "eau", Front: "l'eau", Back: "water"}, {ID: "oeuf", Front: "l'œuf", Back: "egg"},
+			}, Shuffle: true}},
+		),
+	}, {
+		Name: "email-tone", Prompt: "Fix the tone of this email: \"Sam, I still haven't got the report. I need it by Friday.\"",
+		Lead: "Here's a warmer version that still asks for the report by Friday.",
+		Visual: visual("A warmer email",
+			Component{ID: "changes", Type: "before_after", Summary: "The new version greets Sam, asks rather than demands, and says thanks.", BeforeAfter: &BeforeAfter{
+				Mode:   "diff",
+				Before: BeforeAfterSide{Text: "Sam, I still haven't got the report. I need it by Friday."},
+				After:  BeforeAfterSide{Text: "Hi Sam, hope your week's going well! Could you send the report over by Friday? Thanks so much."},
+				Labels: &BeforeAfterLabels{Before: "Yours", After: "Warmer"},
+			}},
+			Component{ID: "email", Type: "draft", Summary: "The warmer email to Sam, ready to copy or change.", Draft: &Draft{
+				Channel: "email", To: "Sam", Subject: "The report",
+				Body: "Hi Sam,\n\nHope your week's going well! Could you send the report over by Friday?\n\nThanks so much,\nAlex",
+			}},
 		),
 	}, {
 		Name: "text-feelings", Prompt: "I'm really nervous about my exam tomorrow",

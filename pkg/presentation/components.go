@@ -26,6 +26,8 @@ type typeSpec struct {
 	// children reports whether Component.Children is allowed.
 	children bool
 	summary  summaryRule
+	// bindings lists the binding kinds the type accepts; nil accepts any.
+	bindings []BindingKind
 	validate func(v *validator, c Component, path string) error
 	// sentence and example feed the model schema.
 	sentence string
@@ -49,8 +51,8 @@ var catalogue = map[string]typeSpec{
 		example: `{"id":"c1","type":"carousel","children":[…]}`},
 	"chart": {payload: "chart", summary: summaryRequired, validate: validateChart, sentence: "Trend or distribution of numbers; pie and donut take one series of at most 7 slices; stacked_bar and grouped_bar need 2+ series with the same labels; scatter labels are x numbers.",
 		example: `{"id":"spend","type":"chart","summary":"Spending rose each month.","chart":{"kind":"bar","xLabel":"Month","yLabel":"Spend","format":"currency","currency":"GBP","series":[{"name":"Spend","points":[{"label":"Jan","value":120},{"label":"Feb","value":140}]}],"highlight":{"x":"Feb"}}}`},
-	"diagram": {payload: "diagram", summary: summaryRequired, validate: validateDiagram, sentence: "Boxes and arrows positioned with x/y.",
-		example: `{"id":"flow","type":"diagram","summary":"Water evaporates, condenses and falls as rain.","diagram":{"nodes":[{"id":"a","label":"Evaporation","x":0,"y":0},{"id":"b","label":"Rain","x":200,"y":0}],"edges":[{"from":"a","to":"b"}]}}`},
+	"diagram": {payload: "diagram", summary: summaryRequired, validate: validateDiagram, sentence: "How 2-30 ideas connect; pick a layout (flow, cycle, hierarchy with parent -> child edges, mindmap with the first node as centre, network) and the app places the nodes; tap a node for its detail.",
+		example: `{"id":"water","type":"diagram","summary":"Water evaporates, condenses, falls as rain and collects again.","diagram":{"layout":"cycle","nodes":[{"id":"evaporate","label":"Evaporation","icon":"sun"},{"id":"condense","label":"Condensation","icon":"cloud"},{"id":"rain","label":"Rain","icon":"droplet"}]}}`},
 	"form": {payload: "form", summary: summaryRequired, validate: validateForm, sentence: "Structured input the user submits once.",
 		example: `{"id":"prefs","type":"form","summary":"Asks for budget and dates.","form":{"fields":[{"id":"budget","type":"number","label":"Budget","min":0}],"submitLabel":"Send"}}`},
 	"table": {payload: "table", summary: summaryRequired, validate: validateTable, sentence: "Exact values in rows and columns; each row maps column keys to cells typed by the column kind.",
@@ -75,6 +77,26 @@ var catalogue = map[string]typeSpec{
 		example: `{"id":"pack","type":"checklist","title":"Packing list","summary":"Eight things to pack.","checklist":{"items":[{"id":"passport","label":"Passport","group":"Documents"},{"id":"charger","label":"Phone charger"}]}}`},
 	"quiz": {payload: "quiz", summary: summaryRequired, validate: validateQuiz, sentence: "One question with 2-6 options; answerKey stays hidden until they answer, then you hear whether they were right.",
 		example: `{"id":"check","type":"quiz","summary":"Where most ATP is made.","quiz":{"question":"Where is most ATP made?","options":[{"id":"nucleus","label":"Nucleus"},{"id":"mito","label":"Mitochondria"}],"answerKey":{"correct":["mito"],"explanation":"The electron chain in the **mitochondria** makes about 34 ATP."}}}`},
+	"labeled_image": {payload: "labeled_image", summary: summaryRequired, validate: validateLabeledImage, sentence: "Numbered markers on an image already in this chat; x and y are 0-1 from the top-left; tap a marker for its detail.",
+		example: `{"id":"parts","type":"labeled_image","summary":"The nucleus and mitochondria of an animal cell.","labeled_image":{"image":{"artifactId":"img-1","version":1},"markers":[{"id":"nucleus","x":0.48,"y":0.5,"label":"Nucleus","detail":"Holds the DNA."},{"id":"mito","x":0.7,"y":0.3,"label":"Mitochondria"}]}}`},
+	"quantity_visual": {payload: "quantity_visual", summary: summaryRequired, validate: validateQuantityVisual, sentence: "Numbers made tangible for learners: fraction_bars (fractions), number_line (min, max, ticks, points, ranges), unit_blocks (groups), percent_waffle (parts totalling at most 100) or scale_compare (items); steps (at most 4) let people step through a change, each with the same fields.",
+		example: `{"id":"compare","type":"quantity_visual","summary":"3/4 is bigger than 2/3: 9/12 against 8/12.","quantity_visual":{"kind":"fraction_bars","fractions":[{"numerator":3,"denominator":4},{"numerator":2,"denominator":3}],"steps":[{"label":"Cut both into twelfths","fractions":[{"numerator":9,"denominator":12},{"numerator":8,"denominator":12}]}]}}`},
+	"math": {payload: "math", summary: summaryRequired, validate: validateMath, sentence: "A worked solution, one LaTeX line (no $ delimiters) per step with an optional note; reveal stepwise to show one step at a time.",
+		example: `{"id":"solve","type":"math","summary":"Solving 2x + 3 = 11 gives x = 4.","math":{"steps":[{"latex":"2x + 3 = 11"},{"latex":"2x = 8","note":"Take 3 from both sides"},{"latex":"x = 4","note":"Divide by 2"}],"reveal":"stepwise"}}`},
+	"definition": {payload: "definition", summary: summaryRequired, validate: validateDefinition, sentence: "One term made simple, with an optional example and image.",
+		example: `{"id":"term","type":"definition","summary":"Photosynthesis is how plants make food from light.","definition":{"term":"Photosynthesis","partOfSpeech":"noun","meaning":"How plants use sunlight, water and carbon dioxide to make sugar and oxygen.","example":"Leaves are green because of the chlorophyll photosynthesis uses."}}`},
+	"flashcards": {payload: "flashcards", summary: summaryRequired, validate: validateFlashcards, sentence: "A practice deck of 2-30 cards; people flip each, mark it Got it or Again, and you hear their tally when they finish.",
+		example: `{"id":"deck","type":"flashcards","title":"French food words","summary":"Five French words for food.","flashcards":{"cards":[{"id":"pain","front":"le pain","back":"bread"},{"id":"fromage","front":"le fromage","back":"cheese"}]}}`},
+	"before_after": {payload: "before_after", summary: summaryRequired, validate: validateBeforeAfter, sentence: "A change shown side by side: two texts (diff highlights changed words, or split) or two images already in this chat (slider or split).",
+		example: `{"id":"tone","type":"before_after","summary":"The reply is warmer and asks one clear question.","before_after":{"mode":"diff","before":{"text":"Send me the report."},"after":{"text":"Could you send me the report when you have a moment?"},"labels":{"before":"Yours","after":"Suggested"}}}`},
+	"draft": {payload: "draft", summary: summaryRequired, bindings: []BindingKind{BindingApproval}, validate: validateDraft, sentence: "A message you wrote for them (email, message, post or note); they can say it looks good, ask for it shorter, or edit it; bind it to the approval of a send you proposed so its buttons send or cancel.",
+		example: `{"id":"reply","type":"draft","summary":"A short, friendly reply to Sam.","draft":{"channel":"email","to":"Sam","subject":"Re: Friday","body":"Hi Sam,\n\nFriday works for me. See you at 10.\n\nAlex"}}`},
+	"recipe": {payload: "recipe", summary: summaryRequired, validate: validateRecipe, sentence: "A dish with ingredients (qty for the servings given; people rescale it) and steps; checkable lets people tick ingredients off together.",
+		example: `{"id":"pancakes","type":"recipe","title":"Pancakes","summary":"Pancakes for 4 in 25 minutes.","recipe":{"servings":4,"time":{"prep":10,"cook":15},"ingredients":[{"id":"flour","qty":100,"unit":"g","name":"plain flour"},{"id":"eggs","qty":2,"name":"eggs"}],"steps":[{"id":"mix","text":"Whisk the flour, eggs and milk into a smooth batter."},{"id":"fry","text":"Fry a ladle at a time for a minute each side."}]}}`},
+	"item": {payload: "item", summary: summaryRequired, validate: validateItem, sentence: "One product, option or listing with price, rating and up to 4 facts.",
+		example: `{"id":"kettle","type":"item","summary":"A quiet 1.7 litre kettle for £35, rated 4.6.","item":{"name":"Quiet Boil kettle","price":{"value":35,"format":"currency","currency":"GBP"},"rating":{"value":4.6,"count":1200},"facts":["1.7 litres","Boils in 3 minutes"],"badge":"Quietest"}}`},
+	"analogy": {payload: "analogy", summary: summaryRequired, validate: validateAnalogy, sentence: "Something new explained as something familiar, with 1-5 matching pairs.",
+		example: `{"id":"like","type":"analogy","summary":"A cell works like a factory.","analogy":{"from":{"label":"Cell","icon":"dna"},"to":{"label":"Factory","icon":"building"},"mapping":[{"a":"Nucleus","b":"Head office"},{"a":"Mitochondria","b":"Power station"}]}}`},
 	"actions": {payload: "actions", validate: validateActions, sentence: "Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item.",
 		example: `{"id":"next","type":"actions","actions":[{"id":"yes","label":"Switch plan","kind":"respond","value":"Switch me to Plus"}]}`},
 }
@@ -319,62 +341,6 @@ func validateChart(_ *validator, c Component, _ string) error {
 		}
 		if highlight.X != "" && !labels[highlight.X] {
 			return fmt.Errorf("chart.highlight.x %q is not the label of a point", highlight.X)
-		}
-	}
-	return nil
-}
-
-// Diagram
-
-type Diagram struct {
-	Nodes []DiagramNode `json:"nodes"`
-	Edges []DiagramEdge `json:"edges,omitempty"`
-}
-
-type DiagramNode struct {
-	ID    string  `json:"id"`
-	Label string  `json:"label"`
-	X     float64 `json:"x"`
-	Y     float64 `json:"y"`
-	Kind  string  `json:"kind,omitempty"`
-}
-
-type DiagramEdge struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	Label string `json:"label,omitempty"`
-}
-
-func validateDiagram(_ *validator, c Component, _ string) error {
-	d := c.Diagram
-	if d == nil {
-		return errors.New("diagram payload is required")
-	}
-	if len(d.Nodes) == 0 || len(d.Nodes) > 100 {
-		return fmt.Errorf("diagram.nodes needs 1-100 nodes (got %d)", len(d.Nodes))
-	}
-	if len(d.Edges) > 200 {
-		return fmt.Errorf("diagram.edges allows at most 200 edges (got %d)", len(d.Edges))
-	}
-	nodes := map[string]bool{}
-	for index, node := range d.Nodes {
-		if !opaqueID.MatchString(node.ID) || nodes[node.ID] {
-			return fmt.Errorf("diagram.nodes[%d].id %q must be a unique id matching %s", index, node.ID, opaqueIDPattern)
-		}
-		nodes[node.ID] = true
-		if err := required(fmt.Sprintf("diagram.nodes[%d].label", index), node.Label, 240); err != nil {
-			return err
-		}
-		if err := optional(fmt.Sprintf("diagram.nodes[%d].kind", index), node.Kind, 80); err != nil {
-			return err
-		}
-	}
-	for index, edge := range d.Edges {
-		if !nodes[edge.From] || !nodes[edge.To] {
-			return fmt.Errorf("diagram.edges[%d] references a missing node (%q -> %q)", index, edge.From, edge.To)
-		}
-		if err := optional(fmt.Sprintf("diagram.edges[%d].label", index), edge.Label, 240); err != nil {
-			return err
 		}
 	}
 	return nil

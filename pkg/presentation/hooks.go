@@ -39,6 +39,13 @@ var EntityCommands = map[BindingKind][]string{
 // the entity exists, is in the publishing conversation's workspace, and is
 // visible from that conversation; otherwise an error the agent can act on,
 // e.g. "conversation_task/X is not part of this conversation".
+//
+// An approval binding (on a draft, or on approval actions) must name an
+// approval that exists, belongs to the publishing conversation, and is for
+// an action proposed by the publishing agent; otherwise the resolver
+// rejects it, e.g. "approval/X was not proposed by you in this chat". A
+// draft accepts only approval bindings; Validate rejects other kinds before
+// calling the resolver.
 type BindingResolver interface {
 	ResolveBinding(ctx context.Context, binding Binding) error
 }
@@ -67,6 +74,23 @@ func (v *validator) binding(binding Binding) error {
 		return fmt.Errorf("%s/%s: %w", binding.Kind, binding.ID, err)
 	}
 	return nil
+}
+
+func containsBindingKind(kinds []BindingKind, kind BindingKind) bool {
+	for _, candidate := range kinds {
+		if kind == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func joinBindingKinds(kinds []BindingKind) string {
+	names := make([]string, len(kinds))
+	for index, kind := range kinds {
+		names[index] = string(kind)
+	}
+	return strings.Join(names, ", ")
 }
 
 func validBindingKind(kind BindingKind) bool {

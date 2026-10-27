@@ -107,8 +107,8 @@ func TestValidate(t *testing.T) {
 		{"chart no series", one(Component{ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "bar"}}), ValidateOptions{}, "chart.series needs"},
 		{"chart point label", one(Component{ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "bar", Series: []ChartSeries{{Name: "s", Points: []ChartPoint{{Value: 1}}}}}}), ValidateOptions{}, "chart.series[0].points[0].label"},
 		// diagram
-		{"diagram", one(Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Nodes: []DiagramNode{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}, Edges: []DiagramEdge{{From: "a", To: "b"}}}}), ValidateOptions{}, ""},
-		{"diagram bad edge", one(Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Nodes: []DiagramNode{{ID: "a", Label: "A"}}, Edges: []DiagramEdge{{From: "a", To: "missing"}}}}), ValidateOptions{}, "diagram.edges[0] references a missing node"},
+		{"diagram", one(Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Layout: "flow", Nodes: []DiagramNode{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}, Edges: []DiagramEdge{{From: "a", To: "b"}}}}), ValidateOptions{}, ""},
+		{"diagram bad edge", one(Component{ID: "d", Type: "diagram", Summary: "x", Diagram: &Diagram{Layout: "flow", Nodes: []DiagramNode{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}, Edges: []DiagramEdge{{From: "a", To: "missing"}}}}), ValidateOptions{}, `diagram.edges[0].to "missing" is not the id of a node`},
 		// form
 		{"form", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "n", Type: "number", Label: "N", Min: float(0), Max: float(5)}}}}), ValidateOptions{}, ""},
 		{"form select without options", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "s", Type: "select", Label: "S"}}}}), ValidateOptions{}, "needs 1-100 options"},
@@ -302,7 +302,12 @@ func TestInteraction(t *testing.T) {
 }
 
 func TestDecodeRoundTripAndFindNested(t *testing.T) {
-	surface := VisualExamples()[6].Visual.Surface(StateReady)
+	var surface Surface
+	for _, example := range VisualExamples() {
+		if example.Name == "french-revolution" {
+			surface = example.Visual.Surface(StateReady)
+		}
+	}
 	raw, err := Encode(surface)
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +333,7 @@ func TestVisualExamplesAreValidAndClean(t *testing.T) {
 		}
 		visuals++
 		surface := example.Visual.Surface(StateReady)
-		warnings, err := Validate(context.Background(), surface, ValidateOptions{})
+		warnings, err := Validate(context.Background(), surface, images("img-cell"))
 		if err != nil {
 			t.Fatalf("%s: %v", example.Name, err)
 		}
@@ -344,12 +349,13 @@ func TestVisualExamplesAreValidAndClean(t *testing.T) {
 func TestVisualRubricOnlyNamesCatalogueTypes(t *testing.T) {
 	rubric := VisualRubric()
 	for _, name := range []string{"Most replies are just text", "Stay with text for", "`stat_row`", "`chart`", "`diagram`", "`table`", "Never restate",
-		"`comparison`", "`steps`", "`timeline`", "`quiz`", "`checklist`", "`callout`", "`choices`", "`image`, `gallery`"} {
+		"`comparison`", "`steps`", "`timeline`", "`quiz`", "`checklist`", "`callout`", "`choices`", "`image`, `gallery`",
+		"`labeled_image`", "`quantity_visual`, `math`", "`quiz`, `flashcards`", "`definition`, `analogy`", "`recipe`", "`item`", "`before_after`, `draft`"} {
 		if !strings.Contains(rubric, name) {
 			t.Fatalf("rubric lacks %s:\n%s", name, rubric)
 		}
 	}
-	for _, missing := range []string{"explorer", "poll", "agenda", "flashcards", "labeled_image", "breakdown"} {
+	for _, missing := range []string{"explorer", "poll", "agenda", "breakdown", "itinerary"} {
 		if strings.Contains(rubric, missing) {
 			t.Fatalf("rubric names %s, which is not in the catalogue yet", missing)
 		}

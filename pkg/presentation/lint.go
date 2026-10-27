@@ -1,6 +1,7 @@
 package presentation
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
@@ -19,6 +20,16 @@ const (
 	LintTableReadsAsComparison  = "table_reads_as_comparison"
 	LintQuizWithoutExplanation  = "quiz_without_explanation"
 	LintTimelineLooksUnordered  = "timeline_unordered"
+	LintDiagramWithoutEdges     = "diagram_without_edges"
+	LintMindmapTooDeep          = "mindmap_too_deep"
+	LintLabeledImageOneMarker   = "labeled_image_one_marker"
+	LintFlashcardFrontIsBack    = "flashcard_front_is_back"
+	LintMathSingleStep          = "math_single_step"
+	LintDraftLongMessage        = "draft_long_message"
+	LintRecipeThinSteps         = "recipe_thin_steps"
+	maxMindmapDepth             = 3
+	longMessageRunes            = 1500
+	thinRecipeStepRunes         = 10
 	longTableTextRunes          = 40
 	minimumLongTextTableColumns = 3
 )
@@ -83,10 +94,65 @@ func Lint(surface Surface) []Warning {
 			if c.Timeline != nil && timelineLooksUnordered(c.Timeline.Events) {
 				add(LintTimelineLooksUnordered, path+".timeline", c.ID, "events look out of order; list them in time order or give each a date")
 			}
+		case "diagram":
+			if c.Diagram == nil {
+				break
+			}
+			if len(c.Diagram.Edges) == 0 && c.Diagram.Layout != "cycle" {
+				add(LintDiagramWithoutEdges, path+".diagram.edges", c.ID, "a diagram without edges shows no connections; add edges or use a list")
+			}
+			if c.Diagram.Layout == "mindmap" {
+				deepest := 0
+				for _, depth := range diagramDepths(c.Diagram) {
+					deepest = max(deepest, depth)
+				}
+				if deepest > maxMindmapDepth {
+					add(LintMindmapTooDeep, path+".diagram", c.ID, "a mindmap more than 3 levels deep is hard to read; keep it to 3 or use a hierarchy")
+				}
+			}
+		case "labeled_image":
+			if c.LabeledImage != nil && len(c.LabeledImage.Markers) == 1 {
+				add(LintLabeledImageOneMarker, path+".labeled_image.markers", c.ID, "one marker reads better as an image with a caption")
+			}
+		case "flashcards":
+			if c.Flashcards == nil {
+				break
+			}
+			for index, card := range c.Flashcards.Cards {
+				if normalized(card.Front) == normalized(card.Back) {
+					add(LintFlashcardFrontIsBack, fmt.Sprintf("%s.flashcards.cards[%d]", path, index), c.ID, "the back repeats the front; put the answer on the back")
+					break
+				}
+			}
+		case "math":
+			if c.Math != nil && len(c.Math.Steps) == 1 && strings.TrimSpace(c.Math.Steps[0].Note) == "" {
+				add(LintMathSingleStep, path+".math.steps", c.ID, "one step without a note reads better in text; show the working or add a note")
+			}
+		case "draft":
+			if c.Draft != nil && c.Draft.Channel == "message" && len([]rune(strings.TrimSpace(c.Draft.Body))) > longMessageRunes {
+				add(LintDraftLongMessage, path+".draft.body", c.ID, "a message over 1,500 characters is long to read on a phone; shorten it or make it an email")
+			}
+		case "recipe":
+			if c.Recipe != nil && recipeStepsThin(c.Recipe.Steps) {
+				add(LintRecipeThinSteps, path+".recipe.steps", c.ID, "the steps are too short to cook from; say what to do in each")
+			}
 		}
 		return true
 	})
 	return warnings
+}
+
+// recipeStepsThin reports steps that are all under thinRecipeStepRunes.
+func recipeStepsThin(steps []RecipeStep) bool {
+	if len(steps) == 0 {
+		return false
+	}
+	for _, step := range steps {
+		if len([]rune(strings.TrimSpace(step.Text))) >= thinRecipeStepRunes {
+			return false
+		}
+	}
+	return true
 }
 
 // longTextColumns counts text columns holding a cell longer than

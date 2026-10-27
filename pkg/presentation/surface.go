@@ -81,6 +81,17 @@ type Component struct {
 	Choices    *Choices    `json:"choices,omitempty"`
 	Checklist  *Checklist  `json:"checklist,omitempty"`
 	Quiz       *Quiz       `json:"quiz,omitempty"`
+
+	LabeledImage   *LabeledImage   `json:"labeled_image,omitempty"`
+	QuantityVisual *QuantityVisual `json:"quantity_visual,omitempty"`
+	Math           *Math           `json:"math,omitempty"`
+	Definition     *Definition     `json:"definition,omitempty"`
+	Flashcards     *Flashcards     `json:"flashcards,omitempty"`
+	BeforeAfter    *BeforeAfter    `json:"before_after,omitempty"`
+	Draft          *Draft          `json:"draft,omitempty"`
+	Recipe         *Recipe         `json:"recipe,omitempty"`
+	Item           *Item           `json:"item,omitempty"`
+	Analogy        *Analogy        `json:"analogy,omitempty"`
 }
 
 type Tone string
@@ -301,6 +312,9 @@ func (v *validator) component(c Component, path string) error {
 		return fmt.Errorf("tone %q is not one of neutral, accent, positive, negative, warning, info", c.Tone)
 	}
 	if c.Binding != nil {
+		if spec.bindings != nil && !containsBindingKind(spec.bindings, c.Binding.Kind) {
+			return fmt.Errorf("binding.kind %q is not allowed on %s; use %s", c.Binding.Kind, c.Type, joinBindingKinds(spec.bindings))
+		}
 		if err := v.binding(*c.Binding); err != nil {
 			return fmt.Errorf("binding: %w", err)
 		}
@@ -321,6 +335,9 @@ func exactPayload(c Component) error {
 		"table": c.Table != nil, "stat_row": c.StatRow != nil, "grid": c.Grid != nil, "tabs": len(c.Tabs) > 0, "actions": len(c.Actions) > 0,
 		"callout": c.Callout != nil, "steps": c.Steps != nil, "comparison": c.Comparison != nil, "timeline": c.Timeline != nil,
 		"image": c.Image != nil, "gallery": c.Gallery != nil, "choices": c.Choices != nil, "checklist": c.Checklist != nil, "quiz": c.Quiz != nil,
+		"labeled_image": c.LabeledImage != nil, "quantity_visual": c.QuantityVisual != nil, "math": c.Math != nil, "definition": c.Definition != nil,
+		"flashcards": c.Flashcards != nil, "before_after": c.BeforeAfter != nil, "draft": c.Draft != nil, "recipe": c.Recipe != nil,
+		"item": c.Item != nil, "analogy": c.Analogy != nil,
 	}
 	allowed := catalogue[c.Type].payload
 	for key, set := range present {
