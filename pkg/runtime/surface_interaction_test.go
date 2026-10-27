@@ -510,3 +510,40 @@ func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
 		})
 	}
 }
+
+func TestConversationChangesShowOnlyTheViewersOwnOutcomes(t *testing.T) {
+	for _, fixture := range surfaceInteractionStores(t) {
+		t.Run(fixture.name, func(t *testing.T) {
+			store := fixture.store(t)
+			f := newSurfaceInteractionFixture(t, store)
+			changes, err := NewConversationChangeService(store.(ConversationStore), store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, actor := range []string{"ana", "ben"} {
+				if _, _, err := f.record(t, RecordSurfaceInteractionRequest{SurfaceID: "cells", ComponentID: "quiz", Actor: surfaceInteractionUser(actor),
+					Values: json.RawMessage(`{"selected":["b"]}`), Outcome: json.RawMessage(`{"correct":true,"correctIds":["b"],"explanation":"Because."}`), IdempotencyKey: actor}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			viewer := ConversationViewer{Participant: surfaceInteractionUser("ana")}
+			set, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: &viewer})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(set.SurfaceInteractions) != 2 {
+				t.Fatalf("interactions = %v", surfaceInteractionKeys(set.SurfaceInteractions))
+			}
+			for _, interaction := range set.SurfaceInteractions {
+				own := interaction.ActorID == "ana"
+				if own != (len(interaction.Outcome) > 0) {
+					t.Fatalf("%s outcome = %s", interaction.ActorID, interaction.Outcome)
+				}
+			}
+			all, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID})
+			if err != nil || len(all.SurfaceInteractions) != 2 || len(all.SurfaceInteractions[1].Outcome) == 0 {
+				t.Fatalf("stored outcomes changed: %#v, %v", all, err)
+			}
+		})
+	}
+}

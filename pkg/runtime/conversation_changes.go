@@ -175,6 +175,7 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		if err != nil {
 			return nil, err
 		}
+		interactions = withoutOthersOutcomes(interactions, req.Viewer.Participant)
 	}
 	interactionsChanged := initial || len(interactions) > 0
 
@@ -292,6 +293,24 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		ApprovalsChanged: approvalsChanged, SkillSetupRequestsChanged: skillSetupsChanged, CredentialRequestsChanged: credentialsChanged,
 		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore || interactionHasMore,
 	}, nil
+}
+
+// withoutOthersOutcomes drops the server outcome (a quiz grade with its
+// correct options and explanation) from interactions another participant
+// made, so a viewer cannot learn a quiz's answer before answering it. The
+// viewer's own outcomes stay.
+func withoutOthersOutcomes(interactions []*SurfaceInteraction, viewer ConversationParticipant) []*SurfaceInteraction {
+	out := make([]*SurfaceInteraction, len(interactions))
+	for index, interaction := range interactions {
+		out[index] = interaction
+		if interaction == nil || len(interaction.Outcome) == 0 || (interaction.ActorType == viewer.Type && interaction.ActorID == viewer.ID) {
+			continue
+		}
+		redacted := *interaction
+		redacted.Outcome = nil
+		out[index] = &redacted
+	}
+	return out
 }
 
 // A child inherits its originating message's visibility, not its assigned
