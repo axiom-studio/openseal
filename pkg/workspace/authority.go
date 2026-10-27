@@ -29,10 +29,16 @@ type Authority struct {
 // ChatID is the Workspace ID of every chat's files.
 const ChatID = "chat"
 
-// ChatAuthority grants a turn full access to its chat's files.
+// ChatCommandSeconds bounds one command in a chat's sandbox.
+const ChatCommandSeconds = 600
+
+// ChatAuthority grants a turn full access to its chat's files and to running
+// commands on them in the chat's sandbox, which reaches the internet but not
+// the host's network. A host without a sandbox does not offer commands.
 func ChatAuthority(conversationID string) *Authority {
 	spec := DefaultSpec()
 	spec.ID, spec.DisplayName = ChatID, "Chat files"
+	spec.Policy.Commands = CommandPolicy{Enabled: true, Network: NetworkEgress, MaxDurationSeconds: ChatCommandSeconds, AllowedExecutables: []string{"bash"}}
 	return &Authority{Workspace: spec, ConversationID: strings.TrimSpace(conversationID)}
 }
 

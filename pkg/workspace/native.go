@@ -40,6 +40,7 @@ func Operations(authority *Authority) []Operation {
 			Operation{Name: OperationEditFile, Description: "Replace exact text in a file: oldText must match the file exactly, including whitespace, and appear once unless replaceAll is set. Read the file first.", InputSchema: editInput()},
 			Operation{Name: OperationDeleteFile, Description: "Delete a file, or a directory and everything in it.", InputSchema: pathOnlyInput()},
 			Operation{Name: OperationMoveFile, Description: "Move or rename a file or directory.", InputSchema: moveInput()},
+			Operation{Name: OperationRunCommand, Description: "Run a shell command in this chat's sandbox: a Linux machine with Python 3 (pandas, matplotlib, openpyxl, python-docx, python-pptx, weasyprint), Node.js and pandoc, with internet access. The chat's files are its working directory; files the command creates or changes are saved to the chat's files, except installed packages and caches (node_modules, .venv, __pycache__, .cache). Use it to convert, compute, chart, or check work.", InputSchema: shellInput()},
 		)
 	}
 	if authority.Workspace.Policy.Filesystem == AccessReadWrite {
@@ -148,4 +149,12 @@ func pathOnlyInput() map[string]interface{} {
 
 func moveInput() map[string]interface{} {
 	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "destination"}, "properties": map[string]interface{}{"path": relativePathProperty(), "destination": relativePathProperty()}}
+}
+
+func shellInput() map[string]interface{} {
+	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"command"}, "properties": map[string]interface{}{
+		"command":          map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 20000, "description": "A bash command, such as python3 make_chart.py or pandoc report.md -o docs/report.docx."},
+		"workingDirectory": relativePathProperty(),
+		"timeoutSeconds":   map[string]interface{}{"type": "integer", "minimum": 1, "maximum": ChatCommandSeconds, "default": 120},
+	}}
 }
