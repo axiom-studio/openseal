@@ -86,8 +86,14 @@ type SkillReferenceBindingRevision struct {
 	ExpectedRevision int64  `json:"expectedRevision"`
 }
 
+// SkillReferenceUpgradeFinding is one contract change a human approves before
+// the upgrade applies. Subject names the changed action or adapter; From and
+// To carry the old and new value when the change has a single one (a risk).
 type SkillReferenceUpgradeFinding struct {
 	Code    string `json:"code"`
+	Subject string `json:"subject,omitempty"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
 	Message string `json:"message"`
 }
 
@@ -112,8 +118,12 @@ type SkillReferenceUpgradePlan struct {
 	ConversationEndpoints []SkillReferenceConversationEndpointImpact `json:"conversationEndpoints,omitempty"`
 	CallbackRegistrations []SkillReferenceCallbackRegistrationImpact `json:"callbackRegistrations,omitempty"`
 	TeamAuthority         *SkillReferenceTeamAuthorityImpact         `json:"teamAuthority,omitempty"`
-	Findings              []SkillReferenceUpgradeFinding             `json:"findings,omitempty"`
-	ApprovalRequired      bool                                       `json:"approvalRequired"`
+	// RemovedActions are allowed actions of the moved bindings that the target
+	// version no longer defines. The upgrade drops them from every binding it
+	// moves; dropping a grant needs no approval.
+	RemovedActions   []string                       `json:"removedActions,omitempty"`
+	Findings         []SkillReferenceUpgradeFinding `json:"findings,omitempty"`
+	ApprovalRequired bool                           `json:"approvalRequired"`
 	// HostManaged carries the in-process request flag to Apply; never JSON.
 	HostManaged bool      `json:"-"`
 	Digest      string    `json:"digest"`
@@ -410,14 +420,22 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 	}
 	unionActions := make([]string, 0)
 	seenActions := map[string]bool{}
+	removedActions := make([]string, 0)
+	seenRemoved := map[string]bool{}
 	for _, member := range members {
 		candidateBinding := cloneUpgradeBinding(member)
 		candidateBinding.SkillVersion = target.Version
 		candidateBinding.SourceIdentity = targetSource
+		for _, action := range retainTargetActions(candidateBinding, target) {
+			if !seenRemoved[action] {
+				seenRemoved[action] = true
+				removedActions = append(removedActions, action)
+			}
+		}
 		if err := s.catalog.ValidateBindingCandidate(ctx, candidateBinding); err != nil {
 			return nil, fmt.Errorf("%w: target binding contract for %s: %v", ErrSkillReferenceUpgradeInvalid, member.ID, err)
 		}
-		for _, action := range member.AllowedActions {
+		for _, action := range candidateBinding.AllowedActions {
 			if !seenActions[action] {
 				seenActions[action] = true
 				unionActions = append(unionActions, action)
@@ -498,6 +516,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 			})
 		}
 	}
+	sort.Strings(removedActions)
 	sort.Slice(objectiveImpacts, func(i, j int) bool { return objectiveImpacts[i].ID < objectiveImpacts[j].ID })
 	sort.Slice(projectImpacts, func(i, j int) bool { return projectImpacts[i].ID < projectImpacts[j].ID })
 	sort.Slice(conversationImpacts, func(i, j int) bool { return conversationImpacts[i].ID < conversationImpacts[j].ID })
@@ -508,7 +527,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		findings = append(findings, compareUpgradeAdapterContracts(previous, target, member)...)
 	}
 	if current.SourceIdentity != targetSource {
-		findings = append(findings, SkillReferenceUpgradeFinding{Code: "source_identity_changed", Message: "Skill publisher identity changed"})
+		findings = append(findings, SkillReferenceUpgradeFinding{Code: "source_identity_changed", From: current.SourceIdentity, To: targetSource, Message: "Skill publisher identity changed"})
 	}
 	teamAuthority, err := s.planTeamSkillReferenceAuthority(ctx, req.Scope, req.DeploymentID, current, previous, target, req.HostManaged)
 	if err != nil {
@@ -520,7 +539,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		From:       SkillReferenceIdentity{ID: current.SkillID, Version: current.SkillVersion, SourceIdentity: current.SourceIdentity},
 		To:         SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
 		Objectives: objectiveImpacts, Projects: projectImpacts, ConversationEndpoints: conversationImpacts,
-		CallbackRegistrations: callbackImpacts, TeamAuthority: teamAuthority, Findings: findings,
+		CallbackRegistrations: callbackImpacts, TeamAuthority: teamAuthority, RemovedActions: removedActions, Findings: findings,
 		ApprovalRequired: len(findings) > 0, HostManaged: req.HostManaged, GeneratedAt: s.now().UTC(),
 	}
 	plan.Digest, err = skillReferenceUpgradeDigest(plan)
@@ -701,6 +720,7 @@ func bindingBeforeUpgrade(binding *skill.Binding, plan *SkillReferenceUpgradePla
 func upgradeBinding(binding *skill.Binding, plan *SkillReferenceUpgradePlan, expectedRevision int64, req ApplySkillReferenceUpgradeRequest, now time.Time) {
 	binding.SkillVersion = plan.To.Version
 	binding.SourceIdentity = plan.To.SourceIdentity
+	dropBindingActions(binding, plan.RemovedActions)
 	binding.Revision++
 	// Bindings created by an atomic workforce apply predate the management
 	// lifecycle until their first explicit mutation. Establish the lifecycle
@@ -719,6 +739,49 @@ func upgradeBinding(binding *skill.Binding, plan *SkillReferenceUpgradePlan, exp
 			ExpectedBindingRevision: expectedRevision, PlanDigest: plan.Digest,
 		},
 	})
+}
+
+// retainTargetActions drops from a binding every allowed action that the
+// target Skill version no longer defines, together with that action's argument
+// restrictions and bindings, and returns the dropped names. A removed action
+// cannot run on the target, so following the newest version simply stops
+// granting it instead of refusing the upgrade.
+func retainTargetActions(binding *skill.Binding, target *skill.Definition) []string {
+	removed := make([]string, 0)
+	for _, action := range binding.AllowedActions {
+		if _, ok := target.Actions[action]; !ok {
+			removed = append(removed, action)
+		}
+	}
+	dropBindingActions(binding, removed)
+	return removed
+}
+
+func dropBindingActions(binding *skill.Binding, actions []string) {
+	if len(actions) == 0 {
+		return
+	}
+	drop := make(map[string]bool, len(actions))
+	for _, action := range actions {
+		drop[action] = true
+	}
+	kept := make([]string, 0, len(binding.AllowedActions))
+	for _, action := range binding.AllowedActions {
+		if !drop[action] {
+			kept = append(kept, action)
+		}
+	}
+	binding.AllowedActions = kept
+	for action := range drop {
+		delete(binding.ArgumentRestrictions, action)
+		delete(binding.ArgumentBindings, action)
+	}
+	if len(binding.ArgumentRestrictions) == 0 {
+		binding.ArgumentRestrictions = nil
+	}
+	if len(binding.ArgumentBindings) == 0 {
+		binding.ArgumentBindings = nil
+	}
 }
 
 func upgradeConversationReferenceMatchesAny(ref ExternalConversationAdapterReference, members []*skill.Binding) bool {
@@ -1004,7 +1067,7 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 		}
 		if upgradeRiskRank(after.Risk) > upgradeRiskRank(before.Risk) {
 			findings = append(findings, SkillReferenceUpgradeFinding{
-				Code: "risk_increased", Message: fmt.Sprintf("%s risk changes from %s to %s", name, before.Risk, after.Risk),
+				Code: "risk_increased", Subject: name, From: string(before.Risk), To: string(after.Risk), Message: fmt.Sprintf("%s risk changes from %s to %s", name, before.Risk, after.Risk),
 			})
 		}
 		// The audited occurrence-limit change reaches 1.3.2; anything later must
@@ -1016,7 +1079,7 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 			before.Idempotency != after.Idempotency || before.ExternalOperationPolicy != after.ExternalOperationPolicy ||
 			!reflect.DeepEqual(before.Transport, after.Transport) || !reflect.DeepEqual(previous.Transport, target.Transport) {
 			findings = append(findings, SkillReferenceUpgradeFinding{
-				Code: "action_contract_changed", Message: fmt.Sprintf("%s action contract changed", name),
+				Code: "action_contract_changed", Subject: name, Message: fmt.Sprintf("%s action contract changed", name),
 			})
 		}
 	}
@@ -1075,7 +1138,7 @@ func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding 
 		}
 
 		if !beforeOK || !afterOK || !reflect.DeepEqual(before, after) {
-			findings = append(findings, SkillReferenceUpgradeFinding{Code: "conversation_adapter_contract_changed", Message: fmt.Sprintf("%s conversation adapter contract changed", id)})
+			findings = append(findings, SkillReferenceUpgradeFinding{Code: "conversation_adapter_contract_changed", Subject: id, Message: fmt.Sprintf("%s conversation adapter contract changed", id)})
 		}
 	}
 	callbackIDs := append([]string(nil), binding.EnabledCallbackAdapters...)
@@ -1085,7 +1148,7 @@ func compareUpgradeAdapterContracts(previous, target *skill.Definition, binding 
 		after, afterOK := target.CallbackAdapters[id]
 		before.Name, before.Description, after.Name, after.Description = "", "", "", ""
 		if !beforeOK || !afterOK || !reflect.DeepEqual(before, after) {
-			findings = append(findings, SkillReferenceUpgradeFinding{Code: "callback_adapter_contract_changed", Message: fmt.Sprintf("%s callback adapter contract changed", id)})
+			findings = append(findings, SkillReferenceUpgradeFinding{Code: "callback_adapter_contract_changed", Subject: id, Message: fmt.Sprintf("%s callback adapter contract changed", id)})
 		}
 	}
 	return findings
