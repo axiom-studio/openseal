@@ -63,15 +63,24 @@ type Component struct {
 	Children []Component `json:"children,omitempty"`
 
 	// Text is the payload of text, caption and (optionally) divider.
-	Text    string   `json:"text,omitempty"`
-	Chart   *Chart   `json:"chart,omitempty"`
-	Diagram *Diagram `json:"diagram,omitempty"`
-	Form    *Form    `json:"form,omitempty"`
-	Table   *Table   `json:"table,omitempty"`
-	StatRow *StatRow `json:"stat_row,omitempty"`
-	Grid    *Grid    `json:"grid,omitempty"`
-	Tabs    []Tab    `json:"tabs,omitempty"`
-	Actions []Action `json:"actions,omitempty"`
+	Text       string      `json:"text,omitempty"`
+	Chart      *Chart      `json:"chart,omitempty"`
+	Diagram    *Diagram    `json:"diagram,omitempty"`
+	Form       *Form       `json:"form,omitempty"`
+	Table      *Table      `json:"table,omitempty"`
+	StatRow    *StatRow    `json:"stat_row,omitempty"`
+	Grid       *Grid       `json:"grid,omitempty"`
+	Tabs       []Tab       `json:"tabs,omitempty"`
+	Actions    []Action    `json:"actions,omitempty"`
+	Callout    *Callout    `json:"callout,omitempty"`
+	Steps      *Steps      `json:"steps,omitempty"`
+	Comparison *Comparison `json:"comparison,omitempty"`
+	Timeline   *Timeline   `json:"timeline,omitempty"`
+	Image      *ImageBlock `json:"image,omitempty"`
+	Gallery    *Gallery    `json:"gallery,omitempty"`
+	Choices    *Choices    `json:"choices,omitempty"`
+	Checklist  *Checklist  `json:"checklist,omitempty"`
+	Quiz       *Quiz       `json:"quiz,omitempty"`
 }
 
 type Tone string
@@ -184,14 +193,17 @@ type Warning struct {
 }
 
 // ValidateOptions carries host-supplied checks. A zero value fails closed:
-// bindings and links are rejected unless their hook is supplied or
+// bindings, links and images are rejected unless their hook is supplied or
 // SkipHostChecks is set.
 type ValidateOptions struct {
 	// Bindings confirms that a bound entity exists and is in scope.
 	Bindings BindingResolver
 	// LinkProvenance confirms that a link URL appeared in this conversation.
 	LinkProvenance LinkProvenance
-	// SkipHostChecks skips binding and link provenance checks. Use it only
+	// Images confirms that an image reference names an image visible from
+	// this conversation.
+	Images ImageResolver
+	// SkipHostChecks skips binding, link provenance and image checks. Use it only
 	// for stored content that already passed publish validation and for
 	// pre-validation whose host checks run later.
 	SkipHostChecks bool
@@ -307,6 +319,8 @@ func exactPayload(c Component) error {
 	present := map[string]bool{
 		"text": c.Text != "", "chart": c.Chart != nil, "diagram": c.Diagram != nil, "form": c.Form != nil,
 		"table": c.Table != nil, "stat_row": c.StatRow != nil, "grid": c.Grid != nil, "tabs": len(c.Tabs) > 0, "actions": len(c.Actions) > 0,
+		"callout": c.Callout != nil, "steps": c.Steps != nil, "comparison": c.Comparison != nil, "timeline": c.Timeline != nil,
+		"image": c.Image != nil, "gallery": c.Gallery != nil, "choices": c.Choices != nil, "checklist": c.Checklist != nil, "quiz": c.Quiz != nil,
 	}
 	allowed := catalogue[c.Type].payload
 	for key, set := range present {

@@ -77,13 +77,13 @@ func TestValidate(t *testing.T) {
 		{"64 components ok", one(many(64)...), ValidateOptions{}, ""},
 		{"65 components rejected", one(many(65)...), ValidateOptions{}, "at most 64 components"},
 		{"nested count", one(append(many(60), Component{ID: "s", Type: "section", Children: many(64)[60:]})...), ValidateOptions{}, "at most 64 components"},
-		{"64KB", one(Component{ID: "t", Type: "table", Summary: "Big.", Table: &Table{Columns: []string{"a"}, Rows: func() [][]string {
-			rows := make([][]string, 40)
-			for index := range rows {
-				rows[index] = []string{strings.Repeat("x", 1900)}
+		{"64KB", one(func() []Component {
+			list := many(60)
+			for index := range list {
+				list[index].Text = strings.Repeat("x", 1150)
 			}
-			return rows
-		}()}}), ValidateOptions{}, "bytes of JSON"},
+			return list
+		}()...), ValidateOptions{}, "bytes of JSON"},
 		// text-like
 		{"text too long", one(Component{ID: "a", Type: "text", Text: strings.Repeat("a", 1201)}), ValidateOptions{}, "text must contain between 1 and 1200"},
 		{"caption", one(Component{ID: "a", Type: "caption", Text: "Source: ONS"}), ValidateOptions{}, ""},
@@ -114,8 +114,6 @@ func TestValidate(t *testing.T) {
 		{"form select without options", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "s", Type: "select", Label: "S"}}}}), ValidateOptions{}, "needs 1-100 options"},
 		{"form min on text", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "s", Type: "text", Label: "S", Min: float(1)}}}}), ValidateOptions{}, "only allowed on number"},
 		{"form field type", one(Component{ID: "f", Type: "form", Summary: "x", Form: &Form{Fields: []FormField{{ID: "s", Type: "file", Label: "S"}}}}), ValidateOptions{}, `form.fields[0].type "file"`},
-		// table
-		{"table ragged", one(Component{ID: "t", Type: "table", Summary: "x", Table: &Table{Columns: []string{"a", "b"}, Rows: [][]string{{"1"}}}}), ValidateOptions{}, "table.rows[0] has 1 cells"},
 		// stat_row
 		{"stat_row", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "Saving", Value: 96, Format: StatCurrency, Currency: "GBP", Unit: "/yr", Delta: "+12%", Trend: "up", GoodDirection: "up", Sparkline: []float64{1, 2, 3}}}}}), ValidateOptions{}, ""},
 		{"stat_row five stats", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: make([]Stat, 5)}}), ValidateOptions{}, "stat_row.stats needs 1-4"},
@@ -227,26 +225,18 @@ func TestLinks(t *testing.T) {
 }
 
 func TestLint(t *testing.T) {
-	pie := func(slices int) Component {
-		points := make([]ChartPoint, slices)
-		for index := range points {
-			points[index] = ChartPoint{Label: "p", Value: 1}
-		}
-		return Component{ID: "pie", Type: "chart", Summary: "Shares.", Chart: &Chart{Kind: "pie", Series: []ChartSeries{{Name: "s", Points: points}}}}
-	}
 	cases := []struct {
 		name      string
 		component Component
 		codes     []string
 	}{
 		{"clean chart", chart("c"), nil},
-		{"no axis labels", Component{ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "line", Series: chart("c").Chart.Series}}, []string{LintChartAxisLabels}},
-		{"pie needs no axes", pie(7), nil},
-		{"pie with 8 slices", pie(8), []string{LintPieSlices}},
+		{"no axis labels", Component{ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "bar", Series: chart("c").Chart.Series}}, []string{LintChartAxisLabels}},
+		{"pie needs no axes", Component{ID: "pie", Type: "chart", Summary: "Shares.", Chart: &Chart{Kind: "pie", Series: chart("c").Chart.Series}}, nil},
 		{"single point", Component{ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "bar", XLabel: "a", YLabel: "b", Series: []ChartSeries{{Name: "s", Points: []ChartPoint{{Label: "a", Value: 1}}}}}}, []string{LintChartSinglePoint}},
 		{"summary repeats title", Component{ID: "s", Type: "stat_row", Title: "Yearly saving", Summary: "Yearly saving.", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1}}}}, []string{LintSummaryRepeatsTitle}},
 		{"single child section", Component{ID: "s", Type: "section", Children: []Component{note("a")}}, []string{LintSingleChild}},
-		{"nested lint", Component{ID: "s", Type: "carousel", Children: []Component{note("a"), pie(9)}}, []string{LintPieSlices}},
+		{"nested lint", Component{ID: "s", Type: "carousel", Children: []Component{note("a"), {ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "bar", Series: chart("c").Chart.Series}}}}, []string{LintChartAxisLabels}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -321,7 +311,7 @@ func TestDecodeRoundTripAndFindNested(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if component, ok := decoded.Find("dates"); !ok || component.Type != "table" {
+	if component, ok := decoded.Find("dates"); !ok || component.Type != "timeline" {
 		t.Fatalf("Find(dates) = %#v", component)
 	}
 	if _, err := Decode([]byte(`{"schema":"` + Schema + `","title":"x","state":"ready","components":[{"id":"a","type":"text","text":"x","color":"#f00"}]}`)); err == nil {
@@ -353,12 +343,13 @@ func TestVisualExamplesAreValidAndClean(t *testing.T) {
 
 func TestVisualRubricOnlyNamesCatalogueTypes(t *testing.T) {
 	rubric := VisualRubric()
-	for _, name := range []string{"Most replies are just text", "Stay with text for", "`stat_row`", "`chart`", "`diagram`", "`table`", "Never restate"} {
+	for _, name := range []string{"Most replies are just text", "Stay with text for", "`stat_row`", "`chart`", "`diagram`", "`table`", "Never restate",
+		"`comparison`", "`steps`", "`timeline`", "`quiz`", "`checklist`", "`callout`", "`choices`", "`image`, `gallery`"} {
 		if !strings.Contains(rubric, name) {
 			t.Fatalf("rubric lacks %s:\n%s", name, rubric)
 		}
 	}
-	for _, missing := range []string{"comparison", "quiz", "explorer", "checklist"} {
+	for _, missing := range []string{"explorer", "poll", "agenda", "flashcards", "labeled_image", "breakdown"} {
 		if strings.Contains(rubric, missing) {
 			t.Fatalf("rubric names %s, which is not in the catalogue yet", missing)
 		}
@@ -376,7 +367,9 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 		"tags": strings.Join(definition.Tags, " "),
 	}
 	for name, text := range texts {
-		lower := strings.ToLower(text)
+		// artifactId is the shared JSON key of an image reference; its
+		// description says "image already in this chat".
+		lower := strings.ToLower(strings.ReplaceAll(text, "artifactId", ""))
 		for _, word := range []string{"presentation", "surface", "artifact", "publish"} {
 			if strings.Contains(lower, word) {
 				t.Fatalf("%s mentions %q", name, word)

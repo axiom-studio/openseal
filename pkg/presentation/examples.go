@@ -29,26 +29,34 @@ func text(id, value string) Component { return Component{ID: id, Type: "text", T
 // replies that should stay text.
 func VisualExamples() []Example {
 	years := []string{"0", "5", "10", "15", "20"}
+	gbp := func(value float64, per string) *Price {
+		return &Price{Amount: Amount{Value: value, Format: StatCurrency, Currency: "GBP"}, Per: per}
+	}
 	return []Example{{
 		Name: "phone-plan", Prompt: "Is this phone plan a good deal?",
 		Lead: "Not quite. You use about half the data you pay for.",
 		Visual: visual("Your phone plan",
-			Component{ID: "plans", Type: "table", Summary: "Your £25 plan against two cheaper plans with enough data.", Table: &Table{
-				Columns: []string{"Plan", "Price", "Data", "Contract"},
-				Rows:    [][]string{{"Current", "£25/mo", "60 GB", "24 months"}, {"Sim Plus", "£17/mo", "30 GB", "12 months"}, {"Flex 20", "£12/mo", "20 GB", "30 days"}},
+			Component{ID: "plans", Type: "comparison", Summary: "Your £25 plan against two cheaper plans with enough data; Sim Plus is the best value.", Comparison: &Comparison{
+				Attributes: []ComparisonAttribute{{Key: "data", Label: "Data"}, {Key: "contract", Label: "Contract"}},
+				Options: []ComparisonOption{
+					{ID: "current", Name: "Current", Price: gbp(25, "month"), Values: map[string]string{"data": "60 GB", "contract": "24 months"}},
+					{ID: "sim-plus", Name: "Sim Plus", Badge: "Best value", Price: gbp(17, "month"), Values: map[string]string{"data": "30 GB", "contract": "12 months"}},
+					{ID: "flex-20", Name: "Flex 20", Price: gbp(12, "month"), Values: map[string]string{"data": "20 GB", "contract": "30 days"}, Cons: []string{"Tight if you stream on the go"}},
+				},
+				Recommended: "sim-plus", Pickable: true,
 			}},
 			Component{ID: "saving", Type: "stat_row", Summary: "Moving to Sim Plus saves £96 a year.", Tone: TonePositive, StatRow: &StatRow{Stats: []Stat{
 				{Label: "Yearly saving", Value: 96, Format: StatCurrency, Currency: "GBP", Trend: "down", GoodDirection: "down"}, {Label: "Data you use", Value: 28, Unit: "GB/mo"},
 			}}},
-			Component{ID: "next", Type: "actions", Actions: []Action{{ID: "switch", Label: "Switch to Sim Plus", Kind: ActionRespond, Icon: "smartphone"}}},
 		),
 	}, {
 		Name: "compound-interest", Prompt: "How does compound interest work?",
 		Lead: "Your interest earns interest too, so growth speeds up over time.",
 		Visual: visual("£1,000 at 5% a year",
 			Component{ID: "growth", Type: "chart", Summary: "£1,000 grows to about £2,653 in 20 years at 5%, faster each year.", Chart: &Chart{
-				Kind: "line", XLabel: "Years", YLabel: "Balance (£)",
-				Series: []ChartSeries{series("Compound", years, 1000, 1276, 1629, 2079, 2653), series("Simple", years, 1000, 1250, 1500, 1750, 2000)},
+				Kind: "line", XLabel: "Years", YLabel: "Balance", Format: StatCurrency, Currency: "GBP",
+				Series:    []ChartSeries{series("Compound", years, 1000, 1276, 1629, 2079, 2653), series("Simple", years, 1000, 1250, 1500, 1750, 2000)},
+				Highlight: &ChartHighlight{Series: "Compound"},
 			}},
 			Component{ID: "result", Type: "stat_row", Summary: "After 20 years compounding earns £653 more than simple interest.", StatRow: &StatRow{Stats: []Stat{
 				{Label: "After 20 years", Value: 2653, Format: StatCurrency, Currency: "GBP"}, {Label: "Extra from compounding", Value: 653, Format: StatCurrency, Currency: "GBP", Trend: "up", GoodDirection: "up"},
@@ -59,26 +67,30 @@ func VisualExamples() []Example {
 		Lead: "Rent and food are most of it, and three streaming services add up.",
 		Visual: visual("Last month's spending",
 			Component{ID: "split", Type: "chart", Summary: "Rent is 48% of spending, food 22%, streaming 4%.", Chart: &Chart{
-				Kind: "donut", Series: []ChartSeries{series("Spending", []string{"Rent", "Food", "Transport", "Bills", "Streaming", "Other"}, 950, 430, 180, 210, 75, 140)},
+				Kind: "donut", Format: StatCurrency, Currency: "GBP",
+				Series: []ChartSeries{series("Spending", []string{"Rent", "Food", "Transport", "Bills", "Streaming", "Other"}, 950, 430, 180, 210, 75, 140)},
 			}},
-			Component{ID: "note", Type: "text", Tone: ToneWarning, Text: "You pay for **three** streaming services and watched one."},
-			Component{ID: "next", Type: "actions", Actions: []Action{
-				{ID: "cancel", Label: "Help me cancel two", Kind: ActionRespond, Icon: "trash-2"},
-				{ID: "keep", Label: "Keep them", Kind: ActionRespond},
+			Component{ID: "note", Type: "callout", Tone: ToneWarning, Summary: "Two of three streaming services go unwatched.", Callout: &Callout{
+				Icon: "lightbulb", Body: "You pay for **three** streaming services and watched one last month.",
 			}},
+			Component{ID: "cancel", Type: "checklist", Title: "To cancel", Summary: "Two unused subscriptions to cancel.", Checklist: &Checklist{Items: []ChecklistItem{
+				{ID: "streamflix", Label: "StreamFlix (£10.99/mo)"}, {ID: "boxplus", Label: "BoxPlus (£6.99/mo)"},
+			}}},
 		),
 	}, {
 		Name: "cells", Prompt: "Explain how cells make energy",
 		Lead: "Cells turn glucose into ATP, mostly inside the mitochondria.",
 		Visual: visual("How cells make energy",
-			Component{ID: "flow", Type: "diagram", Summary: "Glucose is split, broken down further, then turned into ATP in the mitochondria.", Diagram: &Diagram{
-				Nodes: []DiagramNode{{ID: "glucose", Label: "Glucose", X: 0}, {ID: "glycolysis", Label: "Glycolysis (2 ATP)", X: 200}, {ID: "krebs", Label: "Krebs cycle (2 ATP)", X: 400}, {ID: "chain", Label: "Electron chain (~34 ATP)", X: 600}},
-				Edges: []DiagramEdge{{From: "glucose", To: "glycolysis"}, {From: "glycolysis", To: "krebs", Label: "pyruvate"}, {From: "krebs", To: "chain"}},
+			Component{ID: "how", Type: "steps", Summary: "Glucose is split, broken down further, then turned into most of the ATP in the mitochondria.", Steps: &Steps{Items: []Step{
+				{ID: "glycolysis", Title: "Glycolysis", Detail: "Glucose splits into two pyruvate, making **2 ATP**.", Icon: "flask-conical"},
+				{ID: "krebs", Title: "Krebs cycle", Detail: "Pyruvate is broken down in the mitochondria, making **2 ATP**.", Icon: "refresh-cw"},
+				{ID: "chain", Title: "Electron transport chain", Detail: "Oxygen helps turn the rest of the energy into about **34 ATP**.", Icon: "zap"},
+			}}},
+			Component{ID: "check", Type: "quiz", Summary: "One question: where most ATP is made.", Quiz: &Quiz{
+				Question:  "Where is most ATP made?",
+				Options:   []QuizOption{{ID: "nucleus", Label: "Nucleus"}, {ID: "mitochondria", Label: "Mitochondria"}, {ID: "wall", Label: "Cell wall"}},
+				AnswerKey: &QuizAnswerKey{Correct: []string{"mitochondria"}, Explanation: "The electron transport chain in the **mitochondria** makes about 34 of the 38 ATP."},
 			}},
-			Component{ID: "check", Type: "form", Summary: "One question: where most ATP is made.", Form: &Form{SubmitLabel: "Check", Fields: []FormField{{
-				ID: "answer", Type: "radio", Label: "Where is most ATP made?", Required: true,
-				Options: []FormOption{{Label: "Nucleus", Value: "nucleus"}, {Label: "Mitochondria", Value: "mitochondria"}, {Label: "Cell wall", Value: "wall"}},
-			}}}},
 		),
 	}, {
 		Name: "dinners", Prompt: "Five dinners this week, nobody likes mushrooms",
@@ -91,24 +103,22 @@ func VisualExamples() []Example {
 				{ID: "thu", Type: "text", Title: "Thursday: Pesto pasta", Text: "15 min · peas, parmesan"},
 				{ID: "fri", Type: "text", Title: "Friday: Homemade pizza", Text: "40 min · tomato, mozzarella, ham"},
 			}},
-			Component{ID: "next", Type: "actions", Actions: []Action{
-				{ID: "list", Label: "Make a shopping list", Kind: ActionRespond, Icon: "shopping-cart"},
-				{ID: "weekly", Label: "Do this every week", Kind: ActionRespond, Icon: "repeat"},
-			}},
+			Component{ID: "next", Type: "choices", Summary: "Offers a shopping list or a weekly repeat.", Choices: &Choices{Chips: []Chip{
+				{ID: "list", Label: "Make a shopping list"}, {ID: "weekly", Label: "Do this every week"},
+			}}},
 		),
 	}, {
 		Name: "weekend", Prompt: "Plan a long weekend somewhere with a beach, four of us",
 		Lead: "Three beach towns within a few hours, from cheapest to closest.",
 		Visual: visual("Beach weekend options",
-			Component{ID: "options", Type: "grid", Grid: &Grid{Columns: 3}, Children: []Component{
-				{ID: "whitby", Type: "stat_row", Title: "Whitby", Summary: "Whitby: 3h drive, about £620 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: 10800, Format: StatDuration}, {Label: "Budget", Value: 620, Format: StatCurrency, Currency: "GBP"}}}},
-				{ID: "tenby", Type: "stat_row", Title: "Tenby", Summary: "Tenby: 4h drive, about £540 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: 14400, Format: StatDuration}, {Label: "Budget", Value: 540, Format: StatCurrency, Currency: "GBP"}}}},
-				{ID: "camber", Type: "stat_row", Title: "Camber", Summary: "Camber: 2h drive, about £710 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: 7200, Format: StatDuration}, {Label: "Budget", Value: 710, Format: StatCurrency, Currency: "GBP"}}}},
-			}},
-			Component{ID: "pick", Type: "actions", Actions: []Action{
-				{ID: "whitby", Label: "Whitby", Kind: ActionRespond, Value: "Let's go to Whitby"},
-				{ID: "tenby", Label: "Tenby", Kind: ActionRespond, Value: "Let's go to Tenby"},
-				{ID: "camber", Label: "Camber", Kind: ActionRespond, Value: "Let's go to Camber"},
+			Component{ID: "options", Type: "comparison", Summary: "Tenby is cheapest at £540, Camber closest at 2 hours, Whitby in between.", Comparison: &Comparison{
+				Attributes: []ComparisonAttribute{{Key: "drive", Label: "Drive"}, {Key: "beach", Label: "Beach"}},
+				Options: []ComparisonOption{
+					{ID: "tenby", Name: "Tenby", Badge: "Cheapest", Price: gbp(540, "once"), Values: map[string]string{"drive": "4 hours", "beach": "Sandy, sheltered"}},
+					{ID: "whitby", Name: "Whitby", Price: gbp(620, "once"), Values: map[string]string{"drive": "3 hours", "beach": "Sandy, with an abbey above"}},
+					{ID: "camber", Name: "Camber", Badge: "Closest", Price: gbp(710, "once"), Values: map[string]string{"drive": "2 hours", "beach": "Big dunes"}},
+				},
+				Pickable: true,
 			}},
 		),
 	}, {
@@ -117,12 +127,13 @@ func VisualExamples() []Example {
 		Visual: visual("The French Revolution",
 			Component{ID: "levels", Type: "tabs", Tabs: []Tab{
 				{Label: "Simple", Children: []Component{text("simple", "People were hungry and taxed while nobles paid little. They stormed the Bastille, ended the monarchy, and after years of turmoil Napoleon took power.")}},
-				{Label: "Key dates", Children: []Component{{ID: "dates", Type: "table", Summary: "Five key events from 1789 to 1799.", Table: &Table{
-					Columns: []string{"Year", "Event"},
-					Rows:    [][]string{{"1789", "Storming of the Bastille"}, {"1791", "Royal family's failed escape"}, {"1793", "Louis XVI executed"}, {"1794", "End of the Terror"}, {"1799", "Napoleon seizes power"}},
-				}}}},
+				{Label: "Key dates", Children: []Component{{ID: "dates", Type: "timeline", Summary: "Five key events from 1789 to 1799.", Timeline: &Timeline{Events: []TimelineEvent{
+					{ID: "bastille", When: "1789", Title: "Storming of the Bastille"}, {ID: "varennes", When: "1791", Title: "Royal family's failed escape"},
+					{ID: "execution", When: "1793", Title: "Louis XVI executed"}, {ID: "terror", When: "1794", Title: "End of the Terror"},
+					{ID: "napoleon", When: "1799", Title: "Napoleon seizes power"},
+				}}}}},
 			}},
-			Component{ID: "why", Type: "caption", Text: "It spread the idea that power comes from the people, not a king."},
+			Component{ID: "why", Type: "callout", Summary: "Why the revolution still matters.", Callout: &Callout{Icon: "lightbulb", Body: "It spread the idea that power comes from the people, not a king."}},
 		),
 	}, {
 		Name: "text-feelings", Prompt: "I'm really nervous about my exam tomorrow",
