@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/workspace"
+
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
@@ -1357,7 +1359,7 @@ func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
 
 func TestHostedTurnRunnerRejectsInvalidSkillSelections(t *testing.T) {
 	for name, selections := range map[string][]HostedSkillSelection{
-		"malformed": {{SkillRef: "skill:summarize@1.0.0", Disposition: "maybe", Summary: "Unclear"}},
+		"malformed":     {{SkillRef: "skill:summarize@1.0.0", Disposition: "maybe", Summary: "Unclear"}},
 		"empty summary": {{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillNotApplied}},
 		"duplicate": {
 			{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Used summarization"},
@@ -1399,7 +1401,7 @@ func TestHostedTurnRunnerFillsOmittedSkillDispositions(t *testing.T) {
 	}
 	for name, selections := range map[string][]HostedSkillSelection{
 		"restarted turn without dispositions": nil,
-		"partial dispositions": {{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Summarized the page"}},
+		"partial dispositions":                {{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Summarized the page"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			host := &recordingTurnHost{response: &HostedTurnResponse{
@@ -1488,5 +1490,29 @@ func TestHostedTurnRunnerRejectsMismatchedReplayEnvelope(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "mismatched") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestAChatsFilesReplaceAPlainVolumeButNotAWorkingOne(t *testing.T) {
+	run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}, Goal: "Chart this", Context: map[string]interface{}{"conversationId": "chat-1"}}
+	plain := &workspace.Authority{Workspace: workspace.DefaultSpec()}
+	working := &workspace.Authority{Workspace: workspace.DefaultSpec()}
+	working.Workspace.Policy.Commands = workspace.CommandPolicy{Enabled: true, Network: workspace.NetworkDenied, MaxDurationSeconds: 60, AllowedExecutables: []string{"go"}}
+	for _, tc := range []struct {
+		name      string
+		authority *workspace.Authority
+		chat      bool
+	}{{"no volume", nil, true}, {"plain volume", plain, true}, {"working volume", working, false}} {
+		runner, err := NewHostedTurnRunner(&recordingTurnHost{}, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1", Workspace: tc.authority})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request, err := runner.buildRequest(TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := request.Workspace != nil && request.Workspace.ConversationID == "chat-1"; got != tc.chat {
+			t.Fatalf("%s: chat files = %v, want %v", tc.name, got, tc.chat)
+		}
 	}
 }

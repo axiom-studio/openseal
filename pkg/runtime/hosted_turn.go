@@ -309,6 +309,13 @@ func checkHostedSkillSelections(prompts []HostedSkillPrompt, selections []Hosted
 	return selected, nil
 }
 
+// workingVolume reports an Agent's own Workspace that runs commands or works
+// with Git. A plain volume offers nothing a chat's files do not, so in a chat
+// the chat's files take its place.
+func workingVolume(authority *workspace.Authority) bool {
+	return authority != nil && (authority.Workspace.Policy.Commands.Enabled || authority.Workspace.Policy.Git.Enabled)
+}
+
 // ChatFilesInstruction tells a turn how its chat's files work.
 const ChatFilesInstruction = "This chat has its own files, which you can read and change freely with the Workspace tools: everything people attached (uploads/), everything made here, and anything you write. Read a file before editing it and change only what is needed. Every change is kept, so earlier versions can be restored."
 
@@ -798,8 +805,9 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	request.CanAskConversationQuestion = input.canAskConversationQuestion && input.Run.AssignedAgentID == r.config.AgentID
 	request.ConversationApprovalMode = input.approvalMode
 	// A chat's own files are every conversation turn's Workspace, unless the
-	// Agent brings a Workspace of its own.
-	if conversationID, _ := input.Run.Context["conversationId"].(string); request.Workspace == nil && strings.TrimSpace(conversationID) != "" {
+	// Agent brings a Workspace that does more than hold files: one that runs
+	// commands or works with Git repositories.
+	if conversationID, _ := input.Run.Context["conversationId"].(string); !workingVolume(request.Workspace) && strings.TrimSpace(conversationID) != "" {
 		request.Workspace = workspace.ChatAuthority(conversationID)
 		request.WorkspaceOperations = workspace.Operations(request.Workspace)
 		request.SystemInstructions = append(request.SystemInstructions, ChatFilesInstruction)
