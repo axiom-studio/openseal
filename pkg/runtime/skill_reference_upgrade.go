@@ -1090,9 +1090,14 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 // compareUpgradeConfigContracts reports operator-config changes that can
 // invalidate stored values or change who receives them. Adding an optional or
 // defaulted field, and changing labels, descriptions or setup text, keep every
-// stored value valid and need no review.
+// stored value valid and need no review. A Skill's first config declaration
+// needs no review either: its values are migrated from platform settings, so
+// agents see no behavior change.
 func compareUpgradeConfigContracts(previous, target *skill.Definition) []SkillReferenceUpgradeFinding {
 	findings := make([]SkillReferenceUpgradeFinding, 0)
+	if previous.Config == nil {
+		return findings
+	}
 	var beforeScopes, afterScopes []skill.SkillConfigScope
 	var beforeFields, afterFields []skill.SkillConfigField
 	if previous.Config != nil {

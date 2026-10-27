@@ -75,11 +75,6 @@ func TestSkillUpgradeConfigContractFindings(t *testing.T) {
 			t.Fatalf("missing config_contract_changed %s %q→%q: %#v", test.subject, test.from, test.to, findings)
 		})
 	}
-	added := cloneUpgradeTestDefinition(t, base)
-	added.Config = nil
-	if findings := compareUpgradeContracts(added, base, []string{"search"}, nil); len(findings) == 0 {
-		t.Fatal("adding a config section needs review")
-	}
 }
 
 func TestSkillUpgradeConfigCompatibleChangesNeedNoApproval(t *testing.T) {
@@ -112,6 +107,29 @@ func TestSkillUpgradeConfigCompatibleChangesNeedNoApproval(t *testing.T) {
 				t.Fatalf("compatible config change requires approval: %#v", findings)
 			}
 		})
+	}
+}
+
+func TestSkillUpgradeFirstConfigDeclarationNeedsNoApproval(t *testing.T) {
+	target := configUpgradeBase()
+	target.Version = "1.1.0"
+	// A required field without a default would need review between two
+	// config-declaring versions; as part of the first declaration it does not.
+	target.Config.Fields = append(target.Config.Fields, skill.SkillConfigField{Key: "region", Label: "Region", Type: "string", Required: true})
+	previous := cloneUpgradeTestDefinition(t, target)
+	previous.Version = "1.0.0"
+	previous.Config = nil
+	if findings := compareUpgradeContracts(previous, target, []string{"search"}, nil); len(findings) != 0 {
+		t.Fatalf("first config declaration requires approval: %#v", findings)
+	}
+	// Non-config contract changes alongside the first declaration still count.
+	riskier := cloneUpgradeTestDefinition(t, target)
+	search := riskier.Actions["search"]
+	search.Risk = skill.RiskLevelWrite
+	riskier.Actions["search"] = search
+	findings := compareUpgradeContracts(previous, riskier, []string{"search"}, nil)
+	if len(findings) != 1 || findings[0].Code != "risk_increased" {
+		t.Fatalf("first config declaration hid a risk increase: %#v", findings)
 	}
 }
 
