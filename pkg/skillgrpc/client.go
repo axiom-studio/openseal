@@ -56,6 +56,11 @@ type ExecutionContext struct {
 	// the caller's identity and never from action arguments. Skills scope
 	// operator config to it.
 	TenantID string
+	// Config is the tenant's effective operator config for the Skill
+	// (skill-audience fields only, secrets included), attached by the host
+	// to this call alone. ConfigVersion changes whenever any of it does.
+	Config        map[string]interface{}
+	ConfigVersion string
 }
 
 // NewClient creates a new gRPC skill client
@@ -277,7 +282,9 @@ func (c *Client) ExecuteWithContext(
 		Namespace: strings.TrimSpace(execution.Namespace),
 		Variables: cloneVariables(execution.Variables),
 	}
-	setExecutionContextTenant(execCtx, execution.TenantID)
+	if err := setExecutionContextConfig(execCtx, execution.TenantID, execution.Config, execution.ConfigVersion); err != nil {
+		return nil, err
+	}
 
 	// Build request
 	req := &skillpb.ExecuteRequest{
