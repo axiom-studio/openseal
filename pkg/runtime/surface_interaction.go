@@ -18,6 +18,24 @@ const (
 	maximumSurfaceInteractionBytes = 64 << 10
 )
 
+// SurfaceInteractionVisibility says who may read an interaction. Hosts set
+// it from the component type when the interaction is recorded.
+type SurfaceInteractionVisibility string
+
+const (
+	// SurfaceInteractionVisibilityActor is a per-viewer answer (quiz,
+	// flashcards, form, choices, explorer share, actions respond): only its
+	// actor reads it.
+	SurfaceInteractionVisibilityActor SurfaceInteractionVisibility = "actor"
+	// SurfaceInteractionVisibilityShared is shared card state (poll,
+	// checklist): everyone who can see the card's message reads it.
+	SurfaceInteractionVisibilityShared SurfaceInteractionVisibility = "shared"
+)
+
+func (v SurfaceInteractionVisibility) valid() bool {
+	return v == SurfaceInteractionVisibilityActor || v == SurfaceInteractionVisibilityShared
+}
+
 var (
 	ErrInvalidSurfaceInteraction  = errors.New("invalid surface interaction")
 	ErrSurfaceInteractionConflict = errors.New("surface interaction conflict")
@@ -45,23 +63,29 @@ var (
 // with ListLatestSurfaceInteractions, which keeps the latest interaction per
 // (surfaceId, componentId, itemKey) and, unless AcrossActors, per actor.
 // Removing a tick is a new interaction whose Values say so.
+//
+// Visibility and MessageID decide who reads an interaction: a viewer must be
+// able to see MessageID (the message whose references carry the surface
+// artifact), and an actor-visibility interaction is read only by its actor.
 type SurfaceInteraction struct {
 	ID             string `json:"id"`
 	Scope          Scope  `json:"scope"`
 	ConversationID string `json:"conversationId"`
 	// Sequence is assigned by the store, increasing per conversation. The
 	// conversation change stream pages interactions by it.
-	Sequence          int64                       `json:"sequence"`
-	SurfaceArtifactID string                      `json:"surfaceArtifactId"`
-	SurfaceID         string                      `json:"surfaceId"`
-	SurfaceVersion    int64                       `json:"surfaceVersion"`
-	ComponentID       string                      `json:"componentId"`
-	ItemKey           string                      `json:"itemKey,omitempty"`
-	ActionID          string                      `json:"actionId,omitempty"`
-	ActorType         ConversationParticipantType `json:"actorType"`
-	ActorID           string                      `json:"actorId"`
-	Repeatable        bool                        `json:"repeatable"`
-	Values            json.RawMessage             `json:"values"`
+	Sequence          int64                        `json:"sequence"`
+	SurfaceArtifactID string                       `json:"surfaceArtifactId"`
+	SurfaceID         string                       `json:"surfaceId"`
+	SurfaceVersion    int64                        `json:"surfaceVersion"`
+	MessageID         string                       `json:"messageId"`
+	ComponentID       string                       `json:"componentId"`
+	ItemKey           string                       `json:"itemKey,omitempty"`
+	ActionID          string                       `json:"actionId,omitempty"`
+	ActorType         ConversationParticipantType  `json:"actorType"`
+	ActorID           string                       `json:"actorId"`
+	Repeatable        bool                         `json:"repeatable"`
+	Visibility        SurfaceInteractionVisibility `json:"visibility"`
+	Values            json.RawMessage              `json:"values"`
 	// Outcome is server-computed, for example a quiz grade.
 	Outcome        json.RawMessage `json:"outcome,omitempty"`
 	IdempotencyKey string          `json:"idempotencyKey"`
@@ -89,12 +113,15 @@ func (e *SurfaceInteractionConflictError) Is(target error) bool {
 
 // SurfaceInteractionFilter lists interactions in ascending Sequence order.
 // SurfaceID narrows the list to one surface across all its versions.
+// Viewer, honoured by ConversationService only (stores reject it), keeps the
+// interactions that viewer may read; see SurfaceInteraction.
 type SurfaceInteractionFilter struct {
 	Scope          Scope
 	ConversationID string
 	SurfaceID      string
 	AfterSequence  int64
 	Limit          int
+	Viewer         *ConversationViewer
 }
 
 // LatestSurfaceInteractionFilter selects the last-write-wins state of one
@@ -102,11 +129,16 @@ type SurfaceInteractionFilter struct {
 // (componentId, itemKey) when AcrossActors is set (shared checklists and
 // polls). Versions are not part of the key, so state carries forward to a
 // new version that keeps the component.
+//
+// Viewer, honoured by ConversationService only (stores reject it), reduces
+// only the interactions that viewer may read, so AcrossActors aggregates the
+// viewer's own interactions and other actors' shared ones.
 type LatestSurfaceInteractionFilter struct {
 	Scope          Scope
 	ConversationID string
 	SurfaceID      string
 	AcrossActors   bool
+	Viewer         *ConversationViewer
 }
 
 type RecordSurfaceInteractionRequest struct {
@@ -115,14 +147,17 @@ type RecordSurfaceInteractionRequest struct {
 	SurfaceArtifactID string
 	SurfaceID         string
 	SurfaceVersion    int64
-	ComponentID       string
-	ItemKey           string
-	ActionID          string
-	Actor             ConversationParticipant
-	Repeatable        bool
-	Values            json.RawMessage
-	Outcome           json.RawMessage
-	IdempotencyKey    string
+	// MessageID is the message whose references carry the surface artifact.
+	MessageID      string
+	ComponentID    string
+	ItemKey        string
+	ActionID       string
+	Actor          ConversationParticipant
+	Repeatable     bool
+	Visibility     SurfaceInteractionVisibility
+	Values         json.RawMessage
+	Outcome        json.RawMessage
+	IdempotencyKey string
 }
 
 func (i *SurfaceInteraction) Validate() error {
@@ -134,7 +169,7 @@ func (i *SurfaceInteraction) Validate() error {
 	}
 	for name, value := range map[string]string{
 		"id": i.ID, "conversation id": i.ConversationID, "surface artifact id": i.SurfaceArtifactID,
-		"surface id": i.SurfaceID, "component id": i.ComponentID, "idempotency key": i.IdempotencyKey,
+		"surface id": i.SurfaceID, "message id": i.MessageID, "component id": i.ComponentID, "idempotency key": i.IdempotencyKey,
 	} {
 		if !validOpaqueIdentifier(value, 128) || strings.TrimSpace(value) != value {
 			return fmt.Errorf("%w: %s must be a portable opaque identifier", ErrInvalidSurfaceInteraction, name)
@@ -150,6 +185,9 @@ func (i *SurfaceInteraction) Validate() error {
 	}
 	if i.SurfaceVersion < 1 {
 		return fmt.Errorf("%w: surface version must be positive", ErrInvalidSurfaceInteraction)
+	}
+	if !i.Visibility.valid() {
+		return fmt.Errorf("%w: visibility must be %q or %q", ErrInvalidSurfaceInteraction, SurfaceInteractionVisibilityActor, SurfaceInteractionVisibilityShared)
 	}
 	if err := (ConversationParticipant{Type: i.ActorType, ID: i.ActorID}).Validate(); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidSurfaceInteraction, err)
@@ -182,6 +220,9 @@ func (f SurfaceInteractionFilter) validate() error {
 	if f.AfterSequence < 0 || f.Limit < 0 || f.Limit > maximumSurfaceInteractionLimit {
 		return fmt.Errorf("%w: invalid page", ErrInvalidSurfaceInteraction)
 	}
+	if f.Viewer != nil {
+		return errSurfaceInteractionStoreViewer
+	}
 	return nil
 }
 
@@ -199,8 +240,13 @@ func (f LatestSurfaceInteractionFilter) validate() error {
 	if !validOpaqueIdentifier(f.ConversationID, 128) || !validOpaqueIdentifier(f.SurfaceID, 128) {
 		return fmt.Errorf("%w: conversation and surface ids are required", ErrInvalidSurfaceInteraction)
 	}
+	if f.Viewer != nil {
+		return errSurfaceInteractionStoreViewer
+	}
 	return nil
 }
+
+var errSurfaceInteractionStoreViewer = fmt.Errorf("%w: viewer filtering is applied by ConversationService, not the store", ErrInvalidSurfaceInteraction)
 
 // sameSurfaceInteractionTarget reports whether a replay under one idempotency
 // key addresses the same component, item and actor as the stored interaction.
@@ -209,7 +255,7 @@ func sameSurfaceInteractionTarget(left, right *SurfaceInteraction) bool {
 		left.SurfaceArtifactID == right.SurfaceArtifactID && left.SurfaceID == right.SurfaceID &&
 		left.SurfaceVersion == right.SurfaceVersion && left.ComponentID == right.ComponentID &&
 		left.ItemKey == right.ItemKey && left.ActionID == right.ActionID && left.ActorType == right.ActorType &&
-		left.ActorID == right.ActorID && left.Repeatable == right.Repeatable
+		left.ActorID == right.ActorID && left.Repeatable == right.Repeatable && left.Visibility == right.Visibility
 }
 
 // latestSurfaceInteractions reduces interactions in ascending Sequence order
@@ -264,8 +310,10 @@ func decodeSurfaceInteraction(payload string) (*SurfaceInteraction, error) {
 
 // RecordSurfaceInteraction stores one interaction for an existing
 // conversation. It returns the stored interaction and whether it replayed an
-// earlier one with the same idempotency key. Hosts validate the surface,
-// version, component and value shape before calling it.
+// earlier one with the same idempotency key. MessageID must name a message of
+// the conversation that references the surface artifact. Hosts validate the
+// surface, version, component and value shape, and set Visibility from the
+// component type, before calling it.
 func (s *ConversationService) RecordSurfaceInteraction(ctx context.Context, req RecordSurfaceInteractionRequest) (*SurfaceInteraction, bool, error) {
 	if s == nil || s.store == nil {
 		return nil, false, errors.New("conversation store is not configured")
@@ -276,27 +324,168 @@ func (s *ConversationService) RecordSurfaceInteraction(ctx context.Context, req 
 	interaction := &SurfaceInteraction{
 		ID: s.newID(), Scope: req.Scope, ConversationID: strings.TrimSpace(req.ConversationID),
 		SurfaceArtifactID: strings.TrimSpace(req.SurfaceArtifactID), SurfaceID: strings.TrimSpace(req.SurfaceID),
-		SurfaceVersion: req.SurfaceVersion, ComponentID: strings.TrimSpace(req.ComponentID), ItemKey: strings.TrimSpace(req.ItemKey),
-		ActionID: strings.TrimSpace(req.ActionID), ActorType: req.Actor.Type, ActorID: strings.TrimSpace(req.Actor.ID),
-		Repeatable: req.Repeatable, Values: bytes.Clone(req.Values), Outcome: bytes.Clone(req.Outcome),
+		SurfaceVersion: req.SurfaceVersion, MessageID: strings.TrimSpace(req.MessageID), ComponentID: strings.TrimSpace(req.ComponentID),
+		ItemKey: strings.TrimSpace(req.ItemKey), ActionID: strings.TrimSpace(req.ActionID), ActorType: req.Actor.Type, ActorID: strings.TrimSpace(req.Actor.ID),
+		Repeatable: req.Repeatable, Visibility: req.Visibility, Values: bytes.Clone(req.Values), Outcome: bytes.Clone(req.Outcome),
 		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey), CreatedAt: s.now().UTC(),
 	}
 	if err := interaction.Validate(); err != nil {
 		return nil, false, err
 	}
+	message, err := s.GetChannelMessage(ctx, interaction.Scope, interaction.ConversationID, interaction.MessageID)
+	if err != nil {
+		return nil, false, err
+	}
+	if !channelMessageReferencesArtifact(message, interaction.SurfaceArtifactID) {
+		return nil, false, fmt.Errorf("%w: message %q does not reference surface artifact %q", ErrInvalidSurfaceInteraction, interaction.MessageID, interaction.SurfaceArtifactID)
+	}
 	return s.store.CreateSurfaceInteraction(ctx, interaction)
 }
 
+func channelMessageReferencesArtifact(message *ChannelMessage, artifactID string) bool {
+	for _, reference := range message.References {
+		if reference.Kind == ConversationReferenceArtifact && reference.ID == artifactID {
+			return true
+		}
+	}
+	return false
+}
+
+// filterVisibleSurfaceInteractions keeps the interactions viewer may read:
+// shared ones and the viewer's own actor-visibility ones, each only when the
+// viewer can see the message that carries its surface.
+func (s *ConversationService) filterVisibleSurfaceInteractions(ctx context.Context, scope Scope, conversationID string, interactions []*SurfaceInteraction, viewer ConversationViewer) ([]*SurfaceInteraction, error) {
+	if err := viewer.Validate(); err != nil {
+		return nil, err
+	}
+	candidates := make([]*SurfaceInteraction, 0, len(interactions))
+	messageIDs := make([]string, 0)
+	requested := make(map[string]bool)
+	for _, interaction := range interactions {
+		if interaction.Visibility != SurfaceInteractionVisibilityShared &&
+			(interaction.Visibility != SurfaceInteractionVisibilityActor || viewer.Participant != (ConversationParticipant{Type: interaction.ActorType, ID: interaction.ActorID})) {
+			continue
+		}
+		candidates = append(candidates, interaction)
+		if !requested[interaction.MessageID] {
+			requested[interaction.MessageID] = true
+			messageIDs = append(messageIDs, interaction.MessageID)
+		}
+	}
+	if len(candidates) == 0 {
+		return candidates, nil
+	}
+	messages := make([]*ChannelMessage, 0, len(messageIDs))
+	if batch, ok := s.store.(ChannelMessageBatchStore); ok {
+		loaded, err := loadChannelMessageBatches(ctx, batch, scope, conversationID, messageIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range messageIDs {
+			if message := loaded[id]; message != nil {
+				messages = append(messages, message)
+			}
+		}
+	} else {
+		for _, id := range messageIDs {
+			message, err := s.store.GetChannelMessage(ctx, scope, conversationID, id)
+			if err != nil {
+				return nil, err
+			}
+			if message != nil {
+				messages = append(messages, message)
+			}
+		}
+	}
+	visibleMessages, err := s.filterVisibleChannelMessages(ctx, scope, conversationID, messages, viewer)
+	if err != nil {
+		return nil, err
+	}
+	visibleMessageIDs := make(map[string]bool, len(visibleMessages))
+	for _, message := range visibleMessages {
+		visibleMessageIDs[message.ID] = true
+	}
+	visible := make([]*SurfaceInteraction, 0, len(candidates))
+	for _, interaction := range candidates {
+		if visibleMessageIDs[interaction.MessageID] {
+			visible = append(visible, interaction)
+		}
+	}
+	return visible, nil
+}
+
+// ListSurfaceInteractions pages interactions by Sequence. With a Viewer it
+// scans past hidden interactions so a page is not cut short by them.
 func (s *ConversationService) ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
-	return s.store.ListSurfaceInteractions(ctx, filter)
+	if filter.Viewer == nil {
+		return s.store.ListSurfaceInteractions(ctx, filter)
+	}
+	viewer := *filter.Viewer
+	scan := filter
+	scan.Viewer = nil
+	desired := scan.limit()
+	result := make([]*SurfaceInteraction, 0)
+	for len(result) < desired {
+		raw, err := s.store.ListSurfaceInteractions(ctx, scan)
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) == 0 {
+			break
+		}
+		visible, err := s.filterVisibleSurfaceInteractions(ctx, filter.Scope, filter.ConversationID, raw, viewer)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, visible...)
+		scan.AfterSequence = raw[len(raw)-1].Sequence
+		if len(raw) < scan.limit() {
+			break
+		}
+	}
+	if len(result) > desired {
+		result = result[:desired]
+	}
+	return result, nil
 }
 
+// ListLatestSurfaceInteractions resolves last-write-wins state of a surface.
+// With a Viewer it reduces only the interactions that viewer may read.
 func (s *ConversationService) ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
-	return s.store.ListLatestSurfaceInteractions(ctx, filter)
+	if filter.Viewer == nil {
+		return s.store.ListLatestSurfaceInteractions(ctx, filter)
+	}
+	viewer := *filter.Viewer
+	scan := filter
+	scan.Viewer = nil
+	if err := scan.validate(); err != nil {
+		return nil, err
+	}
+	page := SurfaceInteractionFilter{Scope: filter.Scope, ConversationID: filter.ConversationID, SurfaceID: filter.SurfaceID, Limit: maximumSurfaceInteractionLimit}
+	visible := make([]*SurfaceInteraction, 0)
+	for {
+		raw, err := s.store.ListSurfaceInteractions(ctx, page)
+		if err != nil {
+			return nil, err
+		}
+		if len(raw) == 0 {
+			break
+		}
+		filtered, err := s.filterVisibleSurfaceInteractions(ctx, filter.Scope, filter.ConversationID, raw, viewer)
+		if err != nil {
+			return nil, err
+		}
+		visible = append(visible, filtered...)
+		page.AfterSequence = raw[len(raw)-1].Sequence
+		if len(raw) < page.Limit {
+			break
+		}
+	}
+	return latestSurfaceInteractions(visible, filter.AcrossActors), nil
 }

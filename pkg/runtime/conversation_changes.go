@@ -153,20 +153,28 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	}
 	messageHasMore := len(rawMessages) == limit && nextMessageSequence < conversation.LastSequence
 
-	// Read one past the page to learn whether more interactions remain.
-	interactions, err := s.conversations.store.ListSurfaceInteractions(ctx, SurfaceInteractionFilter{
+	// Read one past the page to learn whether more interactions remain. Like
+	// messages, the cursor advances over hidden interactions too.
+	rawInteractions, err := s.conversations.store.ListSurfaceInteractions(ctx, SurfaceInteractionFilter{
 		Scope: req.Scope, ConversationID: conversationID, AfterSequence: cursor.InteractionSequence, Limit: limit + 1,
 	})
 	if err != nil {
 		return nil, err
 	}
-	interactionHasMore := len(interactions) > limit
+	interactionHasMore := len(rawInteractions) > limit
 	if interactionHasMore {
-		interactions = interactions[:limit]
+		rawInteractions = rawInteractions[:limit]
 	}
 	nextInteractionSequence := cursor.InteractionSequence
-	if len(interactions) > 0 {
-		nextInteractionSequence = interactions[len(interactions)-1].Sequence
+	if len(rawInteractions) > 0 {
+		nextInteractionSequence = rawInteractions[len(rawInteractions)-1].Sequence
+	}
+	interactions := rawInteractions
+	if req.Viewer != nil {
+		interactions, err = s.conversations.filterVisibleSurfaceInteractions(ctx, req.Scope, conversationID, rawInteractions, *req.Viewer)
+		if err != nil {
+			return nil, err
+		}
 	}
 	interactionsChanged := initial || len(interactions) > 0
 

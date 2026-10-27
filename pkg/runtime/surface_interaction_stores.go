@@ -179,11 +179,11 @@ func (s *SQLiteStore) CreateSurfaceInteraction(ctx context.Context, interaction 
 		return nil, false, err
 	}
 	if _, err := conn.ExecContext(ctx, `INSERT INTO surface_interactions
-		(scope_kind, scope_id, conversation_id, id, sequence, surface_artifact_id, surface_id, surface_version, component_id,
-		 item_key, actor_type, actor_id, repeatable, idempotency_key, created_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, created.Scope.Kind, created.Scope.ID, created.ConversationID,
-		created.ID, created.Sequence, created.SurfaceArtifactID, created.SurfaceID, created.SurfaceVersion, created.ComponentID,
-		created.ItemKey, created.ActorType, created.ActorID, created.Repeatable, created.IdempotencyKey, created.CreatedAt, string(payload)); err != nil {
+		(scope_kind, scope_id, conversation_id, id, sequence, surface_artifact_id, surface_id, surface_version, message_id, component_id,
+		 item_key, actor_type, actor_id, repeatable, visibility, idempotency_key, created_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, created.Scope.Kind, created.Scope.ID, created.ConversationID,
+		created.ID, created.Sequence, created.SurfaceArtifactID, created.SurfaceID, created.SurfaceVersion, created.MessageID, created.ComponentID,
+		created.ItemKey, created.ActorType, created.ActorID, created.Repeatable, created.Visibility, created.IdempotencyKey, created.CreatedAt, string(payload)); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return nil, false, ErrSurfaceInteractionConflict
 		}
@@ -259,8 +259,8 @@ func (s *PostgresStore) migrateSurfaceInteractions(ctx context.Context, tx *sql.
 		`CREATE TABLE IF NOT EXISTS ` + table + ` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, conversation_id TEXT NOT NULL, id TEXT NOT NULL,
 			sequence BIGINT NOT NULL, surface_artifact_id TEXT NOT NULL, surface_id TEXT NOT NULL, surface_version BIGINT NOT NULL,
-			component_id TEXT NOT NULL, item_key TEXT NOT NULL DEFAULT '', actor_type TEXT NOT NULL, actor_id TEXT NOT NULL,
-			repeatable BOOLEAN NOT NULL, idempotency_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, payload JSONB NOT NULL,
+			message_id TEXT NOT NULL, component_id TEXT NOT NULL, item_key TEXT NOT NULL DEFAULT '', actor_type TEXT NOT NULL, actor_id TEXT NOT NULL,
+			repeatable BOOLEAN NOT NULL, visibility TEXT NOT NULL CHECK (visibility IN ('actor', 'shared')), idempotency_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, payload JSONB NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, conversation_id, id),
 			UNIQUE (scope_kind, scope_id, conversation_id, sequence),
 			UNIQUE (scope_kind, scope_id, conversation_id, idempotency_key),
@@ -332,11 +332,11 @@ func (s *PostgresStore) CreateSurfaceInteraction(ctx context.Context, interactio
 		return nil, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+table+`
-		(scope_kind, scope_id, conversation_id, id, sequence, surface_artifact_id, surface_id, surface_version, component_id,
-		 item_key, actor_type, actor_id, repeatable, idempotency_key, created_at, payload)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)`, created.Scope.Kind, created.Scope.ID, created.ConversationID,
-		created.ID, created.Sequence, created.SurfaceArtifactID, created.SurfaceID, created.SurfaceVersion, created.ComponentID,
-		created.ItemKey, created.ActorType, created.ActorID, created.Repeatable, created.IdempotencyKey, created.CreatedAt, string(payload)); err != nil {
+		(scope_kind, scope_id, conversation_id, id, sequence, surface_artifact_id, surface_id, surface_version, message_id, component_id,
+		 item_key, actor_type, actor_id, repeatable, visibility, idempotency_key, created_at, payload)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)`, created.Scope.Kind, created.Scope.ID, created.ConversationID,
+		created.ID, created.Sequence, created.SurfaceArtifactID, created.SurfaceID, created.SurfaceVersion, created.MessageID, created.ComponentID,
+		created.ItemKey, created.ActorType, created.ActorID, created.Repeatable, created.Visibility, created.IdempotencyKey, created.CreatedAt, string(payload)); err != nil {
 		if postgresUniqueViolation(err) {
 			return nil, false, ErrSurfaceInteractionConflict
 		}

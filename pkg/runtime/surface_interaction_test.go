@@ -79,6 +79,28 @@ func newSurfaceInteractionFixture(t *testing.T, store KernelStore) surfaceIntera
 	return surfaceInteractionFixture{ctx: ctx, scope: scope, conversation: conversation, conversations: conversations}
 }
 
+// postCard posts (or replays) the message that carries a surface's card and
+// returns its id.
+func (f surfaceInteractionFixture) postCard(t *testing.T, surfaceID string, audience ConversationAudience) string {
+	t.Helper()
+	conversation, err := f.conversations.GetConversation(f.ctx, f.scope, f.conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := f.conversations.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+		Scope: f.scope, ConversationID: f.conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: "finn"}, Intent: MessageIntentUpdate,
+		Content: "Card " + surfaceID, Audience: audience, IdempotencyKey: "card-" + surfaceID,
+		References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: "artifact-" + surfaceID, Version: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return posted.Message.ID
+}
+
+// record fills test defaults: version 1, the surface's channel card message,
+// and actor visibility for single-use and shared for repeatable components.
 func (f surfaceInteractionFixture) record(t *testing.T, req RecordSurfaceInteractionRequest) (*SurfaceInteraction, bool, error) {
 	t.Helper()
 	req.Scope, req.ConversationID = f.scope, f.conversation.ID
@@ -88,7 +110,20 @@ func (f surfaceInteractionFixture) record(t *testing.T, req RecordSurfaceInterac
 	if req.SurfaceVersion == 0 {
 		req.SurfaceVersion = 1
 	}
+	if req.MessageID == "" {
+		req.MessageID = f.postCard(t, req.SurfaceID, ConversationAudience{Kind: ConversationAudienceChannel})
+	}
+	if req.Visibility == "" {
+		req.Visibility = SurfaceInteractionVisibilityActor
+		if req.Repeatable {
+			req.Visibility = SurfaceInteractionVisibilityShared
+		}
+	}
 	return f.conversations.RecordSurfaceInteraction(f.ctx, req)
+}
+
+func surfaceInteractionViewer(id string) *ConversationViewer {
+	return &ConversationViewer{Participant: surfaceInteractionUser(id)}
 }
 
 func surfaceInteractionUser(id string) ConversationParticipant {
@@ -315,5 +350,169 @@ func TestPostgresSurfaceInteractionMigrationRollsBackAndReapplies(t *testing.T) 
 	}
 	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != surfaceInteractionMigrationVersion || !exists() {
 		t.Fatalf("after reapply: version %d, %v; table %t", version, err, exists())
+	}
+}
+
+func TestSurfaceInteractionVisibilityFollowsActorAndCardMessage(t *testing.T) {
+	for _, fixture := range surfaceInteractionStores(t) {
+		t.Run(fixture.name, func(t *testing.T) {
+			store := fixture.store(t)
+			f := newSurfaceInteractionFixture(t, store)
+			answer := func(actor, surface, key string, repeatable bool) RecordSurfaceInteractionRequest {
+				req := RecordSurfaceInteractionRequest{SurfaceID: surface, ComponentID: "c1", Actor: surfaceInteractionUser(actor),
+					Repeatable: repeatable, Values: json.RawMessage(`{"pick":1}`), IdempotencyKey: key}
+				if repeatable {
+					req.ItemKey = "tacos"
+				}
+				return req
+			}
+			// Only ana can see the "secret" card's message.
+			secretMessage := f.postCard(t, "secret", ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{surfaceInteractionUser("ana")}})
+			secret := answer("ana", "secret", "secret-ana", true)
+			secret.MessageID = secretMessage
+			for _, req := range []RecordSurfaceInteractionRequest{
+				answer("ben", "quiz", "ben-q1", false),
+				answer("ana", "quiz", "ana-q1", false),
+				answer("ana", "poll", "vote-ana", true),
+				answer("ben", "poll", "vote-ben", true),
+				secret,
+			} {
+				if _, _, err := f.record(t, req); err != nil {
+					t.Fatalf("%s: %v", req.IdempotencyKey, err)
+				}
+			}
+			want := map[string][]string{
+				"":    {"ben-q1", "ana-q1", "vote-ana", "vote-ben", "secret-ana"},
+				"ana": {"ana-q1", "vote-ana", "vote-ben", "secret-ana"},
+				"ben": {"ben-q1", "vote-ana", "vote-ben"},
+				"cy":  {"vote-ana", "vote-ben"},
+			}
+			changes, err := NewConversationChangeService(store.(ConversationStore), store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for viewerID, keys := range want {
+				var viewer *ConversationViewer
+				if viewerID != "" {
+					viewer = surfaceInteractionViewer(viewerID)
+				}
+				set, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: viewer})
+				if err != nil || !reflect.DeepEqual(surfaceInteractionKeys(set.SurfaceInteractions), keys) {
+					t.Fatalf("changes for %q = %v, %v", viewerID, surfaceInteractionKeys(set.SurfaceInteractions), err)
+				}
+				listed, err := f.conversations.ListSurfaceInteractions(f.ctx, SurfaceInteractionFilter{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: viewer})
+				if err != nil || !reflect.DeepEqual(surfaceInteractionKeys(listed), keys) {
+					t.Fatalf("list for %q = %v, %v", viewerID, surfaceInteractionKeys(listed), err)
+				}
+			}
+
+			latest := func(surface string, viewer *ConversationViewer, acrossActors bool) []string {
+				t.Helper()
+				result, err := f.conversations.ListLatestSurfaceInteractions(f.ctx, LatestSurfaceInteractionFilter{
+					Scope: f.scope, ConversationID: f.conversation.ID, SurfaceID: surface, AcrossActors: acrossActors, Viewer: viewer,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return surfaceInteractionKeys(result)
+			}
+			// Across actors, another actor's per-viewer answer never wins.
+			if got := latest("quiz", nil, true); !reflect.DeepEqual(got, []string{"ana-q1"}) {
+				t.Fatalf("quiz across actors = %v", got)
+			}
+			if got := latest("quiz", surfaceInteractionViewer("ben"), true); !reflect.DeepEqual(got, []string{"ben-q1"}) {
+				t.Fatalf("ben quiz across actors = %v", got)
+			}
+			if got := latest("quiz", surfaceInteractionViewer("cy"), false); len(got) != 0 {
+				t.Fatalf("cy quiz = %v", got)
+			}
+			if got := latest("poll", surfaceInteractionViewer("cy"), true); !reflect.DeepEqual(got, []string{"vote-ben"}) {
+				t.Fatalf("cy poll across actors = %v", got)
+			}
+			if got := latest("poll", surfaceInteractionViewer("cy"), false); !reflect.DeepEqual(got, []string{"vote-ana", "vote-ben"}) {
+				t.Fatalf("cy poll per actor = %v", got)
+			}
+			if got := latest("secret", surfaceInteractionViewer("ben"), true); len(got) != 0 {
+				t.Fatalf("ben secret = %v", got)
+			}
+			if got := latest("secret", surfaceInteractionViewer("ana"), true); !reflect.DeepEqual(got, []string{"secret-ana"}) {
+				t.Fatalf("ana secret = %v", got)
+			}
+
+			// Stores never filter by viewer themselves.
+			if _, err := store.(ConversationStore).ListSurfaceInteractions(f.ctx, SurfaceInteractionFilter{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: surfaceInteractionViewer("ana")}); !errors.Is(err, ErrInvalidSurfaceInteraction) {
+				t.Fatalf("store viewer = %v", err)
+			}
+			// Visibility is required, and the message must carry the surface.
+			invalid := answer("ana", "poll", "bad-visibility", true)
+			invalid.Visibility = "everyone"
+			if _, _, err := f.record(t, invalid); !errors.Is(err, ErrInvalidSurfaceInteraction) {
+				t.Fatalf("invalid visibility = %v", err)
+			}
+			wrongMessage := answer("ana", "poll", "wrong-message", true)
+			wrongMessage.MessageID = secretMessage
+			if _, _, err := f.record(t, wrongMessage); !errors.Is(err, ErrInvalidSurfaceInteraction) {
+				t.Fatalf("message without surface = %v", err)
+			}
+			missingMessage := answer("ana", "poll", "missing-message", true)
+			missingMessage.MessageID = "missing"
+			if _, _, err := f.record(t, missingMessage); !errors.Is(err, ErrChannelMessageNotFound) {
+				t.Fatalf("missing message = %v", err)
+			}
+		})
+	}
+}
+
+func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
+	for _, fixture := range surfaceInteractionStores(t) {
+		t.Run(fixture.name, func(t *testing.T) {
+			store := fixture.store(t)
+			f := newSurfaceInteractionFixture(t, store)
+			changes, err := NewConversationChangeService(store.(ConversationStore), store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.postCard(t, "quiz", ConversationAudience{Kind: ConversationAudienceChannel})
+			viewer := surfaceInteractionViewer("ben")
+			list := func(cursor string, limit int) *ConversationChangeSet {
+				t.Helper()
+				set, err := changes.ListChanges(f.ctx, ConversationChangeRequest{Scope: f.scope, ConversationID: f.conversation.ID, Cursor: cursor, Limit: limit, Viewer: viewer})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return set
+			}
+			initial := list("", 0)
+			for index, req := range []struct{ actor, key string }{{"ana", "a1"}, {"ana", "a2"}, {"ben", "b1"}, {"ana", "a3"}, {"ben", "b2"}} {
+				if _, _, err := f.record(t, RecordSurfaceInteractionRequest{SurfaceID: "quiz", ComponentID: "q" + string(rune('1'+index)),
+					Actor: surfaceInteractionUser(req.actor), Values: json.RawMessage(`{}`), IdempotencyKey: req.key}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			hidden := list(initial.Cursor, 2)
+			if len(hidden.SurfaceInteractions) != 0 || !hidden.HasMore || hidden.Cursor == initial.Cursor || hidden.SurfaceInteractionsChanged {
+				t.Fatalf("hidden page = %#v", hidden)
+			}
+			middle := list(hidden.Cursor, 2)
+			if !reflect.DeepEqual(surfaceInteractionKeys(middle.SurfaceInteractions), []string{"b1"}) || !middle.HasMore || !middle.HasChanges {
+				t.Fatalf("middle page = %v, %#v", surfaceInteractionKeys(middle.SurfaceInteractions), middle)
+			}
+			last := list(middle.Cursor, 2)
+			if !reflect.DeepEqual(surfaceInteractionKeys(last.SurfaceInteractions), []string{"b2"}) || last.HasMore {
+				t.Fatalf("last page = %v, %#v", surfaceInteractionKeys(last.SurfaceInteractions), last)
+			}
+			if done := list(last.Cursor, 2); len(done.SurfaceInteractions) != 0 || done.HasMore || done.Cursor != last.Cursor {
+				t.Fatalf("done = %#v", done)
+			}
+			// The service list scans through hidden pages to fill its page.
+			listed, err := f.conversations.ListSurfaceInteractions(f.ctx, SurfaceInteractionFilter{Scope: f.scope, ConversationID: f.conversation.ID, Limit: 1, Viewer: viewer})
+			if err != nil || !reflect.DeepEqual(surfaceInteractionKeys(listed), []string{"b1"}) {
+				t.Fatalf("listed = %v, %v", surfaceInteractionKeys(listed), err)
+			}
+			listed, err = f.conversations.ListSurfaceInteractions(f.ctx, SurfaceInteractionFilter{Scope: f.scope, ConversationID: f.conversation.ID, AfterSequence: 3, Limit: 1, Viewer: viewer})
+			if err != nil || !reflect.DeepEqual(surfaceInteractionKeys(listed), []string{"b2"}) {
+				t.Fatalf("listed after b1 = %v, %v", surfaceInteractionKeys(listed), err)
+			}
+		})
 	}
 }
