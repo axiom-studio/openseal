@@ -256,7 +256,7 @@ func TestTeamMemberAnswerCarriesItsVisual(t *testing.T) {
 	}
 }
 
-func TestTeamMemberVisualThatFailsHostChecksIsNotKept(t *testing.T) {
+func TestTeamMemberVisualThatFailsHostChecksIsDroppedNotTheAnswer(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "team-visual-rejected"}
@@ -276,16 +276,11 @@ func TestTeamMemberVisualThatFailsHostChecksIsNotKept(t *testing.T) {
 	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
 		return []ConversationParticipantBinding{
 			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "planner"}, SemanticRoles: []string{"planner"}},
-			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "helper"}, SemanticRoles: []string{"helper"}},
 		}, nil
 	})
 	proposals := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
-		var visual *presentation.Visual
-		if input.Participant.ID == "planner" {
-			visual = boundAnswerVisual()
-		}
 		return ParticipationProposal{
-			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Not quite.", Visual: visual,
+			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Not quite.", Visual: boundAnswerVisual(),
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 			Signals:  ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true},
 		}, nil
@@ -313,12 +308,20 @@ func TestTeamMemberVisualThatFailsHostChecksIsNotKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spoke := map[string]bool{}
+	answered := false
 	for _, message := range messages {
-		spoke[message.Sender.ID] = true
+		if message.Sender.ID != "planner" {
+			continue
+		}
+		answered = true
+		for _, reference := range message.References {
+			if reference.Kind == ConversationReferenceArtifact {
+				t.Fatalf("answer references a rejected visual: %#v", reference)
+			}
+		}
 	}
-	if spoke["planner"] || !spoke["helper"] {
-		t.Fatalf("speakers = %v; the member with a rejected visual must not speak without it", spoke)
+	if !answered {
+		t.Fatal("a rejected visual must not cost the member its answer")
 	}
 }
 

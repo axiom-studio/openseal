@@ -159,7 +159,7 @@ type ConversationCoordinationRequest struct {
 	MessageReferences []ConversationReference
 	// answerVisual keeps the visual a participant attaches to its answer and
 	// returns the reference its message carries. The conversation Run adapter
-	// supplies it; without it a proposal with a visual fails the round.
+	// supplies it; without it a member's visual is dropped and its answer stands.
 	answerVisual       func(context.Context, ConversationParticipant, presentation.Visual) (ConversationReference, error)
 	Policy             ConversationArbitrationPolicy
 	MaximumConcurrency int
@@ -513,9 +513,9 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 				visual := proposal.Visual
 				proposal.Visual = nil
 				if visual != nil && (!proposal.WantsToSpeak || proposal.ProposedAction != nil) {
-					// A visual goes only with a finished answer.
-					proposals[index] = unavailableParticipationProposal(binding, "participant_runtime_unavailable")
-					continue
+					// A visual goes only with a finished answer; the rest of
+					// the proposal still stands.
+					visual = nil
 				}
 				proposal.ID = ""
 				proposal.RoundID = ""
@@ -572,12 +572,11 @@ queue:
 			continue
 		}
 		if req.answerVisual == nil {
-			return nil, fmt.Errorf("%w: participant %s attached a visual but this round has no Run to keep it", ErrConversationCoordinationUnavailable, proposals[index].Participant.ID)
+			continue // No Run to keep the visual; the member answers in words.
 		}
 		reference, err := req.answerVisual(ctx, proposals[index].Participant, *visuals[index])
 		if errors.Is(err, errInvalidAnswerVisual) {
-			proposals[index] = unavailableParticipationProposal(bindings[index], "participant_runtime_unavailable")
-			continue
+			continue // A rejected visual never costs the member its answer.
 		}
 		if err != nil {
 			return nil, err
