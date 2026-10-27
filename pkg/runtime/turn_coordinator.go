@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 type TurnExecutionContext struct {
@@ -49,16 +51,18 @@ func (f TurnRunnerFunc) RunTurn(ctx context.Context, input TurnExecutionContext)
 }
 
 type TurnOutcome struct {
-	ModelProvider          string
-	Model                  string
-	SkillSelections        []HostedSkillSelection
-	Decisions              []TurnDecision
-	ProposedActions        []TurnAction
-	ProposedFork           *TurnForkProposal
-	ProposedDelegation     *TurnDelegationProposal
-	ProposedRunbook        *TurnRunbookProposal
-	ProposedTask           *TurnTaskProposal
-	OutputSummary          string
+	ModelProvider      string
+	Model              string
+	SkillSelections    []HostedSkillSelection
+	Decisions          []TurnDecision
+	ProposedActions    []TurnAction
+	ProposedFork       *TurnForkProposal
+	ProposedDelegation *TurnDelegationProposal
+	ProposedRunbook    *TurnRunbookProposal
+	ProposedTask       *TurnTaskProposal
+	OutputSummary      string
+	// Visual is shown with the final answer; only a completed outcome has one.
+	Visual                 *presentation.Visual `json:"visual,omitempty"`
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
 	NextRunStatus          AgentRunStatus

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
@@ -226,6 +227,7 @@ type HostedTurnResponse struct {
 	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
 	ProposedTask               *TurnTaskProposal             `json:"proposedTask,omitempty"`
 	OutputSummary              string                        `json:"outputSummary"`
+	Visual                     *presentation.Visual          `json:"visual,omitempty"`
 	Usage                      TurnUsage                     `json:"usage,omitempty"`
 	ContinuationCheckpoint     map[string]interface{}        `json:"continuationCheckpoint,omitempty"`
 	NextRunStatus              AgentRunStatus                `json:"nextRunStatus"`
@@ -320,6 +322,25 @@ type HostedTurnRunnerConfig struct {
 	ModelCredential    *capability.CredentialReference
 	ModelProvider      string
 	Model              string
+	// VisualBindings confirms that entities bound by an answer's visual exist
+	// and are visible from the Run's conversation. Nil rejects bound visuals.
+	VisualBindings func(run *AgentRun) presentation.BindingResolver
+	// VisualLinkProvenance confirms that links in an answer's visual appeared
+	// in the Run's conversation. Nil rejects visuals with links.
+	VisualLinkProvenance func(run *AgentRun) presentation.LinkProvenance
+}
+
+// visualChecks returns the host checks for an answer visual of run. Missing
+// hooks fail closed in presentation.Validate.
+func (c HostedTurnRunnerConfig) visualChecks(run *AgentRun) presentation.ValidateOptions {
+	var checks presentation.ValidateOptions
+	if c.VisualBindings != nil {
+		checks.Bindings = c.VisualBindings(run)
+	}
+	if c.VisualLinkProvenance != nil {
+		checks.LinkProvenance = c.VisualLinkProvenance(run)
+	}
+	return checks
 }
 
 type HostedTurnRunner struct {
@@ -436,6 +457,13 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response.ProposedWorkspaceOperation != nil {
 		return nil, errors.New("turn host returned an unconsumed native Workspace operation")
+	}
+	if response.Visual != nil {
+		proposes := response.ProposedAction != nil || response.ProposedFork != nil || response.ProposedDelegation != nil ||
+			response.ProposedRunbook != nil || response.ProposedTask != nil
+		if err := validateHostedTurnVisual(ctx, response.Visual, response.NextRunStatus, proposes, r.config.visualChecks(input.Run)); err != nil {
+			return nil, fmt.Errorf("turn host returned an invalid answer visual: %w", err)
+		}
 	}
 	response.ModelProvider, response.Model, err = normalizeModelIdentity(response.ModelProvider, response.Model)
 	if err != nil {
@@ -678,7 +706,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		SkillSelections: append([]HostedSkillSelection(nil), response.SkillSelections...),
 		Decisions:       append(selectionDecisions, response.Decisions...), ProposedActions: proposedActions,
 		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(response.ProposedTask),
-		OutputSummary: response.OutputSummary, Usage: response.Usage,
+		OutputSummary: response.OutputSummary, Visual: cloneVisual(response.Visual), Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
 		EvidenceClaims: append([]EvidenceClaim(nil), response.EvidenceClaims...), EvidenceGrounding: cloneEvidenceGroundingReview(response.EvidenceGrounding),

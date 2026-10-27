@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 const (
@@ -95,6 +96,7 @@ type evidenceGroundingState struct {
 	Claims       []EvidenceClaim            `json:"claims"`
 	DraftSummary string                     `json:"draftSummary"`
 	DraftOutput  map[string]interface{}     `json:"draftOutput"`
+	DraftVisual  *presentation.Visual       `json:"draftVisual,omitempty"`
 	Findings     []EvidenceGroundingFinding `json:"findings,omitempty"`
 	LastReview   *EvidenceGroundingReview   `json:"lastReview,omitempty"`
 }
@@ -200,7 +202,7 @@ func stageEvidenceGrounding(response *HostedTurnResponse, snapshot *EvidenceSnap
 	state := evidenceGroundingState{
 		APIVersion: EvidenceGroundingAPIVersion, Status: status, SnapshotID: snapshot.ID,
 		ClaimsDigest: digest, Claims: claims, DraftSummary: strings.TrimSpace(response.OutputSummary),
-		DraftOutput: cloneMap(response.RunOutput), Findings: findings,
+		DraftOutput: cloneMap(response.RunOutput), DraftVisual: cloneVisual(response.Visual), Findings: findings,
 	}
 	checkpoint[evidenceGroundingCheckpointKey] = evidenceGroundingStateMap(state)
 	response.ContinuationCheckpoint = checkpoint
@@ -212,6 +214,7 @@ func stageEvidenceGrounding(response *HostedTurnResponse, snapshot *EvidenceSnap
 	response.NextRunStatus = AgentRunStatusRunning
 	response.WakeCondition = nil
 	response.RunOutput = nil
+	response.Visual = nil
 	if status == evidenceGroundingPendingReview {
 		response.OutputSummary = "Draft preserved for a bounded evidence-grounding review."
 	} else {
@@ -478,7 +481,7 @@ func (r *HostedTurnRunner) runEvidenceGroundingReview(ctx context.Context, input
 		return &TurnOutcome{
 			ModelProvider: review.ReviewerProvider, Model: review.ReviewerModel,
 			Decisions:     []TurnDecision{{Summary: "Accepted the report after bounded semantic evidence review.", EvidenceRefs: references}},
-			OutputSummary: state.DraftSummary, Usage: review.Usage, ContinuationCheckpoint: checkpoint,
+			OutputSummary: state.DraftSummary, Visual: cloneVisual(state.DraftVisual), Usage: review.Usage, ContinuationCheckpoint: checkpoint,
 			NextRunStatus: AgentRunStatusCompleted, RunOutput: output,
 			EvidenceClaims: append([]EvidenceClaim(nil), state.Claims...), EvidenceGrounding: cloneEvidenceGroundingReview(review),
 		}, nil

@@ -667,8 +667,9 @@ type ConversationRunTurnRunnerConfig struct {
 	// participant arbitration. It must return only trusted binding metadata;
 	// the Conversation runner remains the Turn runner.
 	TeamActions TurnRunnerResolver
-	// AttachmentContent supplies tenant-scoped bytes for user-attached text files.
-	// Content is projected into the ephemeral model goal, never message state.
+	// AttachmentContent supplies tenant-scoped bytes for user-attached text files
+	// and stores the visuals Agents attach to their answers. Attachment content
+	// is projected into the ephemeral model goal, never message state.
 	AttachmentContent ArtifactContentStore
 }
 
@@ -1535,6 +1536,13 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	broadcastToChannel, _ := outcome.RunOutput["broadcastToChannel"].(bool)
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}}
 	references = append(references, conversationActionArtifactReferences(input.Run)...)
+	if outcome.Visual != nil {
+		visual, err := r.storeAnswerVisual(ctx, input.Run, participantID, trigger, *outcome.Visual)
+		if err != nil {
+			return nil, err
+		}
+		references = append(references, visual)
+	}
 	message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, content, references, broadcastToChannel)
 	if err != nil {
 		if errors.Is(err, errConversationParticipationStopped) {
