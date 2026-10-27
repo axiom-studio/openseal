@@ -328,6 +328,9 @@ type HostedTurnRunnerConfig struct {
 	// VisualLinkProvenance confirms that links in an answer's visual appeared
 	// in the Run's conversation. Nil rejects visuals with links.
 	VisualLinkProvenance func(run *AgentRun) presentation.LinkProvenance
+	// VisualImages confirms that images in an answer's visual are images
+	// visible from the Run's conversation. Nil rejects visuals with images.
+	VisualImages func(run *AgentRun) presentation.ImageResolver
 }
 
 // visualChecks returns the host checks for an answer visual of run. Missing
@@ -339,6 +342,9 @@ func (c HostedTurnRunnerConfig) visualChecks(run *AgentRun) presentation.Validat
 	}
 	if c.VisualLinkProvenance != nil {
 		checks.LinkProvenance = c.VisualLinkProvenance(run)
+	}
+	if c.VisualImages != nil {
+		checks.Images = c.VisualImages(run)
 	}
 	return checks
 }

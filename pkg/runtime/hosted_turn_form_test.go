@@ -335,7 +335,8 @@ func TestHostedTurnFormSchemaOffersAnswerVisual(t *testing.T) {
 		}
 	}
 	encoded, _ := json.Marshal(visual)
-	lower := strings.ToLower(string(encoded))
+	// artifactId is the image reference key shared with hosts.
+	lower := strings.ToLower(strings.ReplaceAll(string(encoded), "artifactId", ""))
 	for _, word := range []string{"presentation", "surface", "artifact", "publish"} {
 		if strings.Contains(lower, word) {
 			t.Fatalf("visual schema mentions %q", word)

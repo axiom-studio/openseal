@@ -69,6 +69,35 @@ func TestHostedTurnRunnerChecksAnswerVisualWithHostHooks(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerChecksAnswerVisualImages(t *testing.T) {
+	run := &AgentRun{ID: "run-image", Scope: Scope{Kind: "tenant", ID: "7"}, AssignedAgentID: "agent", Goal: "Answer"}
+	turn := &AgentTurn{ID: "turn-image", RunID: run.ID}
+	visual := testAnswerVisual()
+	visual.Components = append(visual.Components, presentation.Component{ID: "cell", Type: "image", Summary: "An animal cell.",
+		Image: &presentation.ImageBlock{Image: presentation.ImageRef{ArtifactID: "img-1", Version: 2}}})
+	config := HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"}
+	runner, err := NewHostedTurnRunner(visualTurnHost{visual: visual}, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err == nil || !strings.Contains(err.Error(), "this host cannot show images yet") {
+		t.Fatalf("image without a host resolver = %v", err)
+	}
+	var resolved string
+	config.VisualImages = func(run *AgentRun) presentation.ImageResolver {
+		return presentation.ImageResolverFunc(func(_ context.Context, ref presentation.ImageRef) error {
+			resolved = run.ID + "/" + ref.ArtifactID
+			return nil
+		})
+	}
+	if runner, err = NewHostedTurnRunner(visualTurnHost{visual: visual}, config); err != nil {
+		t.Fatal(err)
+	}
+	if outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err != nil || outcome.Visual == nil || resolved != "run-image/img-1" {
+		t.Fatalf("outcome = %#v, resolved %q, err %v", outcome, resolved, err)
+	}
+}
+
 type answerVisualContent struct {
 	puts int
 	data []byte

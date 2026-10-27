@@ -32,10 +32,11 @@ type CatalogTurnResolverConfig struct {
 	// ConversationTasks is optional canonical storage for hosted task context.
 	// A model or copied Run context cannot supply task admission authority.
 	ConversationTasks ConversationTaskKernelStore
-	// VisualBindings and VisualLinkProvenance are the host checks for visuals
-	// on hosted answers; see HostedTurnRunnerConfig.
+	// VisualBindings, VisualLinkProvenance and VisualImages are the host
+	// checks for visuals on hosted answers; see HostedTurnRunnerConfig.
 	VisualBindings       func(run *AgentRun) presentation.BindingResolver
 	VisualLinkProvenance func(run *AgentRun) presentation.LinkProvenance
+	VisualImages         func(run *AgentRun) presentation.ImageResolver
 }
 
 // SkillHostCapabilityResolver lets an embedding runtime project the exact
@@ -113,7 +114,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 			AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
 			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 			SystemInstructions: instructions, ModelCredential: deploymentModelCredential(deployment),
-			VisualBindings: config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance,
+			VisualBindings: config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance, VisualImages: config.VisualImages,
 		})
 		if runnerErr != nil {
 			return nil, runnerErr
@@ -135,7 +136,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 			AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
 			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 			SystemInstructions: instructions, ModelCredential: deploymentModelCredential(deployment),
-			VisualBindings: config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance,
+			VisualBindings: config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance, VisualImages: config.VisualImages,
 		})
 		if runnerErr != nil {
 			return nil, runnerErr
@@ -300,7 +301,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		RunbookOperations: base.RunbookOperations,
 		ConversationTasks: conversationTasks,
 		ModelCredential:   deploymentModelCredential(deployment),
-		VisualBindings:    config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance,
+		VisualBindings:    config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance, VisualImages: config.VisualImages,
 	})
 	if err != nil {
 		return nil, err
@@ -310,7 +311,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		DefinitionID: definition.ID, DefinitionVersion: definition.Version,
 		SystemInstructions: append(append([]string(nil), instructions...), runProgressAcknowledgementSystemInstruction),
 		ModelCredential:    deploymentModelCredential(deployment),
-		VisualBindings:     config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance,
+		VisualBindings:     config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance, VisualImages: config.VisualImages,
 	})
 	if err != nil {
 		return nil, err
