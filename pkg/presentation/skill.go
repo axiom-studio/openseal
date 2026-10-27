@@ -1,6 +1,7 @@
 package presentation
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -62,53 +63,18 @@ func VisualRubric() string {
 	return b.String()
 }
 
-// PlotChartInput is the plot_chart action input.
-type PlotChartInput struct {
-	Title   string       `json:"title"`
-	Summary string       `json:"summary"`
-	Kind    string       `json:"kind"`
-	Points  []ChartPoint `json:"points"`
-	XLabel  string       `json:"xLabel,omitempty"`
-	YLabel  string       `json:"yLabel,omitempty"`
-}
-
-// Surface lowers a plot_chart input into a one-chart surface.
-func (p PlotChartInput) Surface() Surface {
-	title := strings.TrimSpace(p.Title)
-	return Surface{Schema: Schema, Title: title, State: StateReady, Components: []Component{{
-		ID: "chart", Type: "chart", Summary: strings.TrimSpace(p.Summary),
-		Chart: &Chart{Kind: p.Kind, XLabel: p.XLabel, YLabel: p.YLabel, Series: []ChartSeries{{Name: title, Points: p.Points}}},
-	}}}
-}
-
 func SkillDefinition() *skill.Definition {
 	artifactRefs := map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 1, "items": closedObject([]interface{}{"id", "version", "requirementName"}, map[string]interface{}{
 		"id": str(0), "version": map[string]interface{}{"type": "integer", "minimum": 1}, "requirementName": str(0),
 	})}
 	return &skill.Definition{
 		ID: SkillID, Version: SkillVersion, Name: "Visuals",
-		Description: "Replace a visual you already showed with a new version, e.g. while work is running, or plot one quick chart. New visuals belong on your answer.",
-		Icon:        "layout-dashboard", Category: "documents", Tags: []string{"interactive", "chart", "diagram", "form", "artifact"},
+		Description: "Replace a visual you already showed in this chat with a newer version. New visuals belong on your answer.",
+		Icon:        "layout-dashboard", Category: "documents", Tags: []string{"interactive", "chart", "diagram", "form", "visual"},
 		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
-		Actions: map[string]skill.Action{PlotChart: {
-			Name: PlotChart, Description: "Plot one chart from labeled numeric values in one call. Use this for an ordinary graph.",
-			InputSchema: closedObject([]interface{}{"title", "summary", "kind", "points"}, map[string]interface{}{
-				"title":   strRange(1, MaxTitleRunes),
-				"summary": describe(strRange(1, MaxSummaryRunes), "One plain sentence saying what the chart shows."),
-				"kind":    enum(ChartKinds),
-				"points": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 200, "items": closedObject([]interface{}{"label", "value"}, map[string]interface{}{
-					"label": strRange(1, 160), "value": number(),
-				})},
-				"xLabel": str(120), "yLabel": str(120),
-			}),
-			OutputSchema: closedObject([]interface{}{"artifactRefs", "state"}, map[string]interface{}{
-				"artifactRefs": artifactRefs, "state": enum([]string{string(StateReady)}),
-			}),
-			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
-			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
-		}, Publish: {
-			Name: Publish, Description: "Replace a visual you already showed with a new version, e.g. to show progress while work is running.",
-			InputSchema: PublishInputSchema(),
+		Actions: map[string]skill.Action{UpdateVisual: {
+			Name: UpdateVisual, Description: "Replace a visual you already showed in this chat with a newer version (e.g. as long work progresses).",
+			InputSchema: UpdateVisualInputSchema(),
 			OutputSchema: closedObject([]interface{}{"artifactRefs", "state"}, map[string]interface{}{
 				"artifactRefs": artifactRefs, "state": enum([]string{string(StateStreaming), string(StateReady)}),
 			}),
@@ -116,12 +82,30 @@ func SkillDefinition() *skill.Definition {
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
 		}},
 		Prompt: &capability.PromptModule{
-			Instructions: "Visuals normally go on your answer. Use publish_surface only to replace a visual you already showed with a new version while work is running, and plot_chart for one quick chart. " +
+			Instructions: "Visuals go on your answer. Use update_visual only to replace a visual you already showed with a newer version, e.g. as long work progresses. " +
 				"Give every chart, diagram, form, table and stat_row a one-sentence summary. Never write HTML, scripts, colours or URLs.",
-			UserInvocable: true, AllowedTools: []string{PlotChart, Publish},
+			UserInvocable: true, AllowedTools: []string{UpdateVisual},
 		},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
 	}
+}
+
+// VisualFieldDescription is the description of an answer's visual field: the
+// rubric followed by the worked examples, one compact JSON object per line.
+func VisualFieldDescription() string {
+	var b strings.Builder
+	b.WriteString("Optional visual shown with your answer, directly under its text. ")
+	b.WriteString(VisualRubric())
+	b.WriteString("\nWorked examples (userAsks, your answer text, and the visual if any):")
+	for _, example := range VisualExamples() {
+		encoded, err := json.Marshal(example)
+		if err != nil {
+			continue
+		}
+		b.WriteString("\n")
+		b.Write(encoded)
+	}
+	return b.String()
 }
 
 // Visual is the model-facing shape of one visual: what an answer's visual
@@ -155,10 +139,10 @@ func componentsSchema() map[string]interface{} {
 		fmt.Sprintf("At most %d components in total including nested ones, nested at most %d deep, %d KB of JSON.", MaxComponents, MaxDepth, MaxSurfaceBytes/1024))
 }
 
-// PublishInputSchema is the publish_surface input schema.
-func PublishInputSchema() map[string]interface{} {
-	return closedObject([]interface{}{"surfaceId", "expectedLatestVersion", "title", "state", "components", "requirementName"}, map[string]interface{}{
-		"surfaceId":             describe(map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}, "Id of the visual to replace."),
+// UpdateVisualInputSchema is the update_visual input schema.
+func UpdateVisualInputSchema() map[string]interface{} {
+	return closedObject([]interface{}{"visualId", "expectedLatestVersion", "title", "state", "components", "requirementName"}, map[string]interface{}{
+		"visualId":              describe(map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}, "Id of the visual to replace."),
 		"expectedLatestVersion": map[string]interface{}{"type": "integer", "minimum": 0, "description": "The visual's current version; 0 only when it does not exist yet."},
 		"title":                 strRange(1, MaxTitleRunes),
 		"state":                 enum([]string{string(StateStreaming), string(StateReady)}),
@@ -263,8 +247,16 @@ func tableSchema() map[string]interface{} {
 }
 
 func statRowSchema() map[string]interface{} {
+	formats := make([]string, len(StatFormats))
+	for index, format := range StatFormats {
+		formats[index] = string(format)
+	}
 	stat := closedObject([]interface{}{"label", "value"}, map[string]interface{}{
-		"label": strRange(1, 60), "value": strRange(1, 40), "unit": str(24), "delta": str(40),
+		"label":    strRange(1, 60),
+		"value":    describe(number(), "The raw number; the app formats it for the reader's language and region."),
+		"format":   describe(enum(formats), "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds)."),
+		"currency": describe(map[string]interface{}{"type": "string", "pattern": "^[A-Z]{3}$"}, "ISO 4217 code such as GBP, USD or EUR; required with format currency."),
+		"unit":     describe(str(24), "Shown after the value, e.g. GB/mo or per month."), "delta": str(40),
 		"trend": enum(Trends), "goodDirection": enum(GoodDirections),
 		"sparkline": map[string]interface{}{"type": "array", "maxItems": 30, "items": number()},
 	})

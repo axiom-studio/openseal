@@ -117,10 +117,16 @@ func TestValidate(t *testing.T) {
 		// table
 		{"table ragged", one(Component{ID: "t", Type: "table", Summary: "x", Table: &Table{Columns: []string{"a", "b"}, Rows: [][]string{{"1"}}}}), ValidateOptions{}, "table.rows[0] has 1 cells"},
 		// stat_row
-		{"stat_row", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "Saving", Value: "£96", Unit: "/yr", Delta: "+12%", Trend: "up", GoodDirection: "up", Sparkline: []float64{1, 2, 3}}}}}), ValidateOptions{}, ""},
+		{"stat_row", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "Saving", Value: 96, Format: StatCurrency, Currency: "GBP", Unit: "/yr", Delta: "+12%", Trend: "up", GoodDirection: "up", Sparkline: []float64{1, 2, 3}}}}}), ValidateOptions{}, ""},
 		{"stat_row five stats", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: make([]Stat, 5)}}), ValidateOptions{}, "stat_row.stats needs 1-4"},
-		{"stat_row trend", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: "1", Trend: "sideways"}}}}), ValidateOptions{}, "trend"},
-		{"stat_row sparkline", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: "1", Sparkline: make([]float64, 31)}}}}), ValidateOptions{}, "sparkline"},
+		{"stat_row trend", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Trend: "sideways"}}}}), ValidateOptions{}, "trend"},
+		{"stat_row percent", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 12.5, Format: StatPercent}, {Label: "b", Value: 60, Format: StatDuration}, {Label: "c", Value: -3, Format: StatNumber}}}}), ValidateOptions{}, ""},
+		{"stat_row currency missing", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Format: StatCurrency}}}}), ValidateOptions{}, "currency is required"},
+		{"stat_row currency unknown", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Format: StatCurrency, Currency: "ABC"}}}}), ValidateOptions{}, "not an ISO 4217 code"},
+		{"stat_row currency lowercase", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Format: StatCurrency, Currency: "gbp"}}}}), ValidateOptions{}, "not an ISO 4217 code"},
+		{"stat_row currency without format", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Currency: "GBP"}}}}), ValidateOptions{}, "only used with format currency"},
+		{"stat_row format", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Format: "money"}}}}), ValidateOptions{}, `format "money"`},
+		{"stat_row sparkline", one(Component{ID: "s", Type: "stat_row", Summary: "x", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1, Sparkline: make([]float64, 31)}}}}), ValidateOptions{}, "sparkline"},
 		// actions
 		{"respond", one(Component{ID: "a", Type: "actions", Actions: []Action{{ID: "y", Label: "Yes", Kind: ActionRespond, Icon: "check"}}}), ValidateOptions{}, ""},
 		{"five actions", one(Component{ID: "a", Type: "actions", Actions: make([]Action, 5)}), ValidateOptions{}, "actions needs 1-4"},
@@ -238,7 +244,7 @@ func TestLint(t *testing.T) {
 		{"pie needs no axes", pie(7), nil},
 		{"pie with 8 slices", pie(8), []string{LintPieSlices}},
 		{"single point", Component{ID: "c", Type: "chart", Summary: "x", Chart: &Chart{Kind: "bar", XLabel: "a", YLabel: "b", Series: []ChartSeries{{Name: "s", Points: []ChartPoint{{Label: "a", Value: 1}}}}}}, []string{LintChartSinglePoint}},
-		{"summary repeats title", Component{ID: "s", Type: "stat_row", Title: "Yearly saving", Summary: "Yearly saving.", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: "1"}}}}, []string{LintSummaryRepeatsTitle}},
+		{"summary repeats title", Component{ID: "s", Type: "stat_row", Title: "Yearly saving", Summary: "Yearly saving.", StatRow: &StatRow{Stats: []Stat{{Label: "a", Value: 1}}}}, []string{LintSummaryRepeatsTitle}},
 		{"single child section", Component{ID: "s", Type: "section", Children: []Component{note("a")}}, []string{LintSingleChild}},
 		{"nested lint", Component{ID: "s", Type: "carousel", Children: []Component{note("a"), pie(9)}}, []string{LintPieSlices}},
 	}
@@ -365,8 +371,9 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 	schema, _ := json.Marshal(VisualJSONSchema())
 	texts := map[string]string{
 		"rubric": VisualRubric(), "examples": string(examples), "schema": string(schema),
-		"description": definition.Description, "instructions": strings.NewReplacer("publish_surface", "").Replace(definition.Prompt.Instructions),
-		"publish": definition.Actions[Publish].Description, "plot": definition.Actions[PlotChart].Description,
+		"description": definition.Description, "instructions": definition.Prompt.Instructions, "field": VisualFieldDescription(),
+		"update": definition.Actions[UpdateVisual].Description, "updateSchema": mustJSON(t, UpdateVisualInputSchema()), "name": definition.Name,
+		"tags": strings.Join(definition.Tags, " "),
 	}
 	for name, text := range texts {
 		lower := strings.ToLower(text)
@@ -386,23 +393,35 @@ func TestSkillDefinitionRegisters(t *testing.T) {
 	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(definition.Prompt.Instructions, "plot_chart") || !strings.Contains(definition.Prompt.Instructions, "publish_surface") {
-		t.Fatalf("instructions = %q", definition.Prompt.Instructions)
-	}
-	if surface := (PlotChartInput{Title: "Spend", Summary: "Spend rose.", Kind: "bar", Points: []ChartPoint{{Label: "Jan", Value: 1}}}).Surface(); surface.Components[0].Summary != "Spend rose." {
-		t.Fatalf("plot chart surface = %#v", surface)
-	} else if _, err := Validate(context.Background(), surface, ValidateOptions{}); err != nil {
-		t.Fatal(err)
+	if len(definition.Actions) != 1 || definition.Actions[UpdateVisual].Name != "update_visual" || !strings.Contains(definition.Prompt.Instructions, "update_visual") {
+		t.Fatalf("actions = %#v, instructions = %q", definition.Actions, definition.Prompt.Instructions)
 	}
 }
 
-func TestPublishSchemaSnapshot(t *testing.T) {
-	got, err := json.MarshalIndent(PublishInputSchema(), "", "  ")
+func mustJSON(t *testing.T, value interface{}) string {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
+}
+
+func TestVisualFieldDescriptionCarriesRubricAndExamples(t *testing.T) {
+	description := VisualFieldDescription()
+	if !strings.HasPrefix(description, "Optional visual") || !strings.Contains(description, VisualRubric()) ||
+		!strings.Contains(description, `"userAsks":"What's the capital of Australia?"`) || !strings.Contains(description, `"format":"currency","currency":"GBP"`) {
+		t.Fatalf("description = %s", description)
+	}
+}
+
+func TestUpdateVisualSchemaSnapshot(t *testing.T) {
+	got, err := json.MarshalIndent(UpdateVisualInputSchema(), "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got = append(got, '\n')
-	const golden = "testdata/publish_surface.schema.json"
+	const golden = "testdata/update_visual.schema.json"
 	if *updateGolden {
 		if err := os.WriteFile(golden, got, 0o644); err != nil {
 			t.Fatal(err)
@@ -413,7 +432,7 @@ func TestPublishSchemaSnapshot(t *testing.T) {
 		t.Fatalf("%v (run go test ./pkg/presentation -update)", err)
 	}
 	if string(got) != string(want) {
-		t.Fatal("publish_surface schema changed; review and run go test ./pkg/presentation -update")
+		t.Fatal("update_visual schema changed; review and run go test ./pkg/presentation -update")
 	}
 }
 

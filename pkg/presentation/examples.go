@@ -38,7 +38,7 @@ func VisualExamples() []Example {
 				Rows:    [][]string{{"Current", "£25/mo", "60 GB", "24 months"}, {"Sim Plus", "£17/mo", "30 GB", "12 months"}, {"Flex 20", "£12/mo", "20 GB", "30 days"}},
 			}},
 			Component{ID: "saving", Type: "stat_row", Summary: "Moving to Sim Plus saves £96 a year.", Tone: TonePositive, StatRow: &StatRow{Stats: []Stat{
-				{Label: "Yearly saving", Value: "£96", Trend: "down", GoodDirection: "down"}, {Label: "Data you use", Value: "28", Unit: "GB/mo"},
+				{Label: "Yearly saving", Value: 96, Format: StatCurrency, Currency: "GBP", Trend: "down", GoodDirection: "down"}, {Label: "Data you use", Value: 28, Unit: "GB/mo"},
 			}}},
 			Component{ID: "next", Type: "actions", Actions: []Action{{ID: "switch", Label: "Switch to Sim Plus", Kind: ActionRespond, Icon: "smartphone"}}},
 		),
@@ -51,7 +51,7 @@ func VisualExamples() []Example {
 				Series: []ChartSeries{series("Compound", years, 1000, 1276, 1629, 2079, 2653), series("Simple", years, 1000, 1250, 1500, 1750, 2000)},
 			}},
 			Component{ID: "result", Type: "stat_row", Summary: "After 20 years compounding earns £653 more than simple interest.", StatRow: &StatRow{Stats: []Stat{
-				{Label: "After 20 years", Value: "£2,653"}, {Label: "Extra from compounding", Value: "£653", Trend: "up", GoodDirection: "up"},
+				{Label: "After 20 years", Value: 2653, Format: StatCurrency, Currency: "GBP"}, {Label: "Extra from compounding", Value: 653, Format: StatCurrency, Currency: "GBP", Trend: "up", GoodDirection: "up"},
 			}}},
 		),
 	}, {
@@ -101,9 +101,9 @@ func VisualExamples() []Example {
 		Lead: "Three beach towns within a few hours, from cheapest to closest.",
 		Visual: visual("Beach weekend options",
 			Component{ID: "options", Type: "grid", Grid: &Grid{Columns: 3}, Children: []Component{
-				{ID: "whitby", Type: "stat_row", Title: "Whitby", Summary: "Whitby: 3h drive, about £620 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: "3h"}, {Label: "Budget", Value: "£620"}}}},
-				{ID: "tenby", Type: "stat_row", Title: "Tenby", Summary: "Tenby: 4h drive, about £540 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: "4h"}, {Label: "Budget", Value: "£540"}}}},
-				{ID: "camber", Type: "stat_row", Title: "Camber", Summary: "Camber: 2h drive, about £710 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: "2h"}, {Label: "Budget", Value: "£710"}}}},
+				{ID: "whitby", Type: "stat_row", Title: "Whitby", Summary: "Whitby: 3h drive, about £620 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: 10800, Format: StatDuration}, {Label: "Budget", Value: 620, Format: StatCurrency, Currency: "GBP"}}}},
+				{ID: "tenby", Type: "stat_row", Title: "Tenby", Summary: "Tenby: 4h drive, about £540 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: 14400, Format: StatDuration}, {Label: "Budget", Value: 540, Format: StatCurrency, Currency: "GBP"}}}},
+				{ID: "camber", Type: "stat_row", Title: "Camber", Summary: "Camber: 2h drive, about £710 for four.", StatRow: &StatRow{Stats: []Stat{{Label: "Drive", Value: 7200, Format: StatDuration}, {Label: "Budget", Value: 710, Format: StatCurrency, Currency: "GBP"}}}},
 			}},
 			Component{ID: "pick", Type: "actions", Actions: []Action{
 				{ID: "whitby", Label: "Whitby", Kind: ActionRespond, Value: "Let's go to Whitby"},

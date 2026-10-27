@@ -748,8 +748,23 @@
                             "items": {
                               "additionalProperties": false,
                               "properties": {
+                                "currency": {
+                                  "description": "ISO 4217 code such as GBP, USD or EUR; required with format currency.",
+                                  "pattern": "^[A-Z]{3}$",
+                                  "type": "string"
+                                },
                                 "delta": {
                                   "maxLength": 40,
+                                  "type": "string"
+                                },
+                                "format": {
+                                  "description": "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds).",
+                                  "enum": [
+                                    "number",
+                                    "currency",
+                                    "percent",
+                                    "duration"
+                                  ],
                                   "type": "string"
                                 },
                                 "goodDirection": {
@@ -780,13 +795,13 @@
                                   "type": "string"
                                 },
                                 "unit": {
+                                  "description": "Shown after the value, e.g. GB/mo or per month.",
                                   "maxLength": 24,
                                   "type": "string"
                                 },
                                 "value": {
-                                  "maxLength": 40,
-                                  "minLength": 1,
-                                  "type": "string"
+                                  "description": "The raw number; the app formats it for the reader's language and region.",
+                                  "type": "number"
                                 }
                               },
                               "required": [
@@ -1076,8 +1091,23 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
+                          "currency": {
+                            "description": "ISO 4217 code such as GBP, USD or EUR; required with format currency.",
+                            "pattern": "^[A-Z]{3}$",
+                            "type": "string"
+                          },
                           "delta": {
                             "maxLength": 40,
+                            "type": "string"
+                          },
+                          "format": {
+                            "description": "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds).",
+                            "enum": [
+                              "number",
+                              "currency",
+                              "percent",
+                              "duration"
+                            ],
                             "type": "string"
                           },
                           "goodDirection": {
@@ -1108,13 +1138,13 @@
                             "type": "string"
                           },
                           "unit": {
+                            "description": "Shown after the value, e.g. GB/mo or per month.",
                             "maxLength": 24,
                             "type": "string"
                           },
                           "value": {
-                            "maxLength": 40,
-                            "minLength": 1,
-                            "type": "string"
+                            "description": "The raw number; the app formats it for the reader's language and region.",
+                            "type": "number"
                           }
                         },
                         "required": [
@@ -1539,8 +1569,23 @@
                                   "items": {
                                     "additionalProperties": false,
                                     "properties": {
+                                      "currency": {
+                                        "description": "ISO 4217 code such as GBP, USD or EUR; required with format currency.",
+                                        "pattern": "^[A-Z]{3}$",
+                                        "type": "string"
+                                      },
                                       "delta": {
                                         "maxLength": 40,
+                                        "type": "string"
+                                      },
+                                      "format": {
+                                        "description": "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds).",
+                                        "enum": [
+                                          "number",
+                                          "currency",
+                                          "percent",
+                                          "duration"
+                                        ],
                                         "type": "string"
                                       },
                                       "goodDirection": {
@@ -1571,13 +1616,13 @@
                                         "type": "string"
                                       },
                                       "unit": {
+                                        "description": "Shown after the value, e.g. GB/mo or per month.",
                                         "maxLength": 24,
                                         "type": "string"
                                       },
                                       "value": {
-                                        "maxLength": 40,
-                                        "minLength": 1,
-                                        "type": "string"
+                                        "description": "The raw number; the app formats it for the reader's language and region.",
+                                        "type": "number"
                                       }
                                     },
                                     "required": [
@@ -1931,8 +1976,23 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "currency": {
+                      "description": "ISO 4217 code such as GBP, USD or EUR; required with format currency.",
+                      "pattern": "^[A-Z]{3}$",
+                      "type": "string"
+                    },
                     "delta": {
                       "maxLength": 40,
+                      "type": "string"
+                    },
+                    "format": {
+                      "description": "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds).",
+                      "enum": [
+                        "number",
+                        "currency",
+                        "percent",
+                        "duration"
+                      ],
                       "type": "string"
                     },
                     "goodDirection": {
@@ -1963,13 +2023,13 @@
                       "type": "string"
                     },
                     "unit": {
+                      "description": "Shown after the value, e.g. GB/mo or per month.",
                       "maxLength": 24,
                       "type": "string"
                     },
                     "value": {
-                      "maxLength": 40,
-                      "minLength": 1,
-                      "type": "string"
+                      "description": "The raw number; the app formats it for the reader's language and region.",
+                      "type": "number"
                     }
                   },
                   "required": [
@@ -2584,8 +2644,23 @@
                                   "items": {
                                     "additionalProperties": false,
                                     "properties": {
+                                      "currency": {
+                                        "description": "ISO 4217 code such as GBP, USD or EUR; required with format currency.",
+                                        "pattern": "^[A-Z]{3}$",
+                                        "type": "string"
+                                      },
                                       "delta": {
                                         "maxLength": 40,
+                                        "type": "string"
+                                      },
+                                      "format": {
+                                        "description": "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds).",
+                                        "enum": [
+                                          "number",
+                                          "currency",
+                                          "percent",
+                                          "duration"
+                                        ],
                                         "type": "string"
                                       },
                                       "goodDirection": {
@@ -2616,13 +2691,13 @@
                                         "type": "string"
                                       },
                                       "unit": {
+                                        "description": "Shown after the value, e.g. GB/mo or per month.",
                                         "maxLength": 24,
                                         "type": "string"
                                       },
                                       "value": {
-                                        "maxLength": 40,
-                                        "minLength": 1,
-                                        "type": "string"
+                                        "description": "The raw number; the app formats it for the reader's language and region.",
+                                        "type": "number"
                                       }
                                     },
                                     "required": [
@@ -2912,8 +2987,23 @@
                             "items": {
                               "additionalProperties": false,
                               "properties": {
+                                "currency": {
+                                  "description": "ISO 4217 code such as GBP, USD or EUR; required with format currency.",
+                                  "pattern": "^[A-Z]{3}$",
+                                  "type": "string"
+                                },
                                 "delta": {
                                   "maxLength": 40,
+                                  "type": "string"
+                                },
+                                "format": {
+                                  "description": "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds).",
+                                  "enum": [
+                                    "number",
+                                    "currency",
+                                    "percent",
+                                    "duration"
+                                  ],
                                   "type": "string"
                                 },
                                 "goodDirection": {
@@ -2944,13 +3034,13 @@
                                   "type": "string"
                                 },
                                 "unit": {
+                                  "description": "Shown after the value, e.g. GB/mo or per month.",
                                   "maxLength": 24,
                                   "type": "string"
                                 },
                                 "value": {
-                                  "maxLength": 40,
-                                  "minLength": 1,
-                                  "type": "string"
+                                  "description": "The raw number; the app formats it for the reader's language and region.",
+                                  "type": "number"
                                 }
                               },
                               "required": [
@@ -3375,8 +3465,23 @@
                                         "items": {
                                           "additionalProperties": false,
                                           "properties": {
+                                            "currency": {
+                                              "description": "ISO 4217 code such as GBP, USD or EUR; required with format currency.",
+                                              "pattern": "^[A-Z]{3}$",
+                                              "type": "string"
+                                            },
                                             "delta": {
                                               "maxLength": 40,
+                                              "type": "string"
+                                            },
+                                            "format": {
+                                              "description": "number (default); currency (set currency); percent (12 means 12%); duration (value in seconds).",
+                                              "enum": [
+                                                "number",
+                                                "currency",
+                                                "percent",
+                                                "duration"
+                                              ],
                                               "type": "string"
                                             },
                                             "goodDirection": {
@@ -3407,13 +3512,13 @@
                                               "type": "string"
                                             },
                                             "unit": {
+                                              "description": "Shown after the value, e.g. GB/mo or per month.",
                                               "maxLength": 24,
                                               "type": "string"
                                             },
                                             "value": {
-                                              "maxLength": 40,
-                                              "minLength": 1,
-                                              "type": "string"
+                                              "description": "The raw number; the app formats it for the reader's language and region.",
+                                              "type": "number"
                                             }
                                           },
                                           "required": [
@@ -3612,7 +3717,7 @@
             "type": "string"
           },
           "type": {
-            "description": "Set only the payload whose key equals type (text, caption and divider use text). Types:\nactions: Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item. Example: {\"id\":\"next\",\"type\":\"actions\",\"actions\":[{\"id\":\"yes\",\"label\":\"Switch plan\",\"kind\":\"respond\",\"value\":\"Switch me to Plus\"}]}\ncaption: Small print under a visual (sources, assumptions). Example: {\"id\":\"src\",\"type\":\"caption\",\"text\":\"Prices checked today.\"}\ncarousel: 2-10 swipeable cards, e.g. recipes or places. Example: {\"id\":\"c1\",\"type\":\"carousel\",\"children\":[…]}\nchart: Trend or distribution of numbers. Example: {\"id\":\"spend\",\"type\":\"chart\",\"summary\":\"Spending rose each month.\",\"chart\":{\"kind\":\"bar\",\"xLabel\":\"Month\",\"yLabel\":\"£\",\"series\":[{\"name\":\"Spend\",\"points\":[{\"label\":\"Jan\",\"value\":120},{\"label\":\"Feb\",\"value\":140}]}]}}\ndiagram: Boxes and arrows positioned with x/y. Example: {\"id\":\"flow\",\"type\":\"diagram\",\"summary\":\"Water evaporates, condenses and falls as rain.\",\"diagram\":{\"nodes\":[{\"id\":\"a\",\"label\":\"Evaporation\",\"x\":0,\"y\":0},{\"id\":\"b\",\"label\":\"Rain\",\"x\":200,\"y\":0}],\"edges\":[{\"from\":\"a\",\"to\":\"b\"}]}}\ndivider: Visual break, optionally labelled. Example: {\"id\":\"d1\",\"type\":\"divider\"}\nform: Structured input the user submits once. Example: {\"id\":\"prefs\",\"type\":\"form\",\"summary\":\"Asks for budget and dates.\",\"form\":{\"fields\":[{\"id\":\"budget\",\"type\":\"number\",\"label\":\"Budget\",\"min\":0}],\"submitLabel\":\"Send\"}}\ngrid: Children side by side in 2-4 columns. Example: {\"id\":\"g1\",\"type\":\"grid\",\"grid\":{\"columns\":2},\"children\":[…]}\nsection: Group of children under the component title. Example: {\"id\":\"s1\",\"type\":\"section\",\"title\":\"Your options\",\"children\":[…]}\nstat_row: 1-4 headline numbers. Example: {\"id\":\"saving\",\"type\":\"stat_row\",\"summary\":\"Switching saves £96 a year.\",\"stat_row\":{\"stats\":[{\"label\":\"Yearly saving\",\"value\":\"£96\",\"trend\":\"down\",\"goodDirection\":\"down\"}]}}\ntable: Exact values in rows and columns. Example: {\"id\":\"plans\",\"type\":\"table\",\"summary\":\"Three plans by price and data.\",\"table\":{\"columns\":[\"Plan\",\"Price\"],\"rows\":[[\"Basic\",\"£10\"],[\"Plus\",\"£15\"]]}}\ntabs: 2-5 alternative views, e.g. Simple / Detailed. Example: {\"id\":\"t1\",\"type\":\"tabs\",\"tabs\":[{\"label\":\"Simple\",\"children\":[…]},{\"label\":\"Detailed\",\"children\":[…]}]}\ntext: Short markdown block (GFM, no HTML). Example: {\"id\":\"lead\",\"type\":\"text\",\"text\":\"You use about **half** the data you pay for.\"}",
+            "description": "Set only the payload whose key equals type (text, caption and divider use text). Types:\nactions: Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item. Example: {\"id\":\"next\",\"type\":\"actions\",\"actions\":[{\"id\":\"yes\",\"label\":\"Switch plan\",\"kind\":\"respond\",\"value\":\"Switch me to Plus\"}]}\ncaption: Small print under a visual (sources, assumptions). Example: {\"id\":\"src\",\"type\":\"caption\",\"text\":\"Prices checked today.\"}\ncarousel: 2-10 swipeable cards, e.g. recipes or places. Example: {\"id\":\"c1\",\"type\":\"carousel\",\"children\":[…]}\nchart: Trend or distribution of numbers. Example: {\"id\":\"spend\",\"type\":\"chart\",\"summary\":\"Spending rose each month.\",\"chart\":{\"kind\":\"bar\",\"xLabel\":\"Month\",\"yLabel\":\"£\",\"series\":[{\"name\":\"Spend\",\"points\":[{\"label\":\"Jan\",\"value\":120},{\"label\":\"Feb\",\"value\":140}]}]}}\ndiagram: Boxes and arrows positioned with x/y. Example: {\"id\":\"flow\",\"type\":\"diagram\",\"summary\":\"Water evaporates, condenses and falls as rain.\",\"diagram\":{\"nodes\":[{\"id\":\"a\",\"label\":\"Evaporation\",\"x\":0,\"y\":0},{\"id\":\"b\",\"label\":\"Rain\",\"x\":200,\"y\":0}],\"edges\":[{\"from\":\"a\",\"to\":\"b\"}]}}\ndivider: Visual break, optionally labelled. Example: {\"id\":\"d1\",\"type\":\"divider\"}\nform: Structured input the user submits once. Example: {\"id\":\"prefs\",\"type\":\"form\",\"summary\":\"Asks for budget and dates.\",\"form\":{\"fields\":[{\"id\":\"budget\",\"type\":\"number\",\"label\":\"Budget\",\"min\":0}],\"submitLabel\":\"Send\"}}\ngrid: Children side by side in 2-4 columns. Example: {\"id\":\"g1\",\"type\":\"grid\",\"grid\":{\"columns\":2},\"children\":[…]}\nsection: Group of children under the component title. Example: {\"id\":\"s1\",\"type\":\"section\",\"title\":\"Your options\",\"children\":[…]}\nstat_row: 1-4 headline numbers. Example: {\"id\":\"saving\",\"type\":\"stat_row\",\"summary\":\"Switching saves £96 a year.\",\"stat_row\":{\"stats\":[{\"label\":\"Yearly saving\",\"value\":96,\"format\":\"currency\",\"currency\":\"GBP\",\"trend\":\"down\",\"goodDirection\":\"down\"}]}}\ntable: Exact values in rows and columns. Example: {\"id\":\"plans\",\"type\":\"table\",\"summary\":\"Three plans by price and data.\",\"table\":{\"columns\":[\"Plan\",\"Price\"],\"rows\":[[\"Basic\",\"£10\"],[\"Plus\",\"£15\"]]}}\ntabs: 2-5 alternative views, e.g. Simple / Detailed. Example: {\"id\":\"t1\",\"type\":\"tabs\",\"tabs\":[{\"label\":\"Simple\",\"children\":[…]},{\"label\":\"Detailed\",\"children\":[…]}]}\ntext: Short markdown block (GFM, no HTML). Example: {\"id\":\"lead\",\"type\":\"text\",\"text\":\"You use about **half** the data you pay for.\"}",
             "enum": [
               "actions",
               "caption",
@@ -3658,19 +3763,19 @@
       ],
       "type": "string"
     },
-    "surfaceId": {
-      "description": "Id of the visual to replace.",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
-      "type": "string"
-    },
     "title": {
       "maxLength": 300,
       "minLength": 1,
       "type": "string"
+    },
+    "visualId": {
+      "description": "Id of the visual to replace.",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "type": "string"
     }
   },
   "required": [
-    "surfaceId",
+    "visualId",
     "expectedLatestVersion",
     "title",
     "state",

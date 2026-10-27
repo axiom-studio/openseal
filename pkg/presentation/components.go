@@ -3,8 +3,11 @@ package presentation
 import (
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
+
+	"golang.org/x/text/currency"
 )
 
 type summaryRule int
@@ -51,7 +54,7 @@ var catalogue = map[string]typeSpec{
 	"table": {payload: "table", summary: summaryRequired, validate: validateTable, sentence: "Exact values in rows and columns.",
 		example: `{"id":"plans","type":"table","summary":"Three plans by price and data.","table":{"columns":["Plan","Price"],"rows":[["Basic","£10"],["Plus","£15"]]}}`},
 	"stat_row": {payload: "stat_row", summary: summaryRequired, validate: validateStatRow, sentence: "1-4 headline numbers.",
-		example: `{"id":"saving","type":"stat_row","summary":"Switching saves £96 a year.","stat_row":{"stats":[{"label":"Yearly saving","value":"£96","trend":"down","goodDirection":"down"}]}}`},
+		example: `{"id":"saving","type":"stat_row","summary":"Switching saves £96 a year.","stat_row":{"stats":[{"label":"Yearly saving","value":96,"format":"currency","currency":"GBP","trend":"down","goodDirection":"down"}]}}`},
 	"actions": {payload: "actions", validate: validateActions, sentence: "Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item.",
 		example: `{"id":"next","type":"actions","actions":[{"id":"yes","label":"Switch plan","kind":"respond","value":"Switch me to Plus"}]}`},
 }
@@ -386,8 +389,13 @@ type StatRow struct {
 }
 
 type Stat struct {
-	Label         string    `json:"label"`
-	Value         string    `json:"value"`
+	Label string  `json:"label"`
+	Value float64 `json:"value"`
+	// Format tells the renderer how to show Value in the viewer's locale.
+	// Empty means StatNumber.
+	Format StatFormat `json:"format,omitempty"`
+	// Currency is the ISO 4217 code; required for StatCurrency only.
+	Currency      string    `json:"currency,omitempty"`
 	Unit          string    `json:"unit,omitempty"`
 	Delta         string    `json:"delta,omitempty"`
 	Trend         string    `json:"trend,omitempty"`
@@ -395,7 +403,23 @@ type Stat struct {
 	Sparkline     []float64 `json:"sparkline,omitempty"`
 }
 
+// StatFormat selects how a stat value is formatted. Hosts format with the
+// viewer's locale (Intl.NumberFormat on the web).
+type StatFormat string
+
+const (
+	// StatNumber is a plain number, e.g. 28.
+	StatNumber StatFormat = "number"
+	// StatCurrency is an amount in Currency, e.g. 96 with GBP.
+	StatCurrency StatFormat = "currency"
+	// StatPercent is the percentage itself: 12 means 12%.
+	StatPercent StatFormat = "percent"
+	// StatDuration is a length of time in seconds: 10800 means 3 hours.
+	StatDuration StatFormat = "duration"
+)
+
 var (
+	StatFormats    = []StatFormat{StatNumber, StatCurrency, StatPercent, StatDuration}
 	Trends         = []string{"up", "down", "flat"}
 	GoodDirections = []string{"up", "down"}
 )
@@ -411,12 +435,29 @@ func validateStatRow(_ *validator, c Component, _ string) error {
 	for index, stat := range stats {
 		at := fmt.Sprintf("stat_row.stats[%d]", index)
 		for _, check := range []error{
-			required(at+".label", stat.Label, 60), required(at+".value", stat.Value, 40),
-			optional(at+".unit", stat.Unit, 24), optional(at+".delta", stat.Delta, 40),
+			required(at+".label", stat.Label, 60), optional(at+".unit", stat.Unit, 24), optional(at+".delta", stat.Delta, 40),
 		} {
 			if check != nil {
 				return check
 			}
+		}
+		if math.IsNaN(stat.Value) || math.IsInf(stat.Value, 0) {
+			return fmt.Errorf("%s.value must be a finite number", at)
+		}
+		switch stat.Format {
+		case "", StatNumber, StatPercent, StatDuration:
+			if stat.Currency != "" {
+				return fmt.Errorf("%s.currency is only used with format currency", at)
+			}
+		case StatCurrency:
+			if stat.Currency == "" {
+				return fmt.Errorf("%s.currency is required with format currency, e.g. GBP, USD or EUR", at)
+			}
+			if code, err := currency.ParseISO(stat.Currency); err != nil || code.String() != stat.Currency {
+				return fmt.Errorf("%s.currency %q is not an ISO 4217 code such as GBP, USD or EUR", at, stat.Currency)
+			}
+		default:
+			return fmt.Errorf("%s.format %q is not one of number, currency, percent, duration", at, stat.Format)
 		}
 		if stat.Trend != "" && !contains(Trends, stat.Trend) {
 			return fmt.Errorf("%s.trend %q is not one of up, down, flat", at, stat.Trend)

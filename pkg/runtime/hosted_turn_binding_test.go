@@ -8,8 +8,8 @@ import (
 
 func TestHostedTurnFormPreservesBindingWithDuplicateCapabilityNames(t *testing.T) {
 	actions := []capability.ModelAction{
-		{Name: "openseal.presentation.publish_surface", BindingID: "bundled:presentation", BindingRevision: 2},
-		{Name: "openseal.presentation.publish_surface", BindingID: "workforce:presentation", BindingRevision: 1},
+		{Name: "openseal.presentation.update_visual", BindingID: "bundled:presentation", BindingRevision: 2},
+		{Name: "openseal.presentation.update_visual", BindingID: "workforce:presentation", BindingRevision: 1},
 	}
 	response, err := CompileHostedTurnForm(HostedTurnForm{
 		SchemaVersion: HostedTurnFormSchemaVersion,

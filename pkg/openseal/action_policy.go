@@ -27,7 +27,7 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	if input.Bound.Definition.ID == builtin.SkillID && input.Bound.Definition.Version == builtin.SkillVersion &&
 		(input.Bound.Action.Name == builtin.GenerateImage || input.Bound.Action.Name == builtin.Present || input.Bound.Action.Name == builtin.SaveApp || input.Bound.Action.Name == builtin.SaveAppData || input.Bound.Action.Name == builtin.CreatePDF || input.Bound.Action.Name == builtin.CreateSheet) ||
 		input.Bound.Definition.ID == presentation.SkillID && input.Bound.Definition.Version == presentation.SkillVersion &&
-			(input.Bound.Action.Name == presentation.Publish || input.Bound.Action.Name == presentation.PlotChart) {
+			input.Bound.Action.Name == presentation.UpdateVisual {
 		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "create bounded conversation artifact"}, nil
 	}
 	// Starting an already reviewed Runbook does not widen authority: the
