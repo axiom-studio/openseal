@@ -122,8 +122,8 @@ func TestConversationRunTurnRunnerStoresAnswerVisualOnTheAnswer(t *testing.T) {
 	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted {
 		t.Fatalf("outcome = %#v, err=%v", outcome, err)
 	}
-	id := answerVisualArtifactID(scheduled.Run.ID, trigger.ID)
-	if id != answerVisualArtifactID(scheduled.Run.ID, trigger.ID) || id == answerVisualArtifactID(scheduled.Run.ID, "other") || !validOpaqueIdentifier(id, 128) {
+	id := answerVisualArtifactID(scheduled.Run.ID, trigger.ID, "")
+	if id != answerVisualArtifactID(scheduled.Run.ID, trigger.ID, "") || id == answerVisualArtifactID(scheduled.Run.ID, "other", "") || !validOpaqueIdentifier(id, 128) {
 		t.Fatalf("visual id %q is not deterministic per run and trigger", id)
 	}
 	want := []ConversationReference{{Kind: ConversationReferenceRun, ID: scheduled.Run.ID}, {Kind: ConversationReferenceArtifact, ID: id, Version: 1}}
@@ -165,5 +165,228 @@ func TestConversationRunTurnRunnerStoresAnswerVisualOnTheAnswer(t *testing.T) {
 	}
 	if second, err := store.GetArtifact(ctx, scope, id, 2); second != nil || (err != nil && !errors.Is(err, ErrArtifactNotFound)) {
 		t.Fatalf("replay added a visual version: %#v, err=%v", second, err)
+	}
+}
+
+func TestTeamMemberAnswerCarriesItsVisual(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "team-visual"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "family"},
+		Title: "Family", IdempotencyKey: "team-visual-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is my phone plan a good deal?", "team-visual-trigger")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+		return []ConversationParticipantBinding{
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "planner"}, SemanticRoles: []string{"planner"}},
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "quiet"}, SemanticRoles: []string{"helper"}},
+		}, nil
+	})
+	visual := boundAnswerVisual()
+	proposals := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+		if input.Participant.ID == "quiet" {
+			return ParticipationProposal{}, nil
+		}
+		return ParticipationProposal{
+			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Not quite.", Visual: cloneVisual(visual),
+			Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Signals:  ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true},
+		}, nil
+	})
+	coordinator, err := NewConversationCoordinator(service, participants, proposals, DefaultConversationCoordinatorConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checkedFor string
+	content := &answerVisualContent{}
+	runner, err := NewConversationRunTurnRunner(store, coordinator, ConversationRunTurnRunnerConfig{
+		AttachmentContent: content,
+		VisualChecks: func(run *AgentRun) presentation.ValidateOptions {
+			return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(_ context.Context, binding presentation.Binding) error {
+				checkedFor = run.ID + "/" + binding.ID
+				return nil
+			})}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
+	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || outcome.Visual != nil {
+		t.Fatalf("outcome = %#v, err=%v", outcome, err)
+	}
+	if checkedFor != scheduled.Run.ID+"/rb-1" {
+		t.Fatalf("team visual bindings were not checked: %q", checkedFor)
+	}
+	id := answerVisualArtifactID(scheduled.Run.ID, trigger.ID, "planner")
+	if id == answerVisualArtifactID(scheduled.Run.ID, trigger.ID, "") || id == answerVisualArtifactID(scheduled.Run.ID, trigger.ID, "quiet") {
+		t.Fatalf("team visual id %q is not distinct per participant", id)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("messages = %#v, err=%v", messages, err)
+	}
+	answer := messages[1]
+	if answer.Sender.ID != "planner" || answer.Content != "Not quite." {
+		t.Fatalf("answer = %#v", answer)
+	}
+	found := false
+	for _, reference := range answer.References {
+		found = found || reference == (ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1})
+	}
+	if !found {
+		t.Fatalf("team answer does not reference its visual: %#v", answer.References)
+	}
+	artifact, err := store.GetArtifact(ctx, scope, id, 1)
+	if err != nil || artifact == nil || artifact.Type != presentation.ArtifactType || artifact.Provenance.RunID != scheduled.Run.ID ||
+		artifact.Provenance.Producer != (ActivityActor{Type: "agent", ID: "planner"}) {
+		t.Fatalf("artifact = %#v, err=%v", artifact, err)
+	}
+	if content.puts != 1 {
+		t.Fatalf("visual stored %d times", content.puts)
+	}
+}
+
+func TestTeamMemberVisualThatFailsHostChecksIsNotKept(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "team-visual-rejected"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "family"},
+		Title: "Family", IdempotencyKey: "team-visual-rejected-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is my phone plan a good deal?", "team-visual-rejected-trigger")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+		return []ConversationParticipantBinding{
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "planner"}, SemanticRoles: []string{"planner"}},
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "helper"}, SemanticRoles: []string{"helper"}},
+		}, nil
+	})
+	proposals := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+		var visual *presentation.Visual
+		if input.Participant.ID == "planner" {
+			visual = boundAnswerVisual()
+		}
+		return ParticipationProposal{
+			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Not quite.", Visual: visual,
+			Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Signals:  ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true},
+		}, nil
+	})
+	coordinator, err := NewConversationCoordinator(service, participants, proposals, DefaultConversationCoordinatorConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := &answerVisualContent{}
+	// No VisualChecks: a bound visual cannot be confirmed and is rejected.
+	runner, err := NewConversationRunTurnRunner(store, coordinator, ConversationRunTurnRunnerConfig{AttachmentContent: content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run}); err != nil {
+		t.Fatal(err)
+	}
+	if content.puts != 0 {
+		t.Fatal("a visual that failed its host checks was stored")
+	}
+	if artifact, _ := store.GetArtifact(ctx, scope, answerVisualArtifactID(scheduled.Run.ID, trigger.ID, "planner"), 1); artifact != nil {
+		t.Fatalf("rejected visual was registered: %#v", artifact)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spoke := map[string]bool{}
+	for _, message := range messages {
+		spoke[message.Sender.ID] = true
+	}
+	if spoke["planner"] || !spoke["helper"] {
+		t.Fatalf("speakers = %v; the member with a rejected visual must not speak without it", spoke)
+	}
+}
+
+func TestVisualOnARunWithNoChatIsReportedNotDropped(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "local", ID: "no-chat-visual"}
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "work", Source: RunSourceManual,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker", Model: "fake",
+	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Not quite.", Visual: testAnswerVisual()}, nil
+	}))
+	if err != nil || result.Run.Status != AgentRunStatusCompleted {
+		t.Fatalf("advance = %#v, err=%v", result, err)
+	}
+	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{answerVisualNotShownEvent}})
+	if err != nil || len(events) != 1 || events[0].Severity != ActivitySeverityWarning || events[0].TurnID != result.Turn.ID ||
+		!strings.Contains(events[0].Summary, "a visual can only go with a reply in a chat") {
+		t.Fatalf("not-shown warning = %#v, err=%v", events, err)
+	}
+	for _, word := range []string{"presentation", "surface", "artifact", "publish"} {
+		if strings.Contains(strings.ToLower(events[0].Summary), word) {
+			t.Fatalf("warning %q mentions %q", events[0].Summary, word)
+		}
+	}
+}
+
+func TestAgentAnswerVisualIsNotReportedAsNotShown(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "answer-visual-shown"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
+		Title: "Phone plans", IdempotencyKey: "answer-visual-shown-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is my phone plan a good deal?", "answer-visual-shown-trigger")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{
+			DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "1",
+			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Not quite."}, Visual: testAnswerVisual()}, nil
+			}),
+		}, nil
+	})
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns, AttachmentContent: &answerVisualContent{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
+	if err != nil || outcome.Visual != nil {
+		t.Fatalf("delivered visual left on the outcome: %#v, err=%v", outcome, err)
 	}
 }

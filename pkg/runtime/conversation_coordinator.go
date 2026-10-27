@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 var (
@@ -154,7 +156,11 @@ type ConversationCoordinationRequest struct {
 	// emitted by this coordination round. Providers cannot remove them. A Run
 	// host uses this to make each visible contribution traceable to the durable
 	// work that produced it.
-	MessageReferences  []ConversationReference
+	MessageReferences []ConversationReference
+	// answerVisual keeps the visual a participant attaches to its answer and
+	// returns the reference its message carries. The conversation Run adapter
+	// supplies it; without it a proposal with a visual fails the round.
+	answerVisual       func(context.Context, ConversationParticipant, presentation.Visual) (ConversationReference, error)
 	Policy             ConversationArbitrationPolicy
 	MaximumConcurrency int
 	IdempotencyKey     string
@@ -372,6 +378,7 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 	}
 
 	proposals := make([]ParticipationProposal, len(bindings))
+	visuals := make([]*presentation.Visual, len(bindings))
 	usages := make([]TurnUsage, len(bindings))
 	leases := make([]*ConversationPresence, len(bindings))
 	errs := make([]error, len(bindings))
@@ -503,6 +510,13 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					c.summaries.put(summary)
 				}
 				proposal.WorkingContextCheckpoint = nil
+				visual := proposal.Visual
+				proposal.Visual = nil
+				if visual != nil && (!proposal.WantsToSpeak || proposal.ProposedAction != nil) {
+					// A visual goes only with a finished answer.
+					proposals[index] = unavailableParticipationProposal(binding, "participant_runtime_unavailable")
+					continue
+				}
 				proposal.ID = ""
 				proposal.RoundID = ""
 				proposal.Participant = binding.Participant
@@ -526,6 +540,7 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					continue
 				}
 				proposals[index] = proposal
+				visuals[index] = visual
 			}
 		}()
 	}
@@ -551,6 +566,23 @@ queue:
 		if proposalErr != nil {
 			return nil, proposalErr
 		}
+	}
+	for index := range proposals {
+		if visuals[index] == nil {
+			continue
+		}
+		if req.answerVisual == nil {
+			return nil, fmt.Errorf("%w: participant %s attached a visual but this round has no Run to keep it", ErrConversationCoordinationUnavailable, proposals[index].Participant.ID)
+		}
+		reference, err := req.answerVisual(ctx, proposals[index].Participant, *visuals[index])
+		if errors.Is(err, errInvalidAnswerVisual) {
+			proposals[index] = unavailableParticipationProposal(bindings[index], "participant_runtime_unavailable")
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		proposals[index].References = mergeConversationReferences(proposals[index].References, []ConversationReference{reference})
 	}
 	for index := range proposals {
 		if proposals[index].WantsToSpeak {

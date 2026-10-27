@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 const (
@@ -671,6 +672,9 @@ type ConversationRunTurnRunnerConfig struct {
 	// and stores the visuals Agents attach to their answers. Attachment content
 	// is projected into the ephemeral model goal, never message state.
 	AttachmentContent ArtifactContentStore
+	// VisualChecks supplies the binding and link checks for visuals Team
+	// members attach to their answers. Nil rejects bound or linked visuals.
+	VisualChecks func(run *AgentRun) presentation.ValidateOptions
 }
 
 func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerConfig, error) {
@@ -1119,6 +1123,7 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		TriggerMessageID: triggerID, Policy: policy, MaximumConcurrency: r.config.MaximumConcurrency,
 		MessageReferences: messageReferences,
 		IdempotencyKey:    key,
+		answerVisual:      r.teamAnswerVisual(input.Run, triggerID),
 	})
 	if measuredUsage != (TurnUsage{}) {
 		participationUsage = measuredUsage
@@ -1537,11 +1542,14 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}}
 	references = append(references, conversationActionArtifactReferences(input.Run)...)
 	if outcome.Visual != nil {
-		visual, err := r.storeAnswerVisual(ctx, input.Run, participantID, trigger, *outcome.Visual)
+		visual, err := r.storeAnswerVisual(ctx, input.Run, participantID, answerVisualArtifactID(input.Run.ID, trigger.ID, ""), *outcome.Visual)
 		if err != nil {
 			return nil, err
 		}
 		references = append(references, visual)
+		// Delivered with the answer; the Turn coordinator warns only about
+		// visuals left on the outcome.
+		outcome.Visual = nil
 	}
 	message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, content, references, broadcastToChannel)
 	if err != nil {

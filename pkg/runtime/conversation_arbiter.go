@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 type ParticipationDisposition string
@@ -96,6 +98,10 @@ type ParticipationProposal struct {
 	// WorkingContextCheckpoint carries temporary host context only. The coordinator
 	// consumes it before arbitration; it must never be serialized or executed.
 	WorkingContextCheckpoint map[string]interface{} `json:"-"`
+	// Visual is an optional visual shown with this participant's answer. The
+	// coordinator stores it and replaces it with an artifact reference before
+	// arbitration; it is never persisted on the round.
+	Visual *presentation.Visual `json:"-"`
 
 	ID                 string                    `json:"id"`
 	RoundID            string                    `json:"roundId"`

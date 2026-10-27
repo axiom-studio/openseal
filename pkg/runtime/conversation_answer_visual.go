@@ -4,25 +4,57 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
-// answerVisualArtifactID is stable per Run and trigger, so a replayed answer
-// references the visual stored by its first attempt.
-func answerVisualArtifactID(runID, triggerID string) string {
-	return "visual-" + strings.TrimPrefix(hashString(runID+"\x00"+triggerID), "sha256:")[:40]
+const (
+	answerVisualNotShownEvent   = "turn.visual_not_shown"
+	answerVisualNotShownSummary = "The agent's visual was not shown: a visual can only go with a reply in a chat."
+)
+
+// errInvalidAnswerVisual marks a visual rejected by validation, as opposed
+// to a storage failure.
+var errInvalidAnswerVisual = errors.New("invalid answer visual")
+
+// answerVisualArtifactID is stable per Run, trigger and (for Team members
+// answering in one round) participant, so a replayed answer references the
+// visual stored by its first attempt.
+func answerVisualArtifactID(runID, triggerID, participantID string) string {
+	key := runID + "\x00" + triggerID
+	if participantID != "" {
+		key += "\x00" + participantID
+	}
+	return "visual-" + strings.TrimPrefix(hashString(key), "sha256:")[:40]
+}
+
+// teamAnswerVisual returns the hook a Team participation round uses to keep
+// the visual a member attaches to its answer. Team members' visuals arrive
+// on participation proposals rather than through HostedTurnRunner, so the
+// host checks run here.
+func (r *ConversationRunTurnRunner) teamAnswerVisual(run *AgentRun, triggerID string) func(context.Context, ConversationParticipant, presentation.Visual) (ConversationReference, error) {
+	return func(ctx context.Context, participant ConversationParticipant, visual presentation.Visual) (ConversationReference, error) {
+		var checks presentation.ValidateOptions
+		if r.config.VisualChecks != nil {
+			checks = r.config.VisualChecks(run)
+		}
+		if err := validateHostedTurnVisual(ctx, &visual, AgentRunStatusCompleted, false, checks); err != nil {
+			return ConversationReference{}, fmt.Errorf("%w: %w", errInvalidAnswerVisual, err)
+		}
+		return r.storeAnswerVisual(ctx, run, participant.ID, answerVisualArtifactID(run.ID, triggerID, participant.ID), visual)
+	}
 }
 
 // storeAnswerVisual stores the visual that rides on an Agent's answer as an
-// interactive surface artifact (version 1) and returns the reference the
-// answer message carries. No receipt is posted: the answer is the delivery.
-func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *AgentRun, participantID string, trigger *ChannelMessage, visual presentation.Visual) (ConversationReference, error) {
+// interactive surface artifact (version 1) with the given ID and returns the
+// reference the answer message carries. No receipt is posted: the answer is
+// the delivery. One-to-one and Team answers share it.
+func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *AgentRun, participantID, id string, visual presentation.Visual) (ConversationReference, error) {
 	if r.artifacts == nil || r.config.AttachmentContent == nil {
 		return ConversationReference{}, errors.New("answer visuals require artifact and content storage")
 	}
-	id := answerVisualArtifactID(run.ID, trigger.ID)
 	reference := ConversationReference{Kind: ConversationReferenceArtifact, ID: id, Version: 1}
 	existing, err := r.artifacts.GetArtifact(ctx, run.Scope, id, 1)
 	if err != nil && !errors.Is(err, ErrArtifactNotFound) {

@@ -543,6 +543,17 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	if err != nil {
 		return nil, err
 	}
+	if finish.Status == AgentTurnStatusCompleted && outcome != nil && outcome.Visual != nil {
+		// Conversation runners clear the visual once it rides on a reply. One
+		// left here had no message to go with, so say so instead of dropping it
+		// silently. The Turn is already durable; a lost warning is not retried.
+		_, _ = c.activity.AppendActivity(ctx, &ActivityEvent{
+			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: run.Owner.ID,
+			EventType: answerVisualNotShownEvent, Severity: ActivitySeverityWarning,
+			Summary: answerVisualNotShownSummary, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
+			Visibility: ActivityVisibilityScope,
+		})
+	}
 	if c.afterTurnPersisted != nil {
 		if err := c.afterTurnPersisted(); err != nil {
 			return &AdvanceAgentRunResult{Run: run, Turn: turn}, err
