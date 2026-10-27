@@ -50,56 +50,34 @@ func TestHistoryContractValidatesForwardCursorAndRejectsForeignFields(t *testing
 	}
 }
 
-func TestAppContractsAcceptProjectsAndRejectForeignInput(t *testing.T) {
+func TestFileToolContractsTakePathsAndRejectForeignInput(t *testing.T) {
 	catalog, definition := builtinContractCatalog(t)
-	appID := "app-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	entry := map[string]interface{}{"path": "src/App.tsx", "content": "export default function App() { return <p>Seal</p>; }"}
+	sheets := []interface{}{map[string]interface{}{"name": "Budget", "rows": []interface{}{[]interface{}{"Item", 12.5, true, nil}}}}
 	cases := []struct {
 		name   string
 		action string
 		input  map[string]interface{}
 		valid  bool
 	}{
-		{"create", CreateApp, map[string]interface{}{"title": "Seal", "files": []interface{}{entry}}, true},
-		{"create without files", CreateApp, map[string]interface{}{"title": "Seal", "files": []interface{}{}}, false},
-		{"create with foreign field", CreateApp, map[string]interface{}{"title": "Seal", "files": []interface{}{entry}, "provider": "caller-chosen"}, false},
-		{"update", UpdateApp, map[string]interface{}{"appId": appID, "expectedLatestVersion": 1, "replace": []interface{}{map[string]interface{}{"path": "src/App.tsx", "find": "Seal", "replace": "Otter"}}, "delete": []interface{}{"src/old.ts"}}, true},
-		{"update with site id", UpdateApp, map[string]interface{}{"appId": "site-0123", "expectedLatestVersion": 1}, false},
-		{"read", ReadApp, map[string]interface{}{"appId": appID, "paths": []interface{}{"src/App.tsx"}}, true},
-		{"publish", PublishApp, map[string]interface{}{"appId": appID, "expectedLatestVersion": 2}, true},
-		{"publish without version", PublishApp, map[string]interface{}{"appId": appID}, false},
-		{"save data", SaveAppData, map[string]interface{}{"appId": appID, "name": "pipeline_by_stage", "value": []interface{}{map[string]interface{}{"stage": "Discovery", "value": 1620000}}}, true},
-		{"save data with a path name", SaveAppData, map[string]interface{}{"appId": appID, "name": "../secrets", "value": 1}, false},
-		{"save data without a value", SaveAppData, map[string]interface{}{"appId": appID, "name": "pipeline"}, false},
+		{"save app", SaveApp, map[string]interface{}{"path": "apps/tracker", "title": "Tracker"}, true},
+		{"save app without a path", SaveApp, map[string]interface{}{"title": "Tracker"}, false},
+		{"save app with foreign field", SaveApp, map[string]interface{}{"path": "apps/tracker", "provider": "caller-chosen"}, false},
+		{"publish", PublishApp, map[string]interface{}{"path": "apps/tracker"}, true},
+		{"save data", SaveAppData, map[string]interface{}{"path": "apps/tracker", "name": "pipeline_by_stage", "value": []interface{}{map[string]interface{}{"stage": "Discovery", "value": 1620000}}}, true},
+		{"save data with a path name", SaveAppData, map[string]interface{}{"path": "apps/tracker", "name": "../secrets", "value": 1}, false},
+		{"save data without a value", SaveAppData, map[string]interface{}{"path": "apps/tracker", "name": "pipeline"}, false},
+		{"present", Present, map[string]interface{}{"paths": []interface{}{"pages/report.html", "docs/report.pdf"}}, true},
+		{"present nothing", Present, map[string]interface{}{"paths": []interface{}{}}, false},
+		{"image", GenerateImage, map[string]interface{}{"prompt": "a seal", "path": "images/seal.png"}, true},
+		{"pdf", CreatePDF, map[string]interface{}{"path": "docs/brief.pdf", "blocks": []interface{}{map[string]interface{}{"kind": "image", "path": "images/seal.png"}}}, true},
+		{"pdf with a revision id", CreatePDF, map[string]interface{}{"path": "docs/brief.pdf", "documentId": "brief"}, false},
+		{"sheet", CreateSheet, map[string]interface{}{"path": "sheets/budget.xlsx", "sheets": sheets}, true},
+		{"sheet without a path", CreateSheet, map[string]interface{}{"sheets": sheets}, false},
 	}
 	for _, tc := range cases {
 		err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), tc.action, tc.input)
 		if tc.valid && err != nil || !tc.valid && err == nil {
 			t.Fatalf("%s: schema validation: %v", tc.name, err)
-		}
-	}
-}
-
-func TestPageAndSheetContractsAreBuiltinAndRequireRevision(t *testing.T) {
-	catalog, definition := builtinContractCatalog(t)
-	if len(definition.Installers) != 0 {
-		t.Fatal("builtin creation must not install a service")
-	}
-	for _, action := range []string{CreatePage, CreateSheet} {
-		input := map[string]interface{}{"artifactId": "brief", "expectedLatestVersion": 0, "title": "Brief", "requirementName": "brief"}
-		if action == CreatePage {
-			input["filename"] = "brief.html"
-			input["html"] = "<html><body>Brief</body></html>"
-		} else {
-			input["filename"] = "brief.xlsx"
-			input["sheets"] = []interface{}{map[string]interface{}{"name": "Budget", "rows": []interface{}{[]interface{}{"Item", 12.5, true, nil}}}}
-		}
-		if err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), action, input); err != nil {
-			t.Fatal(err)
-		}
-		delete(input, "expectedLatestVersion")
-		if err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), action, input); err == nil {
-			t.Fatal("missing revision accepted")
 		}
 	}
 }

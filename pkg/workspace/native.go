@@ -7,6 +7,9 @@ const (
 	OperationBatchRead     = "workspace.batch_read"
 	OperationWriteFile     = "workspace.write_file"
 	OperationApplyPatch    = "workspace.apply_patch"
+	OperationEditFile      = "workspace.edit_file"
+	OperationDeleteFile    = "workspace.delete_file"
+	OperationMoveFile      = "workspace.move_file"
 	OperationRunCommand    = "workspace.run_command"
 	OperationGitClone      = "workspace.git_clone"
 	OperationGitCommit     = "workspace.git_commit"
@@ -30,6 +33,14 @@ func Operations(authority *Authority) []Operation {
 		{Name: OperationReadFile, Description: "Read a bounded UTF-8 file from the Workspace.", InputSchema: pathInput()},
 		{Name: OperationSearchFiles, Description: "Search Workspace files for text or a regular expression.", InputSchema: searchInput()},
 		{Name: OperationBatchRead, Description: "Run two to eight independent Workspace list, read, or search requests concurrently and return their results in request order. Use only when no request depends on another result.", InputSchema: batchReadInput()},
+	}
+	if authority.ConversationID != "" {
+		return append(result,
+			Operation{Name: OperationWriteFile, Description: "Create or replace a text file in this chat's files.", InputSchema: writeInput()},
+			Operation{Name: OperationEditFile, Description: "Replace exact text in a file: oldText must match the file exactly, including whitespace, and appear once unless replaceAll is set. Read the file first.", InputSchema: editInput()},
+			Operation{Name: OperationDeleteFile, Description: "Delete a file, or a directory and everything in it.", InputSchema: pathOnlyInput()},
+			Operation{Name: OperationMoveFile, Description: "Move or rename a file or directory.", InputSchema: moveInput()},
+		)
 	}
 	if authority.Workspace.Policy.Filesystem == AccessReadWrite {
 		result = append(result,
@@ -120,4 +131,21 @@ func gitCommitInput() map[string]interface{} {
 	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "expectedHeadSha", "message", "authorName", "authorEmail", "paths"}, "properties": map[string]interface{}{
 		"path": relativePathProperty(), "expectedHeadSha": map[string]interface{}{"type": "string", "pattern": "^[a-fA-F0-9]{40}$"}, "message": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 65536}, "authorName": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 200}, "authorEmail": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 254}, "paths": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 100, "items": map[string]interface{}{"type": "string", "minLength": 1}, "uniqueItems": true},
 	}}
+}
+
+func editInput() map[string]interface{} {
+	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "oldText", "newText"}, "properties": map[string]interface{}{
+		"path":       relativePathProperty(),
+		"oldText":    map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1048576},
+		"newText":    map[string]interface{}{"type": "string", "maxLength": 1048576},
+		"replaceAll": map[string]interface{}{"type": "boolean", "default": false},
+	}}
+}
+
+func pathOnlyInput() map[string]interface{} {
+	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path"}, "properties": map[string]interface{}{"path": relativePathProperty()}}
+}
+
+func moveInput() map[string]interface{} {
+	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "destination"}, "properties": map[string]interface{}{"path": relativePathProperty(), "destination": relativePathProperty()}}
 }

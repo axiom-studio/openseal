@@ -20,11 +20,28 @@ const (
 // credentials remain host-owned and are never part of this portable contract.
 type Authority struct {
 	Workspace Spec `json:"workspace"`
+	// ConversationID, when set, makes the Workspace that chat's own files
+	// (see pkg/chatfs) rather than a volume of the Agent: every Agent in the
+	// chat shares them, and the host stores them with the chat.
+	ConversationID string `json:"conversationId,omitempty"`
+}
+
+// ChatID is the Workspace ID of every chat's files.
+const ChatID = "chat"
+
+// ChatAuthority grants a turn full access to its chat's files.
+func ChatAuthority(conversationID string) *Authority {
+	spec := DefaultSpec()
+	spec.ID, spec.DisplayName = ChatID, "Chat files"
+	return &Authority{Workspace: spec, ConversationID: strings.TrimSpace(conversationID)}
 }
 
 func (a Authority) Validate() error {
 	if err := a.Workspace.Validate(); err != nil {
 		return err
+	}
+	if a.ConversationID != "" && (a.Workspace.ID != ChatID || a.Workspace.Policy.Filesystem != AccessReadWrite || a.Workspace.Policy.Git.Enabled || len(a.Workspace.Policy.CredentialBindings) != 0) {
+		return errors.New("chat Workspace authority is invalid")
 	}
 	return nil
 }

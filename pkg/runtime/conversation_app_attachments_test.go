@@ -72,7 +72,7 @@ func TestConversationAppAttachmentShowsOnlyTheLatestVersion(t *testing.T) {
 	}
 	text := result[0].Text
 	if result[0].Status != "supplied" || result[0].Version != 3 || !strings.Contains(text, "appId=app-1") || !strings.Contains(text, `title="Tracker"`) ||
-		!strings.Contains(text, "expectedLatestVersion=3 to update_app") || !strings.Contains(text, "<h1>third</h1>") || strings.Contains(text, "<h1>first</h1>") ||
+		!strings.Contains(text, "apps/tracker/ and call save_app") || !strings.Contains(text, "<h1>third</h1>") || strings.Contains(text, "<h1>first</h1>") ||
 		!strings.Contains(text, "--- src/styles.css (19 bytes) ---\nh1 { color: teal; }") || content.opens != 1 {
 		t.Fatalf("expected the latest app source once, got %#v (opens %d)", result[0], content.opens)
 	}
