@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/artifact"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -178,5 +179,60 @@ func TestToolsPickReadablePaths(t *testing.T) {
 	}
 	if got := NewPath(tree, Docs, "Q3 Sales Report.pdf", "application/pdf"); got != "docs/q3-sales-report.pdf" {
 		t.Fatalf("NewPath = %s", got)
+	}
+}
+
+func TestAnExistingChatIsOnboardedOnceWhenFirstOpened(t *testing.T) {
+	store, chat, author := newTestStore(t)
+	ctx := context.Background()
+	entry, err := store.Put(ctx, chat, strings.NewReader("old upload"), 10, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls sync.Map
+	count := func() int {
+		n := 0
+		calls.Range(func(any, any) bool { n++; return true })
+		return n
+	}
+	store.Onboard = func(_ context.Context, onboarded Chat) ([]Change, error) {
+		calls.Store(time.Now().UnixNano(), true)
+		if onboarded != chat {
+			t.Error("onboarded another chat")
+		}
+		return []Change{{Path: "uploads/old.txt", Entry: &entry}}, nil
+	}
+	var group sync.WaitGroup
+	for range 4 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if _, err := store.Head(ctx, chat); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	group.Wait()
+	head, err := store.Head(ctx, chat)
+	if err != nil || head.Version != 1 || len(head.Tree.Files) != 1 {
+		t.Fatalf("onboarded head = v%d %v %v", head.Version, head.Tree.Paths(), err)
+	}
+	calls = sync.Map{}
+	result := run(t, store, chat, author, workspace.OperationReadFile, map[string]interface{}{"path": "uploads/old.txt"})
+	if result["content"] != "old upload" || count() != 0 {
+		t.Fatalf("read after onboarding = %#v, onboarded again %d times", result, count())
+	}
+	run(t, store, chat, author, workspace.OperationWriteFile, map[string]interface{}{"path": "new.md", "content": "x"})
+	if head, _ := store.Head(ctx, chat); head.Version != 2 || len(head.Tree.Files) != 2 {
+		t.Fatalf("a change after onboarding = v%d %v", head.Version, head.Tree.Paths())
+	}
+}
+
+func TestANewChatIsOnboardedEmpty(t *testing.T) {
+	store, chat, _ := newTestStore(t)
+	store.Onboard = func(context.Context, Chat) ([]Change, error) { return nil, nil }
+	head, err := store.Head(context.Background(), chat)
+	if err != nil || head.Version != 1 || len(head.Tree.Files) != 0 {
+		t.Fatalf("new chat = v%d %v", head.Version, err)
 	}
 }

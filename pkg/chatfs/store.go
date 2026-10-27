@@ -46,12 +46,22 @@ type Author struct {
 	TurnID   string
 }
 
+// Onboarder lists the files a chat already has when its filesystem is first
+// opened: those its messages carry and its Runs made before chats had files.
+// It returns them as changes to an empty tree.
+type Onboarder func(context.Context, Chat) ([]Change, error)
+
 // Store reads and commits chat filesystems.
 type Store struct {
 	Artifacts Artifacts
 	Content   runtime.ArtifactContentStore
-	now       func() time.Time
+	// Onboard, when set, gives a chat that has no snapshot yet its first one.
+	Onboard Onboarder
+	now     func() time.Time
 }
+
+// onboardingAuthor commits a chat's first snapshot.
+var onboardingAuthor = Author{Producer: runtime.ActivityActor{Type: "service", ID: "chat-files-onboarding"}}
 
 func NewStore(artifacts Artifacts, content runtime.ArtifactContentStore) *Store {
 	return &Store{Artifacts: artifacts, Content: content, now: time.Now}
@@ -73,9 +83,35 @@ func (s *Store) Head(ctx context.Context, chat Chat) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("read chat files: %w", err)
 	}
 	if len(artifacts) == 0 || artifacts[0] == nil {
-		return Snapshot{Tree: emptyTree()}, nil
+		if s.Onboard == nil {
+			return Snapshot{Tree: emptyTree()}, nil
+		}
+		return s.onboard(ctx, chat)
 	}
 	return s.load(ctx, chat, artifacts[0])
+}
+
+// onboard commits a chat's first snapshot from the files it already has. It
+// commits even an empty tree, so a chat is onboarded once; a concurrent
+// onboarding of the same chat loses the race and reads the winner's.
+func (s *Store) onboard(ctx context.Context, chat Chat) (Snapshot, error) {
+	changes, err := s.Onboard(ctx, chat)
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("bring this chat's files in: %w", err)
+	}
+	tree := emptyTree()
+	if err := apply(tree, changes); err != nil {
+		return Snapshot{}, err
+	}
+	snapshot, err := s.save(ctx, chat, onboardingAuthor, tree, 0)
+	if errors.Is(err, runtime.ErrArtifactVersionConflict) || errors.Is(err, runtime.ErrArtifactImmutable) {
+		artifacts, listErr := s.Artifacts.ListArtifacts(ctx, runtime.ArtifactFilter{Scope: chat.Scope, ID: ArtifactID(chat.ConversationID), LatestOnly: true, Limit: 1})
+		if listErr != nil || len(artifacts) == 0 || artifacts[0] == nil {
+			return Snapshot{}, errors.New("chat files are busy; try again")
+		}
+		return s.load(ctx, chat, artifacts[0])
+	}
+	return snapshot, err
 }
 
 // At returns the snapshot at version.
@@ -197,52 +233,69 @@ func (s *Store) Commit(ctx context.Context, chat Chat, author Author, changes []
 		for name, entry := range head.Tree.Files {
 			tree.Files[name] = entry
 		}
-		for _, change := range changes {
-			name, err := Clean(change.Path)
-			if err != nil {
-				return Snapshot{}, err
-			}
-			if change.Expect != nil && *Expectation(tree, name) != *change.Expect {
-				return Snapshot{}, fmt.Errorf("%w: %s changed since it was read; read it again", ErrConflict, name)
-			}
-			if change.Entry == nil {
-				delete(tree.Files, name)
-				continue
-			}
-			if err := checkPlacement(tree, name); err != nil {
-				return Snapshot{}, err
-			}
-			tree.Files[name] = *change.Entry
-		}
-		if len(tree.Files) > MaximumFiles {
-			return Snapshot{}, fmt.Errorf("a chat holds at most %d files", MaximumFiles)
-		}
-		encoded, err := json.Marshal(tree)
-		if err != nil {
+		if err := apply(tree, changes); err != nil {
 			return Snapshot{}, err
 		}
-		owner := chat.Owner
-		stored, err := s.Content.Put(ctx, runtime.ArtifactContentWrite{Scope: chat.Scope, MediaType: MediaType, Reader: bytes.NewReader(encoded), SizeBytes: int64(len(encoded)), Owner: &owner})
-		if err != nil {
-			return Snapshot{}, fmt.Errorf("store chat files: %w", err)
-		}
-		_, err = s.Artifacts.RegisterArtifact(ctx, runtime.RegisterArtifactRequest{ExpectedLatestVersion: head.Version, Artifact: &runtime.Artifact{
-			ID: ArtifactID(chat.ConversationID), Version: head.Version + 1, Scope: chat.Scope,
-			Name: "Chat files", Type: ArtifactType, MediaType: MediaType,
-			ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes,
-			Classification: runtime.ArtifactClassificationInternal,
-			Metadata:       map[string]interface{}{"conversationId": chat.ConversationID},
-			Provenance:     runtime.ArtifactProvenance{Producer: author.Producer, Owner: &owner, RunID: author.RunID, TurnID: author.TurnID},
-		}})
+		snapshot, err := s.save(ctx, chat, author, tree, head.Version)
 		if errors.Is(err, runtime.ErrArtifactVersionConflict) || errors.Is(err, runtime.ErrArtifactImmutable) {
 			continue
 		}
-		if err != nil {
-			return Snapshot{}, fmt.Errorf("commit chat files: %w", err)
-		}
-		return Snapshot{Version: head.Version + 1, Tree: tree}, nil
+		return snapshot, err
 	}
 	return Snapshot{}, errors.New("chat files are busy; try again")
+}
+
+// apply makes changes to tree in order, checking each one's expectation.
+func apply(tree Tree, changes []Change) error {
+	for _, change := range changes {
+		name, err := Clean(change.Path)
+		if err != nil {
+			return err
+		}
+		if change.Expect != nil && *Expectation(tree, name) != *change.Expect {
+			return fmt.Errorf("%w: %s changed since it was read; read it again", ErrConflict, name)
+		}
+		if change.Entry == nil {
+			delete(tree.Files, name)
+			continue
+		}
+		if err := checkPlacement(tree, name); err != nil {
+			return err
+		}
+		tree.Files[name] = *change.Entry
+	}
+	if len(tree.Files) > MaximumFiles {
+		return fmt.Errorf("a chat holds at most %d files", MaximumFiles)
+	}
+	return nil
+}
+
+// save stores tree as the snapshot after previous.
+func (s *Store) save(ctx context.Context, chat Chat, author Author, tree Tree, previous int64) (Snapshot, error) {
+	encoded, err := json.Marshal(tree)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	owner := chat.Owner
+	stored, err := s.Content.Put(ctx, runtime.ArtifactContentWrite{Scope: chat.Scope, MediaType: MediaType, Reader: bytes.NewReader(encoded), SizeBytes: int64(len(encoded)), Owner: &owner})
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("store chat files: %w", err)
+	}
+	_, err = s.Artifacts.RegisterArtifact(ctx, runtime.RegisterArtifactRequest{ExpectedLatestVersion: previous, Artifact: &runtime.Artifact{
+		ID: ArtifactID(chat.ConversationID), Version: previous + 1, Scope: chat.Scope,
+		Name: "Chat files", Type: ArtifactType, MediaType: MediaType,
+		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes,
+		Classification: runtime.ArtifactClassificationInternal,
+		Metadata:       map[string]interface{}{"conversationId": chat.ConversationID},
+		Provenance:     runtime.ArtifactProvenance{Producer: author.Producer, Owner: &owner, RunID: author.RunID, TurnID: author.TurnID},
+	}})
+	if errors.Is(err, runtime.ErrArtifactVersionConflict) || errors.Is(err, runtime.ErrArtifactImmutable) {
+		return Snapshot{}, err
+	}
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("commit chat files: %w", err)
+	}
+	return Snapshot{Version: previous + 1, Tree: tree}, nil
 }
 
 // A file cannot sit where a directory is, or below another file.
