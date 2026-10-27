@@ -1,0 +1,633 @@
+{
+  "comment": "Shared explorer expression fixtures. Go (pkg/presentation/expr) and the TypeScript evaluator must both pass every case. Compare results with |got-want| <= tolerance * max(1, |want|). Error cases name only the phase (syntax, type or eval); messages differ between implementations. Bool inputs are 1 (true) or 0 (false); a bool result is 1 or 0.",
+  "tolerance": 1e-09,
+  "cases": [
+    {
+      "name": "compound interest, monthly",
+      "expr": "deposit * (1 + rate / 100 / 12) ^ (12 * years)",
+      "vars": {
+        "deposit": "number",
+        "rate": "number",
+        "years": "number"
+      },
+      "inputs": {
+        "deposit": 1000.0,
+        "rate": 5.0,
+        "years": 10.0
+      },
+      "result": 1647.009497690286
+    },
+    {
+      "name": "compound interest with monthly saving",
+      "expr": "sum(m, 1, 12 * years, monthly * (1 + rate / 100 / 12) ^ (12 * years - m))",
+      "vars": {
+        "monthly": "number",
+        "rate": "number",
+        "years": "number"
+      },
+      "inputs": {
+        "monthly": 50.0,
+        "rate": 5.0,
+        "years": 10.0
+      },
+      "result": 7764.113972283401
+    },
+    {
+      "name": "compound interest, continuous",
+      "expr": "deposit * exp(rate / 100 * years)",
+      "vars": {
+        "deposit": "number",
+        "rate": "number",
+        "years": "number"
+      },
+      "inputs": {
+        "deposit": 1000.0,
+        "rate": 5.0,
+        "years": 10.0
+      },
+      "result": 1648.7212707001281
+    },
+    {
+      "name": "loan repayment, monthly payment",
+      "expr": "principal * (rate / 1200) / (1 - (1 + rate / 1200) ^ -(years * 12))",
+      "vars": {
+        "principal": "number",
+        "rate": "number",
+        "years": "number"
+      },
+      "inputs": {
+        "principal": 200000.0,
+        "rate": 4.5,
+        "years": 25.0
+      },
+      "result": 1111.6649559239904
+    },
+    {
+      "name": "loan repayment, total interest",
+      "expr": "round(principal * (rate / 1200) / (1 - (1 + rate / 1200) ^ -(years * 12)) * years * 12 - principal, 2)",
+      "vars": {
+        "principal": "number",
+        "rate": "number",
+        "years": "number"
+      },
+      "inputs": {
+        "principal": 200000.0,
+        "rate": 4.5,
+        "years": 25.0
+      },
+      "result": 133499.49
+    },
+    {
+      "name": "loan repayment, interest-free",
+      "expr": "if(rate == 0, principal / (years * 12), principal * (rate / 1200) / (1 - (1 + rate / 1200) ^ -(years * 12)))",
+      "vars": {
+        "principal": "number",
+        "rate": "number",
+        "years": "number"
+      },
+      "inputs": {
+        "principal": 12000.0,
+        "rate": 0.0,
+        "years": 2.0
+      },
+      "result": 500.0
+    },
+    {
+      "name": "unit conversion, celsius to fahrenheit",
+      "expr": "c * 9 / 5 + 32",
+      "vars": {
+        "c": "number"
+      },
+      "inputs": {
+        "c": 37.0
+      },
+      "result": 98.6
+    },
+    {
+      "name": "unit conversion, km to miles",
+      "expr": "round(km / 1.609344, 2)",
+      "vars": {
+        "km": "number"
+      },
+      "inputs": {
+        "km": 42.195
+      },
+      "result": 26.22
+    },
+    {
+      "name": "unit conversion, kg to stone and pounds",
+      "expr": "floor(kg / 6.35029318) * 100 + round(kg / 0.45359237 - floor(kg / 6.35029318) * 14)",
+      "vars": {
+        "kg": "number"
+      },
+      "inputs": {
+        "kg": 70.0
+      },
+      "result": 1100.0
+    },
+    {
+      "name": "fraction size, compare",
+      "expr": "a / b > c / d",
+      "vars": {
+        "a": "number",
+        "b": "number",
+        "c": "number",
+        "d": "number"
+      },
+      "inputs": {
+        "a": 3.0,
+        "b": 4.0,
+        "c": 2.0,
+        "d": 3.0
+      },
+      "result": 1
+    },
+    {
+      "name": "fraction size, as percent",
+      "expr": "round(a / b * 100, 1)",
+      "vars": {
+        "a": "number",
+        "b": "number"
+      },
+      "inputs": {
+        "a": 2.0,
+        "b": 3.0
+      },
+      "result": 66.7
+    },
+    {
+      "name": "fraction size, re-cut into twelfths",
+      "expr": "a * (12 / b)",
+      "vars": {
+        "a": "number",
+        "b": "number"
+      },
+      "inputs": {
+        "a": 3.0,
+        "b": 4.0
+      },
+      "result": 9.0
+    },
+    {
+      "name": "speed distance time, minutes",
+      "expr": "distance / speed * 60",
+      "vars": {
+        "distance": "number",
+        "speed": "number"
+      },
+      "inputs": {
+        "distance": 42.195,
+        "speed": 10.0
+      },
+      "result": 253.17000000000002
+    },
+    {
+      "name": "speed distance time, guarded",
+      "expr": "if(speed > 0, distance / speed, 0)",
+      "vars": {
+        "distance": "number",
+        "speed": "number"
+      },
+      "inputs": {
+        "distance": 5.0,
+        "speed": 0.0
+      },
+      "result": 0
+    },
+    {
+      "name": "speed distance time, distance",
+      "expr": "speed * minutes / 60",
+      "vars": {
+        "speed": "number",
+        "minutes": "number"
+      },
+      "inputs": {
+        "speed": 12.5,
+        "minutes": 95.0
+      },
+      "result": 19.791666666666668
+    },
+    {
+      "name": "calories burned, MET",
+      "expr": "met * 3.5 * weight / 200 * minutes",
+      "vars": {
+        "met": "number",
+        "weight": "number",
+        "minutes": "number"
+      },
+      "inputs": {
+        "met": 8.0,
+        "weight": 70.0,
+        "minutes": 30.0
+      },
+      "result": 294.0
+    },
+    {
+      "name": "calories burned, toggle",
+      "expr": "round(if(running, 9.8, 3.5) * 3.5 * weight / 200 * minutes)",
+      "vars": {
+        "running": "bool",
+        "weight": "number",
+        "minutes": "number"
+      },
+      "inputs": {
+        "running": 1,
+        "weight": 62.5,
+        "minutes": 45.0
+      },
+      "result": 482.0
+    },
+    {
+      "name": "calories burned, walking",
+      "expr": "round(if(running, 9.8, 3.5) * 3.5 * weight / 200 * minutes)",
+      "vars": {
+        "running": "bool",
+        "weight": "number",
+        "minutes": "number"
+      },
+      "inputs": {
+        "running": 0,
+        "weight": 62.5,
+        "minutes": 45.0
+      },
+      "result": 172.0
+    },
+    {
+      "name": "precedence, negative power",
+      "expr": "-2 ^ 2",
+      "vars": {},
+      "inputs": {},
+      "result": -4.0
+    },
+    {
+      "name": "precedence, right-associative power",
+      "expr": "2 ^ 3 ^ 2",
+      "vars": {},
+      "inputs": {},
+      "result": 512.0
+    },
+    {
+      "name": "precedence, negative exponent",
+      "expr": "2 ^ -1",
+      "vars": {},
+      "inputs": {},
+      "result": 0.5
+    },
+    {
+      "name": "precedence, mixed",
+      "expr": "1 + 2 * 3 - 4 / 2",
+      "vars": {},
+      "inputs": {},
+      "result": 5.0
+    },
+    {
+      "name": "non-integer power",
+      "expr": "2 ^ 0.5",
+      "vars": {},
+      "inputs": {},
+      "result": 1.4142135623730951
+    },
+    {
+      "name": "functions, min max",
+      "expr": "max(1, x, 3) - min(4, x)",
+      "vars": {
+        "x": "number"
+      },
+      "inputs": {
+        "x": 7.0
+      },
+      "result": 3.0
+    },
+    {
+      "name": "functions, floor ceil abs",
+      "expr": "floor(-2.5) + ceil(2.1) + abs(-3)",
+      "vars": {},
+      "inputs": {},
+      "result": 3.0
+    },
+    {
+      "name": "functions, sqrt log exp",
+      "expr": "sqrt(2) + log(10) + exp(1)",
+      "vars": {},
+      "inputs": {},
+      "result": 6.4350804838261855
+    },
+    {
+      "name": "round half away from zero",
+      "expr": "round(2.5) * 10 + round(-2.5)",
+      "vars": {},
+      "inputs": {},
+      "result": 27.0
+    },
+    {
+      "name": "round with digits uses binary floats",
+      "expr": "round(1.005, 2)",
+      "vars": {},
+      "inputs": {},
+      "result": 1.0
+    },
+    {
+      "name": "round to zero is not negative",
+      "expr": "round(-0.4)",
+      "vars": {},
+      "inputs": {},
+      "result": 0
+    },
+    {
+      "name": "sum of integers",
+      "expr": "sum(i, 1, 100, i)",
+      "vars": {},
+      "inputs": {},
+      "result": 5050.0
+    },
+    {
+      "name": "sum over an empty range",
+      "expr": "sum(k, 1, 0, k)",
+      "vars": {},
+      "inputs": {},
+      "result": 0
+    },
+    {
+      "name": "sum at the iteration limit",
+      "expr": "sum(i, 1, 600, 1)",
+      "vars": {},
+      "inputs": {},
+      "result": 600.0
+    },
+    {
+      "name": "logic",
+      "expr": "x == 3 && !(x > 4) || x < 0",
+      "vars": {
+        "x": "number"
+      },
+      "inputs": {
+        "x": 3.0
+      },
+      "result": 1
+    },
+    {
+      "name": "bool equality",
+      "expr": "(x > 1) == (x > 2)",
+      "vars": {
+        "x": "number"
+      },
+      "inputs": {
+        "x": 1.5
+      },
+      "result": 0
+    },
+    {
+      "name": "exponent literal",
+      "expr": "1.5e3 + 2E-1",
+      "vars": {},
+      "inputs": {},
+      "result": 1500.2
+    }
+  ],
+  "errors": [
+    {
+      "name": "dangling operator",
+      "expr": "1 +",
+      "vars": {},
+      "phase": "syntax"
+    },
+    {
+      "name": "unclosed parenthesis",
+      "expr": "(1",
+      "vars": {},
+      "phase": "syntax"
+    },
+    {
+      "name": "double star",
+      "expr": "2 ** 3",
+      "vars": {},
+      "phase": "syntax"
+    },
+    {
+      "name": "chained comparison",
+      "expr": "1 < 2 < 3",
+      "vars": {},
+      "phase": "syntax"
+    },
+    {
+      "name": "string",
+      "expr": "\"a\"",
+      "vars": {},
+      "phase": "syntax"
+    },
+    {
+      "name": "property access",
+      "expr": "x.y",
+      "vars": {
+        "x": "number",
+        "a": "number"
+      },
+      "phase": "syntax"
+    },
+    {
+      "name": "assignment",
+      "expr": "a = 1",
+      "vars": {
+        "x": "number",
+        "a": "number"
+      },
+      "phase": "syntax"
+    },
+    {
+      "name": "sum without index",
+      "expr": "sum(1, 1, 2, 3)",
+      "vars": {},
+      "phase": "syntax"
+    },
+    {
+      "name": "leading dot",
+      "expr": "x * .5",
+      "vars": {
+        "x": "number",
+        "a": "number"
+      },
+      "phase": "syntax"
+    },
+    {
+      "name": "number then name",
+      "expr": "2x",
+      "vars": {
+        "x": "number",
+        "a": "number"
+      },
+      "phase": "syntax"
+    },
+    {
+      "name": "empty",
+      "expr": "",
+      "vars": {},
+      "phase": "syntax"
+    },
+    {
+      "name": "too long",
+      "expr": "1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1",
+      "vars": {},
+      "phase": "syntax"
+    },
+    {
+      "name": "unknown name",
+      "expr": "y + 1",
+      "vars": {
+        "x": "number"
+      },
+      "phase": "type"
+    },
+    {
+      "name": "unknown function",
+      "expr": "foo(1)",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "function used as a name",
+      "expr": "sqrt + 1",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "round digits not literal",
+      "expr": "round(1, x)",
+      "vars": {
+        "x": "number"
+      },
+      "phase": "type"
+    },
+    {
+      "name": "round digits too big",
+      "expr": "round(1, 11)",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "wrong arity",
+      "expr": "sqrt(1, 2)",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "number as condition",
+      "expr": "if(1, 2, 3)",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "bool in arithmetic",
+      "expr": "1 + (2 > 1)",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "mismatched branches",
+      "expr": "if(x > 1, 1, x > 2)",
+      "vars": {
+        "x": "number"
+      },
+      "phase": "type"
+    },
+    {
+      "name": "nested sum",
+      "expr": "sum(i, 1, 3, sum(j, 1, 2, j))",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "index shadows input",
+      "expr": "sum(x, 1, 2, x)",
+      "vars": {
+        "x": "number"
+      },
+      "phase": "type"
+    },
+    {
+      "name": "not on a number",
+      "expr": "!1",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "bool input in arithmetic",
+      "expr": "on * 2",
+      "vars": {
+        "on": "bool"
+      },
+      "phase": "type"
+    },
+    {
+      "name": "index out of scope",
+      "expr": "sum(i, 1, 2, i) + i",
+      "vars": {},
+      "phase": "type"
+    },
+    {
+      "name": "division by zero",
+      "expr": "1 / x",
+      "vars": {
+        "x": "number"
+      },
+      "phase": "eval",
+      "inputs": {
+        "x": 0
+      }
+    },
+    {
+      "name": "negative sqrt",
+      "expr": "sqrt(x)",
+      "vars": {
+        "x": "number"
+      },
+      "phase": "eval",
+      "inputs": {
+        "x": -1
+      }
+    },
+    {
+      "name": "log of zero",
+      "expr": "log(0)",
+      "vars": {},
+      "phase": "eval",
+      "inputs": {}
+    },
+    {
+      "name": "overflow",
+      "expr": "10 ^ 400",
+      "vars": {},
+      "phase": "eval",
+      "inputs": {}
+    },
+    {
+      "name": "too many iterations",
+      "expr": "sum(i, 1, 601, i)",
+      "vars": {},
+      "phase": "eval",
+      "inputs": {}
+    },
+    {
+      "name": "fractional range",
+      "expr": "sum(i, 0.5, 3, i)",
+      "vars": {},
+      "phase": "eval",
+      "inputs": {}
+    },
+    {
+      "name": "missing input",
+      "expr": "x + 1",
+      "vars": {
+        "x": "number"
+      },
+      "phase": "eval",
+      "inputs": {}
+    },
+    {
+      "name": "zero to a negative power",
+      "expr": "0 ^ -1",
+      "vars": {},
+      "phase": "eval",
+      "inputs": {}
+    }
+  ]
+}
