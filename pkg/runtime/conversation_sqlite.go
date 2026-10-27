@@ -64,7 +64,7 @@ func migrateConversations(db *sql.DB) error {
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, conversation_id TEXT NOT NULL, id TEXT NOT NULL,
 			sequence INTEGER NOT NULL, surface_artifact_id TEXT NOT NULL, surface_id TEXT NOT NULL, surface_version INTEGER NOT NULL,
 			message_id TEXT NOT NULL, component_id TEXT NOT NULL, item_key TEXT NOT NULL DEFAULT '', actor_type TEXT NOT NULL, actor_id TEXT NOT NULL,
-			repeatable INTEGER NOT NULL, visibility TEXT NOT NULL CHECK (visibility IN ('actor', 'shared')), idempotency_key TEXT NOT NULL, created_at DATETIME NOT NULL, payload TEXT NOT NULL,
+			repeatable INTEGER NOT NULL, idempotency_key TEXT NOT NULL, created_at DATETIME NOT NULL, payload TEXT NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, conversation_id, id),
 			UNIQUE (scope_kind, scope_id, conversation_id, sequence),
 			UNIQUE (scope_kind, scope_id, conversation_id, idempotency_key)

@@ -99,8 +99,7 @@ func (f surfaceInteractionFixture) postCard(t *testing.T, surfaceID string, audi
 	return posted.Message.ID
 }
 
-// record fills test defaults: version 1, the surface's channel card message,
-// and actor visibility for single-use and shared for repeatable components.
+// record fills test defaults: version 1 and the surface's channel card message.
 func (f surfaceInteractionFixture) record(t *testing.T, req RecordSurfaceInteractionRequest) (*SurfaceInteraction, bool, error) {
 	t.Helper()
 	req.Scope, req.ConversationID = f.scope, f.conversation.ID
@@ -112,12 +111,6 @@ func (f surfaceInteractionFixture) record(t *testing.T, req RecordSurfaceInterac
 	}
 	if req.MessageID == "" {
 		req.MessageID = f.postCard(t, req.SurfaceID, ConversationAudience{Kind: ConversationAudienceChannel})
-	}
-	if req.Visibility == "" {
-		req.Visibility = SurfaceInteractionVisibilityActor
-		if req.Repeatable {
-			req.Visibility = SurfaceInteractionVisibilityShared
-		}
 	}
 	return f.conversations.RecordSurfaceInteraction(f.ctx, req)
 }
@@ -353,7 +346,7 @@ func TestPostgresSurfaceInteractionMigrationRollsBackAndReapplies(t *testing.T) 
 	}
 }
 
-func TestSurfaceInteractionVisibilityFollowsActorAndCardMessage(t *testing.T) {
+func TestSurfaceInteractionVisibilityFollowsCardMessage(t *testing.T) {
 	for _, fixture := range surfaceInteractionStores(t) {
 		t.Run(fixture.name, func(t *testing.T) {
 			store := fixture.store(t)
@@ -383,9 +376,9 @@ func TestSurfaceInteractionVisibilityFollowsActorAndCardMessage(t *testing.T) {
 			}
 			want := map[string][]string{
 				"":    {"ben-q1", "ana-q1", "vote-ana", "vote-ben", "secret-ana"},
-				"ana": {"ana-q1", "vote-ana", "vote-ben", "secret-ana"},
-				"ben": {"ben-q1", "vote-ana", "vote-ben"},
-				"cy":  {"vote-ana", "vote-ben"},
+				"ana": {"ben-q1", "ana-q1", "vote-ana", "vote-ben", "secret-ana"},
+				"ben": {"ben-q1", "ana-q1", "vote-ana", "vote-ben"},
+				"cy":  {"ben-q1", "ana-q1", "vote-ana", "vote-ben"},
 			}
 			changes, err := NewConversationChangeService(store.(ConversationStore), store)
 			if err != nil {
@@ -416,14 +409,14 @@ func TestSurfaceInteractionVisibilityFollowsActorAndCardMessage(t *testing.T) {
 				}
 				return surfaceInteractionKeys(result)
 			}
-			// Across actors, another actor's per-viewer answer never wins.
+			// Everyone who sees a card's message sees all its interactions.
 			if got := latest("quiz", nil, true); !reflect.DeepEqual(got, []string{"ana-q1"}) {
 				t.Fatalf("quiz across actors = %v", got)
 			}
-			if got := latest("quiz", surfaceInteractionViewer("ben"), true); !reflect.DeepEqual(got, []string{"ben-q1"}) {
+			if got := latest("quiz", surfaceInteractionViewer("ben"), true); !reflect.DeepEqual(got, []string{"ana-q1"}) {
 				t.Fatalf("ben quiz across actors = %v", got)
 			}
-			if got := latest("quiz", surfaceInteractionViewer("cy"), false); len(got) != 0 {
+			if got := latest("quiz", surfaceInteractionViewer("cy"), false); !reflect.DeepEqual(got, []string{"ben-q1", "ana-q1"}) {
 				t.Fatalf("cy quiz = %v", got)
 			}
 			if got := latest("poll", surfaceInteractionViewer("cy"), true); !reflect.DeepEqual(got, []string{"vote-ben"}) {
@@ -443,12 +436,7 @@ func TestSurfaceInteractionVisibilityFollowsActorAndCardMessage(t *testing.T) {
 			if _, err := store.(ConversationStore).ListSurfaceInteractions(f.ctx, SurfaceInteractionFilter{Scope: f.scope, ConversationID: f.conversation.ID, Viewer: surfaceInteractionViewer("ana")}); !errors.Is(err, ErrInvalidSurfaceInteraction) {
 				t.Fatalf("store viewer = %v", err)
 			}
-			// Visibility is required, and the message must carry the surface.
-			invalid := answer("ana", "poll", "bad-visibility", true)
-			invalid.Visibility = "everyone"
-			if _, _, err := f.record(t, invalid); !errors.Is(err, ErrInvalidSurfaceInteraction) {
-				t.Fatalf("invalid visibility = %v", err)
-			}
+			// The message must carry the surface.
 			wrongMessage := answer("ana", "poll", "wrong-message", true)
 			wrongMessage.MessageID = secretMessage
 			if _, _, err := f.record(t, wrongMessage); !errors.Is(err, ErrInvalidSurfaceInteraction) {
@@ -473,6 +461,8 @@ func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.postCard(t, "quiz", ConversationAudience{Kind: ConversationAudienceChannel})
+			// ana's card goes only to ana, so ben never sees its interactions.
+			anaCard := f.postCard(t, "private", ConversationAudience{Kind: ConversationAudienceParticipants, Participants: []ConversationParticipant{surfaceInteractionUser("ana")}})
 			viewer := surfaceInteractionViewer("ben")
 			list := func(cursor string, limit int) *ConversationChangeSet {
 				t.Helper()
@@ -484,7 +474,11 @@ func TestConversationChangesAdvancePastHiddenSurfaceInteractions(t *testing.T) {
 			}
 			initial := list("", 0)
 			for index, req := range []struct{ actor, key string }{{"ana", "a1"}, {"ana", "a2"}, {"ben", "b1"}, {"ana", "a3"}, {"ben", "b2"}} {
-				if _, _, err := f.record(t, RecordSurfaceInteractionRequest{SurfaceID: "quiz", ComponentID: "q" + string(rune('1'+index)),
+				surface, message := "quiz", ""
+				if req.actor == "ana" {
+					surface, message = "private", anaCard
+				}
+				if _, _, err := f.record(t, RecordSurfaceInteractionRequest{SurfaceID: surface, ComponentID: "q" + string(rune('1'+index)), MessageID: message,
 					Actor: surfaceInteractionUser(req.actor), Values: json.RawMessage(`{}`), IdempotencyKey: req.key}); err != nil {
 					t.Fatal(err)
 				}
