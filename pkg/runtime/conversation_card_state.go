@@ -19,13 +19,16 @@ const (
 )
 
 // conversationCardState summarises interactions that do not wake the Agent
-// (checklist ticks, checked steps) on cards in messages, for the Agent's next
-// turn: one line per card component whose shared state changed since the
-// Agent's latest message in messages, e.g. "Packing list: 9/14 ticked
-// (unticked: passport, charger)". State is the latest write per item across
-// everyone the viewer can see. Cards are read newest first and the note is
-// at most maximumCardStateLines lines. It is best effort: a card that cannot
-// be read is left out rather than failing the turn.
+// (checklist, step and recipe ticks, flashcard marks) on cards in messages,
+// for the Agent's next turn: one line per card component whose state changed
+// since the Agent's latest message in messages, e.g. "Packing list: 9/14
+// ticked (unticked: passport, charger)". Ticks are the latest write per item
+// across everyone the viewer can see; flashcard marks are each person's own,
+// one line per person who marked since then, e.g. `Flashcards "French food
+// words": 3 got, 1 again, 1 unseen`, named when more than one did. Cards are
+// read newest first and the note is at most maximumCardStateLines lines. It
+// is best effort: a card that cannot be read is left out rather than failing
+// the turn.
 func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, conversation *Conversation, viewer ConversationViewer, participantID string, messages []*ChannelMessage) []string {
 	if r == nil || r.conversations == nil || r.artifacts == nil || r.config.AttachmentContent == nil || conversation == nil {
 		return nil
@@ -44,6 +47,12 @@ func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, c
 			break
 		}
 	}
+	names := map[ConversationParticipant]string{}
+	for _, message := range ordered {
+		if _, known := names[message.Sender]; !known && message.SenderDisplayName != "" {
+			names[message.Sender] = message.SenderDisplayName
+		}
+	}
 	var lines []string
 	seen := map[string]bool{}
 	for _, message := range ordered {
@@ -55,7 +64,7 @@ func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, c
 				return lines
 			}
 			seen[reference.ID] = true
-			for _, line := range r.cardStateLines(ctx, conversation, viewer, reference, since) {
+			for _, line := range r.cardStateLines(ctx, conversation, viewer, reference, since, names) {
 				if len(lines) == maximumCardStateLines {
 					return lines
 				}
@@ -67,8 +76,9 @@ func (r *ConversationRunTurnRunner) conversationCardState(ctx context.Context, c
 }
 
 // cardStateLines returns the state lines of one card whose non-waking
-// interactions changed at or after since.
-func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversation *Conversation, viewer ConversationViewer, reference ConversationReference, since time.Time) []string {
+// interactions changed at or after since. names maps participants to display
+// names.
+func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversation *Conversation, viewer ConversationViewer, reference ConversationReference, since time.Time, names map[ConversationParticipant]string) []string {
 	latest, err := r.conversations.ListLatestSurfaceInteractions(ctx, LatestSurfaceInteractionFilter{
 		Scope: conversation.Scope, ConversationID: conversation.ID, SurfaceID: reference.ID, AcrossActors: true, Viewer: &viewer,
 	})
@@ -89,8 +99,20 @@ func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversa
 		return nil
 	}
 	var lines []string
+	var perActor []*SurfaceInteraction
+	perActorRead := false
 	eachCardComponent(surface.Components, func(component presentation.Component) {
 		if !changed[component.ID] {
+			return
+		}
+		if component.Type == "flashcards" {
+			if !perActorRead {
+				perActorRead = true
+				perActor, _ = r.conversations.ListLatestSurfaceInteractions(ctx, LatestSurfaceInteractionFilter{
+					Scope: conversation.Scope, ConversationID: conversation.ID, SurfaceID: reference.ID, Viewer: &viewer,
+				})
+			}
+			lines = append(lines, flashcardStateLines(component, perActor, since, names)...)
 			return
 		}
 		rule, err := presentation.Interaction(component, "")
@@ -114,6 +136,60 @@ func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversa
 		}
 	})
 	return lines
+}
+
+// flashcardStateLines returns one line per person whose flashcard marks on
+// component changed at or after since, from each person's latest mark per
+// card. Lines name the person when more than one marked.
+func flashcardStateLines(component presentation.Component, latest []*SurfaceInteraction, since time.Time, names map[ConversationParticipant]string) []string {
+	marks := map[ConversationParticipant]map[string]string{}
+	var changed []ConversationParticipant
+	for _, interaction := range latest {
+		if interaction.ComponentID != component.ID || interaction.ActionID != presentation.FlashcardsMark || interaction.ItemKey == "" {
+			continue
+		}
+		actor := ConversationParticipant{Type: interaction.ActorType, ID: interaction.ActorID}
+		if marks[actor] == nil {
+			marks[actor] = map[string]string{}
+		}
+		if result, ok := presentation.FlashcardMark(interaction.Values); ok {
+			marks[actor][interaction.ItemKey] = result
+		}
+		if !interaction.CreatedAt.Before(since) && !containsParticipant(changed, actor) {
+			changed = append(changed, actor)
+		}
+	}
+	sort.Slice(changed, func(i, j int) bool {
+		if changed[i].Type != changed[j].Type {
+			return changed[i].Type < changed[j].Type
+		}
+		return changed[i].ID < changed[j].ID
+	})
+	var lines []string
+	for _, actor := range changed {
+		line, ok := presentation.FlashcardsStateLine(component, marks[actor])
+		if !ok {
+			continue
+		}
+		if len(changed) > 1 {
+			name := names[actor]
+			if name == "" {
+				name = "Someone"
+			}
+			line = name + ": " + line
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func containsParticipant(list []ConversationParticipant, participant ConversationParticipant) bool {
+	for _, candidate := range list {
+		if candidate == participant {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *ConversationRunTurnRunner) loadCardSurface(ctx context.Context, scope Scope, reference ConversationReference) *presentation.Surface {
