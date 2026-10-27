@@ -20,7 +20,31 @@ const (
 	InteractionPick    InteractionKind = "pick"    // comparison option
 	InteractionCheck   InteractionKind = "check"   // checklist item, checkable step
 	InteractionAnswer  InteractionKind = "answer"  // quiz answer
+	InteractionMark    InteractionKind = "mark"    // flashcard got/again
+	InteractionDone    InteractionKind = "done"    // flashcards finished
 )
+
+// Components with more than one interaction name it in the action id:
+// flashcards take FlashcardsMark or FlashcardsDone, drafts take DraftRespond.
+// DraftEdit opens the composer on the client and is never stored.
+const (
+	FlashcardsMark = "mark"
+	FlashcardsDone = "done"
+	DraftRespond   = "respond"
+	DraftEdit      = "edit"
+)
+
+// Flashcard mark results (values {"result": ...}) and draft responses
+// (values {"response": ...}).
+const (
+	FlashcardGot     = "got"
+	FlashcardAgain   = "again"
+	DraftLooksGood   = "looks_good"
+	DraftMakeShorter = "shorter"
+)
+
+// DraftResponses maps each draft response to its button label.
+var DraftResponses = map[string]string{DraftLooksGood: "Looks good", DraftMakeShorter: "Make it shorter"}
 
 // InteractionRule describes how the host stores one interaction.
 type InteractionRule struct {
@@ -42,11 +66,13 @@ type InteractionRule struct {
 var checkRule = InteractionRule{Kind: InteractionCheck, ItemKeyed: true, Shared: true}
 
 // Interaction reports which stored interaction a component accepts. actionID
-// selects the button of an actions component and must be empty otherwise.
+// selects the button of an actions component, the interaction of flashcards
+// (mark or done) and of a draft (respond), and must be empty otherwise.
 // Approval and entity buttons use their existing endpoints and edit buttons
-// are client-only, so none of them is a card interaction.
+// are client-only, so none of them is a card interaction; neither are the
+// buttons of a draft bound to an approval.
 func Interaction(component Component, actionID string) (InteractionRule, error) {
-	if component.Type != "actions" && actionID != "" {
+	if component.Type != "actions" && component.Type != "flashcards" && component.Type != "draft" && actionID != "" {
 		return InteractionRule{}, fmt.Errorf("%s interactions do not take an action id", component.Type)
 	}
 	switch component.Type {
@@ -78,6 +104,31 @@ func Interaction(component Component, actionID string) (InteractionRule, error) 
 		return checkRule, nil
 	case "checklist":
 		return checkRule, nil
+	case "recipe":
+		if component.Recipe == nil || !component.Recipe.Checkable {
+			return InteractionRule{}, fmt.Errorf("recipe %q is not checkable", component.ID)
+		}
+		return checkRule, nil
+	case "flashcards":
+		switch actionID {
+		case FlashcardsMark:
+			// Each person's own progress, last write per card; no wake.
+			return InteractionRule{Kind: InteractionMark, ItemKeyed: true}, nil
+		case FlashcardsDone:
+			return InteractionRule{Kind: InteractionDone, SingleUse: true, NotifyAgent: true}, nil
+		}
+		return InteractionRule{}, fmt.Errorf("flashcards interactions take the action id %q or %q (got %q)", FlashcardsMark, FlashcardsDone, actionID)
+	case "draft":
+		if component.Binding != nil {
+			return InteractionRule{}, fmt.Errorf("draft %q is bound to an approval; its buttons decide that approval and are not card interactions", component.ID)
+		}
+		switch actionID {
+		case DraftRespond:
+			return InteractionRule{Kind: InteractionRespond, SingleUse: true, NotifyAgent: true}, nil
+		case DraftEdit:
+			return InteractionRule{}, fmt.Errorf("draft edit opens the composer and is not recorded as a card interaction")
+		}
+		return InteractionRule{}, fmt.Errorf("draft interactions take the action id %q (got %q)", DraftRespond, actionID)
 	case "quiz":
 		return InteractionRule{Kind: InteractionAnswer, SingleUse: true, NotifyAgent: true}, nil
 	default:
@@ -102,14 +153,28 @@ func ValidateInteractionItem(component Component, actionID, itemKey string) erro
 	if itemKey == "" {
 		return fmt.Errorf("%s interactions need the item id as item key", component.Type)
 	}
-	if _, ok := checkItemLabel(component, itemKey); !ok {
+	if _, ok := itemLabel(component, itemKey); !ok {
 		return fmt.Errorf("%s %q has no item %q", component.Type, component.ID, itemKey)
 	}
 	return nil
 }
 
-// checkItemLabel returns the label of a checklist item or the title of a
-// step.
+// itemLabel names an item of an item-keyed component: a tickable item or
+// the front of a flashcard.
+func itemLabel(component Component, id string) (string, bool) {
+	if component.Type == "flashcards" && component.Flashcards != nil {
+		for _, card := range component.Flashcards.Cards {
+			if card.ID == id {
+				return card.Front, true
+			}
+		}
+		return "", false
+	}
+	return checkItemLabel(component, id)
+}
+
+// checkItemLabel returns the label of a checklist item, the title of a
+// step or the name of a recipe ingredient.
 func checkItemLabel(component Component, id string) (string, bool) {
 	for _, item := range checkItems(component) {
 		if item.id == id {
@@ -132,6 +197,10 @@ func checkItems(component Component) []checkItem {
 		for _, step := range component.Steps.Items {
 			items = append(items, checkItem{step.ID, step.Title})
 		}
+	case component.Type == "recipe" && component.Recipe != nil:
+		for _, ingredient := range component.Recipe.Ingredients {
+			items = append(items, checkItem{ingredient.ID, ingredient.Name})
+		}
 	}
 	return items
 }
@@ -150,6 +219,8 @@ var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //   - check: {"checked": bool}.
 //   - quiz answer: {"selected": [id, ...]}, exactly one id unless the quiz
 //     allows multiple.
+//   - flashcards mark: {"result": "got" | "again"}; done: no values.
+//   - draft respond: {"response": "looks_good" | "shorter"}.
 func ValidateInteractionValues(component Component, actionID string, values map[string]interface{}) error {
 	rule, err := Interaction(component, actionID)
 	if err != nil {
@@ -157,11 +228,14 @@ func ValidateInteractionValues(component Component, actionID string, values map[
 	}
 	switch rule.Kind {
 	case InteractionRespond:
-		if component.Type == "actions" {
+		switch component.Type {
+		case "actions":
 			if len(values) > 0 {
 				return errors.New("respond interactions carry no values")
 			}
 			return nil
+		case "draft":
+			return idValue(values, "response", []string{DraftLooksGood, DraftMakeShorter})
 		}
 		ids := make([]string, 0, len(component.Choices.Chips))
 		for _, chip := range component.Choices.Chips {
@@ -180,6 +254,13 @@ func ValidateInteractionValues(component Component, actionID string, values map[
 		}
 		if _, ok := values["checked"].(bool); !ok {
 			return errors.New("checked must be true or false")
+		}
+		return nil
+	case InteractionMark:
+		return idValue(values, "result", []string{FlashcardGot, FlashcardAgain})
+	case InteractionDone:
+		if len(values) > 0 {
+			return errors.New("done carries no values; the tally comes from the marks")
 		}
 		return nil
 	case InteractionAnswer:
@@ -411,7 +492,22 @@ func CardResponseText(component Component, actionID, itemKey string, values, out
 			}
 			return text
 		}
-	case "checklist", "steps":
+	case "flashcards":
+		if actionID == FlashcardsDone {
+			var tally FlashcardsTally
+			if len(outcome) > 0 && json.Unmarshal(outcome, &tally) == nil {
+				return fmt.Sprintf("Card response (flashcards %q): %s", name, tally.text())
+			}
+		} else if result, _ := decoded["result"].(string); result != "" {
+			if front, found := itemLabel(component, itemKey); found {
+				return fmt.Sprintf("Card response (flashcards %q): marked %q %s", name, front, result)
+			}
+		}
+	case "draft":
+		if label, ok := DraftResponses[fmt.Sprint(decoded["response"])]; ok {
+			return fmt.Sprintf("Card response (draft %q): %q", name, label)
+		}
+	case "checklist", "steps", "recipe":
 		checked, ok := decoded["checked"].(bool)
 		if label, found := checkItemLabel(component, itemKey); ok && found {
 			verb := "ticked"
@@ -427,9 +523,10 @@ func CardResponseText(component Component, actionID, itemKey string, values, out
 // MaxCardStateLabels bounds the item labels CardStateLine names.
 const MaxCardStateLabels = 5
 
-// CardStateLine summarises the shared ticks of a checklist or checkable
-// steps for the agent, e.g. `Packing list: 9/14 ticked (unticked: passport,
-// charger)` or `Steps "Set up the router": 3/5 done`. checked holds the
+// CardStateLine summarises the shared ticks of a checklist, checkable steps
+// or a checkable recipe for the agent, e.g. `Packing list: 9/14 ticked
+// (unticked: passport, charger)`, `Steps "Set up the router": 3/5 done` or
+// `Recipe "Pancakes": 4/6 ingredients ticked`. checked holds the
 // latest checked value per item id; ids that are not items are ignored. It
 // returns false for components without ticks.
 func CardStateLine(component Component, checked map[string]bool) (string, bool) {
@@ -447,9 +544,12 @@ func CardStateLine(component Component, checked map[string]bool) (string, bool) 
 		}
 	}
 	name := strings.TrimSpace(component.Title)
-	if component.Type == "steps" {
+	if component.Type == "steps" || component.Type == "recipe" {
 		if name == "" {
 			name = component.ID
+		}
+		if component.Type == "recipe" {
+			return fmt.Sprintf("Recipe %q: %d/%d ingredients ticked", name, done, len(items)), true
 		}
 		return fmt.Sprintf("Steps %q: %d/%d done", name, done, len(items)), true
 	}
@@ -555,4 +655,70 @@ func validateFieldValue(field FormField, value interface{}) error {
 		}
 	}
 	return nil
+}
+
+// FlashcardsTally is the outcome of finishing a flashcards deck: how many
+// cards the person last marked got or again, and how many they never
+// marked. Hosts store it on the done interaction.
+type FlashcardsTally struct {
+	Got    int `json:"got"`
+	Again  int `json:"again"`
+	Unseen int `json:"unseen"`
+}
+
+func (t FlashcardsTally) text() string {
+	text := fmt.Sprintf("%d got, %d again", t.Got, t.Again)
+	if t.Unseen > 0 {
+		text += fmt.Sprintf(", %d unseen", t.Unseen)
+	}
+	return text
+}
+
+// FlashcardMark reads the result ("got" or "again") of stored mark values.
+func FlashcardMark(values json.RawMessage) (string, bool) {
+	var decoded struct {
+		Result string `json:"result"`
+	}
+	if json.Unmarshal(values, &decoded) != nil || decoded.Result != FlashcardGot && decoded.Result != FlashcardAgain {
+		return "", false
+	}
+	return decoded.Result, true
+}
+
+// FlashcardsOutcome tallies one person's latest marks on a flashcards
+// component. marks maps card ids to "got" or "again" (read them with
+// FlashcardMark from the person's latest mark per card); ids that are not
+// cards of this deck and unknown results are ignored, and cards without a
+// mark count as unseen.
+func FlashcardsOutcome(component Component, marks map[string]string) (FlashcardsTally, error) {
+	if component.Type != "flashcards" || component.Flashcards == nil {
+		return FlashcardsTally{}, fmt.Errorf("component %q is not flashcards", component.ID)
+	}
+	var tally FlashcardsTally
+	for _, card := range component.Flashcards.Cards {
+		switch marks[card.ID] {
+		case FlashcardGot:
+			tally.Got++
+		case FlashcardAgain:
+			tally.Again++
+		default:
+			tally.Unseen++
+		}
+	}
+	return tally, nil
+}
+
+// FlashcardsStateLine summarises one person's flashcard marks for the agent,
+// e.g. `Flashcards "French food words": 3 got, 1 again, 1 unseen`. It
+// returns false for components that are not flashcards.
+func FlashcardsStateLine(component Component, marks map[string]string) (string, bool) {
+	tally, err := FlashcardsOutcome(component, marks)
+	if err != nil {
+		return "", false
+	}
+	name := strings.TrimSpace(component.Title)
+	if name == "" {
+		name = component.ID
+	}
+	return fmt.Sprintf("Flashcards %q: %s", name, tally.text()), true
 }
