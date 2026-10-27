@@ -1083,7 +1083,102 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 			})
 		}
 	}
+	return append(findings, compareUpgradeConfigContracts(previous, target)...)
+}
+
+// compareUpgradeConfigContracts reports operator-config changes that can
+// invalidate stored values or change who receives them. Adding an optional or
+// defaulted field, and changing labels, descriptions or setup text, keep every
+// stored value valid and need no review.
+func compareUpgradeConfigContracts(previous, target *skill.Definition) []SkillReferenceUpgradeFinding {
+	findings := make([]SkillReferenceUpgradeFinding, 0)
+	var beforeScopes, afterScopes []skill.SkillConfigScope
+	var beforeFields, afterFields []skill.SkillConfigField
+	beforeHealth, afterHealth := "", ""
+	if previous.Config != nil {
+		beforeScopes, beforeFields = previous.Config.Scopes, previous.Config.Fields
+		if previous.Config.Health != nil {
+			beforeHealth = previous.Config.Health.Action
+		}
+	}
+	if target.Config != nil {
+		afterScopes, afterFields = target.Config.Scopes, target.Config.Fields
+		if target.Config.Health != nil {
+			afterHealth = target.Config.Health.Action
+		}
+	}
+	changed := func(subject, from, to, message string) {
+		findings = append(findings, SkillReferenceUpgradeFinding{Code: "config_contract_changed", Subject: subject, From: from, To: to, Message: message})
+	}
+	if !reflect.DeepEqual(configScopeStrings(beforeScopes), configScopeStrings(afterScopes)) {
+		changed("config.scopes", strings.Join(configScopeStrings(beforeScopes), ","), strings.Join(configScopeStrings(afterScopes), ","), "Skill config scopes changed")
+	}
+	before := make(map[string]skill.SkillConfigField, len(beforeFields))
+	for _, field := range beforeFields {
+		before[field.Key] = field
+	}
+	after := make(map[string]skill.SkillConfigField, len(afterFields))
+	for _, field := range afterFields {
+		after[field.Key] = field
+	}
+	keys := make([]string, 0, len(before)+len(after))
+	for key := range before {
+		keys = append(keys, key)
+	}
+	for key := range after {
+		if _, ok := before[key]; !ok {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		old, hadOld := before[key]
+		updated, hasNew := after[key]
+		switch {
+		case !hasNew:
+			changed(key, string(old.Type), "", fmt.Sprintf("config field %s was removed", key))
+		case !hadOld:
+			if configFieldMandatory(updated) && updated.Default == nil {
+				changed(key, "", string(updated.Type), fmt.Sprintf("config field %s was added as required without a default", key))
+			}
+		default:
+			if old.Type != updated.Type {
+				changed(key, string(old.Type), string(updated.Type), fmt.Sprintf("config field %s type changes from %s to %s", key, old.Type, updated.Type))
+			}
+			if !reflect.DeepEqual(old.Enum, updated.Enum) {
+				changed(key, strings.Join(old.Enum, ","), strings.Join(updated.Enum, ","), fmt.Sprintf("config field %s enum values changed", key))
+			}
+			oldScopes := configScopeStrings(old.EffectiveScopes(beforeScopes))
+			newScopes := configScopeStrings(updated.EffectiveScopes(afterScopes))
+			if !reflect.DeepEqual(oldScopes, newScopes) {
+				changed(key, strings.Join(oldScopes, ","), strings.Join(newScopes, ","), fmt.Sprintf("config field %s scopes changed", key))
+			}
+			if old.EffectiveAudience() != updated.EffectiveAudience() {
+				changed(key, string(old.EffectiveAudience()), string(updated.EffectiveAudience()), fmt.Sprintf("config field %s audience changes from %s to %s", key, old.EffectiveAudience(), updated.EffectiveAudience()))
+			}
+			if updated.Default == nil && configFieldMandatory(updated) &&
+				(!configFieldMandatory(old) || old.Default != nil || !reflect.DeepEqual(old.RequiredWhen, updated.RequiredWhen) || old.Required != updated.Required) {
+				changed(key, "", "", fmt.Sprintf("config field %s became required without a default", key))
+			}
+		}
+	}
+	if beforeHealth != afterHealth {
+		changed("config.health.action", beforeHealth, afterHealth, "Skill config health action changed")
+	}
 	return findings
+}
+
+func configFieldMandatory(field skill.SkillConfigField) bool {
+	return field.Required || len(field.RequiredWhen) > 0
+}
+
+func configScopeStrings(scopes []skill.SkillConfigScope) []string {
+	values := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		values = append(values, string(scope))
+	}
+	sort.Strings(values)
+	return values
 }
 
 // Only these complete, published builtin descriptors have the audited behavior

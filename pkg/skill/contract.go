@@ -45,6 +45,15 @@ type Action = capability.Action
 type TransportReference = capability.TransportReference
 type TransportArgument = capability.TransportArgument
 type Definition = capability.Definition
+type SkillConfig = capability.SkillConfig
+type SkillConfigScope = capability.SkillConfigScope
+type SkillConfigFieldType = capability.SkillConfigFieldType
+type SkillConfigAudience = capability.SkillConfigAudience
+type SkillConfigField = capability.SkillConfigField
+type SkillConfigHealth = capability.SkillConfigHealth
+type SkillSetupStep = capability.SkillSetupStep
+type SkillSetupLink = capability.SkillSetupLink
+type SkillSetupCopy = capability.SkillSetupCopy
 type ArgumentRule = capability.ArgumentRule
 type BindingArgumentSource = capability.BindingArgumentSource
 type BindingArgumentValue = capability.BindingArgumentValue
@@ -1038,6 +1047,9 @@ func validateDefinition(definition *Definition) error {
 		if _, err := compileSchema(definition.ID+"-"+definition.Version+"-binding-config.json", definition.BindingConfigSchema); err != nil {
 			return fmt.Errorf("skill binding config schema is invalid: %w", err)
 		}
+	}
+	if err := validateSkillConfig(definition); err != nil {
+		return fmt.Errorf("skill config is invalid: %w", err)
 	}
 	if err := validateHostingRequirements(definition.Requirements); err != nil {
 		return fmt.Errorf("skill hosting requirements are invalid: %w", err)
