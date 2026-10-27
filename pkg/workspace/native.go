@@ -40,7 +40,7 @@ func Operations(authority *Authority) []Operation {
 			Operation{Name: OperationEditFile, Description: "Replace exact text in a file: oldText must match the file exactly, including whitespace, and appear once unless replaceAll is set. Read the file first.", InputSchema: editInput()},
 			Operation{Name: OperationDeleteFile, Description: "Delete a file, or a directory and everything in it.", InputSchema: pathOnlyInput()},
 			Operation{Name: OperationMoveFile, Description: "Move or rename a file or directory.", InputSchema: moveInput()},
-			Operation{Name: OperationRunCommand, Description: "Run a shell command in this chat's sandbox: a Linux machine with Python 3 (pandas, matplotlib, openpyxl, python-docx, python-pptx, weasyprint), Node.js and pandoc, with internet access. The chat's files are its working directory; files the command creates or changes are saved to the chat's files, except installed packages and caches (node_modules, .venv, __pycache__, .cache). Use it to convert, compute, chart, or check work.", InputSchema: shellInput()},
+			Operation{Name: OperationRunCommand, Description: ChatSandboxDescription, InputSchema: shellInput()},
 		)
 	}
 	if authority.Workspace.Policy.Filesystem == AccessReadWrite {
@@ -158,3 +158,10 @@ func shellInput() map[string]interface{} {
 		"timeoutSeconds":   map[string]interface{}{"type": "integer", "minimum": 1, "maximum": ChatCommandSeconds, "default": 120},
 	}}
 }
+
+// ChatSandboxDescription tells a model what a chat's sandbox can do, so it
+// reaches for it when a task needs it.
+const ChatSandboxDescription = "Run a bash command in this chat's sandbox, a Debian machine with internet access. The chat's files are the working directory: files a command creates, changes or deletes are saved to the chat's files, except installed packages and caches (node_modules, .venv, __pycache__, .cache). " +
+	"Installed: Python 3 with numpy, pandas, scipy, matplotlib, seaborn, duckdb, openpyxl, xlsxwriter, python-docx, python-pptx, pypdf, pdfplumber, reportlab, weasyprint, beautifulsoup4, lxml, Pillow and requests; Node.js with npm and TypeScript (tsc); pandoc; ffmpeg; ImageMagick; poppler-utils (pdftotext, pdftoppm); qpdf; graphviz (dot); tesseract OCR (English); sqlite3; git, curl and jq. Install anything else with pip install or npm install. " +
+	"Use it to: read scanned PDFs and photos of text (pdftoppm, then tesseract); query large CSV or Excel files (duckdb); make charts (matplotlib or seaborn, saved as images); make Word, PowerPoint or Excel files (python-docx, python-pptx, openpyxl); turn HTML or Markdown into PDF (weasyprint, pandoc); merge, split or extract PDFs (qpdf, pdfplumber); convert or trim audio, video and images (ffmpeg, ImageMagick); draw diagrams (graphviz); type-check an app before save_app (tsc --noEmit). " +
+	"Output is the last 64 KB of stdout and stderr; a non-zero exitStatus means the command failed, so read stderr and fix it."
