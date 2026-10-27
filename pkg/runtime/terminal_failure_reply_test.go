@@ -78,3 +78,9 @@ func TestTerminalFailureTaskReviewMarkerIsTypedAndWinsOverEarlierAction(t *testi
 		}
 	}
 }
+
+func TestTerminalFailureReplyExplainsATextOnlyModel(t *testing.T) {
+	if reply := TerminalFailureReply("model_image_input_unsupported"); !strings.Contains(reply, "only reads text") || !strings.Contains(reply, "settings") {
+		t.Fatalf("reply = %q", reply)
+	}
+}
