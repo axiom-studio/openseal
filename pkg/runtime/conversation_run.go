@@ -1125,6 +1125,7 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 		MessageReferences: messageReferences,
 		IdempotencyKey:    key,
 		answerVisual:      r.teamAnswerVisual(input.Run, triggerID),
+		cardState:         r.conversationCardState,
 	})
 	if measuredUsage != (TurnUsage{}) {
 		participationUsage = measuredUsage

@@ -97,9 +97,14 @@ type ParticipationProposalContext struct {
 	// canonical thread start. It is prompt-only history, never pending input.
 	ContextBackdrop []*ChannelMessage
 	OpenMessages    []*ChannelMessage
-	Participant     ConversationParticipant
-	SemanticRoles   []string
-	Priority        int
+	// CardState summarises what people ticked on cards in the conversation
+	// since this participant's last message, one line per card component,
+	// e.g. "Packing list: 9/14 ticked (unticked: passport, charger)". It is
+	// conversation data, not a request.
+	CardState     []string
+	Participant   ConversationParticipant
+	SemanticRoles []string
+	Priority      int
 }
 
 // ParticipationProposalProvider asks one Agent whether it has new,
@@ -160,7 +165,11 @@ type ConversationCoordinationRequest struct {
 	// answerVisual keeps the visual a participant attaches to its answer and
 	// returns the reference its message carries. The conversation Run adapter
 	// supplies it; without it a member's visual is dropped and its answer stands.
-	answerVisual       func(context.Context, ConversationParticipant, presentation.Visual) (ConversationReference, error)
+	answerVisual func(context.Context, ConversationParticipant, presentation.Visual) (ConversationReference, error)
+	// cardState returns a participant's card state note from the messages it
+	// can see. The conversation Run adapter supplies it; without it proposals
+	// carry no card state.
+	cardState          func(ctx context.Context, conversation *Conversation, viewer ConversationViewer, participantID string, messages []*ChannelMessage) []string
 	Policy             ConversationArbitrationPolicy
 	MaximumConcurrency int
 	IdempotencyKey     string
@@ -475,6 +484,9 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					continue
 				}
 				proposalInput.ContextBackdrop = backdrop
+				if req.cardState != nil {
+					proposalInput.CardState = req.cardState(proposalCtx, conversation, viewer, binding.Participant.ID, visibleRecent)
+				}
 				if c.config.ProposalBudget != (ParticipationProposalBudget{}) {
 					budget := c.config.ProposalBudget
 					proposalInput.Budget = &budget

@@ -144,3 +144,95 @@ func TestAgentTurnSeesCardTicksSinceItsLastMessage(t *testing.T) {
 		t.Fatalf("unchanged cards reported again: %q", state)
 	}
 }
+
+func TestTeamParticipantsSeeCardTicksSinceTheirLastMessage(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "team-card-state"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "family"}, Title: "Trip", IdempotencyKey: "team-card-state-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+		return []ConversationParticipantBinding{
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "planner"}, SemanticRoles: []string{"planner"}},
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "quiet"}, SemanticRoles: []string{"helper"}},
+		}, nil
+	})
+	seen := map[string][][]string{}
+	proposals := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
+		seen[input.Participant.ID] = append(seen[input.Participant.ID], append([]string(nil), input.CardState...))
+		if input.Participant.ID == "quiet" {
+			return ParticipationProposal{}, nil
+		}
+		proposal := ParticipationProposal{
+			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: fmt.Sprintf("Reply %d.", len(seen["planner"])),
+			Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+			Signals:  ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true},
+		}
+		if len(seen["planner"]) == 1 {
+			proposal.Visual = cardStateTestVisual()
+		}
+		return proposal, nil
+	})
+	coordinator, err := NewConversationCoordinator(service, participants, proposals, DefaultConversationCoordinatorConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewConversationRunTurnRunner(store, coordinator, ConversationRunTurnRunnerConfig{AttachmentContent: &answerVisualContent{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := func(text string) {
+		t.Helper()
+		current, err := service.GetConversation(ctx, scope, conversation.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trigger := postConversationRunTestMessage(t, service, current, ConversationParticipantUser, MessageIntentQuestion, text, "team-card-state-"+text)
+		scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if outcome, err := runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run}); err != nil || outcome.NextRunStatus != AgentRunStatusCompleted {
+			t.Fatalf("outcome = %#v, err=%v", outcome, err)
+		}
+	}
+
+	turn("Packing list please")
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("messages = %#v, err=%v", messages, err)
+	}
+	card := messages[1]
+	var artifactID string
+	for _, reference := range card.References {
+		if reference.Kind == ConversationReferenceArtifact {
+			artifactID = reference.ID
+		}
+	}
+	if _, _, err := service.RecordSurfaceInteraction(ctx, RecordSurfaceInteractionRequest{
+		Scope: scope, ConversationID: conversation.ID, SurfaceArtifactID: artifactID, SurfaceID: artifactID, SurfaceVersion: 1,
+		MessageID: card.ID, ComponentID: "k0", ItemKey: "a", Actor: ConversationParticipant{Type: ConversationParticipantUser, ID: "sender-user"},
+		Repeatable: true, Values: json.RawMessage(`{"checked":true}`), IdempotencyKey: "tick",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	turn("Anything missing?")
+	turn("Thanks")
+	want := "Packing list: 1/3 ticked (unticked: Charger, Towel)"
+	planner, quiet := seen["planner"], seen["quiet"]
+	if len(planner) != 3 || len(quiet) != 3 {
+		t.Fatalf("proposals planner=%q quiet=%q", planner, quiet)
+	}
+	if len(planner[0]) != 0 || strings.Join(planner[1], "\n") != want || len(planner[2]) != 0 {
+		t.Fatalf("planner card state = %q", planner)
+	}
+	// The quiet member never spoke, so the tick is news to it on every round.
+	if strings.Join(quiet[1], "\n") != want || strings.Join(quiet[2], "\n") != want {
+		t.Fatalf("quiet card state = %q", quiet)
+	}
+}
