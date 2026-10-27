@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/axiom-studio/openseal/pkg/fileinput"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -33,6 +34,10 @@ type ToolInvocation struct {
 	ActionCallID          string
 	RunID                 string
 	Arguments             map[string]interface{}
+	// FileArguments name the Arguments that are file inputs: each holds a
+	// file's path in the Run's chat, which the host replaces with a
+	// fileinput.File before calling the Skill.
+	FileArguments []string
 	// BindingConfig is trusted, non-secret configuration selected by the host
 	// when the Skill was bound. It is never writable by the model.
 	BindingConfig        map[string]interface{}
@@ -120,7 +125,7 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		ExecutionDeploymentID: executionDeploymentID,
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
 		SkillSourceIdentity: sourceIdentity, SkillDefinitionDigest: definitionDigest,
-		Action: input.Bound.Action.Name, Arguments: arguments, BindingConfig: cloneMap(input.Bound.Binding.Config), Credentials: input.Credentials,
+		Action: input.Bound.Action.Name, Arguments: arguments, FileArguments: fileinput.Properties(input.Bound.Action.InputSchema), BindingConfig: cloneMap(input.Bound.Binding.Config), Credentials: input.Credentials,
 		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: cloneCredentialReferences(input.CredentialReferences),
 	}
 	if input.Call != nil {

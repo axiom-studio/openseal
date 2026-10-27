@@ -131,7 +131,8 @@ func checkpointToolFeedbackFailure(checkpoint map[string]interface{}, call *Acti
 }
 
 // platformActionFailure is a typed failure no model correction can fix now:
-// a source rate limit or the platform's browser connection. The attempt stops
+// a source rate limit, the platform's browser connection or a file too large
+// to hand to an action. The attempt stops
 // with its dedicated reply instead.
 func platformActionFailure(checkpoint map[string]interface{}, call *ActionCall) bool {
 	last, _ := checkpoint["lastAction"].(map[string]interface{})
@@ -140,7 +141,7 @@ func platformActionFailure(checkpoint map[string]interface{}, call *ActionCall) 
 		return false
 	}
 	switch failure.Code() {
-	case "browser_proxy_authentication_failed", "browser_proxy_unavailable":
+	case "browser_proxy_authentication_failed", "browser_proxy_unavailable", "file_too_large":
 		return true
 	}
 	return failure.HasRateLimitedSource()
@@ -256,7 +257,6 @@ func projectToolFeedbackCorrection(request *HostedTurnRequest) {
 	}
 	request.Workspace = nil
 	request.WorkspaceOperations = nil
-	request.WorkspaceCredentials = nil
 	request.EligibleAgents = nil
 	request.RunbookOperations = nil
 	if request.SourceAccessChallenge != nil {

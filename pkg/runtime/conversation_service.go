@@ -184,6 +184,12 @@ type ConversationStore interface {
 	PutConversationPresence(ctx context.Context, record ConversationPresenceRecord) (*ConversationPresence, error)
 	ReleaseConversationPresence(ctx context.Context, request ReleaseConversationPresenceRequest) error
 	ListConversationPresence(ctx context.Context, scope Scope, conversationID string, activeAt time.Time) ([]*ConversationPresence, error)
+	// CreateSurfaceInteraction assigns the interaction's Sequence and stores
+	// it. It returns the stored interaction and whether it replayed one with
+	// the same idempotency key; see SurfaceInteraction for uniqueness.
+	CreateSurfaceInteraction(ctx context.Context, interaction *SurfaceInteraction) (*SurfaceInteraction, bool, error)
+	ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error)
+	ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error)
 }
 
 type ConversationService struct {

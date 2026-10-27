@@ -162,3 +162,59 @@ func TestCompatibleAdapterFeatureAdditionPreservesAuthority(t *testing.T) {
 		t.Fatal("provider authority change accepted")
 	}
 }
+
+func TestSkillReferenceUpgradeDropsActionsRemovedFromTarget(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog := skill.NewCatalogWithStore(store)
+	action := func(name string) skill.Action {
+		return skill.Action{
+			Name: name, Description: name, InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"url": map[string]interface{}{"type": "string"}}},
+			Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported,
+		}
+	}
+	for version, actions := range map[string][]string{"1.0.0": {"open", "capture"}, "2.0.0": {"open"}} {
+		definition := &skill.Definition{
+			ID: "browser", Version: version, Name: "Browser",
+			Requirements: skill.Requirements{AlwaysAvailable: true}, Transport: skill.TransportReference{Kind: "tool", Endpoint: "browser"},
+			Actions: map[string]skill.Action{},
+		}
+		for _, name := range actions {
+			definition.Actions[name] = action(name)
+		}
+		if err := catalog.Register(ctx, definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := skill.ScopeReference{Kind: "tenant", ID: "1"}
+	if err := store.SaveSkillBinding(ctx, &skill.Binding{
+		ID: "browser", Scope: scope, DeploymentID: "researcher", SkillID: "browser", SkillVersion: "1.0.0",
+		AllowedActions: []string{"open", "capture"}, MaximumRisk: skill.RiskLevelRead, Revision: 1,
+		ArgumentRestrictions: map[string]map[string]skill.ArgumentRule{"capture": {"url": {Enum: []interface{}{"https://example.com"}}}},
+	}, 0); err != nil {
+		t.Fatal(err)
+	}
+	service := NewSkillReferenceUpgradeService(store, catalog)
+	plan, err := service.Plan(ctx, PlanSkillReferenceUpgradeRequest{
+		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "researcher", BindingID: "browser", ToVersion: "2.0.0",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.ApprovalRequired || len(plan.Findings) != 0 || len(plan.RemovedActions) != 1 || plan.RemovedActions[0] != "capture" {
+		t.Fatalf("plan approval=%v findings=%#v removed=%#v", plan.ApprovalRequired, plan.Findings, plan.RemovedActions)
+	}
+	if _, err = service.Apply(ctx, ApplySkillReferenceUpgradeRequest{
+		Plan: plan, Actor: ActivityActor{Type: "user", ID: "operator"}, Reason: "Follow the newest Browser",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := catalog.ListBindings(ctx, scope, "researcher")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 1 || bindings[0].SkillVersion != "2.0.0" || len(bindings[0].AllowedActions) != 1 ||
+		bindings[0].AllowedActions[0] != "open" || len(bindings[0].ArgumentRestrictions) != 0 {
+		t.Fatalf("upgraded binding = %#v", bindings)
+	}
+}

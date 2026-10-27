@@ -12,6 +12,8 @@ import (
 func TerminalFailureReply(code string) string {
 	reason := "this attempt encountered an execution failure"
 	switch terminalFailureCode(code) {
+	case "model_image_input_unsupported":
+		return "I couldn't finish this because my model only reads text, and this request included an image from the chat. Choose a model that can read images in my settings, then ask me again."
 	case "agent_behavior_fixed":
 		return "I can't change my own instructions or behavior. This Agent's setup is fixed. I can still help with your request as I am; to use custom instructions, create your own Agent with them."
 	case "cap_lookup_not_available":
@@ -103,7 +105,7 @@ func terminalFailureCode(code string) string {
 		return "budget_exhausted"
 	case "workspace_operation_failed", "workspace_host_unavailable":
 		return "workspace_operation_failed"
-	case "action_admission_failed", "action_failed", "dependency_failed", "task_completion_rejected", "agent_behavior_fixed":
+	case "action_admission_failed", "action_failed", "dependency_failed", "task_completion_rejected", "agent_behavior_fixed", "model_image_input_unsupported":
 		return strings.TrimSpace(code)
 	default:
 		return "execution_failed"
@@ -191,6 +193,8 @@ func terminalRunFailureReply(run *AgentRun) string {
 				return "I couldn't finish this request because the platform's browser connection was rejected. I stopped this attempt. Try again later."
 			case "browser_proxy_unavailable":
 				return "I couldn't finish this request because the platform's browser connection was unavailable. I stopped this attempt. Try again later."
+			case "file_too_large":
+				return fileTooLargeReply(failure.Details())
 			}
 		}
 	}
@@ -210,4 +214,14 @@ func terminalFailureCounterIsOne(value interface{}) bool {
 	default:
 		return false
 	}
+}
+
+// fileTooLargeReply says how large the file was and how large a file an
+// action can be given, from the failure's bounded sizes.
+func fileTooLargeReply(details map[string]string) string {
+	size, limit := details["fileMegabytes"], details["limitMegabytes"]
+	if size == "" || limit == "" {
+		return "I couldn't finish this because the file is too large to hand to another app. Make it smaller, then ask me again."
+	}
+	return "I couldn't finish this because the file is " + size + " MB, and I can hand files of up to " + limit + " MB to another app. Make it smaller, for example by compressing it or splitting it into parts, then ask me again."
 }

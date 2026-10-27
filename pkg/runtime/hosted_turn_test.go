@@ -1357,7 +1357,7 @@ func TestHostedTurnRunnerRejectsUnauthorizedSkillEvidence(t *testing.T) {
 
 func TestHostedTurnRunnerRejectsInvalidSkillSelections(t *testing.T) {
 	for name, selections := range map[string][]HostedSkillSelection{
-		"malformed": {{SkillRef: "skill:summarize@1.0.0", Disposition: "maybe", Summary: "Unclear"}},
+		"malformed":     {{SkillRef: "skill:summarize@1.0.0", Disposition: "maybe", Summary: "Unclear"}},
 		"empty summary": {{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillNotApplied}},
 		"duplicate": {
 			{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Used summarization"},
@@ -1399,7 +1399,7 @@ func TestHostedTurnRunnerFillsOmittedSkillDispositions(t *testing.T) {
 	}
 	for name, selections := range map[string][]HostedSkillSelection{
 		"restarted turn without dispositions": nil,
-		"partial dispositions": {{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Summarized the page"}},
+		"partial dispositions":                {{SkillRef: "skill:summarize@1.0.0", Disposition: HostedSkillApplied, Summary: "Summarized the page"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			host := &recordingTurnHost{response: &HostedTurnResponse{

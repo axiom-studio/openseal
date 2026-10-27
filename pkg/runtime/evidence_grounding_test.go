@@ -75,7 +75,7 @@ func TestEvidenceGroundingRejectsSwappedCitationThenAcceptsRepair(t *testing.T) 
 	_, runContext := groundedSnapshot(t)
 	host := &groundingTurnHost{responses: []*HostedTurnResponse{
 		{OutputSummary: "Drafted report", NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"report": "AgentTransfer loses state [observation-firewall]."}, EvidenceClaims: []EvidenceClaim{{ID: "claim-transfer", Statement: "AgentTransfer loses state.", EvidenceRefs: []string{"observation-firewall"}}}},
-		{OutputSummary: "Repaired report", NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"report": "AgentTransfer loses state [observation-transfer]."}, EvidenceClaims: []EvidenceClaim{{ID: "claim-transfer", Statement: "AgentTransfer loses state.", EvidenceRefs: []string{"observation-transfer"}}}},
+		{OutputSummary: "Repaired report", Visual: testAnswerVisual(), NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"report": "AgentTransfer loses state [observation-transfer]."}, EvidenceClaims: []EvidenceClaim{{ID: "claim-transfer", Statement: "AgentTransfer loses state.", EvidenceRefs: []string{"observation-transfer"}}}},
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "analyst", DefinitionID: "analyst", DefinitionVersion: "1"})
 	if err != nil {
@@ -102,13 +102,16 @@ func TestEvidenceGroundingRejectsSwappedCitationThenAcceptsRepair(t *testing.T) 
 	}
 	run.Checkpoint = rejected.ContinuationCheckpoint
 	repaired, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-three"}})
-	if err != nil || repaired.NextRunStatus != AgentRunStatusRunning || repaired.RunOutput != nil {
+	if err != nil || repaired.NextRunStatus != AgentRunStatusRunning || repaired.RunOutput != nil || repaired.Visual != nil {
 		t.Fatalf("repair=%#v err=%v", repaired, err)
 	}
 	run.Checkpoint = repaired.ContinuationCheckpoint
 	accepted, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-four"}})
 	if err != nil || accepted.NextRunStatus != AgentRunStatusCompleted || accepted.EvidenceGrounding == nil || !accepted.EvidenceGrounding.Accepted {
 		t.Fatalf("accepted=%#v err=%v", accepted, err)
+	}
+	if accepted.Visual == nil || accepted.Visual.Title != testAnswerVisual().Title {
+		t.Fatalf("draft visual was not carried through review: %#v", accepted.Visual)
 	}
 	if accepted.RunOutput["report"] != "AgentTransfer loses state [observation-transfer]." || accepted.RunOutput["evidenceClaims"] == nil || accepted.RunOutput["evidenceGrounding"] == nil {
 		t.Fatalf("published output=%#v", accepted.RunOutput)

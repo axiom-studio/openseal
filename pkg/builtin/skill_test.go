@@ -5,38 +5,28 @@ import "testing"
 func TestBuiltinAttachmentReadIsReferenceOnly(t *testing.T) {
 	d := SkillDefinition()
 	a := d.Actions[ReadAttachment]
-	if d.ID != SkillID || len(d.Actions) != 13 || string(a.Risk) != "read" || string(a.SideEffect) != "read" {
+	if d.ID != SkillID || string(a.Risk) != "read" || string(a.SideEffect) != "read" {
 		t.Fatal("built-in attachment action must grant read-only access")
 	}
 	props := a.InputSchema["properties"].(map[string]interface{})
 	if len(props) != 2 || props["artifactId"] == nil || props["version"] == nil || a.InputSchema["additionalProperties"] != false {
 		t.Fatal("attachment input must contain only an exact artifact version, never paths or URLs")
 	}
-	if !d.Requirements.AlwaysAvailable || len(d.Prompt.AllowedTools) != len(d.Actions) || d.Prompt.AllowedTools[0] != ReadAttachment {
-		t.Fatal("default attachment capability prompt missing")
+	if !d.Requirements.AlwaysAvailable || len(d.Prompt.AllowedTools) != len(d.Actions) {
+		t.Fatal("every built-in tool must be in the prompt")
 	}
 }
 
-func TestBuiltinCreativeActionsStayBounded(t *testing.T) {
+func TestBuiltinMakingActionsStayBounded(t *testing.T) {
 	d := SkillDefinition()
-	for _, name := range []string{GenerateImage, CreatePDF, CreateSlides, CreateApp, UpdateApp, PublishApp, SaveAppData} {
+	for _, name := range []string{GenerateImage, Present, CreatePDF, CreateSheet, SaveApp, PublishApp, SaveAppData} {
 		a, ok := d.Actions[name]
 		if !ok || a.InputSchema["additionalProperties"] != false || a.Retry.MaxAttempts != 1 || string(a.Idempotency) != "required" {
 			t.Fatalf("%s must have a closed input and no automatic retry", name)
 		}
 	}
-	if read := d.Actions[ReadApp]; read.InputSchema["additionalProperties"] != false || string(read.Risk) != "read" || string(read.SideEffect) != "read" || read.Retry.MaxAttempts != 1 {
-		t.Fatal("read_app must be a closed, read-only action")
-	}
 	if string(d.Actions[PublishApp].SideEffect) != "external" || string(d.Actions[GenerateImage].SideEffect) != "write" {
 		t.Fatal("publication and image generation must retain distinct side effects")
-	}
-	pdf := d.Actions[CreatePDF]
-	properties := pdf.InputSchema["properties"].(map[string]interface{})
-	for _, name := range []string{"pages", "blocks", "expectedPages", "revisionMode", "expectedLatestVersion"} {
-		if properties[name] == nil {
-			t.Fatalf("PDF input missing %s", name)
-		}
 	}
 }
 

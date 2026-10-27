@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	inferschema "github.com/invopop/jsonschema"
@@ -34,13 +36,16 @@ type HostedTurnForm struct {
 	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
 	ProposedTask               *TurnTaskProposal             `json:"proposedTask,omitempty"`
 	OutputSummary              string                        `json:"outputSummary"`
-	ContinuationCheckpoint     map[string]interface{}        `json:"continuationCheckpoint"`
-	NextRunStatus              AgentRunStatus                `json:"nextRunStatus"`
-	WakeCondition              *WakeCondition                `json:"wakeCondition,omitempty"`
-	RunOutput                  map[string]interface{}        `json:"runOutput"`
-	RunError                   string                        `json:"runError"`
-	CompletionEvidenceRefs     []string                      `json:"completionEvidenceRefs"`
-	EvidenceClaims             []EvidenceClaim               `json:"evidenceClaims"`
+	// Visual is an optional visual shown with the final answer. Its schema is
+	// supplied by presentation, not reflected.
+	Visual                 *presentation.Visual   `json:"visual,omitempty" jsonschema:"-"`
+	ContinuationCheckpoint map[string]interface{} `json:"continuationCheckpoint"`
+	NextRunStatus          AgentRunStatus         `json:"nextRunStatus"`
+	WakeCondition          *WakeCondition         `json:"wakeCondition,omitempty"`
+	RunOutput              map[string]interface{} `json:"runOutput"`
+	RunError               string                 `json:"runError"`
+	CompletionEvidenceRefs []string               `json:"completionEvidenceRefs"`
+	EvidenceClaims         []EvidenceClaim        `json:"evidenceClaims"`
 }
 
 type HostedWorkspaceOperationForm struct {
@@ -77,11 +82,54 @@ type HostedTurnFormAuthority struct {
 // response. Kernel control metadata already present in the proposal envelope
 // may be projected into an action contract that declares the same field; domain
 // arguments remain model-authored and authority is never widened.
-func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction) (*HostedTurnResponse, error) {
-	return CompileHostedTurnFormWithWorkspace(form, actions, nil)
+func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction, options ...HostedTurnFormOption) (*HostedTurnResponse, error) {
+	return CompileHostedTurnFormWithWorkspace(form, actions, nil, options...)
 }
 
-func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capability.ModelAction, operations []workspace.Operation) (*HostedTurnResponse, error) {
+// HostedTurnFormOption adjusts hosted Turn form compilation.
+type HostedTurnFormOption func(*hostedTurnFormOptions)
+
+type hostedTurnFormOptions struct {
+	visualContext context.Context
+	visualChecks  *presentation.ValidateOptions
+}
+
+// WithVisualHostChecks checks an answer visual's bindings and links with the
+// host's hooks during compilation. Without it compilation checks the visual's
+// structure only; HostedTurnRunner rechecks bindings and links with its own
+// hooks before the answer is stored.
+func WithVisualHostChecks(ctx context.Context, checks presentation.ValidateOptions) HostedTurnFormOption {
+	return func(options *hostedTurnFormOptions) {
+		options.visualContext = ctx
+		options.visualChecks = &checks
+	}
+}
+
+// validateHostedTurnVisual admits a visual only on a finished answer. Its
+// messages are written for the model that produced the form.
+func validateHostedTurnVisual(ctx context.Context, visual *presentation.Visual, status AgentRunStatus, proposes bool, checks presentation.ValidateOptions) error {
+	if visual == nil {
+		return nil
+	}
+	if proposes {
+		return errors.New("a visual can only go with a finished answer; leave visual out when you propose an action or another next step")
+	}
+	if status != AgentRunStatusCompleted {
+		return errors.New("a visual can only go with a finished answer; set nextRunStatus to completed or leave visual out")
+	}
+	if _, err := presentation.Validate(ctx, visual.Surface(presentation.StateReady), checks); err != nil {
+		return fmt.Errorf("visual: %w", err)
+	}
+	return nil
+}
+
+func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capability.ModelAction, operations []workspace.Operation, options ...HostedTurnFormOption) (*HostedTurnResponse, error) {
+	var compile hostedTurnFormOptions
+	for _, option := range options {
+		if option != nil {
+			option(&compile)
+		}
+	}
 	if form.SchemaVersion != HostedTurnFormSchemaVersion {
 		return nil, fmt.Errorf("hosted turn form schemaVersion must be %q", HostedTurnFormSchemaVersion)
 	}
@@ -114,6 +162,18 @@ func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capabilit
 	if err := ValidateHostedTurnLifecycle(form.NextRunStatus, form.WakeCondition); err != nil {
 		return nil, err
 	}
+	visualContext, visualChecks := context.Background(), presentation.ValidateOptions{SkipHostChecks: true}
+	if compile.visualChecks != nil {
+		visualChecks = *compile.visualChecks
+		if compile.visualContext != nil {
+			visualContext = compile.visualContext
+		}
+	}
+	proposes := form.ProposedAction != nil || form.ProposedWorkspaceOperation != nil || form.ProposedFork != nil ||
+		form.ProposedDelegation != nil || form.ProposedRunbook != nil || form.ProposedTask != nil
+	if err := validateHostedTurnVisual(visualContext, form.Visual, form.NextRunStatus, proposes, visualChecks); err != nil {
+		return nil, err
+	}
 	checkpoint, err := cloneHostedTurnObject(form.ContinuationCheckpoint)
 	if err != nil {
 		return nil, err
@@ -121,7 +181,7 @@ func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capabilit
 	response := &HostedTurnResponse{
 		SkillSelections: form.SkillSelections, Decisions: decisions,
 		ProposedFork: form.ProposedFork, ProposedDelegation: form.ProposedDelegation, ProposedRunbook: form.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(form.ProposedTask),
-		OutputSummary: form.OutputSummary, ContinuationCheckpoint: checkpoint, NextRunStatus: form.NextRunStatus,
+		OutputSummary: form.OutputSummary, Visual: cloneVisual(form.Visual), ContinuationCheckpoint: checkpoint, NextRunStatus: form.NextRunStatus,
 		WakeCondition: form.WakeCondition, RunOutput: form.RunOutput, RunError: form.RunError,
 		CompletionEvidenceRefs: form.CompletionEvidenceRefs, EvidenceClaims: form.EvidenceClaims,
 	}
@@ -209,6 +269,25 @@ func projectHostedTurnActionControlArguments(arguments, inputSchema map[string]i
 	arguments["idempotencyKey"] = strings.TrimSpace(proposal.IdempotencyKey)
 }
 
+// cloneVisual deep-copies a visual so forms, responses and outcomes never
+// share component slices.
+func cloneVisual(visual *presentation.Visual) *presentation.Visual {
+	if visual == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(visual)
+	if err != nil {
+		copy := *visual
+		return &copy
+	}
+	var cloned presentation.Visual
+	if json.Unmarshal(encoded, &cloned) != nil {
+		copy := *visual
+		return &copy
+	}
+	return &cloned
+}
+
 func cloneHostedTurnObjectValue(value map[string]interface{}) map[string]interface{} {
 	if value == nil {
 		return nil
@@ -224,7 +303,7 @@ func HostedTurnFormFromResponse(response HostedTurnResponse) (HostedTurnForm, er
 	form := HostedTurnForm{
 		SchemaVersion: HostedTurnFormSchemaVersion, SkillSelections: response.SkillSelections, Decisions: response.Decisions,
 		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(response.ProposedTask),
-		OutputSummary: response.OutputSummary, ContinuationCheckpoint: response.ContinuationCheckpoint,
+		OutputSummary: response.OutputSummary, Visual: cloneVisual(response.Visual), ContinuationCheckpoint: response.ContinuationCheckpoint,
 		NextRunStatus: response.NextRunStatus, WakeCondition: response.WakeCondition, RunOutput: response.RunOutput,
 		RunError: response.RunError, CompletionEvidenceRefs: response.CompletionEvidenceRefs, EvidenceClaims: response.EvidenceClaims,
 	}
@@ -287,6 +366,9 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 		},
 		"required": []string{"taskKey", "goal", "acknowledgment"},
 	}
+	visual := presentation.VisualJSONSchema()
+	visual["description"] = presentation.VisualFieldDescription()
+	properties["visual"] = visual
 	properties["schemaVersion"] = map[string]interface{}{"type": "string", "const": HostedTurnFormSchemaVersion}
 	properties["nextRunStatus"] = map[string]interface{}{
 		"type": "string",

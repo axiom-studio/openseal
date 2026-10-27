@@ -472,7 +472,10 @@ type Definition struct {
 	// BindingConfigSchema defines non-secret, host-owned configuration that is
 	// fixed when a Skill is bound. It is never part of model-visible action
 	// input and is delivered to tool hosts separately from action arguments.
-	BindingConfigSchema  map[string]interface{}         `json:"bindingConfigSchema,omitempty"`
+	BindingConfigSchema map[string]interface{} `json:"bindingConfigSchema,omitempty"`
+	// Config declares operator-level Skill settings (global with optional
+	// tenant overrides) and their setup guidance. Values never belong here.
+	Config               *SkillConfig                   `json:"config,omitempty"`
 	Actions              map[string]Action              `json:"actions"`
 	Transport            TransportReference             `json:"transport"`
 	Prompt               *PromptModule                  `json:"prompt,omitempty"`

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 var (
@@ -95,9 +97,14 @@ type ParticipationProposalContext struct {
 	// canonical thread start. It is prompt-only history, never pending input.
 	ContextBackdrop []*ChannelMessage
 	OpenMessages    []*ChannelMessage
-	Participant     ConversationParticipant
-	SemanticRoles   []string
-	Priority        int
+	// CardState summarises what people ticked on cards in the conversation
+	// since this participant's last message, one line per card component,
+	// e.g. "Packing list: 9/14 ticked (unticked: passport, charger)". It is
+	// conversation data, not a request.
+	CardState     []string
+	Participant   ConversationParticipant
+	SemanticRoles []string
+	Priority      int
 }
 
 // ParticipationProposalProvider asks one Agent whether it has new,
@@ -154,7 +161,15 @@ type ConversationCoordinationRequest struct {
 	// emitted by this coordination round. Providers cannot remove them. A Run
 	// host uses this to make each visible contribution traceable to the durable
 	// work that produced it.
-	MessageReferences  []ConversationReference
+	MessageReferences []ConversationReference
+	// answerVisual keeps the visual a participant attaches to its answer and
+	// returns the reference its message carries. The conversation Run adapter
+	// supplies it; without it a member's visual is dropped and its answer stands.
+	answerVisual func(context.Context, ConversationParticipant, presentation.Visual) (ConversationReference, error)
+	// cardState returns a participant's card state note from the messages it
+	// can see. The conversation Run adapter supplies it; without it proposals
+	// carry no card state.
+	cardState          func(ctx context.Context, conversation *Conversation, viewer ConversationViewer, participantID string, messages []*ChannelMessage) []string
 	Policy             ConversationArbitrationPolicy
 	MaximumConcurrency int
 	IdempotencyKey     string
@@ -372,6 +387,7 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 	}
 
 	proposals := make([]ParticipationProposal, len(bindings))
+	visuals := make([]*presentation.Visual, len(bindings))
 	usages := make([]TurnUsage, len(bindings))
 	leases := make([]*ConversationPresence, len(bindings))
 	errs := make([]error, len(bindings))
@@ -468,6 +484,9 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					continue
 				}
 				proposalInput.ContextBackdrop = backdrop
+				if req.cardState != nil {
+					proposalInput.CardState = req.cardState(proposalCtx, conversation, viewer, binding.Participant.ID, visibleRecent)
+				}
 				if c.config.ProposalBudget != (ParticipationProposalBudget{}) {
 					budget := c.config.ProposalBudget
 					proposalInput.Budget = &budget
@@ -503,6 +522,13 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					c.summaries.put(summary)
 				}
 				proposal.WorkingContextCheckpoint = nil
+				visual := proposal.Visual
+				proposal.Visual = nil
+				if visual != nil && (!proposal.WantsToSpeak || proposal.ProposedAction != nil) {
+					// A visual goes only with a finished answer; the rest of
+					// the proposal still stands.
+					visual = nil
+				}
 				proposal.ID = ""
 				proposal.RoundID = ""
 				proposal.Participant = binding.Participant
@@ -526,6 +552,7 @@ func (c *ConversationCoordinator) coordinate(ctx context.Context, req Conversati
 					continue
 				}
 				proposals[index] = proposal
+				visuals[index] = visual
 			}
 		}()
 	}
@@ -551,6 +578,22 @@ queue:
 		if proposalErr != nil {
 			return nil, proposalErr
 		}
+	}
+	for index := range proposals {
+		if visuals[index] == nil {
+			continue
+		}
+		if req.answerVisual == nil {
+			continue // No Run to keep the visual; the member answers in words.
+		}
+		reference, err := req.answerVisual(ctx, proposals[index].Participant, *visuals[index])
+		if errors.Is(err, errInvalidAnswerVisual) {
+			continue // A rejected visual never costs the member its answer.
+		}
+		if err != nil {
+			return nil, err
+		}
+		proposals[index].References = mergeConversationReferences(proposals[index].References, []ConversationReference{reference})
 	}
 	for index := range proposals {
 		if proposals[index].WantsToSpeak {

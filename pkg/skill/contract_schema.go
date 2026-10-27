@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/axiom-studio/openseal/pkg/fileinput"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -16,7 +17,7 @@ type compiledActionSchemas struct {
 }
 
 func compileActionSchemas(skillID, version string, action Action) (*compiledActionSchemas, error) {
-	input, err := compileSchema(skillID+"-"+version+"-"+action.Name+"-input.json", action.InputSchema)
+	input, err := compileSchema(skillID+"-"+version+"-"+action.Name+"-input.json", fileinput.Schema(action.InputSchema))
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +133,7 @@ func modelVisibleInputSchema(schema map[string]interface{}) map[string]interface
 }
 
 func modelVisibleInputSchemaForBinding(schema map[string]interface{}, bindings map[string]BindingArgumentValue) map[string]interface{} {
-	projected, _ := projectModelSchemaValue(cloneMap(schema)).(map[string]interface{})
+	projected, _ := projectModelSchemaValue(cloneMap(fileinput.Schema(schema))).(map[string]interface{})
 	if len(bindings) == 0 || projected == nil {
 		return projected
 	}

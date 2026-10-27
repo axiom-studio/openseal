@@ -3,40 +3,17 @@ package creation
 import (
 	"archive/zip"
 	"bytes"
-	"encoding/base64"
 	"encoding/xml"
 	"io"
 	"strings"
 	"testing"
 )
 
-func TestHostRenderTypedWorkbookAndCompletePage(t *testing.T) {
-	for _, kind := range []string{Page, Workbook} {
-		config := map[string]interface{}{"artifactId": "brief", "expectedLatestVersion": 0, "title": "Brief", "requirementName": "brief"}
-		if kind == Page {
-			config["filename"] = "brief.html"
-			config["html"] = "<!doctype html><html><body>Résumé &amp; notes</body></html>"
-		} else {
-			config["filename"] = "brief.xlsx"
-			config["sheets"] = []interface{}{map[string]interface{}{"name": "Budget", "header": true, "rows": []interface{}{[]interface{}{"Résumé", "Amount"}, []interface{}{"=1+1", 12.5, true, nil}}}}
-		}
-		output, err := Render(t.Context(), kind, config)
+func TestWorkbooksHoldLiteralTypedValues(t *testing.T) {
+	{
+		data, err := RenderWorkbook(t.Context(), []Sheet{{Name: "Budget", Header: true, Rows: [][]interface{}{{"Résumé", "Amount"}, {"=1+1", 12.5, true, nil}}}})
 		if err != nil {
 			t.Fatal(err)
-		}
-		data, err := base64.StdEncoding.DecodeString(output["_transientArtifactBase64"].(string))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if kind == Page {
-			if string(data) != config["html"] {
-				t.Fatal("page source changed")
-			}
-			config["html"] = "fragment"
-			if _, err := Render(t.Context(), kind, config); err == nil {
-				t.Fatal("fragment accepted")
-			}
-			continue
 		}
 		z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 		if err != nil {

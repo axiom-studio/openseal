@@ -1,3 +1,6 @@
+// Package workspace defines the files a hosted Agent turn works on: its chat's
+// own files, which every Agent in the chat shares and the host stores with the
+// chat (see pkg/chatfs), and the native tools that read and change them.
 package workspace
 
 import (
@@ -5,43 +8,25 @@ import (
 	"strings"
 )
 
-// Access is the framework-owned access level granted to one hosted Agent turn.
-// It is not a Skill permission: the host derives it from the Agent deployment
-// and enforces it when scheduling work against the Workspace.
-type Access string
-
-const (
-	AccessReadOnly  Access = "read_only"
-	AccessReadWrite Access = "read_write"
-)
-
-// Authority is an immutable, credential-free grant from the OpenSeal kernel to
-// a trusted Agent host. Storage handles, mount paths, cluster identities, and
-// credentials remain host-owned and are never part of this portable contract.
+// Authority grants one hosted turn full access to its chat's files, read
+// access to the other chats of the same Agent, and commands in the chat's
+// sandbox, which reaches the internet but not the host's network. It is
+// credential-free: the host proves the chat from the persisted Run.
 type Authority struct {
-	Workspace Spec `json:"workspace"`
+	ConversationID string `json:"conversationId"`
+}
+
+// ChatCommandSeconds bounds one command in a chat's sandbox.
+const ChatCommandSeconds = 600
+
+// ChatAuthority grants a turn its chat's files.
+func ChatAuthority(conversationID string) *Authority {
+	return &Authority{ConversationID: strings.TrimSpace(conversationID)}
 }
 
 func (a Authority) Validate() error {
-	if err := a.Workspace.Validate(); err != nil {
-		return err
+	if strings.TrimSpace(a.ConversationID) == "" || len(a.ConversationID) > 256 {
+		return errors.New("chat Workspace authority is invalid")
 	}
 	return nil
-}
-
-// Select returns the deployment's exact default Workspace. Callers must not
-// silently select another Workspace because the default identity is durable
-// Agent state and determines the host-side storage authority.
-func Select(defaultID string, workspaces []Spec) (*Spec, error) {
-	defaultID = strings.TrimSpace(defaultID)
-	if defaultID == "" {
-		return nil, nil
-	}
-	for index := range workspaces {
-		if workspaces[index].ID == defaultID {
-			selected := workspaces[index]
-			return &selected, nil
-		}
-	}
-	return nil, errors.New("default workspace does not exist")
 }

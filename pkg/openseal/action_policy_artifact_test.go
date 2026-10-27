@@ -20,14 +20,13 @@ func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
 		want       ActionDisposition
 	}{
 		{"generated image", builtin.SkillDefinition(), builtin.GenerateImage, ActionDispositionAllow},
-		{"private app", builtin.SkillDefinition(), builtin.CreateApp, ActionDispositionAllow},
-		{"app update", builtin.SkillDefinition(), builtin.UpdateApp, ActionDispositionAllow},
-		{"app read", builtin.SkillDefinition(), builtin.ReadApp, ActionDispositionAllow},
+		{"private app", builtin.SkillDefinition(), builtin.SaveApp, ActionDispositionAllow},
+		{"present files", builtin.SkillDefinition(), builtin.Present, ActionDispositionAllow},
+		{"sheet", builtin.SkillDefinition(), builtin.CreateSheet, ActionDispositionAllow},
 		{"app data", builtin.SkillDefinition(), builtin.SaveAppData, ActionDispositionAllow},
-		{"chart", presentation.SkillDefinition(), presentation.PlotChart, ActionDispositionAllow},
-		{"conversation surface", presentation.SkillDefinition(), presentation.Publish, ActionDispositionAllow},
+		{"update visual", presentation.SkillDefinition(), presentation.UpdateVisual, ActionDispositionAllow},
 		{"public app", builtin.SkillDefinition(), builtin.PublishApp, ActionDispositionRequireApproval},
-		{"PDF", builtin.SkillDefinition(), builtin.CreatePDF, ActionDispositionRequireApproval},
+		{"PDF", builtin.SkillDefinition(), builtin.CreatePDF, ActionDispositionAllow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			decision, policyErr := engine.evaluateAgentActionAuthority(t.Context(), ActionPolicyInput{

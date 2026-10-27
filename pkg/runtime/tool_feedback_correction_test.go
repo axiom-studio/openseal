@@ -12,7 +12,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skillerror"
-	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 func feedbackReadCatalog(t *testing.T) (*skill.Catalog, Scope) {
@@ -260,8 +259,7 @@ func feedbackAssertKernelFailureReply(t *testing.T, run *AgentRun, code string) 
 		return nil, errors.New("unexpected model request")
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "reader-agent", DefinitionID: "reader", DefinitionVersion: "1",
-		Actions: []capability.ModelAction{{Name: "reader.list"}}, Workspace: &workspace.Authority{Workspace: workspace.DefaultSpec()},
-		WorkspaceCredentials: map[string]capability.CredentialReference{"token": {Kind: "vault", ID: "workspace-secret"}}})
+		Actions: []capability.ModelAction{{Name: "reader.list"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

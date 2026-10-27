@@ -89,6 +89,7 @@ type MemoryStore struct {
 	participationKeys                   map[string]string
 	conversationCursors                 map[string]*ConversationCursor
 	conversationPresence                map[string]*ConversationPresence
+	surfaceInteractions                 map[string][]*SurfaceInteraction
 	embedInstallations                  map[string]*EmbedInstallation
 	embedRoutes                         map[string]string
 	embedSessions                       map[string]*EmbedSession
@@ -166,6 +167,7 @@ func NewMemoryStore() *MemoryStore {
 		participationKeys:           make(map[string]string),
 		conversationCursors:         make(map[string]*ConversationCursor),
 		conversationPresence:        make(map[string]*ConversationPresence),
+		surfaceInteractions:         make(map[string][]*SurfaceInteraction),
 		embedInstallations:          make(map[string]*EmbedInstallation),
 		embedRoutes:                 make(map[string]string),
 		embedSessions:               make(map[string]*EmbedSession),

@@ -10,9 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/chatpath"
 )
 
 const (
@@ -35,13 +38,29 @@ const (
 
 // Extensions an app may contain. Source is TypeScript; plain JavaScript is not
 // accepted so every app type-checks the same way.
+var digestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
 var extensions = map[string]bool{".ts": true, ".tsx": true, ".css": true, ".json": true, ".svg": true, ".md": true, ".txt": true}
+
+// FileRef pins one chat file an app uses to the exact bytes it was saved
+// with.
+type FileRef struct {
+	Digest    string `json:"digest"`
+	MediaType string `json:"mediaType"`
+}
 
 // Project is one complete revision of an app's source.
 type Project struct {
 	Schema string            `json:"schema"`
 	Title  string            `json:"title"`
 	Files  map[string]string `json:"files"`
+	// ChatFiles are the chat files the code uses by absolute path, such as
+	// import hero from "/images/hero.png", keyed by path. The host derives
+	// them from the code on every save; they are never edited. Only these
+	// files are served with the app.
+	ChatFiles map[string]FileRef `json:"chatFiles,omitempty"`
+	// FilesVersion is the chat files snapshot ChatFiles were read from.
+	FilesVersion int64 `json:"filesVersion,omitempty"`
 }
 
 // File is a path and its full content.
@@ -158,6 +177,11 @@ func (p Project) Validate() error {
 			reasons = append(reasons, name+" is not valid JSON")
 		}
 		total += len(content)
+	}
+	for name, ref := range p.ChatFiles {
+		if clean, err := chatpath.Clean(name); err != nil || clean != name || !digestPattern.MatchString(ref.Digest) || ref.MediaType == "" || p.FilesVersion < 1 {
+			reasons = append(reasons, fmt.Sprintf("chat file %q is not a valid reference", name))
+		}
 	}
 	if total > MaximumTotalBytes {
 		reasons = append(reasons, fmt.Sprintf("app source is larger than %d MB", MaximumTotalBytes/(1024*1024)))

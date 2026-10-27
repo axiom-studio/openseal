@@ -179,7 +179,7 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 		value.ID, value.Version = strings.TrimSpace(value.ID), strings.TrimSpace(value.Version)
 		value.SourceIdentity, value.Name = strings.TrimSpace(value.SourceIdentity), strings.TrimSpace(value.Name)
 		value.Description = strings.TrimSpace(value.Description)
-		if value.ID == "" || value.Version == "" || value.Name == "" || len(value.ID) > 256 || len(value.Version) > 256 || len(value.SourceIdentity) > 1024 || len(value.Name) > 256 || len(value.Description) > 2048 {
+		if value.ID == "" || value.Version == "" || value.Name == "" || len(value.ID) > MaxSkillIdentityBytes || len(value.Version) > MaxSkillIdentityBytes || len(value.SourceIdentity) > MaxSourceIdentityBytes || len(value.Name) > MaxSkillNameBytes || len(value.Description) > MaxSkillDescriptionBytes {
 			return nil, fmt.Errorf("discovery candidate %d has invalid identity or display metadata", index)
 		}
 		identity := value.ID + "\x00" + value.Version + "\x00" + value.SourceIdentity
@@ -199,7 +199,7 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 		for actionIndex := range value.Actions {
 			action := &value.Actions[actionIndex]
 			action.Name, action.Description = strings.TrimSpace(action.Name), strings.TrimSpace(action.Description)
-			if action.Name == "" || len(action.Name) > 128 || len(action.Description) > 1024 || !validRisk(action.Risk) {
+			if action.Name == "" || len(action.Name) > MaxActionNameBytes || len(action.Description) > MaxActionDescriptionBytes || !validRisk(action.Risk) {
 				return nil, fmt.Errorf("discovery candidate %d action %d is invalid", index, actionIndex)
 			}
 			if _, ok := actionNames[action.Name]; ok {
@@ -212,7 +212,7 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 		for credentialIndex := range value.Credentials {
 			credential := &value.Credentials[credentialIndex]
 			credential.Name, credential.Kind = strings.TrimSpace(credential.Name), strings.TrimSpace(credential.Kind)
-			if credential.Name == "" || credential.Kind == "" || len(credential.Name) > 128 || len(credential.Kind) > 128 {
+			if credential.Name == "" || credential.Kind == "" || len(credential.Name) > MaxCredentialFieldBytes || len(credential.Kind) > MaxCredentialFieldBytes {
 				return nil, fmt.Errorf("discovery candidate %d credential %d is invalid", index, credentialIndex)
 			}
 			normalizedOAuth2, err := capability.NormalizeOAuth2Requirement(credential.OAuth2)
@@ -261,7 +261,7 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 			for credentialIndex := range adapter.Credentials {
 				credential := &adapter.Credentials[credentialIndex]
 				credential.Name, credential.Kind = strings.TrimSpace(credential.Name), strings.TrimSpace(credential.Kind)
-				if credential.Name == "" || credential.Kind == "" || len(credential.Name) > 128 || len(credential.Kind) > 128 {
+				if credential.Name == "" || credential.Kind == "" || len(credential.Name) > MaxCredentialFieldBytes || len(credential.Kind) > MaxCredentialFieldBytes {
 					return nil, fmt.Errorf("discovery candidate %d conversation adapter %d credential %d is invalid", index, adapterIndex, credentialIndex)
 				}
 				if _, exists := credentialNames[credential.Name]; exists {
@@ -278,7 +278,7 @@ func NormalizeDiscoveryPage(request DiscoveryRequest, page *DiscoveryPage) (*Dis
 		sort.Slice(value.ConversationAdapters, func(i, j int) bool { return value.ConversationAdapters[i].ID < value.ConversationAdapters[j].ID })
 		if value.BindingConfigSchema != nil {
 			encoded, err := json.Marshal(value.BindingConfigSchema)
-			if err != nil || len(encoded) > 64<<10 {
+			if err != nil || len(encoded) > MaxBindingConfigSchemaBytes {
 				return nil, fmt.Errorf("discovery candidate %d binding config schema is invalid", index)
 			}
 			if _, err := compileSchema(value.ID+"-"+value.Version+"-discovery-binding-config.json", value.BindingConfigSchema); err != nil {

@@ -50,7 +50,7 @@ jobs:
   # or failed run never leaves a half-populated release visible to users.
   prepare:
     name: Create the draft release
-    runs-on: self-hosted
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -181,11 +181,16 @@ jobs:
   # desktop job needs these same runners regardless, so it costs no extra
   # infrastructure.
   #
-  # The linux leg runs on the self-hosted fleet; the macOS and Windows legs
-  # stay on GitHub-hosted runners, which the fleet cannot replace. Every leg
-  # gets Go from scripts/ci-setup-go.sh, so all four still share one setup
-  # path. Fork PRs from outside the organization need approval before any
-  # workflow runs; see the note in ci.yml.
+  # Every leg runs on a GitHub-hosted runner, including linux. That is
+  # deliberate: hosted images ship a Go toolchain, so all four legs share one
+  # setup path.
+  #
+  # No job in this repository runs on a self-hosted runner. This comment used to
+  # say the fleet ran the container job; it never did — that job is
+  # `ubuntu-latest` and its own comment says so. `ci.yml` held the last
+  # self-hosted job and moved to `ubuntu-latest` in #5451, because this
+  # repository is public and a fork PR's code would otherwise execute on a
+  # persistent host shared with other repositories' jobs.
   #
   # linux/arm64 is NOT built here, nor by the container job any more.
   # It is the one target with no native runner
@@ -205,7 +210,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: self-hosted
+          - runner: ubuntu-26.04
             goos: linux
             goarch: amd64
           # Intel. macos-13 was retired: GitHub's current macOS labels are
@@ -388,8 +393,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # Container images, published to GHCR.
   #
-  # Runs on the self-hosted fleet, which reaches the host's Docker daemon
-  # through a mounted socket. buildx comes from the runner image's Docker CLI.
+  # Runs on a hosted runner rather than the self-hosted fleet: this job needs a
+  # Docker daemon with buildx, which hosted images provide and which could not
+  # be confirmed on the fleet from here.
   #
   # linux/amd64 only. linux/arm64 used to be built by emulating the builder
   # stage under QEMU, and that one step took 45 minutes per release: the image
@@ -399,7 +405,7 @@ jobs:
   container:
     name: Container image
     needs: prepare
-    runs-on: self-hosted
+    runs-on: ubuntu-26.04
     timeout-minutes: 120
     permissions:
       contents: read
@@ -655,7 +661,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: self-hosted
+          - runner: ubuntu-26.04
             label: linux-x86_64
           # Intel — see the note on the binary job's matrix. macos-13 is gone;
           # Intel is only available as an explicit -intel label.
@@ -1034,7 +1040,7 @@ jobs:
   release:
     name: Checksum and publish
     needs: [binary, container, desktop]
-    runs-on: self-hosted
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     permissions:
       contents: write
@@ -1266,7 +1272,7 @@ jobs:
   promote-latest:
     name: Point :latest at the published release
     needs: release
-    runs-on: self-hosted
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       packages: write

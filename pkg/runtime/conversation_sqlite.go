@@ -60,6 +60,20 @@ func migrateConversations(db *sql.DB) error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_conversation_presence_active
 			ON conversation_presence(scope_kind, scope_id, conversation_id, expires_at);
+		CREATE TABLE IF NOT EXISTS surface_interactions (
+			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, conversation_id TEXT NOT NULL, id TEXT NOT NULL,
+			sequence INTEGER NOT NULL, surface_artifact_id TEXT NOT NULL, surface_id TEXT NOT NULL, surface_version INTEGER NOT NULL,
+			message_id TEXT NOT NULL, component_id TEXT NOT NULL, item_key TEXT NOT NULL DEFAULT '', actor_type TEXT NOT NULL, actor_id TEXT NOT NULL,
+			repeatable INTEGER NOT NULL, idempotency_key TEXT NOT NULL, created_at DATETIME NOT NULL, payload TEXT NOT NULL,
+			PRIMARY KEY (scope_kind, scope_id, conversation_id, id),
+			UNIQUE (scope_kind, scope_id, conversation_id, sequence),
+			UNIQUE (scope_kind, scope_id, conversation_id, idempotency_key)
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_surface_interactions_single_use
+			ON surface_interactions(scope_kind, scope_id, conversation_id, surface_id, surface_version, component_id, actor_type, actor_id)
+			WHERE repeatable = 0;
+		CREATE INDEX IF NOT EXISTS idx_surface_interactions_surface
+			ON surface_interactions(scope_kind, scope_id, conversation_id, surface_id, sequence);
 	`)
 	return err
 }

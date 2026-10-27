@@ -40,6 +40,8 @@ type conversationHistoryPlan struct {
 	FollowUps []*ChannelMessage
 	Summary   *conversationSummary
 	Request   *ConversationCompactionRequest
+	// CardState summarises card ticks made since the Agent's last message.
+	CardState []string
 }
 
 func conversationViewerKey(viewer ConversationViewer) string {

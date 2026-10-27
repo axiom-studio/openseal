@@ -2,32 +2,30 @@ package workspace
 
 import "testing"
 
-func TestOperationsFollowNativeWorkspacePolicy(t *testing.T) {
-	authority := &Authority{Workspace: DefaultSpec()}
-	operations := Operations(authority)
-	if len(operations) != 6 || operations[3].Name != OperationBatchRead || operations[len(operations)-1].Name != OperationApplyPatch {
-		t.Fatalf("default operations = %#v", operations)
+func TestOperationsAreAChatsFileTools(t *testing.T) {
+	if Operations(nil) != nil || Operations(&Authority{}) != nil {
+		t.Fatal("operations offered without a chat")
 	}
-	authority.Workspace.Policy.Filesystem = AccessReadOnly
-	if got := Operations(authority); len(got) != 4 || got[3].Name != OperationBatchRead {
-		t.Fatalf("read-only operations = %#v", got)
+	names := map[string]bool{}
+	for _, operation := range Operations(ChatAuthority("chat-1")) {
+		names[operation.Name] = true
 	}
-	authority.Workspace.Policy.Commands = CommandPolicy{Enabled: true, Network: NetworkDenied, MaxDurationSeconds: 60, AllowedExecutables: []string{"git"}}
-	if got := Operations(authority); len(got) != 5 || got[4].Name != OperationRunCommand {
-		t.Fatalf("command operations = %#v", got)
+	for _, name := range []string{OperationReadFile, OperationWriteFile, OperationRunCommand, OperationListChats, OperationCopyFromChat} {
+		if !names[name] {
+			t.Fatalf("missing %s in %v", name, names)
+		}
 	}
 }
 
-func TestOperationsProjectFixedGitAuthority(t *testing.T) {
-	spec := DefaultSpec()
-	spec.Policy.CredentialBindings = []string{"GITHUB"}
-	spec.Policy.Git = GitPolicy{Enabled: true, PushEnabled: true, CredentialBinding: "GITHUB", CredentialKind: "github_token", AllowedHosts: []string{"github.com"}, AllowedRepositories: []string{"github.com/axiom-studio/cortex"}, MaxDurationSeconds: 300}
-	operations := Operations(&Authority{Workspace: spec})
-	names := make(map[string]bool, len(operations))
-	for _, operation := range operations {
-		names[operation.Name] = true
+func TestReadsCanNameAnotherChatButWritesCannot(t *testing.T) {
+	for _, schema := range []map[string]interface{}{listInput(), pathInput(), searchInput()} {
+		if _, ok := schema["properties"].(map[string]interface{})[ChatArgument]; !ok {
+			t.Fatalf("read without chat: %v", schema)
+		}
 	}
-	if !names[OperationGitClone] || !names[OperationGitCommit] || !names[OperationGitPush] {
-		t.Fatalf("Git operations=%#v", names)
+	for _, schema := range []map[string]interface{}{writeInput(), editInput(), pathOnlyInput(), moveInput(), shellInput()} {
+		if _, ok := schema["properties"].(map[string]interface{})[ChatArgument]; ok {
+			t.Fatalf("change names another chat: %v", schema)
+		}
 	}
 }

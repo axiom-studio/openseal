@@ -1,28 +1,40 @@
 // Package presentation defines the portable, declarative contract used when an
 // Agent presents rich content in a conversation. The contract deliberately has
-// no HTML, JavaScript, iframe, or remote-code escape hatch; hosts render the
-// same immutable Artifact bytes on every supported surface.
+// no HTML, JavaScript, iframe, colour, or remote-code escape hatch; hosts render
+// the same immutable Artifact bytes on every supported surface.
+//
+// A Surface is a tree of typed components drawn from a closed catalogue. Every
+// component shares one envelope (id, type, summary, title, tone, binding,
+// children) and carries at most one payload whose JSON key equals its type.
 package presentation
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
-
-	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 const (
 	SkillID      = "openseal.presentation"
-	SkillVersion = "1.1.0"
-	Publish      = "publish_surface"
-	PlotChart    = "plot_chart"
+	SkillVersion = "3.0.0"
+	// UpdateVisual replaces a visual already shown in the chat with a newer
+	// version. Visuals that answer a turn ride on the answer instead.
+	UpdateVisual = "update_visual"
 	MediaType    = "application/vnd.openseal.surface+json"
 	ArtifactType = "interactive_surface"
-	Schema       = "openseal.dev/presentation/v1"
+	Schema       = "openseal.dev/presentation/v2"
+)
+
+// Surface-wide limits.
+const (
+	MaxComponents   = 64        // every component, including nested ones
+	MaxDepth        = 3         // top-level components are depth 1
+	MaxSurfaceBytes = 64 * 1024 // encoded JSON
+	MaxSummaryRunes = 280
+	MaxTitleRunes   = 300
 )
 
 type State string
@@ -39,451 +51,316 @@ type Surface struct {
 	Components []Component `json:"components"`
 }
 
-// Component is a closed tagged union. Only fields belonging to Type may be
-// populated. Keeping one transport shape makes model schemas manageable while
-// Validate supplies the exact semantic gate.
+// Component is a closed tagged union. Only the payload belonging to Type may
+// be populated; Validate is the exact semantic gate.
 type Component struct {
-	ID      string   `json:"id"`
-	Type    string   `json:"type"`
-	Title   string   `json:"title,omitempty"`
-	Text    string   `json:"text,omitempty"`
-	Chart   *Chart   `json:"chart,omitempty"`
-	Diagram *Diagram `json:"diagram,omitempty"`
-	Canvas  *Canvas  `json:"canvas,omitempty"`
-	Form    *Form    `json:"form,omitempty"`
-	Table   *Table   `json:"table,omitempty"`
-	Metric  *Metric  `json:"metric,omitempty"`
+	ID       string      `json:"id"`
+	Type     string      `json:"type"`
+	Summary  string      `json:"summary,omitempty"`
+	Title    string      `json:"title,omitempty"`
+	Tone     Tone        `json:"tone,omitempty"`
+	Binding  *Binding    `json:"binding,omitempty"`
+	Children []Component `json:"children,omitempty"`
+
+	// Text is the payload of text, caption and (optionally) divider.
+	Text       string      `json:"text,omitempty"`
+	Chart      *Chart      `json:"chart,omitempty"`
+	Diagram    *Diagram    `json:"diagram,omitempty"`
+	Form       *Form       `json:"form,omitempty"`
+	Table      *Table      `json:"table,omitempty"`
+	StatRow    *StatRow    `json:"stat_row,omitempty"`
+	Grid       *Grid       `json:"grid,omitempty"`
+	Tabs       []Tab       `json:"tabs,omitempty"`
+	Actions    []Action    `json:"actions,omitempty"`
+	Callout    *Callout    `json:"callout,omitempty"`
+	Steps      *Steps      `json:"steps,omitempty"`
+	Comparison *Comparison `json:"comparison,omitempty"`
+	Timeline   *Timeline   `json:"timeline,omitempty"`
+	Image      *ImageBlock `json:"image,omitempty"`
+	Gallery    *Gallery    `json:"gallery,omitempty"`
+	Choices    *Choices    `json:"choices,omitempty"`
+	Checklist  *Checklist  `json:"checklist,omitempty"`
+	Quiz       *Quiz       `json:"quiz,omitempty"`
 }
 
-type Chart struct {
-	Kind   string        `json:"kind"`
-	XLabel string        `json:"xLabel,omitempty"`
-	YLabel string        `json:"yLabel,omitempty"`
-	Series []ChartSeries `json:"series"`
-}
+type Tone string
 
-type ChartSeries struct {
-	Name   string       `json:"name"`
-	Points []ChartPoint `json:"points"`
-}
-
-type ChartPoint struct {
-	Label string  `json:"label"`
-	Value float64 `json:"value"`
-}
-
-type Diagram struct {
-	Nodes []DiagramNode `json:"nodes"`
-	Edges []DiagramEdge `json:"edges,omitempty"`
-}
-
-type DiagramNode struct {
-	ID    string  `json:"id"`
-	Label string  `json:"label"`
-	X     float64 `json:"x"`
-	Y     float64 `json:"y"`
-	Kind  string  `json:"kind,omitempty"`
-}
-
-type DiagramEdge struct {
-	From  string `json:"from"`
-	To    string `json:"to"`
-	Label string `json:"label,omitempty"`
-}
-
-type Canvas struct {
-	Width  float64       `json:"width"`
-	Height float64       `json:"height"`
-	Shapes []CanvasShape `json:"shapes"`
-}
-
-type CanvasShape struct {
-	Kind   string  `json:"kind"`
-	X      float64 `json:"x,omitempty"`
-	Y      float64 `json:"y,omitempty"`
-	X2     float64 `json:"x2,omitempty"`
-	Y2     float64 `json:"y2,omitempty"`
-	Width  float64 `json:"width,omitempty"`
-	Height float64 `json:"height,omitempty"`
-	Text   string  `json:"text,omitempty"`
-	Color  string  `json:"color,omitempty"`
-}
-
-type Form struct {
-	Description string      `json:"description,omitempty"`
-	Fields      []FormField `json:"fields"`
-	SubmitLabel string      `json:"submitLabel,omitempty"`
-}
-
-type FormField struct {
-	ID          string       `json:"id"`
-	Type        string       `json:"type"`
-	Label       string       `json:"label"`
-	Description string       `json:"description,omitempty"`
-	Required    bool         `json:"required,omitempty"`
-	Placeholder string       `json:"placeholder,omitempty"`
-	Options     []FormOption `json:"options,omitempty"`
-	Min         *float64     `json:"min,omitempty"`
-	Max         *float64     `json:"max,omitempty"`
-}
-
-type FormOption struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
-}
-
-type Table struct {
-	Columns []string   `json:"columns"`
-	Rows    [][]string `json:"rows"`
-}
-
-type Metric struct {
-	Label string `json:"label"`
-	Value string `json:"value"`
-	Delta string `json:"delta,omitempty"`
-}
-
-var (
-	opaqueID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
-	hexColor = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
+const (
+	ToneNeutral  Tone = "neutral"
+	ToneAccent   Tone = "accent"
+	TonePositive Tone = "positive"
+	ToneNegative Tone = "negative"
+	ToneWarning  Tone = "warning"
+	ToneInfo     Tone = "info"
 )
 
+// Tones lists every semantic tone. Hosts map tones to design tokens.
+var Tones = []Tone{ToneNeutral, ToneAccent, TonePositive, ToneNegative, ToneWarning, ToneInfo}
+
+var opaqueID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
+
+const opaqueIDPattern = `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`
+
+// Decode parses stored surface bytes and validates their structure. Host
+// checks (binding scope, link provenance) belong to publish time and are
+// skipped here.
 func Decode(raw []byte) (*Surface, error) {
-	if len(raw) == 0 || len(raw) > 512*1024 {
-		return nil, errors.New("presentation surface must be between 1 byte and 512 KiB")
+	if len(raw) == 0 || len(raw) > MaxSurfaceBytes {
+		return nil, fmt.Errorf("presentation surface must be between 1 byte and %d bytes", MaxSurfaceBytes)
 	}
 	var surface Surface
-	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&surface); err != nil {
 		return nil, fmt.Errorf("decode presentation surface: %w", err)
 	}
-	if err := surface.Validate(); err != nil {
+	if _, err := Validate(context.Background(), surface, ValidateOptions{SkipHostChecks: true}); err != nil {
 		return nil, err
 	}
 	return &surface, nil
 }
 
+// Encode validates the structure of a surface and returns its canonical bytes.
+// Publishing hosts call Validate with their hooks first.
 func Encode(surface Surface) ([]byte, error) {
-	if err := surface.Validate(); err != nil {
+	if _, err := Validate(context.Background(), surface, ValidateOptions{SkipHostChecks: true}); err != nil {
 		return nil, err
 	}
 	return json.Marshal(surface)
 }
 
-func (s Surface) Validate() error {
-	if s.Schema != Schema {
-		return fmt.Errorf("presentation schema must be %q", Schema)
-	}
-	if err := boundedText("surface title", s.Title, 1, 300); err != nil {
-		return err
-	}
-	if s.State != StateStreaming && s.State != StateReady {
-		return errors.New("presentation state must be streaming or ready")
-	}
-	if len(s.Components) == 0 || len(s.Components) > 32 {
-		return errors.New("presentation must contain between 1 and 32 components")
-	}
-	seen := map[string]bool{}
-	for index := range s.Components {
-		component := &s.Components[index]
-		if !opaqueID.MatchString(component.ID) || seen[component.ID] {
-			return fmt.Errorf("component %d has an invalid or duplicate id", index)
+// Find returns the component with id anywhere in the surface tree.
+func (s Surface) Find(id string) (*Component, bool) {
+	var found *Component
+	walk(s.Components, func(component *Component, _ string, _ int) bool {
+		if component.ID == id {
+			found = component
+			return false
 		}
-		seen[component.ID] = true
-		if err := component.Validate(); err != nil {
-			return fmt.Errorf("component %q: %w", component.ID, err)
-		}
-	}
-	return nil
+		return true
+	})
+	return found, found != nil
 }
 
-func (c Component) Validate() error {
-	if len(c.Title) > 300 {
-		return errors.New("title cannot exceed 300 characters")
-	}
-	present := 0
-	for _, value := range []bool{c.Text != "", c.Chart != nil, c.Diagram != nil, c.Canvas != nil, c.Form != nil, c.Table != nil, c.Metric != nil} {
-		if value {
-			present++
-		}
-	}
-	if present != 1 {
-		return errors.New("exactly one typed component payload is required")
-	}
-	switch c.Type {
-	case "text":
-		return boundedText("text", c.Text, 1, 20000)
-	case "chart":
-		if c.Chart == nil {
-			return errors.New("chart payload is required")
-		}
-		return c.Chart.Validate()
-	case "diagram":
-		if c.Diagram == nil {
-			return errors.New("diagram payload is required")
-		}
-		return c.Diagram.Validate()
-	case "canvas":
-		if c.Canvas == nil {
-			return errors.New("canvas payload is required")
-		}
-		return c.Canvas.Validate()
-	case "form":
-		if c.Form == nil {
-			return errors.New("form payload is required")
-		}
-		return c.Form.Validate()
-	case "table":
-		if c.Table == nil {
-			return errors.New("table payload is required")
-		}
-		return c.Table.Validate()
-	case "metric":
-		if c.Metric == nil {
-			return errors.New("metric payload is required")
-		}
-		if err := boundedText("metric label", c.Metric.Label, 1, 120); err != nil {
-			return err
-		}
-		return boundedText("metric value", c.Metric.Value, 1, 240)
-	default:
-		return fmt.Errorf("unsupported component type %q", c.Type)
-	}
-}
-
-func (c Chart) Validate() error {
-	switch c.Kind {
-	case "bar", "line", "area", "pie", "donut", "scatter":
-	default:
-		return fmt.Errorf("unsupported chart kind %q", c.Kind)
-	}
-	if len(c.Series) == 0 || len(c.Series) > 12 {
-		return errors.New("chart must contain between 1 and 12 series")
-	}
-	points := 0
-	for _, series := range c.Series {
-		if err := boundedText("series name", series.Name, 1, 120); err != nil {
-			return err
-		}
-		if len(series.Points) == 0 || len(series.Points) > 200 {
-			return errors.New("each chart series must contain between 1 and 200 points")
-		}
-		points += len(series.Points)
-		for _, point := range series.Points {
-			if err := boundedText("point label", point.Label, 1, 160); err != nil {
-				return err
+// walk visits every component depth first, including tab children. visit
+// returns false to stop.
+func walk(components []Component, visit func(component *Component, path string, depth int) bool) {
+	var recurse func(list []Component, prefix string, depth int) bool
+	recurse = func(list []Component, prefix string, depth int) bool {
+		for index := range list {
+			component := &list[index]
+			path := fmt.Sprintf("%s[%d]", prefix, index)
+			if !visit(component, path, depth) {
+				return false
+			}
+			if !recurse(component.Children, path+".children", depth+1) {
+				return false
+			}
+			for tab := range component.Tabs {
+				if !recurse(component.Tabs[tab].Children, fmt.Sprintf("%s.tabs[%d].children", path, tab), depth+1) {
+					return false
+				}
 			}
 		}
+		return true
 	}
-	if points > 1000 {
-		return errors.New("chart cannot exceed 1000 total points")
+	recurse(components, "components", 1)
+}
+
+// ValidationError names the component and JSON path that failed.
+type ValidationError struct {
+	Path        string
+	ComponentID string
+	Message     string
+}
+
+func (e *ValidationError) Error() string {
+	if e.ComponentID != "" {
+		return fmt.Sprintf("%s (component %q): %s", e.Path, e.ComponentID, e.Message)
+	}
+	if e.Path != "" {
+		return e.Path + ": " + e.Message
+	}
+	return e.Message
+}
+
+// Warning is a non-blocking finding from Validate or Lint.
+type Warning struct {
+	Code        string `json:"code"`
+	Path        string `json:"path"`
+	ComponentID string `json:"componentId,omitempty"`
+	Message     string `json:"message"`
+}
+
+// ValidateOptions carries host-supplied checks. A zero value fails closed:
+// bindings, links and images are rejected unless their hook is supplied or
+// SkipHostChecks is set.
+type ValidateOptions struct {
+	// Bindings confirms that a bound entity exists and is in scope.
+	Bindings BindingResolver
+	// LinkProvenance confirms that a link URL appeared in this conversation.
+	LinkProvenance LinkProvenance
+	// Images confirms that an image reference names an image visible from
+	// this conversation.
+	Images ImageResolver
+	// SkipHostChecks skips binding, link provenance and image checks. Use it only
+	// for stored content that already passed publish validation and for
+	// pre-validation whose host checks run later.
+	SkipHostChecks bool
+}
+
+type validator struct {
+	ctx      context.Context
+	opts     ValidateOptions
+	warnings []Warning
+	surface  Surface
+	ids      map[string]*Component
+}
+
+func (v *validator) warn(code, path, id, format string, args ...interface{}) {
+	v.warnings = append(v.warnings, Warning{Code: code, Path: path, ComponentID: id, Message: fmt.Sprintf(format, args...)})
+}
+
+// Validate checks a surface against the v2 contract. It returns non-blocking
+// warnings (such as unknown icons) and the first blocking error.
+func Validate(ctx context.Context, surface Surface, opts ValidateOptions) ([]Warning, error) {
+	fail := func(path, format string, args ...interface{}) ([]Warning, error) {
+		return nil, &ValidationError{Path: path, Message: fmt.Sprintf(format, args...)}
+	}
+	if surface.Schema != Schema {
+		return fail("schema", "must be %q", Schema)
+	}
+	if err := boundedText(surface.Title, 1, MaxTitleRunes); err != nil {
+		return fail("title", "%v", err)
+	}
+	if surface.State != StateStreaming && surface.State != StateReady {
+		return fail("state", "must be streaming or ready")
+	}
+	if len(surface.Components) == 0 {
+		return fail("components", "at least one component is required")
+	}
+	encoded, err := json.Marshal(surface)
+	if err != nil {
+		return fail("", "encode visual: %v", err)
+	}
+	if len(encoded) > MaxSurfaceBytes {
+		return fail("", "the visual is %d bytes of JSON; the limit is %d. Use fewer or smaller components", len(encoded), MaxSurfaceBytes)
+	}
+	v := &validator{ctx: ctx, opts: opts, surface: surface, ids: map[string]*Component{}}
+	count := 0
+	var failure error
+	walk(surface.Components, func(component *Component, path string, depth int) bool {
+		count++
+		switch {
+		case count > MaxComponents:
+			failure = &ValidationError{Path: path, ComponentID: component.ID, Message: fmt.Sprintf("a visual can hold at most %d components including nested ones", MaxComponents)}
+		case depth > MaxDepth:
+			failure = &ValidationError{Path: path, ComponentID: component.ID, Message: fmt.Sprintf("components can nest at most %d levels deep", MaxDepth)}
+		case !opaqueID.MatchString(component.ID):
+			failure = &ValidationError{Path: path + ".id", ComponentID: component.ID, Message: "id must match " + opaqueIDPattern}
+		case v.ids[component.ID] != nil:
+			failure = &ValidationError{Path: path + ".id", ComponentID: component.ID, Message: "id is already used by another component"}
+		}
+		if failure != nil {
+			return false
+		}
+		v.ids[component.ID] = component
+		return true
+	})
+	if failure != nil {
+		return nil, failure
+	}
+	walk(surface.Components, func(component *Component, path string, _ int) bool {
+		if err := v.component(*component, path); err != nil {
+			failure = &ValidationError{Path: path, ComponentID: component.ID, Message: err.Error()}
+			return false
+		}
+		return true
+	})
+	if failure != nil {
+		return nil, failure
+	}
+	return v.warnings, nil
+}
+
+func (v *validator) component(c Component, path string) error {
+	spec, ok := catalogue[c.Type]
+	if !ok {
+		return fmt.Errorf("unsupported type %q; use one of %s", c.Type, strings.Join(TypeNames(), ", "))
+	}
+	if spec.summary == summaryRequired && strings.TrimSpace(c.Summary) == "" {
+		return fmt.Errorf("summary is required for %s: one plain sentence saying what it shows", c.Type)
+	}
+	if err := boundedText(c.Summary, 0, MaxSummaryRunes); err != nil {
+		return fmt.Errorf("summary %v", err)
+	}
+	if err := boundedText(c.Title, 0, MaxTitleRunes); err != nil {
+		return fmt.Errorf("title %v", err)
+	}
+	if c.Tone != "" && !validTone(c.Tone) {
+		return fmt.Errorf("tone %q is not one of neutral, accent, positive, negative, warning, info", c.Tone)
+	}
+	if c.Binding != nil {
+		if err := v.binding(*c.Binding); err != nil {
+			return fmt.Errorf("binding: %w", err)
+		}
+	}
+	if len(c.Children) > 0 && !spec.children {
+		return fmt.Errorf("%s cannot have children; only section, grid and carousel can", c.Type)
+	}
+	if err := exactPayload(c); err != nil {
+		return err
+	}
+	return spec.validate(v, c, path)
+}
+
+// exactPayload enforces that exactly the payload matching Type is present.
+func exactPayload(c Component) error {
+	present := map[string]bool{
+		"text": c.Text != "", "chart": c.Chart != nil, "diagram": c.Diagram != nil, "form": c.Form != nil,
+		"table": c.Table != nil, "stat_row": c.StatRow != nil, "grid": c.Grid != nil, "tabs": len(c.Tabs) > 0, "actions": len(c.Actions) > 0,
+		"callout": c.Callout != nil, "steps": c.Steps != nil, "comparison": c.Comparison != nil, "timeline": c.Timeline != nil,
+		"image": c.Image != nil, "gallery": c.Gallery != nil, "choices": c.Choices != nil, "checklist": c.Checklist != nil, "quiz": c.Quiz != nil,
+	}
+	allowed := catalogue[c.Type].payload
+	for key, set := range present {
+		if set && key != allowed {
+			return fmt.Errorf("%s cannot carry a %q payload", c.Type, key)
+		}
 	}
 	return nil
 }
 
-func (d Diagram) Validate() error {
-	if len(d.Nodes) == 0 || len(d.Nodes) > 100 || len(d.Edges) > 200 {
-		return errors.New("diagram must contain 1-100 nodes and at most 200 edges")
-	}
-	nodes := map[string]bool{}
-	for _, node := range d.Nodes {
-		if !opaqueID.MatchString(node.ID) || nodes[node.ID] {
-			return errors.New("diagram node ids must be unique portable identifiers")
-		}
-		nodes[node.ID] = true
-		if err := boundedText("diagram node label", node.Label, 1, 240); err != nil {
-			return err
+func validTone(tone Tone) bool {
+	for _, candidate := range Tones {
+		if tone == candidate {
+			return true
 		}
 	}
-	for _, edge := range d.Edges {
-		if !nodes[edge.From] || !nodes[edge.To] {
-			return errors.New("diagram edge must reference existing nodes")
-		}
-	}
-	return nil
+	return false
 }
 
-func (c Canvas) Validate() error {
-	if c.Width <= 0 || c.Width > 4096 || c.Height <= 0 || c.Height > 4096 {
-		return errors.New("canvas dimensions must be between 1 and 4096")
-	}
-	if len(c.Shapes) == 0 || len(c.Shapes) > 500 {
-		return errors.New("canvas must contain between 1 and 500 shapes")
-	}
-	for _, shape := range c.Shapes {
-		switch shape.Kind {
-		case "rectangle", "ellipse", "line", "text":
-		default:
-			return fmt.Errorf("unsupported canvas shape %q", shape.Kind)
-		}
-		if shape.Color != "" && !hexColor.MatchString(shape.Color) {
-			return errors.New("canvas colors must be six-digit hex colors")
-		}
-		if len(shape.Text) > 1000 {
-			return errors.New("canvas shape text cannot exceed 1000 characters")
-		}
-	}
-	return nil
-}
-
-func (f Form) Validate() error {
-	if len(f.Fields) == 0 || len(f.Fields) > 40 {
-		return errors.New("form must contain between 1 and 40 fields")
-	}
-	seen := map[string]bool{}
-	for _, field := range f.Fields {
-		if !opaqueID.MatchString(field.ID) || seen[field.ID] {
-			return errors.New("form field ids must be unique portable identifiers")
-		}
-		seen[field.ID] = true
-		switch field.Type {
-		case "text", "textarea", "number", "select", "radio", "checkbox", "date":
-		default:
-			return fmt.Errorf("unsupported form field type %q", field.Type)
-		}
-		if err := boundedText("form field label", field.Label, 1, 240); err != nil {
-			return err
-		}
-		if (field.Type == "select" || field.Type == "radio") && (len(field.Options) == 0 || len(field.Options) > 100) {
-			return errors.New("select and radio fields require 1-100 options")
-		}
-		if field.Min != nil && field.Max != nil && *field.Min > *field.Max {
-			return errors.New("form field minimum cannot exceed maximum")
-		}
-	}
-	return nil
-}
-
-func (t Table) Validate() error {
-	if len(t.Columns) == 0 || len(t.Columns) > 30 || len(t.Rows) > 1000 {
-		return errors.New("table must contain 1-30 columns and at most 1000 rows")
-	}
-	for _, row := range t.Rows {
-		if len(row) != len(t.Columns) {
-			return errors.New("every table row must match the column count")
-		}
-	}
-	return nil
-}
-
-func boundedText(name, value string, minimum, maximum int) error {
+func boundedText(value string, minimum, maximum int) error {
 	length := len([]rune(strings.TrimSpace(value)))
 	if length < minimum || length > maximum {
-		return fmt.Errorf("%s must contain between %d and %d characters", name, minimum, maximum)
+		if minimum == 0 {
+			return fmt.Errorf("must be at most %d characters (got %d)", maximum, length)
+		}
+		return fmt.Errorf("must contain between %d and %d characters (got %d)", minimum, maximum, length)
 	}
 	return nil
 }
 
-func SkillDefinition() *skill.Definition {
-	component := presentationComponentSchema()
-	return &skill.Definition{
-		ID: SkillID, Version: SkillVersion, Name: "Interactive presentation",
-		Description: "Present safe live documents, charts, diagrams, drawings, tables, metrics, and forms in a conversation.",
-		Icon:        "layout-dashboard", Category: "documents", Tags: []string{"interactive", "chart", "diagram", "form", "artifact"},
-		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
-		Actions: map[string]skill.Action{PlotChart: {
-			Name: PlotChart, Description: "Plot a chart from labeled numeric values in one call. Use this for ordinary graphs.",
-			InputSchema: closedObject([]interface{}{"title", "kind", "points"}, map[string]interface{}{
-				"title":  map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 300},
-				"kind":   map[string]interface{}{"type": "string", "enum": []interface{}{"bar", "line", "area", "pie", "donut", "scatter"}},
-				"points": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 200, "items": closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 160}, "value": map[string]interface{}{"type": "number"}})},
-				"xLabel": map[string]interface{}{"type": "string", "maxLength": 120},
-				"yLabel": map[string]interface{}{"type": "string", "maxLength": 120},
-			}),
-			OutputSchema: closedObject([]interface{}{"artifactRefs", "state"}, map[string]interface{}{
-				"artifactRefs": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 1, "items": closedObject([]interface{}{"id", "version", "requirementName"}, map[string]interface{}{"id": map[string]interface{}{"type": "string"}, "version": map[string]interface{}{"type": "integer", "minimum": 1}, "requirementName": map[string]interface{}{"type": "string"}})},
-				"state":        map[string]interface{}{"type": "string", "enum": []interface{}{string(StateReady)}},
-			}),
-			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
-			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
-		}, Publish: {
-			Name: Publish, Description: "Create or replace one immutable revision of an interactive conversation surface.",
-			InputSchema: map[string]interface{}{
-				"type": "object", "additionalProperties": false,
-				"required": []interface{}{"surfaceId", "expectedLatestVersion", "title", "state", "components", "requirementName"},
-				"properties": map[string]interface{}{
-					"surfaceId":             map[string]interface{}{"type": "string", "pattern": `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`},
-					"expectedLatestVersion": map[string]interface{}{"type": "integer", "minimum": 0, "description": "Use 0 for the first revision, then the version returned by the preceding publish."},
-					"title":                 map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 300},
-					"state":                 map[string]interface{}{"type": "string", "enum": []interface{}{string(StateStreaming), string(StateReady)}},
-					"components":            map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 32, "items": component},
-					"requirementName":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128},
-				},
-			},
-			OutputSchema: map[string]interface{}{
-				"type": "object", "additionalProperties": false, "required": []interface{}{"artifactRefs", "state"},
-				"properties": map[string]interface{}{
-					"artifactRefs": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"id", "version", "requirementName"}, "properties": map[string]interface{}{"id": map[string]interface{}{"type": "string"}, "version": map[string]interface{}{"type": "integer", "minimum": 1}, "requirementName": map[string]interface{}{"type": "string"}}}},
-					"state":        map[string]interface{}{"type": "string", "enum": []interface{}{string(StateStreaming), string(StateReady)}},
-				},
-			},
-			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
-			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{ArtifactType},
-		}},
-		Prompt:       &capability.PromptModule{Instructions: "Use plot_chart for ordinary graphs: provide title, chart kind, and labeled numeric points. Use publish_surface only for richer interactive layouts, forms, diagrams, or multiple components. Keep simple answers simple and never encode HTML or scripts.", UserInvocable: true, AllowedTools: []string{PlotChart, Publish}},
-		Requirements: capability.Requirements{AlwaysAvailable: true},
+func required(field, value string, maximum int) error {
+	if err := boundedText(value, 1, maximum); err != nil {
+		return fmt.Errorf("%s %w", field, err)
 	}
+	return nil
 }
 
-func presentationComponentSchema() map[string]interface{} {
-	id := map[string]interface{}{"type": "string", "pattern": `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`}
-	text := func(maximum int) map[string]interface{} {
-		return map[string]interface{}{"type": "string", "maxLength": maximum}
+func optional(field, value string, maximum int) error {
+	if err := boundedText(value, 0, maximum); err != nil {
+		return fmt.Errorf("%s %w", field, err)
 	}
-	number := map[string]interface{}{"type": "number"}
-	point := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": text(160), "value": number})
-	series := closedObject([]interface{}{"name", "points"}, map[string]interface{}{
-		"name": text(120), "points": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 200, "items": point},
-	})
-	chart := closedObject([]interface{}{"kind", "series"}, map[string]interface{}{
-		"kind":   map[string]interface{}{"type": "string", "enum": []interface{}{"bar", "line", "area", "pie", "donut", "scatter"}},
-		"xLabel": text(120), "yLabel": text(120),
-		"series": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 12, "items": series},
-	})
-	node := closedObject([]interface{}{"id", "label", "x", "y"}, map[string]interface{}{"id": id, "label": text(240), "x": number, "y": number, "kind": text(80)})
-	edge := closedObject([]interface{}{"from", "to"}, map[string]interface{}{"from": id, "to": id, "label": text(240)})
-	diagram := closedObject([]interface{}{"nodes"}, map[string]interface{}{
-		"nodes": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 100, "items": node},
-		"edges": map[string]interface{}{"type": "array", "maxItems": 200, "items": edge},
-	})
-	shape := closedObject([]interface{}{"kind"}, map[string]interface{}{
-		"kind": map[string]interface{}{"type": "string", "enum": []interface{}{"rectangle", "ellipse", "line", "text"}},
-		"x":    number, "y": number, "x2": number, "y2": number, "width": number, "height": number,
-		"text": text(1000), "color": map[string]interface{}{"type": "string", "pattern": `^#[0-9A-Fa-f]{6}$`},
-	})
-	canvas := closedObject([]interface{}{"width", "height", "shapes"}, map[string]interface{}{
-		"width":  map[string]interface{}{"type": "number", "exclusiveMinimum": 0, "maximum": 4096},
-		"height": map[string]interface{}{"type": "number", "exclusiveMinimum": 0, "maximum": 4096},
-		"shapes": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 500, "items": shape},
-	})
-	option := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": text(240), "value": text(240)})
-	field := closedObject([]interface{}{"id", "type", "label"}, map[string]interface{}{
-		"id": id, "type": map[string]interface{}{"type": "string", "enum": []interface{}{"text", "textarea", "number", "select", "radio", "checkbox", "date"}},
-		"label": text(240), "description": text(1000), "required": map[string]interface{}{"type": "boolean"}, "placeholder": text(500),
-		"options": map[string]interface{}{"type": "array", "maxItems": 100, "items": option}, "min": number, "max": number,
-	})
-	form := closedObject([]interface{}{"fields"}, map[string]interface{}{
-		"description": text(2000), "submitLabel": text(120),
-		"fields": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 40, "items": field},
-	})
-	table := closedObject([]interface{}{"columns", "rows"}, map[string]interface{}{
-		"columns": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 30, "items": text(240)},
-		"rows":    map[string]interface{}{"type": "array", "maxItems": 1000, "items": map[string]interface{}{"type": "array", "maxItems": 30, "items": text(2000)}},
-	})
-	metric := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": text(120), "value": text(240), "delta": text(120)})
-	return map[string]interface{}{
-		"type": "object", "additionalProperties": false, "required": []interface{}{"id", "type"},
-		"properties": map[string]interface{}{
-			"id":    id,
-			"type":  map[string]interface{}{"type": "string", "enum": []interface{}{"text", "chart", "diagram", "canvas", "form", "table", "metric"}},
-			"title": map[string]interface{}{"type": "string", "maxLength": 300},
-			"text":  map[string]interface{}{"type": "string", "maxLength": 20000},
-			"chart": chart, "diagram": diagram, "canvas": canvas, "form": form, "table": table, "metric": metric,
-		},
-	}
-}
-
-func closedObject(required []interface{}, properties map[string]interface{}) map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": required, "properties": properties}
+	return nil
 }

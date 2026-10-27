@@ -13,7 +13,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
-	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 type resolverCatalog struct {
@@ -146,10 +145,8 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	}
 }
 
-func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
+func TestCatalogTurnResolverGivesOnlyAChatTurnFiles(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "11"}
-	spec := workspace.DefaultSpec()
-	spec.Policy.CredentialBindings = []string{"GITHUB_TOKEN"}
 	host := &recordingTurnHost{response: &HostedTurnResponse{
 		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", ModelProvider: "test", Model: "model",
 		NextRunStatus: AgentRunStatusCompleted, OutputSummary: "done", ContinuationCheckpoint: map[string]interface{}{},
@@ -157,8 +154,7 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 	catalog := &resolverCatalog{
 		deployment: &kernelagent.AgentDeployment{
 			ID: "coding-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "coding-agent",
-			ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, DefaultWorkspaceID: spec.ID, Workspaces: []workspace.Spec{spec},
-			Credentials: map[string]capability.CredentialReference{"GITHUB_TOKEN": {Kind: "vault", ID: "vault-credential"}},
+			ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
 		},
 		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories", SystemPrompt: "Work carefully."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "coding-agent"},
@@ -191,15 +187,15 @@ func TestCatalogTurnResolverProjectsNativeDefaultWorkspace(t *testing.T) {
 	if !containsString(host.request.SystemInstructions, agentResourcefulnessGuidance) {
 		t.Fatal("hosted work did not receive resourcefulness guidance")
 	}
-	if host.request.Workspace == nil || host.request.Workspace.Workspace.ID != workspace.DefaultID || host.request.Workspace.Workspace.Policy.Filesystem != workspace.AccessReadWrite {
-		t.Fatalf("workspace authority = %#v", host.request.Workspace)
+	if host.request.Workspace != nil || len(host.request.WorkspaceOperations) != 0 {
+		t.Fatalf("work outside a chat has files: %#v", host.request.Workspace)
 	}
-	if host.request.WorkspaceCredentials["GITHUB_TOKEN"].ID != "vault-credential" {
-		t.Fatalf("Workspace credentials = %#v", host.request.WorkspaceCredentials)
+	run.Context["conversationId"] = "chat-1"
+	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+		t.Fatal(err)
 	}
-	encoded, err := MarshalHostedTurnModelInput(host.request)
-	if err != nil || !strings.Contains(string(encoded), `"credentialBindings":["GITHUB_TOKEN"]`) || strings.Contains(string(encoded), `"storage"`) || strings.Contains(string(encoded), "vault-credential") || strings.Contains(string(encoded), "workspaceCredentials") {
-		t.Fatalf("model input = %s, error=%v", encoded, err)
+	if host.request.Workspace == nil || host.request.Workspace.ConversationID != "chat-1" || len(host.request.WorkspaceOperations) == 0 {
+		t.Fatalf("chat turn workspace = %#v", host.request.Workspace)
 	}
 }
 

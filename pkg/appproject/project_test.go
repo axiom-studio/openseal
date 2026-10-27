@@ -137,3 +137,35 @@ func TestReplacementFeedbackShowsNearestContextForAMissedFind(t *testing.T) {
 		t.Fatalf("expected a read_app suggestion, got %v", err)
 	}
 }
+
+func TestChatFileReferencesRoundTripAndAreChecked(t *testing.T) {
+	project, err := New("Site", []File{{Path: Entry, Content: `import hero from "/images/hero.png"; export default () => <img src={hero} />;`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.ChatFiles = map[string]FileRef{"images/hero.png": {Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MediaType: "image/png"}}
+	project.FilesVersion = 3
+	data, err := project.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := Parse(data)
+	if err != nil || parsed.ChatFiles["images/hero.png"].Digest != "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || parsed.FilesVersion != 3 {
+		t.Fatalf("round trip = %+v %v", parsed.ChatFiles, err)
+	}
+	for _, bad := range []map[string]FileRef{
+		{"../secret.png": {Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MediaType: "image/png"}},
+		{"/images/hero.png": {Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MediaType: "image/png"}},
+		{"images/hero.png": {Digest: "sha256:short", MediaType: "image/png"}},
+	} {
+		project.ChatFiles = bad
+		if project.Validate() == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+	project.ChatFiles = map[string]FileRef{"images/hero.png": {Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MediaType: "image/png"}}
+	next, err := project.Apply("", Edits{Write: []File{{Path: "src/Other.tsx", Content: "export const x = 1;"}}})
+	if err != nil || next.ChatFiles != nil {
+		t.Fatalf("an edit must leave references for the host to derive again: %+v %v", next.ChatFiles, err)
+	}
+}

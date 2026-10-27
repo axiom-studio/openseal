@@ -1,17 +1,26 @@
 package runtime
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 func TestHostedTurnFormCompilesOnlyAuthorizedNativeWorkspaceOperations(t *testing.T) {
-	authority := &workspace.Authority{Workspace: workspace.DefaultSpec()}
-	operations := workspace.Operations(authority)
+	var operations []workspace.Operation
+	for _, operation := range workspace.Operations(workspace.ChatAuthority("chat")) {
+		if operation.Name != workspace.OperationRunCommand {
+			operations = append(operations, operation)
+		}
+	}
 	form := HostedTurnForm{
 		SchemaVersion: HostedTurnFormSchemaVersion, SkillSelections: []HostedSkillSelection{}, Decisions: []TurnDecision{},
 		ProposedWorkspaceOperation: &HostedWorkspaceOperationForm{Operation: workspace.OperationReadFile, Summary: "Inspect config", Arguments: map[string]interface{}{"path": "config.yaml"}},
@@ -321,5 +330,133 @@ func TestHostedTurnFormSchemaAvoidsBooleanSubschemas(t *testing.T) {
 		if selections["maxItems"] != len(references) {
 			t.Fatalf("skillSelections maxItems = %v for %d prompts", selections["maxItems"], len(references))
 		}
+	}
+}
+
+func testAnswerVisual() *presentation.Visual {
+	return &presentation.Visual{Title: "Your phone plan", Components: []presentation.Component{
+		{ID: "saving", Type: "stat_row", Summary: "Switching saves £96 a year.", StatRow: &presentation.StatRow{Stats: []presentation.Stat{
+			{Label: "Yearly saving", Value: 96, Format: presentation.StatCurrency, Currency: "GBP"},
+		}}},
+	}}
+}
+
+func answerVisualForm(visual *presentation.Visual) HostedTurnForm {
+	return HostedTurnForm{
+		SchemaVersion: HostedTurnFormSchemaVersion, SkillSelections: []HostedSkillSelection{}, Decisions: []TurnDecision{},
+		OutputSummary: "Not quite.", Visual: visual, ContinuationCheckpoint: map[string]interface{}{}, NextRunStatus: AgentRunStatusCompleted,
+		RunOutput: map[string]interface{}{"report": "Not quite."}, CompletionEvidenceRefs: []string{}, EvidenceClaims: []EvidenceClaim{},
+	}
+}
+
+func TestHostedTurnFormSchemaOffersAnswerVisual(t *testing.T) {
+	schema, err := HostedTurnFormJSONSchema(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	visual, ok := schema["properties"].(map[string]interface{})["visual"].(map[string]interface{})
+	if !ok || visual["additionalProperties"] != false || visual["properties"].(map[string]interface{})["components"] == nil {
+		t.Fatalf("visual schema = %#v", visual)
+	}
+	description, _ := visual["description"].(string)
+	if !strings.Contains(description, presentation.VisualRubric()) || !strings.Contains(description, "userAsks") {
+		t.Fatalf("visual description = %q", description)
+	}
+	for _, required := range schema["required"].([]interface{}) {
+		if required == "visual" {
+			t.Fatal("visual must stay optional")
+		}
+	}
+	encoded, _ := json.Marshal(visual)
+	// artifactId is the image reference key shared with hosts.
+	lower := strings.ToLower(strings.ReplaceAll(string(encoded), "artifactId", ""))
+	for _, word := range []string{"presentation", "surface", "artifact", "publish"} {
+		if strings.Contains(lower, word) {
+			t.Fatalf("visual schema mentions %q", word)
+		}
+	}
+	if strings.Contains(string(mustMarshalSchema(t, schema)), "presentation_") {
+		t.Fatal("reflected schema still carries presentation definitions")
+	}
+}
+
+func mustMarshalSchema(t *testing.T, schema map[string]interface{}) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+func TestHostedTurnFormCompilesAnswerVisual(t *testing.T) {
+	response, err := CompileHostedTurnForm(answerVisualForm(testAnswerVisual()), nil)
+	if err != nil || response.Visual == nil || response.Visual.Title != "Your phone plan" {
+		t.Fatalf("response=%#v error=%v", response, err)
+	}
+	form, err := HostedTurnFormFromResponse(*response)
+	if err != nil || !reflect.DeepEqual(form.Visual, testAnswerVisual()) {
+		t.Fatalf("round trip = %#v, %v", form.Visual, err)
+	}
+	response.Visual.Components[0].ID = "changed"
+	if form.Visual.Components[0].ID != "saving" {
+		t.Fatal("round trip shares component storage")
+	}
+
+	action := capability.ModelAction{Name: "notes.save", InputSchema: map[string]interface{}{"type": "object"}}
+	bound := testAnswerVisual()
+	bound.Components = append(bound.Components, presentation.Component{ID: "next", Type: "actions", Actions: []presentation.Action{
+		{ID: "stop", Label: "Stop", Kind: presentation.ActionEntity, Command: "stop", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "rb-1"}},
+	}})
+	for name, tc := range map[string]struct {
+		form    func() HostedTurnForm
+		options []HostedTurnFormOption
+		want    string
+	}{
+		"with action": {form: func() HostedTurnForm {
+			form := answerVisualForm(testAnswerVisual())
+			form.NextRunStatus = AgentRunStatusRunning
+			form.ProposedAction = &HostedTurnActionForm{Capability: action.Name, Summary: "Save", IdempotencyKey: "save", Arguments: map[string]interface{}{}}
+			return form
+		}, want: "leave visual out when you propose"},
+		"with task": {form: func() HostedTurnForm {
+			form := answerVisualForm(testAnswerVisual())
+			form.NextRunStatus, form.RunOutput, form.OutputSummary = AgentRunStatusRunning, map[string]interface{}{}, ""
+			form.ProposedTask = &TurnTaskProposal{TaskKey: "t", Goal: "g", Acknowledgment: "On it."}
+			return form
+		}, want: "leave visual out when you propose"},
+		"still running": {form: func() HostedTurnForm {
+			form := answerVisualForm(testAnswerVisual())
+			form.NextRunStatus = AgentRunStatusRunning
+			return form
+		}, want: "set nextRunStatus to completed"},
+		"invalid": {form: func() HostedTurnForm {
+			form := answerVisualForm(testAnswerVisual())
+			form.Visual.Components[0].Summary = ""
+			return form
+		}, want: "visual: components[0]"},
+		"binding rejected by host": {form: func() HostedTurnForm { return answerVisualForm(bound) }, options: []HostedTurnFormOption{
+			WithVisualHostChecks(context.Background(), presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error {
+				return errors.New("not part of this chat")
+			})}),
+		}, want: "not part of this chat"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := CompileHostedTurnForm(tc.form(), []capability.ModelAction{action}, tc.options...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+			lower := strings.ToLower(err.Error())
+			for _, word := range []string{"presentation", "surface", "artifact", "publish"} {
+				if strings.Contains(lower, word) {
+					t.Fatalf("model-facing error mentions %q: %v", word, err)
+				}
+			}
+		})
+	}
+	// Without host hooks compilation checks structure only; the runner
+	// rechecks the binding with the host's resolver.
+	if _, err := CompileHostedTurnForm(answerVisualForm(bound), nil); err != nil {
+		t.Fatalf("structural compile rejected a bound visual: %v", err)
 	}
 }

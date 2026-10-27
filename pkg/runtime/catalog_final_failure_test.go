@@ -7,25 +7,21 @@ import (
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
-	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 	for _, owner := range []ObjectiveOwner{{Type: OwnerTypeAgent, ID: "seal"}, {Type: OwnerTypeTeam, ID: "team"}} {
 		t.Run(string(owner.Type), func(t *testing.T) {
 			scope := Scope{Kind: "tenant", ID: "11"}
-			spec := workspace.DefaultSpec()
-			spec.Policy.CredentialBindings = []string{"MISSING_CREDENTIAL"}
 			catalog := &resolverCatalog{
 				deployment: &kernelagent.AgentDeployment{
 					ID: "seal", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "seal",
 					ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-					DefaultWorkspaceID: spec.ID, Workspaces: []workspace.Spec{spec},
 					Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "vault", ID: "model-account"}},
 				},
 				definition: &kernelagent.AgentDefinition{ID: "seal", Version: "1", SystemPrompt: "Be clear.", Personality: "Friendly and bubbly"},
-				// Activation is deliberately unavailable. Even a broken Skill or
-				// missing Workspace credential must not block the final answer.
+				// Activation is deliberately unavailable. Even a broken Skill
+				// must not block the final answer.
 			}
 			run := &AgentRun{
 				ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: "seal",

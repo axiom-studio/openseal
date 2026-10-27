@@ -23,9 +23,9 @@ func NewActionError(code, _ string, details map[string]string) *ActionError {
 		return nil
 	}
 	clean := map[string]string{"failureKind": code, "retryable": "false"}
-	for key, maximum := range map[string]int{"httpStatus": 599, "retryAfterSeconds": 86400, "failedCount": 4, "totalCount": 4} {
+	for key, maximum := range map[string]int{"httpStatus": 599, "retryAfterSeconds": 86400, "failedCount": 4, "totalCount": 4, "fileMegabytes": 999999, "limitMegabytes": 999999} {
 		minimum := 0
-		if key == "failedCount" || key == "totalCount" {
+		if key == "failedCount" || key == "totalCount" || key == "fileMegabytes" || key == "limitMegabytes" {
 			minimum = 1
 		}
 		if value, ok := boundedActionErrorInteger(details[key], minimum, maximum); ok {
@@ -99,6 +99,8 @@ func actionErrorMessage(code string) string {
 		return "The configured browser proxy could not be reached."
 	case "source_reads_failed":
 		return "The requested sources could not be read."
+	case "file_too_large":
+		return "This file is larger than an action can be given."
 	default:
 		return ""
 	}

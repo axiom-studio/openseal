@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/axiom-studio/openseal/pkg/fileinput"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -26,6 +27,7 @@ func compileInterfaceSchema(schema map[string]interface{}) (*jsonschema.Schema, 
 	if len(schema) == 0 {
 		return nil, errors.New("runbook interface schema is required")
 	}
+	schema = fileinput.Schema(schema)
 	if err := rejectExternalSchemaReferences(schema); err != nil {
 		return nil, err
 	}

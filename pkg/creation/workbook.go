@@ -156,3 +156,7 @@ func RenderWorkbook(ctx context.Context, sheets []Sheet) ([]byte, error) {
 	}
 	return out.Bytes(), nil
 }
+
+func textBound(s string, max int) bool {
+	return strings.TrimSpace(s) != "" && utf8.ValidString(s) && utf8.RuneCountInString(s) <= max
+}
