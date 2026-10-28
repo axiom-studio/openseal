@@ -359,3 +359,118 @@ func TestFlashcardStateLinesArePerPerson(t *testing.T) {
 		t.Fatalf("single person lines = %q", got)
 	}
 }
+
+func TestAgentTurnSeesPollTallySinceItsLastMessage(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "poll-state"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}, Title: "Dinner", IdempotencyKey: "poll-state-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	poll := presentation.Component{ID: "vote", Type: "poll", Title: "Dinner", Summary: "Where to eat.", Poll: &presentation.Poll{
+		Question: "Where shall we eat?", Options: []presentation.PollOption{{ID: "thai", Label: "Thai"}, {ID: "pizza", Label: "Pizza"}, {ID: "pub", Label: "Pub"}},
+	}}
+	one := 1.0
+	explorer := presentation.Component{ID: "calc", Type: "explorer", Summary: "A calculator.", Explorer: &presentation.Explorer{
+		Inputs:  []presentation.ExplorerInput{{ID: "x", Label: "X", Kind: "toggle", Default: &one}},
+		Outputs: []presentation.ExplorerOutput{{ID: "y", Label: "Y", Expr: "if(x, 1, 2)"}},
+	}}
+	var goals []string
+	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{
+			DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "1",
+			Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+				goals = append(goals, input.Run.Goal)
+				outcome := &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Here you go."}}
+				if len(goals) == 1 {
+					outcome.Visual = &presentation.Visual{Title: "Dinner", Components: []presentation.Component{poll, explorer}}
+				}
+				return outcome, nil
+			}),
+		}, nil
+	})
+	people := []ConversationParticipant{{Type: ConversationParticipantUser, ID: "ana"}, {Type: ConversationParticipantUser, ID: "ben"}, {Type: ConversationParticipantUser, ID: "cy"}}
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{
+		AgentTurns: agentTurns, AttachmentContent: &answerVisualContent{},
+		HumanParticipants: func(context.Context, *Conversation) ([]ConversationParticipant, error) { return people, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn := func(text string) {
+		t.Helper()
+		current, err := service.GetConversation(ctx, scope, conversation.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trigger := postConversationRunTestMessage(t, service, current, ConversationParticipantUser, MessageIntentQuestion, text, "poll-state-"+text)
+		scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run}); err != nil || outcome.NextRunStatus != AgentRunStatusCompleted {
+			t.Fatalf("outcome = %#v, err=%v", outcome, err)
+		}
+	}
+	turn("Ask everyone where to eat")
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("messages = %#v, err=%v", messages, err)
+	}
+	card := messages[1]
+	var artifactID string
+	for _, reference := range card.References {
+		if reference.Kind == ConversationReferenceArtifact {
+			artifactID = reference.ID
+		}
+	}
+	record := func(actor, componentID, actionID, values, key string) {
+		t.Helper()
+		if _, _, err := service.RecordSurfaceInteraction(ctx, RecordSurfaceInteractionRequest{
+			Scope: scope, ConversationID: conversation.ID, SurfaceArtifactID: artifactID, SurfaceID: artifactID, SurfaceVersion: 1,
+			MessageID: card.ID, ComponentID: componentID, ActionID: actionID, Actor: ConversationParticipant{Type: ConversationParticipantUser, ID: actor},
+			Repeatable: true, Values: json.RawMessage(values), IdempotencyKey: key,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record("ana", "vote", presentation.PollVoteAction, `{"optionIds":["pizza"]}`, "vote-1")
+	record("ben", "vote", presentation.PollVoteAction, `{"optionIds":["thai"]}`, "vote-2")
+	record("ana", "vote", presentation.PollVoteAction, `{"optionIds":["thai"]}`, "vote-3")
+	record("ana", "calc", presentation.ExplorerShareAction, `{"inputs":{"x":1}}`, "share-1")
+
+	turn("Who wants what?")
+	want := `Poll "Dinner": Thai 2, Pizza 0, Pub 0 (2 of 3 voted)`
+	if state := cardStateOfGoal(t, goals[1]); strings.Join(state, "\n") != want {
+		t.Fatalf("card state = %q, want %q", state, want)
+	}
+	turn("Thanks")
+	if state := cardStateOfGoal(t, goals[2]); len(state) != 0 {
+		t.Fatalf("unchanged poll reported again: %q", state)
+	}
+}
+
+func TestPollVotesKeepEachPersonsLatestVote(t *testing.T) {
+	latest := []*SurfaceInteraction{
+		{ComponentID: "vote", ActionID: presentation.PollVoteAction, ActorType: ConversationParticipantUser, ActorID: "ana", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
+		{ComponentID: "vote", ActionID: presentation.PollVoteAction, ActorType: ConversationParticipantUser, ActorID: "ben", Values: json.RawMessage(`{"optionIds":["pub","thai"]}`)},
+		{ComponentID: "other", ActionID: presentation.PollVoteAction, ActorType: ConversationParticipantUser, ActorID: "cy", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
+		{ComponentID: "vote", ActionID: "share", ActorType: ConversationParticipantUser, ActorID: "dee", Values: json.RawMessage(`{"optionIds":["thai"]}`)},
+		nil,
+	}
+	votes := PollVotes("vote", latest)
+	if len(votes) != 2 || strings.Join(votes["user:ana"], ",") != "thai" || strings.Join(votes["user:ben"], ",") != "pub,thai" {
+		t.Fatalf("votes = %v", votes)
+	}
+	if key := PollVoterKey(ConversationParticipant{Type: ConversationParticipantUser, ID: "ana"}); key != "user:ana" {
+		t.Fatalf("key = %q", key)
+	}
+}

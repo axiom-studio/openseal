@@ -19,13 +19,16 @@ const (
 )
 
 // conversationCardState summarises interactions that do not wake the Agent
-// (checklist, step and recipe ticks, flashcard marks) on cards in messages,
+// (checklist, step and recipe ticks, flashcard marks, poll votes) on cards in
+// messages,
 // for the Agent's next turn: one line per card component whose state changed
 // since the Agent's latest message in messages, e.g. "Packing list: 9/14
 // ticked (unticked: passport, charger)". Ticks are the latest write per item
 // across everyone the viewer can see; flashcard marks are each person's own,
 // one line per person who marked since then, e.g. `Flashcards "French food
-// words": 3 got, 1 again, 1 unseen`, named when more than one did. Cards are
+// words": 3 got, 1 again, 1 unseen`, named when more than one did. A poll
+// with a vote since then gets its tally from everyone's latest vote, e.g.
+// `Poll "Dinner": Thai 3, Pizza 1 (4 of 5 voted)`. Cards are
 // read newest first and the note is at most maximumCardStateLines lines. It
 // is best effort: a card that cannot be read is left out rather than failing
 // the turn.
@@ -87,7 +90,8 @@ func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversa
 	}
 	changed := map[string]bool{}
 	for _, interaction := range latest {
-		if interaction.Repeatable && interaction.ItemKey != "" && !interaction.CreatedAt.Before(since) {
+		quiet := interaction.ItemKey != "" || interaction.ActionID == presentation.PollVoteAction
+		if interaction.Repeatable && quiet && !interaction.CreatedAt.Before(since) {
 			changed[interaction.ComponentID] = true
 		}
 	}
@@ -101,18 +105,28 @@ func (r *ConversationRunTurnRunner) cardStateLines(ctx context.Context, conversa
 	var lines []string
 	var perActor []*SurfaceInteraction
 	perActorRead := false
+	// readPerActor reads each person's latest interaction per item, once.
+	readPerActor := func() []*SurfaceInteraction {
+		if !perActorRead {
+			perActorRead = true
+			perActor, _ = r.conversations.ListLatestSurfaceInteractions(ctx, LatestSurfaceInteractionFilter{
+				Scope: conversation.Scope, ConversationID: conversation.ID, SurfaceID: reference.ID, Viewer: &viewer,
+			})
+		}
+		return perActor
+	}
 	eachCardComponent(surface.Components, func(component presentation.Component) {
 		if !changed[component.ID] {
 			return
 		}
-		if component.Type == "flashcards" {
-			if !perActorRead {
-				perActorRead = true
-				perActor, _ = r.conversations.ListLatestSurfaceInteractions(ctx, LatestSurfaceInteractionFilter{
-					Scope: conversation.Scope, ConversationID: conversation.ID, SurfaceID: reference.ID, Viewer: &viewer,
-				})
+		switch component.Type {
+		case "flashcards":
+			lines = append(lines, flashcardStateLines(component, readPerActor(), since, names)...)
+			return
+		case "poll":
+			if line, ok := r.pollStateLine(ctx, conversation, component, readPerActor()); ok {
+				lines = append(lines, line)
 			}
-			lines = append(lines, flashcardStateLines(component, perActor, since, names)...)
 			return
 		}
 		rule, err := presentation.Interaction(component, "")
@@ -181,6 +195,46 @@ func flashcardStateLines(component presentation.Component, latest []*SurfaceInte
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// pollStateLine tallies everyone's latest vote on a poll component.
+func (r *ConversationRunTurnRunner) pollStateLine(ctx context.Context, conversation *Conversation, component presentation.Component, latest []*SurfaceInteraction) (string, bool) {
+	votes := PollVotes(component.ID, latest)
+	var participants []string
+	if r.config.HumanParticipants != nil {
+		if people, err := r.config.HumanParticipants(ctx, conversation); err == nil {
+			for _, person := range people {
+				participants = append(participants, PollVoterKey(person))
+			}
+		}
+	}
+	tally, err := presentation.PollOutcome(component, votes, participants)
+	if err != nil {
+		return "", false
+	}
+	return presentation.PollStateLine(component, tally)
+}
+
+// PollVoterKey is the key PollVotes gives a person's vote.
+func PollVoterKey(participant ConversationParticipant) string {
+	return string(participant.Type) + ":" + participant.ID
+}
+
+// PollVotes collects each person's latest vote on one poll component, keyed
+// by PollVoterKey, from ListLatestSurfaceInteractions without AcrossActors.
+// Hosts pass it, with the human participants' keys, to
+// presentation.PollOutcome and presentation.EveryoneVoted.
+func PollVotes(componentID string, latest []*SurfaceInteraction) map[string][]string {
+	votes := map[string][]string{}
+	for _, interaction := range latest {
+		if interaction == nil || interaction.ComponentID != componentID || interaction.ActionID != presentation.PollVoteAction {
+			continue
+		}
+		if ids, ok := presentation.PollVote(interaction.Values); ok {
+			votes[PollVoterKey(ConversationParticipant{Type: interaction.ActorType, ID: interaction.ActorID})] = ids
+		}
+	}
+	return votes
 }
 
 func containsParticipant(list []ConversationParticipant, participant ConversationParticipant) bool {

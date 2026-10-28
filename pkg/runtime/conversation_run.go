@@ -678,6 +678,10 @@ type ConversationRunTurnRunnerConfig struct {
 	// the checks know which Agent published. Nil rejects bound or linked
 	// visuals and visuals with images.
 	VisualChecks func(run *AgentRun) presentation.ValidateOptions
+	// HumanParticipants lists the people in a conversation. The card state
+	// note uses it to say how many of them voted in a poll ("4 of 5
+	// voted"); without it the note counts only the votes ("4 voted").
+	HumanParticipants func(ctx context.Context, conversation *Conversation) ([]ConversationParticipant, error)
 }
 
 func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerConfig, error) {
