@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,13 +141,18 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 		t.Fatalf("pending work = %#v", pending)
 	}
 
-	// Commentary activity is recorded; other activity is not.
+	// Commentary and answer previews are recorded; other activity is not.
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("run_activity")+` (scope_kind,scope_id,run_id,sequence,id,event_type,created_at,payload)
 		VALUES ($1,$2,$3,1000,'activity-plain','run.note',now(),'{}'::jsonb), ($1,$2,$3,1001,'activity-commentary','turn.commentary',now(),'{}'::jsonb)`,
 		scope.Kind, scope.ID, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	expect("activity", map[WorkFamily]int{WorkFamilyActivity: 1})
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("run_activity")+` (scope_kind,scope_id,run_id,sequence,id,event_type,created_at,payload)
+		VALUES ($1,$2,$3,1002,'activity-preview','turn.answer_preview',now(),'{}'::jsonb)`, scope.Kind, scope.ID, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	expect("an answer preview", map[WorkFamily]int{WorkFamilyActivity: 1})
 
 	// Leaving a pause also wakes action claimers.
 	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("agent_runs")+` SET status='paused' WHERE id=$1`, run.ID); err != nil {
@@ -206,6 +212,23 @@ func TestPostgresWorkOutboxMigrationRollsBack(t *testing.T) {
 	}
 	if got := countTriggers("work_signal_%"); got != 0 {
 		t.Fatalf("NOTIFY triggers remain: %d", got)
+	}
+	previewTriggered := func() bool {
+		var definition string
+		if err := store.db.QueryRowContext(ctx, `SELECT pg_get_triggerdef(t.oid) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+			JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=$1 AND c.relname='run_activity' AND t.tgname='work_outbox_insert'`, store.schema).Scan(&definition); err != nil {
+			t.Fatal(err)
+		}
+		return strings.Contains(definition, "turn.answer_preview")
+	}
+	if !previewTriggered() {
+		t.Fatal("answer previews do not wake external conversation workers")
+	}
+	if err := store.RollbackPostgresMigrations(ctx, answerStreamSignalMigrationVersion-1); err != nil {
+		t.Fatal(err)
+	}
+	if previewTriggered() || countTriggers("work_outbox_%") != len(workOutboxTriggers()) {
+		t.Fatal("answer stream signal rollback kept preview wakes")
 	}
 	if err := store.RollbackPostgresMigrations(ctx, workOutboxMigrationVersion-1); err != nil {
 		t.Fatal(err)

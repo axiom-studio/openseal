@@ -156,8 +156,11 @@ func (w *ExternalConversationReplyWorker) projectItem(
 	if err != nil {
 		return nil, err
 	}
-	if run == nil || run.Status == AgentRunStatusCanceled {
+	if run == nil {
 		return nil, nil
+	}
+	if run.Status == AgentRunStatusCanceled {
+		return nil, w.retireAnswerStream(ctx, item)
 	}
 	if externalInboxItemIsFollowUp(item, run) {
 		return nil, nil // The Run's own trigger item delivers its single reply.
@@ -181,11 +184,27 @@ func (w *ExternalConversationReplyWorker) projectItem(
 	}
 	// Projection is already durable. Do not reinterpret an old item against a
 	// newer Skill version or enqueue another status clear while new work runs.
-	key := "external-conversation-reply-delivery:" + item.ID
-	existingID := stableExternalConversationID(item.Scope, item.EndpointID, "delivery", key)
-	existing, err := w.store.GetExternalConversationDelivery(ctx, item.Scope, existingID)
+	key := externalConversationReplyKey(item.ID)
+	existing, err := w.store.GetExternalConversationDelivery(ctx, item.Scope, stableExternalConversationID(item.Scope, item.EndpointID, "delivery", key))
 	if err != nil {
 		return nil, err
+	}
+	resend := false
+	if existing != nil && existing.Operation == capability.ConversationDeliveryMessageUpdate {
+		// A reply that finishes a streamed message stays pending until the edit
+		// settles. If the edit failed (the chat message was deleted, say), the
+		// reply is posted as a new message instead.
+		if existing.Status == ExternalConversationDeliveryDelivered {
+			return existing, nil
+		}
+		if !externalConversationDeliveryTerminal(existing.Status) {
+			return nil, errExternalReplyPending
+		}
+		key, resend = key+":resend", true
+		existing, err = w.store.GetExternalConversationDelivery(ctx, item.Scope, stableExternalConversationID(item.Scope, item.EndpointID, "delivery", key))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if existing != nil {
 		if existing.Scope != item.Scope || existing.EndpointID != item.EndpointID || existing.ConversationID != item.ConversationID ||
@@ -242,7 +261,7 @@ func (w *ExternalConversationReplyWorker) projectItem(
 				return nil, checkErr
 			}
 			if superseded {
-				return nil, nil
+				return nil, w.retireAnswerStream(ctx, item)
 			}
 		}
 		reply, ok := externalConversationRunReply(run)
@@ -274,18 +293,21 @@ func (w *ExternalConversationReplyWorker) projectItem(
 		}
 		message = posted.Message
 	}
-	externalThreadID := strings.TrimSpace(item.Event.ExternalThreadID)
-	if externalThreadID == "" && endpoint.Policy.ReplyMode == ExternalConversationReplyThread {
-		externalThreadID = strings.TrimSpace(item.Event.ExternalMessageID)
-	}
-	result, err := w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+	externalThreadID := externalConversationReplyThread(item, endpoint)
+	request := EnqueueExternalConversationDeliveryRequest{
 		Scope: item.Scope, EndpointID: endpoint.ID,
 		Operation:      capability.ConversationDeliveryMessageSend,
 		ConversationID: item.ConversationID, ChannelMessageID: message.ID,
 		ExternalConversationID: item.Event.ExternalConversationID,
 		ExternalThreadID:       externalThreadID,
-		IdempotencyKey:         "external-conversation-reply-delivery:" + item.ID,
-	})
+		IdempotencyKey:         key,
+	}
+	if !resend {
+		if err := w.finishAnswerStream(ctx, item, endpoint, adapter.Adapter, run, message, &request); err != nil {
+			return nil, err
+		}
+	}
+	result, err := w.transport.Enqueue(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -293,19 +315,62 @@ func (w *ExternalConversationReplyWorker) projectItem(
 	// after the reply preserves thread ordering so providers clear "Thinking…"
 	// only after the durable answer has been accepted.
 	busy, busyErr := externalThreadHasActiveWork(ctx, w.store, run)
-	if busyErr != nil || busy {
-		return result.Delivery, nil
+	if busyErr == nil && !busy {
+		_, _ = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+			Scope: item.Scope, EndpointID: endpoint.ID,
+			Operation:      capability.ConversationDeliveryTypingIndicator,
+			ConversationID: item.ConversationID, ChannelMessageID: message.ID,
+			ExternalConversationID: item.Event.ExternalConversationID,
+			ExternalThreadID:       externalThreadID,
+			Parameters:             map[string]interface{}{"status": ""},
+			IdempotencyKey:         "external-conversation-reply-status:" + item.ID,
+		})
 	}
-	_, _ = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
-		Scope: item.Scope, EndpointID: endpoint.ID,
-		Operation:      capability.ConversationDeliveryTypingIndicator,
-		ConversationID: item.ConversationID, ChannelMessageID: message.ID,
-		ExternalConversationID: item.Event.ExternalConversationID,
-		ExternalThreadID:       externalThreadID,
-		Parameters:             map[string]interface{}{"status": ""},
-		IdempotencyKey:         "external-conversation-reply-status:" + item.ID,
-	})
+	if request.Operation == capability.ConversationDeliveryMessageUpdate {
+		return nil, errExternalReplyPending
+	}
 	return result.Delivery, nil
+}
+
+// finishAnswerStream turns the committed reply into an edit of the message
+// its preview streamed into. A failed turn's partial preview, or a reply
+// with files an edit cannot carry, is deleted when the adapter can; the reply
+// is then posted as usual.
+func (w *ExternalConversationReplyWorker) finishAnswerStream(
+	ctx context.Context,
+	item *ExternalConversationInboxItem,
+	endpoint *ExternalConversationEndpoint,
+	adapter capability.ConversationAdapter,
+	run *AgentRun,
+	message *ChannelMessage,
+	request *EnqueueExternalConversationDeliveryRequest,
+) error {
+	stream, err := loadExternalAnswerStream(ctx, w.store, item)
+	if err != nil || stream == nil {
+		return err
+	}
+	if !stream.settled() {
+		return errExternalReplyPending
+	}
+	if !stream.live() || !containsConversationDeliveryOperation(adapter.Delivery.Operations, capability.ConversationDeliveryMessageUpdate) {
+		return nil
+	}
+	files := false
+	if containsConversationFeature(adapter.Features, capability.ConversationFeatureAttachments) {
+		for _, reference := range message.References {
+			files = files || reference.Kind == ConversationReferenceArtifact
+		}
+	}
+	if run.Status == AgentRunStatusFailed || files {
+		deleted, err := deleteAnswerStream(ctx, w.transport, item, endpoint, adapter.Delivery.Operations, stream)
+		if err != nil || deleted || files {
+			return err
+		}
+	}
+	request.Operation = capability.ConversationDeliveryMessageUpdate
+	request.Parameters = map[string]interface{}{"providerMessageId": stream.opened.ProviderMessageID}
+	request.ExternalThreadID = stream.opened.ExternalThreadID
+	return nil
 }
 
 func (w *ExternalConversationReplyWorker) findCanonicalReply(

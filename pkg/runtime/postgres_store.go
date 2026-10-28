@@ -469,6 +469,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateSurfaceInteractions(ctx, tx); err != nil {
 		return fmt.Errorf("surface interaction migration: %w", err)
 	}
+	if err := s.migrateAnswerStreamSignals(ctx, tx); err != nil {
+		return fmt.Errorf("answer stream work signal migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

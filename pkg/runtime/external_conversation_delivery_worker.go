@@ -197,6 +197,26 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 	if message == nil || message.Historical || message.Audience.Kind != ConversationAudienceChannel {
 		return fmt.Errorf("%w: canonical delivery message is unavailable", ErrInvalidExternalConversation)
 	}
+	if preview, ok := externalAnswerStreamPreview(delivery); ok {
+		// Once the committed reply is queued it owns the streamed message, so a
+		// late provisional edit must not overwrite it.
+		final, err := w.store.GetExternalConversationDelivery(ctx, delivery.Scope,
+			stableExternalConversationID(delivery.Scope, delivery.EndpointID, "delivery", externalConversationReplyKey(delivery.Correlation.ID)))
+		if err != nil {
+			return err
+		}
+		if final != nil {
+			return w.markFailed(ctx, delivery, "answer_superseded", "The committed reply replaced this preview.")
+		}
+		// The trigger message only anchors a preview; its provisional text is
+		// the body, with no references or files.
+		message = &ChannelMessage{
+			ID: message.ID, Scope: message.Scope, ConversationID: message.ConversationID, Sequence: message.Sequence,
+			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID},
+			Intent: MessageIntentAnswer, Content: preview, Audience: message.Audience,
+			ThreadRootID: message.ThreadRootID, ReplyToMessageID: message.ID, CreatedAt: message.CreatedAt,
+		}
+	}
 	deliveryEndpoint := cloneExternalConversationEndpoint(endpoint)
 	if origin := strings.TrimSpace(delivery.ExternalConversationID); origin != "" {
 		deliveryEndpoint.Address = origin
@@ -295,8 +315,11 @@ func (w *ExternalConversationDeliveryWorker) markDelivered(
 	now := w.now().UTC()
 	// Ephemeral status acknowledgements identify a thread, not a message.
 	// Recording them as outbound messages collides with earlier progress or
-	// reply mappings that share the thread timestamp.
-	if delivery.Operation != capability.ConversationDeliveryTypingIndicator {
+	// reply mappings that share the thread timestamp. A streamed preview's
+	// message is mapped by the committed reply that finishes it, and a
+	// deleted message needs no mapping.
+	_, preview := externalAnswerStreamPreview(delivery)
+	if delivery.Operation != capability.ConversationDeliveryTypingIndicator && delivery.Operation != capability.ConversationDeliveryMessageDelete && !preview {
 		mapping := &ExternalMessageMapping{
 			Scope: delivery.Scope, EndpointID: delivery.EndpointID, Direction: ExternalMessageOutbound,
 			ExternalMessageID: providerMessageID, ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,

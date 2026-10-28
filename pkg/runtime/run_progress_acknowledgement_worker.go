@@ -160,6 +160,12 @@ func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, sco
 			continue
 		}
 		result = append(result, updates...)
+		// The answer streams after the commentary that precedes it.
+		if stream, streamErr := w.projectAnswerStream(ctx, item); streamErr != nil {
+			processErrors = append(processErrors, fmt.Errorf("stream channel answer for inbox item %s: %w", item.ID, streamErr))
+		} else if stream != nil {
+			result = append(result, stream)
+		}
 		if !renderStatus {
 			status, statusErr := w.projectThreadStatus(ctx, item)
 			if statusErr != nil {

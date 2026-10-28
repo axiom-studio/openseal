@@ -15,7 +15,14 @@ const (
 	// triggers are superseded by the work outbox.
 	workSignalMigrationVersion int64 = 63
 	workOutboxMigrationVersion int64 = 64
+	// answerStreamSignalMigrationVersion also records answer previews, which
+	// external conversation workers stream into connector chats.
+	answerStreamSignalMigrationVersion int64 = 66
 )
+
+// workActivityTrigger records the Activity external conversation workers
+// project into chats: commentary messages and streamed answers.
+const workActivityTrigger = `NEW.event_type IN ('turn.commentary','turn.answer_preview')`
 
 var _ WorkOutboxStore = (*PostgresStore)(nil)
 var _ ActionDeadlineStore = (*PostgresStore)(nil)
@@ -99,7 +106,7 @@ func workOutboxTriggers() []workOutboxTrigger {
 	add("external_conversation_deliveries", "", leaseClaimabilityChanged, `('external', `+leasedDue("leased")+`, false)`)
 	add("external_conversation_endpoints", "", statusChanged+` OR OLD.revision IS DISTINCT FROM NEW.revision`, `('external', NULL, false)`)
 	add("callback_events", "", leaseClaimabilityChanged, `('external', `+leasedDue("leased")+`, false)`)
-	add("run_activity", `NEW.event_type = 'turn.commentary'`, "", `('activity', NULL, false)`)
+	triggers = append(triggers, workActivityOutboxTrigger(workActivityTrigger))
 	add("workforce_change_sets", "", statusChanged, `('authoring', NULL, false)`)
 	return triggers
 }
@@ -172,22 +179,7 @@ func (s *PostgresStore) migrateWorkOutbox(ctx context.Context, tx *sql.Tx) error
 	}
 	statements = append(statements, `DROP FUNCTION IF EXISTS `+s.table("notify_work_signal")+`()`)
 	for _, trigger := range workOutboxTriggers() {
-		when := ""
-		if trigger.when != "" {
-			when = ` WHEN (` + trigger.when + `)`
-		}
-		// Rows without a deadline are due at commit; past deadlines are due now.
-		statements = append(statements, `CREATE OR REPLACE FUNCTION `+s.table(trigger.function())+`() RETURNS trigger LANGUAGE plpgsql AS $$
-			BEGIN
-			INSERT INTO `+outbox+`(family, scope_kind, scope_id, due_at)
-			SELECT item.family, NEW.scope_kind, NEW.scope_id, GREATEST(now(), COALESCE(item.due::timestamptz, now()))
-			FROM (VALUES `+strings.Join(trigger.rows, ", ")+`) AS item(family, due, lease)
-			WHERE NOT item.lease OR item.due IS NOT NULL;
-			RETURN NULL;
-			END $$`,
-			`DROP TRIGGER IF EXISTS `+trigger.name+` ON `+s.table(trigger.table)+`;
-			CREATE TRIGGER `+trigger.name+` AFTER `+trigger.event+` ON `+s.table(trigger.table)+` FOR EACH ROW`+when+`
-			EXECUTE FUNCTION `+s.table(trigger.function())+`()`)
+		statements = append(statements, s.workOutboxTriggerStatements(trigger)...)
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
@@ -196,6 +188,52 @@ func (s *PostgresStore) migrateWorkOutbox(ctx context.Context, tx *sql.Tx) error
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name) VALUES($1,'work outbox') ON CONFLICT(version) DO NOTHING`, workOutboxMigrationVersion)
 	return err
+}
+
+func (s *PostgresStore) workOutboxTriggerStatements(trigger workOutboxTrigger) []string {
+	when := ""
+	if trigger.when != "" {
+		when = ` WHEN (` + trigger.when + `)`
+	}
+	// Rows without a deadline are due at commit; past deadlines are due now.
+	return []string{`CREATE OR REPLACE FUNCTION ` + s.table(trigger.function()) + `() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN
+			INSERT INTO ` + s.table("work_outbox") + `(family, scope_kind, scope_id, due_at)
+			SELECT item.family, NEW.scope_kind, NEW.scope_id, GREATEST(now(), COALESCE(item.due::timestamptz, now()))
+			FROM (VALUES ` + strings.Join(trigger.rows, ", ") + `) AS item(family, due, lease)
+			WHERE NOT item.lease OR item.due IS NOT NULL;
+			RETURN NULL;
+			END $$`,
+		`DROP TRIGGER IF EXISTS ` + trigger.name + ` ON ` + s.table(trigger.table) + `;
+			CREATE TRIGGER ` + trigger.name + ` AFTER ` + trigger.event + ` ON ` + s.table(trigger.table) + ` FOR EACH ROW` + when + `
+			EXECUTE FUNCTION ` + s.table(trigger.function()) + `()`}
+}
+
+func workActivityOutboxTrigger(when string) workOutboxTrigger {
+	return workOutboxTrigger{table: "run_activity", name: "work_outbox_insert", event: "INSERT", when: when, rows: []string{`('activity', NULL, false)`}}
+}
+
+func (s *PostgresStore) migrateAnswerStreamSignals(ctx context.Context, tx *sql.Tx) error {
+	applied, err := s.postgresMigrationApplied(ctx, tx, answerStreamSignalMigrationVersion)
+	if err != nil || applied {
+		return err
+	}
+	for _, statement := range s.workOutboxTriggerStatements(workActivityOutboxTrigger(workActivityTrigger)) {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name) VALUES($1,'answer stream work signal') ON CONFLICT(version) DO NOTHING`, answerStreamSignalMigrationVersion)
+	return err
+}
+
+func (s *PostgresStore) rollbackAnswerStreamSignals(ctx context.Context, tx *sql.Tx) error {
+	for _, statement := range s.workOutboxTriggerStatements(workActivityOutboxTrigger(`NEW.event_type = 'turn.commentary'`)) {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *PostgresStore) rollbackWorkOutbox(ctx context.Context, tx *sql.Tx) error {

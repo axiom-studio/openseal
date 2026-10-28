@@ -238,6 +238,11 @@ type HostedTurnRequest struct {
 	// pressure. Older action results are shortened further in the model view,
 	// and a host shortens context it retains itself. Absent from model input.
 	ContextPressure *HostedContextPressure `json:"contextPressure,omitempty"`
+	// ExternalChannelReply is a trusted host hint: this turn answers a
+	// connector chat, whose reply streams by editing a provider message from
+	// the kernel's answer preview Activity. A host that streams previews
+	// elsewhere should still report one to the kernel about every 1.5s.
+	ExternalChannelReply bool `json:"externalChannelReply,omitempty"`
 }
 
 // HostedTurnExecutionFailure is emitted by the trusted host after a native
@@ -861,6 +866,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		pressure := *input.contextPressure
 		request.ContextPressure = &pressure
 	}
+	request.ExternalChannelReply = input.externalChannelReply
 	// A chat's own files are every conversation turn's Workspace.
 	if conversationID, _ := input.Run.Context["conversationId"].(string); strings.TrimSpace(conversationID) != "" {
 		request.Workspace = workspace.ChatAuthority(conversationID)

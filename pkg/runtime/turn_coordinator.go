@@ -34,6 +34,9 @@ type TurnExecutionContext struct {
 	// turn with less history once when its host reports context pressure.
 	contextReducible bool
 	contextPressure  *HostedContextPressure
+	// externalChannelReply marks a turn whose answer streams into a connector
+	// chat. It only asks the host to report previews; delivery is the kernel's.
+	externalChannelReply bool
 }
 
 // TurnRunner performs one bounded, proposal-only reasoning step. External side

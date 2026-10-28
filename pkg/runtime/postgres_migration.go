@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 65
+const currentPostgresSchemaVersion int64 = 66
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -77,6 +77,11 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == answerStreamSignalMigrationVersion {
+			if err := s.rollbackAnswerStreamSignals(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if version == workOutboxMigrationVersion {
 			if err := s.rollbackWorkOutbox(ctx, tx); err != nil {
 				return err

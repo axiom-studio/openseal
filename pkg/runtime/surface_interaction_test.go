@@ -329,7 +329,7 @@ func TestPostgresSurfaceInteractionMigrationRollsBackAndReapplies(t *testing.T) 
 		}
 		return exists
 	}
-	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != surfaceInteractionMigrationVersion || !exists() {
+	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion || !exists() {
 		t.Fatalf("schema version = %d, %v; table %t", version, err, exists())
 	}
 	if err := store.RollbackPostgresMigrations(ctx, surfaceInteractionMigrationVersion-1); err != nil {
@@ -341,7 +341,7 @@ func TestPostgresSurfaceInteractionMigrationRollsBackAndReapplies(t *testing.T) 
 	if err := store.migrate(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != surfaceInteractionMigrationVersion || !exists() {
+	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion || !exists() {
 		t.Fatalf("after reapply: version %d, %v; table %t", version, err, exists())
 	}
 }
