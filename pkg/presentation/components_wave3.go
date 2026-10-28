@@ -778,3 +778,20 @@ func formatNumber(value float64) string {
 	}
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
+
+// RoutineBindings lists the ids of the routines (runbook activations) that
+// routine components of surface are bound to, in order and without repeats.
+// Hosts link them to the conversation when the visual is stored, so the
+// conversation's change stream carries their live state.
+func RoutineBindings(surface Surface) []string {
+	var ids []string
+	seen := map[string]bool{}
+	walk(surface.Components, func(component *Component, _ string, _ int) bool {
+		if component.Type == "routine" && component.Binding != nil && component.Binding.Kind == BindingRunbook && !seen[component.Binding.ID] {
+			seen[component.Binding.ID] = true
+			ids = append(ids, component.Binding.ID)
+		}
+		return true
+	})
+	return ids
+}

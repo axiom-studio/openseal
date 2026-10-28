@@ -842,6 +842,10 @@ func cloneConversation(in *Conversation) *Conversation {
 		return nil
 	}
 	out := *in
+	out.RunbookActivationIDs = append([]string(nil), in.RunbookActivationIDs...)
+	if len(out.RunbookActivationIDs) == 0 {
+		out.RunbookActivationIDs = nil
+	}
 	if in.Participation != nil {
 		participation := *in.Participation
 		out.Participation = &participation

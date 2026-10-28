@@ -76,6 +76,11 @@ type Conversation struct {
 	// proposed for this conversation. Stores persist it explicitly; it
 	// defaults to auto for new and pre-existing conversations.
 	ApprovalMode ConversationApprovalMode `json:"approvalMode"`
+	// RunbookActivationIDs are the routines (runbook activations) that
+	// routine visuals in this conversation show, oldest first, at most
+	// MaximumConversationRunbooks. The change stream carries their live
+	// state. See ConversationService.LinkRunbooks.
+	RunbookActivationIDs []string `json:"runbookActivationIds,omitempty"`
 }
 
 // ConversationParticipation records an explicit host-authorized opt-in. The
@@ -102,6 +107,16 @@ func (c *Conversation) Validate() error {
 		if err := c.Origin.Validate(); err != nil {
 			return err
 		}
+	}
+	if len(c.RunbookActivationIDs) > MaximumConversationRunbooks {
+		return fmt.Errorf("%w: at most %d linked routines", ErrInvalidConversation, MaximumConversationRunbooks)
+	}
+	linked := make(map[string]bool, len(c.RunbookActivationIDs))
+	for _, id := range c.RunbookActivationIDs {
+		if !validOpaqueIdentifier(id, 128) || linked[id] {
+			return fmt.Errorf("%w: linked routine ids must be distinct portable identifiers", ErrInvalidConversation)
+		}
+		linked[id] = true
 	}
 	if c.Revision <= 0 || c.LastSequence < 0 || c.CreatedAt.IsZero() || c.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: positive revision, sequence, and timestamps are required", ErrInvalidConversation)

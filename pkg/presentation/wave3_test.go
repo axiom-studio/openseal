@@ -407,3 +407,20 @@ func TestWave3SchemaEntries(t *testing.T) {
 		t.Fatal("format lists an empty binding kind")
 	}
 }
+
+func TestRoutineBindings(t *testing.T) {
+	surface := one(
+		routineOf(&Binding{Kind: BindingRunbook, ID: "act-1"}),
+		Component{ID: "s", Type: "section", Children: []Component{
+			{ID: "r2", Type: "routine", Summary: "x", Binding: &Binding{Kind: BindingRunbook, ID: "act-2"}},
+			{ID: "r3", Type: "routine", Summary: "x", Binding: &Binding{Kind: BindingRunbook, ID: "act-1"}},
+			{ID: "b", Type: "actions", Binding: &Binding{Kind: BindingRunbook, ID: "act-3"}, Actions: []Action{{ID: "p", Label: "Pause", Kind: ActionEntity, Command: "pause"}}},
+		}},
+	)
+	if got := strings.Join(RoutineBindings(surface), ","); got != "act-1,act-2" {
+		t.Fatalf("RoutineBindings = %s", got)
+	}
+	if RoutineBindings(one(agendaOf())) != nil {
+		t.Fatal("agenda has routines")
+	}
+}

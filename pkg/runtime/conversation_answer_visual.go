@@ -56,8 +56,24 @@ func (r *ConversationRunTurnRunner) teamAnswerVisual(run *AgentRun, triggerID st
 // storeAnswerVisual stores the visual that rides on an Agent's answer as an
 // interactive surface artifact (version 1) with the given ID and returns the
 // reference the answer message carries. No receipt is posted: the answer is
-// the delivery. One-to-one and Team answers share it.
+// the delivery. One-to-one and Team answers share it. The routines its
+// routine components show are linked to the conversation (also on a
+// replay, in case the first attempt stopped in between).
 func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *AgentRun, participantID, id string, visual presentation.Visual) (ConversationReference, error) {
+	reference, err := r.storeAnswerVisualArtifact(ctx, run, participantID, id, visual)
+	if err != nil {
+		return ConversationReference{}, err
+	}
+	if routines := presentation.RoutineBindings(visual.Surface(presentation.StateReady)); len(routines) > 0 {
+		conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+		if _, err := r.conversations.LinkRunbooks(ctx, run.Scope, conversationID, routines); err != nil {
+			return ConversationReference{}, fmt.Errorf("link the visual's routines to the chat: %w", err)
+		}
+	}
+	return reference, nil
+}
+
+func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Context, run *AgentRun, participantID, id string, visual presentation.Visual) (ConversationReference, error) {
 	if r.artifacts == nil || r.config.AttachmentContent == nil {
 		return ConversationReference{}, errors.New("answer visuals require artifact and content storage")
 	}
