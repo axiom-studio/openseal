@@ -52,6 +52,9 @@ type ConversationChangeSet struct {
 	// CredentialRequests are every pending in-chat credential request for
 	// this conversation plus the most recently settled ones.
 	CredentialRequests []*ConversationCredentialRequest `json:"credentialRequests"`
+	// Runbooks are the live state of the routines shown by routine visuals
+	// in this conversation and of the scheduled tasks created from it.
+	Runbooks []*ConversationRunbook `json:"runbooks"`
 	// SurfaceInteractions are durable deltas like Messages: interactions
 	// stored after the cursor, in Sequence order. SurfaceInteractionsChanged
 	// is set when the page carries any, and on the initial page.
@@ -62,6 +65,7 @@ type ConversationChangeSet struct {
 	ApprovalsChanged           bool                  `json:"approvalsChanged"`
 	SkillSetupRequestsChanged  bool                  `json:"skillSetupRequestsChanged"`
 	CredentialRequestsChanged  bool                  `json:"credentialRequestsChanged"`
+	RunbooksChanged            bool                  `json:"runbooksChanged"`
 	SurfaceInteractionsChanged bool                  `json:"surfaceInteractionsChanged"`
 	Cursor                     string                `json:"cursor"`
 	HasChanges                 bool                  `json:"hasChanges"`
@@ -81,6 +85,7 @@ type conversationChangeCursor struct {
 	ApprovalDigest       string `json:"approvalDigest,omitempty"`
 	SkillSetupDigest     string `json:"skillSetupDigest,omitempty"`
 	CredentialDigest     string `json:"credentialDigest,omitempty"`
+	RunbookDigest        string `json:"runbookDigest,omitempty"`
 }
 
 type ConversationChangeService struct {
@@ -90,6 +95,7 @@ type ConversationChangeService struct {
 	approvals     conversationApprovalStore
 	skillSetups   SkillSetupRequestReader
 	credentials   CredentialRequestStore
+	runbooks      RunbookActivationStore
 	now           func() time.Time
 }
 
@@ -104,6 +110,7 @@ func NewConversationChangeService(conversationStore ConversationStore, portfolio
 		service.skillSetups = store.ListSkillSetupRequests
 	}
 	service.credentials, _ = portfolio.(CredentialRequestStore)
+	service.runbooks, _ = portfolio.(RunbookActivationStore)
 	return service, nil
 }
 
@@ -254,6 +261,19 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		credentialRequests = []*ConversationCredentialRequest{}
 	}
 
+	runbooks, err := s.listConversationRunbooks(ctx, conversation)
+	if err != nil {
+		return nil, err
+	}
+	runbookDigest, err := conversationRunbookProjectionDigest(runbooks)
+	if err != nil {
+		return nil, err
+	}
+	runbooksChanged := initial || runbookDigest != cursor.RunbookDigest
+	if !runbooksChanged {
+		runbooks = []*ConversationRunbook{}
+	}
+
 	activeAt := req.ActiveAt
 	if activeAt.IsZero() {
 		activeAt = s.now().UTC()
@@ -276,21 +296,21 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		Version: conversationChangeCursorVersion, ConversationID: conversationID,
 		ConversationRevision: conversation.Revision, MessageSequence: nextMessageSequence,
 		RoundRevision: nextRoundRevision, InteractionSequence: nextInteractionSequence, RunDigest: runDigest, ActivityDigest: activityDigest, PresenceDigest: presenceDigest,
-		ApprovalDigest: approvalDigest, SkillSetupDigest: skillSetupDigest, CredentialDigest: credentialDigest,
+		ApprovalDigest: approvalDigest, SkillSetupDigest: skillSetupDigest, CredentialDigest: credentialDigest, RunbookDigest: runbookDigest,
 	}
 	encodedCursor, err := encodeConversationChangeCursor(next)
 	if err != nil {
 		return nil, err
 	}
 	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 || len(interactions) > 0 ||
-		runsChanged || activityChanged || presenceChanged || approvalsChanged || skillSetupsChanged || credentialsChanged
+		runsChanged || activityChanged || presenceChanged || approvalsChanged || skillSetupsChanged || credentialsChanged || runbooksChanged
 	return &ConversationChangeSet{
 		Conversation: cloneConversation(conversation), Messages: cloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
 		Runs: cloneAgentRuns(projectedRuns), Activity: cloneConversationActivity(projectedActivity), Presence: cloneConversationPresences(projectedPresence),
-		Approvals: approvals, SkillSetupRequests: skillSetups, CredentialRequests: credentialRequests,
+		Approvals: approvals, SkillSetupRequests: skillSetups, CredentialRequests: credentialRequests, Runbooks: runbooks,
 		SurfaceInteractions: interactions, SurfaceInteractionsChanged: interactionsChanged,
 		RunsChanged: runsChanged, ActivityChanged: activityChanged, PresenceChanged: presenceChanged,
-		ApprovalsChanged: approvalsChanged, SkillSetupRequestsChanged: skillSetupsChanged, CredentialRequestsChanged: credentialsChanged,
+		ApprovalsChanged: approvalsChanged, SkillSetupRequestsChanged: skillSetupsChanged, CredentialRequestsChanged: credentialsChanged, RunbooksChanged: runbooksChanged,
 		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore || interactionHasMore,
 	}, nil
 }
