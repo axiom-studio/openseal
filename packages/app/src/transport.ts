@@ -123,6 +123,7 @@ export function httpTransport(options: HttpOptions): Transport {
         case "run.get": return send("GET", `/runs/${encodeURIComponent(p.runId)}`);
         case "run.cancel": return send("POST", `/runs/${encodeURIComponent(p.runId)}/cancel`);
         case "data.get": return send("GET", `/data/${encodeURIComponent(p.name)}`);
+        case "interaction.post": return Promise.reject(new OpenSealAppError("not_allowed", "Only an app in its chat can report results to its Agent."));
         default: return Promise.reject(new OpenSealAppError("invalid_request", `Unknown request ${String(method)}.`));
       }
     },

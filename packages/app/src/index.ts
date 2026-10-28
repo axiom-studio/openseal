@@ -4,14 +4,16 @@
  *   import { runAgent, getData } from "@openseal/app";
  *   const run = await runAgent({ message: "Research NVDA", values: { ticker: "NVDA" } });
  *   const result = await run.done();
+ *   await postInteraction({ score: 8, of: 10 }, { summary: "Scored 8 out of 10" });
  *
  * Inside the chat's canvas it talks to the host page. A downloaded app calls
  * configure() once with the OpenSeal address and its app key.
  */
-import { type DataSnapshot, type Json, type RunRequest, type RunState, TERMINAL_STATUSES } from "./protocol.ts";
+import { type DataSnapshot, type Interaction, type Json, type RunRequest, type RunState, TERMINAL_STATUSES, interactionRequestProblem } from "./protocol.ts";
 import { type HostWindow, type HttpOptions, OpenSealAppError, type Transport, frameTransport, httpTransport } from "./transport.ts";
 
-export type { AppErrorCode, DataSnapshot, Json, RunRequest, RunState, RunStatus } from "./protocol.ts";
+export type { AppErrorCode, DataSnapshot, Interaction, Json, RunRequest, RunState, RunStatus } from "./protocol.ts";
+export { MAXIMUM_INTERACTION_SUMMARY_LENGTH, MAXIMUM_INTERACTION_VALUES_BYTES } from "./protocol.ts";
 export { OpenSealAppError } from "./transport.ts";
 export type { HttpOptions } from "./transport.ts";
 
@@ -133,4 +135,18 @@ export function watchData<T = Json>(name: string, listener: (snapshot: DataSnaps
     }
   })();
   return () => { active = false; stopped(); stop(); };
+}
+
+/**
+ * Report a result to the Agent, such as a finished quiz's score. The Agent
+ * reads it in the chat and answers. values is a plain JSON object of at
+ * most 4 KB; summary is one line of at most 200 characters. Only an app in
+ * its own chat can report. Resolves with the stored result.
+ */
+export async function postInteraction(values: Record<string, Json>, options: { summary?: string } = {}): Promise<Interaction> {
+  const summary = typeof options.summary === "string" ? options.summary.trim() : options.summary;
+  const request = { values, ...(summary !== undefined && summary !== "" ? { summary } : {}) };
+  const problem = interactionRequestProblem(request);
+  if (problem) throw new OpenSealAppError("invalid_request", problem);
+  return await current().request("interaction.post", request);
 }

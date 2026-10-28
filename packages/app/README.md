@@ -19,6 +19,18 @@ export default function App() {
 
 Without React: `runAgent`, `getData` and `watchData` from `@openseal/app`.
 
+An app can also report a result to its Agent, which reads it in the chat and
+answers:
+
+```ts
+import { postInteraction } from "@openseal/app";
+await postInteraction({ score: 8, of: 10, topic: "times tables" }, { summary: "Scored 8 out of 10" });
+```
+
+`values` is a plain JSON object of at most 4 KB and `summary` one line of at
+most 200 characters. Only an app in its own chat can report; elsewhere the
+request fails with `not_allowed`.
+
 ## Where it runs
 
 - **In OpenSeal's canvas** nothing needs configuring. The app runs in a

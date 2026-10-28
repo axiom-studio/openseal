@@ -40,11 +40,34 @@ export interface DataSnapshot<T = Json> {
   updatedAt: string;
 }
 
+/** At most 4 KB of JSON in a reported result's values. */
+export const MAXIMUM_INTERACTION_VALUES_BYTES = 4 * 1024;
+/** At most 200 characters in a reported result's summary. */
+export const MAXIMUM_INTERACTION_SUMMARY_LENGTH = 200;
+
+/** A result the app reports to its Agent, such as a finished quiz's score. */
+export interface InteractionRequest {
+  /** A plain JSON object of at most 4 KB, e.g. { score: 8, of: 10, topic: "times tables" }. */
+  values: Record<string, Json>;
+  /** One line of plain text of at most 200 characters, e.g. "Scored 8 out of 10". */
+  summary?: string;
+}
+
+/** A reported result as the chat stored it. */
+export interface Interaction {
+  id: string;
+  values: Record<string, Json>;
+  summary?: string;
+  /** When it was stored (ISO 8601). */
+  createdAt: string;
+}
+
 export interface Methods {
   "run.start": { params: RunRequest; result: RunState };
   "run.get": { params: { runId: string }; result: RunState };
   "run.cancel": { params: { runId: string }; result: RunState };
   "data.get": { params: { name: string }; result: DataSnapshot | null };
+  "interaction.post": { params: InteractionRequest; result: Interaction };
 }
 export type Method = keyof Methods;
 
@@ -107,6 +130,32 @@ export function isEventMessage(value: unknown): value is EventMessage {
 export function isRequestMessage(value: unknown): value is RequestMessage {
   return object(value) && value.kind === "openseal-app-request" && value.version === PROTOCOL_VERSION &&
     typeof value.id === "string" && typeof value.method === "string" && object(value.params);
+}
+
+const plainObject = (value: unknown): value is Record<string, unknown> =>
+  object(value) && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+
+/**
+ * Why a reported result would be refused, or undefined when it is valid:
+ * values must be a plain JSON object of at most 4 KB and the summary, when
+ * given, one line of at most 200 characters. Apps and hosts check the same.
+ */
+export function interactionRequestProblem(request: unknown): string | undefined {
+  if (!plainObject(request)) return "A result needs values.";
+  const { values, summary } = request;
+  if (!plainObject(values)) return "Result values must be a plain object.";
+  let encoded: string | undefined;
+  try { encoded = JSON.stringify(values); } catch { return "Result values must be JSON."; }
+  if (encoded === undefined || new TextEncoder().encode(encoded).length > MAXIMUM_INTERACTION_VALUES_BYTES) {
+    return `Result values must be at most ${MAXIMUM_INTERACTION_VALUES_BYTES / 1024} KB of JSON.`;
+  }
+  if (summary !== undefined) {
+    if (typeof summary !== "string" || [...summary.trim()].length > MAXIMUM_INTERACTION_SUMMARY_LENGTH) {
+      return `A result summary must be text of at most ${MAXIMUM_INTERACTION_SUMMARY_LENGTH} characters.`;
+    }
+    if (/[\u0000-\u001f\u007f-\u009f]/.test(summary.trim())) return "A result summary must be one line of plain text.";
+  }
+  return undefined;
 }
 
 export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(["completed", "failed", "canceled"]);

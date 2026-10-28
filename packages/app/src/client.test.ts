@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { getData, runAgent, useTransport, watchData } from "./index.ts";
-import { PROTOCOL_VERSION, type RequestMessage, type RunState } from "./protocol.ts";
+import { getData, postInteraction, runAgent, useTransport, watchData } from "./index.ts";
+import { PROTOCOL_VERSION, type RequestMessage, type RunState, interactionRequestProblem } from "./protocol.ts";
 import { OpenSealAppError, type HostWindow, type Transport, frameTransport, httpTransport } from "./transport.ts";
 
 afterEach(() => useTransport(undefined));
@@ -122,4 +122,44 @@ test("http transport sends the app key and maps status codes", async () => {
   assert.equal((calls[0].init.headers as Record<string, string>).authorization, "Bearer key-123");
   assert.equal(await transport.request("data.get", { name: "missing" }), null);
   await assert.rejects(transport.request("run.get", { runId: "run-9" }), (error: unknown) => error instanceof OpenSealAppError && error.code === "limit_reached" && error.message === "Daily credit limit reached.");
+});
+
+test("postInteraction sends values and a trimmed summary and returns the stored result", async () => {
+  const sent: unknown[] = [];
+  const fake = fakeTransport((method, params) => {
+    sent.push([method, params]);
+    return { id: "int-1", values: params.values, summary: params.summary, createdAt: "2026-10-28T09:00:00Z" };
+  });
+  useTransport(fake.transport);
+  const stored = await postInteraction({ score: 8, of: 10, topic: "times tables" }, { summary: "  Scored 8 out of 10 " });
+  assert.deepEqual(sent, [["interaction.post", { values: { score: 8, of: 10, topic: "times tables" }, summary: "Scored 8 out of 10" }]]);
+  assert.equal(stored.id, "int-1");
+  await postInteraction({ done: true }, { summary: "  " });
+  assert.deepEqual(sent[1], ["interaction.post", { values: { done: true } }]);
+});
+
+test("postInteraction refuses invalid results before contacting OpenSeal", async () => {
+  useTransport(fakeTransport(() => { throw new Error("should not be called"); }).transport);
+  const invalid = (error: unknown) => error instanceof OpenSealAppError && error.code === "invalid_request";
+  await assert.rejects(postInteraction([1, 2] as never), invalid);
+  await assert.rejects(postInteraction(null as never), invalid);
+  await assert.rejects(postInteraction(new Date() as never), invalid);
+  await assert.rejects(postInteraction({ text: "a".repeat(4 * 1024) }), invalid);
+  await assert.rejects(postInteraction({ score: 1 }, { summary: "é".repeat(201) }), invalid);
+  await assert.rejects(postInteraction({ score: 1 }, { summary: "line one\nline two" }), invalid);
+  await assert.rejects(postInteraction({ score: 1 }, { summary: 8 as never }), invalid);
+});
+
+test("interactionRequestProblem accepts the limits exactly", () => {
+  const room = 4 * 1024 - JSON.stringify({ t: "" }).length;
+  assert.equal(interactionRequestProblem({ values: { t: "a".repeat(room) } }), undefined);
+  assert.notEqual(interactionRequestProblem({ values: { t: "a".repeat(room + 1) } }), undefined);
+  assert.equal(interactionRequestProblem({ values: {}, summary: "😀".repeat(200) }), undefined);
+  assert.notEqual(interactionRequestProblem({ values: {} , summary: "😀".repeat(201) }), undefined);
+});
+
+test("only an app in its chat can report results", async () => {
+  const transport = httpTransport({ baseUrl: "https://seal.example/api/apps/v1", appId: "app-1", appKey: "key",
+    fetch: (async () => { throw new Error("should not be called"); }) as typeof fetch });
+  await assert.rejects(transport.request("interaction.post", { values: { score: 1 } }), (error: unknown) => error instanceof OpenSealAppError && error.code === "not_allowed");
 });
