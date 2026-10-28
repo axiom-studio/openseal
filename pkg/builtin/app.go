@@ -45,6 +45,18 @@ func appActions() map[string]skill.Action {
 			}),
 			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{AppDataArtifactType}},
+		ReadAppData: {Name: ReadAppData,
+			Description: "Read a dataset you saved for one of your apps in this chat.",
+			InputSchema: object([]interface{}{"app", "name"}, map[string]interface{}{
+				"app":  map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1024, "description": "The app's directory, such as apps/tracker, or its appId."},
+				"name": map[string]interface{}{"type": "string", "pattern": AppDataNamePattern},
+			}),
+			OutputSchema: object([]interface{}{"name", "value", "version", "updatedAt"}, map[string]interface{}{
+				"name": map[string]interface{}{"type": "string"}, "value": map[string]interface{}{"description": "The saved JSON value."},
+				"version": map[string]interface{}{"type": "integer", "minimum": 1}, "updatedAt": map[string]interface{}{"type": "string"},
+			}),
+			SideEffect: skill.SideEffectRead, Risk: skill.RiskLevelRead, Idempotency: skill.IdempotencySupported,
+			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}},
 		PublishApp: {Name: PublishApp,
 			Description:  "Publish the last saved version of the app in a directory at a stable public internet address. Later saves stay private until it is published again. Only when the user asks for a public link.",
 			InputSchema:  object([]interface{}{"path"}, map[string]interface{}{"path": appPath}),

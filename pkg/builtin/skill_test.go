@@ -1,6 +1,9 @@
 package builtin
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestBuiltinAttachmentReadIsReferenceOnly(t *testing.T) {
 	d := SkillDefinition()
@@ -35,5 +38,26 @@ func TestProfileImageActionIsBoundedSelfOnlyWrite(t *testing.T) {
 	properties := a.InputSchema["properties"].(map[string]interface{})
 	if len(properties) != 1 || properties["prompt"] == nil || a.InputSchema["additionalProperties"] != false || string(a.Risk) != "write" || string(a.SideEffect) != "write" || a.Retry.MaxAttempts != 1 {
 		t.Fatal("profile action must not accept target, credentials, URLs or automatic retries")
+	}
+}
+
+func TestAppDataReadAndPictureStyleActions(t *testing.T) {
+	d := SkillDefinition()
+	if d.Version != "2.1.0" {
+		t.Fatalf("version = %s", d.Version)
+	}
+	read := d.Actions[ReadAppData]
+	if read.Description != "Read a dataset you saved for one of your apps in this chat." || string(read.Risk) != "read" || string(read.SideEffect) != "read" {
+		t.Fatalf("read_app_data = %#v", read)
+	}
+	style := d.Actions[SetImageStyle]
+	if !strings.HasPrefix(style.Description, "Remember the picture style this user asked for") || style.InputSchema["additionalProperties"] != false || style.Retry.MaxAttempts != 1 {
+		t.Fatalf("set_image_style = %#v", style)
+	}
+	if properties := style.InputSchema["properties"].(map[string]interface{}); len(properties) != 1 || properties["style"] == nil {
+		t.Fatal("set_image_style must take only the style; the host decides whose it is")
+	}
+	if image := d.Actions[GenerateImage].InputSchema["properties"].(map[string]interface{})["style"].(map[string]interface{}); image["maxLength"] != MaximumImageStyleRunes {
+		t.Fatalf("generate_image style = %#v", image)
 	}
 }

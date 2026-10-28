@@ -30,6 +30,11 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 			input.Bound.Action.Name == presentation.UpdateVisual {
 		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "create bounded conversation artifact"}, nil
 	}
+	// Remembering the asking user's own picture style changes only how their
+	// later images look.
+	if input.Bound.Definition.ID == builtin.SkillID && input.Bound.Definition.Version == builtin.SkillVersion && input.Bound.Action.Name == builtin.SetImageStyle {
+		return runtime.ActionPolicyDecision{Disposition: runtime.ActionDispositionAllow, Reason: "remember the user's picture style"}, nil
+	}
 	// Starting an already reviewed Runbook does not widen authority: the
 	// activation pins its owner, Objective, definition, policy, budget, and
 	// downstream approval requirements. The Runbook validator has proved those

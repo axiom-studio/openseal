@@ -24,6 +24,8 @@ func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
 		{"present files", builtin.SkillDefinition(), builtin.Present, ActionDispositionAllow},
 		{"sheet", builtin.SkillDefinition(), builtin.CreateSheet, ActionDispositionAllow},
 		{"app data", builtin.SkillDefinition(), builtin.SaveAppData, ActionDispositionAllow},
+		{"read app data", builtin.SkillDefinition(), builtin.ReadAppData, ActionDispositionAllow},
+		{"picture style", builtin.SkillDefinition(), builtin.SetImageStyle, ActionDispositionAllow},
 		{"update visual", presentation.SkillDefinition(), presentation.UpdateVisual, ActionDispositionAllow},
 		{"public app", builtin.SkillDefinition(), builtin.PublishApp, ActionDispositionRequireApproval},
 		{"PDF", builtin.SkillDefinition(), builtin.CreatePDF, ActionDispositionAllow},

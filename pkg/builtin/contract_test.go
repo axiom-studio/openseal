@@ -2,6 +2,7 @@ package builtin
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -69,6 +70,17 @@ func TestFileToolContractsTakePathsAndRejectForeignInput(t *testing.T) {
 		{"present", Present, map[string]interface{}{"paths": []interface{}{"pages/report.html", "docs/report.pdf"}}, true},
 		{"present nothing", Present, map[string]interface{}{"paths": []interface{}{}}, false},
 		{"image", GenerateImage, map[string]interface{}{"prompt": "a seal", "path": "images/seal.png"}, true},
+		{"image with a style", GenerateImage, map[string]interface{}{"prompt": "a seal", "style": "cartoon"}, true},
+		{"image with an empty style", GenerateImage, map[string]interface{}{"prompt": "a seal", "style": ""}, false},
+		{"image with a long style", GenerateImage, map[string]interface{}{"prompt": "a seal", "style": strings.Repeat("é", MaximumImageStyleRunes+1)}, false},
+		{"set style", SetImageStyle, map[string]interface{}{"style": strings.Repeat("é", MaximumImageStyleRunes)}, true},
+		{"clear style", SetImageStyle, map[string]interface{}{"style": ""}, true},
+		{"set style without a style", SetImageStyle, map[string]interface{}{}, false},
+		{"set style for someone else", SetImageStyle, map[string]interface{}{"style": "cartoon", "userId": "23"}, false},
+		{"read data by path", ReadAppData, map[string]interface{}{"app": "apps/tracker", "name": "scores"}, true},
+		{"read data by id", ReadAppData, map[string]interface{}{"app": "app-" + strings.Repeat("a", 64), "name": "scores"}, true},
+		{"read data without an app", ReadAppData, map[string]interface{}{"name": "scores"}, false},
+		{"read data with a path name", ReadAppData, map[string]interface{}{"app": "apps/tracker", "name": "../secrets"}, false},
 		{"pdf", CreatePDF, map[string]interface{}{"path": "docs/brief.pdf", "blocks": []interface{}{map[string]interface{}{"kind": "image", "path": "images/seal.png"}}}, true},
 		{"pdf with a revision id", CreatePDF, map[string]interface{}{"path": "docs/brief.pdf", "documentId": "brief"}, false},
 		{"sheet", CreateSheet, map[string]interface{}{"path": "sheets/budget.xlsx", "sheets": sheets}, true},
