@@ -62,7 +62,10 @@ type TurnOutcome struct {
 	ProposedTask       *TurnTaskProposal
 	OutputSummary      string
 	// Visual is shown with the final answer; only a completed outcome has one.
-	Visual                 *presentation.Visual `json:"visual,omitempty"`
+	Visual *presentation.Visual `json:"visual,omitempty"`
+	// VisualRejection is why the host checks dropped the visual the model
+	// attached to this outcome's answer; the answer is delivered without it.
+	VisualRejection        string
 	Usage                  TurnUsage
 	ContinuationCheckpoint map[string]interface{}
 	NextRunStatus          AgentRunStatus
@@ -551,6 +554,18 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: run.Owner.ID,
 			EventType: answerVisualNotShownEvent, Severity: ActivitySeverityWarning,
 			Summary: answerVisualNotShownSummary, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
+			Visibility: ActivityVisibilityScope,
+		})
+	}
+	if finish.Status == AgentTurnStatusCompleted && outcome != nil && outcome.VisualRejection != "" {
+		reason := outcome.VisualRejection
+		if runes := []rune(reason); len(runes) > 400 {
+			reason = string(runes[:400]) + "…"
+		}
+		_, _ = c.activity.AppendActivity(ctx, &ActivityEvent{
+			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: run.Owner.ID,
+			EventType: answerVisualRejectedEvent, Severity: ActivitySeverityWarning,
+			Summary: answerVisualRejectedSummary + " " + reason, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
 			Visibility: ActivityVisibilityScope,
 		})
 	}

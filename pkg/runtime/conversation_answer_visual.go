@@ -13,6 +13,8 @@ import (
 const (
 	answerVisualNotShownEvent   = "turn.visual_not_shown"
 	answerVisualNotShownSummary = "The agent's visual was not shown: a visual can only go with a reply in a chat."
+	answerVisualRejectedEvent   = "turn.visual_rejected"
+	answerVisualRejectedSummary = "The agent's visual failed its checks and was left off the answer:"
 )
 
 // errInvalidAnswerVisual marks a visual rejected by validation, as opposed

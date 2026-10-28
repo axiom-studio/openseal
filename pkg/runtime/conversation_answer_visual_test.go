@@ -37,8 +37,10 @@ func TestHostedTurnRunnerChecksAnswerVisualWithHostHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err == nil || !strings.Contains(err.Error(), "bindings cannot be checked") {
-		t.Fatalf("bound visual without a host resolver = %v", err)
+	// A visual that fails its host checks is dropped; the answer stands.
+	if outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err != nil || outcome.Visual != nil ||
+		outcome.OutputSummary != "Not quite." || !strings.Contains(outcome.VisualRejection, "bindings cannot be checked") {
+		t.Fatalf("bound visual without a host resolver = %#v, %v", outcome, err)
 	}
 
 	var resolvedFor string
@@ -64,8 +66,8 @@ func TestHostedTurnRunnerChecksAnswerVisualWithHostHooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err == nil || !strings.Contains(err.Error(), "not in this chat") {
-		t.Fatalf("out-of-scope binding = %v", err)
+	if outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err != nil || outcome.Visual != nil || !strings.Contains(outcome.VisualRejection, "not in this chat") {
+		t.Fatalf("out-of-scope binding = %#v, %v", outcome, err)
 	}
 }
 
@@ -80,8 +82,8 @@ func TestHostedTurnRunnerChecksAnswerVisualImages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err == nil || !strings.Contains(err.Error(), "this host cannot show images yet") {
-		t.Fatalf("image without a host resolver = %v", err)
+	if outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err != nil || outcome.Visual != nil || !strings.Contains(outcome.VisualRejection, "this host cannot show images yet") {
+		t.Fatalf("image without a host resolver = %#v, %v", outcome, err)
 	}
 	var resolved string
 	config.VisualImages = func(run *AgentRun) presentation.ImageResolver {
@@ -421,5 +423,67 @@ func TestAgentAnswerVisualIsNotReportedAsNotShown(t *testing.T) {
 	outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
 	if err != nil || outcome.Visual != nil {
 		t.Fatalf("delivered visual left on the outcome: %#v, err=%v", outcome, err)
+	}
+}
+
+func TestOneToOneVisualThatFailsHostChecksIsDroppedNotTheAnswer(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "answer-visual-rejected"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"},
+		Title: "Phone plans", IdempotencyKey: "answer-visual-rejected-channel",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Is my phone plan a good deal?", "answer-visual-rejected-trigger")
+	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosted, err := NewHostedTurnRunner(visualTurnHost{visual: boundAnswerVisual()}, HostedTurnRunnerConfig{
+		AgentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "1",
+		VisualBindings: func(*AgentRun) presentation.BindingResolver {
+			return presentation.BindingResolverFunc(func(context.Context, presentation.Binding) error { return errors.New("not in this chat") })
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "1", Runner: hosted}, nil
+	})
+	content := &answerVisualContent{}
+	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns, AttachmentContent: content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: scheduled.Run.ID, WorkerID: "worker", Model: "test-model",
+	}, binding.Runner)
+	if err != nil || result.Run.Status != AgentRunStatusCompleted {
+		t.Fatalf("advance = %#v, err=%v", result, err)
+	}
+	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil || len(messages) != 2 || messages[1].Content != "Not quite." {
+		t.Fatalf("messages = %#v, err=%v", messages, err)
+	}
+	for _, reference := range messages[1].References {
+		if reference.Kind == ConversationReferenceArtifact {
+			t.Fatalf("the answer carries the rejected visual: %#v", messages[1].References)
+		}
+	}
+	if content.puts != 0 {
+		t.Fatal("a visual that failed its host checks was stored")
+	}
+	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: scheduled.Run.ID, EventTypes: []string{answerVisualRejectedEvent}})
+	if err != nil || len(events) != 1 || events[0].Severity != ActivitySeverityWarning || !strings.Contains(events[0].Summary, "not in this chat") {
+		t.Fatalf("rejection record = %#v, err=%v", events, err)
 	}
 }

@@ -464,11 +464,15 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if response.ProposedWorkspaceOperation != nil {
 		return nil, errors.New("turn host returned an unconsumed native Workspace operation")
 	}
+	visualRejection := ""
 	if response.Visual != nil {
 		proposes := response.ProposedAction != nil || response.ProposedFork != nil || response.ProposedDelegation != nil ||
 			response.ProposedRunbook != nil || response.ProposedTask != nil
 		if err := validateHostedTurnVisual(ctx, response.Visual, response.NextRunStatus, proposes, r.config.visualChecks(input.Run)); err != nil {
-			return nil, fmt.Errorf("turn host returned an invalid answer visual: %w", err)
+			// A visual the host cannot show never costs the answer it rides on,
+			// as for a Team member's answer. The Turn records why it was dropped.
+			response.Visual = nil
+			visualRejection = err.Error()
 		}
 	}
 	response.ModelProvider, response.Model, err = normalizeModelIdentity(response.ModelProvider, response.Model)
@@ -716,6 +720,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
 		EvidenceClaims: append([]EvidenceClaim(nil), response.EvidenceClaims...), EvidenceGrounding: cloneEvidenceGroundingReview(response.EvidenceGrounding),
+		VisualRejection: visualRejection,
 	}, nil
 }
 
