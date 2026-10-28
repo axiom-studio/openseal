@@ -62,7 +62,9 @@ func VisualRubric() string {
 			fmt.Fprintf(&b, "- "+entry.line+"\n", strings.Join(names, ", "))
 		}
 	}
-	b.WriteString("- Ongoing tracking (scores over time, a streak, a plan they'll come back to) → offer to make them an app; don't fake it with cards.\n")
+	b.WriteString("- Practice or progress they'll come back to (quizzing the same topic again, \"track my scores\", a leaderboard, \"how did I do last week\") → " +
+		"answer as usual, then add `choices` \"Make the app\" / \"Not now\"; don't fake tracking with cards.\n")
+	b.WriteString("- An interactive app only when the user explicitly wants to play or experiment and no card fits. Apps can report results back to you.\n")
 	b.WriteString("Stay with text for: conversation and small talk; feelings, worries and sensitive topics; nuanced advice, opinions and reasoning; " +
 		"writing where the words are the deliverable (emails, stories, essays); short facts and one-line answers; " +
 		"and whenever the user asked for text or you are in a quick back-and-forth.\n")

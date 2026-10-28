@@ -93,14 +93,16 @@ func VisualExamples() []Example {
 			}},
 		),
 	}, {
-		Name: "french-words", Prompt: "Teach me the French words for food",
-		Lead: "Here are six everyday food words. Flip each card, mark how you did, and tap Done when you're through.",
-		Visual: visual("French food words",
-			Component{ID: "deck", Type: "flashcards", Title: "French food words", Summary: "Six French words for everyday food.", Flashcards: &Flashcards{Cards: []Flashcard{
-				{ID: "pain", Front: "le pain", Back: "bread"}, {ID: "fromage", Front: "le fromage", Back: "cheese"},
-				{ID: "pomme", Front: "la pomme", Back: "apple"}, {ID: "poulet", Front: "le poulet", Back: "chicken"},
-				{ID: "eau", Front: "l'eau", Back: "water"}, {ID: "oeuf", Front: "l'œuf", Back: "egg"},
+		Name: "times-tables", Prompt: "Can you quiz me on the 7 times table again? I want to beat last time",
+		Lead: "Here's a fresh round. You've practised this a few times now; want an app that keeps your scores so you can see yourself improve?",
+		Visual: visual("7 times table",
+			Component{ID: "deck", Type: "flashcards", Title: "7 times table", Summary: "Six 7 times table facts to practise.", Flashcards: &Flashcards{Cards: []Flashcard{
+				{ID: "x3", Front: "7 × 3", Back: "21"}, {ID: "x6", Front: "7 × 6", Back: "42"}, {ID: "x7", Front: "7 × 7", Back: "49"},
+				{ID: "x8", Front: "7 × 8", Back: "56"}, {ID: "x9", Front: "7 × 9", Back: "63"}, {ID: "x12", Front: "7 × 12", Back: "84"},
 			}, Shuffle: true}},
+			Component{ID: "next", Type: "choices", Summary: "Offer to make a score-keeping app.", Choices: &Choices{Chips: []Chip{
+				{ID: "make-app", Label: "Make the app"}, {ID: "not-now", Label: "Not now"},
+			}}},
 		),
 	}, {
 		Name: "email-tone", Prompt: "Fix the tone of this email: \"Sam, I still haven't got the report. I need it by Friday.\"",

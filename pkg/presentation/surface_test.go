@@ -351,7 +351,8 @@ func TestVisualRubricOnlyNamesCatalogueTypes(t *testing.T) {
 	for _, name := range []string{"Most replies are just text", "Stay with text for", "`stat_row`", "`chart`", "`diagram`", "`table`", "Never restate",
 		"`comparison`", "`steps`", "`timeline`", "`quiz`", "`checklist`", "`callout`", "`choices`", "`image`, `gallery`",
 		"`labeled_image`", "`quantity_visual`, `math`", "`quiz`, `flashcards`", "`definition`, `analogy`", "`recipe`", "`item`, `place`", "`before_after`, `draft`",
-		"`poll`", "`timeline`, `agenda`, `itinerary`", "`breakdown`", "`explorer`", "`progress`", "`routine`, `tasks`, `agent`"} {
+		"`poll`", "`timeline`, `agenda`, `itinerary`", "`breakdown`", "`explorer`", "`progress`", "`routine`, `tasks`, `agent`",
+		"`choices` \"Make the app\" / \"Not now\"", "Apps can report results back to you."} {
 		if !strings.Contains(text, name) {
 			t.Fatalf("rubric lacks %s:\n%s", name, text)
 		}
@@ -393,7 +394,7 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 
 func TestSkillDefinitionRegisters(t *testing.T) {
 	definition := SkillDefinition()
-	if definition.ID != SkillID || definition.Version != "5.0.0" || !definition.Requirements.AlwaysAvailable {
+	if definition.ID != SkillID || definition.Version != "5.1.0" || !definition.Requirements.AlwaysAvailable {
 		t.Fatalf("definition = %#v", definition)
 	}
 	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {
