@@ -302,12 +302,12 @@ func TestInteraction(t *testing.T) {
 }
 
 func TestDecodeRoundTripAndFindNested(t *testing.T) {
-	var surface Surface
-	for _, example := range VisualExamples() {
-		if example.Name == "french-revolution" {
-			surface = example.Visual.Surface(StateReady)
-		}
-	}
+	surface := visual("The French Revolution", Component{ID: "levels", Type: "tabs", Tabs: []Tab{
+		{Label: "Simple", Children: []Component{text("simple", "France overthrew its king.")}},
+		{Label: "Key dates", Children: []Component{{ID: "dates", Type: "timeline", Summary: "Two key events.", Timeline: &Timeline{Events: []TimelineEvent{
+			{ID: "bastille", When: "1789", Title: "Storming of the Bastille"}, {ID: "napoleon", When: "1799", Title: "Napoleon seizes power"},
+		}}}}},
+	}}).Surface(StateReady)
 	raw, err := Encode(surface)
 	if err != nil {
 		t.Fatal(err)
@@ -347,17 +347,20 @@ func TestVisualExamplesAreValidAndClean(t *testing.T) {
 }
 
 func TestVisualRubricOnlyNamesCatalogueTypes(t *testing.T) {
-	rubric := VisualRubric()
+	text := VisualRubric()
 	for _, name := range []string{"Most replies are just text", "Stay with text for", "`stat_row`", "`chart`", "`diagram`", "`table`", "Never restate",
 		"`comparison`", "`steps`", "`timeline`", "`quiz`", "`checklist`", "`callout`", "`choices`", "`image`, `gallery`",
-		"`labeled_image`", "`quantity_visual`, `math`", "`quiz`, `flashcards`", "`definition`, `analogy`", "`recipe`", "`item`", "`before_after`, `draft`"} {
-		if !strings.Contains(rubric, name) {
-			t.Fatalf("rubric lacks %s:\n%s", name, rubric)
+		"`labeled_image`", "`quantity_visual`, `math`", "`quiz`, `flashcards`", "`definition`, `analogy`", "`recipe`", "`item`, `place`", "`before_after`, `draft`",
+		"`poll`", "`timeline`, `agenda`, `itinerary`", "`breakdown`", "`explorer`", "`progress`", "`routine`, `tasks`, `agent`"} {
+		if !strings.Contains(text, name) {
+			t.Fatalf("rubric lacks %s:\n%s", name, text)
 		}
 	}
-	for _, missing := range []string{"explorer", "poll", "agenda", "breakdown", "itinerary"} {
-		if strings.Contains(rubric, missing) {
-			t.Fatalf("rubric names %s, which is not in the catalogue yet", missing)
+	for _, entry := range rubric {
+		for _, name := range entry.types {
+			if _, ok := catalogue[name]; !ok {
+				t.Fatalf("rubric names %s, which is not in the catalogue", name)
+			}
 		}
 	}
 }
@@ -376,7 +379,11 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 		// artifactId is the shared JSON key of an image reference; its
 		// description says "image already in this chat".
 		lower := strings.ToLower(strings.ReplaceAll(text, "artifactId", ""))
-		for _, word := range []string{"presentation", "surface", "artifact", "publish"} {
+		// runbook is a binding kind (a JSON value); prose says routine.
+		for _, token := range []string{`"runbook"`, "runbook|", "kind:runbook"} {
+			lower = strings.ReplaceAll(lower, token, "")
+		}
+		for _, word := range []string{"presentation", "surface", "artifact", "publish", "openseal", "runbook", "objective"} {
 			if strings.Contains(lower, word) {
 				t.Fatalf("%s mentions %q", name, word)
 			}
@@ -386,7 +393,7 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 
 func TestSkillDefinitionRegisters(t *testing.T) {
 	definition := SkillDefinition()
-	if definition.ID != SkillID || definition.Version != "4.2.0" || !definition.Requirements.AlwaysAvailable {
+	if definition.ID != SkillID || definition.Version != "5.0.0" || !definition.Requirements.AlwaysAvailable {
 		t.Fatalf("definition = %#v", definition)
 	}
 	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {

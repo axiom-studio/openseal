@@ -27,6 +27,7 @@ var rubric = []struct {
 	{"A new term or idea → %s.", []string{"definition", "analogy"}},
 	{"Things over time → %s.", []string{"timeline", "agenda", "itinerary"}},
 	{"Headline numbers → %s.", []string{"stat_row"}},
+	{"Progress toward a target → %s.", []string{"progress"}},
 	{"A trend or distribution → %s.", []string{"chart"}},
 	{"Exact values → %s.", []string{"table"}},
 	{"Parts of a whole → %s.", []string{"breakdown"}},
@@ -34,9 +35,10 @@ var rubric = []struct {
 	{"Learning → finish with %s.", []string{"quiz", "flashcards"}},
 	{"Lists the user will act on → %s.", []string{"checklist"}},
 	{"Cooking → %s.", []string{"recipe"}},
-	{"One product or listing → %s.", []string{"item"}},
+	{"One product, listing or place → %s.", []string{"item", "place"}},
 	{"Improving something they wrote → %s (the changes, then the new version).", []string{"before_after", "draft"}},
 	{"\"What if\" questions → %s.", []string{"explorer"}},
+	{"A routine you run, work you handed to helpers, another agent to chat with → %s.", []string{"routine", "tasks", "agent"}},
 	{"Information you need from the user → %s.", []string{"form"}},
 	{"Likely next requests → %s chips.", []string{"choices"}},
 	{"Images already in this chat → %s.", []string{"image", "gallery"}},
@@ -177,7 +179,7 @@ func VisualFormat() string {
 		if spec.children {
 			line += " children:" + notation.render(children)
 		}
-		if spec.bindings != nil {
+		if len(spec.bindings) > 0 {
 			kinds := make([]string, len(spec.bindings))
 			for index, kind := range spec.bindings {
 				kinds[index] = string(kind)
@@ -259,6 +261,9 @@ func payloadSchemas() map[string]map[string]interface{} {
 		"labeled_image": labeledImageSchema(), "quantity_visual": quantityVisualSchema(), "math": mathSchema(), "definition": definitionSchema(),
 		"flashcards": flashcardsSchema(), "before_after": beforeAfterSchema(), "draft": draftSchema(), "recipe": recipeSchema(),
 		"item": itemSchema(), "analogy": analogySchema(),
+		"agenda": agendaSchema(), "itinerary": itinerarySchema(), "place": placeSchema(), "breakdown": breakdownSchema(),
+		"progress": progressSchema(), "poll": pollSchema(), "explorer": explorerSchema(), "routine": routineSchema(),
+		"tasks": tasksSchema(), "agent": agentCardSchema(),
 		"grid": closedObject([]interface{}{"columns"}, map[string]interface{}{"columns": integer(2, 4)}),
 		"tabs": array(closedObject([]interface{}{"label", "children"}, map[string]interface{}{
 			"label": strRange(1, 40), "children": array(componentRef(), 1, maxChildren),
@@ -327,14 +332,14 @@ func diagramSchema() map[string]interface{} {
 	edge := closedObject([]interface{}{"from", "to"}, map[string]interface{}{"from": itemIDSchema(), "to": itemIDSchema(), "label": str(30)})
 	group := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, 30)})
 	return closedObject([]interface{}{"layout", "nodes"}, map[string]interface{}{
-		"layout":    describe(enum(DiagramLayouts), "flow: steps with arrows; cycle: nodes in order around a ring (at least 3; edges optional); hierarchy: parent -> child edges, one parent each; mindmap: the first node is the centre and every node connects to it; network: any links."),
+		"layout":    describe(enum(DiagramLayouts), "flow: steps with arrows; cycle: nodes in order around a ring (at least 3; edges optional); hierarchy: parent to child edges, one parent each; mindmap: the first node is the centre and every node connects to it; network: any links."),
 		"direction": describe(enum(DiagramDirections), "flow and hierarchy only; down by default."),
 		"nodes":     array(node, 2, MaxDiagramNodes), "edges": array(edge, 0, MaxDiagramEdges), "groups": array(group, 0, MaxDiagramGroups),
 	})
 }
 
 func labeledImageSchema() map[string]interface{} {
-	fraction := describe(map[string]interface{}{"type": "number", "minimum": 0, "maximum": 1}, "0-1 from the top-left of the image.")
+	fraction := map[string]interface{}{"type": "number", "minimum": 0, "maximum": 1}
 	marker := closedObject([]interface{}{"id", "x", "y", "label"}, map[string]interface{}{
 		"id": itemIDSchema(), "x": fraction, "y": fraction, "label": strRange(1, 40), "detail": str(300),
 	})
@@ -369,7 +374,12 @@ func quantityValueProperties() map[string]interface{} {
 
 func quantityVisualSchema() map[string]interface{} {
 	properties := quantityValueProperties()
+	// Steps repeat the fields without their notes, which the top level
+	// already gives.
 	step := quantityValueProperties()
+	for _, field := range step {
+		delete(field.(map[string]interface{}), "description")
+	}
 	step["label"] = strRange(1, quantityStepRunes)
 	properties["kind"] = enum(QuantityKinds)
 	properties["steps"] = describe(array(closedObject([]interface{}{"label"}, step), 0, MaxQuantitySteps),
@@ -389,10 +399,10 @@ func priceSchema() map[string]interface{} {
 
 func mathSchema() map[string]interface{} {
 	step := closedObject([]interface{}{"latex"}, map[string]interface{}{
-		"latex": describe(strRange(1, MaxLaTeXRunes), "LaTeX without $ delimiters; no \\href, \\url, \\includegraphics, \\html or new macros."), "note": str(200),
+		"latex": describe(strRange(1, MaxLaTeXRunes), "No \\href, \\url, \\includegraphics, \\html or new macros."), "note": str(200),
 	})
 	return closedObject([]interface{}{"steps"}, map[string]interface{}{
-		"steps": array(step, 1, 12), "reveal": describe(enum(MathReveals), "all (default) or stepwise: one step at a time."),
+		"steps": array(step, 1, 12), "reveal": enum(MathReveals),
 	})
 }
 
@@ -410,12 +420,16 @@ func flashcardsSchema() map[string]interface{} {
 }
 
 func beforeAfterSchema() map[string]interface{} {
-	side := describe(closedObject([]interface{}{}, map[string]interface{}{"text": str(4000), "image": imageRefSchema()}), "Text or an image, not both; both sides the same kind.")
+	side := beforeAfterSideSchema()
 	return closedObject([]interface{}{"mode", "before", "after"}, map[string]interface{}{
 		"mode":   describe(enum(BeforeAfterModes), "diff highlights changed words (texts); split shows both side by side; slider wipes between images."),
 		"before": side, "after": side,
 		"labels": closedObject([]interface{}{}, map[string]interface{}{"before": str(20), "after": str(20)}),
 	})
+}
+
+func beforeAfterSideSchema() map[string]interface{} {
+	return describe(closedObject([]interface{}{}, map[string]interface{}{"text": str(4000), "image": imageRefSchema()}), "Text or an image, not both; both sides the same kind.")
 }
 
 func draftSchema() map[string]interface{} {
@@ -427,23 +441,20 @@ func draftSchema() map[string]interface{} {
 func recipeSchema() map[string]interface{} {
 	minutes := integer(0, MaxRecipeMinutes)
 	ingredient := closedObject([]interface{}{"id", "name"}, map[string]interface{}{
-		"id": itemIDSchema(), "qty": describe(map[string]interface{}{"type": "number", "exclusiveMinimum": 0}, "For servings; people rescale it. Leave out for to taste."),
+		"id": itemIDSchema(), "qty": describe(map[string]interface{}{"type": "number", "exclusiveMinimum": 0}, "Leave out for to taste."),
 		"unit": str(16), "name": strRange(1, 60), "group": str(30),
 	})
 	step := closedObject([]interface{}{"id", "text"}, map[string]interface{}{"id": itemIDSchema(), "text": strRange(1, 300)})
 	return closedObject([]interface{}{"servings", "ingredients", "steps"}, map[string]interface{}{
 		"servings": integer(1, 24), "time": describe(closedObject([]interface{}{}, map[string]interface{}{"prep": minutes, "cook": minutes}), "Minutes."),
 		"ingredients": array(ingredient, 1, 30), "steps": array(step, 1, 15), "image": imageRefSchema(),
-		"checkable": describe(boolean(), "Let people tick ingredients off together."),
+		"checkable": boolean(),
 	})
 }
 
 func itemSchema() map[string]interface{} {
-	rating := closedObject([]interface{}{"value"}, map[string]interface{}{
-		"value": map[string]interface{}{"type": "number", "minimum": 0, "maximum": 5}, "count": map[string]interface{}{"type": "integer", "minimum": 0},
-	})
 	return closedObject([]interface{}{"name"}, map[string]interface{}{
-		"name": strRange(1, 80), "image": imageRefSchema(), "price": priceSchema(), "rating": rating,
+		"name": strRange(1, 80), "image": imageRefSchema(), "price": priceSchema(), "rating": ratingSchema(),
 		"facts": array(strRange(1, 60), 0, 4), "badge": str(24),
 	})
 }
@@ -488,7 +499,7 @@ func stepsSchema() map[string]interface{} {
 		"id": itemIDSchema(), "title": strRange(1, 80), "detail": str(400), "icon": iconSchema(), "image": imageRefSchema(),
 	})
 	return closedObject([]interface{}{"items"}, map[string]interface{}{
-		"items": array(step, 2, 10), "checkable": describe(boolean(), "Let people tick steps off as they go."),
+		"items": array(step, 2, 10), "checkable": boolean(),
 	})
 }
 
@@ -503,7 +514,7 @@ func comparisonSchema() map[string]interface{} {
 	return closedObject([]interface{}{"attributes", "options"}, map[string]interface{}{
 		"attributes": array(attribute, 1, 10), "options": array(option, 2, 4),
 		"recommended": describe(itemIDSchema(), "Id of the option you recommend."),
-		"pickable":    describe(boolean(), "Let the user pick one option; their pick answers you."),
+		"pickable":    boolean(),
 	})
 }
 
@@ -537,9 +548,9 @@ func checklistSchema() map[string]interface{} {
 
 func quizSchema() map[string]interface{} {
 	option := closedObject([]interface{}{"id", "label"}, map[string]interface{}{"id": itemIDSchema(), "label": strRange(1, 120), "image": imageRefSchema()})
-	key := describe(closedObject([]interface{}{"correct", "explanation"}, map[string]interface{}{
+	key := closedObject([]interface{}{"correct", "explanation"}, map[string]interface{}{
 		"correct": describe(array(itemIDSchema(), 1, 6), "Ids of the correct options: exactly one unless allowMultiple."), "explanation": str(400),
-	}), "Hidden from people until they answer.")
+	})
 	return closedObject([]interface{}{"question", "options", "answerKey"}, map[string]interface{}{
 		"question": strRange(1, 300), "options": array(option, 2, 6), "allowMultiple": boolean(), "answerKey": key,
 	})

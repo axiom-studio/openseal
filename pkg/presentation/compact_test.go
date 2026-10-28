@@ -193,7 +193,11 @@ func TestModelFacingVisualBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const ceiling = 24 * 1024
+	// 24 KB held through Wave 2 (22,714 bytes). Wave 3's ten types need
+	// 25,840 bytes even after the format stopped repeating notes and named
+	// the shared Format, Tone, Binding, Side and Rating shapes, so the
+	// ceiling moved to 26 KB (recorded in the Wave 3 contract).
+	const ceiling = 26 * 1024
 	if total := len(encodedField) + len(encodedUpdate); total > ceiling {
 		t.Fatalf("visual field %d + update_visual %d = %d bytes; the ceiling is %d", len(encodedField), len(encodedUpdate), total, ceiling)
 	}

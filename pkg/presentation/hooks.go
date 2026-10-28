@@ -46,6 +46,13 @@ var EntityCommands = map[BindingKind][]string{
 // rejects it, e.g. "approval/X was not proposed by you in this chat". A
 // draft accepts only approval bindings; Validate rejects other kinds before
 // calling the resolver.
+//
+// A routine must be bound to a runbook activation (a routine) in the
+// publishing conversation's workspace that is visible from that
+// conversation; an agent card to an agent of the workspace the viewer can
+// chat with; and every row of a tasks card to a conversation_task of the
+// publishing conversation (one call per row). Validate rejects a missing or
+// wrong binding kind on these types before calling the resolver.
 type BindingResolver interface {
 	ResolveBinding(ctx context.Context, binding Binding) error
 }
@@ -74,6 +81,18 @@ func (v *validator) binding(binding Binding) error {
 		return fmt.Errorf("%s/%s: %w", binding.Kind, binding.ID, err)
 	}
 	return nil
+}
+
+// bindingNoun names what a binding kind points at, in the words people use.
+func bindingNoun(kind BindingKind) string {
+	switch kind {
+	case BindingRunbook:
+		return "routine"
+	case BindingConversationTask:
+		return "task"
+	default:
+		return string(kind)
+	}
 }
 
 func containsBindingKind(kinds []BindingKind, kind BindingKind) bool {

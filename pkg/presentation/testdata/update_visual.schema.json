@@ -12,6 +12,12 @@
             },
             "type": "array"
           },
+          "agenda": {
+            "type": "object"
+          },
+          "agent": {
+            "type": "object"
+          },
           "analogy": {
             "type": "object"
           },
@@ -40,6 +46,9 @@
               "kind",
               "id"
             ],
+            "type": "object"
+          },
+          "breakdown": {
             "type": "object"
           },
           "callout": {
@@ -74,6 +83,9 @@
           "draft": {
             "type": "object"
           },
+          "explorer": {
+            "type": "object"
+          },
           "flashcards": {
             "type": "object"
           },
@@ -96,10 +108,22 @@
           "item": {
             "type": "object"
           },
+          "itinerary": {
+            "type": "object"
+          },
           "labeled_image": {
             "type": "object"
           },
           "math": {
+            "type": "object"
+          },
+          "place": {
+            "type": "object"
+          },
+          "poll": {
+            "type": "object"
+          },
+          "progress": {
             "type": "object"
           },
           "quantity_visual": {
@@ -109,6 +133,9 @@
             "type": "object"
           },
           "recipe": {
+            "type": "object"
+          },
+          "routine": {
             "type": "object"
           },
           "stat_row": {
@@ -129,6 +156,9 @@
               "type": "object"
             },
             "type": "array"
+          },
+          "tasks": {
+            "type": "object"
           },
           "text": {
             "maxLength": 1200,
@@ -156,8 +186,11 @@
             "description": "Set only the payload whose key equals type (text, caption and divider use text).",
             "enum": [
               "actions",
+              "agenda",
+              "agent",
               "analogy",
               "before_after",
+              "breakdown",
               "callout",
               "caption",
               "carousel",
@@ -169,22 +202,29 @@
               "diagram",
               "divider",
               "draft",
+              "explorer",
               "flashcards",
               "form",
               "gallery",
               "grid",
               "image",
               "item",
+              "itinerary",
               "labeled_image",
               "math",
+              "place",
+              "poll",
+              "progress",
               "quantity_visual",
               "quiz",
               "recipe",
+              "routine",
               "section",
               "stat_row",
               "steps",
               "table",
               "tabs",
+              "tasks",
               "text",
               "timeline"
             ],

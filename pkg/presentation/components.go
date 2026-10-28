@@ -26,9 +26,12 @@ type typeSpec struct {
 	// children reports whether Component.Children is allowed.
 	children bool
 	summary  summaryRule
-	// bindings lists the binding kinds the type accepts; nil accepts any.
+	// bindings lists the binding kinds the type accepts; nil accepts any
+	// and an empty list none.
 	bindings []BindingKind
-	validate func(v *validator, c Component, path string) error
+	// bindingRequired types need a component binding.
+	bindingRequired bool
+	validate        func(v *validator, c Component, path string) error
 	// sentence is the type's one-line purpose in the visual format.
 	sentence string
 }
@@ -42,7 +45,7 @@ var catalogue = map[string]typeSpec{
 	"tabs":            {payload: "tabs", validate: validateTabs, sentence: "2-5 alternative views, e.g. Simple / Detailed."},
 	"carousel":        {children: true, validate: validateCarousel, sentence: "2-10 swipeable cards, e.g. recipes or places."},
 	"chart":           {payload: "chart", summary: summaryRequired, validate: validateChart, sentence: "Trend or distribution of numbers; pie and donut take one series of at most 7 slices; stacked_bar and grouped_bar need 2+ series with the same labels; scatter labels are x numbers."},
-	"diagram":         {payload: "diagram", summary: summaryRequired, validate: validateDiagram, sentence: "How 2-30 ideas connect; pick a layout (flow, cycle, hierarchy with parent -> child edges, mindmap with the first node as centre, network) and the app places the nodes; tap a node for its detail."},
+	"diagram":         {payload: "diagram", summary: summaryRequired, validate: validateDiagram, sentence: "How 2-30 ideas connect; the app places the nodes by layout; tap a node for its detail."},
 	"form":            {payload: "form", summary: summaryRequired, validate: validateForm, sentence: "Structured input the user submits once."},
 	"table":           {payload: "table", summary: summaryRequired, validate: validateTable, sentence: "Exact values in rows and columns; each row maps column keys to cells typed by the column kind."},
 	"stat_row":        {payload: "stat_row", summary: summaryRequired, validate: validateStatRow, sentence: "1-4 headline numbers."},
@@ -65,6 +68,16 @@ var catalogue = map[string]typeSpec{
 	"recipe":          {payload: "recipe", summary: summaryRequired, validate: validateRecipe, sentence: "A dish with ingredients (qty for the servings given; people rescale it) and steps; checkable lets people tick ingredients off together."},
 	"item":            {payload: "item", summary: summaryRequired, validate: validateItem, sentence: "One product, option or listing with price, rating and up to 4 facts."},
 	"analogy":         {payload: "analogy", summary: summaryRequired, validate: validateAnalogy, sentence: "Something new explained as something familiar, with 1-5 matching pairs."},
+	"agenda":          {payload: "agenda", summary: summaryRequired, validate: validateAgenda, sentence: "Fixed plans on 1-7 days in date order, items in start order, with free slots."},
+	"itinerary":       {payload: "itinerary", summary: summaryRequired, validate: validateItinerary, sentence: "A trip day by day; travel is the leg into an item from the one before (never on a day's first)."},
+	"place":           {payload: "place", summary: summaryRequired, validate: validatePlace, sentence: "One venue; several go in a carousel."},
+	"breakdown":       {payload: "breakdown", summary: summaryRequired, validate: validateBreakdown, sentence: "Parts of a whole; tap a part for its share."},
+	"progress":        {payload: "progress", summary: summaryRequired, validate: validateProgress, sentence: "Values against targets."},
+	"poll":            {payload: "poll", summary: summaryRequired, validate: validatePoll, sentence: "A group vote; people can change their vote and you hear the tally once everyone has voted."},
+	"explorer":        {payload: "explorer", summary: summaryRequired, validate: validateExplorer, sentence: "A what-if: people move inputs and outputs recompute. Expressions use input ids, + - * / ^, comparisons, && || !, min max round floor ceil abs sqrt log exp, if(c,a,b), sum(i,from,to,body); a toggle is true/false."},
+	"routine":         {payload: "routine", summary: summaryRequired, bindings: []BindingKind{BindingRunbook}, bindingRequired: true, validate: validateRoutine, sentence: "A routine with live schedule, status and buttons; items are its latest highlights."},
+	"tasks":           {payload: "tasks", summary: summaryRequired, bindings: []BindingKind{}, validate: validateTasks, sentence: "Work handed to helpers in this chat, each row bound to its task; status is live."},
+	"agent":           {payload: "agent", summary: summaryRequired, bindings: []BindingKind{BindingAgent}, bindingRequired: true, validate: validateAgentCard, sentence: "Introduces an agent people can start chatting with."},
 	"actions":         {payload: "actions", validate: validateActions, sentence: "Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item."},
 }
 

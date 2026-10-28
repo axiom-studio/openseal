@@ -19,7 +19,7 @@ import (
 
 const (
 	SkillID      = "openseal.presentation"
-	SkillVersion = "4.2.0"
+	SkillVersion = "5.0.0"
 	// UpdateVisual replaces a visual already shown in the chat with a newer
 	// version. Visuals that answer a turn ride on the answer instead.
 	UpdateVisual = "update_visual"
@@ -92,6 +92,17 @@ type Component struct {
 	Recipe         *Recipe         `json:"recipe,omitempty"`
 	Item           *Item           `json:"item,omitempty"`
 	Analogy        *Analogy        `json:"analogy,omitempty"`
+
+	Agenda    *Agenda    `json:"agenda,omitempty"`
+	Itinerary *Itinerary `json:"itinerary,omitempty"`
+	Place     *Place     `json:"place,omitempty"`
+	Breakdown *Breakdown `json:"breakdown,omitempty"`
+	Progress  *Progress  `json:"progress,omitempty"`
+	Poll      *Poll      `json:"poll,omitempty"`
+	Explorer  *Explorer  `json:"explorer,omitempty"`
+	Routine   *Routine   `json:"routine,omitempty"`
+	Tasks     *Tasks     `json:"tasks,omitempty"`
+	Agent     *AgentCard `json:"agent,omitempty"`
 }
 
 type Tone string
@@ -311,7 +322,13 @@ func (v *validator) component(c Component, path string) error {
 	if c.Tone != "" && !validTone(c.Tone) {
 		return fmt.Errorf("tone %q is not one of neutral, accent, positive, negative, warning, info", c.Tone)
 	}
+	if c.Binding == nil && spec.bindingRequired {
+		return fmt.Errorf("binding is required: {kind: %s, id} names the %s this card shows", joinBindingKinds(spec.bindings), bindingNoun(spec.bindings[0]))
+	}
 	if c.Binding != nil {
+		if spec.bindings != nil && len(spec.bindings) == 0 {
+			return fmt.Errorf("%s takes no component binding", c.Type)
+		}
 		if spec.bindings != nil && !containsBindingKind(spec.bindings, c.Binding.Kind) {
 			return fmt.Errorf("binding.kind %q is not allowed on %s; use %s", c.Binding.Kind, c.Type, joinBindingKinds(spec.bindings))
 		}
@@ -338,6 +355,9 @@ func exactPayload(c Component) error {
 		"labeled_image": c.LabeledImage != nil, "quantity_visual": c.QuantityVisual != nil, "math": c.Math != nil, "definition": c.Definition != nil,
 		"flashcards": c.Flashcards != nil, "before_after": c.BeforeAfter != nil, "draft": c.Draft != nil, "recipe": c.Recipe != nil,
 		"item": c.Item != nil, "analogy": c.Analogy != nil,
+		"agenda": c.Agenda != nil, "itinerary": c.Itinerary != nil, "place": c.Place != nil, "breakdown": c.Breakdown != nil,
+		"progress": c.Progress != nil, "poll": c.Poll != nil, "explorer": c.Explorer != nil, "routine": c.Routine != nil,
+		"tasks": c.Tasks != nil, "agent": c.Agent != nil,
 	}
 	allowed := catalogue[c.Type].payload
 	for key, set := range present {

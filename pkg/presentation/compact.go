@@ -57,6 +57,7 @@ func visualPatterns() []namedPattern {
 		{"itemId", itemIDPattern, "lowercase letters, digits, - and _; unique within its component"},
 		{"iconName", iconPattern.String(), ""},
 		{"date", isoDate.String(), "YYYY-MM-DD"},
+		{"time", clockTimePattern, "HH:MM, 24-hour"},
 	}
 }
 
@@ -67,6 +68,11 @@ func visualShapes() []namedShape {
 		{"Amount", amountSchema()},
 		{"Price", priceSchema()},
 		{"Icon", iconSchema()},
+		{"Rating", ratingSchema()},
+		{"Format", enum(formatNames())},
+		{"Tone", enum(toneNames())},
+		{"Binding", bindingSchema()},
+		{"Side", beforeAfterSideSchema()},
 	}
 }
 

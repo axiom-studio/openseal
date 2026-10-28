@@ -2,9 +2,12 @@ package presentation
 
 import (
 	"fmt"
+
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/axiom-studio/openseal/pkg/presentation/expr"
 )
 
 // Lint codes. Lint findings are quality hints for the activity trail and
@@ -27,6 +30,14 @@ const (
 	LintMathSingleStep          = "math_single_step"
 	LintDraftLongMessage        = "draft_long_message"
 	LintRecipeThinSteps         = "recipe_thin_steps"
+	LintAgendaOneItem           = "agenda_one_item"
+	LintItineraryThinDay        = "itinerary_thin_day"
+	LintBreakdownOneDominant    = "breakdown_one_dominant"
+	LintPollTwoMultiple         = "poll_two_multiple"
+	LintExplorerStaticOutputs   = "explorer_static_outputs"
+	LintRoutineWithoutItems     = "routine_without_items"
+	LintTasksOneRow             = "tasks_one_row"
+	dominantShare               = 0.95
 	maxMindmapDepth             = 3
 	longMessageRunes            = 1500
 	thinRecipeStepRunes         = 10
@@ -136,10 +147,74 @@ func Lint(surface Surface) []Warning {
 			if c.Recipe != nil && recipeStepsThin(c.Recipe.Steps) {
 				add(LintRecipeThinSteps, path+".recipe.steps", c.ID, "the steps are too short to cook from; say what to do in each")
 			}
+		case "agenda":
+			if c.Agenda != nil && agendaItems(c.Agenda) == 1 {
+				add(LintAgendaOneItem, path+".agenda", c.ID, "an agenda with one item reads better as a sentence")
+			}
+		case "itinerary":
+			if c.Itinerary == nil {
+				break
+			}
+			for index, day := range c.Itinerary.Days {
+				if len(day.Items) == 1 {
+					add(LintItineraryThinDay, fmt.Sprintf("%s.itinerary.days[%d]", path, index), c.ID, "a day with one stop and no travel adds little; merge it or say it in text")
+					break
+				}
+			}
+		case "breakdown":
+			if c.Breakdown != nil && breakdownDominated(c.Breakdown.Items) {
+				add(LintBreakdownOneDominant, path+".breakdown.items", c.ID, "one part is over 95% of the whole, so the rest are invisible; say it in a sentence or a stat_row")
+			}
+		case "poll":
+			if c.Poll != nil && c.Poll.Multiple && len(c.Poll.Options) == 2 {
+				add(LintPollTwoMultiple, path+".poll.multiple", c.ID, "with two options, voting for both says nothing; leave multiple off")
+			}
+		case "explorer":
+			if c.Explorer != nil && explorerOutputsStatic(c.Explorer) {
+				add(LintExplorerStaticOutputs, path+".explorer.outputs", c.ID, "no output uses an input, so moving the controls changes nothing; use the input ids in expr")
+			}
+		case "routine":
+			if c.Routine == nil || len(c.Routine.Items) == 0 {
+				add(LintRoutineWithoutItems, path+".routine.items", c.ID, "show the latest highlights from the routine in items")
+			}
+		case "tasks":
+			if c.Tasks != nil && len(c.Tasks.Rows) == 1 {
+				add(LintTasksOneRow, path+".tasks.rows", c.ID, "one task reads better as a sentence")
+			}
 		}
 		return true
 	})
 	return warnings
+}
+
+func agendaItems(agenda *Agenda) int {
+	count := 0
+	for _, day := range agenda.Days {
+		count += len(day.Items)
+	}
+	return count
+}
+
+// breakdownDominated reports one item over dominantShare of the total.
+func breakdownDominated(items []BreakdownItem) bool {
+	total, largest := 0.0, 0.0
+	for _, item := range items {
+		total += item.Value
+		largest = max(largest, item.Value)
+	}
+	return total > 0 && largest/total > dominantShare
+}
+
+// explorerOutputsStatic reports outputs that all compile and read no input.
+func explorerOutputsStatic(explorer *Explorer) bool {
+	types := explorerTypes(explorer.Inputs)
+	for _, output := range explorer.Outputs {
+		program, err := expr.Compile(output.Expr, types)
+		if err != nil || len(program.Uses()) > 0 {
+			return false
+		}
+	}
+	return len(explorer.Outputs) > 0
 }
 
 // recipeStepsThin reports steps that are all under thinRecipeStepRunes.

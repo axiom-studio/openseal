@@ -23,6 +23,10 @@ func series(name string, labels []string, values ...float64) ChartSeries {
 	return ChartSeries{Name: name, Points: points}
 }
 
+func number64(value float64) *float64 { return &value }
+
+func digits(value int) *int { return &value }
+
 func text(id, value string) Component { return Component{ID: id, Type: "text", Text: value} }
 
 // VisualExamples returns the worked examples, visual answers first, then
@@ -52,9 +56,11 @@ func VisualExamples() []Example {
 		Name: "money", Prompt: "Where is my money going?",
 		Lead: "Rent and food are most of it, and three streaming services add up.",
 		Visual: visual("Last month's spending",
-			Component{ID: "split", Type: "chart", Summary: "Rent is 48% of spending, food 22%, streaming 4%.", Chart: &Chart{
-				Kind: "donut", Format: StatCurrency, Currency: "GBP",
-				Series: []ChartSeries{series("Spending", []string{"Rent", "Food", "Transport", "Bills", "Streaming", "Other"}, 950, 430, 180, 210, 75, 140)},
+			Component{ID: "split", Type: "breakdown", Summary: "Rent is 48% of spending, food 22%, streaming 4%.", Breakdown: &Breakdown{
+				Kind: "treemap", Format: StatCurrency, Currency: "GBP", Items: []BreakdownItem{
+					{ID: "rent", Label: "Rent", Value: 950, Icon: "house"}, {ID: "food", Label: "Food", Value: 430}, {ID: "transport", Label: "Transport", Value: 180},
+					{ID: "bills", Label: "Bills", Value: 210}, {ID: "streaming", Label: "Streaming", Value: 75}, {ID: "other", Label: "Other", Value: 140},
+				},
 			}},
 			Component{ID: "note", Type: "callout", Tone: ToneWarning, Summary: "Two of three streaming services go unwatched.", Callout: &Callout{
 				Icon: "lightbulb", Body: "You pay for **three** streaming services and watched one last month.",
@@ -87,47 +93,6 @@ func VisualExamples() []Example {
 			}},
 		),
 	}, {
-		Name: "dinners", Prompt: "Five dinners this week, nobody likes mushrooms",
-		Lead: "Here are five mushroom-free dinners, each under 40 minutes.",
-		Visual: visual("Five dinners",
-			Component{ID: "week", Type: "carousel", Children: []Component{
-				{ID: "mon", Type: "text", Title: "Monday: Chicken fajitas", Text: "25 min · peppers, onion, wraps"},
-				{ID: "tue", Type: "text", Title: "Tuesday: Lentil dal", Text: "35 min · red lentils, spinach, rice"},
-				{ID: "wed", Type: "text", Title: "Wednesday: Salmon traybake", Text: "30 min · potatoes, green beans"},
-				{ID: "thu", Type: "text", Title: "Thursday: Pesto pasta", Text: "15 min · peas, parmesan"},
-				{ID: "fri", Type: "text", Title: "Friday: Homemade pizza", Text: "40 min · tomato, mozzarella, ham"},
-			}},
-			Component{ID: "next", Type: "choices", Summary: "Offers a shopping list or a weekly repeat.", Choices: &Choices{Chips: []Chip{
-				{ID: "list", Label: "Make a shopping list"}, {ID: "weekly", Label: "Do this every week"},
-			}}},
-		),
-	}, {
-		Name: "french-revolution", Prompt: "What happened in the French Revolution?",
-		Lead: "France overthrew its king and tried to rebuild itself between 1789 and 1799.",
-		Visual: visual("The French Revolution",
-			Component{ID: "levels", Type: "tabs", Tabs: []Tab{
-				{Label: "Simple", Children: []Component{text("simple", "People were hungry and taxed while nobles paid little. They stormed the Bastille, ended the monarchy, and after years of turmoil Napoleon took power.")}},
-				{Label: "Key dates", Children: []Component{{ID: "dates", Type: "timeline", Summary: "Five key events from 1789 to 1799.", Timeline: &Timeline{Events: []TimelineEvent{
-					{ID: "bastille", When: "1789", Title: "Storming of the Bastille"}, {ID: "varennes", When: "1791", Title: "Royal family's failed escape"},
-					{ID: "execution", When: "1793", Title: "Louis XVI executed"}, {ID: "terror", When: "1794", Title: "End of the Terror"},
-					{ID: "napoleon", When: "1799", Title: "Napoleon seizes power"},
-				}}}}},
-			}},
-			Component{ID: "why", Type: "callout", Summary: "Why the revolution still matters.", Callout: &Callout{Icon: "lightbulb", Body: "It spread the idea that power comes from the people, not a king."}},
-		),
-	}, {
-		Name: "fractions", Prompt: "Is 3/4 bigger than 2/3?",
-		Lead: "Yes. Cut both into twelfths and 3/4 is 9/12 while 2/3 is only 8/12.",
-		Visual: visual("3/4 against 2/3",
-			Component{ID: "bars", Type: "quantity_visual", Summary: "Bars for 3/4 and 2/3, then both cut into twelfths: 9/12 is more than 8/12.", QuantityVisual: &QuantityVisual{
-				Kind:           "fraction_bars",
-				QuantityValues: QuantityValues{Fractions: []Fraction{{Numerator: 3, Denominator: 4, Label: "3/4"}, {Numerator: 2, Denominator: 3, Label: "2/3"}}},
-				Steps: []QuantityStep{{Label: "Cut both into twelfths", QuantityValues: QuantityValues{Fractions: []Fraction{
-					{Numerator: 9, Denominator: 12, Label: "9/12"}, {Numerator: 8, Denominator: 12, Label: "8/12"},
-				}}}},
-			}},
-		),
-	}, {
 		Name: "french-words", Prompt: "Teach me the French words for food",
 		Lead: "Here are six everyday food words. Flip each card, mark how you did, and tap Done when you're through.",
 		Visual: visual("French food words",
@@ -150,6 +115,58 @@ func VisualExamples() []Example {
 			Component{ID: "email", Type: "draft", Summary: "The warmer email to Sam, ready to copy or change.", Draft: &Draft{
 				Channel: "email", To: "Sam", Subject: "The report",
 				Body: "Hi Sam,\n\nHope your week's going well! Could you send the report over by Friday?\n\nThanks so much,\nAlex",
+			}},
+		),
+	}, {
+		Name: "compound-interest", Prompt: "How does compound interest work?",
+		Lead: "Each year you earn interest on your interest too, so the growth speeds up. Move the sliders to see it.",
+		Visual: visual("Compound interest",
+			Component{ID: "growth", Type: "explorer", Summary: "Sliders for deposit, rate and years show the final balance and how it grows year by year.", Explorer: &Explorer{
+				Inputs: []ExplorerInput{
+					{ID: "deposit", Label: "Deposit", Kind: "slider", Min: number64(100), Max: number64(20000), Step: number64(100), Default: number64(10000), Format: StatCurrency, Currency: "GBP"},
+					{ID: "rate", Label: "Interest rate", Kind: "slider", Min: number64(0.5), Max: number64(10), Step: number64(0.5), Default: number64(5), Format: StatPercent},
+					{ID: "years", Label: "Years", Kind: "stepper", Min: number64(1), Max: number64(40), Step: number64(1), Default: number64(10), Unit: "years"},
+				},
+				Outputs: []ExplorerOutput{
+					{ID: "balance", Label: "Final balance", Expr: "deposit * (1 + rate / 100) ^ years", Format: StatCurrency, Currency: "GBP", Digits: digits(2)},
+					{ID: "interest", Label: "Interest earned", Expr: "deposit * (1 + rate / 100) ^ years - deposit", Format: StatCurrency, Currency: "GBP", Digits: digits(2)},
+				},
+				Chart: &ExplorerChart{X: "t", T: &ExplorerRange{From: 0, To: 40, Label: "Year"}, Series: []ExplorerSeries{
+					{Label: "With interest", Expr: "deposit * (1 + rate / 100) ^ t"}, {Label: "Deposit only", Expr: "deposit"},
+				}},
+			}},
+		),
+	}, {
+		Name: "weekend", Prompt: "Plan our long weekend in Brighton, four of us",
+		Lead: "Here's a relaxed three days by the sea, with short walks between stops.",
+		Visual: visual("Brighton weekend",
+			Component{ID: "plan", Type: "itinerary", Summary: "Three days: the pier and beach, the Lanes and a cliff walk, then brunch and home.", Itinerary: &Itinerary{Days: []ItineraryDay{
+				{ID: "fri", Label: "Friday", Items: []ItineraryItem{
+					{ID: "arrive", Time: "15:00", Title: "Check in", Place: "Seafront flat"},
+					{ID: "pier", Time: "16:30", Title: "Palace Pier and the beach", Travel: &Travel{Mode: "walk", Minutes: 10}},
+					{ID: "chips", Time: "19:00", Title: "Fish and chips on the front", Travel: &Travel{Mode: "walk", Minutes: 5}},
+				}},
+				{ID: "sat", Label: "Saturday", Items: []ItineraryItem{
+					{ID: "lanes", Time: "10:00", Title: "The Lanes", Detail: "Small shops and cafés; good for a slow morning."},
+					{ID: "cliffs", Time: "14:00", Title: "Cliff walk to Rottingdean", Travel: &Travel{Mode: "transit", Minutes: 25}},
+				}},
+				{ID: "sun", Label: "Sunday", Items: []ItineraryItem{
+					{ID: "brunch", Time: "10:30", Title: "Brunch in Kemptown"},
+					{ID: "home", Time: "14:00", Title: "Train home", Travel: &Travel{Mode: "walk", Minutes: 20}},
+				}},
+			}}},
+			Component{ID: "pack", Type: "checklist", Title: "Packing", Summary: "Five things to pack for a seaside weekend.", Checklist: &Checklist{Items: []ChecklistItem{
+				{ID: "swimwear", Label: "Swimwear"}, {ID: "towels", Label: "Beach towels"}, {ID: "jackets", Label: "Windproof jackets"},
+				{ID: "suncream", Label: "Sun cream"}, {ID: "shoes", Label: "Walking shoes"},
+			}}},
+		),
+	}, {
+		Name: "family-dinner", Prompt: "Can you ask everyone where we should go for dinner on Saturday?",
+		Lead: "Here's a quick vote. I'll book once everyone has picked.",
+		Visual: visual("Saturday dinner",
+			Component{ID: "vote", Type: "poll", Title: "Saturday dinner", Summary: "A vote between Thai, pizza and the Sunday roast pub.", Poll: &Poll{
+				Question: "Where should we go for dinner on Saturday?",
+				Options:  []PollOption{{ID: "thai", Label: "Thai Garden"}, {ID: "pizza", Label: "Pizza place"}, {ID: "pub", Label: "The Red Lion"}},
 			}},
 		),
 	}, {
