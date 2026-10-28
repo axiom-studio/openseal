@@ -196,6 +196,18 @@ func componentSchema(depth int) map[string]interface{} {
 		"flashcards": flashcardsSchema(), "before_after": beforeAfterSchema(), "draft": draftSchema(), "recipe": recipeSchema(),
 		"item": itemSchema(), "analogy": analogySchema(),
 	}
+	if !top {
+		// Nested components list every payload key but leave its shape open:
+		// the top level already spells each one out, and unrolling every
+		// shape again under children and tabs at each level multiplies the
+		// schema past what model gateways accept. Validate checks nested
+		// payloads as strictly as top-level ones.
+		for name, payload := range properties {
+			if _, ok := payload.(map[string]interface{})["properties"]; ok && name != "binding" {
+				properties[name] = describe(map[string]interface{}{"type": "object"}, "Same fields as "+name+" at the top level.")
+			}
+		}
+	}
 	if depth < MaxDepth {
 		child := componentSchema(depth + 1)
 		properties["children"] = map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 12, "items": child}
