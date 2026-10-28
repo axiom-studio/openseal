@@ -79,7 +79,11 @@ func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *
 	if err != nil {
 		return ConversationReference{}, err
 	}
+	// The name is what a person sees if the card is ever listed: its title.
 	name := strings.TrimSpace(surface.Title)
+	if name == "" {
+		name = "Card"
+	}
 	for len(name) > 480 {
 		runes := []rune(name)
 		name = string(runes[:len(runes)-1])
@@ -89,7 +93,7 @@ func (r *ConversationRunTurnRunner) storeAnswerVisual(ctx context.Context, run *
 		componentTypes = append(componentTypes, component.Type)
 	}
 	_, err = NewArtifactCatalog(r.artifacts).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
-		ID: id, Version: 1, Scope: run.Scope, Name: name + ".surface.json",
+		ID: id, Version: 1, Scope: run.Scope, Name: name,
 		Type: presentation.ArtifactType, MediaType: presentation.MediaType,
 		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationInternal,
 		MetadataSchema: map[string]interface{}{
