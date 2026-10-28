@@ -28,6 +28,32 @@ type TurnHostFailure struct {
 	Code      string
 	Message   string
 	Retryable bool
+	// ContextPressure is set only for a turn sent with ContextReducible whose
+	// input would not fit the model's context. The host made no call with an
+	// effect, so the kernel may rebuild the turn with less context and send it
+	// once more. Message is still a complete user-facing explanation.
+	ContextPressure *HostedContextPressure
+}
+
+// TurnHostContextExceeded is the TurnHostFailure code for a turn whose input
+// does not fit the model's context.
+const TurnHostContextExceeded = "model_context_exceeded"
+
+// HostedContextPressure compares a host's estimate of a turn's model input
+// with the input the model accepts, both in tokens.
+type HostedContextPressure struct {
+	EstimatedTokens int64 `json:"estimatedTokens"`
+	LimitTokens     int64 `json:"limitTokens"`
+}
+
+// reductionBytes is how much model input to remove so the estimate falls to
+// three quarters of the limit. Hosts estimate about four bytes per token.
+func (p HostedContextPressure) reductionBytes() int {
+	target := p.LimitTokens * 3 / 4
+	if p.EstimatedTokens <= target {
+		return 0
+	}
+	return int(p.EstimatedTokens-target) * 4
 }
 
 func (e *TurnHostFailure) Error() string {
@@ -203,6 +229,15 @@ type HostedTurnRequest struct {
 	// absent from model input and never authorizes an action; the action policy
 	// re-resolves the mode, which may change between this turn and an action.
 	ConversationApprovalMode ConversationApprovalMode `json:"conversationApprovalMode,omitempty"`
+	// ContextReducible is a trusted host hint that the kernel can rebuild this
+	// turn with less conversation context. Before any effect, a host then
+	// answers input near or over the model's limit with a TurnHostFailure
+	// carrying ContextPressure instead of sending it. Absent from model input.
+	ContextReducible bool `json:"contextReducible,omitempty"`
+	// ContextPressure is set on a turn the kernel rebuilt after a host reported
+	// pressure. Older action results are shortened further in the model view,
+	// and a host shortens context it retains itself. Absent from model input.
+	ContextPressure *HostedContextPressure `json:"contextPressure,omitempty"`
 }
 
 // HostedTurnExecutionFailure is emitted by the trusted host after a native
@@ -821,6 +856,11 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	}
 	request.CanAskConversationQuestion = input.canAskConversationQuestion && input.Run.AssignedAgentID == r.config.AgentID
 	request.ConversationApprovalMode = input.approvalMode
+	request.ContextReducible = input.contextReducible
+	if input.contextPressure != nil {
+		pressure := *input.contextPressure
+		request.ContextPressure = &pressure
+	}
 	// A chat's own files are every conversation turn's Workspace.
 	if conversationID, _ := input.Run.Context["conversationId"].(string); strings.TrimSpace(conversationID) != "" {
 		request.Workspace = workspace.ChatAuthority(conversationID)

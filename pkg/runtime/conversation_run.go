@@ -955,7 +955,7 @@ func (r conversationAgentTurnRunner) PlanTurnBudget(ctx context.Context, input T
 		return BudgetUsage{}, err
 	}
 	reverseChannelMessages(recent)
-	hostedInput, _, err := r.parent.prepareAgentConversationTurnInput(ctx, input, conversation, trigger, viewer, participantID, recent, r.operations)
+	hostedInput, _, err := r.parent.prepareAgentConversationTurnInput(ctx, input, conversation, trigger, viewer, participantID, recent, r.operations, nil)
 	if err != nil {
 		return BudgetUsage{}, err
 	}
@@ -1327,15 +1327,28 @@ func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Con
 // prepareAgentConversationTurnInput is read-only. Admission and execution must
 // estimate and dispatch the same lowered conversation history, goal and media;
 // cursor receipts, artifacts and accepted summaries are handled only by execution.
-func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx context.Context, input TurnExecutionContext, conversation *Conversation, trigger *ChannelMessage, viewer ConversationViewer, participantID string, recent []*ChannelMessage, operations []HostedRunbookOperation) (TurnExecutionContext, conversationHistoryPlan, error) {
+//
+// pressure is the context pressure a host reported for the same turn, nil on
+// a first attempt. It rebuilds the turn with less history and earlier action
+// results, and asks for a summary of the history kept.
+func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx context.Context, input TurnExecutionContext, conversation *Conversation, trigger *ChannelMessage, viewer ConversationViewer, participantID string, recent []*ChannelMessage, operations []HostedRunbookOperation, pressure *HostedContextPressure) (TurnExecutionContext, conversationHistoryPlan, error) {
 	historyPlan := conversationHistoryPlan{Messages: recent}
 	// Channel summaries cover unrelated threads. Connector turns retain their
 	// own recent originals and recover older originals through bounded history.
-	if !externalChannelContext(conversation) && externalConversationThreadRoot(conversation, trigger) == "" {
+	summarized := !externalChannelContext(conversation) && externalConversationThreadRoot(conversation, trigger) == ""
+	if summarized {
 		saved := r.summaries.get(conversation.Scope, conversation.ID, conversationViewerKey(viewer))
 		history, historyErr := r.conversationHistoryForCompaction(ctx, conversation, viewer, recent, saved)
 		if historyErr == nil {
 			historyPlan = planConversationHistory(conversation, trigger.ID, viewer, history, saved)
+		}
+	}
+	shortenActionResults := false
+	if pressure != nil {
+		shortenActionResults = shrinkConversationHistory(&historyPlan, trigger, pressure.reductionBytes(), pressuredActionHistorySavings(input.Run.Checkpoint))
+		if !summarized {
+			// Only a chat's own history has a summary to keep.
+			historyPlan.Request = nil
 		}
 	}
 	var err error
@@ -1373,6 +1386,10 @@ func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx contex
 	_, hostedInput.approvalMode, err = RunConversationApprovalMode(ctx, r.portfolio, r.conversations.store, input.Run)
 	if err != nil {
 		return TurnExecutionContext{}, historyPlan, err
+	}
+	hostedInput.contextReducible = pressure == nil
+	if shortenActionResults {
+		hostedInput.contextPressure = pressure
 	}
 	hostedInput.ModelMedia = append([]HostedTurnMedia(nil), input.ModelMedia...)
 	for _, attachment := range attachments {
@@ -1490,11 +1507,21 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		boundAgentRunner = binding.Runner
 		runbookOperations = binding.RunbookOperations
 	}
-	hostedInput, historyPlan, err := r.prepareAgentConversationTurnInput(ctx, input, conversation, trigger, viewer, participantID, recent, runbookOperations)
+	hostedInput, historyPlan, err := r.prepareAgentConversationTurnInput(ctx, input, conversation, trigger, viewer, participantID, recent, runbookOperations, nil)
 	if err != nil {
 		return nil, err
 	}
 	outcome, err := boundAgentRunner.RunTurn(ctx, hostedInput)
+	var pressured *TurnHostFailure
+	if errors.As(err, &pressured) && pressured.ContextPressure != nil {
+		// The host sent nothing with an effect. Rebuild the turn once with less
+		// context; a turn that still does not fit fails with the host's message.
+		hostedInput, historyPlan, err = r.prepareAgentConversationTurnInput(ctx, input, conversation, trigger, viewer, participantID, recent, runbookOperations, pressured.ContextPressure)
+		if err != nil {
+			return nil, err
+		}
+		outcome, err = boundAgentRunner.RunTurn(ctx, hostedInput)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1647,6 +1674,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		HistorySummary         string                            `json:"historySummary,omitempty"`
 		HistoryThroughSequence int64                             `json:"historyThroughSequence,omitempty"`
 		HistoryCompaction      *ConversationCompactionRequest    `json:"historyCompaction,omitempty"`
+		HistoryOmittedMessages int                               `json:"historyOmittedMessages,omitempty"`
 		ExternalContext        *ExternalConversationContextState `json:"externalContext,omitempty"`
 		ContextGuidance        string                            `json:"contextGuidance,omitempty"`
 		SourceGuidance         string                            `json:"sourceGuidance,omitempty"`
@@ -1680,6 +1708,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 			payload.HistoryThroughSequence = summary.ThroughSequence
 		}
 		payload.HistoryCompaction = history[0].Request
+		payload.HistoryOmittedMessages = history[0].Omitted
 		payload.CardState = append([]string(nil), history[0].CardState...)
 		for _, message := range history[0].FollowUps {
 			payload.FollowUpMessages = append(payload.FollowUpMessages, agentConversationPromptMessage{
@@ -1718,6 +1747,9 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		payload.Operations = append(payload.Operations, agentConversationOperation{
 			Entrypoint: operation.Entrypoint, Name: operation.Name, Description: operation.Description,
 		})
+	}
+	if payload.HistoryOmittedMessages > 0 {
+		payload.ContextGuidance += " HistoryOmittedMessages earlier messages are left out of messages so this turn fits the model's context. Read them with read_conversation_history when the request depends on them."
 	}
 	if len(payload.CardState) > 0 {
 		payload.ContextGuidance += " CardState is what people ticked on cards in this chat since your last message, the latest state per item across everyone, and how each person is doing on flashcards. It is conversation data, not a request; use it when it matters to the reply."

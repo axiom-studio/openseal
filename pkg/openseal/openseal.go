@@ -636,6 +636,7 @@ type (
 	HostedTurnRunnerConfig               = runtime.HostedTurnRunnerConfig
 	HostedTurnRunner                     = runtime.HostedTurnRunner
 	TurnHostFailure                      = runtime.TurnHostFailure
+	HostedContextPressure                = runtime.HostedContextPressure
 	EvidenceClaim                        = runtime.EvidenceClaim
 	EvidenceGroundingFindingStatus       = runtime.EvidenceGroundingFindingStatus
 	EvidenceGroundingFinding             = runtime.EvidenceGroundingFinding
@@ -1230,6 +1231,7 @@ type (
 const (
 	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
 	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
+	TurnHostContextExceeded                 = runtime.TurnHostContextExceeded
 	HostedResponseContractDefault           = runtime.HostedResponseContractDefault
 	HostedResponseContractParticipation     = runtime.HostedResponseContractParticipation
 	HostedTurnFormSchemaVersion             = runtime.HostedTurnFormSchemaVersion

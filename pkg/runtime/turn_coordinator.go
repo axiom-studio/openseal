@@ -30,6 +30,10 @@ type TurnExecutionContext struct {
 	// resolver the action policy uses. It is a host hint for this turn only;
 	// the action policy re-resolves the mode for every proposed action.
 	approvalMode ConversationApprovalMode
+	// contextReducible and contextPressure let a conversation runner rebuild a
+	// turn with less history once when its host reports context pressure.
+	contextReducible bool
+	contextPressure  *HostedContextPressure
 }
 
 // TurnRunner performs one bounded, proposal-only reasoning step. External side

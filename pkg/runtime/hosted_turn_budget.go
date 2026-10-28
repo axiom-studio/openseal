@@ -58,6 +58,9 @@ const (
 	// reference. The full evidence remains in the ActionCall store and the most
 	// recent result remains available through continuationCheckpoint.lastAction.
 	HostedTurnHistoricalActionResultBytes = 2 << 10
+	// HostedTurnPressuredActionResultBytes is the same bound for a turn
+	// rebuilt after its host reported context pressure.
+	HostedTurnPressuredActionResultBytes = 512
 )
 
 // HostedTurnModelInput is the credential-free data envelope presented to the
@@ -174,6 +177,10 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 	for _, media := range request.ModelMedia {
 		images = append(images, HostedImageReference{MediaType: media.MediaType, SourceActionCallID: media.SourceActionCallID, SourceArtifactID: media.SourceArtifactID, SourceArtifactVersion: media.SourceArtifactVersion, SourceMessageID: media.SourceMessageID})
 	}
+	checkpoint := hostedTurnModelCheckpoint(request.ContinuationCheckpoint)
+	if request.ContextPressure != nil {
+		shortenHostedTurnActionHistory(checkpoint)
+	}
 	return json.Marshal(HostedTurnModelInput{
 		Images: images,
 		Goal:   request.Goal, InputContext: request.InputContext, SystemInstructions: request.SystemInstructions,
@@ -186,9 +193,48 @@ func MarshalHostedTurnModelInput(request HostedTurnRequest) ([]byte, error) {
 		ActionInvocationContracts: ProjectHostedActionInvocationContracts(request.Actions),
 		Budget:                    request.Budget,
 		DependencyResults:         request.DependencyResults, CollaborationResults: request.CollaborationResults,
-		ContinuationCheckpoint: hostedTurnModelCheckpoint(request.ContinuationCheckpoint),
+		ContinuationCheckpoint: checkpoint,
 		PendingInterventions:   request.PendingInterventions,
 	})
+}
+
+// pressuredActionHistorySavings is how many model input bytes shortening
+// earlier action results would save for a turn on checkpoint.
+func pressuredActionHistorySavings(checkpoint map[string]interface{}) int {
+	view := hostedTurnModelCheckpoint(checkpoint)
+	before, err := json.Marshal(view)
+	if err != nil {
+		return 0
+	}
+	shortenHostedTurnActionHistory(view)
+	after, err := json.Marshal(view)
+	if err != nil {
+		return 0
+	}
+	return len(before) - len(after)
+}
+
+// shortenHostedTurnActionHistory compacts every earlier action result in a
+// model view beyond the pressured bound. The current result stays whole.
+func shortenHostedTurnActionHistory(checkpoint map[string]interface{}) {
+	history, _ := checkpoint[actionHistoryCheckpointKey].([]interface{})
+	for _, value := range history {
+		entry, ok := value.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		result, exists := entry["result"]
+		if !exists {
+			continue
+		}
+		if object, _ := result.(map[string]interface{}); object["currentResultRef"] != nil {
+			continue
+		}
+		if encoded, err := json.Marshal(result); err == nil && len(encoded) <= HostedTurnPressuredActionResultBytes {
+			continue
+		}
+		entry["result"] = compactHostedTurnActionResult(result, strings.TrimSpace(fmt.Sprint(entry["actionCallId"])), HostedTurnPressuredActionResultBytes)
+	}
 }
 
 func hostedTurnTextCheckpoint(checkpoint map[string]interface{}) map[string]interface{} {
@@ -341,12 +387,12 @@ func compactHostedTurnActionHistory(checkpoint map[string]interface{}) {
 			continue
 		}
 		if err != nil || len(encoded) > HostedTurnHistoricalActionResultBytes {
-			entry["result"] = compactHostedTurnActionResult(result, actionCallID)
+			entry["result"] = compactHostedTurnActionResult(result, actionCallID, HostedTurnHistoricalActionResultBytes)
 		}
 	}
 }
 
-func compactHostedTurnActionResult(result interface{}, actionCallID string) map[string]interface{} {
+func compactHostedTurnActionResult(result interface{}, actionCallID string, textBytes int) map[string]interface{} {
 	compacted := map[string]interface{}{
 		"compacted": true, "evidenceRef": "action-call:" + actionCallID,
 	}
@@ -360,7 +406,7 @@ func compactHostedTurnActionResult(result interface{}, actionCallID string) map[
 		}
 	}
 	if value, ok := object["text"].(string); ok && strings.TrimSpace(value) != "" {
-		compacted["text"] = boundedHostedTurnEvidenceText(value, HostedTurnHistoricalActionResultBytes)
+		compacted["text"] = boundedHostedTurnEvidenceText(value, textBytes)
 	}
 	if value, exists := object["challenges"]; exists {
 		if encoded, err := json.Marshal(value); err == nil && len(encoded) <= 512 {
