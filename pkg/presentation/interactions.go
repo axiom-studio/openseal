@@ -22,16 +22,21 @@ const (
 	InteractionAnswer  InteractionKind = "answer"  // quiz answer
 	InteractionMark    InteractionKind = "mark"    // flashcard got/again
 	InteractionDone    InteractionKind = "done"    // flashcards finished
+	InteractionVote    InteractionKind = "vote"    // poll vote
+	InteractionShare   InteractionKind = "share"   // explorer result shared
 )
 
 // Components with more than one interaction name it in the action id:
-// flashcards take FlashcardsMark or FlashcardsDone, drafts take DraftRespond.
-// DraftEdit opens the composer on the client and is never stored.
+// flashcards take FlashcardsMark or FlashcardsDone, drafts take DraftRespond,
+// polls PollVoteAction and explorers ExplorerShareAction. DraftEdit opens the
+// composer on the client and is never stored.
 const (
-	FlashcardsMark = "mark"
-	FlashcardsDone = "done"
-	DraftRespond   = "respond"
-	DraftEdit      = "edit"
+	FlashcardsMark      = "mark"
+	FlashcardsDone      = "done"
+	DraftRespond        = "respond"
+	DraftEdit           = "edit"
+	PollVoteAction      = "vote"
+	ExplorerShareAction = "share"
 )
 
 // Flashcard mark results (values {"result": ...}) and draft responses
@@ -61,18 +66,23 @@ type InteractionRule struct {
 	// Shared state is read across actors: everyone who can see the card sees
 	// and changes the same ticks.
 	Shared bool
+	// WakeWhenEveryoneVoted (poll votes) wakes the agent once per visual
+	// version, the first time EveryoneVoted reports that every human
+	// participant has a vote stored; other votes do not wake it.
+	WakeWhenEveryoneVoted bool
 }
 
 var checkRule = InteractionRule{Kind: InteractionCheck, ItemKeyed: true, Shared: true}
 
 // Interaction reports which stored interaction a component accepts. actionID
 // selects the button of an actions component, the interaction of flashcards
-// (mark or done) and of a draft (respond), and must be empty otherwise.
+// (mark or done), of a draft (respond), of a poll (vote) and of an explorer
+// (share), and must be empty otherwise.
 // Approval and entity buttons use their existing endpoints and edit buttons
 // are client-only, so none of them is a card interaction; neither are the
 // buttons of a draft bound to an approval.
 func Interaction(component Component, actionID string) (InteractionRule, error) {
-	if component.Type != "actions" && component.Type != "flashcards" && component.Type != "draft" && actionID != "" {
+	if !contains([]string{"actions", "flashcards", "draft", "poll", "explorer"}, component.Type) && actionID != "" {
 		return InteractionRule{}, fmt.Errorf("%s interactions do not take an action id", component.Type)
 	}
 	switch component.Type {
@@ -131,6 +141,17 @@ func Interaction(component Component, actionID string) (InteractionRule, error) 
 		return InteractionRule{}, fmt.Errorf("draft interactions take the action id %q (got %q)", DraftRespond, actionID)
 	case "quiz":
 		return InteractionRule{Kind: InteractionAnswer, SingleUse: true, NotifyAgent: true}, nil
+	case "poll":
+		if actionID != PollVoteAction {
+			return InteractionRule{}, fmt.Errorf("poll interactions take the action id %q (got %q)", PollVoteAction, actionID)
+		}
+		// Changeable: the latest vote per person counts.
+		return InteractionRule{Kind: InteractionVote, Shared: true, WakeWhenEveryoneVoted: true}, nil
+	case "explorer":
+		if actionID != ExplorerShareAction {
+			return InteractionRule{}, fmt.Errorf("explorer interactions take the action id %q (got %q)", ExplorerShareAction, actionID)
+		}
+		return InteractionRule{Kind: InteractionShare, NotifyAgent: true}, nil
 	default:
 		return InteractionRule{}, fmt.Errorf("component %q (%s) does not accept interactions", component.ID, component.Type)
 	}
@@ -221,6 +242,10 @@ var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 //     allows multiple.
 //   - flashcards mark: {"result": "got" | "again"}; done: no values.
 //   - draft respond: {"response": "looks_good" | "shorter"}.
+//   - poll vote: {"optionIds": [id, ...]}, exactly one id unless the poll
+//     allows multiple, then distinct ids. Hosts also call PollOpen.
+//   - explorer share: {"inputs": {inputId: number, ...}} with every input,
+//     each within its range and on a step (toggles 0 or 1).
 func ValidateInteractionValues(component Component, actionID string, values map[string]interface{}) error {
 	rule, err := Interaction(component, actionID)
 	if err != nil {
@@ -263,6 +288,25 @@ func ValidateInteractionValues(component Component, actionID string, values map[
 			return errors.New("done carries no values; the tally comes from the marks")
 		}
 		return nil
+	case InteractionVote:
+		if err := onlyKeys(values, "optionIds"); err != nil {
+			return err
+		}
+		ids, err := stringList(values["optionIds"], "optionIds")
+		if err != nil {
+			return err
+		}
+		return validatePollVote(component.Poll, ids)
+	case InteractionShare:
+		if err := onlyKeys(values, "inputs"); err != nil {
+			return err
+		}
+		inputs, err := explorerInputValues(values["inputs"])
+		if err != nil {
+			return err
+		}
+		_, err = ExplorerShare(component, inputs)
+		return err
 	case InteractionAnswer:
 		if err := onlyKeys(values, "selected"); err != nil {
 			return err
@@ -502,6 +546,14 @@ func CardResponseText(component Component, actionID, itemKey string, values, out
 			if front, found := itemLabel(component, itemKey); found {
 				return fmt.Sprintf("Card response (flashcards %q): marked %q %s", name, front, result)
 			}
+		}
+	case "poll":
+		if text, ok := pollResponseText(component, values, outcome); ok {
+			return fmt.Sprintf("Card response (poll %q): %s", name, text)
+		}
+	case "explorer":
+		if text, ok := explorerResponseText(component, outcome); ok {
+			return fmt.Sprintf("Card response (explorer %q): %s", name, text)
 		}
 	case "draft":
 		if label, ok := DraftResponses[fmt.Sprint(decoded["response"])]; ok {
