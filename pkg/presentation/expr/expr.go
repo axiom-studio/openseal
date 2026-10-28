@@ -217,3 +217,26 @@ func quoteNames(names map[string]Type) string {
 	}
 	return strings.Join(list, ", ")
 }
+
+// Uses lists the declared inputs the expression reads, sorted.
+func (p *Program) Uses() []string {
+	seen := map[string]bool{}
+	var visit func(n *node)
+	visit = func(n *node) {
+		if n.kind == nodeName {
+			if _, input := p.inputs[n.name]; input {
+				seen[n.name] = true
+			}
+		}
+		for _, arg := range n.args {
+			visit(arg)
+		}
+	}
+	visit(p.root)
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}

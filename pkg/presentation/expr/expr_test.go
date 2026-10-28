@@ -152,3 +152,17 @@ func TestNodeAndNestingLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUses(t *testing.T) {
+	program, err := Compile("sum(i, 1, years, deposit * i) + if(member, 1, 0)", map[string]Type{"deposit": Number, "years": Number, "member": Bool, "rate": Number})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(program.Uses(), ","); got != "deposit,member,years" {
+		t.Fatalf("Uses = %s", got)
+	}
+	constant, _ := Compile("2 * 3", map[string]Type{"x": Number})
+	if len(constant.Uses()) != 0 {
+		t.Fatalf("constant uses %v", constant.Uses())
+	}
+}
