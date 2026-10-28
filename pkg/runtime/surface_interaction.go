@@ -24,8 +24,10 @@ var (
 )
 
 // SurfaceInteraction is one durable answer to an interactive card component:
-// a quiz pick, a checklist tick, a poll vote, a flashcard mark. Interactions
-// are version-scoped (SurfaceVersion) and per actor.
+// a quiz pick, a checklist tick, a poll vote, a flashcard mark. An app in a
+// chat reports results the same way, on the app artifact itself
+// (SurfaceArtifactID and SurfaceID are its id; see presentation.AppInteraction).
+// Interactions are version-scoped (SurfaceVersion) and per actor.
 //
 // Uniqueness is chosen by Repeatable when the interaction is created:
 //
