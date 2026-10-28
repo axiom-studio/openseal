@@ -38,7 +38,11 @@ func (r *ConversationRunTurnRunner) teamAnswerVisual(run *AgentRun, triggerID st
 	return func(ctx context.Context, participant ConversationParticipant, visual presentation.Visual) (ConversationReference, error) {
 		var checks presentation.ValidateOptions
 		if r.config.VisualChecks != nil {
-			checks = r.config.VisualChecks(run)
+			// The member publishes, so an approval binding must name an
+			// action that member proposed.
+			member := cloneAgentRun(run)
+			member.AssignedAgentID = participant.ID
+			checks = r.config.VisualChecks(member)
 		}
 		if err := validateHostedTurnVisual(ctx, &visual, AgentRunStatusCompleted, false, checks); err != nil {
 			return ConversationReference{}, fmt.Errorf("%w: %w", errInvalidAnswerVisual, err)

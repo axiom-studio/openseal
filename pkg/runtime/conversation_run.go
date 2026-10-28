@@ -673,7 +673,9 @@ type ConversationRunTurnRunnerConfig struct {
 	// is projected into the ephemeral model goal, never message state.
 	AttachmentContent ArtifactContentStore
 	// VisualChecks supplies the binding, link and image checks for visuals
-	// Team members attach to their answers. Nil rejects bound or linked
+	// Team members attach to their answers. The run it gets is the Team's
+	// conversation Run with AssignedAgentID set to the answering member, so
+	// the checks know which Agent published. Nil rejects bound or linked
 	// visuals and visuals with images.
 	VisualChecks func(run *AgentRun) presentation.ValidateOptions
 }

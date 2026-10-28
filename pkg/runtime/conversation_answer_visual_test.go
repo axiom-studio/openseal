@@ -241,7 +241,7 @@ func TestTeamMemberAnswerCarriesItsVisual(t *testing.T) {
 		AttachmentContent: content,
 		VisualChecks: func(run *AgentRun) presentation.ValidateOptions {
 			return presentation.ValidateOptions{Bindings: presentation.BindingResolverFunc(func(_ context.Context, binding presentation.Binding) error {
-				checkedFor = run.ID + "/" + binding.ID
+				checkedFor = run.ID + "/" + run.AssignedAgentID + "/" + binding.ID
 				return nil
 			})}
 		},
@@ -253,7 +253,8 @@ func TestTeamMemberAnswerCarriesItsVisual(t *testing.T) {
 	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || outcome.Visual != nil {
 		t.Fatalf("outcome = %#v, err=%v", outcome, err)
 	}
-	if checkedFor != scheduled.Run.ID+"/rb-1" {
+	// The checks see the answering member as the run's Agent.
+	if checkedFor != scheduled.Run.ID+"/planner/rb-1" {
 		t.Fatalf("team visual bindings were not checked: %q", checkedFor)
 	}
 	id := answerVisualArtifactID(scheduled.Run.ID, trigger.ID, "planner")
