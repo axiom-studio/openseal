@@ -2,7 +2,6 @@ package presentation
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -332,7 +331,7 @@ func TestLintWave2(t *testing.T) {
 }
 
 func TestWave2SchemaEntries(t *testing.T) {
-	properties := ComponentJSONSchema()["properties"].(map[string]interface{})
+	properties := componentJSONSchema()["properties"].(map[string]interface{})
 	for _, name := range []string{"diagram", "labeled_image", "quantity_visual", "math", "definition", "flashcards", "before_after", "draft", "recipe", "item", "analogy"} {
 		if properties[name] == nil {
 			t.Fatalf("schema has no %s payload", name)
@@ -340,13 +339,6 @@ func TestWave2SchemaEntries(t *testing.T) {
 		spec := catalogue[name]
 		if spec.payload != name || !RequiresSummary(name) || spec.sentence == "" {
 			t.Fatalf("%s catalogue entry = %#v", name, spec)
-		}
-		var component Component
-		if err := json.Unmarshal([]byte(spec.example), &component); err != nil {
-			t.Fatalf("%s example: %v", name, err)
-		}
-		if _, err := Validate(context.Background(), one(component), images("img-1")); err != nil {
-			t.Fatalf("%s example: %v", name, err)
 		}
 	}
 	diagram := properties["diagram"].(map[string]interface{})["properties"].(map[string]interface{})

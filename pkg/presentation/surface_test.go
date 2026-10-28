@@ -386,7 +386,7 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 
 func TestSkillDefinitionRegisters(t *testing.T) {
 	definition := SkillDefinition()
-	if definition.ID != SkillID || definition.Version != "4.1.0" || !definition.Requirements.AlwaysAvailable {
+	if definition.ID != SkillID || definition.Version != "4.2.0" || !definition.Requirements.AlwaysAvailable {
 		t.Fatalf("definition = %#v", definition)
 	}
 	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {
@@ -406,9 +406,9 @@ func mustJSON(t *testing.T, value interface{}) string {
 	return string(encoded)
 }
 
-func TestVisualFieldDescriptionCarriesRubricAndExamples(t *testing.T) {
+func TestVisualFieldDescriptionCarriesRubricFormatAndExamples(t *testing.T) {
 	description := VisualFieldDescription()
-	if !strings.HasPrefix(description, "Optional visual") || !strings.Contains(description, VisualRubric()) ||
+	if !strings.HasPrefix(description, "Optional visual") || !strings.Contains(description, VisualRubric()) || !strings.Contains(description, VisualFormat()) ||
 		!strings.Contains(description, `"userAsks":"What's the capital of Australia?"`) || !strings.Contains(description, `"format":"currency","currency":"GBP"`) {
 		t.Fatalf("description = %s", description)
 	}
@@ -435,25 +435,24 @@ func TestUpdateVisualSchemaSnapshot(t *testing.T) {
 	}
 }
 
-func TestSchemaUnrollsToMaxDepth(t *testing.T) {
-	level := ComponentJSONSchema()
-	for depth := 1; depth <= MaxDepth; depth++ {
-		properties := level["properties"].(map[string]interface{})
+func TestLooseSchemaListsEveryTypeAndPayload(t *testing.T) {
+	for name, schema := range map[string]map[string]interface{}{
+		"visual": VisualJSONSchema()["properties"].(map[string]interface{})["components"].(map[string]interface{}),
+		"update": UpdateVisualInputSchema()["properties"].(map[string]interface{})["components"].(map[string]interface{}),
+	} {
+		component := schema["items"].(map[string]interface{})
+		properties := component["properties"].(map[string]interface{})
 		types := properties["type"].(map[string]interface{})["enum"].([]interface{})
-		if depth == MaxDepth {
-			if properties["children"] != nil || properties["tabs"] != nil {
-				t.Fatalf("depth %d still allows children", depth)
-			}
-			for _, name := range types {
-				if IsLayout(name.(string)) {
-					t.Fatalf("depth %d allows layout type %s", depth, name)
-				}
-			}
-			return
+		if len(types) != len(catalogue) || component["additionalProperties"] != false {
+			t.Fatalf("%s: types %v, component %v", name, types, component)
 		}
-		if level["additionalProperties"] != false {
-			t.Fatalf("depth %d component schema is open", depth)
+		for key := range payloadSchemas() {
+			if properties[key] == nil {
+				t.Fatalf("%s: no %s payload", name, key)
+			}
 		}
-		level = properties["children"].(map[string]interface{})["items"].(map[string]interface{})
+		if children := properties["children"].(map[string]interface{}); children["items"].(map[string]interface{})["properties"] != nil {
+			t.Fatalf("%s: nested components are spelled out", name)
+		}
 	}
 }

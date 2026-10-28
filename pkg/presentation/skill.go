@@ -95,20 +95,96 @@ func SkillDefinition() *skill.Definition {
 	}
 }
 
+// fieldExamples names the worked examples the visual field shows: one visual
+// answer and the replies that stay text.
+var fieldExamples = []string{"phone-plan", "text-feelings", "text-fact"}
+
 // VisualFieldDescription is the description of an answer's visual field: the
-// rubric followed by the worked examples, one compact JSON object per line.
+// rubric, the exact format in the compact notation, and a few worked
+// examples, one compact JSON object per line.
 func VisualFieldDescription() string {
 	var b strings.Builder
 	b.WriteString("Optional visual shown with your answer, directly under its text. ")
 	b.WriteString(VisualRubric())
-	b.WriteString("\nWorked examples (userAsks, your answer text, and the visual if any):")
+	b.WriteString("\n")
+	b.WriteString(VisualFormat())
+	b.WriteString("\nExamples (userAsks, your answer text, and the visual if any):")
 	for _, example := range VisualExamples() {
+		if !contains(fieldExamples, example.Name) {
+			continue
+		}
 		encoded, err := json.Marshal(example)
 		if err != nil {
 			continue
 		}
 		b.WriteString("\n")
 		b.Write(encoded)
+	}
+	return b.String()
+}
+
+// VisualFormat spells out the exact shape of a visual in the compact
+// notation, generated from the strict schemas Validate mirrors: the named
+// patterns and shapes, the visual and component envelope, nesting limits and
+// one line per type.
+func VisualFormat() string {
+	notation := visualNotation()
+	var b strings.Builder
+	b.WriteString("Format. " + compactLegend + "\n")
+	for _, pattern := range visualPatterns() {
+		line := pattern.name + " = " + compactRenderer{}.render(map[string]interface{}{"type": "string", "pattern": pattern.pattern})
+		if pattern.note != "" {
+			line += " (" + pattern.note + ")"
+		}
+		b.WriteString(line + "\n")
+	}
+	for _, shape := range visualShapes() {
+		line := shape.name + " = " + notation.define(shape.schema)
+		if shape.name == "Icon" {
+			line += " (a Lucide name from: " + strings.Join(Icons, ", ") + "; any other renders as a dot)"
+		}
+		b.WriteString(line + "\n")
+	}
+	b.WriteString("Visual = " + notation.render(visualSchema(componentRef(), "")) + "\n")
+	envelope := envelopeProperties(componentRef())
+	children := envelope["children"]
+	delete(envelope, "children")
+	envelope["type"] = describe(map[string]interface{}{"type": "string"}, "one of the types below")
+	envelope["summary"] = describe(envelope["summary"].(map[string]interface{}), "one plain sentence for screen readers and voice; required for types marked *")
+	b.WriteString("Component = " + notation.render(closedObject([]interface{}{"id", "type"}, envelope)) +
+		" plus only the payload whose key equals type (text, caption and divider use text).\n")
+	var layouts []string
+	for _, name := range TypeNames() {
+		if IsLayout(name) {
+			layouts = append(layouts, name)
+		}
+	}
+	fmt.Fprintf(&b, "Components nest at most %d levels deep (top level is 1, so no %s at level %d); at most %d components in all including nested ones; at most %d KB of JSON; ids are unique across the visual.\n",
+		MaxDepth, strings.Join(layouts, ", "), MaxDepth, MaxComponents, MaxSurfaceBytes/1024)
+	b.WriteString("Markdown fields are GFM without HTML or images; $…$ maths is allowed.\n")
+	b.WriteString("Types (* = summary required):")
+	payloads := payloadSchemas()
+	for _, name := range TypeNames() {
+		spec := catalogue[name]
+		line := "\n" + name
+		if spec.summary == summaryRequired {
+			line += "*"
+		}
+		line += ": " + spec.sentence
+		if spec.payload != "" {
+			line += " " + spec.payload + ":" + notation.render(payloads[spec.payload])
+		}
+		if spec.children {
+			line += " children:" + notation.render(children)
+		}
+		if spec.bindings != nil {
+			kinds := make([]string, len(spec.bindings))
+			for index, kind := range spec.bindings {
+				kinds[index] = string(kind)
+			}
+			line += " binding.kind:" + strings.Join(kinds, "|")
+		}
+		b.WriteString(line)
 	}
 	return b.String()
 }
@@ -125,96 +201,97 @@ func (v Visual) Surface(state State) Surface {
 	return Surface{Schema: Schema, Title: v.Title, State: state, Components: v.Components}
 }
 
-// VisualJSONSchema is the JSON Schema of a Visual, for an answer's visual
-// field. The component tree is unrolled to MaxDepth levels instead of using
-// $ref so the schema can be embedded anywhere.
+// VisualJSONSchema is the JSON Schema of a Visual for an answer's visual
+// field. It is deliberately loose: components list every envelope and
+// payload key but leave payloads open, because VisualFieldDescription
+// spells out every exact shape in a fraction of the tokens and Validate
+// checks each visual strictly.
 func VisualJSONSchema() map[string]interface{} {
-	return closedObject([]interface{}{"title", "components"}, map[string]interface{}{
-		"title": strRange(1, MaxTitleRunes), "components": componentsSchema(),
-	})
+	return visualSchema(looseComponentSchema(), "Each component, its payload and any nested components follow the format in this visual's description exactly.")
 }
 
-// ComponentJSONSchema is the JSON Schema of one top-level component.
-func ComponentJSONSchema() map[string]interface{} {
-	return componentSchema(1)
-}
-
-func componentsSchema() map[string]interface{} {
-	return describe(map[string]interface{}{"type": "array", "minItems": 1, "maxItems": MaxComponents, "items": componentSchema(1)},
-		fmt.Sprintf("At most %d components in total including nested ones, nested at most %d deep, %d KB of JSON.", MaxComponents, MaxDepth, MaxSurfaceBytes/1024))
-}
-
-// UpdateVisualInputSchema is the update_visual input schema.
+// UpdateVisualInputSchema is the update_visual input schema. Its components
+// are as loose as an answer's visual field, which always travels with it.
 func UpdateVisualInputSchema() map[string]interface{} {
 	return closedObject([]interface{}{"visualId", "expectedLatestVersion", "title", "state", "components", "requirementName"}, map[string]interface{}{
-		"visualId":              describe(map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}, "Id of the visual to replace."),
+		"visualId":              describe(idSchema(), "Id of the visual to replace."),
 		"expectedLatestVersion": map[string]interface{}{"type": "integer", "minimum": 0, "description": "The visual's current version; 0 only when it does not exist yet."},
 		"title":                 strRange(1, MaxTitleRunes),
 		"state":                 enum([]string{string(StateStreaming), string(StateReady)}),
-		"components":            componentsSchema(),
-		"requirementName":       strRange(1, 128),
+		"components": describe(array(looseComponentSchema(), 1, MaxComponents),
+			"Components in exactly the format described on your answer's visual field."),
+		"requirementName": strRange(1, 128),
 	})
 }
 
-func componentSchema(depth int) map[string]interface{} {
-	top := depth == 1
-	types := TypeNames()
-	if depth == MaxDepth {
-		leaves := types[:0:0]
-		for _, name := range types {
-			if !IsLayout(name) {
-				leaves = append(leaves, name)
-			}
-		}
-		types = leaves
+// maxChildren bounds children and tab children.
+const maxChildren = 12
+
+func visualSchema(component map[string]interface{}, description string) map[string]interface{} {
+	components := array(component, 1, MaxComponents)
+	if description != "" {
+		components = describe(components, description)
 	}
-	typeSchema := enum(types)
-	summary := strRange(0, MaxSummaryRunes)
-	if top {
-		lines := make([]string, 0, len(catalogue))
-		for _, name := range TypeNames() {
-			spec := catalogue[name]
-			lines = append(lines, fmt.Sprintf("%s: %s Example: %s", name, spec.sentence, spec.example))
-		}
-		typeSchema = describe(typeSchema, "Set only the payload whose key equals type (text, caption and divider use text). Types:\n"+strings.Join(lines, "\n"))
-		var needs []string
-		for _, name := range TypeNames() {
-			if RequiresSummary(name) {
-				needs = append(needs, name)
-			}
-		}
-		summary = describe(summary, "One plain sentence for screen readers and voice. Required for "+strings.Join(needs, ", ")+".")
+	return closedObject([]interface{}{"title", "components"}, map[string]interface{}{"title": strRange(1, MaxTitleRunes), "components": components})
+}
+
+// componentRef stands for a nested component in the strict schemas.
+func componentRef() map[string]interface{} {
+	return map[string]interface{}{"$ref": "#/$defs/Component"}
+}
+
+// envelopeProperties are the fields every component shares; component is
+// the schema of a nested child.
+func envelopeProperties(component map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"id": idSchema(), "type": enum(TypeNames()), "summary": str(MaxSummaryRunes), "title": str(MaxTitleRunes),
+		"tone": enum(toneNames()), "binding": bindingSchema(), "children": array(component, 1, maxChildren),
 	}
-	properties := map[string]interface{}{
-		"id": map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}, "type": typeSchema,
-		"summary": summary, "title": str(MaxTitleRunes), "tone": enum(toneNames()), "binding": bindingSchema(),
+}
+
+// payloadSchemas maps every payload key to its strict schema.
+func payloadSchemas() map[string]map[string]interface{} {
+	return map[string]map[string]interface{}{
 		"text": str(1200), "chart": chartSchema(), "diagram": diagramSchema(), "form": formSchema(),
-		"table": tableSchema(), "stat_row": statRowSchema(), "actions": actionsSchema(top),
+		"table": tableSchema(), "stat_row": statRowSchema(), "actions": actionsSchema(),
 		"callout": calloutSchema(), "steps": stepsSchema(), "comparison": comparisonSchema(), "timeline": timelineSchema(),
 		"image": imageBlockSchema(), "gallery": gallerySchema(), "choices": choicesSchema(), "checklist": checklistSchema(), "quiz": quizSchema(),
 		"labeled_image": labeledImageSchema(), "quantity_visual": quantityVisualSchema(), "math": mathSchema(), "definition": definitionSchema(),
 		"flashcards": flashcardsSchema(), "before_after": beforeAfterSchema(), "draft": draftSchema(), "recipe": recipeSchema(),
 		"item": itemSchema(), "analogy": analogySchema(),
+		"grid": closedObject([]interface{}{"columns"}, map[string]interface{}{"columns": integer(2, 4)}),
+		"tabs": array(closedObject([]interface{}{"label", "children"}, map[string]interface{}{
+			"label": strRange(1, 40), "children": array(componentRef(), 1, maxChildren),
+		}), 2, 5),
 	}
-	if !top {
-		// Nested components list every payload key but leave its shape open:
-		// the top level already spells each one out, and unrolling every
-		// shape again under children and tabs at each level multiplies the
-		// schema past what model gateways accept. Validate checks nested
-		// payloads as strictly as top-level ones.
-		for name, payload := range properties {
-			if _, ok := payload.(map[string]interface{})["properties"]; ok && name != "binding" {
-				properties[name] = describe(map[string]interface{}{"type": "object"}, "Same fields as "+name+" at the top level.")
-			}
+}
+
+// componentJSONSchema is the strict schema of one component, with nested
+// components as references to it. It feeds VisualFormat and tests; models
+// get the loose schema plus the compact format instead.
+func componentJSONSchema() map[string]interface{} {
+	properties := envelopeProperties(componentRef())
+	for key, payload := range payloadSchemas() {
+		properties[key] = payload
+	}
+	return closedObject([]interface{}{"id", "type"}, properties)
+}
+
+// looseComponentSchema lists every envelope and payload key with payloads
+// and nested components left open.
+func looseComponentSchema() map[string]interface{} {
+	open := map[string]interface{}{"type": "object"}
+	properties := envelopeProperties(open)
+	properties["type"] = describe(properties["type"].(map[string]interface{}), "Set only the payload whose key equals type (text, caption and divider use text).")
+	for key, payload := range payloadSchemas() {
+		switch payload["type"] {
+		case "string":
+			properties[key] = payload
+		case "array":
+			properties[key] = map[string]interface{}{"type": "array", "items": open}
+		default:
+			properties[key] = open
 		}
-	}
-	if depth < MaxDepth {
-		child := componentSchema(depth + 1)
-		properties["children"] = map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 12, "items": child}
-		properties["grid"] = closedObject([]interface{}{"columns"}, map[string]interface{}{"columns": map[string]interface{}{"type": "integer", "minimum": 2, "maximum": 4}})
-		properties["tabs"] = map[string]interface{}{"type": "array", "minItems": 2, "maxItems": 5, "items": closedObject([]interface{}{"label", "children"}, map[string]interface{}{
-			"label": strRange(1, 40), "children": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 12, "items": child},
-		})}
 	}
 	return closedObject([]interface{}{"id", "type"}, properties)
 }
@@ -224,7 +301,7 @@ func bindingSchema() map[string]interface{} {
 	for index, kind := range BindingKinds {
 		kinds[index] = string(kind)
 	}
-	return closedObject([]interface{}{"kind", "id"}, map[string]interface{}{"kind": enum(kinds), "id": map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}})
+	return closedObject([]interface{}{"kind", "id"}, map[string]interface{}{"kind": enum(kinds), "id": idSchema()})
 }
 
 func chartSchema() map[string]interface{} {
@@ -380,7 +457,7 @@ func analogySchema() map[string]interface{} {
 func formSchema() map[string]interface{} {
 	option := closedObject([]interface{}{"label", "value"}, map[string]interface{}{"label": strRange(1, 240), "value": strRange(1, 240)})
 	field := closedObject([]interface{}{"id", "type", "label"}, map[string]interface{}{
-		"id": map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}, "type": enum(FormFieldTypes),
+		"id": idSchema(), "type": enum(FormFieldTypes),
 		"label": strRange(1, 240), "description": str(1000), "required": map[string]interface{}{"type": "boolean"}, "placeholder": str(500),
 		"options": map[string]interface{}{"type": "array", "maxItems": 100, "items": option}, "min": number(), "max": number(),
 	})
@@ -470,8 +547,12 @@ func quizSchema() map[string]interface{} {
 
 func imageRefSchema() map[string]interface{} {
 	return describe(closedObject([]interface{}{"artifactId", "version"}, map[string]interface{}{
-		"artifactId": map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}, "version": map[string]interface{}{"type": "integer", "minimum": 1},
+		"artifactId": idSchema(), "version": map[string]interface{}{"type": "integer", "minimum": 1},
 	}), "An image already in this chat (generated, uploaded or a screenshot), by the id and version it was shown with. Never a URL.")
+}
+
+func idSchema() map[string]interface{} {
+	return map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}
 }
 
 func itemIDSchema() map[string]interface{} {
@@ -519,7 +600,7 @@ func statRowSchema() map[string]interface{} {
 	})
 }
 
-func actionsSchema(top bool) map[string]interface{} {
+func actionsSchema() map[string]interface{} {
 	kinds := make([]string, len(ActionKinds))
 	for index, kind := range ActionKinds {
 		kinds[index] = string(kind)
@@ -529,18 +610,13 @@ func actionsSchema(top bool) map[string]interface{} {
 		commands = append(commands, list...)
 	}
 	sort.Strings(commands)
-	icon := iconSchema()
-	kind := enum(kinds)
-	if top {
-		icon = describe(icon, "Lucide icon name from: "+strings.Join(Icons, ", ")+".")
-		kind = describe(kind, "respond sends value (default label) as the user's reply; edit opens the draft named by target; approval sends decision on the approval binding; entity sends command to the bound routine (pause, resume, run_now, stop), task (cancel) or agent (open_chat).")
-	}
+	kind := describe(enum(kinds), "respond sends value (default label) as the user's reply; edit opens the draft named by target; approval sends decision on the approval binding; entity sends command to the bound routine (pause, resume, run_now, stop), task (cancel) or agent (open_chat).")
 	action := closedObject([]interface{}{"id", "label", "kind"}, map[string]interface{}{
-		"id": map[string]interface{}{"type": "string", "pattern": opaqueIDPattern}, "label": strRange(1, 40), "kind": kind, "icon": icon,
-		"value": str(500), "target": map[string]interface{}{"type": "string", "pattern": opaqueIDPattern},
+		"id": idSchema(), "label": strRange(1, 40), "kind": kind, "icon": iconSchema(),
+		"value": str(500), "target": idSchema(),
 		"decision": enum([]string{"approve", "reject"}), "command": enum(commands), "binding": bindingSchema(),
 	})
-	return map[string]interface{}{"type": "array", "minItems": 1, "maxItems": MaxActions, "items": action}
+	return array(action, 1, MaxActions)
 }
 
 func toneNames() []string {
