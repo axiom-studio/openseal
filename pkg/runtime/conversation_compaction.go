@@ -44,6 +44,8 @@ type conversationHistoryPlan struct {
 	CardState []string
 	// Omitted counts earlier messages left out to fit the model's context.
 	Omitted int
+	// ImageStyle is the asking user's saved picture style, if any.
+	ImageStyle string
 }
 
 func conversationViewerKey(viewer ConversationViewer) string {
