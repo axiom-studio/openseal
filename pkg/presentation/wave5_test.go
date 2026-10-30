@@ -12,12 +12,12 @@ import (
 // knownPlaces is what find_place returned in the test chat, including the
 // places of the worked examples.
 var knownPlaces = map[string]PlaceFix{
-	"osm:W27460854": {Name: "Brighton Palace Pier", Lat: 50.8164, Lon: -0.1365, Address: "Madeira Drive, Brighton, England, United Kingdom", Category: "pier"},
-	"osm:W4389201":  {Name: "The Lanes", Lat: 50.8222, Lon: -0.1406, Address: "Brighton, England, United Kingdom", Category: "neighbourhood"},
-	"osm:N26775218": {Name: "Rottingdean", Lat: 50.8094, Lon: -0.0583, Address: "Brighton and Hove, England, United Kingdom", Category: "village"},
-	"osm:W24976203": {Name: "Brighton", Lat: 50.8291, Lon: -0.1413, Address: "Queen's Road, Brighton, England, United Kingdom", Category: "station"},
-	"osm:N1":        {Name: "Lalbagh Botanical Garden", Lat: 12.9507, Lon: 77.5848, Address: "Mavalli, Bengaluru, Karnataka, India", Category: "garden"},
-	"osm:N2":        {Name: strings.Repeat("Very long name ", 10), Lat: 12.97, Lon: 77.59},
+	"place:5e1c7a09b3d2": {Name: "Brighton Palace Pier", Lat: 50.8164, Lon: -0.1365, Address: "Madeira Drive, Brighton, England, United Kingdom", Category: "pier"},
+	"place:a84f20c6e917": {Name: "The Lanes", Lat: 50.8222, Lon: -0.1406, Address: "Brighton, England, United Kingdom", Category: "neighbourhood"},
+	"place:0d3b9e5f7c21": {Name: "Rottingdean", Lat: 50.8094, Lon: -0.0583, Address: "Brighton and Hove, England, United Kingdom", Category: "village"},
+	"place:c72e4a1b8f06": {Name: "Brighton", Lat: 50.8291, Lon: -0.1413, Address: "Queen's Road, Brighton, England, United Kingdom", Category: "station"},
+	"place:000000000001": {Name: "Lalbagh Botanical Garden", Lat: 12.9507, Lon: 77.5848, Address: "Mavalli, Bengaluru, Karnataka, India", Category: "garden"},
+	"place:000000000002": {Name: strings.Repeat("Very long name ", 10), Lat: 12.97, Lon: 77.59},
 }
 
 func examplePlaces(_ context.Context, id string) (PlaceFix, bool, error) {
@@ -41,7 +41,7 @@ func TestValidateWave5(t *testing.T) {
 	pins := func(count int) []MapPin {
 		list := make([]MapPin, count)
 		for index := range list {
-			list[index] = MapPin{ID: fmt.Sprintf("p%d", index), Place: fmt.Sprintf("osm:N%d", index+1)}
+			list[index] = MapPin{ID: fmt.Sprintf("p%d", index), Place: fmt.Sprintf("place:%012x", index+1)}
 		}
 		return list
 	}
@@ -51,40 +51,40 @@ func TestValidateWave5(t *testing.T) {
 		opts      ValidateOptions
 		err       string
 	}{
-		{"map", mapOf(MapPin{ID: "garden", Place: "osm:N1", Label: "Lalbagh", Detail: "Glass house and lake."}, MapPin{ID: "pier", Place: "osm:W27460854"}), places(), ""},
+		{"map", mapOf(MapPin{ID: "garden", Place: "place:000000000001", Label: "Lalbagh", Detail: "Glass house and lake."}, MapPin{ID: "pier", Place: "place:5e1c7a09b3d2"}), places(), ""},
 		{"map connected", Component{ID: "m", Type: "map", Summary: "s", Map: &Map{Pins: pins(2), Connect: true}}, places(), ""},
-		{"unknown place", mapOf(MapPin{ID: "a", Place: "osm:N1"}, MapPin{ID: "b", Place: "osm:N2"}, MapPin{ID: "c", Place: "osm:N123"}), places(),
-			"map.pins[2].place osm:N123 was not found by find_place in this chat"},
+		{"unknown place", mapOf(MapPin{ID: "a", Place: "place:000000000001"}, MapPin{ID: "b", Place: "place:000000000002"}, MapPin{ID: "c", Place: "place:4b2f9c0e1a77"}), places(),
+			"map.pins[2].place place:4b2f9c0e1a77 was not found by find_place in this chat"},
 		{"not a place id", mapOf(MapPin{ID: "a", Place: "Lalbagh"}), places(), `map.pins[0].place "Lalbagh" must be a place id returned by find_place`},
 		{"missing place", mapOf(MapPin{ID: "a"}), places(), "map.pins[0].place is required"},
-		{"place pinned twice", mapOf(MapPin{ID: "a", Place: "osm:N1"}, MapPin{ID: "b", Place: "osm:N1"}), places(), "already pinned by map.pins[0]"},
+		{"place pinned twice", mapOf(MapPin{ID: "a", Place: "place:000000000001"}, MapPin{ID: "b", Place: "place:000000000001"}), places(), "already pinned by map.pins[0]"},
 		{"too many pins", Component{ID: "m", Type: "map", Summary: "s", Map: &Map{Pins: pins(21)}}, ValidateOptions{SkipHostChecks: true}, "map.pins needs 1-20"},
 		{"no pins", Component{ID: "m", Type: "map", Summary: "s", Map: &Map{}}, places(), "map.pins needs 1-20"},
-		{"long label", mapOf(MapPin{ID: "a", Place: "osm:N1", Label: strings.Repeat("x", 61)}), places(), "map.pins[0].label"},
-		{"long detail", mapOf(MapPin{ID: "a", Place: "osm:N1", Detail: strings.Repeat("x", 301)}), places(), "map.pins[0].detail"},
+		{"long label", mapOf(MapPin{ID: "a", Place: "place:000000000001", Label: strings.Repeat("x", 61)}), places(), "map.pins[0].label"},
+		{"long detail", mapOf(MapPin{ID: "a", Place: "place:000000000001", Detail: strings.Repeat("x", 301)}), places(), "map.pins[0].detail"},
 		{"no summary", Component{ID: "m", Type: "map", Map: &Map{Pins: pins(1)}}, places(), "summary is required"},
-		{"typed coordinates", mapOf(MapPin{ID: "a", Place: "osm:N1", Lat: &lat, Lon: &lon}), places(), "map.pins[0].lat and .lon are filled in from find_place; leave them out"},
-		{"typed address", mapOf(MapPin{ID: "a", Place: "osm:N1", Address: "Bengaluru"}), places(), "map.pins[0].address is filled in from find_place"},
-		{"no place checks", mapOf(MapPin{ID: "a", Place: "osm:N1"}), ValidateOptions{}, "map.pins[0].place osm:N1 cannot be checked here"},
-		{"lookup fails", mapOf(MapPin{ID: "a", Place: "osm:N1"}), ValidateOptions{PlaceProvenance: func(context.Context, string) (PlaceFix, bool, error) {
+		{"typed coordinates", mapOf(MapPin{ID: "a", Place: "place:000000000001", Lat: &lat, Lon: &lon}), places(), "map.pins[0].lat and .lon are filled in from find_place; leave them out"},
+		{"typed address", mapOf(MapPin{ID: "a", Place: "place:000000000001", Address: "Bengaluru"}), places(), "map.pins[0].address is filled in from find_place"},
+		{"no place checks", mapOf(MapPin{ID: "a", Place: "place:000000000001"}), ValidateOptions{}, "map.pins[0].place place:000000000001 cannot be checked here"},
+		{"lookup fails", mapOf(MapPin{ID: "a", Place: "place:000000000001"}), ValidateOptions{PlaceProvenance: func(context.Context, string) (PlaceFix, bool, error) {
 			return PlaceFix{}, false, errors.New("store down")
-		}}, "check map.pins[0].place osm:N1: store down"},
-		{"skip host checks", mapOf(MapPin{ID: "a", Place: "osm:N999", Address: "Somewhere", Lat: &lat, Lon: &lon}), ValidateOptions{SkipHostChecks: true}, ""},
-		{"stored half point", mapOf(MapPin{ID: "a", Place: "osm:N999", Lat: &lat}), ValidateOptions{SkipHostChecks: true}, "come as a pair"},
-		{"place with location", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Location: "osm:N1"}}, places(), ""},
-		{"place with name and location", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Name: "Lalbagh", Location: "osm:N1"}}, places(), ""},
+		}}, "check map.pins[0].place place:000000000001: store down"},
+		{"skip host checks", mapOf(MapPin{ID: "a", Place: "place:999999999999", Address: "Somewhere", Lat: &lat, Lon: &lon}), ValidateOptions{SkipHostChecks: true}, ""},
+		{"stored half point", mapOf(MapPin{ID: "a", Place: "place:999999999999", Lat: &lat}), ValidateOptions{SkipHostChecks: true}, "come as a pair"},
+		{"place with location", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Location: "place:000000000001"}}, places(), ""},
+		{"place with name and location", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Name: "Lalbagh", Location: "place:000000000001"}}, places(), ""},
 		{"place without name or location", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Category: "garden"}}, places(), "place.name"},
-		{"place unknown location", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Location: "osm:R7"}}, places(), "place.location osm:R7 was not found by find_place in this chat"},
-		{"place typed coordinates", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Location: "osm:N1", Lat: &lat, Lon: &lon}}, places(), "place.lat and .lon are filled in"},
+		{"place unknown location", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Location: "place:000000000007"}}, places(), "place.location place:000000000007 was not found by find_place in this chat"},
+		{"place typed coordinates", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Location: "place:000000000001", Lat: &lat, Lon: &lon}}, places(), "place.lat and .lon are filled in"},
 		{"stored coordinates without location", Component{ID: "p", Type: "place", Summary: "s", Place: &Place{Name: "x", Lat: &lat, Lon: &lon}}, ValidateOptions{SkipHostChecks: true}, "come as a pair with a place id"},
 		{"itinerary locations", Component{ID: "i", Type: "itinerary", Summary: "s", Itinerary: &Itinerary{Days: []ItineraryDay{{ID: "d", Label: "Day", Items: []ItineraryItem{
-			{ID: "a", Title: "Garden", Location: "osm:N1"}, {ID: "b", Title: "Pier", Location: "osm:W27460854"},
+			{ID: "a", Title: "Garden", Location: "place:000000000001"}, {ID: "b", Title: "Pier", Location: "place:5e1c7a09b3d2"},
 		}}}}}, places(), ""},
 		{"itinerary unknown location", Component{ID: "i", Type: "itinerary", Summary: "s", Itinerary: &Itinerary{Days: []ItineraryDay{{ID: "d", Label: "Day", Items: []ItineraryItem{
-			{ID: "a", Title: "Garden", Location: "osm:N1"}, {ID: "b", Title: "Pier", Location: "osm:W5"},
-		}}}}}, places(), "itinerary.days[0].items[1].location osm:W5 was not found by find_place in this chat"},
+			{ID: "a", Title: "Garden", Location: "place:000000000001"}, {ID: "b", Title: "Pier", Location: "place:000000000005"},
+		}}}}}, places(), "itinerary.days[0].items[1].location place:000000000005 was not found by find_place in this chat"},
 		{"itinerary typed coordinates", Component{ID: "i", Type: "itinerary", Summary: "s", Itinerary: &Itinerary{Days: []ItineraryDay{{ID: "d", Label: "Day", Items: []ItineraryItem{
-			{ID: "a", Title: "Garden", Location: "osm:N1", Lat: &lat, Lon: &lon},
+			{ID: "a", Title: "Garden", Location: "place:000000000001", Lat: &lat, Lon: &lon},
 		}}}}}, places(), "itinerary.days[0].items[0].lat and .lon are filled in"},
 	}
 	for _, tc := range cases {
@@ -99,16 +99,16 @@ func TestValidateWave5(t *testing.T) {
 
 func TestStampPlaces(t *testing.T) {
 	surface := Surface{Schema: Schema, Title: "Day out", State: StateReady, Components: []Component{
-		mapOf(MapPin{ID: "garden", Place: "osm:N1"}, MapPin{ID: "pier", Place: "osm:W27460854", Label: "The pier"}, MapPin{ID: "long", Place: "osm:N2"}),
-		{ID: "card", Type: "place", Summary: "s", Place: &Place{Location: "osm:N1", Address: "Main gate"}},
+		mapOf(MapPin{ID: "garden", Place: "place:000000000001"}, MapPin{ID: "pier", Place: "place:5e1c7a09b3d2", Label: "The pier"}, MapPin{ID: "long", Place: "place:000000000002"}),
+		{ID: "card", Type: "place", Summary: "s", Place: &Place{Location: "place:000000000001", Address: "Main gate"}},
 		{ID: "plan", Type: "itinerary", Summary: "s", Itinerary: &Itinerary{Days: []ItineraryDay{{ID: "d", Label: "Day", Items: []ItineraryItem{
-			{ID: "a", Title: "Garden", Location: "osm:N1"}, {ID: "b", Title: "Pier", Place: "On the front", Location: "osm:W27460854"}, {ID: "c", Title: "Home"},
+			{ID: "a", Title: "Garden", Location: "place:000000000001"}, {ID: "b", Title: "Pier", Place: "On the front", Location: "place:5e1c7a09b3d2"}, {ID: "c", Title: "Home"},
 		}}}}},
 	}}
 	if _, err := Validate(context.Background(), surface, places()); err != nil {
 		t.Fatal(err)
 	}
-	if ids := PlaceIDs(surface); strings.Join(ids, ",") != "osm:N1,osm:W27460854,osm:N2" {
+	if ids := PlaceIDs(surface); strings.Join(ids, ",") != "place:000000000001,place:5e1c7a09b3d2,place:000000000002" {
 		t.Fatalf("PlaceIDs = %v", ids)
 	}
 	before, _ := json.Marshal(surface)
@@ -153,10 +153,10 @@ func TestStampPlaces(t *testing.T) {
 	if _, err := Validate(context.Background(), stamped, places()); err == nil || !strings.Contains(err.Error(), "filled in from find_place") {
 		t.Fatalf("stamped visual from the model = %v", err)
 	}
-	if _, err := StampPlaces(surface, map[string]PlaceFix{"osm:N1": knownPlaces["osm:N1"]}); err == nil || !strings.Contains(err.Error(), "no fix for place osm:W27460854") {
+	if _, err := StampPlaces(surface, map[string]PlaceFix{"place:000000000001": knownPlaces["place:000000000001"]}); err == nil || !strings.Contains(err.Error(), "no fix for place place:5e1c7a09b3d2") {
 		t.Fatalf("missing fix = %v", err)
 	}
-	if _, err := StampPlaces(surface, map[string]PlaceFix{"osm:N1": {Name: "x", Lat: 91}, "osm:W27460854": knownPlaces["osm:W27460854"], "osm:N2": knownPlaces["osm:N2"]}); err == nil {
+	if _, err := StampPlaces(surface, map[string]PlaceFix{"place:000000000001": {Name: "x", Lat: 91}, "place:5e1c7a09b3d2": knownPlaces["place:5e1c7a09b3d2"], "place:000000000002": knownPlaces["place:000000000002"]}); err == nil {
 		t.Fatal("out of range fix stamped")
 	}
 	if _, err := ResolvePlaces(context.Background(), surface, func(context.Context, string) (PlaceFix, bool, error) { return PlaceFix{}, false, nil }); err == nil {
@@ -179,10 +179,10 @@ func TestLintWave5(t *testing.T) {
 		component Component
 		want      string
 	}{
-		{mapOf(MapPin{ID: "a", Place: "osm:N1"}), LintMapOnePin},
-		{mapOf(MapPin{ID: "a", Place: "osm:N1"}, MapPin{ID: "b", Place: "osm:N2"}), ""},
-		{located("osm:N1", ""), LintItineraryOneLocation},
-		{located("osm:N1", "osm:N2"), ""},
+		{mapOf(MapPin{ID: "a", Place: "place:000000000001"}), LintMapOnePin},
+		{mapOf(MapPin{ID: "a", Place: "place:000000000001"}, MapPin{ID: "b", Place: "place:000000000002"}), ""},
+		{located("place:000000000001", ""), LintItineraryOneLocation},
+		{located("place:000000000001", "place:000000000002"), ""},
 		{located("", ""), ""},
 	}
 	for _, tc := range cases {

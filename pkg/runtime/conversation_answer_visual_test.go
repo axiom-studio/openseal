@@ -105,7 +105,7 @@ func TestHostedTurnRunnerStampsAnswerVisualPlaces(t *testing.T) {
 	turn := &AgentTurn{ID: "turn-map", RunID: run.ID}
 	visual := testAnswerVisual()
 	visual.Components = append(visual.Components, presentation.Component{ID: "where", Type: "map", Summary: "Two gardens.", Map: &presentation.Map{Pins: []presentation.MapPin{
-		{ID: "lalbagh", Place: "osm:N1"}, {ID: "cubbon", Place: "osm:W2", Label: "Cubbon Park"},
+		{ID: "lalbagh", Place: "place:000000000001"}, {ID: "cubbon", Place: "place:000000000003", Label: "Cubbon Park"},
 	}}})
 	config := HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"}
 	runner, err := NewHostedTurnRunner(visualTurnHost{visual: visual}, config)
@@ -120,9 +120,9 @@ func TestHostedTurnRunnerStampsAnswerVisualPlaces(t *testing.T) {
 		return func(_ context.Context, id string) (presentation.PlaceFix, bool, error) {
 			lookups++
 			switch id {
-			case "osm:N1":
+			case "place:000000000001":
 				return presentation.PlaceFix{Name: "Lalbagh Botanical Garden", Lat: 12.9507, Lon: 77.5848, Address: "Mavalli, Bengaluru"}, run.ID == "run-map", nil
-			case "osm:W2":
+			case "place:000000000003":
 				return presentation.PlaceFix{Name: "Cubbon Park", Lat: 12.9763, Lon: 77.5929}, true, nil
 			}
 			return presentation.PlaceFix{}, false, nil

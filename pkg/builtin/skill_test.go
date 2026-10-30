@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -76,7 +77,7 @@ func TestFindPlaceIsReadOnlyAndReturnsPlaceIDs(t *testing.T) {
 	}
 	bound := &skill.BoundAction{Definition: d, Binding: &skill.Binding{}, Action: a}
 	found := map[string]interface{}{"places": []interface{}{map[string]interface{}{
-		"place": "osm:N123", "name": "Lalbagh Botanical Garden", "category": "garden", "address": "Mavalli, Bengaluru, Karnataka, India", "lat": 12.9507, "lon": 77.5848,
+		"place": "place:4b2f9c0e1a77", "name": "Lalbagh Botanical Garden", "category": "garden", "address": "Mavalli, Bengaluru, Karnataka, India", "lat": 12.9507, "lon": 77.5848,
 	}}}
 	for _, output := range []map[string]interface{}{found, {"places": []interface{}{}}} {
 		if err := catalog.ValidateOutput(t.Context(), bound, output); err != nil {
@@ -85,11 +86,37 @@ func TestFindPlaceIsReadOnlyAndReturnsPlaceIDs(t *testing.T) {
 	}
 	for _, output := range []map[string]interface{}{
 		{"places": []interface{}{map[string]interface{}{"place": "123", "name": "x", "lat": 1, "lon": 1}}},
-		{"places": []interface{}{map[string]interface{}{"place": "osm:N1", "name": "x", "lat": 91, "lon": 1}}},
-		{"places": []interface{}{map[string]interface{}{"place": "osm:N1", "name": "x"}}},
+		{"places": []interface{}{map[string]interface{}{"place": "place:000000000001", "name": "x", "lat": 91, "lon": 1}}},
+		{"places": []interface{}{map[string]interface{}{"place": "place:000000000001", "name": "x"}}},
 	} {
 		if err := catalog.ValidateOutput(t.Context(), bound, output); err == nil {
 			t.Fatalf("invalid find_place result accepted: %v", output)
+		}
+	}
+}
+
+func TestBuiltinConfigHoldsTheGeoapifyKeyForTheHost(t *testing.T) {
+	_, d := builtinContractCatalog(t)
+	if d.Name != "Built-in tools" {
+		t.Fatalf("name = %q", d.Name)
+	}
+	config := d.Config
+	if config == nil || len(config.Scopes) != 1 || config.Scopes[0] != capability.SkillConfigScopeGlobal || len(config.Fields) != 1 || len(config.Setup) != 1 {
+		t.Fatalf("config = %#v", config)
+	}
+	field := config.Fields[0]
+	if field.Key != GeoapifyAPIKey || field.Label != "Geoapify API key" || field.Type != capability.SkillConfigFieldSecret ||
+		field.EffectiveAudience() != capability.SkillConfigAudienceHost || !field.Summary || field.Required {
+		t.Fatalf("field = %#v", field)
+	}
+	if links := config.Setup[0].Links; len(links) != 1 || links[0].URL != "https://myprojects.geoapify.com/" {
+		t.Fatalf("setup = %#v", config.Setup)
+	}
+	for _, text := range []string{d.Name, d.Description, field.Label, field.Description, config.Setup[0].Title, config.Setup[0].Description, config.Setup[0].Links[0].Label} {
+		for _, word := range []string{"openseal", "surface", "presentation", "artifact", "publish", "runbook", "objective"} {
+			if strings.Contains(strings.ToLower(text), word) {
+				t.Fatalf("operator text %q says %q", text, word)
+			}
 		}
 	}
 }

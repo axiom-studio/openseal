@@ -178,9 +178,10 @@ type PlaceFix struct {
 // these ids; the host stamps coordinates in with StampPlaces.
 type PlaceProvenance func(ctx context.Context, placeID string) (PlaceFix, bool, error)
 
-// PlaceIDPattern matches a place id from find_place: an OpenStreetMap node,
-// way or relation.
-const PlaceIDPattern = `^osm:[NWR][0-9]{1,20}$`
+// PlaceIDPattern matches a place id from find_place: "place:" and 12
+// lowercase hex characters the host derives from its geocoder's own id, so
+// the same place always gets the same id.
+const PlaceIDPattern = `^place:[0-9a-f]{12}$`
 
 var placeIDRegexp = regexp.MustCompile(PlaceIDPattern)
 
@@ -188,7 +189,7 @@ var placeIDRegexp = regexp.MustCompile(PlaceIDPattern)
 // with host checks, that find_place returned it in this conversation.
 func (v *validator) placeRef(field, id string) error {
 	if !placeIDRegexp.MatchString(id) {
-		return fmt.Errorf("%s %q must be a place id returned by find_place, such as osm:N123", field, id)
+		return fmt.Errorf("%s %q must be a place id returned by find_place, such as place:4b2f9c0e1a77", field, id)
 	}
 	if v.opts.SkipHostChecks {
 		return nil

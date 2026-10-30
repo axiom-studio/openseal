@@ -144,24 +144,24 @@ func VisualExamples() []Example {
 	}, {
 		Name: "weekend", Prompt: "Plan our long weekend in Brighton, four of us",
 		Lookups: []string{
-			`find_place{query:"Brighton Palace Pier"} → osm:W27460854`, `find_place{query:"The Lanes", near:"osm:W27460854"} → osm:W4389201`,
-			`find_place{query:"Rottingdean"} → osm:N26775218`, `find_place{query:"Brighton station"} → osm:W24976203`,
+			`find_place{query:"Brighton Palace Pier"} → place:5e1c7a09b3d2`, `find_place{query:"The Lanes", near:"place:5e1c7a09b3d2"} → place:a84f20c6e917`,
+			`find_place{query:"Rottingdean"} → place:0d3b9e5f7c21`, `find_place{query:"Brighton station"} → place:c72e4a1b8f06`,
 		},
 		Lead: "Here's a relaxed three days by the sea, with short walks between stops.",
 		Visual: visual("Brighton weekend",
 			Component{ID: "plan", Type: "itinerary", Summary: "Three days: the pier and beach, the Lanes and a cliff walk, then brunch and home.", Itinerary: &Itinerary{Days: []ItineraryDay{
 				{ID: "fri", Label: "Friday", Items: []ItineraryItem{
 					{ID: "arrive", Time: "15:00", Title: "Check in", Place: "Seafront flat"},
-					{ID: "pier", Time: "16:30", Title: "Palace Pier and the beach", Location: "osm:W27460854", Travel: &Travel{Mode: "walk", Minutes: 10}},
+					{ID: "pier", Time: "16:30", Title: "Palace Pier and the beach", Location: "place:5e1c7a09b3d2", Travel: &Travel{Mode: "walk", Minutes: 10}},
 					{ID: "chips", Time: "19:00", Title: "Fish and chips on the front", Travel: &Travel{Mode: "walk", Minutes: 5}},
 				}},
 				{ID: "sat", Label: "Saturday", Items: []ItineraryItem{
-					{ID: "lanes", Time: "10:00", Title: "The Lanes", Location: "osm:W4389201", Detail: "Small shops and cafés; good for a slow morning."},
-					{ID: "cliffs", Time: "14:00", Title: "Cliff walk to Rottingdean", Location: "osm:N26775218", Travel: &Travel{Mode: "transit", Minutes: 25}},
+					{ID: "lanes", Time: "10:00", Title: "The Lanes", Location: "place:a84f20c6e917", Detail: "Small shops and cafés; good for a slow morning."},
+					{ID: "cliffs", Time: "14:00", Title: "Cliff walk to Rottingdean", Location: "place:0d3b9e5f7c21", Travel: &Travel{Mode: "transit", Minutes: 25}},
 				}},
 				{ID: "sun", Label: "Sunday", Items: []ItineraryItem{
 					{ID: "brunch", Time: "10:30", Title: "Brunch in Kemptown"},
-					{ID: "home", Time: "14:00", Title: "Train home", Location: "osm:W24976203", Travel: &Travel{Mode: "walk", Minutes: 20}},
+					{ID: "home", Time: "14:00", Title: "Train home", Location: "place:c72e4a1b8f06", Travel: &Travel{Mode: "walk", Minutes: 20}},
 				}},
 			}}},
 			Component{ID: "pack", Type: "checklist", Title: "Packing", Summary: "Five things to pack for a seaside weekend.", Checklist: &Checklist{Items: []ChecklistItem{

@@ -82,7 +82,7 @@ func TestFileToolContractsTakePathsAndRejectForeignInput(t *testing.T) {
 		{"read data without an app", ReadAppData, map[string]interface{}{"name": "scores"}, false},
 		{"read data with a path name", ReadAppData, map[string]interface{}{"app": "apps/tracker", "name": "../secrets"}, false},
 		{"find a place", FindPlace, map[string]interface{}{"query": "Lalbagh Botanical Garden"}, true},
-		{"find places near one", FindPlace, map[string]interface{}{"query": "cafes", "near": "osm:W4389201", "limit": 5}, true},
+		{"find places near one", FindPlace, map[string]interface{}{"query": "cafes", "near": "place:a84f20c6e917", "limit": 5}, true},
 		{"find a place without a query", FindPlace, map[string]interface{}{"limit": 3}, false},
 		{"find a place with an empty query", FindPlace, map[string]interface{}{"query": ""}, false},
 		{"find a place with a long query", FindPlace, map[string]interface{}{"query": strings.Repeat("a", MaximumPlaceQueryRunes+1)}, false},
