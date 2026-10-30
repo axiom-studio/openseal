@@ -333,7 +333,9 @@ func TestVisualExamplesAreValidAndClean(t *testing.T) {
 		}
 		visuals++
 		surface := example.Visual.Surface(StateReady)
-		warnings, err := Validate(context.Background(), surface, images("img-cell"))
+		checks := images("img-cell")
+		checks.PlaceProvenance = examplePlaces
+		warnings, err := Validate(context.Background(), surface, checks)
 		if err != nil {
 			t.Fatalf("%s: %v", example.Name, err)
 		}
@@ -352,7 +354,8 @@ func TestVisualRubricOnlyNamesCatalogueTypes(t *testing.T) {
 		"`comparison`", "`steps`", "`timeline`", "`quiz`", "`checklist`", "`callout`", "`choices`", "`image`, `gallery`",
 		"`labeled_image`", "`quantity_visual`, `math`", "`quiz`, `flashcards`", "`definition`, `analogy`", "`recipe`", "`item`, `place`", "`before_after`, `draft`",
 		"`poll`", "`timeline`, `agenda`, `itinerary`", "`breakdown`", "`explorer`", "`progress`", "`routine`, `tasks`, `agent`",
-		"`choices` \"Make the app\" / \"Not now\"", "Apps can report results back to you."} {
+		"`choices` \"Make the app\" / \"Not now\"", "Apps can report results back to you.",
+		"Where things are → find_place, then a `map` (several places, a day out, a trip) or a place card with its location (one venue). Never guess coordinates."} {
 		if !strings.Contains(text, name) {
 			t.Fatalf("rubric lacks %s:\n%s", name, text)
 		}
@@ -394,7 +397,7 @@ func TestModelFacingTextAvoidsInternalWords(t *testing.T) {
 
 func TestSkillDefinitionRegisters(t *testing.T) {
 	definition := SkillDefinition()
-	if definition.ID != SkillID || definition.Version != "5.1.0" || !definition.Requirements.AlwaysAvailable {
+	if definition.ID != SkillID || definition.Version != "6.0.0" || !definition.Requirements.AlwaysAvailable {
 		t.Fatalf("definition = %#v", definition)
 	}
 	if err := skill.NewCatalog().Register(context.Background(), definition); err != nil {

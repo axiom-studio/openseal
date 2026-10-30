@@ -36,6 +36,7 @@ var rubric = []struct {
 	{"Lists the user will act on → %s.", []string{"checklist"}},
 	{"Cooking → %s.", []string{"recipe"}},
 	{"One product, listing or place → %s.", []string{"item", "place"}},
+	{"Where things are → find_place, then a %s (several places, a day out, a trip) or a place card with its location (one venue). Never guess coordinates.", []string{"map"}},
 	{"Improving something they wrote → %s (the changes, then the new version).", []string{"before_after", "draft"}},
 	{"\"What if\" questions → %s.", []string{"explorer"}},
 	{"A routine you run, work you handed to helpers, another agent to chat with → %s.", []string{"routine", "tasks", "agent"}},
@@ -92,7 +93,7 @@ func SkillDefinition() *skill.Definition {
 		}},
 		Prompt: &capability.PromptModule{
 			Instructions: "Visuals go on your answer. Use update_visual only to replace a visual you already showed with a newer version, e.g. as long work progresses. " +
-				"Give every component except text, caption, divider, layouts and actions a one-sentence summary. Never write HTML, scripts, colours or URLs; images must already be in this chat.",
+				"Give every component except text, caption, divider, layouts and actions a one-sentence summary. Never write HTML, scripts, colours, URLs or coordinates; images must already be in this chat and places come from find_place.",
 			UserInvocable: true, AllowedTools: []string{UpdateVisual},
 		},
 		Requirements: capability.Requirements{AlwaysAvailable: true},
@@ -265,7 +266,7 @@ func payloadSchemas() map[string]map[string]interface{} {
 		"item": itemSchema(), "analogy": analogySchema(),
 		"agenda": agendaSchema(), "itinerary": itinerarySchema(), "place": placeSchema(), "breakdown": breakdownSchema(),
 		"progress": progressSchema(), "poll": pollSchema(), "explorer": explorerSchema(), "routine": routineSchema(),
-		"tasks": tasksSchema(), "agent": agentCardSchema(),
+		"tasks": tasksSchema(), "agent": agentCardSchema(), "map": mapSchema(),
 		"grid": closedObject([]interface{}{"columns"}, map[string]interface{}{"columns": integer(2, 4)}),
 		"tabs": array(closedObject([]interface{}{"label", "children"}, map[string]interface{}{
 			"label": strRange(1, 40), "children": array(componentRef(), 1, maxChildren),

@@ -29,6 +29,7 @@ func itinerarySchema() map[string]interface{} {
 	travel := closedObject([]interface{}{"mode", "minutes"}, map[string]interface{}{"mode": enum(TravelModes), "minutes": integer(1, MaxTravelMinutes)})
 	item := closedObject([]interface{}{"id", "title"}, map[string]interface{}{
 		"id": itemIDSchema(), "time": clockSchema(), "title": strRange(1, 80), "place": str(80), "detail": str(200), "image": imageRefSchema(), "travel": travel,
+		"location": placeIDSchema(),
 	})
 	day := closedObject([]interface{}{"id", "label", "items"}, map[string]interface{}{
 		"id": itemIDSchema(), "label": strRange(1, 40), "date": dateSchema(), "items": array(item, 1, 12),
@@ -37,9 +38,10 @@ func itinerarySchema() map[string]interface{} {
 }
 
 func placeSchema() map[string]interface{} {
-	return closedObject([]interface{}{"name"}, map[string]interface{}{
+	return closedObject(nil, map[string]interface{}{
 		"name": strRange(1, 80), "category": str(30), "image": imageRefSchema(), "address": str(160), "rating": ratingSchema(),
 		"priceLevel": integer(1, 4), "hours": array(strRange(1, 40), 0, 7), "facts": array(strRange(1, 60), 0, 4),
+		"location": placeIDSchema(),
 	})
 }
 
@@ -101,4 +103,17 @@ func tasksSchema() map[string]interface{} {
 
 func agentCardSchema() map[string]interface{} {
 	return closedObject([]interface{}{"headline"}, map[string]interface{}{"headline": strRange(1, 80), "points": array(strRange(1, 80), 0, 4)})
+}
+
+func placeIDSchema() map[string]interface{} {
+	return map[string]interface{}{"type": "string", "pattern": PlaceIDPattern}
+}
+
+func mapSchema() map[string]interface{} {
+	pin := closedObject([]interface{}{"id", "place"}, map[string]interface{}{
+		"id": itemIDSchema(), "place": placeIDSchema(), "label": str(MaxMapPinLabelRunes), "detail": str(MaxMapPinDetail),
+	})
+	return closedObject([]interface{}{"pins"}, map[string]interface{}{
+		"pins": array(pin, 1, MaxMapPins), "connect": describe(boolean(), "Dashed line through the pins in visit order."),
+	})
 }

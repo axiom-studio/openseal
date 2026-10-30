@@ -158,6 +158,12 @@ type ItineraryItem struct {
 	Image  *ImageRef `json:"image,omitempty"`
 	// Travel is the leg arriving here from the previous item of the day.
 	Travel *Travel `json:"travel,omitempty"`
+	// Location is a place id from find_place; the card pins the located
+	// items on a map when there are at least two.
+	Location string `json:"location,omitempty"`
+	// Lat and Lon are output-only: StampPlaces fills them in from Location.
+	Lat *float64 `json:"lat,omitempty"`
+	Lon *float64 `json:"lon,omitempty"`
 }
 
 type Travel struct {
@@ -190,7 +196,8 @@ func validateItinerary(v *validator, c Component, _ string) error {
 		for item, entry := range day.Items {
 			itemAt := fmt.Sprintf("%s.items[%d]", at, item)
 			if err := firstError(itemIDs(items, itemAt, entry.ID), validClock(itemAt+".time", entry.Time, false), required(itemAt+".title", entry.Title, 80),
-				optional(itemAt+".place", entry.Place, 80), optional(itemAt+".detail", entry.Detail, 200), v.image(itemAt+".image", entry.Image)); err != nil {
+				optional(itemAt+".place", entry.Place, 80), optional(itemAt+".detail", entry.Detail, 200), v.image(itemAt+".image", entry.Image),
+				v.location(itemAt, entry.Location, entry.Lat, entry.Lon)); err != nil {
 				return err
 			}
 			if travel := entry.Travel; travel != nil {
@@ -209,9 +216,11 @@ func validateItinerary(v *validator, c Component, _ string) error {
 	return nil
 }
 
-// Place is one venue: a restaurant, a museum, a hotel.
+// Place is one venue: a restaurant, a museum, a hotel. With a Location the
+// card shows it on a small map with a Directions button, and Name may be
+// left for StampPlaces to fill in.
 type Place struct {
-	Name       string      `json:"name"`
+	Name       string      `json:"name,omitempty"`
 	Category   string      `json:"category,omitempty"`
 	Image      *ImageRef   `json:"image,omitempty"`
 	Address    string      `json:"address,omitempty"`
@@ -219,6 +228,11 @@ type Place struct {
 	PriceLevel int         `json:"priceLevel,omitempty"`
 	Hours      []string    `json:"hours,omitempty"`
 	Facts      []string    `json:"facts,omitempty"`
+	// Location is a place id from find_place.
+	Location string `json:"location,omitempty"`
+	// Lat and Lon are output-only: StampPlaces fills them in from Location.
+	Lat *float64 `json:"lat,omitempty"`
+	Lon *float64 `json:"lon,omitempty"`
 }
 
 func validateRating(field string, rating *ItemRating) error {
@@ -239,7 +253,11 @@ func validatePlace(v *validator, c Component, _ string) error {
 	if place == nil {
 		return payloadRequired("place")
 	}
-	if err := firstError(required("place.name", place.Name, 80), optional("place.category", place.Category, 30), v.image("place.image", place.Image),
+	name := required("place.name", place.Name, 80)
+	if place.Location != "" {
+		name = optional("place.name", place.Name, 80)
+	}
+	if err := firstError(name, v.location("place", place.Location, place.Lat, place.Lon), optional("place.category", place.Category, 30), v.image("place.image", place.Image),
 		optional("place.address", place.Address, 160), validateRating("place.rating", place.Rating),
 		bounded("place.hours", len(place.Hours), 0, 7), bounded("place.facts", len(place.Facts), 0, 4)); err != nil {
 		return err

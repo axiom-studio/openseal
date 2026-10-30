@@ -58,6 +58,7 @@ func visualPatterns() []namedPattern {
 		{"iconName", iconPattern.String(), ""},
 		{"date", isoDate.String(), "YYYY-MM-DD"},
 		{"time", clockTimePattern, "HH:MM, 24-hour"},
+		{"placeId", PlaceIDPattern, "from find_place"},
 	}
 }
 

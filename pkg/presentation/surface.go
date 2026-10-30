@@ -19,7 +19,7 @@ import (
 
 const (
 	SkillID      = "openseal.presentation"
-	SkillVersion = "5.1.0"
+	SkillVersion = "6.0.0"
 	// UpdateVisual replaces a visual already shown in the chat with a newer
 	// version. Visuals that answer a turn ride on the answer instead.
 	UpdateVisual = "update_visual"
@@ -103,6 +103,8 @@ type Component struct {
 	Routine   *Routine   `json:"routine,omitempty"`
 	Tasks     *Tasks     `json:"tasks,omitempty"`
 	Agent     *AgentCard `json:"agent,omitempty"`
+
+	Map *Map `json:"map,omitempty"`
 }
 
 type Tone string
@@ -215,8 +217,8 @@ type Warning struct {
 }
 
 // ValidateOptions carries host-supplied checks. A zero value fails closed:
-// bindings, links and images are rejected unless their hook is supplied or
-// SkipHostChecks is set.
+// bindings, links, images and places are rejected unless their hook is
+// supplied or SkipHostChecks is set.
 type ValidateOptions struct {
 	// Bindings confirms that a bound entity exists and is in scope.
 	Bindings BindingResolver
@@ -225,7 +227,11 @@ type ValidateOptions struct {
 	// Images confirms that an image reference names an image visible from
 	// this conversation.
 	Images ImageResolver
-	// SkipHostChecks skips binding, link provenance and image checks. Use it only
+	// PlaceProvenance confirms that a place id came from find_place in this
+	// conversation. Visuals with places are rejected without it.
+	PlaceProvenance PlaceProvenance
+	// SkipHostChecks skips binding, link provenance, image and place checks,
+	// and admits the output-only fields StampPlaces fills in. Use it only
 	// for stored content that already passed publish validation and for
 	// pre-validation whose host checks run later.
 	SkipHostChecks bool
@@ -357,7 +363,7 @@ func exactPayload(c Component) error {
 		"item": c.Item != nil, "analogy": c.Analogy != nil,
 		"agenda": c.Agenda != nil, "itinerary": c.Itinerary != nil, "place": c.Place != nil, "breakdown": c.Breakdown != nil,
 		"progress": c.Progress != nil, "poll": c.Poll != nil, "explorer": c.Explorer != nil, "routine": c.Routine != nil,
-		"tasks": c.Tasks != nil, "agent": c.Agent != nil,
+		"tasks": c.Tasks != nil, "agent": c.Agent != nil, "map": c.Map != nil,
 	}
 	allowed := catalogue[c.Type].payload
 	for key, set := range present {

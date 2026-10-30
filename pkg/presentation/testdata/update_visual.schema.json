@@ -114,6 +114,9 @@
           "labeled_image": {
             "type": "object"
           },
+          "map": {
+            "type": "object"
+          },
           "math": {
             "type": "object"
           },
@@ -211,6 +214,7 @@
               "item",
               "itinerary",
               "labeled_image",
+              "map",
               "math",
               "place",
               "poll",

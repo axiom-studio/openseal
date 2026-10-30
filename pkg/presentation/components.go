@@ -47,7 +47,7 @@ var catalogue = map[string]typeSpec{
 	"chart":           {payload: "chart", summary: summaryRequired, validate: validateChart, sentence: "Trend or distribution of numbers; pie and donut take one series of at most 7 slices; stacked_bar and grouped_bar need 2+ series with the same labels; scatter labels are x numbers."},
 	"diagram":         {payload: "diagram", summary: summaryRequired, validate: validateDiagram, sentence: "How 2-30 ideas connect; the app places the nodes by layout; tap a node for its detail."},
 	"form":            {payload: "form", summary: summaryRequired, validate: validateForm, sentence: "Structured input the user submits once."},
-	"table":           {payload: "table", summary: summaryRequired, validate: validateTable, sentence: "Exact values in rows and columns; each row maps column keys to cells typed by the column kind."},
+	"table":           {payload: "table", summary: summaryRequired, validate: validateTable, sentence: "Exact values in rows and columns."},
 	"stat_row":        {payload: "stat_row", summary: summaryRequired, validate: validateStatRow, sentence: "1-4 headline numbers."},
 	"callout":         {payload: "callout", summary: summaryRequired, validate: validateCallout, sentence: "Key takeaway, tip or warning (markdown body); tone sets its colour, info by default."},
 	"steps":           {payload: "steps", summary: summaryRequired, validate: validateSteps, sentence: "2-10 steps in order; checkable lets people tick them off."},
@@ -70,7 +70,7 @@ var catalogue = map[string]typeSpec{
 	"analogy":         {payload: "analogy", summary: summaryRequired, validate: validateAnalogy, sentence: "Something new explained as something familiar, with 1-5 matching pairs."},
 	"agenda":          {payload: "agenda", summary: summaryRequired, validate: validateAgenda, sentence: "Fixed plans on 1-7 days in date order, items in start order, with free slots."},
 	"itinerary":       {payload: "itinerary", summary: summaryRequired, validate: validateItinerary, sentence: "A trip day by day; travel is the leg into an item from the one before (never on a day's first)."},
-	"place":           {payload: "place", summary: summaryRequired, validate: validatePlace, sentence: "One venue; several go in a carousel."},
+	"place":           {payload: "place", summary: summaryRequired, validate: validatePlace, sentence: "One venue; several go in a carousel; location adds a map."},
 	"breakdown":       {payload: "breakdown", summary: summaryRequired, validate: validateBreakdown, sentence: "Parts of a whole; tap a part for its share."},
 	"progress":        {payload: "progress", summary: summaryRequired, validate: validateProgress, sentence: "Values against targets."},
 	"poll":            {payload: "poll", summary: summaryRequired, validate: validatePoll, sentence: "A group vote; people can change their vote and you hear the tally once everyone has voted."},
@@ -78,6 +78,7 @@ var catalogue = map[string]typeSpec{
 	"routine":         {payload: "routine", summary: summaryRequired, bindings: []BindingKind{BindingRunbook}, bindingRequired: true, validate: validateRoutine, sentence: "A routine with live schedule, status and buttons; items are its latest highlights."},
 	"tasks":           {payload: "tasks", summary: summaryRequired, bindings: []BindingKind{}, validate: validateTasks, sentence: "Work handed to helpers in this chat, each row bound to its task; status is live."},
 	"agent":           {payload: "agent", summary: summaryRequired, bindings: []BindingKind{BindingAgent}, bindingRequired: true, validate: validateAgentCard, sentence: "Introduces an agent people can start chatting with."},
+	"map":             {payload: "map", summary: summaryRequired, validate: validateMap, sentence: "Pins for 1-20 real places from find_place; tap a pin for its detail."},
 	"actions":         {payload: "actions", validate: validateActions, sentence: "Up to 4 buttons: respond sends a reply to you; approval and entity act on the bound item."},
 }
 

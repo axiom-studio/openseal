@@ -37,6 +37,8 @@ const (
 	LintExplorerStaticOutputs   = "explorer_static_outputs"
 	LintRoutineWithoutItems     = "routine_without_items"
 	LintTasksOneRow             = "tasks_one_row"
+	LintMapOnePin               = "map_one_pin"
+	LintItineraryOneLocation    = "itinerary_one_location"
 	dominantShare               = 0.95
 	maxMindmapDepth             = 3
 	longMessageRunes            = 1500
@@ -155,6 +157,17 @@ func Lint(surface Surface) []Warning {
 			if c.Itinerary == nil {
 				break
 			}
+			located := 0
+			for _, day := range c.Itinerary.Days {
+				for _, item := range day.Items {
+					if item.Location != "" {
+						located++
+					}
+				}
+			}
+			if located == 1 {
+				add(LintItineraryOneLocation, path+".itinerary", c.ID, "one stop with a location draws no map; give the other stops locations too or leave it out")
+			}
 			for index, day := range c.Itinerary.Days {
 				if len(day.Items) == 1 {
 					add(LintItineraryThinDay, fmt.Sprintf("%s.itinerary.days[%d]", path, index), c.ID, "a day with one stop and no travel adds little; merge it or say it in text")
@@ -180,6 +193,10 @@ func Lint(surface Surface) []Warning {
 		case "tasks":
 			if c.Tasks != nil && len(c.Tasks.Rows) == 1 {
 				add(LintTasksOneRow, path+".tasks.rows", c.ID, "one task reads better as a sentence")
+			}
+		case "map":
+			if c.Map != nil && len(c.Map.Pins) == 1 {
+				add(LintMapOnePin, path+".map.pins", c.ID, "a map of one place reads better as a place card with its location")
 			}
 		}
 		return true

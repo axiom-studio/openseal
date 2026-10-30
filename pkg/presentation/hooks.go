@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -157,4 +159,93 @@ func ValidateLink(ctx context.Context, rawURL string, opts ValidateOptions) erro
 		return fmt.Errorf("link %q did not appear in a tool result or browser page in this conversation; only use links you found", rawURL)
 	}
 	return nil
+}
+
+// PlaceFix is what find_place returned for a place id in this
+// conversation: the place's name, coordinates and, when known, its address
+// and category in plain words.
+type PlaceFix struct {
+	Name     string  `json:"name"`
+	Lat      float64 `json:"lat"`
+	Lon      float64 `json:"lon"`
+	Address  string  `json:"address,omitempty"`
+	Category string  `json:"category,omitempty"`
+}
+
+// PlaceProvenance is supplied by the host. It returns what find_place
+// returned for placeID in the publishing conversation, and false when
+// find_place never returned that id there. Visuals refer to places only by
+// these ids; the host stamps coordinates in with StampPlaces.
+type PlaceProvenance func(ctx context.Context, placeID string) (PlaceFix, bool, error)
+
+// PlaceIDPattern matches a place id from find_place: an OpenStreetMap node,
+// way or relation.
+const PlaceIDPattern = `^osm:[NWR][0-9]{1,20}$`
+
+var placeIDRegexp = regexp.MustCompile(PlaceIDPattern)
+
+// placeRef checks a place id field (a map pin's place, a location) and,
+// with host checks, that find_place returned it in this conversation.
+func (v *validator) placeRef(field, id string) error {
+	if !placeIDRegexp.MatchString(id) {
+		return fmt.Errorf("%s %q must be a place id returned by find_place, such as osm:N123", field, id)
+	}
+	if v.opts.SkipHostChecks {
+		return nil
+	}
+	if v.opts.PlaceProvenance == nil {
+		return fmt.Errorf("%s %s cannot be checked here; leave places out", field, id)
+	}
+	fix, found, err := v.opts.PlaceProvenance(v.ctx, id)
+	if err != nil {
+		return fmt.Errorf("check %s %s: %w", field, id, err)
+	}
+	if !found {
+		return fmt.Errorf("%s %s was not found by find_place in this chat; look the place up with find_place and use the id it returns", field, id)
+	}
+	if err := validPlaceFix(fix); err != nil {
+		return fmt.Errorf("%s %s: %w", field, id, err)
+	}
+	return nil
+}
+
+// stampedPoint checks the output-only lat and lon at field (".lat" and
+// ".lon" are appended). The host fills them in; a visual from the model
+// must leave them out, and stored ones must be a pair on a place id.
+func (v *validator) stampedPoint(field, placeID string, lat, lon *float64) error {
+	if lat == nil && lon == nil {
+		return nil
+	}
+	if !v.opts.SkipHostChecks {
+		return fmt.Errorf("%s.lat and .lon are filled in from find_place; leave them out and never type coordinates", field)
+	}
+	if lat == nil || lon == nil || placeID == "" {
+		return fmt.Errorf("%s.lat and .lon come as a pair with a place id", field)
+	}
+	return validCoordinates(field, *lat, *lon)
+}
+
+// stampedText checks an output-only text field the host fills in.
+func (v *validator) stampedText(field, value string, maximum int) error {
+	if value == "" {
+		return nil
+	}
+	if !v.opts.SkipHostChecks {
+		return fmt.Errorf("%s is filled in from find_place; leave it out", field)
+	}
+	return optional(field, value, maximum)
+}
+
+func validCoordinates(field string, lat, lon float64) error {
+	if math.IsNaN(lat) || lat < -90 || lat > 90 || math.IsNaN(lon) || lon < -180 || lon > 180 {
+		return fmt.Errorf("%s coordinates %v, %v are out of range", field, lat, lon)
+	}
+	return nil
+}
+
+func validPlaceFix(fix PlaceFix) error {
+	if strings.TrimSpace(fix.Name) == "" {
+		return errors.New("the place has no name")
+	}
+	return validCoordinates("the place's", fix.Lat, fix.Lon)
 }
