@@ -3,6 +3,8 @@ package builtin
 import (
 	"strings"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestBuiltinAttachmentReadIsReferenceOnly(t *testing.T) {
@@ -43,7 +45,7 @@ func TestProfileImageActionIsBoundedSelfOnlyWrite(t *testing.T) {
 
 func TestAppDataReadAndPictureStyleActions(t *testing.T) {
 	d := SkillDefinition()
-	if d.Version != "2.1.0" {
+	if d.Version != "2.2.0" {
 		t.Fatalf("version = %s", d.Version)
 	}
 	read := d.Actions[ReadAppData]
@@ -59,5 +61,35 @@ func TestAppDataReadAndPictureStyleActions(t *testing.T) {
 	}
 	if image := d.Actions[GenerateImage].InputSchema["properties"].(map[string]interface{})["style"].(map[string]interface{}); image["maxLength"] != MaximumImageStyleRunes {
 		t.Fatalf("generate_image style = %#v", image)
+	}
+}
+
+func TestFindPlaceIsReadOnlyAndReturnsPlaceIDs(t *testing.T) {
+	catalog, d := builtinContractCatalog(t)
+	a := d.Actions[FindPlace]
+	if a.Description != "Look up real places (venues, landmarks, streets, towns) to show on a map or a place card. Refer to a result by its place id; never type coordinates." ||
+		string(a.Risk) != "read" || string(a.SideEffect) != "read" || a.InputSchema["additionalProperties"] != false || a.Retry.MaxAttempts != 1 {
+		t.Fatalf("find_place = %#v", a)
+	}
+	if properties := a.InputSchema["properties"].(map[string]interface{}); len(properties) != 3 {
+		t.Fatalf("find_place input = %v", properties)
+	}
+	bound := &skill.BoundAction{Definition: d, Binding: &skill.Binding{}, Action: a}
+	found := map[string]interface{}{"places": []interface{}{map[string]interface{}{
+		"place": "osm:N123", "name": "Lalbagh Botanical Garden", "category": "garden", "address": "Mavalli, Bengaluru, Karnataka, India", "lat": 12.9507, "lon": 77.5848,
+	}}}
+	for _, output := range []map[string]interface{}{found, {"places": []interface{}{}}} {
+		if err := catalog.ValidateOutput(t.Context(), bound, output); err != nil {
+			t.Fatalf("valid find_place result rejected: %v", err)
+		}
+	}
+	for _, output := range []map[string]interface{}{
+		{"places": []interface{}{map[string]interface{}{"place": "123", "name": "x", "lat": 1, "lon": 1}}},
+		{"places": []interface{}{map[string]interface{}{"place": "osm:N1", "name": "x", "lat": 91, "lon": 1}}},
+		{"places": []interface{}{map[string]interface{}{"place": "osm:N1", "name": "x"}}},
+	} {
+		if err := catalog.ValidateOutput(t.Context(), bound, output); err == nil {
+			t.Fatalf("invalid find_place result accepted: %v", output)
+		}
 	}
 }
