@@ -100,6 +100,54 @@ func TestHostedTurnRunnerChecksAnswerVisualImages(t *testing.T) {
 	}
 }
 
+func TestHostedTurnRunnerStampsAnswerVisualPlaces(t *testing.T) {
+	run := &AgentRun{ID: "run-map", Scope: Scope{Kind: "tenant", ID: "7"}, AssignedAgentID: "agent", Goal: "Answer"}
+	turn := &AgentTurn{ID: "turn-map", RunID: run.ID}
+	visual := testAnswerVisual()
+	visual.Components = append(visual.Components, presentation.Component{ID: "where", Type: "map", Summary: "Two gardens.", Map: &presentation.Map{Pins: []presentation.MapPin{
+		{ID: "lalbagh", Place: "osm:N1"}, {ID: "cubbon", Place: "osm:W2", Label: "Cubbon Park"},
+	}}})
+	config := HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"}
+	runner, err := NewHostedTurnRunner(visualTurnHost{visual: visual}, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn}); err != nil || outcome.Visual != nil || !strings.Contains(outcome.VisualRejection, "cannot be checked here") {
+		t.Fatalf("map without a place hook = %#v, %v", outcome, err)
+	}
+	lookups := 0
+	config.VisualPlaceProvenance = func(run *AgentRun) presentation.PlaceProvenance {
+		return func(_ context.Context, id string) (presentation.PlaceFix, bool, error) {
+			lookups++
+			switch id {
+			case "osm:N1":
+				return presentation.PlaceFix{Name: "Lalbagh Botanical Garden", Lat: 12.9507, Lon: 77.5848, Address: "Mavalli, Bengaluru"}, run.ID == "run-map", nil
+			case "osm:W2":
+				return presentation.PlaceFix{Name: "Cubbon Park", Lat: 12.9763, Lon: 77.5929}, true, nil
+			}
+			return presentation.PlaceFix{}, false, nil
+		}
+	}
+	if runner, err = NewHostedTurnRunner(visualTurnHost{visual: visual}, config); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: turn})
+	if err != nil || outcome.Visual == nil {
+		t.Fatalf("outcome = %#v, %v", outcome, err)
+	}
+	pins := outcome.Visual.Components[len(outcome.Visual.Components)-1].Map.Pins
+	if pins[0].Label != "Lalbagh Botanical Garden" || pins[0].Address != "Mavalli, Bengaluru" || pins[0].Lat == nil || *pins[0].Lat != 12.9507 ||
+		pins[1].Label != "Cubbon Park" || pins[1].Lon == nil || *pins[1].Lon != 77.5929 || lookups == 0 {
+		t.Fatalf("stamped pins = %+v", pins)
+	}
+	if visual.Components[len(visual.Components)-1].Map.Pins[0].Lat != nil {
+		t.Fatal("stamping changed the model's visual")
+	}
+	if _, err := presentation.Encode(outcome.Visual.Surface(presentation.StateReady)); err != nil {
+		t.Fatalf("stamped visual does not store: %v", err)
+	}
+}
+
 type answerVisualContent struct {
 	puts int
 	data []byte

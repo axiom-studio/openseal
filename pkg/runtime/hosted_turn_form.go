@@ -123,6 +123,30 @@ func validateHostedTurnVisual(ctx context.Context, visual *presentation.Visual, 
 	return nil
 }
 
+// stampHostedTurnVisual fills a validated visual's places in from find_place
+// (coordinates, and names and addresses left out) before it is stored. Run
+// it once, on the visual the model sent: a stamped visual carries
+// coordinates, which a model's visual may not.
+func stampHostedTurnVisual(ctx context.Context, visual *presentation.Visual, checks presentation.ValidateOptions) error {
+	if visual == nil || checks.SkipHostChecks {
+		return nil
+	}
+	surface := visual.Surface(presentation.StateReady)
+	if len(presentation.PlaceIDs(surface)) == 0 {
+		return nil
+	}
+	fixes, err := presentation.ResolvePlaces(ctx, surface, checks.PlaceProvenance)
+	if err != nil {
+		return fmt.Errorf("visual: %w", err)
+	}
+	stamped, err := presentation.StampPlaces(surface, fixes)
+	if err != nil {
+		return fmt.Errorf("visual: %w", err)
+	}
+	*visual = presentation.Visual{Title: stamped.Title, Components: stamped.Components}
+	return nil
+}
+
 func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capability.ModelAction, operations []workspace.Operation, options ...HostedTurnFormOption) (*HostedTurnResponse, error) {
 	var compile hostedTurnFormOptions
 	for _, option := range options {

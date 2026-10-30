@@ -49,6 +49,9 @@ func (r *ConversationRunTurnRunner) teamAnswerVisual(run *AgentRun, triggerID st
 		if err := validateHostedTurnVisual(ctx, &visual, AgentRunStatusCompleted, false, checks); err != nil {
 			return ConversationReference{}, fmt.Errorf("%w: %w", errInvalidAnswerVisual, err)
 		}
+		if err := stampHostedTurnVisual(ctx, &visual, checks); err != nil {
+			return ConversationReference{}, fmt.Errorf("%w: %w", errInvalidAnswerVisual, err)
+		}
 		return r.storeAnswerVisual(ctx, run, participant.ID, answerVisualArtifactID(run.ID, triggerID, participant.ID), visual)
 	}
 }

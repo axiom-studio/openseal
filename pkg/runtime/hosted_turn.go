@@ -371,6 +371,10 @@ type HostedTurnRunnerConfig struct {
 	// VisualImages confirms that images in an answer's visual are images
 	// visible from the Run's conversation. Nil rejects visuals with images.
 	VisualImages func(run *AgentRun) presentation.ImageResolver
+	// VisualPlaceProvenance confirms that places in an answer's visual came
+	// from find_place in the Run's conversation; the runner then stamps
+	// their coordinates into the visual. Nil rejects visuals with places.
+	VisualPlaceProvenance func(run *AgentRun) presentation.PlaceProvenance
 }
 
 // visualChecks returns the host checks for an answer visual of run. Missing
@@ -385,6 +389,9 @@ func (c HostedTurnRunnerConfig) visualChecks(run *AgentRun) presentation.Validat
 	}
 	if c.VisualImages != nil {
 		checks.Images = c.VisualImages(run)
+	}
+	if c.VisualPlaceProvenance != nil {
+		checks.PlaceProvenance = c.VisualPlaceProvenance(run)
 	}
 	return checks
 }
@@ -508,7 +515,12 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if response.Visual != nil {
 		proposes := response.ProposedAction != nil || response.ProposedFork != nil || response.ProposedDelegation != nil ||
 			response.ProposedRunbook != nil || response.ProposedTask != nil
-		if err := validateHostedTurnVisual(ctx, response.Visual, response.NextRunStatus, proposes, r.config.visualChecks(input.Run)); err != nil {
+		checks := r.config.visualChecks(input.Run)
+		err := validateHostedTurnVisual(ctx, response.Visual, response.NextRunStatus, proposes, checks)
+		if err == nil {
+			err = stampHostedTurnVisual(ctx, response.Visual, checks)
+		}
+		if err != nil {
 			// A visual the host cannot show never costs the answer it rides on,
 			// as for a Team member's answer. The Turn records why it was dropped.
 			response.Visual = nil
