@@ -500,6 +500,7 @@ type (
 	ConversationCoordinatorConfig        = runtime.ConversationCoordinatorConfig
 	ConversationRunSchedulerConfig       = runtime.ConversationRunSchedulerConfig
 	ConversationRunTurnRunnerConfig      = runtime.ConversationRunTurnRunnerConfig
+	ConversationPlace                    = runtime.ConversationPlace
 	ConversationRunReconcilerConfig      = runtime.ConversationRunReconcilerConfig
 	ConversationRunReconcileResult       = runtime.ConversationRunReconcileResult
 	ConversationChangeRequest            = runtime.ConversationChangeRequest
@@ -1074,6 +1075,7 @@ const (
 	ClawHubCompilationPreviewAPIVersion = clawhub.CompilationPreviewAPIVersion
 	ActionCredentialLeaseVersion        = runtime.ActionCredentialLeaseVersion
 	MaximumActionCredentialLeaseTTL     = runtime.MaximumActionCredentialLeaseTTL
+	MaximumConversationPlaces           = runtime.MaximumConversationPlaces
 )
 
 func CompileAgentManifest(manifest *AgentManifest, definitionID string, provenance AgentDefinitionProvenance) (*AgentDefinition, error) {

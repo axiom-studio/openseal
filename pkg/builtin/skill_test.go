@@ -46,7 +46,7 @@ func TestProfileImageActionIsBoundedSelfOnlyWrite(t *testing.T) {
 
 func TestAppDataReadAndPictureStyleActions(t *testing.T) {
 	d := SkillDefinition()
-	if d.Version != "2.2.0" {
+	if d.Version != "2.3.0" {
 		t.Fatalf("version = %s", d.Version)
 	}
 	read := d.Actions[ReadAppData]
@@ -91,6 +91,37 @@ func TestFindPlaceIsReadOnlyAndReturnsPlaceIDs(t *testing.T) {
 	} {
 		if err := catalog.ValidateOutput(t.Context(), bound, output); err == nil {
 			t.Fatalf("invalid find_place result accepted: %v", output)
+		}
+	}
+}
+
+func TestRouteIsReadOnlyAndReturnsBoundedLegs(t *testing.T) {
+	catalog, d := builtinContractCatalog(t)
+	a := d.Actions[Route]
+	if string(a.Risk) != "read" || string(a.SideEffect) != "read" || a.InputSchema["additionalProperties"] != false || a.Retry.MaxAttempts != 1 {
+		t.Fatalf("route = %#v", a)
+	}
+	if !strings.Contains(d.Prompt.Instructions, "call route with their place ids") || !strings.Contains(d.Prompt.Instructions, "pass its id as near") {
+		t.Fatal("the prompt must say when to call route and how to search near a place")
+	}
+	bound := &skill.BoundAction{Definition: d, Binding: &skill.Binding{}, Action: a}
+	leg := map[string]interface{}{"from": "place:a84f20c6e917", "to": "place:4b2f9c0e1a77", "distance": 4.2, "minutes": 9, "steps": []interface{}{"Turn left onto Main Street (1.2 km)"}}
+	stops := []interface{}{map[string]interface{}{"place": "place:a84f20c6e917", "name": "95131"}, map[string]interface{}{"place": "place:4b2f9c0e1a77", "name": "Dosa Point"}}
+	routed := map[string]interface{}{"mode": "drive", "units": "km", "stops": stops, "legs": []interface{}{leg}, "distance": 4.2, "minutes": 9}
+	if err := catalog.ValidateOutput(t.Context(), bound, routed); err != nil {
+		t.Fatalf("valid route rejected: %v", err)
+	}
+	tooManySteps := make([]interface{}, MaximumRouteSteps+1)
+	for i := range tooManySteps {
+		tooManySteps[i] = "Continue"
+	}
+	for _, output := range []map[string]interface{}{
+		{"mode": "drive", "units": "km", "stops": stops, "legs": []interface{}{}, "distance": 0, "minutes": 0},
+		{"mode": "drive", "units": "km", "stops": stops, "legs": []interface{}{map[string]interface{}{"from": "place:a84f20c6e917", "to": "place:4b2f9c0e1a77", "distance": 1, "minutes": 1, "steps": tooManySteps}}, "distance": 1, "minutes": 1},
+		{"mode": "drive", "units": "km", "stops": stops, "legs": []interface{}{leg}, "distance": 4.2, "minutes": 9, "geometry": []interface{}{}},
+	} {
+		if err := catalog.ValidateOutput(t.Context(), bound, output); err == nil {
+			t.Fatalf("invalid route accepted: %v", output)
 		}
 	}
 }

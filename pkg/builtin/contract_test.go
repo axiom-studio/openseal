@@ -89,6 +89,19 @@ func TestFileToolContractsTakePathsAndRejectForeignInput(t *testing.T) {
 		{"find places near free text", FindPlace, map[string]interface{}{"query": "cafes", "near": "Indiranagar"}, false},
 		{"find too many places", FindPlace, map[string]interface{}{"query": "cafes", "limit": 6}, false},
 		{"find a place at coordinates", FindPlace, map[string]interface{}{"query": "cafes", "lat": 12.9, "lon": 77.6}, false},
+		{"route", Route, map[string]interface{}{"stops": []interface{}{"place:a84f20c6e917", "place:4b2f9c0e1a77"}}, true},
+		{"shortest round trip", Route, map[string]interface{}{"stops": []interface{}{"place:a84f20c6e917", "place:4b2f9c0e1a77", "place:000000000001"}, "end": "place:a84f20c6e917", "optimize": true, "mode": "walk", "units": "mi"}, true},
+		{"route to one stop", Route, map[string]interface{}{"stops": []interface{}{"place:a84f20c6e917"}}, false},
+		{"route through a stop twice", Route, map[string]interface{}{"stops": []interface{}{"place:a84f20c6e917", "place:a84f20c6e917"}}, false},
+		{"route through free text", Route, map[string]interface{}{"stops": []interface{}{"place:a84f20c6e917", "95131 San Jose"}}, false},
+		{"route by plane", Route, map[string]interface{}{"stops": []interface{}{"place:a84f20c6e917", "place:4b2f9c0e1a77"}, "mode": "fly"}, false},
+		{"route through too many stops", Route, map[string]interface{}{"stops": func() []interface{} {
+			stops := []interface{}{}
+			for i := 0; i <= MaximumRouteStops; i++ {
+				stops = append(stops, fmt.Sprintf("place:%012x", i))
+			}
+			return stops
+		}()}, false},
 		{"pdf", CreatePDF, map[string]interface{}{"path": "docs/brief.pdf", "blocks": []interface{}{map[string]interface{}{"kind": "image", "path": "images/seal.png"}}}, true},
 		{"pdf with a revision id", CreatePDF, map[string]interface{}{"path": "docs/brief.pdf", "documentId": "brief"}, false},
 		{"sheet", CreateSheet, map[string]interface{}{"path": "sheets/budget.xlsx", "sheets": sheets}, true},

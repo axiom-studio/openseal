@@ -46,6 +46,8 @@ type conversationHistoryPlan struct {
 	Omitted int
 	// ImageStyle is the asking user's saved picture style, if any.
 	ImageStyle string
+	// Places are what find_place already found in the chat.
+	Places []ConversationPlace
 }
 
 func conversationViewerKey(viewer ConversationViewer) string {
