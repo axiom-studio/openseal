@@ -66,11 +66,17 @@ func generatedFiles(output map[string]interface{}, status runtime.AgentRunStatus
 	return files, nil
 }
 
+// portableGeneratedFileName expresses the generatedFiles name rule except
+// uniqueness. It lists characters explicitly: llama.cpp grammar conversion
+// silently ignores a pattern using \s and stops enforcing one with \x ranges,
+// so the remaining control characters are left to generatedFiles().
+const portableGeneratedFileName = `^([^ \t\n\r/\\<>:"|?*][^\t\n\r/\\<>:"|?*]*)?[^ \t\n\r./\\<>:"|?*]$`
+
 func generatedOutputSchema() map[string]interface{} {
 	return map[string]interface{}{"type": "object", "properties": map[string]interface{}{
 		"reply": map[string]interface{}{"type": "string"},
 		"generatedFiles": map[string]interface{}{"type": "array", "maxItems": maxGeneratedFiles, "items": map[string]interface{}{"type": "object", "additionalProperties": false, "required": []string{"name", "mediaType", "text"}, "properties": map[string]interface{}{
-			"name":      map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 180, "description": "A unique filename, without a directory or path."},
+			"name":      map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 180, "pattern": portableGeneratedFileName, "description": "A unique filename, without a directory or path."},
 			"mediaType": map[string]interface{}{"type": "string", "enum": []string{"text/plain", "text/markdown", "text/csv", "application/json"}},
 			"text":      map[string]interface{}{"type": "string", "maxLength": maxGeneratedFileBytes},
 		}}},

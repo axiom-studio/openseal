@@ -15,7 +15,10 @@ import (
 // state and policy must never be imported into the execution authority.
 func DesktopWorkRequest(scope runtime.Scope, request runtime.CreateAgentRunRequest) (runtime.CreateAgentRunRequest, error) {
 	validOwner := request.Owner.Type == runtime.OwnerTypeAgent && request.Owner.ID == request.AssignedAgentID || request.Owner.Type == runtime.OwnerTypeTeam && strings.TrimSpace(request.Owner.ID) != ""
-	if scope.Kind != "local" || scope.ID == "" || request.Scope != scope || request.Kind != runtime.RunKindAgentWork || !validOwner || strings.TrimSpace(request.AssignedAgentID) == "" || strings.TrimSpace(request.Goal) == "" || strings.TrimSpace(request.IdempotencyKey) == "" {
+	// An empty kind is agent work, as the kernel normalizes it; the TUI
+	// and other generic clients omit it.
+	validKind := request.Kind == "" || request.Kind == runtime.RunKindAgentWork
+	if scope.Kind != "local" || scope.ID == "" || request.Scope != scope || !validKind || !validOwner || strings.TrimSpace(request.AssignedAgentID) == "" || strings.TrimSpace(request.Goal) == "" || strings.TrimSpace(request.IdempotencyKey) == "" {
 		return runtime.CreateAgentRunRequest{}, errors.New("desktop work requires a local agent, goal, and idempotency key")
 	}
 	if request.ParentRunID != "" || request.ObjectiveID != "" || len(request.Context) > 0 || len(request.Checkpoint) > 0 || len(request.Plan) > 0 || len(request.Policy) > 0 || request.WakeCondition != nil || request.Budget != nil || len(request.ResourceRequirements) > 0 || request.ConcurrencyKey != "" || request.Entrypoint != "" {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -173,5 +174,23 @@ func TestCanceledProviderTurnDoesNotPublishGeneratedFiles(t *testing.T) {
 	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: scope, ProducerRunID: run.ID})
 	if err != nil || len(records) != 0 {
 		t.Fatalf("late artifacts published: %+v %v", records, err)
+	}
+}
+
+func TestPortableGeneratedFileNamePatternAgreesWithGeneratedFiles(t *testing.T) {
+	pattern := regexp.MustCompile(portableGeneratedFileName)
+	for _, name := range []string{
+		"report.md", "daily digest", ".env", "a", "notes today.md", "daily digest.=",
+		" daily_digest", "daily_digest ", "daily digest.", ".", "..", "notes/today.md", `notes\today.md`,
+		"a:b", "what?", "tab\there", "line\nbreak", "",
+	} {
+		_, err := generatedFiles(fileOutput(generatedFile{Name: name, MediaType: "text/plain", Text: "Notes"}), runtime.AgentRunStatusCompleted)
+		if pattern.MatchString(name) != (err == nil) {
+			t.Errorf("name %q: pattern match=%t, generatedFiles error=%v", name, pattern.MatchString(name), err)
+		}
+	}
+	name := generatedOutputSchema()["properties"].(map[string]interface{})["generatedFiles"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})["name"].(map[string]interface{})
+	if name["pattern"] != portableGeneratedFileName {
+		t.Fatalf("generated file name schema = %#v", name)
 	}
 }

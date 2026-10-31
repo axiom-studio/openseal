@@ -296,6 +296,10 @@ type CapabilityContext struct {
 	BlockingRequirements         []CapabilityBlockingRequirement              `json:"blockingRequirements,omitempty"`
 	ConversationGatewayAdapters  []ConversationGatewayAdapterChoice           `json:"conversationGatewayAdapters,omitempty"`
 	CallbackAdapters             []CallbackAdapterChoice                      `json:"callbackAdapters,omitempty"`
+	// HostPolicyEvaluation reports that the host computes the policy decision
+	// for an advertised evaluate operation, so a client only requests it and
+	// never supplies a decision of its own.
+	HostPolicyEvaluation bool `json:"hostPolicyEvaluation,omitempty"`
 }
 
 type ClawHubVersionRequest struct {

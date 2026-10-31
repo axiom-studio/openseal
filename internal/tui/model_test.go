@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"slices"
@@ -118,6 +119,8 @@ type fakeKernelClient struct {
 	changeSetRequests          []authoring.CreateChangeSetRequest
 	changeSetKeys              []string
 	changeSetErrors            []error
+	evaluationRequests         []authoring.SubmitChangeSetEvaluationRequest
+	evaluationKeys             []string
 	approvalRequests           []authoring.ResolveChangeSetApprovalRequest
 	approvalKeys               []string
 	applyRequests              []authoring.ApplyChangeSetRequest
@@ -788,8 +791,10 @@ func (f *fakeKernelClient) AnswerWorkforceChangeSetRefinement(_ context.Context,
 	return f.nextGovernanceResult()
 }
 
-func (f *fakeKernelClient) EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error) {
-	return nil, errors.New("policy evaluation is not initiated by the TUI")
+func (f *fakeKernelClient) EvaluateWorkforceChangeSet(_ context.Context, request authoring.SubmitChangeSetEvaluationRequest, key string) (*authoring.ChangeSet, error) {
+	f.evaluationRequests = append(f.evaluationRequests, request)
+	f.evaluationKeys = append(f.evaluationKeys, key)
+	return f.nextGovernanceResult()
 }
 
 func (f *fakeKernelClient) ResolveWorkforceChangeSetApproval(_ context.Context, request authoring.ResolveChangeSetApprovalRequest, key string) (*authoring.ChangeSet, error) {
@@ -1457,6 +1462,46 @@ func TestTUIInspectsPortableWorkforceBundleThroughAdvertisedKernelCapability(t *
 		if !strings.Contains(model.View(), expected) {
 			t.Fatalf("bundle view missing %q: %s", expected, model.View())
 		}
+	}
+}
+
+func TestCapabilityReloadsKeepTheUsersSectionInAFullWorkspace(t *testing.T) {
+	full := func(authoring bool) kernelapi.CapabilityDocument {
+		capabilities := []kernelapi.Capability{
+			kernelapi.AgentDefinitionsCapability(),
+			kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
+			kernelapi.AgentRunsCapability(kernelapi.OperationList),
+			kernelapi.ObjectivesCapability(),
+			kernelapi.ProjectsCapability(),
+			kernelapi.AgentRequestsCapability(),
+		}
+		if authoring {
+			capabilities = append(capabilities, kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true}))
+		}
+		return kernelapi.NewCapabilityDocument(capabilities...)
+	}
+	fake := &fakeKernelClient{document: full(true)}
+	model := newTestModel(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionOverview {
+		t.Fatalf("first load section = %v, want the guided Home page", model.section)
+	}
+	model.authoringChangeSet = &authoring.ChangeSet{ID: "change-1", Scope: capability.ScopeReference{Kind: "local", ID: "default"}, Status: authoring.ChangeSetReview, Revision: 3, CandidateDigest: "digest"}
+	model.focusPanelList()
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	if model.section != sectionAuthoring {
+		t.Fatalf("Create section = %v", model.section)
+	}
+	for reload := 0; reload < 3; reload++ {
+		applyCommand(t, model, model.loadCapabilities())
+		if model.section != sectionAuthoring {
+			t.Fatalf("reload %d moved the user to section %v", reload, model.section)
+		}
+	}
+	fake.document = full(false)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section == sectionAuthoring {
+		t.Fatal("a section that is no longer advertised was kept")
 	}
 }
 
@@ -2613,6 +2658,52 @@ func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t
 		fake.activationRequests[0].Reason != "Start the reviewed workforce" || fake.activationKeys[0] == "" ||
 		model.authoringChangeSet.ID != activation.ID || model.authoringChangeSet.ParentID != applied.ID {
 		t.Fatalf("activation requests=%#v keys=%#v changeSet=%#v", fake.activationRequests, fake.activationKeys, model.authoringChangeSet)
+	}
+}
+
+func TestWorkforceEvaluationIsRequestedOnlyWhenTheHostComputesPolicy(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	review := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetReview, Revision: 3, CandidateDigest: "digest-1", Result: authoring.CompileResult{Valid: true}}
+	awaiting := *review
+	awaiting.Status, awaiting.Revision = authoring.ChangeSetAwaitingApproval, 4
+	for _, host := range []bool{false, true} {
+		evaluate := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
+		evaluate.Operations = append(evaluate.Operations, kernelapi.OperationEvaluate)
+		evaluate.Context = &kernelapi.CapabilityContext{ChangeSetID: review.ID, Revision: review.Revision, HostPolicyEvaluation: host}
+		fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(evaluate), governanceResults: []*authoring.ChangeSet{&awaiting}}
+		model := newTestModel(t, fake)
+		model.section = sectionAuthoring
+		model.authoringChangeSet, model.authoringResult = review, &review.Result
+		applyCommand(t, model, model.loadCapabilities())
+		model.focusPanelList()
+		if !host {
+			if model.canRequestWorkforceEvaluation() || !strings.Contains(model.View(), "Waiting for the configured policy evaluator") {
+				t.Fatalf("external evaluator decision offered to the TUI:\n%s", model.View())
+			}
+			if _, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter}); command != nil {
+				applyCommand(t, model, command)
+			}
+			if len(fake.evaluationRequests) != 0 {
+				t.Fatalf("TUI submitted an external policy decision: %#v", fake.evaluationRequests)
+			}
+			continue
+		}
+		if !strings.Contains(model.View(), "Enter check this exact reviewed workforce") {
+			t.Fatalf("host evaluation not offered:\n%s", model.View())
+		}
+		_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		applyCommand(t, model, command)
+		if len(fake.evaluationRequests) != 1 || fake.evaluationKeys[0] == "" {
+			t.Fatalf("evaluation requests = %#v keys = %#v", fake.evaluationRequests, fake.evaluationKeys)
+		}
+		request := fake.evaluationRequests[0]
+		if request.ChangeSetID != review.ID || request.ExpectedRevision != review.Revision || request.CandidateDigest != review.CandidateDigest ||
+			request.Allowed || len(request.Findings) != 0 || len(request.ApprovalRequirements) != 0 {
+			t.Fatalf("evaluation request carried a client decision or wrong candidate: %#v", request)
+		}
+		if model.authoringChangeSet.Status != authoring.ChangeSetAwaitingApproval {
+			t.Fatalf("change set after evaluation = %#v", model.authoringChangeSet)
+		}
 	}
 }
 
@@ -4704,4 +4795,127 @@ func testRun(id string, status runtime.AgentRunStatus, revision int64) *runtime.
 func testDigest(value string) string {
 	digest := sha256.Sum256([]byte(value))
 	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+func TestImplicitOwnerAdoptsTheWorkspacesOnlyAgentDeployment(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	deployment := func(id string, status kernelagent.RolloutStatus) kernelapi.AgentDeploymentCatalogEntry {
+		return kernelapi.AgentDeploymentCatalogEntry{Deployment: &kernelagent.AgentDeployment{ID: id, DisplayName: "Summarizer " + id, Scope: scope, RolloutStatus: status}}
+	}
+	operator := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	for _, test := range []struct {
+		name        string
+		deployments []kernelapi.AgentDeploymentCatalogEntry
+		adopt       bool
+		want        string
+	}{
+		{name: "sole agent", deployments: []kernelapi.AgentDeploymentCatalogEntry{deployment("summarizer", kernelagent.RolloutActive)}, adopt: true, want: "summarizer"},
+		{name: "retired ignored", deployments: []kernelapi.AgentDeploymentCatalogEntry{deployment("summarizer", kernelagent.RolloutActive), deployment("old", kernelagent.RolloutRetired)}, adopt: true, want: "summarizer"},
+		{name: "several agents keep the owner", deployments: []kernelapi.AgentDeploymentCatalogEntry{deployment("one", kernelagent.RolloutActive), deployment("two", kernelagent.RolloutActive)}, adopt: true, want: "operator"},
+		{name: "no agents keep the owner", adopt: true, want: "operator"},
+		{name: "explicit owner wins", deployments: []kernelapi.AgentDeploymentCatalogEntry{deployment("summarizer", kernelagent.RolloutActive)}, want: "operator"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			model := newTestModel(t, &fakeKernelClient{agentDeployments: test.deployments})
+			model.config.Owner, model.config.AdoptSoleAgent = operator, test.adopt
+			if command := model.adoptSoleAgent(); command != nil {
+				applyCommand(t, model, command)
+			} else if test.adopt {
+				t.Fatal("adoption requested but no lookup was made")
+			}
+			if model.config.Owner.Type != runtime.OwnerTypeAgent || model.config.Owner.ID != test.want {
+				t.Fatalf("owner = %#v, want agent:%s", model.config.Owner, test.want)
+			}
+		})
+	}
+}
+
+func TestApplyingAWorkforceAdoptsItsAgentForNewWork(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	fake := &fakeKernelClient{}
+	model := newTestModel(t, fake)
+	model.config.AdoptSoleAgent = true
+	fake.agentDeployments = []kernelapi.AgentDeploymentCatalogEntry{{Deployment: &kernelagent.AgentDeployment{ID: "summarizer", DisplayName: "Summarizer", Scope: scope, RolloutStatus: kernelagent.RolloutActive}}}
+	applied := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetApplied, Revision: 6, CandidateDigest: "digest",
+		ApplyReceipt: &authoring.ChangeSetApplyReceipt{ID: "receipt", Resources: []authoring.AppliedResourceReference{{Kind: "agent_deployment", ID: "summarizer", Revision: 1}}}}
+	_, command := model.Update(workforceGoverned{changeSet: applied, action: "Workforce Apply"})
+	applyCommand(t, model, command)
+	if model.config.Owner.ID != "summarizer" || !strings.Contains(model.status, "New work now goes to Agent Summarizer") {
+		t.Fatalf("owner = %#v status = %q", model.config.Owner, model.status)
+	}
+}
+
+func TestSoleAgentAdoptionShowsTheAgentRuntimeInEitherStartupOrder(t *testing.T) {
+	// Init loads capabilities for the default owner and looks up the sole
+	// Agent concurrently. Whichever finishes first, the adopted Agent's
+	// runtime section must end up visible, and late results for the default
+	// owner (whose deployment does not exist) must not hide it again.
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	operator := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}
+	missingOperator := compilationsLoaded{owner: operator, err: &client.APIError{StatusCode: http.StatusNotFound, Message: "deployment not found"}}
+	newModel := func() *Model {
+		fake := &fakeKernelClient{
+			document: kernelapi.NewCapabilityDocument(kernelapi.AgentDefinitionsCapability()),
+			agentDeployments: []kernelapi.AgentDeploymentCatalogEntry{{
+				Deployment: &kernelagent.AgentDeployment{ID: "summarizer", DisplayName: "Summarizer", Scope: scope, DefinitionID: "summarizer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive, Environment: "local", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}, Revision: 1},
+				Definition: &kernelagent.AgentDefinition{ID: "summarizer", Version: "1", DisplayName: "Summarizer", Purpose: "Summarize notes"},
+			}},
+		}
+		model := newTestModel(t, fake)
+		model.config.Owner, model.config.AdoptSoleAgent = operator, true
+		return model
+	}
+	assertRuntimeVisible := func(t *testing.T, model *Model) {
+		t.Helper()
+		if model.config.Owner.ID != "summarizer" || !model.agentDefinitionCapability.Available || model.agentDeployment == nil || model.agentDeployment.Deployment.ID != "summarizer" {
+			t.Fatalf("owner=%#v capability=%t deployment=%#v err=%v", model.config.Owner, model.agentDefinitionCapability.Available, model.agentDeployment, model.err)
+		}
+		model.section = sectionReadiness
+		view := model.View()
+		for _, expected := range []string{"Agent runtime & placement", "Summarizer", "p pause/resume"} {
+			if !strings.Contains(view, expected) {
+				t.Fatalf("runtime view missing %q:\n%s", expected, view)
+			}
+		}
+	}
+
+	t.Run("capabilities first", func(t *testing.T) {
+		model := newModel()
+		model.Update(model.loadCapabilities()())
+		model.Update(missingOperator)
+		if model.agentDefinitionCapability.Available {
+			t.Fatal("precondition: the default owner's 404 should hide the runtime section")
+		}
+		_, reload := model.Update(model.adoptSoleAgent()())
+		if reload == nil {
+			t.Fatal("adopting the sole Agent did not reload its capabilities")
+		}
+		applyCommand(t, model, reload)
+		assertRuntimeVisible(t, model)
+		// The default owner's lookup can still be in flight; it is stale.
+		model.Update(missingOperator)
+		assertRuntimeVisible(t, model)
+	})
+
+	t.Run("adoption first", func(t *testing.T) {
+		model := newModel()
+		initial := model.loadCapabilities()
+		_, reload := model.Update(model.adoptSoleAgent()())
+		applyCommand(t, model, reload)
+		assertRuntimeVisible(t, model)
+		// The initial request for the default owner returns last.
+		if _, followup := model.Update(initial()); followup != nil {
+			t.Fatal("a superseded capability document started new loads")
+		}
+		model.Update(missingOperator)
+		assertRuntimeVisible(t, model)
+	})
+
+	t.Run("several agents keep the configured owner without a reload", func(t *testing.T) {
+		model := newModel()
+		model.Update(model.loadCapabilities()())
+		if _, followup := model.Update(soleAgentResolved{}); followup != nil || model.config.Owner != operator {
+			t.Fatalf("owner=%#v followup=%v", model.config.Owner, followup != nil)
+		}
+	})
 }

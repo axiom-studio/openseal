@@ -7,4 +7,7 @@ if (!host) throw new Error('Cannot determine native Rust target');
 const suffix = process.platform === 'win32' ? '.exe' : '';
 const target = fileURLToPath(new URL(`../src-tauri/binaries/openseal-daemon-${host}${suffix}`, import.meta.url));
 mkdirSync(fileURLToPath(new URL('../src-tauri/binaries', import.meta.url)), { recursive: true });
-execFileSync('go', ['build', '-o', target, './cmd/openseal'], { cwd: root, stdio: 'inherit' });
+// Release builds pass OPENSEAL_VERSION so the sidecar reports the release.
+const version = process.env.OPENSEAL_VERSION?.trim();
+const ldflags = version ? ['-ldflags', `-X github.com/axiom-studio/openseal/cmd/openseal/commands.version=${version}`] : [];
+execFileSync('go', ['build', ...ldflags, '-o', target, './cmd/openseal'], { cwd: root, stdio: 'inherit' });

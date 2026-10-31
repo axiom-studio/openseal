@@ -553,21 +553,30 @@ type RefinementProviderAnswerValue struct {
 }
 
 // RefinementContext is the credential-free context passed to the authoring
-// provider. Answer history remains ordered and auditable on the ChangeSet.
+// provider. Answer history remains ordered and auditable on the ChangeSet;
+// Answers holds each question's current answer in the order those answers
+// were given, so the last entry is the most recent decision.
 type RefinementContext struct {
 	Questions []RefinementQuestion       `json:"questions,omitempty"`
 	Answers   []RefinementResolvedAnswer `json:"answers,omitempty"`
 }
 
 func providerRefinementContext(value ChangeSetRefinement) *RefinementContext {
-	current := make(map[string]RefinementAnswerEvent, len(value.Answers))
-	for _, event := range value.Answers {
-		current[event.QuestionID] = event
+	// Question order is not answer order: follow-up questions are inserted
+	// ahead of earlier ones, and revising an answer appends an event without
+	// moving its question. Consumers such as scheduleIntentAuthority read the
+	// last answer as the latest, so project in event order.
+	latest := make(map[string]int, len(value.Answers))
+	for index, event := range value.Answers {
+		latest[event.QuestionID] = index
 	}
-	answers := make([]RefinementResolvedAnswer, 0, len(current))
+	asked := make(map[string]bool, len(value.Questions))
 	for _, question := range value.Questions {
-		event, ok := current[question.ID]
-		if !ok {
+		asked[question.ID] = true
+	}
+	answers := make([]RefinementResolvedAnswer, 0, len(latest))
+	for index, event := range value.Answers {
+		if latest[event.QuestionID] != index || !asked[event.QuestionID] {
 			continue
 		}
 		projected := RefinementProviderAnswerValue{

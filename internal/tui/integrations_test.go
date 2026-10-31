@@ -92,7 +92,7 @@ func TestConversationIntegrationFailsClosedOnOlderCapability(t *testing.T) {
 	fake := &fakeKernelClient{}
 	model := newModelWithClient(t, fake)
 	old := kernelapi.Capability{ID: kernelapi.ConversationGatewaysCapabilityID, Version: "1", Available: true, Operations: []string{kernelapi.OperationList, kernelapi.OperationCreate, kernelapi.OperationUpdate}}
-	model.Update(capabilitiesLoaded{document: kernelapi.NewCapabilityDocument(old)})
+	model.Update(capabilitiesLoaded{owner: model.config.Owner, document: kernelapi.NewCapabilityDocument(old)})
 	if model.conversationGatewayCapability.Available || strings.Contains(model.renderPanelTabs(), "Integrations") || model.canCreateConversationGateway() {
 		t.Fatal("conversation-gateways/v1 remained visible or operable")
 	}
