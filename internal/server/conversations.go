@@ -36,7 +36,7 @@ func (s *Server) handleCreateConversation(w http.ResponseWriter, r *http.Request
 	key := requestIdempotencyKey(r, payload.IdempotencyKey)
 	conversation, replayed, err := service.CreateConversation(r.Context(), runtime.CreateConversationRequest{
 		ID: payload.ID, Scope: payload.Scope, Owner: payload.Owner, Title: payload.Title, Origin: payload.Origin,
-		IdempotencyKey: key,
+		SpaceID: payload.SpaceID, IdempotencyKey: key,
 	})
 	if err != nil {
 		s.respondConversationError(w, err)
@@ -539,6 +539,7 @@ func conversationFilterFromQuery(r *http.Request) (runtime.ConversationFilter, e
 		}
 		filter.Owner = &owner
 	}
+	filter.SpaceID = strings.TrimSpace(r.URL.Query().Get("spaceId"))
 	for _, raw := range queryValues(r, "status") {
 		status := runtime.ConversationStatus(raw)
 		if status != runtime.ConversationStatusActive && status != runtime.ConversationStatusArchived {
@@ -578,7 +579,7 @@ func validChannelIntent(intent runtime.ConversationMessageIntent) bool {
 func (s *Server) respondConversationError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, runtime.ErrConversationNotFound), errors.Is(err, runtime.ErrChannelMessageNotFound),
-		errors.Is(err, runtime.ErrParticipationRoundNotFound):
+		errors.Is(err, runtime.ErrParticipationRoundNotFound), errors.Is(err, runtime.ErrSpaceNotFound):
 		s.respondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, runtime.ErrMessageConflict), errors.Is(err, runtime.ErrRevisionConflict),
 		errors.Is(err, runtime.ErrConversationCursorConflict), errors.Is(err, runtime.ErrConversationPresenceConflict):

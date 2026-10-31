@@ -39,7 +39,7 @@ func (s *MemoryStore) CreateConversation(_ context.Context, conversation *Conver
 	if existingID := s.conversationKeys[identityKey]; existingID != "" {
 		existing := s.conversations[conversationStoreKey(conversation.Scope, existingID)]
 		if existing == nil || existing.Owner != conversation.Owner || existing.Title != conversation.Title ||
-			!reflect.DeepEqual(existing.Origin, conversation.Origin) {
+			!reflect.DeepEqual(existing.Origin, conversation.Origin) || !sameRequestedSpace(existing, conversation.SpaceID) {
 			return nil, false, ErrMessageConflict
 		}
 		return cloneConversation(existing), true, nil
@@ -47,6 +47,10 @@ func (s *MemoryStore) CreateConversation(_ context.Context, conversation *Conver
 	storeKey := conversationStoreKey(conversation.Scope, conversation.ID)
 	if s.conversations[storeKey] != nil {
 		return nil, false, ErrMessageConflict
+	}
+	conversation = cloneConversation(conversation)
+	if err := s.resolveConversationSpaceLocked(conversation); err != nil {
+		return nil, false, err
 	}
 	s.conversations[storeKey] = cloneConversation(conversation)
 	s.conversationKeys[identityKey] = conversation.ID
@@ -68,6 +72,8 @@ func (s *MemoryStore) UpdateConversation(_ context.Context, conversation *Conver
 	if current.Revision != expectedRevision || conversation.Revision != expectedRevision+1 {
 		return nil, ErrRevisionConflict
 	}
+	conversation = cloneConversation(conversation)
+	conversation.SpaceID = current.SpaceID
 	s.conversations[key] = cloneConversation(conversation)
 	return cloneConversation(conversation), nil
 }
@@ -87,6 +93,8 @@ func (s *MemoryStore) UpdateConversationWithEvent(_ context.Context, conversatio
 	if current.Revision != expectedRevision || conversation.Revision != expectedRevision+1 {
 		return nil, nil, ErrRevisionConflict
 	}
+	conversation = cloneConversation(conversation)
+	conversation.SpaceID = current.SpaceID
 	s.conversations[key] = cloneConversation(conversation)
 	persisted := appendMemoryActivityLocked(s, event)
 	return cloneConversation(conversation), cloneActivityEvent(persisted), nil
@@ -123,6 +131,7 @@ func (s *MemoryStore) ListConversations(_ context.Context, filter ConversationFi
 	result := make([]*Conversation, 0)
 	for _, conversation := range s.conversations {
 		if conversation.Scope != filter.Scope || (filter.Owner != nil && conversation.Owner != *filter.Owner) ||
+			(filter.SpaceID != "" && conversation.SpaceID != filter.SpaceID) ||
 			(len(filter.Statuses) > 0 && !containsConversationStatus(filter.Statuses, conversation.Status)) {
 			continue
 		}

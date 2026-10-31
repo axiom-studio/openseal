@@ -98,7 +98,7 @@ func (s *PostgresStore) CreateConversation(ctx context.Context, conversation *Co
 	}
 	if existing != nil {
 		if existing.Owner != conversation.Owner || existing.Title != conversation.Title ||
-			!reflect.DeepEqual(existing.Origin, conversation.Origin) {
+			!reflect.DeepEqual(existing.Origin, conversation.Origin) || !sameRequestedSpace(existing, conversation.SpaceID) {
 			return nil, false, ErrMessageConflict
 		}
 		if err := tx.Commit(); err != nil {
@@ -106,15 +106,19 @@ func (s *PostgresStore) CreateConversation(ctx context.Context, conversation *Co
 		}
 		return existing, true, nil
 	}
+	conversation = cloneConversation(conversation)
+	if err := s.resolvePostgresConversationSpaceTx(ctx, tx, conversation); err != nil {
+		return nil, false, err
+	}
 	payload, err := json.Marshal(conversation)
 	if err != nil {
 		return nil, false, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("conversations")+`
-		(scope_kind, scope_id, id, owner_type, owner_id, status, idempotency_key, last_sequence, revision, created_at, updated_at, payload)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`, conversation.Scope.Kind, conversation.Scope.ID,
+		(scope_kind, scope_id, id, owner_type, owner_id, status, idempotency_key, last_sequence, revision, created_at, updated_at, payload, space_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13)`, conversation.Scope.Kind, conversation.Scope.ID,
 		conversation.ID, conversation.Owner.Type, conversation.Owner.ID, conversation.Status, key, conversation.LastSequence,
-		conversation.Revision, conversation.CreatedAt, conversation.UpdatedAt, string(payload))
+		conversation.Revision, conversation.CreatedAt, conversation.UpdatedAt, string(payload), conversation.SpaceID)
 	if err != nil {
 		if postgresUniqueViolation(err) {
 			return nil, false, ErrMessageConflict
@@ -197,6 +201,11 @@ func (s *PostgresStore) ListConversations(ctx context.Context, filter Conversati
 		query += fmt.Sprintf(` AND owner_type = $%d AND owner_id = $%d`, placeholder, placeholder+1)
 		args = append(args, filter.Owner.Type, filter.Owner.ID)
 		placeholder += 2
+	}
+	if filter.SpaceID != "" {
+		query += fmt.Sprintf(` AND space_id = $%d`, placeholder)
+		args = append(args, filter.SpaceID)
+		placeholder++
 	}
 	if len(filter.Statuses) > 0 {
 		statuses := make([]string, len(filter.Statuses))
@@ -785,8 +794,10 @@ func (s *PostgresStore) updatePostgresConversationTx(ctx context.Context, tx *sq
 	if err != nil {
 		return err
 	}
+	// space_id is authoritative: only DeleteSpace moves a conversation, so a
+	// revision write keeps the stored space in its payload.
 	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("conversations")+` SET status=$1, last_sequence=$2, revision=$3,
-		updated_at=$4, payload=$5::jsonb WHERE scope_kind=$6 AND scope_id=$7 AND id=$8 AND revision=$9`, conversation.Status,
+		updated_at=$4, payload=jsonb_set($5::jsonb, '{spaceId}', to_jsonb(space_id), true) WHERE scope_kind=$6 AND scope_id=$7 AND id=$8 AND revision=$9`, conversation.Status,
 		conversation.LastSequence, conversation.Revision, conversation.UpdatedAt, string(payload), conversation.Scope.Kind,
 		conversation.Scope.ID, conversation.ID, expectedRevision)
 	return expectPostgresDependencyRow(result, err)

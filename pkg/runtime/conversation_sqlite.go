@@ -99,7 +99,7 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 	}
 	if existing != nil {
 		if existing.Owner != conversation.Owner || existing.Title != conversation.Title ||
-			!reflect.DeepEqual(existing.Origin, conversation.Origin) {
+			!reflect.DeepEqual(existing.Origin, conversation.Origin) || !sameRequestedSpace(existing, conversation.SpaceID) {
 			return nil, false, ErrMessageConflict
 		}
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
@@ -108,15 +108,19 @@ func (s *SQLiteStore) CreateConversation(ctx context.Context, conversation *Conv
 		committed = true
 		return existing, true, nil
 	}
+	conversation = cloneConversation(conversation)
+	if err := resolveSQLiteConversationSpace(ctx, conn, conversation); err != nil {
+		return nil, false, err
+	}
 	payload, err := json.Marshal(conversation)
 	if err != nil {
 		return nil, false, err
 	}
 	_, err = conn.ExecContext(ctx, `INSERT INTO conversations
-		(scope_kind, scope_id, id, owner_type, owner_id, status, idempotency_key, last_sequence, revision, created_at, updated_at, payload)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, conversation.Scope.Kind, conversation.Scope.ID, conversation.ID,
+		(scope_kind, scope_id, id, owner_type, owner_id, status, idempotency_key, last_sequence, revision, created_at, updated_at, payload, space_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, conversation.Scope.Kind, conversation.Scope.ID, conversation.ID,
 		conversation.Owner.Type, conversation.Owner.ID, conversation.Status, key, conversation.LastSequence, conversation.Revision,
-		conversation.CreatedAt, conversation.UpdatedAt, string(payload))
+		conversation.CreatedAt, conversation.UpdatedAt, string(payload), conversation.SpaceID)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return nil, false, ErrMessageConflict
@@ -202,6 +206,10 @@ func (s *SQLiteStore) ListConversations(ctx context.Context, filter Conversation
 	if filter.Owner != nil {
 		query += ` AND owner_type = ? AND owner_id = ?`
 		args = append(args, filter.Owner.Type, filter.Owner.ID)
+	}
+	if filter.SpaceID != "" {
+		query += ` AND space_id = ?`
+		args = append(args, filter.SpaceID)
 	}
 	statuses := make([]string, 0, len(filter.Statuses))
 	for _, status := range filter.Statuses {
@@ -789,7 +797,9 @@ func updateSQLiteConversation(ctx context.Context, conn *sql.Conn, conversation 
 	if err != nil {
 		return err
 	}
-	result, err := conn.ExecContext(ctx, `UPDATE conversations SET status = ?, last_sequence = ?, revision = ?, updated_at = ?, payload = ?
+	// space_id is authoritative; see updatePostgresConversationTx.
+	result, err := conn.ExecContext(ctx, `UPDATE conversations SET status = ?, last_sequence = ?, revision = ?, updated_at = ?,
+		payload = json_set(?, '$.spaceId', space_id)
 		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`, conversation.Status, conversation.LastSequence,
 		conversation.Revision, conversation.UpdatedAt, string(payload), conversation.Scope.Kind, conversation.Scope.ID, conversation.ID, expectedRevision)
 	return expectDependencyRow(result, err)

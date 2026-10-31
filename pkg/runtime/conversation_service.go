@@ -12,11 +12,14 @@ import (
 )
 
 type CreateConversationRequest struct {
-	ID             string
-	Scope          Scope
-	Owner          ObjectiveOwner
-	Title          string
-	Origin         *ConversationReference
+	ID     string
+	Scope  Scope
+	Owner  ObjectiveOwner
+	Title  string
+	Origin *ConversationReference
+	// SpaceID places the conversation in a space. When empty the store uses
+	// the owner's first space, else the scope's Personal space.
+	SpaceID        string
 	IdempotencyKey string
 }
 
@@ -32,6 +35,7 @@ type UpdateConversationRequest struct {
 type ConversationFilter struct {
 	Scope    Scope
 	Owner    *ObjectiveOwner
+	SpaceID  string
 	Statuses []ConversationStatus
 	Limit    int
 	Offset   int
@@ -220,7 +224,7 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 		return nil, false, err
 	} else if existing != nil {
 		if existing.Owner != req.Owner || existing.Title != strings.TrimSpace(req.Title) ||
-			!reflect.DeepEqual(existing.Origin, req.Origin) {
+			!reflect.DeepEqual(existing.Origin, req.Origin) || !sameRequestedSpace(existing, req.SpaceID) {
 			return nil, false, ErrMessageConflict
 		}
 		return existing, true, nil
@@ -231,13 +235,20 @@ func (s *ConversationService) CreateConversation(ctx context.Context, req Create
 	}
 	now := s.now().UTC()
 	conversation := &Conversation{
-		ID: id, Scope: req.Scope, Owner: req.Owner, Title: strings.TrimSpace(req.Title), Status: ConversationStatusActive,
+		ID: id, Scope: req.Scope, Owner: req.Owner, SpaceID: strings.TrimSpace(req.SpaceID), Title: strings.TrimSpace(req.Title), Status: ConversationStatusActive,
 		Origin: cloneConversationReference(req.Origin), ApprovalMode: DefaultConversationApprovalMode, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := conversation.Validate(); err != nil {
 		return nil, false, err
 	}
 	return s.store.CreateConversation(ctx, conversation, key)
+}
+
+// sameRequestedSpace reports whether an idempotent replay asked for the space
+// the conversation already lives in; an omitted space matches any.
+func sameRequestedSpace(existing *Conversation, spaceID string) bool {
+	spaceID = strings.TrimSpace(spaceID)
+	return spaceID == "" || existing.SpaceID == spaceID
 }
 
 func (s *ConversationService) GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error) {

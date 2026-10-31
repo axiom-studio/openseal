@@ -60,9 +60,12 @@ func (p ConversationParticipant) Validate() error {
 }
 
 type Conversation struct {
-	ID            string                     `json:"id"`
-	Scope         Scope                      `json:"scope"`
-	Owner         ObjectiveOwner             `json:"owner"`
+	ID    string         `json:"id"`
+	Scope Scope          `json:"scope"`
+	Owner ObjectiveOwner `json:"owner"`
+	// SpaceID is the space the conversation lives in. Stores resolve an empty
+	// value on create; every stored conversation has one.
+	SpaceID       string                     `json:"spaceId"`
 	Title         string                     `json:"title"`
 	Origin        *ConversationReference     `json:"origin,omitempty"`
 	Status        ConversationStatus         `json:"status"`
@@ -102,6 +105,9 @@ func (c *Conversation) Validate() error {
 	}
 	if !validOpaqueIdentifier(c.ID, 128) || strings.TrimSpace(c.Title) == "" || len(c.Title) > 240 {
 		return fmt.Errorf("%w: portable id and title of at most 240 characters are required", ErrInvalidConversation)
+	}
+	if c.SpaceID != "" && !validOpaqueIdentifier(c.SpaceID, 128) {
+		return fmt.Errorf("%w: space id must be a portable opaque identifier", ErrInvalidConversation)
 	}
 	if c.Origin != nil {
 		if err := c.Origin.Validate(); err != nil {

@@ -32,6 +32,10 @@ func terminalFailureMigrationPostgres(t *testing.T) (*PostgresStore, string, str
 
 func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrigger(t *testing.T) {
 	store, dsn, schema := terminalFailureMigrationPostgres(t)
+	now := eventWaitContractEpoch
+	// The conversation exists before the rollback: conversations need the
+	// space schema, which is newer than 58.
+	run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "pg58-lease"}, now)
 	if err := store.RollbackPostgresMigrations(t.Context(), 58); err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +43,6 @@ func TestTerminalFailurePostgres59MigrationPreserves58LeaseAndRestoresLegacyTrig
 	if err := store.db.QueryRowContext(t.Context(), `SELECT pg_get_functiondef(($1||'.enqueue_run_terminal_report()')::regprocedure)`, schema).Scan(&oldFunction); err != nil || strings.Contains(oldFunction, "terminal_revision") {
 		t.Fatalf("rollback did not restore exact old conflict contract: %v", err)
 	}
-	now := eventWaitContractEpoch
-	run, conversation, trigger := terminalReportingContractRun(t, store, Scope{Kind: "tenant", ID: "pg58-lease"}, now)
 	run = terminalReportingContractComplete(t, store, run, now)
 	expires := now.Add(time.Minute)
 	if _, err := store.db.ExecContext(t.Context(), `UPDATE `+store.table("run_terminal_reports")+` SET lease_owner='old-reader',lease_expires_at=$1,available_at=$1,attempts=1 WHERE run_id=$2`, expires, run.ID); err != nil {

@@ -69,6 +69,8 @@ type MemoryStore struct {
 	dependencies                        map[string]map[string]*RunDependency
 	artifacts                           map[string]map[int64]*Artifact
 	conversations                       map[string]*Conversation
+	spaces                              map[Scope]map[string]*Space
+	spaceMembers                        map[Scope][]*SpaceMember
 	conversationTasks                   map[string]*ConversationTask
 	conversationTaskWorkRuns            map[string]string
 	conversationTaskOrder               map[memoryConversationTaskIndexKey]*memoryOrderedIndexNode[memoryConversationTaskPageKey]
@@ -159,6 +161,8 @@ func NewMemoryStore() *MemoryStore {
 		dependencies:                make(map[string]map[string]*RunDependency),
 		artifacts:                   make(map[string]map[int64]*Artifact),
 		conversations:               make(map[string]*Conversation),
+		spaces:                      make(map[Scope]map[string]*Space),
+		spaceMembers:                make(map[Scope][]*SpaceMember),
 		conversationKeys:            make(map[string]string),
 		channelMessages:             make(map[string][]*ChannelMessage),
 		channelMessageIDs:           make(map[string]*ChannelMessage),

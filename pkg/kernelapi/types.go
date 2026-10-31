@@ -1056,6 +1056,7 @@ type CreateConversationRequest struct {
 	Owner          runtime.ObjectiveOwner         `json:"owner"`
 	Title          string                         `json:"title"`
 	Origin         *runtime.ConversationReference `json:"origin,omitempty"`
+	SpaceID        string                         `json:"spaceId,omitempty"`
 	IdempotencyKey string                         `json:"idempotencyKey,omitempty"`
 }
 

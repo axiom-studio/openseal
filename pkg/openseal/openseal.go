@@ -511,6 +511,15 @@ type (
 	SetConversationApprovalModeRequest   = runtime.SetConversationApprovalModeRequest
 	SetConversationApprovalModeResult    = runtime.SetConversationApprovalModeResult
 	ConversationFilter                   = runtime.ConversationFilter
+	Space                                = runtime.Space
+	SpaceLook                            = runtime.SpaceLook
+	SpaceMember                          = runtime.SpaceMember
+	SpaceMemberType                      = runtime.SpaceMemberType
+	SpaceStore                           = runtime.SpaceStore
+	SpacePatch                           = runtime.SpacePatch
+	CreateSpaceRequest                   = runtime.CreateSpaceRequest
+	UpdateSpaceRequest                   = runtime.UpdateSpaceRequest
+	PutSpaceMemberRequest                = runtime.PutSpaceMemberRequest
 	PostChannelMessageRequest            = runtime.PostChannelMessageRequest
 	ChannelMessageFilter                 = runtime.ChannelMessageFilter
 	ConversationViewer                   = runtime.ConversationViewer
@@ -1738,6 +1747,9 @@ var (
 	ErrInvalidRunDependency                 = runtime.ErrInvalidRunDependency
 	ErrDependencyConflict                   = runtime.ErrDependencyConflict
 	ErrConversationNotFound                 = runtime.ErrConversationNotFound
+	ErrSpaceNotFound                        = runtime.ErrSpaceNotFound
+	ErrInvalidSpace                         = runtime.ErrInvalidSpace
+	ErrPersonalSpaceProtected               = runtime.ErrPersonalSpaceProtected
 	ErrChannelMessageNotFound               = runtime.ErrChannelMessageNotFound
 	ErrParticipationRoundNotFound           = runtime.ErrParticipationRoundNotFound
 	ErrInvalidConversation                  = runtime.ErrInvalidConversation
@@ -2135,6 +2147,9 @@ const (
 	ConversationApprovalAuto   = runtime.ConversationApprovalAuto
 	ConversationApprovalSkip   = runtime.ConversationApprovalSkip
 	ConversationStatusArchived = runtime.ConversationStatusArchived
+
+	SpaceMemberAgent = runtime.SpaceMemberAgent
+	SpaceMemberTeam  = runtime.SpaceMemberTeam
 
 	ConversationParticipantUser       = runtime.ConversationParticipantUser
 	ConversationParticipantAgent      = runtime.ConversationParticipantAgent
@@ -2553,6 +2568,7 @@ type Engine struct {
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
 	conversations                 *runtime.ConversationService
+	spaces                        *runtime.SpaceService
 	embeds                        *runtime.EmbedSessionService
 	conversationCoordinator       *runtime.ConversationCoordinator
 	conversationParticipants      runtime.ConversationParticipantSource
@@ -2918,6 +2934,11 @@ func WithStore(store runtime.KernelStore) Option {
 			e.conversations = nil
 			e.conversationChanges = nil
 			e.embeds = nil
+		}
+		if spaceStore, ok := store.(runtime.SpaceStore); ok {
+			e.spaces = runtime.NewSpaceService(spaceStore)
+		} else {
+			e.spaces = nil
 		}
 		if collaborationStore, ok := store.(runtime.CollaborationKernelStore); ok {
 			e.collaboration = runtime.NewCollaborationService(collaborationStore)
@@ -4543,6 +4564,79 @@ func (e *Engine) ListConversations(ctx context.Context, filter runtime.Conversat
 		return nil, fmt.Errorf("conversation store is not configured")
 	}
 	return e.conversations.ListConversations(ctx, filter)
+}
+
+var errSpacesUnsupported = errors.New("spaces are not supported by this store")
+
+// ListSpaces returns the scope's spaces by position, creating its Personal
+// space on first use.
+func (e *Engine) ListSpaces(ctx context.Context, scope runtime.Scope) ([]*runtime.Space, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.ListSpaces(ctx, scope)
+}
+
+// EnsurePersonalSpace returns the scope's Personal space and whether this call
+// created it.
+func (e *Engine) EnsurePersonalSpace(ctx context.Context, scope runtime.Scope) (*runtime.Space, bool, error) {
+	if e.spaces == nil {
+		return nil, false, errSpacesUnsupported
+	}
+	return e.spaces.EnsurePersonalSpace(ctx, scope)
+}
+
+func (e *Engine) GetSpace(ctx context.Context, scope runtime.Scope, spaceID string) (*runtime.Space, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.GetSpace(ctx, scope, spaceID)
+}
+
+func (e *Engine) CreateSpace(ctx context.Context, request runtime.CreateSpaceRequest) (*runtime.Space, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.CreateSpace(ctx, request)
+}
+
+func (e *Engine) UpdateSpace(ctx context.Context, request runtime.UpdateSpaceRequest) (*runtime.Space, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.UpdateSpace(ctx, request)
+}
+
+// DeleteSpace moves the space's conversations to Personal and drops its
+// members; a deployment left in no space joins Personal.
+func (e *Engine) DeleteSpace(ctx context.Context, scope runtime.Scope, spaceID string) error {
+	if e.spaces == nil {
+		return errSpacesUnsupported
+	}
+	return e.spaces.DeleteSpace(ctx, scope, spaceID)
+}
+
+func (e *Engine) ListSpaceMembers(ctx context.Context, scope runtime.Scope, spaceID string) ([]*runtime.SpaceMember, error) {
+	if e.spaces == nil {
+		return nil, errSpacesUnsupported
+	}
+	return e.spaces.ListSpaceMembers(ctx, scope, spaceID)
+}
+
+// PutSpaceMember adds an Agent or Team deployment to a space. The host must
+// first verify the deployment belongs to the scope.
+func (e *Engine) PutSpaceMember(ctx context.Context, request runtime.PutSpaceMemberRequest) (*runtime.SpaceMember, bool, error) {
+	if e.spaces == nil {
+		return nil, false, errSpacesUnsupported
+	}
+	return e.spaces.PutSpaceMember(ctx, request)
+}
+
+func (e *Engine) DeleteSpaceMember(ctx context.Context, scope runtime.Scope, spaceID string, memberType runtime.SpaceMemberType, memberID string) error {
+	if e.spaces == nil {
+		return errSpacesUnsupported
+	}
+	return e.spaces.DeleteSpaceMember(ctx, scope, spaceID, memberType, memberID)
 }
 
 func (e *Engine) CreateEmbedInstallation(ctx context.Context, request runtime.CreateEmbedInstallationRequest) (*runtime.EmbedInstallation, error) {

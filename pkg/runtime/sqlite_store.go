@@ -124,7 +124,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateConversationTasksSQLite(db); err != nil {
 		return err
 	}
-	return migrateEmbedInstallationsSQLite(db)
+	if err := migrateEmbedInstallationsSQLite(db); err != nil {
+		return err
+	}
+	return migrateSpacesSQLite(db)
 }
 
 // Close closes the underlying database.
