@@ -403,3 +403,31 @@ func resolveSQLiteConversationSpace(ctx context.Context, conn *sql.Conn, convers
 	conversation.SpaceID = spaceID
 	return nil
 }
+
+func (s *SQLiteStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {
+	var member *SpaceMember
+	err := s.withSQLiteSpaceTx(ctx, func(conn *sql.Conn) error {
+		var placed bool
+		if err := conn.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM space_members
+			WHERE scope_kind = ? AND scope_id = ? AND member_type = ? AND member_id = ?)`,
+			scope.Kind, scope.ID, memberType, memberID).Scan(&placed); err != nil || placed {
+			return err
+		}
+		personal, _, err := ensureSQLitePersonalSpace(ctx, conn, scope, now)
+		if err != nil {
+			return err
+		}
+		member = &SpaceMember{SpaceID: personal.ID, Type: memberType, ID: memberID, AddedAt: now}
+		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM space_members
+			WHERE scope_kind = ? AND scope_id = ? AND space_id = ?`, scope.Kind, scope.ID, personal.ID).Scan(&member.Position); err != nil {
+			return err
+		}
+		_, err = conn.ExecContext(ctx, `INSERT INTO space_members (scope_kind, scope_id, `+postgresSpaceMemberColumns+`)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, scope.Kind, scope.ID, member.SpaceID, member.Type, member.ID, member.Position, member.AddedAt)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return member, nil
+}

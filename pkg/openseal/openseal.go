@@ -2714,6 +2714,7 @@ func New(opts ...Option) (*Engine, error) {
 		activity:                 runtime.NewRunActivityService(store, store),
 		dependencies:             runtime.NewDependencyCoordinator(store),
 		conversations:            runtime.NewConversationService(store),
+		spaces:                   runtime.NewSpaceService(store),
 		conversationChanges:      conversationChanges,
 		collaboration:            runtime.NewCollaborationService(store),
 		turns:                    runtime.NewAgentTurnService(store, store),
@@ -5592,6 +5593,7 @@ func (e *Engine) CreateAgentDeployment(ctx context.Context, deployment *kernelag
 	if err != nil {
 		return nil, nil, err
 	}
+	e.ensureDeploymentHasSpace(ctx, created.Scope, runtime.SpaceMemberAgent, created.ID)
 	if _, ensureErr := e.ensureAgentControlConversation(ctx, created); ensureErr != nil {
 		return created, activation, ensureErr
 	}
@@ -5854,7 +5856,13 @@ func (e *Engine) ApplyWorkforceChangeSet(ctx context.Context, request authoring.
 		for _, deploymentID := range applied.Placement.AgentDeploymentIDs {
 			deployment, getErr := e.agents.GetDeployment(ctx, applied.Scope, deploymentID)
 			if getErr == nil {
+				e.ensureDeploymentHasSpace(ctx, deployment.Scope, runtime.SpaceMemberAgent, deployment.ID)
 				e.ensureAgentControlConversationAfterWrite(ctx, deployment)
+			}
+		}
+		if teamID := applied.Placement.TeamDeploymentID; teamID != "" && e.teams != nil {
+			if team, getErr := e.teams.GetDeployment(ctx, applied.Scope, teamID); getErr == nil {
+				e.ensureDeploymentHasSpace(ctx, team.Scope, runtime.SpaceMemberTeam, team.ID)
 			}
 		}
 	}
@@ -5862,7 +5870,23 @@ func (e *Engine) ApplyWorkforceChangeSet(ctx context.Context, request authoring.
 }
 
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
-	return e.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+	created, activation, err := e.teams.CreateDeployment(ctx, deployment, actorType, actorID, reason)
+	if err == nil {
+		e.ensureDeploymentHasSpace(ctx, created.Scope, runtime.SpaceMemberTeam, created.ID)
+	}
+	return created, activation, err
+}
+
+// ensureDeploymentHasSpace runs after a deployment write has committed: a
+// deployment in no space joins the scope's Personal space. A failure is
+// logged, not returned; the deployment exists and the next write retries.
+func (e *Engine) ensureDeploymentHasSpace(ctx context.Context, scope skill.ScopeReference, memberType runtime.SpaceMemberType, deploymentID string) {
+	if e == nil || e.spaces == nil {
+		return
+	}
+	if _, err := e.spaces.EnsureMemberHasSpace(ctx, runtime.Scope{Kind: scope.Kind, ID: scope.ID}, memberType, deploymentID); err != nil && e.logger != nil {
+		e.logger.Warnw("deployment was not placed in a space", "deploymentId", deploymentID, "type", memberType, "error", err)
+	}
 }
 
 func (e *Engine) GetTeamDeployment(ctx context.Context, scope skill.ScopeReference, deploymentID string) (*kernelteam.Deployment, error) {

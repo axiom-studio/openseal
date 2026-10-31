@@ -249,3 +249,13 @@ func (s *MemoryStore) resolveConversationSpaceLocked(conversation *Conversation)
 	conversation.SpaceID = first.ID
 	return nil
 }
+
+func (s *MemoryStore) EnsureMemberHasSpace(_ context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.hasSpaceMembershipLocked(scope, memberType, memberID) {
+		return nil, nil
+	}
+	personal, _ := s.ensurePersonalSpaceLocked(scope, now)
+	return cloneSpaceMember(s.appendSpaceMemberLocked(scope, &SpaceMember{SpaceID: personal.ID, Type: memberType, ID: memberID, AddedAt: now})), nil
+}

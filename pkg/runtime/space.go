@@ -147,6 +147,10 @@ type SpaceStore interface {
 	// PutSpaceMember is idempotent: an existing member is returned unchanged.
 	PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember) (*SpaceMember, bool, error)
 	DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error
+	// EnsureMemberHasSpace adds a deployment that is in no space to the
+	// scope's Personal space, creating Personal when needed. It returns the
+	// new membership, or nil when the deployment already had a space.
+	EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error)
 }
 
 type CreateSpaceRequest struct {
@@ -280,6 +284,20 @@ func (s *SpaceService) DeleteSpaceMember(ctx context.Context, scope Scope, space
 		return fmt.Errorf("%w: member type must be agent or team", ErrInvalidSpace)
 	}
 	return s.store.DeleteSpaceMember(ctx, scope, strings.TrimSpace(spaceID), memberType, strings.TrimSpace(memberID))
+}
+
+// EnsureMemberHasSpace places a newly created Agent or Team deployment in
+// Personal unless it already belongs to a space, so no deployment is left in
+// no space.
+func (s *SpaceService) EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string) (*SpaceMember, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	memberID = strings.TrimSpace(memberID)
+	if !memberType.Valid() || !validOpaqueIdentifier(memberID, 128) {
+		return nil, fmt.Errorf("%w: member type and id are invalid", ErrInvalidSpace)
+	}
+	return s.store.EnsureMemberHasSpace(ctx, scope, memberType, memberID, s.now().UTC())
 }
 
 // PersonalSpaceID is the deterministic id of a scope's Personal space. The

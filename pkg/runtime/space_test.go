@@ -205,6 +205,29 @@ func exerciseSpaceStore(t *testing.T, store spaceConversationStore) {
 		t.Fatalf("home members after delete = %+v, err = %v", homeMembers, err)
 	}
 
+	placed, err := spaces.EnsureMemberHasSpace(ctx, scope, SpaceMemberAgent, "fresh")
+	if err != nil || placed == nil || placed.SpaceID != personal.ID || placed.Position != 2 {
+		t.Fatalf("fresh deployment placed = %+v, err = %v", placed, err)
+	}
+	for _, id := range []string{"fresh", "eng"} {
+		memberType := SpaceMemberAgent
+		if id == "eng" {
+			memberType = SpaceMemberTeam
+		}
+		if again, err := spaces.EnsureMemberHasSpace(ctx, scope, memberType, id); err != nil || again != nil {
+			t.Fatalf("%s placed again = %+v, err = %v", id, again, err)
+		}
+	}
+	// "finn" is no longer in any space after its removal from home.
+	if placed, err := spaces.EnsureMemberHasSpace(ctx, scope, SpaceMemberAgent, "finn"); err != nil || placed == nil || placed.SpaceID != personal.ID {
+		t.Fatalf("finn placed = %+v, err = %v", placed, err)
+	}
+	freshScope := Scope{Kind: scope.Kind, ID: scope.ID + "-fresh"}
+	if placed, err := spaces.EnsureMemberHasSpace(ctx, freshScope, SpaceMemberTeam, "crew"); err != nil || placed == nil ||
+		placed.SpaceID != PersonalSpaceID(freshScope) || placed.Position != 0 {
+		t.Fatalf("placement creates Personal = %+v, err = %v", placed, err)
+	}
+
 	other := Scope{Kind: scope.Kind, ID: scope.ID + "-other"}
 	if otherSpaces, err := spaces.ListSpaces(ctx, other); err != nil || len(otherSpaces) != 1 || otherSpaces[0].ID != PersonalSpaceID(other) {
 		t.Fatalf("other scope = %+v, err = %v", otherSpaces, err)

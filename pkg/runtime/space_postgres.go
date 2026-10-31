@@ -394,3 +394,35 @@ func (s *PostgresStore) resolvePostgresConversationSpaceTx(ctx context.Context, 
 	conversation.SpaceID = spaceID
 	return nil
 }
+
+func (s *PostgresStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if err := s.spacesLock(ctx, tx, scope); err != nil {
+		return nil, err
+	}
+	members := s.table("space_members")
+	var placed bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+members+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND member_type = $3 AND member_id = $4)`,
+		scope.Kind, scope.ID, memberType, memberID).Scan(&placed); err != nil || placed {
+		return nil, err
+	}
+	personal, _, err := s.ensurePostgresPersonalSpaceTx(ctx, tx, scope, now)
+	if err != nil {
+		return nil, err
+	}
+	member := &SpaceMember{SpaceID: personal.ID, Type: memberType, ID: memberID, AddedAt: now}
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM `+members+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3`, scope.Kind, scope.ID, personal.ID).Scan(&member.Position); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO `+members+` (scope_kind, scope_id, `+postgresSpaceMemberColumns+`)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)`, scope.Kind, scope.ID, member.SpaceID, member.Type, member.ID, member.Position, member.AddedAt); err != nil {
+		return nil, err
+	}
+	return member, tx.Commit()
+}
