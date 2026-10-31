@@ -1385,6 +1385,7 @@ const (
 	EventSourceSubscriptionsCapabilityVersion = kernelapi.EventSourceSubscriptionsCapabilityVersion
 	ConversationGatewaysCapabilityID          = kernelapi.ConversationGatewaysCapabilityID
 	ConversationGatewaysCapabilityVersion     = kernelapi.ConversationGatewaysCapabilityVersion
+	SpacesCapabilityID                        = kernelapi.SpacesCapabilityID
 	CallbacksCapabilityID                     = kernelapi.CallbacksCapabilityID
 	CallbacksCapabilityVersion                = kernelapi.CallbacksCapabilityVersion
 	KernelOperationReportHealth               = kernelapi.OperationReportHealth
@@ -1461,6 +1462,10 @@ func SkillBindingsCapability(management bool) KernelCapability {
 
 func AgentEmbedsCapability(management bool) KernelCapability {
 	return kernelapi.AgentEmbedsCapability(management)
+}
+
+func SpacesCapability() KernelCapability {
+	return kernelapi.SpacesCapability()
 }
 
 func ActivityCapability() KernelCapability {

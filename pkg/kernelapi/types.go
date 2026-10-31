@@ -70,6 +70,8 @@ const (
 	CallbacksCapabilityVersion                 = "1"
 	SourcePoliciesCapabilityID                 = "source-policies"
 	SourcePoliciesCapabilityVersion            = source.LifecycleAPIVersion
+	SpacesCapabilityID                         = "spaces"
+	SpacesCapabilityVersion                    = "1"
 )
 
 const (
@@ -602,6 +604,14 @@ func Capabilities() CapabilityDocument {
 // Raw append authority is deliberately not part of the interactive contract.
 func ActivityCapability() Capability {
 	return Capability{ID: ActivityCapabilityID, Version: ActivityCapabilityVersion, Available: true, Operations: []string{OperationList}}
+}
+
+// SpacesCapability describes a tenant's spaces and their agent and team members.
+func SpacesCapability() Capability {
+	return Capability{
+		ID: SpacesCapabilityID, Version: SpacesCapabilityVersion, Available: true,
+		Operations: []string{OperationGet, OperationList, OperationCreate, OperationUpdate, OperationRetire},
+	}
 }
 
 // SourcePoliciesCapability is the portable, credential-free governance
