@@ -97,6 +97,7 @@ type RunTransitionRequest struct {
 	Plan                      map[string]interface{}
 	Checkpoint                map[string]interface{}
 	WakeCondition             *WakeCondition
+	AvailableAt               *time.Time // delays a queued Run's next claim
 	Output                    map[string]interface{}
 	Error                     string
 	CorrelationID             string
@@ -378,6 +379,9 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 	}
 	if req.Status == AgentRunStatusQueued {
 		run.AvailableAt = now
+		if req.AvailableAt != nil && req.AvailableAt.After(now) {
+			run.AvailableAt = *req.AvailableAt
+		}
 		run.QueueEnteredAt = now
 	}
 	severity := req.Severity

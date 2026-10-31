@@ -565,6 +565,7 @@ func TestHostedTurnBudgetReservationIsAtomicAgainstConcurrentWorker(t *testing.T
 }
 
 type retryingHostedTurnHost struct {
+	failure      error
 	calls        int
 	invocations  []string
 	reservations []BudgetUsage
@@ -575,6 +576,9 @@ func (h *retryingHostedTurnHost) ExecuteHostedTurn(_ context.Context, request Ho
 	h.invocations = append(h.invocations, request.InvocationID)
 	h.reservations = append(h.reservations, request.Budget.TurnReservation)
 	if h.calls == 1 {
+		if h.failure != nil {
+			return nil, h.failure
+		}
 		return nil, errors.New("temporary provider outage")
 	}
 	return &HostedTurnResponse{
@@ -584,7 +588,7 @@ func (h *retryingHostedTurnHost) ExecuteHostedTurn(_ context.Context, request Ho
 	}, nil
 }
 
-func TestHostedTurnBudgetFailureSettlesWithoutRetry(t *testing.T) {
+func TestHostedTurnBudgetHostFailureSettlesBeforeRequeue(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "retry-budget"}
 	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
@@ -600,12 +604,12 @@ func TestHostedTurnBudgetFailureSettlesWithoutRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "worker-1"}, runner)
-	if !errors.Is(err, ErrTurnHostUnavailable) || result == nil || result.Run.Status != AgentRunStatusFailed || len(result.Run.BudgetReservations) != 0 || result.Run.BudgetUsage.Turns != 1 || host.calls != 1 {
+	if !errors.Is(err, ErrTurnHostUnavailable) || result == nil || result.Run.Status != AgentRunStatusQueued || len(result.Run.BudgetReservations) != 0 || result.Run.BudgetUsage.Turns != 1 || host.calls != 1 {
 		t.Fatalf("failure did not settle once: %#v calls=%d err=%v", result, host.calls, err)
 	}
 	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "another"})
 	if err != nil || claimed != nil {
-		t.Fatalf("provider failure remained claimable: %#v %v", claimed, err)
+		t.Fatalf("host failure was claimable before its backoff: %#v %v", claimed, err)
 	}
 }
 
@@ -617,14 +621,14 @@ func TestHostedTurnBudgetExplicitRetryUsesANewReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := &retryingHostedTurnHost{}
+	host := &retryingHostedTurnHost{failure: NewTurnHostFailure("provider_quota_exhausted", "Provider quota exhausted", false)}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "definition", DefinitionVersion: "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	coordinator := NewTurnCoordinator(store, store, store)
 	first, err := coordinator.Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "first"}, runner)
-	if !errors.Is(err, ErrTurnHostUnavailable) || first == nil || len(first.Run.BudgetReservations) != 0 {
+	if err == nil || first == nil || first.Run.Status != AgentRunStatusFailed || len(first.Run.BudgetReservations) != 0 {
 		t.Fatalf("first failure: %#v %v", first, err)
 	}
 	_, err = NewRunCommandService(store).CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: first.Run.Revision, Kind: AgentRunCommandRetry, Actor: ActivityActor{Type: "user", ID: "operator"}})

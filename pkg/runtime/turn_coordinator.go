@@ -417,6 +417,16 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		finish.NextRunStatus = AgentRunStatusPaused
 		finish.OutputSummary = "Run paused after reaching its autonomous duration budget"
 		finish.Usage.DurationMS = executionDurationMS
+	} else if errors.Is(runErr, ErrTurnHostUnavailable) && turnHostRetries(run.Checkpoint) < len(turnHostRetryDelays) {
+		// The host returned no outcome, so nothing this Turn proposed applies.
+		// Requeue the Run from its unchanged checkpoint after a short backoff;
+		// it fails as below only once the retries are used up.
+		finish.Status = AgentTurnStatusFailed
+		finish.Error = runErr.Error()
+		finish.NextRunStatus = AgentRunStatusQueued
+		finish.OutputSummary = "Turn host was unavailable; retrying shortly"
+		finish.ContinuationCheckpoint = checkpointTurnHostRetry(run.Checkpoint)
+		finish.Usage.DurationMS = executionDurationMS
 	} else if runErr != nil {
 		finish.Status = AgentTurnStatusFailed
 		finish.Error = runErr.Error()
@@ -479,7 +489,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			finish.EvidenceGrounding = outcome.EvidenceGrounding
 		}
 	}
-	if finish.Status == AgentTurnStatusFailed {
+	if finish.Status == AgentTurnStatusFailed && finish.NextRunStatus == AgentRunStatusFailed {
 		code := "execution_failed"
 		var failure *TurnHostFailure
 		if errors.As(executionErr, &failure) {
@@ -548,6 +558,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			RequestedDelegation: finish.RequestedDelegation, RequestedRunbook: finish.RequestedRunbook, RequestedTask: finish.RequestedTask,
 			NextRunStatus: finish.NextRunStatus,
 		})
+		delete(finish.ContinuationCheckpoint, turnHostRetryCheckpointKey)
 	}
 	turn, err = c.turns.FinishTurn(ctx, req.Scope, turn.ID, finish)
 	if err != nil {
@@ -778,6 +789,10 @@ func (c *TurnCoordinator) applyFinishedTurnOnce(ctx context.Context, run *AgentR
 	if superseded {
 		eventType = "turn.guidance_changed"
 	}
+	availableAt := turnHostRetryAvailableAt(turn)
+	if availableAt != nil {
+		eventType = "run.requeued"
+	}
 	if turn.BudgetAdmission != nil {
 		eventType = "budget.exhausted"
 		activityPayload["budgetState"] = BudgetStateExhausted
@@ -807,8 +822,8 @@ func (c *TurnCoordinator) applyFinishedTurnOnce(ctx context.Context, run *AgentR
 	}
 	updated, event, err := c.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: turn.NextRunStatus, Summary: summary,
-		EventType: eventType,
-		Actor:     ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
+		EventType: eventType, AvailableAt: availableAt,
+		Actor: ActivityActor{Type: "worker", ID: workerID}, Checkpoint: turn.ContinuationCheckpoint,
 		WakeCondition: turn.WakeCondition, Output: output, Error: turn.RunError,
 		TurnID: turn.ID, AppliedTurn: turn.Sequence, CausationID: turn.ID, Payload: activityPayload,
 		LeaseOwner:                leaseOwner,

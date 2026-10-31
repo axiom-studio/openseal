@@ -119,7 +119,7 @@ func TestTurnCoordinatorPersistsRunnerFailure(t *testing.T) {
 	}
 }
 
-func TestTurnCoordinatorStopsWhenHostIsUnavailable(t *testing.T) {
+func TestTurnCoordinatorRequeuesWhenHostIsUnavailable(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
@@ -129,20 +129,131 @@ func TestTurnCoordinatorStopsWhenHostIsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	coordinator := NewTurnCoordinator(store, store, store)
 	calls := 0
-	result, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{
+	result, err := coordinator.Advance(ctx, AdvanceAgentRunRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker-1",
 	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 		calls++
-		return nil, retryableTurnHostError{cause: errors.New("connection reset")}
+		return &TurnOutcome{ProposedActions: []TurnAction{{Capability: "cap:never"}}}, retryableTurnHostError{cause: errors.New("connection reset")}
 	}))
-	if !errors.Is(err, ErrTurnHostUnavailable) || result == nil || result.Run.Status != AgentRunStatusFailed ||
-		result.Run.WakeCondition != nil || result.Turn.Status != AgentTurnStatusFailed || calls != 1 {
-		t.Fatalf("host failure retried: result=%#v calls=%d err=%v", result, calls, err)
+	if !errors.Is(err, ErrTurnHostUnavailable) || result == nil || calls != 1 {
+		t.Fatalf("host failure: result=%#v calls=%d err=%v", result, calls, err)
 	}
-	claimed, err := NewAgentRunScheduler(store).ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
+	if result.Turn.Status != AgentTurnStatusFailed || result.Turn.Error == "" || len(result.Turn.RequestedActions) != 0 ||
+		result.Run.Status != AgentRunStatusQueued || result.Run.Error != "" || result.Run.LastAppliedTurn != 1 ||
+		turnHostRetries(result.Run.Checkpoint) != 1 || result.Event == nil || result.Event.EventType != "run.requeued" {
+		t.Fatalf("host failure was not requeued: run=%#v turn=%#v event=%#v", result.Run, result.Turn, result.Event)
+	}
+	if want := result.Turn.CompletedAt.Add(turnHostRetryDelays[0]); !result.Run.AvailableAt.Equal(want) {
+		t.Fatalf("requeued at %s, want %s", result.Run.AvailableAt, want)
+	}
+	scheduler := NewAgentRunScheduler(store)
+	claimed, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
 	if err != nil || claimed != nil {
-		t.Fatalf("failed run was claimable: %#v %v", claimed, err)
+		t.Fatalf("requeued run was claimable before its backoff: %#v %v", claimed, err)
+	}
+	scheduler.now = func() time.Time { return result.Run.AvailableAt }
+	claimed, err = scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2", LeaseDuration: time.Hour})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("requeued run was not claimable after its backoff: %#v %v", claimed, err)
+	}
+	completed, err := coordinator.Advance(ctx, AdvanceAgentRunRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-2",
+	}, TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+		if turnHostRetries(input.Run.Checkpoint) != 1 || input.Turn.Sequence != 2 {
+			t.Fatalf("retried turn input = %#v", input)
+		}
+		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done", ContinuationCheckpoint: input.Run.Checkpoint}, nil
+	}))
+	if err != nil || completed.Run.Status != AgentRunStatusCompleted || completed.Run.LastAppliedTurn != 2 {
+		t.Fatalf("retried run did not complete: %#v %v", completed, err)
+	}
+	if _, kept := completed.Run.Checkpoint[turnHostRetryCheckpointKey]; kept {
+		t.Fatalf("completed turn kept the host retry count: %#v", completed.Run.Checkpoint)
+	}
+}
+
+func TestTurnCoordinatorFailsConversationAfterTurnHostRetries(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := t.Context()
+	run, _, trigger := terminalFailureConversationFixture(t, store, time.Now(), false)
+	coordinator := NewTurnCoordinator(store, store, store)
+	scheduler := NewAgentRunScheduler(store)
+	unavailable := TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		return nil, retryableTurnHostError{cause: errors.New("dial tcp: connection refused")}
+	})
+	for attempt, delay := range turnHostRetryDelays {
+		claimed, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: run.Scope, WorkerID: "worker", LeaseDuration: time.Hour})
+		if err != nil || claimed == nil || claimed.ID != run.ID {
+			t.Fatalf("attempt %d was not claimable: %#v %v", attempt+1, claimed, err)
+		}
+		result, err := coordinator.Advance(ctx, AdvanceAgentRunRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker"}, unavailable)
+		if !errors.Is(err, ErrTurnHostUnavailable) || result.Run.Status != AgentRunStatusQueued ||
+			turnHostRetries(result.Run.Checkpoint) != attempt+1 || !result.Run.AvailableAt.Equal(result.Turn.CompletedAt.Add(delay)) {
+			t.Fatalf("attempt %d was not requeued: %#v %v", attempt+1, result.Run, err)
+		}
+		eligible, err := conversationFollowUpRunEligible(ctx, store, &Conversation{ID: trigger.ConversationID, Scope: run.Scope, Owner: run.Owner}, result.Run)
+		if err != nil || !eligible {
+			t.Fatalf("requeued run stopped owning its conversation: %v %v", eligible, err)
+		}
+		if count, err := terminalReportingContractWorker(t, store, time.Now()).ProcessBatch(ctx); err != nil || count != 0 {
+			t.Fatalf("requeue published a terminal report: %d %v", count, err)
+		}
+		messages, err := store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: run.Scope, ConversationID: trigger.ConversationID, Limit: 20})
+		if err != nil || len(messages) != 1 {
+			t.Fatalf("requeue posted a conversation message: %#v %v", messages, err)
+		}
+		scheduler.now = func() time.Time { return result.Run.AvailableAt }
+	}
+	claimed, err := scheduler.ClaimNext(ctx, AgentRunClaimRequest{Scope: run.Scope, WorkerID: "worker", LeaseDuration: time.Hour})
+	if err != nil || claimed == nil {
+		t.Fatalf("final attempt was not claimable: %#v %v", claimed, err)
+	}
+	failed, err := coordinator.Advance(ctx, AdvanceAgentRunRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker"}, unavailable)
+	if !errors.Is(err, ErrTurnHostUnavailable) || failed.Run.Status != AgentRunStatusFailed || failed.Run.Error != ErrTurnHostUnavailable.Error() {
+		t.Fatalf("spent retries did not fail the run: %#v %v", failed.Run, err)
+	}
+	if _, kept := failed.Run.Checkpoint[turnHostRetryCheckpointKey]; kept {
+		t.Fatalf("failed run kept the host retry count: %#v", failed.Run.Checkpoint)
+	}
+	if count, err := terminalReportingContractWorker(t, store, time.Now()).ProcessBatch(ctx); err != nil || count != 1 {
+		t.Fatalf("final failure was not reported: %d %v", count, err)
+	}
+	assertTerminalConversationFailure(t, store, failed.Run, trigger, "execution_failed")
+}
+
+func TestTurnCoordinatorFailsNonRetryableHostErrorsImmediately(t *testing.T) {
+	for name, cause := range map[string]error{
+		"non-retryable host failure": NewTurnHostFailure("provider_quota_exhausted", "Provider quota exhausted", false),
+		"configuration":              fmt.Errorf("%w: no model provider", ErrTurnHostConfiguration),
+		"runner":                     errors.New("invalid hosted response"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			store := NewMemoryStore()
+			scope := Scope{Kind: "tenant", ID: "one"}
+			run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "work", Source: RunSourceManual,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
+				Scope: scope, RunID: run.ID, WorkerID: "worker-1",
+			}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+				return nil, cause
+			}))
+			if !errors.Is(err, cause) || result.Run.Status != AgentRunStatusFailed || result.Turn.Status != AgentTurnStatusFailed {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+			if _, counted := result.Run.Checkpoint[turnHostRetryCheckpointKey]; counted {
+				t.Fatalf("non-retryable failure counted a host retry: %#v", result.Run.Checkpoint)
+			}
+			claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: scope, WorkerID: "worker-2"})
+			if err != nil || claimed != nil {
+				t.Fatalf("failed run was claimable: %#v %v", claimed, err)
+			}
+		})
 	}
 }
 

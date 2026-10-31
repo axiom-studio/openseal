@@ -197,6 +197,7 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, FinalFailureExplanationCheckpointKey)
 	delete(result, ToolFeedbackCorrectionCheckpointKey)
 	delete(result, toolFailureCountCheckpointKey)
+	delete(result, turnHostRetryCheckpointKey)
 	delete(result, "lastAction")
 	delete(result, runEventWaitCheckpointKey)
 	if current != nil {
