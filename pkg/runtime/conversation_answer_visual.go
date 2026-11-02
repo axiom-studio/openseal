@@ -117,7 +117,12 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 	for _, component := range surface.Components {
 		componentTypes = append(componentTypes, component.Type)
 	}
-	_, err = NewArtifactCatalog(r.artifacts).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
+	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	placement := ArtifactPlacement{}
+	if r.conversations != nil {
+		placement.Conversations = r.conversations
+	}
+	_, err = NewArtifactCatalog(r.artifacts).WithPlacement(placement).Register(ctx, RegisterArtifactRequest{Artifact: &Artifact{
 		ID: id, Version: 1, Scope: run.Scope, Name: name,
 		Type: presentation.ArtifactType, MediaType: presentation.MediaType,
 		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes, Classification: ArtifactClassificationInternal,
@@ -132,6 +137,7 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 		Metadata: map[string]interface{}{"schema": presentation.Schema, "state": string(surface.State), "componentTypes": componentTypes},
 		Provenance: ArtifactProvenance{
 			Producer: ActivityActor{Type: "agent", ID: participantID}, Owner: &owner, RunID: run.ID, ObjectiveID: run.ObjectiveID,
+			ConversationID: conversationID,
 		},
 	}})
 	if err != nil {

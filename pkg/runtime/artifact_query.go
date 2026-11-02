@@ -56,6 +56,18 @@ func artifactListQuery(filter ArtifactFilter, table string, postgres bool) (stri
 	if filter.ProducerRequestID != "" {
 		where = append(where, "a.producer_request_id = "+bind(filter.ProducerRequestID))
 	}
+	provenanceField := func(name string) string {
+		if postgres {
+			return "a.payload->'provenance'->>'" + name + "'"
+		}
+		return "json_extract(a.payload, '$.provenance." + name + "')"
+	}
+	if filter.ConversationID != "" {
+		where = append(where, provenanceField("conversationId")+" = "+bind(filter.ConversationID))
+	}
+	if filter.SpaceID != "" {
+		where = append(where, provenanceField("spaceId")+" = "+bind(filter.SpaceID))
+	}
 	if filter.LatestOnly {
 		where = append(where, "NOT EXISTS (SELECT 1 FROM "+table+" newer WHERE newer.scope_kind = a.scope_kind AND newer.scope_id = a.scope_id AND newer.id = a.id AND newer.version > a.version)")
 	}

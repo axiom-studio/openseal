@@ -70,6 +70,8 @@ func (c *KernelHTTPClient) ListArtifacts(ctx context.Context, filter runtime.Art
 	}
 	setIfPresent(query, "producerRunId", filter.ProducerRunID)
 	setIfPresent(query, "producerRequestId", filter.ProducerRequestID)
+	setIfPresent(query, "conversationId", filter.ConversationID)
+	setIfPresent(query, "spaceId", filter.SpaceID)
 	setIfPresent(query, "evidenceTarget", filter.EvidenceTarget)
 	query.Set("latestOnly", strconv.FormatBool(filter.LatestOnly))
 	if filter.Limit > 0 {

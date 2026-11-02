@@ -70,15 +70,19 @@ type ArtifactRetention struct {
 
 // ArtifactProvenance records who produced an artifact and the durable work
 // lineage that produced it. Empty lineage fields are omitted for imported
-// artifacts, but the producer is always required.
+// artifacts, but the producer is always required. ConversationID and SpaceID
+// record the chat the artifact was made in and that chat's space at creation;
+// artifacts made outside a chat have neither.
 type ArtifactProvenance struct {
-	Producer    ActivityActor   `json:"producer"`
-	Owner       *ObjectiveOwner `json:"owner,omitempty"`
-	RunID       string          `json:"runId,omitempty"`
-	ObjectiveID string          `json:"objectiveId,omitempty"`
-	TurnID      string          `json:"turnId,omitempty"`
-	ActionID    string          `json:"actionId,omitempty"`
-	RequestID   string          `json:"requestId,omitempty"`
+	Producer       ActivityActor   `json:"producer"`
+	Owner          *ObjectiveOwner `json:"owner,omitempty"`
+	RunID          string          `json:"runId,omitempty"`
+	ObjectiveID    string          `json:"objectiveId,omitempty"`
+	TurnID         string          `json:"turnId,omitempty"`
+	ActionID       string          `json:"actionId,omitempty"`
+	RequestID      string          `json:"requestId,omitempty"`
+	ConversationID string          `json:"conversationId,omitempty"`
+	SpaceID        string          `json:"spaceId,omitempty"`
 }
 
 // EvidenceLink forms a queryable graph without copying source content into
@@ -157,6 +161,12 @@ func (a *Artifact) Validate() error {
 			return fmt.Errorf("%w: provenance owner: %v", ErrInvalidArtifactRecord, err)
 		}
 	}
+	if a.Provenance.ConversationID != "" && !validOpaqueIdentifier(a.Provenance.ConversationID, 128) {
+		return fmt.Errorf("%w: provenance conversation id must be a portable opaque identifier", ErrInvalidArtifactRecord)
+	}
+	if a.Provenance.SpaceID != "" && !validOpaqueIdentifier(a.Provenance.SpaceID, 128) {
+		return fmt.Errorf("%w: provenance space id must be a portable opaque identifier", ErrInvalidArtifactRecord)
+	}
 	if err := validateCredentialFreeContext(a.Metadata); err != nil {
 		return fmt.Errorf("%w: metadata: %v", ErrInvalidArtifactRecord, err)
 	}
@@ -207,14 +217,19 @@ func (l EvidenceLink) Validate() error {
 }
 
 type ArtifactFilter struct {
-	Scope              Scope
-	ID                 string
-	Owner              *ObjectiveOwner
-	Types              []string
-	MediaTypes         []string
-	Classifications    []ArtifactClassification
-	ProducerRunID      string
-	ProducerRequestID  string
+	Scope             Scope
+	ID                string
+	Owner             *ObjectiveOwner
+	Types             []string
+	MediaTypes        []string
+	Classifications   []ArtifactClassification
+	ProducerRunID     string
+	ProducerRequestID string
+	// ConversationID and SpaceID match the chat and space recorded in the
+	// artifact's provenance. Artifacts with no recorded chat or space only
+	// appear when the matching filter is empty.
+	ConversationID     string
+	SpaceID            string
 	EvidenceTarget     string
 	RetentionDueBefore *time.Time
 	LatestOnly         bool
@@ -239,12 +254,20 @@ type ArtifactRegistrationResult struct {
 }
 
 type ArtifactCatalog struct {
-	store ArtifactStore
-	now   func() time.Time
+	store     ArtifactStore
+	placement ArtifactPlacement
+	now       func() time.Time
 }
 
 func NewArtifactCatalog(store ArtifactStore) *ArtifactCatalog {
 	return &ArtifactCatalog{store: store, now: time.Now}
+}
+
+// WithPlacement records the chat and space of each artifact the catalog
+// registers from the run that made it.
+func (c *ArtifactCatalog) WithPlacement(placement ArtifactPlacement) *ArtifactCatalog {
+	c.placement = placement
+	return c
 }
 
 func (c *ArtifactCatalog) Register(ctx context.Context, req RegisterArtifactRequest) (*ArtifactRegistrationResult, error) {
@@ -256,6 +279,9 @@ func (c *ArtifactCatalog) Register(ctx context.Context, req RegisterArtifactRequ
 		return nil, fmt.Errorf("%w: artifact is required", ErrInvalidArtifactRecord)
 	}
 	normalizeArtifact(artifact)
+	if err := c.placement.Place(ctx, artifact); err != nil {
+		return nil, err
+	}
 	if artifact.Classification == "" {
 		artifact.Classification = ArtifactClassificationInternal
 	}
@@ -319,6 +345,8 @@ func (c *ArtifactCatalog) List(ctx context.Context, filter ArtifactFilter) ([]*A
 			return nil, err
 		}
 	}
+	filter.ConversationID = strings.TrimSpace(filter.ConversationID)
+	filter.SpaceID = strings.TrimSpace(filter.SpaceID)
 	if filter.Limit <= 0 {
 		filter.Limit = 50
 	}
@@ -429,6 +457,8 @@ func normalizeArtifact(artifact *Artifact) {
 	artifact.Provenance.TurnID = strings.TrimSpace(artifact.Provenance.TurnID)
 	artifact.Provenance.ActionID = strings.TrimSpace(artifact.Provenance.ActionID)
 	artifact.Provenance.RequestID = strings.TrimSpace(artifact.Provenance.RequestID)
+	artifact.Provenance.ConversationID = strings.TrimSpace(artifact.Provenance.ConversationID)
+	artifact.Provenance.SpaceID = strings.TrimSpace(artifact.Provenance.SpaceID)
 	for index := range artifact.Evidence {
 		artifact.Evidence[index].TargetRef = strings.TrimSpace(artifact.Evidence[index].TargetRef)
 		artifact.Evidence[index].Summary = strings.TrimSpace(artifact.Evidence[index].Summary)
@@ -521,6 +551,12 @@ func matchesArtifactFilter(artifact *Artifact, filter ArtifactFilter) bool {
 		return false
 	}
 	if filter.ProducerRequestID != "" && artifact.Provenance.RequestID != filter.ProducerRequestID {
+		return false
+	}
+	if filter.ConversationID != "" && artifact.Provenance.ConversationID != filter.ConversationID {
+		return false
+	}
+	if filter.SpaceID != "" && artifact.Provenance.SpaceID != filter.SpaceID {
 		return false
 	}
 	if filter.EvidenceTarget != "" {

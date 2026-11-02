@@ -97,6 +97,8 @@ func (s *Server) handleListArtifacts(w http.ResponseWriter, r *http.Request) {
 		Types: queryValues(r, "type"), MediaTypes: queryValues(r, "mediaType"),
 		ProducerRunID:     strings.TrimSpace(r.URL.Query().Get("producerRunId")),
 		ProducerRequestID: strings.TrimSpace(r.URL.Query().Get("producerRequestId")),
+		ConversationID:    strings.TrimSpace(r.URL.Query().Get("conversationId")),
+		SpaceID:           strings.TrimSpace(r.URL.Query().Get("spaceId")),
 		EvidenceTarget:    strings.TrimSpace(r.URL.Query().Get("evidenceTarget")),
 		LatestOnly:        latestOnly, Limit: limit, Offset: offset,
 	}
@@ -259,7 +261,7 @@ func (s *Server) artifactCatalog() (*runtime.ArtifactCatalog, bool) {
 	if !ok {
 		return nil, false
 	}
-	return runtime.NewArtifactCatalog(store), true
+	return runtime.NewArtifactCatalog(store).WithPlacement(runtime.NewStoreArtifactPlacement(s.store)), true
 }
 
 func (s *Server) respondArtifactError(w http.ResponseWriter, err error) {

@@ -2726,7 +2726,7 @@ func New(opts ...Option) (*Engine, error) {
 		turnsRun:                 runtime.NewTurnCoordinator(store, store, store),
 		runQueue:                 runtime.NewAgentRunScheduler(store),
 		wake:                     runtime.NewAgentRunWakeService(store, store),
-		artifacts:                runtime.NewArtifactCatalog(store),
+		artifacts:                runtime.NewArtifactCatalog(store).WithPlacement(runtime.NewStoreArtifactPlacement(store)),
 		skills:                   skill.NewCatalogWithStore(store),
 		agents:                   agentRegistry,
 		teams:                    kernelteam.NewRegistryWithStore(store, agentRegistry),
@@ -2957,7 +2957,7 @@ func WithStore(store runtime.KernelStore) Option {
 		e.runQueue = runtime.NewAgentRunScheduler(store)
 		e.wake = runtime.NewAgentRunWakeService(store, store)
 		if artifactStore, ok := store.(runtime.ArtifactStore); ok {
-			e.artifacts = runtime.NewArtifactCatalog(artifactStore)
+			e.artifacts = runtime.NewArtifactCatalog(artifactStore).WithPlacement(runtime.NewStoreArtifactPlacement(store))
 		} else {
 			e.artifacts = nil
 		}

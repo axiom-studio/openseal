@@ -152,3 +152,51 @@ func (r *testArtifactResolver) Resolve(_ context.Context, request runtime.Artifa
 		URL: "https://delivery.example/ephemeral", ExpiresAt: r.now.Add(request.TTL),
 	}, nil
 }
+
+func TestArtifactListFiltersBySpaceAndChat(t *testing.T) {
+	server := NewServer(runtime.NewMemoryStore(), zap.NewNop().Sugar())
+	for index, provenance := range []string{
+		`"conversationId":"chat-sales","spaceId":"space-sales"`,
+		`"conversationId":"chat-design","spaceId":"space-design"`,
+		``,
+	} {
+		if provenance != "" {
+			provenance = "," + provenance
+		}
+		body := fmt.Sprintf(`{"artifact":{"id":"asset-%d","version":1,"scope":{"kind":"tenant","id":"one"},
+			"name":"asset.png","mediaType":"image/png","contentRef":"object-store:asset-%d",
+			"digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000","sizeBytes":10,
+			"provenance":{"producer":{"type":"agent","id":"finn"}%s}},"expectedLatestVersion":0}`, index, index, provenance)
+		if created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/artifacts", body, ""); created.Code != http.StatusCreated {
+			t.Fatalf("create %d status = %d, body = %s", index, created.Code, created.Body.String())
+		}
+	}
+	list := func(query string) []string {
+		t.Helper()
+		response := performAgentRunRequest(t, server.Handler(), http.MethodGet, "/api/v1/artifacts?scopeKind=tenant&scopeId=one&limit=10"+query, "", "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("list %q status = %d, body = %s", query, response.Code, response.Body.String())
+		}
+		var artifacts []runtime.Artifact
+		if err := json.Unmarshal(response.Body.Bytes(), &artifacts); err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, 0, len(artifacts))
+		for _, artifact := range artifacts {
+			ids = append(ids, artifact.ID+"@"+artifact.Provenance.SpaceID)
+		}
+		return ids
+	}
+	if got := list("&spaceId=space-sales"); len(got) != 1 || got[0] != "asset-0@space-sales" {
+		t.Fatalf("space-sales = %v", got)
+	}
+	if got := list("&conversationId=chat-design"); len(got) != 1 || got[0] != "asset-1@space-design" {
+		t.Fatalf("chat-design = %v", got)
+	}
+	if got := list("&spaceId=space-sales&conversationId=chat-design"); len(got) != 0 {
+		t.Fatalf("mismatched chat and space = %v", got)
+	}
+	if got := list(""); len(got) != 3 {
+		t.Fatalf("unfiltered = %v", got)
+	}
+}

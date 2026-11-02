@@ -38,6 +38,10 @@ func migrateArtifacts(db *sql.DB) error {
 				json_extract(payload, '$.provenance.owner.type'),
 				json_extract(payload, '$.provenance.owner.id'),
 				created_at DESC, id, version DESC);
+		CREATE INDEX IF NOT EXISTS idx_artifacts_space_page
+			ON artifacts(scope_kind, scope_id,
+				json_extract(payload, '$.provenance.spaceId'),
+				created_at DESC, id, version DESC);
 	`)
 	return err
 }

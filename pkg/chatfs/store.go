@@ -293,7 +293,7 @@ func (s *Store) save(ctx context.Context, chat Chat, author Author, tree Tree, p
 		ContentRef: stored.ContentRef, Digest: stored.Digest, SizeBytes: stored.SizeBytes,
 		Classification: runtime.ArtifactClassificationInternal,
 		Metadata:       map[string]interface{}{"conversationId": chat.ConversationID},
-		Provenance:     runtime.ArtifactProvenance{Producer: author.Producer, Owner: &owner, RunID: author.RunID, TurnID: author.TurnID},
+		Provenance:     runtime.ArtifactProvenance{Producer: author.Producer, Owner: &owner, RunID: author.RunID, TurnID: author.TurnID, ConversationID: chat.ConversationID},
 	}})
 	if errors.Is(err, runtime.ErrArtifactVersionConflict) || errors.Is(err, runtime.ErrArtifactImmutable) {
 		return Snapshot{}, err
