@@ -71,8 +71,9 @@ type ArtifactRetention struct {
 // ArtifactProvenance records who produced an artifact and the durable work
 // lineage that produced it. Empty lineage fields are omitted for imported
 // artifacts, but the producer is always required. ConversationID and SpaceID
-// record the chat the artifact was made in and that chat's space at creation;
-// artifacts made outside a chat have neither.
+// record the chat the artifact was made in and that chat's space at creation.
+// An artifact made outside a chat has no ConversationID; its space is its
+// owner's first space, else Personal.
 type ArtifactProvenance struct {
 	Producer       ActivityActor   `json:"producer"`
 	Owner          *ObjectiveOwner `json:"owner,omitempty"`
@@ -226,8 +227,8 @@ type ArtifactFilter struct {
 	ProducerRunID     string
 	ProducerRequestID string
 	// ConversationID and SpaceID match the chat and space recorded in the
-	// artifact's provenance. Artifacts with no recorded chat or space only
-	// appear when the matching filter is empty.
+	// artifact's provenance. Artifacts with no recorded chat only appear when
+	// ConversationID is empty.
 	ConversationID     string
 	SpaceID            string
 	EvidenceTarget     string

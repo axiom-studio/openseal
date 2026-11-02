@@ -379,29 +379,50 @@ func (s *SQLiteStore) DeleteSpaceMember(ctx context.Context, scope Scope, spaceI
 
 // resolveSQLiteConversationSpace mirrors resolvePostgresConversationSpaceTx.
 func resolveSQLiteConversationSpace(ctx context.Context, conn *sql.Conn, conversation *Conversation) error {
-	scope := conversation.Scope
 	if conversation.SpaceID != "" {
-		_, err := getSQLiteSpace(ctx, conn, scope, conversation.SpaceID)
+		_, err := getSQLiteSpace(ctx, conn, conversation.Scope, conversation.SpaceID)
 		return err
 	}
-	var spaceID string
-	err := conn.QueryRowContext(ctx, `SELECT sp.id FROM space_members m
-		JOIN spaces sp ON sp.scope_kind = m.scope_kind AND sp.scope_id = m.scope_id AND sp.id = m.space_id
-		WHERE m.scope_kind = ? AND m.scope_id = ? AND m.member_type = ? AND m.member_id = ?
-		ORDER BY sp.position, sp.created_at, sp.id LIMIT 1`, scope.Kind, scope.ID, string(conversation.Owner.Type),
-		strings.TrimSpace(conversation.Owner.ID)).Scan(&spaceID)
-	if errors.Is(err, sql.ErrNoRows) {
-		personal, _, ensureErr := ensureSQLitePersonalSpace(ctx, conn, scope, conversation.CreatedAt)
-		if ensureErr != nil {
-			return ensureErr
-		}
-		spaceID, err = personal.ID, nil
-	}
+	spaceID, err := sqliteOwnerSpaceID(ctx, conn, conversation.Scope, &conversation.Owner, conversation.CreatedAt)
 	if err != nil {
 		return err
 	}
 	conversation.SpaceID = spaceID
 	return nil
+}
+
+// sqliteOwnerSpaceID mirrors postgresOwnerSpaceIDTx.
+func sqliteOwnerSpaceID(ctx context.Context, conn sqliteSpaceExecer, scope Scope, owner *ObjectiveOwner, now time.Time) (string, error) {
+	if owner != nil && strings.TrimSpace(owner.ID) != "" {
+		var spaceID string
+		err := conn.QueryRowContext(ctx, `SELECT sp.id FROM space_members m
+			JOIN spaces sp ON sp.scope_kind = m.scope_kind AND sp.scope_id = m.scope_id AND sp.id = m.space_id
+			WHERE m.scope_kind = ? AND m.scope_id = ? AND m.member_type = ? AND m.member_id = ?
+			ORDER BY sp.position, sp.created_at, sp.id LIMIT 1`, scope.Kind, scope.ID, string(owner.Type),
+			strings.TrimSpace(owner.ID)).Scan(&spaceID)
+		if err == nil {
+			return spaceID, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+	}
+	personal, _, err := ensureSQLitePersonalSpace(ctx, conn, scope, now)
+	if err != nil {
+		return "", err
+	}
+	return personal.ID, nil
+}
+
+// OwnerSpaceID places something an owner made outside any chat.
+func (s *SQLiteStore) OwnerSpaceID(ctx context.Context, scope Scope, owner *ObjectiveOwner, now time.Time) (string, error) {
+	var spaceID string
+	err := s.withSQLiteSpaceTx(ctx, func(conn *sql.Conn) error {
+		var err error
+		spaceID, err = sqliteOwnerSpaceID(ctx, conn, scope, owner, now)
+		return err
+	})
+	return spaceID, err
 }
 
 func (s *SQLiteStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {

@@ -226,9 +226,14 @@ func (s *MemoryStore) resolveConversationSpaceLocked(conversation *Conversation)
 		}
 		return nil
 	}
+	conversation.SpaceID = s.ownerSpaceLocked(scope, &conversation.Owner, conversation.CreatedAt).ID
+	return nil
+}
+
+func (s *MemoryStore) ownerSpaceLocked(scope Scope, owner *ObjectiveOwner, now time.Time) *Space {
 	var first *Space
 	for _, member := range s.spaceMembers[scope] {
-		if string(member.Type) != string(conversation.Owner.Type) || member.ID != conversation.Owner.ID {
+		if owner == nil || string(member.Type) != string(owner.Type) || member.ID != owner.ID {
 			continue
 		}
 		candidate := s.spaces[scope][member.SpaceID]
@@ -244,10 +249,16 @@ func (s *MemoryStore) resolveConversationSpaceLocked(conversation *Conversation)
 		first = pair[0]
 	}
 	if first == nil {
-		first, _ = s.ensurePersonalSpaceLocked(scope, conversation.CreatedAt)
+		first, _ = s.ensurePersonalSpaceLocked(scope, now)
 	}
-	conversation.SpaceID = first.ID
-	return nil
+	return first
+}
+
+// OwnerSpaceID places something an owner made outside any chat.
+func (s *MemoryStore) OwnerSpaceID(_ context.Context, scope Scope, owner *ObjectiveOwner, now time.Time) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ownerSpaceLocked(scope, owner, now).ID, nil
 }
 
 func (s *MemoryStore) EnsureMemberHasSpace(_ context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {

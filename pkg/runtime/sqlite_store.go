@@ -127,7 +127,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateEmbedInstallationsSQLite(db); err != nil {
 		return err
 	}
-	return migrateSpacesSQLite(db)
+	if err := migrateSpacesSQLite(db); err != nil {
+		return err
+	}
+	return migrateArtifactPlacementSQLite(db)
 }
 
 // Close closes the underlying database.

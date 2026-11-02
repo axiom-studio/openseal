@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 )
 
 // ArtifactRunReader and ArtifactConversationReader are the lookups an
@@ -16,12 +17,20 @@ type ArtifactConversationReader interface {
 	GetConversation(ctx context.Context, scope Scope, conversationID string) (*Conversation, error)
 }
 
+// ArtifactSpaceResolver places an artifact made outside any chat the way a
+// conversation created without a space is placed: the owner's first space by
+// position, else the scope's Personal space, created when needed.
+type ArtifactSpaceResolver interface {
+	OwnerSpaceID(ctx context.Context, scope Scope, owner *ObjectiveOwner, now time.Time) (string, error)
+}
+
 // ArtifactPlacement records where an artifact was made: the chat whose run
-// produced it and the space that chat lives in. Either reader may be nil;
-// placement then fills only what it can.
+// produced it and the space that chat lives in, else the owner's space. Any
+// reader may be nil; placement then fills only what it can.
 type ArtifactPlacement struct {
 	Runs          ArtifactRunReader
 	Conversations ArtifactConversationReader
+	Spaces        ArtifactSpaceResolver
 }
 
 // NewStoreArtifactPlacement places artifacts from whichever run and
@@ -34,14 +43,18 @@ func NewStoreArtifactPlacement(store any) ArtifactPlacement {
 	if conversations, ok := store.(ArtifactConversationReader); ok {
 		placement.Conversations = conversations
 	}
+	if spaces, ok := store.(ArtifactSpaceResolver); ok {
+		placement.Spaces = spaces
+	}
 	return placement
 }
 
 // Place fills Provenance.ConversationID and Provenance.SpaceID when they are
 // empty. The chat comes from the producing run (or its root run), else from
 // the conversationId an app keeps in its metadata. The space is the chat's
-// space at creation. A run or chat that no longer exists leaves the field
-// empty; it does not fail the registration.
+// space at creation; an artifact made outside any chat, or whose chat no
+// longer exists, takes its owner's space, else Personal. A run or chat that
+// no longer exists does not fail the registration.
 func (p ArtifactPlacement) Place(ctx context.Context, artifact *Artifact) error {
 	if artifact == nil {
 		return nil
@@ -59,17 +72,27 @@ func (p ArtifactPlacement) Place(ctx context.Context, artifact *Artifact) error 
 			provenance.ConversationID = strings.TrimSpace(conversationID)
 		}
 	}
-	if provenance.SpaceID != "" || provenance.ConversationID == "" || p.Conversations == nil {
+	if provenance.SpaceID == "" && provenance.ConversationID != "" && p.Conversations != nil {
+		conversation, err := p.Conversations.GetConversation(ctx, artifact.Scope, provenance.ConversationID)
+		if err != nil && !errors.Is(err, ErrConversationNotFound) {
+			return err
+		}
+		if err == nil && conversation != nil {
+			provenance.SpaceID = conversation.SpaceID
+		}
+	}
+	if provenance.SpaceID != "" || p.Spaces == nil {
 		return nil
 	}
-	conversation, err := p.Conversations.GetConversation(ctx, artifact.Scope, provenance.ConversationID)
-	if errors.Is(err, ErrConversationNotFound) || (err == nil && conversation == nil) {
-		return nil
+	now := artifact.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
 	}
+	spaceID, err := p.Spaces.OwnerSpaceID(ctx, artifact.Scope, provenance.Owner, now)
 	if err != nil {
 		return err
 	}
-	provenance.SpaceID = conversation.SpaceID
+	provenance.SpaceID = spaceID
 	return nil
 }
 

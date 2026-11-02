@@ -370,29 +370,54 @@ func (s *PostgresStore) DeleteSpaceMember(ctx context.Context, scope Scope, spac
 // resolvePostgresConversationSpaceTx fills an empty SpaceID with the owner's
 // first space by position, else Personal, and verifies an explicit one.
 func (s *PostgresStore) resolvePostgresConversationSpaceTx(ctx context.Context, tx *sql.Tx, conversation *Conversation) error {
-	scope := conversation.Scope
 	if conversation.SpaceID != "" {
-		_, err := s.getPostgresSpace(ctx, tx, scope, conversation.SpaceID)
+		_, err := s.getPostgresSpace(ctx, tx, conversation.Scope, conversation.SpaceID)
 		return err
 	}
-	var spaceID string
-	err := tx.QueryRowContext(ctx, `SELECT sp.id FROM `+s.table("space_members")+` m
-		JOIN `+s.table("spaces")+` sp ON sp.scope_kind = m.scope_kind AND sp.scope_id = m.scope_id AND sp.id = m.space_id
-		WHERE m.scope_kind = $1 AND m.scope_id = $2 AND m.member_type = $3 AND m.member_id = $4
-		ORDER BY sp.position, sp.created_at, sp.id LIMIT 1`, scope.Kind, scope.ID, string(conversation.Owner.Type),
-		strings.TrimSpace(conversation.Owner.ID)).Scan(&spaceID)
-	if errors.Is(err, sql.ErrNoRows) {
-		personal, _, ensureErr := s.ensurePostgresPersonalSpaceTx(ctx, tx, scope, conversation.CreatedAt)
-		if ensureErr != nil {
-			return ensureErr
-		}
-		spaceID, err = personal.ID, nil
-	}
+	spaceID, err := s.postgresOwnerSpaceIDTx(ctx, tx, conversation.Scope, &conversation.Owner, conversation.CreatedAt)
 	if err != nil {
 		return err
 	}
 	conversation.SpaceID = spaceID
 	return nil
+}
+
+// postgresOwnerSpaceIDTx returns the owner's first space by position, else
+// the scope's Personal space, creating Personal when needed.
+func (s *PostgresStore) postgresOwnerSpaceIDTx(ctx context.Context, tx *sql.Tx, scope Scope, owner *ObjectiveOwner, now time.Time) (string, error) {
+	if owner != nil && strings.TrimSpace(owner.ID) != "" {
+		var spaceID string
+		err := tx.QueryRowContext(ctx, `SELECT sp.id FROM `+s.table("space_members")+` m
+			JOIN `+s.table("spaces")+` sp ON sp.scope_kind = m.scope_kind AND sp.scope_id = m.scope_id AND sp.id = m.space_id
+			WHERE m.scope_kind = $1 AND m.scope_id = $2 AND m.member_type = $3 AND m.member_id = $4
+			ORDER BY sp.position, sp.created_at, sp.id LIMIT 1`, scope.Kind, scope.ID, string(owner.Type),
+			strings.TrimSpace(owner.ID)).Scan(&spaceID)
+		if err == nil {
+			return spaceID, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+	}
+	personal, _, err := s.ensurePostgresPersonalSpaceTx(ctx, tx, scope, now)
+	if err != nil {
+		return "", err
+	}
+	return personal.ID, nil
+}
+
+// OwnerSpaceID places something an owner made outside any chat.
+func (s *PostgresStore) OwnerSpaceID(ctx context.Context, scope Scope, owner *ObjectiveOwner, now time.Time) (string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	spaceID, err := s.postgresOwnerSpaceIDTx(ctx, tx, scope, owner, now)
+	if err != nil {
+		return "", err
+	}
+	return spaceID, tx.Commit()
 }
 
 func (s *PostgresStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error) {
