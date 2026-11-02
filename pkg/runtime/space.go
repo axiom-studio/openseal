@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -28,27 +29,17 @@ const (
 	maxSpaceNameRunes = 60
 )
 
+// SpaceLook names a space's theme. The looks themselves live in the client,
+// so the runtime only checks the name is a short lowercase slug; a client
+// that doesn't know a look shows its default.
 type SpaceLook string
 
-const (
-	SpaceLookTidepool  SpaceLook = "tidepool"
-	SpaceLookHarbor    SpaceLook = "harbor"
-	SpaceLookGraphite  SpaceLook = "graphite"
-	SpaceLookChalk     SpaceLook = "chalk"
-	SpaceLookCritter   SpaceLook = "critter"
-	SpaceLookBitcraft  SpaceLook = "bitcraft"
-	SpaceLookAfterglow SpaceLook = "afterglow"
+// PersonalSpaceLook is the look the Personal space starts with.
+const PersonalSpaceLook SpaceLook = "tidepool"
 
-	PersonalSpaceLook = SpaceLookTidepool
-)
+var spaceLookPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 
-func (l SpaceLook) Valid() bool {
-	switch l {
-	case SpaceLookTidepool, SpaceLookHarbor, SpaceLookGraphite, SpaceLookChalk, SpaceLookCritter, SpaceLookBitcraft, SpaceLookAfterglow:
-		return true
-	}
-	return false
-}
+func (l SpaceLook) Valid() bool { return spaceLookPattern.MatchString(string(l)) }
 
 type Space struct {
 	ID         string    `json:"id"`

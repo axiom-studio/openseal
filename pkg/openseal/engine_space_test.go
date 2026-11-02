@@ -13,7 +13,7 @@ func TestEngineSpacesUseDefaultStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := runtime.Scope{Kind: "tenant", ID: "7"}
-	space, err := engine.CreateSpace(t.Context(), CreateSpaceRequest{Scope: scope, Name: "Work", Look: runtime.SpaceLookHarbor})
+	space, err := engine.CreateSpace(t.Context(), CreateSpaceRequest{Scope: scope, Name: "Work", Look: runtime.SpaceLook("harbor")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestEngineCreatedDeploymentsJoinPersonalWhenInNoSpace(t *testing.T) {
 		t.Fatalf("personal members with team = %+v, err = %v", members, err)
 	}
 	// A host PUT into another space stays idempotent and keeps Personal.
-	work, err := engine.CreateSpace(ctx, CreateSpaceRequest{Scope: spaceScope, Name: "Work", Look: runtime.SpaceLookHarbor})
+	work, err := engine.CreateSpace(ctx, CreateSpaceRequest{Scope: spaceScope, Name: "Work", Look: runtime.SpaceLook("harbor")})
 	if err != nil {
 		t.Fatal(err)
 	}

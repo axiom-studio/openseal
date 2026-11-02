@@ -35,19 +35,20 @@ func TestSpaceValidation(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "one"}
 	ctx := context.Background()
 	for _, request := range []CreateSpaceRequest{
-		{Scope: scope, Name: "   ", Look: SpaceLookHarbor},
-		{Scope: scope, Name: strings.Repeat("a", 61), Look: SpaceLookHarbor},
-		{Scope: scope, Name: "Work", Look: "neon"},
-		{Scope: Scope{}, Name: "Work", Look: SpaceLookHarbor},
+		{Scope: scope, Name: "   ", Look: SpaceLook("harbor")},
+		{Scope: scope, Name: strings.Repeat("a", 61), Look: SpaceLook("harbor")},
+		{Scope: scope, Name: "Work", Look: "neon dusk"},
+		{Scope: scope, Name: "Work", Look: "x"},
+		{Scope: Scope{}, Name: "Work", Look: SpaceLook("harbor")},
 	} {
 		if _, err := service.CreateSpace(ctx, request); err == nil {
 			t.Fatalf("CreateSpace(%+v) succeeded", request)
 		}
 	}
-	if space, err := service.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: strings.Repeat("é", 60), Look: SpaceLookChalk}); err != nil || space.Position != 1 {
+	if space, err := service.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: strings.Repeat("é", 60), Look: SpaceLook("chalk")}); err != nil || space.Position != 1 {
 		t.Fatalf("60-rune name: %+v %v", space, err)
 	}
-	badLook := SpaceLook("neon")
+	badLook := SpaceLook("Neon Dusk")
 	if _, err := service.UpdateSpace(ctx, UpdateSpaceRequest{Scope: scope, SpaceID: PersonalSpaceID(scope), Look: &badLook}); !errors.Is(err, ErrInvalidSpace) {
 		t.Fatalf("invalid look update: %v", err)
 	}
@@ -74,21 +75,21 @@ func exerciseSpaceStore(t *testing.T, store spaceConversationStore) {
 	}
 	personal := listed[0]
 	if personal.ID != PersonalSpaceID(scope) || !personal.IsPersonal || personal.Name != PersonalSpaceName ||
-		personal.Look != SpaceLookTidepool || personal.Position != 0 || personal.Scope != scope {
+		personal.Look != PersonalSpaceLook || personal.Position != 0 || personal.Scope != scope {
 		t.Fatalf("personal = %+v", personal)
 	}
 	if again, created, err := spaces.EnsurePersonalSpace(ctx, scope); err != nil || created || again.ID != personal.ID {
 		t.Fatalf("ensure again: %+v %v %v", again, created, err)
 	}
-	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "  Work  ", Look: SpaceLookHarbor, CreatedBy: "7"})
+	work, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "  Work  ", Look: SpaceLook("harbor"), CreatedBy: "7"})
 	if err != nil || work.Name != "Work" || work.Position != 1 || work.IsPersonal || work.CreatedBy != "7" {
 		t.Fatalf("work = %+v, err = %v", work, err)
 	}
-	home, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Home", Look: SpaceLookCritter, CreatedBy: "7"})
+	home, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Home", Look: SpaceLook("critter"), CreatedBy: "7"})
 	if err != nil || home.Position != 2 {
 		t.Fatalf("home = %+v, err = %v", home, err)
 	}
-	first, renamed, look := 0, "Household", SpaceLookAfterglow
+	first, renamed, look := 0, "Household", SpaceLook("afterglow")
 	moved, err := spaces.UpdateSpace(ctx, UpdateSpaceRequest{Scope: scope, SpaceID: home.ID, Name: &renamed, Look: &look, Position: &first})
 	if err != nil || moved.Position != 0 || moved.Name != renamed || moved.Look != look || !moved.UpdatedAt.After(home.UpdatedAt) {
 		t.Fatalf("moved = %+v, err = %v", moved, err)
@@ -322,7 +323,7 @@ func assertSpacesBackfilled(t *testing.T, store spaceConversationStore, scope, a
 	ctx := context.Background()
 	listed, err := store.ListSpaces(ctx, scope)
 	if err != nil || len(listed) != 1 || listed[0].ID != PersonalSpaceID(scope) || !listed[0].IsPersonal ||
-		listed[0].Name != PersonalSpaceName || listed[0].Look != SpaceLookTidepool || listed[0].Position != 0 {
+		listed[0].Name != PersonalSpaceName || listed[0].Look != PersonalSpaceLook || listed[0].Position != 0 {
 		t.Fatalf("backfilled spaces = %+v, err = %v", listed, err)
 	}
 	members, err := store.ListSpaceMembers(ctx, scope, PersonalSpaceID(scope))
