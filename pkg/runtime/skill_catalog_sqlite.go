@@ -282,6 +282,23 @@ func (s *SQLiteStore) ListSkillBindings(ctx context.Context, scope skill.ScopeRe
 	return bindings, rows.Err()
 }
 
+func (s *SQLiteStore) ListSkillBindingRevisions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.BindingRevision, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, revision, skill_id, skill_version, source_identity FROM skill_bindings WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? ORDER BY id`, scope.Kind, scope.ID, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	revisions := make([]skill.BindingRevision, 0)
+	for rows.Next() {
+		var revision skill.BindingRevision
+		if err := rows.Scan(&revision.ID, &revision.Revision, &revision.SkillID, &revision.SkillVersion, &revision.SourceIdentity); err != nil {
+			return nil, err
+		}
+		revisions = append(revisions, revision)
+	}
+	return revisions, rows.Err()
+}
+
 // DeleteSkillBinding removes one binding row at its expected revision under the
 // same Skill maintenance fence as SaveSkillBinding.
 func (s *SQLiteStore) DeleteSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string, expectedRevision int64) error {
@@ -370,3 +387,4 @@ func sqliteRecordSkillBindingTombstone(ctx context.Context, exec sqliteExecer, s
 
 var _ skill.CatalogStore = (*SQLiteStore)(nil)
 var _ skill.CatalogDefinitionIdentityStore = (*SQLiteStore)(nil)
+var _ skill.CatalogBindingRevisionStore = (*SQLiteStore)(nil)

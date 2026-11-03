@@ -2,6 +2,8 @@ package skill
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -31,6 +33,16 @@ func compileActionSchemas(skillID, version string, action Action) (*compiledActi
 	return &compiledActionSchemas{input: input, output: output}, nil
 }
 
+// The process-wide cache of compiled schemas is bounded by entry count and
+// holds only schemas up to compiledSchemaCacheMaxBytes when encoded. Compiled
+// schemas are immutable and keyed by their exact content.
+const (
+	compiledSchemaCacheEntries  = 2048
+	compiledSchemaCacheMaxBytes = 16 << 10
+)
+
+var compiledSchemas = newLRUCache[*compiledSchema](compiledSchemaCacheEntries)
+
 func compileSchema(name string, value map[string]interface{}) (*compiledSchema, error) {
 	if err := validateSchemaReferences(value); err != nil {
 		return nil, err
@@ -38,6 +50,18 @@ func compileSchema(name string, value map[string]interface{}) (*compiledSchema, 
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return nil, err
+	}
+	return compileSchemaJSON(name, encoded)
+}
+
+// compileSchemaJSON compiles the JSON encoding of a schema whose references
+// were already checked by validateSchemaReferences. Equal schemas compile
+// once per process: many bindings of one connected service share them.
+func compileSchemaJSON(name string, encoded []byte) (*compiledSchema, error) {
+	digest := sha256.Sum256(encoded)
+	key := name + "\x00" + hex.EncodeToString(digest[:])
+	if cached, ok := compiledSchemas.get(key); ok {
+		return cached, nil
 	}
 	document, err := jsonschema.UnmarshalJSON(bytes.NewReader(encoded))
 	if err != nil {
@@ -51,7 +75,11 @@ func compileSchema(name string, value map[string]interface{}) (*compiledSchema, 
 	if err != nil {
 		return nil, err
 	}
-	return &compiledSchema{schema: compiled}, nil
+	result := &compiledSchema{schema: compiled}
+	if len(encoded) <= compiledSchemaCacheMaxBytes {
+		compiledSchemas.put(key, result)
+	}
+	return result, nil
 }
 
 func validateSchemaReferences(value interface{}) error {

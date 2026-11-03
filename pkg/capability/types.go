@@ -1,7 +1,10 @@
 // Package capability defines portable, dependency-free skill contracts.
 package capability
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type RiskLevel string
 
@@ -485,6 +488,70 @@ type Definition struct {
 	Installers           []Installer                    `json:"installers,omitempty"`
 	Resources            []Resource                     `json:"resources,omitempty"`
 	Source               *SourceProvenance              `json:"source,omitempty"`
+	// BindingTools opts the Skill in to tools declared by each binding rather
+	// than by this immutable definition. Each tool becomes its own model
+	// action routed to a base action of this definition.
+	BindingTools *BindingToolsSpec `json:"bindingTools,omitempty"`
+}
+
+// BindingToolEffect is the operator-chosen effect of one binding tool. It
+// selects the base action, so the base action's risk, side effect, and
+// approval policy govern every call of the tool.
+type BindingToolEffect string
+
+const (
+	BindingToolEffectRead  BindingToolEffect = "read"
+	BindingToolEffectWrite BindingToolEffect = "write"
+)
+
+// BindingToolsSpec declares how binding tools route to this definition's
+// actions. A tool call is compiled to its effect's base action with the tool's
+// fixed arguments and the model's input placed under InputArgument.
+type BindingToolsSpec struct {
+	// ModelPrefix is the first segment of each tool's model action name,
+	// <modelPrefix>.<bindingSlug>.<toolName>. It defaults to the definition ID.
+	ModelPrefix string `json:"modelPrefix,omitempty"`
+	// ReadAction receives tools whose effect is read. It must be read-only.
+	ReadAction string `json:"readAction,omitempty"`
+	// WriteAction receives tools whose effect is write.
+	WriteAction string `json:"writeAction,omitempty"`
+	// InputArgument is the base action input that receives the model's tool
+	// input object.
+	InputArgument string `json:"inputArgument"`
+	// FixedArguments names the base action inputs every tool fixes, such as
+	// the tool's upstream name and pinned hash. They are never model-visible.
+	FixedArguments []string `json:"fixedArguments"`
+}
+
+// BindingTool is one tool a binding declares for a definition that opts in
+// to BindingTools.
+type BindingTool struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	InputSchema map[string]interface{} `json:"inputSchema"`
+	Effect      BindingToolEffect      `json:"effect"`
+	// Arguments holds exactly the definition's FixedArguments for this tool.
+	Arguments map[string]interface{} `json:"arguments"`
+}
+
+// Action returns the base action this spec routes effect to.
+func (s *BindingToolsSpec) Action(effect BindingToolEffect) string {
+	if s == nil {
+		return ""
+	}
+	switch effect {
+	case BindingToolEffectRead:
+		return s.ReadAction
+	case BindingToolEffectWrite:
+		return s.WriteAction
+	default:
+		return ""
+	}
+}
+
+// RoutesAction reports whether name is one of the spec's base actions.
+func (s *BindingToolsSpec) RoutesAction(name string) bool {
+	return s != nil && name != "" && (name == s.ReadAction || name == s.WriteAction)
 }
 
 type ArgumentRule struct {
@@ -537,12 +604,17 @@ type Binding struct {
 	MaximumRisk                 RiskLevel                                  `json:"maximumRisk"`
 	ArgumentRestrictions        map[string]map[string]ArgumentRule         `json:"argumentRestrictions,omitempty"`
 	ArgumentBindings            map[string]map[string]BindingArgumentValue `json:"argumentBindings,omitempty"`
-	Credentials                 map[string]CredentialReference             `json:"credentials,omitempty"`
-	Config                      map[string]interface{}                     `json:"config,omitempty"`
-	Revision                    int64                                      `json:"revision"`
-	CreatedAt                   time.Time                                  `json:"createdAt,omitempty"`
-	UpdatedAt                   time.Time                                  `json:"updatedAt,omitempty"`
-	Lifecycle                   []BindingLifecycleEntry                    `json:"lifecycle,omitempty"`
+	// Slug names the binding in its tools' model action names. It is unique
+	// within a deployment; when empty it is derived from ID.
+	Slug string `json:"slug,omitempty"`
+	// Tools are the binding-declared tools of a definition with BindingTools.
+	Tools       []BindingTool                  `json:"tools,omitempty"`
+	Credentials map[string]CredentialReference `json:"credentials,omitempty"`
+	Config      map[string]interface{}         `json:"config,omitempty"`
+	Revision    int64                          `json:"revision"`
+	CreatedAt   time.Time                      `json:"createdAt,omitempty"`
+	UpdatedAt   time.Time                      `json:"updatedAt,omitempty"`
+	Lifecycle   []BindingLifecycleEntry        `json:"lifecycle,omitempty"`
 }
 
 type BindingLifecycleAction string
@@ -600,6 +672,35 @@ type ModelAction struct {
 	Risk                    RiskLevel               `json:"risk"`
 	SideEffect              SideEffect              `json:"sideEffect"`
 	ExternalOperationPolicy ExternalOperationPolicy `json:"externalOperationPolicy,omitempty"`
+	// BindingTool is set when this action projects one binding-declared tool.
+	// It is kernel routing data: the model fills InputSchema only.
+	BindingTool *ModelActionBindingTool `json:"bindingTool,omitempty"`
+}
+
+// ModelActionBindingTool compiles a binding tool's model input into the
+// input of its base action.
+type ModelActionBindingTool struct {
+	Name          string                 `json:"name"`
+	InputArgument string                 `json:"inputArgument"`
+	Arguments     map[string]interface{} `json:"arguments"`
+}
+
+// ActionInput returns the base action input for model-authored arguments.
+// Definition actions take the arguments unchanged; a binding tool's input is
+// placed under its InputArgument beside its fixed arguments.
+func (a ModelAction) ActionInput(arguments map[string]interface{}) map[string]interface{} {
+	if a.BindingTool == nil {
+		return arguments
+	}
+	result := make(map[string]interface{}, len(a.BindingTool.Arguments)+1)
+	for name, value := range a.BindingTool.Arguments {
+		result[name] = cloneJSONValue(value)
+	}
+	if arguments == nil {
+		arguments = map[string]interface{}{}
+	}
+	result[a.BindingTool.InputArgument] = arguments
+	return result
 }
 
 // BindingReference selects one exact, versioned binding. Persisting this
@@ -640,4 +741,16 @@ type BoundCallbackAdapter struct {
 	AdapterID  string
 	Adapter    CallbackAdapter
 	Binding    *Binding
+}
+
+func cloneJSONValue(value interface{}) interface{} {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var result interface{}
+	if json.Unmarshal(encoded, &result) != nil {
+		return nil
+	}
+	return result
 }

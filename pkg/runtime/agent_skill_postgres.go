@@ -692,6 +692,24 @@ func (s *PostgresStore) ListSkillBindings(ctx context.Context, scope skill.Scope
 	return bindings, rows.Err()
 }
 
+func (s *PostgresStore) ListSkillBindingRevisions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.BindingRevision, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, revision, skill_id, skill_version, source_identity FROM `+s.table("skill_bindings")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND deployment_id = $3 ORDER BY id`, scope.Kind, scope.ID, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	revisions := make([]skill.BindingRevision, 0)
+	for rows.Next() {
+		var revision skill.BindingRevision
+		if err := rows.Scan(&revision.ID, &revision.Revision, &revision.SkillID, &revision.SkillVersion, &revision.SourceIdentity); err != nil {
+			return nil, err
+		}
+		revisions = append(revisions, revision)
+	}
+	return revisions, rows.Err()
+}
+
 // DeleteSkillBinding removes one binding row at its expected revision. It takes
 // the same Skill maintenance lock as SaveSkillBinding, and DELETE waits for
 // every action submission and credential lease that holds the row FOR SHARE.
@@ -742,3 +760,4 @@ func (s *PostgresStore) DeleteSkillBinding(ctx context.Context, scope skill.Scop
 
 var _ skill.CatalogStore = (*PostgresStore)(nil)
 var _ skill.CatalogDefinitionIdentityStore = (*PostgresStore)(nil)
+var _ skill.CatalogBindingRevisionStore = (*PostgresStore)(nil)

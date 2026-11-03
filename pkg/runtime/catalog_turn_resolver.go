@@ -174,7 +174,10 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if err != nil {
 		return nil, fmt.Errorf("apply Runbook Skill authority: %w", err)
 	}
-	prompts, actions, prepared, contextRefs := projectActivatedSkills(activation)
+	prompts, actions, prepared, contextRefs, err := projectActivatedSkills(activation)
+	if err != nil {
+		return nil, fmt.Errorf("project bound Skills for Agent %s: %w", deployment.ID, err)
+	}
 	actionDeploymentID := deployment.ID
 	if run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != "" {
 		teamActivation, activateErr := catalog.ActivateSkills(ctx, scope, run.Owner.ID, skillHost)
@@ -196,7 +199,10 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		if activateErr != nil {
 			return nil, fmt.Errorf("authorize bound Skills for Team %s: %w", run.Owner.ID, activateErr)
 		}
-		teamPrompts, teamActions, teamPrepared, teamContextRefs := projectActivatedSkills(teamActivation)
+		teamPrompts, teamActions, teamPrepared, teamContextRefs, projectErr := projectActivatedSkills(teamActivation)
+		if projectErr != nil {
+			return nil, fmt.Errorf("project bound Skills for Team %s: %w", run.Owner.ID, projectErr)
+		}
 		mergedActions, shadowedBindings, mergeErr := mergeOwnerModelActions(actions, teamActions)
 		if mergeErr != nil {
 			return nil, mergeErr
@@ -534,7 +540,11 @@ func mergeOwnerModelActions(existing, owner []capability.ModelAction) ([]capabil
 	for _, action := range owner {
 		if index, duplicate := indexByName[action.Name]; duplicate {
 			current := merged[index]
-			if current.SkillID != action.SkillID || current.Version != action.Version || current.Action != action.Action {
+			// A Team binding may shadow the Agent's binding of the same
+			// definition action. Binding tools are specific to their binding,
+			// so two owners exposing one tool name is never a shadow.
+			if current.SkillID != action.SkillID || current.Version != action.Version || current.Action != action.Action ||
+				current.BindingTool != nil || action.BindingTool != nil {
 				return nil, nil, fmt.Errorf("Team and Agent Skill activations expose conflicting action %q", action.Name)
 			}
 			shadowedBindings[ownerBindingKey(current.DeploymentID, current.BindingID)] = struct{}{}
@@ -561,7 +571,11 @@ func deploymentModelCredential(deployment *kernelagent.AgentDeployment) *capabil
 	return &cloned
 }
 
-func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkillPrompt, []capability.ModelAction, []PreparedSkillRuntime, []string) {
+// projectActivatedSkills projects one activation into the Turn's prompts and
+// model actions. After the deliberate kernel and chat-default preferences
+// below, a model action name exposed twice is a hard error: the model names an
+// action, so a duplicate could only be routed to one binding by guesswork.
+func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkillPrompt, []capability.ModelAction, []PreparedSkillRuntime, []string, error) {
 	prompts := make([]HostedSkillPrompt, 0, len(activation.Skills))
 	actions := make([]capability.ModelAction, 0)
 	prepared := make([]PreparedSkillRuntime, 0)
@@ -592,7 +606,7 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 			continue
 		}
 		for _, action := range activated.Actions {
-			explicitActions[action.SkillID+"\x00"+action.Action] = true
+			explicitActions[action.SkillID+"\x00"+action.Name] = true
 		}
 	}
 	for _, activated := range activation.Skills {
@@ -607,7 +621,7 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 			refs = append(refs, fmt.Sprintf("skill:%s@%s#binding:%s@%d", activated.SkillID, activated.SkillVersion, activated.BindingID, activated.BindingRevision))
 		}
 		for _, action := range activated.Actions {
-			if strings.HasPrefix(activated.BindingID, "bundled:") && explicitActions[action.SkillID+"\x00"+action.Action] {
+			if strings.HasPrefix(activated.BindingID, "bundled:") && explicitActions[action.SkillID+"\x00"+action.Name] {
 				continue
 			}
 			if strings.TrimSpace(action.DeploymentID) == "" {
@@ -624,7 +638,14 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 			})
 		}
 	}
-	return prompts, actions, prepared, refs
+	exposed := make(map[string]string, len(actions))
+	for _, action := range actions {
+		if previous, duplicate := exposed[action.Name]; duplicate {
+			return nil, nil, nil, nil, fmt.Errorf("%w: model action %q is exposed by bindings %s and %s", skill.ErrBindingAmbiguous, action.Name, previous, action.BindingID)
+		}
+		exposed[action.Name] = action.BindingID
+	}
+	return prompts, actions, prepared, refs, nil
 }
 
 func catalogRunbookEntrypoint(definition *kernelagent.AgentDefinition, run *AgentRun) string {

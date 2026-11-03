@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -105,7 +106,7 @@ func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
 	}
 	policy := NewDefaultActionPolicy()
 	policy.ApprovalTimeout = ApprovalTimeoutApprove
-	for _, version := range []*skill.Definition{RunbookManagementSkill(), RunbookManagementSkillLegacy140()} {
+	for _, version := range []*skill.Definition{RunbookManagementSkill(), RunbookManagementSkillLegacy150(), RunbookManagementSkillLegacy140()} {
 		action := version.Actions[RunbookActionCreateTask]
 		bound := &skill.BoundAction{Definition: version, Binding: f.bound.Binding, Action: action}
 		for _, mode := range []ConversationApprovalMode{"", ConversationApprovalManual, ConversationApprovalAuto, ConversationApprovalSkip} {
@@ -180,7 +181,7 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 	}
 	want := []RoutineGrant{{Action: "mail.search", Label: "Search the web"}, {Action: "mail.send", Label: "Email you the summary", ToOwnerOnly: true}}
 	stored, err := f.store.GetRunbookActivation(t.Context(), f.run.Scope, activation.ID)
-	if err != nil || stored.Task == nil || len(stored.Task.Grants) != 2 || stored.Task.Grants[0] != want[0] || stored.Task.Grants[1] != want[1] {
+	if err != nil || stored.Task == nil || !reflect.DeepEqual(stored.Task.Grants, want) {
 		t.Fatalf("persisted grants = %#v, %v", stored.Task, err)
 	}
 	// Dispatch reads only the approved arguments: a grant the brief lacks

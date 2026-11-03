@@ -229,9 +229,9 @@ func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capabilit
 	if form.ProposedAction == nil {
 		return response, nil
 	}
-	selected, ok := exactHostedTurnAction(actions, form.ProposedAction.Capability)
-	if !ok {
-		return nil, fmt.Errorf("proposed action %q is not in the authorized catalog", form.ProposedAction.Capability)
+	selected, err := exactHostedTurnAction(actions, form.ProposedAction.Capability)
+	if err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(form.ProposedAction.Summary) == "" || strings.TrimSpace(form.ProposedAction.IdempotencyKey) == "" {
 		return nil, errors.New("proposed action summary and idempotencyKey are required")
@@ -544,13 +544,25 @@ func ValidateHostedTurnLifecycle(status AgentRunStatus, wake *WakeCondition) err
 	}
 }
 
-func exactHostedTurnAction(actions []capability.ModelAction, name string) (capability.ModelAction, bool) {
-	for _, action := range actions {
-		if action.Name == strings.TrimSpace(name) {
-			return action, true
+// exactHostedTurnAction selects the one authorized action with name. Two
+// authorized actions with one name are refused rather than routed to either
+// binding; activation keeps names unique, so this is a kernel invariant.
+func exactHostedTurnAction(actions []capability.ModelAction, name string) (capability.ModelAction, error) {
+	name = strings.TrimSpace(name)
+	var selected *capability.ModelAction
+	for index := range actions {
+		if actions[index].Name != name {
+			continue
 		}
+		if selected != nil {
+			return capability.ModelAction{}, fmt.Errorf("proposed action %q is ambiguous: bindings %s and %s both expose it", name, selected.BindingID, actions[index].BindingID)
+		}
+		selected = &actions[index]
 	}
-	return capability.ModelAction{}, false
+	if selected == nil {
+		return capability.ModelAction{}, fmt.Errorf("proposed action %q is not in the authorized catalog", name)
+	}
+	return *selected, nil
 }
 
 func cloneHostedTurnObject(value map[string]interface{}) (map[string]interface{}, error) {

@@ -196,6 +196,7 @@ func (c *Catalog) DeleteBinding(ctx context.Context, request DeleteBindingReques
 		return nil, ErrBindingRevisionConflict
 	}
 	key := bindingKey(current.Scope, current.DeploymentID, current.ID)
+	defer c.invalidateActivations(current.Scope, current.DeploymentID)
 	if c.store == nil {
 		c.mu.Lock()
 		latest := c.bindings[key]
@@ -214,9 +215,6 @@ func (c *Catalog) DeleteBinding(ctx context.Context, request DeleteBindingReques
 		if err := c.store.DeleteSkillBinding(ctx, current.Scope, current.DeploymentID, current.ID, request.ExpectedRevision); err != nil {
 			return nil, err
 		}
-		c.mu.Lock()
-		delete(c.bindings, key)
-		c.mu.Unlock()
 	}
 	now := time.Now().UTC()
 	receipt := cloneBinding(current)

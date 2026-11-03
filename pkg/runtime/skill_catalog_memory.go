@@ -90,6 +90,7 @@ func (s *MemoryStore) ListSkillDefinitionIdentities(ctx context.Context, id, ver
 }
 
 var _ skill.CatalogDefinitionIdentityStore = (*MemoryStore)(nil)
+var _ skill.CatalogBindingRevisionStore = (*MemoryStore)(nil)
 
 func (s *MemoryStore) SaveSkillBinding(_ context.Context, binding *skill.Binding, expectedRevision int64) error {
 	if err := skill.ValidateBindingShape(binding); err != nil {
@@ -140,6 +141,19 @@ func (s *MemoryStore) SkillBindingRevisionFloor(_ context.Context, scope skill.S
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.skillBindingFloors[memorySkillBindingKey(scope, deploymentID, bindingID)], nil
+}
+
+func (s *MemoryStore) ListSkillBindingRevisions(_ context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.BindingRevision, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]skill.BindingRevision, 0)
+	for _, binding := range s.skillBindings {
+		if binding.Scope == scope && binding.DeploymentID == deploymentID {
+			result = append(result, skill.BindingRevision{ID: binding.ID, Revision: binding.Revision, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity})
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
 }
 
 func (s *MemoryStore) ListSkillBindings(_ context.Context, scope skill.ScopeReference, deploymentID string) ([]*skill.Binding, error) {

@@ -560,15 +560,13 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 			return nil, fmt.Errorf("turn host reported %d output tokens beyond the reserved %d", response.Usage.OutputTokens, reserved.OutputTokens)
 		}
 	}
-	allowed := make(map[string]capability.ModelAction, len(request.Actions))
-	for _, action := range request.Actions {
-		allowed[action.Name] = action
-	}
 	if proposed := response.ProposedAction; proposed != nil {
-		action, ok := allowed[proposed.Capability]
-		if !ok {
-			return nil, errors.New("turn host proposed an unauthorized capability")
+		action, err := exactAuthorizedTurnAction(request.Actions, *proposed)
+		if err != nil {
+			return nil, err
 		}
+		// Every later lookup of this proposal is exact by name and binding.
+		proposed.BindingID, proposed.BindingRevision = action.BindingID, action.BindingRevision
 		externalOperationPolicy := effectiveExternalOperationPolicy(action.SideEffect, action.ExternalOperationPolicy)
 		if externalOperationPolicy == capability.ExternalOperationRequired && proposed.ExternalOperation == nil {
 			return nil, errors.New("action requires an external operation identity")
@@ -777,16 +775,9 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 }
 
 func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint map[string]interface{}) (map[string]interface{}, error) {
-	var selected *capability.ModelAction
-	for index := range r.config.Actions {
-		candidate := &r.config.Actions[index]
-		if candidate.Name != proposed.Capability || (proposed.BindingID != "" && (candidate.BindingID != proposed.BindingID || candidate.BindingRevision != proposed.BindingRevision)) {
-			continue
-		}
-		if selected != nil {
-			return nil, fmt.Errorf("requested capability %q is ambiguous without an exact binding", proposed.Capability)
-		}
-		selected = candidate
+	selected, err := selectTurnModelAction(r.config.Actions, proposed)
+	if err != nil {
+		return nil, err
 	}
 	if selected == nil {
 		return nil, nil
@@ -801,7 +792,7 @@ func (r *HostedTurnRunner) reuseSucceededAction(proposed TurnAction, checkpoint 
 	}
 	call := &ActionCall{
 		DeploymentID: actionDeploymentID, BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
-		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
+		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: selected.ActionInput(arguments),
 	}
 	// A rejected proposal may require a new authoritative read before it can be
 	// corrected. Historical read reuse would leave the rejected proposal as the
@@ -1014,6 +1005,9 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	for _, action := range request.Actions {
 		if action.SkillID == RunbookManagementSkillID && action.Action == RunbookActionCreateTask {
 			request.SystemInstructions = append(request.SystemInstructions, RoutineTimezoneInstruction)
+			if instruction := routineBindingToolGrantInstruction(request.Actions); instruction != "" {
+				request.SystemInstructions = append(request.SystemInstructions, instruction)
+			}
 			break
 		}
 	}
@@ -1378,6 +1372,11 @@ func cloneHostedModelActions(values []capability.ModelAction) []capability.Model
 	for index, value := range values {
 		result[index] = value
 		result[index].InputSchema = cloneMap(value.InputSchema)
+		if value.BindingTool != nil {
+			tool := *value.BindingTool
+			tool.Arguments = cloneMap(value.BindingTool.Arguments)
+			result[index].BindingTool = &tool
+		}
 		if value.SemanticArguments != nil {
 			result[index].SemanticArguments = make(map[string]string, len(value.SemanticArguments))
 			for role, argument := range value.SemanticArguments {
@@ -1412,4 +1411,18 @@ func cloneHostedWorkspaceOperations(values []workspace.Operation) []workspace.Op
 		result[index].InputSchema = cloneMap(values[index].InputSchema)
 	}
 	return result
+}
+
+// exactAuthorizedTurnAction validates a turn host's proposal against the
+// authorized catalog by name and, when the host reports one, exact binding.
+// A duplicated name is refused instead of resolved first-match or last-wins.
+func exactAuthorizedTurnAction(actions []capability.ModelAction, proposed TurnAction) (capability.ModelAction, error) {
+	selected, err := selectTurnModelAction(actions, proposed)
+	if err != nil {
+		return capability.ModelAction{}, err
+	}
+	if selected == nil {
+		return capability.ModelAction{}, errors.New("turn host proposed an unauthorized capability")
+	}
+	return *selected, nil
 }

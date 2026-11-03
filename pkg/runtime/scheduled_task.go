@@ -134,10 +134,27 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 	return c, "", nil
 }
 
-// scheduledTaskCreateAction adds the routine brief the user approves before
-// the routine exists. Creating a routine is always reviewed, in every
-// approval mode, so the brief is shown every time.
+// scheduledTaskCreateAction is the 1.6.0 contract: a connected tool is
+// granted by its own model action name and the kernel pins the exact tool the
+// user approved; the base action a connected tool runs through is never
+// grantable.
 func scheduledTaskCreateAction() skill.Action {
+	action := scheduledTaskCreateActionLegacy150()
+	action.Description += " To grant a connected app's tool, use that tool's own exact action name from your tools, for example mcp.<connection>.<tool>; the generic action connected tools run through (such as openseal.mcp.call) cannot be granted."
+	brief := action.InputSchema["properties"].(map[string]interface{})["brief"].(map[string]interface{})
+	grants := brief["properties"].(map[string]interface{})["grants"].(map[string]interface{})
+	grants["description"] = "The fewest actions each run must perform without asking. Use exact action names from your tools: skillId.action, or a connected tool's own name such as mcp.<connection>.<tool>, granting each connected tool separately. List what it reads (for example web search) and each sending action; for an email to the user set toOwnerOnly."
+	properties := grants["items"].(map[string]interface{})["properties"].(map[string]interface{})
+	properties["action"].(map[string]interface{})["description"] = "Exact action name: skillId.action, or a connected tool's own name, mcp.<connection>.<tool>."
+	properties["toolArguments"] = map[string]interface{}{"type": "object", "maxProperties": maximumRoutineGrantToolArguments, "description": "Filled in by the system for a connected tool; omit it."}
+	return action
+}
+
+// scheduledTaskCreateActionLegacy150 is the published 1.5.0 contract: the
+// routine brief the user approves before the routine exists. Creating a
+// routine is always reviewed, in every approval mode, so the brief is shown
+// every time.
+func scheduledTaskCreateActionLegacy150() skill.Action {
 	action := scheduledTaskCreateActionLegacy140()
 	action.Review = skill.ActionReviewAlways
 	action.Description += " The user always approves a brief before the routine is created: always pass brief with a one-sentence summary of what it does and when, deliverTo naming where results go, and grants listing only the actions its runs need to perform without asking (for example web search or page reads and an email to the user). Runs ask in this chat before any other side effect, and actions that always ask, such as paying, cannot be granted."

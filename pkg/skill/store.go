@@ -50,3 +50,20 @@ type CatalogStore interface {
 type CatalogDefinitionIdentityStore interface {
 	ListSkillDefinitionIdentities(context.Context, string, string) ([]capability.SkillIdentity, error)
 }
+
+// BindingRevision is the payload-free identity of one stored binding row.
+type BindingRevision struct {
+	ID             string `json:"id"`
+	Revision       int64  `json:"revision"`
+	SkillID        string `json:"skillId"`
+	SkillVersion   string `json:"skillVersion"`
+	SourceIdentity string `json:"sourceIdentity,omitempty"`
+}
+
+// CatalogBindingRevisionStore optionally lists one deployment's binding
+// revisions without hydrating binding payloads. Activation uses it to reuse a
+// cached snapshot without decoding every binding on every turn. It must list
+// exactly the rows ListSkillBindings would return.
+type CatalogBindingRevisionStore interface {
+	ListSkillBindingRevisions(context.Context, ScopeReference, string) ([]BindingRevision, error)
+}

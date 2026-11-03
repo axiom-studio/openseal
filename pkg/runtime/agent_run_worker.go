@@ -985,7 +985,7 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: actionDeploymentID,
 		AssignedAgentID: assignedAgentID,
 		BindingID:       selected.BindingID, BindingRevision: selected.BindingRevision,
-		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: arguments,
+		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: selected.ActionInput(arguments),
 		PreparedRuntime: request.PreparedRuntime,
 		IdempotencyKey:  idempotencyKey, Summary: request.Summary,
 		ExternalOperation: request.ExternalOperation,
@@ -1253,15 +1253,22 @@ func validatePreparedSkillRuntimes(binding *TurnRunnerBinding) error {
 	return nil
 }
 
+// selectTurnModelAction resolves a proposal exactly by name and, when the
+// proposal carries one, binding. A name exposed twice is refused even when the
+// proposal names a binding: a catalog with duplicate names is itself invalid.
 func selectTurnModelAction(actions []capability.ModelAction, request TurnAction) (*capability.ModelAction, error) {
 	var selected *capability.ModelAction
+	matches := 0
 	for index := range actions {
 		candidate := &actions[index]
-		if candidate.Name != request.Capability || (request.BindingID != "" && (candidate.BindingID != request.BindingID || candidate.BindingRevision != request.BindingRevision)) {
+		if candidate.Name != request.Capability {
 			continue
 		}
-		if selected != nil {
-			return nil, fmt.Errorf("requested capability %q is ambiguous without an exact binding", request.Capability)
+		if matches++; matches > 1 {
+			return nil, fmt.Errorf("requested capability %q is ambiguous: more than one binding exposes it", request.Capability)
+		}
+		if request.BindingID != "" && (candidate.BindingID != request.BindingID || candidate.BindingRevision != request.BindingRevision) {
+			continue
 		}
 		selected = candidate
 	}

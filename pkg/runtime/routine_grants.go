@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -18,13 +19,20 @@ import (
 // grant is copied from the approved create_task arguments (bound by the
 // approval's digest) and never added later.
 type RoutineGrant struct {
-	// Action is the model-visible action identity, skillId + "." + action.
+	// Action is the model-visible action identity: skillId + "." + action, or
+	// a binding tool's model action name <modelPrefix>.<bindingSlug>.<tool>.
 	Action string `json:"action"`
 	// Label is the plain-language line the user approved.
 	Label string `json:"label"`
 	// ToOwnerOnly limits a message-sending grant to sends whose recipients
 	// are all the routine owner's own addresses.
 	ToOwnerOnly bool `json:"toOwnerOnly,omitempty"`
+	// ToolArguments pins a connected tool grant to the exact tool the user
+	// approved: the binding tool's fixed arguments (for an MCP tool, its
+	// upstream name and pinned hash), copied from the catalog when the brief
+	// is resolved. A tool re-pinned or replaced under the same name no longer
+	// matches.
+	ToolArguments map[string]interface{} `json:"toolArguments,omitempty"`
 }
 
 // RoutineBrief is what the user approves before a routine is created.
@@ -55,9 +63,12 @@ const (
 	maximumRoutineBriefSummary = 300
 	maximumRoutineDeliverTo    = 160
 	maximumRoutineGrantLabel   = 120
+	// maximumRoutineGrantToolArguments bounds a connected tool pin.
+	maximumRoutineGrantToolArguments      = 8
+	maximumRoutineGrantToolArgumentsBytes = 2048
 )
 
-var routineGrantActionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\.[A-Za-z0-9][A-Za-z0-9_:-]{0,127}$`)
+var routineGrantActionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\.[A-Za-z0-9_-][A-Za-z0-9_.:-]{0,127}$`)
 
 // Kernel management Skills govern the Agent's own authority, work and
 // routines; a routine brief never waives their review.
@@ -117,7 +128,7 @@ func normalizeRoutineGrants(values []RoutineGrant, allowEmptyLabels bool) ([]Rou
 	for _, value := range values {
 		action := strings.TrimSpace(value.Action)
 		if !routineGrantActionPattern.MatchString(action) {
-			return nil, fmt.Errorf("routine grant action %q must be an exact skillId.action", action)
+			return nil, fmt.Errorf("routine grant action %q must be an exact action name: skillId.action, or a connected tool's own action name", action)
 		}
 		if seen[action] {
 			return nil, fmt.Errorf("routine grant action %s is listed twice", action)
@@ -130,7 +141,15 @@ func normalizeRoutineGrants(values []RoutineGrant, allowEmptyLabels bool) ([]Rou
 		if label == "" && !allowEmptyLabels {
 			return nil, errors.New("routine grant label is required")
 		}
-		grants = append(grants, RoutineGrant{Action: action, Label: label, ToOwnerOnly: value.ToOwnerOnly})
+		if len(value.ToolArguments) > maximumRoutineGrantToolArguments {
+			return nil, fmt.Errorf("routine grant %s pins at most %d tool arguments", action, maximumRoutineGrantToolArguments)
+		}
+		if value.ToolArguments != nil {
+			if encoded, err := json.Marshal(value.ToolArguments); err != nil || len(encoded) > maximumRoutineGrantToolArgumentsBytes {
+				return nil, fmt.Errorf("routine grant %s tool pin must encode to at most %d bytes", action, maximumRoutineGrantToolArgumentsBytes)
+			}
+		}
+		grants = append(grants, RoutineGrant{Action: action, Label: label, ToOwnerOnly: value.ToOwnerOnly, ToolArguments: cloneMap(value.ToolArguments)})
 	}
 	return grants, nil
 }
@@ -139,13 +158,36 @@ func cloneRoutineGrants(values []RoutineGrant) []RoutineGrant {
 	if values == nil {
 		return nil
 	}
-	return append([]RoutineGrant(nil), values...)
+	grants := append([]RoutineGrant(nil), values...)
+	for index := range grants {
+		grants[index].ToolArguments = cloneMap(grants[index].ToolArguments)
+	}
+	return grants
+}
+
+// routineGrantToolPinned reports whether a grant's pin is exactly the fixed
+// arguments of the tool being called.
+func routineGrantToolPinned(grant RoutineGrant, tool *skill.BindingTool) bool {
+	if tool == nil || len(grant.ToolArguments) == 0 || len(grant.ToolArguments) != len(tool.Arguments) {
+		return false
+	}
+	pinned, err := json.Marshal(grant.ToolArguments)
+	if err != nil {
+		return false
+	}
+	current, err := json.Marshal(tool.Arguments)
+	return err == nil && string(pinned) == string(current)
 }
 
 // resolveRoutineBriefGrants proves every grant names an enabled action bound
 // to the routine's Agent that a brief may waive, and fills labels from the
-// catalog when the model gave none (or one naming a tool identifier).
-func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant) ([]RoutineGrant, error) {
+// catalog when the model gave none (or one naming a tool identifier). A
+// binding tool is granted by its own model action name; the base actions it
+// routes to are never grantable, since one grant would cover every tool of
+// every binding. Each connected tool grant is pinned to that tool's fixed
+// arguments; pinTools is false only for an earlier contract that cannot carry
+// the pin, which then cannot grant connected tools at all.
+func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant, pinTools bool) ([]RoutineGrant, error) {
 	if len(grants) == 0 {
 		return grants, nil
 	}
@@ -160,42 +202,78 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 		skillID string
 		name    string
 		action  skill.Action
+		pin     map[string]interface{}
 	}
 	available := map[string]boundAction{}
+	// routed maps a binding-tools base action to an example tool to grant.
+	routed := map[string]string{}
 	for _, binding := range bindings {
 		if binding == nil || binding.Disabled || routineUngrantableSkills[binding.SkillID] {
 			continue
 		}
 		var definition *skill.Definition
+		if strings.TrimSpace(binding.SourceIdentity) == "" {
+			definition, err = catalog.GetDefinition(ctx, binding.SkillID, binding.SkillVersion)
+		} else {
+			definition, err = catalog.GetDefinitionVariant(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if definition == nil {
+			continue
+		}
+		spec := definition.BindingTools
 		for _, name := range binding.AllowedActions {
 			identity := routineGrantIdentity(binding.SkillID, name)
-			if _, exists := available[identity]; exists {
+			if spec.RoutesAction(name) {
+				if _, exists := routed[identity]; !exists {
+					routed[identity] = ""
+				}
 				continue
 			}
-			if definition == nil {
-				if strings.TrimSpace(binding.SourceIdentity) == "" {
-					definition, err = catalog.GetDefinition(ctx, binding.SkillID, binding.SkillVersion)
-				} else {
-					definition, err = catalog.GetDefinitionVariant(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
-				}
-				if err != nil {
-					return nil, err
-				}
-				if definition == nil {
-					break
-				}
+			if _, exists := available[identity]; exists {
+				continue
 			}
 			if action, ok := definition.Actions[name]; ok {
 				available[identity] = boundAction{skillID: binding.SkillID, name: name, action: action}
 			}
+		}
+		for _, tool := range binding.Tools {
+			base := spec.Action(tool.Effect)
+			action, ok := definition.Actions[base]
+			if !ok || !containsString(binding.AllowedActions, base) {
+				continue
+			}
+			identity := skill.BindingToolModelName(definition, binding, tool.Name)
+			if _, exists := available[identity]; exists {
+				continue
+			}
+			if example := routineGrantIdentity(binding.SkillID, base); routed[example] == "" {
+				routed[example] = identity
+			}
+			action.Description = tool.Description
+			action.InputSchema = tool.InputSchema
+			available[identity] = boundAction{skillID: binding.SkillID, name: tool.Name, action: action, pin: tool.Arguments}
 		}
 	}
 	resolved := make([]RoutineGrant, 0, len(grants))
 	for _, grant := range grants {
 		bound, ok := available[grant.Action]
 		if !ok {
+			if example, routes := routed[grant.Action]; routes {
+				if example == "" {
+					return nil, fmt.Errorf("routine grant %s runs connected tools and cannot be granted; grant the specific tool by its own action name", grant.Action)
+				}
+				return nil, fmt.Errorf("routine grant %s runs connected tools and cannot be granted; grant the specific tool, e.g. %s", grant.Action, example)
+			}
 			return nil, fmt.Errorf("routine grant %s is not an action this Agent can use", grant.Action)
 		}
+		if bound.pin != nil && !pinTools {
+			return nil, fmt.Errorf("routine grant %s is a connected tool, which this routine contract cannot grant", grant.Action)
+		}
+		// The pin always comes from the catalog, never from the model.
+		grant.ToolArguments = cloneMap(bound.pin)
 		if bound.action.AlwaysReview() {
 			return nil, fmt.Errorf("routine grant %s always asks first and cannot run without asking", grant.Action)
 		}
@@ -387,7 +465,11 @@ func routineOwner(ctx context.Context, store routineGrantStore, activation *Runb
 
 // resolveRoutineGrant returns the approved routine grant that covers this
 // action, or nil. A review: always action is never covered, and an owner-only
-// grant covers a send only when every recipient is the owner's address.
+// grant covers a send only when every recipient is the owner's address. A
+// call of a binding-tools base action is covered only by a grant naming the
+// exact tool its fixed arguments select on the routine Agent's own binding,
+// never by the base action, and only while that tool still has the fixed
+// arguments (upstream name and pinned hash) the user approved.
 func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routineGrantStore, owners RoutineOwnerAddressResolver, run *AgentRun, bound *skill.BoundAction, arguments map[string]interface{}) (*RoutineGrant, error) {
 	if bound == nil || bound.Definition == nil || bound.Action.AlwaysReview() || routineUngrantableSkills[bound.Definition.ID] {
 		return nil, nil
@@ -397,8 +479,18 @@ func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routine
 		return nil, err
 	}
 	identity := routineGrantIdentity(bound.Definition.ID, bound.Action.Name)
+	recipients := arguments
+	var tool *skill.BindingTool
+	if spec := bound.Definition.BindingTools; spec.RoutesAction(bound.Action.Name) {
+		tool = skill.SelectedBindingTool(bound.Definition, bound.Binding, bound.Action.Name, arguments)
+		if tool == nil || bound.Binding.DeploymentID != activation.AssignedAgentID {
+			return nil, nil
+		}
+		identity = skill.BindingToolModelName(bound.Definition, bound.Binding, tool.Name)
+		recipients, _ = arguments[spec.InputArgument].(map[string]interface{})
+	}
 	for _, grant := range activation.Task.Grants {
-		if grant.Action != identity {
+		if grant.Action != identity || (tool == nil) != (grant.ToolArguments == nil) || tool != nil && !routineGrantToolPinned(grant, tool) {
 			continue
 		}
 		if grant.ToOwnerOnly {
@@ -410,7 +502,7 @@ func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routine
 				return nil, nil
 			}
 			addresses, err := owners.RoutineOwnerAddresses(ctx, activation.Scope, owner)
-			if err != nil || !routineRecipientsOwned(arguments, addresses) {
+			if err != nil || !routineRecipientsOwned(recipients, addresses) {
 				return nil, nil
 			}
 		}
@@ -484,6 +576,9 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 		if grant.ToOwnerOnly {
 			item["toOwnerOnly"] = true
 		}
+		if grant.ToolArguments != nil {
+			item["toolArguments"] = cloneMap(grant.ToolArguments)
+		}
 		grants = append(grants, item)
 	}
 	preview := map[string]interface{}{"summary": brief.Summary, "grants": grants}
@@ -496,7 +591,7 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 // resolveRoutineBriefArguments normalizes a proposed create_task brief and
 // fills grant labels from the catalog before the arguments are digested, so
 // the approved arguments carry exactly the brief the user sees.
-func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}) error {
+func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}, pinTools bool) error {
 	var parsed struct {
 		Brief *RoutineBrief `json:"brief"`
 	}
@@ -511,15 +606,23 @@ func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatal
 	if err != nil {
 		return err
 	}
-	if brief.Grants, err = resolveRoutineBriefGrants(ctx, catalog, owners, run, brief.Grants); err != nil {
+	if brief.Grants, err = resolveRoutineBriefGrants(ctx, catalog, owners, run, brief.Grants, pinTools); err != nil {
 		return err
 	}
 	arguments["brief"] = routineBriefPreview(brief)
 	return nil
 }
 
-// routineBriefContract reports whether a create_task binding uses the
-// contract that carries a routine brief.
+// routineBriefContract reports whether a create_task binding uses a
+// contract that carries a routine brief: the current one, or 1.5.0 while its
+// accepted calls drain.
 func routineBriefContract(bound *skill.BoundAction) bool {
+	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.5.0")
+}
+
+// routineBriefPinsTools reports whether a create_task binding's contract
+// carries connected tool pins, so its briefs may grant connected tools.
+func routineBriefPinsTools(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID && bound.Definition.Version == RunbookManagementSkillVersion
 }

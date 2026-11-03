@@ -124,3 +124,46 @@ func TestAccountUpsertSupersedesLegacyDuplicatesAtomically(t *testing.T) {
 		t.Fatal("upsert did not preserve exactly one active record for the verified identity")
 	}
 }
+
+func TestUserOwnedGrantsStayWithTheirOwner(t *testing.T) {
+	ctx := context.Background()
+	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
+	provider := &fixtureProvider{id: "mcp", grant: TokenGrant{AccessToken: "token", GrantedScopes: []string{"read"}, Resource: "https://mcp.example/mcp", ExternalIdentity: ExternalIdentity{AccountID: "https://mcp.example/mcp"}}}
+	service, err := NewService(store, credentials, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "42"}
+	request := func(owner, connection string) BeginAuthorizationRequest {
+		return BeginAuthorizationRequest{Scope: scope, ConnectionID: connection, Kind: "mcp_credential", Owner: Owner{Kind: OwnerUser, ID: owner},
+			Requirement: capability.OAuth2Requirement{Provider: "mcp", Subject: capability.OAuth2SubjectUser, Scopes: []string{"read"}, Resource: "https://mcp.example/mcp"},
+			RedirectURI: "https://studio.example/oauth/callback"}
+	}
+	complete := func(r BeginAuthorizationRequest) (*Connection, error) {
+		t.Helper()
+		begin, err := service.BeginAuthorization(ctx, r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, _ := url.Parse(begin.AuthorizationURL)
+		result, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Scope: scope, SessionID: begin.SessionID, State: u.Query().Get("state"), Code: "valid-code"})
+		if err != nil {
+			return nil, err
+		}
+		return result.Connection, nil
+	}
+	mine, err := complete(request("7", "attempt-7"))
+	if err != nil || mine.Owner != (Owner{Kind: OwnerUser, ID: "7"}) {
+		t.Fatalf("user grant = %#v, %v", mine, err)
+	}
+	theirs, err := complete(request("8", "attempt-8"))
+	if err != nil || theirs.ID == mine.ID || theirs.Owner.ID != "8" {
+		t.Fatalf("two users' grants for one account merged: %#v %#v %v", mine, theirs, err)
+	}
+	if _, err := complete(request("8", mine.ID)); err == nil {
+		t.Fatal("another user re-authorized a personal grant")
+	}
+	if _, err := service.BeginAuthorization(ctx, request("", "attempt-none")); err == nil {
+		t.Fatal("user grant without a user accepted")
+	}
+}

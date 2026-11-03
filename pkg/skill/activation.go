@@ -133,35 +133,35 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 	}
 	host.Adapters = adapters
 
-	bindings, err := c.bindingsFor(ctx, scope, deploymentID)
+	now := time.Now().UTC()
+	hostDigest := hostActivationDigest(host)
+	if cached, err := c.warmActivation(ctx, scope, deploymentID, hostDigest); err != nil {
+		return nil, err
+	} else if cached != nil {
+		return shareActivation(cached, now), nil
+	}
+	listed, definitions, err := c.deploymentBindings(ctx, scope, deploymentID)
 	if err != nil {
 		return nil, err
 	}
-	definitions := make(map[string]*Definition)
-	for _, binding := range bindings {
-		if binding.Disabled {
-			continue
-		}
-		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
-		if err != nil {
-			return nil, err
-		}
-		if definition != nil {
-			definitions[definitionKey(binding.SkillID, binding.SkillVersion, binding.SourceIdentity)] = definition
+	fingerprint := c.activationFingerprint(ctx, bindingRevisions(listed), definitions)
+	if cached := c.cachedActivation(scope, deploymentID, hostDigest, fingerprint); cached != nil {
+		return shareActivation(cached, now), nil
+	}
+	bindings := make([]*Binding, 0, len(listed))
+	for _, binding := range listed {
+		if !binding.Disabled {
+			bindings = append(bindings, binding)
 		}
 	}
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].ID < bindings[j].ID })
-	activeBindings := bindings[:0]
-	for _, binding := range bindings {
-		if !binding.Disabled {
-			activeBindings = append(activeBindings, binding)
-		}
-	}
-	bindings = activeBindings
+	// A snapshot that called a host lifecycle adapter reflects that adapter's
+	// state at the time of the call and is never reused.
+	invokedHostAdapter := false
 
 	snapshot := &ActivationSnapshot{
 		Scope: scope, DeploymentID: deploymentID, HostRevision: strings.TrimSpace(host.Revision),
-		Adapters: adapters, Skills: make([]ActivatedSkill, 0, len(bindings)), CreatedAt: time.Now().UTC(),
+		Adapters: adapters, Skills: make([]ActivatedSkill, 0, len(bindings)), CreatedAt: now,
 	}
 	for _, binding := range bindings {
 		definition := definitions[definitionKey(binding.SkillID, binding.SkillVersion, binding.SourceIdentity)]
@@ -186,6 +186,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		} else if resourceRoot == "" && len(reasons) == 0 && resourcesRequired && !adapterAvailable(adapters, AdapterResourceStaging) {
 			reasons = append(reasons, AvailabilityReason{Code: "resource_staging_unavailable", Requirement: AdapterResourceStaging, Message: "the configured resource stager is not advertised as available by this host"})
 		} else if resourceRoot == "" && len(reasons) == 0 && resourcesRequired {
+			invokedHostAdapter = true
 			stage, stageErr := host.ResourceStager.StageResources(ctx, ResourceStageRequest{
 				Scope: scope, DeploymentID: deploymentID, BindingID: binding.ID,
 				SkillID: definition.ID, SkillVersion: definition.Version,
@@ -228,6 +229,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 				if requestErr != nil {
 					reasons = append(reasons, AvailabilityReason{Code: "runtime_preparation_invalid", Requirement: AdapterPreparedRuntime, Message: "the Skill runtime requirements cannot be prepared safely"})
 				} else if request != nil {
+					invokedHostAdapter = true
 					result, prepareErr := host.RuntimePreparer.PrepareRuntime(ctx, *request)
 					switch {
 					case prepareErr != nil || result == nil:
@@ -250,20 +252,9 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 			})
 			continue
 		}
-		actions := make([]ModelAction, 0, len(binding.AllowedActions))
-		for _, name := range binding.AllowedActions {
-			action := definition.Actions[name]
-			if action.Transport != nil && action.Transport.Endpoint == opensealprocess.TransportName && !processActionAvailable(definition, action, host) {
-				continue
-			}
-			actions = append(actions, ModelAction{
-				Name: definition.ID + "." + name, Description: action.Description,
-				BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID,
-				Version: definition.Version, Action: name, InputSchema: modelVisibleInputSchemaForBinding(action.InputSchema, binding.ArgumentBindings[name]),
-				SemanticArguments: cloneStringMap(action.SemanticArguments), Risk: action.Risk, SideEffect: action.SideEffect,
-				ExternalOperationPolicy: action.ExternalOperationPolicy,
-			})
-		}
+		actions := bindingModelActions(definition, binding, func(action Action) bool {
+			return action.Transport == nil || action.Transport.Endpoint != opensealprocess.TransportName || processActionAvailable(definition, action, host)
+		})
 		sort.Slice(actions, func(i, j int) bool { return actions[i].Name < actions[j].Name })
 		conversationAdapters := make([]ActivatedConversationAdapter, 0, len(binding.EnabledConversationAdapters))
 		for _, adapterID := range binding.EnabledConversationAdapters {
@@ -289,7 +280,18 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 		})
 	}
 	sort.Slice(snapshot.Unavailable, func(i, j int) bool { return snapshot.Unavailable[i].BindingID < snapshot.Unavailable[j].BindingID })
+	activated := make([]ModelAction, 0)
+	for _, skill := range snapshot.Skills {
+		activated = append(activated, skill.Actions...)
+	}
+	if err := validateBindingToolActionNames(activated); err != nil {
+		return nil, err
+	}
 	snapshot.SnapshotID = activationSnapshotDigest(snapshot)
+	if !invokedHostAdapter {
+		c.storeActivation(scope, deploymentID, hostDigest, fingerprint, snapshot)
+		return shareActivation(snapshot, now), nil
+	}
 	return snapshot, nil
 }
 

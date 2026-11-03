@@ -157,12 +157,21 @@ type Catalog struct {
 	floors  map[string]int64
 	schemas map[string]*compiledActionSchemas
 	store   CatalogStore
+	// activations caches immutable snapshots per deployment and host state.
+	activations *lruCache[map[string]cachedActivation]
+	// validated records stored binding revisions already validated against
+	// their immutable definition variant.
+	validated *lruCache[struct{}]
 }
 
+// NewCatalog creates a catalog whose bindings live in memory. Without a
+// store, bindings is the authoritative binding set; with one, the store is.
 func NewCatalog() *Catalog {
 	return &Catalog{
 		skills: make(map[string]*Definition), bindings: make(map[string]*Binding), floors: make(map[string]int64),
-		schemas: make(map[string]*compiledActionSchemas),
+		schemas:     make(map[string]*compiledActionSchemas),
+		activations: newLRUCache[map[string]cachedActivation](activationCacheDeployments),
+		validated:   newLRUCache[struct{}](validatedBindingCacheEntries),
 	}
 }
 
@@ -329,17 +338,37 @@ func (c *Catalog) Bind(ctx context.Context, binding *Binding) error {
 	if err := validateBindingAgainstDefinition(normalized, definition); err != nil {
 		return err
 	}
+	key := bindingKey(normalized.Scope, normalized.DeploymentID, normalized.ID)
+	defer c.invalidateActivations(normalized.Scope, normalized.DeploymentID)
+	if c.store != nil {
+		// The durable store owns bindings; the catalog keeps no copy of them.
+		// A concurrent writer can still race this slug check, and activation
+		// refuses the resulting duplicate model names.
+		if bindingClaimsSlug(normalized) {
+			existing, err := c.store.ListSkillBindings(ctx, normalized.Scope, normalized.DeploymentID)
+			if err != nil {
+				return err
+			}
+			if err := validateDeploymentBindingSlugs(normalized, existing); err != nil {
+				return err
+			}
+		}
+		return c.store.SaveSkillBinding(ctx, normalized, normalized.Revision-1)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	key := bindingKey(normalized.Scope, normalized.DeploymentID, normalized.ID)
 	current := c.bindings[key]
-	if c.store == nil {
-		if (current == nil && normalized.Revision != c.floors[key]+1) || (current != nil && normalized.Revision != current.Revision+1) {
-			return ErrBindingRevisionConflict
+	if (current == nil && normalized.Revision != c.floors[key]+1) || (current != nil && normalized.Revision != current.Revision+1) {
+		return ErrBindingRevisionConflict
+	}
+	if bindingClaimsSlug(normalized) {
+		existing := make([]*Binding, 0)
+		for _, other := range c.bindings {
+			if other.Scope == normalized.Scope && other.DeploymentID == normalized.DeploymentID {
+				existing = append(existing, other)
+			}
 		}
-	} else {
-		expectedRevision := normalized.Revision - 1
-		if err := c.store.SaveSkillBinding(ctx, normalized, expectedRevision); err != nil {
+		if err := validateDeploymentBindingSlugs(normalized, existing); err != nil {
 			return err
 		}
 	}
@@ -360,6 +389,7 @@ func (c *Catalog) disableBinding(ctx context.Context, binding *Binding) error {
 	}
 	normalized := cloneBinding(binding)
 	key := bindingKey(normalized.Scope, normalized.DeploymentID, normalized.ID)
+	defer c.invalidateActivations(normalized.Scope, normalized.DeploymentID)
 	if c.store == nil {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -370,13 +400,7 @@ func (c *Catalog) disableBinding(ctx context.Context, binding *Binding) error {
 		c.bindings[key] = normalized
 		return nil
 	}
-	if err := c.store.SaveSkillBinding(ctx, normalized, normalized.Revision-1); err != nil {
-		return err
-	}
-	c.mu.Lock()
-	c.bindings[key] = normalized
-	c.mu.Unlock()
-	return nil
+	return c.store.SaveSkillBinding(ctx, normalized, normalized.Revision-1)
 }
 
 func (c *Catalog) currentBindingWithoutDefinition(ctx context.Context, scope ScopeReference, deploymentID, bindingID string) (*Binding, error) {
@@ -420,18 +444,15 @@ func (c *Catalog) ListModelActions(ctx context.Context, scope ScopeReference, de
 		if definition == nil {
 			continue
 		}
-		for _, name := range binding.AllowedActions {
-			action := definition.Actions[name]
-			result = append(result, ModelAction{
-				Name: definition.ID + "." + name, Description: action.Description,
-				BindingID: binding.ID, BindingRevision: binding.Revision, DeploymentID: binding.DeploymentID,
-				SkillID: definition.ID, Version: definition.Version, Action: name,
-				InputSchema: modelVisibleInputSchemaForBinding(action.InputSchema, binding.ArgumentBindings[name]), SemanticArguments: cloneStringMap(action.SemanticArguments),
-				Risk: action.Risk, SideEffect: action.SideEffect, ExternalOperationPolicy: action.ExternalOperationPolicy,
-			})
+		for _, action := range bindingModelActions(definition, binding, nil) {
+			action.DeploymentID = binding.DeploymentID
+			result = append(result, action)
 		}
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	if err := validateBindingToolActionNames(result); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -847,46 +868,79 @@ func selectDefinitionVariant(definitions []*Definition, sourceIdentity string) (
 }
 
 func (c *Catalog) bindingsFor(ctx context.Context, scope ScopeReference, deploymentID string) ([]*Binding, error) {
+	bindings, _, err := c.deploymentBindings(ctx, scope, deploymentID)
+	return bindings, err
+}
+
+// deploymentBindings returns one deployment's bindings and the definition
+// variants of its enabled bindings, keyed by definitionKey of the binding's
+// reference. Returned bindings are shared and read-only. Stored bindings are
+// validated once per exact revision and definition variant.
+func (c *Catalog) deploymentBindings(ctx context.Context, scope ScopeReference, deploymentID string) ([]*Binding, map[string]*Definition, error) {
+	var bindings []*Binding
 	if c.store == nil {
 		c.mu.RLock()
-		defer c.mu.RUnlock()
-		result := make([]*Binding, 0)
+		bindings = make([]*Binding, 0)
 		for _, binding := range c.bindings {
 			if binding.Scope == scope && binding.DeploymentID == deploymentID {
-				result = append(result, cloneBinding(binding))
+				bindings = append(bindings, binding)
 			}
 		}
-		return result, nil
+		c.mu.RUnlock()
+	} else {
+		var err error
+		if bindings, err = c.store.ListSkillBindings(ctx, scope, deploymentID); err != nil {
+			return nil, nil, err
+		}
 	}
-	bindings, err := c.store.ListSkillBindings(ctx, scope, deploymentID)
-	if err != nil {
-		return nil, err
-	}
+	definitions := make(map[string]*Definition)
+	resolved := make(map[string]bool)
 	for _, binding := range bindings {
-		if err := validateBindingShape(binding); err != nil {
-			return nil, fmt.Errorf("stored skill binding is invalid: %w", err)
+		validatedKey, validated := "", c.store == nil
+		if !validated {
+			if binding == nil {
+				return nil, nil, fmt.Errorf("stored skill binding is invalid: %w", ErrBindingInvalid)
+			}
+			validatedKey = validatedBindingKey(binding)
+			if _, validated = c.validated.get(validatedKey); !validated {
+				if err := validateBindingShape(binding); err != nil {
+					return nil, nil, fmt.Errorf("stored skill binding is invalid: %w", err)
+				}
+			}
 		}
 		if binding.Disabled {
-			c.mu.Lock()
-			c.bindings[bindingKey(binding.Scope, binding.DeploymentID, binding.ID)] = cloneBinding(binding)
-			c.mu.Unlock()
+			if !validated {
+				c.validated.put(validatedKey, struct{}{})
+			}
 			continue
 		}
-		definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
-		if err != nil {
-			return nil, err
+		key := definitionKey(binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
+		if !resolved[key] {
+			definition, err := c.definitionFor(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
+			if err != nil {
+				return nil, nil, err
+			}
+			resolved[key] = true
+			if definition != nil {
+				definitions[key] = definition
+			}
 		}
+		if c.store == nil {
+			continue
+		}
+		definition := definitions[key]
 		if definition == nil {
-			return nil, fmt.Errorf("stored skill binding %s references a missing definition", binding.ID)
+			return nil, nil, fmt.Errorf("stored skill binding %s references a missing definition", binding.ID)
+		}
+		if validated {
+			continue
 		}
 		if err := validateBindingAgainstDefinition(binding, definition); err != nil {
-			return nil, fmt.Errorf("stored skill binding %s is invalid: %w", binding.ID, err)
+			return nil, nil, fmt.Errorf("stored skill binding %s is invalid: %w", binding.ID, err)
 		}
-		c.mu.Lock()
-		c.bindings[bindingKey(binding.Scope, binding.DeploymentID, binding.ID)] = cloneBinding(binding)
-		c.mu.Unlock()
+		c.validated.put(validatedKey, struct{}{})
 	}
-	return bindings, nil
+	return bindings, definitions, nil
 }
 
 func compileDefinitionSchemas(definition *Definition) (map[string]*compiledActionSchemas, error) {
@@ -923,7 +977,7 @@ func (c *Catalog) ValidateInput(_ context.Context, bound *BoundAction, input map
 			return fmt.Errorf("skill input field %s is outside its binding allowlist", field)
 		}
 	}
-	return nil
+	return validateBindingToolInput(bound.Definition, bound.Binding, bound.Action.Name, input)
 }
 
 func (c *Catalog) ValidateOutput(_ context.Context, bound *BoundAction, output map[string]interface{}) error {
@@ -1049,6 +1103,9 @@ func validateDefinition(definition *Definition) error {
 	}
 	if err := validateSkillConfig(definition); err != nil {
 		return fmt.Errorf("skill config is invalid: %w", err)
+	}
+	if err := validateBindingToolsSpec(definition); err != nil {
+		return fmt.Errorf("skill binding tools are invalid: %w", err)
 	}
 	if err := validateHostingRequirements(definition.Requirements); err != nil {
 		return fmt.Errorf("skill hosting requirements are invalid: %w", err)
@@ -1616,7 +1673,7 @@ func validateBindingAgainstDefinition(binding *Binding, definition *Definition) 
 			}
 		}
 	}
-	return nil
+	return validateBindingTools(binding, definition)
 }
 
 func validateBindingArgumentValue(value BindingArgumentValue, property map[string]interface{}) error {

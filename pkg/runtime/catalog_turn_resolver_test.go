@@ -223,7 +223,10 @@ func TestProjectActivatedSkillsPrefersCanonicalKernelManagementBinding(t *testin
 		},
 	}
 
-	_, actions, prepared, refs := projectActivatedSkills(activation)
+	_, actions, prepared, refs, err := projectActivatedSkills(activation)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(actions) != 1 || actions[0].BindingID != "bundled:agents" || actions[0].BindingRevision != 2 {
 		t.Fatalf("management actions = %#v", actions)
 	}
@@ -239,7 +242,10 @@ func TestProjectActivatedSkillsPreservesExplicitVersionOverChatDefaults(t *testi
 	bundled := skill.ActivatedSkill{BindingID: "bundled:builtin", SkillID: "openseal.builtin", SkillVersion: "1.5.0", Actions: []capability.ModelAction{action("bundled:builtin", "1.5.0", "read_attachment"), action("bundled:builtin", "1.5.0", "generate_image")}}
 	explicit := skill.ActivatedSkill{BindingID: "workforce:agent:openseal.builtin", SkillID: "openseal.builtin", SkillVersion: "1.4.4", Actions: []capability.ModelAction{action("workforce:agent:openseal.builtin", "1.4.4", "read_attachment")}}
 	for _, skills := range [][]skill.ActivatedSkill{{bundled, explicit}, {explicit, bundled}} {
-		_, actions, _, _ := projectActivatedSkills(&skill.ActivationSnapshot{DeploymentID: "agent", Skills: skills})
+		_, actions, _, _, err := projectActivatedSkills(&skill.ActivationSnapshot{DeploymentID: "agent", Skills: skills})
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(actions) != 2 {
 			t.Fatalf("expected explicit overlap and default-only action, got %#v", actions)
 		}
@@ -252,9 +258,10 @@ func TestProjectActivatedSkillsPreservesExplicitVersionOverChatDefaults(t *testi
 	other := explicit
 	other.BindingID = "other-explicit"
 	other.Actions = []capability.ModelAction{action(other.BindingID, "1.4.4", "read_attachment")}
-	_, actions, _, _ := projectActivatedSkills(&skill.ActivationSnapshot{DeploymentID: "agent", Skills: []skill.ActivatedSkill{explicit, other}})
-	if len(actions) != 2 {
-		t.Fatal("distinct explicit bindings must retain their authority ambiguity")
+	// Distinct explicit bindings may carry different credentials or authority;
+	// exposing one name for both is refused rather than routed to either.
+	if _, _, _, _, err := projectActivatedSkills(&skill.ActivationSnapshot{DeploymentID: "agent", Skills: []skill.ActivatedSkill{explicit, other}}); !errors.Is(err, skill.ErrBindingAmbiguous) {
+		t.Fatalf("duplicate explicit binding names were not refused: %v", err)
 	}
 }
 
