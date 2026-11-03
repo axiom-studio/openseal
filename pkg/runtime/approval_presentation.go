@@ -210,6 +210,8 @@ func approvalOutcome(status ApprovalStatus) string {
 		return "Expired"
 	case ApprovalStatusCanceled:
 		return "Canceled"
+	case ApprovalStatusSuperseded:
+		return "Replaced by your message"
 	default:
 		return ""
 	}

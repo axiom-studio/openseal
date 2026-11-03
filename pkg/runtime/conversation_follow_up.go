@@ -68,7 +68,8 @@ func externalInboxItemIsFollowUp(item *ExternalConversationInboxItem, run *Agent
 // queued, planning, running and sleeping Runs see the message on their next
 // Turn; Runs waiting for approval, an event (credential, setup, browser
 // handoff), another Agent, a dependency, or paused by the user keep waiting
-// and see the message when they resume. Terminal Runs, Runs promoted to a
+// and see the message when they resume; only a pending routine brief is
+// replaced by the message (supersedeRoutineBriefForMessage). Terminal Runs, Runs promoted to a
 // background conversation task, Runs explaining their final failure and
 // pinned Runbook Runs never absorb new messages.
 func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, conversation *Conversation, run *AgentRun) (bool, error) {
@@ -113,6 +114,14 @@ func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Co
 		for _, run := range runs {
 			for _, intervention := range runOrEmpty(run).PendingInterventions {
 				if intervention.ID == interventionID {
+					// Replay finishes a supersede interrupted after delivery.
+					superseded, err := s.supersedeRoutineBriefForMessage(ctx, run, message)
+					if err != nil {
+						return nil, err
+					}
+					if superseded != nil {
+						run = superseded.Run
+					}
 					return &AgentRunCommandResult{Run: run}, nil
 				}
 			}
@@ -173,6 +182,15 @@ func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Co
 		}
 		if err != nil {
 			return nil, err
+		}
+		// A message that answers a pending routine brief replaces it: the Run
+		// resumes with the message and proposes the revised brief.
+		superseded, err := s.supersedeRoutineBriefForMessage(ctx, run, message)
+		if err != nil {
+			return nil, err
+		}
+		if superseded != nil {
+			run = superseded.Run
 		}
 		return &AgentRunCommandResult{Run: run, Event: event}, nil
 	}

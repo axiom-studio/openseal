@@ -230,6 +230,10 @@ const (
 	ApprovalStatusChangesRequested ApprovalStatus = "changes_requested"
 	ApprovalStatusExpired          ApprovalStatus = "expired"
 	ApprovalStatusCanceled         ApprovalStatus = "canceled"
+	// ApprovalStatusSuperseded closes a routine brief the person answered
+	// with a chat message instead of a decision. Like changes_requested it
+	// resumes the Run, which revises the proposal from that message.
+	ApprovalStatusSuperseded ApprovalStatus = "superseded"
 )
 
 // ApprovalDecision is the reviewer's explicit decision on one immutable
@@ -460,5 +464,12 @@ func validActionCallStatus(status ActionCallStatus) bool {
 
 func validApprovalStatus(status ApprovalStatus) bool {
 	return status == ApprovalStatusPending || status == ApprovalStatusApproved || status == ApprovalStatusRejected ||
-		status == ApprovalStatusChangesRequested || status == ApprovalStatusExpired || status == ApprovalStatusCanceled
+		status == ApprovalStatusChangesRequested || status == ApprovalStatusExpired || status == ApprovalStatusCanceled ||
+		status == ApprovalStatusSuperseded
+}
+
+// approvalRevisesProposal reports a decision that closes the proposal and
+// asks the Run for a revised one rather than ending the attempt.
+func approvalRevisesProposal(status string) bool {
+	return status == string(ApprovalStatusChangesRequested) || status == string(ApprovalStatusSuperseded)
 }

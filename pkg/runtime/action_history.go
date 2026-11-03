@@ -360,7 +360,7 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 		}
 	} else if call.Status == ActionCallStatusSucceeded {
 		result = checkpointToolFeedbackSuccess(result, call)
-	} else if call.Status == ActionCallStatusDenied && fmt.Sprint(metadata["approvalStatus"]) != string(ApprovalStatusChangesRequested) {
+	} else if call.Status == ActionCallStatusDenied && !approvalRevisesProposal(fmt.Sprint(metadata["approvalStatus"])) && !declinedRoutineBrief(call.SkillID, call.Action, fmt.Sprint(metadata["approvalStatus"])) {
 		result = checkpointToolFeedbackDenied(result, call)
 	}
 	return result

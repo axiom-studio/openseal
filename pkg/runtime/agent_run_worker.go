@@ -1135,8 +1135,11 @@ func (p *AgentRunWorkerPool) resumeReplayedTurnAction(ctx context.Context, worke
 					metadata["reviewerGuidance"] = approval.DecisionReason
 					metadata["reviewedProposalRevision"] = approval.Revision - 1
 				}
+				if approval.Status == ApprovalStatusSuperseded {
+					metadata["reviewedProposalRevision"] = approval.Revision - 1
+				}
 			} else if last, ok := run.Checkpoint["lastAction"].(map[string]interface{}); ok && last["actionCallId"] == call.ID && last["approvalId"] == call.ApprovalID {
-				for _, key := range []string{"approvalStatus", "reviewerGuidance", "reviewedProposalRevision"} {
+				for _, key := range []string{"approvalStatus", "reviewerGuidance", "reviewedProposalRevision", "supersededByMessageId"} {
 					if value, ok := last[key]; ok {
 						metadata[key] = value
 					}

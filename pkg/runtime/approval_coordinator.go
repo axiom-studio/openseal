@@ -49,7 +49,15 @@ const (
 	approvalResolutionPrincipal approvalResolutionKind = iota
 	approvalResolutionTimeout
 	approvalResolutionMode
+	approvalResolutionSuperseded
 )
+
+// ApprovalSupersededPrincipal is the kernel principal recorded when a chat
+// message from the person replaces a pending routine brief.
+var ApprovalSupersededPrincipal = ApprovalPrincipal{Type: "system", ID: "kernel"}
+
+// ApprovalSupersededReason is the decision reason of a superseded brief.
+const ApprovalSupersededReason = "The person replied instead of approving; revise the routine from their message."
 
 // ApprovalModePrincipal is the system principal recorded when a conversation
 // approval mode change resolves a pending approval.
@@ -77,6 +85,23 @@ func (c *ApprovalCoordinator) ResolveByApprovalMode(ctx context.Context, scope S
 		DecisionID: "approval-mode:" + approvalID, Decision: ApprovalDecisionApprove, Principal: ApprovalModePrincipal,
 		Reason: "approval mode " + string(mode), CorrelationID: correlationID,
 	}, approvalResolutionMode)
+}
+
+// ResolveSupersededByMessage closes a pending approval because the person
+// answered it with a chat message. The Run resumes with that message as a
+// follow-up and revises the proposal. The decision id is stable per approval,
+// so repeated or concurrent messages converge on one decision; a racing human
+// decision wins through the revision check. The caller proves the approval is
+// one a message may replace.
+func (c *ApprovalCoordinator) ResolveSupersededByMessage(ctx context.Context, scope Scope, approvalID string, expectedRevision int64, messageID string) (*ApprovalResolutionResult, error) {
+	if strings.TrimSpace(messageID) == "" {
+		return nil, errors.New("superseding message is required")
+	}
+	return c.resolve(ctx, ResolveApprovalRequest{
+		Scope: scope, ApprovalID: approvalID, ExpectedRevision: expectedRevision,
+		DecisionID: "superseded:" + approvalID, Principal: ApprovalSupersededPrincipal,
+		Reason: ApprovalSupersededReason, CorrelationID: messageID,
+	}, approvalResolutionSuperseded)
 }
 
 // ResolveTimeout applies only the timeout rule durably captured on the
@@ -127,7 +152,7 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	}
 	now := c.now().UTC()
 	expired := !now.Before(approval.ExpiresAt)
-	if !timeout && !expired {
+	if !timeout && !expired && kind != approvalResolutionSuperseded {
 		if err := req.Decision.Validate(); err != nil {
 			return nil, err
 		}
@@ -138,7 +163,7 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	if timeout && !expired {
 		return nil, errors.New("approval timeout deadline has not elapsed")
 	}
-	if kind == approvalResolutionMode && expired {
+	if (kind == approvalResolutionMode || kind == approvalResolutionSuperseded) && expired {
 		return nil, ErrApprovalExpired
 	}
 	runWaiting := run.Status == AgentRunStatusWaitingForApproval && run.WakeCondition != nil &&
@@ -174,12 +199,15 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 				return nil, fmt.Errorf("authorize approval: %w", err)
 			}
 		}
-		switch req.Decision {
-		case ApprovalDecisionApprove:
+		switch {
+		case kind == approvalResolutionSuperseded:
+			status = ApprovalStatusSuperseded
+			eventType = "approval.superseded"
+		case req.Decision == ApprovalDecisionApprove:
 			status = ApprovalStatusApproved
 			eventType = "approval.approved"
 			callStatus = ActionCallStatusReady
-		case ApprovalDecisionRequestChanges:
+		case req.Decision == ApprovalDecisionRequestChanges:
 			status = ApprovalStatusChangesRequested
 			eventType = "approval.changes_requested"
 		}
@@ -229,6 +257,10 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 			metadata := map[string]interface{}{"approvalId": approval.ID, "approvalStatus": status}
 			if status == ApprovalStatusChangesRequested {
 				metadata["reviewerGuidance"] = strings.TrimSpace(req.Reason)
+				metadata["reviewedProposalRevision"] = approval.Revision
+			}
+			if status == ApprovalStatusSuperseded {
+				metadata["supersededByMessageId"] = req.CorrelationID
 				metadata["reviewedProposalRevision"] = approval.Revision
 			}
 			updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, metadata)

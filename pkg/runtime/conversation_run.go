@@ -71,6 +71,7 @@ type ConversationRunReconcileResult struct {
 type ConversationRunScheduler struct {
 	conversations  *ConversationService
 	runs           *RunCommandService
+	approvals      *ApprovalCoordinator
 	config         ConversationRunSchedulerConfig
 	sessionContext ConversationSessionContextResolver
 }
@@ -94,6 +95,7 @@ func NewConversationRunScheduler(
 	return &ConversationRunScheduler{
 		conversations: NewConversationService(conversationStore),
 		runs:          NewRunCommandService(runStore),
+		approvals:     NewApprovalCoordinator(runStore, runStore, nil),
 		config:        normalized,
 	}, nil
 }
@@ -2421,10 +2423,11 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		actionDescription = "Agent behavior"
 	}
 	disposition := strings.TrimSpace(fmt.Sprint(last["approvalStatus"]))
-	if disposition == string(ApprovalStatusChangesRequested) {
+	if approvalRevisesProposal(disposition) {
 		return nil, false
 	}
 	content := actionDescription + " was not applied because policy denied the action."
+	declinedBrief := terminalStatus == string(ActionCallStatusDenied) && declinedRoutineBrief(fmt.Sprint(last["skillId"]), operation, disposition)
 	if terminalStatus == governedActionProposalFailedStatus {
 		content = actionDescription + " could not be proposed."
 		if reason := strings.TrimSpace(fmt.Sprint(last["error"])); reason != "" {
@@ -2438,6 +2441,8 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 		if strings.Contains(strings.ToLower(strings.TrimSpace(fmt.Sprint(last["error"]))), "revision conflict") {
 			content = actionDescription + " was not applied because the " + label + " changed while approval was pending. Review the latest state and try again."
 		}
+	} else if declinedBrief {
+		content = DeclinedRoutineBriefReply
 	} else if disposition != "" {
 		content = actionDescription + " was not applied because approval was " + strings.ReplaceAll(disposition, "_", " ") + "."
 	}

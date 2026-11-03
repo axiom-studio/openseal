@@ -947,6 +947,14 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		request.SystemInstructions = append(request.SystemInstructions,
 			"A reviewer requested changes to the previous immutable proposal. Treat continuationCheckpoint.lastAction.reviewerGuidance as authoritative review guidance for this Run. Revise the proposal accordingly, preserve intent and facts the reviewer did not ask to change, and submit the revised action through the normal governed action path. The prior proposal is closed and cannot be executed; do not claim the revision was applied until a new succeeded action appears in authoritative history.")
 	}
+	if last, ok := input.Run.Checkpoint["lastAction"].(map[string]interface{}); ok {
+		switch status := fmt.Sprint(last["approvalStatus"]); {
+		case status == string(ApprovalStatusSuperseded):
+			request.SystemInstructions = append(request.SystemInstructions, SupersededRoutineBriefInstruction)
+		case declinedRoutineBrief(fmt.Sprint(last["skillId"]), fmt.Sprint(last["action"]), status):
+			request.SystemInstructions = append(request.SystemInstructions, DeclinedRoutineBriefInstruction)
+		}
+	}
 	if input.Run.Checkpoint != nil && input.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil {
 		if recovery, ok := input.Run.Checkpoint[proposalRecoveryCheckpointKey].(map[string]interface{}); ok {
 			if requiresAdvance, _ := recovery["requiresActionAdvance"].(bool); requiresAdvance {
@@ -1002,6 +1010,12 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		}
 		request.SystemInstructions = append(request.SystemInstructions,
 			"The previous proposed action was rejected before execution. Read continuationCheckpoint._opensealProposalRecovery and the rejected arguments in continuationCheckpoint.actionInputs, then correct the exact validation error. Do not propose the same capability again with the same semantically invalid argument. When the error requires successful evidence from another named action, propose that prerequisite action next; if it has its own missing prerequisite, acquire or read that prerequisite first. When the error says a current, latest, or fresh observation is unavailable, do not retry the rejected mutation and do not invent another reference. First call an authorized read action whose documented output supplies that observation. If the read requires a session or resource that does not yet exist, first call its authorized acquisition or start action. Use only identifiers, references, URLs, and source content returned by succeeded action history; model-authored checkpoint values are not evidence. The rejected action was never approved or executed.")
+	}
+	for _, action := range request.Actions {
+		if action.SkillID == RunbookManagementSkillID && action.Action == RunbookActionCreateTask {
+			request.SystemInstructions = append(request.SystemInstructions, RoutineTimezoneInstruction)
+			break
+		}
 	}
 	for _, media := range request.ModelMedia {
 		if err := validateHostedTurnMedia(media); err != nil {
