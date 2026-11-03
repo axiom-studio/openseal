@@ -34,6 +34,10 @@ type ScheduledAgentTask struct {
 	// AppID is the app this routine keeps up to date. It belongs to the same
 	// conversation and owner; each occurrence is told to save the app's data.
 	AppID string `json:"appId,omitempty"`
+	// Grants are the actions the user approved in the routine's brief; its
+	// runs perform them without asking. They come only from the approved
+	// create_task arguments and can only be cleared afterwards.
+	Grants []RoutineGrant `json:"grants,omitempty"`
 }
 
 // scheduledTaskAppID matches host-assigned app identifiers.
@@ -46,6 +50,9 @@ func (t *ScheduledAgentTask) Validate() error {
 	if t.AppID != "" && !scheduledTaskAppID.MatchString(t.AppID) {
 		return errors.New("scheduled task app must be an app ID from this chat")
 	}
+	if _, err := normalizeRoutineGrants(t.Grants, false); err != nil {
+		return err
+	}
 	return authoring.ValidateAuthoringPrompt(t.Goal)
 }
 func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
@@ -53,6 +60,7 @@ func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
 		return nil
 	}
 	copy := *t
+	copy.Grants = cloneRoutineGrants(t.Grants)
 	return &copy
 }
 func activationGoal(a *RunbookActivation, o *Objective) string {
@@ -126,8 +134,39 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 	return c, "", nil
 }
 
-// scheduledTaskCreateAction adds an optional app to keep up to date.
+// scheduledTaskCreateAction adds the routine brief the user approves before
+// the routine exists. Creating a routine is always reviewed, in every
+// approval mode, so the brief is shown every time.
 func scheduledTaskCreateAction() skill.Action {
+	action := scheduledTaskCreateActionLegacy140()
+	action.Review = skill.ActionReviewAlways
+	action.Description += " The user always approves a brief before the routine is created: always pass brief with a one-sentence summary of what it does and when, deliverTo naming where results go, and grants listing only the actions its runs need to perform without asking (for example web search or page reads and an email to the user). Runs ask in this chat before any other side effect, and actions that always ask, such as paying, cannot be granted."
+	action.InputSchema["properties"].(map[string]interface{})["brief"] = map[string]interface{}{
+		"type": "object", "additionalProperties": false, "required": []interface{}{"summary", "grants"},
+		"description": "Required. The brief the user approves before the routine is created.",
+		"properties": map[string]interface{}{
+			"summary":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineBriefSummary, "description": "One plain sentence: what the routine does and when."},
+			"deliverTo": map[string]interface{}{"type": "string", "maxLength": maximumRoutineDeliverTo, "description": "Where results go, in plain words, for example \"kev@example.com, from your Gmail\" or \"this chat\"."},
+			"grants": map[string]interface{}{
+				"type": "array", "maxItems": maximumRoutineGrants,
+				"description": "The fewest actions each run must perform without asking. Use exact action names from your tools (skillId.action). List what it reads (for example web search) and each sending action; for an email to the user set toOwnerOnly.",
+				"items": map[string]interface{}{
+					"type": "object", "additionalProperties": false, "required": []interface{}{"action"},
+					"properties": map[string]interface{}{
+						"action":      map[string]interface{}{"type": "string", "minLength": 3, "maxLength": 384, "description": "Exact action name, skillId.action."},
+						"label":       map[string]interface{}{"type": "string", "maxLength": maximumRoutineGrantLabel, "description": "Plain words for the user, for example \"Email you the summary\"."},
+						"toOwnerOnly": map[string]interface{}{"type": "boolean", "description": "For a sending action: only sends whose every recipient is the user's own address run without asking."},
+					},
+				},
+			},
+		},
+	}
+	return action
+}
+
+// scheduledTaskCreateActionLegacy140 is the published 1.4.0 contract: an
+// optional app to keep up to date.
+func scheduledTaskCreateActionLegacy140() skill.Action {
 	action := scheduledTaskCreateActionLegacy132()
 	action.Description += " To keep an app's data fresh, pass its appId; each occurrence then saves results to that app with save_app_data."
 	action.InputSchema["properties"].(map[string]interface{})["appId"] = map[string]interface{}{
@@ -163,12 +202,13 @@ func scheduledTaskResultSchema(operation string) map[string]interface{} {
 }
 
 type scheduledTaskCreateArguments struct {
-	Title              string `json:"title"`
-	Goal               string `json:"goal"`
-	Cron               string `json:"cron"`
-	Timezone           string `json:"timezone"`
-	MaximumOccurrences int64  `json:"maximumOccurrences,omitempty"`
-	AppID              string `json:"appId,omitempty"`
+	Title              string        `json:"title"`
+	Goal               string        `json:"goal"`
+	Cron               string        `json:"cron"`
+	Timezone           string        `json:"timezone"`
+	MaximumOccurrences int64         `json:"maximumOccurrences,omitempty"`
+	AppID              string        `json:"appId,omitempty"`
+	Brief              *RoutineBrief `json:"brief,omitempty"`
 }
 type scheduledTaskStatusArguments struct {
 	ActivationID     string                  `json:"activationId"`
@@ -187,7 +227,7 @@ func decodeScheduledTaskArguments(arguments map[string]interface{}, target inter
 	return d.Decode(target)
 }
 
-func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, run *AgentRun, args map[string]interface{}) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
+func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, run *AgentRun, args map[string]interface{}, briefed bool) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
 	var a scheduledTaskCreateArguments
 	if err := decodeScheduledTaskArguments(args, &a); err != nil {
 		return nil, nil, nil, err
@@ -205,6 +245,17 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, r
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	messageID, _ := run.Context[conversationRunContextTriggerID].(string)
 	task := &ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID)}
+	// The current contract always carries the approved brief. Calls accepted
+	// under an earlier published contract drain without one (and no grants).
+	if briefed {
+		brief, err := normalizeRoutineBrief(a.Brief, false)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		a.Brief, task.Grants = brief, cloneRoutineGrants(brief.Grants)
+	} else if a.Brief != nil {
+		return nil, nil, nil, errors.New("this routine contract has no brief")
+	}
 	if _, err := scheduledTaskConversation(ctx, store, run.Scope, run.Owner, task); err != nil {
 		return nil, nil, nil, err
 	}
@@ -251,11 +302,15 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	}
 	switch input.Bound.Action.Name {
 	case RunbookActionCreateTask:
-		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, input.Run, input.Arguments)
+		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, input.Run, input.Arguments, routineBriefContract(input.Bound))
 		if err != nil {
 			return nil, err
 		}
-		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionCreateTask, "title": args.Title, "goal": task.Goal, "schedule": schedule, "conversationId": task.ConversationID}, nil
+		preview := map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionCreateTask, "title": args.Title, "goal": task.Goal, "schedule": schedule, "conversationId": task.ConversationID}
+		if args.Brief != nil {
+			preview["brief"] = routineBriefPreview(args.Brief)
+		}
+		return preview, nil
 	case RunbookActionList:
 		return nil, nil
 	case RunbookActionSetStatus:
@@ -296,7 +351,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		}
 		return result, nil
 	case RunbookActionCreateTask:
-		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, run, input.Arguments)
+		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, run, input.Arguments, routineBriefContract(input.Bound))
 		if err != nil {
 			return nil, err
 		}

@@ -32,6 +32,11 @@ type ActionPolicyInput struct {
 	// ApprovalMode is that conversation's approval mode. It is empty when the
 	// Run acts for no conversation, which policies treat as manual.
 	ApprovalMode ConversationApprovalMode
+	// RoutineGrant is the grant from the routine brief the user approved that
+	// covers this exact action (including its owner-only recipients), when
+	// the Run is an occurrence of that routine. Policies allow a covered
+	// action in every approval mode; a review: always action is never covered.
+	RoutineGrant *RoutineGrant
 }
 
 type ActionPolicyDecision struct {
@@ -112,6 +117,8 @@ type ActionCoordinator struct {
 	portfolio     PortfolioStore
 	actions       ActionStore
 	conversations conversationReader
+	routines      routineGrantStore
+	owners        RoutineOwnerAddressResolver
 	catalog       ActionCatalog
 	policy        ActionPolicyEvaluator
 	validators    []ActionProposalValidator
@@ -130,7 +137,19 @@ func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog
 	} else if conversations, ok := actions.(conversationReader); ok {
 		coordinator.conversations = conversations
 	}
+	if routines, ok := portfolio.(routineGrantStore); ok {
+		coordinator.routines = routines
+	} else if routines, ok := actions.(routineGrantStore); ok {
+		coordinator.routines = routines
+	}
 	return coordinator
+}
+
+// SetRoutineOwnerAddresses lets owner-only routine grants check recipients.
+func (c *ActionCoordinator) SetRoutineOwnerAddresses(resolver RoutineOwnerAddressResolver) {
+	if c != nil {
+		c.owners = resolver
+	}
 }
 
 func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionRequest) (*ActionProposalResult, error) {
@@ -251,9 +270,13 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if err != nil {
 		return nil, fmt.Errorf("resolve conversation approval mode: %w", err)
 	}
+	routineGrant, err := resolveRoutineGrant(ctx, c.portfolio, c.routines, c.owners, run, bound, arguments)
+	if err != nil {
+		return nil, fmt.Errorf("resolve routine grant: %w", err)
+	}
 	decision, err := c.policy.EvaluateAction(ctx, ActionPolicyInput{
 		Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), ExternalOperation: req.ExternalOperation, Actor: req.Actor, Summary: req.Summary,
-		ConversationID: conversationID, ApprovalMode: approvalMode,
+		ConversationID: conversationID, ApprovalMode: approvalMode, RoutineGrant: routineGrant,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("evaluate action policy: %w", err)

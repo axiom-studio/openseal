@@ -15,7 +15,7 @@ import (
 
 const (
 	RunbookManagementSkillID      = "openseal.runbooks"
-	RunbookManagementSkillVersion = "1.4.0"
+	RunbookManagementSkillVersion = "1.5.0"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -27,6 +27,13 @@ const (
 // the model cannot manufacture a definition, execution policy, or authority.
 func RunbookManagementSkill() *skill.Definition {
 	return runbookManagementSkill(RunbookManagementSkillVersion, workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateAction())
+}
+
+// RunbookManagementSkillLegacy140 preserves the immutable published 1.4.0
+// contract (routines without a brief) so accepted calls drain while bindings
+// upgrade.
+func RunbookManagementSkillLegacy140() *skill.Definition {
+	return runbookManagementSkill("1.4.0", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy140())
 }
 
 // RunbookManagementSkillLegacy132 preserves the immutable published 1.3.2
@@ -149,6 +156,22 @@ type RunbookActionValidator struct {
 	store           runbookActionStore
 	workflowCatalog WorkflowSourceCatalog
 	workflowTeams   WorkflowTeamCatalog
+	grantCatalog    RoutineGrantCatalog
+	ownerAddresses  RoutineOwnerAddressResolver
+}
+
+// SetRoutineGrantCatalog lets routine briefs name the Agent's bound actions.
+func (v *RunbookActionValidator) SetRoutineGrantCatalog(catalog RoutineGrantCatalog) {
+	if v != nil {
+		v.grantCatalog = catalog
+	}
+}
+
+// SetRoutineOwnerAddresses lets routine briefs offer owner-only sends.
+func (v *RunbookActionValidator) SetRoutineOwnerAddresses(resolver RoutineOwnerAddressResolver) {
+	if v != nil {
+		v.ownerAddresses = resolver
+	}
 }
 
 func (v *RunbookActionValidator) SetWorkflowCatalog(catalog WorkflowSourceCatalog) {
@@ -175,6 +198,12 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		return nil, false, nil
 	}
 	arguments := cloneMap(input.Arguments)
+	if input.Bound.Action.Name == RunbookActionCreateTask && routineBriefContract(input.Bound) {
+		if err := resolveRoutineBriefArguments(ctx, v.grantCatalog, v.ownerAddresses, input.Run, arguments); err != nil {
+			return nil, true, err
+		}
+		return arguments, true, nil
+	}
 	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList || isWorkflowActionName(input.Bound.Action.Name) {
 		return arguments, true, nil
 	}
@@ -515,6 +544,6 @@ func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, r
 
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.3.2" || bound.Definition.Version == "1.3.1" || bound.Definition.Version == "1.3.0" || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.4.0" || bound.Definition.Version == "1.3.2" || bound.Definition.Version == "1.3.1" || bound.Definition.Version == "1.3.0" || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
 		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || isWorkflowActionName(bound.Action.Name))
 }

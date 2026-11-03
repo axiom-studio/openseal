@@ -13,6 +13,7 @@ import (
 func scheduledTaskUpgradeFixture(t *testing.T, store KernelStore, previous, target *skill.Definition) (*AgentRun, *skill.Catalog, *skill.Binding, map[string]interface{}) {
 	t.Helper()
 	run, _, bound, args := scheduledTaskFixture(t, store)
+	delete(args, "brief") // published contracts before 1.5.0 have no brief
 	catalog := skill.NewCatalogWithStore(store.(skill.CatalogStore))
 	for _, definition := range []*skill.Definition{previous, target} {
 		if err := catalog.Register(t.Context(), definition); err != nil {

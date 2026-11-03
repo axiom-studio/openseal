@@ -63,6 +63,9 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 		t.Fatal(err)
 	}
 	args := map[string]interface{}{"title": "Forecast update", "goal": "Use the browser to read the current public forecast and summarize it with its source.", "cron": "0 */30 * * * *", "timezone": "Asia/Kolkata", "maximumOccurrences": float64(2)}
+	if def.Version == RunbookManagementSkillVersion {
+		args["brief"] = map[string]interface{}{"summary": "Reads the public forecast every thirty minutes and posts a summary here.", "grants": []interface{}{}}
+	}
 	return run, catalog, bound, args
 }
 func dispatchTaskForTest(t *testing.T, store KernelStore, run *AgentRun, bound *skill.BoundAction, args map[string]interface{}, callID string) map[string]interface{} {

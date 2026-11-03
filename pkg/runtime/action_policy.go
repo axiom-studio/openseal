@@ -35,6 +35,19 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	if !action.AlwaysReview() && action.Risk == skill.RiskLevelRead && (action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only action"}, nil
 	}
+	// Creating a routine always shows its brief, in every approval mode.
+	if input.Bound.Definition.ID == RunbookManagementSkillID && action.Name == RunbookActionCreateTask {
+		decision, err := p.requireApproval("a routine's brief is always approved before it is created")
+		if decision.ApprovalTimeout == ApprovalTimeoutApprove {
+			decision.ApprovalTimeout = ApprovalTimeoutExpire
+		}
+		return decision, err
+	}
+	// A routine run performs what the user approved in its brief without
+	// asking, whatever the conversation's mode. review: always never waives.
+	if input.RoutineGrant != nil && !action.AlwaysReview() {
+		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "approved in the routine's brief: " + input.RoutineGrant.Label}, nil
+	}
 	// The conversation's approval mode is the user's review boundary: auto
 	// allows read and write risk work, skip allows everything, and manual (or
 	// a Run acting for no conversation) keeps every side effect under review.
@@ -45,16 +58,20 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 			Reason:      fmt.Sprintf("approval mode %s allows %s risk action with %s side effects", input.ApprovalMode, action.Risk, action.SideEffect),
 		}, nil
 	}
+	reason := fmt.Sprintf("%s risk action with %s side effects", action.Risk, action.SideEffect)
+	if action.AlwaysReview() {
+		reason = "action always requires explicit review"
+	}
+	return p.requireApproval(reason)
+}
+
+func (p *DefaultActionPolicy) requireApproval(reason string) (ActionPolicyDecision, error) {
 	if p == nil || len(p.Approvers) == 0 {
 		return ActionPolicyDecision{}, errors.New("side-effecting actions require configured approvers")
 	}
 	ttl := p.ApprovalTTL
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
-	}
-	reason := fmt.Sprintf("%s risk action with %s side effects", action.Risk, action.SideEffect)
-	if action.AlwaysReview() {
-		reason = "action always requires explicit review"
 	}
 	return ActionPolicyDecision{
 		Disposition:       ActionDispositionRequireApproval,

@@ -359,6 +359,10 @@ type (
 	ObjectiveExecutionPolicy             = runtime.ObjectiveExecutionPolicy
 	ObjectiveStatus                      = runtime.ObjectiveStatus
 	ScheduledAgentTask                   = runtime.ScheduledAgentTask
+	RoutineGrant                         = runtime.RoutineGrant
+	RoutineBrief                         = runtime.RoutineBrief
+	RoutineOwnerAddressResolver          = runtime.RoutineOwnerAddressResolver
+	RevokeRoutineGrantsRequest           = runtime.RevokeRoutineGrantsRequest
 	RunbookActivation                    = runtime.RunbookActivation
 	RunbookDetail                        = runtime.RunbookDetail
 	RunbookExecutionAudit                = runtime.RunbookExecutionAudit
@@ -1619,6 +1623,7 @@ var (
 	NewRunActionValidator                  = runtime.NewRunActionValidator
 	NewRunActionDispatcher                 = runtime.NewRunActionDispatcher
 	RunbookManagementSkill                 = runtime.RunbookManagementSkill
+	RunbookManagementSkillLegacy140        = runtime.RunbookManagementSkillLegacy140
 	RunbookManagementSkillLegacy132        = runtime.RunbookManagementSkillLegacy132
 	RunbookManagementSkillLegacy131        = runtime.RunbookManagementSkillLegacy131
 	RunbookManagementSkillLegacy130        = runtime.RunbookManagementSkillLegacy130
@@ -1722,6 +1727,7 @@ var (
 	ErrObjectiveIdempotency                 = runtime.ErrObjectiveIdempotency
 	ErrInvalidObjectiveTransition           = runtime.ErrInvalidObjectiveTransition
 	ErrRunbookActivationNotFound            = runtime.ErrRunbookActivationNotFound
+	ErrRoutineGrantsNotOwner                = runtime.ErrRoutineGrantsNotOwner
 	ErrRunbookDefinitionNotFound            = runtime.ErrRunbookDefinitionNotFound
 	ErrRunbookActivationInactive            = runtime.ErrRunbookActivationInactive
 	ErrRunbookActivationRevision            = runtime.ErrRunbookActivationRevision
@@ -2596,6 +2602,7 @@ type Engine struct {
 	artifacts                     *runtime.ArtifactCatalog
 	runbookAudits                 *runtime.RunbookExecutionAuditService
 	actionPolicy                  runtime.ActionPolicyEvaluator
+	routineOwnerAddresses         runtime.RoutineOwnerAddressResolver
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
 	runbookManagementActions      bool
@@ -3446,6 +3453,25 @@ func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
 	}
 }
 
+// WithRoutineOwnerAddresses lets routine briefs grant sends limited to the
+// routine owner's own verified email addresses. Without it, owner-only grants
+// are neither offered nor applied.
+func WithRoutineOwnerAddresses(resolver runtime.RoutineOwnerAddressResolver) Option {
+	return func(e *Engine) error {
+		if resolver == nil {
+			return fmt.Errorf("routine owner address resolver is required")
+		}
+		e.routineOwnerAddresses = resolver
+		return nil
+	}
+}
+
+// RevokeRoutineGrants clears what a routine may do without asking. Only the
+// user who asked for the routine may revoke; it is idempotent.
+func (e *Engine) RevokeRoutineGrants(ctx context.Context, scope runtime.Scope, activationID string, req runtime.RevokeRoutineGrantsRequest) (*runtime.RunbookActivation, error) {
+	return runtime.NewRunbookActivationService(e.store).RevokeGrants(ctx, scope, activationID, req)
+}
+
 // WithActionProposalValidators adds deterministic, kernel-owned validation to
 // the governed action proposal path. Validators run before policy evaluation
 // and before an ApprovalCheckpoint is persisted.
@@ -3587,7 +3613,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if !e.runbookManagementActions {
 		return nil
 	}
-	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkillLegacy131(), runtime.RunbookManagementSkillLegacy132(), runtime.RunbookManagementSkill()} {
+	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkillLegacy131(), runtime.RunbookManagementSkillLegacy132(), runtime.RunbookManagementSkillLegacy140(), runtime.RunbookManagementSkill()} {
 		if err := e.skills.Register(context.Background(), definition); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 			return err
 		}
@@ -3605,6 +3631,8 @@ func (e *Engine) configureRunbookManagementActions() error {
 	}
 	validator.SetWorkflowCatalog(e.skills)
 	validator.SetWorkflowTeams(e.teams)
+	validator.SetRoutineGrantCatalog(e.skills)
+	validator.SetRoutineOwnerAddresses(e.routineOwnerAddresses)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionPoolSpecs[index].dispatcher)
@@ -3828,6 +3856,7 @@ func WithApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) Option {
 
 func (e *Engine) rebuildGovernance() {
 	e.actions = runtime.NewActionCoordinator(e.store, e.store, e.skills, e.actionPolicy, e.actionValidators...)
+	e.actions.SetRoutineOwnerAddresses(e.routineOwnerAddresses)
 	e.approvals = runtime.NewApprovalCoordinator(e.store, e.store, e.approvalAuth)
 }
 
