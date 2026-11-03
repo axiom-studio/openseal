@@ -41,9 +41,15 @@ An upgrade that requires review before it can be applied is refused with `428 Pr
 
 A pending request parks the Run with wake condition `credential_request`. The host verifies that a matching credential was saved after the request (or that the user dismissed the card), then calls `ResolveCredentialRequest`, which resumes the Run with guidance to retry the blocked step. When the Run has already ended, the result reports `continued: false` and the host starts a new reply. Requests appear on conversation change sets as `credentialRequests`.
 
+### Connecting an app from a conversation
+
+`find_apps` and `request_connection` let every Agent connect a remote MCP server (a connected app) without leaving the chat. The host supplies the catalog with `Engine.SetAppCatalog`. `find_apps {query, limit}` lists catalog entries with their sign-in kind and whether a connection the Run may use already covers them (then with their `mcp.<slug>.*` tool names). `request_connection {app}` takes a catalog slug or `{"address": "https://..."}`. When the app is already connected for the Run it returns the tools instead of a card. Otherwise it saves a Skill setup request of kind `connect_app` (target `openseal.mcp`, with an `app` description) and parks the Run with wake condition `connect_app`. One pending card per app per conversation is reused.
+
+The host calls `ResolveConnectAppRequest` (or `ReconcileConnectAppRequests` after a connection becomes active). Resolution requires the host binding provider, asked for the requesting Run, to supply a connection for that app, and records its binding as the resolution. Resolving or dismissing resumes the Run with guidance. `continued: false` means the Run already ended and the host starts a new reply.
+
 ### Interaction requests never end a Run
 
-When `request_setup` or `request_credential` cannot create its card, the action still succeeds with a `refused` result whose message the model explains to the user. A failed interaction request is never a terminal action failure.
+When `request_setup`, `request_credential` or `request_connection` cannot create its card, the action still succeeds with a `refused` result whose message the model explains to the user. A failed interaction request is never a terminal action failure.
 
 ### Setup from a conversation
 

@@ -298,7 +298,7 @@ func (e *interactionRequestRefusal) Error() string { return e.message }
 func refuseInteraction(message string) error { return &interactionRequestRefusal{message: message} }
 
 func isInteractionRequestAction(name string) bool {
-	return name == SkillActionRequestSetup || name == SkillActionRequestCredential
+	return name == SkillActionRequestSetup || name == SkillActionRequestCredential || name == SkillActionRequestConnection
 }
 
 // interactionRequestRefusalResult turns any failure to create an in-chat

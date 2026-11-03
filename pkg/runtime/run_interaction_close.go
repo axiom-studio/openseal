@@ -40,7 +40,7 @@ func closeTerminalRunInteractionRequests(ctx context.Context, store ActionStore,
 		switch {
 		case call.Action == SkillActionRequestCredential && credentials != nil:
 			errs = append(errs, dismissRunCredentialRequest(ctx, credentials, run, call))
-		case call.Action == SkillActionRequestSetup && closeSetups:
+		case (call.Action == SkillActionRequestSetup || call.Action == SkillActionRequestConnection) && closeSetups:
 			errs = append(errs, dismissRunSkillSetupRequest(ctx, setups, run, call))
 		}
 	}

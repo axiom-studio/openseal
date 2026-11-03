@@ -2615,6 +2615,7 @@ type Engine struct {
 	teamManagementActions         bool
 	skillManagementActions        bool
 	skillDiscovery                skill.DiscoveryProvider
+	appCatalog                    *runtime.AppCatalogRef
 	approvalAuth                  runtime.ApprovalAuthorizer
 	clawHub                       *clawhub.InstallManager
 	clawHubPreview                *clawhub.PreviewManager
@@ -3561,11 +3562,15 @@ func (e *Engine) configureSkillManagementActions() error {
 		return err
 	}
 	e.actionValidators = append(e.actionValidators, validator)
+	if e.appCatalog == nil {
+		e.appCatalog = &runtime.AppCatalogRef{}
+	}
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewSkillBindingActionDispatcher(e.store, e.skills, e.actionPoolSpecs[index].dispatcher, optionalSkillDiscovery(e.skillDiscovery)...)
 		if dispatchErr != nil {
 			return dispatchErr
 		}
+		dispatcher.UseAppCatalog(e.appCatalog)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3573,6 +3578,7 @@ func (e *Engine) configureSkillManagementActions() error {
 		if dispatchErr != nil {
 			return dispatchErr
 		}
+		dispatcher.UseAppCatalog(e.appCatalog)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil

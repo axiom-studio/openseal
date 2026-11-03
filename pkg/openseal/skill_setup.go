@@ -104,7 +104,8 @@ func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope runtime
 const skillSetupReconciliationActor = "system:binding-reconciliation"
 
 func skillSetupReconcilable(request *runtime.SkillSetupRequest) bool {
-	return request != nil && request.Status == "pending" && request.Phase != runtime.SkillSetupPhaseBindingUpgrade
+	return request != nil && request.Status == "pending" && request.Phase != runtime.SkillSetupPhaseBindingUpgrade &&
+		request.Kind != runtime.SkillSetupKindConnectApp
 }
 
 // skillSetupBindingCandidate reports whether a binding is a save made for
@@ -177,6 +178,14 @@ func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Sco
 	}
 	if strings.TrimSpace(actor) == "" {
 		return nil, runtime.ErrInvalidSkillSetup
+	}
+	// A connect card is completed by a connection, not a saved binding.
+	if r.Kind == runtime.SkillSetupKindConnectApp {
+		resolution, resolveErr := e.ResolveConnectAppRequest(ctx, scope, deploymentID, id, expected, actor, dismiss)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		return resolution.Request, nil
 	}
 	if r.Status != "pending" {
 		if (dismiss && r.Status == "dismissed") || (!dismiss && r.Status == "resolved" && r.ResolvedBindingID == bindingID) {

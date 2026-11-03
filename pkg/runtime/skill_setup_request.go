@@ -69,6 +69,10 @@ type SkillSetupRequest struct {
 	ResolvedBindingID       string          `json:"resolvedBindingId,omitempty"`
 	ResolvedBindingRevision int64           `json:"resolvedBindingRevision,omitempty"`
 	ResolvedBy              string          `json:"resolvedBy,omitempty"`
+	// App is the connected app a connect_app request asks the user to
+	// connect. It is set only for that kind, whose target Skill is always
+	// openseal.mcp and whose resolution names the connection's binding.
+	App *ConnectAppTarget `json:"app,omitempty"`
 }
 
 func (r *SkillSetupRequest) Validate() error {
@@ -98,8 +102,18 @@ func (r *SkillSetupRequest) Validate() error {
 	}
 	switch r.Kind {
 	case "install", "configure", "reauthorize":
+		if r.App != nil {
+			return invalidSkillSetupField("app", "is only valid for connect_app")
+		}
+	case SkillSetupKindConnectApp:
+		if err := r.App.validate(); err != nil {
+			return err
+		}
+		if r.BindingID != "" || r.BindingRevision != 0 || r.Phase == SkillSetupPhaseBindingUpgrade || len(r.RequiredActions) > 0 || r.EnablePrompt || r.InstallationReference != "" {
+			return invalidSkillSetupField("kind", "connect_app requests carry only the app to connect")
+		}
 	default:
-		return invalidSkillSetupField("kind", "must be install, configure, or reauthorize")
+		return invalidSkillSetupField("kind", "must be install, configure, reauthorize, or connect_app")
 	}
 	if r.Kind == "reauthorize" && (r.BindingID == "" || r.BindingRevision < 1) {
 		return invalidSkillSetupField("binding", "must identify an existing revision for reauthorization")

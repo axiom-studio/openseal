@@ -518,6 +518,19 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 				}
 				eventType = "action.credential_requested"
 				summary = "Waiting for the user to save a requested credential"
+			} else if request := pendingConnectAppRequestFromAction(ctx, w.store, updatedCall); request != nil {
+				// The work continues with the app's tools once the user connects
+				// it, or with an explanation once the card is dismissed.
+				condition := &WakeCondition{Type: ConnectAppWakeType, Reference: request.ID}
+				if paused {
+					updatedRun.PausedFrom = AgentRunStatusWaitingForEvent
+					updatedRun.PausedWakeCondition = condition
+				} else {
+					updatedRun.Status = AgentRunStatusWaitingForEvent
+					updatedRun.WakeCondition = condition
+				}
+				eventType = "action.connection_requested"
+				summary = "Waiting for the user to connect " + request.SkillName
 			}
 		}
 	}

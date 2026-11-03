@@ -114,19 +114,44 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Sco
 }
 
 func (e *Engine) continueCredentialRequestRun(ctx context.Context, r *CredentialRequest) (bool, error) {
+	return e.continueInteractionRun(ctx, interactionContinuation{
+		scope: r.Scope, runID: r.RunID, requestID: r.ID, actionCallID: r.ActionCallID, status: r.Status, revision: r.Revision,
+		updatedAt: r.UpdatedAt, wakeType: runtime.CredentialRequestWakeType, coordinator: "credential-request-coordinator",
+		eventType: "run.credential_request_settled", summary: "Received the credential request result; continuing",
+		interventionPrefix: "credential-request-result:", instruction: runtime.CredentialRequestResolutionInstruction(r),
+	})
+}
+
+// interactionContinuation is one settled in-chat request whose Run may be
+// waiting for it.
+type interactionContinuation struct {
+	scope                                                  runtime.Scope
+	runID, requestID, actionCallID, status                 string
+	revision                                               int64
+	updatedAt                                              time.Time
+	wakeType, coordinator, eventType, summary, instruction string
+	interventionPrefix                                     string
+}
+
+// continueInteractionRun resumes the Run waiting for a settled in-chat
+// request with guidance for the model. It reports false when the Run already
+// ended, so the host starts a new reply instead.
+func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContinuation) (bool, error) {
 	for attempt := 0; attempt < 4; attempt++ {
-		run, err := e.store.GetAgentRun(ctx, r.Scope, r.RunID)
+		run, err := e.store.GetAgentRun(ctx, c.scope, c.runID)
 		if err != nil {
 			return false, err
 		}
 		if run == nil {
 			return false, nil
 		}
-		if !runtime.IsExactCredentialRequestWait(run, r.ID) {
+		waiting := run.Status == runtime.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
+			run.WakeCondition.Type == c.wakeType && run.WakeCondition.Reference == c.requestID
+		if !waiting {
 			if run.Status == runtime.AgentRunStatusPaused && run.PausedWakeCondition != nil &&
-				run.PausedWakeCondition.Type == runtime.CredentialRequestWakeType && run.PausedWakeCondition.Reference == r.ID {
-				// The user paused this work; resuming it later finds the saved
-				// credential through the requested action's retry.
+				run.PausedWakeCondition.Type == c.wakeType && run.PausedWakeCondition.Reference == c.requestID {
+				// The user paused this work; resuming it later finds the
+				// settled request through the requested action's retry.
 				return true, nil
 			}
 			switch run.Status {
@@ -135,14 +160,14 @@ func (e *Engine) continueCredentialRequestRun(ctx context.Context, r *Credential
 			}
 			return true, nil
 		}
-		actor := runtime.ActivityActor{Type: "service", ID: "credential-request-coordinator"}
-		_, _, err = runtime.NewRunActivityService(e.store, e.store).TransitionRun(ctx, r.Scope, run.ID, runtime.RunTransitionRequest{
+		actor := runtime.ActivityActor{Type: "service", ID: c.coordinator}
+		_, _, err = runtime.NewRunActivityService(e.store, e.store).TransitionRun(ctx, c.scope, run.ID, runtime.RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: runtime.AgentRunStatusQueued,
-			Summary: "Received the credential request result; continuing", EventType: "run.credential_request_settled",
-			Actor: actor, CorrelationID: r.ID, CausationID: r.ActionCallID,
-			Payload: map[string]interface{}{"requestId": r.ID, "status": r.Status, "revision": r.Revision},
-			Intervention: &runtime.AgentRunIntervention{ID: "credential-request-result:" + r.ID, Actor: actor,
-				Instruction: runtime.CredentialRequestResolutionInstruction(r), CreatedAt: r.UpdatedAt},
+			Summary: c.summary, EventType: c.eventType,
+			Actor: actor, CorrelationID: c.requestID, CausationID: c.actionCallID,
+			Payload: map[string]interface{}{"requestId": c.requestID, "status": c.status, "revision": c.revision},
+			Intervention: &runtime.AgentRunIntervention{ID: c.interventionPrefix + c.requestID, Actor: actor,
+				Instruction: c.instruction, CreatedAt: c.updatedAt},
 		})
 		if errors.Is(err, runtime.ErrRevisionConflict) {
 			continue
@@ -150,7 +175,7 @@ func (e *Engine) continueCredentialRequestRun(ctx context.Context, r *Credential
 		if err != nil {
 			return false, err
 		}
-		e.wakeAgentWorkersForScope(r.Scope)
+		e.wakeAgentWorkersForScope(c.scope)
 		return true, nil
 	}
 	return false, runtime.ErrRevisionConflict

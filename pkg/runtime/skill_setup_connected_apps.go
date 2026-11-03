@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -44,20 +43,10 @@ func (d *SkillBindingActionDispatcher) connectedAppSetupRefusal(ctx context.Cont
 		if !covers {
 			continue
 		}
-		var definition *skill.Definition
-		if strings.TrimSpace(binding.SourceIdentity) == "" {
-			definition, err = d.catalog.GetDefinition(ctx, binding.SkillID, binding.SkillVersion)
-		} else {
-			definition, err = d.catalog.GetDefinitionVariant(ctx, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
-		}
+		tools, err := ConnectedAppToolNames(ctx, d.catalog, binding)
 		if err != nil {
 			return "", err
 		}
-		tools := make([]string, 0, len(binding.Tools))
-		for _, tool := range binding.Tools {
-			tools = append(tools, skill.BindingToolModelName(definition, binding, tool.Name))
-		}
-		sort.Strings(tools)
 		listed := tools
 		if len(listed) > maximumConnectedAppToolsNamed {
 			listed = listed[:maximumConnectedAppToolsNamed]

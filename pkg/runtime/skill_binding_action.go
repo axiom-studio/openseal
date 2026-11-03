@@ -15,7 +15,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.4.7"
+	SkillManagementSkillVersion = "1.5.0"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -72,6 +72,8 @@ func SkillManagementSkill() *skill.Definition {
 			SkillActionRequestSetup:      skillSetupAction(),
 			SkillActionRequestCredential: credentialRequestAction(),
 			SkillActionListSetupRequests: skillListSetupRequestsAction(),
+			SkillActionFindApps:          findAppsAction(),
+			SkillActionRequestConnection: requestConnectionAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
 				"Propose enabling or updating configuration on an exact registered Skill for this Agent. An existing binding retains its exact Skill ID, source and version; use the canonical Skill reference upgrade flow before changing executable versions. Use only after all required reviewed configuration and verified authorized credential references are available. If user configuration or authorization is needed, call request_setup instead. Discovery never supplies credential references, so never construct a reference from a credential kind or name. Credential values are never accepted; credentials must be opaque references.",
@@ -308,11 +310,11 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 		"resourceType": "skill_binding", "operation": input.Bound.Action.Name, "deploymentId": deploymentID,
 	}
 	switch input.Bound.Action.Name {
-	case SkillActionRequestSetup, SkillActionRequestCredential:
+	case SkillActionRequestSetup, SkillActionRequestCredential, SkillActionRequestConnection:
 		// Invalid interaction arguments are explained by the model from the
 		// action result; they never block the proposal or end the Run.
 		return nil, nil
-	case SkillActionDiscoverBinding, SkillActionListSetupRequests:
+	case SkillActionDiscoverBinding, SkillActionListSetupRequests, SkillActionFindApps:
 		return nil, nil
 	case SkillActionUpsertBinding:
 		args, definition, current, resolveErr := resolveSkillBindingUpsert(ctx, v.catalog, scope, deploymentID, input.Arguments)
@@ -349,6 +351,7 @@ type SkillBindingActionDispatcher struct {
 	catalog   *skill.Catalog
 	discovery skill.DiscoveryProvider
 	fallback  ActionDispatcher
+	apps      *AppCatalogRef
 }
 
 func NewSkillBindingActionDispatcher(store KernelStore, catalog *skill.Catalog, fallback ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {
@@ -402,11 +405,14 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 	}
 	scope := skill.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}
 	switch input.Bound.Action.Name {
-	case SkillActionRequestSetup, SkillActionRequestCredential:
+	case SkillActionRequestSetup, SkillActionRequestCredential, SkillActionRequestConnection:
 		var result map[string]interface{}
-		if input.Bound.Action.Name == SkillActionRequestSetup {
+		switch input.Bound.Action.Name {
+		case SkillActionRequestSetup:
 			result, err = d.requestSkillSetup(ctx, input, run, deploymentID)
-		} else {
+		case SkillActionRequestConnection:
+			result, err = d.requestConnection(ctx, input, run, deploymentID)
+		default:
 			result, err = d.requestCredential(ctx, input, run, deploymentID)
 		}
 		if err != nil && ctx.Err() == nil {
@@ -415,6 +421,8 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 		return result, err
 	case SkillActionListSetupRequests:
 		return d.listSkillSetupRequests(ctx, run, deploymentID)
+	case SkillActionFindApps:
+		return d.findApps(ctx, input, run, deploymentID)
 	case SkillActionDiscoverBinding:
 		if d.discovery == nil {
 			return nil, errors.New("authorized Skill discovery is unavailable")
@@ -794,5 +802,5 @@ func isSkillBindingAction(bound *skill.BoundAction) bool {
 			return false
 		}
 	}
-	return bound.Action.Name == SkillActionListSetupRequests || bound.Action.Name == SkillActionRequestSetup || bound.Action.Name == SkillActionRequestCredential || bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
+	return bound.Action.Name == SkillActionListSetupRequests || bound.Action.Name == SkillActionRequestSetup || bound.Action.Name == SkillActionRequestCredential || bound.Action.Name == SkillActionRequestConnection || bound.Action.Name == SkillActionFindApps || bound.Action.Name == SkillActionDiscoverBinding || bound.Action.Name == SkillActionUpsertBinding || bound.Action.Name == SkillActionDisableBinding
 }
