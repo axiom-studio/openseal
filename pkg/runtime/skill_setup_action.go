@@ -128,6 +128,18 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		}
 	}
 	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
+	// Models often drop sourceIdentity. The authorized catalog, not the model,
+	// decides it: an ID that exactly one source supplies is unambiguous.
+	if a.SourceIdentity == "" && d.discovery != nil {
+		identity, refusal, resolveErr := d.omittedSkillSource(ctx, run.Scope, deploymentID, a.SkillID)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if refusal != "" {
+			return nil, refuseInteraction(refusal)
+		}
+		a.SourceIdentity = identity
+	}
 	// Account identity and the prospective executable target are separate.
 	// Resolve an existing account before choosing latest so retained versions
 	// never look like a missing account or silently create another connection.
@@ -394,4 +406,43 @@ func skillCandidateNeedsConfigurationSetup(candidate *skill.DiscoveryCandidate) 
 		missing = true
 	}
 	return missing
+}
+
+// omittedSkillSource returns the only catalog source that supplies skillID, or
+// a refusal naming the choices when several do. No match leaves the identity
+// empty so the usual "not available" refusal applies.
+func (d *SkillBindingActionDispatcher) omittedSkillSource(ctx context.Context, scope Scope, deploymentID, skillID string) (string, string, error) {
+	sources := map[string]bool{}
+	cursor := ""
+	for pageNumber := 0; pageNumber < 20; pageNumber++ {
+		request := skill.DiscoveryRequest{Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID, Query: skillID, Limit: skill.MaximumDiscoveryLimit, Cursor: cursor}
+		page, err := d.discovery.DiscoverSkills(ctx, request)
+		if err != nil {
+			return "", "", err
+		}
+		if page, err = skill.NormalizeDiscoveryPage(request, page); err != nil {
+			return "", "", err
+		}
+		for _, item := range page.Items {
+			if item.ID == skillID {
+				sources[item.SourceIdentity] = true
+			}
+		}
+		if page.NextCursor == "" || page.NextCursor == cursor {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if len(sources) > 1 {
+		names := make([]string, 0, len(sources))
+		for source := range sources {
+			names = append(names, source)
+		}
+		sort.Strings(names)
+		return "", "more than one source supplies " + skillID + "; repeat with sourceIdentity copied exactly from discover: " + strings.Join(names, ", "), nil
+	}
+	for source := range sources {
+		return source, "", nil
+	}
+	return "", "", nil
 }

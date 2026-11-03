@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -255,5 +256,42 @@ func TestSkillSetupDoesNotRediscoverAnIdenticalFailedRequestInSameRun(t *testing
 	}
 	if skillSetupAction().Retry.MaxAttempts != 1 {
 		t.Fatal("setup automatically retries failures")
+	}
+}
+
+func TestSkillSetupResolvesAnOmittedSourceFromTheCatalog(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "a"}
+	deploymentID := "agent"
+	catalog := skillActionCatalog(t, ctx, scope, deploymentID)
+	sources := []string{"https://github.com/axiom-studio/skills::skill-mcp"}
+	provider := skill.DiscoveryProviderFunc(func(_ context.Context, r skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
+		items := []skill.DiscoveryCandidate{}
+		for _, source := range sources {
+			items = append(items, skill.DiscoveryCandidate{ID: "skill-mcp", Version: "0.3.1", Name: "MCP server", SourceIdentity: source, Readiness: skill.DiscoveryReadinessBindable, Actions: []skill.DiscoveryAction{{Name: "mcp-read", Risk: skill.RiskLevelRead}}})
+		}
+		return &skill.DiscoveryPage{Items: items}, nil
+	})
+	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker")
+	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
+	// The shape DeepSeek sent: no sourceIdentity.
+	args := map[string]interface{}{"kind": "configure", "skillId": "skill-mcp", "skillVersion": "latest", "reason": "Connect Supabase's MCP server"}
+	result, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "call-1", Scope: scope, RunID: run.ID}, Arguments: args}, run, deploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := result["setupRequest"].(map[string]interface{})
+	if request["status"] != "pending" || request["sourceIdentity"] != sources[0] || request["skillVersion"] != "0.3.1" {
+		t.Fatal(request)
+	}
+	sources = append(sources, "https://example.com/other::skill-mcp")
+	_, err = dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "call-2", Scope: scope, RunID: run.ID}, Arguments: args}, run, deploymentID)
+	if err == nil || !strings.Contains(err.Error(), "more than one source supplies skill-mcp") {
+		t.Fatalf("ambiguous source accepted: %v", err)
 	}
 }
