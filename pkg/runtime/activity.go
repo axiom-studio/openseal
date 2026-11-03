@@ -256,6 +256,7 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.Output = req.Output
 	}
 	run.Error = req.Error
+	run.CreditError = terminalCreditError(run.Status, run.Checkpoint)
 	if req.WakeSignalID != "" {
 		run.LastWakeSignalID = req.WakeSignalID
 	}

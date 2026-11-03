@@ -31,6 +31,19 @@ func terminalFailureOutcome(run *AgentRun) (*TurnOutcome, bool) {
 	}, true
 }
 
+// terminalCreditError reads the kernel-classified cause of a failed Run, never
+// provider text, so only a Workspace credit refusal yields a credit error.
+func terminalCreditError(status AgentRunStatus, checkpoint map[string]interface{}) *RunCreditError {
+	if status != AgentRunStatusFailed {
+		return nil
+	}
+	failure, _ := checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+	if code, _ := failure["code"].(string); code != RunCreditErrorWorkspaceCreditsExhausted {
+		return nil
+	}
+	return &RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
+}
+
 func failedConversationReportCandidate(run *AgentRun) bool {
 	if run == nil || run.Status != AgentRunStatusFailed || run.Kind != RunKindConversation || run.ParentRunID != "" {
 		return false
@@ -56,6 +69,12 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 	}
 	if conversation == nil || conversation.Scope != run.Scope || conversation.Owner != run.Owner || conversation.Status != ConversationStatusActive {
 		return ErrInvalidAgentRun
+	}
+	// An application chat explains a credit stop beside the saved message and
+	// retries this attempt once credits are added. A provider channel has no
+	// such surface, so it still receives the failure answer.
+	if run.CreditError != nil && !externalChannelContext(conversation) {
+		return nil
 	}
 	trigger, err := store.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
 	if err != nil {

@@ -46,7 +46,7 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	}
 	run := cloneAgentRun(current)
 	now := s.now()
-	run.Status, run.Error, run.CompletedAt = AgentRunStatusQueued, "", nil
+	run.Status, run.Error, run.CreditError, run.CompletedAt = AgentRunStatusQueued, "", nil, nil
 	run.LeaseOwner, run.LeaseExpiresAt = "", nil
 	run.AvailableAt, run.QueueEnteredAt, run.UpdatedAt = now, now, now
 	run.Revision++

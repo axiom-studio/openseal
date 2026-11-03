@@ -304,3 +304,29 @@ func TestTerminalConversationFailureResponseFlagCannotAuthorizeControlSource(t *
 		t.Fatalf("unscheduled control source produced a failure reply: %#v %v", current, err)
 	}
 }
+
+func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.T) {
+	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
+		store := terminalReportingContractFixture(t, fixture)
+		now := eventWaitContractEpoch
+		run, _, trigger := terminalFailureConversationFixture(t, store, now, false)
+		run = failTerminalConversation(t, store, run, now, "gateway_credits_exhausted")
+		if run.CreditError == nil || run.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted {
+			t.Fatalf("credit stop is not typed on the Run: %#v", run.CreditError)
+		}
+		if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 1 {
+			t.Fatalf("credit stop report was not acknowledged: %d %v", count, err)
+		}
+		if message, err := store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, trigger.ConversationID, terminalConversationFailureReplyKey(run)); message != nil || !errors.Is(err, ErrChannelMessageNotFound) && err != nil {
+			t.Fatalf("an application chat received a failure answer for a credit stop: %#v %v", message, err)
+		}
+		retry, err := NewRunCommandService(store).RetryConversationRun(t.Context(), AgentRunCommandRequest{Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Actor: ActivityActor{Type: "user", ID: "kev"}})
+		if err != nil || retry.Run.CreditError != nil || retry.Run.Status != AgentRunStatusQueued {
+			t.Fatalf("retry after adding credits kept the credit stop: %#v %v", retry, err)
+		}
+		other := failTerminalConversation(t, store, retry.Run, now.Add(time.Second), "provider_rate_limited")
+		if other.CreditError != nil {
+			t.Fatalf("a different failure carried a credit error: %#v", other.CreditError)
+		}
+	})
+}

@@ -264,6 +264,16 @@ type HumanInterventionRequest struct {
 	ResolvedAt   *time.Time              `json:"resolvedAt,omitempty"`
 }
 
+// RunCreditError says a Run stopped because its Workspace has no model
+// credits. Clients offer the billing step and retry the saved reply instead of
+// showing a failure answer, so the kernel posts none to an application chat.
+type RunCreditError struct {
+	Code string `json:"code"`
+}
+
+// RunCreditErrorWorkspaceCreditsExhausted is the only RunCreditError code.
+const RunCreditErrorWorkspaceCreditsExhausted = "workspace_credits_exhausted"
+
 // AgentRun is the canonical durable workstream. Workflow execution records are
 // subordinate execution details and must not be used as agent-run identity.
 type AgentRun struct {
@@ -307,6 +317,7 @@ type AgentRun struct {
 	Policy               map[string]interface{}       `json:"policy,omitempty"`
 	Output               map[string]interface{}       `json:"output,omitempty"`
 	Error                string                       `json:"error,omitempty"`
+	CreditError          *RunCreditError              `json:"creditError,omitempty"`
 	WorkflowExecution    *int                         `json:"workflowExecutionId,omitempty"`
 	LastAppliedTurn      int64                        `json:"lastAppliedTurn"`
 	Revision             int64                        `json:"revision"`
