@@ -131,9 +131,11 @@ func checkpointToolFeedbackFailure(checkpoint map[string]interface{}, call *Acti
 }
 
 // platformActionFailure is a typed failure no model correction can fix now:
-// a source rate limit, the platform's browser connection or a file too large
-// to hand to an action. The attempt stops
-// with its dedicated reply instead.
+// the platform's browser connection or a file too large to hand to an action.
+// The attempt stops with its dedicated reply instead. A source that rate
+// limited a read is not one: the model gets it back as the result and can use
+// another source, and the usual bounds (the unchanged request is denied, two
+// corrections, four failures per Run) still stop it from looping.
 func platformActionFailure(checkpoint map[string]interface{}, call *ActionCall) bool {
 	last, _ := checkpoint["lastAction"].(map[string]interface{})
 	failure := latestCanonicalActionFailure(checkpoint)
@@ -144,7 +146,7 @@ func platformActionFailure(checkpoint map[string]interface{}, call *ActionCall) 
 	case "browser_proxy_authentication_failed", "browser_proxy_unavailable", "file_too_large":
 		return true
 	}
-	return failure.HasRateLimitedSource()
+	return false
 }
 
 // checkpointProposalRejection returns a single action proposal rejected before

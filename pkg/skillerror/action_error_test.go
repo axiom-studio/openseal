@@ -39,7 +39,7 @@ func TestActionErrorSanitizesKnownFailuresAndKeepsRateLimitDistinct(t *testing.T
 	}
 	for _, code := range []string{"source_http_error", "source_access_challenge", "source_rate_limited"} {
 		err := NewActionError(code, "bot detected", map[string]string{"httpStatus": "429"})
-		if err.Code() != "source_rate_limited" || err.Error() != "This source returned HTTP 429 (rate limited). Try again later." {
+		if err.Code() != "source_rate_limited" || err.Error() != "This source returned HTTP 429 (rate limited). Read another source, or try this one later." {
 			t.Fatalf("429 changed to challenge or lost safe feedback: %#v", err)
 		}
 		if _, invented := err.Details()["retryAfterSeconds"]; invented {

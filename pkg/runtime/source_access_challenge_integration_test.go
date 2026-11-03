@@ -200,9 +200,10 @@ func TestSourceAccessChallengeIntegrationLeavesOtherFailuresToTheirPolicy(t *tes
 		// otherwise the platform failure stops the attempt.
 		returned bool
 	}{
-		{"source 429", skillerror.NewActionError("source_rate_limited", "", nil), false},
-		{"challenge normalized to 429", skillerror.NewActionError("source_access_challenge", "", map[string]string{"httpStatus": "429"}), false},
-		{"mixed source throttling", skillerror.NewActionError("source_reads_failed", "", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_access_challenge"}]`}), false},
+		// A rate-limited source goes back to the model, which can read another source.
+		{"source 429", skillerror.NewActionError("source_rate_limited", "", nil), true},
+		{"challenge normalized to 429", skillerror.NewActionError("source_access_challenge", "", map[string]string{"httpStatus": "429"}), true},
+		{"mixed source throttling", skillerror.NewActionError("source_reads_failed", "", map[string]string{"failures": `[{"index":0,"failureKind":"source_rate_limited","httpStatus":429},{"index":1,"failureKind":"source_access_challenge"}]`}), true},
 		{"proxy authentication", skillerror.NewActionError("browser_proxy_authentication_failed", "", nil), false},
 		{"untyped access challenge", errors.New("source_access_challenge: try another browser"), true},
 	} {

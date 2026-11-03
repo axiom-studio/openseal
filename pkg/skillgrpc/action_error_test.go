@@ -32,7 +32,7 @@ func TestClientPreservesTypedSourceFailureAndLegacyUnknownError(t *testing.T) {
 			t.Fatalf("typed boundary mismatch: %#v %v", result, err)
 		}
 		if known {
-			if typed.Code() != code || typed.Details()["retryAfterSeconds"] != "12" || typed.Details()["retryable"] != "false" || typed.Details()["url"] != "" || err.Error() != "This source returned HTTP 429 (rate limited). Try again later." {
+			if typed.Code() != code || typed.Details()["retryAfterSeconds"] != "12" || typed.Details()["retryable"] != "false" || typed.Details()["url"] != "" || err.Error() != "This source returned HTTP 429 (rate limited). Read another source, or try this one later." {
 				t.Fatalf("typed failure changed: %#v", typed)
 			}
 		} else if err.Error() != "legacy_error: legacy message" {

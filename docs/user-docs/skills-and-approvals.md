@@ -90,7 +90,7 @@ A failed action, and a single action proposal rejected before it ran (input sche
 - at most `MaximumRecoveredToolFailures` (4) failures per Run are returned to the model, counted by the kernel across successes;
 - the correction Turn cannot schedule, wait, fork or delegate, and every corrected proposal still passes policy, approval and budget checks.
 
-Beyond these bounds, and for platform conditions no correction can fix (a source rate limit, the platform's browser connection), the attempt stops with the kernel's failure reply. A failed change may already have taken effect, so the model is told to verify before doing it again.
+Beyond these bounds, and for platform conditions no correction can fix (the platform's browser connection, a file too large for an action), the attempt stops with the kernel's failure reply. A source that rate limited a read (HTTP 429) is returned to the model like any other failed read, so it can use another source. A failed change may already have taken effect, so the model is told to verify before doing it again.
 
 An input schema property can declare `x-openseal-observationRef: {roles, requireEnabled, requireFlags}`: the argument must be an element reference from the latest successful observation with an allowed role, enabled, and with each named flag set to `true` by the observing Skill. It is checked when the proposal is admitted, before any approval is created. An omitted optional argument is not checked.
 

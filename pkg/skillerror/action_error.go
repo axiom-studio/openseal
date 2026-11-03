@@ -82,7 +82,7 @@ func (e *ActionError) HasRateLimitedSource() bool {
 func actionErrorMessage(code string) string {
 	switch code {
 	case "source_rate_limited":
-		return "This source returned HTTP 429 (rate limited). Try again later."
+		return "This source returned HTTP 429 (rate limited). Read another source, or try this one later."
 	case "source_http_error":
 		return "This source returned an unsuccessful HTTP response."
 	case "source_access_challenge":
