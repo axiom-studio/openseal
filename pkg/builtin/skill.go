@@ -13,7 +13,7 @@ import (
 
 const (
 	SkillID                 = "openseal.builtin"
-	SkillVersion            = "2.3.0"
+	SkillVersion            = "2.3.1"
 	ReadAttachment          = "read_attachment"
 	ReadConversationHistory = "read_conversation_history"
 	GenerateProfileImage    = "generate_profile_image"

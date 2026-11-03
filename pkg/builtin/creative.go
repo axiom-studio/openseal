@@ -2,6 +2,11 @@ package builtin
 
 import "github.com/axiom-studio/openseal/pkg/skill"
 
+// DocumentNotSavedPrefix starts a create_pdf or create_sheet failure caused by
+// the call's own content, such as a page count the render did not match.
+// Nothing was saved, so the Agent may correct the call and render again.
+const DocumentNotSavedPrefix = "document not saved:"
+
 func documentActions() map[string]skill.Action {
 	text := func(max int) map[string]interface{} {
 		return map[string]interface{}{"type": "string", "minLength": 1, "maxLength": max}
@@ -33,7 +38,7 @@ func documentActions() map[string]skill.Action {
 			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{artifactType}}
 	}
 	return map[string]skill.Action{
-		CreatePDF: write(CreatePDF, "Render a styled Unicode PDF to a path in this chat's files and show it. Supply body for simple text, pages as strings for one text page each, or pages with blocks for headings, paragraphs and images. To change it, call again with the same path and the complete new content. For an exact page count, set expectedPages; the host verifies the rendered count.",
+		CreatePDF: write(CreatePDF, "Render a styled Unicode PDF to a path in this chat's files and show it. Supply body for simple text, pages as strings for one text page each, or pages with blocks for headings, paragraphs and images. Each pages entry starts a new page, and long text continues onto further pages. To change it, call again with the same path and the complete new content. For an exact page count from body or blocks, set expectedPages; the host verifies the rendered count. With pages, leave expectedPages out unless it equals the number of pages entries.",
 			object([]interface{}{"path"}, map[string]interface{}{
 				"path":          chatPath("Where to save it, such as docs/q3-report.pdf."),
 				"title":         text(300),
