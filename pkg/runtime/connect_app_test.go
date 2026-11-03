@@ -101,6 +101,37 @@ func TestFindAppsListsCatalogAppsAndWhetherTheyAreConnected(t *testing.T) {
 	}
 }
 
+func TestFindAppsAlsoListsSkillsTheUserCanSetUp(t *testing.T) {
+	ctx, store, _, dispatcher, scope, _ := connectAppFixture(t)
+	var queried skill.DiscoveryRequest
+	dispatcher.discovery = skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
+		queried = request
+		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{
+			{ID: "google-workspace", Version: "1.4.0", SourceIdentity: "axiomstudio/skill-google-workspace", Name: "Google Workspace", Description: "Gmail, Calendar and Drive", Readiness: skill.DiscoveryReadinessNeedsInstallation},
+			{ID: "gmail-bound", Version: "1.0.0", Name: "Gmail (bound)", Readiness: skill.DiscoveryReadinessBindable},
+			{ID: "gmail-blocked", Version: "1.0.0", Name: "Gmail (blocked)", Readiness: skill.DiscoveryReadinessUnavailable,
+				Compatibility: []skill.DiscoveryCompatibility{{Requirement: "network", Compatible: false, Evidence: "egress blocked"}}},
+		}}, nil
+	})
+	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	result, err := dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "gmail", "limit": 3}}, run, "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queried.Query != "gmail" || queried.Limit != 3 || queried.DeploymentID != "agent" {
+		t.Fatalf("discovery request: %#v", queried)
+	}
+	skills := result["skills"].([]interface{})
+	if len(skills) != 2 {
+		t.Fatalf("skills: %#v", skills)
+	}
+	first, second := skills[0].(map[string]interface{}), skills[1].(map[string]interface{})
+	if first["skillId"] != "google-workspace" || first["skillVersion"] != "latest" || first["sourceIdentity"] != "axiomstudio/skill-google-workspace" ||
+		first["setupKind"] != "install" || first["summary"] != "Gmail, Calendar and Drive" || second["setupKind"] != "configure" {
+		t.Fatalf("skills: %#v", skills)
+	}
+}
+
 func TestFindAppsRunsThroughTheActionWorker(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope, _ := connectAppFixture(t)
 	run := proposeInteraction(t, ctx, store, catalog, scope, SkillActionFindApps, map[string]interface{}{"query": "neon", "limit": 3})

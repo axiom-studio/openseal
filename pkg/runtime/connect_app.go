@@ -181,16 +181,16 @@ const connectAppGuidance = "Use this when the user wants to connect or use a ser
 
 func findAppsAction() skill.Action {
 	return skill.Action{Name: SkillActionFindApps,
-		Description: "Search the catalog of apps (remote MCP servers) that can be connected for every Agent. " + connectAppGuidance + " Query with the service name, for example Linear. Results list slug, name, whether the vendor maintains it (official), how it signs in, and whether it is already connected for this chat (then its tools are listed). Then call request_connection with the slug. Prefer this over setting up a provider-specific Skill when the catalog has the service.",
+		Description: "Search what can be connected for every Agent: catalog apps (remote MCP servers) and Skills. " + connectAppGuidance + " Query with the service name, for example Linear. Apps list slug, name, whether the vendor maintains it (official), how it signs in, and whether it is already connected for this chat (then its tools are listed); call request_connection with the slug. Prefer an app that covers the service. When no app does, use a matching Skill: call request_setup with its skillId, skillVersion and sourceIdentity, and its setupKind as kind.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"query": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumAppQueryBytes},
 			"limit": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": maximumFindAppsLimit},
 		}, "required": []interface{}{"query"}},
 		OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
-			"apps": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}},
-			"note": map[string]interface{}{"type": "string"},
-		}, "required": []interface{}{"apps"}}}
+			"apps":   map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}},
+			"skills": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}},
+		}, "required": []interface{}{"apps", "skills"}}}
 }
 
 func requestConnectionAction() skill.Action {
@@ -231,13 +231,15 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input Actio
 		a.Limit = defaultFindAppsLimit
 	}
 	a.Limit = min(a.Limit, maximumFindAppsLimit)
-	catalog := d.apps.get()
-	if catalog == nil {
-		return map[string]interface{}{"apps": []interface{}{}, "note": "No app catalog is available on this host."}, nil
-	}
-	entries, err := catalog.FindApps(ctx, run.Scope, a.Query, a.Limit)
+	skills, err := d.findSetupSkills(ctx, run, deploymentID, a.Query, a.Limit)
 	if err != nil {
 		return nil, err
+	}
+	var entries []AppCatalogEntry
+	if catalog := d.apps.get(); catalog != nil {
+		if entries, err = catalog.FindApps(ctx, run.Scope, a.Query, a.Limit); err != nil {
+			return nil, err
+		}
 	}
 	if len(entries) > a.Limit {
 		entries = entries[:a.Limit]
@@ -262,7 +264,57 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input Actio
 		}
 		apps = append(apps, item)
 	}
-	return map[string]interface{}{"apps": apps}, nil
+	return map[string]interface{}{"apps": apps, "skills": skills}, nil
+}
+
+// findSetupSkills lists the Skills that discovery offers for the query and
+// that the user can set up from chat, so one search covers apps and Skills.
+func (d *SkillBindingActionDispatcher) findSetupSkills(ctx context.Context, run *AgentRun, deploymentID, query string, limit int) ([]interface{}, error) {
+	skills := []interface{}{}
+	if d.discovery == nil {
+		return skills, nil
+	}
+	request, err := skill.NormalizeDiscoveryRequest(skill.DiscoveryRequest{
+		Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, DeploymentID: deploymentID, Query: query, Limit: limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	page, err := d.discovery.DiscoverSkills(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if page, err = skill.NormalizeDiscoveryPage(request, page); err != nil {
+		return nil, err
+	}
+	for index := range page.Items {
+		candidate := &page.Items[index]
+		kind := skillSetupKindFor(candidate)
+		if kind == "" {
+			continue
+		}
+		item := map[string]interface{}{"skillId": candidate.ID, "skillVersion": "latest", "name": candidate.Name, "setupKind": kind}
+		if candidate.SourceIdentity != "" {
+			item["sourceIdentity"] = candidate.SourceIdentity
+		}
+		if summary := strings.TrimSpace(candidate.Description); summary != "" {
+			item["summary"] = truncateRunes(summary, 240)
+		}
+		skills = append(skills, item)
+	}
+	return skills, nil
+}
+
+// skillSetupKindFor is the request_setup kind that sets a discovered Skill
+// up for this Agent, or "" when the user cannot set it up from chat.
+func skillSetupKindFor(candidate *skill.DiscoveryCandidate) string {
+	switch {
+	case candidate.Readiness == skill.DiscoveryReadinessNeedsInstallation:
+		return "install"
+	case candidate.Readiness == skill.DiscoveryReadinessBindable, skillCandidateNeedsConfigurationSetup(candidate):
+		return "configure"
+	}
+	return ""
 }
 
 type requestConnectionArguments struct {
