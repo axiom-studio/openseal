@@ -221,6 +221,11 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 	if candidate != nil {
 		a.SkillVersion = candidate.Version
 	}
+	if refusal, refusalErr := d.connectedAppSetupRefusal(ctx, run, deploymentID, a.SkillID, candidate); refusalErr != nil {
+		return nil, refusalErr
+	} else if refusal != "" {
+		return nil, refuseInteraction(refusal)
+	}
 	configurationSetup := skillCandidateNeedsConfigurationSetup(candidate) && a.Kind != "install"
 	if candidate == nil || (candidate.Readiness == skill.DiscoveryReadinessUnavailable && !configurationSetup) {
 		return nil, refuseInteraction("requested Skill is not available in the authorized catalog; a built-in Skill needs no setup, and a missing website login or card is requested with request_credential")

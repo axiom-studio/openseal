@@ -93,15 +93,21 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	err = conn.QueryRowContext(ctx, `SELECT payload FROM skill_bindings
 		WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? AND id = ?`,
 		call.Scope.Kind, call.Scope.ID, call.DeploymentID, call.BindingID).Scan(&bindingPayload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrActionCredentialLeaseMismatch
-	}
-	if err != nil {
-		return err
-	}
 	var binding skill.Binding
-	if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if request.HostBinding == nil {
+			return ErrActionCredentialLeaseMismatch
+		}
+		binding = *request.HostBinding
+	case err != nil:
 		return err
+	case request.HostBinding != nil:
+		return ErrActionCredentialLeaseMismatch
+	default:
+		if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
+			return err
+		}
 	}
 
 	// SQLite's built-in clock has millisecond resolution. Compare every lease
@@ -128,6 +134,10 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	}
 	if err := matchCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
 		return err
+	}
+	// The host supplies bindings only to its run's own Agent.
+	if request.HostBinding != nil && binding.DeploymentID != run.AssignedAgentID {
+		return ErrActionCredentialLeaseMismatch
 	}
 	credentialFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
 	if err != nil {

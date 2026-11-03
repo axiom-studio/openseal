@@ -354,6 +354,10 @@ type ActionProposalRecord struct {
 	// never by model arguments. Durable catalogs share submission authority
 	// with the store and must serialize it against binding changes.
 	RequireBindingFence bool
+	// HostBinding is the host-supplied binding the call was resolved
+	// through (see skill.HostBindingProvider). It has no stored row: the
+	// fence requires that none exists and checks the call against it.
+	HostBinding *skill.Binding
 }
 
 type ActionProposalResult struct {

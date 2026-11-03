@@ -134,19 +134,37 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 	host.Adapters = adapters
 
 	now := time.Now().UTC()
+	// Host bindings depend on the run, so their set is part of the cache key
+	// next to the host state; stored bindings are part of its fingerprint.
+	hosted, err := c.hostBindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
 	hostDigest := hostActivationDigest(host)
+	if hosted != nil {
+		hostDigest += "\x00" + hosted.key
+	}
 	if cached, err := c.warmActivation(ctx, scope, deploymentID, hostDigest); err != nil {
 		return nil, err
 	} else if cached != nil {
 		return shareActivation(cached, now), nil
 	}
-	listed, definitions, err := c.deploymentBindings(ctx, scope, deploymentID)
+	stored, definitions, err := c.deploymentBindings(ctx, scope, deploymentID)
 	if err != nil {
 		return nil, err
 	}
-	fingerprint := c.activationFingerprint(ctx, bindingRevisions(listed), definitions)
+	fingerprint := c.activationFingerprint(ctx, bindingRevisions(stored), definitions)
 	if cached := c.cachedActivation(scope, deploymentID, hostDigest, fingerprint); cached != nil {
 		return shareActivation(cached, now), nil
+	}
+	listed, err := withHostBindings(stored, hosted)
+	if err != nil {
+		return nil, err
+	}
+	if hosted != nil {
+		for key, definition := range hosted.definitions {
+			definitions[key] = definition
+		}
 	}
 	bindings := make([]*Binding, 0, len(listed))
 	for _, binding := range listed {

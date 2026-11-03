@@ -26,6 +26,7 @@ type resolverCatalog struct {
 	activations           map[string]*skill.ActivationSnapshot
 	activationDeployments []string
 	gotHost               skill.HostCapabilityState
+	actors                []skill.RunActor
 }
 
 func TestRunbookSkillAuthorityExcludesConversationDeliveryTools(t *testing.T) {
@@ -84,8 +85,10 @@ func (c *resolverCatalog) GetAgentDefinition(_ context.Context, id, version stri
 	return c.definition, nil
 }
 
-func (c *resolverCatalog) ActivateSkills(_ context.Context, _ skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
+func (c *resolverCatalog) ActivateSkills(ctx context.Context, _ skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
 	c.gotHost = host
+	actor, _ := skill.RunActorFromContext(ctx)
+	c.actors = append(c.actors, actor)
 	c.activationDeployments = append(c.activationDeployments, deploymentID)
 	if c.activations != nil {
 		return c.activations[deploymentID], nil
@@ -137,6 +140,10 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	}
 	if _, ok := binding.Runner.(*CapabilityInvocationTurnRunner); !ok || len(binding.ModelActions) != 1 {
 		t.Fatalf("capability binding = %#v", binding)
+	}
+	// The Agent's activation acts for the run, so host bindings for it apply.
+	if got := catalog.actors[len(catalog.actors)-1]; got != (skill.RunActor{RunID: "run", AgentID: "researcher"}) {
+		t.Fatalf("activation actor = %#v", got)
 	}
 
 	_, err = ResolveCatalogTurnRunner(t.Context(), catalog, base, CatalogTurnResolverConfig{})

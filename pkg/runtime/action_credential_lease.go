@@ -220,6 +220,10 @@ type ActionCredentialLeaseValidationRequest struct {
 	// CredentialFields is the exact host-derived field allowlist for the
 	// current action definition. It contains field names only.
 	CredentialFields map[string][]string
+	// HostBinding is the current host-supplied binding of the lease, which
+	// the host re-resolved for the lease's run (skill.Catalog.GetHostBinding).
+	// It is set only for a binding with no stored row.
+	HostBinding *skill.Binding
 }
 
 // ActionCredentialLeaseRedemptionRequest contains the host-authorized inputs
@@ -233,6 +237,9 @@ type ActionCredentialLeaseRedemptionRequest struct {
 	// ActionCall and SkillBinding authority inside the store transaction.
 	Transport        string
 	CredentialFields map[string][]string
+	// HostBinding replaces the stored binding row for a host-supplied
+	// binding; a stored row with the same identity then fails closed.
+	HostBinding *skill.Binding
 }
 
 // ActionCredentialLeaseRedeemer is the durable, product-neutral
@@ -287,6 +294,7 @@ func (v *ActionCredentialLeaseValidator) Validate(ctx context.Context, request A
 	}
 	if err := v.redeemer.RedeemActionCredentialLease(ctx, ActionCredentialLeaseRedemptionRequest{
 		Lease: lease, Transport: request.Transport, CredentialFields: cloneActionCredentialFields(request.CredentialFields),
+		HostBinding: request.HostBinding,
 	}); err != nil {
 		return nil, fmt.Errorf("redeem action credential lease: %w", err)
 	}

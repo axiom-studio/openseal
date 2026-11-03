@@ -131,17 +131,22 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 			WHERE scope_kind = ? AND scope_id = ? AND deployment_id = ? AND id = ?`,
 			call.Scope.Kind, call.Scope.ID, call.DeploymentID, call.BindingID).Scan(&bindingPayload)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, skill.ErrBindingUnavailable
-		}
-		if err != nil {
+			if err := validateActionSubmissionBinding(call, proposal.HostBinding); err != nil {
+				return nil, err
+			}
+		} else if err != nil {
 			return nil, err
-		}
-		var binding skill.Binding
-		if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
-			return nil, err
-		}
-		if err := validateActionSubmissionBinding(call, &binding); err != nil {
-			return nil, err
+		} else {
+			var binding skill.Binding
+			if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
+				return nil, err
+			}
+			if proposal.HostBinding != nil {
+				return nil, skill.ErrBindingAmbiguous
+			}
+			if err := validateActionSubmissionBinding(call, &binding); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if call.ExternalOperationDigest != "" && call.DuplicateOfActionCallID == "" && externalOperationProtects(call.Status) {

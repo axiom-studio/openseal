@@ -727,6 +727,10 @@ type BoundAction struct {
 	Definition *Definition
 	Action     Action
 	Binding    *Binding
+	// Host marks a binding the host supplied for this run (see
+	// skill.HostBindingProvider). It has no stored row, so durable fences
+	// check it as supplied instead.
+	Host bool
 }
 
 type BoundConversationAdapter struct {
