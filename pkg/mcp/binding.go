@@ -46,8 +46,10 @@ const (
 	MaxToolPages = 20
 	// MaxListedTools bounds one tools/list across all pages. A binding pins
 	// at most skill.MaxBindingTools of them.
-	MaxListedTools         = 1000
-	MaxSecretHeaders       = 64
+	MaxListedTools   = 1000
+	MaxSecretHeaders = 64
+	// MaxSecretHeaderBytes bounds one secret header value.
+	MaxSecretHeaderBytes   = 8 << 10
 	MaxToolNameBytes       = 128
 	MaxToolSlugBytes       = 48
 	MaxTimeoutSeconds      = 300
@@ -98,6 +100,53 @@ type Auth struct {
 type SecretHeader struct {
 	Name  string `json:"name"`
 	Field string `json:"field"`
+}
+
+// HeaderSecrets decodes the headers credential (CredentialHeaders): a JSON
+// object holding exactly one string per SecretHeaders field. It refuses a
+// non-object, a non-string, empty or oversized value, a missing or unknown
+// field and a value with CR, LF or NUL. Errors name fields, never values.
+func (c *BindingConfig) HeaderSecrets(raw string) (Secrets, error) {
+	if len(c.SecretHeaders) == 0 {
+		return nil, errors.New("MCP binding has no secret headers")
+	}
+	var values map[string]interface{}
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	if err := decoder.Decode(&values); err != nil || values == nil || decoder.Decode(new(interface{})) != io.EOF {
+		return nil, errors.New("MCP secret headers must be a JSON object of strings")
+	}
+	secrets := make(Secrets, len(values))
+	for _, header := range c.SecretHeaders {
+		if _, done := secrets[header.Field]; done {
+			continue
+		}
+		raw, ok := values[header.Field]
+		if !ok {
+			return nil, fmt.Errorf("MCP secret header field %s is missing", header.Field)
+		}
+		value, ok := raw.(string)
+		if !ok || value == "" || len(value) > MaxSecretHeaderBytes || strings.ContainsAny(value, "\r\n\x00") {
+			return nil, fmt.Errorf("MCP secret header field %s must be a non-empty single-line string", header.Field)
+		}
+		secrets[header.Field] = value
+	}
+	if len(secrets) != len(values) {
+		return nil, errors.New("MCP secret headers hold a field that is not configured")
+	}
+	return secrets, nil
+}
+
+// EncodeHeaderSecrets is the headers credential for values keyed by
+// SecretHeaders field, checked as HeaderSecrets checks it.
+func (c *BindingConfig) EncodeHeaderSecrets(values map[string]string) (string, error) {
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "", errors.New("MCP secret headers could not be encoded")
+	}
+	if _, err := c.HeaderSecrets(string(encoded)); err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 // ToolSlug maps a remote tool name to a suffix safe in model tool names such

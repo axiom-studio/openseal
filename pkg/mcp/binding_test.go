@@ -209,3 +209,45 @@ func TestHeaderEncodingAndNestedSchema(t *testing.T) {
 		t.Fatal("duplicate header annotation accepted")
 	}
 }
+
+func TestHeaderSecretsHoldExactlyTheConfiguredFields(t *testing.T) {
+	c := validConfig()
+	c.SecretHeaders = append(c.SecretHeaders, SecretHeader{Name: "X-Team", Field: "team"}, SecretHeader{Name: "X-Team-Copy", Field: "team"})
+	secrets, err := c.HeaderSecrets(`{"workspace":"ws-secret-1","team":"team-secret-2"}`)
+	if err != nil || !reflect.DeepEqual(secrets, Secrets{"workspace": "ws-secret-1", "team": "team-secret-2"}) {
+		t.Fatalf("secrets = %v, %v", secrets, err)
+	}
+	encoded, err := c.EncodeHeaderSecrets(map[string]string{"workspace": "a", "team": "b"})
+	if err != nil || encoded != `{"team":"b","workspace":"a"}` {
+		t.Fatalf("encoded = %q, %v", encoded, err)
+	}
+	for name, raw := range map[string]string{
+		"not JSON":      `{"workspace":`,
+		"array":         `["ws-secret-1"]`,
+		"string":        `"ws-secret-1"`,
+		"null":          `null`,
+		"trailing":      `{"workspace":"ws-secret-1","team":"t"} {}`,
+		"number":        `{"workspace":1,"team":"t"}`,
+		"object value":  `{"workspace":{"v":"ws-secret-1"},"team":"t"}`,
+		"empty value":   `{"workspace":"","team":"t"}`,
+		"missing field": `{"workspace":"ws-secret-1"}`,
+		"unknown field": `{"workspace":"ws-secret-1","team":"t","other":"x"}`,
+		"CRLF":          `{"workspace":"ws-secret-1\r\nX-Evil: 1","team":"t"}`,
+		"LF":            `{"workspace":"ws-secret-1\nx","team":"t"}`,
+		"NUL":           `{"workspace":"ws-secret-1\u0000","team":"t"}`,
+		"oversized":     `{"workspace":"` + strings.Repeat("a", MaxSecretHeaderBytes+1) + `","team":"t"}`,
+	} {
+		_, err := c.HeaderSecrets(raw)
+		if err == nil {
+			t.Errorf("%s accepted", name)
+		} else if strings.Contains(err.Error(), "ws-secret-1") {
+			t.Errorf("%s error leaks the value: %v", name, err)
+		}
+	}
+	if _, err := c.EncodeHeaderSecrets(map[string]string{"workspace": "a\r\nb", "team": "b"}); err == nil {
+		t.Error("CRLF value encoded")
+	}
+	if _, err := (&BindingConfig{}).HeaderSecrets(`{}`); err == nil {
+		t.Error("headers accepted for a binding without secret headers")
+	}
+}

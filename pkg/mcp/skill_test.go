@@ -14,7 +14,7 @@ func TestSkillDefinitionRegistersAndKeepsPolicies(t *testing.T) {
 	if err := catalog.Register(t.Context(), d); err != nil {
 		t.Fatal(err)
 	}
-	if d.ID != SkillID || d.Version != "1.0.0" || len(d.Actions) != 3 {
+	if d.ID != SkillID || d.Version != "1.1.0" || len(d.Actions) != 3 {
 		t.Fatalf("definition = %s@%s with %d actions", d.ID, d.Version, len(d.Actions))
 	}
 	read, call, refresh := d.Actions[Read], d.Actions[Call], d.Actions[RefreshTools]
@@ -81,8 +81,13 @@ func TestSkillCredentialSlotsAreSecretFields(t *testing.T) {
 	for kind, want := range map[AuthKind][]string{
 		AuthNone: nil, AuthOAuth: {SecretAccess}, AuthBearer: {SecretAccess}, AuthAPIKey: {SecretAccess}, AuthBasic: {SecretUsername, SecretPassword},
 	} {
-		if got := CredentialSlots(kind); !reflect.DeepEqual(got, want) {
+		config := BindingConfig{Auth: Auth{Kind: kind}}
+		if got := config.CredentialSlots(); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s slots = %v, want %v", kind, got, want)
+		}
+		config.SecretHeaders = []SecretHeader{{Name: "X-Workspace", Field: "workspace"}}
+		if got := config.CredentialSlots(); !reflect.DeepEqual(got, append(append([]string(nil), want...), CredentialHeaders)) {
+			t.Errorf("%s slots with secret headers = %v", kind, got)
 		}
 	}
 	refresh := d.Actions[RefreshTools].OutputSchema["properties"].(map[string]interface{})

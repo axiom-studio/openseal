@@ -9,7 +9,7 @@ import (
 
 const (
 	SkillID      = "openseal.mcp"
-	SkillVersion = "1.0.0"
+	SkillVersion = "1.1.0"
 	// Read calls a binding tool whose effect is read, Call one whose effect
 	// is write. The model reaches them only as binding tools
 	// mcp.<bindingSlug>.<tool>.
@@ -20,15 +20,19 @@ const (
 	ModelPrefix = "mcp"
 )
 
-// Credential slots of every action, named exactly as the Secrets fields the
-// host fills from them. All are optional: an open server binds none, and a
-// binding fills exactly the slots of its Auth kind (CredentialSlots). One
-// kind covers a host-managed OAuth grant (resolved to its current access
-// token) and a stored key or password, so either can fill access.
+// Credential slots of every action. access, username and password are
+// named exactly as the Secrets fields the host fills from them; headers holds
+// every SecretHeaders value as one JSON object {field: value}, which the host
+// turns into Secrets with BindingConfig.HeaderSecrets. All are optional: an
+// open server binds none, and a binding fills exactly the slots of its config
+// (BindingConfig.CredentialSlots). One kind covers a host-managed OAuth grant
+// (resolved to its current access token) and a stored key or password, so
+// either can fill access.
 const (
 	CredentialAccess   = SecretAccess
 	CredentialUsername = SecretUsername
 	CredentialPassword = SecretPassword
+	CredentialHeaders  = "headers"
 
 	// CredentialKind is the kind of every openseal.mcp credential reference,
 	// and the OAuth connection kind hosts create MCP grants with.
@@ -42,19 +46,25 @@ func Credentials() []skill.CredentialRequirement {
 		{Name: CredentialAccess, Kind: CredentialKind, Optional: true},
 		{Name: CredentialUsername, Kind: CredentialKind, Optional: true},
 		{Name: CredentialPassword, Kind: CredentialKind, Optional: true},
+		{Name: CredentialHeaders, Kind: CredentialKind, Optional: true},
 	}
 }
 
-// CredentialSlots names the credential slots a binding authenticating with
-// kind must fill, and only those.
-func CredentialSlots(kind AuthKind) []string {
-	switch kind {
+// CredentialSlots names the credential slots a binding with this config must
+// fill, and only those: the slots of its Auth kind, then headers when it has
+// SecretHeaders.
+func (c *BindingConfig) CredentialSlots() []string {
+	var slots []string
+	switch c.Auth.Kind {
 	case AuthOAuth, AuthBearer, AuthAPIKey:
-		return []string{CredentialAccess}
+		slots = []string{CredentialAccess}
 	case AuthBasic:
-		return []string{CredentialUsername, CredentialPassword}
+		slots = []string{CredentialUsername, CredentialPassword}
 	}
-	return nil
+	if len(c.SecretHeaders) > 0 {
+		slots = append(slots, CredentialHeaders)
+	}
+	return slots
 }
 
 func object(required []interface{}, properties map[string]interface{}) map[string]interface{} {
