@@ -13,11 +13,11 @@ import (
 )
 
 // Activation cache bounds. Snapshots are cached per deployment and host
-// state; validated binding revisions are cached per exact binding revision
-// and definition variant.
+// state (including the run's host binding set); validated binding revisions
+// are cached per exact binding revision and definition variant.
 const (
 	activationCacheDeployments    = 512
-	activationCacheHostsPerTarget = 4
+	activationCacheHostsPerTarget = 16
 	validatedBindingCacheEntries  = 16384
 )
 

@@ -58,6 +58,11 @@ type RoutineGrantCatalog interface {
 	GetDefinitionVariant(ctx context.Context, id, version, sourceIdentity string) (*skill.Definition, error)
 }
 
+// routineHostBindingCatalog also supplies the host's bindings for a run.
+type routineHostBindingCatalog interface {
+	HostBindings(context.Context, skill.ScopeReference, string, skill.RunActor) (*skill.HostBindingSet, error)
+}
+
 const (
 	maximumRoutineGrants       = 12
 	maximumRoutineBriefSummary = 300
@@ -194,9 +199,20 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 	if catalog == nil || run == nil || strings.TrimSpace(run.AssignedAgentID) == "" {
 		return nil, errors.New("routine grants cannot be checked on this host")
 	}
-	bindings, err := catalog.ListBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID)
+	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
+	bindings, err := catalog.ListBindings(ctx, scope, run.AssignedAgentID)
 	if err != nil {
 		return nil, err
+	}
+	// The host's bindings for this run (connected apps) are granted like
+	// stored ones, by their own tool names; the routine's runs resolve them
+	// for its owner again.
+	if hosted, ok := catalog.(routineHostBindingCatalog); ok {
+		set, hostErr := hosted.HostBindings(ctx, scope, run.AssignedAgentID, skill.RunActor{RunID: run.ID, AgentID: run.AssignedAgentID})
+		if hostErr != nil {
+			return nil, hostErr
+		}
+		bindings = append(bindings, set.Bindings...)
 	}
 	type boundAction struct {
 		skillID string

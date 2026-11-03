@@ -194,7 +194,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if req.BindingID != "" || req.BindingRevision != 0 {
 		selection = append(selection, skill.BindingReference{ID: req.BindingID, Revision: req.BindingRevision})
 	}
-	bound, err := c.catalog.Resolve(ctx, skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, req.DeploymentID, req.SkillID, req.SkillVersion, req.Action, selection...)
+	bound, err := c.catalog.Resolve(skill.WithRunActor(ctx, skill.RunActor{RunID: run.ID, AgentID: run.AssignedAgentID}), skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, req.DeploymentID, req.SkillID, req.SkillVersion, req.Action, selection...)
 	if err != nil {
 		// Maintenance may have started while the catalog was being read. Return
 		// its durable continuation instead of a transient stale-version error.
@@ -441,7 +441,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if decision.Reason != "" && decision.Disposition != ActionDispositionAllow {
 		event.Payload["policyReason"] = decision.Reason
 	}
-	result, err := c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog)})
+	result, err := c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound)})
 	var conflict *ExternalOperationConflictError
 	if errors.As(err, &conflict) && conflict.Prior != nil && externalOperationReceiptComplete(conflict.Prior.Status) {
 		return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, conflict.Prior, lease, now)
@@ -487,7 +487,16 @@ func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Conte
 		Payload: map[string]interface{}{"actionCallId": call.ID, "priorActionCallId": prior.ID, "priorRunId": prior.RunID,
 			"externalOperationDigest": digest, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action},
 	}
-	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog)})
+	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound)})
+}
+
+// hostActionBinding is the binding a call resolved through when the host
+// supplied it for the run rather than storing it.
+func hostActionBinding(bound *skill.BoundAction) *skill.Binding {
+	if bound == nil || !bound.Host {
+		return nil
+	}
+	return bound.Binding
 }
 
 func usesDurableActionBindings(catalog interface{}) bool {

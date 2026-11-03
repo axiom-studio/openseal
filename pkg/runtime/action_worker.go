@@ -172,7 +172,7 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if call.BindingID != "" || call.BindingRevision != 0 {
 		selection = append(selection, skill.BindingReference{ID: call.BindingID, Revision: call.BindingRevision})
 	}
-	bound, executionErr := w.catalog.Resolve(executionCtx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
+	bound, executionErr := w.catalog.Resolve(skill.WithRunActor(executionCtx, skill.RunActor{RunID: sourceRun.ID, AgentID: sourceRun.AssignedAgentID}), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
 	if executionErr == nil {
 		executionErr = w.catalog.ValidateInput(executionCtx, bound, call.Arguments)
 	}

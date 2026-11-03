@@ -163,7 +163,9 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		}
 		skillHost = *resolved
 	}
-	activation, err := catalog.ActivateSkills(ctx, scope, deployment.ID, skillHost)
+	// The Agent's activation also carries the host's bindings for this run
+	// (for example connected apps the run's user may use); a Team's does not.
+	activation, err := catalog.ActivateSkills(skill.WithRunActor(ctx, skill.RunActor{RunID: run.ID, AgentID: deployment.ID}), scope, deployment.ID, skillHost)
 	if err != nil {
 		return nil, fmt.Errorf("activate bound Skills for Agent %s: %w", deployment.ID, err)
 	}

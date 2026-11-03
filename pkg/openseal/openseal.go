@@ -692,6 +692,9 @@ type (
 	SkillAction                          = skill.Action
 	SkillBinding                         = skill.Binding
 	SkillBindingReference                = skill.BindingReference
+	SkillRunActor                        = skill.RunActor
+	SkillHostBindingSet                  = skill.HostBindingSet
+	SkillHostBindingProvider             = skill.HostBindingProvider
 	SkillBindingActor                    = skill.BindingActor
 	SkillBindingLifecycleAction          = skill.BindingLifecycleAction
 	SkillBindingLifecycleEntry           = skill.BindingLifecycleEntry
@@ -5535,6 +5538,25 @@ func (e *Engine) ResolveExactSkillAction(ctx context.Context, scope skill.ScopeR
 
 func (e *Engine) ValidateSkillActionInput(ctx context.Context, bound *skill.BoundAction, input map[string]interface{}) error {
 	return e.skills.ValidateInput(ctx, bound, input)
+}
+
+// SetHostSkillBindingProvider installs the host's run-aware bindings (for
+// example connected apps), consulted at every Agent activation and action
+// resolution of a run. Call it before workers start.
+func (e *Engine) SetHostSkillBindingProvider(provider skill.HostBindingProvider) {
+	e.skills.SetHostBindingProvider(provider)
+}
+
+// WithSkillRunActor marks ctx as acting for one run so activation and exact
+// action resolution through it include that run's host bindings.
+func WithSkillRunActor(ctx context.Context, actor skill.RunActor) context.Context {
+	return skill.WithRunActor(ctx, actor)
+}
+
+// GetHostSkillBinding returns a host binding of the run ctx acts for (see
+// WithSkillRunActor), or nil when the host does not supply it to that run.
+func (e *Engine) GetHostSkillBinding(ctx context.Context, scope skill.ScopeReference, deploymentID, bindingID string) (*skill.Binding, error) {
+	return e.skills.GetHostBinding(ctx, scope, deploymentID, bindingID)
 }
 
 func (e *Engine) ActivateSkills(ctx context.Context, scope skill.ScopeReference, deploymentID string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {

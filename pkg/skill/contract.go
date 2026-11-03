@@ -162,6 +162,8 @@ type Catalog struct {
 	// validated records stored binding revisions already validated against
 	// their immutable definition variant.
 	validated *lruCache[struct{}]
+	// hostBindings supplies the host's own bindings for one run.
+	hostBindings HostBindingProvider
 }
 
 // NewCatalog creates a catalog whose bindings live in memory. Without a
@@ -699,6 +701,13 @@ func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentI
 	if err != nil {
 		return nil, err
 	}
+	hosted, err := c.hostBindingsFor(ctx, scope, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	if bindings, err = withHostBindings(bindings, hosted); err != nil {
+		return nil, err
+	}
 	var resolved *BoundAction
 	for _, binding := range bindings {
 		if binding.Disabled || binding.SkillID != skillID || binding.SkillVersion != version ||
@@ -716,7 +725,7 @@ func (c *Catalog) Resolve(ctx context.Context, scope ScopeReference, deploymentI
 			continue
 		}
 		copy := cloneDefinition(definition)
-		candidate := &BoundAction{Definition: copy, Action: copy.Actions[actionName], Binding: cloneBinding(binding)}
+		candidate := &BoundAction{Definition: copy, Action: copy.Actions[actionName], Binding: cloneBinding(binding), Host: hosted.has(binding.ID)}
 		if resolved != nil && len(selected) == 0 {
 			return nil, ErrBindingAmbiguous
 		}

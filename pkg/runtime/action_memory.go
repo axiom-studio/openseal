@@ -36,6 +36,12 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	}
 	if proposal.RequireBindingFence {
 		binding := s.skillBindings[memorySkillBindingKey(skill.ScopeReference{Kind: call.Scope.Kind, ID: call.Scope.ID}, call.DeploymentID, call.BindingID)]
+		if binding != nil && proposal.HostBinding != nil {
+			return nil, skill.ErrBindingAmbiguous
+		}
+		if binding == nil {
+			binding = proposal.HostBinding
+		}
 		if err := validateActionSubmissionBinding(call, binding); err != nil {
 			return nil, err
 		}

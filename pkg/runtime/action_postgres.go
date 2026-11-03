@@ -87,17 +87,22 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 			WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 FOR SHARE`,
 			call.Scope.Kind, call.Scope.ID, call.DeploymentID, call.BindingID).Scan(&bindingPayload)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, skill.ErrBindingUnavailable
-		}
-		if err != nil {
+			if err := validateActionSubmissionBinding(call, proposal.HostBinding); err != nil {
+				return nil, err
+			}
+		} else if err != nil {
 			return nil, err
-		}
-		var binding skill.Binding
-		if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
-			return nil, err
-		}
-		if err := validateActionSubmissionBinding(call, &binding); err != nil {
-			return nil, err
+		} else {
+			var binding skill.Binding
+			if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
+				return nil, err
+			}
+			if proposal.HostBinding != nil {
+				return nil, skill.ErrBindingAmbiguous
+			}
+			if err := validateActionSubmissionBinding(call, &binding); err != nil {
+				return nil, err
+			}
 		}
 	}
 	var currentRevision int64

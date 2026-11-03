@@ -78,15 +78,23 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("skill_bindings")+`
 		WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND id=$4 FOR SHARE`,
 		request.Lease.Scope.Kind, request.Lease.Scope.ID, request.Lease.BindingOwnerID, request.Lease.BindingID).Scan(&bindingPayload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrActionCredentialLeaseMismatch
-	}
-	if err != nil {
-		return err
-	}
+	// A host-supplied binding has no row; the host re-resolved it for this
+	// exact run just before redemption.
 	var binding skill.Binding
-	if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if request.HostBinding == nil {
+			return ErrActionCredentialLeaseMismatch
+		}
+		binding = *request.HostBinding
+	case err != nil:
 		return err
+	case request.HostBinding != nil:
+		return ErrActionCredentialLeaseMismatch
+	default:
+		if err := json.Unmarshal([]byte(bindingPayload), &binding); err != nil {
+			return err
+		}
 	}
 	// The remaining stable order is ActionCall, then its owning AgentRun.
 	call, err := s.getActionByID(ctx, tx, request.Lease.Scope, request.Lease.ActionCallID, true)
@@ -127,6 +135,10 @@ func (s *PostgresStore) RedeemActionCredentialLease(ctx context.Context, request
 	}
 	if err := matchCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
 		return err
+	}
+	// The host supplies bindings only to its run's own Agent.
+	if request.HostBinding != nil && binding.DeploymentID != run.AssignedAgentID {
+		return ErrActionCredentialLeaseMismatch
 	}
 	credentialFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
 	if err != nil {
