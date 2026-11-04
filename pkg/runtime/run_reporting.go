@@ -261,6 +261,12 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 			references = append(references, ConversationReference{Kind: ConversationReferenceRun, ID: task.WorkRunID})
 		}
 	}
+	replyTo := rootMessageID
+	if task == nil && routineOccurrenceRun(run) {
+		// Each routine occurrence reports as a new top-level message in the
+		// chat the routine was created from, not inside the creating thread.
+		replyTo, broadcast = "", false
+	}
 	service := NewConversationService(store)
 	channel, err := service.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
@@ -270,7 +276,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		Scope: run.Scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision,
 		Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID},
 		SenderDisplayName: "Agent", Intent: intent, Content: content, ResolvesMessageID: resolvesMessageID,
-		Audience: audience, ReplyToMessageID: rootMessageID, BroadcastToChannel: broadcast,
+		Audience: audience, ReplyToMessageID: replyTo, BroadcastToChannel: broadcast,
 		ResponseMode:   responseMode,
 		References:     references,
 		IdempotencyKey: "run-reporting-terminal:" + run.ID + ":" + string(run.Status),
@@ -292,6 +298,13 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		}
 	}
 	return err
+}
+
+// routineOccurrenceRun reports whether run is an occurrence of a routine (a
+// scheduled task), as opposed to a deferred workflow follow-up, which keeps
+// answering in the thread of the message that asked for it.
+func routineOccurrenceRun(run *AgentRun) bool {
+	return run != nil && run.Context[scheduledTaskContextKey] == true && run.Context[deferredWorkflowContextKey] != true
 }
 
 func runReportsMilestone(run *AgentRun, milestone runbook.ReportingMilestone) bool {

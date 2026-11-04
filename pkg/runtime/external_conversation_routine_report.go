@@ -17,9 +17,12 @@ func routineReportDeliveryKey(messageID string) string {
 // projectRoutineReportDelivery sends a routine occurrence's terminal report to
 // the external conversation the routine was created from. The reply worker
 // answers only inbound messages; an occurrence answers none, so its report
-// would otherwise stay in the mirrored Conversation. It goes where the Agent
-// replied to the creating message: that message's thread when it had one (or
-// the endpoint replies in threads), else top level in the conversation.
+// would otherwise stay in the mirrored Conversation. A routine occurrence's
+// report is a new top-level message in that conversation, as it is in the
+// mirrored Conversation, whatever the endpoint's reply mode. A deferred
+// workflow's report goes where the Agent replied to the creating message:
+// that message's thread when it had one (or the endpoint replies in threads),
+// else top level.
 //
 // The destination is proven only from kernel records: the Conversation's
 // endpoint origin, the creating message's provider mapping and the active
@@ -43,7 +46,8 @@ func projectRoutineReportDelivery(ctx context.Context, store ExternalConversatio
 	if err != nil || report == nil {
 		return nil, ignoreMissingConversation(err)
 	}
-	if !routineReportMessage(report, run, sourceID) {
+	topLevel := routineOccurrenceRun(run)
+	if !routineReportMessage(report, run, sourceID, topLevel) {
 		return nil, nil
 	}
 	endpoint, err := store.GetExternalConversationEndpoint(ctx, run.Scope, conversation.Origin.ID)
@@ -63,7 +67,7 @@ func projectRoutineReportDelivery(ctx context.Context, store ExternalConversatio
 	if err != nil || source == nil {
 		return nil, ignoreMissingConversation(err)
 	}
-	externalConversationID, externalThreadID, err := routineReportDestination(ctx, store, endpoint, conversation, source)
+	externalConversationID, externalThreadID, err := routineReportDestination(ctx, store, endpoint, conversation, source, topLevel)
 	if err != nil || externalConversationID == "" {
 		return nil, err
 	}
@@ -86,11 +90,16 @@ func projectRoutineReportDelivery(ctx context.Context, store ExternalConversatio
 	return result.Delivery, nil
 }
 
-// routineReportMessage is the Agent's terminal report for this Run, posted
-// in reply to the routine's creating message.
-func routineReportMessage(message *ChannelMessage, run *AgentRun, sourceID string) bool {
+// routineReportMessage is the Agent's terminal report for this Run: top
+// level for a routine occurrence, else in reply to the creating message.
+func routineReportMessage(message *ChannelMessage, run *AgentRun, sourceID string, topLevel bool) bool {
+	replyTo := sourceID
+	if topLevel {
+		replyTo = ""
+	}
 	if message == nil || message.Historical || message.Sender.Type != ConversationParticipantAgent || message.Sender.ID != run.AssignedAgentID ||
-		message.ReplyToMessageID != sourceID || message.Audience.Kind != ConversationAudienceChannel || strings.TrimSpace(message.Content) == "" {
+		message.ReplyToMessageID != replyTo || topLevel && message.ThreadRootID != "" ||
+		message.Audience.Kind != ConversationAudienceChannel || strings.TrimSpace(message.Content) == "" {
 		return false
 	}
 	for _, reference := range message.References {
@@ -101,10 +110,11 @@ func routineReportMessage(message *ChannelMessage, run *AgentRun, sourceID strin
 	return false
 }
 
-// routineReportDestination resolves the provider conversation and thread of
-// the routine's creating message, the same placement the reply worker gives
-// its answer. The mappings written when that message arrived must agree.
-func routineReportDestination(ctx context.Context, store ExternalConversationStore, endpoint *ExternalConversationEndpoint, conversation *Conversation, source *ChannelMessage) (string, string, error) {
+// routineReportDestination resolves the provider conversation of the
+// routine's creating message and, unless the report is top level, its
+// thread: the same placement the reply worker gives its answer. The mappings
+// written when that message arrived must agree.
+func routineReportDestination(ctx context.Context, store ExternalConversationStore, endpoint *ExternalConversationEndpoint, conversation *Conversation, source *ChannelMessage, topLevel bool) (string, string, error) {
 	origin := source.ExternalSource
 	if source.Historical || source.Sender.Type != ConversationParticipantUser || origin == nil || !validExternalConversationReference(origin.ChannelID, 1024) {
 		return "", "", nil
@@ -112,6 +122,14 @@ func routineReportDestination(ctx context.Context, store ExternalConversationSto
 	base, err := store.GetExternalConversationMapping(ctx, endpoint.Scope, endpoint.ID, origin.ChannelID, "")
 	if err != nil || base == nil || base.ConversationID != conversation.ID {
 		return "", "", err
+	}
+	if topLevel {
+		// The creating message must have arrived through this endpoint.
+		mapping, err := store.GetExternalMessageMapping(ctx, endpoint.Scope, endpoint.ID, ExternalMessageInbound, origin.MessageID)
+		if err != nil || mapping == nil || mapping.ConversationID != conversation.ID || mapping.ChannelMessageID != source.ID {
+			return "", "", err
+		}
+		return origin.ChannelID, "", nil
 	}
 	if origin.ThreadID != "" {
 		thread, err := store.GetExternalConversationMapping(ctx, endpoint.Scope, endpoint.ID, origin.ChannelID, origin.ThreadID)

@@ -171,7 +171,7 @@ func TestMessageDuringPendingRoutineBriefSupersedesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	instructions := strings.Join(seen.SystemInstructions, "\n")
-	if !strings.Contains(instructions, SupersededRoutineBriefInstruction) || !strings.Contains(instructions, RoutineTimezoneInstruction) || len(seen.Actions) != 1 {
+	if !strings.Contains(instructions, SupersededRoutineBriefInstruction) || !strings.Contains(instructions, RoutineTimezoneInstruction) || !strings.Contains(instructions, RoutineDeliveryInstruction) || len(seen.Actions) != 1 {
 		t.Fatalf("hosted request = %#v", seen)
 	}
 }

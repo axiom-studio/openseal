@@ -134,11 +134,29 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 	return c, "", nil
 }
 
-// scheduledTaskCreateAction is the 1.6.0 contract: a connected tool is
-// granted by its own model action name and the kernel pins the exact tool the
-// user approved; the base action a connected tool runs through is never
-// grantable.
+// scheduledTaskCreateAction is the 1.7.0 contract: each run's result reaches
+// the chat the routine was created from on its own, and a grant of an action
+// that posts to a channel is pinned to the destinations the user approved.
 func scheduledTaskCreateAction() skill.Action {
+	action := scheduledTaskCreateActionLegacy160()
+	action.Description += " Each run's result is posted automatically as a new message in the chat or Slack conversation the routine was created from, so never grant a send action to deliver results there. To post to any other channel, grant that sending action (for example skill-slack.slack-send-message) with toDestinations naming each channel, and name it in the label, for example \"Post to #ai-news\"; runs then post there without asking, and anywhere else asks first."
+	brief := action.InputSchema["properties"].(map[string]interface{})["brief"].(map[string]interface{})
+	grants := brief["properties"].(map[string]interface{})["grants"].(map[string]interface{})
+	grants["description"] = "The fewest actions each run must perform without asking. Use exact action names from your tools: skillId.action, or a connected tool's own name such as mcp.<connection>.<tool>, granting each connected tool separately. List what it reads (for example web search) and each sending action; for an email to the user set toOwnerOnly; for a post to another channel set toDestinations. Never grant a send to this chat: results are posted here automatically."
+	properties := grants["items"].(map[string]interface{})["properties"].(map[string]interface{})
+	properties["toDestinations"] = map[string]interface{}{
+		"type": "array", "minItems": 1, "maxItems": maximumRoutineGrantDestinations,
+		"items":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineGrantDestinationBytes},
+		"description": "Required for an action that posts to a channel or conversation: each destination its runs post to, exactly as the runs will pass it as the action's channel argument (the channel ID, or its #name). Only posts to these run without asking.",
+	}
+	return action
+}
+
+// scheduledTaskCreateActionLegacy160 is the published 1.6.0 contract: a
+// connected tool is granted by its own model action name and the kernel pins
+// the exact tool the user approved; the base action a connected tool runs
+// through is never grantable.
+func scheduledTaskCreateActionLegacy160() skill.Action {
 	action := scheduledTaskCreateActionLegacy150()
 	action.Description += " To grant a connected app's tool, use that tool's own exact action name from your tools, for example mcp.<connection>.<tool>; the generic action connected tools run through (such as openseal.mcp.call) cannot be granted."
 	brief := action.InputSchema["properties"].(map[string]interface{})["brief"].(map[string]interface{})

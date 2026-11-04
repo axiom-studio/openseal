@@ -1005,6 +1005,9 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	for _, action := range request.Actions {
 		if action.SkillID == RunbookManagementSkillID && action.Action == RunbookActionCreateTask {
 			request.SystemInstructions = append(request.SystemInstructions, RoutineTimezoneInstruction)
+			if action.Version == RunbookManagementSkillVersion {
+				request.SystemInstructions = append(request.SystemInstructions, RoutineDeliveryInstruction)
+			}
 			if instruction := routineBindingToolGrantInstruction(request.Actions); instruction != "" {
 				request.SystemInstructions = append(request.SystemInstructions, instruction)
 			}

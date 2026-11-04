@@ -96,7 +96,7 @@ func terminalReportingContractAssertMessage(t *testing.T, store ConversationStor
 			report = message
 		}
 	}
-	if report == nil || report.Content != "The requested result is ready" || report.ReplyToMessageID != trigger.ID || len(report.References) != 1 || report.References[0].ID != run.ID {
+	if report == nil || report.Content != "The requested result is ready" || report.ReplyToMessageID != "" || report.ThreadRootID != "" || len(report.References) != 1 || report.References[0].ID != run.ID {
 		t.Fatalf("result missed the original chat/context: %#v", report)
 	}
 }

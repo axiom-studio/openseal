@@ -96,16 +96,26 @@ func (f *routineReportFixture) deliveries(t *testing.T) []*ExternalConversationD
 	return deliveries
 }
 
-// A routine created from a Slack DM posts each occurrence's report there, in
-// the thread its creating message got a reply in, exactly once.
+// A routine created from a Slack conversation posts each occurrence's report
+// there as a new top-level message, even when it was created in a thread, and
+// exactly once. A deferred workflow keeps answering where its request got a
+// reply: that thread, or the reply-mode thread of a top-level request.
 func TestRoutineReportReachesTheExternalConversationItWasCreatedFrom(t *testing.T) {
-	for _, test := range []struct{ name, thread, want string }{
-		{"top-level creating message", "", "171.001"},
-		{"creating message in a thread", "170.500", "170.500"},
+	for _, test := range []struct {
+		name, thread, want string
+		workflow           bool
+	}{
+		{"routine from a top-level message", "", "", false},
+		{"routine from a thread", "170.500", "", false},
+		{"workflow from a top-level message", "", "171.001", true},
+		{"workflow from a thread", "170.500", "170.500", true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newRoutineReportFixture(t, test.thread, true)
 			run := f.occurrence("routine-occurrence", true)
+			if test.workflow {
+				run.Context[deferredWorkflowContextKey] = true
+			}
 			for range 2 {
 				if err := f.worker.project(t.Context(), run); err != nil {
 					t.Fatal(err)
@@ -114,6 +124,9 @@ func TestRoutineReportReachesTheExternalConversationItWasCreatedFrom(t *testing.
 			report, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, f.conversation.ID, "run-reporting-terminal:"+run.ID+":"+string(run.Status))
 			if err != nil || report == nil || report.Content != "Today's digest: three stories." {
 				t.Fatalf("routine report was not posted: %#v %v", report, err)
+			}
+			if topLevel := report.ReplyToMessageID == "" && report.ThreadRootID == ""; topLevel == test.workflow {
+				t.Fatalf("report placement in the Conversation = reply %q thread %q", report.ReplyToMessageID, report.ThreadRootID)
 			}
 			deliveries := f.deliveries(t)
 			if len(deliveries) != 1 {

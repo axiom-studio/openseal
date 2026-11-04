@@ -1626,6 +1626,7 @@ var (
 	NewRunActionValidator                  = runtime.NewRunActionValidator
 	NewRunActionDispatcher                 = runtime.NewRunActionDispatcher
 	RunbookManagementSkill                 = runtime.RunbookManagementSkill
+	RunbookManagementSkillLegacy160        = runtime.RunbookManagementSkillLegacy160
 	RunbookManagementSkillLegacy150        = runtime.RunbookManagementSkillLegacy150
 	RunbookManagementSkillLegacy140        = runtime.RunbookManagementSkillLegacy140
 	RunbookManagementSkillLegacy132        = runtime.RunbookManagementSkillLegacy132
@@ -3624,7 +3625,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if !e.runbookManagementActions {
 		return nil
 	}
-	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkillLegacy131(), runtime.RunbookManagementSkillLegacy132(), runtime.RunbookManagementSkillLegacy140(), runtime.RunbookManagementSkillLegacy150(), runtime.RunbookManagementSkill()} {
+	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkillLegacy131(), runtime.RunbookManagementSkillLegacy132(), runtime.RunbookManagementSkillLegacy140(), runtime.RunbookManagementSkillLegacy150(), runtime.RunbookManagementSkillLegacy160(), runtime.RunbookManagementSkill()} {
 		if err := e.skills.Register(context.Background(), definition); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 			return err
 		}

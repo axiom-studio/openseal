@@ -27,6 +27,12 @@ type RoutineGrant struct {
 	// ToOwnerOnly limits a message-sending grant to sends whose recipients
 	// are all the routine owner's own addresses.
 	ToOwnerOnly bool `json:"toOwnerOnly,omitempty"`
+	// ToDestinations limits a grant of an action that posts to a channel or
+	// conversation (for example a Slack channel) to those destinations: the
+	// exact channel values its runs pass, normalized without a leading '#'.
+	// A posting action is granted only with destinations, and a call is
+	// covered only when every destination argument it names is one of them.
+	ToDestinations []string `json:"toDestinations,omitempty"`
 	// ToolArguments pins a connected tool grant to the exact tool the user
 	// approved: the binding tool's fixed arguments (for an MCP tool, its
 	// upstream name and pinned hash), copied from the catalog when the brief
@@ -71,7 +77,18 @@ const (
 	// maximumRoutineGrantToolArguments bounds a connected tool pin.
 	maximumRoutineGrantToolArguments      = 8
 	maximumRoutineGrantToolArgumentsBytes = 2048
+	// maximumRoutineGrantDestinations bounds a destination pin.
+	maximumRoutineGrantDestinations     = 8
+	maximumRoutineGrantDestinationBytes = 256
 )
+
+// routineGrantContract is what a create_task contract's briefs can carry.
+type routineGrantContract struct {
+	// pinTools: connected tool grants pinned to the approved tool.
+	pinTools bool
+	// pinDestinations: posting grants pinned to approved destinations.
+	pinDestinations bool
+}
 
 var routineGrantActionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\.[A-Za-z0-9_-][A-Za-z0-9_.:-]{0,127}$`)
 
@@ -154,9 +171,45 @@ func normalizeRoutineGrants(values []RoutineGrant, allowEmptyLabels bool) ([]Rou
 				return nil, fmt.Errorf("routine grant %s tool pin must encode to at most %d bytes", action, maximumRoutineGrantToolArgumentsBytes)
 			}
 		}
-		grants = append(grants, RoutineGrant{Action: action, Label: label, ToOwnerOnly: value.ToOwnerOnly, ToolArguments: cloneMap(value.ToolArguments)})
+		destinations, err := normalizeRoutineGrantDestinations(action, value.ToDestinations)
+		if err != nil {
+			return nil, err
+		}
+		if value.ToOwnerOnly && len(destinations) > 0 {
+			return nil, fmt.Errorf("routine grant %s is limited either to the owner or to destinations, not both", action)
+		}
+		grants = append(grants, RoutineGrant{Action: action, Label: label, ToOwnerOnly: value.ToOwnerOnly, ToDestinations: destinations, ToolArguments: cloneMap(value.ToolArguments)})
 	}
 	return grants, nil
+}
+
+// normalizeRoutineGrantDestination trims a destination and drops one leading
+// '#', so "#ai-news" and "ai-news" pin the same channel name.
+func normalizeRoutineGrantDestination(value string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(value), "#"))
+}
+
+func normalizeRoutineGrantDestinations(action string, values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) > maximumRoutineGrantDestinations {
+		return nil, fmt.Errorf("routine grant %s names at most %d destinations", action, maximumRoutineGrantDestinations)
+	}
+	destinations := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		destination := normalizeRoutineGrantDestination(value)
+		if destination == "" || len(destination) > maximumRoutineGrantDestinationBytes || strings.ContainsAny(destination, " \t\r\n<>`#") ||
+			strings.ContainsFunc(destination, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+			return nil, fmt.Errorf("routine grant %s destination %q must be a channel ID or name", action, value)
+		}
+		if !seen[destination] {
+			seen[destination] = true
+			destinations = append(destinations, destination)
+		}
+	}
+	return destinations, nil
 }
 
 func cloneRoutineGrants(values []RoutineGrant) []RoutineGrant {
@@ -166,6 +219,10 @@ func cloneRoutineGrants(values []RoutineGrant) []RoutineGrant {
 	grants := append([]RoutineGrant(nil), values...)
 	for index := range grants {
 		grants[index].ToolArguments = cloneMap(grants[index].ToolArguments)
+		grants[index].ToDestinations = append([]string(nil), grants[index].ToDestinations...)
+		if len(grants[index].ToDestinations) == 0 {
+			grants[index].ToDestinations = nil
+		}
 	}
 	return grants
 }
@@ -190,9 +247,10 @@ func routineGrantToolPinned(grant RoutineGrant, tool *skill.BindingTool) bool {
 // binding tool is granted by its own model action name; the base actions it
 // routes to are never grantable, since one grant would cover every tool of
 // every binding. Each connected tool grant is pinned to that tool's fixed
-// arguments; pinTools is false only for an earlier contract that cannot carry
-// the pin, which then cannot grant connected tools at all.
-func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant, pinTools bool) ([]RoutineGrant, error) {
+// arguments, and each grant of an action that posts to a channel is pinned to
+// the destinations the user approved, which its label names. An earlier
+// contract that cannot carry a pin cannot grant those actions at all.
+func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant, contract routineGrantContract) ([]RoutineGrant, error) {
 	if len(grants) == 0 {
 		return grants, nil
 	}
@@ -285,7 +343,7 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 			}
 			return nil, fmt.Errorf("routine grant %s is not an action this Agent can use", grant.Action)
 		}
-		if bound.pin != nil && !pinTools {
+		if bound.pin != nil && !contract.pinTools {
 			return nil, fmt.Errorf("routine grant %s is a connected tool, which this routine contract cannot grant", grant.Action)
 		}
 		// The pin always comes from the catalog, never from the model.
@@ -301,8 +359,21 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 				return nil, fmt.Errorf("routine grant %s does not send messages, so it cannot be limited to the owner", grant.Action)
 			}
 		}
+		posts := routineActionPostsToDestination(bound.action)
+		if posts && !contract.pinDestinations {
+			return nil, fmt.Errorf("routine grant %s posts to a channel, which this routine contract cannot grant", grant.Action)
+		}
+		if posts && len(grant.ToDestinations) == 0 {
+			return nil, fmt.Errorf("routine grant %s posts to a channel: set toDestinations to each channel its runs post to; results reach this chat without it", grant.Action)
+		}
+		if len(grant.ToDestinations) > 0 && len(routineActionDestinationKeys(bound.action.InputSchema)) == 0 {
+			return nil, fmt.Errorf("routine grant %s takes no channel, so it cannot be limited to destinations", grant.Action)
+		}
 		if grant.Label == "" || approvalNamesIdentifier(grant.Label, bound.skillID, bound.name, grant.Action) {
 			grant.Label = routineGrantCatalogLabel(bound.name, bound.action)
+		}
+		if grant.Label, err = routineGrantDestinationLabel(grant.Label, grant.ToDestinations); err != nil {
+			return nil, fmt.Errorf("routine grant %s: %w", grant.Action, err)
 		}
 		resolved = append(resolved, grant)
 	}
@@ -350,6 +421,101 @@ func routineActionHasRecipients(schema map[string]interface{}) bool {
 		}
 	}
 	return false
+}
+
+// routineDestinationKey reports whether an argument names the channel or
+// conversation a message is posted to.
+func routineDestinationKey(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "channel", "channel_id", "channelid", "channels", "conversation", "conversation_id", "conversationid", "destination", "destinations":
+		return true
+	}
+	return false
+}
+
+// routineActionDestinationKeys returns the destination arguments of an
+// action's input schema.
+func routineActionDestinationKeys(schema map[string]interface{}) []string {
+	properties, _ := schema["properties"].(map[string]interface{})
+	keys := []string{}
+	for name := range properties {
+		if routineDestinationKey(name) {
+			keys = append(keys, name)
+		}
+	}
+	return keys
+}
+
+// routineActionPostsToDestination reports whether an action has side effects
+// in a channel or conversation it takes as an argument.
+func routineActionPostsToDestination(action skill.Action) bool {
+	return action.SideEffect != skill.SideEffectRead && len(routineActionDestinationKeys(action.InputSchema)) > 0
+}
+
+// routineGrantDestinationLabel makes the approved label name every pinned
+// destination, appending those it does not mention.
+func routineGrantDestinationLabel(label string, destinations []string) (string, error) {
+	missing := []string{}
+	lower := strings.ToLower(label)
+	for _, destination := range destinations {
+		if !strings.Contains(lower, strings.ToLower(destination)) {
+			missing = append(missing, destination)
+		}
+	}
+	if len(missing) == 0 {
+		return label, nil
+	}
+	label = strings.TrimSpace(strings.TrimRight(label, ".")) + " (" + strings.Join(missing, ", ") + ")"
+	if utf8.RuneCountInString(label) > maximumRoutineGrantLabel {
+		return "", fmt.Errorf("label naming its destinations must be at most %d characters", maximumRoutineGrantLabel)
+	}
+	return label, nil
+}
+
+// routineDestinationsPinned reports whether arguments name at least one
+// destination under keys, and every one of them is pinned. A value it cannot
+// read as a destination fails closed.
+func routineDestinationsPinned(arguments map[string]interface{}, keys []string, pinned []string) bool {
+	allowed := make(map[string]bool, len(pinned))
+	for _, destination := range pinned {
+		if destination = normalizeRoutineGrantDestination(destination); destination != "" {
+			allowed[destination] = true
+		}
+	}
+	count := 0
+	check := func(value string) bool {
+		destination := normalizeRoutineGrantDestination(value)
+		if destination == "" {
+			return true
+		}
+		count++
+		return allowed[destination]
+	}
+	for _, key := range keys {
+		switch typed := arguments[key].(type) {
+		case nil:
+		case string:
+			if !check(typed) {
+				return false
+			}
+		case []interface{}:
+			for _, nested := range typed {
+				value, ok := nested.(string)
+				if !ok || !check(value) {
+					return false
+				}
+			}
+		case []string:
+			for _, value := range typed {
+				if !check(value) {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return count > 0
 }
 
 // routineRecipientsOwned reports whether every recipient in arguments, at any
@@ -522,6 +688,15 @@ func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routine
 				return nil, nil
 			}
 		}
+		action := bound.Action
+		if tool != nil {
+			action.InputSchema = tool.InputSchema
+		}
+		if len(grant.ToDestinations) > 0 || routineActionPostsToDestination(action) {
+			if len(grant.ToDestinations) == 0 || !routineDestinationsPinned(recipients, routineActionDestinationKeys(action.InputSchema), grant.ToDestinations) {
+				return nil, nil
+			}
+		}
 		matched := grant
 		return &matched, nil
 	}
@@ -592,6 +767,13 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 		if grant.ToOwnerOnly {
 			item["toOwnerOnly"] = true
 		}
+		if len(grant.ToDestinations) > 0 {
+			destinations := make([]interface{}, 0, len(grant.ToDestinations))
+			for _, destination := range grant.ToDestinations {
+				destinations = append(destinations, destination)
+			}
+			item["toDestinations"] = destinations
+		}
 		if grant.ToolArguments != nil {
 			item["toolArguments"] = cloneMap(grant.ToolArguments)
 		}
@@ -607,7 +789,7 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 // resolveRoutineBriefArguments normalizes a proposed create_task brief and
 // fills grant labels from the catalog before the arguments are digested, so
 // the approved arguments carry exactly the brief the user sees.
-func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}, pinTools bool) error {
+func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}, contract routineGrantContract) error {
 	var parsed struct {
 		Brief *RoutineBrief `json:"brief"`
 	}
@@ -622,7 +804,7 @@ func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatal
 	if err != nil {
 		return err
 	}
-	if brief.Grants, err = resolveRoutineBriefGrants(ctx, catalog, owners, run, brief.Grants, pinTools); err != nil {
+	if brief.Grants, err = resolveRoutineBriefGrants(ctx, catalog, owners, run, brief.Grants, contract); err != nil {
 		return err
 	}
 	arguments["brief"] = routineBriefPreview(brief)
@@ -630,15 +812,19 @@ func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatal
 }
 
 // routineBriefContract reports whether a create_task binding uses a
-// contract that carries a routine brief: the current one, or 1.5.0 while its
-// accepted calls drain.
+// contract that carries a routine brief: the current one, or 1.6.0 and 1.5.0
+// while their accepted calls drain.
 func routineBriefContract(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.5.0")
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.6.0" || bound.Definition.Version == "1.5.0")
 }
 
-// routineBriefPinsTools reports whether a create_task binding's contract
-// carries connected tool pins, so its briefs may grant connected tools.
-func routineBriefPinsTools(bound *skill.BoundAction) bool {
-	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID && bound.Definition.Version == RunbookManagementSkillVersion
+// routineBriefGrantContract reports which pins a create_task binding's
+// contract carries: connected tools since 1.6.0, destinations since 1.7.0.
+func routineBriefGrantContract(bound *skill.BoundAction) routineGrantContract {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != RunbookManagementSkillID {
+		return routineGrantContract{}
+	}
+	current := bound.Definition.Version == RunbookManagementSkillVersion
+	return routineGrantContract{pinTools: current || bound.Definition.Version == "1.6.0", pinDestinations: current}
 }
