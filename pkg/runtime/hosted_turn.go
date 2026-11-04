@@ -453,9 +453,13 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if r == nil || r.host == nil || input.Run == nil || input.Turn == nil {
 		return nil, errors.New("hosted turn requires a durable Run and Turn")
 	}
-	// Legacy failure checkpoints complete through kernel-owned text, never a
-	// correction proposal or an additional model request.
+	// A stopped attempt gets one answer-only model turn that explains its
+	// recorded failure; kernel text is only the fallback when no model answer
+	// is possible.
 	if input.sourceAccessChallenge == nil || !input.canAskConversationQuestion || input.Run.AssignedAgentID != r.config.AgentID || !hasCanonicalSourceAccessChallenge(input.Run) {
+		if requiresFinalFailureExplanation(input.Run.Checkpoint) {
+			return r.runFinalFailureExplanation(ctx, input)
+		}
 		if outcome, stopped := terminalFailureOutcome(input.Run); stopped {
 			return outcome, nil
 		}

@@ -176,7 +176,8 @@ func TestRetryConversationReplyContinuesWorkerAndPublishesOnce(t *testing.T) {
 		return &TurnRunnerBinding{DeploymentID: "agent", DefinitionID: "agent-definition", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 			calls++
 			if calls == 1 {
-				return nil, errors.New("provider unavailable")
+				// No model can answer, so the Run fails without an explanation turn.
+				return nil, NewTurnHostFailure("provider_unavailable", "provider unavailable", false)
 			}
 			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Recovered answer"}, nil
 		})}, nil

@@ -118,7 +118,8 @@ func TestConversationTaskFailureReportingSafeOnceAcrossRestartAndThread(t *testi
 							delete(checkpoint, FinalFailureExplanationCheckpointKey)
 						case "stale rate limited":
 							checkpoint = checkpointTerminalAction(checkpoint, &ActionCall{ID: "latest-call", Status: ActionCallStatusFailed, Error: "Different operation failed."}, nil)
-							terminalError, expected = "Different operation failed.", TerminalFailureReply("action_failed")
+							// The latest failure stopped the attempt, so its answer is the cause.
+							terminalError, expected = "Different operation failed.", "I couldn't finish this request because a tool reported: Different operation failed. I stopped this attempt. Ask me to try again when you're ready."
 						case "unproven rate limited":
 							delete(checkpoint, actionHistoryCheckpointKey)
 							expected = TerminalFailureReply("action_failed")

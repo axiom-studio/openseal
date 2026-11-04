@@ -247,7 +247,9 @@ func TestLegacyFailureReplyDoesNotDependOnModelAvailability(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker"}, runner)
-	if err != nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.WakeCondition != nil || host.calls != 0 || result.Run.Error != "Service rejected the action." ||
+	// The model is asked first; while it is unavailable the kernel's reply
+	// still closes the attempt at once.
+	if err != nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.WakeCondition != nil || host.calls != 1 || result.Run.Error != "Service rejected the action." ||
 		result.Run.Output["summary"] != TerminalFailureReply("action_failed") || result.Turn.Usage.InputTokens != 0 || result.Turn.Usage.OutputTokens != 0 || result.Turn.Usage.Cost != 0 {
 		t.Fatalf("legacy failure reply spent a model request: %#v calls=%d err=%v", result, host.calls, err)
 	}
@@ -309,7 +311,7 @@ func TestExplicitSoftActionErrorsAreFailures(t *testing.T) {
 	}
 }
 
-func TestFailedTeamActionRepliesWithoutModelOrParticipationRound(t *testing.T) {
+func TestFailedTeamActionRepliesWithModelExplanationWithoutParticipationRound(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewConversationService(store)
 	scope := Scope{Kind: "tenant", ID: "team-final"}
@@ -337,9 +339,12 @@ func TestFailedTeamActionRepliesWithoutModelOrParticipationRound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := &failureExplanationTestHost{respond: func(HostedTurnRequest) (*HostedTurnResponse, error) {
-		t.Fatal("Team failure requested an explanation model")
-		return nil, nil
+	host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+		if len(request.Actions) != 0 {
+			t.Fatalf("Team failure explanation offered actions: %#v", request.Actions)
+		}
+		return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model",
+			NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "That change was rejected, so nothing was applied."}}, nil
 	}}
 	agentTurns := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 		if run.AssignedAgentID != "agent" || run.Owner != conversation.Owner {
@@ -360,11 +365,11 @@ func TestFailedTeamActionRepliesWithoutModelOrParticipationRound(t *testing.T) {
 		t.Fatal(err)
 	}
 	outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: scheduled.Run, Turn: &AgentTurn{ID: "final"}})
-	if err != nil || outcome == nil || host.calls != 0 || conversationResultString(outcome.RunOutput, "messageId") == "" {
+	if err != nil || outcome == nil || host.calls != 1 || conversationResultString(outcome.RunOutput, "messageId") == "" {
 		t.Fatalf("Team final reply absent: %#v calls=%d err=%v", outcome, host.calls, err)
 	}
 	message, err := store.GetChannelMessage(t.Context(), scope, conversation.ID, conversationResultString(outcome.RunOutput, "messageId"))
-	if err != nil || message.Sender.ID != "agent" || message.Content != TerminalFailureReply("action_admission_failed") {
+	if err != nil || message.Sender.ID != "agent" || message.Content != "That change was rejected, so nothing was applied." {
 		t.Fatalf("Team final attribution incorrect: %#v %v", message, err)
 	}
 	scheduled.Run.Checkpoint[teamActionAssignedAgentCheckpointKey] = "foreign-agent"

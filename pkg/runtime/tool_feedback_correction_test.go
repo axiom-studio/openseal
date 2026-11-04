@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -181,11 +182,13 @@ func TestToolFeedbackFailingCorrectionsStopAtTheBoundAcrossStores(t *testing.T) 
 				t.Fatalf("correction %d: %#v %v", attempt, failed, err)
 			}
 		}
-		if failed.Run.Status != AgentRunStatusFailed || !requiresFinalFailureExplanation(failed.Run.Checkpoint) || dispatches != MaximumToolFeedbackCorrections+1 {
+		// The attempt stops: no further action runs, and the model's one
+		// remaining turn explains the failure to the user.
+		if failed.Run.Status != AgentRunStatusQueued || !requiresFinalFailureExplanation(failed.Run.Checkpoint) || dispatches != MaximumToolFeedbackCorrections+1 {
 			t.Fatalf("failing corrections did not stop at the bound: %#v dispatches=%d", failed.Run, dispatches)
 		}
+		feedbackAssertModelExplains(t, failed.Run, "invalid field selector")
 		feedbackAssertKernelFailureReply(t, failed.Run, "action_failed")
-		feedbackAssertNotClaimable(t, store, scope, now)
 	})
 }
 
@@ -252,11 +255,15 @@ func feedbackAssertNotClaimable(t *testing.T, store KernelStore, scope Scope, no
 	}
 }
 
+// feedbackAssertKernelFailureReply checks the kernel's fallback reply of a
+// stopped attempt, used when no model can answer its explanation turn.
 func feedbackAssertKernelFailureReply(t *testing.T, run *AgentRun, code string) {
 	t.Helper()
+	if got := terminalFailureCodeFromCheckpoint(run.Checkpoint); got != code {
+		t.Fatalf("stopped attempt cause = %q, want %q", got, code)
+	}
 	host := &failureExplanationTestHost{respond: func(HostedTurnRequest) (*HostedTurnResponse, error) {
-		t.Fatal("terminal failure invoked the hosted model")
-		return nil, errors.New("unexpected model request")
+		return nil, NewTurnHostFailure("provider_invalid_turn_outcome", "The model returned an invalid answer.", false)
 	}}
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "reader-agent", DefinitionID: "reader", DefinitionVersion: "1",
 		Actions: []capability.ModelAction{{Name: "reader.list"}}})
@@ -264,16 +271,45 @@ func feedbackAssertKernelFailureReply(t *testing.T, run *AgentRun, code string) 
 		t.Fatal(err)
 	}
 	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "stale-explanation"}})
-	if err != nil || outcome == nil || host.calls != 0 || outcome.ModelProvider != "host" || outcome.Model != "terminal-failure-report" {
-		t.Fatalf("failure was not handled without a model: %#v %v hostcalls=%d", outcome, err, host.calls)
+	if err != nil || outcome == nil || outcome.ModelProvider != "host" || outcome.Model != "terminal-failure-report" {
+		t.Fatalf("failure fallback was not the kernel reply: %#v %v hostcalls=%d", outcome, err, host.calls)
 	}
-	if outcome.OutputSummary != TerminalFailureReply(code) || outcome.RunOutput["summary"] != outcome.OutputSummary ||
+	if outcome.OutputSummary != terminalFailureReplyFromCheckpoint(run.Checkpoint) || outcome.RunOutput["summary"] != outcome.OutputSummary ||
 		outcome.OutputSummary == "" || outcome.WakeCondition != nil || len(outcome.ProposedActions) != 0 ||
 		outcome.ProposedFork != nil || outcome.ProposedTask != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil {
 		t.Fatalf("failure reply was absent or authorized further work: %#v", outcome)
 	}
 	if strings.Contains(outcome.OutputSummary, "private-secret") || strings.Contains(outcome.OutputSummary, "workspace-secret") {
 		t.Fatal("failure reply exposed private execution details")
+	}
+}
+
+// feedbackAssertModelExplains checks that a stopped attempt's next turn asks
+// the model, with nothing to execute, to explain the recorded failure, and
+// returns its answer as the reply.
+func feedbackAssertModelExplains(t *testing.T, run *AgentRun, cause string) {
+	t.Helper()
+	if !requiresFinalFailureExplanation(run.Checkpoint) || isTerminalAgentRunStatus(run.Status) {
+		t.Fatalf("stopped attempt is not waiting for its explanation: %#v", run)
+	}
+	host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+		failure, _ := request.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+		if len(request.Actions) != 0 || request.Workspace != nil || len(request.RunbookOperations) != 0 || request.ConversationTasks != nil ||
+			!slices.Contains(request.SystemInstructions, FinalFailureExplanationSystemInstruction) || !strings.Contains(fmt.Sprint(failure["message"]), cause) {
+			t.Fatalf("explanation turn offered work or hid the failure: %#v", request)
+		}
+		return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model",
+			NextRunStatus: AgentRunStatusCompleted, OutputSummary: "It didn't work: " + cause, RunOutput: map[string]interface{}{"summary": "It didn't work: " + cause}}, nil
+	}}
+	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: run.AssignedAgentID, DefinitionID: "agent", DefinitionVersion: "1",
+		Actions: []capability.ModelAction{{Name: "reader.list"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "explanation"}})
+	if err != nil || outcome == nil || host.calls != 1 || outcome.Model != "model" || outcome.OutputSummary != "It didn't work: "+cause ||
+		outcome.NextRunStatus != AgentRunStatusCompleted || len(outcome.ProposedActions) != 0 {
+		t.Fatalf("model did not explain the stopped attempt: %#v %v calls=%d", outcome, err, host.calls)
 	}
 }
 
@@ -423,35 +459,55 @@ func TestToolFeedbackMutationFailureReturnsAndPreservesPhase(t *testing.T) {
 	}
 }
 
-func TestToolFeedbackStoppedAttemptPublishesWithoutModelCallAcrossStores(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-		now := time.Now().UTC()
-		_, scope := feedbackReadCatalog(t)
-		portfolio := NewPortfolioService(store)
-		portfolio.now = func() time.Time { return now }
-		stopped := checkpointTerminalAction(nil, &ActionCall{ID: "failed-read", Status: ActionCallStatusFailed, SideEffect: skill.SideEffectRead, Error: "invalid fields"}, nil)
-		stopped = checkpointTerminalFailure(checkpointFinalFailureExplanation(stopped, "action", "invalid fields"), "action_failed")
-		if _, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope,
-			Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reader-agent"}, AssignedAgentID: "reader-agent", Goal: "Read records",
-			Checkpoint: stopped}); err != nil {
-			t.Fatal(err)
-		}
-		run := feedbackClaim(t, store, scope, now)
-		host := &failureExplanationTestHost{respond: func(HostedTurnRequest) (*HostedTurnResponse, error) {
-			t.Fatal("stopped attempt invoked an explanatory model")
-			return nil, nil
-		}}
-		runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "reader-agent", DefinitionID: "reader", DefinitionVersion: "1"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "agent-worker"}, runner)
-		if err != nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.Error != "invalid fields" ||
-			result.Run.Output["summary"] != TerminalFailureReply("action_failed") || host.calls != 0 || (result.Turn.Usage.InputTokens != 0 || result.Turn.Usage.OutputTokens != 0 || result.Turn.Usage.Cost != 0 || result.Turn.Usage.RepairAttempts != 0) {
-			t.Fatalf("stopped attempt was not terminal without model usage: %#v %v calls=%d", result, err, host.calls)
-		}
-		feedbackAssertNotClaimable(t, store, scope, now)
-	})
+// A stopped attempt's last turn is the model's own explanation of the
+// failure; the kernel's reply, naming the tool's answer, is only the fallback
+// when the model cannot answer.
+func TestToolFeedbackStoppedAttemptIsExplainedByTheModelAcrossStores(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		t.Run(map[bool]string{true: "model", false: "fallback"}[available], func(t *testing.T) {
+			forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+				now := time.Now().UTC()
+				_, scope := feedbackReadCatalog(t)
+				portfolio := NewPortfolioService(store)
+				portfolio.now = func() time.Time { return now }
+				stopped := checkpointTerminalAction(nil, &ActionCall{ID: "failed-read", SkillID: "skill-records", Status: ActionCallStatusFailed, SideEffect: skill.SideEffectRead, Error: "runId=r1 Atlas error: execution: invalid fields"}, nil)
+				stopped = checkpointTerminalFailure(checkpointFinalFailureExplanation(stopped, "action", "runId=r1 Atlas error: execution: invalid fields"), "action_failed")
+				if _, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope,
+					Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reader-agent"}, AssignedAgentID: "reader-agent", Goal: "Read records",
+					Checkpoint: stopped}); err != nil {
+					t.Fatal(err)
+				}
+				run := feedbackClaim(t, store, scope, now)
+				host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+					if len(request.Actions) != 0 {
+						t.Fatalf("explanation turn offered actions: %#v", request.Actions)
+					}
+					if !available {
+						return nil, NewTurnHostFailure("provider_unavailable", "The model provider is unavailable.", true)
+					}
+					return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model",
+						NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "The records service didn't accept those fields."},
+						Usage: TurnUsage{InputTokens: 10, OutputTokens: 5}}, nil
+				}}
+				runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "reader-agent", DefinitionID: "reader", DefinitionVersion: "1",
+					Actions: []capability.ModelAction{{Name: "reader.list"}}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "agent-worker"}, runner)
+				want := "The records service didn't accept those fields."
+				if !available {
+					want = "I couldn't finish this request because Records reported: invalid fields. I stopped this attempt. Ask me to try again when you're ready."
+				}
+				failure, _ := result.Run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+				if err != nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.Error != "runId=r1 Atlas error: execution: invalid fields" ||
+					result.Run.Output["summary"] != want || host.calls != 1 || failure["explained"] != true {
+					t.Fatalf("stopped attempt was not explained: %#v %v calls=%d", result, err, host.calls)
+				}
+				feedbackAssertNotClaimable(t, store, scope, now)
+			})
+		})
+	}
 }
 
 type feedbackProposalConflictStore struct {

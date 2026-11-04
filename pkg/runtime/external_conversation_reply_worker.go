@@ -511,7 +511,7 @@ func externalConversationRunReply(run *AgentRun) (string, bool) {
 		// Failures may follow partially executed actions. Report only the reply
 		// interruption, without exposing internal errors or guessing whether
 		// those actions had external effects.
-		return TerminalFailureReply(terminalFailureCodeFromCheckpoint(run.Checkpoint)), true
+		return terminalRunFailureReply(run), true
 	}
 	if run.Status != AgentRunStatusCompleted {
 		return "", false

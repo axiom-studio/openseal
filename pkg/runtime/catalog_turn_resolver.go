@@ -97,6 +97,23 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, interactionErr
 	}
 	if outcome, stopped := terminalFailureOutcome(run); stopped && interaction == nil {
+		// The model explains the failure with nothing to execute: no Skill is
+		// activated or prepared, so a broken Skill cannot block the answer.
+		if requiresFinalFailureExplanation(run.Checkpoint) && config.Host != nil {
+			runner, runnerErr := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
+				AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
+				DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+				SystemInstructions: hostedAgentInstructions(definition), ModelCredential: deploymentModelCredential(deployment),
+			})
+			if runnerErr != nil {
+				return nil, runnerErr
+			}
+			return &TurnRunnerBinding{
+				Runner: runner, DeploymentID: deployment.ID, ActionDeploymentID: deployment.ID,
+				DefinitionID: definition.ID, DefinitionVersion: definition.Version,
+				BudgetReservation: BudgetUsage{Turns: 1},
+			}, nil
+		}
 		return &TurnRunnerBinding{
 			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 				return outcome, nil

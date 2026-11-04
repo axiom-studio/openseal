@@ -495,12 +495,41 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		if errors.As(executionErr, &failure) {
 			code = failure.Code
 		}
+		turnCode := code
+		turnCause := ""
+		if executionErr != nil {
+			turnCause = boundedTurnFailureText(sanitizeActionError(executionErr, nil))
+		}
 		finish.ContinuationCheckpoint = preserveKernelActionHistory(run.Checkpoint, run.Checkpoint)
-		if cause := recordedToolFailure(run.Checkpoint); cause != "" {
+		if cause := recordedToolFailure(run.Checkpoint); cause != "" && !creditStopFailureCode(turnCode) {
 			finish.RunError = cause
 			code = terminalFailureCodeFromCheckpoint(run.Checkpoint)
 		}
+		if !requiresFinalFailureExplanation(run.Checkpoint) && modelExplainsFailure(run) && turnFailureCanBeExplained(executionErr, turnCode) {
+			// The model gets the failure back for one answer-only turn and
+			// tells the user what went wrong; the Run then ends failed.
+			message := recordedToolFailure(run.Checkpoint)
+			if message == "" {
+				message = turnCause
+			}
+			if message == "" {
+				message = "The requested work did not complete."
+			}
+			finish.ContinuationCheckpoint = checkpointFinalFailureExplanation(finish.ContinuationCheckpoint, "execution", message)
+			finish.NextRunStatus = AgentRunStatusQueued
+			finish.RunError = ""
+			finish.OutputSummary += "; the agent will explain what went wrong"
+		}
 		finish.ContinuationCheckpoint = checkpointTerminalFailure(finish.ContinuationCheckpoint, code)
+		if turnCause != "" {
+			// Keep the turn's own cause beside the Run's failure, so a fast
+			// failure is never left without its reason.
+			failure := finish.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+			failure["turnError"] = turnCause
+			if turnCode != "execution_failed" {
+				failure["turnErrorCode"] = turnCode
+			}
+		}
 	}
 	// Provider work is chargeable even if its outcome fails validation, the
 	// runner returns an error, or the duration deadline discards its output.
@@ -769,6 +798,11 @@ func (c *TurnCoordinator) applyFinishedTurnOnce(ctx context.Context, run *AgentR
 	}
 	if traceDelta := runbookTraceDelta(run.Checkpoint, turn.ContinuationCheckpoint); len(traceDelta) > 0 {
 		activityPayload["runbookTraceDelta"] = traceDelta
+	}
+	if turn.Status == AgentTurnStatusFailed && strings.TrimSpace(turn.Error) != "" {
+		// A failed turn's cause is part of the Run's record, however fast it
+		// failed and whatever the Run does next.
+		activityPayload["turnError"] = boundedTurnFailureText(turn.Error)
 	}
 	if len(turn.RequestedActions) > 0 {
 		activityPayload["requestedActions"] = append([]TurnAction(nil), turn.RequestedActions...)

@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/skillerror"
 )
@@ -149,6 +152,11 @@ func terminalFailureCodeFromCheckpoint(checkpoint map[string]interface{}) string
 func terminalFailureReplyFromCheckpoint(checkpoint map[string]interface{}) string {
 	code := terminalFailureCodeFromCheckpoint(checkpoint)
 	reply := TerminalFailureReply(code)
+	if code == "action_failed" {
+		if cause := failedActionCause(checkpoint); cause != "" {
+			return "I couldn't finish this request because " + cause + ". I stopped this attempt. Ask me to try again when you're ready."
+		}
+	}
 	if code != "task_completion_rejected" {
 		return reply
 	}
@@ -224,4 +232,83 @@ func fileTooLargeReply(details map[string]string) string {
 		return "I couldn't finish this because the file is too large to hand to another app. Make it smaller, then ask me again."
 	}
 	return "I couldn't finish this because the file is " + size + " MB, and I can hand files of up to " + limit + " MB to another app. Make it smaller, for example by compressing it or splitting it into parts, then ask me again."
+}
+
+const maximumFailedActionCauseBytes = 300
+
+// failedActionCause names the tool whose action failed last and what it
+// answered, for the kernel's fallback reply when no model could explain the
+// failure. Transport wrappers around the answer are dropped; credentials were
+// already removed at the ActionWorker boundary.
+func failedActionCause(checkpoint map[string]interface{}) string {
+	last, _ := checkpoint["lastAction"].(map[string]interface{})
+	if last == nil || fmt.Sprint(last["status"]) != string(ActionCallStatusFailed) || last["errorCode"] != nil {
+		// A typed failure has its own exact wording.
+		return ""
+	}
+	message, _ := last["error"].(string)
+	// Only the failure that stopped this attempt is its cause, never an
+	// earlier one the model already handled.
+	if recorded := recordedToolFailure(checkpoint); recorded == "" || recorded != toolFeedbackMessage(message) {
+		return ""
+	}
+	message = failedActionAnswer(message)
+	if message == "" {
+		return ""
+	}
+	label := failedActionToolLabel(fmt.Sprint(last["skillId"]))
+	if label == "" {
+		return "a tool reported: " + message
+	}
+	return label + " reported: " + message
+}
+
+func failedActionAnswer(message string) string {
+	message = strings.Join(strings.Fields(message), " ")
+	for {
+		trimmed := message
+		if field, rest, ok := strings.Cut(trimmed, " "); ok && strings.Contains(field, "=") && !strings.Contains(field, ":") {
+			trimmed = rest // a leading diagnostic key=value, such as runId=…
+		}
+		lower := strings.ToLower(trimmed)
+		for _, wrapper := range []string{"atlas error:", "execution:", "execution failed:", "action failed:", "skill error:", "error:"} {
+			if strings.HasPrefix(lower, wrapper) {
+				trimmed = strings.TrimSpace(trimmed[len(wrapper):])
+				break
+			}
+		}
+		if trimmed == message {
+			break
+		}
+		message = trimmed
+	}
+	message = strings.TrimRight(message, ". ")
+	if len(message) > maximumFailedActionCauseBytes {
+		cut := maximumFailedActionCauseBytes
+		for cut > 0 && !utf8.RuneStart(message[cut]) {
+			cut--
+		}
+		message = message[:cut] + "…"
+	}
+	return message
+}
+
+// failedActionToolLabel turns a Skill ID such as skill-slack or
+// openseal.browser into a plain tool name, Slack or Browser.
+func failedActionToolLabel(skillID string) string {
+	skillID = strings.TrimSpace(skillID)
+	if skillID == "" || skillID == "<nil>" {
+		return ""
+	}
+	if index := strings.LastIndexAny(skillID, "./"); index >= 0 {
+		skillID = skillID[index+1:]
+	}
+	skillID = strings.TrimPrefix(skillID, "skill-")
+	words := strings.FieldsFunc(skillID, func(r rune) bool { return r == '-' || r == '_' })
+	for index, word := range words {
+		runes := []rune(word)
+		runes[0] = unicode.ToUpper(runes[0])
+		words[index] = string(runes)
+	}
+	return strings.Join(words, " ")
 }

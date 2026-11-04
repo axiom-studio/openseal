@@ -31,6 +31,14 @@ func TestSourceAccessChallengeLatestHostGateRequiresCanonicalOrigin(t *testing.T
 				input.Run.Checkpoint = checkpointTerminalFailure(input.Run.Checkpoint, "action_failed")
 			}
 			host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+				if mode == "final marker" {
+					// A stopped attempt only explains: no question, no actions.
+					if request.SourceAccessChallenge != nil || request.CanAskConversationQuestion || len(request.Actions) != 0 {
+						t.Fatalf("failure explanation reopened the challenge: %#v", request)
+					}
+					return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "test",
+						NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "The site blocked the read."}}, nil
+				}
 				if request.SourceAccessChallenge == nil || !request.CanAskConversationQuestion {
 					t.Fatal("host lost verified challenge")
 				}
@@ -49,6 +57,10 @@ func TestSourceAccessChallengeLatestHostGateRequiresCanonicalOrigin(t *testing.T
 			if mode == "canonical" {
 				if host.calls != 1 || outcome.NextRunStatus != AgentRunStatusWaitingForEvent {
 					t.Fatalf("verified question stopped: %#v calls=%d", outcome, host.calls)
+				}
+			} else if mode == "final marker" {
+				if host.calls != 1 || outcome.NextRunStatus != AgentRunStatusCompleted || len(outcome.ProposedActions) != 0 {
+					t.Fatalf("stopped attempt was not explained: %#v calls=%d", outcome, host.calls)
 				}
 			} else if host.calls != 0 || outcome.Model != "terminal-failure-report" {
 				t.Fatalf("unverified failure reopened model: %#v calls=%d", outcome, host.calls)
@@ -113,7 +125,10 @@ func TestSourceAccessChallengeLatestCatalogGateUsesPersistedRun(t *testing.T) {
 			if allowed && (binding.Model == "terminal-failure-report" || len(catalog.activationDeployments) != 1) {
 				t.Fatalf("canonical challenge stopped before hosted continuation: %#v", binding)
 			}
-			if !allowed && (binding.Model != "terminal-failure-report" || len(catalog.activationDeployments) != 0 || host.calls != 0) {
+			if mode == "generic failure" && (len(binding.ModelActions) != 0 || len(catalog.activationDeployments) != 0 || host.calls != 0) {
+				t.Fatalf("stopped attempt reopened capabilities: %#v", binding)
+			}
+			if !allowed && mode != "generic failure" && (binding.Model != "terminal-failure-report" || len(catalog.activationDeployments) != 0 || host.calls != 0) {
 				t.Fatalf("unproven challenge reopened capabilities: %#v", binding)
 			}
 			if allowed {

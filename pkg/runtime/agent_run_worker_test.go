@@ -503,11 +503,12 @@ func TestAgentRunWorkerStopsCombinedProposalMaterializationFailure(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if failed.Status != AgentRunStatusFailed || failed.Error == "" || failed.LeaseOwner != "" || failed.CompletedAt == nil || failed.WakeCondition != nil ||
+	// The attempt stops; its one remaining turn is the model's explanation.
+	if failed.Status != AgentRunStatusQueued || failed.Error != "" || failed.LeaseOwner != "" || failed.CompletedAt != nil || failed.WakeCondition != nil ||
 		failed.Checkpoint[proposalRecoveryCheckpointKey] != nil || terminalFailureCodeFromCheckpoint(failed.Checkpoint) != "action_admission_failed" {
 		t.Fatalf("proposal failure authorized another attempt: %#v", failed)
 	}
-	feedbackAssertNotClaimable(t, store, scope, time.Now())
+	feedbackAssertModelExplains(t, failed, "draft -> paused")
 	feedbackAssertKernelFailureReply(t, failed, "action_admission_failed")
 	events, err := store.ListActivity(ctx, ActivityFilter{Scope: scope, RunID: run.ID})
 	if err != nil {
@@ -645,10 +646,11 @@ func TestAgentRunWorkerProposalRejectionReturnsToTheModelWithinBounds(t *testing
 			t.Fatal(err)
 		}
 	}
-	if current.Status != AgentRunStatusFailed || current.CompletedAt == nil || terminalFailureCodeFromCheckpoint(current.Checkpoint) != "action_admission_failed" {
+	if current.Status != AgentRunStatusQueued || current.CompletedAt != nil || terminalFailureCodeFromCheckpoint(current.Checkpoint) != "action_admission_failed" {
 		t.Fatalf("repeated rejections did not stop the attempt: %#v", current)
 	}
-	feedbackAssertNotClaimable(t, store, scope, time.Now())
+	// The stopped attempt's only remaining turn is the model's explanation.
+	feedbackAssertModelExplains(t, current, "target still invalid")
 	feedbackAssertKernelFailureReply(t, current, "action_admission_failed")
 }
 

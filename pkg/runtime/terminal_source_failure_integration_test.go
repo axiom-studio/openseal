@@ -57,7 +57,13 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 				if err != nil || message == nil || message.Scope != run.Scope || message.ThreadRootID != trigger.ID || message.ReplyToMessageID != trigger.ID || message.ResolvesMessageID != trigger.ID || message.ResponseMode != trigger.ResponseMode {
 					t.Fatalf("source failure lost provenance: %#v %v", message, err)
 				}
-				if strings.Contains(message.Content, "PRIVATE") {
+				if code == "stale rate limit" {
+					// The newer untyped failure stopped the attempt; its answer,
+					// not the stale typed one, is the cause the reply names.
+					if message.Content != "I couldn't finish this request because a tool reported: PRIVATE_CURRENT. I stopped this attempt. Ask me to try again when you're ready." {
+						t.Fatalf("current failure cause not named: %q", message.Content)
+					}
+				} else if strings.Contains(message.Content, "PRIVATE") {
 					t.Fatalf("untrusted diagnostic leaked: %q", message.Content)
 				}
 				if code == "source_rate_limited" || code == "source_reads_failed" {
@@ -72,7 +78,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 					if !strings.Contains(message.Content, "the file is 140 MB") || !strings.Contains(message.Content, "up to 100 MB") {
 						t.Fatalf("file size limit hidden: %q", message.Content)
 					}
-				} else if message.Content != TerminalFailureReply("action_failed") {
+				} else if code != "stale rate limit" && message.Content != TerminalFailureReply("action_failed") {
 					t.Fatalf("stale or raw evidence attributed: %q", message.Content)
 				}
 				if count, err := terminalReportingContractWorker(t, store, now).ProcessBatch(t.Context()); err != nil || count != 0 {

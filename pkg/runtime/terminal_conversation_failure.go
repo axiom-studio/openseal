@@ -25,8 +25,8 @@ func terminalFailureOutcome(run *AgentRun) (*TurnOutcome, bool) {
 	code := terminalFailureCodeFromCheckpoint(run.Checkpoint)
 	checkpoint := checkpointTerminalFailure(run.Checkpoint, code)
 	return &TurnOutcome{
-		NextRunStatus: AgentRunStatusCompleted, OutputSummary: TerminalFailureReply(code),
-		RunOutput:              map[string]interface{}{"summary": TerminalFailureReply(code)},
+		NextRunStatus: AgentRunStatusCompleted, OutputSummary: terminalFailureReplyFromCheckpoint(checkpoint),
+		RunOutput:              map[string]interface{}{"summary": terminalFailureReplyFromCheckpoint(checkpoint)},
 		ContinuationCheckpoint: checkpoint, ModelProvider: "host", Model: "terminal-failure-report",
 	}, true
 }

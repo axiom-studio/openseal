@@ -114,8 +114,12 @@ func TestTurnCoordinatorPersistsRunnerFailure(t *testing.T) {
 	if err == nil || err.Error() != "provider unavailable" {
 		t.Fatalf("advance error = %v", err)
 	}
-	if result.Turn.Status != AgentTurnStatusFailed || result.Run.Status != AgentRunStatusFailed || result.Run.LastAppliedTurn != 1 {
-		t.Fatalf("failure was not durable: %#v", result)
+	// The failed turn is durable with its cause, and the attempt waits for the
+	// model's explanation of it instead of ending with a generic failure.
+	failure, _ := result.Run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+	if result.Turn.Status != AgentTurnStatusFailed || result.Turn.Error != "provider unavailable" || result.Run.Status != AgentRunStatusQueued || result.Run.LastAppliedTurn != 1 ||
+		failure["message"] != "provider unavailable" || failure["turnError"] != "provider unavailable" || result.Event.Payload["turnError"] != "provider unavailable" {
+		t.Fatalf("failure was not durable with its cause: %#v %#v", result.Run, result.Event)
 	}
 }
 
@@ -243,6 +247,14 @@ func TestTurnCoordinatorFailsNonRetryableHostErrorsImmediately(t *testing.T) {
 			}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
 				return nil, cause
 			}))
+			if name == "runner" {
+				// A model can still answer: the failure goes back to it for one
+				// answer-only explanation turn.
+				if !errors.Is(err, cause) || result.Run.Status != AgentRunStatusQueued || result.Turn.Status != AgentTurnStatusFailed || !requiresFinalFailureExplanation(result.Run.Checkpoint) {
+					t.Fatalf("result=%#v err=%v", result, err)
+				}
+				return
+			}
 			if !errors.Is(err, cause) || result.Run.Status != AgentRunStatusFailed || result.Turn.Status != AgentTurnStatusFailed {
 				t.Fatalf("result=%#v err=%v", result, err)
 			}
@@ -605,7 +617,7 @@ func TestTurnCoordinatorChargesKnownUsageOnFailedOutcome(t *testing.T) {
 			if err == nil {
 				t.Fatal("failed outcome accepted")
 			}
-			if result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.BudgetUsage.InputTokens != 12 || result.Run.BudgetUsage.OutputTokens != 8 || result.Turn.Usage.InputTokens != 12 {
+			if result == nil || result.Run.Status != AgentRunStatusQueued || !requiresFinalFailureExplanation(result.Run.Checkpoint) || result.Run.BudgetUsage.InputTokens != 12 || result.Run.BudgetUsage.OutputTokens != 8 || result.Turn.Usage.InputTokens != 12 {
 				t.Fatalf("failed work lost usage: %#v %v", result, err)
 			}
 		})

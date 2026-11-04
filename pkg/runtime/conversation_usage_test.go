@@ -97,7 +97,9 @@ func TestMeteredParticipationRetainsUsageWhenPublicationConflicts(t *testing.T) 
 	if err == nil || err.Error() != "conversation_changed" {
 		t.Fatalf("expected terminal publication conflict, got %v", err)
 	}
-	if result.Run.Status != AgentRunStatusFailed || result.Turn.Usage.InputTokens != 19 || result.Turn.Usage.OutputTokens != 7 || result.Run.BudgetUsage.InputTokens != 19 || result.Run.BudgetUsage.OutputTokens != 7 {
+	// The failed turn keeps its usage; the attempt stops and waits for the
+	// model's explanation of the failure.
+	if result.Run.Status != AgentRunStatusQueued || !requiresFinalFailureExplanation(result.Run.Checkpoint) || result.Turn.Usage.InputTokens != 19 || result.Turn.Usage.OutputTokens != 7 || result.Run.BudgetUsage.InputTokens != 19 || result.Run.BudgetUsage.OutputTokens != 7 {
 		t.Fatalf("failed turn lost usage: %#v", result)
 	}
 	messages, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: channel.ID})
@@ -211,7 +213,7 @@ func TestMeteredParticipationReservesBeforeCallsAndRejectsOverage(t *testing.T) 
 				t.Fatalf("calls=%d", calls)
 			}
 			if scenario == "overage" {
-				if err == nil || result.Run.Status != AgentRunStatusFailed || result.Run.BudgetUsage.OutputTokens != 11 {
+				if err == nil || result.Run.Status != AgentRunStatusQueued || !requiresFinalFailureExplanation(result.Run.Checkpoint) || result.Run.BudgetUsage.OutputTokens != 11 {
 					t.Fatalf("overage accepted or uncharged: %#v %v", result, err)
 				}
 				messages, listErr := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: channel.ID})

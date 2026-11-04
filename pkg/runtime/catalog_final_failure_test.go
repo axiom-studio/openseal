@@ -28,9 +28,13 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				Goal: "Explain the stopped attempt", Context: map[string]interface{}{},
 				Checkpoint: checkpointFinalFailureExplanation(nil, "action", "The image service rejected the request."),
 			}
-			host := &failureExplanationTestHost{respond: func(HostedTurnRequest) (*HostedTurnResponse, error) {
-				t.Fatal("catalog failure requested an explanatory model")
-				return nil, nil
+			host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+				if len(request.Actions) != 0 || len(request.SkillPrompts) != 0 || len(request.RunbookOperations) != 0 || len(request.EligibleAgents) != 0 ||
+					request.ModelCredential == nil || request.ModelCredential.ID != "model-account" {
+					t.Fatalf("failure explanation offered work or lost the Agent's model: %#v", request)
+				}
+				return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model",
+					NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "The image service turned the request down."}}, nil
 			}}
 			config := CatalogTurnResolverConfig{Host: host, SkillHosts: SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
 				t.Fatal("failure explanation attempted runtime preparation")
@@ -40,17 +44,16 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(catalog.activationDeployments) != 0 || len(binding.ModelActions) != 0 || len(binding.PreparedRuntimes) != 0 || len(binding.RunbookOperations) != 0 ||
-				binding.BudgetReservation != (BudgetUsage{}) || binding.ModelProvider != "host" || binding.Model != "terminal-failure-report" {
-				t.Fatalf("failure report prepared executable work or model usage: %#v", binding)
+			if len(catalog.activationDeployments) != 0 || len(binding.ModelActions) != 0 || len(binding.PreparedRuntimes) != 0 || len(binding.RunbookOperations) != 0 {
+				t.Fatalf("failure explanation prepared executable work: %#v", binding)
 			}
 			if binding.DeploymentID != "seal" || binding.ActionDeploymentID != "seal" || binding.DefinitionID != "seal" || binding.DefinitionVersion != "1" {
-				t.Fatalf("kernel failure report lost verified Agent identity: %#v", binding)
+				t.Fatalf("failure explanation lost verified Agent identity: %#v", binding)
 			}
 			outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
-			if err != nil || outcome == nil || host.calls != 0 || outcome.OutputSummary != TerminalFailureReply("action_failed") ||
+			if err != nil || outcome == nil || host.calls != 1 || outcome.OutputSummary != "The image service turned the request down." ||
 				len(outcome.ProposedActions) != 0 || outcome.ProposedTask != nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil {
-				t.Fatalf("kernel report used model or granted new operations: %#v %v calls=%d", outcome, err, host.calls)
+				t.Fatalf("model did not explain the failure without new operations: %#v %v calls=%d", outcome, err, host.calls)
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutPaused
 			if _, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, config); err == nil {
@@ -59,7 +62,7 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 			catalog.deployment.RolloutStatus = kernelagent.RolloutActive
 			config.Host = nil
 			withoutHost, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, config)
-			if err != nil || withoutHost == nil || withoutHost.ModelProvider != "host" || withoutHost.Model != "terminal-failure-report" || host.calls != 0 {
+			if err != nil || withoutHost == nil || withoutHost.ModelProvider != "host" || withoutHost.Model != "terminal-failure-report" || host.calls != 1 {
 				t.Fatalf("kernel failure reply depended on model host: %#v %v", withoutHost, err)
 			}
 		})

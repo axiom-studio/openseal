@@ -476,7 +476,10 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 					updatedRun.Checkpoint = checkpointUnaskedTerminalAction(recordedCheckpoint, updatedCall)
 				}
 			}
-			if requiresFinalFailureExplanation(updatedRun.Checkpoint) {
+			// A stopped attempt stays queued for its answer-only explanation
+			// turn, where the model tells the user what failed. A platform
+			// failure no correction can fix ends at once with its exact reply.
+			if requiresFinalFailureExplanation(updatedRun.Checkpoint) && (!modelExplainsFailure(updatedRun) || platformActionFailure(updatedRun.Checkpoint, updatedCall)) {
 				updatedRun.Status = AgentRunStatusFailed
 				updatedRun.Error = updatedCall.Error
 				updatedRun.CompletedAt = &now

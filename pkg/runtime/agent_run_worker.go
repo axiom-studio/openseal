@@ -1307,7 +1307,13 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 	} else if behaviorFixed {
 		checkpoint = checkpointTerminalFailure(preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "agent_behavior_fixed")
 	} else {
-		checkpoint = checkpointTerminalFailure(preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "action_admission_failed")
+		checkpoint = checkpointTerminalFailure(checkpointFinalFailureExplanation(
+			preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "proposal", toolFeedbackMessage(safeCause)), "action_admission_failed")
+		if modelExplainsFailure(run) {
+			// The correction bound is spent; the model still explains why the
+			// proposal could not run in one answer-only turn.
+			status, runError, summary = AgentRunStatusQueued, "", "Agent action proposal was rejected; the model will explain the stopped attempt"
+		}
 	}
 	failed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, LeaseOwner: workerID, Checkpoint: checkpoint,
