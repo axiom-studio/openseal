@@ -55,5 +55,12 @@ func (e *Engine) NewRunTerminalReportingWorker(options RunTerminalReportingWorke
 		return nil, err
 	}
 	worker.SetWorkerLimiter(e.workerLimiter)
+	// Routine reports reach the external conversation (Slack, for example)
+	// the routine was created from when the store has external conversations.
+	if _, external := e.store.(runtime.ExternalConversationStore); external && e.skills != nil {
+		if err := worker.SetExternalConversationDelivery(e.skills); err != nil {
+			return nil, err
+		}
+	}
 	return worker, nil
 }

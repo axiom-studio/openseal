@@ -52,6 +52,30 @@ func NewRunTerminalReportingWorker(store interface {
 
 func (w *RunTerminalReportingWorker) SetWorkerLimiter(limiter *WorkerLimiter) { w.limiter = limiter }
 
+// SetExternalConversationDelivery also sends each routine occurrence report to
+// the external conversation the routine was created from, through the same
+// durable outbox as replies. A report is acknowledged only once that delivery
+// is enqueued, so a crash between the two retries both idempotently.
+func (w *RunTerminalReportingWorker) SetExternalConversationDelivery(resolver ExternalConversationAdapterResolver) error {
+	if w == nil || resolver == nil {
+		return errors.New("external conversation delivery requires an adapter resolver")
+	}
+	store, ok := w.store.(ExternalConversationStore)
+	if !ok {
+		return errors.New("terminal reporting store has no external conversations")
+	}
+	transport := NewExternalConversationTransportService(store, resolver)
+	conversations := w.store.(ConversationStore)
+	w.project = func(ctx context.Context, run *AgentRun) error {
+		if err := projectTerminalRunReporting(ctx, conversations, run); err != nil {
+			return err
+		}
+		_, err := projectRoutineReportDelivery(ctx, store, transport, run)
+		return err
+	}
+	return nil
+}
+
 func (w *RunTerminalReportingWorker) ProcessBatch(ctx context.Context) (int, error) {
 	return w.process(ctx, nil)
 }
