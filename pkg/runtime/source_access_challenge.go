@@ -28,12 +28,14 @@ func hasCanonicalSourceAccessChallenge(run *AgentRun) bool {
 }
 
 // sourceAccessChallengeFeedback reports kernel failure feedback for the latest
-// receipt's typed source access challenge.
+// receipt's typed source access challenge, recorded for its question. A
+// challenge recorded as ordinary tool feedback is only the read's result.
 func sourceAccessChallengeFeedback(checkpoint map[string]interface{}) bool {
 	feedback, active := ReadToolFeedbackCorrection(checkpoint)
 	failure := latestCanonicalActionFailure(checkpoint)
 	last, _ := checkpoint["lastAction"].(map[string]interface{})
-	return active && feedback.LastFailureID != "" && feedback.LastFailureID == last["actionCallId"] &&
+	state, _ := checkpoint[ToolFeedbackCorrectionCheckpointKey].(map[string]interface{})
+	return active && state[sourceAccessQuestionKey] == true && feedback.LastFailureID != "" && feedback.LastFailureID == last["actionCallId"] &&
 		failure != nil && failure.Code() == "source_access_challenge" && failure.Details()["failures"] == "" && !failure.HasRateLimitedSource()
 }
 

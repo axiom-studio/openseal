@@ -197,6 +197,7 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, FinalFailureExplanationCheckpointKey)
 	delete(result, ToolFeedbackCorrectionCheckpointKey)
 	delete(result, toolFailureCountCheckpointKey)
+	delete(result, sourceReadFailureCountCheckpointKey)
 	delete(result, turnHostRetryCheckpointKey)
 	delete(result, "lastAction")
 	delete(result, runEventWaitCheckpointKey)
@@ -206,6 +207,9 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 		}
 		if failures, ok := current[toolFailureCountCheckpointKey]; ok {
 			result[toolFailureCountCheckpointKey] = deepCloneCheckpointValue(failures)
+		}
+		if reads, ok := current[sourceReadFailureCountCheckpointKey]; ok {
+			result[sourceReadFailureCountCheckpointKey] = deepCloneCheckpointValue(reads)
 		}
 		if explanation, ok := current[FinalFailureExplanationCheckpointKey]; ok {
 			result[FinalFailureExplanationCheckpointKey] = deepCloneCheckpointValue(explanation)
@@ -314,6 +318,16 @@ func appendActionHistory(checkpoint map[string]interface{}, call *ActionCall) ma
 // and disposition. Keeping this projection shared prevents approval and policy
 // denials from disappearing between Turns and being proposed again.
 func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCall, metadata map[string]interface{}) map[string]interface{} {
+	return recordTerminalAction(checkpoint, call, metadata, true)
+}
+
+// checkpointUnaskedTerminalAction records a failed read whose source access
+// challenge has no conversation to ask in as ordinary tool feedback.
+func checkpointUnaskedTerminalAction(checkpoint map[string]interface{}, call *ActionCall) map[string]interface{} {
+	return recordTerminalAction(checkpoint, call, nil, false)
+}
+
+func recordTerminalAction(checkpoint map[string]interface{}, call *ActionCall, metadata map[string]interface{}, askSourceAccess bool) map[string]interface{} {
 	recorded := false
 	for _, entry := range actionHistoryEntries(checkpoint) {
 		if entry["actionCallId"] == call.ID {
@@ -356,7 +370,7 @@ func checkpointTerminalAction(checkpoint map[string]interface{}, call *ActionCal
 			// feedback and cannot grant another correction allowance.
 			result = checkpointFinalFailureExplanation(result, "action", toolFeedbackMessage(call.Error))
 		} else {
-			result = checkpointToolFeedbackFailure(result, call)
+			result = checkpointToolFeedbackFailure(result, call, askSourceAccess)
 		}
 	} else if call.Status == ActionCallStatusSucceeded {
 		result = checkpointToolFeedbackSuccess(result, call)

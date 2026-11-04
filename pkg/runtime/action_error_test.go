@@ -47,8 +47,11 @@ func TestActionWorkerPreservesStructuredRateLimitAcrossRestartWithoutRetry(t *te
 					t.Fatalf("durable typed failure missing: %#v %v", call, err)
 				}
 				persisted, err := store.GetAgentRun(t.Context(), scope, run.ID)
-				if err != nil || persisted.Status != AgentRunStatusFailed || persisted.WakeCondition != nil || persisted.CompletedAt == nil || persisted.Error != call.Error {
-					t.Fatalf("source throttling did not terminalize the attempt: %#v %v", persisted, err)
+				// A throttled source is the read's result: the model gets it back
+				// and can read another source. Nothing re-sends the request.
+				if feedback, active := ReadToolFeedbackCorrection(persisted.Checkpoint); err != nil || persisted.Status != AgentRunStatusQueued || persisted.CompletedAt != nil ||
+					requiresFinalFailureExplanation(persisted.Checkpoint) || !active || feedback.LastFailureID != call.ID {
+					t.Fatalf("source throttling was not returned to the model: %#v %v", persisted, err)
 				}
 				for _, checkpoint := range []map[string]interface{}{persisted.Checkpoint, hostedTurnTextCheckpoint(persisted.Checkpoint), checkpointTerminalAction(nil, call, map[string]interface{}{"idempotentReplay": true})} {
 					last := checkpoint["lastAction"].(map[string]interface{})
@@ -77,8 +80,8 @@ func TestActionWorkerPreservesStructuredRateLimitAcrossRestartWithoutRetry(t *te
 				if result, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute); err != nil || result != nil || dispatches != 1 {
 					t.Fatalf("429 triggered automatic retry: %#v %v dispatches=%d", result, err, dispatches)
 				}
-				if next, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: scope, WorkerID: "correction-worker", Now: now.Add(time.Hour), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || next != nil {
-					t.Fatalf("429 queued another model turn: %#v %v", next, err)
+				if next, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: scope, WorkerID: "correction-worker", Now: now.Add(time.Hour), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || next == nil || next.ID != run.ID {
+					t.Fatalf("429 did not return to the model: %#v %v", next, err)
 				}
 			})
 		})

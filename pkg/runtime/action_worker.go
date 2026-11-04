@@ -462,18 +462,21 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			updatedRun.QueueEnteredAt = now
 		}
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
-		updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, nil)
+		recordedCheckpoint := updatedRun.Checkpoint
+		updatedRun.Checkpoint = checkpointTerminalAction(recordedCheckpoint, updatedCall, nil)
 		if updatedCall.Status == ActionCallStatusFailed && !paused {
 			// The failure is returned to the model as this action's result
-			// (bounded by checkpointToolFeedbackFailure). The attempt ends when
-			// that bound is reached, or for a typed source challenge without a
-			// proven conversation for its bounded question.
-			stop := requiresFinalFailureExplanation(updatedRun.Checkpoint)
-			if !stop && hasCanonicalSourceAccessChallenge(updatedRun) {
-				interaction, interactionErr := resolveSourceAccessChallengeInteraction(ctx, w.store, updatedRun)
-				stop = interactionErr != nil || interaction == nil
+			// (bounded by checkpointToolFeedbackFailure). The attempt ends only
+			// when that bound is reached. A typed source challenge asks its
+			// bounded question only in a proven conversation; anywhere else (a
+			// schedule, agent work, a lost origin) the model gets it back like
+			// any other failed read and can use another source.
+			if hasCanonicalSourceAccessChallenge(updatedRun) {
+				if interaction, interactionErr := resolveSourceAccessChallengeInteraction(ctx, w.store, updatedRun); interactionErr != nil || interaction == nil {
+					updatedRun.Checkpoint = checkpointUnaskedTerminalAction(recordedCheckpoint, updatedCall)
+				}
 			}
-			if stop {
+			if requiresFinalFailureExplanation(updatedRun.Checkpoint) {
 				updatedRun.Status = AgentRunStatusFailed
 				updatedRun.Error = updatedCall.Error
 				updatedRun.CompletedAt = &now

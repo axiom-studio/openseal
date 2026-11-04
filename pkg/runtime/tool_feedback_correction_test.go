@@ -655,3 +655,105 @@ func TestToolFeedbackOutcomeIsOneCorrectionOrAFinalExplanation(t *testing.T) {
 		}
 	}
 }
+
+func feedbackScheduledRun(t *testing.T, store KernelStore, scope Scope, now time.Time) *AgentRun {
+	t.Helper()
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	if _, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Kind: RunKindAgentWork, Source: RunSourceSchedule,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reader-agent"}, AssignedAgentID: "reader-agent", Goal: "Write the morning news digest"}); err != nil {
+		t.Fatal(err)
+	}
+	return feedbackClaim(t, store, scope, now)
+}
+
+func feedbackSourceFailingWorker(store KernelStore, catalog *skill.Catalog, now time.Time, failures []error, dispatches *int) *ActionWorker {
+	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
+		return map[string]string{"token": "private-secret"}, nil
+	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		failure := failures[*dispatches%len(failures)]
+		(*dispatches)++
+		return nil, failure
+	}))
+	worker.now = func() time.Time { return now }
+	return worker
+}
+
+// A scheduled Run has nobody to ask about a source's access check. The
+// challenge, like any other failed read, is the read's result: the model gets
+// it back and can read another source. Failed reads of different sources never
+// end the Run, while the unchanged failed read is still never sent again.
+func TestToolFeedbackScheduledSourceReadFailuresContinueAcrossStores(t *testing.T) {
+	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+		now := time.Date(2026, 11, 4, 7, 0, 0, 0, time.UTC)
+		catalog, scope := feedbackReadCatalog(t)
+		run := feedbackScheduledRun(t, store, scope, now)
+		failures := []error{
+			skillerror.NewActionError("source_access_challenge", "", map[string]string{"httpStatus": "403"}),
+			skillerror.NewActionError("source_rate_limited", "", nil),
+			skillerror.NewActionError("source_http_error", "", map[string]string{"httpStatus": "500"}),
+			skillerror.NewActionError("source_unavailable", "", nil),
+			skillerror.NewActionError("source_empty_response", "", nil),
+			skillerror.NewActionError("source_invalid_response", "", nil),
+			skillerror.NewActionError("source_reads_failed", "", map[string]string{"failures": `[{"index":0,"failureKind":"source_access_challenge","httpStatus":403}]`}),
+		}
+		dispatches := 0
+		worker := feedbackSourceFailingWorker(store, catalog, now, failures, &dispatches)
+		feedbackPropose(t, store, catalog, run, now, "source-0", "source-0", ActionDispositionAllow)
+		for index := range MaximumRecoveredToolFailures + 4 {
+			if index > 0 {
+				proposal := feedbackProposeCorrection(t, store, catalog, scope, run.ID, now, fmt.Sprint("source-", index), fmt.Sprint("source-", index))
+				if proposal.Call.Status != ActionCallStatusReady {
+					t.Fatalf("read of another source %d was not admitted: %#v", index, proposal.Call)
+				}
+			}
+			failed, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
+			if err != nil || failed == nil || failed.Call.Status != ActionCallStatusFailed {
+				t.Fatalf("read %d: %#v %v", index, failed, err)
+			}
+			feedback, active := ReadToolFeedbackCorrection(failed.Run.Checkpoint)
+			if failed.Run.Status != AgentRunStatusQueued || failed.Run.CompletedAt != nil || requiresFinalFailureExplanation(failed.Run.Checkpoint) ||
+				!active || feedback.LastFailureID != failed.Call.ID || feedback.CorrectionsRemaining != MaximumToolFeedbackCorrections ||
+				hasCanonicalSourceAccessChallenge(failed.Run) || toolFeedbackInteger(failed.Run.Checkpoint[toolFailureCountCheckpointKey]) != 0 {
+				t.Fatalf("failed read %d (%s) ended the Run or asked nobody: %#v", index, failed.Call.ErrorCode, failed.Run)
+			}
+			if interaction, err := resolveSourceAccessChallengeInteraction(t.Context(), store, failed.Run); err != nil || interaction != nil {
+				t.Fatalf("scheduled Run gained a conversation question: %#v %v", interaction, err)
+			}
+		}
+		repeated := feedbackProposeCorrection(t, store, catalog, scope, run.ID, now, "source-repeat", "source-2")
+		if repeated.Call.Status != ActionCallStatusDenied || !requiresFinalFailureExplanation(repeated.Run.Checkpoint) || dispatches != MaximumRecoveredToolFailures+4 {
+			t.Fatalf("unchanged failed read was admitted: %#v dispatches=%d", repeated.Call, dispatches)
+		}
+	})
+}
+
+// Failed source reads are bounded only as a loop guard, far above what a Run
+// reading many sources hits; other failures keep their own bound.
+func TestToolFeedbackSourceReadFailuresHaveTheirOwnBound(t *testing.T) {
+	checkpoint := map[string]interface{}{}
+	for index := 1; index <= MaximumFailedSourceReads+1; index++ {
+		failure := skillerror.NewActionError("source_unavailable", "", nil)
+		failed := &ActionCall{ID: fmt.Sprint("read-", index), Status: ActionCallStatusFailed, SideEffect: skill.SideEffectRead,
+			Action: "fetch", Arguments: map[string]interface{}{"url": index}, Error: failure.Error(), ErrorCode: failure.Code(), ErrorDetails: failure.Details()}
+		checkpoint = checkpointTerminalAction(checkpoint, failed, nil)
+		if stopped := requiresFinalFailureExplanation(checkpoint); stopped != (index > MaximumFailedSourceReads) {
+			t.Fatalf("failed read %d stopped=%v", index, stopped)
+		}
+		if index > MaximumFailedSourceReads {
+			break
+		}
+		next := &ActionCall{ID: fmt.Sprint("next-", index), Status: ActionCallStatusReady, Action: "fetch", Arguments: map[string]interface{}{"url": index + 1}}
+		var denied string
+		if checkpoint, denied = admitToolFeedbackCorrection(checkpoint, next); denied != "" {
+			t.Fatalf("read after failure %d denied: %s", index, denied)
+		}
+	}
+	// A platform failure on a read still stops at once.
+	failure := skillerror.NewActionError("browser_proxy_unavailable", "", nil)
+	platform := &ActionCall{ID: "proxy", Status: ActionCallStatusFailed, SideEffect: skill.SideEffectRead, Action: "fetch",
+		Arguments: map[string]interface{}{"url": "x"}, Error: failure.Error(), ErrorCode: failure.Code(), ErrorDetails: failure.Details()}
+	if !requiresFinalFailureExplanation(checkpointTerminalAction(nil, platform, nil)) {
+		t.Fatal("platform failure on a read did not stop the attempt")
+	}
+}

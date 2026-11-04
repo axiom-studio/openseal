@@ -17,16 +17,35 @@ const ToolFeedbackCorrectionCheckpointKey = "_opensealToolFeedbackCorrection"
 // successful corrections, so alternating failures and reads cannot loop.
 const toolFailureCountCheckpointKey = "_opensealToolFailures"
 
+// sourceReadFailureCountCheckpointKey counts the failed source reads of one
+// Run. Only the kernel writes it, like toolFailureCountCheckpointKey.
+const sourceReadFailureCountCheckpointKey = "_opensealSourceReadFailures"
+
+// sourceAccessQuestionKey marks correction state for a source access challenge
+// that may be asked in its proven conversation. Without it the challenge is
+// ordinary tool feedback.
+const sourceAccessQuestionKey = "sourceAccessQuestion"
+
 // A failed action is returned to the model as its result, which may answer
 // with one corrected action or a final explanation. MaximumToolFeedbackCorrections
 // bounds corrected proposals after one failure while they keep failing (the
 // chain resets when a correction succeeds); MaximumRecoveredToolFailures bounds
 // the failures of one Run returned to its model. Beyond either bound, and when
 // an unchanged failed request is proposed again, the attempt stops.
+//
+// A failed source read (blocked, throttled, unreachable or unreadable) is not
+// a failed correction: work that reads many sources may hit several, and the
+// model reads another. It counts only toward MaximumFailedSourceReads, a loop
+// guard; the unchanged failed read is still never sent again.
 const (
 	MaximumToolFeedbackCorrections = 2
 	MaximumRecoveredToolFailures   = 4
+	MaximumFailedSourceReads       = 24
 )
+
+// maximumFailedSemanticDigests bounds the remembered failed requests of one
+// failure chain, which a source read failure does not end.
+const maximumFailedSemanticDigests = MaximumFailedSourceReads + MaximumToolFeedbackCorrections + 1
 
 const maximumToolFeedbackMessageBytes = 4096
 
@@ -78,18 +97,20 @@ func toolFeedbackMessage(message string) string {
 	return message
 }
 
-func checkpointToolFeedbackFailure(checkpoint map[string]interface{}, call *ActionCall) map[string]interface{} {
+// checkpointToolFeedbackFailure records a fresh failed receipt. A typed read
+// challenge is shaped for its bounded human exchange when askSourceAccess is
+// set; the worker must then prove its exact conversation origin before queuing
+// it, and otherwise records the failure again without the question.
+func checkpointToolFeedbackFailure(checkpoint map[string]interface{}, call *ActionCall, askSourceAccess bool) map[string]interface{} {
 	if requiresFinalFailureExplanation(checkpoint) {
 		return checkpointTerminalFailure(checkpoint, "action_failed")
 	}
-	// A typed read challenge keeps its bounded human exchange. The worker must
-	// prove its exact conversation origin before queuing it.
-	if call.SideEffect == skill.SideEffectRead || call.SideEffect == skill.SideEffectNone {
+	if askSourceAccess && (call.SideEffect == skill.SideEffectRead || call.SideEffect == skill.SideEffectNone) {
 		last, _ := checkpoint["lastAction"].(map[string]interface{})
 		if failure := latestCanonicalActionFailure(checkpoint); failure != nil && failure.Code() == "source_access_challenge" && last["actionCallId"] == call.ID {
 			result := deepCloneCheckpointMap(checkpoint)
 			result[ToolFeedbackCorrectionCheckpointKey] = map[string]interface{}{
-				"kind": "action", "message": failure.Error(), "lastFailureId": call.ID,
+				"kind": "action", "message": failure.Error(), "lastFailureId": call.ID, sourceAccessQuestionKey: true,
 				"correctionsUsed": 0, "failedSemanticDigests": []interface{}{ComputeActionSemanticDigest(call)},
 			}
 			return result
@@ -103,39 +124,68 @@ func checkpointToolFeedbackFailure(checkpoint map[string]interface{}, call *Acti
 	if result == nil {
 		result = make(map[string]interface{})
 	}
-	failures := toolFeedbackInteger(result[toolFailureCountCheckpointKey]) + 1
-	result[toolFailureCountCheckpointKey] = failures
 	state, _ := result[ToolFeedbackCorrectionCheckpointKey].(map[string]interface{})
 	if state == nil {
 		state = map[string]interface{}{"correctionsUsed": 0, "failedSemanticDigests": []interface{}{}}
 	} else {
 		state = deepCloneCheckpointMap(state)
 	}
-	if failures > MaximumRecoveredToolFailures || toolFeedbackInteger(state["correctionsUsed"]) >= MaximumToolFeedbackCorrections {
-		return checkpointTerminalFailure(checkpointFinalFailureExplanation(result, "action", message), "action_failed")
+	if sourceReadFailure(checkpoint, call) {
+		reads := toolFeedbackInteger(result[sourceReadFailureCountCheckpointKey]) + 1
+		result[sourceReadFailureCountCheckpointKey] = reads
+		if reads > MaximumFailedSourceReads {
+			return checkpointTerminalFailure(checkpointFinalFailureExplanation(result, "action", message), "action_failed")
+		}
+		state["correctionsUsed"] = 0
+	} else {
+		failures := toolFeedbackInteger(result[toolFailureCountCheckpointKey]) + 1
+		result[toolFailureCountCheckpointKey] = failures
+		if failures > MaximumRecoveredToolFailures || toolFeedbackInteger(state["correctionsUsed"]) >= MaximumToolFeedbackCorrections {
+			return checkpointTerminalFailure(checkpointFinalFailureExplanation(result, "action", message), "action_failed")
+		}
 	}
 	state["kind"], state["message"], state["lastFailureId"] = "action", message, call.ID
 	delete(state, "admittedActionCallId")
 	delete(state, "rejectedProposal")
 	delete(state, sourceAccessChallengeStateKey)
+	delete(state, sourceAccessQuestionKey)
 	digests, _ := state["failedSemanticDigests"].([]interface{})
 	if digest := ComputeActionSemanticDigest(call); digest != "" {
 		digests = append(digests, digest)
 	}
-	if len(digests) > MaximumToolFeedbackCorrections+1 {
-		digests = digests[len(digests)-(MaximumToolFeedbackCorrections+1):]
+	if len(digests) > maximumFailedSemanticDigests {
+		digests = digests[len(digests)-maximumFailedSemanticDigests:]
 	}
 	state["failedSemanticDigests"] = digests
 	result[ToolFeedbackCorrectionCheckpointKey] = state
 	return result
 }
 
+// sourceReadFailure is a typed failure of this read to get a source's content.
+// It is the action's result, never a reason to end the Run.
+func sourceReadFailure(checkpoint map[string]interface{}, call *ActionCall) bool {
+	if call.SideEffect != skill.SideEffectRead && call.SideEffect != skill.SideEffectNone {
+		return false
+	}
+	last, _ := checkpoint["lastAction"].(map[string]interface{})
+	failure := latestCanonicalActionFailure(checkpoint)
+	if failure == nil || last["actionCallId"] != call.ID {
+		return false
+	}
+	switch failure.Code() {
+	case "source_rate_limited", "source_http_error", "source_access_challenge", "source_unavailable",
+		"source_invalid_response", "source_empty_response", "source_reads_failed":
+		return true
+	}
+	return false
+}
+
 // platformActionFailure is a typed failure no model correction can fix now:
 // the platform's browser connection or a file too large to hand to an action.
 // The attempt stops with its dedicated reply instead. A source that rate
 // limited a read is not one: the model gets it back as the result and can use
-// another source, and the usual bounds (the unchanged request is denied, two
-// corrections, four failures per Run) still stop it from looping.
+// another source; the unchanged request is still denied and
+// MaximumFailedSourceReads stops it from looping.
 func platformActionFailure(checkpoint map[string]interface{}, call *ActionCall) bool {
 	last, _ := checkpoint["lastAction"].(map[string]interface{})
 	failure := latestCanonicalActionFailure(checkpoint)
@@ -189,6 +239,7 @@ func checkpointProposalRejection(run *AgentRun, turn *AgentTurn, cause string) (
 	state["rejectedProposal"] = rejected
 	delete(state, "admittedActionCallId")
 	delete(state, sourceAccessChallengeStateKey)
+	delete(state, sourceAccessQuestionKey)
 	result[ToolFeedbackCorrectionCheckpointKey] = state
 	result[toolFailureCountCheckpointKey] = failures
 	return result, true
