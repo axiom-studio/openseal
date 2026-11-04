@@ -227,6 +227,9 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		return nil, refuseInteraction(refusal)
 	}
 	configurationSetup := skillCandidateNeedsConfigurationSetup(candidate) && a.Kind != "install"
+	if candidate == nil && d.isCatalogApp(ctx, run.Scope, a.SkillID) {
+		return nil, refuseInteraction(a.SkillID + " is an app (type mcp-server), not a Skill: apps are connected, never installed; call request_connection with app " + a.SkillID)
+	}
 	if candidate == nil || (candidate.Readiness == skill.DiscoveryReadinessUnavailable && !configurationSetup) {
 		return nil, refuseInteraction("requested Skill is not available in the authorized catalog; a built-in Skill needs no setup, and a missing website login or card is requested with request_credential")
 	}

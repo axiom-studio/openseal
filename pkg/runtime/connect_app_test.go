@@ -86,6 +86,12 @@ func TestFindAppsListsCatalogAppsAndWhetherTheyAreConnected(t *testing.T) {
 	if len(apps) != 2 || first["slug"] != "linear" || first["official"] != true || first["signIn"] != "oauth" || first["connected"] != false || second["signIn"] != "unknown" {
 		t.Fatalf("apps: %#v", apps)
 	}
+	// Every app says what it is and the one action that connects it.
+	for _, app := range apps {
+		if item := app.(map[string]interface{}); item["type"] != "mcp-server" || item["setup"] != SkillActionRequestConnection {
+			t.Fatalf("app without its type and setup path: %#v", item)
+		}
+	}
 	connected.Store(true)
 	result, err = dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "linear"}}, run, "agent")
 	if err != nil {
@@ -129,6 +135,11 @@ func TestFindAppsAlsoListsSkillsTheUserCanSetUp(t *testing.T) {
 	if first["skillId"] != "google-workspace" || first["skillVersion"] != "latest" || first["sourceIdentity"] != "axiomstudio/skill-google-workspace" ||
 		first["setupKind"] != "install" || first["summary"] != "Gmail, Calendar and Drive" || second["setupKind"] != "configure" {
 		t.Fatalf("skills: %#v", skills)
+	}
+	for _, found := range skills {
+		if item := found.(map[string]interface{}); item["type"] != "skill" || item["setup"] != SkillActionRequestSetup {
+			t.Fatalf("skill without its type and setup path: %#v", item)
+		}
 	}
 }
 
@@ -264,4 +275,43 @@ func TestConnectAppRequestValidation(t *testing.T) {
 			t.Errorf("%s accepted", name)
 		}
 	}
+}
+
+// An app is only ever connected and a Skill only ever set up: each action
+// refuses the other type and names the right one.
+func TestAppsAndSkillsCannotTakeEachOthersSetupPath(t *testing.T) {
+	ctx, store, _, dispatcher, scope, _ := connectAppFixture(t)
+	dispatcher.discovery = skill.DiscoveryProviderFunc(func(_ context.Context, request skill.DiscoveryRequest) (*skill.DiscoveryPage, error) {
+		return &skill.DiscoveryPage{Items: []skill.DiscoveryCandidate{{ID: "google-workspace", Version: "1.4.0", SourceIdentity: "axiomstudio/skill-google-workspace",
+			Name: "Google Workspace", Readiness: skill.DiscoveryReadinessNeedsInstallation}}}, nil
+	})
+	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
+	var refusal *interactionRequestRefusal
+
+	// The app's slug is not a Skill.
+	_, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "setup-app", Scope: scope, RunID: run.ID},
+		Arguments: map[string]interface{}{"kind": "install", "skillId": "linear", "skillVersion": "latest", "reason": "Connect Linear"}}, run, "agent")
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.message, "request_connection") || !strings.Contains(refusal.message, "mcp-server") {
+		t.Fatalf("request_setup for an app = %v", err)
+	}
+	// The Skill's id is not an app.
+	_, err = dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "connect-skill"}, Arguments: map[string]interface{}{"app": "google-workspace"}}, run, "agent")
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.message, "request_setup") {
+		t.Fatalf("request_connection for a Skill = %v", err)
+	}
+	if requests, _ := store.ListSkillSetupRequests(ctx, scope, "agent", "chat"); len(requests) != 0 {
+		t.Fatalf("a refused path created a request: %#v", requests)
+	}
+	// Each takes its own type.
+	connect, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "connect-app"}, Arguments: map[string]interface{}{"app": "linear"}}, run, "agent")
+	if err != nil || connect["setupRequest"] == nil {
+		t.Fatalf("request_connection for an app = %#v, %v", connect, err)
+	}
+	setup, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "setup-skill", Scope: scope, RunID: run.ID},
+		Arguments: map[string]interface{}{"kind": "install", "skillId": "google-workspace", "skillVersion": "latest", "sourceIdentity": "axiomstudio/skill-google-workspace", "reason": "Use Gmail"}}, run, "agent")
+	if errors.As(err, &refusal) && strings.Contains(refusal.message, "mcp-server") {
+		t.Fatalf("a Skill was refused as an app: %v", err)
+	}
+	_ = setup
 }

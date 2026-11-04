@@ -125,6 +125,17 @@ func NormalizeAppAddress(value string) (string, error) {
 	return parsed.String(), nil
 }
 
+// Result types of find_apps. Each result names its type and the one action
+// that sets it up: an app (a remote MCP server) is connected with
+// request_connection, a Skill is installed or configured with request_setup.
+// Neither action accepts the other type.
+const (
+	FindAppsTypeApp    = "mcp-server"
+	FindAppsTypeSkill  = "skill"
+	FindAppsSetupApp   = SkillActionRequestConnection
+	FindAppsSetupSkill = SkillActionRequestSetup
+)
+
 // AppCatalogEntry is one connectable app as the host's catalog lists it.
 type AppCatalogEntry struct {
 	Slug           string `json:"slug"`
@@ -142,6 +153,17 @@ type AppCatalog interface {
 	FindApps(ctx context.Context, scope Scope, query string, limit int) ([]AppCatalogEntry, error)
 	// GetApp returns nil, nil when no entry has the slug.
 	GetApp(ctx context.Context, scope Scope, slug string) (*AppCatalogEntry, error)
+}
+
+// isCatalogApp reports whether id is the slug of an app in the host's
+// catalog, so a Skill setup naming an app can say how to connect it.
+func (d *SkillBindingActionDispatcher) isCatalogApp(ctx context.Context, scope Scope, id string) bool {
+	catalog := d.apps.get()
+	if catalog == nil || !validAppSlug(id) {
+		return false
+	}
+	entry, err := catalog.GetApp(ctx, scope, id)
+	return err == nil && entry != nil
 }
 
 // AppCatalogRef holds the host's app catalog, which hosts install after the
@@ -181,7 +203,7 @@ const connectAppGuidance = "Use this when the user wants to connect or use a ser
 
 func findAppsAction() skill.Action {
 	return skill.Action{Name: SkillActionFindApps,
-		Description: "Search what can be connected for every Agent: catalog apps (remote MCP servers) and Skills. " + connectAppGuidance + " Query with the service name, for example Linear. Apps list slug, name, whether the vendor maintains it (official), how it signs in, and whether it is already connected for this chat (then its tools are listed); call request_connection with the slug. Prefer an app that covers the service. When no app does, use a matching Skill: call request_setup with its skillId, skillVersion and sourceIdentity, and its setupKind as kind.",
+		Description: "Search what can be connected for every Agent: catalog apps (remote MCP servers) and Skills. " + connectAppGuidance + " Query with the service name, for example Linear. Every result has a type and the one action that sets it up (setup). Apps (type mcp-server, setup request_connection) are connected, never installed: a remote server the user signs in to. They list slug, name, whether the vendor maintains it (official), how it signs in, and whether it is already connected for this chat (then its tools are listed); call request_connection with the slug. Skills (type skill, setup request_setup) are installed and configured for this Agent: call request_setup with its skillId, skillVersion and sourceIdentity, and its setupKind as kind. Never pass an app to request_setup or a Skill to request_connection. Prefer an app that covers the service; when no app does, use a matching Skill.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"query": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumAppQueryBytes},
@@ -250,7 +272,8 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input Actio
 	}
 	apps := make([]interface{}, 0, len(entries))
 	for _, entry := range entries {
-		item := map[string]interface{}{"slug": entry.Slug, "name": entry.Name, "official": entry.Official, "signIn": appSignIn(entry.SignIn), "connected": false}
+		item := map[string]interface{}{"type": FindAppsTypeApp, "setup": FindAppsSetupApp, "slug": entry.Slug, "name": entry.Name,
+			"official": entry.Official, "signIn": appSignIn(entry.SignIn), "connected": false}
 		if summary := strings.TrimSpace(entry.Summary); summary != "" {
 			item["summary"] = truncateRunes(summary, 240)
 		}
@@ -293,7 +316,8 @@ func (d *SkillBindingActionDispatcher) findSetupSkills(ctx context.Context, run 
 		if kind == "" {
 			continue
 		}
-		item := map[string]interface{}{"skillId": candidate.ID, "skillVersion": "latest", "name": candidate.Name, "setupKind": kind}
+		item := map[string]interface{}{"type": FindAppsTypeSkill, "setup": FindAppsSetupSkill, "skillId": candidate.ID, "skillVersion": "latest",
+			"name": candidate.Name, "setupKind": kind}
 		if candidate.SourceIdentity != "" {
 			item["sourceIdentity"] = candidate.SourceIdentity
 		}
@@ -375,7 +399,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 			return nil, getErr
 		}
 		if entry == nil {
-			return nil, refuseInteraction("no catalog app has the slug " + target.CatalogSlug + "; call find_apps and copy a returned slug")
+			return nil, refuseInteraction("no catalog app has the slug " + target.CatalogSlug + "; call find_apps and copy the slug of a result with type mcp-server. A Skill (type skill) is not connected: set it up with request_setup")
 		}
 		target = ConnectAppTarget{CatalogSlug: entry.Slug, Name: strings.TrimSpace(entry.Name), Official: entry.Official, SignIn: appSignIn(entry.SignIn), LogoSHA256: entry.LogoSHA256, LogoMonochrome: entry.LogoMonochrome}
 		if target.Name == "" {
