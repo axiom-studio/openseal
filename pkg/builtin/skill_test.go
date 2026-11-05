@@ -151,3 +151,19 @@ func TestBuiltinConfigHoldsTheGeoapifyKeyForTheHost(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptSendsHeavyWorkToTheSecureVM(t *testing.T) {
+	if SkillDefinition().Version != "2.5.0" {
+		t.Fatal("the heavy-work rule ships in built-in 2.5.0")
+	}
+	for _, want := range []string{
+		"Heavy work: do it in the secure VM with run_command",
+		"git clone --filter=blob:none https://git.seal/github.com/<owner>/<repo>.git",
+		"seal call <tool>",
+		"Reading one or two files directly is fine.",
+	} {
+		if !strings.Contains(Prompt, want) {
+			t.Fatalf("prompt lacks %q", want)
+		}
+	}
+}

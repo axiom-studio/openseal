@@ -945,6 +945,7 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		return HostedTurnRequest{}, err
 	}
 	projectToolFeedbackCorrection(&request)
+	projectRepeatedActionNotice(&request)
 	// A script routine's first step is its script, not an action.
 	if len(request.Actions) > 0 && len(actionHistoryEntries(input.Run.Checkpoint)) == 0 && !scriptRoutine {
 		if result, ok := input.Run.Checkpoint[runEventWaitCheckpointKey].(map[string]interface{}); ok && result["status"] == string(RunEventWaitMatched) && result["event"] != nil {
