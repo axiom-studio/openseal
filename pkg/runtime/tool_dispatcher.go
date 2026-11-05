@@ -9,6 +9,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/fileinput"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
 
 // ToolInvocation is the complete, tenant-scoped transport envelope. Resolved
@@ -38,6 +39,14 @@ type ToolInvocation struct {
 	// file's path in the Run's chat, which the host replaces with a
 	// fileinput.File before calling the Skill.
 	FileArguments []string
+	// FileReferences are the {"$file": path} values of Arguments, where each
+	// is in Arguments and the encoding its field takes. The host puts each
+	// file's content there just before calling the tool.
+	FileReferences []toolfile.Reference
+	// OutputSchema is the action's declared output schema: a host takes the
+	// file content fields it declares out of the result and keeps them as
+	// chat files.
+	OutputSchema map[string]interface{}
 	// BindingConfig is trusted, non-secret configuration selected by the host
 	// when the Skill was bound. It is never writable by the model.
 	BindingConfig        map[string]interface{}
@@ -107,6 +116,10 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 	if err != nil {
 		return nil, err
 	}
+	fileReferences, err := skill.FileReferences(input.Bound, input.Arguments)
+	if err != nil {
+		return nil, err
+	}
 	executionDeploymentID := input.Bound.Binding.DeploymentID
 	if input.Run != nil {
 		if input.Run.Scope != (Scope{Kind: input.Bound.Binding.Scope.Kind, ID: input.Bound.Binding.Scope.ID}) {
@@ -125,7 +138,8 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		ExecutionDeploymentID: executionDeploymentID,
 		SkillID:               input.Bound.Definition.ID, SkillVersion: input.Bound.Definition.Version,
 		SkillSourceIdentity: sourceIdentity, SkillDefinitionDigest: definitionDigest,
-		Action: input.Bound.Action.Name, Arguments: arguments, FileArguments: fileinput.Properties(input.Bound.Action.InputSchema), BindingConfig: cloneMap(input.Bound.Binding.Config), Credentials: input.Credentials,
+		Action: input.Bound.Action.Name, Arguments: arguments, FileArguments: fileinput.Properties(input.Bound.Action.InputSchema),
+		FileReferences: fileReferences, OutputSchema: cloneMap(input.Bound.Action.OutputSchema), BindingConfig: cloneMap(input.Bound.Binding.Config), Credentials: input.Credentials,
 		CredentialLease: cloneSignedActionCredentialLease(input.CredentialLease), CredentialReferences: cloneCredentialReferences(input.CredentialReferences),
 	}
 	if input.Call != nil {

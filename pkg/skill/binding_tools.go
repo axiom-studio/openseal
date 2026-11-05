@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
 
 type BindingToolsSpec = capability.BindingToolsSpec
@@ -338,6 +339,12 @@ func validateBindingToolInput(definition *Definition, binding *Binding, actionNa
 	if !ok {
 		return fmt.Errorf("skill input field %s must be the binding tool input object", spec.InputArgument)
 	}
+	// A file passed as {"$file": path} is checked in its content's shape.
+	checked, _, err := toolfile.Check(tool.InputSchema, arguments, "")
+	if err != nil {
+		return fmt.Errorf("binding tool %s input is invalid: %w", tool.Name, err)
+	}
+	arguments, _ = checked.(map[string]interface{})
 	compiled, err := compileSchema("binding-tool-input.json", tool.InputSchema)
 	if err != nil {
 		return fmt.Errorf("binding tool %s input schema is invalid: %w", tool.Name, err)
@@ -384,7 +391,7 @@ func bindingModelActions(definition *Definition, binding *Binding, include func(
 		actions = append(actions, ModelAction{
 			Name: BindingToolModelName(definition, binding, tool.Name), Description: strings.TrimSpace(tool.Description),
 			BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID,
-			Version: definition.Version, Action: name, InputSchema: cloneMap(tool.InputSchema),
+			Version: definition.Version, Action: name, InputSchema: toolfile.ModelSchema(cloneMap(tool.InputSchema)),
 			Risk: action.Risk, SideEffect: action.SideEffect, ExternalOperationPolicy: action.ExternalOperationPolicy,
 			BindingTool: &ModelActionBindingTool{Name: tool.Name, InputArgument: spec.InputArgument, Arguments: fixed},
 		})

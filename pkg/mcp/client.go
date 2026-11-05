@@ -118,6 +118,10 @@ func toolDescription(tool map[string]interface{}, name string) string {
 type CallResult struct {
 	Content           []interface{} `json:"content"`
 	StructuredContent interface{}   `json:"structuredContent,omitempty"`
+	// OutputSchema is the tool's declared output schema, for taking its file
+	// content out of the result (toolfile.ExtractMCP); it is not part of the
+	// result.
+	OutputSchema map[string]interface{} `json:"-"`
 }
 
 // NewClient validates config and snapshots it. See Options.HTTPClient: the

@@ -13,7 +13,7 @@ import (
 
 const (
 	SkillID                 = "openseal.builtin"
-	SkillVersion            = "2.4.0"
+	SkillVersion            = "2.5.0"
 	ReadAttachment          = "read_attachment"
 	ReadConversationHistory = "read_conversation_history"
 	GenerateProfileImage    = "generate_profile_image"
@@ -34,6 +34,8 @@ const (
 
 // Prompt is how an Agent makes things in a chat.
 const Prompt = `Everything you make here is a file in this chat's files, next to everything people attached (uploads/). Make and change things by writing and editing files with the Workspace tools; every change is kept, so earlier versions can be restored. Refer to files by path.
+
+Files a tool returns, such as screenshots, images, PDFs or audio from a connected app, are kept under tool-output/<call>/ and appear in its result as {"type": "file", "path": …}: present them or read them by that path. To give a tool a file where its input takes file content, pass {"$file": "<path>"} as that field's value.
 
 - Pages: write a complete HTML document under pages/, such as pages/report.html, then present it.
 - Decks, documents, PDFs and spreadsheets: build them in the chat's secure VM with run_command and real tools, which give far better results than hand-written files. PowerPoint with python-pptx (save as slides/name.pptx; the chat shows it as a deck), Word with python-docx, PDFs with weasyprint from HTML or reportlab, Excel with openpyxl, charts with matplotlib or seaborn saved as images and placed in the file. Write the script to a file, run it, read any error and fix it, then present the result. For a deck people will watch in the browser rather than download, an HTML deck is also fine: one file under slides/, such as slides/pitch.html, with one <section> per slide.

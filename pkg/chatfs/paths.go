@@ -16,13 +16,14 @@ var (
 )
 
 const (
-	Apps    = chatpath.Apps
-	Uploads = chatpath.Uploads
-	Slides  = chatpath.Slides
-	Pages   = chatpath.Pages
-	Sheets  = chatpath.Sheets
-	Images  = chatpath.Images
-	Docs    = chatpath.Docs
-	Media   = chatpath.Media
-	Files   = chatpath.Files
+	Apps       = chatpath.Apps
+	Uploads    = chatpath.Uploads
+	Slides     = chatpath.Slides
+	Pages      = chatpath.Pages
+	Sheets     = chatpath.Sheets
+	Images     = chatpath.Images
+	Docs       = chatpath.Docs
+	Media      = chatpath.Media
+	Files      = chatpath.Files
+	ToolOutput = chatpath.ToolOutput
 )

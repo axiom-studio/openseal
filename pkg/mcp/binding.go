@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
 
 type Transport string
@@ -42,7 +44,10 @@ const (
 )
 
 const (
-	MaxBytes     = 2 << 20
+	MaxBytes = 2 << 20
+	// MaxCallBytes bounds one tools/call request or response: the files a
+	// call takes or returns (toolfile.MaxCallBytes) as base64, and the rest.
+	MaxCallBytes = int(toolfile.MaxCallBytes/3*4) + MaxBytes
 	MaxToolPages = 20
 	// MaxListedTools bounds one tools/list across all pages. A binding pins
 	// at most skill.MaxBindingTools of them.

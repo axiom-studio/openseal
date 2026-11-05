@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/toolfile"
 )
 
 type RiskLevel = capability.RiskLevel
@@ -974,7 +975,13 @@ func (c *Catalog) ValidateInput(_ context.Context, bound *BoundAction, input map
 	if schemas == nil || schemas.input == nil {
 		return errors.New("input schema is not compiled")
 	}
-	if err := schemas.input.validate(input); err != nil {
+	// A file passed as {"$file": path} is validated in its content's shape;
+	// the host puts the content in before calling the tool.
+	checked, _, err := checkFileInput(bound, input)
+	if err != nil {
+		return fmt.Errorf("skill input is invalid: %w", err)
+	}
+	if err := schemas.input.validate(checked); err != nil {
 		return fmt.Errorf("skill input is invalid: %w", err)
 	}
 	for field, rule := range bound.Binding.ArgumentRestrictions[bound.Action.Name] {
@@ -1002,7 +1009,9 @@ func (c *Catalog) ValidateOutput(_ context.Context, bound *BoundAction, output m
 	if schemas.output == nil {
 		return nil
 	}
-	if err := schemas.output.validate(output); err != nil {
+	// A host keeps the files a tool returns and puts a file reference in
+	// their place, which stands for the content the schema declares.
+	if err := schemas.output.validate(toolfile.CheckOutput(bound.Action.OutputSchema, output)); err != nil {
 		return fmt.Errorf("skill output is invalid: %w", err)
 	}
 	return nil

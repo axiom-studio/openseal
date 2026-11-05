@@ -75,12 +75,13 @@ func (st *sseStream) read(endpoints chan<- string) {
 	defer close(endpoints)
 	defer st.fail(errors.New("MCP SSE stream ended; outcome may be unknown"))
 	scan := bufio.NewScanner(st.body)
-	scan.Buffer(make([]byte, 4096), MaxBytes)
+	// Any event may answer a tools/call.
+	scan.Buffer(make([]byte, 4096), callLimit)
 	event, data, size, announced := "", []string{}, 0, false
 	for scan.Scan() {
 		line := scan.Text()
-		if size += len(line) + 1; size > MaxBytes {
-			st.fail(errors.New("MCP SSE event exceeds 2 MiB"))
+		if size += len(line) + 1; size > callLimit {
+			st.fail(errors.New("MCP SSE event exceeds its size limit"))
 			return
 		}
 		switch {

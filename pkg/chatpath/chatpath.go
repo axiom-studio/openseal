@@ -30,6 +30,8 @@ const (
 	Docs    = "docs/"
 	Media   = "media/"
 	Files   = "files/"
+	// ToolOutput holds the files tools return: tool-output/<call>/<name>.
+	ToolOutput = "tool-output/"
 )
 
 // ErrPath explains a path that cannot name a file.

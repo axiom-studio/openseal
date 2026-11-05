@@ -148,6 +148,8 @@ func TestNegotiationPaginationAndCall(t *testing.T) {
 }
 
 func TestCallRejectsInvalidRequestsBeforeNetwork(t *testing.T) {
+	defer func(limit int) { callLimit = limit }(callLimit)
+	callLimit = 4 << 20
 	var calls atomic.Int32
 	server := toolsServer(t, lookupTool(), &calls, false)
 	c := newClient(t, pin(server), server)
@@ -162,7 +164,7 @@ func TestCallRejectsInvalidRequestsBeforeNetwork(t *testing.T) {
 		"unlisted tool":   {Read, Input{Tool: "other", Hash: hash}, "no longer offered"},
 		"stale hash":      {Read, Input{Tool: "lookup", Hash: strings.Repeat("0", 64), Arguments: map[string]interface{}{"key": "a"}}, "tool definition changed; reconnect to refresh"},
 		"unknown action":  {"delete", lookupInput(lookupTool(), "a"), "unknown MCP action"},
-		"oversized input": {Call, lookupInput(lookupTool(), strings.Repeat("x", MaxBytes)), "oversized"},
+		"oversized input": {Call, lookupInput(lookupTool(), strings.Repeat("x", 4<<20)), "oversized"},
 	} {
 		if _, err := c.Call(t.Context(), secrets, tc.action, tc.input); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", name, err, tc.want)
@@ -614,5 +616,37 @@ func TestNewClientRequiresHostHTTPClient(t *testing.T) {
 	config := &BindingConfig{Endpoint: "https://mcp.example/mcp", Transport: TransportStreamableHTTP, Auth: Auth{Kind: AuthNone}}
 	if _, err := NewClient(config, Options{}); err == nil {
 		t.Fatal("client built without the host's HTTP client")
+	}
+}
+
+// A tools/call may carry files (screenshots, PDFs) well past the 2 MiB bound
+// of other messages, in its arguments and its result; the result names the
+// tool's output schema so a host can keep the declared file fields.
+func TestToolCallsCarryLargeFiles(t *testing.T) {
+	image := strings.Repeat("A", 3<<20)
+	tool := lookupTool()
+	tool["inputSchema"] = schemaOf(`{"type":"object","properties":{"key":{"type":"string","contentEncoding":"base64"}},"required":["key"]}`)
+	server := mcpServer(t, func(r *http.Request, method string, params map[string]interface{}) interface{} {
+		switch method {
+		case "tools/list":
+			return map[string]interface{}{"tools": []interface{}{tool}}
+		case "tools/call":
+			arguments, _ := params["arguments"].(map[string]interface{})
+			if arguments["key"] != image {
+				t.Error("large argument lost")
+			}
+			return map[string]interface{}{"content": []interface{}{map[string]interface{}{"type": "image", "data": image, "mimeType": "image/png"}}, "structuredContent": map[string]interface{}{"value": 1}}
+		}
+		return nil
+	})
+	result, err := newClient(t, pin(server), server).Call(t.Context(), secrets, Read, lookupInput(tool, image))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Content[0].(map[string]interface{})["data"] != image || result.OutputSchema["required"] == nil {
+		t.Fatalf("result = %d content, output schema %v", len(result.Content), result.OutputSchema)
+	}
+	if messageLimit("tools/list") != MaxBytes || messageLimit("tools/call") != MaxCallBytes || MaxCallBytes < 600<<20 {
+		t.Fatal("only tools/call takes large messages")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/axiom-studio/openseal/pkg/fileinput"
+	"github.com/axiom-studio/openseal/pkg/toolfile"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -162,6 +163,7 @@ func modelVisibleInputSchema(schema map[string]interface{}) map[string]interface
 
 func modelVisibleInputSchemaForBinding(schema map[string]interface{}, bindings map[string]BindingArgumentValue) map[string]interface{} {
 	projected, _ := projectModelSchemaValue(cloneMap(fileinput.Schema(schema))).(map[string]interface{})
+	projected = toolfile.ModelSchema(projected)
 	if len(bindings) == 0 || projected == nil {
 		return projected
 	}

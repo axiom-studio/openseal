@@ -51,7 +51,10 @@ type verifiedTool struct {
 	inputSchema map[string]interface{}
 	input       *schema
 	output      *schema
-	tasks       bool
+	// outputSchema is the tool's declared output schema, whose file content
+	// fields a host keeps as files.
+	outputSchema map[string]interface{}
+	tasks        bool
 }
 
 type envelope struct {
@@ -212,7 +215,7 @@ func (s *Session) Call(ctx context.Context, action string, input Input) (*CallRe
 	if args == nil {
 		args = map[string]interface{}{}
 	}
-	if raw, err := json.Marshal(args); err != nil || len(raw) > MaxBytes {
+	if raw, err := json.Marshal(args); err != nil || len(raw) > callLimit {
 		return nil, errors.New("invalid or oversized MCP arguments")
 	}
 	if remote.input.validate(args) != nil {
@@ -245,7 +248,7 @@ func (s *Session) Call(ctx context.Context, action string, input Input) (*CallRe
 	if remote.output != nil && remote.output.validate(structured) != nil {
 		return nil, errors.New("MCP structuredContent does not match the output schema; the call may already have run")
 	}
-	out := &CallResult{Content: s.redact.value(content, true).([]interface{})}
+	out := &CallResult{Content: s.redact.value(content, true).([]interface{}), OutputSchema: remote.outputSchema}
 	if structured != nil {
 		out.StructuredContent = s.redact.value(structured, true)
 	}
@@ -343,6 +346,7 @@ func verify(tool, inputSchema map[string]interface{}) (verifiedTool, bool) {
 		if v.output, err = compileSchema(output); err != nil {
 			return v, false
 		}
+		v.outputSchema = output
 	}
 	if execution, ok := tool["execution"].(map[string]interface{}); ok {
 		v.tasks = execution["taskSupport"] == "required"
@@ -371,7 +375,7 @@ func (s *Session) message(method string, params map[string]interface{}, id int64
 		msg["id"] = id
 	}
 	data, err := json.Marshal(msg)
-	if err != nil || len(data) > MaxBytes {
+	if err != nil || len(data) > messageLimit(method) {
 		return nil, errors.New("invalid or oversized MCP request")
 	}
 	return data, nil
@@ -417,9 +421,9 @@ func (s *Session) request(ctx context.Context, method string, params map[string]
 	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	switch contentType {
 	case "text/event-stream":
-		return readStreamResponse(resp.Body, id)
+		return readStreamResponse(resp.Body, id, messageLimit(method))
 	case "application/json":
-		b, err := readBounded(resp.Body)
+		b, err := readBounded(resp.Body, messageLimit(method))
 		if err != nil {
 			return nil, err
 		}
@@ -457,15 +461,15 @@ func (s *Session) protocolHeaders(method string, params map[string]interface{}, 
 
 // readStreamResponse returns the matching response from a Streamable HTTP
 // SSE body without waiting for the server to close it.
-func readStreamResponse(body io.Reader, id int64) (map[string]interface{}, error) {
-	scanner := bufio.NewScanner(io.LimitReader(body, MaxBytes+1))
-	scanner.Buffer(make([]byte, 4096), MaxBytes)
+func readStreamResponse(body io.Reader, id int64, limit int) (map[string]interface{}, error) {
+	scanner := bufio.NewScanner(io.LimitReader(body, int64(limit)+1))
+	scanner.Buffer(make([]byte, 4096), limit)
 	var event []string
 	total := 0
 	for scanner.Scan() {
 		line := scanner.Text()
-		if total += len(line) + 1; total > MaxBytes {
-			return nil, errors.New("MCP stream exceeds 2 MiB")
+		if total += len(line) + 1; total > limit {
+			return nil, errors.New("MCP stream exceeds its size limit")
 		}
 		if line == "" {
 			if len(event) > 0 {
@@ -541,13 +545,25 @@ func (s *Session) do(ctx context.Context, method, target string, body []byte, he
 	return resp, nil
 }
 
-func readBounded(r io.Reader) ([]byte, error) {
-	b, err := io.ReadAll(io.LimitReader(r, MaxBytes+1))
+func readBounded(r io.Reader, limit int) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, int64(limit)+1))
 	if err != nil {
 		return nil, errors.New("MCP response read failed; outcome may be unknown")
 	}
-	if len(b) > MaxBytes {
-		return nil, errors.New("MCP response exceeds 2 MiB; outcome may be unknown")
+	if len(b) > limit {
+		return nil, errors.New("MCP response exceeds its size limit; outcome may be unknown")
 	}
 	return b, nil
+}
+
+// callLimit is MaxCallBytes; tests lower it.
+var callLimit = MaxCallBytes
+
+// messageLimit bounds one message of method: a tools/call may carry the files
+// a call takes or returns, every other message is small.
+func messageLimit(method string) int {
+	if method == "tools/call" {
+		return callLimit
+	}
+	return MaxBytes
 }
