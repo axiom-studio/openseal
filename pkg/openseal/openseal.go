@@ -203,13 +203,12 @@ type (
 	TeamManifestSpec                          = kernelteam.ManifestSpec
 	TeamManifestRoleSlot                      = kernelteam.ManifestRoleSlot
 	TeamManifestRoleSkillGrant                = kernelteam.ManifestRoleSkillGrant
-	TeamManifestCoordinationPolicy            = kernelteam.ManifestCoordinationPolicy
 	TeamManifestDelegationPolicy              = kernelteam.ManifestDelegationPolicy
 	TeamManifestSharedContextPolicy           = kernelteam.ManifestSharedContextPolicy
 	TeamRoleSlot                              = kernelteam.RoleSlot
 	TeamRoleSkillGrant                        = kernelteam.RoleSkillGrant
 	TeamRoleChannelParticipation              = kernelteam.RoleChannelParticipation
-	TeamCoordinationPolicy                    = kernelteam.CoordinationPolicy
+	TeamRoutingPolicy                         = kernelteam.RoutingPolicy
 	TeamDelegationPolicy                      = kernelteam.DelegationPolicy
 	TeamApprovalPolicy                        = kernelteam.ApprovalPolicy
 	TeamDeployment                            = kernelteam.Deployment

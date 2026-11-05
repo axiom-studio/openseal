@@ -66,9 +66,8 @@ func TestEngineCreatedDeploymentsJoinPersonalWhenInNoSpace(t *testing.T) {
 	}
 	teamDefinition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: "crew", Version: "1", DisplayName: "Crew", Purpose: "Work together",
-		Roles:        []TeamRoleSlot{{ID: "helper", DisplayName: "Helper", Purpose: "Help", MinimumMembers: 1}},
-		Coordination: TeamCoordinationPolicy{QuietByDefault: true, RequireRoleRelevance: true},
-		Approvals:    TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"helper"}},
+		Roles:     []TeamRoleSlot{{ID: "helper", DisplayName: "Helper", Purpose: "Help", MinimumMembers: 1}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"helper"}},
 	})
 	if err != nil {
 		t.Fatal(err)

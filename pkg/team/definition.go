@@ -62,12 +62,17 @@ const (
 	RoleChannelDisabled    RoleChannelParticipation = "disabled"
 )
 
-type CoordinationPolicy struct {
-	MaximumSpeakersPerRound  int  `json:"maximumSpeakersPerRound,omitempty"`
-	QuietByDefault           bool `json:"quietByDefault,omitempty"`
-	RequireRoleRelevance     bool `json:"requireRoleRelevance,omitempty"`
-	SuppressDuplicateContent bool `json:"suppressDuplicateContent,omitempty"`
+// RoutingPolicy is the lead's view of who answers what in the Team channel.
+// A message nobody addressed goes to one member chosen by the host's router;
+// Notes (free text, e.g. "Maya owns pricing, Otto owns press") and the lead
+// role feed that router and the members' agent cards.
+type RoutingPolicy struct {
+	Notes      string `json:"notes,omitempty"`
+	LeadRoleID string `json:"leadRoleId,omitempty"`
 }
+
+// MaximumRoutingNotesBytes bounds the routing notes a router prompt carries.
+const MaximumRoutingNotesBytes = 4000
 
 type DelegationPolicy struct {
 	MaximumDepth            int  `json:"maximumDepth,omitempty"`
@@ -96,7 +101,7 @@ type Definition struct {
 	Purpose             string                          `json:"purpose"`
 	OperatingPrinciples []string                        `json:"operatingPrinciples,omitempty"`
 	Roles               []RoleSlot                      `json:"roles"`
-	Coordination        CoordinationPolicy              `json:"coordination"`
+	Routing             RoutingPolicy                   `json:"routing,omitempty"`
 	Delegation          DelegationPolicy                `json:"delegation,omitempty"`
 	SharedContext       workforce.SharedContextPolicy   `json:"sharedContext,omitempty"`
 	Approvals           ApprovalPolicy                  `json:"approvals"`
@@ -116,7 +121,7 @@ func (d *Definition) Validate() error {
 		strings.TrimSpace(d.DisplayName) == "" || strings.TrimSpace(d.Purpose) == "" || len(d.Roles) == 0 {
 		return errors.New("team definition id, valid version, display name, purpose, and roles are required")
 	}
-	if d.Coordination.MaximumSpeakersPerRound < 0 ||
+	if len(d.Routing.Notes) > MaximumRoutingNotesBytes ||
 		d.Delegation.MaximumDepth < 0 || d.Delegation.MaximumConcurrent < 0 || d.Delegation.CompletionReviewQuorum < 0 ||
 		d.SharedContext.Retention < 0 || d.SharedContext.MaximumBytes < 0 || !validRisk(d.Approvals.MaximumRisk) {
 		return errors.New("team definition policies are invalid")
@@ -158,6 +163,9 @@ func (d *Definition) Validate() error {
 				actions[action] = true
 			}
 		}
+	}
+	if lead := strings.TrimSpace(d.Routing.LeadRoleID); lead != d.Routing.LeadRoleID || lead != "" && !roles[lead] {
+		return errors.New("team routing lead must reference a declared role")
 	}
 	for _, roleID := range d.Approvals.ApproverRoleIDs {
 		if !roles[strings.TrimSpace(roleID)] {

@@ -50,7 +50,7 @@ type ManifestMetadata struct {
 type ManifestSpec struct {
 	OperatingPrinciples []string                        `json:"operatingPrinciples,omitempty" yaml:"operatingPrinciples,omitempty"`
 	Roles               []ManifestRoleSlot              `json:"roles" yaml:"roles"`
-	Coordination        ManifestCoordinationPolicy      `json:"coordination,omitempty" yaml:"coordination,omitempty"`
+	Routing             RoutingPolicy                   `json:"routing,omitempty" yaml:"routing,omitempty"`
 	Delegation          ManifestDelegationPolicy        `json:"delegation,omitempty" yaml:"delegation,omitempty"`
 	SharedContext       ManifestSharedContextPolicy     `json:"sharedContext,omitempty" yaml:"sharedContext,omitempty"`
 	Approvals           ApprovalPolicy                  `json:"approvals,omitempty" yaml:"approvals,omitempty"`
@@ -80,13 +80,6 @@ type ManifestRoleSkillGrant struct {
 	AllowedActions []string             `json:"allowedActions,omitempty" yaml:"allowedActions,omitempty"`
 	EnablePrompt   bool                 `json:"enablePrompt,omitempty" yaml:"enablePrompt,omitempty"`
 	MaximumRisk    capability.RiskLevel `json:"maximumRisk" yaml:"maximumRisk"`
-}
-
-type ManifestCoordinationPolicy struct {
-	MaximumSpeakersPerRound  int   `json:"maximumSpeakersPerRound,omitempty" yaml:"maximumSpeakersPerRound,omitempty"`
-	QuietByDefault           *bool `json:"quietByDefault,omitempty" yaml:"quietByDefault,omitempty"`
-	RequireRoleRelevance     *bool `json:"requireRoleRelevance,omitempty" yaml:"requireRoleRelevance,omitempty"`
-	SuppressDuplicateContent *bool `json:"suppressDuplicateContent,omitempty" yaml:"suppressDuplicateContent,omitempty"`
 }
 
 type ManifestDelegationPolicy struct {
@@ -171,15 +164,6 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance workfor
 	if maximumBytes == 0 {
 		maximumBytes = defaultSharedContextBytes
 	}
-	coordination := CoordinationPolicy{
-		MaximumSpeakersPerRound:  manifest.Spec.Coordination.MaximumSpeakersPerRound,
-		QuietByDefault:           booleanDefault(manifest.Spec.Coordination.QuietByDefault, true),
-		RequireRoleRelevance:     booleanDefault(manifest.Spec.Coordination.RequireRoleRelevance, true),
-		SuppressDuplicateContent: booleanDefault(manifest.Spec.Coordination.SuppressDuplicateContent, true),
-	}
-	if coordination.MaximumSpeakersPerRound == 0 {
-		coordination.MaximumSpeakersPerRound = 2
-	}
 	delegation := DelegationPolicy{
 		MaximumDepth:            manifest.Spec.Delegation.MaximumDepth,
 		MaximumConcurrent:       manifest.Spec.Delegation.MaximumConcurrent,
@@ -224,7 +208,7 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance workfor
 	}
 	definition := &Definition{
 		ID: definitionID, Version: metadata.Version, DisplayName: metadata.DisplayName, Purpose: purpose,
-		OperatingPrinciples: manifest.Spec.OperatingPrinciples, Roles: roles, Coordination: coordination,
+		OperatingPrinciples: manifest.Spec.OperatingPrinciples, Roles: roles, Routing: manifest.Spec.Routing,
 		Delegation: delegation,
 		SharedContext: workforce.SharedContextPolicy{
 			Retention: retention, MaximumBytes: maximumBytes,
@@ -258,6 +242,8 @@ func canonicalizeManifestDefinition(candidate *Definition) {
 	candidate.Approvals.ApproverPrincipals = normalizedStrings(candidate.Approvals.ApproverPrincipals)
 	candidate.Amendments.AllowedFields = normalizedStrings(candidate.Amendments.AllowedFields)
 	candidate.Amendments.ApproverPrincipals = normalizedStrings(candidate.Amendments.ApproverPrincipals)
+	candidate.Routing.Notes = strings.TrimSpace(candidate.Routing.Notes)
+	candidate.Routing.LeadRoleID = strings.TrimSpace(candidate.Routing.LeadRoleID)
 	for index := range candidate.Roles {
 		role := &candidate.Roles[index]
 		role.ID = strings.TrimSpace(role.ID)

@@ -54,8 +54,7 @@ func teamSkillUpgradeRuntimeFixture(t *testing.T, store KernelStore) (*SkillRefe
 			{ID: "reader", DisplayName: "Reader", Purpose: "Read", SkillGrants: []kernelteam.RoleSkillGrant{{SkillID: "reader", SkillVersion: "1.0.0", CatalogID: "native-reader", AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead}}},
 			{ID: "observer", DisplayName: "Observer", Purpose: "Observe without Skill authority", ChannelParticipation: kernelteam.RoleChannelObserveOnly},
 		},
-		Coordination: kernelteam.CoordinationPolicy{QuietByDefault: true, SuppressDuplicateContent: true},
-		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}, eventWaitContractEpoch)
 	if err != nil {
 		t.Fatal(err)
@@ -240,8 +239,7 @@ func TestTeamSkillReferenceUpgradeAcceptsLegacyDefinitionDigest(t *testing.T) {
 		ID: "legacy-design", Version: "1", DisplayName: "Team", Purpose: "Read sources",
 		Roles: []kernelteam.RoleSlot{{ID: "reader", DisplayName: "Reader", Purpose: "Read",
 			SkillGrants: []kernelteam.RoleSkillGrant{{SkillID: "reader", SkillVersion: "1.0.0", CatalogID: "native-reader", AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead}}}},
-		Coordination: kernelteam.CoordinationPolicy{QuietByDefault: true, SuppressDuplicateContent: true},
-		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}, eventWaitContractEpoch)
 	if err != nil {
 		t.Fatal(err)
@@ -307,8 +305,7 @@ func TestTeamSkillReferenceUpgradeOfUngrantedBindingLeavesTeamAuthority(t *testi
 		ID: "platform-design", Version: "1", DisplayName: "Team", Purpose: "Read sources",
 		Roles: []kernelteam.RoleSlot{{ID: "reader", DisplayName: "Reader", Purpose: "Read",
 			SkillGrants: []kernelteam.RoleSkillGrant{{SkillID: "reader", SkillVersion: "1.0.0", CatalogID: "native-reader", AllowedActions: []string{"read"}, MaximumRisk: skill.RiskLevelRead}}}},
-		Coordination: kernelteam.CoordinationPolicy{QuietByDefault: true, SuppressDuplicateContent: true},
-		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}, eventWaitContractEpoch)
 	if err != nil {
 		t.Fatal(err)

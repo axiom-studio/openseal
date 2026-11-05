@@ -318,9 +318,8 @@ func representativeBundle(t *testing.T) *Bundle {
 	}
 	teamDefinition := &team.Definition{
 		ID: "research-team", Version: "1.0.0", DisplayName: "Research Team", Purpose: "Produce reviewed research",
-		Roles:        []team.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1, MaximumMembers: 1, ChannelParticipation: team.RoleChannelActive}},
-		Coordination: team.CoordinationPolicy{MaximumSpeakersPerRound: 1, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
-		Approvals:    team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Roles:     []team.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1, MaximumMembers: 1, ChannelParticipation: team.RoleChannelActive}},
+		Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}
 	teamDeployment := &team.Deployment{
 		ID: "team:source-research", Scope: deployment.Scope, DefinitionID: teamDefinition.ID, ActiveVersion: teamDefinition.Version,

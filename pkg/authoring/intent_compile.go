@@ -571,7 +571,6 @@ func compileAuthoringTeam(answer AuthoringTeamIntent, agents map[string]*agent.A
 	definition := &team.Definition{
 		ID: answer.Key, AuthoringKey: answer.Key, Version: "1.0.0", DisplayName: strings.TrimSpace(answer.Name), Purpose: strings.TrimSpace(answer.Purpose),
 		OperatingPrinciples: normalized(answer.OperatingPrinciples),
-		Coordination:        team.CoordinationPolicy{MaximumSpeakersPerRound: maxInt(1, len(answer.Roles)), QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
 		Delegation:          team.DelegationPolicy{MaximumDepth: 4, MaximumConcurrent: maxInt(1, len(agents)), AllowPeerDelegation: true, RequireAcceptance: true, RequireCompletionReview: true},
 		Approvals:           team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		Amendments:          workforce.AmendmentPolicy{AgentMayPropose: true},

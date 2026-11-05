@@ -189,8 +189,7 @@ func teamRoleActionRegistry(t *testing.T, ctx context.Context, scope Scope) (*ke
 			ID: "ux-reviewer", DisplayName: "UX Reviewer", Purpose: "Review UX", MinimumMembers: 1, MaximumMembers: 1,
 			RequiredDefinitionIDs: []string{agentDefinition.ID}, ChannelParticipation: kernelteam.RoleChannelObserveOnly,
 		}},
-		Coordination: kernelteam.CoordinationPolicy{},
-		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
+		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
 		Amendments: workforce.AmendmentPolicy{
 			AgentMayPropose: true, AllowedFields: []string{"roles"}, RequiresApproval: true,
 			ApproverPrincipals: []string{"user:operator"},

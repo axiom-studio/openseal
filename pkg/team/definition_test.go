@@ -130,10 +130,10 @@ func TestDefinitionAndDeploymentFailClosedOnInvalidAuthorityOrRoster(t *testing.
 func validDefinition() *Definition {
 	return &Definition{
 		ID: "market-research", Version: "1.0.0", DisplayName: "Market research", Purpose: "Discover evidence-backed customer needs",
-		Roles:        []RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Collects and synthesizes evidence", MinimumMembers: 1, MaximumMembers: 3}},
-		Coordination: CoordinationPolicy{MaximumSpeakersPerRound: 2, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
-		Delegation:   DelegationPolicy{MaximumDepth: 3, MaximumConcurrent: 6, AllowPeerDelegation: true, RequireAcceptance: true},
-		Approvals:    ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal, ApproverRoleIDs: []string{"researcher"}},
-		Digest:       "sha256:definition", CreatedAt: time.Now().UTC(),
+		Roles:      []RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Collects and synthesizes evidence", MinimumMembers: 1, MaximumMembers: 3}},
+		Routing:    RoutingPolicy{Notes: "Researchers own customer interviews"},
+		Delegation: DelegationPolicy{MaximumDepth: 3, MaximumConcurrent: 6, AllowPeerDelegation: true, RequireAcceptance: true},
+		Approvals:  ApprovalPolicy{MaximumRisk: capability.RiskLevelExternal, ApproverRoleIDs: []string{"researcher"}},
+		Digest:     "sha256:definition", CreatedAt: time.Now().UTC(),
 	}
 }

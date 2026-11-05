@@ -52,10 +52,9 @@ func TestTeamDefinitionAPIUsesVersionedScopedControlPlane(t *testing.T) {
 					AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead,
 				}},
 			}},
-			Coordination: kernelteam.CoordinationPolicy{QuietByDefault: true},
-			Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
-			Evaluations:  []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
-			Amendments:   workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"}},
+			Approvals:   kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
+			Evaluations: []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
+			Amendments:  workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"}},
 		}
 		body, _ := json.Marshal(definition)
 		created := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-definitions", string(body), "")

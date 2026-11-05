@@ -164,10 +164,9 @@ func TestPostgresTeamWorkBidsUseCASAcrossReplicasAndSurviveRestart(t *testing.T)
 	teams := kernelteam.NewRegistryWithStore(primary, agents)
 	teamDefinition, err := teams.RegisterDefinition(ctx, &kernelteam.Definition{
 		ID: "review-team", Version: "1", DisplayName: "Review Team", Purpose: "Review work",
-		Roles:        []kernelteam.RoleSlot{{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review", RequiredDefinitionIDs: []string{"reviewer"}}},
-		Coordination: kernelteam.CoordinationPolicy{MaximumSpeakersPerRound: 1, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
-		Delegation:   kernelteam.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 2, RequireAcceptance: true},
-		Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Roles:      []kernelteam.RoleSlot{{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review", RequiredDefinitionIDs: []string{"reviewer"}}},
+		Delegation: kernelteam.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 2, RequireAcceptance: true},
+		Approvals:  kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	})
 	if err != nil {
 		t.Fatal(err)

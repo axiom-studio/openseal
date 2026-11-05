@@ -93,9 +93,8 @@ type governedAuthoringGenerator struct{}
 func (governedAuthoringGenerator) Generate(context.Context, authoring.GenerateRequest) ([]byte, error) {
 	agent := &kernelagent.AgentDefinition{ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Collect evidence", SystemPrompt: "Collect attributed evidence.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1}}
 	team := &kernelteam.Definition{ID: "research", Version: "1", DisplayName: "Research", Purpose: "Synthesize evidence",
-		Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence", MinimumMembers: 1, RequiredDefinitionIDs: []string{agent.ID}, ChannelParticipation: kernelteam.RoleChannelActive}},
-		Coordination: kernelteam.CoordinationPolicy{MaximumSpeakersPerRound: 1, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
-		Delegation:   kernelteam.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 1, RequireAcceptance: true}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}}
+		Roles:      []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence", MinimumMembers: 1, RequiredDefinitionIDs: []string{agent.ID}, ChannelParticipation: kernelteam.RoleChannelActive}},
+		Delegation: kernelteam.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 1, RequireAcceptance: true}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}}
 	return json.Marshal(authoring.GenerationResponse{Candidate: authoring.WorkforceCandidate{Agents: []*kernelagent.AgentDefinition{agent}, Team: team,
 		Assignments: []authoring.Assignment{{ID: "researcher", RoleID: "researcher", AgentDefinitionID: agent.ID, DisplayName: agent.DisplayName}}}})
 }

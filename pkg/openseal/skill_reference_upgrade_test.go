@@ -533,8 +533,7 @@ func createTeamSkillUpgradeFixture(t *testing.T, engine *openseal.Engine, option
 			ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review research without source access",
 			MaximumMembers: 1, ChannelParticipation: openseal.TeamRoleChannelObserveOnly,
 		}},
-		Coordination: openseal.TeamCoordinationPolicy{QuietByDefault: true, SuppressDuplicateContent: true},
-		Approvals:    openseal.TeamApprovalPolicy{MaximumRisk: openseal.SkillRiskWrite},
+		Approvals: openseal.TeamApprovalPolicy{MaximumRisk: openseal.SkillRiskWrite},
 	})
 	if err != nil {
 		t.Fatal(err)

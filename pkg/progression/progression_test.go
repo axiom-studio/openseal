@@ -158,7 +158,7 @@ func TestTeamProgressionUsesSameApprovalAndRejectionLifecycle(t *testing.T) {
 	candidate := *registered
 	candidate.Version, candidate.Digest = "2", ""
 	candidate.Delegation.MaximumConcurrent = 2
-	ceiling := TeamPolicyCeiling{MaximumRisk: capability.RiskLevelWrite, MaximumDelegationDepth: 2, MaximumConcurrency: 2, MaximumSpeakers: 3}
+	ceiling := TeamPolicyCeiling{MaximumRisk: capability.RiskLevelWrite, MaximumDelegationDepth: 2, MaximumConcurrency: 2}
 	amendment, err := service.ProposeTeam(ctx, ProposeTeamRequest{Recommendation: recommendation, Candidate: &candidate, Ceiling: ceiling, ProposerType: "agent", ProposerID: "coordinator"})
 	if err != nil || !amendment.RiskWidening || amendment.Status != team.AmendmentEvaluating {
 		t.Fatalf("Team proposal = %#v, %v", amendment, err)
@@ -241,5 +241,5 @@ func testAgentDefinition() *agent.AgentDefinition {
 }
 
 func testTeamDefinition() *team.Definition {
-	return &team.Definition{ID: "operations", Version: "1", DisplayName: "Operations", Purpose: "Coordinate operations", Roles: []team.RoleSlot{{ID: "operator", DisplayName: "Operator", Purpose: "Operate", ChannelParticipation: team.RoleChannelActive}}, Coordination: team.CoordinationPolicy{MaximumSpeakersPerRound: 2}, Delegation: team.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 1}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}, Evaluations: []workforce.EvaluationCriterion{{ID: "quality", Description: "Output quality", Required: true}}, Amendments: workforce.AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"delegation", "purpose"}, ApproverPrincipals: []string{"user:admin"}}}
+	return &team.Definition{ID: "operations", Version: "1", DisplayName: "Operations", Purpose: "Coordinate operations", Roles: []team.RoleSlot{{ID: "operator", DisplayName: "Operator", Purpose: "Operate", ChannelParticipation: team.RoleChannelActive}}, Delegation: team.DelegationPolicy{MaximumDepth: 1, MaximumConcurrent: 1}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead}, Evaluations: []workforce.EvaluationCriterion{{ID: "quality", Description: "Output quality", Required: true}}, Amendments: workforce.AmendmentPolicy{AgentMayPropose: true, AllowedFields: []string{"delegation", "purpose"}, ApproverPrincipals: []string{"user:admin"}}}
 }

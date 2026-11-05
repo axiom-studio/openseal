@@ -30,9 +30,8 @@ func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
 	}
 	teamDefinition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: "research-team", Version: "1", DisplayName: "Research Team", Purpose: "Produce evidence-backed findings",
-		Roles:        []TeamRoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1}},
-		Coordination: TeamCoordinationPolicy{QuietByDefault: true, RequireRoleRelevance: true},
-		Approvals:    TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
+		Roles:     []TeamRoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Find evidence", MinimumMembers: 1}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"researcher"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,8 +91,7 @@ func TestPublicEngineProjectsTeamSkillsPerRosterRole(t *testing.T) {
 				SkillID: "portfolio", SkillVersion: "1", AllowedActions: []string{"pause"}, MaximumRisk: SkillRiskWrite,
 			}},
 		}},
-		Coordination: TeamCoordinationPolicy{QuietByDefault: true, RequireRoleRelevance: true},
-		Approvals:    TeamApprovalPolicy{MaximumRisk: SkillRiskExternal, ApproverRoleIDs: []string{"operator"}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: SkillRiskExternal, ApproverRoleIDs: []string{"operator"}},
 	})
 	if err != nil {
 		t.Fatal(err)

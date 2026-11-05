@@ -1084,10 +1084,9 @@ func marketingCandidate(version string, risk capability.RiskLevel) WorkforceCand
 	}
 	teamDefinition := &team.Definition{
 		ID: "gtm-research", Version: version, DisplayName: "GTM research", Purpose: "Research demand and synthesize findings",
-		Roles:        []team.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence", MinimumMembers: 1, RequiredDefinitionIDs: []string{agentDefinition.ID}, ChannelParticipation: team.RoleChannelActive}},
-		Coordination: team.CoordinationPolicy{MaximumSpeakersPerRound: 2, QuietByDefault: true, RequireRoleRelevance: true, SuppressDuplicateContent: true},
-		Delegation:   team.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 2, AllowPeerDelegation: true, RequireAcceptance: true},
-		Approvals:    team.ApprovalPolicy{MaximumRisk: risk},
+		Roles:      []team.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence", MinimumMembers: 1, RequiredDefinitionIDs: []string{agentDefinition.ID}, ChannelParticipation: team.RoleChannelActive}},
+		Delegation: team.DelegationPolicy{MaximumDepth: 2, MaximumConcurrent: 2, AllowPeerDelegation: true, RequireAcceptance: true},
+		Approvals:  team.ApprovalPolicy{MaximumRisk: risk},
 	}
 	return WorkforceCandidate{
 		Agents: []*agent.AgentDefinition{agentDefinition}, Team: teamDefinition,
@@ -1102,7 +1101,7 @@ func TestTeamRoleSkillGrantsUseCatalogIdentityAndRejectModelRuntimeIdentity(t *t
 			ID: "analyst", DisplayName: "Analyst", Purpose: "Analyze", ChannelParticipation: team.RoleChannelActive,
 			SkillGrants: []team.RoleSkillGrant{{SkillID: "clawhub-listing", SkillVersion: "1.0.0", AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead}},
 		}},
-		Coordination: team.CoordinationPolicy{}, Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Approvals: team.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	}}
 	catalog := CapabilityCatalog{Skills: map[string]SkillCapability{
 		"clawhub-listing": {ID: "clawhub-listing", Version: "1.0.0", Actions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead},

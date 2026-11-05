@@ -30,8 +30,6 @@ func TestCompileManifestBuildsPortableTeamWithCalmDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if definition.ID != "catalog-market-research" ||
-		definition.Coordination.MaximumSpeakersPerRound != 2 || !definition.Coordination.QuietByDefault ||
-		!definition.Coordination.RequireRoleRelevance || !definition.Coordination.SuppressDuplicateContent ||
 		!definition.Delegation.RequireAcceptance || !definition.Delegation.RequireCompletionReview ||
 		definition.SharedContext.Retention != 7*24*time.Hour || definition.SharedContext.MaximumBytes != 1<<20 ||
 		!definition.SharedContext.AllowMemberRead || !definition.SharedContext.AllowMemberWrite ||
@@ -60,10 +58,7 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 					MaximumRisk: capability.RiskLevelRead,
 				}},
 			}},
-			Coordination: ManifestCoordinationPolicy{
-				MaximumSpeakersPerRound: 5, QuietByDefault: &no,
-				RequireRoleRelevance: &no, SuppressDuplicateContent: &no,
-			},
+			Routing: RoutingPolicy{Notes: "  Reviewer owns release notes  ", LeadRoleID: "reviewer"},
 			Delegation: ManifestDelegationPolicy{
 				MaximumDepth: 5, MaximumConcurrent: 8, AllowPeerDelegation: &yes,
 				RequireAcceptance: &no, RequireCompletionReview: &no,
@@ -78,8 +73,7 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if definition.Coordination.QuietByDefault || definition.Coordination.RequireRoleRelevance ||
-		definition.Coordination.SuppressDuplicateContent || !definition.Delegation.AllowPeerDelegation ||
+	if definition.Routing.Notes != "Reviewer owns release notes" || definition.Routing.LeadRoleID != "reviewer" || !definition.Delegation.AllowPeerDelegation ||
 		definition.Delegation.RequireAcceptance || definition.Delegation.RequireCompletionReview ||
 		definition.SharedContext.AllowMemberWrite || definition.SharedContext.Retention != 24*time.Hour {
 		t.Fatalf("explicit policy was not preserved: %#v", definition)
@@ -119,9 +113,9 @@ spec:
 			t.Fatalf("host-owned field %s was accepted", field)
 		}
 	}
-	retiredMode := strings.Replace(string(data), "  sharedContext:\n", "  coordination:\n    mode: peer\n  sharedContext:\n", 1)
-	if _, err = DecodeManifestYAML([]byte(retiredMode)); err == nil || !strings.Contains(err.Error(), "mode") {
-		t.Fatalf("retired coordination mode was accepted: %v", err)
+	retired := strings.Replace(string(data), "  sharedContext:\n", "  coordination:\n    maximumSpeakersPerRound: 2\n  sharedContext:\n", 1)
+	if _, err = DecodeManifestYAML([]byte(retired)); err == nil || !strings.Contains(err.Error(), "coordination") {
+		t.Fatalf("retired coordination policy was accepted: %v", err)
 	}
 	encoded, err := json.Marshal(manifest)
 	if err != nil {

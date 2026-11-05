@@ -1629,7 +1629,6 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 	identity := capability.NewSkillIdentity("summarize", "1.0.0+source.0123456789ab", "https://clawhub.ai::@alice/summarize")
 	definition := &kernelteam.Definition{
 		ID: "gtm-research", Version: "3", DisplayName: "GTM Research", Purpose: "Find evidence, synthesize it, and coordinate approved outreach.",
-		Coordination:       kernelteam.CoordinationPolicy{},
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "monitor", Title: "Monitor source communities"}, {ID: "report", Title: "Deliver cited report"}},
 		Roles: []kernelteam.RoleSlot{{ID: "research", DisplayName: "Researcher", Purpose: "Find evidence", SkillGrants: []kernelteam.RoleSkillGrant{{
 			SkillID: "summarize", SkillVersion: "1.0.0", CatalogID: "clawhub-listing", RuntimeIdentity: &identity,
@@ -1776,8 +1775,8 @@ func TestTeamAmendmentGovernanceIsInspectableRevisionSafeAndCapabilityGated(t *t
 	scope := capability.ScopeReference{Kind: "local", ID: "default"}
 	definition := &kernelteam.Definition{
 		ID: "research", Version: "1", DisplayName: "Research", Purpose: "Monitor evidence",
-		Roles:        []kernelteam.RoleSlot{{ID: "analyst", DisplayName: "Analyst", Purpose: "Synthesize evidence"}},
-		Coordination: kernelteam.CoordinationPolicy{}, Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+		Roles:       []kernelteam.RoleSlot{{ID: "analyst", DisplayName: "Analyst", Purpose: "Synthesize evidence"}},
+		Approvals:   kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		Evaluations: []workforce.EvaluationCriterion{{ID: "evidence", Description: "Evidence remains attributable", Required: true}},
 		Amendments:  workforce.AmendmentPolicy{AllowedFields: []string{"purpose"}, RequiresApproval: true, ApproverPrincipals: []string{"user:local"}},
 	}
@@ -2171,9 +2170,8 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 			}},
 			Team: &kernelteam.Definition{
 				ID: "research", Version: "1", DisplayName: "Research Team", Purpose: "Find customer pain points",
-				Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
-				Coordination: kernelteam.CoordinationPolicy{},
-				Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+				Roles:     []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
+				Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 			},
 		},
 		UnresolvedQuestions: []authoring.RefinementQuestion{{
@@ -2339,9 +2337,8 @@ func TestWorkforceAuthoringPersistsChangeSetsAndRefinesByParent(t *testing.T) {
 		Valid: true,
 		Candidate: authoring.WorkforceCandidate{Team: &kernelteam.Definition{
 			ID: "research", Version: "1", DisplayName: "Research Team", Purpose: "Find customer pain points",
-			Roles:        []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
-			Coordination: kernelteam.CoordinationPolicy{},
-			Approvals:    kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
+			Roles:     []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
+			Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 		}},
 	}
 	amendResult := createResult

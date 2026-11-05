@@ -23,7 +23,13 @@ type RosterAssignment struct {
 	RoleID            string `json:"roleId"`
 	AgentDeploymentID string `json:"agentDeploymentId"`
 	DisplayName       string `json:"displayName,omitempty"`
+	// Owns lists the topics this member answers in the Team channel ("press
+	// list", "pricing"). The router prefers a topic's owner.
+	Owns []string `json:"owns,omitempty"`
 }
+
+// MaximumOwnedTopics bounds one member's owned topics.
+const MaximumOwnedTopics = 16
 
 type DeploymentRestrictions struct {
 	AllowedSkillIDs    []string             `json:"allowedSkillIds,omitempty"`
@@ -64,6 +70,14 @@ func (d *Deployment) Validate(definition *Definition) error {
 		if strings.TrimSpace(assignment.ID) == "" || strings.TrimSpace(assignment.AgentDeploymentID) == "" ||
 			roles[assignment.RoleID].ID == "" || assignments[assignment.ID] || agents[assignment.AgentDeploymentID] {
 			return errors.New("team roster assignments require unique ids, agents, and declared roles")
+		}
+		if len(assignment.Owns) > MaximumOwnedTopics {
+			return errors.New("team roster member owns too many topics")
+		}
+		for _, topic := range assignment.Owns {
+			if strings.TrimSpace(topic) == "" || topic != strings.TrimSpace(topic) || len(topic) > 80 {
+				return errors.New("team roster owned topics must be 1-80 trimmed characters")
+			}
 		}
 		assignments[assignment.ID] = true
 		agents[assignment.AgentDeploymentID] = true

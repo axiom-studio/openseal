@@ -347,11 +347,8 @@ func composeResearchWorkforce(
 	}
 	teamDefinition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: researchTeamID, Version: "1", DisplayName: "Market Research Team",
-		Purpose: "Monitor approved sources and deliver evidence-backed reports",
-		Roles:   roles,
-		Coordination: TeamCoordinationPolicy{
-			QuietByDefault: true, RequireRoleRelevance: true, MaximumSpeakersPerRound: 2,
-		},
+		Purpose:   "Monitor approved sources and deliver evidence-backed reports",
+		Roles:     roles,
 		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelExternal, ApproverRoleIDs: []string{"publisher"}},
 	})
 	if err != nil {

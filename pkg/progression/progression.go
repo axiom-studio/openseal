@@ -166,7 +166,6 @@ type TeamPolicyCeiling struct {
 	MaximumRisk            capability.RiskLevel `json:"maximumRisk"`
 	MaximumDelegationDepth int                  `json:"maximumDelegationDepth"`
 	MaximumConcurrency     int                  `json:"maximumConcurrency"`
-	MaximumSpeakers        int                  `json:"maximumSpeakers,omitempty"`
 	AllowedSkillIDs        []string             `json:"allowedSkillIds,omitempty"`
 	AllowSharedWrite       bool                 `json:"allowSharedWrite,omitempty"`
 }
@@ -380,7 +379,7 @@ func validateAgentCeiling(candidate *agent.AgentDefinition, ceiling AgentPolicyC
 }
 
 func validateTeamCeiling(candidate *team.Definition, ceiling TeamPolicyCeiling) error {
-	if riskRank(ceiling.MaximumRisk) < 0 || ceiling.MaximumDelegationDepth < 0 || ceiling.MaximumConcurrency < 0 || riskRank(candidate.Approvals.MaximumRisk) > riskRank(ceiling.MaximumRisk) || candidate.Delegation.MaximumDepth > ceiling.MaximumDelegationDepth || candidate.Delegation.MaximumConcurrent > ceiling.MaximumConcurrency || ceiling.MaximumSpeakers > 0 && candidate.Coordination.MaximumSpeakersPerRound > ceiling.MaximumSpeakers || candidate.SharedContext.AllowMemberWrite && !ceiling.AllowSharedWrite {
+	if riskRank(ceiling.MaximumRisk) < 0 || ceiling.MaximumDelegationDepth < 0 || ceiling.MaximumConcurrency < 0 || riskRank(candidate.Approvals.MaximumRisk) > riskRank(ceiling.MaximumRisk) || candidate.Delegation.MaximumDepth > ceiling.MaximumDelegationDepth || candidate.Delegation.MaximumConcurrent > ceiling.MaximumConcurrency || candidate.SharedContext.AllowMemberWrite && !ceiling.AllowSharedWrite {
 		return ErrPolicyCeiling
 	}
 	for _, role := range candidate.Roles {
