@@ -18,9 +18,13 @@ func (s *PostgresStore) ListConversationForegroundRuns(ctx context.Context, scop
 		SELECT payload,created_at,id FROM (SELECT payload,created_at,id FROM `+s.table("agent_runs")+`
 		WHERE scope_kind=$1 AND scope_id=$2 AND payload->'owner'->>'type'=$3 AND payload->'owner'->>'id'=$4
 		AND payload->>'kind'='conversation' AND payload->'context'->>'conversationId'=$5
-		AND jsonb_typeof(payload->'context'->'threadRootMessageId')='string' AND payload->'context'->>'threadRootMessageId'<>''
-		AND payload->>'concurrencyKey'=(payload->'context'->>'conversationId')||':thread:'||(payload->'context'->>'threadRootMessageId')
-		ORDER BY created_at DESC,id DESC LIMIT $8) thread
+		AND payload->>'concurrencyKey'<>$5
+		AND payload->>'concurrencyKey'=(payload->'context'->>'conversationId')
+			||CASE WHEN jsonb_typeof(payload->'context'->'threadRootMessageId')='string' AND payload->'context'->>'threadRootMessageId'<>''
+				THEN ':thread:'||(payload->'context'->>'threadRootMessageId') ELSE '' END
+			||CASE WHEN payload->'owner'->>'type'='team' AND COALESCE(payload->>'assignedAgentId','')<>''
+				THEN ':agent:'||(payload->>'assignedAgentId') ELSE '' END
+		ORDER BY created_at DESC,id DESC LIMIT $8) lanes
 		ORDER BY created_at DESC,id DESC LIMIT $6 OFFSET $7`, scope.Kind, scope.ID, owner.Type, owner.ID, conversationID, limit, offset, conversationForegroundSQLPageSize(limit, offset))
 	if err != nil {
 		return nil, err

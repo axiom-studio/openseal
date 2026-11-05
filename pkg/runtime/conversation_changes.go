@@ -551,21 +551,31 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 				continue
 			}
 			if run.Scope != conversation.Scope || run.Owner != conversation.Owner || run.Kind != RunKindConversation ||
-				run.Context[conversationRunContextConversationID] != conversation.ID || s.conversations == nil {
+				run.Context[conversationRunContextConversationID] != conversation.ID {
 				continue
 			}
-			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
-			trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
-			if err != nil {
-				if errors.Is(err, ErrChannelMessageNotFound) {
+			// A thread lane or a Team member's lane of this conversation.
+			thread, _ := run.Context["threadRootMessageId"].(string)
+			if run.ConcurrencyKey != conversationRunLane(conversation.ID, thread, run.Owner, run.AssignedAgentID) {
+				continue
+			}
+			if thread != "" {
+				if s.conversations == nil {
 					continue
 				}
-				return nil, err
+				triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+				trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
+				if err != nil {
+					if errors.Is(err, ErrChannelMessageNotFound) {
+						continue
+					}
+					return nil, err
+				}
+				if externalConversationThreadRoot(conversation, trigger) != thread {
+					continue
+				}
 			}
-			thread := externalConversationThreadRoot(conversation, trigger)
-			if thread != "" && run.Context["threadRootMessageId"] == thread && run.ConcurrencyKey == conversation.ID+":thread:"+thread {
-				all = append(all, run)
-			}
+			all = append(all, run)
 		}
 		if len(page) < pageSize {
 			break

@@ -2,8 +2,10 @@ package runtime
 
 import "context"
 
-// ConversationForegroundRunsReadStore retains legacy unthreaded roots and
-// canonically scheduled explicit threads without scanning unrelated runs.
+// ConversationForegroundRunsReadStore lists a conversation's foreground Runs
+// (the channel lane, explicit threads and Team members' lanes) without
+// scanning unrelated Runs. Every store matches lanes exactly as
+// conversationRunLane builds them.
 type ConversationForegroundRunsReadStore interface {
 	ListConversationForegroundRuns(context.Context, Scope, ObjectiveOwner, string, int, int) ([]*AgentRun, error)
 }
@@ -27,7 +29,7 @@ func foregroundConversationRunID(run *AgentRun) string {
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	threadID, _ := run.Context["threadRootMessageId"].(string)
-	if conversationID != "" && threadID != "" && run.ConcurrencyKey == conversationID+":thread:"+threadID {
+	if conversationID != "" && run.ConcurrencyKey != conversationID && run.ConcurrencyKey == conversationRunLane(conversationID, threadID, run.Owner, run.AssignedAgentID) {
 		return conversationID
 	}
 	if validOpaqueIdentifier(run.ConcurrencyKey, 128) {

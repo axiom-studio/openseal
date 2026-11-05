@@ -78,3 +78,46 @@ func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 		})
 	}
 }
+
+func TestConversationRunsIncludeTeamMemberLanes(t *testing.T) {
+	for _, backend := range []string{"memory", "sqlite"} {
+		t.Run(backend, func(t *testing.T) {
+			var store KernelStore = NewMemoryStore()
+			if backend == "sqlite" {
+				db, err := NewSQLiteStore(filepath.Join(t.TempDir(), "runs.db"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = db.Close() })
+				store = db
+			}
+			scope := Scope{Kind: "tenant", ID: "one"}
+			owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "launch"}
+			now := time.Now().UTC()
+			for _, run := range []*AgentRun{
+				{ID: "routing", ConcurrencyKey: "room"},
+				{ID: "member", ConcurrencyKey: "room:agent:rio", AssignedAgentID: "rio"},
+				{ID: "forged", ConcurrencyKey: "room:agent:otto", AssignedAgentID: "rio"},
+			} {
+				run.Scope, run.Kind, run.Owner, run.Goal, run.Source, run.Status = scope, RunKindConversation, owner, "Answer", RunSourceChat, AgentRunStatusRunning
+				run.Context = map[string]interface{}{conversationRunContextConversationID: "room", conversationRunContextTriggerID: "ask"}
+				run.Revision, run.CreatedAt, run.UpdatedAt, run.AvailableAt, run.QueueEnteredAt = 1, now, now, now, now
+				if err := store.CreateAgentRun(t.Context(), run); err != nil {
+					t.Fatal(err)
+				}
+			}
+			service := &ConversationChangeService{portfolio: store}
+			runs, err := service.listConversationRuns(t.Context(), &Conversation{ID: "room", Scope: scope, Owner: owner})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids := map[string]bool{}
+			for _, run := range runs {
+				ids[run.ID] = true
+			}
+			if len(runs) != 2 || !ids["routing"] || !ids["member"] {
+				t.Fatalf("conversation Runs = %v", ids)
+			}
+		})
+	}
+}
