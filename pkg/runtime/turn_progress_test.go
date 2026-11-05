@@ -105,3 +105,46 @@ func TestCommentaryPersistsSeparatelyFromMatchingActivitySummary(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTurnProgressCarriesItsOriginRef(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "7"}
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Inspect", Source: RunSourceObjective})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "worker"}, TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
+		first := WithTurnProgressOrigin(ctx, " command:ab ")
+		second := WithTurnProgressOrigin(ctx, "command:cd")
+		for _, step := range []struct {
+			ctx     context.Context
+			summary string
+		}{{first, "Running a command in the secure VM…"}, {first, "Running a command in the secure VM"},
+			{second, "Running a command in the secure VM…"}, {second, "Running a command in the secure VM"},
+			{WithTurnProgressOrigin(ctx, strings.Repeat("x", MaxTurnProgressOriginRefBytes+1)), "Saving report.html"}, {ctx, "Saving report.html…"}} {
+			if err := ReportTurnProgress(step.ctx, step.summary); err != nil {
+				return nil, err
+			}
+		}
+		return &TurnOutcome{OutputSummary: "Done.", NextRunStatus: AgentRunStatusCompleted}, nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.ListActivity(t.Context(), ActivityFilter{Scope: scope, RunID: run.ID, EventTypes: []string{"turn.progress"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs []string
+	for _, event := range events {
+		ref, _ := event.Payload["originRef"].(string)
+		refs = append(refs, ref)
+	}
+	// The same step text under a new command is a new step, not a repeat.
+	if strings.Join(refs, ",") != "command:ab,command:ab,command:cd,command:cd,," {
+		t.Fatalf("progress refs = %q", refs)
+	}
+	if feed, err := NewRunActivityService(store, store).ListActivityFeed(t.Context(), ActivityFeedRequest{Scope: scope, RunID: run.ID, EventTypes: []string{"turn.progress"}, IncludeDetails: true}); err != nil || len(feed.Items) != len(events) || feed.Items[len(feed.Items)-1].Payload["originRef"] != "command:ab" {
+		t.Fatalf("feed: %+v %v", feed, err)
+	}
+}

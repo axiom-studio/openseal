@@ -311,13 +311,14 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 	go c.heartbeatTurnLease(executionCtx, cancelExecution, req.Scope, turn, req.WorkerID, req.LeaseDuration, heartbeatDone)
 	// Progress is append-only activity, not a Turn mutation: lease heartbeats and
 	// terminal result commits retain their existing revision discipline.
-	lastSummary, lastKind := "", ""
+	lastSummary, lastKind, lastOrigin := "", "", ""
 	executionCtx = WithTurnProgress(executionCtx, func(progressCtx context.Context, summary string) error {
 		kind := "turn.progress"
 		if IsTurnCommentary(progressCtx) {
 			kind = "turn.commentary"
 		}
-		if summary == lastSummary && kind == lastKind {
+		origin := TurnProgressOrigin(progressCtx)
+		if summary == lastSummary && kind == lastKind && origin == lastOrigin {
 			return nil
 		}
 		current, err := c.turns.turns.GetAgentTurn(progressCtx, req.Scope, turn.ID)
@@ -334,13 +335,17 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		if active == nil || active.Status != AgentRunStatusRunning || active.LeaseOwner != "" && active.LeaseOwner != req.WorkerID {
 			return ErrLeaseLost
 		}
-		_, err = c.activity.AppendActivity(progressCtx, &ActivityEvent{
+		event := &ActivityEvent{
 			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: run.Owner.ID,
 			EventType: kind, Summary: summary, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
 			Visibility: ActivityVisibilityScope,
-		})
+		}
+		if origin != "" {
+			event.Payload = map[string]interface{}{"originRef": origin}
+		}
+		_, err = c.activity.AppendActivity(progressCtx, event)
 		if err == nil {
-			lastSummary, lastKind = summary, kind
+			lastSummary, lastKind, lastOrigin = summary, kind, origin
 		}
 		return err
 	})

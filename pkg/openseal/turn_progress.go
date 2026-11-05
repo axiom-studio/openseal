@@ -15,6 +15,12 @@ func ReportTurnProgress(ctx context.Context, summary string) error {
 	return runtime.ReportTurnProgress(ctx, summary)
 }
 
+// WithTurnProgressOrigin marks the progress reported with ctx as the step
+// that ref's nested calls (ActionCall.OriginRef) ran under.
+func WithTurnProgressOrigin(ctx context.Context, ref string) context.Context {
+	return runtime.WithTurnProgressOrigin(ctx, ref)
+}
+
 func IsTurnCommentary(ctx context.Context) bool { return runtime.IsTurnCommentary(ctx) }
 func ReportTurnCommentary(ctx context.Context, summary string) error {
 	return runtime.ReportTurnCommentary(ctx, summary)
