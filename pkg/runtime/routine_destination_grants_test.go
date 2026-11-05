@@ -48,17 +48,6 @@ func TestRoutineBriefPinsPostingGrantsToDestinations(t *testing.T) {
 			t.Fatalf("%s: brief was accepted", name)
 		}
 	}
-	// The 1.6.0 contract cannot carry a destination pin, so it cannot grant a post.
-	legacy := RunbookManagementSkillLegacy160()
-	bound := &skill.BoundAction{Definition: legacy, Binding: f.bound.Binding, Action: legacy.Actions[RunbookActionCreateTask]}
-	if _, _, err := f.validator.ResolveActionProposalArguments(t.Context(), ActionProposalValidationInput{Run: f.run, Bound: bound,
-		Arguments: f.withGrants(map[string]interface{}{"action": "chat.post", "label": "Post the digest"})}); err == nil {
-		t.Fatal("1.6.0 contract granted a post")
-	}
-	if _, ok := legacy.Actions[RunbookActionCreateTask].InputSchema["properties"].(map[string]interface{})["brief"].(map[string]interface{})["properties"].(map[string]interface{})["grants"].(map[string]interface{})["items"].(map[string]interface{})["properties"].(map[string]interface{})["toDestinations"]; ok {
-		t.Fatal("published 1.6.0 contract changed")
-	}
-
 	resolved, err := f.resolve(t, f.withGrants(
 		map[string]interface{}{"action": "chat.post", "label": "Post to #ai-news", "toDestinations": []interface{}{" #ai-news ", "ai-news"}},
 		map[string]interface{}{"action": "chat.read", "label": "Read the digest", "toDestinations": []interface{}{"C08AINEWS"}},

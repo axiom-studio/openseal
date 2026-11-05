@@ -111,11 +111,6 @@ func TestRoutineBriefGrantsBindingToolsIndividually(t *testing.T) {
 		t.Fatalf("pinned brief breaks the create_task contract: %v", err)
 	}
 
-	// The 1.5.0 contract cannot carry a pin, so it cannot grant connected tools.
-	legacy := &skill.BoundAction{Definition: RunbookManagementSkillLegacy150(), Binding: f.bound.Binding, Action: RunbookManagementSkillLegacy150().Actions[RunbookActionCreateTask]}
-	if _, _, err := f.validator.ResolveActionProposalArguments(t.Context(), ActionProposalValidationInput{Run: f.run, Bound: legacy, Arguments: f.withGrants(map[string]interface{}{"action": "mcp.github.create_issue"})}); err == nil || !strings.Contains(err.Error(), "cannot grant") {
-		t.Fatalf("1.5.0 brief granted a connected tool: %v", err)
-	}
 }
 
 // Regression: every binding tool routes to one base action, so a grant must

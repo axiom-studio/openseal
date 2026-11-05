@@ -152,11 +152,6 @@ func projectWorkflowKnownSubjects(ctx context.Context, store runbookActionStore,
 	return nil
 }
 
-type workflowSubjectReceiptHint struct {
-	actionCallID string
-	action       string
-}
-
 // Hint metadata only skips unrelated receipts before a potentially large
 // ActionCall read. It never supplies success, authorization, or subject facts.
 func workflowSubjectEvidenceHint(hint map[string]interface{}, source *WorkflowEventSource) (string, string, bool) {
@@ -175,58 +170,4 @@ func workflowSubjectEvidenceHint(hint map[string]interface{}, source *WorkflowEv
 		}
 	}
 	return "", "", false
-}
-
-// legacyWorkflowReceiptHints reads metadata from at most the latest 16
-// canonical history entries plus lastAction, without copying result payloads.
-// Qualifying receipt IDs are deduplicated and capped at 16 scoped ActionCall
-// point lookups. Earlier recipients and earlier successful sends remain
-// provable after another send or failure, without a durable history query.
-func legacyWorkflowReceiptHints(run *AgentRun, source *WorkflowEventSource) []workflowSubjectReceiptHint {
-	if run == nil || source == nil || len(source.SubjectEvidence) == 0 || len(source.SubjectEvidence) > 16 {
-		return nil
-	}
-	result := make([]workflowSubjectReceiptHint, 0, maximumActionHistoryEntries)
-	seenIDs := map[string]bool{}
-	appendHint := func(hint map[string]interface{}) {
-		id, action, matched := workflowSubjectEvidenceHint(hint, source)
-		if matched && !seenIDs[id] && len(result) < maximumActionHistoryEntries {
-			seenIDs[id] = true
-			result = append(result, workflowSubjectReceiptHint{actionCallID: id, action: action})
-		}
-	}
-	last, _ := run.Checkpoint["lastAction"].(map[string]interface{})
-	appendHint(last)
-	switch entries := run.Checkpoint[actionHistoryCheckpointKey].(type) {
-	case []interface{}:
-		for i := len(entries) - 1; i >= max(0, len(entries)-maximumActionHistoryEntries); i-- {
-			hint, _ := entries[i].(map[string]interface{})
-			appendHint(hint)
-		}
-	case []map[string]interface{}:
-		for i := len(entries) - 1; i >= max(0, len(entries)-maximumActionHistoryEntries); i-- {
-			appendHint(entries[i])
-		}
-	}
-	return result
-}
-
-func requireLegacyWorkflowSubjectEvidence(ctx context.Context, store runbookActionStore, run *AgentRun, source *WorkflowEventSource, subject string) error {
-	for _, hint := range legacyWorkflowReceiptHints(run, source) {
-		call, err := store.GetActionCall(ctx, run.Scope, hint.actionCallID)
-		if errors.Is(err, ErrActionNotFound) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if call == nil || call.ID != hint.actionCallID || call.Action != hint.action {
-			continue
-		}
-		known, err := workflowSubjectFromAction(run, source, call)
-		if err == nil && known.ExternalConversationID == subject {
-			return nil
-		}
-	}
-	return errors.New("legacy workflow subject requires a succeeded declared action receipt from this originating chat Run proving its exact external conversation ID")
 }

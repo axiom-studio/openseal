@@ -1041,7 +1041,6 @@ func (s *SkillReferenceUpgradeService) planTeamSkillReferenceAuthority(
 }
 
 func compareUpgradeContracts(previous, target *skill.Definition, bindingActions []string, referenced map[string]bool) []SkillReferenceUpgradeFinding {
-	occurrenceLimitUpgrade := compatibleRunbookOccurrenceLimitUpgrade(previous, target)
 	actions := make(map[string]bool, len(bindingActions)+len(referenced))
 	for _, action := range bindingActions {
 		actions[action] = true
@@ -1071,11 +1070,7 @@ func compareUpgradeContracts(previous, target *skill.Definition, bindingActions 
 				Code: "risk_increased", Subject: name, From: string(before.Risk), To: string(after.Risk), Message: fmt.Sprintf("%s risk changes from %s to %s", name, before.Risk, after.Risk),
 			})
 		}
-		// The audited occurrence-limit change reaches 1.3.2; anything later must
-		// only add to the 1.3.2 contract.
-		inputCompatible := compatibleUpgradeInputSchema(before.InputSchema, after.InputSchema) || (name == RunbookActionCreateTask && occurrenceLimitUpgrade &&
-			compatibleUpgradeInputSchema(storedInputSchema(scheduledTaskCreateActionLegacy132().InputSchema), after.InputSchema))
-		if !inputCompatible || !reflect.DeepEqual(before.OutputSchema, after.OutputSchema) ||
+		if !compatibleUpgradeInputSchema(before.InputSchema, after.InputSchema) || !reflect.DeepEqual(before.OutputSchema, after.OutputSchema) ||
 			!reflect.DeepEqual(before.Credentials, after.Credentials) || before.SideEffect != after.SideEffect ||
 			before.Idempotency != after.Idempotency || before.ExternalOperationPolicy != after.ExternalOperationPolicy ||
 			!reflect.DeepEqual(before.Transport, after.Transport) || !reflect.DeepEqual(previous.Transport, target.Transport) {
@@ -1216,41 +1211,6 @@ func configScopeStrings(scopes []skill.SkillConfigScope) []string {
 	return values
 }
 
-// Only these complete, published builtin descriptors have the audited behavior
-// that a null create_task occurrence limit is identical to its already permitted
-// omission. This is not a general nullable-schema compatibility rule. Hashing
-// every field also excludes external sources and descriptors spoofing the same
-// ID/version, and all other action/authority checks still run normally.
-func compatibleRunbookOccurrenceLimitUpgrade(previous, target *skill.Definition) bool {
-	if previous == nil || target == nil || previous.ID != RunbookManagementSkillID || target.ID != RunbookManagementSkillID ||
-		(target.Version != "1.3.2" && target.Version != RunbookManagementSkillVersion) {
-		return false
-	}
-	var previousDigest string
-	switch previous.Version {
-	case "1.3.0":
-		previousDigest = "54b02b77d43c735d4aeb5523cec033241c70df8b5e5ca685d2c1743ba528fd0b"
-	case "1.3.1":
-		previousDigest = "25e4b88d8a2046005db74696ea2f085956a1b5cf9ecd44157c704592ceb17313"
-	default:
-		return false
-	}
-	matches := func(definition *skill.Definition, digest string) bool {
-		encoded, err := json.Marshal(definition)
-		return err == nil && fmt.Sprintf("%x", sha256.Sum256(encoded)) == digest
-	}
-	targetDigest := "98de6212b5340284dcd896f2bb75e8e6951b275cc5707dd549218a0c5ba4967d"
-	if target.Version == RunbookManagementSkillVersion {
-		// The current descriptor is compiled in; only that exact one qualifies.
-		encoded, err := json.Marshal(RunbookManagementSkill())
-		if err != nil {
-			return false
-		}
-		targetDigest = fmt.Sprintf("%x", sha256.Sum256(encoded))
-	}
-	return matches(previous, previousDigest) && matches(target, targetDigest)
-}
-
 // Descriptive text can change without changing an adapter's authority. Every
 // executable adapter field, including receipt projections and credential
 // selection, must remain identical for an unattended upgrade.
@@ -1304,20 +1264,6 @@ func featureSubset(before, after []capability.ConversationAdapterFeature) bool {
 // Existing constraints (including required fields and cross-field rules) must
 // remain identical. Open objects could previously accept values rejected by a
 // newly declared property, so they deliberately retain exact comparison.
-// storedInputSchema gives a compiled schema the shape it has after the
-// catalog stores it (JSON numbers and arrays), so it compares with stored ones.
-func storedInputSchema(schema map[string]interface{}) map[string]interface{} {
-	encoded, err := json.Marshal(schema)
-	if err != nil {
-		return nil
-	}
-	var stored map[string]interface{}
-	if json.Unmarshal(encoded, &stored) != nil {
-		return nil
-	}
-	return stored
-}
-
 func compatibleUpgradeInputSchema(before, after map[string]interface{}) bool {
 	if reflect.DeepEqual(before, after) {
 		return true

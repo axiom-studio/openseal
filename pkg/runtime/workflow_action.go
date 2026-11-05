@@ -200,44 +200,35 @@ func isWorkflowActionName(name string) bool {
 	return name == RunbookActionCreateWorkflow || name == RunbookActionWorkflowSources || name == RunbookActionInspectWorkflows
 }
 
-func workflowCreateActionLegacy130() skill.Action {
+func workflowCreateAction() skill.Action {
 	return skill.Action{Name: RunbookActionCreateWorkflow,
-		Description: "Register a durable follow-up for an authenticated external event, then continue the current chat. Use workflow_sources to select an enabled event adapter. Supply the exact resource/conversation subject and participant/thread selectors; the current Agent executes the self-contained goal when a match arrives or the deadline expires, and reports here. Register before sending an external request when the subject is known. If delivery first supplies the subject, register immediately after its receipt; the durable inbox retains fast replies from the original human request boundary. For multiple recipients create one follow-up per recipient. This does not enable missing connector access, create polling, send the initial request, or promise services without an event source. Do not create another workflow in the goal. Existing Run tools inspect, pause, resume or cancel the returned workflowId.",
-		Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
+		Description: "Register a durable follow-up for an authenticated external event, then continue the current chat. Use workflow_sources to select an enabled event adapter. Supply the exact resource/conversation subject and participant/thread selectors; the current Agent executes the self-contained goal when a match arrives or the deadline expires, and reports here. Register before sending an external request when the subject is known. If delivery first supplies the subject, register immediately after its receipt; the durable inbox retains fast replies from the original human request boundary. For multiple recipients create one follow-up per recipient. This does not enable missing connector access, create polling, send the initial request, or promise services without an event source. Do not create another workflow in the goal. Existing Run tools inspect, pause, resume or cancel the returned workflowId." +
+			" For conversation adapters with evidenceRequired, supply subjectEvidenceActionCallId from a succeeded action in this originating chat Run. The persisted output at the adapter's declared subjectEvidence path must equal subject exactly; a participant ID or intended delivery target is not conversation evidence.",
+		Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"title", "goal", "bindingId", "adapterId", "adapterKind", "eventType", "subject", "deadline"}, "properties": map[string]interface{}{
-			"title":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 240},
-			"goal":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 16000, "description": "Self-contained work to perform on a matched event or timeout, including the destination and requested result. Event data is supplied by the runtime; credentials and new workflow creation are forbidden."},
-			"bindingId":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256},
-			"adapterId":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128},
-			"adapterKind": map[string]interface{}{"type": "string", "enum": []interface{}{"conversation", "callback"}},
-			"eventType":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256},
-			"subject":     map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 512, "description": "Exact external conversation ID for conversation adapters, or normalized resource subject for callbacks. Wildcards are not supported."},
-			"attributes":  map[string]interface{}{"type": "object", "maxProperties": 10, "additionalProperties": map[string]interface{}{"type": []interface{}{"string", "number", "boolean"}}, "description": "Exact non-secret scalar correlation selectors. For messages use externalParticipantId and/or externalThreadId. Tenant, deployment, binding and adapter authority are server-owned."},
-			"deadline":    map[string]interface{}{"type": "string", "format": "date-time", "description": "Explicit RFC3339 deadline, at most 30 days after the originating request. Clarify an unspecified or ambiguous deadline."},
+			"title":                       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 240},
+			"goal":                        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 16000, "description": "Self-contained work to perform on a matched event or timeout, including the destination and requested result. Event data is supplied by the runtime; credentials and new workflow creation are forbidden."},
+			"bindingId":                   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256},
+			"adapterId":                   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128},
+			"adapterKind":                 map[string]interface{}{"type": "string", "enum": []interface{}{"conversation", "callback"}},
+			"eventType":                   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256},
+			"subject":                     map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 512, "description": "Exact external conversation ID for conversation adapters, or normalized resource subject for callbacks. Wildcards are not supported."},
+			"attributes":                  map[string]interface{}{"type": "object", "maxProperties": 10, "additionalProperties": map[string]interface{}{"type": []interface{}{"string", "number", "boolean"}}, "description": "Exact non-secret scalar correlation selectors. For messages use externalParticipantId and/or externalThreadId. Tenant, deployment, binding and adapter authority are server-owned."},
+			"subjectEvidenceActionCallId": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "Durable succeeded action call from this originating chat Run, using this exact current connector binding and Skill version. Required when the selected conversation adapter declares subjectEvidence. Its declared output conversation ID must exactly equal subject."},
+			"deadline":                    map[string]interface{}{"type": "string", "format": "date-time", "description": "Explicit RFC3339 deadline, at most 30 days after the originating request. Clarify an unspecified or ambiguous deadline."},
 		}},
 		OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"workflowId", "run", "replayed"}, "properties": map[string]interface{}{"workflowId": map[string]interface{}{"type": "string"}, "run": map[string]interface{}{"type": "object"}, "replayed": map[string]interface{}{"type": "boolean"}}},
 	}
 }
 
-func workflowSourcesActionLegacy130() skill.Action {
-	return skill.Action{Name: RunbookActionWorkflowSources, Description: "List the current Agent's enabled, authenticated event adapter capabilities for durable follow-ups. Select exact bindingId, adapterId, adapterKind, eventType and subject from these capabilities; an account with only read/write actions cannot be watched until an event adapter is enabled. This lists adapter permission, not delivery health or arbitrary provider polling.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported,
-		InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{}},
+func workflowSourcesAction() skill.Action {
+	return skill.Action{Name: RunbookActionWorkflowSources, Description: "List the current Agent's enabled, authenticated event adapter capabilities for durable follow-ups. Select exact bindingId, adapterId, adapterKind, eventType and subject from these capabilities; an account with only read/write actions cannot be watched until an event adapter is enabled. This lists adapter permission, not delivery health or arbitrary provider polling." +
+		" Conversation sources report subjectEvidence declarations, evidenceRequired, and bounded knownSubjects with actionCallId provenance. Optionally supply subjectEvidenceActionCallId to inspect one durable action receipt from this originating chat Run. Known subjects contain only the declared external conversation ID, not complete action output.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported,
+		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
+			"subjectEvidenceActionCallId": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "Optional succeeded action call receipt to project through the selected adapter's declared conversation subject path. Only same-Run, same-binding evidence is returned."},
+		}},
 		OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"sources"}, "properties": map[string]interface{}{"sources": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}}},
 	}
-}
-
-func workflowCreateAction() skill.Action {
-	action := workflowCreateActionLegacy130()
-	action.Description += " For conversation adapters with evidenceRequired, supply subjectEvidenceActionCallId from a succeeded action in this originating chat Run. The persisted output at the adapter's declared subjectEvidence path must equal subject exactly; a participant ID or intended delivery target is not conversation evidence."
-	action.InputSchema["properties"].(map[string]interface{})["subjectEvidenceActionCallId"] = map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "Durable succeeded action call from this originating chat Run, using this exact current connector binding and Skill version. Required when the selected conversation adapter declares subjectEvidence. Its declared output conversation ID must exactly equal subject."}
-	return action
-}
-
-func workflowSourcesAction() skill.Action {
-	action := workflowSourcesActionLegacy130()
-	action.Description += " Conversation sources report subjectEvidence declarations, evidenceRequired, and bounded knownSubjects with actionCallId provenance. Optionally supply subjectEvidenceActionCallId to inspect one durable action receipt from this originating chat Run. Known subjects contain only the declared external conversation ID, not complete action output."
-	action.InputSchema["properties"].(map[string]interface{})["subjectEvidenceActionCallId"] = map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "Optional succeeded action call receipt to project through the selected adapter's declared conversation subject path. Only same-Run, same-binding evidence is returned."}
-	return action
 }
 
 func workflowInspectAction() skill.Action {
@@ -355,7 +346,7 @@ func workflowSources(ctx context.Context, store runbookActionStore, catalog Work
 	return result, nil
 }
 
-func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalog WorkflowSourceCatalog, run *AgentRun, arguments map[string]interface{}, actionVersions ...string) (*workflowCreateArguments, *ScheduledAgentTask, *RunEventWaitSpec, error) {
+func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalog WorkflowSourceCatalog, run *AgentRun, arguments map[string]interface{}) (*workflowCreateArguments, *ScheduledAgentTask, *RunEventWaitSpec, error) {
 	var args workflowCreateArguments
 	if err := decodeScheduledTaskArguments(arguments, &args); err != nil {
 		return nil, nil, nil, err
@@ -392,16 +383,8 @@ func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalo
 		return nil, nil, nil, errors.New("selected adapter does not declare this event type")
 	}
 	if source.AdapterKind == "conversation" && source.EvidenceRequired {
-		var evidenceErr error
-		if len(actionVersions) == 1 && actionVersions[0] == "1.3.0" {
-			// The immutable 1.3.0 schema has no receipt argument. Its bounded
-			// kernel-owned hints select durable receipt lookups instead.
-			evidenceErr = requireLegacyWorkflowSubjectEvidence(ctx, store, run, source, args.Subject)
-		} else {
-			evidenceErr = requireWorkflowSubjectEvidence(ctx, store, run, source, args.SubjectEvidenceActionCallID, args.Subject)
-		}
-		if evidenceErr != nil {
-			return nil, nil, nil, evidenceErr
+		if err := requireWorkflowSubjectEvidence(ctx, store, run, source, args.SubjectEvidenceActionCallID, args.Subject); err != nil {
+			return nil, nil, nil, err
 		}
 	}
 	deadline, err := time.Parse(time.RFC3339Nano, args.Deadline)
@@ -469,7 +452,7 @@ func validateWorkflowAction(ctx context.Context, store runbookActionStore, catal
 	if _, ok := store.(RunEventWaitStore); !ok {
 		return nil, errors.New("durable workflow event storage is unavailable")
 	}
-	args, task, spec, err := resolveWorkflowCreate(ctx, store, catalog, input.Run, input.Arguments, input.Bound.Definition.Version)
+	args, task, spec, err := resolveWorkflowCreate(ctx, store, catalog, input.Run, input.Arguments)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +513,7 @@ func dispatchWorkflowAction(ctx context.Context, store runbookActionStore, catal
 			}
 			return map[string]interface{}{"workflowId": persisted.ID, "run": persisted, "replayed": true}, nil
 		}
-		args, task, spec, err := resolveWorkflowCreate(ctx, store, catalog, run, input.Arguments, input.Bound.Definition.Version)
+		args, task, spec, err := resolveWorkflowCreate(ctx, store, catalog, run, input.Arguments)
 		if err != nil {
 			return nil, err
 		}

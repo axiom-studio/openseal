@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -101,20 +103,22 @@ func TestRoutineScriptValidation(t *testing.T) {
 	}
 }
 
-// The published 1.7.0 create_task cannot run a script, and the current one
-// documents testing before scheduling.
+// The 1.8.0 definition is immutable once published: any change to its
+// descriptions or schemas needs a new version. Its create_task runs saved
+// scripts and documents testing before scheduling.
 func TestRoutineScriptContractVersions(t *testing.T) {
 	if RunbookManagementSkillVersion != "1.8.0" {
 		t.Fatalf("version=%s", RunbookManagementSkillVersion)
 	}
-	legacy := RunbookManagementSkillLegacy170()
-	if _, ok := legacy.Actions[RunbookActionCreateTask].InputSchema["properties"].(map[string]interface{})["script"]; ok {
-		t.Fatal("published 1.7.0 contract changed")
-	}
-	if _, ok := legacy.Actions[RunbookActionSetScript]; ok {
-		t.Fatal("published 1.7.0 contract gained set_script")
-	}
 	current := RunbookManagementSkill()
+	encoded, err := json.Marshal(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const published180SHA256 = "d4e43ed8eb0c8700c8d7d69abd05ac3d58f910b97acdb54f774aa093213e6023"
+	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published180SHA256 {
+		t.Fatalf("published 1.8.0 definition changed: got %s", got)
+	}
 	create := current.Actions[RunbookActionCreateTask]
 	if _, ok := create.InputSchema["properties"].(map[string]interface{})["script"]; !ok || !strings.Contains(create.Description, "test it in this chat's sandbox with run_command") {
 		t.Fatalf("create_task contract=%s", create.Description)
@@ -125,11 +129,8 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if !strings.Contains(workspace.ChatSandboxDescription, "a routine can run that exact script") {
 		t.Fatal("run_command does not mention scheduling a tested script")
 	}
-	catalog := skill.NewCatalog()
-	for _, definition := range []*skill.Definition{legacy, current} {
-		if err := catalog.Register(t.Context(), definition); err != nil {
-			t.Fatal(err)
-		}
+	if err := skill.NewCatalog().Register(t.Context(), current); err != nil {
+		t.Fatal(err)
 	}
 }
 

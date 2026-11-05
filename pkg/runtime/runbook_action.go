@@ -26,67 +26,16 @@ const (
 // Runbook activations. Starting an activation creates a normal durable Run;
 // the model cannot manufacture a definition, execution policy, or authority.
 func RunbookManagementSkill() *skill.Definition {
-	definition := runbookManagementSkill(RunbookManagementSkillVersion, workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateAction())
-	definition.Actions[RunbookActionSetScript] = scheduledTaskSetScriptAction()
-	return definition
-}
-
-// RunbookManagementSkillLegacy170 preserves the immutable published 1.7.0
-// contract (routines without scripts) so accepted calls drain while bindings
-// upgrade.
-func RunbookManagementSkillLegacy170() *skill.Definition {
-	return runbookManagementSkill("1.7.0", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy170())
-}
-
-// RunbookManagementSkillLegacy160 preserves the immutable published 1.6.0
-// contract (grants without destination pins) so accepted calls drain while
-// bindings upgrade.
-func RunbookManagementSkillLegacy160() *skill.Definition {
-	return runbookManagementSkill("1.6.0", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy160())
-}
-
-// RunbookManagementSkillLegacy150 preserves the immutable published 1.5.0
-// contract (grants without connected-tool pins) so accepted calls drain while
-// bindings upgrade.
-func RunbookManagementSkillLegacy150() *skill.Definition {
-	return runbookManagementSkill("1.5.0", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy150())
-}
-
-// RunbookManagementSkillLegacy140 preserves the immutable published 1.4.0
-// contract (routines without a brief) so accepted calls drain while bindings
-// upgrade.
-func RunbookManagementSkillLegacy140() *skill.Definition {
-	return runbookManagementSkill("1.4.0", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy140())
-}
-
-// RunbookManagementSkillLegacy132 preserves the immutable published 1.3.2
-// contract (routines without an app) for bindings not yet upgraded.
-func RunbookManagementSkillLegacy132() *skill.Definition {
-	return runbookManagementSkill("1.3.2", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy132())
-}
-
-// RunbookManagementSkillLegacy131 preserves the immutable published 1.3.1
-// contract so already queued calls remain resolvable after a host upgrades.
-func RunbookManagementSkillLegacy131() *skill.Definition {
-	return runbookManagementSkill("1.3.1", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy131())
-}
-
-// RunbookManagementSkillLegacy130 preserves the immutable published 1.3.0
-// contract so already queued calls remain resolvable after a host upgrades.
-func RunbookManagementSkillLegacy130() *skill.Definition {
-	return runbookManagementSkill("1.3.0", workflowCreateActionLegacy130(), workflowSourcesActionLegacy130(), scheduledTaskCreateActionLegacy131())
-}
-
-func runbookManagementSkill(version string, createWorkflow, workflowSources, createTask skill.Action) *skill.Definition {
 	return &skill.Definition{
-		ID: RunbookManagementSkillID, Version: version,
+		ID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
 		Name: "Routines and workflows", Description: "Create scheduled tasks and durable event-driven follow-ups, inspect their state, start reviewed Runbooks and manage schedules. Work uses the current Agent tools and reports results back to the originating chat.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunbookManagementEndpoint},
 		Actions: map[string]skill.Action{
-			RunbookActionCreateWorkflow:   createWorkflow,
-			RunbookActionWorkflowSources:  workflowSources,
+			RunbookActionCreateWorkflow:   workflowCreateAction(),
+			RunbookActionWorkflowSources:  workflowSourcesAction(),
 			RunbookActionInspectWorkflows: workflowInspectAction(),
-			RunbookActionCreateTask:       createTask,
+			RunbookActionCreateTask:       scheduledTaskCreateAction(),
+			RunbookActionSetScript:        scheduledTaskSetScriptAction(),
 			RunbookActionList:             scheduledTaskListAction(),
 			RunbookActionSetStatus:        scheduledTaskStatusAction(),
 			RunbookActionStart: {
@@ -230,14 +179,12 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		return nil, false, nil
 	}
 	arguments := cloneMap(input.Arguments)
-	if input.Bound.Action.Name == RunbookActionCreateTask && routineBriefContract(input.Bound) {
-		if err := resolveRoutineBriefArguments(ctx, v.grantCatalog, v.ownerAddresses, input.Run, arguments, routineBriefGrantContract(input.Bound)); err != nil {
+	if input.Bound.Action.Name == RunbookActionCreateTask {
+		if err := resolveRoutineBriefArguments(ctx, v.grantCatalog, v.ownerAddresses, input.Run, arguments); err != nil {
 			return nil, true, err
 		}
-		if routineScriptContract(input.Bound) {
-			if err := pinRoutineScriptArguments(ctx, v.chatFiles, input.Run, arguments); err != nil {
-				return nil, true, err
-			}
+		if err := pinRoutineScriptArguments(ctx, v.chatFiles, input.Run, arguments); err != nil {
+			return nil, true, err
 		}
 		return arguments, true, nil
 	}
@@ -598,6 +545,6 @@ func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, r
 
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.7.0" || bound.Definition.Version == "1.6.0" || bound.Definition.Version == "1.5.0" || bound.Definition.Version == "1.4.0" || bound.Definition.Version == "1.3.2" || bound.Definition.Version == "1.3.1" || bound.Definition.Version == "1.3.0" || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
+		bound.Definition.Version == RunbookManagementSkillVersion &&
 		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || bound.Action.Name == RunbookActionSetScript || isWorkflowActionName(bound.Action.Name))
 }

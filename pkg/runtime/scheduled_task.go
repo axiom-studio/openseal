@@ -150,119 +150,65 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 	return c, "", nil
 }
 
-// scheduledTaskCreateAction is the 1.8.0 contract: a routine may run a saved,
-// tested script from its chat's files as each run's first step. The kernel
+// scheduledTaskCreateAction creates a routine. The user always approves its
+// brief first, in every approval mode. Its grants are pinned to the connected
+// tools and destinations the user approved, and a routine may run a saved,
+// tested script from its chat's files as each run's first step; the kernel
 // pins the script's current version when the routine is proposed.
 func scheduledTaskCreateAction() skill.Action {
-	action := scheduledTaskCreateActionLegacy170()
-	action.Description += " For work that is the same steps with new data each time (pull data, compute, chart, write a file), make the routine run a saved script instead of redoing the work: first write the script in this chat's files and test it in this chat's sandbox with run_command until it works, then pass script with its path and the exact command that ran it. Approving the brief pins the script as it is then; each run executes that version first, and you then write the report from its output, so say in goal what to report from the script's results."
-	action.InputSchema["properties"].(map[string]interface{})["script"] = map[string]interface{}{
-		"type": "object", "additionalProperties": false, "required": []interface{}{"path", "command"},
-		"description": "Optional. A tested script from this chat's files that each run executes first, in this chat's sandbox.",
-		"properties": map[string]interface{}{
-			"path":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1024, "description": "The script's path in this chat's files, for example scripts/weekly_signups.py."},
-			"command":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineScriptCommand, "description": "Exactly how to run it: python3, node or bash, then the script's path, then any plain arguments without quotes or shell characters, for example python3 scripts/weekly_signups.py --days 7."},
-			"timeoutSeconds": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumRoutineScriptSeconds, "description": "Optional limit for one run of the script. Defaults to 300."},
-			"digest":         map[string]interface{}{"type": "string", "description": "Filled in by the system; omit it."},
-			"filesVersion":   map[string]interface{}{"type": "integer", "minimum": 1, "description": "Filled in by the system; omit it."},
-		},
-	}
-	return action
-}
-
-// scheduledTaskCreateActionLegacy170 is the published 1.7.0 contract: each
-// run's result reaches the chat the routine was created from on its own, and
-// a grant of an action that posts to a channel is pinned to the destinations
-// the user approved.
-func scheduledTaskCreateActionLegacy170() skill.Action {
-	action := scheduledTaskCreateActionLegacy160()
-	action.Description += " Each run's result is posted automatically as a new message in the chat or Slack conversation the routine was created from, so never grant a send action to deliver results there. To post to any other channel, grant that sending action (for example skill-slack.slack-send-message) with toDestinations naming each channel, and name it in the label, for example \"Post to #ai-news\"; runs then post there without asking, and anywhere else asks first."
-	brief := action.InputSchema["properties"].(map[string]interface{})["brief"].(map[string]interface{})
-	grants := brief["properties"].(map[string]interface{})["grants"].(map[string]interface{})
-	grants["description"] = "The fewest actions each run must perform without asking. Use exact action names from your tools: skillId.action, or a connected tool's own name such as mcp.<connection>.<tool>, granting each connected tool separately. List what it reads (for example web search) and each sending action; for an email to the user set toOwnerOnly; for a post to another channel set toDestinations. Never grant a send to this chat: results are posted here automatically."
-	properties := grants["items"].(map[string]interface{})["properties"].(map[string]interface{})
-	properties["toDestinations"] = map[string]interface{}{
-		"type": "array", "minItems": 1, "maxItems": maximumRoutineGrantDestinations,
-		"items":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineGrantDestinationBytes},
-		"description": "Required for an action that posts to a channel or conversation: each destination its runs post to, exactly as the runs will pass it as the action's channel argument (the channel ID, or its #name). Only posts to these run without asking.",
-	}
-	return action
-}
-
-// scheduledTaskCreateActionLegacy160 is the published 1.6.0 contract: a
-// connected tool is granted by its own model action name and the kernel pins
-// the exact tool the user approved; the base action a connected tool runs
-// through is never grantable.
-func scheduledTaskCreateActionLegacy160() skill.Action {
-	action := scheduledTaskCreateActionLegacy150()
-	action.Description += " To grant a connected app's tool, use that tool's own exact action name from your tools, for example mcp.<connection>.<tool>; the generic action connected tools run through (such as openseal.mcp.call) cannot be granted."
-	brief := action.InputSchema["properties"].(map[string]interface{})["brief"].(map[string]interface{})
-	grants := brief["properties"].(map[string]interface{})["grants"].(map[string]interface{})
-	grants["description"] = "The fewest actions each run must perform without asking. Use exact action names from your tools: skillId.action, or a connected tool's own name such as mcp.<connection>.<tool>, granting each connected tool separately. List what it reads (for example web search) and each sending action; for an email to the user set toOwnerOnly."
-	properties := grants["items"].(map[string]interface{})["properties"].(map[string]interface{})
-	properties["action"].(map[string]interface{})["description"] = "Exact action name: skillId.action, or a connected tool's own name, mcp.<connection>.<tool>."
-	properties["toolArguments"] = map[string]interface{}{"type": "object", "maxProperties": maximumRoutineGrantToolArguments, "description": "Filled in by the system for a connected tool; omit it."}
-	return action
-}
-
-// scheduledTaskCreateActionLegacy150 is the published 1.5.0 contract: the
-// routine brief the user approves before the routine exists. Creating a
-// routine is always reviewed, in every approval mode, so the brief is shown
-// every time.
-func scheduledTaskCreateActionLegacy150() skill.Action {
-	action := scheduledTaskCreateActionLegacy140()
-	action.Review = skill.ActionReviewAlways
-	action.Description += " The user always approves a brief before the routine is created: always pass brief with a one-sentence summary of what it does and when, deliverTo naming where results go, and grants listing only the actions its runs need to perform without asking (for example web search or page reads and an email to the user). Runs ask in this chat before any other side effect, and actions that always ask, such as paying, cannot be granted."
-	action.InputSchema["properties"].(map[string]interface{})["brief"] = map[string]interface{}{
-		"type": "object", "additionalProperties": false, "required": []interface{}{"summary", "grants"},
-		"description": "Required. The brief the user approves before the routine is created.",
-		"properties": map[string]interface{}{
-			"summary":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineBriefSummary, "description": "One plain sentence: what the routine does and when."},
-			"deliverTo": map[string]interface{}{"type": "string", "maxLength": maximumRoutineDeliverTo, "description": "Where results go, in plain words, for example \"kev@example.com, from your Gmail\" or \"this chat\"."},
-			"grants": map[string]interface{}{
-				"type": "array", "maxItems": maximumRoutineGrants,
-				"description": "The fewest actions each run must perform without asking. Use exact action names from your tools (skillId.action). List what it reads (for example web search) and each sending action; for an email to the user set toOwnerOnly.",
-				"items": map[string]interface{}{
-					"type": "object", "additionalProperties": false, "required": []interface{}{"action"},
-					"properties": map[string]interface{}{
-						"action":      map[string]interface{}{"type": "string", "minLength": 3, "maxLength": 384, "description": "Exact action name, skillId.action."},
-						"label":       map[string]interface{}{"type": "string", "maxLength": maximumRoutineGrantLabel, "description": "Plain words for the user, for example \"Email you the summary\"."},
-						"toOwnerOnly": map[string]interface{}{"type": "boolean", "description": "For a sending action: only sends whose every recipient is the user's own address run without asking."},
-					},
-				},
-			},
-		},
-	}
-	return action
-}
-
-// scheduledTaskCreateActionLegacy140 is the published 1.4.0 contract: an
-// optional app to keep up to date.
-func scheduledTaskCreateActionLegacy140() skill.Action {
-	action := scheduledTaskCreateActionLegacy132()
-	action.Description += " To keep an app's data fresh, pass its appId; each occurrence then saves results to that app with save_app_data."
-	action.InputSchema["properties"].(map[string]interface{})["appId"] = map[string]interface{}{
-		"type": "string", "pattern": `^app-[a-f0-9]{64}$`, "description": "Optional app from this chat that each occurrence updates.",
-	}
-	return action
-}
-
-func scheduledTaskCreateActionLegacy132() skill.Action {
-	return skill.Action{Name: RunbookActionCreateTask, Description: "Create and activate a recurring scheduled task when the user requests future or repeated work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. Use a six-field cron including seconds and an explicit IANA timezone; clarify ambiguous timing. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
+	return skill.Action{Name: RunbookActionCreateTask, Description: "Create and activate a recurring scheduled task when the user requests future or repeated work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. Use a six-field cron including seconds and an explicit IANA timezone; clarify ambiguous timing. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run." +
+		" To keep an app's data fresh, pass its appId; each occurrence then saves results to that app with save_app_data." +
+		" The user always approves a brief before the routine is created: always pass brief with a one-sentence summary of what it does and when, deliverTo naming where results go, and grants listing only the actions its runs need to perform without asking (for example web search or page reads and an email to the user). Runs ask in this chat before any other side effect, and actions that always ask, such as paying, cannot be granted." +
+		" To grant a connected app's tool, use that tool's own exact action name from your tools, for example mcp.<connection>.<tool>; the generic action connected tools run through (such as openseal.mcp.call) cannot be granted." +
+		" Each run's result is posted automatically as a new message in the chat or Slack conversation the routine was created from, so never grant a send action to deliver results there. To post to any other channel, grant that sending action (for example skill-slack.slack-send-message) with toDestinations naming each channel, and name it in the label, for example \"Post to #ai-news\"; runs then post there without asking, and anywhere else asks first." +
+		" For work that is the same steps with new data each time (pull data, compute, chart, write a file), make the routine run a saved script instead of redoing the work: first write the script in this chat's files and test it in this chat's sandbox with run_command until it works, then pass script with its path and the exact command that ran it. Approving the brief pins the script as it is then; each run executes that version first, and you then write the report from its output, so say in goal what to report from the script's results.",
+		Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2}, Review: skill.ActionReviewAlways,
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"title", "goal", "cron", "timezone"}, "properties": map[string]interface{}{
 			"title": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 240}, "goal": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 16000, "description": "Self-contained work to perform on every occurrence, including the source to use and requested result. Do not include credentials or request another schedule."},
 			"cron": map[string]interface{}{"type": "string", "pattern": `^\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+$`, "description": "Six-field cron: seconds minutes hours day-of-month month weekday."}, "timezone": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 100}, "maximumOccurrences": map[string]interface{}{"type": []interface{}{"integer", "null"}, "minimum": 1, "maximum": 1000000, "description": "Omit or supply null for an ongoing routine; supply a positive integer only when the user requested a bounded number of executions."},
+			"appId": map[string]interface{}{
+				"type": "string", "pattern": `^app-[a-f0-9]{64}$`, "description": "Optional app from this chat that each occurrence updates.",
+			},
+			"brief": map[string]interface{}{
+				"type": "object", "additionalProperties": false, "required": []interface{}{"summary", "grants"},
+				"description": "Required. The brief the user approves before the routine is created.",
+				"properties": map[string]interface{}{
+					"summary":   map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineBriefSummary, "description": "One plain sentence: what the routine does and when."},
+					"deliverTo": map[string]interface{}{"type": "string", "maxLength": maximumRoutineDeliverTo, "description": "Where results go, in plain words, for example \"kev@example.com, from your Gmail\" or \"this chat\"."},
+					"grants": map[string]interface{}{
+						"type": "array", "maxItems": maximumRoutineGrants,
+						"description": "The fewest actions each run must perform without asking. Use exact action names from your tools: skillId.action, or a connected tool's own name such as mcp.<connection>.<tool>, granting each connected tool separately. List what it reads (for example web search) and each sending action; for an email to the user set toOwnerOnly; for a post to another channel set toDestinations. Never grant a send to this chat: results are posted here automatically.",
+						"items": map[string]interface{}{
+							"type": "object", "additionalProperties": false, "required": []interface{}{"action"},
+							"properties": map[string]interface{}{
+								"action":        map[string]interface{}{"type": "string", "minLength": 3, "maxLength": 384, "description": "Exact action name: skillId.action, or a connected tool's own name, mcp.<connection>.<tool>."},
+								"label":         map[string]interface{}{"type": "string", "maxLength": maximumRoutineGrantLabel, "description": "Plain words for the user, for example \"Email you the summary\"."},
+								"toOwnerOnly":   map[string]interface{}{"type": "boolean", "description": "For a sending action: only sends whose every recipient is the user's own address run without asking."},
+								"toolArguments": map[string]interface{}{"type": "object", "maxProperties": maximumRoutineGrantToolArguments, "description": "Filled in by the system for a connected tool; omit it."},
+								"toDestinations": map[string]interface{}{
+									"type": "array", "minItems": 1, "maxItems": maximumRoutineGrantDestinations,
+									"items":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineGrantDestinationBytes},
+									"description": "Required for an action that posts to a channel or conversation: each destination its runs post to, exactly as the runs will pass it as the action's channel argument (the channel ID, or its #name). Only posts to these run without asking.",
+								},
+							},
+						},
+					},
+				},
+			},
+			"script": map[string]interface{}{
+				"type": "object", "additionalProperties": false, "required": []interface{}{"path", "command"},
+				"description": "Optional. A tested script from this chat's files that each run executes first, in this chat's sandbox.",
+				"properties": map[string]interface{}{
+					"path":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1024, "description": "The script's path in this chat's files, for example scripts/weekly_signups.py."},
+					"command":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineScriptCommand, "description": "Exactly how to run it: python3, node or bash, then the script's path, then any plain arguments without quotes or shell characters, for example python3 scripts/weekly_signups.py --days 7."},
+					"timeoutSeconds": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumRoutineScriptSeconds, "description": "Optional limit for one run of the script. Defaults to 300."},
+					"digest":         map[string]interface{}{"type": "string", "description": "Filled in by the system; omit it."},
+					"filesVersion":   map[string]interface{}{"type": "integer", "minimum": 1, "description": "Filled in by the system; omit it."},
+				},
+			},
 		}}, OutputSchema: scheduledTaskResultSchema(RunbookActionCreateTask)}
 }
 
-func scheduledTaskCreateActionLegacy131() skill.Action {
-	action := scheduledTaskCreateActionLegacy132()
-	action.InputSchema["properties"].(map[string]interface{})["maximumOccurrences"] = map[string]interface{}{
-		"type": "integer", "minimum": 1, "maximum": 1000000,
-		"description": "Omit for an ongoing routine; supply only when the user requested a bounded number of executions.",
-	}
-	return action
-}
 func scheduledTaskListAction() skill.Action {
 	return skill.Action{Name: RunbookActionList, Description: "List routines owned by this Agent or Team, including exact activation IDs, schedules, status, revisions, next occurrence and originating chat. Use these IDs to start, pause, resume, cancel or replace a schedule.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported, InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"offset": map[string]interface{}{"type": "integer", "minimum": 0}}}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"activations": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}, "nextOffset": map[string]interface{}{"type": "integer"}}, "required": []interface{}{"activations"}}}
 }
@@ -312,7 +258,7 @@ func decodeScheduledTaskArguments(arguments map[string]interface{}, target inter
 	return d.Decode(target)
 }
 
-func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *AgentRun, args map[string]interface{}, briefed bool) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
+func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *AgentRun, args map[string]interface{}) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
 	var a scheduledTaskCreateArguments
 	if err := decodeScheduledTaskArguments(args, &a); err != nil {
 		return nil, nil, nil, err
@@ -330,17 +276,12 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	messageID, _ := run.Context[conversationRunContextTriggerID].(string)
 	task := &ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID)}
-	// The current contract always carries the approved brief. Calls accepted
-	// under an earlier published contract drain without one (and no grants).
-	if briefed {
-		brief, err := normalizeRoutineBrief(a.Brief, false)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		a.Brief, task.Grants = brief, cloneRoutineGrants(brief.Grants)
-	} else if a.Brief != nil {
-		return nil, nil, nil, errors.New("this routine contract has no brief")
+	// A routine always carries the brief the user approved.
+	brief, err := normalizeRoutineBrief(a.Brief, false)
+	if err != nil {
+		return nil, nil, nil, err
 	}
+	a.Brief, task.Grants = brief, cloneRoutineGrants(brief.Grants)
 	if a.Script != nil {
 		// The kernel pinned this version from the chat's files when the
 		// routine was proposed; it must still be that snapshot's file.
@@ -395,7 +336,7 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	}
 	switch input.Bound.Action.Name {
 	case RunbookActionCreateTask:
-		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, input.Run, input.Arguments, routineBriefContract(input.Bound))
+		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, input.Run, input.Arguments)
 		if err != nil {
 			return nil, err
 		}
@@ -454,7 +395,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		}
 		return result, nil
 	case RunbookActionCreateTask:
-		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, run, input.Arguments, routineBriefContract(input.Bound))
+		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, run, input.Arguments)
 		if err != nil {
 			return nil, err
 		}

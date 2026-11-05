@@ -82,14 +82,6 @@ const (
 	maximumRoutineGrantDestinationBytes = 256
 )
 
-// routineGrantContract is what a create_task contract's briefs can carry.
-type routineGrantContract struct {
-	// pinTools: connected tool grants pinned to the approved tool.
-	pinTools bool
-	// pinDestinations: posting grants pinned to approved destinations.
-	pinDestinations bool
-}
-
 var routineGrantActionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\.[A-Za-z0-9_-][A-Za-z0-9_.:-]{0,127}$`)
 
 // Kernel management Skills govern the Agent's own authority, work and
@@ -250,7 +242,7 @@ func routineGrantToolPinned(grant RoutineGrant, tool *skill.BindingTool) bool {
 // arguments, and each grant of an action that posts to a channel is pinned to
 // the destinations the user approved, which its label names. An earlier
 // contract that cannot carry a pin cannot grant those actions at all.
-func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant, contract routineGrantContract) ([]RoutineGrant, error) {
+func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, grants []RoutineGrant) ([]RoutineGrant, error) {
 	if len(grants) == 0 {
 		return grants, nil
 	}
@@ -343,9 +335,6 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 			}
 			return nil, fmt.Errorf("routine grant %s is not an action this Agent can use", grant.Action)
 		}
-		if bound.pin != nil && !contract.pinTools {
-			return nil, fmt.Errorf("routine grant %s is a connected tool, which this routine contract cannot grant", grant.Action)
-		}
 		// The pin always comes from the catalog, never from the model.
 		grant.ToolArguments = cloneMap(bound.pin)
 		if bound.action.AlwaysReview() {
@@ -360,9 +349,6 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 			}
 		}
 		posts := routineActionPostsToDestination(bound.action)
-		if posts && !contract.pinDestinations {
-			return nil, fmt.Errorf("routine grant %s posts to a channel, which this routine contract cannot grant", grant.Action)
-		}
 		if posts && len(grant.ToDestinations) == 0 {
 			return nil, fmt.Errorf("routine grant %s posts to a channel: set toDestinations to each channel its runs post to; results reach this chat without it", grant.Action)
 		}
@@ -789,7 +775,7 @@ func routineBriefPreview(brief *RoutineBrief) map[string]interface{} {
 // resolveRoutineBriefArguments normalizes a proposed create_task brief and
 // fills grant labels from the catalog before the arguments are digested, so
 // the approved arguments carry exactly the brief the user sees.
-func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}, contract routineGrantContract) error {
+func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatalog, owners RoutineOwnerAddressResolver, run *AgentRun, arguments map[string]interface{}) error {
 	var parsed struct {
 		Brief *RoutineBrief `json:"brief"`
 	}
@@ -804,33 +790,9 @@ func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatal
 	if err != nil {
 		return err
 	}
-	if brief.Grants, err = resolveRoutineBriefGrants(ctx, catalog, owners, run, brief.Grants, contract); err != nil {
+	if brief.Grants, err = resolveRoutineBriefGrants(ctx, catalog, owners, run, brief.Grants); err != nil {
 		return err
 	}
 	arguments["brief"] = routineBriefPreview(brief)
 	return nil
-}
-
-// routineBriefContract reports whether a create_task binding uses a
-// contract that carries a routine brief: the current one, or 1.7.0, 1.6.0
-// and 1.5.0 while their accepted calls drain.
-func routineBriefContract(bound *skill.BoundAction) bool {
-	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.7.0" || bound.Definition.Version == "1.6.0" || bound.Definition.Version == "1.5.0")
-}
-
-// routineScriptContract reports whether a create_task binding's contract can
-// run a saved script (since 1.8.0).
-func routineScriptContract(bound *skill.BoundAction) bool {
-	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID && bound.Definition.Version == RunbookManagementSkillVersion
-}
-
-// routineBriefGrantContract reports which pins a create_task binding's
-// contract carries: connected tools since 1.6.0, destinations since 1.7.0.
-func routineBriefGrantContract(bound *skill.BoundAction) routineGrantContract {
-	if bound == nil || bound.Definition == nil || bound.Definition.ID != RunbookManagementSkillID {
-		return routineGrantContract{}
-	}
-	destinations := bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.7.0"
-	return routineGrantContract{pinTools: destinations || bound.Definition.Version == "1.6.0", pinDestinations: destinations}
 }

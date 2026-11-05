@@ -38,7 +38,7 @@ func TestScheduledTaskKeepsOnlyItsChatsAppUpToDate(t *testing.T) {
 				copy["appId"] = appID
 				return copy
 			}
-			_, task, _, err := resolveScheduledTaskCreate(t.Context(), store.(runbookActionStore), nil, run, withApp(ours), true)
+			_, task, _, err := resolveScheduledTaskCreate(t.Context(), store.(runbookActionStore), nil, run, withApp(ours))
 			if err != nil || task.AppID != ours {
 				t.Fatalf("own app: task=%#v err=%v", task, err)
 			}
@@ -47,7 +47,7 @@ func TestScheduledTaskKeepsOnlyItsChatsAppUpToDate(t *testing.T) {
 				t.Fatalf("occurrence goal does not name the app: %q", goal)
 			}
 			for _, foreign := range []string{"app-" + strings.Repeat("2", 64), "app-" + strings.Repeat("3", 64), "app-" + strings.Repeat("4", 64), "app-" + strings.Repeat("5", 64), "site-1"} {
-				if _, _, _, err := resolveScheduledTaskCreate(t.Context(), store.(runbookActionStore), nil, run, withApp(foreign), true); err == nil {
+				if _, _, _, err := resolveScheduledTaskCreate(t.Context(), store.(runbookActionStore), nil, run, withApp(foreign)); err == nil {
 					t.Fatalf("routine accepted app %s", foreign)
 				}
 			}

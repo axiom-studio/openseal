@@ -106,14 +106,12 @@ func TestCreateTaskAlwaysAsksForItsBriefInEveryMode(t *testing.T) {
 	}
 	policy := NewDefaultActionPolicy()
 	policy.ApprovalTimeout = ApprovalTimeoutApprove
-	for _, version := range []*skill.Definition{RunbookManagementSkill(), RunbookManagementSkillLegacy150(), RunbookManagementSkillLegacy140()} {
-		action := version.Actions[RunbookActionCreateTask]
-		bound := &skill.BoundAction{Definition: version, Binding: f.bound.Binding, Action: action}
-		for _, mode := range []ConversationApprovalMode{"", ConversationApprovalManual, ConversationApprovalAuto, ConversationApprovalSkip} {
-			decision, err := policy.EvaluateAction(t.Context(), ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
-			if err != nil || decision.Disposition != ActionDispositionRequireApproval || decision.ApprovalTimeout != ApprovalTimeoutExpire {
-				t.Fatalf("%s mode %q create_task decision = %#v, %v", version.Version, mode, decision, err)
-			}
+	definition := RunbookManagementSkill()
+	bound := &skill.BoundAction{Definition: definition, Binding: f.bound.Binding, Action: definition.Actions[RunbookActionCreateTask]}
+	for _, mode := range []ConversationApprovalMode{"", ConversationApprovalManual, ConversationApprovalAuto, ConversationApprovalSkip} {
+		decision, err := policy.EvaluateAction(t.Context(), ActionPolicyInput{Run: f.run, Bound: bound, ApprovalMode: mode, RoutineGrant: &RoutineGrant{Action: "openseal.runbooks.create_task", Label: "x"}})
+		if err != nil || decision.Disposition != ActionDispositionRequireApproval || decision.ApprovalTimeout != ApprovalTimeoutExpire {
+			t.Fatalf("mode %q create_task decision = %#v, %v", mode, decision, err)
 		}
 	}
 }
