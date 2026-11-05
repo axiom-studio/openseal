@@ -94,23 +94,14 @@ func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, 
 // guidance, so one Run handles the whole exchange instead of parallel Runs
 // competing for the lane. A nil result means no Run absorbed the message.
 func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*AgentRunCommandResult, error) {
-	if conversation.Owner.Type != OwnerTypeAgent {
-		return nil, nil
-	}
-	return s.deliverToConversationLane(ctx, conversation, message, conversationAgentRunRequest(conversation, message).ConcurrencyKey)
-}
-
-// deliverToConversationLane is deliverToActiveConversationRun for one lane:
-// an Agent channel's, or a Team member's lane in a Team channel, so a member
-// already answering the same person takes the new message as a follow-up.
-func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context, conversation *Conversation, message *ChannelMessage, lane string) (*AgentRunCommandResult, error) {
-	if message.Sender.Type != ConversationParticipantUser {
+	if conversation.Owner.Type != OwnerTypeAgent || message.Sender.Type != ConversationParticipantUser {
 		return nil, nil
 	}
 	actor, valid := conversationMessageInitiatingUser(conversation, message)
 	if !valid {
 		return nil, nil
 	}
+	lane := conversationAgentRunRequest(conversation, message).ConcurrencyKey
 	interventionID := conversationFollowUpInterventionID(conversation.Scope, message.ID)
 	for attempt := 0; attempt < 3; attempt++ {
 		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{

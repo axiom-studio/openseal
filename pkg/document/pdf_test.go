@@ -22,6 +22,16 @@ func TestPlainTextPDFRendererIsDeterministicAndPaged(t *testing.T) {
 	if first.Pages < 2 || !bytes.Equal(first.Bytes, second.Bytes) || !bytes.HasPrefix(first.Bytes, []byte("%PDF-1.4")) || !bytes.Contains(first.Bytes, []byte("https://forum.example/thread/7")) || !bytes.HasSuffix(first.Bytes, []byte("%%EOF\n")) {
 		t.Fatalf("rendered PDF pages=%d bytes=%d", first.Pages, len(first.Bytes))
 	}
+	definition := SkillDefinition()
+	if definition.ID != SkillID || definition.Actions[RenderPDF].EmittedArtifactTypes[0] != "report" {
+		t.Fatalf("skill definition=%#v", definition)
+	}
+	if definition.Transport.Kind != "tool" || definition.Transport.Endpoint != SkillID {
+		t.Fatalf("transport = %#v, want tool transport targeting %q", definition.Transport, SkillID)
+	}
+	if len(definition.Installers) != 1 || definition.Installers[0].Kind != "oci" || definition.Installers[0].Package != SkillImage {
+		t.Fatalf("document Skill OCI installer mismatch: %#v", definition.Installers)
+	}
 }
 
 func TestPlainTextPDFRendererFailsExplicitlyForUnsupportedUnicode(t *testing.T) {
