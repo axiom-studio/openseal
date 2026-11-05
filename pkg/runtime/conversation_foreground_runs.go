@@ -29,7 +29,7 @@ func foregroundConversationRunID(run *AgentRun) string {
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	threadID, _ := run.Context["threadRootMessageId"].(string)
-	if conversationID != "" && run.ConcurrencyKey != conversationID && run.ConcurrencyKey == conversationRunLane(conversationID, threadID, run.Owner, run.AssignedAgentID) {
+	if conversationID != "" && run.ConcurrencyKey != conversationID && run.ConcurrencyKey == conversationRunLane(conversationID, threadID, run.AssignedAgentID) {
 		return conversationID
 	}
 	if validOpaqueIdentifier(run.ConcurrencyKey, 128) {

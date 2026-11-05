@@ -19,7 +19,7 @@ func (s *SQLiteStore) ListConversationForegroundRuns(ctx context.Context, scope 
 		AND json_extract(payload,'$.concurrencyKey')=json_extract(payload,'$.context.conversationId')
 			||CASE WHEN json_type(payload,'$.context.threadRootMessageId')='text' AND json_extract(payload,'$.context.threadRootMessageId')<>''
 				THEN ':thread:'||json_extract(payload,'$.context.threadRootMessageId') ELSE '' END
-			||CASE WHEN json_extract(payload,'$.owner.type')='team' AND COALESCE(json_extract(payload,'$.assignedAgentId'),'')<>''
+			||CASE WHEN COALESCE(json_extract(payload,'$.assignedAgentId'),'')<>''
 				THEN ':agent:'||json_extract(payload,'$.assignedAgentId') ELSE '' END
 		ORDER BY created_at DESC,id DESC LIMIT ?) lanes
 		ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?`, scope.Kind, scope.ID, owner.Type, owner.ID, conversationID, pageSize,

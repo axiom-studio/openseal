@@ -44,6 +44,7 @@ func TestConversationRunFilterAvoidsUnrelatedHistory(t *testing.T) {
 					Revision: 1, CreatedAt: now, UpdatedAt: now, AvailableAt: now, QueueEnteredAt: now}
 				if i >= 500 {
 					run.ConcurrencyKey = "selected"
+					run.Context = map[string]interface{}{conversationRunContextConversationID: "selected"}
 				}
 				if i == 501 {
 					run.Scope.ID = "foreign"

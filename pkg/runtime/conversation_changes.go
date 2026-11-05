@@ -536,7 +536,7 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 		} else {
 			page, err = s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
 				Scope: conversation.Scope, Kind: RunKindConversation, Owner: &conversation.Owner, Limit: pageSize, Offset: offset,
-				ConcurrencyKey: conversation.ID,
+				ConversationID: conversation.ID,
 			})
 		}
 		if err != nil {
@@ -554,9 +554,9 @@ func (s *ConversationChangeService) listConversationRuns(ctx context.Context, co
 				run.Context[conversationRunContextConversationID] != conversation.ID {
 				continue
 			}
-			// A thread lane or a Team member's lane of this conversation.
+			// An Agent's lane of this conversation, or of one of its threads.
 			thread, _ := run.Context["threadRootMessageId"].(string)
-			if run.ConcurrencyKey != conversationRunLane(conversation.ID, thread, run.Owner, run.AssignedAgentID) {
+			if run.ConcurrencyKey != conversationRunLane(conversation.ID, thread, run.AssignedAgentID) {
 				continue
 			}
 			if thread != "" {

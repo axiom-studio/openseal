@@ -32,23 +32,25 @@ func isTeamMemberRun(run *AgentRun) bool {
 }
 
 // conversationRunLane is a conversation Run's concurrency key: the channel or
-// one thread of it, and for a Team member its own lane in that channel.
-func conversationRunLane(conversationID, threadRoot string, owner ObjectiveOwner, assignedAgentID string) string {
+// one thread of it, then the Agent working in it. It is the same rule for an
+// Agent's own chat and a Team member's, so once a member is assigned its Run
+// is an Agent Run like any other. Only a Team's unassigned routing Run keeps
+// the bare channel lane.
+func conversationRunLane(conversationID, threadRoot, assignedAgentID string) string {
 	lane := conversationID
 	if threadRoot != "" {
 		lane += ":thread:" + threadRoot
 	}
-	if owner.Type == OwnerTypeTeam && assignedAgentID != "" {
+	if assignedAgentID != "" {
 		lane += ":agent:" + assignedAgentID
 	}
 	return lane
 }
 
 // ConversationRunLane is the concurrency key a chat's conversation Run is
-// queued under. Hosts that verify a Run's chat origin compare against it, so
-// an Agent's Run and a Team member's Run are checked the same way.
-func ConversationRunLane(conversationID, threadRoot string, owner ObjectiveOwner, assignedAgentID string) string {
-	return conversationRunLane(conversationID, threadRoot, owner, assignedAgentID)
+// queued under. Hosts that verify a Run's chat origin compare against it.
+func ConversationRunLane(conversationID, threadRoot, assignedAgentID string) string {
+	return conversationRunLane(conversationID, threadRoot, assignedAgentID)
 }
 
 func conversationRoutingKey(scope Scope, conversationID, triggerID string) string {
@@ -118,7 +120,7 @@ func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger
 	return CreateAgentRunRequest{
 		Scope: routing.Scope, Kind: RunKindConversation, Owner: routing.Owner,
 		AssignedAgentID: responder.Participant.ID,
-		ConcurrencyKey:  conversationRunLane(conversation.ID, root, routing.Owner, responder.Participant.ID),
+		ConcurrencyKey:  conversationRunLane(conversation.ID, root, responder.Participant.ID),
 		Goal:            teamMemberRunGoal, Source: RunSourceChat, Priority: routing.Priority, Context: context,
 		Budget: cloneBudgetPolicy(routing.Budget), IdempotencyKey: key,
 		Actor:      ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},

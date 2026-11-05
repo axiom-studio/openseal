@@ -97,7 +97,7 @@ func TestTelegramDMHostedPromptIncludesEarlierUnrelatedReplyRoots(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scheduled.Run.ConcurrencyKey != conversation.ID || scheduled.Run.Context["threadRootMessageId"] != nil {
+	if scheduled.Run.ConcurrencyKey != conversationRunLane(conversation.ID, "", scheduled.Run.AssignedAgentID) || scheduled.Run.Context["threadRootMessageId"] != nil {
 		t.Fatal("DM scheduled in isolated reply lane")
 	}
 	calls := 0

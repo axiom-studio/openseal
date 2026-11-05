@@ -85,7 +85,7 @@ func TestExternalConversationRunbookEventDispatcherCreatesOneExactEventRun(t *te
 	runbookPlan, _ := run.Plan["runbook"].(map[string]interface{})
 	if run.Kind != RunKindConversation || run.Source != RunSourceEvent || run.Owner != endpoint.Owner ||
 		run.AssignedAgentID != "support-agent" || run.Entrypoint != "respond" ||
-		run.ConcurrencyKey != conversation.ID || run.Context["triggerMessageId"] != message.ID ||
+		run.ConcurrencyKey != conversationRunLane(conversation.ID, "", run.AssignedAgentID) || run.Context["triggerMessageId"] != message.ID ||
 		runbookPlan["id"] != definition.ID || runbookPlan["version"] != definition.Version ||
 		runbookPlan["trigger"] != handler.Trigger {
 		t.Fatalf("Run = %#v", run)

@@ -90,7 +90,7 @@ func (d *ExternalConversationRunbookEventDispatcher) DispatchExternalConversatio
 		return CreateAgentRunRequest{
 			Scope: req.Endpoint.Scope, Kind: RunKindConversation, Owner: req.Endpoint.Owner,
 			AssignedAgentID: handler.AssignedAgentID, Entrypoint: entrypoint,
-			ConcurrencyKey: req.Conversation.ID,
+			ConcurrencyKey: conversationRunLane(req.Conversation.ID, "", handler.AssignedAgentID),
 			Goal:           "Handle a conversation message through Runbook " + handler.ID,
 			Source:         RunSourceEvent, Context: input,
 			Plan: map[string]interface{}{"runbook": map[string]interface{}{

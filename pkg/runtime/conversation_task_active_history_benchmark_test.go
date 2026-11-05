@@ -239,7 +239,7 @@ func conversationTaskBenchmarkRecord(t testing.TB, store conversationTaskSQLTest
 	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "task-agent"}
 	sourceID := "source-" + suffix
 	source := &AgentRun{ID: sourceID, Scope: scope, Kind: RunKindConversation, RootRunID: sourceID, Owner: owner,
-		AssignedAgentID: owner.ID, ConcurrencyKey: "conversation:thread:thread", Goal: "Accept conversation work", Source: RunSourceChat, Status: AgentRunStatusRunning,
+		AssignedAgentID: owner.ID, ConcurrencyKey: conversationRunLane("conversation", "thread", owner.ID), Goal: "Accept conversation work", Source: RunSourceChat, Status: AgentRunStatusRunning,
 		Priority: 90, AvailableAt: now, QueueEnteredAt: now, LeaseOwner: "task-worker", LeaseExpiresAt: &expires,
 		LastAppliedTurn: 1, Budget: &BudgetPolicy{MaxTurns: 20}, Policy: map[string]interface{}{"preserve": "source-policy"},
 		Context:  map[string]interface{}{conversationRunContextConversationID: "conversation", conversationRunContextTriggerID: "message-" + suffix, "threadRootMessageId": "thread"},

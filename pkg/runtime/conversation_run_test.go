@@ -55,7 +55,7 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	if err != nil || replayed || created == nil || created.Run == nil {
 		t.Fatalf("initial schedule = %#v, replayed=%v, err=%v", created, replayed, err)
 	}
-	if created.Event == nil || created.Run.Kind != RunKindConversation || created.Run.ConcurrencyKey != conversation.ID ||
+	if created.Event == nil || created.Run.Kind != RunKindConversation || created.Run.ConcurrencyKey != conversationRunLane(conversation.ID, "", created.Run.AssignedAgentID) ||
 		created.Run.Owner != conversation.Owner || created.Run.Context[conversationRunContextTriggerID] != first.ID {
 		t.Fatalf("scheduled conversation Run = %#v", created)
 	}

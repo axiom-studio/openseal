@@ -177,10 +177,12 @@ func TestConversationForegroundRunsSQLIncludesExactLegacyAndThreadRoots(t *testi
 			kind         RunKind
 		}{
 			{"legacy-root", "conversation", "", "", RunKindConversation},
-			{"thread-root", "conversation:thread:thread-message", "conversation", "thread-message", RunKindConversation},
-			{"bad-thread", "conversation:thread:other-message", "conversation", "thread-message", RunKindConversation},
+			{"thread-root", "conversation:thread:thread-message:agent:foreground-agent", "conversation", "thread-message", RunKindConversation},
+			{"agent-root", "conversation:agent:foreground-agent", "conversation", "", RunKindConversation},
+			{"bad-thread", "conversation:thread:other-message:agent:foreground-agent", "conversation", "thread-message", RunKindConversation},
+			{"bare-thread", "conversation:thread:thread-message", "conversation", "thread-message", RunKindConversation},
 			{"context-only", "unrelated", "conversation", "thread-message", RunKindConversation},
-			{"missing-thread", "conversation:thread:thread-message", "conversation", "", RunKindConversation},
+			{"missing-thread", "conversation:thread:thread-message:agent:foreground-agent", "conversation", "", RunKindConversation},
 			{"work-root", "conversation", "conversation", "", RunKindAgentWork},
 		} {
 			run := conversationReadSQLRun(testCase.id, scope, owner, testCase.kind, AgentRunStatusCompleted, at)
@@ -198,7 +200,11 @@ func TestConversationForegroundRunsSQLIncludesExactLegacyAndThreadRoots(t *testi
 		if err != nil || len(runs) != 1 || runs[0].ID != "legacy-root" {
 			t.Fatalf("second foreground page = %#v, %v", runs, err)
 		}
-		runs, err = reader.ListConversationForegroundRuns(t.Context(), scope, owner, "conversation", 500, 2)
+		runs, err = reader.ListConversationForegroundRuns(t.Context(), scope, owner, "conversation", 1, 2)
+		if err != nil || len(runs) != 1 || runs[0].ID != "agent-root" {
+			t.Fatalf("third foreground page = %#v, %v", runs, err)
+		}
+		runs, err = reader.ListConversationForegroundRuns(t.Context(), scope, owner, "conversation", 500, 3)
 		if err != nil || len(runs) != 0 {
 			t.Fatalf("foreground roots admitted a false concurrency match: %#v, %v", runs, err)
 		}

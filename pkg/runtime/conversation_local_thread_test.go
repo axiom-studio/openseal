@@ -77,7 +77,7 @@ func TestLocalConversationThreadScopesFollowUpsAndPreservesIndependentWork(t *te
 			t.Fatalf("follow-up reached the wrong thread: %#v expected=%q err=%v", current, expected.followUp, err)
 		}
 	}
-	if one.Context["threadRootMessageId"] != rootOne.ID || one.ConcurrencyKey != conversation.ID+":thread:"+rootOne.ID || ordinary.ConcurrencyKey != conversation.ID {
+	if one.Context["threadRootMessageId"] != rootOne.ID || one.ConcurrencyKey != conversationRunLane(conversation.ID, rootOne.ID, one.AssignedAgentID) || ordinary.ConcurrencyKey != conversationRunLane(conversation.ID, "", ordinary.AssignedAgentID) {
 		t.Fatal("local roots did not become canonical foreground execution context")
 	}
 	unthreaded := post("refine ordinary request", "", ConversationParticipantUser)

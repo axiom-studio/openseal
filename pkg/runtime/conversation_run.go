@@ -210,7 +210,7 @@ func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx conte
 	}
 	threadRoot := externalConversationThreadRoot(conversation, message)
 	// The routing Run's lane and every member's lane in it.
-	lane := conversationRunLane(conversation.ID, threadRoot, conversation.Owner, "")
+	lane := conversationRunLane(conversation.ID, threadRoot, "")
 	const pageSize = 100
 	// Two HTTP posts can overlap: an older message may be scheduled after the
 	// newer one. In that case its own Run must be canceled as well.
@@ -324,7 +324,7 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 	}
 	request := CreateAgentRunRequest{
 		Scope: conversation.Scope, Kind: RunKindConversation, Owner: conversation.Owner,
-		AssignedAgentID: assignedAgentID, ConcurrencyKey: conversation.ID, Goal: goal, Source: RunSourceChat,
+		AssignedAgentID: assignedAgentID, ConcurrencyKey: conversationRunLane(conversation.ID, "", assignedAgentID), Goal: goal, Source: RunSourceChat,
 		Context: map[string]interface{}{
 			conversationRunContextConversationID: conversation.ID,
 			conversationRunContextTriggerID:      message.ID,
@@ -336,7 +336,7 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 	}
 	if root := externalConversationThreadRoot(conversation, message); root != "" {
 		request.Context["threadRootMessageId"] = root
-		request.ConcurrencyKey = conversation.ID + ":thread:" + root
+		request.ConcurrencyKey = conversationRunLane(conversation.ID, root, assignedAgentID)
 	}
 	if message.ResponseMode != "" {
 		request.Context["responseMode"] = message.ResponseMode
@@ -2247,7 +2247,7 @@ func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context,
 		// lane against the canonical Task ledger.
 		run = cloneAgentRun(run)
 		root, _ := run.Context["threadRootMessageId"].(string)
-		run.ConcurrencyKey = conversationRunLane(task.ConversationID, root, run.Owner, run.AssignedAgentID)
+		run.ConcurrencyKey = conversationRunLane(task.ConversationID, root, run.AssignedAgentID)
 	}
 	return validateConversationRun(run)
 }
@@ -2303,7 +2303,7 @@ func validateConversationRun(run *AgentRun) error {
 	}
 	reason, _ := run.Context[routingReasonContextKey].(string)
 	if !conversationOK || !triggerOK || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) ||
-		run.ConcurrencyKey != conversationRunLane(conversationID, root, run.Owner, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
+		run.ConcurrencyKey != conversationRunLane(conversationID, root, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
 		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
 	}
 	return nil

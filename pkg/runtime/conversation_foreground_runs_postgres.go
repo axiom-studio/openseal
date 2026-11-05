@@ -22,7 +22,7 @@ func (s *PostgresStore) ListConversationForegroundRuns(ctx context.Context, scop
 		AND payload->>'concurrencyKey'=(payload->'context'->>'conversationId')
 			||CASE WHEN jsonb_typeof(payload->'context'->'threadRootMessageId')='string' AND payload->'context'->>'threadRootMessageId'<>''
 				THEN ':thread:'||(payload->'context'->>'threadRootMessageId') ELSE '' END
-			||CASE WHEN payload->'owner'->>'type'='team' AND COALESCE(payload->>'assignedAgentId','')<>''
+			||CASE WHEN COALESCE(payload->>'assignedAgentId','')<>''
 				THEN ':agent:'||(payload->>'assignedAgentId') ELSE '' END
 		ORDER BY created_at DESC,id DESC LIMIT $8) lanes
 		ORDER BY created_at DESC,id DESC LIMIT $6 OFFSET $7`, scope.Kind, scope.ID, owner.Type, owner.ID, conversationID, limit, offset, conversationForegroundSQLPageSize(limit, offset))

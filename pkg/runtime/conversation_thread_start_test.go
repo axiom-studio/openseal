@@ -81,10 +81,7 @@ func TestConversationStartsThreadRootsKeepSeparateForegroundLanes(t *testing.T) 
 			if err != nil || result == nil || result.Run == nil {
 				t.Fatalf("schedule %s: %#v, %v", message.ID, result, err)
 			}
-			key := conversation.ID
-			if thread != "" {
-				key += ":thread:" + thread
-			}
+			key := conversationRunLane(conversation.ID, thread, result.Run.AssignedAgentID)
 			actualThread, _ := result.Run.Context["threadRootMessageId"].(string)
 			if result.Run.ConcurrencyKey != key || actualThread != thread {
 				t.Fatalf("wrong foreground lane: %#v, expected thread %q", result.Run, thread)
