@@ -11,9 +11,10 @@ import (
 
 const (
 	// routingReasonContextKey carries the router's reason onto the answer.
-	routingReasonContextKey = "routingReason"
-	teamMemberRunGoal       = "Respond to a Team channel message"
-	teamRoutingRunGoal      = "Route a Team channel message"
+	routingReasonContextKey  = "routingReason"
+	teamRoutingRunContextKey = "routingRunId"
+	teamMemberRunGoal        = "Respond to a Team channel message"
+	teamRoutingRunGoal       = "Route a Team channel message"
 )
 
 // teamChannelRules are the Team-only rules a member gets with its roster.
@@ -95,6 +96,8 @@ func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger
 		conversationRunContextConversationID: conversation.ID,
 		conversationRunContextTriggerID:      trigger.ID,
 		conversationRunContextTriggerSeq:     trigger.Sequence,
+		// The client's link from the routing Run to the answers it started.
+		teamRoutingRunContextKey: routing.ID,
 	}
 	for _, copied := range []string{"threadRootMessageId", "responseMode", "voiceCallStarted", RunContextSessionKey} {
 		if value, ok := routing.Context[copied]; ok {
