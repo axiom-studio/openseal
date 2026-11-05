@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 67
+const currentPostgresSchemaVersion int64 = 69
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -77,6 +77,11 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == teamRoutingMigrationVersion {
+			if err := s.rollbackTeamRouting(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if version == spacesMigrationVersion {
 			if err := s.rollbackSpaces(ctx, tx); err != nil {
 				return err
@@ -213,21 +218,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 				ALTER TABLE `+s.table("external_conversation_endpoints")+` DROP COLUMN IF EXISTS ingress_route
 			`); err != nil {
 				return err
-			}
-		}
-		if version == naturalTeamCoordinationMigrationVersion {
-			for _, statement := range []string{
-				`UPDATE ` + s.table("team_definitions") + `
-				 SET payload = jsonb_set(payload, '{coordination,mode}', '"dynamic"'::jsonb, true)`,
-				`UPDATE ` + s.table("team_definition_amendments") + `
-				 SET payload = jsonb_set(payload, '{candidate,coordination,mode}', '"dynamic"'::jsonb, true)`,
-				`UPDATE ` + s.table("workforce_change_sets") + `
-				 SET payload = jsonb_set(payload, '{result,candidate,team,coordination,mode}', '"dynamic"'::jsonb, true)
-				 WHERE payload #> '{result,candidate,team}' IS NOT NULL`,
-			} {
-				if _, err := tx.ExecContext(ctx, statement); err != nil {
-					return err
-				}
 			}
 		}
 		if version == 23 {

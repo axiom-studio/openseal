@@ -103,10 +103,7 @@ func migrate(db *sql.DB) error {
 	if err := migrateSensitiveAuthoringPromptsSQLite(db); err != nil {
 		return err
 	}
-	if err := migrateNaturalTeamCoordinationSQLite(db); err != nil {
-		return err
-	}
-	if err := migrateTeamCoordinationDefaultsSQLite(db); err != nil {
+	if err := migrateTeamRoutingSQLite(db); err != nil {
 		return err
 	}
 	if err := migrateActivationContinuationsSQLite(db); err != nil {
