@@ -15,7 +15,7 @@ import (
 
 const (
 	RunbookManagementSkillID      = "openseal.runbooks"
-	RunbookManagementSkillVersion = "1.7.0"
+	RunbookManagementSkillVersion = "1.8.0"
 	RunbookActionStart            = "start"
 	RunbookActionReplaceSchedule  = "replace_schedule"
 	RunbookManagementEndpoint     = "kernel://runbooks"
@@ -26,7 +26,16 @@ const (
 // Runbook activations. Starting an activation creates a normal durable Run;
 // the model cannot manufacture a definition, execution policy, or authority.
 func RunbookManagementSkill() *skill.Definition {
-	return runbookManagementSkill(RunbookManagementSkillVersion, workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateAction())
+	definition := runbookManagementSkill(RunbookManagementSkillVersion, workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateAction())
+	definition.Actions[RunbookActionSetScript] = scheduledTaskSetScriptAction()
+	return definition
+}
+
+// RunbookManagementSkillLegacy170 preserves the immutable published 1.7.0
+// contract (routines without scripts) so accepted calls drain while bindings
+// upgrade.
+func RunbookManagementSkillLegacy170() *skill.Definition {
+	return runbookManagementSkill("1.7.0", workflowCreateAction(), workflowSourcesAction(), scheduledTaskCreateActionLegacy170())
 }
 
 // RunbookManagementSkillLegacy160 preserves the immutable published 1.6.0
@@ -172,6 +181,15 @@ type RunbookActionValidator struct {
 	workflowTeams   WorkflowTeamCatalog
 	grantCatalog    RoutineGrantCatalog
 	ownerAddresses  RoutineOwnerAddressResolver
+	chatFiles       ChatFileResolver
+}
+
+// SetChatFiles lets routines run saved scripts: proposals pin a script's
+// version from the chat's files.
+func (v *RunbookActionValidator) SetChatFiles(files ChatFileResolver) {
+	if v != nil {
+		v.chatFiles = files
+	}
 }
 
 // SetRoutineGrantCatalog lets routine briefs name the Agent's bound actions.
@@ -214,6 +232,20 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 	arguments := cloneMap(input.Arguments)
 	if input.Bound.Action.Name == RunbookActionCreateTask && routineBriefContract(input.Bound) {
 		if err := resolveRoutineBriefArguments(ctx, v.grantCatalog, v.ownerAddresses, input.Run, arguments, routineBriefGrantContract(input.Bound)); err != nil {
+			return nil, true, err
+		}
+		if routineScriptContract(input.Bound) {
+			if err := pinRoutineScriptArguments(ctx, v.chatFiles, input.Run, arguments); err != nil {
+				return nil, true, err
+			}
+		}
+		return arguments, true, nil
+	}
+	if input.Bound.Action.Name == RunbookActionSetScript {
+		if v == nil || v.store == nil || input.Run == nil {
+			return nil, true, errors.New("Runbook action validator is not configured")
+		}
+		if err := pinRoutineScriptRepinArguments(ctx, v.store, v.chatFiles, input.Run, arguments); err != nil {
 			return nil, true, err
 		}
 		return arguments, true, nil
@@ -288,8 +320,8 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 	switch input.Bound.Action.Name {
 	case RunbookActionCreateWorkflow, RunbookActionWorkflowSources, RunbookActionInspectWorkflows:
 		return validateWorkflowAction(ctx, v.store, v.workflowCatalog, v.workflowTeams, input)
-	case RunbookActionCreateTask, RunbookActionList, RunbookActionSetStatus:
-		return validateScheduledTaskAction(ctx, v.store, input)
+	case RunbookActionCreateTask, RunbookActionList, RunbookActionSetStatus, RunbookActionSetScript:
+		return validateScheduledTaskAction(ctx, v.store, v.chatFiles, input)
 	case RunbookActionStart:
 		args, activation, objective, err := resolveRunbookStart(ctx, v.store, input.Run, input.Arguments)
 		if err != nil {
@@ -324,6 +356,14 @@ type RunbookActionDispatcher struct {
 	workflowCatalog   WorkflowSourceCatalog
 	workflowTeams     WorkflowTeamCatalog
 	executionPreparer AcceptedRunExecutionPreparer
+	chatFiles         ChatFileResolver
+}
+
+// SetChatFiles lets approved routines verify their pinned script versions.
+func (d *RunbookActionDispatcher) SetChatFiles(files ChatFileResolver) {
+	if d != nil {
+		d.chatFiles = files
+	}
 }
 
 func (d *RunbookActionDispatcher) SetAcceptedRunExecutionPreparer(preparer AcceptedRunExecutionPreparer) {
@@ -364,8 +404,8 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input Acti
 	if isWorkflowActionName(input.Bound.Action.Name) {
 		return dispatchWorkflowAction(ctx, d.store, d.workflowCatalog, d.workflowTeams, input)
 	}
-	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList || input.Bound.Action.Name == RunbookActionSetStatus {
-		return dispatchScheduledTaskAction(ctx, d.store, input)
+	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList || input.Bound.Action.Name == RunbookActionSetStatus || input.Bound.Action.Name == RunbookActionSetScript {
+		return dispatchScheduledTaskAction(ctx, d.store, d.chatFiles, input)
 	}
 	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
 		_, source, _, schedule, err := resolveRunbookScheduleReplacement(ctx, d.store, input.Run, input.Arguments)
@@ -558,6 +598,6 @@ func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, r
 
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.6.0" || bound.Definition.Version == "1.5.0" || bound.Definition.Version == "1.4.0" || bound.Definition.Version == "1.3.2" || bound.Definition.Version == "1.3.1" || bound.Definition.Version == "1.3.0" || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
-		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || isWorkflowActionName(bound.Action.Name))
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.7.0" || bound.Definition.Version == "1.6.0" || bound.Definition.Version == "1.5.0" || bound.Definition.Version == "1.4.0" || bound.Definition.Version == "1.3.2" || bound.Definition.Version == "1.3.1" || bound.Definition.Version == "1.3.0" || bound.Definition.Version == "1.2.0" || bound.Definition.Version == "1.1.3") &&
+		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || bound.Action.Name == RunbookActionSetScript || isWorkflowActionName(bound.Action.Name))
 }

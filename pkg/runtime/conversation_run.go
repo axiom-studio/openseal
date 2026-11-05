@@ -2415,7 +2415,7 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	operation := strings.TrimSpace(fmt.Sprint(last["action"]))
 	if operation != ObjectiveActionCreate && operation != ObjectiveActionUpdate && operation != ObjectiveActionPause &&
 		operation != AgentActionAmendBehavior && operation != AgentActionConfigureChannel && operation != RunbookActionStart && operation != RunbookActionReplaceSchedule &&
-		operation != RunActionPause && operation != RunActionResume && operation != RunActionCancel && operation != RunbookActionCreateTask && operation != RunbookActionSetStatus {
+		operation != RunActionPause && operation != RunActionResume && operation != RunActionCancel && operation != RunbookActionCreateTask && operation != RunbookActionSetStatus && operation != RunbookActionSetScript {
 		return nil, false
 	}
 	actionDescription := label + " " + strings.ReplaceAll(operation, "_", " ")

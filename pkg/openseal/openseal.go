@@ -20,6 +20,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/authoring"
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/chatfs"
 	"github.com/axiom-studio/openseal/pkg/executor"
 	"github.com/axiom-studio/openseal/pkg/httpaction"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
@@ -363,6 +364,12 @@ type (
 	RoutineBrief                         = runtime.RoutineBrief
 	RoutineOwnerAddressResolver          = runtime.RoutineOwnerAddressResolver
 	RevokeRoutineGrantsRequest           = runtime.RevokeRoutineGrantsRequest
+	RoutineScript                        = runtime.RoutineScript
+	RoutineScriptStatus                  = runtime.RoutineScriptStatus
+	ChatFile                             = runtime.ChatFile
+	ChatFileResolver                     = runtime.ChatFileResolver
+	HostedPinnedScript                   = runtime.HostedPinnedScript
+	HostedPinnedScriptResult             = runtime.HostedPinnedScriptResult
 	RunbookActivation                    = runtime.RunbookActivation
 	RunbookDetail                        = runtime.RunbookDetail
 	RunbookExecutionAudit                = runtime.RunbookExecutionAudit
@@ -1626,7 +1633,10 @@ var (
 	NewRunActionValidator                  = runtime.NewRunActionValidator
 	NewRunActionDispatcher                 = runtime.NewRunActionDispatcher
 	RunbookManagementSkill                 = runtime.RunbookManagementSkill
+	RunbookManagementSkillLegacy170        = runtime.RunbookManagementSkillLegacy170
 	RunbookManagementSkillLegacy160        = runtime.RunbookManagementSkillLegacy160
+	ApplyPinnedScriptResult                = runtime.ApplyPinnedScriptResult
+	ResolveRoutineScriptStatus             = runtime.ResolveRoutineScriptStatus
 	RunbookManagementSkillLegacy150        = runtime.RunbookManagementSkillLegacy150
 	RunbookManagementSkillLegacy140        = runtime.RunbookManagementSkillLegacy140
 	RunbookManagementSkillLegacy132        = runtime.RunbookManagementSkillLegacy132
@@ -1733,6 +1743,8 @@ var (
 	ErrInvalidObjectiveTransition           = runtime.ErrInvalidObjectiveTransition
 	ErrRunbookActivationNotFound            = runtime.ErrRunbookActivationNotFound
 	ErrRoutineGrantsNotOwner                = runtime.ErrRoutineGrantsNotOwner
+	ErrRoutineHasNoScript                   = runtime.ErrRoutineHasNoScript
+	ErrChatFileNotFound                     = runtime.ErrChatFileNotFound
 	ErrRunbookDefinitionNotFound            = runtime.ErrRunbookDefinitionNotFound
 	ErrRunbookActivationInactive            = runtime.ErrRunbookActivationInactive
 	ErrRunbookActivationRevision            = runtime.ErrRunbookActivationRevision
@@ -1979,6 +1991,13 @@ const (
 	RunbookActionInspectWorkflows   = runtime.RunbookActionInspectWorkflows
 	RunbookActionList               = runtime.RunbookActionList
 	RunbookActionSetStatus          = runtime.RunbookActionSetStatus
+	RunbookActionSetScript          = runtime.RunbookActionSetScript
+	RoutineScriptInstruction        = runtime.RoutineScriptInstruction
+	RoutineScriptFailureInstruction = runtime.RoutineScriptFailureInstruction
+	RoutineScriptCheckpointKey      = runtime.RoutineScriptCheckpointKey
+	RoutineScriptContextKey         = runtime.RoutineScriptContextKey
+	MaximumRoutineScriptSeconds     = runtime.MaximumRoutineScriptSeconds
+	DefaultRoutineScriptSeconds     = runtime.DefaultRoutineScriptSeconds
 	RunbookActionStart              = runtime.RunbookActionStart
 	RunbookActionReplaceSchedule    = runtime.RunbookActionReplaceSchedule
 	TeamManagementSkillID           = runtime.TeamManagementSkillID
@@ -2609,6 +2628,7 @@ type Engine struct {
 	runbookAudits                 *runtime.RunbookExecutionAuditService
 	actionPolicy                  runtime.ActionPolicyEvaluator
 	routineOwnerAddresses         runtime.RoutineOwnerAddressResolver
+	chatFiles                     runtime.ChatFileResolver
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
 	runbookManagementActions      bool
@@ -3473,6 +3493,28 @@ func WithRoutineOwnerAddresses(resolver runtime.RoutineOwnerAddressResolver) Opt
 	}
 }
 
+// WithChatFileContent gives the kernel read access to chats' files, stored
+// as chat filesystem artifacts with their bytes in content (see pkg/chatfs),
+// so a routine can run a saved script: proposing one pins the script's
+// current version, and a script routine reports when its file changed.
+// Without it, routines cannot run scripts.
+func WithChatFileContent(content runtime.ArtifactContentStore) Option {
+	return func(e *Engine) error {
+		if content == nil {
+			return fmt.Errorf("chat file content store is required")
+		}
+		e.chatFiles = chatfs.NewStore(e, content)
+		return nil
+	}
+}
+
+// RoutineScriptStatus reports whether a script routine's chat file changed
+// since its script was approved. The routine keeps running the approved
+// version; the set_script action approves the current one.
+func (e *Engine) RoutineScriptStatus(ctx context.Context, scope runtime.Scope, activationID string) (*runtime.RoutineScriptStatus, error) {
+	return runtime.NewRunbookActivationService(e.store).RoutineScriptStatus(ctx, e.chatFiles, scope, activationID)
+}
+
 // RevokeRoutineGrants clears what a routine may do without asking. Only the
 // user who asked for the routine may revoke; it is idempotent.
 func (e *Engine) RevokeRoutineGrants(ctx context.Context, scope runtime.Scope, activationID string, req runtime.RevokeRoutineGrantsRequest) (*runtime.RunbookActivation, error) {
@@ -3625,7 +3667,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if !e.runbookManagementActions {
 		return nil
 	}
-	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkillLegacy131(), runtime.RunbookManagementSkillLegacy132(), runtime.RunbookManagementSkillLegacy140(), runtime.RunbookManagementSkillLegacy150(), runtime.RunbookManagementSkillLegacy160(), runtime.RunbookManagementSkill()} {
+	for _, definition := range []*skill.Definition{runtime.RunbookManagementSkillLegacy130(), runtime.RunbookManagementSkillLegacy131(), runtime.RunbookManagementSkillLegacy132(), runtime.RunbookManagementSkillLegacy140(), runtime.RunbookManagementSkillLegacy150(), runtime.RunbookManagementSkillLegacy160(), runtime.RunbookManagementSkillLegacy170(), runtime.RunbookManagementSkill()} {
 		if err := e.skills.Register(context.Background(), definition); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 			return err
 		}
@@ -3645,6 +3687,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 	validator.SetWorkflowTeams(e.teams)
 	validator.SetRoutineGrantCatalog(e.skills)
 	validator.SetRoutineOwnerAddresses(e.routineOwnerAddresses)
+	validator.SetChatFiles(e.chatFiles)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewRunbookActionDispatcher(store, e.actionPoolSpecs[index].dispatcher)
@@ -3654,6 +3697,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		dispatcher.SetWorkflowCatalog(e.skills)
 		dispatcher.SetWorkflowTeams(e.teams)
 		dispatcher.SetAcceptedRunExecutionPreparer(e)
+		dispatcher.SetChatFiles(e.chatFiles)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3664,6 +3708,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		dispatcher.SetWorkflowCatalog(e.skills)
 		dispatcher.SetWorkflowTeams(e.teams)
 		dispatcher.SetAcceptedRunExecutionPreparer(e)
+		dispatcher.SetChatFiles(e.chatFiles)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil

@@ -812,11 +812,17 @@ func resolveRoutineBriefArguments(ctx context.Context, catalog RoutineGrantCatal
 }
 
 // routineBriefContract reports whether a create_task binding uses a
-// contract that carries a routine brief: the current one, or 1.6.0 and 1.5.0
-// while their accepted calls drain.
+// contract that carries a routine brief: the current one, or 1.7.0, 1.6.0
+// and 1.5.0 while their accepted calls drain.
 func routineBriefContract(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
-		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.6.0" || bound.Definition.Version == "1.5.0")
+		(bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.7.0" || bound.Definition.Version == "1.6.0" || bound.Definition.Version == "1.5.0")
+}
+
+// routineScriptContract reports whether a create_task binding's contract can
+// run a saved script (since 1.8.0).
+func routineScriptContract(bound *skill.BoundAction) bool {
+	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID && bound.Definition.Version == RunbookManagementSkillVersion
 }
 
 // routineBriefGrantContract reports which pins a create_task binding's
@@ -825,6 +831,6 @@ func routineBriefGrantContract(bound *skill.BoundAction) routineGrantContract {
 	if bound == nil || bound.Definition == nil || bound.Definition.ID != RunbookManagementSkillID {
 		return routineGrantContract{}
 	}
-	current := bound.Definition.Version == RunbookManagementSkillVersion
-	return routineGrantContract{pinTools: current || bound.Definition.Version == "1.6.0", pinDestinations: current}
+	destinations := bound.Definition.Version == RunbookManagementSkillVersion || bound.Definition.Version == "1.7.0"
+	return routineGrantContract{pinTools: destinations || bound.Definition.Version == "1.6.0", pinDestinations: destinations}
 }

@@ -2,6 +2,7 @@ package chatfs
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -302,5 +303,33 @@ func TestAnAgentReadsAndCopiesFromItsOtherChatsOnly(t *testing.T) {
 	}
 	if theirs := run(t, store, earlier, author, workspace.OperationReadFile, map[string]interface{}{"path": "apps/board-v2/index.html"}); theirs["isError"] != true {
 		t.Fatal("copy changed the other chat")
+	}
+}
+
+// A routine pins a script from the chat's files: the latest version, or the
+// exact one in an earlier immutable snapshot.
+func TestResolveChatFileReadsLatestAndPinnedVersions(t *testing.T) {
+	store, chat, author := newTestStore(t)
+	ctx := context.Background()
+	run(t, store, chat, author, workspace.OperationWriteFile, map[string]interface{}{"path": "scripts/weekly.py", "content": "print(1)\n"})
+	first, err := store.ResolveChatFile(ctx, chat.Scope, chat.Owner, chat.ConversationID, "/scripts/weekly.py", 0)
+	if err != nil || first.Path != "scripts/weekly.py" || first.FilesVersion != 1 || !strings.HasPrefix(first.Digest, "sha256:") {
+		t.Fatalf("first = %#v %v", first, err)
+	}
+	run(t, store, chat, author, workspace.OperationWriteFile, map[string]interface{}{"path": "scripts/weekly.py", "content": "print(2)\n"})
+	latest, err := store.ResolveChatFile(ctx, chat.Scope, chat.Owner, chat.ConversationID, "scripts/weekly.py", 0)
+	if err != nil || latest.FilesVersion != 2 || latest.Digest == first.Digest {
+		t.Fatalf("latest = %#v %v", latest, err)
+	}
+	pinned, err := store.ResolveChatFile(ctx, chat.Scope, chat.Owner, chat.ConversationID, "scripts/weekly.py", 1)
+	if err != nil || pinned.Digest != first.Digest {
+		t.Fatalf("pinned = %#v %v", pinned, err)
+	}
+	if _, err := store.ResolveChatFile(ctx, chat.Scope, chat.Owner, chat.ConversationID, "scripts/missing.py", 0); !errors.Is(err, runtime.ErrChatFileNotFound) {
+		t.Fatalf("missing = %v", err)
+	}
+	other := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "someone-else"}
+	if _, err := store.ResolveChatFile(ctx, chat.Scope, other, chat.ConversationID, "scripts/weekly.py", 0); err == nil {
+		t.Fatal("another owner read the chat's files")
 	}
 }

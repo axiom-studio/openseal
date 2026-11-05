@@ -324,3 +324,29 @@ func checkPlacement(tree Tree, name string) error {
 	}
 	return nil
 }
+
+// ResolveChatFile is runtime.ChatFileResolver: the file at path in a chat's
+// latest snapshot (version 0) or in the snapshot at version.
+func (s *Store) ResolveChatFile(ctx context.Context, scope runtime.Scope, owner runtime.ObjectiveOwner, conversationID, path string, version int64) (*runtime.ChatFile, error) {
+	name, err := Clean(path)
+	if err != nil {
+		return nil, err
+	}
+	chat := Chat{Scope: scope, Owner: owner, ConversationID: conversationID}
+	var snapshot Snapshot
+	if version == 0 {
+		snapshot, err = s.Head(ctx, chat)
+	} else {
+		snapshot, err = s.At(ctx, chat, version)
+	}
+	if err != nil {
+		return nil, err
+	}
+	entry, ok := snapshot.Tree.Files[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", runtime.ErrChatFileNotFound, name)
+	}
+	return &runtime.ChatFile{Path: name, Digest: entry.Digest, SizeBytes: entry.SizeBytes, FilesVersion: snapshot.Version}, nil
+}
+
+var _ runtime.ChatFileResolver = (*Store)(nil)

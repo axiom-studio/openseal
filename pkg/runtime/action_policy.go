@@ -35,8 +35,9 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 	if !action.AlwaysReview() && action.Risk == skill.RiskLevelRead && (action.SideEffect == skill.SideEffectNone || action.SideEffect == skill.SideEffectRead) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only action"}, nil
 	}
-	// Creating a routine always shows its brief, in every approval mode.
-	if input.Bound.Definition.ID == RunbookManagementSkillID && action.Name == RunbookActionCreateTask {
+	// Creating a routine always shows its brief, in every approval mode, and
+	// so does making it run a new version of its script.
+	if input.Bound.Definition.ID == RunbookManagementSkillID && (action.Name == RunbookActionCreateTask || action.Name == RunbookActionSetScript) {
 		decision, err := p.requireApproval("a routine's brief is always approved before it is created")
 		if decision.ApprovalTimeout == ApprovalTimeoutApprove {
 			decision.ApprovalTimeout = ApprovalTimeoutExpire

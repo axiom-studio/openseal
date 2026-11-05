@@ -20,6 +20,7 @@ const (
 	RunbookActionCreateTask = "create_task"
 	RunbookActionList       = "list"
 	RunbookActionSetStatus  = "set_status"
+	RunbookActionSetScript  = "set_script"
 	scheduledTaskContextKey = "scheduledAgentTask"
 )
 
@@ -38,6 +39,10 @@ type ScheduledAgentTask struct {
 	// runs perform them without asking. They come only from the approved
 	// create_task arguments and can only be cleared afterwards.
 	Grants []RoutineGrant `json:"grants,omitempty"`
+	// Script, when set, is the saved chat script every occurrence runs as
+	// its first step, pinned to the version the user approved. Only an
+	// approved create_task or set_script sets it.
+	Script *RoutineScript `json:"script,omitempty"`
 }
 
 // scheduledTaskAppID matches host-assigned app identifiers.
@@ -53,6 +58,11 @@ func (t *ScheduledAgentTask) Validate() error {
 	if _, err := normalizeRoutineGrants(t.Grants, false); err != nil {
 		return err
 	}
+	if t.Script != nil {
+		if err := t.Script.Validate(); err != nil {
+			return err
+		}
+	}
 	return authoring.ValidateAuthoringPrompt(t.Goal)
 }
 func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
@@ -61,6 +71,7 @@ func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
 	}
 	copy := *t
 	copy.Grants = cloneRoutineGrants(t.Grants)
+	copy.Script = cloneRoutineScript(t.Script)
 	return &copy
 }
 func activationGoal(a *RunbookActivation, o *Objective) string {
@@ -131,13 +142,39 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 	values[runReportingContextRootRunID] = runID
 	values[runReportingContextMilestones] = []interface{}{string(runbook.ReportingCompleted), string(runbook.ReportingFailed)}
 	values[scheduledTaskContextKey] = true
+	if a.Task.Script != nil {
+		// The occurrence runs the version pinned when it started, even if the
+		// routine is approved for a newer one while it runs.
+		values[RoutineScriptContextKey] = routineScriptMap(a.Task.Script)
+	}
 	return c, "", nil
 }
 
-// scheduledTaskCreateAction is the 1.7.0 contract: each run's result reaches
-// the chat the routine was created from on its own, and a grant of an action
-// that posts to a channel is pinned to the destinations the user approved.
+// scheduledTaskCreateAction is the 1.8.0 contract: a routine may run a saved,
+// tested script from its chat's files as each run's first step. The kernel
+// pins the script's current version when the routine is proposed.
 func scheduledTaskCreateAction() skill.Action {
+	action := scheduledTaskCreateActionLegacy170()
+	action.Description += " For work that is the same steps with new data each time (pull data, compute, chart, write a file), make the routine run a saved script instead of redoing the work: first write the script in this chat's files and test it in this chat's sandbox with run_command until it works, then pass script with its path and the exact command that ran it. Approving the brief pins the script as it is then; each run executes that version first, and you then write the report from its output, so say in goal what to report from the script's results."
+	action.InputSchema["properties"].(map[string]interface{})["script"] = map[string]interface{}{
+		"type": "object", "additionalProperties": false, "required": []interface{}{"path", "command"},
+		"description": "Optional. A tested script from this chat's files that each run executes first, in this chat's sandbox.",
+		"properties": map[string]interface{}{
+			"path":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1024, "description": "The script's path in this chat's files, for example scripts/weekly_signups.py."},
+			"command":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineScriptCommand, "description": "Exactly how to run it: python3, node or bash, then the script's path, then any plain arguments without quotes or shell characters, for example python3 scripts/weekly_signups.py --days 7."},
+			"timeoutSeconds": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": MaximumRoutineScriptSeconds, "description": "Optional limit for one run of the script. Defaults to 300."},
+			"digest":         map[string]interface{}{"type": "string", "description": "Filled in by the system; omit it."},
+			"filesVersion":   map[string]interface{}{"type": "integer", "minimum": 1, "description": "Filled in by the system; omit it."},
+		},
+	}
+	return action
+}
+
+// scheduledTaskCreateActionLegacy170 is the published 1.7.0 contract: each
+// run's result reaches the chat the routine was created from on its own, and
+// a grant of an action that posts to a channel is pinned to the destinations
+// the user approved.
+func scheduledTaskCreateActionLegacy170() skill.Action {
 	action := scheduledTaskCreateActionLegacy160()
 	action.Description += " Each run's result is posted automatically as a new message in the chat or Slack conversation the routine was created from, so never grant a send action to deliver results there. To post to any other channel, grant that sending action (for example skill-slack.slack-send-message) with toDestinations naming each channel, and name it in the label, for example \"Post to #ai-news\"; runs then post there without asking, and anywhere else asks first."
 	brief := action.InputSchema["properties"].(map[string]interface{})["brief"].(map[string]interface{})
@@ -232,18 +269,31 @@ func scheduledTaskListAction() skill.Action {
 func scheduledTaskStatusAction() skill.Action {
 	return skill.Action{Name: RunbookActionSetStatus, Description: "Pause, resume or cancel future occurrences of an owned routine using its exact activationId and expectedRevision from list. active resumes; paused suspends; retired cancels permanently. Existing runs continue separately and can be controlled with Run tools. To change timing, retire then replace_schedule; the work and reporting destination remain unchanged.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"activationId", "expectedRevision", "status", "reason"}, "properties": map[string]interface{}{"activationId": map[string]interface{}{"type": "string", "minLength": 1}, "expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1}, "status": map[string]interface{}{"type": "string", "enum": []interface{}{"active", "paused", "retired"}}, "reason": map[string]interface{}{"type": "string", "minLength": 1}}}, OutputSchema: scheduledTaskResultSchema(RunbookActionSetStatus)}
 }
+
+// scheduledTaskSetScriptAction re-pins a script routine to its chat file's
+// current version. Like creating the routine, it always shows the brief.
+func scheduledTaskSetScriptAction() skill.Action {
+	return skill.Action{Name: RunbookActionSetScript, Description: "Make a routine that runs a saved script run the script's current version from this chat's files. A routine keeps running the version approved in its brief after the script changes; use this only when the person wants the new version, after you tested it with run_command. The person approves the routine's brief again before it changes. Use the exact activationId and expectedRevision from list.", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Review: skill.ActionReviewAlways,
+		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"activationId", "expectedRevision"}, "properties": map[string]interface{}{
+			"activationId": map[string]interface{}{"type": "string", "minLength": 1}, "expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
+			"digest":       map[string]interface{}{"type": "string", "description": "Filled in by the system; omit it."},
+			"filesVersion": map[string]interface{}{"type": "integer", "minimum": 1, "description": "Filled in by the system; omit it."},
+		}}, OutputSchema: scheduledTaskResultSchema(RunbookActionSetScript)}
+}
+
 func scheduledTaskResultSchema(operation string) map[string]interface{} {
 	return map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"resourceType": map[string]interface{}{"type": "string", "const": runbookActivationResourceType}, "operation": map[string]interface{}{"type": "string", "const": operation}, "activation": map[string]interface{}{"type": "object"}, "objective": map[string]interface{}{"type": "object"}, "replayed": map[string]interface{}{"type": "boolean"}}, "required": []interface{}{"resourceType", "operation", "activation", "replayed"}}
 }
 
 type scheduledTaskCreateArguments struct {
-	Title              string        `json:"title"`
-	Goal               string        `json:"goal"`
-	Cron               string        `json:"cron"`
-	Timezone           string        `json:"timezone"`
-	MaximumOccurrences int64         `json:"maximumOccurrences,omitempty"`
-	AppID              string        `json:"appId,omitempty"`
-	Brief              *RoutineBrief `json:"brief,omitempty"`
+	Title              string         `json:"title"`
+	Goal               string         `json:"goal"`
+	Cron               string         `json:"cron"`
+	Timezone           string         `json:"timezone"`
+	MaximumOccurrences int64          `json:"maximumOccurrences,omitempty"`
+	AppID              string         `json:"appId,omitempty"`
+	Brief              *RoutineBrief  `json:"brief,omitempty"`
+	Script             *RoutineScript `json:"script,omitempty"`
 }
 type scheduledTaskStatusArguments struct {
 	ActivationID     string                  `json:"activationId"`
@@ -262,7 +312,7 @@ func decodeScheduledTaskArguments(arguments map[string]interface{}, target inter
 	return d.Decode(target)
 }
 
-func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, run *AgentRun, args map[string]interface{}, briefed bool) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
+func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, files ChatFileResolver, run *AgentRun, args map[string]interface{}, briefed bool) (*scheduledTaskCreateArguments, *ScheduledAgentTask, *runbook.Schedule, error) {
 	var a scheduledTaskCreateArguments
 	if err := decodeScheduledTaskArguments(args, &a); err != nil {
 		return nil, nil, nil, err
@@ -290,6 +340,14 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, r
 		a.Brief, task.Grants = brief, cloneRoutineGrants(brief.Grants)
 	} else if a.Brief != nil {
 		return nil, nil, nil, errors.New("this routine contract has no brief")
+	}
+	if a.Script != nil {
+		// The kernel pinned this version from the chat's files when the
+		// routine was proposed; it must still be that snapshot's file.
+		if err := verifyRoutineScriptPin(ctx, files, run.Scope, run.Owner, conversationID, a.Script); err != nil {
+			return nil, nil, nil, err
+		}
+		task.Script = cloneRoutineScript(a.Script)
 	}
 	if _, err := scheduledTaskConversation(ctx, store, run.Scope, run.Owner, task); err != nil {
 		return nil, nil, nil, err
@@ -331,13 +389,13 @@ func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *
 	}
 	return &args, a, nil
 }
-func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, input ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.Bound.Binding.DeploymentID != input.Run.Owner.ID {
 		return nil, errors.New("routine binding targets another Agent")
 	}
 	switch input.Bound.Action.Name {
 	case RunbookActionCreateTask:
-		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, input.Run, input.Arguments, routineBriefContract(input.Bound))
+		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, input.Run, input.Arguments, routineBriefContract(input.Bound))
 		if err != nil {
 			return nil, err
 		}
@@ -345,7 +403,17 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		if args.Brief != nil {
 			preview["brief"] = routineBriefPreview(args.Brief)
 		}
+		if task.Script != nil {
+			// The brief's Runs line: the exact file version and command approved.
+			preview["script"] = routineScriptMap(task.Script)
+		}
 		return preview, nil
+	case RunbookActionSetScript:
+		_, a, script, err := resolveOwnedTaskScript(ctx, store, files, input.Run, input.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		return routineScriptChangePreview(ctx, store, a, script)
 	case RunbookActionList:
 		return nil, nil
 	case RunbookActionSetStatus:
@@ -357,7 +425,7 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }
-func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, input ActionDispatchInput) (map[string]interface{}, error) {
+func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, input ActionDispatchInput) (map[string]interface{}, error) {
 	run, err := store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil {
 		return nil, err
@@ -386,7 +454,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		}
 		return result, nil
 	case RunbookActionCreateTask:
-		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, run, input.Arguments, routineBriefContract(input.Bound))
+		args, task, schedule, err := resolveScheduledTaskCreate(ctx, store, files, run, input.Arguments, routineBriefContract(input.Bound))
 		if err != nil {
 			return nil, err
 		}
@@ -427,13 +495,38 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			return nil, err
 		}
 		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetStatus, "activation": activation, "replayed": false}, nil
+	case RunbookActionSetScript:
+		var args scheduledTaskSetScriptArguments
+		if err := decodeScheduledTaskArguments(input.Arguments, &args); err != nil {
+			return nil, err
+		}
+		current, err := store.GetRunbookActivation(ctx, run.Scope, args.ActivationID)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil || current.Owner != run.Owner {
+			return nil, errors.New("routine is not owned by this Agent")
+		}
+		// Replay after the re-pin committed but the action receipt did not.
+		if current.LifecycleActionID == input.Call.ID && current.Task != nil && current.Task.Script != nil && current.Task.Script.Digest == args.Digest && current.Task.Script.FilesVersion == args.FilesVersion {
+			return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetScript, "activation": current, "replayed": true}, nil
+		}
+		_, a, script, err := resolveOwnedTaskScript(ctx, store, files, run, input.Arguments)
+		if err != nil {
+			return nil, err
+		}
+		activation, err := NewRunbookActivationService(store).RepinScript(ctx, run.Scope, a.ID, args.ExpectedRevision, script, input.Call.ID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetScript, "activation": activation, "replayed": false}, nil
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }
 
 func scheduledTaskConversationCompletion(run *AgentRun, result map[string]interface{}) (*governedConversationCompletion, bool) {
 	operation := conversationResultString(result, "operation")
-	if operation != RunbookActionCreateTask && operation != RunbookActionSetStatus {
+	if operation != RunbookActionCreateTask && operation != RunbookActionSetStatus && operation != RunbookActionSetScript {
 		return nil, false
 	}
 	activation := conversationResultMap(result["activation"])
@@ -448,6 +541,9 @@ func scheduledTaskConversationCompletion(run *AgentRun, result map[string]interf
 			status = "cancelled"
 		}
 		content = "The routine is now " + status + "."
+	}
+	if operation == RunbookActionSetScript {
+		content = "The routine now runs the new version of its script."
 	}
 	if operation == RunbookActionCreateTask {
 		if due, err := time.Parse(time.RFC3339Nano, conversationResultString(activation, "nextRunAt")); err == nil {
