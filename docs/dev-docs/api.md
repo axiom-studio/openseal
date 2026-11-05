@@ -179,6 +179,7 @@ presence:
 /conversations/{id}/runs
 /conversations/{id}/cursor
 /conversations/{id}/presence
+/conversations/{id}/reactions
 ```
 
 The `channels` capability includes `runs` for `GET /conversations/{id}/runs`.

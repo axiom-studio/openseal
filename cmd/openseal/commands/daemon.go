@@ -335,6 +335,7 @@ Options:
 		}
 		apiServer.SetChannelParticipation(authorize, post)
 	}
+	apiServer.SetReactionProjector(kernel.ReactionProjector())
 	apiServer.SetClawHubLifecycle(kernel, *standaloneOperator)
 	apiServer.SetWorkforceCredentialBindings(standaloneContext.CredentialChoices(scope))
 	if *standaloneOperator {

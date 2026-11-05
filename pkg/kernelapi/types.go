@@ -1136,6 +1136,17 @@ type SetConversationPresenceRequest struct {
 	TTLSeconds       int64                             `json:"ttlSeconds,omitempty"`
 }
 
+// MessageReactionRequest adds (PUT) or removes (DELETE) the actor's emoji on
+// a channel message at /api/v1/conversations/{id}/reactions. The host
+// authenticates the actor; roles are the actor's audience roles.
+type MessageReactionRequest struct {
+	Scope     runtime.Scope                   `json:"scope"`
+	Actor     runtime.ConversationParticipant `json:"actor"`
+	Roles     []string                        `json:"roles,omitempty"`
+	MessageID string                          `json:"messageId"`
+	Emoji     string                          `json:"emoji"`
+}
+
 type ReleaseConversationPresenceRequest struct {
 	Scope       runtime.Scope                   `json:"scope"`
 	Participant runtime.ConversationParticipant `json:"participant"`

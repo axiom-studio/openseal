@@ -488,6 +488,14 @@ type (
 	ConversationArchiveImportResult      = runtime.ConversationArchiveImportResult
 	ChannelMessage                       = runtime.ChannelMessage
 	ChannelMessageQuote                  = runtime.ChannelMessageQuote
+	MessageReaction                      = runtime.MessageReaction
+	MessageReactionRecord                = runtime.MessageReactionRecord
+	MessageReactionRequest               = runtime.MessageReactionRequest
+	MessageReactionResult                = runtime.MessageReactionResult
+	MessageReactionProjector             = runtime.MessageReactionProjector
+	ConversationReactionEvent            = runtime.ConversationReactionEvent
+	ConversationReactionStore            = runtime.ConversationReactionStore
+	TurnReaction                         = runtime.TurnReaction
 	ConversationCursor                   = runtime.ConversationCursor
 	ConversationPresenceState            = runtime.ConversationPresenceState
 	ConversationPresence                 = runtime.ConversationPresence
@@ -2790,6 +2798,9 @@ func New(opts ...Option) (*Engine, error) {
 	if err := e.rebuildConversationRuns(); err != nil {
 		return nil, fmt.Errorf("conversation Run configuration: %w", err)
 	}
+	if e.conversations != nil {
+		e.conversations.SetReactionProjector(e.ReactionProjector())
+	}
 	if err := e.rebuildExternalConversations(); err != nil {
 		return nil, fmt.Errorf("external conversation configuration: %w", err)
 	}
@@ -2962,6 +2973,7 @@ func WithStore(store runtime.KernelStore) Option {
 		}
 		if conversationStore, ok := store.(runtime.ConversationStore); ok {
 			e.conversations = runtime.NewConversationService(conversationStore)
+			e.conversations.SetReactionProjector(e.ReactionProjector())
 			e.conversationChanges, _ = runtime.NewConversationChangeService(conversationStore, store)
 			e.conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
 			if embedStore, supported := store.(runtime.EmbedStore); supported {
@@ -3162,6 +3174,7 @@ func (e *Engine) rebuildConversationRuns() error {
 	if err != nil {
 		return err
 	}
+	runner.SetReactionProjector(e.ReactionProjector())
 	reconciler, err := runtime.NewConversationRunReconciler(scheduler, e.conversationRunScopes, e.logger, config.Reconciler)
 	if err != nil {
 		return err
