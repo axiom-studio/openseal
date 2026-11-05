@@ -9,7 +9,7 @@ import (
 
 const (
 	SkillID      = "openseal.mcp"
-	SkillVersion = "1.1.0"
+	SkillVersion = "1.2.0"
 	// Read calls a binding tool whose effect is read, Call one whose effect
 	// is write. The model reaches them only as binding tools
 	// mcp.<bindingSlug>.<tool>.
@@ -117,6 +117,7 @@ func SkillDefinition() *skill.Definition {
 		Icon:        "plug", Category: "integrations", Tags: []string{"connect", "connection", "connector", "integration", "app", "mcp"},
 		Transport:           skill.TransportReference{Kind: "tool", Endpoint: SkillID},
 		BindingConfigSchema: bindingConfigSchema(),
+		Config:              Config(),
 		BindingTools: &capability.BindingToolsSpec{
 			ModelPrefix: ModelPrefix, ReadAction: Read, WriteAction: Call,
 			InputArgument: "arguments", FixedArguments: []string{"tool", "hash"},
@@ -163,4 +164,28 @@ func bindingConfigSchema() map[string]interface{} {
 			"name": text(1, 128), "field": text(1, 64),
 		})},
 	})
+}
+
+// OAuthApps is the operator's OAuth apps for MCP servers whose sign-in does
+// not let clients register themselves (GitHub, for one). It is host config: a
+// JSON object keyed by the sign-in host, {"github.com": {"clientId": "...",
+// "clientSecret": "..."}}, read when a connection starts and never sent to the
+// Skill. A server that registers clients dynamically needs no entry.
+const OAuthApps = "oauthApps"
+
+// Config is the Connected apps Skill's operator config, set once for the platform.
+func Config() *capability.SkillConfig {
+	return &capability.SkillConfig{
+		Scopes: []capability.SkillConfigScope{capability.SkillConfigScopeGlobal},
+		Fields: []capability.SkillConfigField{{
+			Key: OAuthApps, Label: "OAuth apps",
+			Description: `For apps whose sign-in needs a pre-registered OAuth app, such as GitHub. JSON keyed by sign-in host: {"github.com": {"clientId": "...", "clientSecret": "..."}}.`,
+			Type:        capability.SkillConfigFieldSecret, Audience: capability.SkillConfigAudienceHost, Summary: true,
+		}},
+		Setup: []capability.SkillSetupStep{{
+			Title:       "Register an OAuth app for apps that need one",
+			Description: "Most apps sign in without this. For GitHub, create an OAuth app whose callback URL is this site's /connections/oauth/callback, then add its client ID and secret above under github.com.",
+			Links:       []capability.SkillSetupLink{{Label: "GitHub OAuth apps", URL: "https://github.com/organizations/axiom-studio/settings/applications"}},
+		}},
+	}
 }
