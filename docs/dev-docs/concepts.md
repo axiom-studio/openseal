@@ -179,6 +179,15 @@ own approval while the Turn continues, and a call whose Turn has ended is
 canceled before dispatch. Each Turn allows at most 500 nested calls, 4
 unfinished at once.
 
+A nested call can also be a **host call** (`Engine.ProposeNestedHost`): work the
+host performs itself, such as git over HTTPS, governed exactly as one Skill
+action the Turn offers (its binding, credentials, input validation, policy and
+approvals). No action worker dispatches it. The host claims it and takes a
+fresh single-use credential lease for each piece of work
+(`AcquireNestedHostAction`), resolves the lease itself, and records the outcome
+(`FinishNestedHostAction`). A host call the host abandons is closed by an action
+worker without dispatch.
+
 ## Approvals
 
 An **approval checkpoint** records the exact proposed action, policy decision,

@@ -583,8 +583,12 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*
 			AND json_extract(r.payload, '$.pausedWakeCondition.reference') = c.id)
 		AND NOT EXISTS (SELECT 1 FROM skill_runtime_maintenance m WHERE m.scope_kind = c.scope_kind AND m.scope_id = c.scope_id
 			AND m.skill_id = c.skill_id AND m.active = 1)
+		AND (CASE WHEN ? <> '' THEN c.id = ? AND c.status = ? AND json_extract(c.payload, '$.execution') = ?
+			ELSE NOT (COALESCE(json_extract(c.payload, '$.execution'), '') = ? AND c.status = ? AND c.available_at > ?) END)
 		ORDER BY c.available_at, c.created_at, c.id LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
-		ActionCallStatusReady, claim.Now, ActionCallStatusRunning, claim.Now).Scan(&selectedPayload)
+		ActionCallStatusReady, claim.Now, ActionCallStatusRunning, claim.Now,
+		claim.HostActionID, claim.HostActionID, ActionCallStatusReady, string(ActionExecutionHost),
+		string(ActionExecutionHost), ActionCallStatusReady, claim.hostReadyCutoff()).Scan(&selectedPayload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 			return nil, err

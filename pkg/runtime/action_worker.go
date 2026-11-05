@@ -100,6 +100,8 @@ type ActionWorker struct {
 	// onClaim is an immutable pool hook that hands off another claim before
 	// this worker starts hydrating authority or waiting on the provider.
 	onClaim func()
+	// hostSummary, when set, describes a host call's outcome in activity.
+	hostSummary string
 }
 
 func NewActionWorker(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher) *ActionWorker {
@@ -124,6 +126,12 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	}
 	if w.onClaim != nil {
 		w.onClaim()
+	}
+	if call.Execution == ActionExecutionHost {
+		// Only its host performs a host call. A worker gets one only after
+		// the host abandoned it, and closes it without dispatch; a call that
+		// was running may already have reached its provider.
+		return w.persistOutcome(ctx, call, nil, nil, nil, errNestedHostActionAbandoned, workerID, call.RecoveredRunning)
 	}
 	executionCtx, stopLease := w.holdActionLease(ctx, call, workerID, leaseDuration)
 	// An ActionCall may outlive its parent dependency after cancellation or a
@@ -475,6 +483,9 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		}
 	}
 	terminalOutcome := updatedCall.Status == ActionCallStatusSucceeded || updatedCall.Status == ActionCallStatusFailed
+	if terminalOutcome && w.hostSummary != "" && call.Execution == ActionExecutionHost {
+		summary = w.hostSummary
+	}
 	if ownsDependency && terminalOutcome && !nested {
 		updatedRun = cloneAgentRun(sourceRun)
 		if paused {

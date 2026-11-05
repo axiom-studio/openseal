@@ -9,13 +9,20 @@ import (
 )
 
 type (
-	ActionOrigin        = runtime.ActionOrigin
-	NestedActionRequest = runtime.NestedActionRequest
-	NestedActionResult  = runtime.NestedActionResult
+	ActionOrigin            = runtime.ActionOrigin
+	NestedActionRequest     = runtime.NestedActionRequest
+	NestedActionResult      = runtime.NestedActionResult
+	ActionExecution         = runtime.ActionExecution
+	NestedHostActionRequest = runtime.NestedHostActionRequest
+	NestedHostActionGrant   = runtime.NestedHostActionGrant
+	NestedHostActionOutcome = runtime.NestedHostActionOutcome
 )
 
 const (
 	ActionOriginVM                 = runtime.ActionOriginVM
+	ActionExecutionHost            = runtime.ActionExecutionHost
+	NestedHostActionLease          = runtime.NestedHostActionLease
+	NestedHostActionReadyGrace     = runtime.NestedHostActionReadyGrace
 	MaxNestedActionCallsPerTurn    = runtime.MaxNestedActionCallsPerTurn
 	MaxConcurrentNestedActionCalls = runtime.MaxConcurrentNestedActionCalls
 	// NestedActionWait bounds how long RunNestedAction waits for a call to
@@ -27,6 +34,8 @@ var (
 	ErrNestedTurnNotActive       = runtime.ErrNestedTurnNotActive
 	ErrNestedActionNotAuthorized = runtime.ErrNestedActionNotAuthorized
 	ErrNestedActionLimit         = runtime.ErrNestedActionLimit
+	ErrNestedHostActionNotReady  = runtime.ErrNestedHostActionNotReady
+	ErrNestedHostActionClosed    = runtime.ErrNestedHostActionClosed
 )
 
 // RunNestedAction polls a call's state from nestedActionPollFirst, doubling
@@ -90,4 +99,41 @@ func (e *Engine) GetNestedAction(ctx context.Context, scope Scope, runID, action
 		return nil, errors.New("governed actions are not configured")
 	}
 	return e.actions.GetNested(ctx, scope, runID, actionCallID)
+}
+
+// ProposeNestedHost records work the host itself performs during the in-flight
+// Turn req.TurnID for code in the chat's VM, such as a git fetch or push over
+// HTTPS. It is governed, approved and recorded as the offered Skill action
+// req.SkillID/req.Action with req.Arguments, but never dispatched to the
+// Skill: the host claims it with AcquireNestedHostAction, which hands it a
+// credential lease, performs the work, and ends it with
+// FinishNestedHostAction. It returns at once: a call that needs approval
+// waits for it (poll GetNestedAction); an allowed call is ready for the host.
+// It must be called in the process hosting the Turn.
+func (e *Engine) ProposeNestedHost(ctx context.Context, req NestedHostActionRequest) (*NestedActionResult, error) {
+	if e == nil || e.actions == nil {
+		return nil, errors.New("governed actions are not configured")
+	}
+	return e.actions.ProposeNestedHost(ctx, req)
+}
+
+// AcquireNestedHostAction claims (or renews the host's hold on) a ready host
+// call of the in-flight Turn and issues a fresh single-use credential lease for
+// it through issuer. The lease names opaque credential references only; the
+// host resolves them for its own use and must never record the values. It
+// returns ErrNestedHostActionNotReady while the call waits for approval and
+// ErrNestedHostActionClosed once it was denied or ended.
+func (e *Engine) AcquireNestedHostAction(ctx context.Context, scope Scope, runID, turnID, actionCallID string, issuer ActionCredentialLeaseIssuer) (*NestedHostActionGrant, error) {
+	if e == nil || e.actions == nil {
+		return nil, errors.New("governed actions are not configured")
+	}
+	return e.actions.AcquireNestedHostAction(ctx, scope, runID, turnID, actionCallID, issuer)
+}
+
+// FinishNestedHostAction records how a host call ended and releases it.
+func (e *Engine) FinishNestedHostAction(ctx context.Context, outcome NestedHostActionOutcome) (*ActionCall, error) {
+	if e == nil || e.actions == nil {
+		return nil, errors.New("governed actions are not configured")
+	}
+	return e.actions.FinishNestedHostAction(ctx, outcome)
 }

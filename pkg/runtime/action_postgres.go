@@ -508,8 +508,10 @@ func (s *PostgresStore) ClaimNextAction(ctx context.Context, claim ActionClaim) 
 			AND r.payload#>>'{pausedWakeCondition,type}'='action' AND r.payload#>>'{pausedWakeCondition,reference}'=c.id)
 		AND NOT EXISTS (SELECT 1 FROM `+s.table("skill_runtime_maintenance")+` m WHERE m.scope_kind=c.scope_kind AND m.scope_id=c.scope_id
 			AND m.skill_id=c.skill_id AND m.active)
+		AND (CASE WHEN $6 <> '' THEN c.id=$6 AND c.status=$3 AND c.payload->>'execution'=$7
+			ELSE NOT (COALESCE(c.payload->>'execution', '')=$7 AND c.status=$3 AND c.available_at > $8) END)
 		ORDER BY c.available_at, c.created_at, c.id FOR UPDATE OF c SKIP LOCKED LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
-		ActionCallStatusReady, ActionCallStatusRunning, claim.Now).Scan(&payload)
+		ActionCallStatusReady, ActionCallStatusRunning, claim.Now, claim.HostActionID, string(ActionExecutionHost), claim.hostReadyCutoff()).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return nil, err

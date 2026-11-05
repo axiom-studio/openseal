@@ -59,7 +59,12 @@ type ActionCall struct {
 	Origin ActionOrigin `json:"origin,omitempty"`
 	// OriginRef is the host's grouping reference for a nested call, such as
 	// the workspace command it ran under.
-	OriginRef  string           `json:"originRef,omitempty"`
+	OriginRef string `json:"originRef,omitempty"`
+	// Execution is empty for a call an action worker dispatches to its
+	// Skill. ActionExecutionHost marks a nested call the host that proposed it
+	// performs itself under a credential lease (see ProposeNestedHost); action
+	// workers never dispatch it.
+	Execution  ActionExecution  `json:"execution,omitempty"`
 	Status     ActionCallStatus `json:"status"`
 	Risk       skill.RiskLevel  `json:"risk"`
 	SideEffect skill.SideEffect `json:"sideEffect"`
@@ -128,6 +133,9 @@ func (c *ActionCall) Validate() error {
 	}
 	if c.Origin == "" && c.OriginRef != "" {
 		return errors.New("only a nested action call has an origin reference")
+	}
+	if c.Execution != "" && (c.Execution != ActionExecutionHost || c.Origin != ActionOriginVM) {
+		return errors.New("only a nested action call may be performed by its host")
 	}
 	if c.FailurePhase != "" && (c.Status != ActionCallStatusFailed || c.FailurePhase != ActionFailureBeforeDispatch && c.FailurePhase != ActionFailureAfterDispatch) {
 		return errors.New("action failure phase is invalid")
@@ -433,6 +441,12 @@ type ActionClaim struct {
 	WorkerID      string
 	Now           time.Time
 	LeaseDuration time.Duration
+	// HostActionID claims exactly this ready host-performed call for the
+	// host that proposed it (see ClaimNestedHostAction). Without it a claim
+	// takes the next call an action worker may run: never a host call that
+	// became ready within NestedHostActionReadyGrace, which its host claims
+	// itself, so a worker only recovers host calls their host abandoned.
+	HostActionID string
 }
 
 func (c ActionClaim) Validate() error {
@@ -443,6 +457,21 @@ func (c ActionClaim) Validate() error {
 		return errors.New("action worker, current time, and lease duration are required")
 	}
 	return nil
+}
+
+// claimSelects reports whether a claim may take call, apart from its status,
+// availability, Run and maintenance, which every store checks itself.
+func (c ActionClaim) claimSelects(call *ActionCall) bool {
+	if c.HostActionID != "" {
+		return call.ID == c.HostActionID && call.Execution == ActionExecutionHost && call.Status == ActionCallStatusReady
+	}
+	return call.Execution != ActionExecutionHost || call.Status != ActionCallStatusReady || !call.AvailableAt.After(c.hostReadyCutoff())
+}
+
+// hostReadyCutoff is the latest time a ready host call became available for
+// an action worker to recover it.
+func (c ActionClaim) hostReadyCutoff() time.Time {
+	return c.Now.Add(-NestedHostActionReadyGrace)
 }
 
 type ActionExecutionRecord struct {

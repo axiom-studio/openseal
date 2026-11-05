@@ -115,6 +115,9 @@ type ProposeActionRequest struct {
 	// proposal never changes the Run and is fenced by its in-flight Turn.
 	Origin    ActionOrigin
 	OriginRef string
+	// Execution ActionExecutionHost marks a nested call its host performs
+	// itself (see ProposeNestedHost).
+	Execution ActionExecution
 }
 
 type ActionCoordinator struct {
@@ -188,6 +191,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	nested := req.Origin == ActionOriginVM
 	if req.Origin != "" && !nested {
 		return nil, fmt.Errorf("unsupported action origin %q", req.Origin)
+	}
+	if req.Execution != "" && (req.Execution != ActionExecutionHost || !nested) {
+		return nil, errors.New("only a nested action may be performed by its host")
 	}
 	if nested {
 		if strings.TrimSpace(req.TurnID) == "" || strings.TrimSpace(req.WorkerID) == "" || strings.TrimSpace(req.AssignedAgentID) != "" || req.ExternalOperation != nil {
@@ -327,7 +333,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	call := &ActionCall{
 		ID: callID, Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
-		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action, Origin: req.Origin, OriginRef: strings.TrimSpace(req.OriginRef),
+		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action, Origin: req.Origin, OriginRef: strings.TrimSpace(req.OriginRef), Execution: req.Execution,
 		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: bound.Action.Review,
 		Arguments:         persistedActionArguments(arguments, bound.Action.InputSchema),
 		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
@@ -529,6 +535,9 @@ func addActionOrigin(payload map[string]interface{}, call *ActionCall) {
 	payload["origin"] = string(call.Origin)
 	if call.OriginRef != "" {
 		payload["originRef"] = call.OriginRef
+	}
+	if call.Execution != "" {
+		payload["execution"] = string(call.Execution)
 	}
 }
 

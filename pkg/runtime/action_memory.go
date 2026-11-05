@@ -305,7 +305,7 @@ func (s *MemoryStore) ClaimNextAction(_ context.Context, claim ActionClaim) (*Ac
 	defer s.mu.Unlock()
 	var selected *ActionCall
 	for _, call := range s.actions {
-		if call.Scope != claim.Scope || !actionEligible(call, claim.Now) || runHasPausedActionDependency(s.agentRuns[portfolioKey(call.Scope, call.RunID)], call) {
+		if call.Scope != claim.Scope || !actionEligible(call, claim.Now) || !claim.claimSelects(call) || runHasPausedActionDependency(s.agentRuns[portfolioKey(call.Scope, call.RunID)], call) {
 			continue
 		}
 		if s.memorySkillRuntimeMaintenanceActiveLocked(call.Scope, call.SkillID) != nil {

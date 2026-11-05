@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 // ActionOrigin records who requested an ActionCall when it was not the model
@@ -67,6 +69,11 @@ type NestedActionResult struct {
 func (r *NestedActionResult) Settled() bool {
 	if r == nil || r.Call == nil {
 		return false
+	}
+	if r.Call.Execution == ActionExecutionHost {
+		// No action worker moves a host call on: ready or running, it waits
+		// for its host.
+		return true
 	}
 	switch r.Call.Status {
 	case ActionCallStatusReady, ActionCallStatusRunning:
@@ -207,6 +214,10 @@ func (c *ActionCoordinator) OpenNestedActionTurn(run *AgentRun, turn *AgentTurn,
 // changes the Run. An allowed call is ready for action workers; a call that
 // needs review waits for its approval; a denied call is returned denied.
 func (c *ActionCoordinator) ProposeNested(ctx context.Context, req NestedActionRequest) (*NestedActionResult, error) {
+	return c.proposeNested(ctx, req, "", nil)
+}
+
+func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionRequest, execution ActionExecution, choose func(*TurnRunnerBinding) (*capability.ModelAction, error)) (*NestedActionResult, error) {
 	if c == nil {
 		return nil, errors.New("action coordinator is not configured")
 	}
@@ -227,7 +238,13 @@ func (c *ActionCoordinator) ProposeNested(ctx context.Context, req NestedActionR
 		return nil, errors.New("nested action calls are not available in Team conversations")
 	}
 	binding := authority.binding
-	selected, err := selectTurnModelAction(binding.ModelActions, TurnAction{Capability: req.Capability})
+	var selected *capability.ModelAction
+	var err error
+	if choose != nil {
+		selected, err = choose(binding)
+	} else {
+		selected, err = selectTurnModelAction(binding.ModelActions, TurnAction{Capability: req.Capability})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -245,15 +262,19 @@ func (c *ActionCoordinator) ProposeNested(ctx context.Context, req NestedActionR
 	if summary == "" {
 		summary = "Called " + selected.Name + " from the chat's VM"
 	}
+	idempotencyPrefix := "vm:"
+	if execution == ActionExecutionHost {
+		idempotencyPrefix = "vm-host:"
+	}
 	proposal, err := c.Propose(ctx, ProposeActionRequest{
 		Scope: req.Scope, RunID: req.RunID, TurnID: req.TurnID, WorkerID: authority.workerID, DeploymentID: deploymentID,
 		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action,
 		Arguments:       selected.ActionInput(cloneMap(req.Arguments)),
 		PreparedRuntime: preparedRuntimeForAction(binding, selected),
-		IdempotencyKey:  "vm:" + req.TurnID + ":" + strings.TrimSpace(req.IdempotencyKey),
+		IdempotencyKey:  idempotencyPrefix + req.TurnID + ":" + strings.TrimSpace(req.IdempotencyKey),
 		Summary:         summary, Actor: ActivityActor{Type: "worker", ID: authority.workerID},
-		Origin: ActionOriginVM, OriginRef: strings.TrimSpace(req.OriginRef), CausationID: req.TurnID,
+		Origin: ActionOriginVM, OriginRef: strings.TrimSpace(req.OriginRef), CausationID: req.TurnID, Execution: execution,
 	})
 	if err != nil {
 		return nil, err
@@ -261,7 +282,7 @@ func (c *ActionCoordinator) ProposeNested(ctx context.Context, req NestedActionR
 	if proposal == nil || proposal.Call == nil {
 		return nil, errors.New("nested action proposal returned no ActionCall")
 	}
-	if proposal.Call.Origin != ActionOriginVM || proposal.Call.TurnID != req.TurnID {
+	if proposal.Call.Origin != ActionOriginVM || proposal.Call.TurnID != req.TurnID || proposal.Call.Execution != execution {
 		return nil, ErrIdempotencyConflict
 	}
 	return &NestedActionResult{Call: proposal.Call, Approval: proposal.Approval, Created: proposal.Created}, nil

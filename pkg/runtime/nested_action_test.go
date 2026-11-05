@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
 )
@@ -66,35 +67,44 @@ func nestedActionStores(t *testing.T) []struct {
 // offers two actions: a read and an external write that needs approval.
 func newNestedActionFixture(t *testing.T, store KernelStore) *nestedActionFixture {
 	t.Helper()
-	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "one"}
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	catalog := skill.NewCatalog()
 	object := map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"path": map[string]interface{}{"type": "string"}}}
-	if err := catalog.Register(ctx, &skill.Definition{
+	definition := &skill.Definition{
 		ID: "repo", Version: "1.0.0", Name: "Repo", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://repo.invalid"},
 		Actions: map[string]skill.Action{
 			"read_file":  {Name: "read_file", Description: "Read a file", SideEffect: skill.SideEffectRead, Risk: skill.RiskLevelRead, InputSchema: object, Idempotency: skill.IdempotencySupported},
 			"push":       {Name: "push", Description: "Push a branch", SideEffect: skill.SideEffectExternal, Risk: skill.RiskLevelExternal, InputSchema: object, Idempotency: skill.IdempotencySupported},
 			"delete_all": {Name: "delete_all", Description: "Delete everything", SideEffect: skill.SideEffectDestructive, Risk: skill.RiskLevelDestructive, InputSchema: object, Idempotency: skill.IdempotencySupported},
 		},
-	}); err != nil {
+	}
+	binding := &skill.Binding{
+		ID: "repo-binding", DeploymentID: "agent", SkillID: "repo", SkillVersion: "1.0.0", AllowedActions: []string{"read_file", "push", "delete_all"}, MaximumRisk: skill.RiskLevelDestructive, Revision: 1,
+	}
+	// The Turn offers only the read and the push.
+	return newNestedActionFixtureWith(t, store, definition, binding, func(action capability.ModelAction) bool { return action.Action != "delete_all" })
+}
+
+// newNestedActionFixtureWith opens the same Run and Turn offering the actions
+// of definition's binding that offer selects.
+func newNestedActionFixtureWith(t *testing.T, store KernelStore, definition *skill.Definition, skillBinding *skill.Binding, offer func(capability.ModelAction) bool) *nestedActionFixture {
+	t.Helper()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "one"}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	catalog := skill.NewCatalog()
+	if err := catalog.Register(ctx, definition); err != nil {
 		t.Fatal(err)
 	}
-	if err := catalog.Bind(ctx, &skill.Binding{
-		ID: "repo-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "agent",
-		SkillID: "repo", SkillVersion: "1.0.0", AllowedActions: []string{"read_file", "push", "delete_all"}, MaximumRisk: skill.RiskLevelDestructive, Revision: 1,
-	}); err != nil {
+	skillBinding.Scope = skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	if err := catalog.Bind(ctx, skillBinding); err != nil {
 		t.Fatal(err)
 	}
 	offered, err := catalog.ListModelActions(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "agent")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The Turn offers only the read and the push.
 	binding := &TurnRunnerBinding{DeploymentID: "agent"}
 	for _, action := range offered {
-		if action.Action != "delete_all" {
+		if offer(action) {
 			binding.ModelActions = append(binding.ModelActions, action)
 		}
 	}
