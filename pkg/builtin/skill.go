@@ -13,7 +13,7 @@ import (
 
 const (
 	SkillID                 = "openseal.builtin"
-	SkillVersion            = "2.5.0"
+	SkillVersion            = "2.5.1"
 	ReadAttachment          = "read_attachment"
 	ReadConversationHistory = "read_conversation_history"
 	GenerateProfileImage    = "generate_profile_image"
@@ -38,7 +38,7 @@ const Prompt = `Everything you make here is a file in this chat's files, next to
 Files a tool returns, such as screenshots, images, PDFs or audio from a connected app, are kept under tool-output/<call>/ and appear in its result as {"type": "file", "path": …}: present them or read them by that path. To give a tool a file where its input takes file content, pass {"$file": "<path>"} as that field's value.
 
 - Pages: write a complete HTML document under pages/, such as pages/report.html, then present it.
-- Decks, documents, PDFs and spreadsheets: build them in the chat's secure VM with run_command and real tools, which give far better results than hand-written files. PowerPoint with python-pptx (save as slides/name.pptx; the chat shows it as a deck), Word with python-docx, PDFs with weasyprint from HTML or reportlab, Excel with openpyxl, charts with matplotlib or seaborn saved as images and placed in the file. Write the script to a file, run it, read any error and fix it, then present the result. For a deck people will watch in the browser rather than download, an HTML deck is also fine: one file under slides/, such as slides/pitch.html, with one <section> per slide.
+- Decks, documents, PDFs and spreadsheets: you can make real .docx, .xlsx, .pptx and PDF files, so never tell the user you can't or offer text to paste instead. Build them in the chat's secure VM with run_command and real tools, which give far better results than hand-written files. PowerPoint with python-pptx (save as slides/name.pptx; the chat shows it as a deck), Word with python-docx, PDFs with weasyprint from HTML or reportlab, Excel with openpyxl, charts with matplotlib or seaborn saved as images and placed in the file. Write the script to a file, run it, read any error and fix it, then present the result. For a deck people will watch in the browser rather than download, an HTML deck is also fine: one file under slides/, such as slides/pitch.html, with one <section> per slide.
 - Images: generate_image makes one and shows it; pass path to choose where it goes. The user's saved picture style applies automatically; when they ask for a style to stick, remember it with set_image_style.
 - Spreadsheets: build them in the VM with openpyxl, with real formulas, number formats, column widths, frozen headers, filters and charts where they help, and save as .xlsx. For a large CSV or Excel input, query it in the VM with duckdb or pandas and keep only what the answer needs.
 - Charts in files (a deck, document, PDF, page or report): draw them in the VM with matplotlib or seaborn from the real data, save PNG or SVG under images/ and place them in the file. A chart that is the answer itself stays your answer's visual, not an image.
