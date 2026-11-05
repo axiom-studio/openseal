@@ -174,8 +174,8 @@ func (s *MemoryStore) CommitChannelMessage(_ context.Context, record ChannelMess
 		return nil, ErrMessageConflict
 	}
 	s.conversations[conversationKey] = cloneConversation(record.Conversation)
-	s.channelMessages[conversationKey] = append(s.channelMessages[conversationKey], cloneChannelMessage(record.Message))
-	s.channelMessageIDs[messageKey] = cloneChannelMessage(record.Message)
+	s.channelMessages[conversationKey] = append(s.channelMessages[conversationKey], cloneChannelMessage(persistedChannelMessage(record.Message)))
+	s.channelMessageIDs[messageKey] = cloneChannelMessage(persistedChannelMessage(record.Message))
 	s.channelMessageKeys[idempotencyKey] = record.Message.ID
 	return &ChannelMessageCommitResult{Conversation: cloneConversation(record.Conversation), Message: cloneChannelMessage(record.Message)}, nil
 }
@@ -286,9 +286,9 @@ func (s *MemoryStore) CommitParticipationRound(_ context.Context, record Partici
 	}
 	s.conversations[conversationKey] = cloneConversation(record.Conversation)
 	for _, message := range record.Messages {
-		cloned := cloneChannelMessage(message)
+		cloned := cloneChannelMessage(persistedChannelMessage(message))
 		s.channelMessages[conversationKey] = append(s.channelMessages[conversationKey], cloned)
-		s.channelMessageIDs[channelMessageStoreKey(message.Scope, message.ConversationID, message.ID)] = cloneChannelMessage(message)
+		s.channelMessageIDs[channelMessageStoreKey(message.Scope, message.ConversationID, message.ID)] = cloneChannelMessage(cloned)
 		s.channelMessageKeys[channelMessageIdempotencyKey(message.Scope, message.ConversationID, message.IdempotencyKey)] = message.ID
 	}
 	result := &ParticipationRoundResult{

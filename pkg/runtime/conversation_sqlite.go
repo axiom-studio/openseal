@@ -806,7 +806,7 @@ func updateSQLiteConversation(ctx context.Context, conn *sql.Conn, conversation 
 }
 
 func insertSQLiteChannelMessage(ctx context.Context, conn *sql.Conn, message *ChannelMessage) error {
-	payload, err := json.Marshal(message)
+	payload, err := json.Marshal(persistedChannelMessage(message))
 	if err != nil {
 		return err
 	}

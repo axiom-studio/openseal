@@ -196,12 +196,14 @@ type ConversationStore interface {
 	CreateSurfaceInteraction(ctx context.Context, interaction *SurfaceInteraction) (*SurfaceInteraction, bool, error)
 	ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error)
 	ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error)
+	ConversationReactionStore
 }
 
 type ConversationService struct {
-	store ConversationStore
-	now   func() time.Time
-	newID func() string
+	store     ConversationStore
+	now       func() time.Time
+	newID     func() string
+	reactions MessageReactionProjector
 }
 
 func NewConversationService(store ConversationStore) *ConversationService {
@@ -550,7 +552,11 @@ func (s *ConversationService) ListChannelMessages(ctx context.Context, filter Ch
 		return nil, fmt.Errorf("%w: message sequence bounds are invalid", ErrInvalidConversation)
 	}
 	if filter.Viewer == nil {
-		return s.store.ListChannelMessages(ctx, filter)
+		messages, err := s.store.ListChannelMessages(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+		return withMessageReactions(ctx, s.store, messages)
 	}
 	// Scan through fully hidden pages server-side so an authorized caller does
 	// not get stuck on an empty page and does not need hidden sequence metadata.
@@ -587,7 +593,7 @@ func (s *ConversationService) ListChannelMessages(ctx context.Context, filter Ch
 	if len(result) > desired {
 		result = result[:desired]
 	}
-	return result, nil
+	return withMessageReactions(ctx, s.store, result)
 }
 
 func validateChannelMessageViewFilter(filter ChannelMessageFilter) error {
@@ -723,7 +729,11 @@ func (s *ConversationService) GetChannelMessage(ctx context.Context, scope Scope
 	if message == nil {
 		return nil, ErrChannelMessageNotFound
 	}
-	return message, nil
+	filled, err := withMessageReactions(ctx, s.store, []*ChannelMessage{message})
+	if err != nil {
+		return nil, err
+	}
+	return filled[0], nil
 }
 
 func (s *ConversationService) GetParticipationRound(ctx context.Context, scope Scope, conversationID, roundID string) (*ParticipationRoundResult, error) {
@@ -1032,6 +1042,7 @@ func cloneChannelMessage(in *ChannelMessage) *ChannelMessage {
 	out.Mentions = cloneParticipants(in.Mentions)
 	out.References = cloneConversationReferences(in.References)
 	out.Quote = cloneChannelMessageQuote(in.Quote)
+	out.Reactions = cloneMessageReactions(in.Reactions)
 	return &out
 }
 

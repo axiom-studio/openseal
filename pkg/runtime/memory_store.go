@@ -92,6 +92,8 @@ type MemoryStore struct {
 	conversationCursors                 map[string]*ConversationCursor
 	conversationPresence                map[string]*ConversationPresence
 	surfaceInteractions                 map[string][]*SurfaceInteraction
+	messageReactions                    map[string][]*MessageReactionRecord
+	reactionEvents                      map[string][]*ConversationReactionEvent
 	embedInstallations                  map[string]*EmbedInstallation
 	embedRoutes                         map[string]string
 	embedSessions                       map[string]*EmbedSession

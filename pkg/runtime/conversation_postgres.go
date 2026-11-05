@@ -804,7 +804,7 @@ func (s *PostgresStore) updatePostgresConversationTx(ctx context.Context, tx *sq
 }
 
 func (s *PostgresStore) insertPostgresChannelMessageTx(ctx context.Context, tx *sql.Tx, message *ChannelMessage) error {
-	payload, err := json.Marshal(message)
+	payload, err := json.Marshal(persistedChannelMessage(message))
 	if err != nil {
 		return err
 	}

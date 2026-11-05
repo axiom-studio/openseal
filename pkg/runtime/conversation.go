@@ -347,6 +347,9 @@ type ChannelMessage struct {
 	ParticipationRoundID string                    `json:"participationRoundId,omitempty"`
 	Historical           bool                      `json:"historical,omitempty"`
 	CreatedAt            time.Time                 `json:"createdAt"`
+	// Reactions are filled on read from the reaction store. They are never
+	// part of the stored message, its validation or its idempotency.
+	Reactions []MessageReaction `json:"reactions,omitempty"`
 }
 
 // ChannelMessageQuote is a snapshot of a quoted message taken when the reply
