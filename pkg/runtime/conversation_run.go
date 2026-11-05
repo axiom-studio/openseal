@@ -209,10 +209,8 @@ func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx conte
 		return nil
 	}
 	threadRoot := externalConversationThreadRoot(conversation, message)
-	concurrencyKey := conversation.ID
-	if threadRoot != "" {
-		concurrencyKey += ":thread:" + threadRoot
-	}
+	// The routing Run's lane and every member's lane in it.
+	lane := conversationRunLane(conversation.ID, threadRoot, conversation.Owner, "")
 	const pageSize = 100
 	// Two HTTP posts can overlap: an older message may be scheduled after the
 	// newer one. In that case its own Run must be canceled as well.
@@ -238,13 +236,14 @@ func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx conte
 	for offset := 0; ; offset += pageSize {
 		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
 			Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
-			ConcurrencyKey: concurrencyKey, Limit: pageSize, Offset: offset,
+			Statuses: activeConversationRunStatuses, Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
 			return err
 		}
 		for _, run := range runs {
-			if run == nil || (run.ID == replacementID && supersedingSequence == message.Sequence) || isTerminalAgentRunStatus(run.Status) {
+			if run == nil || (run.ID == replacementID && supersedingSequence == message.Sequence) || isTerminalAgentRunStatus(run.Status) ||
+				(run.ConcurrencyKey != lane && !strings.HasPrefix(run.ConcurrencyKey, lane+":agent:")) {
 				continue
 			}
 			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
@@ -315,7 +314,7 @@ func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Conte
 }
 
 func conversationAgentRunRequest(conversation *Conversation, message *ChannelMessage) CreateAgentRunRequest {
-	goal := "Coordinate Team channel participation"
+	goal := teamRoutingRunGoal
 	assignedAgentID := ""
 	visibility := ActivityVisibilityTeam
 	if conversation.Owner.Type == OwnerTypeAgent {
@@ -822,7 +821,7 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	}
 	pinnedRunbook := run.Plan != nil && run.Plan["runbook"] != nil
 	finalExplanation := requiresFinalFailureExplanation(run.Checkpoint)
-	agentTurn := run.Owner.Type == OwnerTypeAgent || pinnedRunbook || finalExplanation || isTeamResponderRun(run)
+	agentTurn := run.Owner.Type == OwnerTypeAgent || pinnedRunbook || finalExplanation || isTeamMemberRun(run)
 	if agentTurn && r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
@@ -987,7 +986,7 @@ func (r *ConversationRunTurnRunner) PlanTurnBudget(ctx context.Context, input Tu
 	} else if stopped {
 		return BudgetUsage{}, nil
 	}
-	if input.Run.Owner.Type == OwnerTypeAgent || (input.Run.Plan != nil && input.Run.Plan["runbook"] != nil) || requiresFinalFailureExplanation(input.Run.Checkpoint) || isTeamResponderRun(input.Run) {
+	if input.Run.Owner.Type == OwnerTypeAgent || (input.Run.Plan != nil && input.Run.Plan["runbook"] != nil) || requiresFinalFailureExplanation(input.Run.Checkpoint) || isTeamMemberRun(input.Run) {
 		binding, err := r.ResolveTurnRunner(ctx, input.Run)
 		if err != nil {
 			return BudgetUsage{}, err
@@ -1017,7 +1016,7 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	if conversation.Owner != input.Run.Owner {
 		return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
 	}
-	if conversation.Owner.Type == OwnerTypeAgent || requiresFinalFailureExplanation(input.Run.Checkpoint) || isTeamResponderRun(input.Run) {
+	if conversation.Owner.Type == OwnerTypeAgent || requiresFinalFailureExplanation(input.Run.Checkpoint) || isTeamMemberRun(input.Run) {
 		return r.runAgentTurn(ctx, input, conversation, triggerID, nil, nil)
 	}
 	return r.routeTeamMessage(ctx, input.Run, conversation, triggerID)
@@ -1092,7 +1091,7 @@ func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx contex
 			historyPlan.Places = historyPlan.Places[:MaximumConversationPlaces]
 		}
 	}
-	if isTeamResponderRun(input.Run) {
+	if isTeamMemberRun(input.Run) {
 		historyPlan.Team, err = r.agentConversationTeamContext(ctx, input.Run, conversation, trigger)
 		if err != nil {
 			return TurnExecutionContext{}, historyPlan, err
@@ -1905,7 +1904,7 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		}
 		var routingReason string
 		var mentions []ConversationParticipant
-		if isTeamResponderRun(run) {
+		if isTeamMemberRun(run) {
 			routingReason, _ = run.Context[routingReasonContextKey].(string)
 			// One hop: an answer to a teammate's handoff never hands off again.
 			if trigger.Sender.Type != ConversationParticipantAgent {
@@ -2234,9 +2233,6 @@ func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context,
 	if run == nil {
 		return ErrInvalidAgentRun
 	}
-	if isTeamResponderRun(run) {
-		return validateTeamResponderRun(run)
-	}
 	if taskID, _ := run.Context[ConversationTaskContextKey].(string); taskID != "" {
 		task, err := canonicalConversationTaskContinuation(ctx, r.portfolio, run)
 		if err != nil {
@@ -2248,10 +2244,8 @@ func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context,
 		// Reuse the ordinary envelope validation only after proving the new
 		// lane against the canonical Task ledger.
 		run = cloneAgentRun(run)
-		run.ConcurrencyKey = task.ConversationID
-		if root, _ := run.Context["threadRootMessageId"].(string); root != "" {
-			run.ConcurrencyKey += ":thread:" + root
-		}
+		root, _ := run.Context["threadRootMessageId"].(string)
+		run.ConcurrencyKey = conversationRunLane(task.ConversationID, root, run.Owner, run.AssignedAgentID)
 	}
 	return validateConversationRun(run)
 }
@@ -2302,37 +2296,13 @@ func validateConversationRun(run *AgentRun) error {
 	conversationID, conversationOK := run.Context[conversationRunContextConversationID].(string)
 	triggerID, triggerOK := run.Context[conversationRunContextTriggerID].(string)
 	root, _ := run.Context["threadRootMessageId"].(string)
-	key := conversationID
-	if root != "" {
-		if !validOpaqueIdentifier(root, 128) {
-			return ErrInvalidAgentRun
-		}
-		key += ":thread:" + root
-	}
-	if !conversationOK || !triggerOK || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) ||
-		run.ConcurrencyKey != key {
-		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
-	}
-	return nil
-}
-
-// validateTeamResponderRun checks a Team member's child Run envelope: the
-// same conversation context as its parent and its own member lane.
-func validateTeamResponderRun(run *AgentRun) error {
-	conversationID, conversationOK := run.Context[conversationRunContextConversationID].(string)
-	triggerID, triggerOK := run.Context[conversationRunContextTriggerID].(string)
-	root, _ := run.Context["threadRootMessageId"].(string)
-	key := conversationID
-	if root != "" {
-		if !validOpaqueIdentifier(root, 128) {
-			return ErrInvalidAgentRun
-		}
-		key += ":thread:" + root
+	if root != "" && !validOpaqueIdentifier(root, 128) {
+		return ErrInvalidAgentRun
 	}
 	reason, _ := run.Context[routingReasonContextKey].(string)
 	if !conversationOK || !triggerOK || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) ||
-		run.ConcurrencyKey != teamResponderConcurrencyKey(key, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
-		return fmt.Errorf("%w: Team member Run context or concurrency key is invalid", ErrInvalidAgentRun)
+		run.ConcurrencyKey != conversationRunLane(conversationID, root, run.Owner, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
+		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
 	}
 	return nil
 }

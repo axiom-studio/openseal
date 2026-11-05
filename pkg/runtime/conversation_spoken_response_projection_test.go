@@ -76,7 +76,7 @@ func TestConversationAnswersInheritCanonicalTriggerResponseMode(t *testing.T) {
 							t.Fatalf("routing started %d member Runs", len(children))
 						}
 						child, err := store.GetAgentRun(t.Context(), scope, children[0].(string))
-						if err != nil || child == nil || child.Kind != RunKindAgentWork || child.ParentRunID != scheduled.Run.ID || child.AssignedAgentID != "agent-1" {
+						if err != nil || child == nil || !isTeamMemberRun(child) || child.ParentRunID != "" || child.AssignedAgentID != "agent-1" {
 							t.Fatalf("member Run = %#v, %v", child, err)
 						}
 						binding, err := runner.ResolveTurnRunner(t.Context(), child)

@@ -3138,18 +3138,6 @@ func (e *Engine) rebuildConversationRuns() error {
 	}
 	e.conversationRunScheduler = scheduler
 	e.conversationRunReconciler = reconciler
-	// Team members answer in child agent_work Runs; whichever agent_work
-	// workers claim them must run them through the conversation runner.
-	for index := range e.agentSupervisorSpecs {
-		if e.agentSupervisorSpecs[index].config.Kind == "" || e.agentSupervisorSpecs[index].config.Kind == runtime.RunKindAgentWork {
-			e.agentSupervisorSpecs[index].resolver = runtime.TeamResponderTurnResolver(runner, e.agentSupervisorSpecs[index].resolver)
-		}
-	}
-	for index := range e.agentPoolSpecs {
-		if e.agentPoolSpecs[index].config.Kind == "" || e.agentPoolSpecs[index].config.Kind == runtime.RunKindAgentWork {
-			e.agentPoolSpecs[index].resolver = runtime.TeamResponderTurnResolver(runner, e.agentPoolSpecs[index].resolver)
-		}
-	}
 	e.agentSupervisorSpecs = append(e.agentSupervisorSpecs, agentRunWorkerSupervisorSpec{
 		config: config.Workers, source: e.conversationRunScopes, resolver: runner,
 	})

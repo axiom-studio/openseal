@@ -78,13 +78,6 @@ func (s *MemoryStore) PromoteConversationTask(ctx context.Context, req Conversat
 			return nil, nil
 		}
 	}
-	if run.Owner.Type == OwnerTypeTeam {
-		roundID := s.participationKeys[channelMessageIdempotencyKey(req.Scope, conversationID, conversationTaskParticipationRoundKey(run))]
-		round := s.participationRounds[channelMessageStoreKey(req.Scope, conversationID, roundID)]
-		if round != nil && conversationTaskFinishedTeamRound(run, round.Round) {
-			return nil, nil
-		}
-	}
 	for _, turn := range s.turns[key] {
 		if turn.Sequence == run.LastAppliedTurn+1 && conversationTaskFinishedBeforePromotion(turn) {
 			return nil, nil

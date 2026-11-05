@@ -17,7 +17,7 @@ func (workforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringReq
 type evaluableWorkforceFixtureGenerator struct{}
 
 func (evaluableWorkforceFixtureGenerator) Generate(context.Context, WorkforceAuthoringRequest) ([]byte, error) {
-	return []byte(`{"schemaVersion":"openseal.authoring-result/v1","candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"coordination":{},"approvals":{"maximumRisk":"read"}},"assignments":[]},"authoring":{"version":"openseal.authoring-form/v1"},"commitments":{}}`), nil
+	return []byte(`{"schemaVersion":"openseal.authoring-result/v1","candidate":{"agents":[],"team":{"id":"team","version":"1","displayName":"Team","purpose":"Own work","roles":[{"id":"member","displayName":"Member","purpose":"Do work"}],"approvals":{"maximumRisk":"read"}},"assignments":[]},"authoring":{"version":"openseal.authoring-form/v1"},"commitments":{}}`), nil
 }
 
 type sourceQualifiedWorkforceFixtureGenerator struct{}

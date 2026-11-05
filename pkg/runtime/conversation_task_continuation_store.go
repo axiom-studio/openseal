@@ -118,17 +118,6 @@ func conversationTaskFinalResponseKeys(run *AgentRun) []string {
 		"team-action-outcome:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+trigger)}
 }
 
-func conversationTaskParticipationRoundKey(run *AgentRun) string {
-	conversation, _ := run.Context[conversationRunContextConversationID].(string)
-	trigger, _ := run.Context[conversationRunContextTriggerID].(string)
-	return "participation-round:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+conversation+"\x00"+trigger)
-}
-
-func conversationTaskFinishedTeamRound(run *AgentRun, round *ParticipationRound) bool {
-	return run.Owner.Type == OwnerTypeTeam && round != nil && round.Status == ParticipationRoundCommitted &&
-		round.TriggerMessageID == run.Context[conversationRunContextTriggerID]
-}
-
 func conversationTaskFinishedBeforePromotion(turn *AgentTurn) bool {
 	return turn != nil && terminalAgentTurnStatus(turn.Status) && isTerminalAgentRunStatus(turn.NextRunStatus)
 }

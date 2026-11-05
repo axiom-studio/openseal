@@ -480,8 +480,12 @@ func loadConversationTeamRoster(ctx context.Context, store ConversationStore, co
 	return roster
 }
 
-// teamBusyMembers maps each member with an active child Run in this Team's
-// conversations to a short label of that work.
+// activeConversationRunStatuses are the non-terminal Run statuses.
+var activeConversationRunStatuses = []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusPaused, AgentRunStatusSleeping,
+	AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent, AgentRunStatusWaitingForApproval, AgentRunStatusWaitingForEvent}
+
+// teamBusyMembers maps each member with an active Run of this Team (an answer
+// or a task) to a short label of that work.
 func teamBusyMembers(ctx context.Context, store ConversationStore, conversation *Conversation) (map[string]string, error) {
 	busy := make(map[string]string)
 	runs, ok := store.(PortfolioStore)
@@ -491,9 +495,8 @@ func teamBusyMembers(ctx context.Context, store ConversationStore, conversation 
 	const pageSize = 200
 	for offset := 0; ; offset += pageSize {
 		page, err := runs.ListAgentRuns(ctx, AgentRunFilter{
-			Scope: conversation.Scope, Kind: RunKindAgentWork, Owner: &conversation.Owner,
-			Statuses: []AgentRunStatus{AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusPaused, AgentRunStatusSleeping,
-				AgentRunStatusWaitingForDependency, AgentRunStatusWaitingForAgent, AgentRunStatusWaitingForApproval, AgentRunStatusWaitingForEvent},
+			Scope: conversation.Scope, Owner: &conversation.Owner,
+			Statuses: activeConversationRunStatuses,
 			Limit: pageSize, Offset: offset,
 		})
 		if err != nil {
@@ -504,7 +507,11 @@ func teamBusyMembers(ctx context.Context, store ConversationStore, conversation 
 				continue
 			}
 			if _, exists := busy[run.AssignedAgentID]; !exists {
-				busy[run.AssignedAgentID] = truncateRunes(strings.TrimPrefix(run.Goal, teamResponderGoalPrefix), 80)
+				label := run.Goal
+				if run.Kind == RunKindConversation {
+					label = "answering in the Team channel"
+				}
+				busy[run.AssignedAgentID] = truncateRunes(label, 80)
 			}
 		}
 		if len(page) < pageSize {

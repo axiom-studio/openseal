@@ -506,13 +506,14 @@ func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T)
 		if listErr != nil {
 			t.Fatal(listErr)
 		}
+		// Each message gets a routing Run and its member's answer Run.
 		completed := 0
 		for _, run := range runs {
 			if run.Status == AgentRunStatusCompleted {
 				completed++
 			}
 		}
-		if len(runs) == 2 && completed == 2 {
+		if len(runs) == 4 && completed == 4 {
 			for _, conversation := range []*Conversation{immediate, recovered} {
 				messages, messageErr := engine.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
 				if messageErr != nil {

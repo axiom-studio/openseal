@@ -96,15 +96,6 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 			return nil, nil
 		}
 	}
-	if run.Owner.Type == OwnerTypeTeam {
-		round, err := getSQLiteParticipationRoundByKey(ctx, conn, req.Scope, conversationID, conversationTaskParticipationRoundKey(run))
-		if err != nil {
-			return nil, err
-		}
-		if conversationTaskFinishedTeamRound(run, round) {
-			return nil, nil
-		}
-	}
 	var turnPayload string
 	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_turns WHERE scope_kind=? AND scope_id=? AND run_id=? AND sequence=?`, req.Scope.Kind, req.Scope.ID, req.RunID, run.LastAppliedTurn+1).Scan(&turnPayload)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

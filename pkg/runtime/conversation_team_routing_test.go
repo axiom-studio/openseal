@@ -257,7 +257,10 @@ func TestTeamMemberTurnGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 	}
 	childID := routed.RunOutput["responderRunIds"].([]interface{})[0].(string)
 	child, err := store.GetAgentRun(ctx, team.Scope, childID)
-	if err != nil || !isTeamResponderRun(child) {
+	// The member's answer is the same root conversation Run a 1:1 chat gets,
+	// in the member's own lane.
+	if err != nil || !isTeamMemberRun(child) || child.ParentRunID != "" || child.RootRunID != child.ID ||
+		child.ConcurrencyKey != team.ID+":agent:agent-1" || validateConversationRun(child) != nil {
 		t.Fatalf("member Run = %#v, %v", child, err)
 	}
 	binding, err = runner.ResolveTurnRunner(ctx, child)

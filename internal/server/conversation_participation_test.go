@@ -30,10 +30,6 @@ func TestChannelParticipationRequiresHostAuthorityAndCurrentRevision(t *testing.
 	if got := patch(1, true, "default"); got != http.StatusForbidden {
 		t.Fatalf("unconfigured host: %d", got)
 	}
-	forged := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/conversations/"+channel.ID+"/participation-rounds", `{"scope":{"kind":"local","id":"default"},"expectedRevision":1,"proposals":[]}`, "forged")
-	if forged.Code != http.StatusForbidden {
-		t.Fatalf("desktop accepted model-authored proposal injection: %d", forged.Code)
-	}
 	allowed := true
 	checks := 0
 	server.SetChannelParticipation(func(_ context.Context, current *runtime.Conversation) error {

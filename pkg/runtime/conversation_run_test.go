@@ -68,7 +68,9 @@ func TestConversationRunSchedulerIsIdempotentAndReconcilesMissedMessages(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := postConversationRunTestMessage(t, service, current, ConversationParticipantAgent, MessageIntentHandoff, "Please review the release notes.", "message-two")
+	// A member's message without an @mention is not a wake in a Team channel;
+	// a second human message is.
+	second := postConversationRunTestMessage(t, service, current, ConversationParticipantUser, MessageIntentQuestion, "Please review the release notes.", "message-two")
 	current, err = service.GetConversation(ctx, scope, conversation.ID)
 	if err != nil {
 		t.Fatal(err)

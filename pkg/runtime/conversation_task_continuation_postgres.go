@@ -108,15 +108,6 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req Convers
 			return nil, nil
 		}
 	}
-	if run.Owner.Type == OwnerTypeTeam {
-		round, err := s.getPostgresParticipationRoundByKey(ctx, tx, req.Scope, conversationID, conversationTaskParticipationRoundKey(run), false)
-		if err != nil {
-			return nil, err
-		}
-		if conversationTaskFinishedTeamRound(run, round) {
-			return nil, nil
-		}
-	}
 	var turnPayload string
 	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_turns")+
 		` WHERE scope_kind=$1 AND scope_id=$2 AND run_id=$3 AND sequence=$4 FOR UPDATE`, req.Scope.Kind, req.Scope.ID, req.RunID, run.LastAppliedTurn+1).Scan(&turnPayload)

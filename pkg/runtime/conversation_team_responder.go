@@ -10,12 +10,10 @@ import (
 )
 
 const (
-	// teamResponderContextKey marks a Team member's child agent_work Run that
-	// answers one channel message. Its turn is the ordinary Agent turn.
-	teamResponderContextKey = "teamResponder"
 	// routingReasonContextKey carries the router's reason onto the answer.
 	routingReasonContextKey = "routingReason"
-	teamResponderGoalPrefix = "Answer in the Team channel: "
+	teamMemberRunGoal       = "Respond to a Team channel message"
+	teamRoutingRunGoal      = "Route a Team channel message"
 )
 
 // teamChannelRules are the Team-only rules a member gets with its roster.
@@ -25,44 +23,33 @@ const teamChannelRules = "You are one member of this Team channel and answer und
 	"Never @mention teammates just to agree, thank or acknowledge. " +
 	"Prefer a reaction (👀 picked up, ✅ done, 👍 agree) over a filler message."
 
-// isTeamResponderRun reports whether run is a Team member's child Run that
-// answers a Team channel message.
-func isTeamResponderRun(run *AgentRun) bool {
-	if run == nil || run.Kind != RunKindAgentWork || run.Owner.Type != OwnerTypeTeam ||
-		strings.TrimSpace(run.ParentRunID) == "" || strings.TrimSpace(run.AssignedAgentID) == "" {
-		return false
-	}
-	marked, _ := run.Context[teamResponderContextKey].(bool)
-	return marked
+// isTeamMemberRun reports whether run is a Team member's answer to a Team
+// channel message: an ordinary conversation Run, assigned to that member.
+func isTeamMemberRun(run *AgentRun) bool {
+	return run != nil && run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam &&
+		strings.TrimSpace(run.AssignedAgentID) != ""
 }
 
-func teamResponderConcurrencyKey(conversationKey, agentID string) string {
-	return conversationKey + ":member:" + agentID
+// conversationRunLane is a conversation Run's concurrency key: the channel or
+// one thread of it, and for a Team member its own lane in that channel.
+func conversationRunLane(conversationID, threadRoot string, owner ObjectiveOwner, assignedAgentID string) string {
+	lane := conversationID
+	if threadRoot != "" {
+		lane += ":thread:" + threadRoot
+	}
+	if owner.Type == OwnerTypeTeam && assignedAgentID != "" {
+		lane += ":agent:" + assignedAgentID
+	}
+	return lane
 }
 
 func conversationRoutingKey(scope Scope, conversationID, triggerID string) string {
 	return "participation-round:" + hashString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+triggerID)
 }
 
-// TeamResponderTurnResolver sends Team members' child Runs to the conversation
-// runner, so they answer through the same Agent turn as a 1:1 chat and post
-// their own answer; every other Run goes to next. Hosts wrap their agent_work
-// worker resolver with it.
-func TeamResponderTurnResolver(conversations *ConversationRunTurnRunner, next TurnRunnerResolver) TurnRunnerResolver {
-	return TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
-		if conversations != nil && isTeamResponderRun(run) {
-			return conversations.ResolveTurnRunner(ctx, run)
-		}
-		if next == nil {
-			return nil, ErrTurnHostUnavailable
-		}
-		return next.ResolveTurnRunner(ctx, run)
-	})
-}
-
-// routeTeamMessage is a Team channel's conversation Run: it records who answers
-// the message and starts one child agent_work Run per responder. It writes no
-// answer itself.
+// routeTeamMessage is a Team channel's routing Run: it records who answers the
+// message and starts one member conversation Run per responder, the same Run a
+// 1:1 Agent chat gets. It writes no answer itself.
 func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (*TurnOutcome, error) {
 	if r.runs == nil || r.coordinator == nil {
 		return nil, ErrConversationCoordinationUnavailable
@@ -72,7 +59,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 		return nil, err
 	}
 	childKey := func(participant ConversationParticipant) string {
-		return "team-responder:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+participant.ID)
+		return "team-member-run:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+participant.ID)
 	}
 	result, err := r.coordinator.Coordinate(ctx, ConversationRoutingRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, TriggerMessageID: triggerID,
@@ -86,7 +73,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	}
 	runIDs := make([]interface{}, 0, len(result.Round.Responders))
 	for _, responder := range result.Round.Responders {
-		created, err := r.runs.CreateAgentRun(ctx, teamResponderRunRequest(run, trigger, responder, childKey(responder.Participant)))
+		created, err := r.runs.CreateAgentRun(ctx, teamMemberRunRequest(run, conversation, trigger, responder, childKey(responder.Participant)))
 		if err != nil {
 			return nil, err
 		}
@@ -101,28 +88,30 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	}, nil
 }
 
-func teamResponderRunRequest(parent *AgentRun, trigger *ChannelMessage, responder ConversationResponder, key string) CreateAgentRunRequest {
+// teamMemberRunRequest is a member's answer Run: a root conversation Run in
+// the member's own lane, shaped like a 1:1 Agent chat's Run.
+func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger *ChannelMessage, responder ConversationResponder, key string) CreateAgentRunRequest {
 	context := map[string]interface{}{
-		conversationRunContextConversationID: parent.Context[conversationRunContextConversationID],
+		conversationRunContextConversationID: conversation.ID,
 		conversationRunContextTriggerID:      trigger.ID,
 		conversationRunContextTriggerSeq:     trigger.Sequence,
-		teamResponderContextKey:              true,
 	}
 	for _, copied := range []string{"threadRootMessageId", "responseMode", "voiceCallStarted", RunContextSessionKey} {
-		if value, ok := parent.Context[copied]; ok {
+		if value, ok := routing.Context[copied]; ok {
 			context[copied] = value
 		}
 	}
 	if responder.Reason != "" {
 		context[routingReasonContextKey] = responder.Reason
 	}
+	root, _ := routing.Context["threadRootMessageId"].(string)
 	return CreateAgentRunRequest{
-		Scope: parent.Scope, Kind: RunKindAgentWork, ParentRunID: parent.ID, Owner: parent.Owner,
+		Scope: routing.Scope, Kind: RunKindConversation, Owner: routing.Owner,
 		AssignedAgentID: responder.Participant.ID,
-		ConcurrencyKey:  teamResponderConcurrencyKey(parent.ConcurrencyKey, responder.Participant.ID),
-		Goal:            teamResponderGoalPrefix + truncateRunes(strings.Join(strings.Fields(trigger.Content), " "), 120),
-		Source:          RunSourceChat, Priority: parent.Priority, Context: context, Budget: cloneBudgetPolicy(parent.Budget),
-		IdempotencyKey: key, Actor: ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
+		ConcurrencyKey:  conversationRunLane(conversation.ID, root, routing.Owner, responder.Participant.ID),
+		Goal:            teamMemberRunGoal, Source: RunSourceChat, Priority: routing.Priority, Context: context,
+		Budget: cloneBudgetPolicy(routing.Budget), IdempotencyKey: key,
+		Actor:      ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
 		Visibility: ActivityVisibilityTeam,
 	}
 }
