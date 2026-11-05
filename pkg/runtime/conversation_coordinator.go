@@ -497,7 +497,7 @@ func teamBusyMembers(ctx context.Context, store ConversationStore, conversation 
 		page, err := runs.ListAgentRuns(ctx, AgentRunFilter{
 			Scope: conversation.Scope, Owner: &conversation.Owner,
 			Statuses: activeConversationRunStatuses,
-			Limit: pageSize, Offset: offset,
+			Limit:    pageSize, Offset: offset,
 		})
 		if err != nil {
 			return nil, err

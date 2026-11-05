@@ -129,7 +129,7 @@ func TestTeamRoutingFallbackOrder(t *testing.T) {
 	members := []RouteMember{{AgentID: "maya", Busy: true}, {AgentID: "otto"}, {AgentID: "rio"}}
 	for _, tc := range []struct {
 		name, last, lead, want string
-		members               []RouteMember
+		members                []RouteMember
 	}{
 		{"last with user", "rio", "maya", "rio", members},
 		{"lead", "", "maya", "maya", members},
