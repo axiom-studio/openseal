@@ -46,7 +46,7 @@ func TestProfileImageActionIsBoundedSelfOnlyWrite(t *testing.T) {
 
 func TestAppDataReadAndPictureStyleActions(t *testing.T) {
 	d := SkillDefinition()
-	if d.Version != "2.3.1" {
+	if d.Version != "2.4.0" {
 		t.Fatalf("version = %s", d.Version)
 	}
 	read := d.Actions[ReadAppData]
