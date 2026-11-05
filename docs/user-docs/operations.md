@@ -76,10 +76,10 @@ The daemon emits structured JSON logs at info level through a production logger.
 | Field | Value |
 |---|---|
 | Path | `GET /api/v1/health` |
-| Status | `200` when reached; `401` without a valid token if `OPENSEAL_API_TOKEN` is set |
+| Status | `200` when reached, with or without a token: `GET` on this exact path is exempt from `OPENSEAL_API_TOKEN` so container and orchestrator health checks work. Other methods on the path still require the token |
 | Body | `{"status": "ok"}` |
 
-> **There is no metrics endpoint, and the health check is not a readiness check.** No Prometheus client, no expvar, and no `/metrics` route exists. After any token check, the health handler returns a hard-coded body without touching the store, the workers, or the model provider, so it can report `200` while those dependencies are unavailable. Treat it as an HTTP liveness signal, not system readiness.
+> **There is no metrics endpoint, and the health check is not a readiness check.** No Prometheus client, no expvar, and no `/metrics` route exists. The health handler returns a hard-coded body without touching the store, the workers, or the model provider, so it can report `200` while those dependencies are unavailable. Treat it as an HTTP liveness signal, not system readiness.
 
 ### The Activity Feed
 

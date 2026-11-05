@@ -189,3 +189,47 @@ func TestDesktopActionAuthorityPreservesCheckpointEligibility(t *testing.T) {
 		t.Fatal("accepted foreign scope")
 	}
 }
+
+func TestWorkforceCapabilityReportsWhetherTheHostComputesPolicyEvaluation(t *testing.T) {
+	scope := capability.ScopeReference{Kind: "local", ID: "default"}
+	for _, test := range []struct {
+		name       string
+		authorizer WorkforceLifecycleAuthorizer
+		host       bool
+	}{
+		{name: "desktop host policy", authorizer: DesktopLifecycleAuthorizer{Scope: scope}, host: true},
+		{name: "external policy evaluator", authorizer: governedFixtureAuthority{actor: "configured-operator"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, err := runtime.NewSQLiteStore(filepath.Join(t.TempDir(), "capability.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			api := NewServer(store, zap.NewNop().Sugar())
+			compiler, _ := authoring.NewCompiler(governedAuthoringGenerator{})
+			api.SetWorkforceAuthoringCompiler(compiler)
+			api.SetWorkforceLifecycleAuthorizer(test.authorizer)
+			created, _, err := api.authoringChanges.Create(context.Background(), authoring.CreateChangeSetRequest{
+				Scope: scope, Prompt: "Create research agents", Catalog: authoring.CapabilityCatalog{},
+				Placement: authoring.ChangeSetPlacement{TeamDeploymentID: "research-live", AgentDeploymentIDs: map[string]string{"researcher": "researcher-live"}, Environment: "local"},
+				Actor:     authoring.ChangeSetActor{Type: "user", ID: "local-operator"}, IdempotencyKey: "create",
+			})
+			if err != nil || created.Status != authoring.ChangeSetReview {
+				t.Fatalf("created = %#v, %v", created, err)
+			}
+			response := performAgentRunRequest(t, api.Handler(), http.MethodGet, "/api/v1/capabilities?scopeKind=local&scopeId=default&changeSetId="+created.ID, "", "")
+			var document kernelapi.CapabilityDocument
+			if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
+				t.Fatal(err)
+			}
+			authoringCapability, ok := document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
+			if !ok || !authoringCapability.Supports(kernelapi.OperationEvaluate) || authoringCapability.Context == nil {
+				t.Fatalf("authoring capability = %#v", authoringCapability)
+			}
+			if authoringCapability.Context.HostPolicyEvaluation != test.host {
+				t.Fatalf("hostPolicyEvaluation = %t, want %t", authoringCapability.Context.HostPolicyEvaluation, test.host)
+			}
+		})
+	}
+}

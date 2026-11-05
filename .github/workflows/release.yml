@@ -269,13 +269,9 @@ jobs:
           BIN=openseal
           if [ "${{ matrix.goos }}" = "windows" ]; then BIN=openseal.exe; fi
           # -w -s strips DWARF and the symbol table; the unstripped binary is
-          # ~96 MB. Matches what the Dockerfile already does.
-          #
-          # No -X version stamping: cmd/openseal/commands/root.go declares
-          # `const version`, and -X can only write to a string *variable*.
-          # Changing that const to a var is a source change and belongs in its
-          # own work item, not smuggled into a pipeline commit.
-          go build -trimpath -ldflags="-w -s" -o "$BIN" ./cmd/openseal
+          # ~96 MB. Matches what the Dockerfile already does. -X stamps the
+          # validated tag so `openseal version` reports the release.
+          go build -trimpath -ldflags="-w -s -X github.com/axiom-studio/openseal/cmd/openseal/commands.version=${GITHUB_REF_NAME#v}" -o "$BIN" ./cmd/openseal
           test -x "$BIN" || test -f "$BIN"
 
           # Regenerate the third-party notices rather than trusting the
@@ -300,10 +296,10 @@ jobs:
           # this proves the binary runs and reports itself.
           OUT="$("$BIN" version)"
           echo "$OUT"
-          case "$OUT" in
-            *OpenSeal*) ;;
-            *) echo "::error::unexpected version output: ${OUT}" >&2; exit 1 ;;
-          esac
+          if [ "$OUT" != "OpenSeal ${GITHUB_REF_NAME}" ]; then
+            echo "::error::version output ${OUT} does not report tag ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
 
       - name: Check the Linux binary's glibc floor has not drifted
         if: ${{ matrix.goos == 'linux' }}
@@ -492,6 +488,7 @@ jobs:
           # a user has to ask for it by name.
           docker buildx build \
             --platform "$(echo "$PLATFORMS" | tr ' ' ',')" \
+            --build-arg "OPENSEAL_VERSION=${VERSION}" \
             --tag "${IMAGE}:${VERSION}" \
             --label "org.opencontainers.image.title=OpenSeal" \
             --label "org.opencontainers.image.description=Agent execution platform" \
@@ -871,8 +868,9 @@ jobs:
           # runs `make build` first, producing a root ./openseal that the bundle
           # never uses — tauri.conf.json's beforeBuildCommand compiles its own
           # sidecar under the Rust host triple. Skipping it avoids a redundant
-          # cgo build on every leg.
-          pnpm tauri build
+          # cgo build on every leg. prepare-daemon.mjs stamps OPENSEAL_VERSION
+          # into that sidecar.
+          OPENSEAL_VERSION="${GITHUB_REF_NAME#v}" pnpm tauri build
 
       - name: Assert the notices reached the bundle payload
         run: |

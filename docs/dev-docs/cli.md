@@ -71,8 +71,8 @@ openseal daemon [options]
 If the configuration path does not exist, OpenSeal writes the default
 configuration before starting. `--standalone-operator` is rejected unless the
 API address is loopback. `--desktop-operator` additionally requires a nonempty
-`OPENSEAL_API_TOKEN` and a local workspace scope. The API token protects all
-routes but does not provide multi-user roles.
+`OPENSEAL_API_TOKEN` and a local workspace scope. The API token protects every
+route except `GET /api/v1/health` but does not provide multi-user roles.
 The context file is optional; when present, it maps opaque credential
 references to environment variables or private files and can configure the
 standalone authoring model. See [Standalone context](standalone-context.md).

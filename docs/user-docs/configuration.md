@@ -83,6 +83,8 @@ credentials:
 | `authoring.baseURL` | `string` | OpenAI-compatible model endpoint |
 | `authoring.model` | `string` | Model name |
 | `authoring.credential` | reference | Opaque `kind` and `id` pair |
+| `authoring.structuredOutput` | `string` | How the model returns structured replies; same values as `OPENSEAL_LLM_STRUCTURED_OUTPUT` |
+| `authoring.timeout` | duration | Per-request model timeout; same values as `OPENSEAL_LLM_TIMEOUT` |
 | `credentials[].scope` | `kind:id` | Scope the credential belongs to |
 | `credentials[].kind` | `string` | Credential kind, part of its reference |
 | `credentials[].id` | `string` | Credential identifier, part of its reference |
@@ -93,7 +95,7 @@ credentials:
 
 Each credential entry must configure exactly one of `env` or `file`; setting both or neither is a load error. Relative file paths resolve against the directory containing the context file. Unknown fields are rejected, and duplicate `kind`/`id` pairs within a scope are rejected.
 
-When an `authoring` block is present it takes precedence over the `OPENSEAL_LLM_BASE_URL`, `OPENSEAL_LLM_MODEL`, and `OPENAI_API_KEY` environment variables, and its credential is resolved through the opaque reference mechanism rather than read directly from the environment.
+When an `authoring` block is present it takes precedence over the `OPENSEAL_LLM_BASE_URL`, `OPENSEAL_LLM_MODEL`, `OPENSEAL_LLM_STRUCTURED_OUTPUT`, `OPENSEAL_LLM_TIMEOUT`, and `OPENAI_API_KEY` environment variables, and its credential is resolved through the opaque reference mechanism rather than read directly from the environment.
 
 ### File-Backed Credential Checks
 
@@ -128,7 +130,9 @@ credential scopes + outreach-enabled policy scopes → worker scopes → Run and
 | `OPENSEAL_LLM_BASE_URL` | Workforce authoring model endpoint |
 | `OPENSEAL_LLM_MODEL` | Workforce authoring model name |
 | `OPENAI_API_KEY` | Workforce authoring credential |
-| `OPENSEAL_API_TOKEN` | Optional bearer token required on every daemon API route; required by `--desktop-operator` |
+| `OPENSEAL_LLM_STRUCTURED_OUTPUT` | How the model returns structured replies for authoring and desktop agent turns: `tool` (default, a forced tool call), `json_schema` (schema-constrained `response_format`, for providers that ignore `tool_choice` such as Ollama), or the authoring-only `json` and `plain` |
+| `OPENSEAL_LLM_TIMEOUT` | Per-request timeout for authoring and desktop agent turns as a Go duration such as `5m`; default `90s`, maximum `10m`. Raise it for slow local models |
+| `OPENSEAL_API_TOKEN` | Optional bearer token required on every daemon API route except `GET /api/v1/health`; required by `--desktop-operator`. `openseal tui` sends it as `Authorization: Bearer` |
 | `CLAWHUB_REGISTRY` | ClawHub registry base URL; defaults to `https://clawhub.ai` |
 | `OPENSEAL_API_URL` | Default endpoint for the terminal client |
 

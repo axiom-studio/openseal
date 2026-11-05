@@ -143,12 +143,15 @@ func applyAuthoringApprovalDeliveryAuthority(intent AuthoringIntent, catalog Cap
 }
 
 // applyAuthoringScheduleAuthority keeps the semantic form and the canonical
-// Runbook in one authority domain. In particular, an audited "on demand"
-// answer must remove provider-authored scheduled operations and schedule prose;
-// otherwise Studio can truthfully show no Trigger while the Agent definition
-// continues to claim that automatic work exists.
+// Runbook in one authority domain. An audited "on demand" answer removes
+// provider-authored scheduled operations, so no Trigger is compiled, and adds
+// a compiler-owned principle that no automatic schedule is active. Behavior
+// and principle prose are never edited: no sentence classifier can tell a
+// timing claim from a requirement that mentions a frequency ("Check daily
+// summaries for personal information"), and deleting a requirement is worse
+// than leaving a stale timing sentence that the principle overrides.
 func applyAuthoringScheduleAuthority(intent AuthoringIntent, request GenerateRequest) AuthoringIntent {
-	if parseScheduleIntent(scheduleIntentAuthorityText(request)).kind != scheduleIntentManual {
+	if scheduleIntentAuthority(request).kind != scheduleIntentManual {
 		return intent
 	}
 	for index := range intent.Agents {
@@ -160,48 +163,12 @@ func applyAuthoringScheduleAuthority(intent AuthoringIntent, request GenerateReq
 			}
 		}
 		agentIntent.Operations = operations
-		agentIntent.Behavior = removeAuthoringScheduleClaims(agentIntent.Behavior)
-		principles := make([]string, 0, len(agentIntent.OperatingPrinciples)+1)
-		for _, principle := range agentIntent.OperatingPrinciples {
-			if !looksLikeAuthoringScheduleClaim(principle) {
-				principles = append(principles, principle)
-			}
-		}
-		agentIntent.OperatingPrinciples = normalized(append(principles, "Operate only on demand; no automatic schedule is active."))
+		agentIntent.OperatingPrinciples = normalized(append(agentIntent.OperatingPrinciples, authoringOnDemandPrinciple))
 	}
 	return intent
 }
 
-func removeAuthoringScheduleClaims(value string) string {
-	parts := strings.FieldsFunc(value, func(r rune) bool { return r == '.' || r == '\n' })
-	kept := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed == "" {
-			continue
-		}
-		if looksLikeAuthoringScheduleClaim(trimmed) {
-			continue
-		}
-		kept = append(kept, trimmed)
-	}
-	return strings.Join(kept, ". ")
-}
-
-func looksLikeAuthoringScheduleClaim(value string) bool {
-	parsed := parseScheduleIntent(value)
-	if parsed.kind == scheduleIntentExact || parsed.kind == scheduleIntentAmbiguous {
-		return true
-	}
-	lower := strings.ToLower(value)
-	if containsAnyScheduleWord(lower, "schedule", "scheduled", "recurring", "hourly", "daily", "weekly", "cadence") {
-		return true
-	}
-	if !containsWord(lower, "every") && !containsWord(lower, "each") {
-		return false
-	}
-	return containsAnyScheduleWord(lower, "second", "seconds", "minute", "minutes", "hour", "hours", "day", "days", "week", "weeks")
-}
+const authoringOnDemandPrinciple = "Operate only on demand; no automatic schedule is active."
 
 // ProjectAuthoringIntent is the struct-to-form half of the semantic codec. It
 // is used for amendments so a model sees current user-facing intent without
@@ -422,6 +389,41 @@ func validateAuthoringIntent(intent AuthoringIntent, catalog CapabilityCatalog) 
 			}
 		}
 	}
+	return validateAuthoringIntentConversationReferences(intent, seenAgents)
+}
+
+// validateAuthoringIntentConversationReferences checks the conversation
+// cross-references that compilation would otherwise reject after the
+// semantic repair loop has ended. Each check reads only keys the model
+// authored, so its message is safe to return to the model for repair; the
+// adapter and endpoint checks that depend on the private catalog stay in
+// compilation.
+func validateAuthoringIntentConversationReferences(intent AuthoringIntent, agentKeys map[string]bool) error {
+	owners := make(map[string]string, len(intent.Conversations))
+	for _, conversation := range intent.Conversations {
+		isTeam := intent.Team != nil && conversation.OwnerKey == intent.Team.Key
+		if !agentKeys[conversation.OwnerKey] && !isTeam {
+			return fmt.Errorf("conversation %s references unknown owner %q", conversation.Key, conversation.OwnerKey)
+		}
+		owners[conversation.Key] = conversation.OwnerKey
+	}
+	for _, answer := range intent.Agents {
+		for _, operation := range answer.Operations {
+			if operation.ApprovalDelivery != AuthoringApprovalDeliveryChannels {
+				continue
+			}
+			for _, channelKey := range operation.ApprovalChannelKeys {
+				owner, ok := owners[strings.TrimSpace(channelKey)]
+				if !ok {
+					return fmt.Errorf("operation %s references unknown approval channel %q", operation.Key, channelKey)
+				}
+				// Compilation resolves an owner key to an Agent before the Team.
+				if owner != answer.Key {
+					return fmt.Errorf("operation %s approval channel %q does not belong to Agent %s", operation.Key, strings.TrimSpace(channelKey), answer.Key)
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -490,7 +492,7 @@ func compileAuthoringRunbook(answer AuthoringAgentIntent, definition *agent.Agen
 		Name: answer.Name + " operations", Description: "Compiler-owned execution methods for " + answer.Purpose,
 		Entrypoints: map[string]string{}, Interfaces: map[string]runbook.Interface{}, Triggers: map[string]runbook.Trigger{}, Steps: map[string]runbook.Step{},
 	}
-	authorizedSchedule := parseScheduleIntent(scheduleIntentAuthorityText(request))
+	authorizedSchedule := scheduleIntentAuthority(request)
 	for _, operation := range answer.Operations {
 		stepID, endID := operation.Key, operation.Key+"-done"
 		result.Entrypoints[operation.Key] = stepID

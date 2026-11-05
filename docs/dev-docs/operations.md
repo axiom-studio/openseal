@@ -28,7 +28,8 @@ event-source subscriptions. Removed `workflowsDir`, `triggers`, and `webhook` da
 rejected instead of being silently ignored.
 
 Setting `OPENSEAL_API_TOKEN` requires a bearer token on every API route,
-including health and capability discovery. It is one shared secret, not a
+including capability discovery; only `GET /api/v1/health` is exempt, so
+liveness probes keep working. It is one shared secret, not a
 multi-user authorization system. `--desktop-operator` requires this token, a
 loopback listener, and a local workspace scope; it provides the desktop's
 local owner review and installation authority. `--standalone-operator` permits

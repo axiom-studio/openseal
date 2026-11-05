@@ -237,6 +237,31 @@ func TestScheduleIntentAuditedAnswerAuthorizesExactTrigger(t *testing.T) {
 	}
 }
 
+func TestScheduleIntentOnDemandAnswerOverridesAFrequencyWordInThePrompt(t *testing.T) {
+	for _, answers := range [][]string{{"on demand"}, {"daily at a varied time, 10 times between 08:00 and 20:00", "on demand"}} {
+		refinement := &RefinementContext{}
+		for index, text := range answers {
+			id := scheduleIntentQuestionID
+			if index > 0 {
+				id = scheduleIntentClarificationQuestionIDPrefix + strconv.Itoa(index)
+			}
+			refinement.Answers = append(refinement.Answers, RefinementResolvedAnswer{QuestionID: id, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: text}})
+		}
+		result := compileScheduledCandidate(t, "Create an Agent that summarizes my notes into a short daily digest.", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), refinement, nil)
+		if hasScheduleIntentQuestion(result.UnresolvedQuestions) || candidateSchedule(result) != nil {
+			t.Fatalf("answers %q: on demand did not resolve the schedule question: %#v", answers, result)
+		}
+	}
+	// Without an answer the frequency word still asks, and an exact answer still schedules.
+	if result := compileScheduledCandidate(t, "Create an Agent that summarizes my notes into a short daily digest.", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), nil, nil); !hasScheduleIntentQuestion(result.UnresolvedQuestions) {
+		t.Fatalf("unanswered daily prompt = %#v", result)
+	}
+	exact := &RefinementContext{Answers: []RefinementResolvedAnswer{{QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: "daily at 09:00 UTC"}}}}
+	if result := compileScheduledCandidate(t, "Create an Agent that summarizes my notes into a short daily digest.", scheduledAuthoringCandidate(dailySchedule("09:00", "UTC")), exact, nil); !result.Valid || candidateSchedule(result) == nil {
+		t.Fatalf("exact answer = %#v", result)
+	}
+}
+
 func TestScheduleIntentAmbiguousAnswerProducesANewBlockingClarification(t *testing.T) {
 	refinement := &RefinementContext{Answers: []RefinementResolvedAnswer{{
 		QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser,
@@ -285,5 +310,39 @@ func TestScheduleIntentAmendmentPreservesExistingAndRemovesWidening(t *testing.T
 	result := compileScheduledCandidate(t, "Improve the Agent's instructions", candidate, nil, &existing)
 	if !result.Valid || !reflect.DeepEqual(candidateSchedule(result), existing.Agents[0].Runbook.Triggers["recurring"].Schedule) || len(result.Candidate.Agents[0].Runbook.Triggers) != 1 {
 		t.Fatalf("non-schedule amendment = %#v", result)
+	}
+}
+
+func TestScheduleAuthorityFollowsAnswerOrderNotQuestionOrder(t *testing.T) {
+	// Reconciliation places a follow-up question ahead of the original, and a
+	// revision appends an event without moving its question. The authority
+	// must read the most recently given answer, reached through the same
+	// projection the ChangeSet service uses.
+	followUp := scheduleIntentClarificationQuestionIDPrefix + "1"
+	answer := func(questionID, text string) RefinementAnswerEvent {
+		return RefinementAnswerEvent{QuestionID: questionID, Source: RefinementAnswerSourceUser, Value: RefinementAnswerValue{Text: text}}
+	}
+	refinement := ChangeSetRefinement{
+		Questions: []RefinementQuestion{{ID: followUp}, {ID: scheduleIntentQuestionID}},
+		Answers: []RefinementAnswerEvent{
+			answer(scheduleIntentQuestionID, "at a varied time"),
+			answer(followUp, "daily at 09:00 UTC"),
+			answer(scheduleIntentQuestionID, "weekly on monday at 10:00 UTC"),
+			answer(followUp, "daily at 11:00 UTC"),
+		},
+	}
+	request := GenerateRequest{Mode: ModeCreate, Prompt: "Create an Agent that summarizes my notes into a short daily digest.", Refinement: providerRefinementContext(refinement)}
+	if got, want := scheduleIntentAuthority(request), parseScheduleIntent("daily at 11:00 UTC"); got != want {
+		t.Fatalf("authority = %#v, want the latest answer %#v", got, want)
+	}
+
+	// Revising the original question last makes it the latest decision.
+	refinement.Answers = append(refinement.Answers, answer(scheduleIntentQuestionID, "on demand"))
+	request.Refinement = providerRefinementContext(refinement)
+	if got := scheduleIntentAuthority(request); got.kind != scheduleIntentManual {
+		t.Fatalf("authority after revising the original = %#v, want manual", got)
+	}
+	if answers := request.Refinement.Answers; len(answers) != 2 || answers[0].QuestionID != followUp || answers[1].Value.Text != "on demand" {
+		t.Fatalf("projected answers = %#v", answers)
 	}
 }

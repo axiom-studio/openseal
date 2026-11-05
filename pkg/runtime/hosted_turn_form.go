@@ -430,12 +430,13 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 				"required": []string{"skillRef", "disposition", "summary"},
 			})
 		}
+		// maxItems alone forbids selections when no prompt is offered. Boolean
+		// subschemas are avoided because grammar-constrained decoders (llama.cpp)
+		// reject them.
 		skillSelections := map[string]interface{}{
 			"type": "array", "maxItems": len(promptBranches),
 		}
-		if len(promptBranches) == 0 {
-			skillSelections["items"] = false
-		} else {
+		if len(promptBranches) > 0 {
 			skillSelections["items"] = map[string]interface{}{"oneOf": promptBranches}
 		}
 		properties["skillSelections"] = skillSelections

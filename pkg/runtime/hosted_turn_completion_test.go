@@ -105,3 +105,25 @@ func hostedContractContains(values []string, target string) bool {
 	}
 	return false
 }
+
+func TestHostedTurnCompletionEvidenceRefsListExactlyTheAcceptedReceipts(t *testing.T) {
+	if refs := HostedTurnCompletionEvidenceRefs(nil); len(refs) != 0 {
+		t.Fatalf("refs without history = %v", refs)
+	}
+	checkpoint := checkpointTerminalAction(nil, &ActionCall{ID: "commit-1", SkillID: "browser", Action: "commit", Status: ActionCallStatusSucceeded, ExternalOperationDigest: "receipt-digest"}, nil)
+	checkpoint = checkpointTerminalAction(checkpoint, &ActionCall{ID: "commit-2", SkillID: "browser", Action: "commit", Status: ActionCallStatusFailed}, nil)
+	refs := HostedTurnCompletionEvidenceRefs(checkpoint)
+	if len(refs) != 1 || refs[0] != "action-call:commit-1" {
+		t.Fatalf("refs = %v, want only the succeeded call", refs)
+	}
+	request := HostedTurnRequest{Goal: "Post a comment", ContinuationCheckpoint: checkpoint}
+	for _, test := range []struct {
+		refs  []string
+		valid bool
+	}{{refs: refs, valid: true}, {refs: []string{"action-call:commit-2"}}} {
+		err := ValidateHostedTurnCompletion(request, &HostedTurnResponse{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done", CompletionEvidenceRefs: test.refs})
+		if test.valid != (err == nil) {
+			t.Fatalf("refs %v: error = %v", test.refs, err)
+		}
+	}
+}

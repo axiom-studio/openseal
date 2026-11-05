@@ -4,11 +4,11 @@ OpenSeal is designed for one of two deployments: a single-operator local process
 
 ## The Deployment Model
 
-Identity and authorization belong to the deployment rather than to the portable kernel. The plain daemon binds to loopback by default. An optional API bearer token protects all routes, and the desktop host supplies a token and local owner authority; this is not a multi-user role system.
+Identity and authorization belong to the deployment rather than to the portable kernel. The plain daemon binds to loopback by default. An optional API bearer token protects every route except the `GET /api/v1/health` liveness probe, and the desktop host supplies a token and local owner authority; this is not a multi-user role system.
 
 | Property | Where it lives |
 |---|---|
-| Authentication | The optional `OPENSEAL_API_TOKEN` bearer token protects every daemon route when set. A host or fronting proxy supplies identity-aware authentication for shared deployments |
+| Authentication | The optional `OPENSEAL_API_TOKEN` bearer token protects every daemon route except `GET /api/v1/health` when set. A host or fronting proxy supplies identity-aware authentication for shared deployments |
 | Transport security | The embedding host, or a fronting proxy. The API server is plain HTTP — there is no TLS configuration, no certificate handling, and no TLS listener |
 | Authorization | The desktop's explicit local-owner mode or an embedding host. The bearer token alone supplies no roles or per-scope entitlements |
 

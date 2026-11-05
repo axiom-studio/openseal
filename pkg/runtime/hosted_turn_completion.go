@@ -14,6 +14,26 @@ import (
 // line to an otherwise evidence-backed URL.
 var hostedTurnURLPattern = regexp.MustCompile(`https?://[^\s<>"'\\]+`)
 
+// HostedTurnCompletionEvidenceRefs lists every completion evidence reference
+// ValidateHostedTurnCompletion accepts for this checkpoint: one
+// "action-call:<id>" per succeeded durable ActionCall, in history order.
+func HostedTurnCompletionEvidenceRefs(checkpoint map[string]interface{}) []string {
+	history := actionHistoryEntries(checkpoint)
+	refs := make([]string, 0, len(history))
+	seen := make(map[string]bool, len(history))
+	for _, entry := range history {
+		if entry["actionCallId"] == nil || fmt.Sprint(entry["status"]) != string(ActionCallStatusSucceeded) {
+			continue
+		}
+		reference := "action-call:" + fmt.Sprint(entry["actionCallId"])
+		if !seen[reference] {
+			seen[reference] = true
+			refs = append(refs, reference)
+		}
+	}
+	return refs
+}
+
 // ValidateHostedTurnCompletion prevents a model-authored terminal response
 // from becoming evidence. External effects must cite a succeeded, kernel-owned
 // ActionCall receipt, and URLs must already be present in the model-visible

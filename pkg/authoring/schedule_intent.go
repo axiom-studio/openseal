@@ -55,7 +55,7 @@ func enforceScheduleIntentAuthority(generated *GenerationResponse, request Gener
 	if generated == nil {
 		return nil
 	}
-	intent := parseScheduleIntent(scheduleIntentAuthorityText(request))
+	intent := scheduleIntentAuthority(request)
 	switch intent.kind {
 	case scheduleIntentManual:
 		if removeAllCandidateSchedules(&generated.Candidate) {
@@ -79,6 +79,26 @@ func enforceScheduleIntentAuthority(generated *GenerationResponse, request Gener
 	default:
 		return nil
 	}
+}
+
+// scheduleIntentAuthority lets the latest answer to OpenSeal's own schedule
+// question decide when it is conclusive on its own, so an "on demand" answer
+// is not overridden by a frequency word ("daily digest") in the original
+// prompt. Otherwise the prompt and every answer are read together.
+func scheduleIntentAuthority(request GenerateRequest) scheduleIntent {
+	if request.Refinement != nil {
+		for index := len(request.Refinement.Answers) - 1; index >= 0; index-- {
+			answer := request.Refinement.Answers[index]
+			if !isScheduleIntentQuestionID(answer.QuestionID) || strings.TrimSpace(answer.Value.Text) == "" {
+				continue
+			}
+			if intent := parseScheduleIntent(answer.Value.Text); intent.kind == scheduleIntentManual || intent.kind == scheduleIntentExact {
+				return intent
+			}
+			break
+		}
+	}
+	return parseScheduleIntent(scheduleIntentAuthorityText(request))
 }
 
 func scheduleIntentAuthorityText(request GenerateRequest) string {
@@ -302,7 +322,7 @@ func upsertScheduleIntentQuestion(generated *GenerationResponse, request Generat
 }
 
 func sourceCapabilityRequiresDurableAction(request GenerateRequest) bool {
-	switch parseScheduleIntent(scheduleIntentAuthorityText(request)).kind {
+	switch scheduleIntentAuthority(request).kind {
 	case scheduleIntentAmbiguous, scheduleIntentExact:
 		return true
 	default:

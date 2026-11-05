@@ -293,8 +293,9 @@ func (s *Server) composeWorkforceLifecycleCapability(r *http.Request, result *ke
 		}
 	}
 	if strings.TrimSpace(changeSet.CandidateDigest) != "" && (changeSet.Status == authoring.ChangeSetReview || changeSet.Status == authoring.ChangeSetEvaluating) {
-		if _, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationEvaluate, changeSet); err == nil {
+		if authorization, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationEvaluate, changeSet); err == nil {
 			result.Operations = append(result.Operations, kernelapi.OperationEvaluate)
+			result.Context.HostPolicyEvaluation = authorization.PolicyDecision != nil
 		}
 	}
 	if authorization, err := s.workforceAuthority.AuthorizeWorkforceLifecycle(r.Context(), kernelapi.OperationApprove, changeSet); err == nil && changeSet.Status == authoring.ChangeSetAwaitingApproval {

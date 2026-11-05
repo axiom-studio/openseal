@@ -40,7 +40,7 @@ func TestIdentityProfileGeneratorCompactSingleRequestAcrossTransports(t *testing
 	for _, responses := range []bool{false, true} {
 		for _, mode := range []OpenAICompatibleStructuredOutputMode{
 			OpenAICompatibleStructuredOutputDefault, OpenAICompatibleStructuredOutputTool,
-			OpenAICompatibleStructuredOutputJSON, OpenAICompatibleStructuredOutputPlain,
+			OpenAICompatibleStructuredOutputJSON, OpenAICompatibleStructuredOutputJSONSchema, OpenAICompatibleStructuredOutputPlain,
 		} {
 			name := "chat/" + string(mode)
 			if responses {
@@ -140,6 +140,25 @@ func TestIdentityProfileGeneratorCompactSingleRequestAcrossTransports(t *testing
 						t.Fatalf("profile tool=%#v", function)
 					}
 					assertIdentityProfileProviderSchema(t, function["parameters"].(map[string]interface{}))
+				}
+				if mode == OpenAICompatibleStructuredOutputJSONSchema {
+					if observed["tools"] != nil || observed["tool_choice"] != nil {
+						t.Fatalf("json_schema transport sent tools: %#v", observed)
+					}
+					var format map[string]interface{}
+					if responses {
+						format = observed["text"].(map[string]interface{})["format"].(map[string]interface{})
+					} else {
+						format = observed["response_format"].(map[string]interface{})
+						if format["type"] != "json_schema" {
+							t.Fatalf("response_format=%#v", format)
+						}
+						format = format["json_schema"].(map[string]interface{})
+					}
+					if format["name"] != "submit_agent_profile" || (responses && format["type"] != "json_schema") {
+						t.Fatalf("profile json_schema format=%#v", format)
+					}
+					assertIdentityProfileProviderSchema(t, format["schema"].(map[string]interface{}))
 				}
 			})
 		}

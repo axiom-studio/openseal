@@ -14,7 +14,8 @@ COPY . .
 
 # SQLite-backed durability requires CGO; Alpine's toolchain produces a
 # self-contained musl-linked kernel binary for the runtime image.
-RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s" -o openseal ./cmd/openseal
+ARG OPENSEAL_VERSION=0.0.0-dev
+RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-w -s -X github.com/axiom-studio/openseal/cmd/openseal/commands.version=${OPENSEAL_VERSION}" -o openseal ./cmd/openseal
 
 # Runtime stage
 FROM alpine:3.21

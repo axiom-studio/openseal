@@ -32,7 +32,7 @@ All routes are served under `/api/v1` from the address in `api.listenAddr`. Resp
 | 502 | An upstream registry or transport failed |
 | 503 | A required dependency is temporarily unavailable |
 
-> **Bearer authentication is optional.** With `OPENSEAL_API_TOKEN`, every route requires `Authorization: Bearer <token>` and rejects missing or invalid tokens with `401`. The token does not supply individual identity or per-scope authorization. See [Security](security.md).
+> **Bearer authentication is optional.** With `OPENSEAL_API_TOKEN`, every route except `GET /api/v1/health` requires `Authorization: Bearer <token>` and rejects missing or invalid tokens with `401`. The token does not supply individual identity or per-scope authorization. See [Security](security.md).
 
 ### Reading the Capability Document First
 

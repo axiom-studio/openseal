@@ -2,8 +2,11 @@ package commands
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
@@ -55,5 +58,47 @@ func TestParseOwnerAcceptsOnlyAgentOrTeam(t *testing.T) {
 		if _, err := parseOwner(value); err == nil {
 			t.Fatalf("parseOwner(%q) succeeded", value)
 		}
+	}
+}
+
+func TestTUIRequestHeadersSendDaemonTokenFromEnvironment(t *testing.T) {
+	for _, test := range []struct {
+		name, token, flag, want string
+	}{
+		{name: "token", token: " daemon-token ", want: "Bearer daemon-token"},
+		{name: "no token", want: ""},
+		{name: "explicit header wins", token: "daemon-token", flag: "Authorization=Bearer explicit", want: "Bearer explicit"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var observed []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				observed = r.Header.Values("Authorization")
+				if len(observed) != 1 || observed[0] != "Bearer daemon-token" {
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			defer server.Close()
+			flags := make(requestHeaderFlags)
+			if test.flag != "" {
+				if err := flags.Set(test.flag); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err := client.NewKernelHTTPClient(server.URL, server.Client(), client.WithRequestHeaders(tuiRequestHeaders(flags, test.token))).Capabilities(t.Context())
+			if got := strings.Join(observed, ","); got != test.want {
+				t.Fatalf("Authorization = %q, want %q", got, test.want)
+			}
+			if (test.want == "Bearer daemon-token") != (err == nil) {
+				t.Fatalf("token-protected request error = %v", err)
+			}
+		})
+	}
+	flags := make(requestHeaderFlags)
+	tuiRequestHeaders(flags, "daemon-token")
+	if len(flags) != 0 {
+		t.Fatal("token was written into the caller's header flags")
 	}
 }

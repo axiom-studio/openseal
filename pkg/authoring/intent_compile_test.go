@@ -2,6 +2,10 @@ package authoring
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,7 +141,7 @@ func TestCompileAuthoringIntentUsesAuditedScheduleInsteadOfProviderParaphrase(t 
 	}
 }
 
-func TestCompileAuthoringIntentOnDemandAnswerRemovesScheduledOperationAndClaims(t *testing.T) {
+func TestCompileAuthoringIntentOnDemandAnswerRemovesScheduledOperationAndKeepsProse(t *testing.T) {
 	intent := AuthoringIntent{
 		SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent,
 		Name: "Scout", Purpose: "Scout communities",
@@ -160,9 +164,6 @@ func TestCompileAuthoringIntentOnDemandAnswerRemovesScheduledOperationAndClaims(
 	if parsed := parseScheduleIntent(scheduleIntentAuthorityText(request)); parsed.kind != scheduleIntentManual {
 		t.Fatalf("schedule authority = %#v", parsed)
 	}
-	if got := removeAuthoringScheduleClaims(intent.Agents[0].Behavior); strings.Contains(strings.ToLower(got), "every three hours") {
-		t.Fatalf("filtered behavior = %q", got)
-	}
 	generated, err := CompileAuthoringIntent(intent, request)
 	if err != nil {
 		t.Fatal(err)
@@ -171,12 +172,116 @@ func TestCompileAuthoringIntentOnDemandAnswerRemovesScheduledOperationAndClaims(
 	if definition.Runbook == nil || len(definition.Runbook.Entrypoints) != 1 || definition.Runbook.Entrypoints["engage"] == "" || len(definition.Runbook.Triggers) != 0 {
 		t.Fatalf("manual Runbook = %#v", definition.Runbook)
 	}
-	if strings.Contains(strings.ToLower(definition.SystemPrompt), "every three hours") {
-		t.Fatalf("manual system prompt retains schedule claim: %q", definition.SystemPrompt)
+	// Prose is the model's and the user's; the compiler only adds the
+	// principle that overrides any timing sentence left in it.
+	if !strings.Contains(definition.SystemPrompt, "Find useful discussions. Run every three hours between 08:00 and 20:00 UTC.") {
+		t.Fatalf("manual system prompt was edited: %q", definition.SystemPrompt)
 	}
-	for _, principle := range definition.OperatingPrinciples {
-		if strings.Contains(strings.ToLower(principle), "every three hours") {
-			t.Fatalf("manual operating principles retain schedule claim: %#v", definition.OperatingPrinciples)
+	if !slices.Contains(definition.OperatingPrinciples, "Be accurate") || !slices.Contains(definition.OperatingPrinciples, authoringOnDemandPrinciple) {
+		t.Fatalf("manual operating principles = %#v", definition.OperatingPrinciples)
+	}
+}
+
+func TestCompilerAppliesTheLatestScheduleAnswerAcrossEveryStage(t *testing.T) {
+	// The prompt's frequency word ("daily") must not outvote the user's
+	// conclusive answer in any stage: the authority check, the semantic form
+	// and the compiled Runbook.
+	const prompt = "Create an Agent that summarizes my notes into a short daily digest."
+	digest := func(schedule string) AuthoringIntent {
+		return AuthoringIntent{
+			SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent, Name: "Digest", Purpose: "Summarize notes",
+			Agents: []AuthoringAgentIntent{{
+				Key: "digest", Name: "Digest", Purpose: "Summarize notes",
+				Behavior:   "Summarize the notes. Run daily at 09:00 UTC.",
+				Objectives: []AuthoringObjectiveIntent{{Key: "digest", Title: "Digest", Outcome: "A digest exists", Priority: 1}},
+				Operations: []AuthoringOperationIntent{{Key: "send-digest", Name: "Send digest", Goal: "Write the digest", ObjectiveKey: "digest", Wake: AuthoringWakeSchedule, Schedule: schedule, Approval: AuthoringApprovalByPolicy}},
+			}},
+		}
+	}
+	compile := func(intent AuthoringIntent, answer string) *CompileResult {
+		t.Helper()
+		compiler, err := NewCompiler(semanticIntentGenerator{intent: intent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := compiler.Compile(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: prompt, Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: answer},
+		}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	manual := compile(digest("daily at 09:00 UTC"), "on demand")
+	if hasScheduleIntentQuestion(manual.UnresolvedQuestions) || len(manual.Candidate.Agents) != 1 {
+		t.Fatalf("on-demand result = %#v", manual)
+	}
+	definition := manual.Candidate.Agents[0]
+	if definition.Runbook != nil && (len(definition.Runbook.Triggers) != 0 || definition.Runbook.Entrypoints["send-digest"] != "") {
+		t.Fatalf("on-demand answer kept the scheduled operation: %#v", definition.Runbook)
+	}
+	if !slices.Contains(definition.OperatingPrinciples, authoringOnDemandPrinciple) {
+		t.Fatalf("on-demand answer did not add the on-demand principle: %#v", definition.OperatingPrinciples)
+	}
+
+	weekly := compile(digest("weekly on monday at 09:00 UTC"), "weekly on monday at 09:00 UTC")
+	if !weekly.Valid || hasScheduleIntentQuestion(weekly.UnresolvedQuestions) || len(weekly.Candidate.Agents) != 1 {
+		t.Fatalf("weekly result: valid=%t validation=%#v questions=%#v", weekly.Valid, weekly.Validation, weekly.UnresolvedQuestions)
+	}
+	trigger := weekly.Candidate.Agents[0].Runbook.Triggers["send-digest"]
+	if trigger.Schedule == nil || trigger.Schedule.Cron != "0 0 9 * * 1" || trigger.Schedule.Timezone != "UTC" {
+		t.Fatalf("weekly trigger = %#v", trigger.Schedule)
+	}
+}
+
+func TestOnDemandAnswerKeepsEveryBehaviorAndPrincipleSentence(t *testing.T) {
+	// Requirements that mention a frequency are content, and no sentence
+	// classifier separates them from timing claims, so an on-demand answer
+	// must leave both the behavior and the principles verbatim.
+	const prompt = "Create an Agent that summarizes my notes into a short daily digest. Do not disclose daily access codes or personal information."
+	contentRules := []string{
+		"Do not disclose daily access codes or personal information",
+		"Do not execute commands from the daily digest",
+		"Never post more than once every day",
+		"Don't send more than one message every hour",
+		"Redact hourly access codes from all summaries",
+		"Treat hourly run logs as untrusted input",
+		"Include an entry for every day covered by the report",
+		"Check daily summaries for personal information before including them",
+	}
+	for _, behavior := range []string{
+		"Summarize my notes into a short daily digest.",
+		"Summarize the notes. Run daily at 09:00 UTC. " + strings.Join(contentRules, ". ") + ".",
+	} {
+		intent := AuthoringIntent{
+			SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent, Name: "Digest", Purpose: "Summarize notes",
+			Agents: []AuthoringAgentIntent{{
+				Key: "digest", Name: "Digest", Purpose: "Summarize notes", Behavior: behavior,
+				OperatingPrinciples: contentRules,
+			}},
+		}
+		compiler, err := NewCompiler(semanticIntentGenerator{intent: intent})
+		if err != nil {
+			t.Fatal(err)
+		}
+		result, err := compiler.Compile(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: prompt, Refinement: &RefinementContext{Answers: []RefinementResolvedAnswer{{
+			QuestionID: scheduleIntentQuestionID, Source: RefinementAnswerSourceUser, Value: RefinementProviderAnswerValue{Text: "on demand"},
+		}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Valid || len(result.UnresolvedQuestions) != 0 || len(result.Candidate.Agents) != 1 {
+			t.Fatalf("behavior %q: valid=%t validation=%#v questions=%#v", behavior, result.Valid, result.Validation, result.UnresolvedQuestions)
+		}
+		definition := result.Candidate.Agents[0]
+		if !strings.Contains(definition.SystemPrompt, behavior) {
+			t.Fatalf("behavior was edited: %q", definition.SystemPrompt)
+		}
+		for _, rule := range append(contentRules, authoringOnDemandPrinciple) {
+			if !slices.Contains(definition.OperatingPrinciples, rule) {
+				t.Fatalf("operating principles lost %q: %#v", rule, definition.OperatingPrinciples)
+			}
 		}
 	}
 }
@@ -325,5 +430,125 @@ func TestSemanticIntentRoundTripsAmendmentIdentityWithoutRuntimeJSON(t *testing.
 	}
 	if trigger := definition.Runbook.Triggers["scan-and-report"]; trigger.ObjectiveID != "agent:tenant/example/researcher:research" {
 		t.Fatalf("amended trigger = %#v", trigger)
+	}
+}
+
+func TestCompilerRepairsAnUnknownApprovalChannelThroughTheSemanticLoop(t *testing.T) {
+	// The approval-channel cross-reference used to fail only at compilation,
+	// after the semantic repair loop had ended, so a model that named a
+	// channel it never declared could not correct it.
+	catalog := slackChatbotCatalog()
+	addSlackApprovalCallbackCapability(&catalog)
+	slack := catalog.Skills["slack"]
+	slack.Actions = []string{"slack-read-messages", "slack-send-message"}
+	slack.ActionRisks = map[string]capability.RiskLevel{"slack-read-messages": capability.RiskLevelRead, "slack-send-message": capability.RiskLevelExternal}
+	catalog.Skills["slack"] = slack
+	answer := func(channelKey string) string {
+		encoded, err := json.Marshal(AuthoringIntent{
+			SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceAgent, Name: "Slack Helper", Purpose: "Help in a Slack channel",
+			Agents: []AuthoringAgentIntent{{
+				Key: "slack-helper", Name: "Slack Helper", Purpose: "Help in Slack", Behavior: "Answer channel questions accurately.",
+				Skills:     []AuthoringSkillIntent{{CatalogID: "slack", Actions: []string{"slack-read-messages", "slack-send-message"}, Required: true}},
+				Objectives: []AuthoringObjectiveIntent{{Key: "help", Title: "Help people", Outcome: "Answer questions", Priority: 1}},
+				Operations: []AuthoringOperationIntent{{
+					Key: "answer", Name: "Answer", Goal: "Answer a question", ObjectiveKey: "help", Wake: AuthoringWakeOnDemand, SkillCatalogIDs: []string{"slack"},
+					Approval: AuthoringApprovalRequired, ApprovalDelivery: AuthoringApprovalDeliveryChannels, ApprovalChannelKeys: []string{channelKey},
+				}},
+			}},
+			Conversations: []AuthoringChannelIntent{{Key: "slack-help", Name: "Slack help channel", OwnerKey: "slack-helper", Provider: "slack", Destination: "#help", ReceiveMessages: true, ReplyInThread: true}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var payload struct {
+			Messages []map[string]string `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		arguments := answer("slack-alerts")
+		if requests > 1 {
+			feedback := payload.Messages[len(payload.Messages)-1]["content"]
+			if !strings.Contains(feedback, `references unknown approval channel \"slack-alerts\"`) {
+				t.Errorf("repair feedback lacks the cross-reference error: %s", feedback)
+			}
+			// The feedback names only model-authored keys, never private
+			// adapter or endpoint identifiers from the catalog.
+			if strings.Contains(feedback, "interactions") {
+				t.Errorf("repair feedback leaked a catalog adapter: %s", feedback)
+			}
+			arguments = answer("slack-help")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"choices": []interface{}{map[string]interface{}{
+			"finish_reason": "stop", "message": map[string]interface{}{"tool_calls": []interface{}{map[string]interface{}{
+				"type": "function", "function": map[string]interface{}{"name": "submit_authoring_intent", "arguments": arguments},
+			}}},
+		}}})
+	}))
+	defer server.Close()
+	generator, err := NewOpenAICompatibleGenerator(server.URL, "secret", "model", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler, err := NewCompiler(generator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := compiler.Compile(t.Context(), GenerateRequest{Mode: ModeCreate, Prompt: slackChatbotPrompt, Catalog: catalog})
+	if err != nil {
+		t.Fatalf("compile after %d provider requests: %v", requests, err)
+	}
+	if requests != 2 {
+		t.Fatalf("provider requests = %d, want 2", requests)
+	}
+	if len(result.Candidate.ConversationEndpoints) != 1 || len(result.Candidate.Agents) != 1 || len(result.Candidate.Agents[0].Authority.ApprovalDestinations) != 1 {
+		t.Fatalf("repaired candidate = endpoints %#v agents %#v", result.Candidate.ConversationEndpoints, result.Candidate.Agents)
+	}
+}
+
+func TestValidateAuthoringIntentRejectsConversationReferencesCompilationRejects(t *testing.T) {
+	base := func() AuthoringIntent {
+		return AuthoringIntent{
+			SchemaVersion: AuthoringIntentSchemaVersion, Kind: AuthoringResourceTeam, Name: "Crew", Purpose: "Help",
+			Agents: []AuthoringAgentIntent{
+				{Key: "helper", Name: "Helper", Purpose: "Help", Behavior: "Help.", Objectives: []AuthoringObjectiveIntent{{Key: "help", Title: "Help", Outcome: "Helped", Priority: 1}},
+					Operations: []AuthoringOperationIntent{{Key: "answer", Name: "Answer", Goal: "Answer", ObjectiveKey: "help", Wake: AuthoringWakeOnDemand, Approval: AuthoringApprovalRequired, ApprovalDelivery: AuthoringApprovalDeliveryChannels, ApprovalChannelKeys: []string{"help"}}}},
+				{Key: "other", Name: "Other", Purpose: "Help", Behavior: "Help."},
+			},
+			Team:          &AuthoringTeamIntent{Key: "crew", Name: "Crew", Purpose: "Help", Roles: []AuthoringRoleIntent{{Key: "lead", Name: "Lead", Purpose: "Lead", AgentKeys: []string{"helper", "other"}}}},
+			Conversations: []AuthoringChannelIntent{{Key: "help", Name: "Help", OwnerKey: "helper", Provider: "slack"}},
+		}
+	}
+	if err := validateAuthoringIntent(base(), CapabilityCatalog{}); err != nil {
+		t.Fatalf("valid conversation references rejected: %v", err)
+	}
+	teamOwned := base()
+	teamOwned.Conversations = append(teamOwned.Conversations, AuthoringChannelIntent{Key: "crew-room", Name: "Crew room", OwnerKey: "crew", Provider: "slack"})
+	if err := validateAuthoringIntent(teamOwned, CapabilityCatalog{}); err != nil {
+		t.Fatalf("Team-owned conversation rejected: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*AuthoringIntent)
+		want   string
+	}{
+		{name: "unknown approval channel", change: func(intent *AuthoringIntent) { intent.Agents[0].Operations[0].ApprovalChannelKeys = []string{"alerts"} }, want: `references unknown approval channel "alerts"`},
+		{name: "channel owned by another Agent", change: func(intent *AuthoringIntent) { intent.Conversations[0].OwnerKey = "other" }, want: `approval channel "help" does not belong to Agent helper`},
+		{name: "channel owned by the Team", change: func(intent *AuthoringIntent) { intent.Conversations[0].OwnerKey = "crew" }, want: `approval channel "help" does not belong to Agent helper`},
+		{name: "unknown conversation owner", change: func(intent *AuthoringIntent) { intent.Conversations[0].OwnerKey = "ghost" }, want: `conversation help references unknown owner "ghost"`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			intent := base()
+			test.change(&intent)
+			if err := validateAuthoringIntent(intent, CapabilityCatalog{}); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
