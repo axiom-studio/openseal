@@ -59,7 +59,23 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	if currentRun == nil {
 		return nil, ErrRunNotFound
 	}
-	if currentRun.Revision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
+	if proposal.Nested != nil {
+		state := nestedActionTurnState{RunStatus: currentRun.Status, RunLeaseOwner: currentRun.LeaseOwner, RunLeaseExpiry: currentRun.LeaseExpiresAt}
+		if turn := s.turns[runKey][call.TurnID]; turn != nil {
+			state.Turn = turn
+		}
+		for _, existing := range s.actions {
+			if existing.Scope == call.Scope && existing.RunID == call.RunID && existing.TurnID == call.TurnID && existing.Origin == ActionOriginVM {
+				state.TotalCalls++
+				if containsActionStatus(nestedActionUnfinished, existing.Status) {
+					state.UnfinishedCalls++
+				}
+			}
+		}
+		if err := proposal.Nested.admit(call, state); err != nil {
+			return nil, err
+		}
+	} else if currentRun.Revision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
 		return nil, ErrRevisionConflict
 	}
 	if proposal.Lease != nil && (currentRun.LeaseOwner != proposal.Lease.WorkerID || currentRun.LeaseExpiresAt == nil || !currentRun.LeaseExpiresAt.After(proposal.Lease.Now)) {
@@ -71,8 +87,10 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	if proposal.Approval != nil && s.approvals[portfolioKey(call.Scope, proposal.Approval.ID)] != nil {
 		return nil, ErrRevisionConflict
 	}
-	if err := s.validateMemoryRunSkillDependenciesLocked(proposal.Run); err != nil {
-		return nil, err
+	if proposal.Run != nil {
+		if err := s.validateMemoryRunSkillDependenciesLocked(proposal.Run); err != nil {
+			return nil, err
+		}
 	}
 	event := cloneActivityEvent(proposal.Event)
 	event.Sequence = int64(len(s.activity[runKey]) + 1)
@@ -86,7 +104,9 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 	if proposal.Approval != nil {
 		s.approvals[portfolioKey(call.Scope, proposal.Approval.ID)] = cloneApprovalCheckpoint(proposal.Approval)
 	}
-	s.saveMemoryAgentRunLocked(runKey, proposal.Run)
+	if proposal.Run != nil {
+		s.saveMemoryAgentRunLocked(runKey, proposal.Run)
+	}
 	s.activity[runKey] = append(s.activity[runKey], event)
 	return &ActionProposalResult{
 		Call: cloneActionCall(call), Approval: cloneApprovalCheckpoint(proposal.Approval),
@@ -235,7 +255,7 @@ func (s *MemoryStore) ResolveApproval(_ context.Context, resolution ApprovalReso
 		return nil, ErrApprovalNotFound
 	}
 	callKey := portfolioKey(resolution.Call.Scope, resolution.Call.ID)
-	runKey := portfolioKey(resolution.Run.Scope, resolution.Run.ID)
+	runKey := portfolioKey(resolution.Approval.Scope, resolution.Approval.RunID)
 	currentCall := s.actions[callKey]
 	currentRun := s.agentRuns[runKey]
 	if currentCall == nil {
@@ -250,12 +270,15 @@ func (s *MemoryStore) ResolveApproval(_ context.Context, resolution ApprovalReso
 		}
 		return nil, ErrApprovalResolved
 	}
-	if currentApproval.Revision != resolution.ExpectedApprovalRevision || currentCall.Revision != resolution.ExpectedCallRevision || currentRun.Revision != resolution.ExpectedRunRevision ||
-		resolution.Approval.Revision != resolution.ExpectedApprovalRevision+1 || resolution.Call.Revision != resolution.ExpectedCallRevision+1 || resolution.Run.Revision != resolution.ExpectedRunRevision+1 {
+	if currentApproval.Revision != resolution.ExpectedApprovalRevision || currentCall.Revision != resolution.ExpectedCallRevision ||
+		resolution.Approval.Revision != resolution.ExpectedApprovalRevision+1 || resolution.Call.Revision != resolution.ExpectedCallRevision+1 ||
+		resolution.Run != nil && (currentRun.Revision != resolution.ExpectedRunRevision || resolution.Run.Revision != resolution.ExpectedRunRevision+1) {
 		return nil, ErrRevisionConflict
 	}
-	if err := s.validateMemoryRunSkillDependenciesLocked(resolution.Run); err != nil {
-		return nil, err
+	if resolution.Run != nil {
+		if err := s.validateMemoryRunSkillDependenciesLocked(resolution.Run); err != nil {
+			return nil, err
+		}
 	}
 	event := cloneActivityEvent(resolution.Event)
 	event.Sequence = int64(len(s.activity[runKey]) + 1)
@@ -264,9 +287,14 @@ func (s *MemoryStore) ResolveApproval(_ context.Context, resolution ApprovalReso
 	if currentCall.ExternalOperationDigest != "" && externalOperationProtects(currentCall.Status) && !externalOperationProtects(resolution.Call.Status) {
 		delete(s.externalOperationKeys, externalOperationStoreKey(currentCall.Scope, currentCall.ExternalOperationDigest))
 	}
-	s.saveMemoryAgentRunLocked(runKey, resolution.Run)
+	resolvedRun := resolution.Run
+	if resolvedRun != nil {
+		s.saveMemoryAgentRunLocked(runKey, resolvedRun)
+	} else {
+		resolvedRun = currentRun
+	}
 	s.activity[runKey] = append(s.activity[runKey], event)
-	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolution.Run), Event: cloneActivityEvent(event), Resolved: true}, nil
+	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolvedRun), Event: cloneActivityEvent(event), Resolved: true}, nil
 }
 
 func (s *MemoryStore) ClaimNextAction(_ context.Context, claim ActionClaim) (*ActionCall, error) {
@@ -384,14 +412,24 @@ func validateActionProposalRecord(proposal ActionProposalRecord) error {
 	if err := proposal.Call.Validate(); err != nil {
 		return err
 	}
-	if err := proposal.Run.Validate(); err != nil {
+	if err := validateNestedActionFence(proposal); err != nil {
 		return err
+	}
+	if proposal.Nested == nil {
+		if proposal.Call.Origin != "" {
+			return errors.New("a nested action call requires its Turn fence")
+		}
+		if err := proposal.Run.Validate(); err != nil {
+			return err
+		}
+		if proposal.Call.Scope != proposal.Run.Scope || proposal.Call.RunID != proposal.Run.ID {
+			return ErrInvalidScope
+		}
 	}
 	if err := proposal.Event.Validate(); err != nil {
 		return err
 	}
-	if proposal.Call.Scope != proposal.Run.Scope || proposal.Call.Scope != proposal.Event.Scope ||
-		proposal.Call.RunID != proposal.Run.ID || proposal.Call.RunID != proposal.Event.RunID {
+	if proposal.Call.Scope != proposal.Event.Scope || proposal.Call.RunID != proposal.Event.RunID {
 		return ErrInvalidScope
 	}
 	if proposal.Approval != nil {
@@ -416,6 +454,8 @@ func validateActionSubmissionBinding(call *ActionCall, binding *skill.Binding) e
 	return nil
 }
 
+// A nested call's approval is resolved without a Run update (Run nil); every
+// other resolution updates its Run.
 func validateApprovalResolutionRecord(resolution ApprovalResolutionRecord) error {
 	if err := resolution.Approval.Validate(); err != nil {
 		return err
@@ -423,8 +463,16 @@ func validateApprovalResolutionRecord(resolution ApprovalResolutionRecord) error
 	if err := resolution.Call.Validate(); err != nil {
 		return err
 	}
-	if err := resolution.Run.Validate(); err != nil {
-		return err
+	if (resolution.Run == nil) != (resolution.Call.Origin == ActionOriginVM) {
+		return errors.New("only a nested action call's approval resolves without a Run update")
+	}
+	if resolution.Run != nil {
+		if err := resolution.Run.Validate(); err != nil {
+			return err
+		}
+		if resolution.Approval.Scope != resolution.Run.Scope || resolution.Approval.RunID != resolution.Run.ID {
+			return ErrInvalidScope
+		}
 	}
 	if err := resolution.Event.Validate(); err != nil {
 		return err
@@ -432,8 +480,8 @@ func validateApprovalResolutionRecord(resolution ApprovalResolutionRecord) error
 	if resolution.Approval.Status == ApprovalStatusPending || strings.TrimSpace(resolution.Approval.DecisionID) == "" || resolution.Approval.DecisionBy == nil || resolution.Approval.DecidedAt == nil {
 		return errors.New("approval resolution requires a terminal decision, id, principal, and decision time")
 	}
-	if resolution.Approval.Scope != resolution.Call.Scope || resolution.Approval.Scope != resolution.Run.Scope || resolution.Approval.Scope != resolution.Event.Scope ||
-		resolution.Approval.RunID != resolution.Run.ID || resolution.Approval.RunID != resolution.Call.RunID || resolution.Approval.RunID != resolution.Event.RunID ||
+	if resolution.Approval.Scope != resolution.Call.Scope || resolution.Approval.Scope != resolution.Event.Scope ||
+		resolution.Approval.RunID != resolution.Call.RunID || resolution.Approval.RunID != resolution.Event.RunID ||
 		resolution.Approval.ActionCallID != resolution.Call.ID || resolution.Call.ApprovalID != resolution.Approval.ID {
 		return ErrInvalidScope
 	}

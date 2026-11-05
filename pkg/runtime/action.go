@@ -43,19 +43,26 @@ const (
 )
 
 type ActionCall struct {
-	ID              string           `json:"id"`
-	Scope           Scope            `json:"scope"`
-	RunID           string           `json:"runId"`
-	TurnID          string           `json:"turnId,omitempty"`
-	DeploymentID    string           `json:"deploymentId"`
-	BindingID       string           `json:"bindingId"`
-	BindingRevision int64            `json:"bindingRevision"`
-	SkillID         string           `json:"skillId"`
-	SkillVersion    string           `json:"skillVersion"`
-	Action          string           `json:"action"`
-	Status          ActionCallStatus `json:"status"`
-	Risk            skill.RiskLevel  `json:"risk"`
-	SideEffect      skill.SideEffect `json:"sideEffect"`
+	ID              string `json:"id"`
+	Scope           Scope  `json:"scope"`
+	RunID           string `json:"runId"`
+	TurnID          string `json:"turnId,omitempty"`
+	DeploymentID    string `json:"deploymentId"`
+	BindingID       string `json:"bindingId"`
+	BindingRevision int64  `json:"bindingRevision"`
+	SkillID         string `json:"skillId"`
+	SkillVersion    string `json:"skillVersion"`
+	Action          string `json:"action"`
+	// Origin is empty for an action the model requested at the end of its
+	// Turn. ActionOriginVM marks a nested call made during the Turn by code in
+	// the chat's VM; such a call never changes its Run's lifecycle.
+	Origin ActionOrigin `json:"origin,omitempty"`
+	// OriginRef is the host's grouping reference for a nested call, such as
+	// the workspace command it ran under.
+	OriginRef  string           `json:"originRef,omitempty"`
+	Status     ActionCallStatus `json:"status"`
+	Risk       skill.RiskLevel  `json:"risk"`
+	SideEffect skill.SideEffect `json:"sideEffect"`
 	// Review is the action's manifest review floor captured at proposal time,
 	// so later approval-mode sweeps cannot waive an always-reviewed action.
 	Review                  skill.ActionReview                   `json:"review,omitempty"`
@@ -112,6 +119,15 @@ func (c *ActionCall) Validate() error {
 	}
 	if !validActionCallStatus(c.Status) || c.Revision < 1 || c.MaxAttempts < 1 || c.Attempt < 0 {
 		return errors.New("action call lifecycle metadata is invalid")
+	}
+	if c.Origin != "" && c.Origin != ActionOriginVM {
+		return errors.New("action origin is invalid")
+	}
+	if c.Origin == ActionOriginVM && strings.TrimSpace(c.TurnID) == "" {
+		return errors.New("a nested action call requires its Turn")
+	}
+	if c.Origin == "" && c.OriginRef != "" {
+		return errors.New("only a nested action call has an origin reference")
 	}
 	if c.FailurePhase != "" && (c.Status != ActionCallStatusFailed || c.FailurePhase != ActionFailureBeforeDispatch && c.FailurePhase != ActionFailureAfterDispatch) {
 		return errors.New("action failure phase is invalid")
@@ -358,6 +374,9 @@ type ActionProposalRecord struct {
 	// through (see skill.HostBindingProvider). It has no stored row: the
 	// fence requires that none exists and checks the call against it.
 	HostBinding *skill.Binding
+	// Nested is set, with Run nil, for a nested call. The store then checks
+	// the fence instead of updating the Run.
+	Nested *NestedActionFence
 }
 
 type ActionProposalResult struct {
@@ -368,6 +387,8 @@ type ActionProposalResult struct {
 	Created  bool                `json:"created"`
 }
 
+// ApprovalResolutionRecord updates its Run, except for a nested call's
+// approval (Run nil), which leaves the Run unchanged.
 type ApprovalResolutionRecord struct {
 	Approval                 *ApprovalCheckpoint
 	ExpectedApprovalRevision int64

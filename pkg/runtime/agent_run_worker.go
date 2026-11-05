@@ -431,7 +431,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			ModelProvider: binding.ModelProvider, Model: binding.Model, InputContextRefs: binding.InputContextRefs,
 			BudgetReservation: binding.BudgetReservation,
 			OutputPublisher:   binding.OutputPublisher,
-		}, preparedRuntimeTurnRunner{binding: binding})
+		}, preparedRuntimeTurnRunner{binding: binding, actions: p.actions})
 		cancelAdvance()
 		heartbeatErr := <-heartbeatDone
 		if heartbeatErr != nil && (advanceErr == nil || errors.Is(heartbeatErr, ErrLeaseLost)) {
@@ -1177,7 +1177,13 @@ func (p *AgentRunWorkerPool) resumeReplayedTurnAction(ctx context.Context, worke
 	return resumed, nil
 }
 
-type preparedRuntimeTurnRunner struct{ binding *TurnRunnerBinding }
+// preparedRuntimeTurnRunner hosts one Turn with its resolved binding. While
+// the Turn runs, its offered actions are open to nested calls (see
+// ActionCoordinator.ProposeNested).
+type preparedRuntimeTurnRunner struct {
+	binding *TurnRunnerBinding
+	actions *ActionCoordinator
+}
 
 func (r preparedRuntimeTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
 	if r.binding == nil || r.binding.Runner == nil {
@@ -1197,7 +1203,9 @@ func (r preparedRuntimeTurnRunner) RunTurn(ctx context.Context, input TurnExecut
 	if err := validatePreparedSkillRuntimes(r.binding); err != nil {
 		return nil, err
 	}
+	closeNested := r.actions.OpenNestedActionTurn(input.Run, input.Turn, r.binding)
 	outcome, err := r.binding.Runner.RunTurn(ctx, input)
+	closeNested()
 	if outcome == nil {
 		return nil, err
 	}
@@ -1209,18 +1217,24 @@ func (r preparedRuntimeTurnRunner) RunTurn(ctx context.Context, input TurnExecut
 		if selectionErr != nil || selected == nil {
 			continue
 		}
-		for runtimeIndex := range r.binding.PreparedRuntimes {
-			prepared := &r.binding.PreparedRuntimes[runtimeIndex]
-			if prepared.DeploymentID == selected.DeploymentID && prepared.BindingID == selected.BindingID && prepared.BindingRevision == selected.BindingRevision &&
-				prepared.SkillID == selected.SkillID && prepared.SkillVersion == selected.Version {
-				copy := prepared.Runtime
-				copy.Executables = append([]string(nil), prepared.Runtime.Executables...)
-				request.PreparedRuntime = &copy
-				break
-			}
-		}
+		request.PreparedRuntime = preparedRuntimeForAction(r.binding, selected)
 	}
 	return outcome, err
+}
+
+// preparedRuntimeForAction is the activation-time runtime prepared for the
+// selected action's exact binding, if any.
+func preparedRuntimeForAction(binding *TurnRunnerBinding, selected *capability.ModelAction) *skill.PreparedRuntime {
+	for runtimeIndex := range binding.PreparedRuntimes {
+		prepared := &binding.PreparedRuntimes[runtimeIndex]
+		if prepared.DeploymentID == selected.DeploymentID && prepared.BindingID == selected.BindingID && prepared.BindingRevision == selected.BindingRevision &&
+			prepared.SkillID == selected.SkillID && prepared.SkillVersion == selected.Version {
+			copy := prepared.Runtime
+			copy.Executables = append([]string(nil), prepared.Runtime.Executables...)
+			return &copy
+		}
+	}
+	return nil
 }
 
 func validatePreparedSkillRuntimes(binding *TurnRunnerBinding) error {

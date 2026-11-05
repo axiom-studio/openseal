@@ -161,18 +161,46 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 	}
 
 	var currentRevision int64
-	var currentLeaseOwner string
+	var currentStatus, currentLeaseOwner string
 	var currentLeaseExpiry sql.NullTime
-	err = conn.QueryRowContext(ctx, `SELECT revision, lease_owner, lease_expires_at FROM agent_runs
+	err = conn.QueryRowContext(ctx, `SELECT revision, status, lease_owner, lease_expires_at FROM agent_runs
 		WHERE scope_kind = ? AND scope_id = ? AND id = ?`, call.Scope.Kind, call.Scope.ID, call.RunID).
-		Scan(&currentRevision, &currentLeaseOwner, &currentLeaseExpiry)
+		Scan(&currentRevision, &currentStatus, &currentLeaseOwner, &currentLeaseExpiry)
 	if err == sql.ErrNoRows {
 		return nil, ErrRunNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
+	if proposal.Nested != nil {
+		state := nestedActionTurnState{RunStatus: AgentRunStatus(currentStatus), RunLeaseOwner: currentLeaseOwner}
+		if currentLeaseExpiry.Valid {
+			state.RunLeaseExpiry = &currentLeaseExpiry.Time
+		}
+		turn := &AgentTurn{}
+		var turnLeaseExpiry sql.NullTime
+		err := conn.QueryRowContext(ctx, `SELECT run_id, status, lease_owner, lease_expires_at FROM agent_turns
+			WHERE scope_kind = ? AND scope_id = ? AND id = ?`, call.Scope.Kind, call.Scope.ID, call.TurnID).
+			Scan(&turn.RunID, &turn.Status, &turn.LeaseOwner, &turnLeaseExpiry)
+		if err != nil && err != sql.ErrNoRows {
+			return nil, err
+		}
+		if err == nil {
+			if turnLeaseExpiry.Valid {
+				turn.LeaseExpiresAt = &turnLeaseExpiry.Time
+			}
+			state.Turn = turn
+		}
+		if err := conn.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(CASE WHEN status IN (?, ?, ?) THEN 1 ELSE 0 END), 0) FROM action_calls
+			WHERE scope_kind = ? AND scope_id = ? AND run_id = ? AND turn_id = ? AND json_extract(payload, '$.origin') = ?`,
+			nestedActionUnfinished[0], nestedActionUnfinished[1], nestedActionUnfinished[2],
+			call.Scope.Kind, call.Scope.ID, call.RunID, call.TurnID, string(ActionOriginVM)).Scan(&state.TotalCalls, &state.UnfinishedCalls); err != nil {
+			return nil, err
+		}
+		if err := proposal.Nested.admit(call, state); err != nil {
+			return nil, err
+		}
+	} else if currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
 		return nil, ErrRevisionConflict
 	}
 	if proposal.Lease != nil && (currentLeaseOwner != proposal.Lease.WorkerID || !currentLeaseExpiry.Valid || !currentLeaseExpiry.Time.After(proposal.Lease.Now)) {
@@ -207,26 +235,28 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		}
 	}
 
-	runPayload, err := json.Marshal(proposal.Run)
-	if err != nil {
-		return nil, err
-	}
-	result, err := conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
-		deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
-		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
-		proposal.Run.Status, proposal.Run.Priority, proposal.Run.AssignedAgentID, proposal.Run.Revision,
-		proposal.Run.Deadline, proposal.Run.AvailableAt, proposal.Run.QueueEnteredAt, proposal.Run.LeaseOwner,
-		proposal.Run.LeaseExpiresAt, proposal.Run.LastClaimedAt, proposal.Run.Attempt, string(runPayload),
-		proposal.Run.Scope.Kind, proposal.Run.Scope.ID, proposal.Run.ID, proposal.ExpectedRunRevision)
-	if err != nil {
-		return nil, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	if affected != 1 {
-		return nil, ErrRevisionConflict
+	if proposal.Run != nil {
+		runPayload, err := json.Marshal(proposal.Run)
+		if err != nil {
+			return nil, err
+		}
+		result, err := conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
+			deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
+			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+			proposal.Run.Status, proposal.Run.Priority, proposal.Run.AssignedAgentID, proposal.Run.Revision,
+			proposal.Run.Deadline, proposal.Run.AvailableAt, proposal.Run.QueueEnteredAt, proposal.Run.LeaseOwner,
+			proposal.Run.LeaseExpiresAt, proposal.Run.LastClaimedAt, proposal.Run.Attempt, string(runPayload),
+			proposal.Run.Scope.Kind, proposal.Run.Scope.ID, proposal.Run.ID, proposal.ExpectedRunRevision)
+		if err != nil {
+			return nil, err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected != 1 {
+			return nil, ErrRevisionConflict
+		}
 	}
 
 	event := cloneActivityEvent(proposal.Event)
@@ -427,7 +457,7 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 	}
 	var runPayload string
 	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
-		resolution.Run.Scope.Kind, resolution.Run.Scope.ID, resolution.Run.ID).Scan(&runPayload)
+		resolution.Approval.Scope.Kind, resolution.Approval.Scope.ID, resolution.Approval.RunID).Scan(&runPayload)
 	if err == sql.ErrNoRows {
 		return nil, ErrRunNotFound
 	}
@@ -448,8 +478,9 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 		}
 		return nil, ErrApprovalResolved
 	}
-	if currentApproval.Revision != resolution.ExpectedApprovalRevision || currentCall.Revision != resolution.ExpectedCallRevision || currentRun.Revision != resolution.ExpectedRunRevision ||
-		resolution.Approval.Revision != resolution.ExpectedApprovalRevision+1 || resolution.Call.Revision != resolution.ExpectedCallRevision+1 || resolution.Run.Revision != resolution.ExpectedRunRevision+1 {
+	if currentApproval.Revision != resolution.ExpectedApprovalRevision || currentCall.Revision != resolution.ExpectedCallRevision ||
+		resolution.Approval.Revision != resolution.ExpectedApprovalRevision+1 || resolution.Call.Revision != resolution.ExpectedCallRevision+1 ||
+		resolution.Run != nil && (currentRun.Revision != resolution.ExpectedRunRevision || resolution.Run.Revision != resolution.ExpectedRunRevision+1) {
 		return nil, ErrRevisionConflict
 	}
 	approvalPayload, err := json.Marshal(resolution.Approval)
@@ -481,22 +512,26 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 	if affected, _ := result.RowsAffected(); affected != 1 {
 		return nil, ErrRevisionConflict
 	}
-	updatedRunPayload, err := json.Marshal(resolution.Run)
-	if err != nil {
-		return nil, err
-	}
-	result, err = conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
-		deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
-		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
-		resolution.Run.Status, resolution.Run.Priority, resolution.Run.AssignedAgentID, resolution.Run.Revision,
-		resolution.Run.Deadline, resolution.Run.AvailableAt, resolution.Run.QueueEnteredAt, resolution.Run.LeaseOwner,
-		resolution.Run.LeaseExpiresAt, resolution.Run.LastClaimedAt, resolution.Run.Attempt, string(updatedRunPayload),
-		resolution.Run.Scope.Kind, resolution.Run.Scope.ID, resolution.Run.ID, resolution.ExpectedRunRevision)
-	if err != nil {
-		return nil, err
-	}
-	if affected, _ := result.RowsAffected(); affected != 1 {
-		return nil, ErrRevisionConflict
+	resolvedRun := currentRun
+	if resolution.Run != nil {
+		resolvedRun = resolution.Run
+		updatedRunPayload, err := json.Marshal(resolution.Run)
+		if err != nil {
+			return nil, err
+		}
+		result, err = conn.ExecContext(ctx, `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
+			deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
+			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
+			resolution.Run.Status, resolution.Run.Priority, resolution.Run.AssignedAgentID, resolution.Run.Revision,
+			resolution.Run.Deadline, resolution.Run.AvailableAt, resolution.Run.QueueEnteredAt, resolution.Run.LeaseOwner,
+			resolution.Run.LeaseExpiresAt, resolution.Run.LastClaimedAt, resolution.Run.Attempt, string(updatedRunPayload),
+			resolution.Run.Scope.Kind, resolution.Run.Scope.ID, resolution.Run.ID, resolution.ExpectedRunRevision)
+		if err != nil {
+			return nil, err
+		}
+		if affected, _ := result.RowsAffected(); affected != 1 {
+			return nil, ErrRevisionConflict
+		}
 	}
 	event := cloneActivityEvent(resolution.Event)
 	if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_activity
@@ -517,7 +552,7 @@ func (s *SQLiteStore) ResolveApproval(ctx context.Context, resolution ApprovalRe
 		return nil, err
 	}
 	committed = true
-	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolution.Run), Event: event, Resolved: true}, nil
+	return &ApprovalResolutionResult{Approval: cloneApprovalCheckpoint(resolution.Approval), Call: cloneActionCall(resolution.Call), Run: cloneAgentRun(resolvedRun), Event: event, Resolved: true}, nil
 }
 
 func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*ActionCall, error) {

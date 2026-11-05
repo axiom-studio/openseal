@@ -111,6 +111,10 @@ type ProposeActionRequest struct {
 	ContinuationCheckpoint map[string]interface{}
 	CorrelationID          string
 	CausationID            string
+	// Origin and OriginRef mark a nested call (see ProposeNested). A nested
+	// proposal never changes the Run and is fenced by its in-flight Turn.
+	Origin    ActionOrigin
+	OriginRef string
 }
 
 type ActionCoordinator struct {
@@ -124,12 +128,18 @@ type ActionCoordinator struct {
 	validators    []ActionProposalValidator
 	now           func() time.Time
 	newID         func() string
+	nested        nestedActionTurns
+	// nestedMaxCalls and nestedMaxConcurrent bound nested calls per Turn.
+	nestedMaxCalls, nestedMaxConcurrent int
 }
 
 func NewActionCoordinator(portfolio PortfolioStore, actions ActionStore, catalog ActionCatalog, policy ActionPolicyEvaluator, validators ...ActionProposalValidator) *ActionCoordinator {
 	portable := []ActionProposalValidator{KernelResolvedActionArgumentResolver{}, BindingActionArgumentResolver{}, EmbedSessionActionAuthorityValidator{}, RequiredActionEvidenceValidator{}, ObservationRefActionProposalValidator{}}
 	portable = append(portable, validators...)
-	coordinator := &ActionCoordinator{portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: time.Now, newID: uuid.NewString}
+	coordinator := &ActionCoordinator{
+		portfolio: portfolio, actions: actions, catalog: catalog, policy: policy, validators: portable, now: time.Now, newID: uuid.NewString,
+		nestedMaxCalls: MaxNestedActionCallsPerTurn, nestedMaxConcurrent: MaxConcurrentNestedActionCalls,
+	}
 	// Conversation approval modes are read from the same kernel store when it
 	// keeps conversations; a store without them has no modes (manual).
 	if conversations, ok := portfolio.(conversationReader); ok {
@@ -174,6 +184,20 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	if run.Status != AgentRunStatusRunning {
 		return nil, fmt.Errorf("action can only be proposed by a running run, got %s", run.Status)
+	}
+	nested := req.Origin == ActionOriginVM
+	if req.Origin != "" && !nested {
+		return nil, fmt.Errorf("unsupported action origin %q", req.Origin)
+	}
+	if nested {
+		if strings.TrimSpace(req.TurnID) == "" || strings.TrimSpace(req.WorkerID) == "" || strings.TrimSpace(req.AssignedAgentID) != "" || req.ExternalOperation != nil {
+			return nil, errors.New("a nested action requires its Turn and worker and takes no Agent attribution or external operation")
+		}
+		// An answer-only explanation Turn or a pending source question may
+		// not act, and a nested call cannot take the model's one correction.
+		if requiresFinalFailureExplanation(run.Checkpoint) || hasCanonicalSourceAccessChallenge(run) {
+			return nil, ErrNestedActionNotAuthorized
+		}
 	}
 	if assignedAgentID := strings.TrimSpace(req.AssignedAgentID); assignedAgentID != "" {
 		if run.Kind != RunKindConversation || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.AssignedAgentID) != "" {
@@ -303,7 +327,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	call := &ActionCall{
 		ID: callID, Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
-		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action,
+		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action, Origin: req.Origin, OriginRef: strings.TrimSpace(req.OriginRef),
 		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: bound.Action.Review,
 		Arguments:         persistedActionArguments(arguments, bound.Action.InputSchema),
 		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
@@ -314,6 +338,9 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
 	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	if nested {
+		return c.createNestedProposal(ctx, req, run, bound, arguments, proposedAction, call, decision, lease, now)
+	}
 	updatedRun := cloneAgentRun(run)
 	updatedRun.Revision++
 	updatedRun.UpdatedAt = now
@@ -382,32 +409,76 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			eventSummary = "Run paused before exceeding its autonomous action budget"
 		}
 	case ActionDispositionRequireApproval:
-		approvalID := c.newID()
-		ttl := decision.ApprovalTTL
-		if ttl <= 0 {
-			ttl = 24 * time.Hour
-		}
-		call.Status = ActionCallStatusWaitingApproval
-		call.ApprovalID = approvalID
-		approval = &ApprovalCheckpoint{
-			ID: approvalID, Scope: req.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
-			Risk: bound.Action.Risk, Summary: eventSummary, PolicyReason: decision.Reason, ProposedAction: proposedAction,
-			EvidenceRefs: append([]string(nil), req.EvidenceRefs...), EligibleApprovers: append([]ApprovalPrincipal(nil), decision.EligibleApprovers...),
-			Destinations:           append([]ApprovalDestination(nil), decision.ApprovalDestinations...),
-			ContinuationCheckpoint: cloneMap(req.ContinuationCheckpoint), ExpiresAt: now.Add(ttl), TimeoutDecision: decision.ApprovalTimeout,
-			Revision: 1, CreatedAt: now, UpdatedAt: now,
-		}
+		approval = c.newApprovalCheckpoint(ctx, req, run, bound, arguments, proposedAction, call, decision, eventSummary, now)
 		updatedRun.Status = AgentRunStatusWaitingForApproval
-		updatedRun.WakeCondition = &WakeCondition{Type: "approval", Reference: approvalID}
+		updatedRun.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
 		updatedRun.Checkpoint = correctionCheckpoint
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
 		eventType = "action.approval_requested"
 	}
-	if approval != nil && approval.ProposedAction == nil {
+	event := c.proposalEvent(req, run, call, decision, eventType, eventSummary, now)
+	result, err := c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound)})
+	var conflict *ExternalOperationConflictError
+	if errors.As(err, &conflict) && conflict.Prior != nil && externalOperationReceiptComplete(conflict.Prior.Status) {
+		return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, conflict.Prior, lease, now)
+	}
+	return result, err
+}
+
+// createNestedProposal records a nested call with the same disposition,
+// approval and activity a model proposal would get, without touching the Run.
+// The store fences it against the in-flight Turn and its bounds.
+func (c *ActionCoordinator) createNestedProposal(ctx context.Context, req ProposeActionRequest, run *AgentRun, bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *ActionCall, decision ActionPolicyDecision, lease *AgentRunLeaseGuard, now time.Time) (*ActionProposalResult, error) {
+	if lease == nil {
+		return nil, ErrNestedTurnNotActive
+	}
+	eventType := "action.proposed"
+	summary := req.Summary
+	if summary == "" {
+		summary = fmt.Sprintf("Proposed %s.%s", req.SkillID, req.Action)
+	}
+	var approval *ApprovalCheckpoint
+	switch decision.Disposition {
+	case ActionDispositionAllow:
+		call.Status = ActionCallStatusReady
+	case ActionDispositionDeny:
+		call.Status = ActionCallStatusDenied
+		call.Error = decision.Reason
+		call.CompletedAt = &now
+		eventType = "action.denied"
+	case ActionDispositionRequireApproval:
+		approval = c.newApprovalCheckpoint(ctx, req, run, bound, arguments, proposedAction, call, decision, summary, now)
+		eventType = "action.approval_requested"
+	}
+	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{
+		Call: call, Approval: approval, Lease: lease, Event: c.proposalEvent(req, run, call, decision, eventType, summary, now),
+		RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound),
+		Nested: &NestedActionFence{WorkerID: lease.WorkerID, Now: now, MaxCalls: c.nestedMaxCalls, MaxConcurrent: c.nestedMaxConcurrent},
+	})
+}
+
+// newApprovalCheckpoint puts call in review and returns its pending approval.
+func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req ProposeActionRequest, run *AgentRun, bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *ActionCall, decision ActionPolicyDecision, summary string, now time.Time) *ApprovalCheckpoint {
+	approvalID := c.newID()
+	ttl := decision.ApprovalTTL
+	if ttl <= 0 {
+		ttl = 24 * time.Hour
+	}
+	call.Status = ActionCallStatusWaitingApproval
+	call.ApprovalID = approvalID
+	approval := &ApprovalCheckpoint{
+		ID: approvalID, Scope: req.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+		Risk: bound.Action.Risk, Summary: summary, PolicyReason: decision.Reason, ProposedAction: proposedAction,
+		EvidenceRefs: append([]string(nil), req.EvidenceRefs...), EligibleApprovers: append([]ApprovalPrincipal(nil), decision.EligibleApprovers...),
+		Destinations:           append([]ApprovalDestination(nil), decision.ApprovalDestinations...),
+		ContinuationCheckpoint: cloneMap(req.ContinuationCheckpoint), ExpiresAt: now.Add(ttl), TimeoutDecision: decision.ApprovalTimeout,
+		Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if approval.ProposedAction == nil {
 		approval.ProposedAction = approvalPreview(bound, arguments)
 	}
-	if approval != nil && bound.Action.AlwaysReview() {
+	if bound.Action.AlwaysReview() {
 		// The reviewer must see exactly what they consent to (for a payment:
 		// amount, currency, merchant) even when a validator supplied its own
 		// preview. Sensitive inputs remain redacted.
@@ -416,14 +487,18 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		}
 		approval.ProposedAction["review"] = string(bound.Action.Review)
 	}
-	if approval != nil {
-		approval.ProposedAction = c.enrichApprovalPreview(ctx, approval.ProposedAction, run, req.EvidenceRefs, req.ExternalOperation)
-		if req.ReviewContext != nil {
-			approval.ProposedAction["reviewContext"] = approvalReviewContextMap(req.ReviewContext)
-		} else if review := intentApprovalReviewContext(approval.ProposedAction, req.ExternalOperation); review != nil {
-			approval.ProposedAction["reviewContext"] = approvalReviewContextMap(review)
-		}
+	approval.ProposedAction = c.enrichApprovalPreview(ctx, approval.ProposedAction, run, req.EvidenceRefs, req.ExternalOperation)
+	if req.ReviewContext != nil {
+		approval.ProposedAction["reviewContext"] = approvalReviewContextMap(req.ReviewContext)
+	} else if review := intentApprovalReviewContext(approval.ProposedAction, req.ExternalOperation); review != nil {
+		approval.ProposedAction["reviewContext"] = approvalReviewContextMap(review)
 	}
+	return approval
+}
+
+// proposalEvent is the activity recorded with a proposal. A nested call's
+// event carries its origin so a feed can group it under its command.
+func (c *ActionCoordinator) proposalEvent(req ProposeActionRequest, run *AgentRun, call *ActionCall, decision ActionPolicyDecision, eventType, summary string, now time.Time) *ActivityEvent {
 	actor := req.Actor
 	if actor.Type == "" {
 		actor = ActivityActor{Type: "worker", ID: req.WorkerID}
@@ -431,22 +506,30 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	event := &ActivityEvent{
 		ID: c.newID(), Scope: req.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
 		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TurnID: req.TurnID, TeamID: teamIDForRun(run),
-		ParentRunID: run.ParentRunID, Actor: actor, Summary: eventSummary, Visibility: ActivityVisibilityScope,
+		ParentRunID: run.ParentRunID, Actor: actor, Summary: summary, Visibility: ActivityVisibilityScope,
 		Payload:       map[string]interface{}{"actionCallId": call.ID, "approvalId": call.ApprovalID, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "risk": call.Risk},
 		CorrelationID: req.CorrelationID, CausationID: req.CausationID, CreatedAt: now,
 	}
+	addActionOrigin(event.Payload, call)
 	if call.PreparedRuntime != nil {
 		event.Payload["preparedRuntime"] = clonePreparedRuntime(call.PreparedRuntime)
 	}
 	if decision.Reason != "" && decision.Disposition != ActionDispositionAllow {
 		event.Payload["policyReason"] = decision.Reason
 	}
-	result, err := c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound)})
-	var conflict *ExternalOperationConflictError
-	if errors.As(err, &conflict) && conflict.Prior != nil && externalOperationReceiptComplete(conflict.Prior.Status) {
-		return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, conflict.Prior, lease, now)
+	return event
+}
+
+// addActionOrigin marks the activity of a nested call with its origin and
+// grouping reference.
+func addActionOrigin(payload map[string]interface{}, call *ActionCall) {
+	if call == nil || call.Origin == "" {
+		return
 	}
-	return result, err
+	payload["origin"] = string(call.Origin)
+	if call.OriginRef != "" {
+		payload["originRef"] = call.OriginRef
+	}
 }
 
 func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Context, req ProposeActionRequest, run *AgentRun, bound *skill.BoundAction, arguments map[string]interface{}, digest string, prior *ActionCall, lease *AgentRunLeaseGuard, now time.Time) (*ActionProposalResult, error) {

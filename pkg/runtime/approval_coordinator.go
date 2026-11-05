@@ -171,6 +171,13 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	runPausedWaiting := run.Status == AgentRunStatusPaused && run.PausedFrom == AgentRunStatusWaitingForApproval &&
 		run.PausedWakeCondition != nil && run.PausedWakeCondition.Type == "approval" && run.PausedWakeCondition.Reference == approval.ID
 	callWaiting := call.Status == ActionCallStatusWaitingApproval && call.ApprovalID == approval.ID
+	// A nested call waits on its approval while its Run keeps running; the
+	// decision only readies or closes the call and never touches the Run.
+	nested := call.Origin == ActionOriginVM
+	if nested {
+		runWaiting = callWaiting
+		runPausedWaiting = false
+	}
 	waitingPair := runWaiting && callWaiting
 	if !expired && !runWaiting {
 		return nil, fmt.Errorf("%w: run is not waiting on this approval", ErrInvalidRunTransition)
@@ -232,6 +239,21 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 		}
 		updatedCall.CompletedAt = &now
 	}
+	event := &ActivityEvent{
+		ID: c.newID(), Scope: req.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
+		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TurnID: call.TurnID, TeamID: teamIDForRun(run),
+		ParentRunID: run.ParentRunID, Actor: ActivityActor{Type: req.Principal.Type, ID: req.Principal.ID},
+		Summary: fmt.Sprintf("Approval %s for %s.%s", status, call.SkillID, call.Action), Visibility: ActivityVisibilityScope, CorrelationID: req.CorrelationID,
+		CausationID: approval.ID, CreatedAt: now,
+		Payload: map[string]interface{}{"approvalId": approval.ID, "actionCallId": call.ID, "status": status, "decisionId": req.DecisionID, "decisionReason": strings.TrimSpace(req.Reason)},
+	}
+	addActionOrigin(event.Payload, call)
+	if nested {
+		return c.actions.ResolveApproval(ctx, ApprovalResolutionRecord{
+			Approval: updatedApproval, ExpectedApprovalRevision: approval.Revision,
+			Call: updatedCall, ExpectedCallRevision: call.Revision, Event: event,
+		})
+	}
 	updatedRun := cloneAgentRun(run)
 	if callStatus == ActionCallStatusDenied && callWaiting && updatedRun.Budget != nil {
 		if err := releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
@@ -271,15 +293,6 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	updatedRun.LastWakeSignalID = req.DecisionID
 	updatedRun.UpdatedAt = now
 	updatedRun.Revision++
-	summary := fmt.Sprintf("Approval %s for %s.%s", status, call.SkillID, call.Action)
-	event := &ActivityEvent{
-		ID: c.newID(), Scope: req.Scope, EventType: eventType, Severity: ActivitySeverityInfo,
-		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, TurnID: call.TurnID, TeamID: teamIDForRun(run),
-		ParentRunID: run.ParentRunID, Actor: ActivityActor{Type: req.Principal.Type, ID: req.Principal.ID},
-		Summary: summary, Visibility: ActivityVisibilityScope, CorrelationID: req.CorrelationID,
-		CausationID: approval.ID, CreatedAt: now,
-		Payload: map[string]interface{}{"approvalId": approval.ID, "actionCallId": call.ID, "status": status, "decisionId": req.DecisionID, "decisionReason": strings.TrimSpace(req.Reason)},
-	}
 	return c.actions.ResolveApproval(ctx, ApprovalResolutionRecord{
 		Approval: updatedApproval, ExpectedApprovalRevision: approval.Revision,
 		Call: updatedCall, ExpectedCallRevision: call.Revision,

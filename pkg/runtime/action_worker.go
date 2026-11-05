@@ -132,7 +132,11 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if executionErr == nil && sourceRun == nil {
 		executionErr = ErrRunNotFound
 	}
-	if executionErr != nil || !runOwnsActionDependency(sourceRun, call) || runHasPausedActionDependency(sourceRun, call) {
+	owns := false
+	if executionErr == nil {
+		owns, executionErr = w.callOwnedByRun(executionCtx, sourceRun, call)
+	}
+	if executionErr != nil || !owns || runHasPausedActionDependency(sourceRun, call) {
 		call, leaseErr := stopLease()
 		if leaseErr != nil {
 			return nil, leaseErr
@@ -142,7 +146,7 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		}
 		return w.persistOutcome(ctx, call, nil, nil, nil, nil, workerID, false)
 	}
-	if w.correctionBlocked(executionCtx, sourceRun, call) {
+	if call.Origin == "" && w.correctionBlocked(executionCtx, sourceRun, call) {
 		// Only the correction admitted for a returned failure may run; a stopped
 		// attempt runs nothing. Stop before catalog hydration, credentials or dispatch.
 		call, leaseErr := stopLease()
@@ -223,10 +227,14 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if executionErr == nil {
 		executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID)
 	}
-	if executionErr == nil && w.correctionBlocked(executionCtx, sourceRun, call) {
+	if executionErr == nil && call.Origin == "" && w.correctionBlocked(executionCtx, sourceRun, call) {
 		executionErr = errActionNotAdmittedAfterFailure
 	}
-	if executionErr == nil && runOwnsActionDependency(sourceRun, call) && !runHasPausedActionDependency(sourceRun, call) {
+	owns = false
+	if executionErr == nil {
+		owns, executionErr = w.callOwnedByRun(executionCtx, sourceRun, call)
+	}
+	if executionErr == nil && owns && !runHasPausedActionDependency(sourceRun, call) {
 		dispatchCtx := executionCtx
 		cancel := func() {}
 		if timeout := bound.Action.Timeout.Duration(); timeout > 0 {
@@ -333,6 +341,16 @@ func actionSkillRuntimeMaintenanceError(ctx context.Context, store interface{}, 
 	return nil
 }
 
+// callOwnedByRun reports whether the Run still wants call executed: a model
+// action is the Run's awaited dependency; a nested call needs its Turn to
+// still be the Run's in-flight Turn.
+func (w *ActionWorker) callOwnedByRun(ctx context.Context, run *AgentRun, call *ActionCall) (bool, error) {
+	if call != nil && call.Origin == ActionOriginVM {
+		return nestedActionTurnLive(ctx, w.store, run, call, w.now().UTC())
+	}
+	return runOwnsActionDependency(run, call), nil
+}
+
 // Both the active and paused continuation own the same durable dependency.
 // Checking identity prevents a late result from waking a newer continuation.
 func runOwnsActionDependency(run *AgentRun, call *ActionCall) bool {
@@ -393,7 +411,11 @@ func (w *ActionWorker) persistOutcome(ctx context.Context, call *ActionCall, bou
 
 func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCall, sourceRun *AgentRun, bound *skill.BoundAction, credentials map[string]string, output map[string]interface{}, executionErr error, workerID string, dispatched bool, eventID, humanInterventionID string) (ActionExecutionRecord, error) {
 	now := w.now().UTC()
-	ownsDependency := runOwnsActionDependency(sourceRun, call)
+	nested := call.Origin == ActionOriginVM
+	ownsDependency, err := w.callOwnedByRun(ctx, sourceRun, call)
+	if err != nil {
+		return ActionExecutionRecord{}, err
+	}
 	paused := runHasPausedActionDependency(sourceRun, call)
 	updatedCall := cloneActionCall(call)
 	updatedCall.Revision++
@@ -407,6 +429,9 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		updatedCall.Status = ActionCallStatusCanceled
 		updatedCall.CompletedAt = &now
 		updatedCall.Error = "owning Run no longer waits for this action"
+		if nested {
+			updatedCall.Error = "the turn that made this call has ended"
+		}
 		eventType = "action.canceled"
 		summary = fmt.Sprintf("Canceled stale %s.%s action", call.SkillID, call.Action)
 	} else if !dispatched && (paused || executionErr == nil || errors.Is(executionErr, ErrSkillRuntimeMaintenance)) {
@@ -450,7 +475,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		}
 	}
 	terminalOutcome := updatedCall.Status == ActionCallStatusSucceeded || updatedCall.Status == ActionCallStatusFailed
-	if ownsDependency && terminalOutcome {
+	if ownsDependency && terminalOutcome && !nested {
 		updatedRun = cloneAgentRun(sourceRun)
 		if paused {
 			updatedRun.PausedFrom = AgentRunStatusQueued
@@ -543,7 +568,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 	// Cancellation before dispatch releases unused capacity. A result obtained
 	// during cancellation settles its own reservation without changing the
 	// canceled status or replacing a newer continuation's checkpoint.
-	if sourceRun.Budget != nil && (terminalOutcome || updatedCall.Status == ActionCallStatusCanceled) {
+	if !nested && sourceRun.Budget != nil && (terminalOutcome || updatedCall.Status == ActionCallStatusCanceled) {
 		_, reserved := sourceRun.BudgetReservations[actionBudgetReservationID(call.ID)]
 		if reserved || ownsDependency && terminalOutcome {
 			if updatedRun == nil {
@@ -570,6 +595,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		Summary: summary, Visibility: ActivityVisibilityScope, CausationID: call.ID, CreatedAt: now,
 		Payload: map[string]interface{}{"actionCallId": call.ID, "bindingId": call.BindingID, "bindingRevision": call.BindingRevision, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action, "status": updatedCall.Status, "attempt": updatedCall.Attempt},
 	}
+	addActionOrigin(event.Payload, call)
 	if eventType == "action.human_intervention_required" {
 		event.Severity = ActivitySeverityWarning
 		event.Payload["humanInterventionId"] = updatedRun.HumanInterventions[len(updatedRun.HumanInterventions)-1].ID

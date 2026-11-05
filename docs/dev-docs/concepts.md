@@ -170,6 +170,15 @@ evaluates policy, reserves budget, and either dispatches it or creates an
 approval checkpoint. Credential material is resolved after authorization and
 is never written to the definition, model-visible arguments, or activity.
 
+A host may also run a **nested action** while a Turn is in flight, on behalf of
+code in the chat's VM (`Engine.RunNestedAction`). It is authorized against the
+actions that Turn offered, uses the same binding, credentials, policy and
+approvals, and is recorded as an ActionCall of the Run and Turn with origin
+`vm`. It never changes the Run's state: a call that needs review waits on its
+own approval while the Turn continues, and a call whose Turn has ended is
+canceled before dispatch. Each Turn allows at most 500 nested calls, 4
+unfinished at once.
+
 ## Approvals
 
 An **approval checkpoint** records the exact proposed action, policy decision,
