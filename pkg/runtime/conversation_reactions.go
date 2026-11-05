@@ -610,3 +610,16 @@ func (r *ConversationRunTurnRunner) applyTurnReactions(ctx context.Context, conv
 	}
 	return applied
 }
+
+// reactionEcho reports whether content says nothing beyond the turn's
+// reactions: empty, or only the reacted emoji and whitespace.
+func reactionEcho(content string, reactions []TurnReaction) bool {
+	for _, reaction := range reactions {
+		if reaction.Emoji != "" {
+			content = strings.ReplaceAll(content, reaction.Emoji, "")
+		}
+	}
+	return strings.TrimFunc(content, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '\uFE0F' || r == '\u200D'
+	}) == ""
+}

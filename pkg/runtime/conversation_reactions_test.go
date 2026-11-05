@@ -181,3 +181,15 @@ func TestAdmitTurnReactions(t *testing.T) {
 		t.Fatalf("admitted = %+v", got)
 	}
 }
+
+func TestReactionEchoIsNotAnAnswer(t *testing.T) {
+	thumbs := []TurnReaction{{MessageID: "m", Emoji: "👍"}}
+	for content, want := range map[string]bool{"": true, "👍": true, " 👍\n": true, "👍️": true, "👍 Done.": false, "Sure": false} {
+		if got := reactionEcho(content, thumbs); got != want {
+			t.Fatalf("reactionEcho(%q) = %v", content, got)
+		}
+	}
+	if reactionEcho("👍", nil) {
+		t.Fatal("an emoji with no reaction is an answer")
+	}
+}

@@ -1272,6 +1272,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 			return skipped, nil
 		}
 	}
+	reactions := append([]TurnReaction(nil), outcome.React...)
 	reacted := r.applyTurnReactions(ctx, conversation, viewer, outcome)
 	if outcome != nil {
 		summary := acceptedConversationSummary(conversation, viewer, historyPlan, outcome.ContinuationCheckpoint)
@@ -1303,8 +1304,9 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		}
 	}
 	content := agentConversationResponseContent(outcome)
-	if content == "" && reacted > 0 && outcome.Visual == nil {
-		// A reaction said it; no filler message.
+	if reacted > 0 && outcome.Visual == nil && reactionEcho(content, reactions) {
+		// A reaction said it; no filler message (also when the answer only
+		// repeats the reacted emoji).
 		outcome.OutputSummary = "Agent reacted"
 		outcome.RunOutput = map[string]interface{}{"reacted": true, "conversationId": conversation.ID, "triggerMessageId": trigger.ID}
 		return outcome, nil
