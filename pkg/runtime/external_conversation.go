@@ -486,6 +486,7 @@ type NormalizedExternalConversationEvent struct {
 	ParticipantDisplayName   string                 `json:"participantDisplayName,omitempty"`
 	ParticipantIsBot         bool                   `json:"participantIsBot,omitempty"`
 	Text                     string                 `json:"text,omitempty"`
+	Emoji                    string                 `json:"emoji,omitempty"` // reaction events: Unicode emoji, see ValidateReactionEmoji
 	MentionsEndpoint         bool                   `json:"mentionsEndpoint,omitempty"`
 	Direct                   bool                   `json:"direct,omitempty"`
 	OrderingKey              string                 `json:"orderingKey"`
@@ -513,7 +514,8 @@ func (e *NormalizedExternalConversationEvent) Validate() error {
 			return ErrInvalidExternalConversation
 		}
 	case capability.ConversationEventReactionAdded, capability.ConversationEventReactionRemoved:
-		if !validExternalConversationReference(e.ExternalMessageID, 1024) || !validExternalConversationReference(e.ExternalParticipantID, 1024) {
+		if !validExternalConversationReference(e.ExternalMessageID, 1024) || !validExternalConversationReference(e.ExternalParticipantID, 1024) ||
+			ValidateReactionEmoji(e.Emoji) != nil {
 			return ErrInvalidExternalConversation
 		}
 	case capability.ConversationEventParticipantJoined, capability.ConversationEventParticipantLeft:
