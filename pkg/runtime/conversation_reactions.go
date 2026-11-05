@@ -540,3 +540,68 @@ func (s *MemoryStore) ListConversationReactionEvents(_ context.Context, scope Sc
 	}
 	return result, nil
 }
+
+// TurnReaction is the react action of a conversation turn: the answering
+// Agent reacts to a message in the conversation it can see. A reaction is not
+// a channel message; it never routes, schedules or answers anything.
+type TurnReaction struct {
+	MessageID string `json:"messageId"`
+	Emoji     string `json:"emoji"`
+}
+
+// MaximumTurnReactions bounds the reactions one turn may add.
+const MaximumTurnReactions = 3
+
+// ConversationReactInstruction describes the react action to Agents in
+// conversation turns.
+const ConversationReactInstruction = "react adds emoji reactions ({messageId, emoji}) to messages in this conversation as the answering Agent; use message ids from the conversation context. A reaction is not a reply and never asks anyone to act. Prefer a reaction (👀 picked up, ✅ done, 👍 agree) over a filler message. A turn may complete with only reactions and an empty outputSummary when nothing else needs saying."
+
+func cloneTurnReactions(in []TurnReaction) []TurnReaction {
+	return append([]TurnReaction(nil), in...)
+}
+
+// admitTurnReactions keeps the first valid, distinct reactions within the
+// turn bound. Invalid reactions are dropped rather than costing the turn.
+func admitTurnReactions(in []TurnReaction) []TurnReaction {
+	var out []TurnReaction
+	seen := make(map[TurnReaction]bool, len(in))
+	for _, reaction := range in {
+		reaction.MessageID = strings.TrimSpace(reaction.MessageID)
+		if len(out) == MaximumTurnReactions || seen[reaction] ||
+			!validOpaqueIdentifier(reaction.MessageID, 256) || ValidateReactionEmoji(reaction.Emoji) != nil {
+			continue
+		}
+		seen[reaction] = true
+		out = append(out, reaction)
+	}
+	return out
+}
+
+// SetReactionProjector mirrors reactions Agents add to external
+// conversations.
+func (r *ConversationRunTurnRunner) SetReactionProjector(projector MessageReactionProjector) {
+	if r != nil && r.conversations != nil {
+		r.conversations.SetReactionProjector(projector)
+	}
+}
+
+// applyTurnReactions adds the outcome's reactions as the answering Agent and
+// consumes them from the outcome. Each must target a message the Agent can
+// see; a failed reaction is skipped. It returns how many were applied.
+func (r *ConversationRunTurnRunner) applyTurnReactions(ctx context.Context, conversation *Conversation, viewer ConversationViewer, outcome *TurnOutcome) int {
+	if r == nil || r.conversations == nil || conversation == nil || outcome == nil || len(outcome.React) == 0 {
+		return 0
+	}
+	reactions := admitTurnReactions(outcome.React)
+	outcome.React = nil
+	applied := 0
+	for _, reaction := range reactions {
+		if _, err := r.conversations.AddMessageReaction(ctx, MessageReactionRequest{
+			Scope: conversation.Scope, ConversationID: conversation.ID, MessageID: reaction.MessageID, Emoji: reaction.Emoji,
+			Actor: viewer.Participant, ActorRoles: viewer.Roles,
+		}); err == nil {
+			applied++
+		}
+	}
+	return applied
+}
