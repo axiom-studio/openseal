@@ -44,6 +44,13 @@ func conversationRunLane(conversationID, threadRoot string, owner ObjectiveOwner
 	return lane
 }
 
+// ConversationRunLane is the concurrency key a chat's conversation Run is
+// queued under. Hosts that verify a Run's chat origin compare against it, so
+// an Agent's Run and a Team member's Run are checked the same way.
+func ConversationRunLane(conversationID, threadRoot string, owner ObjectiveOwner, assignedAgentID string) string {
+	return conversationRunLane(conversationID, threadRoot, owner, assignedAgentID)
+}
+
 func conversationRoutingKey(scope Scope, conversationID, triggerID string) string {
 	return "participation-round:" + hashString(scope.Kind+"\x00"+scope.ID+"\x00"+conversationID+"\x00"+triggerID)
 }
