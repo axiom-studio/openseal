@@ -151,23 +151,7 @@ func receiptTestScheduler(t *testing.T, store *MemoryStore) *ConversationRunSche
 
 func receiptTestCoordinator(t *testing.T, service *ConversationService) *ConversationCoordinator {
 	t.Helper()
-	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-		return []ConversationParticipantBinding{{
-			Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"}, SemanticRoles: []string{"developer"},
-		}}, nil
-	})
-	proposals := ParticipationProposalProviderFunc(func(context.Context, ParticipationProposalContext) (ParticipationProposal, error) {
-		return ParticipationProposal{
-			WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Telemetry confirms all three replicas passed the smoke checks.",
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-			Signals:  ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true},
-		}, nil
-	})
-	coordinator, err := NewConversationCoordinator(service, participants, proposals, DefaultConversationCoordinatorConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return coordinator
+	return conversationRunTestCoordinator(t, service)
 }
 
 func receiptTestMessage(

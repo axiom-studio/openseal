@@ -170,6 +170,9 @@ const (
 	ConversationAudienceChannel      ConversationAudienceKind = "channel"
 	ConversationAudienceParticipants ConversationAudienceKind = "participants"
 	ConversationAudienceRoles        ConversationAudienceKind = "roles"
+	// ConversationAudienceEveryone is visible like the channel and asks every
+	// non-observer Team member to answer (@everyone).
+	ConversationAudienceEveryone ConversationAudienceKind = "everyone"
 )
 
 type ConversationAudience struct {
@@ -206,7 +209,7 @@ func CanViewChannelMessage(message *ChannelMessage, viewer ConversationViewer) b
 		return true
 	}
 	switch message.Audience.Kind {
-	case ConversationAudienceChannel:
+	case ConversationAudienceChannel, ConversationAudienceEveryone:
 		return true
 	case ConversationAudienceParticipants:
 		for _, participant := range message.Audience.Participants {
@@ -228,7 +231,7 @@ func CanViewChannelMessage(message *ChannelMessage, viewer ConversationViewer) b
 
 func (a ConversationAudience) Validate() error {
 	switch a.Kind {
-	case ConversationAudienceChannel:
+	case ConversationAudienceChannel, ConversationAudienceEveryone:
 		if len(a.Participants) > 0 || len(a.Roles) > 0 {
 			return fmt.Errorf("%w: channel audience cannot contain targets", ErrInvalidConversation)
 		}
@@ -345,8 +348,11 @@ type ChannelMessage struct {
 	SupersedesMessageID  string                    `json:"supersedesMessageId,omitempty"`
 	IdempotencyKey       string                    `json:"idempotencyKey,omitempty"`
 	ParticipationRoundID string                    `json:"participationRoundId,omitempty"`
-	Historical           bool                      `json:"historical,omitempty"`
-	CreatedAt            time.Time                 `json:"createdAt"`
+	// RoutingReason says why the router picked this member to answer ("owns
+	// the press list"). Set only on a routed member's answer.
+	RoutingReason string    `json:"routingReason,omitempty"`
+	Historical    bool      `json:"historical,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 // ChannelMessageQuote is a snapshot of a quoted message taken when the reply
@@ -444,6 +450,10 @@ func (m *ChannelMessage) Validate() error {
 	}
 	if err := m.Audience.Validate(); err != nil {
 		return err
+	}
+	if len(m.RoutingReason) > MaximumRoutingReasonBytes || strings.ContainsAny(m.RoutingReason, "\r\n") ||
+		m.RoutingReason != "" && m.Sender.Type != ConversationParticipantAgent {
+		return fmt.Errorf("%w: a routing reason is one short line on an Agent's answer", ErrInvalidConversation)
 	}
 	for _, id := range []string{m.ThreadRootID, m.ReplyToMessageID, m.ResolvesMessageID, m.SupersedesMessageID, m.ParticipationRoundID} {
 		if id != "" && !validOpaqueIdentifier(id, 128) {

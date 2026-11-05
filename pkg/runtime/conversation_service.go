@@ -66,7 +66,9 @@ type PostChannelMessageRequest struct {
 	RequiresResponse    bool
 	ResolvesMessageID   string
 	SupersedesMessageID string
-	IdempotencyKey      string
+	// RoutingReason is set by a routed Team member's answer.
+	RoutingReason  string
+	IdempotencyKey string
 }
 
 type ChannelMessageFilter struct {
@@ -84,16 +86,13 @@ type ChannelMessageFilter struct {
 	Viewer          *ConversationViewer
 }
 
-type CoordinateParticipationRequest struct {
-	Usage            TurnUsage
-	UsageTurnID      string
-	ID               string
+// CommitConversationRoutingRequest records who answers one channel message.
+type CommitConversationRoutingRequest struct {
 	Scope            Scope
 	ConversationID   string
 	ExpectedRevision int64
 	TriggerMessageID string
-	Policy           ConversationArbitrationPolicy
-	Proposals        []ParticipationProposal
+	Responders       []ConversationResponder
 	IdempotencyKey   string
 }
 
@@ -396,7 +395,7 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 		Mentions:   cloneParticipants(req.Mentions),
 		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
 		ResolvesMessageID: strings.TrimSpace(req.ResolvesMessageID), SupersedesMessageID: strings.TrimSpace(req.SupersedesMessageID),
-		IdempotencyKey: key, CreatedAt: now,
+		RoutingReason: strings.TrimSpace(req.RoutingReason), IdempotencyKey: key, CreatedAt: now,
 	}
 	if err := message.Validate(); err != nil {
 		return nil, err
@@ -417,128 +416,57 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	return s.store.CommitChannelMessage(ctx, ChannelMessageCommitRecord{Conversation: updated, ExpectedRevision: conversation.Revision, Message: message})
 }
 
-func (s *ConversationService) CoordinateParticipation(ctx context.Context, req CoordinateParticipationRequest) (*ParticipationRoundResult, error) {
+// CommitConversationRouting durably records a routing decision. It posts no
+// messages: every responder commits its own answer from its own Run.
+func (s *ConversationService) CommitConversationRouting(ctx context.Context, req CommitConversationRoutingRequest) (*ParticipationRoundResult, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("conversation store is not configured")
 	}
 	key := strings.TrimSpace(req.IdempotencyKey)
-	if key == "" || len(req.Proposals) == 0 {
-		return nil, fmt.Errorf("%w: participation idempotency key and proposals are required", ErrInvalidConversation)
+	if key == "" {
+		return nil, fmt.Errorf("%w: routing idempotency key is required", ErrInvalidConversation)
 	}
-	roundID := strings.TrimSpace(req.ID)
-	if roundID == "" {
-		roundID = stableConversationID(req.Scope, key, "round")
+	roundID := stableConversationID(req.Scope, key, "round")
+	now := s.now().UTC()
+	round := &ParticipationRound{
+		ID: roundID, Scope: req.Scope, ConversationID: strings.TrimSpace(req.ConversationID),
+		TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Status: ParticipationRoundCommitted,
+		Responders: append([]ConversationResponder(nil), req.Responders...), IdempotencyKey: key, Revision: 1, CreatedAt: now, CommittedAt: now,
 	}
-	proposals := cloneParticipationProposals(req.Proposals)
-	for index := range proposals {
-		proposals[index].RoundID = roundID
-		if strings.TrimSpace(proposals[index].ID) == "" {
-			proposals[index].ID = stableConversationID(req.Scope, key, string(proposals[index].Participant.Type)+":"+proposals[index].Participant.ID)
-		}
-	}
-	normalizedPolicy, err := req.Policy.normalize()
-	if err != nil {
-		return nil, err
-	}
-	if existing, err := s.store.FindParticipationRoundByIdempotencyKey(ctx, req.Scope, req.ConversationID, key); err != nil {
+	if existing, err := s.store.FindParticipationRoundByIdempotencyKey(ctx, req.Scope, round.ConversationID, key); err != nil {
 		return nil, err
 	} else if existing != nil {
-		if !sameParticipationRoundIntent(existing.Round, req, roundID, proposals, normalizedPolicy) {
+		if !sameParticipationRound(existing.Round, round) {
 			return nil, ErrMessageConflict
 		}
 		return existing, nil
 	}
-	conversation, err := s.GetConversation(ctx, req.Scope, req.ConversationID)
+	conversation, err := s.GetConversation(ctx, req.Scope, round.ConversationID)
 	if err != nil {
 		return nil, err
 	}
-	if conversation.Status != ConversationStatusActive || conversation.Revision != req.ExpectedRevision {
-		if conversation.Revision != req.ExpectedRevision {
-			if existing, findErr := s.store.FindParticipationRoundByIdempotencyKey(ctx, req.Scope, req.ConversationID, key); findErr != nil {
-				return nil, findErr
-			} else if existing != nil {
-				if !sameParticipationRoundIntent(existing.Round, req, roundID, proposals, normalizedPolicy) {
-					return nil, ErrMessageConflict
-				}
-				return existing, nil
-			}
-			return nil, ErrRevisionConflict
-		}
+	if conversation.Status != ConversationStatusActive {
 		return nil, ErrInvalidConversation
 	}
-	responseMode := ""
-	if req.TriggerMessageID != "" {
-		trigger, err := s.store.GetChannelMessage(ctx, req.Scope, conversation.ID, req.TriggerMessageID)
-		if err != nil {
+	if conversation.Revision != req.ExpectedRevision {
+		return nil, ErrRevisionConflict
+	}
+	if round.TriggerMessageID != "" {
+		if trigger, err := s.store.GetChannelMessage(ctx, req.Scope, conversation.ID, round.TriggerMessageID); err != nil {
 			return nil, err
-		}
-		if trigger == nil {
+		} else if trigger == nil {
 			return nil, ErrMessageConflict
 		}
-		responseMode = trigger.ResponseMode
-	}
-	recent, err := s.store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: req.Scope, ConversationID: conversation.ID, Limit: 100, Descending: true})
-	if err != nil {
-		return nil, err
-	}
-	arbitration, err := ArbitrateParticipation(roundID, proposals, recent, normalizedPolicy)
-	if err != nil {
-		return nil, err
-	}
-	proposalByID := make(map[string]ParticipationProposal, len(proposals))
-	for _, proposal := range proposals {
-		proposalByID[proposal.ID] = proposal
-	}
-	now := s.now().UTC()
-	messages := make([]*ChannelMessage, 0, len(arbitration.Speakers))
-	sequence := conversation.LastSequence
-	for _, proposalID := range arbitration.Speakers {
-		proposal := proposalByID[proposalID]
-		threadRootID, err := s.resolveThreadRoot(ctx, req.Scope, conversation.ID, proposal.ReplyToMessageID)
-		if err != nil {
-			return nil, err
-		}
-		quotedID := proposal.QuotedMessageID
-		if quotedID == "" && proposal.ReplyToMessageID != "" && answerNeedsQuote(proposal.ReplyToMessageID, proposal.Participant, recent) {
-			quotedID = proposal.ReplyToMessageID
-		}
-		quote, err := s.resolveQuote(ctx, req.Scope, conversation.ID, quotedID)
-		if err != nil {
-			return nil, err
-		}
-		sequence++
-		message := &ChannelMessage{
-			ID: stableConversationID(req.Scope, key, "speaker:"+proposal.ID), Scope: req.Scope, ConversationID: conversation.ID,
-			Sequence: sequence, Sender: proposal.Participant, Intent: proposal.Intent, Content: strings.TrimSpace(proposal.Content),
-			ContributionKey: proposal.ContributionKey,
-			ResponseMode:    responseMode,
-			Audience:        proposal.Audience, ThreadRootID: threadRootID, ReplyToMessageID: proposal.ReplyToMessageID, Quote: quote,
-			BroadcastToChannel: proposal.BroadcastToChannel,
-			Mentions:           cloneParticipants(proposal.Mentions), References: cloneConversationReferences(proposal.References),
-			RequiresResponse: proposal.RequiresResponse, ResolvesMessageID: proposal.ResolvesMessageID,
-			IdempotencyKey: key + ":speaker:" + proposal.ID, ParticipationRoundID: roundID, CreatedAt: now,
-		}
-		if err := message.Validate(); err != nil {
-			return nil, err
-		}
-		messages = append(messages, message)
-	}
-	round := &ParticipationRound{
-		Usage: req.Usage, UsageTurnID: req.UsageTurnID,
-		ID: roundID, Scope: req.Scope, ConversationID: conversation.ID, TriggerMessageID: strings.TrimSpace(req.TriggerMessageID),
-		Status: ParticipationRoundCommitted, Policy: normalizedPolicy, Proposals: proposals, Arbitration: *arbitration,
-		IdempotencyKey: key, Revision: 1, CreatedAt: now, CommittedAt: now,
-	}
-	if err := round.Validate(); err != nil {
-		return nil, err
 	}
 	updated := cloneConversation(conversation)
-	updated.LastSequence = sequence
 	updated.Revision++
 	updated.UpdatedAt = now
 	round.ConversationRevision = updated.Revision
+	if err := round.Validate(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidConversation, err)
+	}
 	return s.store.CommitParticipationRound(ctx, ParticipationRoundCommitRecord{
-		Conversation: updated, ExpectedRevision: conversation.Revision, Round: round, Messages: messages,
+		Conversation: updated, ExpectedRevision: conversation.Revision, Round: round,
 	})
 }
 
@@ -978,6 +906,7 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 		(strings.TrimSpace(req.QuotedMessageID) == "" || quotedMessageID(existing.Quote) == strings.TrimSpace(req.QuotedMessageID)) &&
 		existing.StartsThread == req.StartThread && existing.BroadcastToChannel == req.BroadcastToChannel &&
 		reflect.DeepEqual(existing.Mentions, req.Mentions) && reflect.DeepEqual(existing.References, req.References) &&
+		existing.RoutingReason == strings.TrimSpace(req.RoutingReason) &&
 		existing.RequiresResponse == req.RequiresResponse && existing.ResolvesMessageID == strings.TrimSpace(req.ResolvesMessageID) &&
 		existing.SupersedesMessageID == strings.TrimSpace(req.SupersedesMessageID)
 }
@@ -988,12 +917,6 @@ func cloneConversationReference(in *ConversationReference) *ConversationReferenc
 	}
 	out := *in
 	return &out
-}
-
-func sameParticipationRoundIntent(existing *ParticipationRound, req CoordinateParticipationRequest, roundID string, proposals []ParticipationProposal, policy ConversationArbitrationPolicy) bool {
-	return existing != nil && existing.ID == roundID && existing.Scope == req.Scope &&
-		existing.ConversationID == strings.TrimSpace(req.ConversationID) && existing.TriggerMessageID == strings.TrimSpace(req.TriggerMessageID) &&
-		sameConversationArbitrationPolicy(existing.Policy, policy) && reflect.DeepEqual(existing.Proposals, proposals)
 }
 
 func cloneConversation(in *Conversation) *Conversation {
@@ -1049,44 +972,6 @@ func cloneParticipants(in []ConversationParticipant) []ConversationParticipant {
 
 func cloneConversationReferences(in []ConversationReference) []ConversationReference {
 	return append([]ConversationReference(nil), in...)
-}
-
-func cloneParticipationProposals(in []ParticipationProposal) []ParticipationProposal {
-	out := make([]ParticipationProposal, len(in))
-	for index := range in {
-		out[index] = in[index]
-		out[index].SemanticRoles = append([]string(nil), in[index].SemanticRoles...)
-		out[index].Audience.Participants = cloneParticipants(in[index].Audience.Participants)
-		out[index].Audience.Roles = append([]string(nil), in[index].Audience.Roles...)
-		out[index].Mentions = cloneParticipants(in[index].Mentions)
-		out[index].References = cloneConversationReferences(in[index].References)
-		if in[index].ProposedAction != nil {
-			action := *in[index].ProposedAction
-			action.EvidenceRefs = append([]string(nil), in[index].ProposedAction.EvidenceRefs...)
-			action.PreparedRuntime = nil
-			out[index].ProposedAction = &action
-		}
-		out[index].ActionInputs = cloneMap(in[index].ActionInputs)
-	}
-	return out
-}
-
-func cloneParticipationRound(in *ParticipationRound) *ParticipationRound {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	if in.Policy.Participation != nil {
-		participation := *in.Policy.Participation
-		out.Policy.Participation = &participation
-	}
-	out.Proposals = cloneParticipationProposals(in.Proposals)
-	out.Arbitration.Decisions = append([]ParticipationDecision(nil), in.Arbitration.Decisions...)
-	for index := range out.Arbitration.Decisions {
-		out.Arbitration.Decisions[index].Reasons = append([]ParticipationReason(nil), in.Arbitration.Decisions[index].Reasons...)
-	}
-	out.Arbitration.Speakers = append([]string(nil), in.Arbitration.Speakers...)
-	return &out
 }
 
 func cloneConversationCursor(in *ConversationCursor) *ConversationCursor {

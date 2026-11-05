@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // Summary streams expose only the typed public preview, never arbitrary payload
@@ -44,11 +45,20 @@ func (c *TurnCoordinator) observeTurnAnswer(ctx context.Context, scope Scope, ru
 			return ErrLeaseLost
 		}
 		_, err = c.activity.AppendActivity(previewCtx, &ActivityEvent{
-			Scope: scope, RunID: run.ID, TurnID: turn.ID, AgentID: run.Owner.ID,
+			Scope: scope, RunID: run.ID, TurnID: turn.ID, AgentID: runActingAgentID(run),
 			EventType: "turn.answer_preview", Summary: "Reply preview updated",
 			Actor: ActivityActor{Type: "worker", ID: workerID}, Visibility: ActivityVisibilityScope,
 			Payload: map[string]interface{}{"attemptId": preview.AttemptID, "sequence": preview.Sequence, "text": preview.Text, "reset": preview.Reset},
 		})
 		return err
 	})
+}
+
+// runActingAgentID is the Agent doing a Run's turn: its assigned member when
+// a Team owns it, else its owner.
+func runActingAgentID(run *AgentRun) string {
+	if id := strings.TrimSpace(run.AssignedAgentID); id != "" && run.Owner.Type == OwnerTypeTeam {
+		return id
+	}
+	return run.Owner.ID
 }

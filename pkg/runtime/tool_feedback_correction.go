@@ -212,11 +212,6 @@ func checkpointProposalRejection(run *AgentRun, turn *AgentTurn, cause string) (
 	}
 	// Model-authored state from the rejected Turn is not committed.
 	result := preserveKernelActionHistory(run.Checkpoint, run.Checkpoint)
-	if run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam {
-		if participant, ok := turn.ContinuationCheckpoint[teamActionAssignedAgentCheckpointKey].(string); ok && validOpaqueIdentifier(participant, 256) {
-			result[teamActionAssignedAgentCheckpointKey] = participant
-		}
-	}
 	failures := toolFeedbackInteger(result[toolFailureCountCheckpointKey]) + 1
 	state, _ := result[ToolFeedbackCorrectionCheckpointKey].(map[string]interface{})
 	used := 0

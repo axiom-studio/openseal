@@ -169,8 +169,14 @@ func TestAgentRequestConversationProjectionShowsHandoffAndIndependentReview(t *t
 		decision.ThreadRootID != root.ID || decision.Sender.ID != "reviewer-agent" {
 		t.Fatalf("decision = %#v", decision)
 	}
-	if open := openConversationMessages(messages); len(open) != 0 {
-		t.Fatalf("open messages = %#v", open)
+	resolved := map[string]bool{}
+	for _, message := range messages {
+		resolved[message.ResolvesMessageID] = true
+	}
+	for _, message := range messages {
+		if message.RequiresResponse && !resolved[message.ID] {
+			t.Fatalf("open message = %#v", message)
+		}
 	}
 }
 

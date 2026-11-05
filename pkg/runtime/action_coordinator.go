@@ -94,7 +94,6 @@ type ProposeActionRequest struct {
 	TurnID                 string
 	WorkerID               string
 	DeploymentID           string
-	AssignedAgentID        string
 	BindingID              string
 	BindingRevision        int64
 	SkillID                string
@@ -196,7 +195,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		return nil, errors.New("only a nested action may be performed by its host")
 	}
 	if nested {
-		if strings.TrimSpace(req.TurnID) == "" || strings.TrimSpace(req.WorkerID) == "" || strings.TrimSpace(req.AssignedAgentID) != "" || req.ExternalOperation != nil {
+		if strings.TrimSpace(req.TurnID) == "" || strings.TrimSpace(req.WorkerID) == "" || req.ExternalOperation != nil {
 			return nil, errors.New("a nested action requires its Turn and worker and takes no Agent attribution or external operation")
 		}
 		// An answer-only explanation Turn or a pending source question may
@@ -204,13 +203,6 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		if requiresFinalFailureExplanation(run.Checkpoint) || hasCanonicalSourceAccessChallenge(run) {
 			return nil, ErrNestedActionNotAuthorized
 		}
-	}
-	if assignedAgentID := strings.TrimSpace(req.AssignedAgentID); assignedAgentID != "" {
-		if run.Kind != RunKindConversation || run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.AssignedAgentID) != "" {
-			return nil, errors.New("action Agent attribution is only valid for an unassigned Team conversation Run")
-		}
-		run = cloneAgentRun(run)
-		run.AssignedAgentID = assignedAgentID
 	}
 	var lease *AgentRunLeaseGuard
 	now := c.now().UTC()

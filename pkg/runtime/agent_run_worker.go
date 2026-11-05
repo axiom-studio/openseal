@@ -973,18 +973,9 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 	if actionDeploymentID == "" {
 		actionDeploymentID = binding.DeploymentID
 	}
-	assignedAgentID := ""
-	if run.Owner.Type == OwnerTypeTeam && run.Kind == RunKindConversation {
-		assignedAgentID, _ = turn.ContinuationCheckpoint[teamActionAssignedAgentCheckpointKey].(string)
-		assignedAgentID = strings.TrimSpace(assignedAgentID)
-		if assignedAgentID == "" {
-			return nil, errors.New("Team action proposal is missing its trusted roster Agent attribution")
-		}
-	}
 	proposalRequest := ProposeActionRequest{
 		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: actionDeploymentID,
-		AssignedAgentID: assignedAgentID,
-		BindingID:       selected.BindingID, BindingRevision: selected.BindingRevision,
+		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
 		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: selected.ActionInput(arguments),
 		PreparedRuntime: request.PreparedRuntime,
 		IdempotencyKey:  idempotencyKey, Summary: request.Summary,

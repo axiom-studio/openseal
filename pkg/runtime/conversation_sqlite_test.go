@@ -73,16 +73,10 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	roundRequest := CoordinateParticipationRequest{
+	roundRequest := CommitConversationRoutingRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: question.Conversation.Revision,
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
-		Proposals: []ParticipationProposal{{
-			Participant: agent, WantsToSpeak: true, Intent: MessageIntentAnswer,
-			Availability: ParticipationAvailability{Status: ParticipationAvailable},
-			Content:      "It is ready and the smoke-test evidence passed.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-			ReplyToMessageID: question.Message.ID, ResolvesMessageID: question.Message.ID,
-			Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true, HasEvidence: true},
-		}},
+		Responders: []ConversationResponder{{Participant: agent, Addressed: ConversationAddressedRouted, Reason: "owns the release"}},
 	}
 	services := []*ConversationService{primaryService, replicaService}
 	var committed atomic.Int32
@@ -94,7 +88,7 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			result, err := services[index%len(services)].CoordinateParticipation(ctx, roundRequest)
+			result, err := services[index%len(services)].CommitConversationRouting(ctx, roundRequest)
 			if err != nil {
 				failed.Add(1)
 				failureErrors <- err
@@ -129,11 +123,11 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	restartedService := NewConversationService(restarted)
 	restartedService.now = func() time.Time { return fixed }
 	restored, err := restartedService.GetConversation(ctx, scope, conversation.ID)
-	if err != nil || restored.Revision != 3 || restored.LastSequence != 2 {
+	if err != nil || restored.Revision != 3 || restored.LastSequence != 1 {
 		t.Fatalf("restored conversation = %#v, err = %v", restored, err)
 	}
 	messages, err := restartedService.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-	if err != nil || len(messages) != 2 || messages[1].ThreadRootID != question.Message.ID || messages[1].ResolvesMessageID != question.Message.ID {
+	if err != nil || len(messages) != 1 {
 		t.Fatalf("restored messages = %#v, err = %v", messages, err)
 	}
 	restoredCursor, err := restarted.GetConversationCursor(ctx, scope, conversation.ID, agent)
@@ -152,13 +146,13 @@ func TestSQLiteConversationServiceSurvivesRestartAndConcurrentReplicas(t *testin
 	if err != nil || restoredTyping.LeaseID != typingPresence.LeaseID || restoredTyping.State != ConversationPresenceTyping || restoredTyping.RunID != "" {
 		t.Fatalf("restored typing presence = %#v, err = %v", restoredTyping, err)
 	}
-	roundReplay, err := restartedService.CoordinateParticipation(ctx, roundRequest)
-	if err != nil || !roundReplay.Replayed || len(roundReplay.Messages) != 1 {
+	roundReplay, err := restartedService.CommitConversationRouting(ctx, roundRequest)
+	if err != nil || !roundReplay.Replayed || len(roundReplay.Messages) != 0 {
 		t.Fatalf("restored round replay = %#v, err = %v", roundReplay, err)
 	}
 	loadedRound, err := restartedService.GetParticipationRound(ctx, scope, conversation.ID, roundReplay.Round.ID)
-	if err != nil || len(loadedRound.Messages) != 1 || len(loadedRound.Round.Arbitration.Decisions) != 1 ||
-		loadedRound.Round.Proposals[0].Availability.Status != ParticipationAvailable {
+	if err != nil || len(loadedRound.Round.Responders) != 1 || loadedRound.Round.Responders[0].Participant != agent ||
+		loadedRound.Round.Responders[0].Reason != "owns the release" {
 		t.Fatalf("loaded round = %#v, err = %v", loadedRound, err)
 	}
 	rounds, err := restartedService.ListParticipationRounds(ctx, ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})

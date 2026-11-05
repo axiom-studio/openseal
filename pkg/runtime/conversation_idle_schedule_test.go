@@ -199,10 +199,9 @@ func TestConversationIdleSchedulingHonorsCommittedRoundAndScopedVisibility(t *te
 		second := channelMessageBatchConversation(t, store, Scope{Kind: "tenant", ID: "second"}, "same-channel")
 		channelMessageBatchCommit(t, store, &second, &ChannelMessage{ID: "coordinated"})
 		service := NewConversationService(store)
-		if _, err := service.CoordinateParticipation(t.Context(), CoordinateParticipationRequest{
+		if _, err := service.CommitConversationRouting(t.Context(), CommitConversationRoutingRequest{
 			Scope: second.Scope, ConversationID: second.ID, ExpectedRevision: second.Revision,
-			TriggerMessageID: "coordinated", Policy: DefaultConversationArbitrationPolicy(), IdempotencyKey: "silent-round",
-			Proposals: []ParticipationProposal{{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "silent-agent"}, WantsToSpeak: false}},
+			TriggerMessageID: "coordinated", IdempotencyKey: "silent-round",
 		}); err != nil {
 			t.Fatal(err)
 		}

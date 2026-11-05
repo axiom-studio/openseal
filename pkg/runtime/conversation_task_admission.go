@@ -239,15 +239,10 @@ func validConversationTaskAdmissionSourceWithRound(source *AgentRun, conversatio
 	}
 	if task.Mode == ConversationTaskModeContinuation {
 		storedThread, _ := source.Context["threadRootMessageId"].(string)
+		// A Team channel's conversation Run only routes; it never acts for
+		// an assigned member, so such a continuation cannot be proven.
 		if conversationTaskContinuationNeedsAssignmentProof(task, source) {
-			if round == nil || round.Validate() != nil || round.Scope != task.Scope || round.ConversationID != task.ConversationID || round.TriggerMessageID != task.SourceMessageID ||
-				round.IdempotencyKey != conversationTaskLedgerParticipationRoundKey(task) {
-				return false
-			}
-			selected := selectedParticipationAction(round)
-			if selected == nil || selected.Participant.Type != ConversationParticipantAgent || selected.Participant.ID != source.AssignedAgentID || selected.ProposedAction == nil {
-				return false
-			}
+			return false
 		}
 		return ConversationTaskMatchesWorkRun(task, source) && storedThread == externalConversationThreadRoot(conversation, message) &&
 			!task.CreatedAt.Before(*task.ForegroundDeadline)

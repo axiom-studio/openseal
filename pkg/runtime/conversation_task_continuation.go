@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"reflect"
 	"sync"
 	"time"
 )
@@ -132,47 +131,6 @@ func canonicalConversationTaskContinuation(ctx context.Context, store interface{
 	}
 	if !verified {
 		return nil, ErrInvalidConversationTask
-	}
-	return task, nil
-}
-
-// conversationTaskCoordinationRebase admits message drift for already accepted
-// continuation work while retaining the original participant proposals. Every
-// configuration revision remains a conflict, even if settings were reverted.
-func conversationTaskCoordinationRebase(ctx context.Context, store ConversationStore, before, current *Conversation, runID, triggerID string) (*ConversationTask, error) {
-	if before == nil || current == nil || runID == "" || current.Revision < before.Revision ||
-		current.LastSequence < before.LastSequence || current.Revision-before.Revision != current.LastSequence-before.LastSequence {
-		return nil, nil
-	}
-	previousSettings, currentSettings := cloneConversation(before), cloneConversation(current)
-	previousSettings.Revision, currentSettings.Revision = 0, 0
-	previousSettings.LastSequence, currentSettings.LastSequence = 0, 0
-	previousSettings.UpdatedAt, currentSettings.UpdatedAt = time.Time{}, time.Time{}
-	if !reflect.DeepEqual(previousSettings, currentSettings) {
-		return nil, nil
-	}
-	runs, ok := store.(PortfolioStore)
-	if !ok {
-		return nil, nil
-	}
-	run, err := runs.GetAgentRun(ctx, current.Scope, runID)
-	if err != nil || run == nil {
-		return nil, err
-	}
-	task, err := canonicalConversationTaskContinuation(ctx, store, run)
-	if err != nil || task == nil {
-		return nil, err
-	}
-	if isTerminalAgentRunStatus(run.Status) || task.ConversationID != current.ID || task.SourceMessageID != triggerID || task.Owner != current.Owner {
-		return nil, nil
-	}
-	ack, err := store.FindChannelMessageByIdempotencyKey(ctx, task.Scope, task.ConversationID, "conversation-task-handoff:"+task.ID)
-	if err != nil {
-		return nil, err
-	}
-	if ack == nil || ack.ID != ConversationTaskAcknowledgmentMessageID(task) || ack.ReplyToMessageID != task.SourceMessageID ||
-		ack.ThreadRootID != task.ThreadRootID || ack.Content != task.Acknowledgment || ack.Sequence > current.LastSequence {
-		return nil, nil
 	}
 	return task, nil
 }

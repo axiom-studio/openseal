@@ -111,25 +111,22 @@ func TestConversationChangesAreCursorStableAndProjectDurableState(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			round, err := conversations.CoordinateParticipation(ctx, CoordinateParticipationRequest{
+			round, err := conversations.CommitConversationRouting(ctx, CommitConversationRoutingRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
 				TriggerMessageID: question.Message.ID, IdempotencyKey: "release-round",
-				Proposals: []ParticipationProposal{{
-					Participant:  ConversationParticipant{Type: ConversationParticipantAgent, ID: "accountant"},
-					WantsToSpeak: true, Intent: MessageIntentAnswer,
-					Content:  "The reconciled ledger evidence is attached and the control passed.",
-					Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: question.Message.ID,
-					Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, HasEvidence: true, RoleRelevant: true},
+				Responders: []ConversationResponder{{
+					Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "accountant"},
+					Addressed:   ConversationAddressedRouted, Reason: "owns the ledger",
 				}},
 			})
-			if err != nil || round.Round.ConversationRevision != 3 || len(round.Messages) != 1 {
+			if err != nil || round.Round.ConversationRevision != 3 || len(round.Messages) != 0 {
 				t.Fatalf("round = %#v, %v", round, err)
 			}
 			afterRound, err := changes.ListChanges(ctx, ConversationChangeRequest{
 				Scope: scope, ConversationID: conversation.ID, Cursor: working.Cursor, ActiveAt: now,
 			})
-			if err != nil || !afterRound.HasChanges || len(afterRound.Messages) != 1 || afterRound.Messages[0].ParticipationRoundID != round.Round.ID ||
-				len(afterRound.Rounds) != 1 || afterRound.Rounds[0].Round.ID != round.Round.ID {
+			if err != nil || !afterRound.HasChanges || len(afterRound.Rounds) != 1 || afterRound.Rounds[0].Round.ID != round.Round.ID ||
+				afterRound.Rounds[0].Round.Responders[0].Reason != "owns the ledger" {
 				t.Fatalf("round changes = %#v, %v", afterRound, err)
 			}
 			expired, err := changes.ListChanges(ctx, ConversationChangeRequest{

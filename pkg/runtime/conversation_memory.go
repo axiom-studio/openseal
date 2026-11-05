@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -569,8 +570,8 @@ func sameParticipationRound(left, right *ParticipationRound) bool {
 		return left == right
 	}
 	return left.ID == right.ID && left.Scope == right.Scope && left.ConversationID == right.ConversationID &&
-		left.TriggerMessageID == right.TriggerMessageID && sameConversationArbitrationPolicy(left.Policy, right.Policy) && left.IdempotencyKey == right.IdempotencyKey &&
-		reflect.DeepEqual(left.Proposals, right.Proposals)
+		left.TriggerMessageID == right.TriggerMessageID && left.IdempotencyKey == right.IdempotencyKey &&
+		slices.Equal(left.Responders, right.Responders)
 }
 
 func cloneParticipationRoundResult(in *ParticipationRoundResult, replayed bool) *ParticipationRoundResult {

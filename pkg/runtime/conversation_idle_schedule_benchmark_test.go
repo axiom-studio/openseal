@@ -71,14 +71,9 @@ func benchmarkCaughtUpConversations(b *testing.B, count, historicalRounds int) (
 		}
 		conversation = posted.Conversation
 		for round := 0; round < historicalRounds; round++ {
-			committed, err := service.CoordinateParticipation(ctx, CoordinateParticipationRequest{
+			committed, err := service.CommitConversationRouting(ctx, CommitConversationRoutingRequest{
 				Scope: scope, ConversationID: id, ExpectedRevision: conversation.Revision,
 				TriggerMessageID: posted.Message.ID, IdempotencyKey: fmt.Sprintf("round-%05d", round),
-				Policy: DefaultConversationArbitrationPolicy(),
-				Proposals: []ParticipationProposal{{
-					Participant:  ConversationParticipant{Type: ConversationParticipantAgent, ID: "benchmark-agent"},
-					WantsToSpeak: false,
-				}},
 			})
 			if err != nil {
 				b.Fatal(err)

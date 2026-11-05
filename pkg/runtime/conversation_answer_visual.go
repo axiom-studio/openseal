@@ -32,30 +32,6 @@ func answerVisualArtifactID(runID, triggerID, participantID string) string {
 	return "visual-" + strings.TrimPrefix(hashString(key), "sha256:")[:40]
 }
 
-// teamAnswerVisual returns the hook a Team participation round uses to keep
-// the visual a member attaches to its answer. Team members' visuals arrive
-// on participation proposals rather than through HostedTurnRunner, so the
-// host checks run here.
-func (r *ConversationRunTurnRunner) teamAnswerVisual(run *AgentRun, triggerID string) func(context.Context, ConversationParticipant, presentation.Visual) (ConversationReference, error) {
-	return func(ctx context.Context, participant ConversationParticipant, visual presentation.Visual) (ConversationReference, error) {
-		var checks presentation.ValidateOptions
-		if r.config.VisualChecks != nil {
-			// The member publishes, so an approval binding must name an
-			// action that member proposed.
-			member := cloneAgentRun(run)
-			member.AssignedAgentID = participant.ID
-			checks = r.config.VisualChecks(member)
-		}
-		if err := validateHostedTurnVisual(ctx, &visual, AgentRunStatusCompleted, false, checks); err != nil {
-			return ConversationReference{}, fmt.Errorf("%w: %w", errInvalidAnswerVisual, err)
-		}
-		if err := stampHostedTurnVisual(ctx, &visual, checks); err != nil {
-			return ConversationReference{}, fmt.Errorf("%w: %w", errInvalidAnswerVisual, err)
-		}
-		return r.storeAnswerVisual(ctx, run, participant.ID, answerVisualArtifactID(run.ID, triggerID, participant.ID), visual)
-	}
-}
-
 // storeAnswerVisual stores the visual that rides on an Agent's answer as an
 // interactive surface artifact (version 1) with the given ID and returns the
 // reference the answer message carries. No receipt is posted: the answer is

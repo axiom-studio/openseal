@@ -22,8 +22,7 @@ const (
 )
 
 const (
-	teamActionAssignedAgentCheckpointKey = "_opensealTeamActionAssignedAgentId"
-	governedActionProposalFailedStatus   = "proposal_failed"
+	governedActionProposalFailedStatus = "proposal_failed"
 )
 
 type ConversationRunSchedulerConfig struct {
@@ -641,6 +640,16 @@ func conversationMessageStartsRun(conversation *Conversation, message *ChannelMe
 		message.Sender.ID == conversation.Owner.ID {
 		return false
 	}
+	// In a Team channel a member's answer is a new wake only when it hands
+	// off: it @mentions a teammate. Anything else would route forever.
+	if conversation.Owner.Type == OwnerTypeTeam && message.Sender.Type == ConversationParticipantAgent {
+		for _, mention := range message.Mentions {
+			if mention.Type == ConversationParticipantAgent && mention != message.Sender {
+				return true
+			}
+		}
+		return false
+	}
 	switch message.Sender.Type {
 	case ConversationParticipantUser, ConversationParticipantAgent, ConversationParticipantService:
 		return true
@@ -654,22 +663,14 @@ func conversationRunIdempotencyKey(scope Scope, conversationID, messageID string
 }
 
 type ConversationRunTurnRunnerConfig struct {
-	// ResolvePolicy applies canonical host/Team policy before a new round.
-	ResolvePolicy             func(context.Context, *Conversation) (ConversationArbitrationPolicy, error)
 	RequireParticipationOptIn bool
 	MaximumRetries            int
 	InitialRetryDelay         time.Duration
 	MaximumRetryDelay         time.Duration
-	Policy                    ConversationArbitrationPolicy
-	MaximumConcurrency        int
 	// AgentTurns resolves the active prompt-first Agent definition and its
-	// authorized Skills for Agent-owned channels. Team-owned channels continue
-	// through governed multi-participant arbitration.
+	// authorized Skills. It runs every Agent turn: Agent-owned channels and
+	// each Team member's child Run, which answers exactly like a 1:1 Agent.
 	AgentTurns TurnRunnerResolver
-	// TeamActions resolves the exact Team-level capability binding used after
-	// participant arbitration. It must return only trusted binding metadata;
-	// the Conversation runner remains the Turn runner.
-	TeamActions TurnRunnerResolver
 	// AttachmentContent supplies tenant-scoped bytes for user-attached text files
 	// and stores the visuals Agents attach to their answers. Attachment content
 	// is projected into the ephemeral model goal, never message state.
@@ -718,21 +719,16 @@ func (c ConversationRunTurnRunnerConfig) normalize() (ConversationRunTurnRunnerC
 		c.MaximumRetryDelay = time.Minute
 	}
 	if c.MaximumRetries < 0 || c.MaximumRetries > 100 || c.InitialRetryDelay <= 0 ||
-		c.MaximumRetryDelay < c.InitialRetryDelay || c.MaximumRetryDelay > time.Hour || c.MaximumConcurrency < 0 {
+		c.MaximumRetryDelay < c.InitialRetryDelay || c.MaximumRetryDelay > time.Hour {
 		return ConversationRunTurnRunnerConfig{}, fmt.Errorf("%w: invalid conversation Run retry configuration", ErrInvalidConversation)
 	}
-	policy, err := c.Policy.normalize()
-	if err != nil {
-		return ConversationRunTurnRunnerConfig{}, err
-	}
-	c.Policy = policy
 	return c, nil
 }
 
-// ConversationRunTurnRunner executes one governed participation round as a
-// bounded Run turn. The round idempotency key closes the crash gap after round
-// commit; optimistic channel drift and transient proposal failures sleep and
-// fail without scheduling another model attempt.
+// ConversationRunTurnRunner runs conversation Runs. An Agent channel's Run is
+// the Agent's own turn. A Team channel's Run only routes: it records who
+// answers and starts one child agent_work Run per responder, and each child
+// runs the same Agent turn as a 1:1 chat (runAgentTurn).
 type ConversationRunTurnRunner struct {
 	summaries     conversationSummaryCache
 	conversations *ConversationService
@@ -742,7 +738,7 @@ type ConversationRunTurnRunner struct {
 	coordinator   *ConversationCoordinator
 	config        ConversationRunTurnRunnerConfig
 	agentTurns    TurnRunnerResolver
-	teamActions   TurnRunnerResolver
+	runs          *RunCommandService
 	now           func() time.Time
 }
 
@@ -760,7 +756,10 @@ func NewConversationRunTurnRunner(
 	}
 	runner := &ConversationRunTurnRunner{
 		conversations: NewConversationService(conversationStore), coordinator: coordinator,
-		config: normalized, agentTurns: normalized.AgentTurns, teamActions: normalized.TeamActions, now: time.Now,
+		config: normalized, agentTurns: normalized.AgentTurns, now: time.Now,
+	}
+	if runs, ok := conversationStore.(RunCommandStore); ok {
+		runner.runs = NewRunCommandService(runs)
 	}
 	if portfolio, ok := conversationStore.(PortfolioStore); ok {
 		runner.portfolio = portfolio
@@ -778,9 +777,6 @@ func NewConversationRunTurnRunner(
 // Attribution is kernel-owned and rechecked before resolving an Agent model.
 func (r *ConversationRunTurnRunner) finalExplanationParticipant(ctx context.Context, run *AgentRun) (string, error) {
 	participant := strings.TrimSpace(run.AssignedAgentID)
-	if participant == "" {
-		participant, _ = run.Checkpoint[teamActionAssignedAgentCheckpointKey].(string)
-	}
 	if !validOpaqueIdentifier(participant, 256) {
 		return "", errors.New("failed Team action is missing Agent attribution")
 	}
@@ -826,10 +822,11 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	}
 	pinnedRunbook := run.Plan != nil && run.Plan["runbook"] != nil
 	finalExplanation := requiresFinalFailureExplanation(run.Checkpoint)
-	if (run.Owner.Type == OwnerTypeAgent || pinnedRunbook || finalExplanation) && r.agentTurns == nil {
+	agentTurn := run.Owner.Type == OwnerTypeAgent || pinnedRunbook || finalExplanation || isTeamResponderRun(run)
+	if agentTurn && r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
-	if run.Owner.Type == OwnerTypeAgent || pinnedRunbook || finalExplanation {
+	if agentTurn {
 		hostedRun := cloneAgentRun(run)
 		hostedRun.Kind = RunKindAgentWork
 		if !pinnedRunbook && run.Owner.Type == OwnerTypeAgent {
@@ -875,25 +872,11 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 			BudgetReservation: agentBinding.BudgetReservation,
 		}, nil
 	}
-	binding := &TurnRunnerBinding{
-		Runner: r, DefinitionID: "openseal.conversation-coordinator", DefinitionVersion: "1",
-		ModelProvider: "host", Model: "participant-runtime",
+	return &TurnRunnerBinding{
+		Runner: r, DefinitionID: "openseal.conversation-router", DefinitionVersion: "1",
+		ModelProvider: "host", Model: "conversation-router",
 		InputContextRefs: []string{conversationRunContextConversationID, conversationRunContextTriggerID},
-	}
-	if r.teamActions != nil {
-		actions, err := r.teamActions.ResolveTurnRunner(ctx, run)
-		if err != nil {
-			return nil, err
-		}
-		if actions == nil || strings.TrimSpace(actions.DeploymentID) == "" {
-			return nil, ErrConversationCoordinationUnavailable
-		}
-		binding.DeploymentID = actions.DeploymentID
-		binding.ModelActions = append([]capability.ModelAction(nil), actions.ModelActions...)
-		binding.PreparedRuntimes = append([]PreparedSkillRuntime(nil), actions.PreparedRuntimes...)
-		binding.InputContextRefs = append(binding.InputContextRefs, actions.InputContextRefs...)
-	}
-	return binding, nil
+	}, nil
 }
 
 // conversationAgentTurnRunner keeps the bound Agent's admission planner while
@@ -992,9 +975,9 @@ func (r conversationAgentTurnRunner) PlanTurnBudget(ctx context.Context, input T
 	return planner.PlanTurnBudget(ctx, hostedInput)
 }
 
-// PlanTurnBudget reserves the full permitted fan-out before any proposal call.
-// The provider receives its per-participant allowance independently of model
-// content; a changed roster remains bounded by MaximumParticipants.
+// PlanTurnBudget reserves nothing for a Team channel's routing turn: the host
+// router is one small call outside the Run's model budget, and each responder
+// is budgeted by its own child Run.
 func (r *ConversationRunTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
 	if err := r.validateConversationRun(ctx, input.Run); err != nil {
 		return BudgetUsage{}, err
@@ -1004,7 +987,7 @@ func (r *ConversationRunTurnRunner) PlanTurnBudget(ctx context.Context, input Tu
 	} else if stopped {
 		return BudgetUsage{}, nil
 	}
-	if input.Run.Owner.Type == OwnerTypeAgent || (input.Run.Plan != nil && input.Run.Plan["runbook"] != nil) || requiresFinalFailureExplanation(input.Run.Checkpoint) {
+	if input.Run.Owner.Type == OwnerTypeAgent || (input.Run.Plan != nil && input.Run.Plan["runbook"] != nil) || requiresFinalFailureExplanation(input.Run.Checkpoint) || isTeamResponderRun(input.Run) {
 		binding, err := r.ResolveTurnRunner(ctx, input.Run)
 		if err != nil {
 			return BudgetUsage{}, err
@@ -1012,62 +995,13 @@ func (r *ConversationRunTurnRunner) PlanTurnBudget(ctx context.Context, input Tu
 		if planner, ok := binding.Runner.(TurnBudgetPlanner); ok {
 			return planner.PlanTurnBudget(ctx, input)
 		}
-		return BudgetUsage{}, nil
 	}
-	if input.Run.Owner.Type != OwnerTypeTeam {
-		return BudgetUsage{}, nil
-	}
-	if _, completed := governedConversationActionOutcome(input.Run); completed {
-		return BudgetUsage{}, nil
-	}
-	budget := r.coordinator.config.ProposalBudget
-	if budget == (ParticipationProposalBudget{}) {
-		return BudgetUsage{}, nil
-	}
-	// An already committed round needs no new model capacity on recovery.
-	conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
-	key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
-	existing, err := r.conversations.FindParticipationRoundByIdempotencyKey(ctx, input.Run.Scope, conversationID, key)
-	if err != nil {
-		return BudgetUsage{}, err
-	}
-	if existing != nil {
-		return BudgetUsage{}, nil
-	}
-	count := int64(r.coordinator.config.MaximumParticipants)
-	return BudgetUsage{InputTokens: count * budget.InputTokens, OutputTokens: count * budget.OutputTokens}, nil
+	return BudgetUsage{}, nil
 }
 
-func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (outcome *TurnOutcome, runErr error) {
-	// Retain provider usage on every exit after coordination, including errors,
-	// revision-conflict retries, opt-out, and failures publishing fallback text.
-	var participationUsage TurnUsage
-	defer func() {
-		if participationUsage == (TurnUsage{}) {
-			return
-		}
-		if outcome == nil {
-			outcome = &TurnOutcome{}
-		}
-		outcome.Usage = participationUsage
-	}()
+func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
 	if err := r.validateConversationRun(ctx, input.Run); err != nil {
 		return nil, err
-	}
-	// Recover a committed round's charge only for its original unfinished
-	// turn. A later continuation must not charge that round again.
-	if input.Turn != nil && input.Run.Owner.Type == OwnerTypeTeam {
-		conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
-		triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
-		key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
-		saved, err := r.conversations.FindParticipationRoundByIdempotencyKey(ctx, input.Run.Scope, conversationID, key)
-		if err != nil {
-			return nil, err
-		}
-		if saved != nil && saved.Round.UsageTurnID == input.Turn.ID {
-			participationUsage = saved.Round.Usage
-		}
 	}
 	if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
 		return nil, err
@@ -1083,252 +1017,10 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	if conversation.Owner != input.Run.Owner {
 		return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
 	}
-	if r.config.RequireParticipationOptIn {
-		trigger, err := r.conversations.GetChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID)
-		if err != nil {
-			return nil, err
-		}
-		if !conversationParticipationAllows(conversation, trigger) {
-			return participationStoppedOutcome(), nil
-		}
-	}
-	if conversation.Owner.Type == OwnerTypeAgent {
+	if conversation.Owner.Type == OwnerTypeAgent || requiresFinalFailureExplanation(input.Run.Checkpoint) || isTeamResponderRun(input.Run) {
 		return r.runAgentTurn(ctx, input, conversation, triggerID, nil, nil)
 	}
-	if requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		participant, err := r.finalExplanationParticipant(ctx, input.Run)
-		if err != nil {
-			return nil, err
-		}
-		input.Run = cloneAgentRun(input.Run)
-		input.Run.AssignedAgentID = participant
-		return r.runAgentTurn(ctx, input, conversation, triggerID, nil, nil)
-	}
-	if outcome, ok := governedConversationActionOutcome(input.Run); ok && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		trigger, getErr := r.conversations.GetChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID)
-		if getErr != nil {
-			return nil, getErr
-		}
-		participantID := strings.TrimSpace(fmt.Sprint(input.Run.Checkpoint[teamActionAssignedAgentCheckpointKey]))
-		if !validOpaqueIdentifier(participantID, 256) {
-			return nil, errors.New("governed Team action outcome is missing its trusted roster Agent attribution")
-		}
-		message, replayed, postErr := r.postTeamActionOutcome(ctx, input.Run, conversation, trigger.ID, ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID}, outcome)
-		if postErr != nil {
-			return nil, postErr
-		}
-		return &TurnOutcome{
-			NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Governed Team action resolved",
-			RunOutput: map[string]interface{}{
-				"conversationId": conversation.ID, "triggerMessageId": trigger.ID, "messageId": message.ID, "replayed": replayed,
-				"resourceType": outcome.ResourceType, "resourceId": outcome.ResourceID,
-			},
-		}, nil
-	}
-	key := "participation-round:" + hashString(input.Run.Scope.Kind+"\x00"+input.Run.Scope.ID+"\x00"+conversationID+"\x00"+triggerID)
-	policy := r.config.Policy
-	if r.config.ResolvePolicy != nil {
-		saved, err := r.conversations.FindParticipationRoundByIdempotencyKey(ctx, input.Run.Scope, conversationID, key)
-		if err != nil {
-			return nil, err
-		}
-		if saved != nil {
-			policy = saved.Round.Policy
-		} else {
-			policy, err = r.config.ResolvePolicy(ctx, conversation)
-			if err != nil {
-				return r.retryOutcome(input.Run, err)
-			}
-		}
-	}
-	usageTurnID := ""
-	if input.Turn != nil {
-		usageTurnID = input.Turn.ID
-	}
-	messageReferences, err := r.conversationTaskResponseReferences(ctx, input.Run, []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}})
-	if err != nil {
-		return nil, err
-	}
-	result, measuredUsage, err := r.coordinator.CoordinateWithUsage(ctx, ConversationCoordinationRequest{
-		conversationSnapshot: cloneConversation(conversation),
-		UsageTurnID:          usageTurnID,
-		Scope:                input.Run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
-		TriggerMessageID: triggerID, Policy: policy, MaximumConcurrency: r.config.MaximumConcurrency,
-		MessageReferences: messageReferences,
-		IdempotencyKey:    key,
-		answerVisual:      r.teamAnswerVisual(input.Run, triggerID),
-		cardState:         r.conversationCardState,
-	})
-	if measuredUsage != (TurnUsage{}) {
-		participationUsage = measuredUsage
-	}
-	if err != nil {
-		if r.config.RequireParticipationOptIn {
-			if stopped, checkErr := r.participationStopped(ctx, input.Run); checkErr != nil {
-				return nil, checkErr
-			} else if stopped {
-				return participationStoppedOutcome(), nil
-			}
-		}
-		if ctx.Err() != nil || permanentConversationRunError(err) {
-			return nil, err
-		}
-		return r.retryOutcome(input.Run, err)
-	}
-	if len(result.Messages) == 0 {
-		trigger, triggerErr := r.conversations.GetChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID)
-		if triggerErr != nil {
-			return nil, triggerErr
-		}
-		if trigger.RequiresResponse {
-			current, currentErr := r.conversations.GetConversation(ctx, input.Run.Scope, conversation.ID)
-			if currentErr != nil {
-				return nil, currentErr
-			}
-			if r.config.RequireParticipationOptIn && !conversationParticipationAllows(current, trigger) {
-				return participationStoppedOutcome(), nil
-			}
-			fallback, fallbackErr := r.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
-				Scope: input.Run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-				Sender:   ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"},
-				Intent:   MessageIntentSystem,
-				Content:  "No Team member offered a role-relevant response or authorized action for this request. Review the Team’s roles and Skills, or rephrase the request.",
-				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: trigger.ID,
-				References: []ConversationReference{{Kind: ConversationReferenceRun, ID: input.Run.ID}}, ResolvesMessageID: trigger.ID,
-				IdempotencyKey: "team-participation-unanswered:" + result.Round.ID,
-			})
-			if fallbackErr != nil {
-				return nil, fallbackErr
-			}
-			result.Conversation = fallback.Conversation
-			result.Messages = append(result.Messages, fallback.Message)
-		}
-	}
-	messageIDs := make([]interface{}, 0, len(result.Messages))
-	for _, message := range result.Messages {
-		messageIDs = append(messageIDs, message.ID)
-	}
-	proposal := selectedParticipationAction(result.Round)
-	if proposal != nil {
-		if stopped, err := r.participationStopped(ctx, input.Run); err != nil {
-			return nil, err
-		} else if stopped {
-			return participationStoppedOutcome(), nil
-		}
-		action := *proposal.ProposedAction
-		action.EvidenceRefs = append([]string(nil), proposal.ProposedAction.EvidenceRefs...)
-		if strings.TrimSpace(action.IdempotencyKey) == "" {
-			action.IdempotencyKey = "team-participation-action:" + result.Round.ID + ":" + proposal.ID
-		}
-		checkpoint := cloneMap(proposal.ActionInputs)
-		// The participant identity comes from the persisted, arbitrated proposal,
-		// not model action arguments. Carry it through the Turn checkpoint so the
-		// ActionCoordinator can durably attribute Team authority to the roster
-		// Agent that actually proposed the action.
-		checkpoint[teamActionAssignedAgentCheckpointKey] = proposal.Participant.ID
-		return &TurnOutcome{
-			NextRunStatus:          AgentRunStatusRunning,
-			OutputSummary:          "Team participant proposed a governed action",
-			ProposedActions:        []TurnAction{action},
-			ContinuationCheckpoint: checkpoint,
-			RunOutput:              participationRoundRunOutput(result, conversationID, triggerID, messageIDs, result.Replayed),
-		}, nil
-	}
-	return &TurnOutcome{
-		NextRunStatus: AgentRunStatusCompleted,
-		OutputSummary: "Team channel participation coordinated",
-		RunOutput:     participationRoundRunOutput(result, conversationID, triggerID, messageIDs, result.Replayed),
-	}, nil
-}
-
-func participationRoundRunOutput(result *ParticipationRoundResult, conversationID, triggerID string, messageIDs []interface{}, replayed bool) map[string]interface{} {
-	participantCount, availableCount, unavailableCount := 0, 0, 0
-	if result != nil && result.Round != nil {
-		participantCount = len(result.Round.Proposals)
-		for _, proposal := range result.Round.Proposals {
-			switch proposal.Availability.Status {
-			case ParticipationUnavailable:
-				unavailableCount++
-			case "", ParticipationAvailable:
-				availableCount++
-			}
-		}
-	}
-	return map[string]interface{}{
-		"conversationId": conversationID, "triggerMessageId": triggerID,
-		"participationRoundId": result.Round.ID, "messageIds": messageIDs,
-		"speakerCount": len(result.Messages), "replayed": replayed,
-		"participantCount": participantCount, "availableParticipantCount": availableCount,
-		"unavailableParticipantCount": unavailableCount, "degraded": unavailableCount > 0,
-	}
-}
-
-func selectedParticipationAction(round *ParticipationRound) *ParticipationProposal {
-	if round == nil {
-		return nil
-	}
-	byID := make(map[string]*ParticipationProposal, len(round.Proposals))
-	for index := range round.Proposals {
-		byID[round.Proposals[index].ID] = &round.Proposals[index]
-	}
-	for _, id := range round.Arbitration.Speakers {
-		if proposal := byID[id]; proposal != nil && proposal.ProposedAction != nil {
-			return proposal
-		}
-	}
-	return nil
-}
-
-func (r *ConversationRunTurnRunner) postTeamActionOutcome(
-	ctx context.Context,
-	run *AgentRun,
-	conversation *Conversation,
-	triggerID string,
-	participant ConversationParticipant,
-	outcome *governedConversationCompletion,
-) (*ChannelMessage, bool, error) {
-	if outcome == nil {
-		return nil, false, errors.New("governed Team action outcome is required")
-	}
-	trigger, err := r.conversations.GetChannelMessage(ctx, run.Scope, conversation.ID, triggerID)
-	if err != nil {
-		return nil, false, err
-	}
-	key := "team-action-outcome:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+triggerID)
-	for range 3 {
-		current, err := r.conversations.GetConversation(ctx, run.Scope, conversation.ID)
-		if err != nil {
-			return nil, false, err
-		}
-		references, err := r.conversationTaskResponseReferences(ctx, run, outcome.References)
-		if err != nil {
-			return nil, false, err
-		}
-		request := PostChannelMessageRequest{
-			Scope: run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
-			Sender: participant, Intent: MessageIntentAnswer, Content: outcome.Content,
-			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
-			ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
-			ResponseMode:   trigger.ResponseMode,
-			References:     references,
-			IdempotencyKey: key,
-		}
-		result, err := r.conversations.PostChannelMessage(ctx, request)
-		if err == nil {
-			return result.Message, result.Replayed, nil
-		}
-		if errors.Is(err, ErrMessageConflict) {
-			if saved, replayErr := r.conversations.replayLegacySpokenResponse(ctx, request); replayErr != nil {
-				return nil, false, replayErr
-			} else if saved != nil {
-				return saved, true, nil
-			}
-		}
-		if !errors.Is(err, ErrRevisionConflict) && !errors.Is(err, ErrMessageConflict) {
-			return nil, false, err
-		}
-	}
-	return nil, false, ErrRevisionConflict
+	return r.routeTeamMessage(ctx, input.Run, conversation, triggerID)
 }
 
 func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, input TurnExecutionContext, conversation *Conversation, triggerID string) (string, ConversationViewer, *ChannelMessage, error) {
@@ -1398,6 +1090,12 @@ func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx contex
 		historyPlan.Places = r.config.Places(ctx, input.Run)
 		if len(historyPlan.Places) > MaximumConversationPlaces {
 			historyPlan.Places = historyPlan.Places[:MaximumConversationPlaces]
+		}
+	}
+	if isTeamResponderRun(input.Run) {
+		historyPlan.Team, err = r.agentConversationTeamContext(ctx, input.Run, conversation, trigger)
+		if err != nil {
+			return TurnExecutionContext{}, historyPlan, err
 		}
 	}
 	attachments := r.conversationAttachments(ctx, conversation, trigger, recent)
@@ -1734,6 +1432,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		CardState              []string                          `json:"cardState,omitempty"`
 		ImageStyle             string                            `json:"imageStyle,omitempty"`
 		Places                 []ConversationPlace               `json:"places,omitempty"`
+		Team                   *agentConversationTeam            `json:"team,omitempty"`
 	}{
 		TriggerID: trigger.ID,
 		Messages:  make([]agentConversationPromptMessage, 0, len(recent)),
@@ -1756,6 +1455,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		payload.CardState = append([]string(nil), history[0].CardState...)
 		payload.ImageStyle = history[0].ImageStyle
 		payload.Places = append([]ConversationPlace(nil), history[0].Places...)
+		payload.Team = history[0].Team
 		for _, message := range history[0].FollowUps {
 			payload.FollowUpMessages = append(payload.FollowUpMessages, agentConversationPromptMessage{
 				ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, SenderDisplayName: message.SenderDisplayName,
@@ -2188,6 +1888,17 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		if participantID == "" {
 			participantID = current.Owner.ID
 		}
+		var routingReason string
+		var mentions []ConversationParticipant
+		if isTeamResponderRun(run) {
+			routingReason, _ = run.Context[routingReasonContextKey].(string)
+			// One hop: an answer to a teammate's handoff never hands off again.
+			if trigger.Sender.Type != ConversationParticipantAgent {
+				if mentions, err = r.handoffMentions(ctx, current, trigger, participantID, content); err != nil {
+					return nil, false, err
+				}
+			}
+		}
 		request := PostChannelMessageRequest{
 			Scope: run.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID},
@@ -2195,7 +1906,9 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 			ReplyToMessageID: trigger.ID, ResolvesMessageID: trigger.ID,
 			ResponseMode:       trigger.ResponseMode,
 			BroadcastToChannel: broadcastToChannel,
+			Mentions:           mentions,
 			References:         responseReferences,
+			RoutingReason:      routingReason,
 			IdempotencyKey:     key,
 		}
 		result, err := r.conversations.PostChannelMessage(ctx, request)
@@ -2506,6 +2219,9 @@ func (r *ConversationRunTurnRunner) validateConversationRun(ctx context.Context,
 	if run == nil {
 		return ErrInvalidAgentRun
 	}
+	if isTeamResponderRun(run) {
+		return validateTeamResponderRun(run)
+	}
 	if taskID, _ := run.Context[ConversationTaskContextKey].(string); taskID != "" {
 		task, err := canonicalConversationTaskContinuation(ctx, r.portfolio, run)
 		if err != nil {
@@ -2581,6 +2297,27 @@ func validateConversationRun(run *AgentRun) error {
 	if !conversationOK || !triggerOK || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) ||
 		run.ConcurrencyKey != key {
 		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
+	}
+	return nil
+}
+
+// validateTeamResponderRun checks a Team member's child Run envelope: the
+// same conversation context as its parent and its own member lane.
+func validateTeamResponderRun(run *AgentRun) error {
+	conversationID, conversationOK := run.Context[conversationRunContextConversationID].(string)
+	triggerID, triggerOK := run.Context[conversationRunContextTriggerID].(string)
+	root, _ := run.Context["threadRootMessageId"].(string)
+	key := conversationID
+	if root != "" {
+		if !validOpaqueIdentifier(root, 128) {
+			return ErrInvalidAgentRun
+		}
+		key += ":thread:" + root
+	}
+	reason, _ := run.Context[routingReasonContextKey].(string)
+	if !conversationOK || !triggerOK || !validOpaqueIdentifier(conversationID, 128) || !validOpaqueIdentifier(triggerID, 128) ||
+		run.ConcurrencyKey != teamResponderConcurrencyKey(key, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
+		return fmt.Errorf("%w: Team member Run context or concurrency key is invalid", ErrInvalidAgentRun)
 	}
 	return nil
 }

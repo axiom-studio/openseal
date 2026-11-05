@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 )
 
 type participationTestStore interface {
@@ -136,94 +133,6 @@ func TestParticipationOptInStartsAtNewMessagesAndSurvivesRestart(t *testing.T) {
 	}
 }
 
-func TestParticipationOptOutBlocksQueuedAndInFlightPublication(t *testing.T) {
-	store := NewMemoryStore()
-	service := NewConversationService(store)
-	scope := Scope{Kind: "local", ID: "default"}
-	channel, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, Title: "Evidence", IdempotencyKey: "channel"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	enabled := true
-	channel, err = service.UpdateConversation(t.Context(), UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: channel.Revision, ParticipationEnabled: &enabled})
-	if err != nil {
-		t.Fatal(err)
-	}
-	trigger := postConversationRunTestMessage(t, service, channel, ConversationParticipantUser, MessageIntentQuestion, "Review this evidence", "question")
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{RequireParticipationOptIn: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	scheduled, _, err := scheduler.ScheduleMessage(t.Context(), scope, channel.ID, trigger.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var calls atomic.Int32
-	started, release := make(chan struct{}), make(chan struct{})
-	var releaseOnce sync.Once
-	unblock := func() { releaseOnce.Do(func() { close(release) }) }
-	t.Cleanup(unblock)
-	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-		return []ConversationParticipantBinding{{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "analyst"}, SemanticRoles: []string{"reviewer"}}, {Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "second"}, SemanticRoles: []string{"reviewer"}}}, nil
-	})
-	provider := ParticipationProposalProviderFunc(func(context.Context, ParticipationProposalContext) (ParticipationProposal, error) {
-		if calls.Add(1) == 1 {
-			close(started)
-		}
-		<-release
-		return ParticipationProposal{WantsToSpeak: true, Intent: MessageIntentAnswer, Content: "Late model answer", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true}}, nil
-	})
-	config := DefaultConversationCoordinatorConfig()
-	config.MaximumConcurrency = 1
-	coordinator, err := NewConversationCoordinator(service, participants, provider, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, err := NewConversationRunTurnRunner(store, coordinator, ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	finished := make(chan error, 1)
-	go func() {
-		_, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: scheduled.Run})
-		finished <- err
-	}()
-	select {
-	case <-started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("provider did not start")
-	}
-	current, err := service.GetConversation(t.Context(), scope, channel.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	enabled = false
-	if _, err := service.UpdateConversation(t.Context(), UpdateConversationRequest{Scope: scope, ConversationID: channel.ID, ExpectedRevision: current.Revision, ParticipationEnabled: &enabled}); err != nil {
-		t.Fatal(err)
-	}
-	unblock()
-	select {
-	case err := <-finished:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("provider did not finish")
-	}
-	messages, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: channel.ID})
-	if err != nil || len(messages) != 1 {
-		t.Fatalf("late publication: %#v %v", messages, err)
-	}
-	binding, err := runner.ResolveTurnRunner(t.Context(), scheduled.Run)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: scheduled.Run})
-	if err != nil || result.RunOutput["participationSkipped"] != true || calls.Load() != 1 {
-		t.Fatalf("queued work reached model after opt-out: %#v %v calls=%d", result, err, calls.Load())
-	}
-}
-
 func TestParticipationArchiveRequiresFreshOptIn(t *testing.T) {
 	store := NewMemoryStore()
 	service := NewConversationService(store)
@@ -315,47 +224,5 @@ func TestParticipationOptOutDiscardsAgentOutputAndKeepsUsage(t *testing.T) {
 				t.Fatalf("late reply: %#v %v", messages, err)
 			}
 		})
-	}
-}
-
-func TestConversationRunPinsResolvedPolicyAcrossRoundRecovery(t *testing.T) {
-	store := NewMemoryStore()
-	service := NewConversationService(store)
-	scope := Scope{Kind: "local", ID: "policy"}
-	channel, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Research", IdempotencyKey: "channel"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	trigger := postConversationRunTestMessage(t, service, channel, ConversationParticipantUser, MessageIntentQuestion, "Review evidence", "trigger")
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	scheduled, _, err := scheduler.ScheduleMessage(t.Context(), scope, channel.ID, trigger.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{ResolvePolicy: func(context.Context, *Conversation) (ConversationArbitrationPolicy, error) {
-		calls++
-		if calls > 1 {
-			return ConversationArbitrationPolicy{}, errors.New("team changed after round committed")
-		}
-		policy := DefaultConversationArbitrationPolicy()
-		policy.MaximumSpeakers = 1
-		return policy, nil
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: scheduled.Run})
-		if err != nil || outcome.NextRunStatus != AgentRunStatusCompleted {
-			t.Fatalf("round recovery: %#v %v", outcome, err)
-		}
-	}
-	rounds, err := service.ListParticipationRounds(t.Context(), ParticipationRoundFilter{Scope: scope, ConversationID: channel.ID})
-	if err != nil || len(rounds) != 1 || rounds[0].Round.Policy.MaximumSpeakers != 1 || calls != 1 {
-		t.Fatalf("resolved policy lost on recovery: %#v %v calls=%d", rounds, err, calls)
 	}
 }

@@ -74,22 +74,12 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	roundRequest := CoordinateParticipationRequest{
+	roundRequest := CommitConversationRoutingRequest{
 		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: question.Conversation.Revision,
 		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
-		Proposals: []ParticipationProposal{
-			{
-				Participant: agent, WantsToSpeak: true, Intent: MessageIntentAnswer,
-				Content: "Production is ready; rollout and smoke evidence passed.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-				ReplyToMessageID: question.Message.ID, ResolvesMessageID: question.Message.ID,
-				References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: "smoke-evidence", Version: 1}},
-				Signals:    ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, RoleRelevant: true, HasEvidence: true},
-			},
-			{
-				Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "observer"}, WantsToSpeak: true,
-				Intent: MessageIntentAcknowledgment, Content: "Great, thanks everyone.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-				Signals: ParticipationSignals{RoleRelevant: true},
-			},
+		Responders: []ConversationResponder{
+			{Participant: agent, Addressed: ConversationAddressedRouted, Reason: "owns production"},
+			{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "observer"}, Addressed: ConversationAddressedEveryone},
 		},
 	}
 	services := []*ConversationService{primaryService, replicaService}
@@ -101,7 +91,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			result, err := services[index%len(services)].CoordinateParticipation(ctx, roundRequest)
+			result, err := services[index%len(services)].CommitConversationRouting(ctx, roundRequest)
 			if err != nil {
 				failed.Add(1)
 				return
@@ -124,11 +114,11 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	restartedService := NewConversationService(restarted)
 	restartedService.now = func() time.Time { return fixed }
 	restored, err := restartedService.GetConversation(ctx, scope, conversation.ID)
-	if err != nil || restored.Revision != 3 || restored.LastSequence != 2 {
+	if err != nil || restored.Revision != 3 || restored.LastSequence != 1 {
 		t.Fatalf("restored conversation = %#v, err = %v", restored, err)
 	}
 	messages, err := restartedService.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-	if err != nil || len(messages) != 2 || messages[1].ThreadRootID != question.Message.ID || messages[1].ResolvesMessageID != question.Message.ID {
+	if err != nil || len(messages) != 1 {
 		t.Fatalf("restored messages = %#v, err = %v", messages, err)
 	}
 	restoredCursor, err := restarted.GetConversationCursor(ctx, scope, conversation.ID, agent)
@@ -139,12 +129,12 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	if err != nil || restoredPresence.LeaseID != presence.LeaseID {
 		t.Fatalf("restored presence = %#v, err = %v", restoredPresence, err)
 	}
-	replay, err := restartedService.CoordinateParticipation(ctx, roundRequest)
-	if err != nil || !replay.Replayed || len(replay.Messages) != 1 || len(replay.Round.Arbitration.Decisions) != 2 {
+	replay, err := restartedService.CommitConversationRouting(ctx, roundRequest)
+	if err != nil || !replay.Replayed || len(replay.Messages) != 0 || len(replay.Round.Responders) != 2 {
 		t.Fatalf("round replay = %#v, err = %v", replay, err)
 	}
 	loadedRound, err := restartedService.GetParticipationRound(ctx, scope, conversation.ID, replay.Round.ID)
-	if err != nil || len(loadedRound.Messages) != 1 || len(loadedRound.Round.Arbitration.Decisions) != 2 {
+	if err != nil || len(loadedRound.Round.Responders) != 2 || loadedRound.Round.Responders[0].Reason != "owns production" {
 		t.Fatalf("loaded round = %#v, err = %v", loadedRound, err)
 	}
 	rounds, err := restartedService.ListParticipationRounds(ctx, ParticipationRoundFilter{Scope: scope, ConversationID: conversation.ID})
@@ -158,7 +148,7 @@ func TestPostgresNaturalChannelsAreConcurrentRestartSafeAndIsolated(t *testing.T
 	initialChanges, err := primaryChanges.ListChanges(ctx, ConversationChangeRequest{
 		Scope: scope, ConversationID: conversation.ID, ActiveAt: fixed,
 	})
-	if err != nil || len(initialChanges.Messages) != 2 || len(initialChanges.Rounds) != 1 ||
+	if err != nil || len(initialChanges.Messages) != 1 || len(initialChanges.Rounds) != 1 ||
 		len(initialChanges.Presence) != 1 || initialChanges.Cursor == "" {
 		t.Fatalf("initial PostgreSQL changes = %#v, err = %v", initialChanges, err)
 	}

@@ -48,6 +48,8 @@ type conversationHistoryPlan struct {
 	ImageStyle string
 	// Places are what find_place already found in the chat.
 	Places []ConversationPlace
+	// Team is set when a Team member answers in its Team channel.
+	Team *agentConversationTeam
 }
 
 func conversationViewerKey(viewer ConversationViewer) string {

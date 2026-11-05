@@ -316,6 +316,12 @@ func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *Ag
 			// handoff. ParentRunID remains the immutable historical lineage.
 			continue
 		}
+		if parent.Status == AgentRunStatusCompleted && parent.Kind == RunKindConversation && isTeamResponderRun(child) {
+			// A Team channel's routing Run completes as soon as it starts its
+			// members' answers; those answers outlive it. Canceling the
+			// routing Run still cancels them.
+			continue
+		}
 		if _, seen := visited[child.ID]; seen {
 			cascadeErrors = append(cascadeErrors, fmt.Errorf("Run ownership cycle includes %s", child.ID))
 			continue

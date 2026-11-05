@@ -126,7 +126,7 @@ func conversationTaskParticipationRoundKey(run *AgentRun) string {
 
 func conversationTaskFinishedTeamRound(run *AgentRun, round *ParticipationRound) bool {
 	return run.Owner.Type == OwnerTypeTeam && round != nil && round.Status == ParticipationRoundCommitted &&
-		round.TriggerMessageID == run.Context[conversationRunContextTriggerID] && selectedParticipationAction(round) == nil
+		round.TriggerMessageID == run.Context[conversationRunContextTriggerID]
 }
 
 func conversationTaskFinishedBeforePromotion(turn *AgentTurn) bool {
