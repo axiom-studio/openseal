@@ -47,7 +47,8 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			// A scheduled task made from this chat is already linked to it.
 			task := &RunbookActivation{
 				ID: "chat-task", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, TriggerID: "weekly",
-				Task:    &ScheduledAgentTask{Goal: "Send the weekly plan", ConversationID: f.conversation.ID, SourceMessageID: f.trigger.ID},
+				Task: &ScheduledAgentTask{Goal: "Send the weekly plan", ConversationID: f.conversation.ID, SourceMessageID: f.trigger.ID,
+					Script: &RoutineScript{Path: "scripts/plan.py", Digest: routineScriptDigestOf("a"), FilesVersion: 1, Command: "python3 scripts/plan.py", TimeoutSeconds: 60}},
 				Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 0 8 * * 1", Timezone: "UTC"}},
 				Status:  RunbookActivationActive, Revision: 1, CreatedAt: now, UpdatedAt: now,
 			}
@@ -65,7 +66,8 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			if !initial.RunbooksChanged || runbookIDs(initial.Runbooks) != "chat-task" {
 				t.Fatalf("initial runbooks = %s changed=%v", runbookIDs(initial.Runbooks), initial.RunbooksChanged)
 			}
-			if got := initial.Runbooks[0]; got.Title != "Morning news" || got.Status != ConversationRunbookActive || got.Schedule == nil || got.Schedule.Cron != "0 0 8 * * 1" {
+			if got := initial.Runbooks[0]; got.Title != "Morning news" || got.Status != ConversationRunbookActive || got.Schedule == nil || got.Schedule.Cron != "0 0 8 * * 1" ||
+				got.Script == nil || got.Script.Path != "scripts/plan.py" {
 				t.Fatalf("task runbook = %#v", got)
 			}
 			quiet := f.list(t, initial.Cursor)
@@ -80,7 +82,7 @@ func TestConversationChangesCarryLinkedRunbooks(t *testing.T) {
 			if !linked.RunbooksChanged || !linked.HasChanges || runbookIDs(linked.Runbooks) != "chat-task,daily-news" {
 				t.Fatalf("linked runbooks = %s changed=%v", runbookIDs(linked.Runbooks), linked.RunbooksChanged)
 			}
-			if got := linked.Runbooks[1]; got.ObjectiveID != objective.ID || got.Schedule.Timezone != "Europe/London" || got.NextRunAt != nil || got.LastRun != nil {
+			if got := linked.Runbooks[1]; got.ObjectiveID != objective.ID || got.Schedule.Timezone != "Europe/London" || got.NextRunAt != nil || got.LastRun != nil || got.Script != nil {
 				t.Fatalf("daily runbook = %#v", got)
 			}
 

@@ -368,8 +368,9 @@ type (
 	RoutineScriptStatus                  = runtime.RoutineScriptStatus
 	ChatFile                             = runtime.ChatFile
 	ChatFileResolver                     = runtime.ChatFileResolver
-	HostedPinnedScript                   = runtime.HostedPinnedScript
-	HostedPinnedScriptResult             = runtime.HostedPinnedScriptResult
+	WorkspaceCommandPin                  = workspace.CommandPin
+	WorkspaceCommandRecord               = workspace.CommandRecord
+	WorkspaceExpectedDigest              = workspace.ExpectedDigest
 	RunbookActivation                    = runtime.RunbookActivation
 	RunbookDetail                        = runtime.RunbookDetail
 	RunbookExecutionAudit                = runtime.RunbookExecutionAudit
@@ -1633,7 +1634,9 @@ var (
 	NewRunActionValidator                  = runtime.NewRunActionValidator
 	NewRunActionDispatcher                 = runtime.NewRunActionDispatcher
 	RunbookManagementSkill                 = runtime.RunbookManagementSkill
-	ApplyPinnedScriptResult                = runtime.ApplyPinnedScriptResult
+	PinRunCommand                          = workspace.PinRunCommand
+	RecordPinnedCommand                    = workspace.RecordPinnedCommand
+	ExpectedDigestOf                       = workspace.ExpectedDigestOf
 	ResolveRoutineScriptStatus             = runtime.ResolveRoutineScriptStatus
 	NewRunbookActionValidator              = runtime.NewRunbookActionValidator
 	NewRunbookActionDispatcher             = runtime.NewRunbookActionDispatcher
@@ -1987,7 +1990,9 @@ const (
 	RunbookActionSetScript          = runtime.RunbookActionSetScript
 	RoutineScriptInstruction        = runtime.RoutineScriptInstruction
 	RoutineScriptFailureInstruction = runtime.RoutineScriptFailureInstruction
-	RoutineScriptCheckpointKey      = runtime.RoutineScriptCheckpointKey
+	PinnedCommandsCheckpointKey     = runtime.PinnedCommandsCheckpointKey
+	ExpectedDigestArgument          = workspace.ExpectedDigestArgument
+	RefusedCommandResult            = workspace.RefusedResult
 	RoutineScriptContextKey         = runtime.RoutineScriptContextKey
 	MaximumRoutineScriptSeconds     = runtime.MaximumRoutineScriptSeconds
 	DefaultRoutineScriptSeconds     = runtime.DefaultRoutineScriptSeconds

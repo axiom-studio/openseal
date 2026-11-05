@@ -40,6 +40,13 @@ type ConversationRunbook struct {
 	LastRun   *ConversationRunbookRun `json:"lastRun,omitempty"`
 	// Revision is the activation's revision.
 	Revision int64 `json:"revision"`
+	// Script is the chat script a script routine runs.
+	Script *ConversationRunbookScript `json:"script,omitempty"`
+}
+
+// ConversationRunbookScript names the chat file a script routine runs.
+type ConversationRunbookScript struct {
+	Path string `json:"path"`
 }
 
 // ConversationRunbookRun is the newest Run a routine started.
@@ -119,6 +126,9 @@ func (s *ConversationChangeService) projectConversationRunbook(ctx context.Conte
 	}
 	if objective != nil {
 		projected.Title = strings.TrimSpace(objective.Title)
+	}
+	if activation.Task != nil && activation.Task.Script != nil {
+		projected.Script = &ConversationRunbookScript{Path: activation.Task.Script.Path}
 	}
 	if projected.Title == "" && activation.Task != nil {
 		projected.Title = strings.TrimSpace(activation.Task.Goal)

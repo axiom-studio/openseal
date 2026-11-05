@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/axiom-studio/openseal/pkg/chatpath"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -14,33 +15,26 @@ import (
 
 // A routine can run a saved script: a chat file the Agent wrote and tested
 // with workspace.run_command. Approving the routine's brief pins the file as
-// it was then, and every occurrence runs exactly that version as its first
-// step, in the chat's sandbox, before one model turn writes the report. The
-// script changing later in the chat never changes what the routine runs; the
-// routine shows the drift and the user can approve the new version again
-// (set_script).
+// it was then. Each occurrence is an ordinary agent run in the chat whose
+// model runs exactly that version with run_command and then reports (see
+// hosted_turn_routine_script.go). The script changing later in the chat
+// never changes what the routine runs; the routine shows the drift and the
+// user can approve the new version (set_script).
 
 const (
-	// MaximumRoutineScriptSeconds bounds one scripted step: a chat sandbox
-	// command never runs longer.
+	// MaximumRoutineScriptSeconds bounds one run of the script: a chat
+	// sandbox command never runs longer.
 	MaximumRoutineScriptSeconds = workspace.ChatCommandSeconds
 	// DefaultRoutineScriptSeconds applies when the proposal names no timeout.
 	DefaultRoutineScriptSeconds = 300
 	// maximumRoutineScriptCommand bounds the exact approved command.
 	maximumRoutineScriptCommand = 2000
-	// maximumRoutineScriptOutputTail bounds each output tail a host returns.
-	maximumRoutineScriptOutputTail = 16 << 10
-	// maximumRoutineScriptChangedFiles bounds the changed paths a host returns.
-	maximumRoutineScriptChangedFiles = 200
 
 	// RoutineScriptContextKey carries an occurrence's pinned script in its
 	// Run context, written once by the kernel when the occurrence starts.
 	RoutineScriptContextKey = "routineScript"
-	// RoutineScriptCheckpointKey is kernel-owned: the pinned script and its
-	// host-reported result once the scripted first step ran. Its presence
-	// means the step is done and is never run again in this Run.
-	RoutineScriptCheckpointKey = "_opensealRoutineScript"
-	// routineScriptFailureKind is the final-failure kind of a failed script.
+	// routineScriptFailureKind is the final-failure kind of a script that
+	// failed or did not run.
 	routineScriptFailureKind = "script"
 )
 
@@ -61,6 +55,10 @@ type RoutineScript struct {
 	Command string `json:"command"`
 	// TimeoutSeconds bounds the run, at most MaximumRoutineScriptSeconds.
 	TimeoutSeconds int `json:"timeoutSeconds"`
+	// ApprovedAt is when the user's approval of this version was applied
+	// (create_task or set_script). It is set by the kernel, never proposed,
+	// and is not part of the approved arguments.
+	ApprovedAt *time.Time `json:"approvedAt,omitempty"`
 }
 
 var (
@@ -99,6 +97,10 @@ func cloneRoutineScript(s *RoutineScript) *RoutineScript {
 		return nil
 	}
 	copy := *s
+	if s.ApprovedAt != nil {
+		approved := *s.ApprovedAt
+		copy.ApprovedAt = &approved
+	}
 	return &copy
 }
 
@@ -252,10 +254,14 @@ func routineScriptMap(script *RoutineScript) map[string]interface{} {
 	if script == nil {
 		return nil
 	}
-	return map[string]interface{}{
+	values := map[string]interface{}{
 		"path": script.Path, "digest": script.Digest, "filesVersion": script.FilesVersion,
 		"command": script.Command, "timeoutSeconds": script.TimeoutSeconds,
 	}
+	if script.ApprovedAt != nil {
+		values["approvedAt"] = script.ApprovedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return values
 }
 
 func decodeRoutineScript(value interface{}) (*RoutineScript, error) {
@@ -367,6 +373,8 @@ func (s *RunbookActivationService) RepinScript(ctx context.Context, scope Scope,
 	}
 	next := cloneRunbookActivation(current)
 	next.Task.Script = cloneRoutineScript(script)
+	approved := s.now().UTC()
+	next.Task.Script.ApprovedAt = &approved
 	next.LifecycleActionID = actionID
 	next.Revision++
 	next.UpdatedAt = s.now().UTC()
@@ -444,7 +452,7 @@ func resolveOwnedTaskScript(ctx context.Context, store runbookActionStore, files
 		return nil, nil, nil, ErrRunbookActivationRevision
 	}
 	script := cloneRoutineScript(a.Task.Script)
-	script.Digest, script.FilesVersion = args.Digest, args.FilesVersion
+	script.Digest, script.FilesVersion, script.ApprovedAt = args.Digest, args.FilesVersion, nil
 	if err := verifyRoutineScriptPin(ctx, files, a.Scope, a.Owner, a.Task.ConversationID, script); err != nil {
 		return nil, nil, nil, err
 	}

@@ -201,10 +201,10 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, turnHostRetryCheckpointKey)
 	delete(result, "lastAction")
 	delete(result, runEventWaitCheckpointKey)
-	delete(result, RoutineScriptCheckpointKey)
+	delete(result, PinnedCommandsCheckpointKey)
 	if current != nil {
-		if script, ok := current[RoutineScriptCheckpointKey]; ok {
-			result[RoutineScriptCheckpointKey] = deepCloneCheckpointValue(script)
+		if commands, ok := current[PinnedCommandsCheckpointKey]; ok {
+			result[PinnedCommandsCheckpointKey] = deepCloneCheckpointValue(commands)
 		}
 		if correction, ok := current[ToolFeedbackCorrectionCheckpointKey]; ok {
 			result[ToolFeedbackCorrectionCheckpointKey] = deepCloneCheckpointValue(correction)

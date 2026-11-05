@@ -243,10 +243,12 @@ type HostedTurnRequest struct {
 	// the kernel's answer preview Activity. A host that streams previews
 	// elsewhere should still report one to the kernel about every 1.5s.
 	ExternalChannelReply bool `json:"externalChannelReply,omitempty"`
-	// PinnedScript is a script routine's approved script, which the host
-	// runs in the chat's sandbox before this Turn's model call (see
-	// HostedPinnedScript). It is absent from model input.
-	PinnedScript *HostedPinnedScript `json:"pinnedScript,omitempty"`
+	// CommandPins are chat file versions the Turn's run_command calls must
+	// run (a script routine's approved script). The host attaches the pin to
+	// each run_command that invokes the file (workspace.PinRunCommand) and
+	// reports those calls in HostedTurnResponse.PinnedCommands. Absent from
+	// model input.
+	CommandPins []workspace.CommandPin `json:"commandPins,omitempty"`
 }
 
 // HostedTurnExecutionFailure is emitted by the trusted host after a native
@@ -281,9 +283,9 @@ type HostedTurnResponse struct {
 	CompletionEvidenceRefs     []string                      `json:"completionEvidenceRefs,omitempty"`
 	EvidenceClaims             []EvidenceClaim               `json:"evidenceClaims,omitempty"`
 	EvidenceGrounding          *EvidenceGroundingReview      `json:"evidenceGrounding,omitempty"`
-	// PinnedScriptResult is required exactly when the request carried a
-	// PinnedScript: what running it observed.
-	PinnedScriptResult *HostedPinnedScriptResult `json:"pinnedScriptResult,omitempty"`
+	// PinnedCommands records each run_command of the Turn that ran with one
+	// of the request's CommandPins (workspace.RecordPinnedCommand).
+	PinnedCommands []workspace.CommandRecord `json:"pinnedCommands,omitempty"`
 }
 
 // HostedSkillHostFilledSummary is the summary recorded for an offered Skill
@@ -510,16 +512,8 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		return nil, errors.New("a task proposal cannot be combined with another proposal")
 	}
 	validationRequest := request
-	if (request.PinnedScript == nil) != (response.PinnedScriptResult == nil) {
-		return nil, errors.New("turn host must run the routine's pinned script exactly when the Turn requests it")
-	}
-	if request.PinnedScript != nil {
-		// The model call followed the script; validate it as the host had to
-		// make it.
-		validationRequest, err = ApplyPinnedScriptResult(request, *response.PinnedScriptResult)
-		if err != nil {
-			return nil, err
-		}
+	if err := validatePinnedCommands(request, response.PinnedCommands); err != nil {
+		return nil, err
 	}
 	if failure := response.ExecutionFailure; failure != nil {
 		if failure.Kind != "workspace" || len(request.WorkspaceOperations) == 0 || strings.TrimSpace(failure.Message) == "" || len(failure.Message) > 4096 {
@@ -611,13 +605,8 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	response.ContinuationCheckpoint = preserveKernelActionHistory(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
 	response.ContinuationCheckpoint = preserveKernelEvidenceGrounding(request.ContinuationCheckpoint, response.ContinuationCheckpoint)
-	if request.PinnedScript != nil {
-		// The step's record and any failure it caused are kernel-owned.
-		response.ContinuationCheckpoint[RoutineScriptCheckpointKey] = deepCloneCheckpointValue(validationRequest.ContinuationCheckpoint[RoutineScriptCheckpointKey])
-		if failure, failed := validationRequest.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey]; failed && !requiresFinalFailureExplanation(response.ContinuationCheckpoint) {
-			response.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey] = deepCloneCheckpointValue(failure)
-		}
-	}
+	// What the Turn's pinned commands did is kernel-owned evidence.
+	checkpointPinnedCommands(response.ContinuationCheckpoint, response.PinnedCommands)
 	if response.ExecutionFailure != nil {
 		response.ContinuationCheckpoint = checkpointFinalFailureExplanation(response.ContinuationCheckpoint, response.ExecutionFailure.Kind, response.ExecutionFailure.Message)
 	}
@@ -786,6 +775,14 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	if snapshot != nil && response.NextRunStatus == AgentRunStatusCompleted && !requiresFinalFailureExplanation(response.ContinuationCheckpoint) {
 		stageEvidenceGrounding(response, snapshot)
 	}
+	// A script routine completes only after its approved script ran cleanly;
+	// otherwise the model's report gives way to its explanation of why not.
+	if script, ok, _ := routineScriptFromRun(input.Run); ok && script != nil && proposalCount == 0 &&
+		response.NextRunStatus == AgentRunStatusCompleted && !requiresFinalFailureExplanation(response.ContinuationCheckpoint) {
+		if message := routineScriptCompletionFailure(script, response.ContinuationCheckpoint); message != "" {
+			return r.explainRoutineScriptFailure(ctx, input, response, message)
+		}
+	}
 	proposedActions := []TurnAction(nil)
 	if response.ProposedAction != nil {
 		proposedActions = []TurnAction{*response.ProposedAction}
@@ -938,13 +935,18 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	appendResponseChannelInstructions(&request)
 	if requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		projectFinalFailureExplanation(&request)
+		if failure, _ := input.Run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{}); failure["kind"] == routineScriptFailureKind {
+			request.SystemInstructions = append(request.SystemInstructions, RoutineScriptFailureInstruction)
+		}
 		return request, nil
 	}
-	if err := projectRoutineScript(&request, input.Run); err != nil {
+	scriptRoutine, err := projectRoutineScript(&request, input.Run)
+	if err != nil {
 		return HostedTurnRequest{}, err
 	}
 	projectToolFeedbackCorrection(&request)
-	if len(request.Actions) > 0 && len(actionHistoryEntries(input.Run.Checkpoint)) == 0 && request.PinnedScript == nil {
+	// A script routine's first step is its script, not an action.
+	if len(request.Actions) > 0 && len(actionHistoryEntries(input.Run.Checkpoint)) == 0 && !scriptRoutine {
 		if result, ok := input.Run.Checkpoint[runEventWaitCheckpointKey].(map[string]interface{}); ok && result["status"] == string(RunEventWaitMatched) && result["event"] != nil {
 			request.SystemInstructions = append(request.SystemInstructions,
 				"The authoritative governed action history is empty. The kernel-owned continuationCheckpoint.lastEventWait contains an authenticated inbound event that was acquired without an ActionCall; you may use that observed event directly to perform this goal. It does not establish that any outbound message, read or mutation action ran. Continue to acquire any other missing prerequisites through authorized actions, and never claim that an external side effect happened without matching succeeded action evidence.")

@@ -39,9 +39,9 @@ type ScheduledAgentTask struct {
 	// runs perform them without asking. They come only from the approved
 	// create_task arguments and can only be cleared afterwards.
 	Grants []RoutineGrant `json:"grants,omitempty"`
-	// Script, when set, is the saved chat script every occurrence runs as
-	// its first step, pinned to the version the user approved. Only an
-	// approved create_task or set_script sets it.
+	// Script, when set, is the saved chat script every occurrence's model
+	// runs first with run_command, pinned to the version the user approved.
+	// Only an approved create_task or set_script sets it.
 	Script *RoutineScript `json:"script,omitempty"`
 }
 
@@ -153,15 +153,16 @@ func prepareActivationReporting(ctx context.Context, store ConversationStore, a 
 // scheduledTaskCreateAction creates a routine. The user always approves its
 // brief first, in every approval mode. Its grants are pinned to the connected
 // tools and destinations the user approved, and a routine may run a saved,
-// tested script from its chat's files as each run's first step; the kernel
-// pins the script's current version when the routine is proposed.
+// tested script from its chat's files, which each run runs first with
+// run_command; the kernel pins the script's current version when the
+// routine is proposed.
 func scheduledTaskCreateAction() skill.Action {
 	return skill.Action{Name: RunbookActionCreateTask, Description: "Create and activate a recurring scheduled task when the user requests future or repeated work. The current Agent executes the supplied goal with its authorized tools on each occurrence and posts results to this chat. Use a six-field cron including seconds and an explicit IANA timezone; clarify ambiguous timing. This creates a real routine, not a sleeping chat reply. Tool access and approval requirements still apply on each run." +
 		" To keep an app's data fresh, pass its appId; each occurrence then saves results to that app with save_app_data." +
 		" The user always approves a brief before the routine is created: always pass brief with a one-sentence summary of what it does and when, deliverTo naming where results go, and grants listing only the actions its runs need to perform without asking (for example web search or page reads and an email to the user). Runs ask in this chat before any other side effect, and actions that always ask, such as paying, cannot be granted." +
 		" To grant a connected app's tool, use that tool's own exact action name from your tools, for example mcp.<connection>.<tool>; the generic action connected tools run through (such as openseal.mcp.call) cannot be granted." +
 		" Each run's result is posted automatically as a new message in the chat or Slack conversation the routine was created from, so never grant a send action to deliver results there. To post to any other channel, grant that sending action (for example skill-slack.slack-send-message) with toDestinations naming each channel, and name it in the label, for example \"Post to #ai-news\"; runs then post there without asking, and anywhere else asks first." +
-		" For work that is the same steps with new data each time (pull data, compute, chart, write a file), make the routine run a saved script instead of redoing the work: first write the script in this chat's files and test it in this chat's sandbox with run_command until it works, then pass script with its path and the exact command that ran it. Approving the brief pins the script as it is then; each run executes that version first, and you then write the report from its output, so say in goal what to report from the script's results.",
+		" For work that is the same steps with new data each time (pull data, compute, chart, write a file), make the routine run a saved script instead of redoing the work: first write the script in this chat's files and test it in this chat's sandbox with run_command until it works, then pass script with its path and the exact command that ran it. Approving the brief pins the script as it is then; each run then starts by running that exact version with run_command, and you write the report from its output, so say in goal what to report from the script's results.",
 		Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2}, Review: skill.ActionReviewAlways,
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"title", "goal", "cron", "timezone"}, "properties": map[string]interface{}{
 			"title": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 240}, "goal": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 16000, "description": "Self-contained work to perform on every occurrence, including the source to use and requested result. Do not include credentials or request another schedule."},
@@ -197,7 +198,7 @@ func scheduledTaskCreateAction() skill.Action {
 			},
 			"script": map[string]interface{}{
 				"type": "object", "additionalProperties": false, "required": []interface{}{"path", "command"},
-				"description": "Optional. A tested script from this chat's files that each run executes first, in this chat's sandbox.",
+				"description": "Optional. A tested script from this chat's files that each run runs first with run_command, in this chat's sandbox.",
 				"properties": map[string]interface{}{
 					"path":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1024, "description": "The script's path in this chat's files, for example scripts/weekly_signups.py."},
 					"command":        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumRoutineScriptCommand, "description": "Exactly how to run it: python3, node or bash, then the script's path, then any plain arguments without quotes or shell characters, for example python3 scripts/weekly_signups.py --days 7."},
@@ -401,6 +402,11 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		}
 		if input.Call.IdempotencyKey == "" {
 			return nil, errors.New("scheduled task requires action idempotency")
+		}
+		if task.Script != nil {
+			// Applying the approved brief approves its script version now.
+			approved := time.Now().UTC()
+			task.Script.ApprovedAt = &approved
 		}
 		objective, err := NewPortfolioService(store).CreateObjectiveIdempotent(ctx, CreateObjectiveRequest{Scope: run.Scope, Owner: run.Owner, Title: args.Title, Goal: task.Goal, Status: ObjectiveStatusActive, IdempotencyKey: input.Call.IdempotencyKey, ExecutionPolicy: &ObjectiveExecutionPolicy{MaximumConcurrentRuns: 1}, Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Visibility: ActivityVisibilityScope})
 		if err != nil {

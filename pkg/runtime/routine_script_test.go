@@ -103,8 +103,8 @@ func TestRoutineScriptValidation(t *testing.T) {
 	}
 }
 
-// The 1.8.0 definition is immutable once published: any change to its
-// descriptions or schemas needs a new version. Its create_task runs saved
+// The 1.8.0 definition is immutable once published (it is not yet): any
+// change to its descriptions or schemas after release needs a new version. Its create_task runs saved
 // scripts and documents testing before scheduling.
 func TestRoutineScriptContractVersions(t *testing.T) {
 	if RunbookManagementSkillVersion != "1.8.0" {
@@ -115,7 +115,7 @@ func TestRoutineScriptContractVersions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const published180SHA256 = "d4e43ed8eb0c8700c8d7d69abd05ac3d58f910b97acdb54f774aa093213e6023"
+	const published180SHA256 = "2a531547d90039558b9a1286a7455020b9f8c84d423331abe01c544996790b8f"
 	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published180SHA256 {
 		t.Fatalf("published 1.8.0 definition changed: got %s", got)
 	}
@@ -239,13 +239,25 @@ func TestRoutineScriptPinsPreviewsDriftsRepinsAndRunsFirstAcrossStores(t *testin
 		}
 		activation := result["activation"].(*RunbookActivation)
 		stored, err := store.GetRunbookActivation(ctx, run.Scope, activation.ID)
-		if err != nil || stored.Task == nil || stored.Task.Script == nil || fmt.Sprint(routineScriptMap(stored.Task.Script)) != fmt.Sprint(pinned) {
+		if err != nil || stored.Task == nil || stored.Task.Script == nil || stored.Task.Script.ApprovedAt == nil {
 			t.Fatalf("stored=%#v %v", stored, err)
 		}
+		// Approval is recorded when the brief is applied, outside the
+		// approved arguments.
+		storedPin := routineScriptMap(stored.Task.Script)
+		if storedPin["approvedAt"] == nil {
+			t.Fatalf("stored pin=%#v", storedPin)
+		}
+		delete(storedPin, "approvedAt")
+		if fmt.Sprint(storedPin) != fmt.Sprint(pinned) {
+			t.Fatalf("stored pin=%#v", storedPin)
+		}
+		firstApproval := *stored.Task.Script.ApprovedAt
 
 		// Drift: the chat file now differs from the approved version.
 		status, err := NewRunbookActivationService(store).RoutineScriptStatus(ctx, files, run.Scope, activation.ID)
-		if err != nil || !status.Changed || status.CurrentDigest != routineScriptDigestOf("b") || status.CurrentFilesVersion != 3 || status.Pinned.Digest != routineScriptDigestOf("a") {
+		if err != nil || !status.Changed || status.CurrentDigest != routineScriptDigestOf("b") || status.CurrentFilesVersion != 3 || status.Pinned.Digest != routineScriptDigestOf("a") ||
+			status.Pinned.ApprovedAt == nil || !status.Pinned.ApprovedAt.Equal(firstApproval) {
 			t.Fatalf("status=%#v %v", status, err)
 		}
 
@@ -279,7 +291,8 @@ func TestRoutineScriptPinsPreviewsDriftsRepinsAndRunsFirstAcrossStores(t *testin
 		repinPreview, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: run, Bound: repinBound, Arguments: repinResolved})
 		if err != nil || repinPreview["operation"] != RunbookActionSetScript || repinPreview["title"] != "Forecast update" ||
 			repinPreview["script"].(map[string]interface{})["digest"] != routineScriptDigestOf("b") || repinPreview["previousScript"].(map[string]interface{})["digest"] != routineScriptDigestOf("a") ||
-			repinPreview["script"].(map[string]interface{})["command"] != "python3 scripts/weekly.py --days 7" {
+			repinPreview["script"].(map[string]interface{})["command"] != "python3 scripts/weekly.py --days 7" ||
+			repinPreview["previousScript"].(map[string]interface{})["approvedAt"] == nil || repinPreview["script"].(map[string]interface{})["approvedAt"] != nil {
 			t.Fatalf("repin preview=%#v %v", repinPreview, err)
 		}
 		stale := cloneMap(repinResolved)
@@ -292,7 +305,8 @@ func TestRoutineScriptPinsPreviewsDriftsRepinsAndRunsFirstAcrossStores(t *testin
 			t.Fatal(err)
 		}
 		after := repinned["activation"].(*RunbookActivation)
-		if after.Task.Script.Digest != routineScriptDigestOf("b") || after.Task.Script.FilesVersion != 3 || after.Revision != stored.Revision+1 || after.Task.Script.Command != stored.Task.Script.Command {
+		if after.Task.Script.Digest != routineScriptDigestOf("b") || after.Task.Script.FilesVersion != 3 || after.Revision != stored.Revision+1 || after.Task.Script.Command != stored.Task.Script.Command ||
+			after.Task.Script.ApprovedAt == nil || after.Task.Script.ApprovedAt.Before(firstApproval) {
 			t.Fatalf("repinned=%#v", after.Task.Script)
 		}
 		if replay, err := dispatch(repinBound, repinResolved, "repin"); err != nil || replay["replayed"] != true {
@@ -309,24 +323,18 @@ func TestRoutineScriptPinsPreviewsDriftsRepinsAndRunsFirstAcrossStores(t *testin
 			t.Fatalf("status after delete=%#v %v", status, err)
 		}
 
-		// The occurrence's first Turn: the host runs the pinned script, then
-		// the model reports once. Its Run context came back from the store.
+		// The occurrence is an ordinary run: the model runs the approved
+		// script with run_command, then reports, over as many Turns as it
+		// needs. Its Run context came back from the store.
 		occurrence, err = store.GetAgentRun(ctx, run.Scope, occurrence.ID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		host := &routineScriptHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-			result := HostedPinnedScriptResult{Digest: request.PinnedScript.Digest, ExitCode: 0, StdoutTail: "412 signups", ChangedFiles: []string{"images/signups.png"}, FilesVersion: 9}
-			modelRequest, err := ApplyPinnedScriptResult(request, result)
-			if err != nil {
-				return nil, err
-			}
-			if modelRequest.ContinuationCheckpoint[RoutineScriptCheckpointKey] == nil || len(modelRequest.Actions) != len(request.Actions) {
-				t.Fatalf("model request=%#v", modelRequest.ContinuationCheckpoint)
-			}
-			response := routineScriptReply(request, "412 people signed up last week; chart attached.")
-			response.PinnedScriptResult = &result
-			response.ContinuationCheckpoint = map[string]interface{}{RoutineScriptCheckpointKey: "forged"}
+			response := routineScriptReply(request, "Ran the script; now posting.")
+			response.NextRunStatus = AgentRunStatusRunning
+			response.PinnedCommands = []workspace.CommandRecord{ranPinned(t, request, "python3 scripts/weekly.py --days 7", "", 0, "412 signups")}
+			response.ContinuationCheckpoint = map[string]interface{}{PinnedCommandsCheckpointKey: "forged"}
 			return response, nil
 		}}
 		runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: occurrence.AssignedAgentID, DefinitionID: "agent", DefinitionVersion: "1"})
@@ -338,44 +346,72 @@ func TestRoutineScriptPinsPreviewsDriftsRepinsAndRunsFirstAcrossStores(t *testin
 			t.Fatal(err)
 		}
 		first := host.requests[0]
-		if first.PinnedScript == nil || first.PinnedScript.Digest != routineScriptDigestOf("a") || first.PinnedScript.FilesVersion != 2 ||
-			first.PinnedScript.Command != "python3 scripts/weekly.py --days 7" || first.PinnedScript.TimeoutSeconds != DefaultRoutineScriptSeconds ||
-			first.PinnedScript.ExecutionKey != "routine-script:"+occurrence.ID+":"+routineScriptDigestOf("a") {
-			t.Fatalf("pinned script=%#v", first.PinnedScript)
+		wantPin := workspace.CommandPin{Path: "scripts/weekly.py", Digest: routineScriptDigestOf("a"), FilesVersion: 2, Command: "python3 scripts/weekly.py --days 7", TimeoutSeconds: DefaultRoutineScriptSeconds}
+		if len(first.CommandPins) != 1 || first.CommandPins[0] != wantPin {
+			t.Fatalf("pins=%#v", first.CommandPins)
 		}
-		for _, operation := range first.WorkspaceOperations {
-			if !routineScriptReadOperations[operation.Name] {
-				t.Fatalf("script routine turn offered %s", operation.Name)
-			}
+		if !offersOperation(first.WorkspaceOperations, workspace.OperationRunCommand) || !hasInstructionPrefix(first.SystemInstructions, RoutineScriptInstruction, "Command: python3 scripts/weekly.py --days 7") {
+			t.Fatal("script routine turn lacks run_command or its instruction")
 		}
-		if len(first.WorkspaceOperations) == 0 || !hasInstruction(first.SystemInstructions, RoutineScriptInstruction) {
-			t.Fatal("script routine turn lacks its read tools or instruction")
+		if input, _ := MarshalHostedTurnModelInput(first); strings.Contains(string(input), "commandPins") {
+			t.Fatal("command pins reached model input")
 		}
-		if input, _ := MarshalHostedTurnModelInput(first); strings.Contains(string(input), "executionKey") {
-			t.Fatal("pinned script reached model input")
+		records := pinnedCommandRecords(outcome.ContinuationCheckpoint)
+		if outcome.NextRunStatus != AgentRunStatusRunning || len(records) != 1 || records[0].Digest != routineScriptDigestOf("a") || records[0].OutputTail != "412 signups" {
+			t.Fatalf("outcome=%#v", outcome.ContinuationCheckpoint)
 		}
-		record, _ := outcome.ContinuationCheckpoint[RoutineScriptCheckpointKey].(map[string]interface{})
-		if record == nil || record["failed"] != false || record["result"].(map[string]interface{})["stdoutTail"] != "412 signups" || requiresFinalFailureExplanation(outcome.ContinuationCheckpoint) {
-			t.Fatalf("record=%#v", outcome.ContinuationCheckpoint)
-		}
-		// Later Turns never run the script again.
+		// A later Turn completes from the recorded run.
 		later := cloneAgentRun(occurrence)
 		later.Checkpoint = outcome.ContinuationCheckpoint
 		host.respond = func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-			return routineScriptReply(request, "Done."), nil
+			return routineScriptReply(request, "412 people signed up last week; chart attached."), nil
 		}
-		if _, err := runner.RunTurn(ctx, TurnExecutionContext{Run: later, Turn: &AgentTurn{ID: "second"}}); err != nil {
+		done, err := runner.RunTurn(ctx, TurnExecutionContext{Run: later, Turn: &AgentTurn{ID: "second"}})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if second := host.requests[1]; second.PinnedScript != nil || !hasInstruction(second.SystemInstructions, RoutineScriptInstruction) {
-			t.Fatalf("second turn=%#v", second.PinnedScript)
+		if second := host.requests[1]; len(second.CommandPins) != 1 || done.NextRunStatus != AgentRunStatusCompleted || requiresFinalFailureExplanation(done.ContinuationCheckpoint) ||
+			done.OutputSummary != "412 people signed up last week; chart attached." || len(host.requests) != 2 {
+			t.Fatalf("second turn=%#v", done)
 		}
 	})
+}
+
+// ranPinned is what a host reports after the model ran command: the pin
+// attached as run_command's expectedDigest, and the sandbox's result.
+func ranPinned(t *testing.T, request HostedTurnRequest, command, directory string, exitStatus int, stderr string) workspace.CommandRecord {
+	t.Helper()
+	arguments := map[string]interface{}{"command": command}
+	if directory != "" {
+		arguments["workingDirectory"] = directory
+	}
+	pinned, pin := workspace.PinRunCommand(request.CommandPins, arguments)
+	if pin == nil {
+		t.Fatalf("%s was not pinned", command)
+	}
+	expected, _ := workspace.ExpectedDigestOf(pinned)
+	record, ok := workspace.RecordPinnedCommand(pinned, map[string]interface{}{
+		"exitStatus": float64(exitStatus), "stdout": "", "stderr": stderr,
+		workspace.ExpectedDigestArgument: map[string]interface{}{"path": expected.Path, "digest": expected.Digest, "filesVersion": float64(expected.FilesVersion)},
+	})
+	if !ok {
+		t.Fatal("no record")
+	}
+	return record
 }
 
 func hasInstruction(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasInstructionPrefix(values []string, prefix, contains string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) && strings.Contains(value, contains) {
 			return true
 		}
 	}
@@ -390,108 +426,185 @@ func routineScriptRun() *AgentRun {
 	}}
 }
 
-// A failed script fails the Run with one explanation: no actions, no
-// Workspace tools, no rerun.
-func TestRoutineScriptFailureIsExplainedNotRetried(t *testing.T) {
-	failed := HostedPinnedScriptResult{Digest: routineScriptDigestOf("a"), ExitCode: 1, StderrTail: "Traceback (most recent call last):\nKeyError: 'signup_date'"}
-	host := &routineScriptHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-		modelRequest, err := ApplyPinnedScriptResult(request, failed)
-		if err != nil {
-			return nil, err
+// The host attaches the routine's pin to every run_command that invokes the
+// script, and only to those; the model cannot supply one.
+func TestRoutineScriptPinIsAttachedToCommandsThatRunIt(t *testing.T) {
+	pins := []workspace.CommandPin{{Path: "scripts/weekly.py", Digest: routineScriptDigestOf("a"), FilesVersion: 2, Command: "python3 scripts/weekly.py", TimeoutSeconds: 420}}
+	for _, arguments := range []map[string]interface{}{
+		{"command": "python3 scripts/weekly.py"},
+		{"command": "python3   scripts/weekly.py  --verbose", "timeoutSeconds": float64(30)},
+		{"command": "pip install x && python3 scripts/weekly.py"},
+		{"command": "python3 weekly.py", "workingDirectory": "scripts"},
+		{"command": "python3 ./weekly.py", "workingDirectory": "./scripts/"},
+	} {
+		pinned, pin := workspace.PinRunCommand(pins, arguments)
+		expected, ok := workspace.ExpectedDigestOf(pinned)
+		if pin == nil || !ok || *expected != (workspace.ExpectedDigest{Path: "scripts/weekly.py", Digest: routineScriptDigestOf("a"), FilesVersion: 2}) {
+			t.Errorf("%v: not pinned: %#v", arguments, pinned)
 		}
-		if len(modelRequest.Actions) != 0 || len(modelRequest.WorkspaceOperations) != 0 || modelRequest.Workspace != nil ||
-			!hasInstruction(modelRequest.SystemInstructions, RoutineScriptFailureInstruction) || !hasInstruction(modelRequest.SystemInstructions, FinalFailureExplanationSystemInstruction) {
-			t.Fatalf("failure turn offers work: %#v", modelRequest)
-		}
-		response := routineScriptReply(request, "The signup script failed: the CSV no longer has a signup_date column.")
-		response.PinnedScriptResult = &failed
-		return response, nil
-	}}
+	}
+	if pinned, _ := workspace.PinRunCommand(pins, map[string]interface{}{"command": "python3 scripts/weekly.py"}); pinned["timeoutSeconds"] != 420 {
+		t.Fatalf("approved command timeout=%v", pinned["timeoutSeconds"])
+	}
+	if pinned, _ := workspace.PinRunCommand(pins, map[string]interface{}{"command": "python3 scripts/weekly.py --verbose", "timeoutSeconds": 30}); pinned["timeoutSeconds"] != 30 {
+		t.Fatalf("other command timeout=%v", pinned["timeoutSeconds"])
+	}
+	forged := map[string]interface{}{"command": "ls data", workspace.ExpectedDigestArgument: map[string]interface{}{"path": "data/x", "digest": routineScriptDigestOf("f")}}
+	if pinned, pin := workspace.PinRunCommand(pins, forged); pin != nil || pinned[workspace.ExpectedDigestArgument] != nil {
+		t.Fatalf("unrelated command pinned: %#v", pinned)
+	}
+	if pinned, pin := workspace.PinRunCommand(nil, map[string]interface{}{"command": "python3 scripts/weekly.py"}); pin != nil || pinned[workspace.ExpectedDigestArgument] != nil {
+		t.Fatal("chat command pinned without pins")
+	}
+	if _, ok := workspace.RecordPinnedCommand(map[string]interface{}{"command": "ls"}, map[string]interface{}{"exitStatus": float64(0)}); ok {
+		t.Fatal("unpinned command recorded")
+	}
+	// A refusal, or a result that does not confirm the version, never
+	// counts as the script having run.
+	pinned, _ := workspace.PinRunCommand(pins, map[string]interface{}{"command": "python3 scripts/weekly.py"})
+	if record, _ := workspace.RecordPinnedCommand(pinned, map[string]interface{}{"refused": "the approved version is not in this chat's files"}); record.Digest != "" || record.Refused == "" || record.Succeeded(pins[0].Digest) {
+		t.Fatalf("refused=%#v", record)
+	}
+	if record, _ := workspace.RecordPinnedCommand(pinned, map[string]interface{}{"exitStatus": float64(0)}); record.Succeeded(pins[0].Digest) {
+		t.Fatalf("unconfirmed=%#v", record)
+	}
+}
+
+func scriptRoutineRunner(t *testing.T, host *routineScriptHost) *HostedTurnRunner {
+	t.Helper()
 	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: routineScriptRun(), Turn: &AgentTurn{ID: "first"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	failure, _ := outcome.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
-	message, _ := failure["message"].(string)
-	if failure["kind"] != routineScriptFailureKind || !strings.Contains(message, "exited with status 1: python3 scripts/weekly.py") || !strings.Contains(message, "KeyError: 'signup_date'") {
-		t.Fatalf("failure=%#v", failure)
-	}
-	if record := outcome.ContinuationCheckpoint[RoutineScriptCheckpointKey].(map[string]interface{}); record["failed"] != true {
-		t.Fatalf("record=%#v", record)
-	}
+	return runner
+}
 
-	// After a failure the model may not act, keep working or stay silent.
-	for name, change := range map[string]func(*HostedTurnResponse){
-		"action": func(r *HostedTurnResponse) {
-			r.NextRunStatus = AgentRunStatusRunning
-			r.ProposedAction = &TurnAction{Type: "action", Capability: "workspace.rerun", Summary: "Run it again"}
+// A Run that would complete without a clean run of the approved script
+// fails instead: the model explains the kernel's account, with no actions
+// or tools, in place of its report.
+func TestRoutineScriptCompletionCheckFailsRunsThatDidNotRunTheScript(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		records func(*testing.T, HostedTurnRequest) []workspace.CommandRecord
+		want    []string
+	}{
+		"never ran": {
+			records: func(*testing.T, HostedTurnRequest) []workspace.CommandRecord { return nil },
+			want:    []string{"The routine's script did not run: python3 scripts/weekly.py"},
 		},
-		"continue": func(r *HostedTurnResponse) { r.NextRunStatus = AgentRunStatusRunning },
-		"silent":   func(r *HostedTurnResponse) { r.OutputSummary, r.RunOutput = "", map[string]interface{}{} },
+		"failed": {
+			records: func(t *testing.T, request HostedTurnRequest) []workspace.CommandRecord {
+				return []workspace.CommandRecord{ranPinned(t, request, "python3 scripts/weekly.py", "", 1, "Traceback (most recent call last):\nKeyError: 'signup_date'")}
+			},
+			want: []string{"exited with status 1: python3 scripts/weekly.py", "Last output:", "KeyError: 'signup_date'"},
+		},
+		"edited script refused": {
+			records: func(t *testing.T, request HostedTurnRequest) []workspace.CommandRecord {
+				pinned, _ := workspace.PinRunCommand(request.CommandPins, map[string]interface{}{"command": "python3 scripts/weekly.py"})
+				record, _ := workspace.RecordPinnedCommand(pinned, map[string]interface{}{"refused": "the chat's files hold another version of scripts/weekly.py than the approved one; it was not run"})
+				return []workspace.CommandRecord{record}
+			},
+			want: []string{"The routine's script scripts/weekly.py could not run: the chat's files hold another version"},
+		},
+		"other command": {
+			records: func(t *testing.T, request HostedTurnRequest) []workspace.CommandRecord {
+				return []workspace.CommandRecord{ranPinned(t, request, "python3 scripts/weekly.py --skip-checks", "", 0, "")}
+			},
+			want: []string{"did not run as approved: python3 scripts/weekly.py"},
+		},
 	} {
-		host.respond = func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-			response := routineScriptReply(request, "Explained.")
-			response.PinnedScriptResult = &failed
-			change(response)
-			return response, nil
-		}
-		if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: routineScriptRun(), Turn: &AgentTurn{ID: name}}); err == nil {
-			t.Errorf("%s: failed script turn accepted", name)
-		}
-	}
-
-	timedOut := HostedPinnedScriptResult{Digest: routineScriptDigestOf("a"), TimedOut: true, ExitCode: -1}
-	if !timedOut.Failed() || !strings.Contains(timedOut.failureMessage(&HostedPinnedScript{Command: "python3 scripts/weekly.py", TimeoutSeconds: 120}), "timed out after 120 seconds") {
-		t.Fatal("timeout is not a failure")
-	}
-	unavailable := HostedPinnedScriptResult{Error: "the approved version is not in this chat's files"}
-	if err := unavailable.validate(&HostedPinnedScript{Digest: routineScriptDigestOf("a")}); err != nil || !unavailable.Failed() {
-		t.Fatalf("host failure=%v", err)
+		t.Run(name, func(t *testing.T) {
+			host := &routineScriptHost{}
+			host.respond = func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+				if len(host.requests) == 1 {
+					response := routineScriptReply(request, "All done: 412 signups.")
+					response.PinnedCommands = testCase.records(t, request)
+					response.Usage = TurnUsage{InputTokens: 100, OutputTokens: 10}
+					return response, nil
+				}
+				if len(request.Actions) != 0 || len(request.WorkspaceOperations) != 0 || request.Workspace != nil || len(request.CommandPins) != 0 ||
+					!hasInstruction(request.SystemInstructions, RoutineScriptFailureInstruction) || !hasInstruction(request.SystemInstructions, FinalFailureExplanationSystemInstruction) {
+					t.Fatalf("explanation offers work: %#v", request)
+				}
+				response := routineScriptReply(request, "The signup script did not finish, so there is no report this week.")
+				response.Usage = TurnUsage{InputTokens: 50, OutputTokens: 5}
+				return response, nil
+			}
+			outcome, err := scriptRoutineRunner(t, host).RunTurn(t.Context(), TurnExecutionContext{Run: routineScriptRun(), Turn: &AgentTurn{ID: "first"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(host.requests) != 2 || outcome.OutputSummary != "The signup script did not finish, so there is no report this week." || outcome.NextRunStatus != AgentRunStatusCompleted {
+				t.Fatalf("outcome=%#v", outcome)
+			}
+			failure, _ := outcome.ContinuationCheckpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
+			message, _ := failure["message"].(string)
+			if failure["kind"] != routineScriptFailureKind {
+				t.Fatalf("failure=%#v", failure)
+			}
+			for _, want := range testCase.want {
+				if !strings.Contains(message, want) {
+					t.Fatalf("message %q lacks %q", message, want)
+				}
+			}
+			if outcome.Usage.InputTokens != 150 || outcome.Usage.OutputTokens != 15 {
+				t.Fatalf("usage=%#v", outcome.Usage)
+			}
+		})
 	}
 }
 
-// The host runs the pinned script exactly when asked, at the pinned version.
+// The kernel accepts only records of the pinned script at its pinned
+// version, and only on a script routine's Turns. A chat's own run_command
+// calls are not pinned or checked.
 func TestRoutineScriptHostContractIsEnforced(t *testing.T) {
-	for name, respond := range map[string]func(HostedTurnRequest) *HostedTurnResponse{
-		"skipped": func(request HostedTurnRequest) *HostedTurnResponse { return routineScriptReply(request, "Done.") },
-		"other version": func(request HostedTurnRequest) *HostedTurnResponse {
-			response := routineScriptReply(request, "Done.")
-			response.PinnedScriptResult = &HostedPinnedScriptResult{Digest: routineScriptDigestOf("b")}
-			return response
+	for name, change := range map[string]func(*workspace.CommandRecord){
+		"other version": func(r *workspace.CommandRecord) { r.Digest = routineScriptDigestOf("b") },
+		"other file":    func(r *workspace.CommandRecord) { r.Path = "scripts/other.py" },
+		"unexplained":   func(r *workspace.CommandRecord) { r.Digest, r.Refused = "", "" },
+		"huge output": func(r *workspace.CommandRecord) {
+			r.OutputTail = strings.Repeat("x", workspace.MaximumCommandRecordOutputTail+1)
 		},
-		"changed file outside chat": func(request HostedTurnRequest) *HostedTurnResponse {
-			response := routineScriptReply(request, "Done.")
-			response.PinnedScriptResult = &HostedPinnedScriptResult{Digest: request.PinnedScript.Digest, ChangedFiles: []string{"../etc/passwd"}}
-			return response
-		},
-		"huge output": func(request HostedTurnRequest) *HostedTurnResponse {
-			response := routineScriptReply(request, "Done.")
-			response.PinnedScriptResult = &HostedPinnedScriptResult{Digest: request.PinnedScript.Digest, StdoutTail: strings.Repeat("x", maximumRoutineScriptOutputTail+1)}
-			return response
-		},
+		"bad exit":       func(r *workspace.CommandRecord) { r.ExitCode = 300 },
+		"invalid output": func(r *workspace.CommandRecord) { r.OutputTail = string([]byte{0xff}) },
 	} {
-		host := &routineScriptHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) { return respond(request), nil }}
-		runner, _ := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
-		if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: routineScriptRun(), Turn: &AgentTurn{ID: "first"}}); err == nil {
+		host := &routineScriptHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+			response := routineScriptReply(request, "Done.")
+			record := ranPinned(t, request, "python3 scripts/weekly.py", "", 0, "")
+			change(&record)
+			response.PinnedCommands = []workspace.CommandRecord{record}
+			return response, nil
+		}}
+		if _, err := scriptRoutineRunner(t, host).RunTurn(t.Context(), TurnExecutionContext{Run: routineScriptRun(), Turn: &AgentTurn{ID: "first"}}); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	// A Run that is not a script routine never reports a script result.
+	// A clean run completes in one Turn.
 	host := &routineScriptHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-		response := routineScriptReply(request, "Done.")
-		response.PinnedScriptResult = &HostedPinnedScriptResult{}
+		response := routineScriptReply(request, "412 signups.")
+		response.PinnedCommands = []workspace.CommandRecord{ranPinned(t, request, "python3 scripts/weekly.py", "", 0, "")}
 		return response, nil
 	}}
-	runner, _ := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
-	plain := &AgentRun{ID: "plain", Scope: Scope{Kind: "tenant", ID: "one"}, Context: map[string]interface{}{conversationRunContextConversationID: "chat"}}
-	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: plain, Turn: &AgentTurn{ID: "first"}}); err == nil {
-		t.Fatal("host invented a script result")
+	if outcome, err := scriptRoutineRunner(t, host).RunTurn(t.Context(), TurnExecutionContext{Run: routineScriptRun(), Turn: &AgentTurn{ID: "first"}}); err != nil ||
+		outcome.NextRunStatus != AgentRunStatusCompleted || requiresFinalFailureExplanation(outcome.ContinuationCheckpoint) || len(host.requests) != 1 {
+		t.Fatalf("clean run=%#v %v", outcome, err)
 	}
-	if host.requests[0].PinnedScript != nil {
-		t.Fatal("plain Run asked for a script")
+
+	// A chat Run: no pins, no check, and no records accepted.
+	plain := &AgentRun{ID: "plain", Scope: Scope{Kind: "tenant", ID: "one"}, Context: map[string]interface{}{conversationRunContextConversationID: "chat"}}
+	host = &routineScriptHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+		return routineScriptReply(request, "Ran it."), nil
+	}}
+	outcome, err := scriptRoutineRunner(t, host).RunTurn(t.Context(), TurnExecutionContext{Run: plain, Turn: &AgentTurn{ID: "first"}})
+	if err != nil || outcome.NextRunStatus != AgentRunStatusCompleted || len(host.requests) != 1 || host.requests[0].CommandPins != nil ||
+		!offersOperation(host.requests[0].WorkspaceOperations, workspace.OperationRunCommand) || hasInstructionPrefix(host.requests[0].SystemInstructions, RoutineScriptInstruction, "") {
+		t.Fatalf("chat run=%#v %v", outcome, err)
+	}
+	host.respond = func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+		response := routineScriptReply(request, "Done.")
+		response.PinnedCommands = []workspace.CommandRecord{{Command: "python3 scripts/weekly.py", Path: "scripts/weekly.py", Digest: routineScriptDigestOf("a")}}
+		return response, nil
+	}
+	if _, err := scriptRoutineRunner(t, host).RunTurn(t.Context(), TurnExecutionContext{Run: plain, Turn: &AgentTurn{ID: "second"}}); err == nil {
+		t.Fatal("host invented pinned commands for a chat run")
 	}
 }
