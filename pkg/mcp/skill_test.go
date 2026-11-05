@@ -14,7 +14,7 @@ func TestSkillDefinitionRegistersAndKeepsPolicies(t *testing.T) {
 	if err := catalog.Register(t.Context(), d); err != nil {
 		t.Fatal(err)
 	}
-	if d.ID != SkillID || d.Version != "1.2.0" || len(d.Actions) != 3 {
+	if d.ID != SkillID || d.Version != "1.3.0" || d.Config != nil || len(d.Actions) != 3 {
 		t.Fatalf("definition = %s@%s with %d actions", d.ID, d.Version, len(d.Actions))
 	}
 	read, call, refresh := d.Actions[Read], d.Actions[Call], d.Actions[RefreshTools]
