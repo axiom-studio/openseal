@@ -94,7 +94,10 @@ type MessageReactionRequest struct {
 	FromExternal bool
 }
 
+// MessageReactionResult reports whether the reaction changed and carries
+// the message as the actor sees it, with its current reactions.
 type MessageReactionResult struct {
+	Message   *ChannelMessage            `json:"message"`
 	Changed   bool                       `json:"changed"`
 	Event     *ConversationReactionEvent `json:"event,omitempty"`
 	Reactions []MessageReaction          `json:"reactions"`
@@ -309,11 +312,11 @@ func (s *ConversationService) changeMessageReaction(ctx context.Context, req Mes
 		return nil, err
 	}
 	viewer := ConversationViewer{Participant: req.Actor, Roles: append([]string(nil), req.ActorRoles...)}
-	if _, err := s.GetVisibleChannelMessage(ctx, record.Scope, record.ConversationID, record.MessageID, viewer); err != nil {
+	message, err := s.GetVisibleChannelMessage(ctx, record.Scope, record.ConversationID, record.MessageID, viewer)
+	if err != nil {
 		return nil, err
 	}
 	var event *ConversationReactionEvent
-	var err error
 	if add {
 		event, err = s.store.AddMessageReaction(ctx, record)
 	} else {
@@ -330,6 +333,8 @@ func (s *ConversationService) changeMessageReaction(ctx context.Context, req Mes
 	if result.Reactions == nil {
 		result.Reactions = []MessageReaction{}
 	}
+	result.Message = cloneChannelMessage(message)
+	result.Message.Reactions = cloneMessageReactions(reactions[record.MessageID])
 	if event != nil {
 		event.Reactions = cloneMessageReactions(result.Reactions)
 		result.Event = event
