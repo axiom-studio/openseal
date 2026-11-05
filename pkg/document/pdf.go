@@ -1,6 +1,5 @@
-// Package document provides portable deterministic document capabilities.
-// Hosts may replace Renderer with a richer implementation while preserving the
-// same governed Skill contract and Artifact semantics.
+// Package document renders plain-text reports as PDFs. Agents make documents
+// in their chat's secure VM; this renderer is a deterministic fixture source.
 package document
 
 import (
@@ -10,16 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/skill"
-)
-
-const (
-	SkillID      = "openseal.document"
-	SkillVersion = "1.0.2"
-	SkillImage   = "axiomstudio/skill-openseal-document:1.0.2"
-	RenderPDF    = "render_pdf"
 )
 
 type Report struct {
@@ -58,46 +47,6 @@ func (PlainTextPDFRenderer) RenderPDF(report Report) (*RenderedDocument, error) 
 	}
 	pdf := encodePDF(pages)
 	return &RenderedDocument{MediaType: "application/pdf", Bytes: pdf, Pages: len(pages)}, nil
-}
-
-func SkillDefinition() *skill.Definition {
-	return &skill.Definition{
-		ID: SkillID, Version: SkillVersion, Name: "Document renderer",
-		Description: "Render durable reports into governed PDF artifacts.",
-		Icon:        "file-text", Category: "documents", Tags: []string{"pdf", "report", "artifact"},
-		Transport: skill.TransportReference{Kind: "tool", Endpoint: SkillID},
-		Actions: map[string]skill.Action{RenderPDF: {
-			Name: RenderPDF, Description: "Render a title and report body as a PDF artifact.",
-			InputSchema: map[string]interface{}{
-				"type": "object", "additionalProperties": false,
-				"required": []interface{}{"title", "body", "filename", "requirementName"},
-				"properties": map[string]interface{}{
-					"title":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 300},
-					"body":            map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 500000},
-					"filename":        map[string]interface{}{"type": "string", "pattern": `^[^/\\]{1,240}\.pdf$`},
-					"requirementName": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128},
-					"sources":         map[string]interface{}{"type": "array", "maxItems": 100, "items": map[string]interface{}{"type": "string", "format": "uri"}},
-				},
-			},
-			OutputSchema: map[string]interface{}{
-				"type": "object", "additionalProperties": false, "required": []interface{}{"artifactRefs", "pages"},
-				"properties": map[string]interface{}{
-					"artifactRefs": map[string]interface{}{"type": "array", "minItems": 1, "maxItems": 1, "items": map[string]interface{}{
-						"type": "object", "additionalProperties": false, "required": []interface{}{"id", "version", "requirementName"},
-						"properties": map[string]interface{}{"id": map[string]interface{}{"type": "string"}, "version": map[string]interface{}{"type": "integer", "minimum": 1}, "requirementName": map[string]interface{}{"type": "string"}},
-					}},
-					"pages": map[string]interface{}{"type": "integer", "minimum": 1},
-				},
-			},
-			SideEffect: skill.SideEffectWrite, Risk: skill.RiskLevelWrite, Idempotency: skill.IdempotencyRequired,
-			Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, EmittedArtifactTypes: []string{"report"},
-		}},
-		Prompt:       &capability.PromptModule{Instructions: "Use render_pdf when work requires a durable PDF deliverable. Cite sources in the body before rendering.", UserInvocable: true, AllowedTools: []string{RenderPDF}},
-		Requirements: capability.Requirements{AlwaysAvailable: true},
-		Installers: []capability.Installer{{
-			ID: "oci", Kind: "oci", Label: "Document renderer service image", Package: SkillImage,
-		}},
-	}
 }
 
 func asciiPrintable(value string) bool {

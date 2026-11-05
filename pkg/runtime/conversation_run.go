@@ -140,9 +140,6 @@ func (s *ConversationRunScheduler) ScheduleMessage(
 			return &AgentRunCommandResult{Run: current}, true, nil
 		}
 		result, err := s.runs.CreateAgentRun(ctx, request)
-		if err == nil {
-			err = s.interruptSupersededConversationRuns(ctx, conversation, message, result.Run.ID)
-		}
 		return result, true, err
 	}
 	coordinated, err := s.coordinatedTriggerIDs(ctx, conversation)
@@ -174,9 +171,6 @@ func (s *ConversationRunScheduler) scheduleLoadedMessage(
 	if err != nil {
 		return nil, false, err
 	}
-	if err := s.interruptSupersededConversationRuns(ctx, conversation, message, result.Run.ID); err != nil {
-		return result, false, err
-	}
 	return result, result.Event == nil, nil
 }
 
@@ -192,106 +186,6 @@ func conversationMessageInitiatingUser(conversation *Conversation, message *Chan
 		actor = *message.Initiator
 	}
 	return actor, actor.Type == ConversationParticipantUser && actor.Validate() == nil
-}
-
-// In a local Team channel a new human prompt supersedes only that human's
-// unfinished replies in the same thread. Unthreaded application prompts share
-// their conversation execution lane. The message and its replacement Run are
-// durable before cancellation, so a failed cancellation can be retried by
-// message reconciliation without losing input. Agent channels never reach
-// this: their active Run absorbs the new message instead.
-func (s *ConversationRunScheduler) interruptSupersededConversationRuns(ctx context.Context, conversation *Conversation, message *ChannelMessage, replacementID string) error {
-	if conversation.Owner.Type != OwnerTypeTeam || externalChannelContext(conversation) || message.Sender.Type != ConversationParticipantUser || !message.RequiresResponse {
-		return nil
-	}
-	actor, ok := conversationMessageInitiatingUser(conversation, message)
-	if !ok {
-		return nil
-	}
-	threadRoot := externalConversationThreadRoot(conversation, message)
-	// The routing Run's lane and every member's lane in it.
-	lane := conversationRunLane(conversation.ID, threadRoot, conversation.Owner, "")
-	const pageSize = 100
-	// Two HTTP posts can overlap: an older message may be scheduled after the
-	// newer one. In that case its own Run must be canceled as well.
-	supersedingSequence := message.Sequence
-	for after := message.Sequence; ; {
-		messages, err := s.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
-			Scope: conversation.Scope, ConversationID: conversation.ID, AfterSequence: after, Limit: pageSize,
-		})
-		if err != nil {
-			return err
-		}
-		for _, candidate := range messages {
-			candidateActor, valid := conversationMessageInitiatingUser(conversation, candidate)
-			if valid && candidateActor == actor && candidate.Sender.Type == ConversationParticipantUser && candidate.RequiresResponse && externalConversationThreadRoot(conversation, candidate) == threadRoot {
-				supersedingSequence = candidate.Sequence
-			}
-		}
-		if len(messages) < pageSize {
-			break
-		}
-		after = messages[len(messages)-1].Sequence
-	}
-	for offset := 0; ; offset += pageSize {
-		runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
-			Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
-			Statuses: activeConversationRunStatuses, Limit: pageSize, Offset: offset,
-		})
-		if err != nil {
-			return err
-		}
-		for _, run := range runs {
-			if run == nil || (run.ID == replacementID && supersedingSequence == message.Sequence) || isTerminalAgentRunStatus(run.Status) ||
-				(run.ConcurrencyKey != lane && !strings.HasPrefix(run.ConcurrencyKey, lane+":agent:")) {
-				continue
-			}
-			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
-			if triggerID == "" {
-				continue
-			}
-			trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
-			if err != nil {
-				return err
-			}
-			triggerActor, valid := conversationMessageInitiatingUser(conversation, trigger)
-			if !valid || triggerActor != actor || trigger.Sequence >= supersedingSequence {
-				continue
-			}
-			visibility := ActivityVisibilityPrivate
-			if conversation.Owner.Type == OwnerTypeTeam {
-				visibility = ActivityVisibilityTeam
-			}
-			for attempt := 0; attempt < 3; attempt++ {
-				if task, proofErr := canonicalConversationTaskContinuation(ctx, s.runs.store, run); proofErr != nil {
-					return proofErr
-				} else if task != nil {
-					// A promotion can race the foreground lookup. Recheck after
-					// every revision conflict before superseding this old lane.
-					err = nil
-					break
-				}
-				_, err = s.runs.CommandAgentRun(ctx, AgentRunCommandRequest{
-					Scope: conversation.Scope, RunID: run.ID, ExpectedRevision: run.Revision,
-					Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
-					Summary: "Interrupted by a newer message", Visibility: visibility,
-				})
-				if !errors.Is(err, ErrRevisionConflict) {
-					break
-				}
-				run, err = s.runs.store.GetAgentRun(ctx, conversation.Scope, run.ID)
-				if err != nil || run == nil || isTerminalAgentRunStatus(run.Status) {
-					break
-				}
-			}
-			if err != nil && !(run != nil && isTerminalAgentRunStatus(run.Status)) {
-				return err
-			}
-		}
-		if len(runs) < pageSize {
-			return nil
-		}
-	}
 }
 
 func (s *ConversationRunScheduler) conversationAgentRunRequest(ctx context.Context, conversation *Conversation, message *ChannelMessage) (CreateAgentRunRequest, error) {
