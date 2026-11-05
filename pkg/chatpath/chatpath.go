@@ -149,7 +149,7 @@ func Folder(artifactType, mediaType string, uploaded bool) string {
 		return Apps
 	case uploaded:
 		return Uploads
-	case artifactType == "slides" || artifactType == "slide_deck":
+	case media == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
 		return Slides
 	case artifactType == "page":
 		return Pages
