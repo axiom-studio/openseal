@@ -213,8 +213,10 @@ Upload and download require an artifact content store, which the daemon wires fr
 | PUT | `/api/v1/conversations/{id}/presence` |
 | DELETE | `/api/v1/conversations/{id}/presence` |
 | GET | `/api/v1/conversations/{id}/presence` |
+| PUT | `/api/v1/conversations/{id}/reactions` |
+| DELETE | `/api/v1/conversations/{id}/reactions` |
 
-Participation rounds are how multiple Agents take turns in one channel without talking over each other. Cursors record how far each participant has read; presence records who is currently attached.
+Participation rounds are how multiple Agents take turns in one channel without talking over each other. Cursors record how far each participant has read; presence records who is currently attached. Reactions add (PUT) or remove (DELETE) the actor's emoji on a message with `{scope, actor, messageId, emoji}`; both are idempotent, and the change stream carries them as `reactionEvents`.
 
 ## Runbooks
 

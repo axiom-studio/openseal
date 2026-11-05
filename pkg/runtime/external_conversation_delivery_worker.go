@@ -319,7 +319,9 @@ func (w *ExternalConversationDeliveryWorker) markDelivered(
 	// message is mapped by the committed reply that finishes it, and a
 	// deleted message needs no mapping.
 	_, preview := externalAnswerStreamPreview(delivery)
-	if delivery.Operation != capability.ConversationDeliveryTypingIndicator && delivery.Operation != capability.ConversationDeliveryMessageDelete && !preview {
+	// A reaction belongs to an already mapped message and maps nothing new.
+	reaction := delivery.Operation == capability.ConversationDeliveryReactionAdd || delivery.Operation == capability.ConversationDeliveryReactionRemove
+	if delivery.Operation != capability.ConversationDeliveryTypingIndicator && delivery.Operation != capability.ConversationDeliveryMessageDelete && !preview && !reaction {
 		mapping := &ExternalMessageMapping{
 			Scope: delivery.Scope, EndpointID: delivery.EndpointID, Direction: ExternalMessageOutbound,
 			ExternalMessageID: providerMessageID, ConversationID: delivery.ConversationID, ChannelMessageID: delivery.ChannelMessageID,

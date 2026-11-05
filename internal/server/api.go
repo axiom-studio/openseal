@@ -130,6 +130,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /api/v1/conversations/{id}/presence", s.handleSetConversationPresence)
 	s.mux.HandleFunc("DELETE /api/v1/conversations/{id}/presence", s.handleReleaseConversationPresence)
 	s.mux.HandleFunc("GET /api/v1/conversations/{id}/presence", s.handleListConversationPresence)
+	s.mux.HandleFunc("PUT /api/v1/conversations/{id}/reactions", s.handleAddMessageReaction)
+	s.mux.HandleFunc("DELETE /api/v1/conversations/{id}/reactions", s.handleRemoveMessageReaction)
 	s.mux.HandleFunc("POST /api/v1/team-definitions", s.handleRegisterTeamDefinition)
 	s.mux.HandleFunc("GET /api/v1/team-definitions/{id}", s.handleGetTeamDefinition)
 	s.mux.HandleFunc("POST /api/v1/team-deployments", s.handleCreateTeamDeployment)

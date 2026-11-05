@@ -249,6 +249,9 @@ type HostedTurnRequest struct {
 	// reports those calls in HostedTurnResponse.PinnedCommands. Absent from
 	// model input.
 	CommandPins []workspace.CommandPin `json:"commandPins,omitempty"`
+	// CanReact offers the react action (HostedTurnFormAuthority.CanReact) in
+	// a conversation turn of the answering Agent. Absent from model input.
+	CanReact bool `json:"canReact,omitempty"`
 }
 
 // HostedTurnExecutionFailure is emitted by the trusted host after a native
@@ -272,6 +275,7 @@ type HostedTurnResponse struct {
 	ProposedDelegation         *TurnDelegationProposal       `json:"proposedDelegation,omitempty"`
 	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
 	ProposedTask               *TurnTaskProposal             `json:"proposedTask,omitempty"`
+	React                      []TurnReaction                `json:"react,omitempty"`
 	OutputSummary              string                        `json:"outputSummary"`
 	Visual                     *presentation.Visual          `json:"visual,omitempty"`
 	Usage                      TurnUsage                     `json:"usage,omitempty"`
@@ -526,6 +530,13 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 	}
 	if response.ProposedWorkspaceOperation != nil {
 		return nil, errors.New("turn host returned an unconsumed native Workspace operation")
+	}
+	// Reactions are offered only to the answering Agent of a conversation
+	// turn; an invalid one is dropped rather than costing the turn.
+	if request.CanReact {
+		response.React = admitTurnReactions(response.React)
+	} else {
+		response.React = nil
 	}
 	visualRejection := ""
 	if response.Visual != nil {
@@ -792,6 +803,7 @@ func (r *HostedTurnRunner) RunTurn(ctx context.Context, input TurnExecutionConte
 		SkillSelections: append([]HostedSkillSelection(nil), response.SkillSelections...),
 		Decisions:       append(selectionDecisions, response.Decisions...), ProposedActions: proposedActions,
 		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(response.ProposedTask),
+		React:         cloneTurnReactions(response.React),
 		OutputSummary: response.OutputSummary, Visual: cloneVisual(response.Visual), Usage: response.Usage,
 		ContinuationCheckpoint: cloneMap(response.ContinuationCheckpoint), NextRunStatus: response.NextRunStatus,
 		WakeCondition: cloneWakeCondition(response.WakeCondition), RunOutput: cloneMap(response.RunOutput), RunError: response.RunError,
@@ -896,6 +908,10 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 		request.ContextPressure = &pressure
 	}
 	request.ExternalChannelReply = input.externalChannelReply
+	request.CanReact = input.canReact && input.Run.AssignedAgentID == r.config.AgentID
+	if request.CanReact {
+		request.SystemInstructions = append(request.SystemInstructions, ConversationReactInstruction)
+	}
 	// A chat's own files are every conversation turn's Workspace.
 	if conversationID, _ := input.Run.Context["conversationId"].(string); strings.TrimSpace(conversationID) != "" {
 		request.Workspace = workspace.ChatAuthority(conversationID)

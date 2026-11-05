@@ -469,6 +469,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateSpaces(ctx, tx); err != nil {
 		return fmt.Errorf("spaces migration: %w", err)
 	}
+	if err := s.migrateConversationReactions(ctx, tx); err != nil {
+		return fmt.Errorf("conversation reaction migration: %w", err)
+	}
 	if err := s.migrateTeamRouting(ctx, tx); err != nil {
 		return fmt.Errorf("Team routing migration: %w", err)
 	}

@@ -380,6 +380,15 @@ func externalConversationAdapterBelongsToEndpoint(endpoint, captured ExternalCon
 }
 
 func externalConversationPolicyAccepts(policy ExternalConversationPolicy, event NormalizedExternalConversationEvent) (bool, string) {
+	if event.Type == capability.ConversationEventReactionAdded || event.Type == capability.ConversationEventReactionRemoved {
+		// Reactions never address the endpoint, so message selection does
+		// not apply. Bot reactions include this endpoint's own mirrored
+		// reactions and are never imported back.
+		if event.ParticipantIsBot {
+			return false, "Ignored a provider bot reaction."
+		}
+		return true, ""
+	}
 	if policy.IgnoreBots && event.ParticipantIsBot {
 		return false, "Ignored a provider bot message."
 	}

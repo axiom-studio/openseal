@@ -37,6 +37,9 @@ type TurnExecutionContext struct {
 	// externalChannelReply marks a turn whose answer streams into a connector
 	// chat. It only asks the host to report previews; delivery is the kernel's.
 	externalChannelReply bool
+	// canReact offers the react action: set by the conversation runner for
+	// the answering Agent's turn.
+	canReact bool
 }
 
 // TurnRunner performs one bounded, proposal-only reasoning step. External side
@@ -67,6 +70,7 @@ type TurnOutcome struct {
 	ProposedDelegation *TurnDelegationProposal
 	ProposedRunbook    *TurnRunbookProposal
 	ProposedTask       *TurnTaskProposal
+	React              []TurnReaction
 	OutputSummary      string
 	// Visual is shown with the final answer; only a completed outcome has one.
 	Visual *presentation.Visual `json:"visual,omitempty"`

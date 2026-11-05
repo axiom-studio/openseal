@@ -35,6 +35,7 @@ type HostedTurnForm struct {
 	ProposedDelegation         *TurnDelegationProposal       `json:"proposedDelegation,omitempty"`
 	ProposedRunbook            *TurnRunbookProposal          `json:"proposedRunbook,omitempty"`
 	ProposedTask               *TurnTaskProposal             `json:"proposedTask,omitempty"`
+	React                      []TurnReaction                `json:"react,omitempty"`
 	OutputSummary              string                        `json:"outputSummary"`
 	// Visual is an optional visual shown with the final answer. Its schema is
 	// supplied by presentation, not reflected.
@@ -73,6 +74,7 @@ type HostedTurnFormAuthority struct {
 	CanForkSelf           bool
 	CanInvokeRunbook      bool
 	CanStartTask          bool
+	CanReact              bool
 	SkillPromptReferences []string
 	WorkspaceOperations   []workspace.Operation
 }
@@ -205,6 +207,7 @@ func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capabilit
 	response := &HostedTurnResponse{
 		SkillSelections: form.SkillSelections, Decisions: decisions,
 		ProposedFork: form.ProposedFork, ProposedDelegation: form.ProposedDelegation, ProposedRunbook: form.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(form.ProposedTask),
+		React:         cloneTurnReactions(form.React),
 		OutputSummary: form.OutputSummary, Visual: cloneVisual(form.Visual), ContinuationCheckpoint: checkpoint, NextRunStatus: form.NextRunStatus,
 		WakeCondition: form.WakeCondition, RunOutput: form.RunOutput, RunError: form.RunError,
 		CompletionEvidenceRefs: form.CompletionEvidenceRefs, EvidenceClaims: form.EvidenceClaims,
@@ -327,6 +330,7 @@ func HostedTurnFormFromResponse(response HostedTurnResponse) (HostedTurnForm, er
 	form := HostedTurnForm{
 		SchemaVersion: HostedTurnFormSchemaVersion, SkillSelections: response.SkillSelections, Decisions: response.Decisions,
 		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(response.ProposedTask),
+		React:         cloneTurnReactions(response.React),
 		OutputSummary: response.OutputSummary, Visual: cloneVisual(response.Visual), ContinuationCheckpoint: response.ContinuationCheckpoint,
 		NextRunStatus: response.NextRunStatus, WakeCondition: response.WakeCondition, RunOutput: response.RunOutput,
 		RunError: response.RunError, CompletionEvidenceRefs: response.CompletionEvidenceRefs, EvidenceClaims: response.EvidenceClaims,
@@ -389,6 +393,17 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 			},
 		},
 		"required": []string{"taskKey", "goal", "acknowledgment"},
+	}
+	properties["react"] = map[string]interface{}{
+		"type": "array", "maxItems": MaximumTurnReactions, "description": ConversationReactInstruction,
+		"items": map[string]interface{}{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]interface{}{
+				"messageId": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256},
+				"emoji":     map[string]interface{}{"type": "string", "minLength": 1, "maxLength": MaximumReactionEmojiBytes},
+			},
+			"required": []string{"messageId", "emoji"},
+		},
 	}
 	visual := presentation.VisualJSONSchema()
 	visual["description"] = presentation.VisualFieldDescription()
@@ -501,6 +516,9 @@ func HostedTurnFormJSONSchema(actions []capability.ModelAction, authority ...Hos
 		}
 		if !authority[0].CanStartTask {
 			delete(properties, "proposedTask")
+		}
+		if !authority[0].CanReact {
+			delete(properties, "react")
 		}
 	}
 	return schema, nil

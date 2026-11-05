@@ -25,6 +25,7 @@ import (
 type Server struct {
 	channelParticipationAuthorizer func(context.Context, *runtime.Conversation) error
 	channelMessageDispatcher       func(context.Context, runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error)
+	reactionProjector              runtime.MessageReactionProjector
 
 	store                    runtime.KernelStore
 	artifactContent          runtime.ArtifactContentStore
@@ -290,6 +291,12 @@ var _ = time.Now
 // Configure before serving requests; standalone channel behavior is unchanged.
 func (s *Server) SetDesktopConversationScope(scope runtime.Scope) {
 	s.desktopConversationScope = &scope
+}
+
+// SetReactionProjector mirrors reactions made through the API to external
+// conversations. Configure before serving.
+func (s *Server) SetReactionProjector(projector runtime.MessageReactionProjector) {
+	s.reactionProjector = projector
 }
 
 // SetChannelParticipation enables explicit participation settings and optionally

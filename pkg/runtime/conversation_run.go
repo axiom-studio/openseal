@@ -1117,6 +1117,7 @@ func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx contex
 	hostedInput.canAskConversationQuestion = questionConversation != nil && questionTrigger != nil &&
 		questionConversation.Owner.Type == OwnerTypeAgent && hostedRun.AssignedAgentID == questionConversation.Owner.ID
 	hostedInput.externalChannelReply = externalChannelContext(questionConversation)
+	hostedInput.canReact = true
 	hostedInput.sourceAccessChallenge, questionErr = resolveSourceAccessChallengeInteraction(ctx, r.portfolio, input.Run)
 	if questionErr != nil {
 		return TurnExecutionContext{}, historyPlan, questionErr
@@ -1272,6 +1273,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 			return skipped, nil
 		}
 	}
+	reacted := r.applyTurnReactions(ctx, conversation, viewer, outcome)
 	if outcome != nil {
 		summary := acceptedConversationSummary(conversation, viewer, historyPlan, outcome.ContinuationCheckpoint)
 		delete(outcome.ContinuationCheckpoint, conversationSummaryCheckpoint)
@@ -1302,6 +1304,12 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		}
 	}
 	content := agentConversationResponseContent(outcome)
+	if content == "" && reacted > 0 && outcome.Visual == nil {
+		// A reaction said it; no filler message.
+		outcome.OutputSummary = "Agent reacted"
+		outcome.RunOutput = map[string]interface{}{"reacted": true, "conversationId": conversation.ID, "triggerMessageId": trigger.ID}
+		return outcome, nil
+	}
 	if content == "" {
 		return nil, errors.New("Agent channel response did not contain user-visible output")
 	}
@@ -1355,6 +1363,8 @@ type agentConversationPromptMessage struct {
 	Intent     ConversationMessageIntent `json:"intent"`
 	Content    string                    `json:"content"`
 	References []ConversationReference   `json:"references,omitempty"`
+	// Reactions renders the message's reactions, e.g. "👍 Rio, ✅ Maya".
+	Reactions string `json:"reactions,omitempty"`
 }
 
 type agentConversationObjective struct {
@@ -1584,6 +1594,11 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 			Intent: message.Intent, Content: message.Content,
 			References: append([]ConversationReference(nil), message.References...),
 		})
+	}
+	reactions := reactionPromptLines(recent, trigger)
+	payload.CurrentMessage.Reactions = reactions[payload.CurrentMessage.ID]
+	for index := range payload.Messages {
+		payload.Messages[index].Reactions = reactions[payload.Messages[index].ID]
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

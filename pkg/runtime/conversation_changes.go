@@ -55,6 +55,11 @@ type ConversationChangeSet struct {
 	// Runbooks are the live state of the routines shown by routine visuals
 	// in this conversation and of the scheduled tasks created from it.
 	Runbooks []*ConversationRunbook `json:"runbooks"`
+	// ReactionEvents are durable deltas like Messages: conversation.reaction
+	// added/removed events stored after the cursor, in Sequence order, on
+	// messages the viewer can see. Each carries its message's current
+	// reactions. Messages themselves carry reactions as of when they are read.
+	ReactionEvents []*ConversationReactionEvent `json:"reactionEvents"`
 	// SurfaceInteractions are durable deltas like Messages: interactions
 	// stored after the cursor, in Sequence order. SurfaceInteractionsChanged
 	// is set when the page carries any, and on the initial page.
@@ -79,6 +84,7 @@ type conversationChangeCursor struct {
 	MessageSequence      int64  `json:"messageSequence"`
 	RoundRevision        int64  `json:"roundRevision"`
 	InteractionSequence  int64  `json:"interactionSequence,omitempty"`
+	ReactionSequence     int64  `json:"reactionSequence,omitempty"`
 	RunDigest            string `json:"runDigest,omitempty"`
 	ActivityDigest       string `json:"activityDigest,omitempty"`
 	PresenceDigest       string `json:"presenceDigest,omitempty"`
@@ -185,6 +191,29 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 		interactions = withoutOthersOutcomes(interactions, req.Viewer.Participant)
 	}
 	interactionsChanged := initial || len(interactions) > 0
+
+	// Like interactions, read one past the page; the cursor advances over
+	// events on hidden messages too.
+	rawReactionEvents, err := s.conversations.store.ListConversationReactionEvents(ctx, req.Scope, conversationID, cursor.ReactionSequence, limit+1)
+	if err != nil {
+		return nil, err
+	}
+	reactionHasMore := len(rawReactionEvents) > limit
+	if reactionHasMore {
+		rawReactionEvents = rawReactionEvents[:limit]
+	}
+	nextReactionSequence := cursor.ReactionSequence
+	if len(rawReactionEvents) > 0 {
+		nextReactionSequence = rawReactionEvents[len(rawReactionEvents)-1].Sequence
+	}
+	reactionEvents, err := s.conversations.visibleReactionEvents(ctx, req.Scope, conversationID, rawReactionEvents, req.Viewer)
+	if err != nil {
+		return nil, err
+	}
+	messages, err = withMessageReactions(ctx, s.conversations.store, messages)
+	if err != nil {
+		return nil, err
+	}
 
 	rounds, roundHasMore, nextRoundRevision, err := s.listRoundsAfter(ctx, req.Scope, conversationID, cursor.RoundRevision, limit)
 	if err != nil {
@@ -295,23 +324,23 @@ func (s *ConversationChangeService) ListChanges(ctx context.Context, req Convers
 	next := conversationChangeCursor{
 		Version: conversationChangeCursorVersion, ConversationID: conversationID,
 		ConversationRevision: conversation.Revision, MessageSequence: nextMessageSequence,
-		RoundRevision: nextRoundRevision, InteractionSequence: nextInteractionSequence, RunDigest: runDigest, ActivityDigest: activityDigest, PresenceDigest: presenceDigest,
+		RoundRevision: nextRoundRevision, InteractionSequence: nextInteractionSequence, ReactionSequence: nextReactionSequence, RunDigest: runDigest, ActivityDigest: activityDigest, PresenceDigest: presenceDigest,
 		ApprovalDigest: approvalDigest, SkillSetupDigest: skillSetupDigest, CredentialDigest: credentialDigest, RunbookDigest: runbookDigest,
 	}
 	encodedCursor, err := encodeConversationChangeCursor(next)
 	if err != nil {
 		return nil, err
 	}
-	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 || len(interactions) > 0 ||
+	hasChanges := initial || conversation.Revision != cursor.ConversationRevision || len(messages) > 0 || len(rounds) > 0 || len(interactions) > 0 || len(reactionEvents) > 0 ||
 		runsChanged || activityChanged || presenceChanged || approvalsChanged || skillSetupsChanged || credentialsChanged || runbooksChanged
 	return &ConversationChangeSet{
 		Conversation: cloneConversation(conversation), Messages: cloneChannelMessages(messages), Rounds: cloneParticipationRoundResults(rounds),
 		Runs: cloneAgentRuns(projectedRuns), Activity: cloneConversationActivity(projectedActivity), Presence: cloneConversationPresences(projectedPresence),
 		Approvals: approvals, SkillSetupRequests: skillSetups, CredentialRequests: credentialRequests, Runbooks: runbooks,
-		SurfaceInteractions: interactions, SurfaceInteractionsChanged: interactionsChanged,
+		SurfaceInteractions: interactions, SurfaceInteractionsChanged: interactionsChanged, ReactionEvents: reactionEvents,
 		RunsChanged: runsChanged, ActivityChanged: activityChanged, PresenceChanged: presenceChanged,
 		ApprovalsChanged: approvalsChanged, SkillSetupRequestsChanged: skillSetupsChanged, CredentialRequestsChanged: credentialsChanged, RunbooksChanged: runbooksChanged,
-		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore || interactionHasMore,
+		Cursor: encodedCursor, HasChanges: hasChanges, HasMore: messageHasMore || roundHasMore || interactionHasMore || reactionHasMore,
 	}, nil
 }
 

@@ -178,6 +178,9 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *Exter
 	if item.Status != ExternalConversationInboxLeased || item.LeaseOwner != w.config.WorkerID {
 		return ErrExternalConversationLeaseLost
 	}
+	if item.Event.Type == capability.ConversationEventReactionAdded || item.Event.Type == capability.ConversationEventReactionRemoved {
+		return w.applyReaction(ctx, item)
+	}
 	if item.Event.Type != capability.ConversationEventMessageReceived {
 		return fmt.Errorf("%w: event type %q is not yet a canonical message", ErrInvalidExternalConversation, item.Event.Type)
 	}

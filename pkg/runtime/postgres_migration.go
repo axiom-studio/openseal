@@ -39,6 +39,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		return err
 	}
 	down := map[int64][]string{
+		68: {"conversation_reaction_events", "conversation_message_reactions"},
 		65: {"surface_interactions"},
 		62: {"credential_requests"},
 		60: {"skill_binding_tombstones"},

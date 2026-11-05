@@ -186,6 +186,24 @@ func (c *KernelHTTPClient) ListConversationPresence(ctx context.Context, scope r
 	return result, nil
 }
 
+// AddMessageReaction adds the actor's emoji to a channel message.
+func (c *KernelHTTPClient) AddMessageReaction(ctx context.Context, conversationID string, request kernelapi.MessageReactionRequest) (*runtime.MessageReactionResult, error) {
+	var result runtime.MessageReactionResult
+	if err := c.do(ctx, http.MethodPut, conversationPath(conversationID)+"/reactions", request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RemoveMessageReaction removes the actor's emoji from a channel message.
+func (c *KernelHTTPClient) RemoveMessageReaction(ctx context.Context, conversationID string, request kernelapi.MessageReactionRequest) (*runtime.MessageReactionResult, error) {
+	var result runtime.MessageReactionResult
+	if err := c.do(ctx, http.MethodDelete, conversationPath(conversationID)+"/reactions", request, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func conversationPath(conversationID string) string {
 	return "/api/v1/conversations/" + url.PathEscape(strings.TrimSpace(conversationID))
 }

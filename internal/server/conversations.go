@@ -451,6 +451,46 @@ func (s *Server) handleReleaseConversationPresence(w http.ResponseWriter, r *htt
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (s *Server) handleAddMessageReaction(w http.ResponseWriter, r *http.Request) {
+	s.handleMessageReaction(w, r, true)
+}
+
+func (s *Server) handleRemoveMessageReaction(w http.ResponseWriter, r *http.Request) {
+	s.handleMessageReaction(w, r, false)
+}
+
+// handleMessageReaction applies reaction.add or reaction.remove for the
+// authenticated actor. Both are idempotent; the result says whether the
+// reaction changed and carries the message's current reactions.
+func (s *Server) handleMessageReaction(w http.ResponseWriter, r *http.Request, add bool) {
+	service, _, conversationID, ok := s.conversationRequestContextFromBodyStore(w, r)
+	if !ok {
+		return
+	}
+	var payload kernelapi.MessageReactionRequest
+	if err := decodeStrictJSON(r, &payload); err != nil {
+		s.respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.authorizeDesktopChannelWrite(w, payload.Scope, &payload.Actor) {
+		return
+	}
+	service.SetReactionProjector(s.reactionProjector)
+	change := service.RemoveMessageReaction
+	if add {
+		change = service.AddMessageReaction
+	}
+	result, err := change(r.Context(), runtime.MessageReactionRequest{
+		Scope: payload.Scope, ConversationID: conversationID, MessageID: payload.MessageID, Emoji: payload.Emoji,
+		Actor: payload.Actor, ActorRoles: payload.Roles,
+	})
+	if err != nil {
+		s.respondConversationError(w, err)
+		return
+	}
+	s.respondJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleListConversationPresence(w http.ResponseWriter, r *http.Request) {
 	service, scope, conversationID, ok := s.conversationRequestContext(w, r)
 	if !ok {
