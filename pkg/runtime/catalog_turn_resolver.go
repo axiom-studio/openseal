@@ -598,6 +598,7 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 	actions := make([]capability.ModelAction, 0)
 	prepared := make([]PreparedSkillRuntime, 0)
 	refs := []string{"skill-snapshot:" + activation.SnapshotID}
+	promptSeen := make(map[string]bool)
 	// Kernel management Skills have one well-known binding identity. Historical
 	// authoring versions could leave an equivalent alias beside it; never expose
 	// both aliases as indistinguishable tools while asynchronous reconciliation
@@ -631,11 +632,18 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 		if canonicalID := canonicalManagement[activated.SkillID+"@"+activated.SkillVersion]; canonicalID != "" && activated.BindingID != canonicalID {
 			continue
 		}
-		if activated.Prompt != nil && strings.TrimSpace(activated.Prompt.Instructions) != "" {
+		// A Skill's instructions go into the turn once per version: the
+		// built-in Skill alone has about ten bindings with identical text.
+		// Every binding still contributes its evidence reference and actions.
+		promptKey := activated.SkillID + "@" + activated.SkillVersion
+		if activated.Prompt != nil && strings.TrimSpace(activated.Prompt.Instructions) != "" && !promptSeen[promptKey] {
+			promptSeen[promptKey] = true
 			prompts = append(prompts, HostedSkillPrompt{
 				SkillID: activated.SkillID, Version: activated.SkillVersion, BindingID: activated.BindingID, BindingRevision: activated.BindingRevision,
 				Name: activated.Name, Description: activated.Description, Instructions: activated.Prompt.Instructions,
 			})
+		}
+		if activated.Prompt != nil && strings.TrimSpace(activated.Prompt.Instructions) != "" {
 			refs = append(refs, fmt.Sprintf("skill:%s@%s#binding:%s@%d", activated.SkillID, activated.SkillVersion, activated.BindingID, activated.BindingRevision))
 		}
 		for _, action := range activated.Actions {
