@@ -528,9 +528,8 @@ func resolveHostedAgentTargets(
 			Purpose: strings.TrimSpace(definition.Purpose),
 		})
 	}
-	if len(targets) != len(allowed) {
-		return nil, errors.New("Team delegation roster contains an unavailable Agent")
-	}
+	// A paused or removed member is simply not a delegation target, the same
+	// way it sits out Team routing; it must not stop the rest of the Team.
 	sort.Slice(targets, func(i, j int) bool { return targets[i].ID < targets[j].ID })
 	return targets, nil
 }
