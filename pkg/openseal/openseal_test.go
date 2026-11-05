@@ -426,19 +426,27 @@ func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T)
 			SemanticRoles: []string{"operator"},
 		}}, nil
 	})
-	proposals := ParticipationProposalProviderFunc(func(_ context.Context, input ParticipationProposalContext) (ParticipationProposal, error) {
-		return ParticipationProposal{
-			WantsToSpeak: true, Intent: MessageIntentAnswer,
-			Content:  "Telemetry evidence confirms all three replicas passed their checks.",
-			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: input.Trigger.ID,
-			Signals: ParticipationSignals{AnswersOpenQuestion: true, HasNewInformation: true, HasEvidence: true, RoleRelevant: true},
-		}, nil
+	router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
+		return ConversationRouteDecision{AgentID: "agent-1", Reason: "watches the replicas"}, nil
+	})
+	// The routed member answers through the ordinary Agent turn.
+	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
+		return &TurnRunnerBinding{DeploymentID: "agent-1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{
+				"summary": "Telemetry evidence confirms all three replicas passed their checks.",
+			}}, nil
+		})}, nil
 	})
 	scopes := WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{scope}, nil })
 	engine, err := New(
 		WithStore(store),
-		WithConversationCoordinator(participants, proposals, DefaultConversationCoordinatorConfig()),
+		WithConversationCoordinator(participants, router, DefaultConversationCoordinatorConfig()),
+		WithDynamicAgentRunWorkers(DynamicAgentRunWorkerConfig{
+			Kind: RunKindAgentWork, Concurrency: 2, PollInterval: 5 * time.Millisecond, ReconcileInterval: 5 * time.Millisecond,
+			LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+		}, scopes, agentTurns),
 		WithDynamicConversationRuns(ConversationRunConfig{
+			Runner: ConversationRunTurnRunnerConfig{AgentTurns: agentTurns},
 			Workers: DynamicAgentRunWorkerConfig{
 				Concurrency: 2, PollInterval: 5 * time.Millisecond, ReconcileInterval: 5 * time.Millisecond,
 				LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
@@ -507,13 +515,24 @@ func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T)
 		if len(runs) == 2 && completed == 2 {
 			for _, conversation := range []*Conversation{immediate, recovered} {
 				messages, messageErr := engine.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-				if messageErr != nil || len(messages) != 2 || messages[1].ParticipationRoundID == "" {
-					t.Fatalf("completed channel %s messages = %#v, %v", conversation.ID, messages, messageErr)
+				if messageErr != nil {
+					t.Fatal(messageErr)
+				}
+				if len(messages) != 2 {
+					goto wait
+				}
+				if messages[1].Sender.ID != "agent-1" || messages[1].RoutingReason != "watches the replicas" {
+					t.Fatalf("completed channel %s messages = %#v", conversation.ID, messages)
 				}
 			}
 			return
 		}
+	wait:
 		time.Sleep(10 * time.Millisecond)
+	}
+	all, _ := engine.ListAgentRuns(ctx, AgentRunFilter{Scope: scope})
+	for _, run := range all {
+		t.Logf("run %s kind=%s status=%s parent=%s assigned=%s error=%s output=%v", run.ID, run.Kind, run.Status, run.ParentRunID, run.AssignedAgentID, run.Error, run.Output)
 	}
 	t.Fatal("durable conversation runtime did not complete immediate and reconciled messages")
 }
@@ -523,12 +542,12 @@ func TestConversationRunsRejectMismatchedParticipationPolicy(t *testing.T) {
 		participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
 			return nil, nil
 		})
-		proposals := ParticipationProposalProviderFunc(func(context.Context, ParticipationProposalContext) (ParticipationProposal, error) {
-			return ParticipationProposal{}, nil
+		router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
+			return ConversationRouteDecision{}, nil
 		})
 		_, err := New(
 			WithStore(runtime.NewMemoryStore()),
-			WithConversationCoordinator(participants, proposals, DefaultConversationCoordinatorConfig()),
+			WithConversationCoordinator(participants, router, DefaultConversationCoordinatorConfig()),
 			WithDynamicConversationRuns(ConversationRunConfig{
 				Scheduler: ConversationRunSchedulerConfig{RequireParticipationOptIn: schedulerOptIn},
 				Runner:    ConversationRunTurnRunnerConfig{RequireParticipationOptIn: !schedulerOptIn},

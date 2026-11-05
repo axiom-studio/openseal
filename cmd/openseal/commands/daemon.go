@@ -198,8 +198,9 @@ Options:
 		return append([]runtime.Scope(nil), workerScopes...), nil
 	})
 	var kernel *opensealkernel.Engine
+	var turnResolver runtime.TurnRunnerResolver
 	if len(workerScopes) > 0 {
-		turnResolver := runtime.TurnRunnerResolverFunc(func(resolveCtx context.Context, run *runtime.AgentRun) (*runtime.TurnRunnerBinding, error) {
+		turnResolver = runtime.TurnRunnerResolverFunc(func(resolveCtx context.Context, run *runtime.AgentRun) (*runtime.TurnRunnerBinding, error) {
 			if kernel == nil {
 				return nil, runtime.ErrTurnHostUnavailable
 			}
@@ -247,35 +248,20 @@ Options:
 			}
 			return source.ResolveConversationParticipants(ctx, query)
 		})
-		proposals := runtime.MeteredParticipationProposalProviderFunc(func(ctx context.Context, input runtime.ParticipationProposalContext) (runtime.MeteredParticipationProposal, error) {
-			if kernel == nil {
-				return runtime.MeteredParticipationProposal{}, runtime.ErrConversationCoordinationUnavailable
-			}
-			source, err := daemon.NewDesktopConversationParticipants(kernel, scope, 8)
-			if err != nil {
-				return runtime.MeteredParticipationProposal{}, err
-			}
-			provider, err := daemon.NewDesktopParticipationProvider(taskHost, source)
-			if err != nil {
-				return runtime.MeteredParticipationProposal{}, err
-			}
-			return provider.ProposeParticipationWithUsage(ctx, input)
-		})
+		router, err := daemon.NewDesktopConversationRouter(taskHost)
+		if err != nil {
+			sugar.Fatalf("configure desktop channel routing: %v", err)
+		}
 		config := runtime.DefaultConversationCoordinatorConfig()
-		config.MaximumParticipants, config.MaximumConcurrency, config.RecentMessageLimit = 8, 2, 30
-		config.ProposalBudget = runtime.ParticipationProposalBudget{InputTokens: 16000, OutputTokens: 2048}
+		config.MaximumParticipants = 8
 		localScopes := runtime.WorkerScopeSourceFunc(func(context.Context) ([]runtime.Scope, error) { return []runtime.Scope{scope}, nil })
 		engineOptions = append(engineOptions,
-			opensealkernel.WithConversationCoordinator(participants, proposals, config),
+			opensealkernel.WithConversationCoordinator(participants, router, config),
 			opensealkernel.WithDynamicConversationRuns(opensealkernel.ConversationRunConfig{
 				Scheduler: runtime.ConversationRunSchedulerConfig{RequireParticipationOptIn: true, Budget: &runtime.BudgetPolicy{MaxTurns: 3, MaxAttempts: 4, MaxTotalTokens: 432000, MaxOutputTokens: 49152, MaxDurationMS: 180000}},
-				Runner: runtime.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true, ResolvePolicy: func(ctx context.Context, channel *runtime.Conversation) (runtime.ConversationArbitrationPolicy, error) {
-					source, err := daemon.NewDesktopConversationParticipants(kernel, scope, 8)
-					if err != nil {
-						return runtime.ConversationArbitrationPolicy{}, err
-					}
-					return source.ResolvePolicy(ctx, channel)
-				}},
+				// Each routed member answers in its own agent_work Run through
+				// the same Agent turn as a 1:1 chat.
+				Runner:     runtime.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true, AgentTurns: turnResolver},
 				Workers:    runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindConversation, Concurrency: 2, MaxTurnsPerClaim: 1, WorkerIDPrefix: "desktop-channel"},
 				Reconciler: runtime.ConversationRunReconcilerConfig{Interval: 5 * time.Second},
 			}, localScopes),

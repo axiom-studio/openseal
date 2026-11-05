@@ -322,36 +322,6 @@ func (s *Server) handleListConversationChanges(w http.ResponseWriter, r *http.Re
 	s.respondJSON(w, http.StatusOK, changes)
 }
 
-func (s *Server) handleCoordinateParticipation(w http.ResponseWriter, r *http.Request) {
-	if s.desktopConversationScope != nil {
-		s.respondError(w, http.StatusForbidden, "desktop team replies are produced by workspace workers; clients cannot submit agent proposals")
-		return
-	}
-	service, _, conversationID, ok := s.conversationRequestContextFromBodyStore(w, r)
-	if !ok {
-		return
-	}
-	var payload kernelapi.CoordinateParticipationRequest
-	if err := decodeStrictJSON(r, &payload); err != nil {
-		s.respondError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	key := requestIdempotencyKey(r, payload.IdempotencyKey)
-	result, err := service.CoordinateParticipation(r.Context(), runtime.CoordinateParticipationRequest{
-		ID: payload.ID, Scope: payload.Scope, ConversationID: conversationID, ExpectedRevision: payload.ExpectedRevision,
-		TriggerMessageID: payload.TriggerMessageID, Policy: payload.Policy, Proposals: payload.Proposals, IdempotencyKey: key,
-	})
-	if err != nil {
-		s.respondConversationError(w, err)
-		return
-	}
-	status := http.StatusCreated
-	if result.Replayed {
-		status = http.StatusOK
-	}
-	s.respondJSON(w, status, result)
-}
-
 func (s *Server) handleGetParticipationRound(w http.ResponseWriter, r *http.Request) {
 	service, scope, conversationID, ok := s.conversationRequestContext(w, r)
 	if !ok {

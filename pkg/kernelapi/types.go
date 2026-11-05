@@ -1107,16 +1107,6 @@ type PostChannelMessageRequest struct {
 	IdempotencyKey      string                            `json:"idempotencyKey,omitempty"`
 }
 
-type CoordinateParticipationRequest struct {
-	ID               string                                `json:"id,omitempty"`
-	Scope            runtime.Scope                         `json:"scope"`
-	ExpectedRevision int64                                 `json:"expectedRevision"`
-	TriggerMessageID string                                `json:"triggerMessageId,omitempty"`
-	Policy           runtime.ConversationArbitrationPolicy `json:"policy,omitempty"`
-	Proposals        []runtime.ParticipationProposal       `json:"proposals"`
-	IdempotencyKey   string                                `json:"idempotencyKey,omitempty"`
-}
-
 type AdvanceConversationCursorRequest struct {
 	Scope             runtime.Scope                   `json:"scope"`
 	Participant       runtime.ConversationParticipant `json:"participant"`

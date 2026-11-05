@@ -3101,14 +3101,10 @@ func renderParticipationAudit(rounds []*runtime.ParticipationRoundResult, width 
 		}
 		round := result.Round
 		lines := []string{mutedStyle.Render(fmt.Sprintf("Round %s · %s", compact(round.ID, 12), relativeTime(round.CommittedAt)))}
-		for _, decision := range round.Arbitration.Decisions {
-			reasons := make([]string, len(decision.Reasons))
-			for index, reason := range decision.Reasons {
-				reasons[index] = strings.ReplaceAll(string(reason), "_", " ")
-			}
-			line := fmt.Sprintf("  %s:%s · %s · %d", decision.Participant.Type, decision.Participant.ID, decision.Disposition, decision.Score)
-			if len(reasons) > 0 {
-				line += " · " + strings.Join(reasons, ", ")
+		for _, responder := range round.Responders {
+			line := fmt.Sprintf("  %s:%s · %s", responder.Participant.Type, responder.Participant.ID, responder.Addressed)
+			if responder.Reason != "" {
+				line += " · " + responder.Reason
 			}
 			lines = append(lines, mutedStyle.Render(compact(line, max(width-8, 28))))
 		}

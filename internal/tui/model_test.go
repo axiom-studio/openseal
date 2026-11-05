@@ -522,10 +522,6 @@ func (f *fakeChannelKernelClient) GetChannelMessage(context.Context, runtime.Sco
 	return nil, runtime.ErrChannelMessageNotFound
 }
 
-func (f *fakeChannelKernelClient) CoordinateParticipation(context.Context, string, kernelapi.CoordinateParticipationRequest, string) (*runtime.ParticipationRoundResult, error) {
-	return nil, errors.New("not implemented by test client")
-}
-
 func (f *fakeChannelKernelClient) GetParticipationRound(context.Context, runtime.Scope, string, string) (*runtime.ParticipationRoundResult, error) {
 	return nil, runtime.ErrParticipationRoundNotFound
 }
@@ -3908,7 +3904,7 @@ func TestTeamChannelsRequireAdvertisedCapabilityAndConcreteClient(t *testing.T) 
 	}
 }
 
-func TestTeamChannelProjectionShowsMessagesPresenceAndArbitrationAudit(t *testing.T) {
+func TestTeamChannelProjectionShowsMessagesPresenceAndRoutingAudit(t *testing.T) {
 	conversation := testConversation("release", "release-coordination", 2, 3)
 	question := &runtime.ChannelMessage{
 		ID: "question", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 1,
@@ -3923,12 +3919,10 @@ func TestTeamChannelProjectionShowsMessagesPresenceAndArbitrationAudit(t *testin
 		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now(),
 	}
 	round := &runtime.ParticipationRoundResult{Round: &runtime.ParticipationRound{
-		ID: "round-1", CommittedAt: time.Now(), Arbitration: runtime.ConversationArbitration{
-			RoundID: "round-1", Decisions: []runtime.ParticipationDecision{{
-				ProposalID: "observer", Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "observer"},
-				Disposition: runtime.ParticipationSilent, Score: 0, Reasons: []runtime.ParticipationReason{runtime.ParticipationReasonNoNewInformation},
-			}},
-		},
+		ID: "round-1", CommittedAt: time.Now(), Responders: []runtime.ConversationResponder{{
+			Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "developer"},
+			Addressed:   runtime.ConversationAddressedRouted, Reason: "owns the canary",
+		}},
 	}}
 	fake := &fakeChannelKernelClient{
 		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{Coordination: true, Changes: true}))},
@@ -3952,7 +3946,7 @@ func TestTeamChannelProjectionShowsMessagesPresenceAndArbitrationAudit(t *testin
 	}
 	model.channelAuditExpanded = true
 	view = model.View()
-	for _, expected := range []string{"agent:observer", "silent", "no new information"} {
+	for _, expected := range []string{"agent:developer", "routed", "owns the canary"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("channel audit missing %q:\n%s", expected, view)
 		}

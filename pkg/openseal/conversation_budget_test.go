@@ -136,8 +136,8 @@ func conversationBudgetEngine(t *testing.T, store *runtime.MemoryStore, scope Sc
 		ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
 			return nil, fmt.Errorf("Agent channel cannot resolve a Team roster")
 		}),
-		ParticipationProposalProviderFunc(func(context.Context, ParticipationProposalContext) (ParticipationProposal, error) {
-			return ParticipationProposal{}, fmt.Errorf("Agent channel cannot arbitrate Team participation")
+		ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
+			return ConversationRouteDecision{}, fmt.Errorf("Agent channel cannot route Team messages")
 		}), DefaultConversationCoordinatorConfig()),
 		WithDynamicConversationRuns(ConversationRunConfig{Scheduler: ConversationRunSchedulerConfig{Budget: budget}, Runner: ConversationRunTurnRunnerConfig{AgentTurns: resolver}, Workers: DynamicAgentRunWorkerConfig{Kind: RunKindConversation, AssignedAgentID: "agent", Concurrency: 1, PollInterval: 5 * time.Millisecond, ReconcileInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second}, Reconciler: ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond}}, WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{scope}, nil })),
 		WithAgentRunWorkers(AgentRunWorkerConfig{Scope: scope, Kind: RunKindAgentWork, AssignedAgentID: "agent", Concurrency: 1, PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second}, resolver))

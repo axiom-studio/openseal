@@ -55,35 +55,30 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	if err := json.NewDecoder(questionResponse.Body).Decode(&question); err != nil {
 		t.Fatal(err)
 	}
-	roundBody := `{
-		"scope":{"kind":"tenant","id":"one"},
-		"expectedRevision":2,
-		"triggerMessageId":"` + question.Message.ID + `",
-		"proposals":[
-			{
-				"participant":{"type":"agent","id":"developer"},
-				"wantsToSpeak":true,
-				"intent":"answer",
-				"content":"It is ready and smoke evidence passed.",
-				"audience":{"kind":"channel"},
-				"replyToMessageId":"` + question.Message.ID + `",
-				"resolvesMessageId":"` + question.Message.ID + `",
-				"signals":{"answersOpenQuestion":true,"hasNewInformation":true,"roleRelevant":true,"hasEvidence":true}
-			},
-			{"participant":{"type":"agent","id":"quiet"},"wantsToSpeak":false}
-		]
-	}`
-	roundResponse := performAgentRunRequest(t, server.Handler(), http.MethodPost,
-		"/api/v1/conversations/"+conversation.ID+"/participation-rounds", roundBody, "round-v1")
-	if roundResponse.Code != http.StatusCreated {
-		t.Fatalf("round status = %d, body = %s", roundResponse.Code, roundResponse.Body.String())
-	}
-	var round runtime.ParticipationRoundResult
-	if err := json.NewDecoder(roundResponse.Body).Decode(&round); err != nil {
+	round, err := runtime.NewConversationService(store).CommitConversationRouting(t.Context(), runtime.CommitConversationRoutingRequest{
+		Scope: runtime.Scope{Kind: "tenant", ID: "one"}, ConversationID: conversation.ID, ExpectedRevision: 2,
+		TriggerMessageID: question.Message.ID, IdempotencyKey: "round-v1",
+		Responders: []runtime.ConversationResponder{{
+			Participant: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "developer"},
+			Addressed:   runtime.ConversationAddressedRouted, Reason: "owns the release",
+		}},
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(round.Messages) != 1 || len(round.Round.Arbitration.Decisions) != 2 {
-		t.Fatalf("round = %#v", round)
+	answerBody := `{
+		"scope":{"kind":"tenant","id":"one"},
+		"expectedRevision":3,
+		"sender":{"type":"agent","id":"developer"},
+		"intent":"answer",
+		"content":"It is ready and smoke evidence passed.",
+		"audience":{"kind":"channel"},
+		"replyToMessageId":"` + question.Message.ID + `",
+		"resolvesMessageId":"` + question.Message.ID + `"
+	}`
+	if answer := performAgentRunRequest(t, server.Handler(), http.MethodPost,
+		"/api/v1/conversations/"+conversation.ID+"/messages", answerBody, "answer-v1"); answer.Code != http.StatusCreated {
+		t.Fatalf("answer status = %d, body = %s", answer.Code, answer.Body.String())
 	}
 	messages := performAgentRunRequest(t, server.Handler(), http.MethodGet,
 		"/api/v1/conversations/"+conversation.ID+"/messages?scopeKind=tenant&scopeId=one", "", "")
@@ -92,7 +87,7 @@ func TestTeamChannelAPIExposesOnlyDurableNaturalChannelFacts(t *testing.T) {
 	}
 	audit := performAgentRunRequest(t, server.Handler(), http.MethodGet,
 		"/api/v1/conversations/"+conversation.ID+"/participation-rounds/"+round.Round.ID+"?scopeKind=tenant&scopeId=one", "", "")
-	if audit.Code != http.StatusOK || !strings.Contains(audit.Body.String(), `"requested_silence"`) {
+	if audit.Code != http.StatusOK || !strings.Contains(audit.Body.String(), `"owns the release"`) {
 		t.Fatalf("audit status = %d, body = %s", audit.Code, audit.Body.String())
 	}
 	changesResponse := performAgentRunRequest(t, server.Handler(), http.MethodGet,

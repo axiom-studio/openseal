@@ -19,7 +19,6 @@ type ConversationClient interface {
 	PostChannelMessage(context.Context, string, kernelapi.PostChannelMessageRequest, string) (*runtime.ChannelMessageCommitResult, error)
 	ListChannelMessages(context.Context, runtime.ChannelMessageFilter) ([]*runtime.ChannelMessage, error)
 	GetChannelMessage(context.Context, runtime.Scope, string, string) (*runtime.ChannelMessage, error)
-	CoordinateParticipation(context.Context, string, kernelapi.CoordinateParticipationRequest, string) (*runtime.ParticipationRoundResult, error)
 	GetParticipationRound(context.Context, runtime.Scope, string, string) (*runtime.ParticipationRoundResult, error)
 	ListParticipationRounds(context.Context, runtime.ParticipationRoundFilter) ([]*runtime.ParticipationRoundResult, error)
 	AdvanceConversationCursor(context.Context, string, kernelapi.AdvanceConversationCursorRequest) (*runtime.ConversationCursor, bool, error)
@@ -120,14 +119,6 @@ func (c *KernelHTTPClient) GetChannelMessage(ctx context.Context, scope runtime.
 	var result runtime.ChannelMessage
 	path := conversationPath(conversationID) + "/messages/" + url.PathEscape(strings.TrimSpace(messageID)) + "?" + scopeQuery(scope).Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (c *KernelHTTPClient) CoordinateParticipation(ctx context.Context, conversationID string, request kernelapi.CoordinateParticipationRequest, idempotencyKey string) (*runtime.ParticipationRoundResult, error) {
-	var result runtime.ParticipationRoundResult
-	if err := c.do(ctx, http.MethodPost, conversationPath(conversationID)+"/participation-rounds", request, idempotencyKey, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil

@@ -490,25 +490,22 @@ type (
 	ConversationCursor                   = runtime.ConversationCursor
 	ConversationPresenceState            = runtime.ConversationPresenceState
 	ConversationPresence                 = runtime.ConversationPresence
-	ParticipationSignals                 = runtime.ParticipationSignals
-	ParticipationProposal                = runtime.ParticipationProposal
-	ParticipationDisposition             = runtime.ParticipationDisposition
-	ParticipationReason                  = runtime.ParticipationReason
-	ParticipationDecision                = runtime.ParticipationDecision
-	ConversationParticipationPolicy      = runtime.ConversationParticipationPolicy
-	ConversationArbitrationPolicy        = runtime.ConversationArbitrationPolicy
-	ConversationArbitration              = runtime.ConversationArbitration
+	ConversationAddressing               = runtime.ConversationAddressing
+	ConversationResponder                = runtime.ConversationResponder
+	ConversationRouter                   = runtime.ConversationRouter
+	ConversationRouterFunc               = runtime.ConversationRouterFunc
+	ConversationRouteRequest             = runtime.ConversationRouteRequest
+	ConversationRouteDecision            = runtime.ConversationRouteDecision
+	RouteMember                          = runtime.RouteMember
+	ConversationRoutingRequest           = runtime.ConversationRoutingRequest
+	CommitConversationRoutingRequest     = runtime.CommitConversationRoutingRequest
 	ParticipationRoundStatus             = runtime.ParticipationRoundStatus
 	ParticipationRound                   = runtime.ParticipationRound
 	ConversationParticipantBinding       = runtime.ConversationParticipantBinding
 	ConversationParticipantQuery         = runtime.ConversationParticipantQuery
 	ConversationParticipantSource        = runtime.ConversationParticipantSource
 	ConversationParticipantSourceFunc    = runtime.ConversationParticipantSourceFunc
-	ParticipationProposalContext         = runtime.ParticipationProposalContext
 	ConversationCompactionRequest        = runtime.ConversationCompactionRequest
-	ParticipationProposalProvider        = runtime.ParticipationProposalProvider
-	ParticipationProposalProviderFunc    = runtime.ParticipationProposalProviderFunc
-	ConversationCoordinationRequest      = runtime.ConversationCoordinationRequest
 	ConversationCoordinatorConfig        = runtime.ConversationCoordinatorConfig
 	ConversationRunSchedulerConfig       = runtime.ConversationRunSchedulerConfig
 	ConversationRunTurnRunnerConfig      = runtime.ConversationRunTurnRunnerConfig
@@ -535,7 +532,6 @@ type (
 	PostChannelMessageRequest            = runtime.PostChannelMessageRequest
 	ChannelMessageFilter                 = runtime.ChannelMessageFilter
 	ConversationViewer                   = runtime.ConversationViewer
-	CoordinateParticipationRequest       = runtime.CoordinateParticipationRequest
 	ParticipationRoundFilter             = runtime.ParticipationRoundFilter
 	AdvanceConversationCursorRequest     = runtime.AdvanceConversationCursorRequest
 	SetConversationPresenceRequest       = runtime.SetConversationPresenceRequest
@@ -1834,32 +1830,8 @@ func EvaluateBudget(policy BudgetPolicy, usage BudgetUsage) (BudgetState, []stri
 	return runtime.EvaluateBudget(policy, usage)
 }
 
-func DefaultConversationArbitrationPolicy() runtime.ConversationArbitrationPolicy {
-	return runtime.DefaultConversationArbitrationPolicy()
-}
-
-func DefaultConversationParticipationPolicy() runtime.ConversationParticipationPolicy {
-	return runtime.DefaultConversationParticipationPolicy()
-}
-
-// Metered participation contracts expose host-reported usage to durable Runs.
-type (
-	ParticipationProposalBudget              = runtime.ParticipationProposalBudget
-	MeteredParticipationProposal             = runtime.MeteredParticipationProposal
-	MeteredParticipationProposalProvider     = runtime.MeteredParticipationProposalProvider
-	MeteredParticipationProposalProviderFunc = runtime.MeteredParticipationProposalProviderFunc
-)
-
 func DefaultConversationCoordinatorConfig() runtime.ConversationCoordinatorConfig {
 	return runtime.DefaultConversationCoordinatorConfig()
-}
-
-func ArbitrateParticipation(roundID string, proposals []runtime.ParticipationProposal, recent []*runtime.ChannelMessage, policy runtime.ConversationArbitrationPolicy) (*runtime.ConversationArbitration, error) {
-	return runtime.ArbitrateParticipation(roundID, proposals, recent, policy)
-}
-
-func ConversationMessageFingerprint(content string) string {
-	return runtime.ConversationMessageFingerprint(content)
 }
 
 // NewPostgresStore opens the production-grade shared persistence adapter and
@@ -2205,6 +2177,7 @@ const (
 	ConversationAudienceChannel      = runtime.ConversationAudienceChannel
 	ConversationAudienceParticipants = runtime.ConversationAudienceParticipants
 	ConversationAudienceRoles        = runtime.ConversationAudienceRoles
+	ConversationAudienceEveryone     = runtime.ConversationAudienceEveryone
 
 	ConversationReferenceObjective      = runtime.ConversationReferenceObjective
 	ConversationReferenceAgentControl   = runtime.ConversationReferenceAgentControl
@@ -2232,27 +2205,11 @@ const (
 	ConversationPresenceThinking = runtime.ConversationPresenceThinking
 	ConversationPresenceWorking  = runtime.ConversationPresenceWorking
 
-	ParticipationSpeak    = runtime.ParticipationSpeak
-	ParticipationSilent   = runtime.ParticipationSilent
-	ParticipationDeferred = runtime.ParticipationDeferred
-
-	ParticipationReasonDirectMention        = runtime.ParticipationReasonDirectMention
-	ParticipationReasonAnswersQuestion      = runtime.ParticipationReasonAnswersQuestion
-	ParticipationReasonNewInformation       = runtime.ParticipationReasonNewInformation
-	ParticipationReasonRoleRelevant         = runtime.ParticipationReasonRoleRelevant
-	ParticipationReasonEvidenceBacked       = runtime.ParticipationReasonEvidenceBacked
-	ParticipationReasonResolvesWork         = runtime.ParticipationReasonResolvesWork
-	ParticipationReasonCoordinatesWork      = runtime.ParticipationReasonCoordinatesWork
-	ParticipationReasonSubstantiveObjection = runtime.ParticipationReasonSubstantiveObjection
-	ParticipationReasonRequestedSilence     = runtime.ParticipationReasonRequestedSilence
-	ParticipationReasonNoNewInformation     = runtime.ParticipationReasonNoNewInformation
-	ParticipationReasonLowRelevance         = runtime.ParticipationReasonLowRelevance
-	ParticipationReasonDuplicate            = runtime.ParticipationReasonDuplicate
-	ParticipationReasonBackpressure         = runtime.ParticipationReasonBackpressure
-	ParticipationReasonAcknowledgmentOnly   = runtime.ParticipationReasonAcknowledgmentOnly
-	ParticipationReasonNotAddressed         = runtime.ParticipationReasonNotAddressed
-	ParticipationReasonQuietByDefault       = runtime.ParticipationReasonQuietByDefault
-	ParticipationReasonRoleNotRelevant      = runtime.ParticipationReasonRoleNotRelevant
+	ConversationAddressedMention  = runtime.ConversationAddressedMention
+	ConversationAddressedEveryone = runtime.ConversationAddressedEveryone
+	ConversationAddressedReply    = runtime.ConversationAddressedReply
+	ConversationAddressedRole     = runtime.ConversationAddressedRole
+	ConversationAddressedRouted   = runtime.ConversationAddressedRouted
 
 	ParticipationRoundCommitted = runtime.ParticipationRoundCommitted
 
@@ -2606,7 +2563,7 @@ type Engine struct {
 	embeds                        *runtime.EmbedSessionService
 	conversationCoordinator       *runtime.ConversationCoordinator
 	conversationParticipants      runtime.ConversationParticipantSource
-	participationProposals        runtime.ParticipationProposalProvider
+	conversationRouter            runtime.ConversationRouter
 	conversationCoordinatorConfig runtime.ConversationCoordinatorConfig
 	conversationRunScheduler      *runtime.ConversationRunScheduler
 	conversationRunReconciler     *runtime.ConversationRunReconciler
@@ -3053,17 +3010,17 @@ func WithPersistentStore(store PersistentKernelStore) Option {
 	return WithStore(store)
 }
 
-// WithConversationCoordinator connects portable channel arbitration to a
-// host's authorized Agent roster and proposal runtime. The host keeps tenant,
-// credential, model, and deployment concerns behind these interfaces.
+// WithConversationCoordinator connects Team channel routing to a host's
+// authorized Agent roster and its router. The host keeps tenant, credential,
+// model, and deployment concerns behind these interfaces.
 func WithConversationCoordinator(
 	participants runtime.ConversationParticipantSource,
-	proposals runtime.ParticipationProposalProvider,
+	router runtime.ConversationRouter,
 	config runtime.ConversationCoordinatorConfig,
 ) Option {
 	return func(e *Engine) error {
 		e.conversationParticipants = participants
-		e.participationProposals = proposals
+		e.conversationRouter = router
 		e.conversationCoordinatorConfig = config
 		return nil
 	}
@@ -3105,11 +3062,11 @@ func WithExternalConversationTransport(
 
 func (e *Engine) rebuildConversationCoordinator() error {
 	e.conversationCoordinator = nil
-	if e.conversationParticipants == nil && e.participationProposals == nil {
+	if e.conversationParticipants == nil && e.conversationRouter == nil {
 		return nil
 	}
 	coordinator, err := runtime.NewConversationCoordinator(
-		e.conversations, e.conversationParticipants, e.participationProposals, e.conversationCoordinatorConfig,
+		e.conversations, e.conversationParticipants, e.conversationRouter, e.conversationCoordinatorConfig,
 	)
 	if err != nil {
 		return err
@@ -3167,6 +3124,18 @@ func (e *Engine) rebuildConversationRuns() error {
 	}
 	e.conversationRunScheduler = scheduler
 	e.conversationRunReconciler = reconciler
+	// Team members answer in child agent_work Runs; whichever agent_work
+	// workers claim them must run them through the conversation runner.
+	for index := range e.agentSupervisorSpecs {
+		if e.agentSupervisorSpecs[index].config.Kind == "" || e.agentSupervisorSpecs[index].config.Kind == runtime.RunKindAgentWork {
+			e.agentSupervisorSpecs[index].resolver = runtime.TeamResponderTurnResolver(runner, e.agentSupervisorSpecs[index].resolver)
+		}
+	}
+	for index := range e.agentPoolSpecs {
+		if e.agentPoolSpecs[index].config.Kind == "" || e.agentPoolSpecs[index].config.Kind == runtime.RunKindAgentWork {
+			e.agentPoolSpecs[index].resolver = runtime.TeamResponderTurnResolver(runner, e.agentPoolSpecs[index].resolver)
+		}
+	}
 	e.agentSupervisorSpecs = append(e.agentSupervisorSpecs, agentRunWorkerSupervisorSpec{
 		config: config.Workers, source: e.conversationRunScopes, resolver: runner,
 	})
@@ -4845,24 +4814,6 @@ func (e *Engine) ListConversationChanges(ctx context.Context, request runtime.Co
 // projections can be served by the configured persistent kernel store.
 func (e *Engine) ConversationChangesAvailable() bool {
 	return e != nil && e.conversationChanges != nil
-}
-
-func (e *Engine) CoordinateParticipation(ctx context.Context, request runtime.CoordinateParticipationRequest) (*runtime.ParticipationRoundResult, error) {
-	if e.conversations == nil {
-		return nil, fmt.Errorf("conversation store is not configured")
-	}
-	return e.conversations.CoordinateParticipation(ctx, request)
-}
-
-// CoordinateConversation asks every eligible Agent for a bounded proposal,
-// persists truthful working/read state, and atomically commits deterministic
-// arbitration. It is available only when the embedding host configured the
-// participant and proposal boundaries.
-func (e *Engine) CoordinateConversation(ctx context.Context, request runtime.ConversationCoordinationRequest) (*runtime.ParticipationRoundResult, error) {
-	if e.conversationCoordinator == nil {
-		return nil, runtime.ErrConversationCoordinationUnavailable
-	}
-	return e.conversationCoordinator.Coordinate(ctx, request)
 }
 
 func (e *Engine) ConversationCoordinationAvailable() bool {
