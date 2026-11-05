@@ -1981,6 +1981,7 @@ const (
 	TeamManagementSkillID           = runtime.TeamManagementSkillID
 	TeamManagementSkillVersion      = runtime.TeamManagementSkillVersion
 	TeamActionUpdateRole            = runtime.TeamActionUpdateRole
+	TeamActionUpdateProfile         = runtime.TeamActionUpdateProfile
 	SkillManagementSkillID          = runtime.SkillManagementSkillID
 	SkillManagementSkillVersion     = runtime.SkillManagementSkillVersion
 	SkillActionDiscover             = runtime.SkillActionDiscoverBinding

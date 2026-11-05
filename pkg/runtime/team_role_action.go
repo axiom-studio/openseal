@@ -17,8 +17,9 @@ import (
 
 const (
 	TeamManagementSkillID      = "openseal.teams"
-	TeamManagementSkillVersion = "1.0.0"
+	TeamManagementSkillVersion = "2.0.0"
 	TeamActionUpdateRole       = "update_role"
+	TeamActionUpdateProfile    = "update_profile"
 	TeamManagementEndpoint     = "kernel://teams"
 )
 
@@ -28,9 +29,38 @@ const (
 func TeamManagementSkill() *skill.Definition {
 	return &skill.Definition{
 		ID: TeamManagementSkillID, Version: TeamManagementSkillVersion,
-		Name: "Teams", Description: "Propose governed changes to the current Team's role behavior.",
+		Name: "Teams", Description: "Propose governed changes to the current Team's profile and role behavior.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: TeamManagementEndpoint},
 		Actions: map[string]skill.Action{
+			TeamActionUpdateProfile: {
+				Name:        TeamActionUpdateProfile,
+				Description: "Change the current Team's name or description when the user asks the Team to rename or describe itself. Supply only the changed fields; each replaces the current value in full. The user approves the change before it applies.",
+				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
+				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
+				InputSchema: map[string]interface{}{
+					"type": "object", "additionalProperties": false,
+					"properties": map[string]interface{}{
+						"displayName": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 120},
+						"purpose":     map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 2000},
+						"rationale":   map[string]interface{}{"type": "string", "minLength": 1},
+					},
+					"required": []interface{}{"rationale"},
+					"anyOf": []interface{}{
+						map[string]interface{}{"required": []interface{}{"displayName"}},
+						map[string]interface{}{"required": []interface{}{"purpose"}},
+					},
+				},
+				OutputSchema: map[string]interface{}{
+					"type": "object", "additionalProperties": false,
+					"properties": map[string]interface{}{
+						"resourceType": map[string]interface{}{"type": "string", "const": "team"},
+						"operation":    map[string]interface{}{"type": "string", "const": TeamActionUpdateProfile},
+						"deployment":   map[string]interface{}{"type": "object"},
+						"definition":   map[string]interface{}{"type": "object"},
+					},
+					"required": []interface{}{"resourceType", "operation", "deployment", "definition"},
+				},
+			},
 			TeamActionUpdateRole: {
 				Name:        TeamActionUpdateRole,
 				Description: "Propose changing one role's channel participation or purpose. The kernel creates and activates a new immutable Team definition after required approval.",

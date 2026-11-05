@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -218,7 +219,28 @@ func resolveTeamSkillAuthority(ctx context.Context, catalog TeamSkillAuthorityCa
 	for _, grant := range role.SkillGrants {
 		grants[grant.ExactIdentity().Key()] = grant
 	}
+	grantTeamProfileToMember(grants)
 	return &teamSkillAuthority{deployment: deployment, definition: definition, agent: agentDeployment, agentDefinition: agentDefinition, assignment: *assignment, grants: grants}, nil
+}
+
+// grantTeamProfileToMember lets every roster member propose a change to its
+// own Team's name and description, the way every Agent may propose changes
+// to its own profile. The action is always reviewed, so the change applies
+// only after a person approves it; allowlists and risk bounds still apply.
+func grantTeamProfileToMember(grants map[string]kernelteam.RoleSkillGrant) {
+	grant := kernelteam.RoleSkillGrant{SkillID: TeamManagementSkillID, SkillVersion: TeamManagementSkillVersion}
+	key := grant.ExactIdentity().Key()
+	if existing, ok := grants[key]; ok {
+		grant = existing
+		grant.AllowedActions = append([]string(nil), existing.AllowedActions...)
+	}
+	if !slices.Contains(grant.AllowedActions, TeamActionUpdateProfile) {
+		grant.AllowedActions = append(grant.AllowedActions, TeamActionUpdateProfile)
+	}
+	if grant.MaximumRisk == "" || teamSkillRiskRank(grant.MaximumRisk) < teamSkillRiskRank(capability.RiskLevelWrite) {
+		grant.MaximumRisk = capability.RiskLevelWrite
+	}
+	grants[key] = grant
 }
 
 func (a *teamSkillAuthority) skillAllowed(grant kernelteam.RoleSkillGrant, skillID string) bool {

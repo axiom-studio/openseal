@@ -215,3 +215,44 @@ func teamSkillAuthorityFixture(scope Scope) teamSkillAuthorityCatalogStub {
 		},
 	}
 }
+
+func TestTeamSkillAuthorityLetsEveryMemberProposeTheTeamProfile(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "one"}
+	catalog := teamSkillAuthorityFixture(scope)
+	catalog.agentDefinition.Authority.AllowedSkillIDs = nil
+	catalog.deployment.Restrictions.AllowedSkillIDs = nil
+	run := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research"}, AssignedAgentID: "analyst"}
+	snapshot := &skill.ActivationSnapshot{
+		SnapshotID: "base", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research",
+		Skills: []skill.ActivatedSkill{{
+			BindingID: "bundled:teams", BindingRevision: 1, SkillID: TeamManagementSkillID, SkillVersion: TeamManagementSkillVersion,
+			Actions: []capability.ModelAction{
+				{Name: "teams.update_profile", SkillID: TeamManagementSkillID, Version: TeamManagementSkillVersion, Action: TeamActionUpdateProfile, Risk: capability.RiskLevelWrite},
+				{Name: "teams.update_role", SkillID: TeamManagementSkillID, Version: TeamManagementSkillVersion, Action: TeamActionUpdateRole, Risk: capability.RiskLevelWrite},
+			},
+		}},
+	}
+	projected, err := AuthorizeTeamSkillActivation(t.Context(), catalog, run, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projected.Skills) != 1 || len(projected.Skills[0].Actions) != 1 || projected.Skills[0].Actions[0].Action != TeamActionUpdateProfile {
+		t.Fatalf("a member without a role grant must get only update_profile: %#v", projected.Skills)
+	}
+
+	validator, err := NewTeamSkillActionValidator(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound := &skill.BoundAction{
+		Binding: &skill.Binding{Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research", SkillID: TeamManagementSkillID, SkillVersion: TeamManagementSkillVersion},
+		Action:  capability.Action{Name: TeamActionUpdateProfile, Risk: capability.RiskLevelWrite},
+	}
+	if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound}); err != nil {
+		t.Fatalf("member profile proposal rejected: %v", err)
+	}
+	catalog.deployment.Restrictions.AllowedSkillIDs = []string{"forum"}
+	if _, err := validator.ValidateActionProposal(t.Context(), ActionProposalValidationInput{Run: run, Bound: bound}); err == nil {
+		t.Fatal("a Team allowlist without openseal.teams must still block the profile action")
+	}
+}
