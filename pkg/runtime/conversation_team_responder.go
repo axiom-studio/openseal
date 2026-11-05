@@ -81,9 +81,28 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 		}
 		return r.retryOutcome(run, err)
 	}
+	// A member already answering this person takes the message as a follow-up,
+	// like a 1:1 chat's active Run; nobody's work is interrupted.
+	followUps := &ConversationRunScheduler{conversations: r.conversations, runs: r.runs, approvals: NewApprovalCoordinator(r.runs.store, r.runs.store, nil)}
+	root, _ := run.Context["threadRootMessageId"].(string)
 	runIDs := make([]interface{}, 0, len(result.Round.Responders))
 	for _, responder := range result.Round.Responders {
-		created, err := r.runs.CreateAgentRun(ctx, teamMemberRunRequest(run, conversation, trigger, responder, childKey(responder.Participant)))
+		key := childKey(responder.Participant)
+		existing, err := r.runs.store.GetAgentRun(ctx, run.Scope, runIDForIdempotencyKey(run.Scope, key))
+		if err != nil {
+			return nil, err
+		}
+		if existing == nil {
+			delivered, err := followUps.deliverToConversationLane(ctx, conversation, trigger, conversationRunLane(conversation.ID, root, responder.Participant.ID))
+			if err != nil {
+				return nil, err
+			}
+			if delivered != nil {
+				runIDs = append(runIDs, delivered.Run.ID)
+				continue
+			}
+		}
+		created, err := r.runs.CreateAgentRun(ctx, teamMemberRunRequest(run, conversation, trigger, responder, key))
 		if err != nil {
 			return nil, err
 		}
