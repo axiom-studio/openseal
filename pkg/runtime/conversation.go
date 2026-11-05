@@ -331,9 +331,12 @@ type ChannelMessage struct {
 	Audience        ConversationAudience `json:"audience"`
 	// StartsThread marks a host-created thread root without turning that root
 	// into a reply. It affects conversation routing, never sender authority.
-	StartsThread         bool                      `json:"startsThread,omitempty"`
-	ThreadRootID         string                    `json:"threadRootId,omitempty"`
-	ReplyToMessageID     string                    `json:"replyToMessageId,omitempty"`
+	StartsThread     bool   `json:"startsThread,omitempty"`
+	ThreadRootID     string `json:"threadRootId,omitempty"`
+	ReplyToMessageID string `json:"replyToMessageId,omitempty"`
+	// Quote shows the earlier message this one answers, like a chat-app reply.
+	// It never changes thread placement; ReplyToMessageID does that.
+	Quote                *ChannelMessageQuote      `json:"quote,omitempty"`
 	BroadcastToChannel   bool                      `json:"broadcastToChannel,omitempty"`
 	Mentions             []ConversationParticipant `json:"mentions,omitempty"`
 	References           []ConversationReference   `json:"references,omitempty"`
@@ -344,6 +347,66 @@ type ChannelMessage struct {
 	ParticipationRoundID string                    `json:"participationRoundId,omitempty"`
 	Historical           bool                      `json:"historical,omitempty"`
 	CreatedAt            time.Time                 `json:"createdAt"`
+}
+
+// ChannelMessageQuote is a snapshot of a quoted message taken when the reply
+// is posted. Readers who cannot see the quoted message get only MessageID and
+// Unavailable, never its sender or excerpt.
+type ChannelMessageQuote struct {
+	MessageID         string                   `json:"messageId"`
+	Sender            *ConversationParticipant `json:"sender,omitempty"`
+	SenderDisplayName string                   `json:"senderDisplayName,omitempty"`
+	Excerpt           string                   `json:"excerpt,omitempty"`
+	Unavailable       bool                     `json:"unavailable,omitempty"`
+}
+
+const channelMessageQuoteExcerptRunes = 200
+
+func newChannelMessageQuote(message *ChannelMessage) *ChannelMessageQuote {
+	sender := message.Sender
+	excerpt := strings.Join(strings.Fields(message.Content), " ")
+	if runes := []rune(excerpt); len(runes) > channelMessageQuoteExcerptRunes {
+		excerpt = strings.TrimSpace(string(runes[:channelMessageQuoteExcerptRunes])) + "\u2026"
+	}
+	return &ChannelMessageQuote{MessageID: message.ID, Sender: &sender, SenderDisplayName: message.SenderDisplayName, Excerpt: excerpt}
+}
+
+func (q *ChannelMessageQuote) unavailable() *ChannelMessageQuote {
+	return &ChannelMessageQuote{MessageID: q.MessageID, Unavailable: true}
+}
+
+func (q *ChannelMessageQuote) validate(messageID string) error {
+	if q == nil {
+		return nil
+	}
+	if !validOpaqueIdentifier(q.MessageID, 128) || q.MessageID == messageID {
+		return fmt.Errorf("%w: a quote must name another portable message id", ErrInvalidConversation)
+	}
+	if q.Unavailable {
+		if q.Sender != nil || q.SenderDisplayName != "" || q.Excerpt != "" {
+			return fmt.Errorf("%w: an unavailable quote cannot carry its sender or excerpt", ErrInvalidConversation)
+		}
+		return nil
+	}
+	if q.Sender == nil {
+		return fmt.Errorf("%w: a quote requires its sender", ErrInvalidConversation)
+	}
+	if err := q.Sender.Validate(); err != nil {
+		return err
+	}
+	if len(q.SenderDisplayName) > 160 || len(q.Excerpt) > 1024 {
+		return fmt.Errorf("%w: quote sender name or excerpt is too long", ErrInvalidConversation)
+	}
+	return nil
+}
+
+func cloneChannelMessageQuote(in *ChannelMessageQuote) *ChannelMessageQuote {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Sender = cloneConversationParticipant(in.Sender)
+	return &out
 }
 
 func (m *ChannelMessage) Validate() error {
@@ -386,6 +449,9 @@ func (m *ChannelMessage) Validate() error {
 		if id != "" && !validOpaqueIdentifier(id, 128) {
 			return fmt.Errorf("%w: linked message and round ids must be portable", ErrInvalidConversation)
 		}
+	}
+	if err := m.Quote.validate(m.ID); err != nil {
+		return err
 	}
 	if m.BroadcastToChannel && m.ThreadRootID == "" {
 		return fmt.Errorf("%w: only a thread reply can be broadcast to its channel", ErrInvalidConversation)

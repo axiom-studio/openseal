@@ -487,6 +487,7 @@ type (
 	ImportConversationArchiveRequest     = runtime.ImportConversationArchiveRequest
 	ConversationArchiveImportResult      = runtime.ConversationArchiveImportResult
 	ChannelMessage                       = runtime.ChannelMessage
+	ChannelMessageQuote                  = runtime.ChannelMessageQuote
 	ConversationCursor                   = runtime.ConversationCursor
 	ConversationPresenceState            = runtime.ConversationPresenceState
 	ConversationPresence                 = runtime.ConversationPresence

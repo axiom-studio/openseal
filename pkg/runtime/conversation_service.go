@@ -56,8 +56,10 @@ type PostChannelMessageRequest struct {
 	Audience          ConversationAudience
 	// StartThread is a host option. The canonical root remains in the channel
 	// timeline while its responses are routed to its own durable thread.
-	StartThread         bool `json:"-"`
-	ReplyToMessageID    string
+	StartThread      bool `json:"-"`
+	ReplyToMessageID string
+	// QuotedMessageID shows an earlier message of this conversation as a quote.
+	QuotedMessageID     string
 	BroadcastToChannel  bool
 	Mentions            []ConversationParticipant
 	References          []ConversationReference
@@ -358,6 +360,14 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	if err != nil {
 		return nil, err
 	}
+	quotedID, err := s.answerQuoteID(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	quote, err := s.resolveQuote(ctx, req.Scope, conversation.ID, quotedID)
+	if err != nil {
+		return nil, err
+	}
 	if req.StartThread {
 		threadRootID = ""
 	}
@@ -382,7 +392,7 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 		Initiator:      cloneConversationParticipant(req.Initiator),
 		ExternalSource: cloneExternalMessageSource(req.ExternalSource),
 		Intent:         req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
-		StartsThread: req.StartThread, ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), BroadcastToChannel: req.BroadcastToChannel,
+		StartsThread: req.StartThread, ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), Quote: quote, BroadcastToChannel: req.BroadcastToChannel,
 		Mentions:   cloneParticipants(req.Mentions),
 		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
 		ResolvesMessageID: strings.TrimSpace(req.ResolvesMessageID), SupersedesMessageID: strings.TrimSpace(req.SupersedesMessageID),
@@ -488,13 +498,21 @@ func (s *ConversationService) CoordinateParticipation(ctx context.Context, req C
 		if err != nil {
 			return nil, err
 		}
+		quotedID := proposal.QuotedMessageID
+		if quotedID == "" && proposal.ReplyToMessageID != "" && answerNeedsQuote(proposal.ReplyToMessageID, proposal.Participant, recent) {
+			quotedID = proposal.ReplyToMessageID
+		}
+		quote, err := s.resolveQuote(ctx, req.Scope, conversation.ID, quotedID)
+		if err != nil {
+			return nil, err
+		}
 		sequence++
 		message := &ChannelMessage{
 			ID: stableConversationID(req.Scope, key, "speaker:"+proposal.ID), Scope: req.Scope, ConversationID: conversation.ID,
 			Sequence: sequence, Sender: proposal.Participant, Intent: proposal.Intent, Content: strings.TrimSpace(proposal.Content),
 			ContributionKey: proposal.ContributionKey,
 			ResponseMode:    responseMode,
-			Audience:        proposal.Audience, ThreadRootID: threadRootID, ReplyToMessageID: proposal.ReplyToMessageID,
+			Audience:        proposal.Audience, ThreadRootID: threadRootID, ReplyToMessageID: proposal.ReplyToMessageID, Quote: quote,
 			BroadcastToChannel: proposal.BroadcastToChannel,
 			Mentions:           cloneParticipants(proposal.Mentions), References: cloneConversationReferences(proposal.References),
 			RequiresResponse: proposal.RequiresResponse, ResolvesMessageID: proposal.ResolvesMessageID,
@@ -580,6 +598,57 @@ func validateChannelMessageViewFilter(filter ChannelMessageFilter) error {
 }
 
 func (s *ConversationService) filterVisibleChannelMessages(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
+	visible, err := s.filterVisibleChannelMessageParents(ctx, scope, conversationID, messages, viewer)
+	if err != nil {
+		return nil, err
+	}
+	return s.redactUnviewableQuotes(ctx, scope, conversationID, visible, viewer)
+}
+
+// redactUnviewableQuotes keeps a quote's sender and excerpt only for viewers
+// who can see the quoted message itself.
+func (s *ConversationService) redactUnviewableQuotes(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
+	ids := make([]string, 0)
+	for _, message := range messages {
+		if message != nil && message.Quote != nil && !message.Quote.Unavailable {
+			ids = append(ids, message.Quote.MessageID)
+		}
+	}
+	if len(ids) == 0 {
+		return messages, nil
+	}
+	quoted := make(map[string]*ChannelMessage, len(ids))
+	if batch, ok := s.store.(ChannelMessageBatchStore); ok {
+		loaded, err := loadChannelMessageBatches(ctx, batch, scope, conversationID, ids)
+		if err != nil {
+			return nil, err
+		}
+		quoted = loaded
+	} else {
+		for _, id := range ids {
+			if _, seen := quoted[id]; seen {
+				continue
+			}
+			message, err := s.store.GetChannelMessage(ctx, scope, conversationID, id)
+			if err != nil {
+				return nil, err
+			}
+			quoted[id] = message
+		}
+	}
+	out := make([]*ChannelMessage, len(messages))
+	for i, message := range messages {
+		out[i] = message
+		if message != nil && message.Quote != nil && !message.Quote.Unavailable && !CanViewChannelMessage(quoted[message.Quote.MessageID], viewer) {
+			redacted := cloneChannelMessage(message)
+			redacted.Quote = message.Quote.unavailable()
+			out[i] = redacted
+		}
+	}
+	return out, nil
+}
+
+func (s *ConversationService) filterVisibleChannelMessageParents(ctx context.Context, scope Scope, conversationID string, messages []*ChannelMessage, viewer ConversationViewer) ([]*ChannelMessage, error) {
 	if err := viewer.Validate(); err != nil {
 		return nil, err
 	}
@@ -812,6 +881,84 @@ func (s *ConversationService) resolveThreadRoot(ctx context.Context, scope Scope
 	return message.ID, nil
 }
 
+func (s *ConversationService) resolveQuote(ctx context.Context, scope Scope, conversationID, quotedID string) (*ChannelMessageQuote, error) {
+	quotedID = strings.TrimSpace(quotedID)
+	if quotedID == "" {
+		return nil, nil
+	}
+	message, err := s.store.GetChannelMessage(ctx, scope, conversationID, quotedID)
+	if err != nil {
+		return nil, err
+	}
+	if message == nil {
+		return nil, ErrMessageConflict
+	}
+	return newChannelMessageQuote(message), nil
+}
+
+// answerQuoteID returns the explicit quote, or quotes the message an Agent or
+// Team is answering when that answer would otherwise read out of order.
+func (s *ConversationService) answerQuoteID(ctx context.Context, req PostChannelMessageRequest) (string, error) {
+	if quoted := strings.TrimSpace(req.QuotedMessageID); quoted != "" {
+		return quoted, nil
+	}
+	replyTo := strings.TrimSpace(req.ReplyToMessageID)
+	if replyTo == "" || req.Intent != MessageIntentAnswer ||
+		(req.Sender.Type != ConversationParticipantAgent && req.Sender.Type != ConversationParticipantTeam) {
+		return "", nil
+	}
+	recent, err := s.store.ListChannelMessages(ctx, ChannelMessageFilter{Scope: req.Scope, ConversationID: req.ConversationID, Limit: 50, Descending: true})
+	if err != nil {
+		return "", err
+	}
+	if answerNeedsQuote(replyTo, req.Sender, recent) {
+		return replyTo, nil
+	}
+	return "", nil
+}
+
+func quotedMessageID(quote *ChannelMessageQuote) string {
+	if quote == nil {
+		return ""
+	}
+	return quote.MessageID
+}
+
+// answerNeedsQuote reports whether an answer to triggerID would read out of
+// order: someone other than the answerer has already spoken after the trigger
+// in the same view (main chat or the same started thread). recent is newest first.
+func answerNeedsQuote(triggerID string, answerer ConversationParticipant, recent []*ChannelMessage) bool {
+	byID := make(map[string]*ChannelMessage, len(recent))
+	for _, message := range recent {
+		if message != nil {
+			byID[message.ID] = message
+		}
+	}
+	trigger := byID[triggerID]
+	if trigger == nil {
+		return false
+	}
+	view := func(message *ChannelMessage) string {
+		if message.StartsThread {
+			return ""
+		}
+		if root := byID[message.ThreadRootID]; root != nil && root.StartsThread {
+			return root.ID
+		}
+		return ""
+	}
+	triggerView := view(trigger)
+	for _, message := range recent {
+		if message == nil || message.Sequence <= trigger.Sequence {
+			continue
+		}
+		if message.Sender != answerer && message.Intent != MessageIntentSystem && message.Sender.Type != ConversationParticipantService && view(message) == triggerView {
+			return true
+		}
+	}
+	return false
+}
+
 func stableConversationID(scope Scope, key, suffix string) string {
 	seed := strings.Join([]string{"openseal", "conversation", scope.key(), strings.TrimSpace(key), strings.TrimSpace(suffix)}, ":")
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(seed)).String()
@@ -828,6 +975,7 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 		existing.Intent == req.Intent && existing.Content == strings.TrimSpace(req.Content) &&
 		existing.Audience.Kind == req.Audience.Kind && reflect.DeepEqual(existing.Audience.Participants, req.Audience.Participants) &&
 		reflect.DeepEqual(existing.Audience.Roles, req.Audience.Roles) && existing.ReplyToMessageID == strings.TrimSpace(req.ReplyToMessageID) &&
+		(strings.TrimSpace(req.QuotedMessageID) == "" || quotedMessageID(existing.Quote) == strings.TrimSpace(req.QuotedMessageID)) &&
 		existing.StartsThread == req.StartThread && existing.BroadcastToChannel == req.BroadcastToChannel &&
 		reflect.DeepEqual(existing.Mentions, req.Mentions) && reflect.DeepEqual(existing.References, req.References) &&
 		existing.RequiresResponse == req.RequiresResponse && existing.ResolvesMessageID == strings.TrimSpace(req.ResolvesMessageID) &&
@@ -883,6 +1031,7 @@ func cloneChannelMessage(in *ChannelMessage) *ChannelMessage {
 	out.Audience.Roles = append([]string(nil), in.Audience.Roles...)
 	out.Mentions = cloneParticipants(in.Mentions)
 	out.References = cloneConversationReferences(in.References)
+	out.Quote = cloneChannelMessageQuote(in.Quote)
 	return &out
 }
 

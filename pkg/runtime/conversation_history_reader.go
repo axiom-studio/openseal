@@ -27,6 +27,7 @@ type ConversationHistoryExcerpt struct {
 	CreatedAt        time.Time                 `json:"createdAt"`
 	Intent           ConversationMessageIntent `json:"intent"`
 	ReplyToMessageID string                    `json:"replyToMessageId,omitempty"`
+	Quote            *ChannelMessageQuote      `json:"quote,omitempty"`
 	ID               string                    `json:"id"`
 	Sequence         int64                     `json:"sequence"`
 	Sender           ConversationParticipant   `json:"sender"`
@@ -119,7 +120,7 @@ func ReadConversationHistory(ctx context.Context, store ConversationHistoryReadS
 		for end < len(message.Content) && !utf8.RuneStart(message.Content[end]) {
 			end--
 		}
-		excerpt := ConversationHistoryExcerpt{CreatedAt: message.CreatedAt, Intent: message.Intent, ReplyToMessageID: message.ReplyToMessageID, ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, Content: message.Content[start:end], OffsetBytes: start, References: append([]ConversationReference(nil), message.References...)}
+		excerpt := ConversationHistoryExcerpt{CreatedAt: message.CreatedAt, Intent: message.Intent, ReplyToMessageID: message.ReplyToMessageID, Quote: cloneChannelMessageQuote(message.Quote), ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, Content: message.Content[start:end], OffsetBytes: start, References: append([]ConversationReference(nil), message.References...)}
 		if end < len(message.Content) {
 			next := end
 			excerpt.NextOffsetBytes = &next

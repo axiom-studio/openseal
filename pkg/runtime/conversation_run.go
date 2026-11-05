@@ -1644,17 +1644,19 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 }
 
 type agentConversationPromptMessage struct {
-	ID                string                    `json:"id"`
-	Sequence          int64                     `json:"sequence"`
-	Sender            ConversationParticipant   `json:"sender"`
-	SenderDisplayName string                    `json:"senderDisplayName,omitempty"`
-	ExternalSource    *ExternalMessageSource    `json:"externalSource,omitempty"`
-	CreatedAt         time.Time                 `json:"createdAt"`
-	ReplyToMessageID  string                    `json:"replyToMessageId,omitempty"`
-	Historical        bool                      `json:"historical,omitempty"`
-	Intent            ConversationMessageIntent `json:"intent"`
-	Content           string                    `json:"content"`
-	References        []ConversationReference   `json:"references,omitempty"`
+	ID                string                  `json:"id"`
+	Sequence          int64                   `json:"sequence"`
+	Sender            ConversationParticipant `json:"sender"`
+	SenderDisplayName string                  `json:"senderDisplayName,omitempty"`
+	ExternalSource    *ExternalMessageSource  `json:"externalSource,omitempty"`
+	CreatedAt         time.Time               `json:"createdAt"`
+	ReplyToMessageID  string                  `json:"replyToMessageId,omitempty"`
+	// Quote is the earlier message the sender is answering, as they saw it.
+	Quote      *ChannelMessageQuote      `json:"quote,omitempty"`
+	Historical bool                      `json:"historical,omitempty"`
+	Intent     ConversationMessageIntent `json:"intent"`
+	Content    string                    `json:"content"`
+	References []ConversationReference   `json:"references,omitempty"`
 }
 
 type agentConversationObjective struct {
@@ -1737,7 +1739,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		Messages:  make([]agentConversationPromptMessage, 0, len(recent)),
 		CurrentMessage: agentConversationPromptMessage{
 			ID: trigger.ID, Sequence: trigger.Sequence, Sender: trigger.Sender,
-			SenderDisplayName: trigger.SenderDisplayName, ExternalSource: cloneExternalMessageSource(trigger.ExternalSource), CreatedAt: trigger.CreatedAt, ReplyToMessageID: trigger.ReplyToMessageID, Historical: trigger.Historical,
+			SenderDisplayName: trigger.SenderDisplayName, ExternalSource: cloneExternalMessageSource(trigger.ExternalSource), CreatedAt: trigger.CreatedAt, ReplyToMessageID: trigger.ReplyToMessageID, Quote: cloneChannelMessageQuote(trigger.Quote), Historical: trigger.Historical,
 			Intent: trigger.Intent, Content: trigger.Content,
 			References: append([]ConversationReference(nil), trigger.References...),
 		},
@@ -1758,7 +1760,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 			payload.FollowUpMessages = append(payload.FollowUpMessages, agentConversationPromptMessage{
 				ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, SenderDisplayName: message.SenderDisplayName,
 				ExternalSource: cloneExternalMessageSource(message.ExternalSource), CreatedAt: message.CreatedAt,
-				ReplyToMessageID: message.ReplyToMessageID, Intent: message.Intent, Content: message.Content,
+				ReplyToMessageID: message.ReplyToMessageID, Quote: cloneChannelMessageQuote(message.Quote), Intent: message.Intent, Content: message.Content,
 				References: cloneConversationReferences(message.References),
 			})
 		}
@@ -1766,7 +1768,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 			payload.ContextBackdrop = append(payload.ContextBackdrop, agentConversationPromptMessage{
 				ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, SenderDisplayName: message.SenderDisplayName,
 				ExternalSource: cloneExternalMessageSource(message.ExternalSource), CreatedAt: message.CreatedAt,
-				ReplyToMessageID: message.ReplyToMessageID, Historical: true, Intent: message.Intent, Content: message.Content,
+				ReplyToMessageID: message.ReplyToMessageID, Quote: cloneChannelMessageQuote(message.Quote), Historical: true, Intent: message.Intent, Content: message.Content,
 				References: cloneConversationReferences(message.References),
 			})
 		}
@@ -1878,7 +1880,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		}
 		payload.Messages = append(payload.Messages, agentConversationPromptMessage{
 			ID: message.ID, Sequence: message.Sequence, Sender: message.Sender,
-			SenderDisplayName: message.SenderDisplayName, ExternalSource: cloneExternalMessageSource(message.ExternalSource), CreatedAt: message.CreatedAt, ReplyToMessageID: message.ReplyToMessageID, Historical: message.Historical,
+			SenderDisplayName: message.SenderDisplayName, ExternalSource: cloneExternalMessageSource(message.ExternalSource), CreatedAt: message.CreatedAt, ReplyToMessageID: message.ReplyToMessageID, Quote: cloneChannelMessageQuote(message.Quote), Historical: message.Historical,
 			Intent: message.Intent, Content: message.Content,
 			References: append([]ConversationReference(nil), message.References...),
 		})

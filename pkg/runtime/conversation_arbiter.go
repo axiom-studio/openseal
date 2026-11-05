@@ -115,6 +115,7 @@ type ParticipationProposal struct {
 	Mentions           []ConversationParticipant `json:"mentions,omitempty"`
 	References         []ConversationReference   `json:"references,omitempty"`
 	ReplyToMessageID   string                    `json:"replyToMessageId,omitempty"`
+	QuotedMessageID    string                    `json:"quotedMessageId,omitempty"`
 	BroadcastToChannel bool                      `json:"broadcastToChannel,omitempty"`
 	RequiresResponse   bool                      `json:"requiresResponse,omitempty"`
 	ResolvesMessageID  string                    `json:"resolvesMessageId,omitempty"`

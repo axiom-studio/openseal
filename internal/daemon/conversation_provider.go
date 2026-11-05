@@ -50,13 +50,14 @@ type participationMessage struct {
 	Sender  runtime.ConversationParticipant   `json:"sender"`
 	Intent  runtime.ConversationMessageIntent `json:"intent"`
 	Content string                            `json:"content"`
+	Quote   *runtime.ChannelMessageQuote      `json:"quote,omitempty"`
 }
 
 func participationMessageInput(message *runtime.ChannelMessage) *participationMessage {
 	if message == nil {
 		return nil
 	}
-	return &participationMessage{ID: message.ID, Sender: message.Sender, Intent: message.Intent, Content: message.Content}
+	return &participationMessage{ID: message.ID, Sender: message.Sender, Intent: message.Intent, Content: message.Content, Quote: message.Quote}
 }
 
 func (p *DesktopParticipationProvider) ProposeParticipationWithUsage(ctx context.Context, input runtime.ParticipationProposalContext) (report runtime.MeteredParticipationProposal, resultErr error) {
