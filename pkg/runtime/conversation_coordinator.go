@@ -254,14 +254,6 @@ func (c *ConversationCoordinator) addressedResponders(ctx context.Context, conve
 		}
 		return responders, nil
 	}
-	// "Cove, can you…" names who answers just like @Cove does: a member named at the start of the
-	// message is addressed, whatever the rest of it is about.
-	if named, ok := namedAtStart(trigger.Content, loadConversationTeamRoster(ctx, c.conversations.store, conversation)); ok {
-		add(ConversationParticipant{Type: ConversationParticipantAgent, ID: named}, ConversationAddressedMention)
-		if len(responders) > 0 {
-			return responders, nil
-		}
-	}
 	for _, id := range []string{quotedMessageID(trigger.Quote), trigger.ReplyToMessageID} {
 		if id == "" {
 			continue
@@ -584,30 +576,4 @@ func reverseChannelMessages(messages []*ChannelMessage) {
 	for left, right := 0, len(messages)-1; left < right; left, right = left+1, right-1 {
 		messages[left], messages[right] = messages[right], messages[left]
 	}
-}
-
-// namedAtStart finds a Team member addressed by name at the start of a message
-// ("Cove, …", "hey Miso can you …", "@Cove …"). Only a whole-word name counts.
-func namedAtStart(content string, roster conversationTeamRoster) (string, bool) {
-	text := strings.ToLower(strings.TrimSpace(content))
-	for _, lead := range []string{"hey ", "hi ", "hello ", "ok ", "okay ", "so ", "and ", "@"} {
-		if strings.HasPrefix(text, lead) {
-			text = strings.TrimSpace(strings.TrimPrefix(text, lead))
-			break
-		}
-	}
-	best, bestLen := "", 0
-	for id, member := range roster.members {
-		name := strings.ToLower(strings.TrimSpace(member.name))
-		if name == "" || !strings.HasPrefix(text, name) || len(name) <= bestLen {
-			continue
-		}
-		if rest := text[len(name):]; rest != "" {
-			if r := rune(rest[0]); r == '_' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r >= 0x80 {
-				continue
-			}
-		}
-		best, bestLen = id, len(name)
-	}
-	return best, best != ""
 }
