@@ -25,7 +25,7 @@ func TestBuiltinAttachmentReadIsReferenceOnly(t *testing.T) {
 
 func TestBuiltinMakingActionsStayBounded(t *testing.T) {
 	d := SkillDefinition()
-	for _, name := range []string{GenerateImage, Present, CreatePDF, CreateSheet, SaveApp, PublishApp, SaveAppData} {
+	for _, name := range []string{GenerateImage, Present, SaveApp, PublishApp, SaveAppData} {
 		a, ok := d.Actions[name]
 		if !ok || a.InputSchema["additionalProperties"] != false || a.Retry.MaxAttempts != 1 || string(a.Idempotency) != "required" {
 			t.Fatalf("%s must have a closed input and no automatic retry", name)
@@ -46,7 +46,7 @@ func TestProfileImageActionIsBoundedSelfOnlyWrite(t *testing.T) {
 
 func TestAppDataReadAndPictureStyleActions(t *testing.T) {
 	d := SkillDefinition()
-	if d.Version != "2.5.1" {
+	if d.Version != "2.5.2" {
 		t.Fatalf("version = %s", d.Version)
 	}
 	read := d.Actions[ReadAppData]

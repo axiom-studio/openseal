@@ -22,14 +22,12 @@ func TestBoundedConversationArtifactsDoNotRequireApproval(t *testing.T) {
 		{"generated image", builtin.SkillDefinition(), builtin.GenerateImage, ActionDispositionAllow},
 		{"private app", builtin.SkillDefinition(), builtin.SaveApp, ActionDispositionAllow},
 		{"present files", builtin.SkillDefinition(), builtin.Present, ActionDispositionAllow},
-		{"sheet", builtin.SkillDefinition(), builtin.CreateSheet, ActionDispositionAllow},
 		{"app data", builtin.SkillDefinition(), builtin.SaveAppData, ActionDispositionAllow},
 		{"read app data", builtin.SkillDefinition(), builtin.ReadAppData, ActionDispositionAllow},
 		{"find place", builtin.SkillDefinition(), builtin.FindPlace, ActionDispositionAllow},
 		{"picture style", builtin.SkillDefinition(), builtin.SetImageStyle, ActionDispositionAllow},
 		{"update visual", presentation.SkillDefinition(), presentation.UpdateVisual, ActionDispositionAllow},
 		{"public app", builtin.SkillDefinition(), builtin.PublishApp, ActionDispositionRequireApproval},
-		{"PDF", builtin.SkillDefinition(), builtin.CreatePDF, ActionDispositionAllow},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			decision, policyErr := engine.evaluateAgentActionAuthority(t.Context(), ActionPolicyInput{

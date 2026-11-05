@@ -53,7 +53,6 @@ func TestHistoryContractValidatesForwardCursorAndRejectsForeignFields(t *testing
 
 func TestFileToolContractsTakePathsAndRejectForeignInput(t *testing.T) {
 	catalog, definition := builtinContractCatalog(t)
-	sheets := []interface{}{map[string]interface{}{"name": "Budget", "rows": []interface{}{[]interface{}{"Item", 12.5, true, nil}}}}
 	cases := []struct {
 		name   string
 		action string
@@ -102,10 +101,6 @@ func TestFileToolContractsTakePathsAndRejectForeignInput(t *testing.T) {
 			}
 			return stops
 		}()}, false},
-		{"pdf", CreatePDF, map[string]interface{}{"path": "docs/brief.pdf", "blocks": []interface{}{map[string]interface{}{"kind": "image", "path": "images/seal.png"}}}, true},
-		{"pdf with a revision id", CreatePDF, map[string]interface{}{"path": "docs/brief.pdf", "documentId": "brief"}, false},
-		{"sheet", CreateSheet, map[string]interface{}{"path": "sheets/budget.xlsx", "sheets": sheets}, true},
-		{"sheet without a path", CreateSheet, map[string]interface{}{"sheets": sheets}, false},
 	}
 	for _, tc := range cases {
 		err := catalog.ValidateDefinitionInput(t.Context(), definition.ID, definition.Version, skill.DefinitionSourceIdentity(definition), tc.action, tc.input)
