@@ -94,14 +94,7 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 	if root, _ := run.Context["threadRootMessageId"].(string); root != expectedRoot {
 		return ErrInvalidAgentRun
 	}
-	agentID := strings.TrimSpace(run.AssignedAgentID)
-	if run.Owner.Type == OwnerTypeAgent {
-		if agentID == "" {
-			agentID = run.Owner.ID
-		} else if agentID != run.Owner.ID {
-			return ErrInvalidAgentRun
-		}
-	}
+	agentID := ConversationRunAgentID(conversation, run)
 	if !validOpaqueIdentifier(agentID, 256) {
 		return ErrInvalidAgentRun
 	}

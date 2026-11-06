@@ -692,9 +692,6 @@ func skillActionAgentDeployment(run *AgentRun) (string, error) {
 	if deploymentID := strings.TrimSpace(run.AssignedAgentID); deploymentID != "" {
 		return deploymentID, nil
 	}
-	if run.Owner.Type == OwnerTypeAgent && strings.TrimSpace(run.Owner.ID) != "" {
-		return strings.TrimSpace(run.Owner.ID), nil
-	}
 	return "", errors.New("skill management requires a Run assigned to an Agent deployment")
 }
 

@@ -229,6 +229,9 @@ func (v *ProjectActionValidator) ValidateActionProposal(ctx context.Context, inp
 	if err := input.Run.Owner.Validate(); err != nil {
 		return nil, fmt.Errorf("project action run owner: %w", err)
 	}
+	if strings.TrimSpace(input.Run.AssignedAgentID) == "" {
+		return nil, errors.New("project action run has no assigned agent")
+	}
 	preview := map[string]interface{}{"resourceType": "project", "operation": input.Bound.Action.Name, "owner": input.Run.Owner, "changes": cloneMap(input.Arguments)}
 	service := NewProjectService(v.store, v.store)
 	if input.Bound.Action.Name == ProjectActionCreate {
@@ -310,11 +313,11 @@ func (d *ProjectActionDispatcher) DispatchAction(ctx context.Context, input Acti
 		}
 		return nil, err
 	}
+	if strings.TrimSpace(run.AssignedAgentID) == "" {
+		return nil, errors.New("project action run has no assigned agent")
+	}
 	service := NewProjectService(d.store, d.store)
 	actor := ActivityActor{Type: "agent", ID: run.AssignedAgentID}
-	if actor.ID == "" {
-		actor = ActivityActor{Type: string(run.Owner.Type), ID: run.Owner.ID}
-	}
 	var project *Project
 	created := false
 	switch input.Bound.Action.Name {

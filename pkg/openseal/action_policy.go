@@ -51,9 +51,6 @@ func (e *Engine) evaluateAgentActionAuthority(ctx context.Context, input runtime
 	}
 
 	deploymentID := strings.TrimSpace(input.Run.AssignedAgentID)
-	if deploymentID == "" && input.Run.Owner.Type == runtime.OwnerTypeAgent {
-		deploymentID = strings.TrimSpace(input.Run.Owner.ID)
-	}
 	if deploymentID == "" {
 		return e.defaultSideEffectPolicy().EvaluateAction(ctx, input)
 	}

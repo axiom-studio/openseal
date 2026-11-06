@@ -254,7 +254,7 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 		operation = capability.ConversationDeliveryTypingIndicator
 		parameters = map[string]interface{}{"status": acknowledgement.Text}
 	} else {
-		message, postErr := w.post(ctx, item, endpoint, acknowledgement)
+		message, postErr := w.post(ctx, item, acknowledgement, snapshot.AgentID)
 		if postErr != nil {
 			return nil, postErr
 		}
@@ -293,7 +293,8 @@ func (w *RunProgressAcknowledgementWorker) resolveEndpoint(ctx context.Context, 
 	return endpoint, adapter, nil
 }
 
-func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *ExternalConversationInboxItem, endpoint *ExternalConversationEndpoint, acknowledgement RunProgressAcknowledgement) (*ChannelMessage, error) {
+// post sends the acknowledgement as the Run's acting Agent, which rendered it.
+func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *ExternalConversationInboxItem, acknowledgement RunProgressAcknowledgement, agentID string) (*ChannelMessage, error) {
 	for range 3 {
 		conversation, err := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if err != nil {
@@ -305,7 +306,7 @@ func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *Exter
 		}
 		posted, err := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 			Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: conversation.Revision,
-			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID},
+			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID},
 			Intent: MessageIntentAcknowledgment, Content: acknowledgement.Text,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: item.ChannelMessageID,
 			References: references, IdempotencyKey: "run-acknowledgement-message:" + item.ID + ":" + acknowledgement.Phase,

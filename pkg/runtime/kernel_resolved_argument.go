@@ -61,9 +61,6 @@ func kernelAgentSessionID(run *AgentRun) (string, error) {
 		return "", errors.New("durable Run is required")
 	}
 	agentID := strings.TrimSpace(run.AssignedAgentID)
-	if agentID == "" && run.Owner.Type == OwnerTypeAgent {
-		agentID = strings.TrimSpace(run.Owner.ID)
-	}
 	if agentID == "" {
 		return "", errors.New("assigned durable Agent is required")
 	}

@@ -42,7 +42,7 @@ func (e *Engine) credentialRequestStore() (runtime.CredentialRequestStore, error
 	return e.store, nil
 }
 
-// ListCredentialRequests lists one agent conversation's credential requests.
+// ListCredentialRequests lists one chat roster member's credential requests in a conversation.
 func (e *Engine) ListCredentialRequests(ctx context.Context, scope runtime.Scope, deploymentID, conversationID string) ([]*CredentialRequest, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
@@ -52,7 +52,14 @@ func (e *Engine) ListCredentialRequests(ctx context.Context, scope runtime.Scope
 	if err != nil {
 		return nil, err
 	}
-	if conversation == nil || conversation.Owner.Type != "agent" || conversation.Owner.ID != deploymentID {
+	if conversation == nil {
+		return nil, runtime.ErrConversationNotFound
+	}
+	onRoster, err := runtime.AgentOnChatRoster(ctx, e, scope, conversation.Owner, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	if !onRoster {
 		return nil, runtime.ErrConversationNotFound
 	}
 	return store.ListCredentialRequests(ctx, scope, deploymentID, conversationID)

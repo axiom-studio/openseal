@@ -152,9 +152,6 @@ func buildConversationTaskContinuation(req ConversationTaskPromotionRequest, run
 	if actor.Type != ConversationParticipantUser || actor.Validate() != nil {
 		return nil, nil, nil, nil
 	}
-	if run.Owner.Type == OwnerTypeAgent && run.AssignedAgentID != run.Owner.ID {
-		return nil, nil, nil, ErrInvalidConversationTask
-	}
 	thread := message.ThreadRootID
 	if thread == "" {
 		thread = message.ID

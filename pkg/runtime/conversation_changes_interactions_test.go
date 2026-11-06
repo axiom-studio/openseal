@@ -283,7 +283,7 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	team := &kernelteam.Deployment{ID: "gtm", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+	team := &kernelteam.Deployment{ID: "gtm", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "a", AgentDeploymentID: "member"}, {ID: "b", AgentDeploymentID: "other"}}}
 	changes, err := NewConversationChangeService(store, teamRosterPortfolio{MemoryStore: store, team: team})
 	if err != nil {

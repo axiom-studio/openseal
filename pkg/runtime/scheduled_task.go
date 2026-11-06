@@ -271,11 +271,26 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 	if err := authoring.ValidateAuthoringPrompt(a.Title); err != nil {
 		return nil, nil, nil, err
 	}
-	if run == nil || run.Kind != RunKindConversation || run.AssignedAgentID == "" || (run.Owner.Type == OwnerTypeAgent && run.Owner.ID != run.AssignedAgentID) {
-		return nil, nil, nil, errors.New("scheduled task creation requires its owning Agent's user conversation")
+	if run == nil || run.Kind != RunKindConversation || run.AssignedAgentID == "" {
+		return nil, nil, nil, errors.New("scheduled task creation requires a chat whose roster includes this Agent")
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	messageID, _ := run.Context[conversationRunContextTriggerID].(string)
+	if isTeamMemberRun(run) {
+		// A teammate's hand-off started this Run; the routine's source is the
+		// person's request that the hand-off answered.
+		trigger, err := store.GetChannelMessage(ctx, run.Scope, conversationID, messageID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		request, err := ResolveTeamHandoffRequest(ctx, store, run, trigger)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if request != nil {
+			messageID = request.ID
+		}
+	}
 	task := &ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID)}
 	// A routine always carries the brief the user approved.
 	brief, err := normalizeRoutineBrief(a.Brief, false)
@@ -291,8 +306,12 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 		}
 		task.Script = cloneRoutineScript(a.Script)
 	}
-	if _, err := scheduledTaskConversation(ctx, store, run.Scope, run.Owner, task); err != nil {
+	conversation, err := scheduledTaskConversation(ctx, store, run.Scope, run.Owner, task)
+	if err != nil {
 		return nil, nil, nil, err
+	}
+	if ConversationRunAgentID(conversation, run) != run.AssignedAgentID {
+		return nil, nil, nil, errors.New("scheduled task creation requires a chat whose roster includes this Agent")
 	}
 	if task.AppID != "" {
 		if err := validateScheduledTaskApp(ctx, store, run, task); err != nil {
@@ -321,7 +340,7 @@ func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *
 		return nil, nil, err
 	}
 	if a == nil || a.Owner != run.Owner {
-		return nil, nil, errors.New("routine is not owned by this Agent")
+		return nil, nil, errors.New("routine is not owned by this chat")
 	}
 	if a.Revision != args.ExpectedRevision {
 		return nil, nil, ErrRunbookActivationRevision
@@ -331,9 +350,9 @@ func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *
 	}
 	return &args, a, nil
 }
-func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, input ActionProposalValidationInput) (map[string]interface{}, error) {
-	if input.Bound.Binding.DeploymentID != input.Run.Owner.ID {
-		return nil, errors.New("routine binding targets another Agent")
+func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams WorkflowTeamCatalog, input ActionProposalValidationInput) (map[string]interface{}, error) {
+	if err := runbookActionOwner(ctx, teams, input.Run, input.Bound); err != nil {
+		return nil, err
 	}
 	switch input.Bound.Action.Name {
 	case RunbookActionCreateTask:
@@ -367,13 +386,16 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }
-func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, input ActionDispatchInput) (map[string]interface{}, error) {
+func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams WorkflowTeamCatalog, input ActionDispatchInput) (map[string]interface{}, error) {
 	run, err := store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil {
 		return nil, err
 	}
-	if input.Call.ID == "" || run == nil || run.Scope != input.Run.Scope || run.ID != input.Run.ID || input.Call.DeploymentID != run.Owner.ID || input.Bound.Binding.DeploymentID != run.Owner.ID {
+	if input.Call.ID == "" || run == nil || run.Scope != input.Run.Scope || run.ID != input.Run.ID || input.Call.DeploymentID != input.Bound.Binding.DeploymentID {
 		return nil, errors.New("routine execution does not match its persisted Agent run")
+	}
+	if err := runbookActionOwner(ctx, teams, run, input.Bound); err != nil {
+		return nil, err
 	}
 	switch input.Bound.Action.Name {
 	case RunbookActionList:
@@ -428,7 +450,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			return nil, err
 		}
 		if current == nil || current.Owner != run.Owner {
-			return nil, errors.New("routine is not owned by this Agent")
+			return nil, errors.New("routine is not owned by this chat")
 		}
 		// The action checkpoint uses CAS; arbitrary stale revisions remain conflicts.
 		if current.LifecycleActionID == input.Call.ID && current.Status == args.Status {
@@ -452,7 +474,7 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 			return nil, err
 		}
 		if current == nil || current.Owner != run.Owner {
-			return nil, errors.New("routine is not owned by this Agent")
+			return nil, errors.New("routine is not owned by this chat")
 		}
 		// Replay after the re-pin committed but the action receipt did not.
 		if current.LifecycleActionID == input.Call.ID && current.Task != nil && current.Task.Script != nil && current.Task.Script.Digest == args.Digest && current.Task.Script.FilesVersion == args.FilesVersion {

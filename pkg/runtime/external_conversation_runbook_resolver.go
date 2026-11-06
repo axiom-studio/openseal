@@ -89,17 +89,4 @@ func (r *CatalogExternalConversationRunbookResolver) ResolveExternalConversation
 	}, nil
 }
 
-func teamRosterContainsAgent(deployment *kernelteam.Deployment, agentDeploymentID string) bool {
-	if deployment == nil {
-		return false
-	}
-	agentDeploymentID = strings.TrimSpace(agentDeploymentID)
-	for _, assignment := range deployment.Roster {
-		if assignment.AgentDeploymentID == agentDeploymentID {
-			return true
-		}
-	}
-	return false
-}
-
 var _ ExternalConversationRunbookResolver = (*CatalogExternalConversationRunbookResolver)(nil)

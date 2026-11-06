@@ -180,6 +180,15 @@ type agentChannelActionArguments struct {
 type AgentBehaviorActionValidator struct {
 	agents    *kernelagent.Registry
 	endpoints *ExternalConversationEndpointService
+	teams     TeamRosterReader
+}
+
+// SetTeamRoster gives the validator the Team catalog that proves a Team
+// member is still on its chat's roster.
+func (v *AgentBehaviorActionValidator) SetTeamRoster(teams TeamRosterReader) {
+	if v != nil {
+		v.teams = teams
+	}
 }
 
 func NewAgentBehaviorActionValidator(agents *kernelagent.Registry, endpoints ...*ExternalConversationEndpointService) (*AgentBehaviorActionValidator, error) {
@@ -203,6 +212,9 @@ func (v *AgentBehaviorActionValidator) ResolveActionProposalArguments(ctx contex
 	}
 	deploymentID, err := agentBehaviorDeploymentID(input.Run)
 	if err != nil {
+		return nil, true, err
+	}
+	if err := agentBehaviorRunOnRoster(ctx, v.teams, input.Run); err != nil {
 		return nil, true, err
 	}
 	deployment, err := v.agents.GetDeployment(ctx, capability.ScopeReference{Kind: input.Run.Scope.Kind, ID: input.Run.Scope.ID}, deploymentID)
@@ -240,6 +252,9 @@ func (v *AgentBehaviorActionValidator) ValidateActionProposal(ctx context.Contex
 	}
 	deploymentID, err := agentBehaviorDeploymentID(input.Run)
 	if err != nil {
+		return nil, err
+	}
+	if err := agentBehaviorRunOnRoster(ctx, v.teams, input.Run); err != nil {
 		return nil, err
 	}
 	if input.Bound.Binding.DeploymentID != deploymentID {
@@ -314,6 +329,10 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 	}
 	if input.Call.DeploymentID != deploymentID || input.Bound.Binding.DeploymentID != deploymentID {
 		return nil, errors.New("agent behavior action cannot target another Agent deployment")
+	}
+	// The roster can change while a proposal waits for approval.
+	if err := agentBehaviorRunOnRoster(ctx, teamRosterReader(d.store), run); err != nil {
+		return nil, err
 	}
 	if isAgentListChannelsAction(input.Bound) {
 		return d.listChannels(ctx, input.Call.Scope, deploymentID)
@@ -802,17 +821,45 @@ func hasExactAgentActionString(values []string, expected string) bool {
 }
 
 // agentBehaviorDeploymentID is the Agent whose behavior and channels the Run
-// may change: the Agent itself in its own chat, or the answering member in a
-// Team channel, exactly as in that member's own chat.
+// may change: its acting Agent, in that Agent's own chat or as a Team member
+// in a Team chat, exactly as in that member's own chat.
 func agentBehaviorDeploymentID(run *AgentRun) (string, error) {
-	if run == nil || (run.Owner.Type != OwnerTypeAgent && !isTeamMemberRun(run)) || strings.TrimSpace(run.Owner.ID) == "" {
+	if run == nil {
 		return "", errors.New("agent behavior actions require an Agent's own conversation Run or a Team member's Run")
 	}
-	deploymentID := strings.TrimSpace(runActingAgentID(run))
-	if assigned := strings.TrimSpace(run.AssignedAgentID); assigned != "" && assigned != deploymentID {
-		return "", errors.New("agent behavior action cannot target a Run assigned to another Agent")
+	deploymentID := strings.TrimSpace(run.AssignedAgentID)
+	if deploymentID == "" {
+		return "", errors.New("agent behavior actions require the Run's acting Agent")
+	}
+	switch {
+	case run.Owner.Type == OwnerTypeAgent:
+		if run.Owner.ID != deploymentID {
+			return "", errors.New("agent behavior action cannot target a Run assigned to another Agent")
+		}
+	case isTeamMemberRun(run):
+	default:
+		return "", errors.New("agent behavior actions require an Agent's own conversation Run or a Team member's Run")
 	}
 	return deploymentID, nil
+}
+
+// agentBehaviorRunOnRoster requires a Team member Run's Agent to be on the
+// owning Team's current active roster. An Agent's own Run is its roster of one.
+func agentBehaviorRunOnRoster(ctx context.Context, teams TeamRosterReader, run *AgentRun) error {
+	if run == nil || run.Owner.Type != OwnerTypeTeam {
+		return nil
+	}
+	if teams == nil {
+		return errors.New("agent behavior action requires the current Team roster")
+	}
+	onRoster, err := AgentOnChatRoster(ctx, teams, run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
+	if err != nil {
+		return err
+	}
+	if !onRoster {
+		return errors.New("agent behavior action Agent is not on the active Team roster")
+	}
+	return nil
 }
 
 func decodeAgentBehaviorArguments(arguments map[string]interface{}, target interface{}) error {

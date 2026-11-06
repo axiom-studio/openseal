@@ -764,7 +764,7 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
 		return nil, err
 	}
-	if err := validateChatDelegationSource(source); err != nil {
+	if err := s.validateChatDelegation(ctx, source, req.Recipient); err != nil {
 		return nil, err
 	}
 	delegationPolicy, err := s.resolveSourceDelegationPolicy(ctx, source)
@@ -912,7 +912,7 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 		if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
 			return nil, err
 		}
-		if err := validateChatDelegationSource(source); err != nil {
+		if err := s.validateChatDelegation(ctx, source, spec.Recipient); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(spec.Goal) == "" {
@@ -1798,11 +1798,19 @@ func requesterControlsRun(requester CollaborationParty, run *AgentRun) bool {
 		requester.Type == OwnerTypeAgent && requester.ID == run.AssignedAgentID
 }
 
-func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now time.Time, id string) *AgentRun {
-	owner := source.Owner
-	if request.Kind == AgentRequestKindHandoff {
-		owner = ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}
+// collaborationChildOwner is who owns delegated work: the source's owner, or
+// the recipient of a hand-off. A hand-off inside a Team chat stays in that
+// chat, so the Team keeps it and the recipient member is its acting Agent.
+func collaborationChildOwner(source *AgentRun, request *AgentRequest) ObjectiveOwner {
+	teamChat := normalizeRunKind(source.Kind) == RunKindConversation && source.Owner.Type == OwnerTypeTeam
+	if request.Kind == AgentRequestKindHandoff && !teamChat {
+		return ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}
 	}
+	return source.Owner
+}
+
+func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now time.Time, id string) *AgentRun {
+	owner := collaborationChildOwner(source, request)
 	assignedAgent := request.AssignedAgentID
 	context := cloneMap(request.SharedContext)
 	if context == nil {
@@ -1862,6 +1870,35 @@ func validateChatDelegationSource(source *AgentRun) error {
 		return fmt.Errorf("%w: only Team chats hand work to another Agent", ErrInvalidAgentRequestState)
 	}
 	return nil
+}
+
+// validateChatDelegation keeps chat work on the chat's roster: a Team chat
+// hands work to the Team, which routes among its members, or to an Agent on
+// its current active roster. It is checked when the request is created.
+func (s *CollaborationService) validateChatDelegation(ctx context.Context, source *AgentRun, recipient CollaborationParty) error {
+	if err := validateChatDelegationSource(source); err != nil {
+		return err
+	}
+	if source == nil || source.Kind != RunKindConversation {
+		return nil
+	}
+	if recipient == (CollaborationParty{Type: OwnerTypeTeam, ID: source.Owner.ID}) {
+		return nil
+	}
+	if recipient.Type == OwnerTypeAgent {
+		var teams TeamRosterReader
+		if s.teams != nil {
+			teams = s.teams
+		}
+		onRoster, err := AgentOnChatRoster(ctx, teams, source.Scope, source.Owner, recipient.ID)
+		if err != nil {
+			return err
+		}
+		if onRoster {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: chat work goes only to an Agent on the chat's roster", ErrAgentRequestUnauthorized)
 }
 
 // collaborationHandedOffByContextKey records the teammate that handed work over in a chat.

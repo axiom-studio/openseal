@@ -820,7 +820,7 @@ func TestGovernedConversationActionCompletionProjectsAgentBehaviorIdentity(t *te
 func TestGovernedConversationAgentBehaviorDenialResolvesWithoutModelRetry(t *testing.T) {
 	run := &AgentRun{
 		ID: "run-agent-denied", Kind: RunKindConversation,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"},
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher",
 		Checkpoint: map[string]interface{}{"lastAction": map[string]interface{}{
 			"status": ActionCallStatusDenied, "skillId": AgentManagementSkillID, "action": AgentActionAmendBehavior,
 			"arguments":  map[string]interface{}{"personality": "More concise", "rationale": "Reduce noise"},

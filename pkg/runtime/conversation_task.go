@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/google/uuid"
 )
 
@@ -370,30 +369,12 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 	if !reflect.DeepEqual(proposal, turn.RequestedTask) {
 		return nil, ErrConversationTaskConflict
 	}
-	if source.Owner.Type == OwnerTypeAgent && source.Owner.ID != source.AssignedAgentID {
-		return nil, ErrInvalidConversationTask
+	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(s.store), conversation.Scope, conversation.Owner, source.AssignedAgentID)
+	if err != nil {
+		return nil, err
 	}
-	if source.Owner.Type == OwnerTypeTeam {
-		teams, ok := s.store.(collaborationTeamStore)
-		if !ok {
-			return nil, ErrInvalidConversationTask
-		}
-		team, teamErr := teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, source.Owner.ID)
-		if teamErr != nil {
-			return nil, teamErr
-		}
-		found := false
-		if team != nil && string(team.Status) == "active" {
-			for _, member := range team.Roster {
-				if member.AgentDeploymentID == source.AssignedAgentID {
-					found = true
-					break
-				}
-			}
-		}
-		if !found {
-			return nil, ErrInvalidConversationTask
-		}
+	if !onRoster {
+		return nil, ErrInvalidConversationTask
 	}
 	actor := message.Sender
 	if actor.Type == ConversationParticipantService && message.Initiator != nil {

@@ -9,9 +9,9 @@ import (
 
 // Task context is a lookup hint. Only the canonical immutable task aggregate,
 // source message/actor/thread, settled source turn and exact work lineage can
-// route an account setup back to its originating Agent conversation.
+// route an account setup back to its originating conversation.
 func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.Context, run *AgentRun, deploymentID string) (string, string, error) {
-	denied := errors.New("Skill setup requires a verified Agent conversation origin")
+	denied := errors.New("Skill setup requires a verified conversation origin")
 	if run == nil {
 		return "", "", denied
 	}
@@ -50,7 +50,7 @@ func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.
 	if err != nil {
 		return "", "", err
 	}
-	if !verified || task.TargetAgentID != deploymentID || !(task.Owner.Type == OwnerTypeAgent && task.Owner.ID == deploymentID || task.Owner.Type == OwnerTypeTeam) {
+	if !verified || task.TargetAgentID != deploymentID {
 		return "", "", denied
 	}
 	conversation, err := proof.GetConversation(ctx, task.Scope, task.ConversationID)
@@ -58,6 +58,13 @@ func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.
 		return "", "", err
 	}
 	if conversation == nil || conversation.Status != ConversationStatusActive || conversation.Owner != task.Owner {
+		return "", "", denied
+	}
+	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(d.store), conversation.Scope, conversation.Owner, deploymentID)
+	if err != nil {
+		return "", "", err
+	}
+	if !onRoster {
 		return "", "", denied
 	}
 	if task.Mode == ConversationTaskModeIndependent {

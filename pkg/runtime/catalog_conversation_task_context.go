@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"time"
-
-	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 // The conversation adapter lowers the Run kind for ordinary Agent cognition.
@@ -122,22 +120,12 @@ func resolveCatalogConversationTaskContext(ctx context.Context, catalog AgentTur
 	result := &HostedConversationTaskContext{ConversationID: conversation.ID, ThreadRootID: thread, Tasks: []ConversationTaskSnapshot{}}
 	result.CanStart = foreground && conversation.Status == ConversationStatusActive && canonical.Status == AgentRunStatusRunning &&
 		canonical.AssignedAgentID != "" && canonical.LeaseOwner != "" && canonical.LeaseExpiresAt != nil && canonical.LeaseExpiresAt.After(time.Now()) && !voiceCallStartedMessage(message)
-	if result.CanStart && canonical.Owner.Type == OwnerTypeTeam {
-		result.CanStart = false
-		if teams, ok := store.(collaborationTeamStore); ok {
-			team, err := teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: canonical.Scope.Kind, ID: canonical.Scope.ID}, canonical.Owner.ID)
-			if err != nil {
-				return nil, err
-			}
-			if team != nil && string(team.Status) == "active" {
-				for _, member := range team.Roster {
-					if member.AgentDeploymentID == canonical.AssignedAgentID {
-						result.CanStart = true
-						break
-					}
-				}
-			}
+	if result.CanStart {
+		onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, ConversationRunAgentID(conversation, canonical))
+		if err != nil {
+			return nil, err
 		}
+		result.CanStart = onRoster
 	}
 	rows, err := store.ListConversationTasks(ctx, ConversationTaskFilter{
 		Scope: canonical.Scope, Owner: canonical.Owner, ConversationID: conversation.ID, ThreadRootID: thread,

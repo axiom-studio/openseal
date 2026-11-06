@@ -6,83 +6,105 @@ import (
 	"time"
 )
 
+// A Team member's status-only reply is repaired as its own, like a 1:1 Agent's.
 func TestConversationOperationDeliversDraftAndRecoversStatusOnlyReply(t *testing.T) {
-	for _, status := range []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed} {
-		t.Run(string(status), func(t *testing.T) {
-			store := NewMemoryStore()
-			service := NewConversationService(store)
-			scope := Scope{Kind: "tenant", ID: "drafts"}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}
-			now := time.Now()
-			conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Writing", IdempotencyKey: "chat"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Write a short draft", "prompt")
-			root := &AgentRun{ID: "root", Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: owner.ID, Goal: "Respond", Source: RunSourceChat, Status: AgentRunStatusCompleted, RootRunID: "root", Revision: 2, LastAppliedTurn: 1, CreatedAt: now, UpdatedAt: now, CompletedAt: &now, Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID}}
-			operation := &AgentRun{ID: "operation", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: owner.ID, Goal: "Write", Source: RunSourceFork, Status: status, RootRunID: "root", ParentRunID: "root", Entrypoint: "writing-session", Revision: 2, CreatedAt: now, UpdatedAt: now, CompletedAt: &now}
-			draft := "The actual requested draft, with all of its paragraphs."
-			if status == AgentRunStatusCompleted {
-				operation.Output = map[string]interface{}{"result": map[string]interface{}{"summary": draft}, "internal": map[string]interface{}{"opaqueReference": "private-value"}}
-			}
-			for _, run := range []*AgentRun{root, operation} {
-				if err := store.CreateAgentRun(t.Context(), run); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if status == AgentRunStatusFailed {
-				leaf := cloneAgentRun(operation)
-				leaf.ID = "writer-child"
-				leaf.ParentRunID = operation.ID
-				leaf.Entrypoint = ""
-				leaf.LastAppliedTurn = 2
-				leaf.Context = map[string]interface{}{DelegationModeContextKey: "reason"}
-				leaf.Output = map[string]interface{}{"summary": draft}
-				leaf.Checkpoint = map[string]interface{}{turnContinuityCheckpointKey: map[string]interface{}{"nextRunStatus": "running"}}
-				leaf.Error = "provider returned multiple values"
-				if err := store.CreateAgentRun(t.Context(), leaf); err != nil {
-					t.Fatal(err)
-				}
-			}
-			runner := &ConversationRunTurnRunner{portfolio: store, conversations: service}
-			outcome, ok, err := runner.governedConversationOperationOutcome(t.Context(), root)
-			if err != nil || !ok || !strings.Contains(outcome.Content, draft) || strings.Contains(outcome.Content, "private-value") {
-				t.Fatalf("draft delivery=%#v %v", outcome, err)
-			}
-			if status == AgentRunStatusFailed && !strings.Contains(outcome.Content, "may be incomplete") {
-				t.Fatal("partial draft presented as success")
-			}
-			old := "Operation “writing-session” completed successfully."
-			if status == AgentRunStatusFailed {
-				old = "Operation “writing-session” failed. Review the Run for the exact failed step and retry when ready."
-			}
-			if _, _, err := runner.postAgentResponseWithReferences(t.Context(), root, conversation, trigger, old, outcome.References, false); err != nil {
-				t.Fatal(err)
-			}
-			scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for range 2 {
-				if err := scheduler.reconcileConversationOperationOutputs(t.Context(), scope, &ConversationRunReconcileResult{}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			messages, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(messages) != 3 || messages[2].Content != outcome.Content {
-				t.Fatalf("recovered messages=%#v", messages)
-			}
-			// No second model run is needed to recover a persisted result.
-			runs, _ := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, Kind: RunKindConversation})
-			if len(runs) != 1 {
-				t.Fatal("recovery scheduled duplicate work")
-			}
-		})
+	for _, chat := range []struct {
+		name  string
+		owner ObjectiveOwner
+	}{{"agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}}, {"team", ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}}} {
+		for _, status := range []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed} {
+			t.Run(chat.name+"/"+string(status), func(t *testing.T) {
+				testConversationOperationRecovery(t, chat.owner, status)
+			})
+		}
 	}
 }
+
+func testConversationOperationRecovery(t *testing.T, owner ObjectiveOwner, status AgentRunStatus) {
+	scope := Scope{Kind: "tenant", ID: "drafts"}
+	team := chatRosterTeam(scope, "writer")
+	store := teamRosterPortfolio{MemoryStore: NewMemoryStore(), team: team}
+	service := NewConversationService(store)
+	now := time.Now()
+	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Writing", IdempotencyKey: "chat"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Write a short draft", "prompt")
+	root := &AgentRun{ID: "root", Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: "writer", Goal: "Respond", Source: RunSourceChat, Status: AgentRunStatusCompleted, RootRunID: "root", Revision: 2, LastAppliedTurn: 1, CreatedAt: now, UpdatedAt: now, CompletedAt: &now, Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID}}
+	operation := &AgentRun{ID: "operation", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: "writer", Goal: "Write", Source: RunSourceFork, Status: status, RootRunID: "root", ParentRunID: "root", Entrypoint: "writing-session", Revision: 2, CreatedAt: now, UpdatedAt: now, CompletedAt: &now}
+	draft := "The actual requested draft, with all of its paragraphs."
+	if status == AgentRunStatusCompleted {
+		operation.Output = map[string]interface{}{"result": map[string]interface{}{"summary": draft}, "internal": map[string]interface{}{"opaqueReference": "private-value"}}
+	}
+	for _, run := range []*AgentRun{root, operation} {
+		if err := store.CreateAgentRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if status == AgentRunStatusFailed {
+		leaf := cloneAgentRun(operation)
+		leaf.ID = "writer-child"
+		leaf.ParentRunID = operation.ID
+		leaf.Entrypoint = ""
+		leaf.LastAppliedTurn = 2
+		leaf.Context = map[string]interface{}{DelegationModeContextKey: "reason"}
+		leaf.Output = map[string]interface{}{"summary": draft}
+		leaf.Checkpoint = map[string]interface{}{turnContinuityCheckpointKey: map[string]interface{}{"nextRunStatus": "running"}}
+		leaf.Error = "provider returned multiple values"
+		if err := store.CreateAgentRun(t.Context(), leaf); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &ConversationRunTurnRunner{portfolio: store, conversations: service}
+	outcome, ok, err := runner.governedConversationOperationOutcome(t.Context(), root)
+	if err != nil || !ok || !strings.Contains(outcome.Content, draft) || strings.Contains(outcome.Content, "private-value") {
+		t.Fatalf("draft delivery=%#v %v", outcome, err)
+	}
+	if status == AgentRunStatusFailed && !strings.Contains(outcome.Content, "may be incomplete") {
+		t.Fatal("partial draft presented as success")
+	}
+	old := "Operation “writing-session” completed successfully."
+	if status == AgentRunStatusFailed {
+		old = "Operation “writing-session” failed. Review the Run for the exact failed step and retry when ready."
+	}
+	if _, _, err := runner.postAgentResponseWithReferences(t.Context(), root, conversation, trigger, old, outcome.References, false); err != nil {
+		t.Fatal(err)
+	}
+	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner.Type == OwnerTypeTeam {
+		// A member off the roster never posts again.
+		team.Roster = nil
+		if err := scheduler.reconcileConversationOperationOutputs(t.Context(), scope, &ConversationRunReconcileResult{}); err != nil {
+			t.Fatal(err)
+		}
+		if messages, _ := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID}); len(messages) != 2 {
+			t.Fatalf("removed member repaired its reply: %#v", messages)
+		}
+		team.Roster = chatRosterTeam(scope, "writer").Roster
+	}
+	for range 2 {
+		if err := scheduler.reconcileConversationOperationOutputs(t.Context(), scope, &ConversationRunReconcileResult{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 || messages[2].Content != outcome.Content || messages[2].Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: "writer"}) {
+		t.Fatalf("recovered messages=%#v", messages)
+	}
+	// No second model run is needed to recover a persisted result.
+	runs, _ := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, Kind: RunKindConversation})
+	if len(runs) != 1 {
+		t.Fatal("recovery scheduled duplicate work")
+	}
+}
+
 func TestConversationOperationNeverDumpsArbitraryOutput(t *testing.T) {
 	for _, output := range []map[string]interface{}{{"result": map[string]interface{}{"opaqueReference": "private"}}, {"raw": "private"}, {"result": []interface{}{map[string]interface{}{"summary": "unreviewed"}}}} {
 		if got := conversationOperationSummary(output); got != "" {

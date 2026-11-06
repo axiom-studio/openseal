@@ -1,0 +1,93 @@
+package openseal
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime"
+)
+
+// A Team member lists its own setup and credential requests in the Team chat,
+// exactly as in its 1:1 chat; an Agent off the roster sees none.
+func TestTeamMemberListsItsOwnRequestsInTheTeamChat(t *testing.T) {
+	ctx := t.Context()
+	store := runtime.NewMemoryStore()
+	engine, err := New(WithStore(store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := runtime.Scope{Kind: "tenant", ID: "roster"}
+	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	definition, err := engine.RegisterAgentDefinition(ctx, &AgentDefinition{
+		ID: "helper", Version: "1", DisplayName: "Helper", Purpose: "Help", SystemPrompt: "Help.",
+		Authority: AgentAuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"member", "outsider"} {
+		if _, _, err := engine.CreateAgentDeployment(ctx, &AgentDeployment{
+			ID: id, Scope: catalogScope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
+			RolloutStatus: AgentRolloutActive, Environment: "test", Capacity: AgentDeploymentCapacity{MaxConcurrentRuns: 1},
+		}, "user", "operator", "create"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	team, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
+		ID: "crew", Version: "1", DisplayName: "Crew", Purpose: "Work together",
+		Roles:     []TeamRoleSlot{{ID: "helper", DisplayName: "Helper", Purpose: "Help", MinimumMembers: 1}},
+		Approvals: TeamApprovalPolicy{MaximumRisk: capability.RiskLevelRead, ApproverRoleIDs: []string{"helper"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := engine.CreateTeamDeployment(ctx, &TeamDeployment{
+		ID: "crew-one", Scope: catalogScope, DefinitionID: team.ID, ActiveVersion: team.Version, Status: TeamDeploymentActive,
+		Roster: []TeamRosterAssignment{{ID: "helper", RoleID: "helper", AgentDeploymentID: "member"}},
+	}, "user", "operator", "create"); err != nil {
+		t.Fatal(err)
+	}
+	for _, chat := range []struct {
+		id        string
+		ownerType runtime.OwnerType
+		ownerID   string
+	}{{"team-chat", OwnerTypeTeam, "crew-one"}, {"own-chat", OwnerTypeAgent, "member"}} {
+		if _, _, err := engine.CreateConversation(ctx, CreateConversationRequest{ID: chat.id, Scope: scope, Owner: ObjectiveOwner{Type: chat.ownerType, ID: chat.ownerID}, Title: chat.id, IdempotencyKey: chat.id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	for _, chat := range []string{"team-chat", "own-chat"} {
+		for _, deployment := range []string{"member", "outsider"} {
+			id := chat + "-" + deployment
+			if err := store.SaveSkillSetupRequest(ctx, &SkillSetupRequest{ID: "setup-" + id, Scope: scope, DeploymentID: deployment,
+				ConversationID: chat, TriggerMessageID: "ask", RunID: "run", ActionCallID: "call-" + id, Kind: "configure",
+				SkillID: "vercel.reader", SkillVersion: "1.0.0", SkillName: "Vercel", Reason: "Connect Vercel", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.SaveCredentialRequest(ctx, &runtime.CredentialRequest{ID: "credential-" + id, Scope: scope, DeploymentID: deployment,
+				ConversationID: chat, TriggerMessageID: "ask", RunID: "run", ActionCallID: "secret-" + id, Kind: runtime.CredentialRequestKindPaymentCard, Reason: "Pay",
+				Status: runtime.CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, chat := range []string{"team-chat", "own-chat"} {
+		setups, err := engine.ListSkillSetupRequests(ctx, scope, "member", chat)
+		if err != nil || len(setups) != 1 || setups[0].ID != "setup-"+chat+"-member" {
+			t.Fatalf("%s member setups = %#v, %v", chat, setups, err)
+		}
+		credentials, err := engine.ListCredentialRequests(ctx, scope, "member", chat)
+		if err != nil || len(credentials) != 1 || credentials[0].ID != "credential-"+chat+"-member" {
+			t.Fatalf("%s member credentials = %#v, %v", chat, credentials, err)
+		}
+		if _, err := engine.ListSkillSetupRequests(ctx, scope, "outsider", chat); !errors.Is(err, runtime.ErrConversationNotFound) {
+			t.Fatalf("%s outsider setups err = %v", chat, err)
+		}
+		if _, err := engine.ListCredentialRequests(ctx, scope, "outsider", chat); !errors.Is(err, runtime.ErrConversationNotFound) {
+			t.Fatalf("%s outsider credentials err = %v", chat, err)
+		}
+	}
+}

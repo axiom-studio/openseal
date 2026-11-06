@@ -268,7 +268,7 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 	case RunbookActionCreateWorkflow, RunbookActionWorkflowSources, RunbookActionInspectWorkflows:
 		return validateWorkflowAction(ctx, v.store, v.workflowCatalog, v.workflowTeams, input)
 	case RunbookActionCreateTask, RunbookActionList, RunbookActionSetStatus, RunbookActionSetScript:
-		return validateScheduledTaskAction(ctx, v.store, v.chatFiles, input)
+		return validateScheduledTaskAction(ctx, v.store, v.chatFiles, v.workflowTeams, input)
 	case RunbookActionStart:
 		args, activation, objective, err := resolveRunbookStart(ctx, v.store, input.Run, input.Arguments)
 		if err != nil {
@@ -352,7 +352,7 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input Acti
 		return dispatchWorkflowAction(ctx, d.store, d.workflowCatalog, d.workflowTeams, input)
 	}
 	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList || input.Bound.Action.Name == RunbookActionSetStatus || input.Bound.Action.Name == RunbookActionSetScript {
-		return dispatchScheduledTaskAction(ctx, d.store, d.chatFiles, input)
+		return dispatchScheduledTaskAction(ctx, d.store, d.chatFiles, d.workflowTeams, input)
 	}
 	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
 		_, source, _, schedule, err := resolveRunbookScheduleReplacement(ctx, d.store, input.Run, input.Arguments)
@@ -398,7 +398,7 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input Acti
 	}
 	result, err := StartRunbookActivationWithExecutionPreparer(ctx, d.store, input.Run.Scope, activation.ID, StartRunbookActivationRequest{
 		IdempotencyKey: "conversation-runbook-start:" + input.Call.ID,
-		Actor:          ActivityActor{Type: "agent", ID: activation.AssignedAgentID},
+		Actor:          ActivityActor{Type: "agent", ID: input.Run.AssignedAgentID},
 		Visibility:     visibility,
 	}, d.executionPreparer)
 	if err != nil {

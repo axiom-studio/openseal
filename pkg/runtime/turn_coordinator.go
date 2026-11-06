@@ -340,7 +340,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			return ErrLeaseLost
 		}
 		event := &ActivityEvent{
-			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: runActingAgentID(run),
+			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: teamIDForRun(run),
 			EventType: kind, Summary: summary, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
 			Visibility: ActivityVisibilityScope,
 		}
@@ -607,7 +607,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 		// left here had no message to go with, so say so instead of dropping it
 		// silently. The Turn is already durable; a lost warning is not retried.
 		_, _ = c.activity.AppendActivity(ctx, &ActivityEvent{
-			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: runActingAgentID(run),
+			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: teamIDForRun(run),
 			EventType: answerVisualNotShownEvent, Severity: ActivitySeverityWarning,
 			Summary: answerVisualNotShownSummary, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
 			Visibility: ActivityVisibilityScope,
@@ -619,7 +619,7 @@ func (c *TurnCoordinator) Advance(ctx context.Context, req AdvanceAgentRunReques
 			reason = string(runes[:400]) + "…"
 		}
 		_, _ = c.activity.AppendActivity(ctx, &ActivityEvent{
-			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: runActingAgentID(run),
+			Scope: req.Scope, RunID: run.ID, TurnID: turn.ID, AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: teamIDForRun(run),
 			EventType: answerVisualRejectedEvent, Severity: ActivitySeverityWarning,
 			Summary: answerVisualRejectedSummary + " " + reason, Actor: ActivityActor{Type: "worker", ID: req.WorkerID},
 			Visibility: ActivityVisibilityScope,

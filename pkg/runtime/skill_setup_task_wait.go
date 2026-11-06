@@ -45,7 +45,7 @@ func conversationTaskSetupOrigin(ctx context.Context, store ConversationTaskProo
 	if err != nil || task == nil {
 		return nil, err
 	}
-	if task.Mode != ConversationTaskModeIndependent || task.Owner.Type != OwnerTypeAgent || task.TargetAgentID != task.Owner.ID {
+	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID == "" || task.TargetAgentID != run.AssignedAgentID {
 		return nil, ErrInvalidSkillSetup
 	}
 	valid, err := VerifyConversationTaskWorkRun(ctx, store, task, run)
@@ -60,6 +60,13 @@ func conversationTaskSetupOrigin(ctx context.Context, store ConversationTaskProo
 		return nil, err
 	}
 	if conversation == nil || conversation.Status != ConversationStatusActive || conversation.Scope != task.Scope || conversation.Owner != task.Owner {
+		return nil, ErrInvalidSkillSetup
+	}
+	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, task.TargetAgentID)
+	if err != nil {
+		return nil, err
+	}
+	if !onRoster {
 		return nil, ErrInvalidSkillSetup
 	}
 	return task, nil

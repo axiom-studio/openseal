@@ -107,7 +107,7 @@ func resolveSourceAccessChallengeInteraction(ctx context.Context, portfolio Port
 		return nil, nil
 	}
 	source, conversation, trigger, err := conversationWorkOrigin(ctx, portfolio, conversations, run)
-	if err != nil || source == nil || conversation == nil || trigger == nil || run.AssignedAgentID == "" || conversationRunAgentID(conversation, run) != run.AssignedAgentID {
+	if err != nil || source == nil || conversation == nil || trigger == nil || run.AssignedAgentID == "" || ConversationRunAgentID(conversation, run) != run.AssignedAgentID {
 		return nil, err
 	}
 	actor, valid := conversationMessageInitiatingUser(conversation, trigger)

@@ -234,8 +234,8 @@ func (c *ActionCoordinator) proposeNested(ctx context.Context, req NestedActionR
 	if authority == nil || authority.runID != req.RunID {
 		return nil, ErrNestedTurnNotActive
 	}
-	if authority.run.Kind == RunKindConversation && authority.run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(authority.run.AssignedAgentID) == "" {
-		return nil, errors.New("nested action calls are not available in Team conversations")
+	if authority.run.Kind == RunKindConversation && strings.TrimSpace(authority.run.AssignedAgentID) == "" {
+		return nil, errors.New("nested action calls require the Run's acting Agent")
 	}
 	binding := authority.binding
 	var selected *capability.ModelAction

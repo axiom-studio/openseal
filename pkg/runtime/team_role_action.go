@@ -198,7 +198,7 @@ func (d *TeamRoleActionDispatcher) DispatchAction(ctx context.Context, input Act
 		applyTeamRoleArguments(&candidate.Roles, args)
 		amendment, err = d.teams.ProposeAmendment(ctx, kernelteam.ProposeAmendmentRequest{
 			Scope: capability.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}, DeploymentID: deployment.ID,
-			Candidate: candidate, ProposerType: "agent", ProposerID: teamActionActorID(run),
+			Candidate: candidate, ProposerType: "agent", ProposerID: strings.TrimSpace(run.AssignedAgentID),
 			Rationale: "Team role behavior changed through conversation", EvidenceRefs: append([]string(nil), input.Call.EvidenceRefs...),
 		})
 		if err != nil {
@@ -208,7 +208,7 @@ func (d *TeamRoleActionDispatcher) DispatchAction(ctx context.Context, input Act
 	if amendment.Status == kernelteam.AmendmentEvaluating {
 		return nil, errors.New("team role action requires definition evaluations that cannot be skipped")
 	}
-	actorType, actorID := "agent", teamActionActorID(run)
+	actorType, actorID := "agent", strings.TrimSpace(run.AssignedAgentID)
 	if amendment.Status == kernelteam.AmendmentAwaitingApproval {
 		approval, approvalErr := approvedActionCheckpoint(ctx, d.store, input.Call)
 		if approvalErr != nil {
@@ -249,6 +249,13 @@ func resolveTeamRoleAction(ctx context.Context, teams *kernelteam.Registry, run 
 	deployment, err := teams.GetDeployment(ctx, scope, run.Owner.ID)
 	if err != nil {
 		return args, nil, nil, kernelteam.RoleSlot{}, err
+	}
+	onRoster, err := AgentOnChatRoster(ctx, workflowTeamRoster{teams: teams}, run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
+	if err != nil {
+		return args, nil, nil, kernelteam.RoleSlot{}, err
+	}
+	if !onRoster {
+		return args, nil, nil, kernelteam.RoleSlot{}, errors.New("team role action Agent is not on the active Team roster")
 	}
 	if deployment.Revision != args.ExpectedDeploymentRevision {
 		return args, nil, nil, kernelteam.RoleSlot{}, ErrRevisionConflict
@@ -407,13 +414,6 @@ func teamRoleActionResult(amendment *kernelteam.DefinitionAmendment, deployment 
 		result["activation"] = activation
 	}
 	return result
-}
-
-func teamActionActorID(run *AgentRun) string {
-	if strings.TrimSpace(run.AssignedAgentID) != "" {
-		return run.AssignedAgentID
-	}
-	return run.Owner.ID
 }
 
 func isTeamRoleAction(bound *skill.BoundAction) bool {

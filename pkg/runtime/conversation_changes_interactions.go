@@ -6,9 +6,6 @@ import (
 	"errors"
 	"sort"
 	"strings"
-
-	"github.com/axiom-studio/openseal/pkg/capability"
-	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 // conversationInteractionHistoryLimit bounds the decided approvals and the
@@ -323,26 +320,7 @@ func (s *ConversationChangeService) conversationRequestDeployments(ctx context.C
 	case OwnerTypeAgent:
 		return []string{conversation.Owner.ID}, nil
 	case OwnerTypeTeam:
-		teams, ok := s.portfolio.(collaborationTeamStore)
-		if !ok {
-			return nil, nil
-		}
-		team, err := teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: conversation.Scope.Kind, ID: conversation.Scope.ID}, conversation.Owner.ID)
-		if errors.Is(err, kernelteam.ErrDeploymentNotFound) || (err == nil && team == nil) {
-			return nil, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		seen := make(map[string]bool, len(team.Roster))
-		deployments := make([]string, 0, len(team.Roster))
-		for _, member := range team.Roster {
-			if id := strings.TrimSpace(member.AgentDeploymentID); id != "" && !seen[id] {
-				seen[id] = true
-				deployments = append(deployments, id)
-			}
-		}
-		return deployments, nil
+		return activeTeamRoster(ctx, teamRosterReader(s.portfolio), conversation.Scope, conversation.Owner.ID)
 	}
 	return nil, nil
 }

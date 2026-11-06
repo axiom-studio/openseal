@@ -666,39 +666,54 @@ func NewConversationRunTurnRunner(
 	return runner, nil
 }
 
-// Only a current, authorized Team roster member may explain its failed proposal.
-// Attribution is kernel-owned and rechecked before resolving an Agent model.
-func (r *ConversationRunTurnRunner) finalExplanationParticipant(ctx context.Context, run *AgentRun) (string, error) {
-	participant := strings.TrimSpace(run.AssignedAgentID)
-	if !validOpaqueIdentifier(participant, 256) {
-		return "", errors.New("failed Team action is missing Agent attribution")
+// conversationRunHasActingAgent reports whether a validated conversation Run
+// speaks as an Agent. Only a Team chat's routing Run has none.
+func conversationRunHasActingAgent(run *AgentRun) bool {
+	return run != nil && strings.TrimSpace(run.AssignedAgentID) != ""
+}
+
+// conversationRosterMember proves the Run's exact acting Agent may still speak
+// in its chat: the owner of an Agent's chat, or a current, authorized member
+// of a Team's. Attribution is kernel-owned and rechecked before resolving an
+// Agent model.
+func (r *ConversationRunTurnRunner) conversationRosterMember(ctx context.Context, run *AgentRun) error {
+	participant := run.AssignedAgentID
+	if !validOpaqueIdentifier(participant, 256) || strings.TrimSpace(participant) != participant {
+		return errors.New("failed action is missing Agent attribution")
+	}
+	switch run.Owner.Type {
+	case OwnerTypeAgent:
+		if participant != run.Owner.ID {
+			return ErrInvalidAgentRun
+		}
+		return nil
+	case OwnerTypeTeam:
+	default:
+		return ErrInvalidAgentRun
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
 	conversation, err := r.conversations.GetConversation(ctx, run.Scope, conversationID)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if conversation.Scope != run.Scope || conversation.Owner != run.Owner {
-		return "", ErrInvalidAgentRun
+		return ErrInvalidAgentRun
 	}
 	trigger, err := r.conversations.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
 	if err != nil {
-		return "", err
+		return err
 	}
 	bindings, err := r.coordinator.participants.ResolveConversationParticipants(ctx, ConversationParticipantQuery{Conversation: cloneConversation(conversation), Trigger: cloneChannelMessage(trigger)})
 	if err != nil {
-		return "", err
+		return err
 	}
 	for _, binding := range bindings {
 		if binding.Participant.Type == ConversationParticipantAgent && binding.Participant.ID == participant {
-			if err := binding.Validate(); err != nil {
-				return "", err
-			}
-			return participant, nil
+			return binding.Validate()
 		}
 	}
-	return "", errors.New("failed Team action Agent is no longer authorized in this conversation")
+	return errors.New("failed Team action Agent is no longer authorized in this conversation")
 }
 
 func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
@@ -715,22 +730,17 @@ func (r *ConversationRunTurnRunner) ResolveTurnRunner(ctx context.Context, run *
 	}
 	pinnedRunbook := run.Plan != nil && run.Plan["runbook"] != nil
 	finalExplanation := requiresFinalFailureExplanation(run.Checkpoint)
-	agentTurn := run.Owner.Type == OwnerTypeAgent || pinnedRunbook || finalExplanation || isTeamMemberRun(run)
+	agentTurn := conversationRunHasActingAgent(run) || pinnedRunbook || finalExplanation
 	if agentTurn && r.agentTurns == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
 	if agentTurn {
 		hostedRun := cloneAgentRun(run)
 		hostedRun.Kind = RunKindAgentWork
-		if !pinnedRunbook && run.Owner.Type == OwnerTypeAgent {
-			hostedRun.AssignedAgentID = run.Owner.ID
-		}
-		if finalExplanation && run.Owner.Type == OwnerTypeTeam {
-			participant, err := r.finalExplanationParticipant(ctx, run)
-			if err != nil {
+		if finalExplanation {
+			if err := r.conversationRosterMember(ctx, run); err != nil {
 				return nil, err
 			}
-			hostedRun.AssignedAgentID = participant
 		}
 		agentBinding, err := r.agentTurns.ResolveTurnRunner(ctx, hostedRun)
 		if err != nil {
@@ -839,10 +849,6 @@ func (r conversationAgentTurnRunner) PlanTurnBudget(ctx context.Context, input T
 	if r.parent.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
 		return BudgetUsage{}, nil
 	}
-	if input.Run.Owner.Type == OwnerTypeTeam && requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		input.Run = cloneAgentRun(input.Run)
-		input.Run.AssignedAgentID = participantID
-	}
 	// Deterministic completion does not invoke the hosted runner and must
 	// still work after its model budget is exhausted.
 	if !requiresFinalFailureExplanation(input.Run.Checkpoint) && len(conversationRunFollowUps(input.Run)) == 0 {
@@ -880,7 +886,7 @@ func (r *ConversationRunTurnRunner) PlanTurnBudget(ctx context.Context, input Tu
 	} else if stopped {
 		return BudgetUsage{}, nil
 	}
-	if input.Run.Owner.Type == OwnerTypeAgent || (input.Run.Plan != nil && input.Run.Plan["runbook"] != nil) || requiresFinalFailureExplanation(input.Run.Checkpoint) || isTeamMemberRun(input.Run) {
+	if conversationRunHasActingAgent(input.Run) || (input.Run.Plan != nil && input.Run.Plan["runbook"] != nil) || requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		binding, err := r.ResolveTurnRunner(ctx, input.Run)
 		if err != nil {
 			return BudgetUsage{}, err
@@ -913,23 +919,21 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	if conversation.Owner != input.Run.Owner {
 		return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
 	}
-	if conversation.Owner.Type == OwnerTypeAgent || requiresFinalFailureExplanation(input.Run.Checkpoint) || isTeamMemberRun(input.Run) {
+	if conversationRunHasActingAgent(input.Run) || requiresFinalFailureExplanation(input.Run.Checkpoint) {
 		return r.runAgentTurn(ctx, input, conversation, triggerID, nil, nil)
 	}
 	return r.routeTeamMessage(ctx, input.Run, conversation, triggerID)
 }
 
 func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, input TurnExecutionContext, conversation *Conversation, triggerID string) (string, ConversationViewer, *ChannelMessage, error) {
-	participantID := strings.TrimSpace(input.Run.AssignedAgentID)
-	if input.Run.Owner.Type == OwnerTypeTeam && requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		var err error
-		participantID, err = r.finalExplanationParticipant(ctx, input.Run)
-		if err != nil {
+	participantID := input.Run.AssignedAgentID
+	if requiresFinalFailureExplanation(input.Run.Checkpoint) {
+		if err := r.conversationRosterMember(ctx, input.Run); err != nil {
 			return "", ConversationViewer{}, nil, err
 		}
 	}
 	if participantID == "" {
-		participantID = conversation.Owner.ID
+		return "", ConversationViewer{}, nil, fmt.Errorf("%w: conversation Run has no acting Agent", ErrInvalidAgentRun)
 	}
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID}}
 	trigger, err := r.conversations.GetVisibleChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID, viewer)
@@ -1012,7 +1016,7 @@ func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx contex
 		return TurnExecutionContext{}, historyPlan, questionErr
 	}
 	hostedInput.canAskConversationQuestion = questionConversation != nil && questionTrigger != nil &&
-		hostedRun.AssignedAgentID != "" && hostedRun.AssignedAgentID == conversationRunAgentID(questionConversation, input.Run)
+		hostedRun.AssignedAgentID != "" && hostedRun.AssignedAgentID == ConversationRunAgentID(questionConversation, input.Run)
 	hostedInput.externalChannelReply = externalChannelContext(questionConversation)
 	hostedInput.canReact = true
 	hostedInput.sourceAccessChallenge, questionErr = resolveSourceAccessChallengeInteraction(ctx, r.portfolio, input.Run)
@@ -1050,10 +1054,6 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	participantID, viewer, trigger, err := r.agentConversationTurnContext(ctx, input, conversation, triggerID)
 	if err != nil {
 		return nil, err
-	}
-	if input.Run.Owner.Type == OwnerTypeTeam && requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		input.Run = cloneAgentRun(input.Run)
-		input.Run.AssignedAgentID = participantID
 	}
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
 		return participationStoppedOutcome(), nil
@@ -1770,17 +1770,6 @@ func unverifiedApprovalClaim(content string) bool {
 	return false
 }
 
-func (r *ConversationRunTurnRunner) postAgentResponse(
-	ctx context.Context,
-	run *AgentRun,
-	conversation *Conversation,
-	trigger *ChannelMessage,
-	content string,
-	broadcastToChannel bool,
-) (*ChannelMessage, bool, error) {
-	return r.postAgentResponseWithReferences(ctx, run, conversation, trigger, content, []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, broadcastToChannel)
-}
-
 func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 	ctx context.Context,
 	run *AgentRun,
@@ -1803,9 +1792,9 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 		if err != nil {
 			return nil, false, err
 		}
-		participantID := strings.TrimSpace(run.AssignedAgentID)
+		participantID := run.AssignedAgentID
 		if participantID == "" {
-			participantID = current.Owner.ID
+			return nil, false, fmt.Errorf("%w: conversation Run has no acting Agent", ErrInvalidAgentRun)
 		}
 		var routingReason string
 		var mentions []ConversationParticipant
@@ -2088,7 +2077,7 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	}
 	resourceID := ""
 	if resourceType == agentBehaviorResourceType {
-		resourceID = runActingAgentID(run)
+		resourceID = strings.TrimSpace(run.AssignedAgentID)
 	} else if arguments, argumentsOK := last["arguments"].(map[string]interface{}); argumentsOK {
 		resourceID = strings.TrimSpace(fmt.Sprint(arguments[idField]))
 		if validOpaqueIdentifier(resourceID, 256) {

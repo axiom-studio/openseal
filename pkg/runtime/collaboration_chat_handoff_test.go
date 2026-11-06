@@ -19,9 +19,9 @@ func TestCollaborationChildAnswersInTheSameChat(t *testing.T) {
 		request := &AgentRequest{ID: "request", Kind: kind, Goal: "Suggest one launch step",
 			Requester: CollaborationParty{Type: OwnerTypeTeam, ID: "gtm"}, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "harp"}, AssignedAgentID: "harp"}
 		child := buildCollaborationChildRun(source, request, now, "harp-run")
-		if kind == AgentRequestKindHandoff {
-			// A handoff gives the work to its recipient; it still answers in the chat.
-			child.Owner = source.Owner
+		// A hand-off gives the work to its recipient member; the chat keeps it.
+		if child.Owner != source.Owner || child.AssignedAgentID != "harp" {
+			t.Fatalf("%s child owner = %v, Agent %q", kind, child.Owner, child.AssignedAgentID)
 		}
 		if child.Kind != RunKindConversation || child.ConcurrencyKey != conversationRunLane("chat", "root", "harp") {
 			t.Fatalf("%s child = %s %q", kind, child.Kind, child.ConcurrencyKey)

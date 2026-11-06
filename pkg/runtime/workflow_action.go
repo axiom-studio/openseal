@@ -238,24 +238,33 @@ func workflowInspectAction() skill.Action {
 	}
 }
 
-func workflowActionOwner(ctx context.Context, teams WorkflowTeamCatalog, run *AgentRun, bound *skill.BoundAction) error {
-	if run == nil || bound == nil || bound.Binding == nil || run.AssignedAgentID == "" || (bound.Binding.DeploymentID != run.AssignedAgentID && !(run.Owner.Type == OwnerTypeTeam && bound.Binding.DeploymentID == run.Owner.ID)) || bound.Binding.Scope.Kind != run.Scope.Kind || bound.Binding.Scope.ID != run.Scope.ID || (run.Owner.Type == OwnerTypeAgent && run.Owner.ID != run.AssignedAgentID) {
-		return errors.New("workflow action requires its current Agent's scoped binding")
+// runbookActionOwner requires run's acting Agent to hold the scoped binding
+// (its own, or its owning Team's) and to be on its owner's current roster.
+func runbookActionOwner(ctx context.Context, teams WorkflowTeamCatalog, run *AgentRun, bound *skill.BoundAction) error {
+	if run == nil || bound == nil || bound.Binding == nil || run.AssignedAgentID == "" || (bound.Binding.DeploymentID != run.AssignedAgentID && !(run.Owner.Type == OwnerTypeTeam && bound.Binding.DeploymentID == run.Owner.ID)) || bound.Binding.Scope.Kind != run.Scope.Kind || bound.Binding.Scope.ID != run.Scope.ID {
+		return errors.New("runbook action requires its current Agent's scoped binding")
 	}
-	if run.Owner.Type == OwnerTypeTeam {
-		if teams == nil {
-			return errors.New("workflow creation requires the current authorized Team roster")
-		}
-		scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
-		deployment, err := teams.GetDeployment(ctx, scope, run.Owner.ID)
-		if err != nil {
-			return err
-		}
-		if deployment == nil || deployment.ID != run.Owner.ID || deployment.Scope != scope || deployment.Status != kernelteam.DeploymentActive || !teamRosterContainsAgent(deployment, run.AssignedAgentID) {
-			return errors.New("workflow Agent is not a member of the current active Team")
-		}
+	var roster TeamRosterReader
+	if teams != nil {
+		roster = workflowTeamRoster{teams: teams}
+	} else if run.Owner.Type == OwnerTypeTeam {
+		return errors.New("runbook action requires the current authorized Team roster")
+	}
+	onRoster, err := AgentOnChatRoster(ctx, roster, run.Scope, run.Owner, run.AssignedAgentID)
+	if err != nil {
+		return err
+	}
+	if !onRoster {
+		return errors.New("runbook action Agent is not on its owner's current roster")
 	}
 	return nil
+}
+
+// workflowTeamRoster reads Team deployments through a WorkflowTeamCatalog.
+type workflowTeamRoster struct{ teams WorkflowTeamCatalog }
+
+func (r workflowTeamRoster) GetTeamDeployment(ctx context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
+	return r.teams.GetDeployment(ctx, scope, id)
 }
 
 func workflowBoundSource(ctx context.Context, catalog WorkflowSourceCatalog, run *AgentRun, bindingID, adapterID, kind string) (*WorkflowEventSource, error) {
@@ -443,7 +452,7 @@ func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalo
 }
 
 func validateWorkflowAction(ctx context.Context, store runbookActionStore, catalog WorkflowSourceCatalog, teams WorkflowTeamCatalog, input ActionProposalValidationInput) (map[string]interface{}, error) {
-	if err := workflowActionOwner(ctx, teams, input.Run, input.Bound); err != nil {
+	if err := runbookActionOwner(ctx, teams, input.Run, input.Bound); err != nil {
 		return nil, err
 	}
 	if input.Bound.Action.Name != RunbookActionCreateWorkflow {
@@ -470,7 +479,7 @@ func dispatchWorkflowAction(ctx context.Context, store runbookActionStore, catal
 	if run == nil || run.Scope != input.Run.Scope || run.ID != input.Run.ID || input.Bound.Binding == nil || input.Call.DeploymentID != input.Bound.Binding.DeploymentID {
 		return nil, errors.New("workflow execution does not match its persisted Agent run")
 	}
-	if err := workflowActionOwner(ctx, teams, run, input.Bound); err != nil {
+	if err := runbookActionOwner(ctx, teams, run, input.Bound); err != nil {
 		return nil, err
 	}
 	switch input.Bound.Action.Name {

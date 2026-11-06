@@ -610,12 +610,7 @@ func projectEvent(i *Project, typ string, actor ActivityActor, v ActivityVisibil
 			return i.Owner.ID
 		}
 		return ""
-	}(), AgentID: func() string {
-		if i.Owner.Type == OwnerTypeAgent {
-			return i.Owner.ID
-		}
-		return ""
-	}(), Actor: actor, Summary: summary, Visibility: v, Payload: map[string]interface{}{"status": i.Status, "revision": i.Revision}, CreatedAt: i.UpdatedAt}
+	}(), AgentID: ownedItemEventAgentID(i.Owner, actor), Actor: actor, Summary: summary, Visibility: v, Payload: map[string]interface{}{"status": i.Status, "revision": i.Revision}, CreatedAt: i.UpdatedAt}
 }
 func projectCreationFingerprint(i *Project) (string, error) {
 	c := cloneProject(i)

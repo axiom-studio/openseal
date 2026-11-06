@@ -43,6 +43,6 @@ func (s *RunCommandService) acceptedHandoffTransfer(ctx context.Context, source 
 func handoffOwnsChild(transfer *AgentRequest, source, child *AgentRun) bool {
 	return transfer != nil && child.ID == transfer.ChildRunID && child.Scope == source.Scope &&
 		child.ParentRunID == source.ID && child.RootRunID == source.RootRunID && child.Source == RunSourceHandoff &&
-		child.Owner == (ObjectiveOwner{Type: transfer.Recipient.Type, ID: transfer.Recipient.ID}) &&
+		child.Owner == collaborationChildOwner(source, transfer) &&
 		transfer.AssignedAgentID != "" && child.AssignedAgentID == transfer.AssignedAgentID
 }

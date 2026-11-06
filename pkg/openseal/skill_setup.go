@@ -50,7 +50,14 @@ func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope
 	if err != nil {
 		return nil, err
 	}
-	if conversation == nil || conversation.Owner.Type != "agent" || conversation.Owner.ID != deploymentID {
+	if conversation == nil {
+		return nil, runtime.ErrConversationNotFound
+	}
+	onRoster, err := runtime.AgentOnChatRoster(ctx, e, scope, conversation.Owner, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	if !onRoster {
 		return nil, runtime.ErrConversationNotFound
 	}
 	return e.reconciledSkillSetupRequests(ctx, scope, deploymentID, conversationID)

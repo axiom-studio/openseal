@@ -122,9 +122,9 @@ func FindConversationTaskResultMessage(ctx context.Context, store ConversationSt
 		}
 		return message, nil
 	}
-	// Team coordination can save several answers in one canonical round. The
-	// first visible result is the stable task result link; the round still owns
-	// the complete answer set.
+	// Team coordination can save several answers in one canonical round. This
+	// Run's own Agent's answer is the stable task result link; the round still
+	// owns the complete answer set.
 	key := "participation-round:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+task.ConversationID+"\x00"+task.SourceMessageID)
 	round, err := store.FindParticipationRoundByIdempotencyKey(ctx, task.Scope, task.ConversationID, key)
 	if err != nil {
@@ -156,7 +156,15 @@ func conversationTaskResultMessageMatches(task *ConversationTask, run *AgentRun,
 	if message.Sender.Type != ConversationParticipantAgent && (message.Sender.Type != ConversationParticipantService || message.Sender.ID != "openseal.conversation") {
 		return false
 	}
-	if task.TargetAgentID != "" && message.Sender.Type == ConversationParticipantAgent && message.Sender.ID != task.TargetAgentID && task.Owner.Type != OwnerTypeTeam {
+	// A result is the expected speaker's own answer, never another member's.
+	want := task.TargetAgentID
+	if want == "" {
+		want = strings.TrimSpace(run.AssignedAgentID)
+	}
+	if want == "" {
+		want = task.Owner.ID
+	}
+	if message.Sender.Type == ConversationParticipantAgent && message.Sender.ID != want {
 		return false
 	}
 	runReference, taskReference := false, false

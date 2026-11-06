@@ -59,9 +59,6 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			return err
 		}
 		for _, run := range runs {
-			if run.Owner.Type != OwnerTypeAgent {
-				continue
-			}
 			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 			triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
 			if conversationID == "" || triggerID == "" {
@@ -119,9 +116,22 @@ func (s *ConversationRunScheduler) reconcileConversationOperationOutputs(ctx con
 			if conversation.Status != ConversationStatusActive || conversation.Owner != run.Owner {
 				continue
 			}
+			// Only the Agent that posted the reply repairs it, with its own
+			// operation's output, while it is still on the chat's roster.
+			agentID := ConversationRunAgentID(conversation, run)
+			if agentID == "" || old.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}) || operation.AssignedAgentID != agentID {
+				continue
+			}
+			onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(s.runs.store), scope, conversation.Owner, agentID)
+			if err != nil {
+				return err
+			}
+			if !onRoster {
+				continue
+			}
 			posted, err := s.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID}, Intent: MessageIntentAnswer,
+				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}, Intent: MessageIntentAnswer,
 				Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
 				References: []ConversationReference{{Kind: ConversationReferenceRun, ID: operation.ID}}, IdempotencyKey: key,
 			})

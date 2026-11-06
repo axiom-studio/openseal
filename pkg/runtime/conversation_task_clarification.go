@@ -24,7 +24,7 @@ func conversationTaskWorkOrigin(ctx context.Context, runs PortfolioStore, conver
 	if err != nil || task == nil {
 		return nil, nil, nil, err
 	}
-	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID == "" || task.TargetAgentID != runActingAgentID(run) {
+	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID == "" || task.TargetAgentID != strings.TrimSpace(run.AssignedAgentID) {
 		return nil, nil, nil, nil
 	}
 	valid, err := VerifyConversationTaskWorkRun(ctx, proof, task, run)
@@ -101,7 +101,7 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 			if err != nil {
 				return false, err
 			}
-			if origin != nil && origin.ID == conversation.ID && conversationRunAgentID(conversation, run) == question.Sender.ID {
+			if origin != nil && origin.ID == conversation.ID && ConversationRunAgentID(conversation, run) == question.Sender.ID {
 				return true, nil
 			}
 		}

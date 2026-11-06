@@ -128,8 +128,9 @@ func (d *ToolActionDispatcher) DispatchAction(ctx context.Context, input ActionD
 		if strings.TrimSpace(input.Run.AssignedAgentID) == "" {
 			return nil, errors.New("action Run has no assigned execution Agent")
 		}
-		if input.Run.Owner.Type == OwnerTypeTeam && input.Bound.Binding.DeploymentID != input.Run.Owner.ID && input.Bound.Binding.DeploymentID != input.Run.AssignedAgentID {
-			return nil, errors.New("Team Run cannot execute a Skill binding owned outside its Team or assigned Agent")
+		// A Run executes its acting Agent's bindings, plus its owning Team's.
+		if owner := input.Bound.Binding.DeploymentID; owner != input.Run.AssignedAgentID && !(input.Run.Owner.Type == OwnerTypeTeam && owner == input.Run.Owner.ID) {
+			return nil, errors.New("Run cannot execute a Skill binding owned outside its acting Agent or owning Team")
 		}
 		executionDeploymentID = input.Run.AssignedAgentID
 	}

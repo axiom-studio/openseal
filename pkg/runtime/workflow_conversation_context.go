@@ -13,7 +13,7 @@ func deferredWorkflowConversationOrigin(ctx context.Context, runs PortfolioStore
 	invalid := func() (*AgentRun, *Conversation, *ChannelMessage, error) {
 		return nil, nil, nil, fmt.Errorf("%w: deferred workflow origin does not match its pinned human request", ErrInvalidAgentRun)
 	}
-	if runs == nil || conversations == nil || run == nil || run.Kind != RunKindAgentWork || run.ParentRunID != "" || run.Context[deferredWorkflowContextKey] != true || run.Context[scheduledTaskContextKey] != true || run.AssignedAgentID == "" || run.Owner.Validate() != nil || (run.Owner.Type == OwnerTypeAgent && run.Owner.ID != run.AssignedAgentID) {
+	if runs == nil || conversations == nil || run == nil || run.Kind != RunKindAgentWork || run.ParentRunID != "" || run.Context[deferredWorkflowContextKey] != true || run.Context[scheduledTaskContextKey] != true || run.AssignedAgentID == "" || run.Owner.Validate() != nil {
 		return invalid()
 	}
 	sourceID, _ := run.Context["workflowSourceRunId"].(string)
@@ -33,7 +33,8 @@ func deferredWorkflowConversationOrigin(ctx context.Context, runs PortfolioStore
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	if conversation == nil || conversation.Scope != run.Scope || conversation.ID != conversationID || conversation.Owner != run.Owner || conversation.Status != ConversationStatusActive {
+	if conversation == nil || conversation.Scope != run.Scope || conversation.ID != conversationID || conversation.Owner != run.Owner || conversation.Status != ConversationStatusActive ||
+		ConversationRunAgentID(conversation, run) != run.AssignedAgentID {
 		return invalid()
 	}
 	trigger, err := conversations.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)

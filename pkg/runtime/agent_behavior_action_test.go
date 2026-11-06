@@ -12,6 +12,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
@@ -285,12 +286,26 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 			EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	proposal, err := NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
-		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
-		Arguments:      map[string]interface{}{"displayName": "Team Researcher", "rationale": "The user asked for the rename"},
-		IdempotencyKey: "team-rename", Summary: "Rename the member",
-	})
+	propose := func(key string) (*ActionProposalResult, error) {
+		return NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, ProposeActionRequest{
+			Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
+			SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
+			Arguments:      map[string]interface{}{"displayName": "Team Researcher", "rationale": "The user asked for the rename"},
+			IdempotencyKey: key, Summary: "Rename the member",
+		})
+	}
+	// Without the Team roster, or off it, the member cannot amend itself.
+	if _, err := propose("team-rename-unproven"); err == nil {
+		t.Fatal("proposal without the Team roster was accepted")
+	}
+	team := &kernelteam.Deployment{ID: "research-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+		Roster: []kernelteam.RosterAssignment{{ID: "other", AgentDeploymentID: "writer"}}}
+	validator.SetTeamRoster(teamRosterPortfolio{MemoryStore: store, team: team})
+	if _, err := propose("team-rename-removed"); err == nil {
+		t.Fatal("proposal from an Agent off the Team roster was accepted")
+	}
+	team.Roster = append(team.Roster, kernelteam.RosterAssignment{ID: "member", AgentDeploymentID: "researcher"})
+	proposal, err := propose("team-rename")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +319,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	if err != nil || resolved.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolve = %#v, %v", resolved, err)
 	}
-	dispatcher, err := NewAgentBehaviorActionDispatcher(store, agents, nil)
+	dispatcher, err := NewAgentBehaviorActionDispatcher(teamRosterPortfolio{MemoryStore: store, team: team}, agents, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,4 +645,41 @@ var legacyAgentManagementArguments = map[string]map[string]interface{}{
 	AgentActionAmendBehavior: {"expectedDeploymentRevision": 1, "displayName": "Renamed", "rationale": "The user asked for a new name"},
 	AgentActionConfigureChannel: {"expectedDeploymentRevision": 1, "expectedEndpointRevision": 1, "endpointId": "slack", "status": "paused",
 		"rationale": "The user asked to pause the channel"},
+}
+
+// The roster can change while a proposal waits for approval, so dispatch
+// rechecks it; an Agent's own Run is its roster of one.
+func TestAgentBehaviorRunOnRosterChecksTheCurrentTeamRoster(t *testing.T) {
+	ctx, store, scope := context.Background(), NewMemoryStore(), Scope{Kind: "tenant", ID: "tenant-a"}
+	team := &kernelteam.Deployment{ID: "research-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+		Roster: []kernelteam.RosterAssignment{{ID: "member", AgentDeploymentID: "researcher"}}}
+	teams := teamRosterPortfolio{MemoryStore: store, team: team}
+	member := &AgentRun{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "research-team"}, AssignedAgentID: "researcher"}
+	if err := agentBehaviorRunOnRoster(ctx, teams, member); err != nil {
+		t.Fatalf("roster member rejected: %v", err)
+	}
+	if err := agentBehaviorRunOnRoster(ctx, nil, member); err == nil {
+		t.Fatal("Team member accepted without a Team roster")
+	}
+	team.Roster = nil
+	if err := agentBehaviorRunOnRoster(ctx, teams, member); err == nil {
+		t.Fatal("removed member accepted")
+	}
+	team.Roster, team.Status = []kernelteam.RosterAssignment{{ID: "member", AgentDeploymentID: "researcher"}}, kernelteam.DeploymentPaused
+	if err := agentBehaviorRunOnRoster(ctx, teams, member); err == nil {
+		t.Fatal("member of an inactive Team accepted")
+	}
+	own := &AgentRun{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher"}
+	if err := agentBehaviorRunOnRoster(ctx, nil, own); err != nil {
+		t.Fatalf("Agent's own Run rejected: %v", err)
+	}
+	if id, err := agentBehaviorDeploymentID(own); err != nil || id != "researcher" {
+		t.Fatalf("own Run Agent = %q, %v", id, err)
+	}
+	if _, err := agentBehaviorDeploymentID(&AgentRun{Kind: RunKindConversation, Owner: own.Owner}); err == nil {
+		t.Fatal("Run without an acting Agent accepted")
+	}
+	if _, err := agentBehaviorDeploymentID(&AgentRun{Kind: RunKindConversation, Owner: own.Owner, AssignedAgentID: "writer"}); err == nil {
+		t.Fatal("Agent's chat Run assigned to another Agent accepted")
+	}
 }

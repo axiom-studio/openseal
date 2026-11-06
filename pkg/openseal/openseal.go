@@ -3615,6 +3615,7 @@ func (e *Engine) configureAgentManagementActions() error {
 	if err != nil {
 		return err
 	}
+	validator.SetTeamRoster(e)
 	e.actionValidators = append(e.actionValidators, validator)
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewAgentBehaviorActionDispatcher(e.store, e.agents, e.actionPoolSpecs[index].dispatcher, e.externalConversations.endpoints)

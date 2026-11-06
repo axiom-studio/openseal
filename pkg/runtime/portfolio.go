@@ -765,12 +765,25 @@ func objectiveActivityEvent(objective *Objective, actor ActivityActor, visibilit
 		Severity: ActivitySeverityInfo, Actor: actor, Summary: summary, Payload: payload,
 		Visibility: visibility, CreatedAt: occurredAt,
 	}
-	if objective.Owner.Type == OwnerTypeAgent {
-		event.AgentID = objective.Owner.ID
-	} else if objective.Owner.Type == OwnerTypeTeam {
+	event.AgentID = ownedItemEventAgentID(objective.Owner, actor)
+	if objective.Owner.Type == OwnerTypeTeam {
 		event.TeamID = objective.Owner.ID
 	}
 	return event
+}
+
+// ownedItemEventAgentID is the Agent an owned item's activity belongs to: the
+// owning Agent, or the Team member that acted on a Team-owned item.
+func ownedItemEventAgentID(owner ObjectiveOwner, actor ActivityActor) string {
+	switch owner.Type {
+	case OwnerTypeAgent:
+		return owner.ID
+	case OwnerTypeTeam:
+		if actor.Type == "agent" {
+			return actor.ID
+		}
+	}
+	return ""
 }
 
 func (s *PortfolioService) GetObjective(ctx context.Context, scope Scope, objectiveID string) (*Objective, error) {

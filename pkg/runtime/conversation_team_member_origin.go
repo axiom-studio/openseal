@@ -4,13 +4,20 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
-// conversationRunAgentID is the Agent a chat Run speaks as in conversation:
+// ConversationRunAgentID is the Agent a chat Run speaks as in conversation:
 // the owner of an Agent's chat, or the assigned member of a Team's. It is ""
 // when the Run cannot speak there. A Team member is the same Agent its 1:1
 // chat has, so everything keyed by "the Agent in this chat" uses this.
-func conversationRunAgentID(conversation *Conversation, run *AgentRun) string {
+//
+// It names the acting Agent only and is not an authorization proof: Team
+// membership is proved when the member Run is created (verifyTeamMemberRun),
+// and the current roster is checked by AgentOnChatRoster.
+func ConversationRunAgentID(conversation *Conversation, run *AgentRun) string {
 	if conversation == nil || run == nil || run.Owner != conversation.Owner {
 		return ""
 	}
@@ -23,6 +30,85 @@ func conversationRunAgentID(conversation *Conversation, run *AgentRun) string {
 		return strings.TrimSpace(run.AssignedAgentID)
 	}
 	return ""
+}
+
+// TeamRosterReader reads the current Team deployment for roster checks.
+type TeamRosterReader interface {
+	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
+}
+
+// teamRosterReader returns store's Team deployment reader, or nil.
+func teamRosterReader(store any) TeamRosterReader {
+	teams, _ := store.(TeamRosterReader)
+	return teams
+}
+
+// AgentOnChatRoster reports whether agentID is on the roster of the chat
+// owned by owner: the owner of an Agent's chat, or a member of the owning
+// Team's current active deployment. An empty agent, an unknown owner, a
+// missing Team catalog and a missing or inactive Team are not members; store
+// errors are returned.
+func AgentOnChatRoster(ctx context.Context, teams TeamRosterReader, scope Scope, owner ObjectiveOwner, agentID string) (bool, error) {
+	if agentID == "" || strings.TrimSpace(agentID) != agentID {
+		return false, nil
+	}
+	switch owner.Type {
+	case OwnerTypeAgent:
+		return owner.ID != "" && owner.ID == agentID, nil
+	case OwnerTypeTeam:
+		roster, err := activeTeamRoster(ctx, teams, scope, owner.ID)
+		if err != nil {
+			return false, err
+		}
+		for _, id := range roster {
+			if id == agentID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// activeTeamRoster is the Agent deployment IDs on teamID's current active
+// deployment, or none when the Team is missing, inactive or unreadable.
+func activeTeamRoster(ctx context.Context, teams TeamRosterReader, scope Scope, teamID string) ([]string, error) {
+	if teams == nil || strings.TrimSpace(teamID) == "" {
+		return nil, nil
+	}
+	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	deployment, err := teams.GetTeamDeployment(ctx, catalogScope, teamID)
+	if errors.Is(err, kernelteam.ErrDeploymentNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if deployment == nil || deployment.ID != teamID || deployment.Scope != catalogScope || deployment.Status != kernelteam.DeploymentActive {
+		return nil, nil
+	}
+	seen := make(map[string]bool, len(deployment.Roster))
+	roster := make([]string, 0, len(deployment.Roster))
+	for _, assignment := range deployment.Roster {
+		if id := strings.TrimSpace(assignment.AgentDeploymentID); id != "" && !seen[id] {
+			seen[id] = true
+			roster = append(roster, id)
+		}
+	}
+	return roster, nil
+}
+
+// teamRosterContainsAgent reports whether a non-empty agent is on deployment's roster.
+func teamRosterContainsAgent(deployment *kernelteam.Deployment, agentDeploymentID string) bool {
+	agentDeploymentID = strings.TrimSpace(agentDeploymentID)
+	if deployment == nil || agentDeploymentID == "" {
+		return false
+	}
+	for _, assignment := range deployment.Roster {
+		if assignment.AgentDeploymentID == agentDeploymentID {
+			return true
+		}
+	}
+	return false
 }
 
 // teamMemberRunKey is the idempotency key the routing Run creates a member's

@@ -45,8 +45,11 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 			if externalInboxItemIsFollowUp(item, run) {
 				return nil, false, nil // The trigger's item already forwards this Run's updates.
 			}
+			if strings.TrimSpace(run.AssignedAgentID) == "" {
+				continue // Only an Agent's own turn has commentary to forward.
+			}
 			phase := "commentary-" + event.ID
-			message, err := w.post(ctx, item, endpoint, RunProgressAcknowledgement{RunID: run.ID, Phase: phase, Text: event.Summary, SourceEventID: event.ID})
+			message, err := w.post(ctx, item, RunProgressAcknowledgement{RunID: run.ID, Phase: phase, Text: event.Summary, SourceEventID: event.ID}, run.AssignedAgentID)
 			if err != nil {
 				return result, seen, err
 			}

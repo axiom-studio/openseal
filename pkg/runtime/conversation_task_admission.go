@@ -200,14 +200,12 @@ func validConversationTaskContinuationDelegation(child, parent *AgentRun, reques
 		return false
 	}
 	expectedSource := RunSourceRequest
-	expectedOwner := parent.Owner
 	if request.Kind == AgentRequestKindHandoff {
 		expectedSource = RunSourceHandoff
-		expectedOwner = ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID}
 	} else if request.Kind == AgentRequestKindEscalation {
 		expectedSource = RunSourceEscalation
 	}
-	return child.Source == expectedSource && child.Owner == expectedOwner
+	return child.Source == expectedSource && child.Owner == collaborationChildOwner(parent, request)
 }
 
 func validConversationTaskAdmissionRoot(root *AgentRun, task *ConversationTask) bool {
