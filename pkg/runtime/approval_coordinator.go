@@ -53,11 +53,11 @@ const (
 )
 
 // ApprovalSupersededPrincipal is the kernel principal recorded when a chat
-// message from the person replaces a pending routine brief.
+// message from the person replaces a pending approval.
 var ApprovalSupersededPrincipal = ApprovalPrincipal{Type: "system", ID: "kernel"}
 
-// ApprovalSupersededReason is the decision reason of a superseded brief.
-const ApprovalSupersededReason = "The person replied instead of approving; revise the routine from their message."
+// ApprovalSupersededReason is the decision reason of a superseded approval.
+const ApprovalSupersededReason = "The person replied with a message instead of approving; the action was not carried out."
 
 // ApprovalModePrincipal is the system principal recorded when a conversation
 // approval mode change resolves a pending approval.

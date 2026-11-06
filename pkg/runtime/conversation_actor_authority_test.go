@@ -317,17 +317,17 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 		t.Fatalf("member B changed pending action: %#v, %v", call, err)
 	}
 
-	// The requesting member's new message is delivered to their waiting Run.
-	// The approval stays pending; the Run sees the message once it resumes.
+	// The requesting member's own message replaces the approval: the action
+	// is not carried out and their Run resumes with the message.
 	messageA := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "follow-up-a"})
 	delivered := f.schedule(t, messageA)
-	if delivered.ID != root.ID || delivered.Status != AgentRunStatusWaitingForApproval || delivered.WakeCondition == nil ||
+	if delivered.ID != root.ID || delivered.Status != AgentRunStatusQueued || delivered.WakeCondition != nil ||
 		!conversationRunHasFollowUp(delivered, messageA.ID) {
-		t.Fatalf("follow-up was not delivered to the waiting Run: %#v", delivered)
+		t.Fatalf("follow-up did not resume the waiting Run: %#v", delivered)
 	}
 	approval, err = f.store.GetApproval(t.Context(), scope, proposal.Approval.ID)
-	if err != nil || approval.Status != ApprovalStatusPending {
-		t.Fatalf("follow-up changed the pending approval: %#v, %v", approval, err)
+	if err != nil || approval.Status != ApprovalStatusSuperseded {
+		t.Fatalf("follow-up did not replace the pending approval: %#v, %v", approval, err)
 	}
 	f.assertRunUnchanged(t, runB)
 }

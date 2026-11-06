@@ -991,8 +991,10 @@ func (r *HostedTurnRunner) buildRequest(input TurnExecutionContext) (HostedTurnR
 	}
 	if last, ok := input.Run.Checkpoint["lastAction"].(map[string]interface{}); ok {
 		switch status := fmt.Sprint(last["approvalStatus"]); {
-		case status == string(ApprovalStatusSuperseded):
+		case status == string(ApprovalStatusSuperseded) && routineBriefAction(fmt.Sprint(last["skillId"]), fmt.Sprint(last["action"])):
 			request.SystemInstructions = append(request.SystemInstructions, SupersededRoutineBriefInstruction)
+		case status == string(ApprovalStatusSuperseded):
+			request.SystemInstructions = append(request.SystemInstructions, SupersededApprovalInstruction)
 		case declinedRoutineBrief(fmt.Sprint(last["skillId"]), fmt.Sprint(last["action"]), status):
 			request.SystemInstructions = append(request.SystemInstructions, DeclinedRoutineBriefInstruction)
 		}

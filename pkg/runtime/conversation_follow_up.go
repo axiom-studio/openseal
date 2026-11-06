@@ -66,10 +66,10 @@ func externalInboxItemIsFollowUp(item *ExternalConversationInboxItem, run *Agent
 // conversationFollowUpRunEligible reports whether a foreground conversation
 // Run can still consume new human input. Any non-terminal state qualifies:
 // queued, planning, running and sleeping Runs see the message on their next
-// Turn; Runs waiting for approval, an event (credential, setup, browser
-// handoff), another Agent, a dependency, or paused by the user keep waiting
-// and see the message when they resume; only a pending routine brief is
-// replaced by the message (supersedeRoutineBriefForMessage). Terminal Runs, Runs promoted to a
+// Turn; a pending approval is
+// replaced by the message (supersedeApprovalForMessage); Runs waiting for an
+// event (credential, setup, browser handoff), another Agent, a dependency, or
+// paused by the user keep waiting and see the message when they resume. Terminal Runs, Runs promoted to a
 // background conversation task, Runs explaining their final failure and
 // pinned Runbook Runs never absorb new messages.
 func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, conversation *Conversation, run *AgentRun) (bool, error) {
@@ -124,7 +124,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 			for _, intervention := range runOrEmpty(run).PendingInterventions {
 				if intervention.ID == interventionID {
 					// Replay finishes a supersede interrupted after delivery.
-					superseded, err := s.supersedeRoutineBriefForMessage(ctx, run, message)
+					superseded, err := s.supersedeApprovalForMessage(ctx, run, message)
 					if err != nil {
 						return nil, err
 					}
@@ -192,9 +192,9 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 		if err != nil {
 			return nil, err
 		}
-		// A message that answers a pending routine brief replaces it: the Run
-		// resumes with the message and proposes the revised brief.
-		superseded, err := s.supersedeRoutineBriefForMessage(ctx, run, message)
+		// A message that answers a pending approval replaces it: the action is
+		// not carried out and the Run resumes with the message.
+		superseded, err := s.supersedeApprovalForMessage(ctx, run, message)
 		if err != nil {
 			return nil, err
 		}
@@ -259,5 +259,48 @@ func (r *ConversationRunTurnRunner) conversationFollowUpMessages(ctx context.Con
 		}
 	}
 	sort.SliceStable(result, func(i, j int) bool { return result[i].Sequence < result[j].Sequence })
+	return result, nil
+}
+
+// supersedeApprovalForMessage closes the pending approval that the Run is
+// waiting on when the person answers it with a chat message, which is already
+// delivered to the Run as a follow-up. Any approval of this Run, still pending
+// and created before the message, qualifies; the action is not carried out and
+// the Run resumes with the message. A decision that won the race (the
+// person pressed Accept or Decline) is kept: the message then reaches the Run
+// as an ordinary follow-up when it resumes. It returns the resolution, or nil
+// when nothing was superseded.
+func (s *ConversationRunScheduler) supersedeApprovalForMessage(ctx context.Context, run *AgentRun, message *ChannelMessage) (*ApprovalResolutionResult, error) {
+	if run == nil || message == nil || run.Status != AgentRunStatusWaitingForApproval || run.WakeCondition == nil ||
+		run.WakeCondition.Type != "approval" || run.WakeCondition.Reference == "" || !conversationRunHasFollowUp(run, message.ID) {
+		return nil, nil
+	}
+	approval, err := s.runs.store.GetApproval(ctx, run.Scope, run.WakeCondition.Reference)
+	if errors.Is(err, ErrApprovalNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if approval == nil || approval.Status != ApprovalStatusPending || approval.RunID != run.ID || !approval.CreatedAt.Before(message.CreatedAt) {
+		return nil, nil
+	}
+	call, err := s.runs.store.GetActionCall(ctx, run.Scope, approval.ActionCallID)
+	if errors.Is(err, ErrActionNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if call == nil || call.Status != ActionCallStatusWaitingApproval || call.ApprovalID != approval.ID {
+		return nil, nil
+	}
+	result, err := s.approvals.ResolveSupersededByMessage(ctx, run.Scope, approval.ID, approval.Revision, message.ID)
+	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidRunTransition) || errors.Is(err, ErrApprovalExpired) {
+		return nil, nil
+	}
+	if err != nil || result == nil || !result.Resolved {
+		return nil, err
+	}
 	return result, nil
 }

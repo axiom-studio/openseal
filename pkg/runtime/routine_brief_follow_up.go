@@ -1,15 +1,17 @@
 package runtime
 
 import (
-	"context"
-	"errors"
-
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // DeclinedRoutineBriefReply is the calm reply after the person declines a
 // routine brief. Declining is a decision, not a failure: the Run completes.
 const DeclinedRoutineBriefReply = "Okay, I didn't set up the routine."
+
+// SupersededApprovalInstruction tells the Agent how to continue after the
+// person answered any other pending approval with a chat message. The action
+// was not carried out; the message never approves it.
+const SupersededApprovalInstruction = "The person replied with a message instead of approving your proposed action, so it was not carried out and its approval is closed (continuationCheckpoint.lastAction holds its exact arguments). Their message is in followUpMessages; a message never approves an action. Do what their message asks first. If the original request still stands, propose the action again through the normal governed action path, with any change they asked for, once whatever they asked first is done or in the same Turn when nothing blocks it. If they no longer want it, do not propose it again; reply briefly. Never propose a payment again unless their message explicitly asks for it."
 
 // SupersededRoutineBriefInstruction tells the Agent how to continue after the
 // person answered a pending routine brief with a chat message.
@@ -48,47 +50,4 @@ func routineBriefAction(skillID, action string) bool {
 // declinedRoutineBrief reports a routine brief the person declined.
 func declinedRoutineBrief(skillID, action, approvalStatus string) bool {
 	return routineBriefAction(skillID, action) && approvalStatus == string(ApprovalStatusRejected)
-}
-
-// supersedeRoutineBriefForMessage closes the pending routine brief that the
-// Run is waiting on when the person answers it with a chat message, which is
-// already delivered to the Run as a follow-up. Only a create_task approval of
-// this Run, still pending and created before the message, qualifies; any other
-// approval keeps waiting for its decision. A decision that won the race (the
-// person pressed Accept or Decline) is kept: the message then reaches the Run
-// as an ordinary follow-up when it resumes. It returns the resolution, or nil
-// when nothing was superseded.
-func (s *ConversationRunScheduler) supersedeRoutineBriefForMessage(ctx context.Context, run *AgentRun, message *ChannelMessage) (*ApprovalResolutionResult, error) {
-	if run == nil || message == nil || run.Status != AgentRunStatusWaitingForApproval || run.WakeCondition == nil ||
-		run.WakeCondition.Type != "approval" || run.WakeCondition.Reference == "" || !conversationRunHasFollowUp(run, message.ID) {
-		return nil, nil
-	}
-	approval, err := s.runs.store.GetApproval(ctx, run.Scope, run.WakeCondition.Reference)
-	if errors.Is(err, ErrApprovalNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if approval == nil || approval.Status != ApprovalStatusPending || approval.RunID != run.ID || !approval.CreatedAt.Before(message.CreatedAt) {
-		return nil, nil
-	}
-	call, err := s.runs.store.GetActionCall(ctx, run.Scope, approval.ActionCallID)
-	if errors.Is(err, ErrActionNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if call == nil || !routineBriefAction(call.SkillID, call.Action) || call.Status != ActionCallStatusWaitingApproval || call.ApprovalID != approval.ID {
-		return nil, nil
-	}
-	result, err := s.approvals.ResolveSupersededByMessage(ctx, run.Scope, approval.ID, approval.Revision, message.ID)
-	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, ErrRevisionConflict) || errors.Is(err, ErrInvalidRunTransition) || errors.Is(err, ErrApprovalExpired) {
-		return nil, nil
-	}
-	if err != nil || result == nil || !result.Resolved {
-		return nil, err
-	}
-	return result, nil
 }

@@ -218,16 +218,38 @@ func TestRoutineBriefSupersedeIsIdempotent(t *testing.T) {
 
 // Other approvals keep waiting for their decision; the message stays a
 // follow-up for when the Run resumes.
-func TestMessageDuringOtherPendingApprovalKeepsWaiting(t *testing.T) {
+func TestMessageDuringAnyPendingApprovalReplacesIt(t *testing.T) {
 	f := newRoutineBriefFixture(t)
 	run, proposal := briefRunWaiting(t, f, "shop", "pay", map[string]interface{}{})
-	message := f.post(t, "user", "use the other card")
+	message := f.post(t, "user", "connect my Google account first")
 	delivered := f.schedule(t, message)
-	if delivered.ID != run.ID || delivered.Status != AgentRunStatusWaitingForApproval || !conversationRunHasFollowUp(delivered, message.ID) {
-		t.Fatalf("Run = %#v", delivered)
+	if delivered.ID != run.ID || delivered.Status != AgentRunStatusQueued || delivered.WakeCondition != nil || !conversationRunHasFollowUp(delivered, message.ID) {
+		t.Fatalf("Run did not resume with the message: %#v", delivered)
 	}
-	if approval := f.approval(t, proposal.Approval.ID); approval.Status != ApprovalStatusPending {
-		t.Fatalf("payment approval changed: %#v", approval)
+	if approval := f.approval(t, proposal.Approval.ID); approval.Status != ApprovalStatusSuperseded || approval.DecisionReason != ApprovalSupersededReason {
+		t.Fatalf("payment approval = %#v", approval)
+	}
+	call, err := f.store.GetActionCall(t.Context(), run.Scope, proposal.Call.ID)
+	if err != nil || call.Status != ActionCallStatusDenied {
+		t.Fatalf("payment call = %#v, %v", call, err)
+	}
+
+	// The resumed Turn gets the general instruction, not the routine one.
+	var seen HostedTurnRequest
+	host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
+		seen = request
+		return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model", NextRunStatus: AgentRunStatusCompleted, OutputSummary: "ok", RunOutput: map[string]interface{}{"summary": "ok"}}, nil
+	}}
+	hosted, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent-42", DefinitionID: "agent", DefinitionVersion: "1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hosted.RunTurn(t.Context(), TurnExecutionContext{Run: delivered, Turn: &AgentTurn{ID: "continue"}}); err != nil {
+		t.Fatal(err)
+	}
+	instructions := strings.Join(seen.SystemInstructions, "\n")
+	if !strings.Contains(instructions, SupersededApprovalInstruction) || strings.Contains(instructions, SupersededRoutineBriefInstruction) {
+		t.Fatalf("instructions = %s", instructions)
 	}
 }
 
