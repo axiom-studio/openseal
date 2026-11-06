@@ -7,6 +7,22 @@ import (
 	"strings"
 )
 
+// ErrRunTerminalReportUndeliverable marks a failure report whose Run and
+// conversation disagree for good. Retrying cannot change that, so the outbox
+// acknowledges the report instead of retrying it forever.
+var ErrRunTerminalReportUndeliverable = errors.New("terminal Run report is undeliverable")
+
+// undeliverableReport still matches ErrInvalidAgentRun for callers that check it.
+type undeliverableReport struct{ reason string }
+
+func (e undeliverableReport) Error() string { return "invalid agent run: " + e.reason }
+
+func (e undeliverableReport) Is(target error) bool {
+	return target == ErrRunTerminalReportUndeliverable || target == ErrInvalidAgentRun
+}
+
+func undeliverable(reason string) error { return undeliverableReport{reason: reason} }
+
 func checkpointTerminalFailure(checkpoint map[string]interface{}, code string) map[string]interface{} {
 	result := checkpointFinalFailureExplanation(checkpoint, "execution", "The requested work did not complete.")
 	failure := result[FinalFailureExplanationCheckpointKey].(map[string]interface{})
@@ -44,8 +60,14 @@ func terminalCreditError(status AgentRunStatus, checkpoint map[string]interface{
 	return &RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
 }
 
+// failedConversationReportCandidate is a failed chat Run with an Agent to
+// speak for it: an Agent's own Run or a Team member's. A Team's routing Run
+// has no speaker, so it reports nothing.
 func failedConversationReportCandidate(run *AgentRun) bool {
 	if run == nil || run.Status != AgentRunStatusFailed || run.Kind != RunKindConversation || run.ParentRunID != "" {
+		return false
+	}
+	if run.Owner.Type != OwnerTypeAgent && !isTeamMemberRun(run) {
 		return false
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
@@ -67,8 +89,12 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 	if err != nil {
 		return err
 	}
-	if conversation == nil || conversation.Scope != run.Scope || conversation.Owner != run.Owner || conversation.Status != ConversationStatusActive {
-		return ErrInvalidAgentRun
+	if conversation == nil || conversation.Status != ConversationStatusActive {
+		// A deleted or archived chat has nobody left to tell.
+		return nil
+	}
+	if conversation.Scope != run.Scope || conversation.Owner != run.Owner {
+		return undeliverable("conversation owner differs from the Run owner")
 	}
 	// An application chat explains a credit stop beside the saved message and
 	// retries this attempt once credits are added. A provider channel has no
@@ -81,22 +107,27 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		return err
 	}
 	if trigger == nil || trigger.Scope != run.Scope || trigger.ConversationID != conversationID || trigger.ID != triggerID || !conversationMessageStartsRun(conversation, trigger) {
-		return ErrInvalidAgentRun
+		return undeliverable("trigger message is missing or does not start a Run")
 	}
 	initiator := trigger.Sender
 	if voiceCallStartedMessage(trigger) && trigger.Initiator != nil {
 		initiator = *trigger.Initiator
 	}
-	if initiator.Type != ConversationParticipantUser || initiator.Validate() != nil {
-		return ErrInvalidAgentRun
+	if initiator.Type != ConversationParticipantUser {
+		// Service wakes (connection setup, for example) and Agent handoffs
+		// have no person waiting on this attempt's answer.
+		return nil
+	}
+	if initiator.Validate() != nil {
+		return undeliverable("trigger initiator is invalid")
 	}
 	expectedRoot := externalConversationThreadRoot(conversation, trigger)
 	if root, _ := run.Context["threadRootMessageId"].(string); root != expectedRoot {
-		return ErrInvalidAgentRun
+		return undeliverable("Run thread differs from the trigger thread")
 	}
 	agentID := ConversationRunAgentID(conversation, run)
 	if !validOpaqueIdentifier(agentID, 256) {
-		return ErrInvalidAgentRun
+		return undeliverable("Run has no Agent to answer")
 	}
 	references := []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}
 	if run.Context[ConversationTaskContextKey] != nil {
@@ -118,7 +149,7 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		return findErr
 	} else if saved != nil {
 		if !terminalConversationReplyMatches(saved, run, triggerID, agentID) {
-			return ErrInvalidAgentRun
+			return undeliverable("saved answer does not belong to this Run")
 		}
 		return nil
 	}
@@ -127,7 +158,7 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		return findErr
 	} else if saved != nil {
 		if !terminalConversationReplyMatches(saved, run, triggerID, agentID) {
-			return ErrInvalidAgentRun
+			return undeliverable("saved answer does not belong to this Run")
 		}
 		return nil
 	}

@@ -22,7 +22,9 @@ type RunTerminalReportingWorkerStats struct {
 	Claimed   uint64
 	Delivered uint64
 	Retried   uint64
-	Errors    uint64
+	// Dropped reports can never be delivered and were acknowledged.
+	Dropped uint64
+	Errors  uint64
 }
 
 type RunTerminalReportingWorker struct {
@@ -34,6 +36,7 @@ type RunTerminalReportingWorker struct {
 	claimed   atomic.Uint64
 	delivered atomic.Uint64
 	retried   atomic.Uint64
+	dropped   atomic.Uint64
 	errors    atomic.Uint64
 }
 
@@ -155,11 +158,16 @@ dispatch:
 }
 
 func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *RunTerminalReport) error {
-	if report == nil || report.Run == nil || report.LeaseExpiresAt == nil || report.Run.Scope != report.Scope || report.Run.ID != report.RunID || report.Run.Status != report.Status || report.TerminalRevision != report.Run.Revision || !runNeedsTerminalReporting(report.Run) {
+	if report == nil || report.Run == nil || report.LeaseExpiresAt == nil || report.Run.Scope != report.Scope || report.Run.ID != report.RunID || report.Run.Status != report.Status || report.TerminalRevision != report.Run.Revision {
 		return ErrInvalidRunTerminalReport
 	}
 	var err error
-	if w.options.ScopeAllowed != nil {
+	if !runNeedsTerminalReporting(report.Run) {
+		// The outbox trigger enqueues broadly; a Run with nothing to report
+		// (a Team routing Run, for example) is acknowledged, not retried.
+		err = ErrRunTerminalReportUndeliverable
+	}
+	if err == nil && w.options.ScopeAllowed != nil {
 		var allowed bool
 		allowed, err = w.options.ScopeAllowed(ctx, report.Scope)
 		if err == nil && !allowed {
@@ -173,6 +181,13 @@ func (w *RunTerminalReportingWorker) processReport(ctx context.Context, report *
 	completion := RunTerminalReportingCompletion{
 		Scope: report.Scope, RunID: report.RunID, Status: report.Status, TerminalRevision: report.TerminalRevision, WorkerID: report.LeaseOwner,
 		LeaseExpiresAt: *report.LeaseExpiresAt, Now: now,
+	}
+	if errors.Is(err, ErrRunTerminalReportUndeliverable) {
+		if completeErr := w.store.CompleteRunTerminalReport(ctx, completion); completeErr != nil {
+			return errors.Join(err, completeErr)
+		}
+		w.dropped.Add(1)
+		return nil
 	}
 	if err != nil {
 		delay := workerPollDelay(time.Second, report.Attempts-1, "terminal-report:"+report.RunID)
@@ -193,5 +208,5 @@ func (w *RunTerminalReportingWorker) Stats() RunTerminalReportingWorkerStats {
 	if w == nil {
 		return RunTerminalReportingWorkerStats{}
 	}
-	return RunTerminalReportingWorkerStats{Claimed: w.claimed.Load(), Delivered: w.delivered.Load(), Retried: w.retried.Load(), Errors: w.errors.Load()}
+	return RunTerminalReportingWorkerStats{Claimed: w.claimed.Load(), Delivered: w.delivered.Load(), Retried: w.retried.Load(), Dropped: w.dropped.Load(), Errors: w.errors.Load()}
 }
