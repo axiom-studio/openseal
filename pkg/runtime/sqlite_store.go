@@ -133,7 +133,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateTeamSkillGrantRemovalSQLite(db); err != nil {
 		return err
 	}
-	return migrateInteractionUmbrellasSQLite(db)
+	if err := migrateInteractionUmbrellasSQLite(db); err != nil {
+		return err
+	}
+	return migrateChannelUmbrellasSQLite(db)
 }
 
 // Close closes the underlying database.

@@ -14,7 +14,7 @@ import (
 
 func externalConversationGatewayFixture(scope Scope) ExternalConversationIngressGateway {
 	return ExternalConversationIngressGateway{
-		Scope: scope, DeploymentID: "skill-deployment-1", Provider: "slack",
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "skill-deployment-1"}, DeploymentID: "skill-deployment-1", Provider: "slack",
 		Adapter: ExternalConversationAdapterReference{
 			SkillID: "skill-slack", SkillVersion: "2.0.0",
 			SourceIdentity: "oci://example/slack@sha256:abc", BindingID: "binding-1",
@@ -115,7 +115,7 @@ func TestExternalConversationGatewayServiceRejectsStaleExactAdapter(t *testing.T
 	store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	service := NewExternalConversationGatewayService(store, catalog)
 	gateway := ExternalConversationIngressGateway{
-		Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
+		Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
 		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 	}
 	created, err := service.Create(ctx, CreateExternalConversationGatewayRequest{
@@ -218,7 +218,7 @@ func TestCredentialFreeConversationGatewayRoutesAfterSQLiteRestart(t *testing.T)
 	gateway := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "synthetic-gateway", Name: "Synthetic gateway",
 		Gateway: ExternalConversationIngressGateway{
-			Scope: scope, DeploymentID: "synthetic-agent", Provider: "synthetic",
+			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "synthetic-agent"}, DeploymentID: "synthetic-agent", Provider: "synthetic",
 			Adapter: ExternalConversationAdapterReference{
 				SkillID: definition.ID, SkillVersion: definition.Version,
 				BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",

@@ -71,6 +71,10 @@ func (s *SQLiteStore) ListExternalConversationGateways(
 		query += ` AND json_extract(payload,'$.gateway.deploymentId')=?`
 		args = append(args, filter.DeploymentID)
 	}
+	if filter.Owner != nil {
+		query += ` AND json_extract(payload,'$.gateway.owner.type')=? AND json_extract(payload,'$.gateway.owner.id')=?`
+		args = append(args, string(filter.Owner.Type), filter.Owner.ID)
+	}
 	statuses := make([]string, 0, len(filter.Statuses))
 	for _, status := range filter.Statuses {
 		statuses = append(statuses, string(status))

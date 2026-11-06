@@ -91,7 +91,7 @@ func TestUnpinnedApplicationRequiresExactAuthenticatedGateway(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			store, catalog, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
-			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
+			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
 			endpoint.InstallationID = "T123"
 			endpoint.ApplicationID = ""
 			endpoint.Address = "C123"

@@ -57,7 +57,7 @@ func workflowActionDefinitionFixture(t *testing.T, store KernelStore, routinesDe
 	if !ok {
 		t.Fatal("gateway store missing")
 	}
-	createActiveExternalConversationGateway(t, t.Context(), NewExternalConversationGatewayService(gatewayStore), CreateExternalConversationGatewayRequest{ID: "event-gateway", Name: "Verified installation", Gateway: ExternalConversationIngressGateway{Scope: run.Scope, DeploymentID: run.AssignedAgentID, Provider: "test", InstallationID: "installation-one", ApplicationID: "application-one", Adapter: ExternalConversationAdapterReference{BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "messages", SkillID: definition.ID, SkillVersion: definition.Version}}, Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "Install reviewed ingress"})
+	createActiveExternalConversationGateway(t, t.Context(), NewExternalConversationGatewayService(gatewayStore), CreateExternalConversationGatewayRequest{ID: "event-gateway", Name: "Verified installation", Gateway: ExternalConversationIngressGateway{Scope: run.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}, DeploymentID: run.AssignedAgentID, Provider: "test", InstallationID: "installation-one", ApplicationID: "application-one", Adapter: ExternalConversationAdapterReference{BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "messages", SkillID: definition.ID, SkillVersion: definition.Version}}, Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "Install reviewed ingress"})
 	bound, err := catalog.Resolve(t.Context(), routines.Scope, run.AssignedAgentID, routines.SkillID, routines.SkillVersion, RunbookActionCreateWorkflow)
 	if err != nil {
 		t.Fatal(err)
@@ -329,7 +329,7 @@ func TestWorkflowCreationReplayRecoversAfterIngressIsPaused(t *testing.T) {
 	}
 }
 
-func TestWorkflowActionUsesTeamManagementAuthorityAndAssignedAgentSource(t *testing.T) {
+func TestWorkflowActionUsesTeamManagementAuthorityAndTeamChannels(t *testing.T) {
 	store := NewMemoryStore()
 	sourceRun, catalog, agentBound, args := workflowActionFixture(t, store)
 	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations-team"}
@@ -354,6 +354,12 @@ func TestWorkflowActionUsesTeamManagementAuthorityAndAssignedAgentSource(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A Team run follows the Team's channel, never its member's own.
+	teamEvents := &skill.Binding{ID: "event-account", Scope: binding.Scope, DeploymentID: owner.ID, SkillID: "test-events", SkillVersion: "1.0.0", Revision: 1, MaximumRisk: skill.RiskLevelRead, EnabledConversationAdapters: []string{"messages"}}
+	if err := catalog.Bind(t.Context(), teamEvents); err != nil {
+		t.Fatal(err)
+	}
+	createActiveExternalConversationGateway(t, t.Context(), NewExternalConversationGatewayService(store), CreateExternalConversationGatewayRequest{ID: "team-event-gateway", Name: "Team installation", Gateway: ExternalConversationIngressGateway{Scope: run.Scope, Owner: owner, DeploymentID: owner.ID, Provider: "test", InstallationID: "installation-one", ApplicationID: "application-one", Adapter: ExternalConversationAdapterReference{BindingID: teamEvents.ID, BindingRevision: teamEvents.Revision, AdapterID: "messages", SkillID: "test-events", SkillVersion: "1.0.0"}}, Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "Install the Team ingress"})
 	teamStore := kernelteam.NewMemoryStore()
 	deployment := &kernelteam.Deployment{ID: owner.ID, Scope: binding.Scope, DefinitionID: "team-definition", ActiveVersion: "1.0.0", Status: kernelteam.DeploymentActive, Revision: 1, CreatedAt: run.CreatedAt, UpdatedAt: run.CreatedAt, Roster: []kernelteam.RosterAssignment{{ID: "member", RoleID: "researcher", AgentDeploymentID: run.AssignedAgentID}}}
 	if err := teamStore.CreateTeamDeployment(t.Context(), deployment, workforce.DefinitionActivation{}); err != nil {
@@ -368,7 +374,8 @@ func TestWorkflowActionUsesTeamManagementAuthorityAndAssignedAgentSource(t *test
 		t.Fatal(err)
 	}
 	work := result["run"].(*AgentRun)
-	if work.Owner != owner || work.AssignedAgentID != sourceRun.AssignedAgentID || work.Context[conversationRunContextConversationID] != chat.ID || work.WakeCondition.EventWait.Attributes["deploymentId"] != sourceRun.AssignedAgentID {
+	if work.Owner != owner || work.AssignedAgentID != sourceRun.AssignedAgentID || work.Context[conversationRunContextConversationID] != chat.ID || work.WakeCondition.EventWait.Attributes["deploymentId"] != owner.ID ||
+		work.WakeCondition.EventWait.Source != RunEventBindingSource(owner.ID, "event-account", "messages") {
 		t.Fatalf("team workflow=%#v", work)
 	}
 	if _, _, _, err := conversationWorkOrigin(t.Context(), store, store, work); err == nil {

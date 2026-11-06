@@ -4918,6 +4918,13 @@ func (e *Engine) CreateExternalConversationGateway(
 	if e == nil || e.externalConversations.gateways == nil {
 		return nil, fmt.Errorf("external conversation gateways are not configured")
 	}
+	// A tenant gateway serves one existing Agent or Team; a platform gateway
+	// lives in the host's own scope.
+	if gateway := request.Gateway; gateway.Scope.Kind != "platform" {
+		if err := e.checkUmbrella(ctx, skill.ScopeReference{Kind: gateway.Scope.Kind, ID: gateway.Scope.ID}, gateway.Owner); err != nil {
+			return nil, fmt.Errorf("external conversation gateway owner: %w", err)
+		}
+	}
 	return e.externalConversations.gateways.Create(ctx, request)
 }
 
@@ -4929,6 +4936,9 @@ func (e *Engine) CreateExternalConversationEndpoint(
 ) (*runtime.ExternalConversationEndpoint, error) {
 	if e == nil || e.externalConversations.endpoints == nil {
 		return nil, fmt.Errorf("external conversation endpoints are not configured")
+	}
+	if err := e.checkUmbrella(ctx, skill.ScopeReference{Kind: request.Scope.Kind, ID: request.Scope.ID}, request.Owner); err != nil {
+		return nil, fmt.Errorf("external conversation endpoint owner: %w", err)
 	}
 	return e.externalConversations.endpoints.Create(ctx, request)
 }

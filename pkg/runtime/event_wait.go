@@ -93,16 +93,17 @@ const (
 )
 
 type RunEventWait struct {
-	Scope           Scope              `json:"scope"`
-	RunID           string             `json:"runId"`
-	AssignedAgentID string             `json:"assignedAgentId,omitempty"`
-	Spec            RunEventWaitSpec   `json:"spec"`
-	Status          RunEventWaitStatus `json:"status"`
-	AvailableAt     *time.Time         `json:"availableAt,omitempty"`
-	LeaseOwner      string             `json:"-"`
-	LeaseExpiresAt  *time.Time         `json:"-"`
-	ResolvedAt      *time.Time         `json:"resolvedAt,omitempty"`
-	EventID         string             `json:"eventId,omitempty"`
+	Scope Scope  `json:"scope"`
+	RunID string `json:"runId"`
+	// UmbrellaID is the Agent or Team whose binding events wake the wait.
+	UmbrellaID     string             `json:"umbrellaId,omitempty"`
+	Spec           RunEventWaitSpec   `json:"spec"`
+	Status         RunEventWaitStatus `json:"status"`
+	AvailableAt    *time.Time         `json:"availableAt,omitempty"`
+	LeaseOwner     string             `json:"-"`
+	LeaseExpiresAt *time.Time         `json:"-"`
+	ResolvedAt     *time.Time         `json:"resolvedAt,omitempty"`
+	EventID        string             `json:"eventId,omitempty"`
 }
 
 // RunEventReceipt records a verified observation. Ordinary caller-authored
@@ -302,7 +303,7 @@ func runEventWaitForRun(run *AgentRun) (*RunEventWait, error) {
 	if available.IsZero() {
 		available = run.CreatedAt
 	}
-	wait := &RunEventWait{Scope: run.Scope, RunID: run.ID, AssignedAgentID: run.AssignedAgentID, Spec: *cloneRunEventWaitSpec(spec), Status: status, AvailableAt: &available}
+	wait := &RunEventWait{Scope: run.Scope, RunID: run.ID, UmbrellaID: RunSkillActor(run).Umbrella.ID, Spec: *cloneRunEventWaitSpec(spec), Status: status, AvailableAt: &available}
 	if run.Status == AgentRunStatusPaused {
 		wait.Status = RunEventWaitPaused
 		wait.AvailableAt = nil
@@ -364,7 +365,7 @@ func runEventWaitMatches(wait *RunEventWait, receipt *RunEventReceipt) bool {
 		deployment, _ := e.Attributes["deploymentId"].(string)
 		binding, _ := e.Attributes["bindingId"].(string)
 		adapter, _ := e.Attributes["adapterId"].(string)
-		if deployment == "" || deployment != wait.AssignedAgentID || binding == "" || adapter == "" || s.Source != RunEventBindingSource(deployment, binding, adapter) {
+		if deployment == "" || deployment != wait.UmbrellaID || binding == "" || adapter == "" || s.Source != RunEventBindingSource(deployment, binding, adapter) {
 			return false
 		}
 	}

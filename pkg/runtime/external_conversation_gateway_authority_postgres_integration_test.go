@@ -13,7 +13,7 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 	memory, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	legacy := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(memory), CreateExternalConversationGatewayRequest{
 		ID: "legacy-gateway", Name: "Legacy provider gateway",
-		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
+		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
 		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Exercise upgrade from reviewed legacy routing",
 	})
 	endpoint.InstallationID, endpoint.ApplicationID = "owned-installation", "owned-application"
@@ -31,7 +31,7 @@ func TestPostgresGatewayAuthorityBackfillIsTenantBoundUniqueAndAudited(t *testin
 	}
 	ambiguousGateway := cloneExternalConversationGateway(legacy)
 	ambiguousGateway.ID, ambiguousGateway.IngressRoute = "ambiguous-gateway", "ambiguous-gateway-route"
-	ambiguousGateway.Gateway.DeploymentID = "ambiguous-agent"
+	ambiguousGateway.Gateway.DeploymentID, ambiguousGateway.Gateway.Owner.ID = "ambiguous-agent", "ambiguous-agent"
 	if err := store.CreateExternalConversationGateway(ctx, ambiguousGateway); err != nil {
 		t.Fatal(err)
 	}

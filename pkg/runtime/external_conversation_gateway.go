@@ -98,6 +98,7 @@ func (g *ExternalConversationGatewayRegistration) Validate() error {
 type ExternalConversationGatewayFilter struct {
 	Scope        Scope
 	Provider     string
+	Owner        *ObjectiveOwner
 	DeploymentID string
 	Statuses     []ExternalConversationGatewayStatus
 	Limit        int

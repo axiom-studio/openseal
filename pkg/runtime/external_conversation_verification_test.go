@@ -65,7 +65,7 @@ func newGatewayVerificationFixture(t *testing.T) (*gatewayVerificationStore, *sk
 	store := &gatewayVerificationStore{MemoryStore: base}
 	registration, err := NewExternalConversationGatewayService(store, catalog).Create(t.Context(), CreateExternalConversationGatewayRequest{
 		ID: "verification-gateway", Name: "Paused setup verification",
-		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123"},
+		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider, InstallationID: "T123", ApplicationID: "A123"},
 		Actor:   ActivityActor{Type: "user", ID: "operator"}, Reason: "Prepare provider setup",
 	})
 	if err != nil {

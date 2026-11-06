@@ -165,7 +165,7 @@ func TestExternalConversationGatewayRoutesOnlyVerifiedInstallationAndAddress(t *
 		}},
 	}}
 	gateway := ExternalConversationIngressGateway{
-		Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
+		Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
 		Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 	}
 	service := NewExternalConversationTransportService(store, catalog)
@@ -320,7 +320,7 @@ func TestTenantConversationGatewayCannotRouteIntoAnotherTenant(t *testing.T) {
 		CreateExternalConversationGatewayRequest{
 			ID: "tenant-slack", Name: "Tenant Slack",
 			Gateway: ExternalConversationIngressGateway{
-				Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
+				Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
 				Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 			},
 			Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create tenant isolation route",
@@ -401,7 +401,7 @@ func TestPlatformConversationGatewayRoutesInstallationsAcrossTenantsAndRejectsCr
 	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "platform-slack", Name: "Platform Slack events",
 		Gateway: ExternalConversationIngressGateway{
-			Scope: platformScope, DeploymentID: platformBinding.DeploymentID, Provider: "slack",
+			Scope: platformScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: platformBinding.DeploymentID}, DeploymentID: platformBinding.DeploymentID, Provider: "slack",
 			Adapter: ExternalConversationAdapterReference{
 				SkillID: "slack", SkillVersion: "1.0.0", BindingID: platformBinding.ID,
 				BindingRevision: platformBinding.Revision, AdapterID: "conversations",
@@ -478,7 +478,7 @@ func TestRegisteredConversationGatewayReturnsVerificationResponseBeforeEndpoints
 	gateway := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "verification-gateway", Name: "Verification gateway",
 		Gateway: ExternalConversationIngressGateway{
-			Scope: scope, DeploymentID: binding.DeploymentID, Provider: "slack",
+			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: binding.DeploymentID}, DeploymentID: binding.DeploymentID, Provider: "slack",
 			Adapter: ExternalConversationAdapterReference{
 				SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID,
 				BindingRevision: binding.Revision, AdapterID: "conversations",
@@ -506,7 +506,7 @@ func TestConversationGatewayUsesCurrentReviewedBindingAfterSetupSave(t *testing.
 	if err := store.UpdateExternalConversationEndpoint(ctx, endpoint, endpoint.Revision-1); err != nil {
 		t.Fatal(err)
 	}
-	gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
+	gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
 	registration := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{ID: "saved-setup", Name: "Saved setup", Gateway: gateway, Actor: ActivityActor{Type: "test", ID: "owner"}, Reason: "Reviewed inbox"})
 	bound, err := catalog.ResolveConversationAdapterBinding(ctx, skill.ScopeReference{Kind: endpoint.Scope.Kind, ID: endpoint.Scope.ID}, endpoint.DeploymentID, endpoint.Adapter.BindingID, endpoint.Adapter.AdapterID)
 	if err != nil {

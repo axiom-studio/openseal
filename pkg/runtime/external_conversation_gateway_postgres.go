@@ -97,6 +97,11 @@ func (s *PostgresStore) ListExternalConversationGateways(
 		args = append(args, filter.DeploymentID)
 		placeholder++
 	}
+	if filter.Owner != nil {
+		query += fmt.Sprintf(` AND payload#>>'{gateway,owner,type}'=$%d AND payload#>>'{gateway,owner,id}'=$%d`, placeholder, placeholder+1)
+		args = append(args, string(filter.Owner.Type), filter.Owner.ID)
+		placeholder += 2
+	}
 	statuses := make([]string, 0, len(filter.Statuses))
 	for _, status := range filter.Statuses {
 		statuses = append(statuses, string(status))

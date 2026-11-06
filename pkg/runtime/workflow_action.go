@@ -87,15 +87,18 @@ func workflowSourceKey(kind, bindingID, adapterID string) string {
 // by exact deployment/binding/adapter. This avoids one registry scan per binding.
 func workflowInstalledSources(ctx context.Context, store runbookActionStore, run *AgentRun) (map[string][]workflowInstalledSource, error) {
 	result := map[string][]workflowInstalledSource{}
+	// Channels belong to the run's umbrella: a Team member's run uses the
+	// Team's channels, never its own.
+	umbrella := workflowUmbrella(run)
 	if gateways, ok := store.(ExternalConversationGatewayStore); ok {
 		for offset := 0; ; offset += 100 {
-			page, err := gateways.ListExternalConversationGateways(ctx, ExternalConversationGatewayFilter{Scope: run.Scope, DeploymentID: run.AssignedAgentID, Statuses: []ExternalConversationGatewayStatus{ExternalConversationGatewayActive}, Limit: 100, Offset: offset})
+			page, err := gateways.ListExternalConversationGateways(ctx, ExternalConversationGatewayFilter{Scope: run.Scope, Owner: &umbrella, Statuses: []ExternalConversationGatewayStatus{ExternalConversationGatewayActive}, Limit: 100, Offset: offset})
 			if err != nil {
 				return nil, err
 			}
 			for _, entry := range page {
 				gateway := entry.Gateway
-				if gateway.DeploymentID != run.AssignedAgentID || gateway.InstallationID == "" {
+				if gateway.Owner != umbrella || gateway.InstallationID == "" {
 					continue
 				}
 				key := workflowSourceKey("conversation", gateway.Adapter.BindingID, gateway.Adapter.AdapterID)
@@ -108,12 +111,12 @@ func workflowInstalledSources(ctx context.Context, store runbookActionStore, run
 	}
 	if callbacks, ok := store.(CallbackRegistrationStore); ok {
 		for offset := 0; ; offset += 100 {
-			page, err := callbacks.ListCallbackRegistrations(ctx, CallbackRegistrationFilter{Scope: run.Scope, DeploymentID: run.AssignedAgentID, Statuses: []CallbackRegistrationStatus{CallbackRegistrationActive}, Limit: 100, Offset: offset})
+			page, err := callbacks.ListCallbackRegistrations(ctx, CallbackRegistrationFilter{Scope: run.Scope, DeploymentID: umbrella.ID, Statuses: []CallbackRegistrationStatus{CallbackRegistrationActive}, Limit: 100, Offset: offset})
 			if err != nil {
 				return nil, err
 			}
 			for _, entry := range page {
-				if entry.DeploymentID != run.AssignedAgentID || entry.Owner != run.Owner {
+				if entry.DeploymentID != umbrella.ID || entry.Owner != umbrella {
 					continue
 				}
 				eventTypes := []string{}
@@ -260,6 +263,12 @@ func runbookActionOwner(ctx context.Context, teams WorkflowTeamCatalog, run *Age
 	return nil
 }
 
+// workflowUmbrella is the Agent or Team whose channels and callbacks a
+// workflow follows; runbookActionOwner has checked the roster.
+func workflowUmbrella(run *AgentRun) ObjectiveOwner {
+	return OwnerOfSkillUmbrella(RunSkillActor(run).Umbrella)
+}
+
 // workflowTeamRoster reads Team deployments through a WorkflowTeamCatalog.
 type workflowTeamRoster struct{ teams WorkflowTeamCatalog }
 
@@ -275,7 +284,7 @@ func workflowBoundSource(ctx context.Context, catalog WorkflowSourceCatalog, run
 	base := WorkflowEventSource{BindingID: bindingID, AdapterID: adapterID, AdapterKind: kind}
 	switch kind {
 	case "conversation":
-		bound, err := catalog.ResolveConversationAdapterBinding(ctx, scope, run.AssignedAgentID, bindingID, adapterID)
+		bound, err := catalog.ResolveConversationAdapterBinding(ctx, scope, workflowUmbrella(run).ID, bindingID, adapterID)
 		if err != nil {
 			return nil, fmt.Errorf("enabled conversation event source is unavailable: %w", err)
 		}
@@ -292,7 +301,7 @@ func workflowBoundSource(ctx context.Context, catalog WorkflowSourceCatalog, run
 		base.SubjectDescription = "Exact external conversation ID"
 		base.CorrelationAttributes = []string{"externalParticipantId", "externalThreadId", "externalMessageId", "direct", "installationId", "applicationId"}
 	case "callback":
-		bound, err := catalog.ResolveCallbackAdapterBinding(ctx, scope, run.AssignedAgentID, bindingID, adapterID)
+		bound, err := catalog.ResolveCallbackAdapterBinding(ctx, scope, workflowUmbrella(run).ID, bindingID, adapterID)
 		if err != nil {
 			return nil, fmt.Errorf("enabled callback event source is unavailable: %w", err)
 		}
@@ -321,7 +330,7 @@ func workflowSources(ctx context.Context, store runbookActionStore, catalog Work
 	if catalog == nil {
 		return nil, errors.New("workflow event catalog is unavailable")
 	}
-	bindings, err := catalog.ListBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, run.AssignedAgentID)
+	bindings, err := catalog.ListBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, workflowUmbrella(run).ID)
 	if err != nil {
 		return nil, err
 	}
@@ -443,8 +452,9 @@ func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalo
 			return nil, nil, nil, errors.New("conversation selector must match the exact event subject")
 		}
 	}
-	attrs["deploymentId"], attrs["bindingId"], attrs["adapterId"] = run.AssignedAgentID, args.BindingID, args.AdapterID
-	spec := &RunEventWaitSpec{Key: "initial", Type: args.EventType, Source: RunEventBindingSource(run.AssignedAgentID, args.BindingID, args.AdapterID), Subject: args.Subject, Attributes: attrs, After: run.CreatedAt, Deadline: deadline}
+	umbrella := workflowUmbrella(run)
+	attrs["deploymentId"], attrs["bindingId"], attrs["adapterId"] = umbrella.ID, args.BindingID, args.AdapterID
+	spec := &RunEventWaitSpec{Key: "initial", Type: args.EventType, Source: RunEventBindingSource(umbrella.ID, args.BindingID, args.AdapterID), Subject: args.Subject, Attributes: attrs, After: run.CreatedAt, Deadline: deadline}
 	if err := spec.Validate(); err != nil {
 		return nil, nil, nil, err
 	}

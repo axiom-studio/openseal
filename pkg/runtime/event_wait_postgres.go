@@ -96,7 +96,7 @@ func (s *PostgresStore) syncPostgresRunEventWaitTx(ctx context.Context, tx *sql.
 		return err
 	}
 	if existing != nil {
-		if !sameRunEventWaitSpec(&existing.Spec, &wait.Spec) || existing.AssignedAgentID != wait.AssignedAgentID || (existing.Status != RunEventWaitPending && existing.Status != RunEventWaitPaused) {
+		if !sameRunEventWaitSpec(&existing.Spec, &wait.Spec) || existing.UmbrellaID != wait.UmbrellaID || (existing.Status != RunEventWaitPending && existing.Status != RunEventWaitPaused) {
 			return ErrRunEventConflict
 		}
 		// An unrelated revision while already pending must not discard a lease
@@ -300,7 +300,7 @@ func (s *PostgresStore) ProcessRunEventWait(ctx context.Context, request Process
 				AND consumed.source=inbox.source AND consumed.event_id=inbox.event_id)
 			ORDER BY inbox.occurred_at,inbox.received_at,inbox.event_id LIMIT 1`,
 			request.Scope.Kind, request.Scope.ID, wait.Spec.Source, wait.Spec.Type, wait.Spec.Subject,
-			wait.Spec.After.UnixNano(), wait.Spec.Deadline.UnixNano(), string(attributes), request.RunID, wait.AssignedAgentID).Scan(&payload)
+			wait.Spec.After.UnixNano(), wait.Spec.Deadline.UnixNano(), string(attributes), request.RunID, wait.UmbrellaID).Scan(&payload)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
@@ -494,7 +494,7 @@ func (s *PostgresStore) PruneRunEvents(ctx context.Context, scope Scope, now tim
 			WHERE waits.scope_kind=inbox.scope_kind AND waits.scope_id=inbox.scope_id AND waits.source=inbox.source
 			AND waits.event_type=inbox.event_type AND waits.subject=inbox.subject AND waits.status IN ('pending','paused')
 			AND waits.after_at <= inbox.occurred_at AND waits.deadline >= inbox.received_at AND inbox.attributes @> waits.attributes
-			AND (inbox.source NOT LIKE 'binding:%' OR inbox.attributes->>'deploymentId'=waits.payload->>'assignedAgentId')
+			AND (inbox.source NOT LIKE 'binding:%' OR inbox.attributes->>'deploymentId'=waits.payload->>'umbrellaId')
 			AND NOT EXISTS (SELECT 1 FROM `+s.table("run_event_consumptions")+` AS consumed
 				WHERE consumed.scope_kind=inbox.scope_kind AND consumed.scope_id=inbox.scope_id AND consumed.run_id=waits.run_id
 				AND consumed.source=inbox.source AND consumed.event_id=inbox.event_id)

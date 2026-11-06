@@ -75,6 +75,7 @@ func (s *MemoryStore) ListExternalConversationGateways(
 		if value.Gateway.Scope != filter.Scope ||
 			(filter.Provider != "" && value.Gateway.Provider != filter.Provider) ||
 			(filter.DeploymentID != "" && value.Gateway.DeploymentID != filter.DeploymentID) ||
+			(filter.Owner != nil && value.Gateway.Owner != *filter.Owner) ||
 			!externalConversationGatewayStatusMatches(value.Status, filter.Statuses) {
 			continue
 		}

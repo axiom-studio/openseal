@@ -182,7 +182,7 @@ func (s *PostgresStore) PruneExpiredRunEvents(ctx context.Context, before time.T
 			AND waits.after_at<=inbox.occurred_at AND waits.deadline>=inbox.received_at AND inbox.attributes @> waits.attributes
 			AND NOT EXISTS (SELECT 1 FROM jsonb_each(waits.attributes) AS expected
 				WHERE jsonb_typeof(inbox.attributes->expected.key) IS DISTINCT FROM jsonb_typeof(expected.value))
-			AND (left(inbox.source,8)<>'binding:' OR inbox.attributes->>'deploymentId'=waits.payload->>'assignedAgentId')
+			AND (left(inbox.source,8)<>'binding:' OR inbox.attributes->>'deploymentId'=waits.payload->>'umbrellaId')
 			AND NOT EXISTS (SELECT 1 FROM ` + s.table("run_event_consumptions") + ` AS consumed
 				WHERE consumed.scope_kind=waits.scope_kind AND consumed.scope_id=waits.scope_id
 				AND consumed.run_id=waits.run_id AND consumed.source=inbox.source AND consumed.event_id=inbox.event_id))

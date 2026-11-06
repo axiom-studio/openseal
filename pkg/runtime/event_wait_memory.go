@@ -54,7 +54,7 @@ func (s *MemoryStore) prepareMemoryRunEventWaitLocked(run *AgentRun) (*RunEventW
 	}
 	key := memoryRunEventWaitKey{memoryRunEventRunKey{Scope: run.Scope, RunID: run.ID}, wait.Spec.Key}
 	if existing := s.runEventWaits[key]; existing != nil {
-		if !sameRunEventWaitSpec(&existing.Spec, &wait.Spec) || existing.AssignedAgentID != wait.AssignedAgentID ||
+		if !sameRunEventWaitSpec(&existing.Spec, &wait.Spec) || existing.UmbrellaID != wait.UmbrellaID ||
 			(existing.Status != RunEventWaitPending && existing.Status != RunEventWaitPaused) {
 			return nil, ErrInvalidRunEventWait
 		}

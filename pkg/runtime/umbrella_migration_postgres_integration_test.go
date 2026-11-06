@@ -12,8 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// Migrations 71 and 72 strip role Skill grants and move setup requests to
-// their conversation's umbrella on an existing database.
+// Migrations 71 to 73 strip role Skill grants, move setup requests to their
+// conversation's umbrella and give gateways an owner on an existing database.
 func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	dsn := os.Getenv("OPENSEAL_TEST_POSTGRES_DSN")
 	if dsn == "" {
@@ -52,7 +52,12 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 	insert("pending-member", "member", "pending")
 	insert("pending-gone", "gone", "pending")
 	insert("history", "member", "resolved")
-	exec(`DELETE FROM ` + store.table("schema_migrations") + ` WHERE version IN (71, 72)`)
+	if _, err := NewExternalConversationGatewayService(store).Create(ctx, CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
+		Gateway: externalConversationGatewayFixture(Scope{Kind: "tenant", ID: "one"}), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
+		t.Fatal(err)
+	}
+	exec(`UPDATE ` + store.table("external_conversation_gateways") + ` SET payload = payload #- '{gateway,owner}'`)
+	exec(`DELETE FROM ` + store.table("schema_migrations") + ` WHERE version IN (71, 72, 73)`)
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +85,10 @@ func TestPostgresUmbrellaMigrationsRewriteStoredRecords(t *testing.T) {
 		rows[id] = [3]string{deployment + "/" + owner, status, agent}
 	}
 	result.Close()
+	gateway, err := store.GetExternalConversationGateway(ctx, Scope{Kind: "tenant", ID: "one"}, "legacy")
+	if err != nil || gateway.Gateway.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: gateway.Gateway.DeploymentID}) {
+		t.Fatalf("backfilled gateway = %#v, %v", gateway, err)
+	}
 	if len(rows) != 2 || rows["pending-member"] != [3]string{"crew/crew", "pending", "member"} || rows["pending-gone"] != [3]string{"crew/crew", "dismissed", "gone"} {
 		t.Fatalf("setup requests after migration = %#v", rows)
 	}

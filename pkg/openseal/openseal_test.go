@@ -115,6 +115,7 @@ func TestEngineExposesExternalConversationEndpointLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := SkillScope{Kind: "tenant", ID: "one"}
+	ensureTestAgent(t, engine, scope, "agent-one")
 	if err := engine.BindSkill(ctx, &SkillBinding{
 		ID: "slack-primary", Scope: scope, DeploymentID: "agent-one", SkillID: definition.ID,
 		SkillVersion: definition.Version, EnabledConversationAdapters: []string{"conversations"},

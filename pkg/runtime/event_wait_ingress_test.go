@@ -79,7 +79,7 @@ func TestVerifiedGatewayRetainsUnboundReplyForGenericRunWait(t *testing.T) {
 			store := &ingressRunEventStore{MemoryStore: memory}
 			service := NewExternalConversationTransportService(store, catalog)
 			gateway := ExternalConversationIngressGateway{
-				Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID,
+				Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID,
 				Adapter: endpoint.Adapter, Provider: provider,
 				InstallationID: "installation-one", ApplicationID: "application-one",
 			}
@@ -133,7 +133,7 @@ func TestVerifiedGatewayUnboundReplyResumesOriginalRun(t *testing.T) {
 				After:      now.Add(-time.Minute), Deadline: now.Add(time.Hour),
 			}
 			run := eventWaitContractCreateForAgent(t, store, endpoint.Scope, spec, endpoint.DeploymentID, spec.After)
-			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: provider, InstallationID: "reviewed-installation"}
+			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: provider, InstallationID: "reviewed-installation"}
 			host := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{{
 				InstallationID: gateway.InstallationID, Address: spec.Subject,
 				Event: NormalizedExternalConversationEvent{ID: "requested-reply-event", Type: spec.Type, ExternalConversationID: spec.Subject,
@@ -167,7 +167,7 @@ func TestVerifiedConversationIntakeRejectsFailedNormalizationAndPersistence(t *t
 	store := &ingressRunEventStore{MemoryStore: memory}
 	service := NewExternalConversationTransportService(store, catalog)
 	gateway := ExternalConversationIngressGateway{
-		Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider,
+		Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 		InstallationID: "installation",
 	}
 	event := NormalizedExternalConversationEvent{

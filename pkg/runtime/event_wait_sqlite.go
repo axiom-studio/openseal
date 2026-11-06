@@ -63,7 +63,7 @@ const sqliteRunEventAttributesMatch = `NOT EXISTS (
 	WHERE actual.key IS NULL
 	OR json_extract(actual.value,'$[0]') IS NOT json_extract(expected.value,'$[0]')
 	OR json_extract(actual.value,'$[1]') IS NOT json_extract(expected.value,'$[1]')
-) AND (substr(w.source,1,8)<>'binding:' OR json_extract(e.attributes,'$.deploymentId[1]')=json_extract(w.payload,'$.assignedAgentId'))`
+) AND (substr(w.source,1,8)<>'binding:' OR json_extract(e.attributes,'$.deploymentId[1]')=json_extract(w.payload,'$.umbrellaId'))`
 
 func (s *SQLiteStore) PublishRunEvent(ctx context.Context, receipt *RunEventReceipt) (bool, error) {
 	if err := validateRunEventReceipt(receipt); err != nil {
@@ -358,7 +358,7 @@ func syncSQLiteRunEventWaitConn(ctx context.Context, conn *sql.Conn, run *AgentR
 			return err
 		}
 		if existing != nil {
-			if existing.AssignedAgentID != wait.AssignedAgentID || !sameRunEventWaitSpec(&existing.Spec, &wait.Spec) || (existing.Status != RunEventWaitPending && existing.Status != RunEventWaitPaused) {
+			if existing.UmbrellaID != wait.UmbrellaID || !sameRunEventWaitSpec(&existing.Spec, &wait.Spec) || (existing.Status != RunEventWaitPending && existing.Status != RunEventWaitPaused) {
 				return ErrRunEventConflict
 			}
 			if existing.Status == RunEventWaitPending && wait.Status == RunEventWaitPending {

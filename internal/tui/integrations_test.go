@@ -23,7 +23,7 @@ func conversationGatewayRecordFixture() *runtime.ExternalConversationGatewayRegi
 		ID: "gateway-one", IngressRoute: "opaque-public-route", Name: "Product Slack", Status: runtime.ExternalConversationGatewayPaused,
 		Revision: 4, CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
 		Gateway: runtime.ExternalConversationIngressGateway{
-			Scope: runtime.Scope{Kind: "local", ID: "default"}, DeploymentID: "research-agent", Provider: "slack",
+			Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "research-agent"}, DeploymentID: "research-agent", Provider: "slack",
 			Adapter: runtime.ExternalConversationAdapterReference{SkillID: "skill-slack", SkillVersion: "2.0.0", SourceIdentity: "https://github.com/axiom-studio/skills::skill-slack", BindingID: "slack-binding", BindingRevision: 7, AdapterID: "events"},
 		},
 		Lifecycle: []runtime.ExternalConversationGatewayLifecycleEntry{{Revision: 4, Action: runtime.ExternalConversationGatewayCreated, Actor: runtime.ActivityActor{Type: "user", ID: "operator"}, Reason: "forward-ported connection", At: now}},

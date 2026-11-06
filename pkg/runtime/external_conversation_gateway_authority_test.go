@@ -17,7 +17,7 @@ func TestGatewayAuthorityPinsRejectForeignProviderInstallation(t *testing.T) {
 	store := &ingressRunEventStore{MemoryStore: memory}
 	service := NewExternalConversationTransportService(store, catalog)
 	gateway := ExternalConversationIngressGateway{
-		Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider,
+		Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider,
 		InstallationID: "owned-installation", ApplicationID: "owned-application",
 	}
 	for _, identity := range []struct{ installation, application string }{
@@ -69,7 +69,7 @@ func TestGatewayAuthorityDerivesOnlyUniqueReviewedExactBinding(t *testing.T) {
 	}
 	gateway := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(store, catalog), CreateExternalConversationGatewayRequest{
 		ID: "uniquely-pinned", Name: "Exact reviewed installation",
-		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
+		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
 		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Use reviewed provider connection identity",
 	})
 	if gateway.Gateway.InstallationID != endpoint.InstallationID || gateway.Gateway.ApplicationID != endpoint.ApplicationID {
@@ -87,7 +87,7 @@ func TestGatewayAuthorityDerivesOnlyUniqueReviewedExactBinding(t *testing.T) {
 	}
 	_, err = NewExternalConversationGatewayService(store, catalog).Create(ctx, CreateExternalConversationGatewayRequest{
 		ID: "ambiguous-gateway", Name: "Ambiguous identity",
-		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
+		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
 		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Reject ambiguous reviewed account authority",
 	})
 	if !errors.Is(err, ErrExternalConversationConflict) {
@@ -106,7 +106,7 @@ func TestLegacyUnpinnedGatewayDoesNotPublishUnboundObservation(t *testing.T) {
 			ExternalMessageID: "message", ExternalParticipantID: "person", Text: "A provider reply", OrderingKey: "message", OccurredAt: time.Now().UTC(),
 		}}},
 	}}
-	gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
+	gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider}
 	result, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway,
 		ExternalConversationPublicIngressRequest{Route: "route", Method: http.MethodPost, Body: []byte(`{}`)}, host)
 	if err != nil || len(result.Received) != 0 || len(store.events) != 0 {
@@ -119,7 +119,7 @@ func TestSQLiteGatewayAuthorityBackfillSurvivesRestartAndRejectsAmbiguity(t *tes
 	memory, _, endpoint := externalConversationDeliveryFixture(t, ctx, "slack")
 	legacy := createActiveExternalConversationGateway(t, ctx, NewExternalConversationGatewayService(memory), CreateExternalConversationGatewayRequest{
 		ID: "legacy-gateway", Name: "Legacy gateway",
-		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
+		Gateway: ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider},
 		Actor:   ActivityActor{Type: "test", ID: "operator"}, Reason: "Create pre-migration provider routing",
 	})
 	path := filepath.Join(t.TempDir(), "authority.db")
@@ -142,7 +142,7 @@ func TestSQLiteGatewayAuthorityBackfillSurvivesRestartAndRejectsAmbiguity(t *tes
 	}
 	ambiguousGateway := cloneExternalConversationGateway(legacy)
 	ambiguousGateway.ID, ambiguousGateway.IngressRoute = "ambiguous-gateway", "ambiguous-gateway-route"
-	ambiguousGateway.Gateway.DeploymentID = "ambiguous-agent"
+	ambiguousGateway.Gateway.DeploymentID, ambiguousGateway.Gateway.Owner.ID = "ambiguous-agent", "ambiguous-agent"
 	if err := store.CreateExternalConversationGateway(ctx, ambiguousGateway); err != nil {
 		t.Fatal(err)
 	}

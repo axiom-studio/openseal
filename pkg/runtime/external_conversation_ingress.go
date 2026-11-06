@@ -104,7 +104,10 @@ type ExternalConversationIngressHostRequest struct {
 // the endpoints selected from its verified routing claims remain tenant
 // scoped. Provider application secrets are supplied only by the Skill host.
 type ExternalConversationIngressGateway struct {
-	Scope          Scope                                `json:"scope"`
+	Scope Scope `json:"scope"`
+	// Owner is the Agent or Team whose binding the gateway serves;
+	// DeploymentID is always Owner.ID.
+	Owner          ObjectiveOwner                       `json:"owner"`
 	DeploymentID   string                               `json:"deploymentId"`
 	Adapter        ExternalConversationAdapterReference `json:"adapter"`
 	Provider       string                               `json:"provider"`
@@ -113,8 +116,8 @@ type ExternalConversationIngressGateway struct {
 }
 
 func (g ExternalConversationIngressGateway) Validate() error {
-	if g.Scope.Validate() != nil || !validAgentReference(strings.TrimSpace(g.DeploymentID), 256) ||
-		!validOpaqueIdentifier(strings.TrimSpace(g.Provider), 128) {
+	if g.Scope.Validate() != nil || g.Owner.Validate() != nil || g.DeploymentID != g.Owner.ID ||
+		!validAgentReference(strings.TrimSpace(g.DeploymentID), 256) || !validOpaqueIdentifier(strings.TrimSpace(g.Provider), 128) {
 		return ErrInvalidExternalConversation
 	}
 	if (g.InstallationID != "" && !validOpaqueIdentifier(g.InstallationID, 1024)) ||
@@ -429,7 +432,7 @@ func (s *ExternalConversationTransportService) normalizeExternalConversationGate
 				continue
 			}
 			if endpoint.ApplicationID == "" && (gateway.Scope.Kind == "platform" ||
-				endpoint.Scope != gateway.Scope || endpoint.DeploymentID != gateway.DeploymentID ||
+				endpoint.Scope != gateway.Scope || endpoint.Owner != gateway.Owner || endpoint.DeploymentID != gateway.DeploymentID ||
 				endpoint.Adapter.BindingID != ref.BindingID) {
 				continue
 			}

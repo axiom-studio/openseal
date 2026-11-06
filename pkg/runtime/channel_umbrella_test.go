@@ -1,0 +1,105 @@
+package runtime
+
+import (
+	"context"
+	"database/sql"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	_ "github.com/mattn/go-sqlite3"
+)
+
+func TestGatewayOwnerNamesItsDeploymentAndFiltersLists(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "tenant-1"}
+	gateway := externalConversationGatewayFixture(scope)
+	for name, mutate := range map[string]func(*ExternalConversationIngressGateway){
+		"no owner":           func(g *ExternalConversationIngressGateway) { g.Owner = ObjectiveOwner{} },
+		"another deployment": func(g *ExternalConversationIngressGateway) { g.Owner.ID = "other" },
+		"unknown owner kind": func(g *ExternalConversationIngressGateway) { g.Owner.Type = "user" },
+	} {
+		candidate := gateway
+		mutate(&candidate)
+		if err := candidate.Validate(); err == nil {
+			t.Fatalf("%s: gateway accepted", name)
+		}
+	}
+	for _, store := range []ExternalConversationGatewayStore{NewMemoryStore(), func() ExternalConversationGatewayStore {
+		sqlite, err := NewSQLiteStore(filepath.Join(t.TempDir(), "gateways.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sqlite.Close() })
+		return sqlite
+	}()} {
+		service := NewExternalConversationGatewayService(store)
+		team := gateway
+		team.Owner, team.DeploymentID = ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}, "crew"
+		for id, value := range map[string]ExternalConversationIngressGateway{"agent-gateway": gateway, "team-gateway": team} {
+			if _, err := service.Create(context.Background(), CreateExternalConversationGatewayRequest{ID: id, Name: id, Gateway: value,
+				Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
+		listed, err := service.List(context.Background(), ExternalConversationGatewayFilter{Scope: scope, Owner: &owner})
+		if err != nil || len(listed) != 1 || listed[0].ID != "team-gateway" {
+			t.Fatalf("%T Team gateways = %#v, %v", store, listed, err)
+		}
+	}
+}
+
+func TestEventWaitMatchesOnlyItsUmbrellaBindingEvents(t *testing.T) {
+	now := time.Now().UTC()
+	scope := Scope{Kind: "tenant", ID: "one"}
+	wait := &RunEventWait{Scope: scope, UmbrellaID: "crew", Spec: RunEventWaitSpec{Key: "initial", Type: "conversation.message.received",
+		Source: RunEventBindingSource("crew", "slack", "conversations"), Subject: "C1", After: now.Add(-time.Minute), Deadline: now.Add(time.Hour)}}
+	receipt := func(deployment string) *RunEventReceipt {
+		return &RunEventReceipt{ReceivedAt: now, Event: EventEnvelope{Scope: scope, Type: "conversation.message.received", Subject: "C1", OccurredAt: now,
+			Source:     RunEventBindingSource(deployment, "slack", "conversations"),
+			Attributes: map[string]interface{}{"deploymentId": deployment, "bindingId": "slack", "adapterId": "conversations"}}}
+	}
+	if !runEventWaitMatches(wait, receipt("crew")) {
+		t.Fatal("a Team wait missed the Team channel's event")
+	}
+	if runEventWaitMatches(wait, receipt("member")) {
+		t.Fatal("a Team wait matched the member's own channel")
+	}
+}
+
+func TestSQLiteChannelUmbrellaBackfill(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "channels.db")
+	store, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := Scope{Kind: "tenant", ID: "tenant-1"}
+	if _, err := NewExternalConversationGatewayService(store).Create(context.Background(), CreateExternalConversationGatewayRequest{ID: "legacy", Name: "legacy",
+		Gateway: externalConversationGatewayFixture(scope), Actor: ActivityActor{Type: "test", ID: "operator"}, Reason: "create"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE external_conversation_gateways SET payload = json_remove(payload, '$.gateway.owner')`); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	reopened, err := NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	gateway, err := reopened.GetExternalConversationGateway(context.Background(), scope, "legacy")
+	if err != nil || gateway.Gateway.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "skill-deployment-1"}) {
+		t.Fatalf("backfilled gateway = %#v, %v", gateway, err)
+	}
+	if !strings.Contains(string(gateway.Gateway.Owner.Type), "agent") {
+		t.Fatal("owner type")
+	}
+}

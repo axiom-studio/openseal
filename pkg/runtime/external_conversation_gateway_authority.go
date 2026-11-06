@@ -19,7 +19,7 @@ func gatewayAuthorityFromEndpoints(gateway ExternalConversationIngressGateway, e
 	installationID, applicationID := "", ""
 	for _, endpoint := range endpoints {
 		if endpoint == nil || endpoint.Scope != gateway.Scope || endpoint.Status != ExternalConversationEndpointActive ||
-			endpoint.DeploymentID != gateway.DeploymentID || endpoint.Provider != gateway.Provider ||
+			endpoint.Owner != gateway.Owner || endpoint.DeploymentID != gateway.DeploymentID || endpoint.Provider != gateway.Provider ||
 			endpoint.Adapter.BindingID != gateway.Adapter.BindingID || endpoint.Adapter.AdapterID != gateway.Adapter.AdapterID ||
 			endpoint.Adapter.SkillID != gateway.Adapter.SkillID || endpoint.Adapter.SourceIdentity != gateway.Adapter.SourceIdentity ||
 			endpoint.Adapter.BindingRevision > gateway.Adapter.BindingRevision ||

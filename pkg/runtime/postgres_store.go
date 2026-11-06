@@ -484,6 +484,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateInteractionUmbrellas(ctx, tx); err != nil {
 		return fmt.Errorf("interaction umbrella migration: %w", err)
 	}
+	if err := s.migrateChannelUmbrellas(ctx, tx); err != nil {
+		return fmt.Errorf("channel umbrella migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

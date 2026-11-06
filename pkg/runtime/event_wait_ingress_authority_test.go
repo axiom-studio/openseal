@@ -67,7 +67,7 @@ func TestVerifiedIngressRejectsReplacementSkillOrPublisher(t *testing.T) {
 			if _, err := service.NormalizeExternalConversationPublicIngress(ctx, request, directHost); !errors.Is(err, ErrExternalConversationConflict) {
 				t.Fatalf("direct endpoint accepted replacement authority: %v", err)
 			}
-			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider, InstallationID: "reviewed-installation"}
+			gateway := ExternalConversationIngressGateway{Scope: endpoint.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: endpoint.DeploymentID}, DeploymentID: endpoint.DeploymentID, Adapter: endpoint.Adapter, Provider: endpoint.Provider, InstallationID: "reviewed-installation"}
 			gatewayHost := &externalConversationGatewayHostStub{result: &ExternalConversationGatewayHostResult{StatusCode: http.StatusOK, Events: []ExternalConversationGatewayEvent{{InstallationID: gateway.InstallationID, Address: endpoint.Address, Event: event}}}}
 			if _, err := service.NormalizeExternalConversationGatewayIngress(ctx, gateway, request, gatewayHost); !errors.Is(err, ErrExternalConversationConflict) {
 				t.Fatalf("gateway accepted replacement authority: %v", err)
