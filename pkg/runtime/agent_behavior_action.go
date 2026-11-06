@@ -801,11 +801,14 @@ func hasExactAgentActionString(values []string, expected string) bool {
 	return false
 }
 
+// agentBehaviorDeploymentID is the Agent whose behavior and channels the Run
+// may change: the Agent itself in its own chat, or the answering member in a
+// Team channel, exactly as in that member's own chat.
 func agentBehaviorDeploymentID(run *AgentRun) (string, error) {
-	if run == nil || run.Owner.Type != OwnerTypeAgent || strings.TrimSpace(run.Owner.ID) == "" {
-		return "", errors.New("agent behavior actions require an Agent-owned conversation Run")
+	if run == nil || (run.Owner.Type != OwnerTypeAgent && !isTeamMemberRun(run)) || strings.TrimSpace(run.Owner.ID) == "" {
+		return "", errors.New("agent behavior actions require an Agent's own conversation Run or a Team member's Run")
 	}
-	deploymentID := strings.TrimSpace(run.Owner.ID)
+	deploymentID := strings.TrimSpace(runActingAgentID(run))
 	if assigned := strings.TrimSpace(run.AssignedAgentID); assigned != "" && assigned != deploymentID {
 		return "", errors.New("agent behavior action cannot target a Run assigned to another Agent")
 	}

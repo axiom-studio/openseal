@@ -2088,7 +2088,7 @@ func governedConversationActionOutcome(run *AgentRun) (*governedConversationComp
 	}
 	resourceID := ""
 	if resourceType == agentBehaviorResourceType {
-		resourceID = run.Owner.ID
+		resourceID = runActingAgentID(run)
 	} else if arguments, argumentsOK := last["arguments"].(map[string]interface{}); argumentsOK {
 		resourceID = strings.TrimSpace(fmt.Sprint(arguments[idField]))
 		if validOpaqueIdentifier(resourceID, 256) {
