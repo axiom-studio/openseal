@@ -34,6 +34,48 @@ type CredentialResolutionRequest struct {
 	ActionCallID string
 	RunID        string
 	References   map[string]skill.CredentialReference
+	// Umbrella is the run's umbrella and ActingUser the person it acts for
+	// ("" for no person). Requirements are the bound action's credential
+	// requirements by slot.
+	Umbrella     ObjectiveOwner
+	ActingUser   string
+	Requirements map[string]skill.CredentialRequirement
+}
+
+// CredentialAvailabilityRequest asks the host, before a credential lease is
+// issued, whether every referenced slot of a bound action can be resolved
+// for the run's umbrella and acting person.
+type CredentialAvailabilityRequest struct {
+	Scope        Scope
+	Umbrella     ObjectiveOwner
+	ActingUser   string
+	DeploymentID string
+	BindingID    string
+	References   map[string]skill.CredentialReference
+	Requirements map[string]skill.CredentialRequirement
+}
+
+// CredentialGap is why one slot cannot be resolved.
+type CredentialGap string
+
+const (
+	// CredentialGapPersonSignIn: the acting person has not connected an
+	// account for a per_person slot.
+	CredentialGapPersonSignIn CredentialGap = "person_sign_in"
+	// CredentialGapSharedSignIn: no usable shared sign-in fills the slot.
+	CredentialGapSharedSignIn CredentialGap = "shared_sign_in"
+	// CredentialGapNoPerson: a per_person slot, and no person asked for the run.
+	CredentialGapNoPerson CredentialGap = "no_person"
+)
+
+// CredentialAvailability maps each slot that cannot be resolved to its gap.
+// An empty map means every slot can be resolved.
+type CredentialAvailability struct{ Gaps map[string]CredentialGap }
+
+// CredentialAvailabilityChecker is the host hook the action worker asks
+// before it issues a credential lease.
+type CredentialAvailabilityChecker interface {
+	CheckCredentialAvailability(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error)
 }
 
 type CredentialResolverFunc func(context.Context, CredentialResolutionRequest) (map[string]string, error)

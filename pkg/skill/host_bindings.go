@@ -26,6 +26,10 @@ type RunActor struct {
 	// a Team chat, task or hand-off. A Team member's own host bindings never
 	// reach a Team run, and a Team's never reach a 1:1 chat.
 	Umbrella Umbrella `json:"umbrella"`
+	// ActingUser is the human the run acts for (the run's ActingUser), or
+	// empty when no person asked for it. Hosts select per-person sign-ins by
+	// it. It is optional: Valid does not require it.
+	ActingUser string `json:"actingUser,omitempty"`
 }
 
 // Valid reports whether actor names a run, its acting Agent and an umbrella.
@@ -47,6 +51,9 @@ type HostBindingSet struct {
 	// connected app's catalog slug and display name). Setup of a Skill for
 	// one of these services is refused in favour of the binding's tools.
 	Services map[string][]string
+	// PersonalApps names, by app key, the per-person apps of the umbrella
+	// that the acting user has not connected yet (app key -> display name).
+	PersonalApps map[string]string
 }
 
 // HostBindingProvider supplies host-owned bindings for one run of one
@@ -62,7 +69,7 @@ type runActorKey struct{}
 // through ctx include the host's bindings for that run. Only the kernel's
 // trusted run paths and hosts redeeming an exact run's authority set it.
 func WithRunActor(ctx context.Context, actor RunActor) context.Context {
-	actor.RunID, actor.AgentID = strings.TrimSpace(actor.RunID), strings.TrimSpace(actor.AgentID)
+	actor.RunID, actor.AgentID, actor.ActingUser = strings.TrimSpace(actor.RunID), strings.TrimSpace(actor.AgentID), strings.TrimSpace(actor.ActingUser)
 	return context.WithValue(ctx, runActorKey{}, actor)
 }
 
@@ -105,6 +112,8 @@ type hostBindings struct {
 	definitions map[string]*Definition
 	ids         map[string]bool
 	services    map[string][]string
+	// personalApps is the validated HostBindingSet.PersonalApps.
+	personalApps map[string]string
 	// key identifies the set for the activation cache.
 	key string
 }
@@ -122,6 +131,12 @@ func (c *Catalog) HostBindings(ctx context.Context, scope ScopeReference, deploy
 		return &HostBindingSet{}, err
 	}
 	result := &HostBindingSet{Fingerprint: hosted.key, Services: make(map[string][]string, len(hosted.services))}
+	if len(hosted.personalApps) > 0 {
+		result.PersonalApps = make(map[string]string, len(hosted.personalApps))
+		for key, name := range hosted.personalApps {
+			result.PersonalApps[key] = name
+		}
+	}
 	for _, binding := range hosted.bindings {
 		result.Bindings = append(result.Bindings, cloneBinding(binding))
 	}
@@ -168,15 +183,29 @@ func (c *Catalog) hostBindingsFor(ctx context.Context, scope ScopeReference, dep
 	if err != nil {
 		return nil, fmt.Errorf("host Skill bindings: %w", err)
 	}
-	if set == nil || len(set.Bindings) == 0 {
+	if set == nil || (len(set.Bindings) == 0 && len(set.PersonalApps) == 0) {
 		return nil, nil
+	}
+	personalApps, err := validPersonalApps(set.PersonalApps)
+	if err != nil {
+		return nil, err
 	}
 	result := &hostBindings{
 		bindings: make([]*Binding, 0, len(set.Bindings)), definitions: make(map[string]*Definition),
 		ids: make(map[string]bool, len(set.Bindings)), services: make(map[string][]string),
+		personalApps: personalApps,
 	}
 	hash := sha256.New()
 	hash.Write([]byte(set.Fingerprint))
+	appKeys := make([]string, 0, len(personalApps))
+	for key := range personalApps {
+		appKeys = append(appKeys, key)
+	}
+	sort.Strings(appKeys)
+	for _, key := range appKeys {
+		hash.Write([]byte{0})
+		hash.Write([]byte(key + "\x00" + personalApps[key]))
+	}
 	for _, candidate := range set.Bindings {
 		binding, err := c.validHostBinding(ctx, scope, deploymentID, candidate)
 		if err != nil {
@@ -210,6 +239,26 @@ func (c *Catalog) hostBindingsFor(ctx context.Context, scope ScopeReference, dep
 	}
 	sort.Slice(result.bindings, func(i, j int) bool { return result.bindings[i].ID < result.bindings[j].ID })
 	result.key = hex.EncodeToString(hash.Sum(nil))
+	return result, nil
+}
+
+// validPersonalApps returns a trimmed copy of a host's per-person app names.
+// Every app needs a bounded key and a display name.
+func validPersonalApps(apps map[string]string) (map[string]string, error) {
+	if len(apps) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]string, len(apps))
+	for key, name := range apps {
+		key, name = strings.TrimSpace(key), strings.TrimSpace(name)
+		if key == "" || len(key) > 256 || name == "" {
+			return nil, fmt.Errorf("%w: host personal app needs a key of at most 256 bytes and a name", ErrBindingInvalid)
+		}
+		if _, ok := result[key]; ok {
+			return nil, fmt.Errorf("%w: host personal app %s is supplied twice", ErrBindingInvalid, key)
+		}
+		result[key] = name
+	}
 	return result, nil
 }
 

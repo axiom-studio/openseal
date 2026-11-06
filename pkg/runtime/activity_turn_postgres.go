@@ -233,12 +233,12 @@ func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentR
 		query := `UPDATE ` + s.table("agent_runs") + ` SET status = $1, priority = $2, assigned_agent_id = $3, revision = $4,
 			deadline = $5, available_at = $6, queue_entered_at = $7, lease_owner = $8, lease_expires_at = $9,
 			last_claimed_at = $10, attempt = $11, payload = $12::jsonb
-			WHERE scope_kind = $13 AND scope_id = $14 AND id = $15 AND revision = $16`
+			WHERE scope_kind = $13 AND scope_id = $14 AND id = $15 AND revision = $16 AND COALESCE(payload->>'actingUser','') = $17`
 		args := []interface{}{run.Status, run.Priority, run.AssignedAgentID, run.Revision, run.Deadline, run.AvailableAt,
 			run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, string(runPayload),
-			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision}
+			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision, run.ActingUser}
 		if lease != nil {
-			query += ` AND lease_owner = $17 AND lease_expires_at > $18`
+			query += ` AND lease_owner = $18 AND lease_expires_at > $19`
 			args = append(args, lease.WorkerID, lease.Now)
 		}
 		result, err := tx.ExecContext(ctx, query, args...)
@@ -250,13 +250,22 @@ func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentR
 			return err
 		}
 		if affected != 1 {
-			if lease != nil {
+			if lease != nil && !s.agentRunActingUserChanged(ctx, tx, run, expectedRevision) {
 				return ErrLeaseLost
 			}
 			return ErrRevisionConflict
 		}
 		return s.syncPostgresRunEventWaitTx(ctx, tx, run)
 	})
+}
+
+// agentRunActingUserChanged reports whether a refused leased update was refused
+// because it would change the stored run's immutable acting user.
+func (s *PostgresStore) agentRunActingUserChanged(ctx context.Context, tx *sql.Tx, run *AgentRun, expectedRevision int64) bool {
+	var stored string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(payload->>'actingUser','') FROM `+s.table("agent_runs")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 AND revision = $4`, run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision).Scan(&stored)
+	return err == nil && stored != run.ActingUser
 }
 
 func (s *PostgresStore) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {

@@ -75,7 +75,7 @@ func (s *RunCommandService) FindCreatedAgentRun(ctx context.Context, req CreateA
 	if err != nil || current == nil {
 		return nil, err
 	}
-	return replayedRun(current, fingerprint)
+	return replayedRun(current, fingerprint, req.ActingUser)
 }
 
 // CreateAgentRun creates the canonical durable run and its first audit event
@@ -103,7 +103,7 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req CreateAgentR
 			return nil, err
 		}
 		if current != nil {
-			return replayedRun(current, fingerprint)
+			return replayedRun(current, fingerprint, req.ActingUser)
 		}
 	}
 	now := s.now()
@@ -140,7 +140,7 @@ func (s *RunCommandService) CreateAgentRun(ctx context.Context, req CreateAgentR
 		if key != "" {
 			current, loadErr := s.store.GetAgentRun(ctx, req.Scope, runID)
 			if loadErr == nil && current != nil {
-				return replayedRun(current, fingerprint)
+				return replayedRun(current, fingerprint, req.ActingUser)
 			}
 		}
 		return nil, err
@@ -152,8 +152,11 @@ func runIDForIdempotencyKey(scope Scope, key string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(scope.Kind+"\x00"+scope.ID+"\x00"+hashString(strings.TrimSpace(key)))).String()
 }
 
-func replayedRun(current *AgentRun, fingerprint string) (*AgentRunCommandResult, error) {
-	if current.CreationFingerprint != fingerprint {
+// replayedRun returns the stored run for an exact replay. ActingUser is not
+// part of the creation fingerprint, so a run created before it existed still
+// replays; a stored acting user must match the replayed request.
+func replayedRun(current *AgentRun, fingerprint, actingUser string) (*AgentRunCommandResult, error) {
+	if current.CreationFingerprint != fingerprint || (current.ActingUser != "" && current.ActingUser != actingUser) {
 		return nil, ErrRunIdempotency
 	}
 	return &AgentRunCommandResult{Run: current}, nil

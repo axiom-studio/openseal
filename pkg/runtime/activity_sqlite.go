@@ -199,16 +199,19 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 			// timestamp in a different offset is lexical rather than temporal.
 			// Verify the canonical expiry at full precision while this write
 			// transaction excludes any concurrent renewal or claim.
-			var owner string
+			var owner, actingUser string
 			var expiry sql.NullString
-			err := conn.QueryRowContext(ctx, `SELECT lease_owner, json_extract(payload, '$.leaseExpiresAt') FROM agent_runs
+			err := conn.QueryRowContext(ctx, `SELECT lease_owner, json_extract(payload, '$.leaseExpiresAt'), IFNULL(json_extract(payload, '$.actingUser'), '') FROM agent_runs
 				WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
-				run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision).Scan(&owner, &expiry)
+				run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision).Scan(&owner, &expiry, &actingUser)
 			if err == sql.ErrNoRows {
 				return ErrLeaseLost
 			}
 			if err != nil {
 				return err
+			}
+			if actingUser != run.ActingUser {
+				return ErrRevisionConflict
 			}
 			expires, err := time.Parse(time.RFC3339Nano, expiry.String)
 			if owner != lease.WorkerID || !expiry.Valid || err != nil || !expires.After(lease.Now) {
@@ -217,11 +220,11 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 		}
 		query := `UPDATE agent_runs SET status = ?, priority = ?, assigned_agent_id = ?, revision = ?,
 			deadline = ?, available_at = ?, queue_entered_at = ?, lease_owner = ?, lease_expires_at = ?, last_claimed_at = ?, attempt = ?, payload = ?
-			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`
+			WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND IFNULL(json_extract(payload, '$.actingUser'), '') = ?`
 		args := []interface{}{
 			run.Status, run.Priority, run.AssignedAgentID, run.Revision, run.Deadline, run.AvailableAt,
 			run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt, string(runPayload),
-			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision,
+			run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision, run.ActingUser,
 		}
 		if lease != nil {
 			query += ` AND lease_owner = ?`

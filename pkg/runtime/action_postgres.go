@@ -718,9 +718,9 @@ func (s *PostgresStore) updateAgentRunTx(ctx context.Context, tx *sql.Tx, run *A
 	}
 	if err := rowsOne(tx.ExecContext(ctx, `UPDATE `+s.table("agent_runs")+` SET status=$1, priority=$2, assigned_agent_id=$3, revision=$4,
 		deadline=$5, available_at=$6, queue_entered_at=$7, lease_owner=$8, lease_expires_at=$9, last_claimed_at=$10, attempt=$11, payload=$12::jsonb
-		WHERE scope_kind=$13 AND scope_id=$14 AND id=$15 AND revision=$16`, run.Status, run.Priority, run.AssignedAgentID, run.Revision,
+		WHERE scope_kind=$13 AND scope_id=$14 AND id=$15 AND revision=$16 AND COALESCE(payload->>'actingUser','')=$17`, run.Status, run.Priority, run.AssignedAgentID, run.Revision,
 		run.Deadline, run.AvailableAt, run.QueueEnteredAt, run.LeaseOwner, run.LeaseExpiresAt, run.LastClaimedAt, run.Attempt,
-		string(payload), run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision)); err != nil {
+		string(payload), run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision, run.ActingUser)); err != nil {
 		return err
 	}
 	return s.syncPostgresRunEventWaitTx(ctx, tx, run)

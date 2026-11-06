@@ -277,14 +277,17 @@ const RunCreditErrorWorkspaceCreditsExhausted = "workspace_credits_exhausted"
 // AgentRun is the canonical durable workstream. Workflow execution records are
 // subordinate execution details and must not be used as agent-run identity.
 type AgentRun struct {
-	ID                   string                       `json:"id"`
-	Kind                 RunKind                      `json:"kind"`
-	Scope                Scope                        `json:"scope"`
-	ObjectiveID          string                       `json:"objectiveId,omitempty"`
-	ParentRunID          string                       `json:"parentRunId,omitempty"`
-	RootRunID            string                       `json:"rootRunId"`
-	Owner                ObjectiveOwner               `json:"owner"`
-	AssignedAgentID      string                       `json:"assignedAgentId,omitempty"`
+	ID              string         `json:"id"`
+	Kind            RunKind        `json:"kind"`
+	Scope           Scope          `json:"scope"`
+	ObjectiveID     string         `json:"objectiveId,omitempty"`
+	ParentRunID     string         `json:"parentRunId,omitempty"`
+	RootRunID       string         `json:"rootRunId"`
+	Owner           ObjectiveOwner `json:"owner"`
+	AssignedAgentID string         `json:"assignedAgentId,omitempty"`
+	// ActingUser is the human the run acts for, stamped only at creation by
+	// trusted kernel paths and the host. Empty means no person. It is immutable.
+	ActingUser           string                       `json:"actingUser,omitempty"`
 	Entrypoint           string                       `json:"entrypoint,omitempty"`
 	ConcurrencyKey       string                       `json:"concurrencyKey,omitempty"`
 	ResourceRequirements map[string]int               `json:"resourceRequirements,omitempty"`
@@ -338,6 +341,9 @@ func (r *AgentRun) Validate() error {
 	}
 	if err := r.Owner.Validate(); err != nil {
 		return err
+	}
+	if !validActingUser(r.ActingUser) {
+		return errors.New("run acting user is invalid")
 	}
 	if _, err := AcceptedRunExecutionForRun(r); err != nil {
 		return err
@@ -595,6 +601,7 @@ type CreateAgentRunRequest struct {
 	ParentRunID          string
 	Owner                ObjectiveOwner
 	AssignedAgentID      string
+	ActingUser           string
 	Entrypoint           string
 	ConcurrencyKey       string
 	ResourceRequirements map[string]int
@@ -884,7 +891,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 	run := &AgentRun{
 		ID: runID, Kind: kind, Scope: req.Scope, ObjectiveID: req.ObjectiveID,
 		ParentRunID: req.ParentRunID, RootRunID: rootID, Owner: req.Owner,
-		AssignedAgentID: req.AssignedAgentID, Entrypoint: strings.TrimSpace(req.Entrypoint), ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
+		AssignedAgentID: req.AssignedAgentID, ActingUser: req.ActingUser, Entrypoint: strings.TrimSpace(req.Entrypoint), ConcurrencyKey: strings.TrimSpace(req.ConcurrencyKey),
 		ResourceRequirements: cloneResourceQuantities(req.ResourceRequirements),
 		Goal:                 req.Goal, Source: source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,

@@ -53,26 +53,29 @@ type ActionCredentialFieldReference struct {
 // for one just-in-time credential resolution. It is intentionally map-free so
 // its canonical JSON representation can be signed consistently by hosts.
 type ActionCredentialLease struct {
-	Version         string                           `json:"version"`
-	TenantID        string                           `json:"tenantId"`
-	Scope           Scope                            `json:"scope"`
-	RunID           string                           `json:"runId"`
-	ActionCallID    string                           `json:"actionCallId"`
-	ActionLease     ActionLeaseIdentity              `json:"actionLease"`
-	SkillID         string                           `json:"skillId"`
-	SkillVersion    string                           `json:"skillVersion"`
-	Action          string                           `json:"action"`
-	Transport       string                           `json:"transport"`
-	BindingOwnerID  string                           `json:"bindingOwnerId"`
-	BindingID       string                           `json:"bindingId"`
-	BindingRevision int64                            `json:"bindingRevision"`
-	AssignedAgentID string                           `json:"assignedAgentId"`
-	Credentials     []ActionCredentialFieldReference `json:"credentials"`
-	Issuer          string                           `json:"issuer"`
-	Audience        string                           `json:"audience"`
-	IssuedAt        time.Time                        `json:"issuedAt"`
-	ExpiresAt       time.Time                        `json:"expiresAt"`
-	Nonce           string                           `json:"nonce"`
+	Version         string              `json:"version"`
+	TenantID        string              `json:"tenantId"`
+	Scope           Scope               `json:"scope"`
+	RunID           string              `json:"runId"`
+	ActionCallID    string              `json:"actionCallId"`
+	ActionLease     ActionLeaseIdentity `json:"actionLease"`
+	SkillID         string              `json:"skillId"`
+	SkillVersion    string              `json:"skillVersion"`
+	Action          string              `json:"action"`
+	Transport       string              `json:"transport"`
+	BindingOwnerID  string              `json:"bindingOwnerId"`
+	BindingID       string              `json:"bindingId"`
+	BindingRevision int64               `json:"bindingRevision"`
+	AssignedAgentID string              `json:"assignedAgentId"`
+	// ActingUser is the run's ActingUser at issue; redemption requires it
+	// to still match the run.
+	ActingUser  string                           `json:"actingUser,omitempty"`
+	Credentials []ActionCredentialFieldReference `json:"credentials"`
+	Issuer      string                           `json:"issuer"`
+	Audience    string                           `json:"audience"`
+	IssuedAt    time.Time                        `json:"issuedAt"`
+	ExpiresAt   time.Time                        `json:"expiresAt"`
+	Nonce       string                           `json:"nonce"`
 }
 
 type ActionCredentialLeaseSignature struct {

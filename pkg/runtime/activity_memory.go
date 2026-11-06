@@ -100,7 +100,7 @@ func (s *MemoryStore) UpdateAgentRunWithEvent(_ context.Context, run *AgentRun, 
 	if current == nil {
 		return nil, ErrRunNotFound
 	}
-	if current.Revision != expectedRevision || run.Revision != expectedRevision+1 {
+	if current.Revision != expectedRevision || run.Revision != expectedRevision+1 || current.ActingUser != run.ActingUser {
 		return nil, ErrRevisionConflict
 	}
 	if lease != nil && (current.LeaseOwner != lease.WorkerID || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(lease.Now)) {

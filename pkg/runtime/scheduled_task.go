@@ -43,6 +43,10 @@ type ScheduledAgentTask struct {
 	// runs first with run_command, pinned to the version the user approved.
 	// Only an approved create_task or set_script sets it.
 	Script *RoutineScript `json:"script,omitempty"`
+	// CreatedBy is the person who created the routine: the creating run's
+	// ActingUser. Its occurrences act for that person, and only that person
+	// changes its script or resumes it. Empty means no recorded creator.
+	CreatedBy string `json:"createdBy,omitempty"`
 }
 
 // scheduledTaskAppID matches host-assigned app identifiers.
@@ -51,6 +55,9 @@ var scheduledTaskAppID = regexp.MustCompile(`^app-[a-f0-9]{64}$`)
 func (t *ScheduledAgentTask) Validate() error {
 	if t == nil || strings.TrimSpace(t.Goal) == "" || len(t.Goal) > 16000 || !validOpaqueIdentifier(t.ConversationID, 256) || !validOpaqueIdentifier(t.SourceMessageID, 256) {
 		return errors.New("scheduled task requires bounded work and an originating conversation message")
+	}
+	if t.CreatedBy != "" && !validOpaqueIdentifier(t.CreatedBy, 256) {
+		return errors.New("scheduled task creator is invalid")
 	}
 	if t.AppID != "" && !scheduledTaskAppID.MatchString(t.AppID) {
 		return errors.New("scheduled task app must be an app ID from this chat")
