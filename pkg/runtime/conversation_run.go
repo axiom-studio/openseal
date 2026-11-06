@@ -901,6 +901,9 @@ func (r *ConversationRunTurnRunner) RunTurn(ctx context.Context, input TurnExecu
 	} else if stopped {
 		return participationStoppedOutcome(), nil
 	}
+	if replaced := replacedTeamApprovalOutcome(input.Run); replaced != nil {
+		return replaced, nil
+	}
 	conversationID, _ := input.Run.Context[conversationRunContextConversationID].(string)
 	triggerID, _ := input.Run.Context[conversationRunContextTriggerID].(string)
 	conversation, err := r.conversations.GetConversation(ctx, input.Run.Scope, conversationID)

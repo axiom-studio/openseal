@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -271,8 +272,17 @@ func (r *ConversationRunTurnRunner) conversationFollowUpMessages(ctx context.Con
 // as an ordinary follow-up when it resumes. It returns the resolution, or nil
 // when nothing was superseded.
 func (s *ConversationRunScheduler) supersedeApprovalForMessage(ctx context.Context, run *AgentRun, message *ChannelMessage) (*ApprovalResolutionResult, error) {
+	if run == nil || message == nil || !conversationRunHasFollowUp(run, message.ID) {
+		return nil, nil
+	}
+	return s.replaceApprovalWithMessage(ctx, run, message)
+}
+
+// replaceApprovalWithMessage closes the Run's pending approval as replaced by
+// the message, whether or not the message was delivered to the Run.
+func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Context, run *AgentRun, message *ChannelMessage) (*ApprovalResolutionResult, error) {
 	if run == nil || message == nil || run.Status != AgentRunStatusWaitingForApproval || run.WakeCondition == nil ||
-		run.WakeCondition.Type != "approval" || run.WakeCondition.Reference == "" || !conversationRunHasFollowUp(run, message.ID) {
+		run.WakeCondition.Type != "approval" || run.WakeCondition.Reference == "" {
 		return nil, nil
 	}
 	approval, err := s.runs.store.GetApproval(ctx, run.Scope, run.WakeCondition.Reference)
@@ -303,4 +313,67 @@ func (s *ConversationRunScheduler) supersedeApprovalForMessage(ctx context.Conte
 		return nil, err
 	}
 	return result, nil
+}
+
+// replaceOtherMemberApprovals applies a Team message to the members it was not
+// routed to: the person's pending approvals in their lanes of this chat are
+// replaced by the message, like a 1:1 chat's. Those Runs then stop without a
+// reply (replacedTeamApprovalOutcome); the routed member answers the message.
+func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Context, conversation *Conversation, message *ChannelMessage, root string, routed map[string]bool) error {
+	if conversation.Owner.Type != OwnerTypeTeam || message.Sender.Type != ConversationParticipantUser {
+		return nil
+	}
+	actor, valid := conversationMessageInitiatingUser(conversation, message)
+	if !valid {
+		return nil
+	}
+	runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+		Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation,
+		Statuses: []AgentRunStatus{AgentRunStatusWaitingForApproval}, Order: AgentRunOrderCreatedDesc, Limit: 50,
+	})
+	if err != nil {
+		return err
+	}
+	for _, run := range runs {
+		if !isTeamMemberRun(run) || routed[run.AssignedAgentID] || run.ConcurrencyKey != conversationRunLane(conversation.ID, root, run.AssignedAgentID) {
+			continue
+		}
+		if conversationID, _ := run.Context[conversationRunContextConversationID].(string); conversationID != conversation.ID {
+			continue
+		}
+		triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
+		if triggerID == "" || triggerID == message.ID {
+			continue
+		}
+		trigger, err := s.conversations.GetChannelMessage(ctx, conversation.Scope, conversation.ID, triggerID)
+		if errors.Is(err, ErrChannelMessageNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if triggerActor, ok := conversationMessageInitiatingUser(conversation, trigger); !ok || triggerActor != actor {
+			continue
+		}
+		if _, err := s.replaceApprovalWithMessage(ctx, run, message); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// replacedTeamApprovalOutcome stops a Team member Run whose approval a message
+// routed to another member replaced: the action was not carried out and the
+// chat already shows that, so the member posts nothing.
+func replacedTeamApprovalOutcome(run *AgentRun) *TurnOutcome {
+	if !isTeamMemberRun(run) {
+		return nil
+	}
+	last, _ := run.Checkpoint["lastAction"].(map[string]interface{})
+	messageID, _ := last["supersededByMessageId"].(string)
+	if fmt.Sprint(last["approvalStatus"]) != string(ApprovalStatusSuperseded) || messageID == "" || conversationRunHasFollowUp(run, messageID) {
+		return nil
+	}
+	return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Replaced by a newer message for another member",
+		RunOutput: map[string]interface{}{"approvalReplaced": true, "replacedByMessageId": messageID}}
 }

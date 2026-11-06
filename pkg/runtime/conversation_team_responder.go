@@ -86,6 +86,13 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	followUps := &ConversationRunScheduler{conversations: r.conversations, runs: r.runs, approvals: NewApprovalCoordinator(r.runs.store, r.runs.store, nil)}
 	root, _ := run.Context["threadRootMessageId"].(string)
 	runIDs := make([]interface{}, 0, len(result.Round.Responders))
+	routed := map[string]bool{}
+	for _, responder := range result.Round.Responders {
+		routed[responder.Participant.ID] = true
+	}
+	if err := followUps.replaceOtherMemberApprovals(ctx, conversation, trigger, root, routed); err != nil {
+		return nil, err
+	}
 	for _, responder := range result.Round.Responders {
 		key := childKey(responder.Participant)
 		existing, err := r.runs.store.GetAgentRun(ctx, run.Scope, runIDForIdempotencyKey(run.Scope, key))
