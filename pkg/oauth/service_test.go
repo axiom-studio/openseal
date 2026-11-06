@@ -124,7 +124,7 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 		AccessToken: "rotated-access-token", ExpiresAt: &refreshExpiry,
 	}}
 	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
-	service, err := NewService(store, credentials, allowOwners, provider)
+	service, err := NewService(store, credentials, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 	scope := capability.ScopeReference{Kind: "tenant", ID: "tenant-1"}
 	begin, err := service.BeginAuthorization(context.Background(), BeginAuthorizationRequest{
 		Scope: scope, ConnectionID: "slack-primary", Kind: "slack-oauth",
-		Owner: Owner{Kind: OwnerAgent, ID: "agent-1"}, Principal: "user:1",
+		Owner: Owner{Kind: OwnerUser, ID: "1"}, Principal: "1",
 		Requirement: capability.OAuth2Requirement{
 			Provider: "slack", Subject: capability.OAuth2SubjectInstallation,
 			Scopes: []string{"chat:write", "channels:history"},
@@ -169,7 +169,7 @@ func TestAuthorizationLifecycleUsesPKCEAndReturnsOpaqueConnection(t *testing.T) 
 		strings.Contains(string(encodedSession), "secret-store://transient") {
 		t.Fatalf("session JSON exposed callback authority: %s", encodedSession)
 	}
-	result, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "user:1",
+	result, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "1",
 		Scope: scope, SessionID: begin.SessionID, State: callbackState, Code: "valid-code",
 	})
 	if err != nil {
@@ -230,7 +230,7 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 		AccessToken: "token", GrantedScopes: []string{"read"},
 	}}
 	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
-	service, _ := NewService(store, credentials, allowOwners, provider)
+	service, _ := NewService(store, credentials, provider)
 	service.now = func() time.Time { return now }
 	service.newID = func() string { return "session-one" }
 	values := []string{"state-value-with-at-least-thirty-two-bytes", "verifier-value"}
@@ -242,7 +242,7 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 	scope := capability.ScopeReference{Kind: "tenant", ID: "tenant-1"}
 	begin, err := service.BeginAuthorization(context.Background(), BeginAuthorizationRequest{
 		Scope: scope, ConnectionID: "connection-one", Kind: "provider-oauth",
-		Owner: Owner{Kind: OwnerAgent, ID: "agent-1"}, Principal: "user:1",
+		Owner: Owner{Kind: OwnerUser, ID: "1"}, Principal: "1",
 		Requirement: capability.OAuth2Requirement{
 			Provider: "provider", Subject: capability.OAuth2SubjectInstallation,
 			Scopes: []string{"read", "write"},
@@ -253,18 +253,18 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	callbackState := "session-one.state-value-with-at-least-thirty-two-bytes"
-	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "user:1",
+	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "1",
 		Scope:     capability.ScopeReference{Kind: "tenant", ID: "tenant-2"},
 		SessionID: begin.SessionID, State: callbackState, Code: "valid-code",
 	}); !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("cross-tenant callback error = %v", err)
 	}
-	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "user:1",
+	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "1",
 		Scope: scope, SessionID: begin.SessionID, State: "wrong-state", Code: "valid-code",
 	}); !errors.Is(err, ErrStateMismatch) {
 		t.Fatalf("wrong-state callback error = %v", err)
 	}
-	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "user:1",
+	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "1",
 		Scope: scope, SessionID: begin.SessionID, State: callbackState, Code: "valid-code",
 	}); !errors.Is(err, ErrScopeMismatch) {
 		t.Fatalf("under-scoped callback error = %v", err)
@@ -272,7 +272,7 @@ func TestAuthorizationCallbackIsTenantBoundSingleUseAndScopeSafe(t *testing.T) {
 	if provider.exchanges != 1 {
 		t.Fatalf("provider exchanges = %d", provider.exchanges)
 	}
-	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "user:1",
+	if _, err := service.CompleteAuthorization(context.Background(), CompleteAuthorizationRequest{Principal: "1",
 		Scope: scope, SessionID: begin.SessionID, State: callbackState, Code: "valid-code",
 	}); !errors.Is(err, ErrSessionConsumed) {
 		t.Fatalf("callback replay error = %v", err)
@@ -294,19 +294,21 @@ func TestTokenGrantJSONNeverSerializesTokenMaterial(t *testing.T) {
 	}
 }
 
-// Engine-issued Agent IDs are random and mixed case, often with '_' first.
-func TestValidOwnerAcceptsEngineAgentIDs(t *testing.T) {
-	for _, id := range []string{"s0ccXg8tONFWpCHqOxrzb", "_NlNw_ukIS4DTbtL7MOBC", "c0tAXIIXTohKauF4_3-TG", "openseal-assistant"} {
-		if !validOwner(Owner{Kind: OwnerAgent, ID: id}) {
-			t.Fatalf("owner %q rejected", id)
+// A sign-in's owner is a person, named by the host user ID.
+func TestValidOwnerAcceptsOnlyPeople(t *testing.T) {
+	for _, id := range []string{"1", "42", "9007199254740993"} {
+		if !validOwner(Owner{Kind: OwnerUser, ID: id}) {
+			t.Fatalf("person %q rejected", id)
 		}
 	}
-	for _, id := range []string{"", " agent", "agent one", "agent\x00", strings.Repeat("a", 513)} {
-		if validOwner(Owner{Kind: OwnerAgent, ID: id}) {
-			t.Fatalf("owner %q accepted", id)
+	for _, id := range []string{"", " 7", "7 8", "7\x00", strings.Repeat("1", 513)} {
+		if validOwner(Owner{Kind: OwnerUser, ID: id}) {
+			t.Fatalf("person %q accepted", id)
 		}
 	}
-	if validOwner(Owner{Kind: "user", ID: "agent-1"}) {
-		t.Fatal("non-umbrella owner kind accepted")
+	for _, kind := range []OwnerKind{"agent", "team", "tenant", ""} {
+		if validOwner(Owner{Kind: kind, ID: "7"}) {
+			t.Fatalf("owner kind %q accepted", kind)
+		}
 	}
 }

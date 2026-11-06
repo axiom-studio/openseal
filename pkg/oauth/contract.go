@@ -50,21 +50,16 @@ const (
 
 type OwnerKind string
 
-const (
-	OwnerAgent OwnerKind = "agent"
-	OwnerTeam  OwnerKind = "team"
-)
+// OwnerUser is the only owner kind: a sign-in belongs to the person who made
+// it. ID is that person's host user ID.
+const OwnerUser OwnerKind = "user"
 
-// Owner is the umbrella a connection belongs to: an Agent or a Team
-// deployment. Only that umbrella's runs may use the connection.
+// Owner is the person a connection belongs to. Umbrellas use it only through
+// the host's use links.
 type Owner struct {
 	Kind OwnerKind `json:"kind"`
 	ID   string    `json:"id"`
 }
-
-// OwnerVerifier checks that owner names an existing, usable Agent or Team in
-// scope. Hosts pass the Engine's verifier.
-type OwnerVerifier func(ctx context.Context, scope capability.ScopeReference, owner Owner) error
 
 // ExternalIdentity contains operator-visible, non-secret installation facts.
 // It must never be projected into model catalogs.
@@ -129,8 +124,8 @@ type BeginAuthorizationRequest struct {
 	ConnectionID string
 	Kind         string
 	Owner        Owner
-	// Principal is the person beginning the authorization; the state is
-	// bound to it and to Owner.
+	// Principal is the person beginning the authorization. Owner must be
+	// {user, Principal}; the state is bound to both.
 	Principal       string
 	Requirement     capability.OAuth2Requirement
 	RedirectURI     string

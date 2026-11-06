@@ -726,7 +726,6 @@ type (
 	OAuthAuthorizationSessionStatus      = kerneloauth.SessionStatus
 	OAuthConnectionOwnerKind             = kerneloauth.OwnerKind
 	OAuthConnectionOwner                 = kerneloauth.Owner
-	OAuthOwnerVerifier                   = kerneloauth.OwnerVerifier
 	OAuthExternalIdentity                = kerneloauth.ExternalIdentity
 	OAuthConnection                      = kerneloauth.Connection
 	OAuthAuthorizationSession            = kerneloauth.AuthorizationSession
@@ -2287,8 +2286,7 @@ const (
 	OAuthAuthorizationDenied     = kerneloauth.SessionDenied
 	OAuthAuthorizationFailed     = kerneloauth.SessionFailed
 
-	OAuthConnectionOwnerAgent = kerneloauth.OwnerAgent
-	OAuthConnectionOwnerTeam  = kerneloauth.OwnerTeam
+	OAuthConnectionOwnerUser = kerneloauth.OwnerUser
 
 	SkillDiscoveryBindable          = skill.DiscoveryReadinessBindable
 	SkillDiscoveryNeedsInstallation = skill.DiscoveryReadinessNeedsInstallation

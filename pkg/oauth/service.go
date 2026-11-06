@@ -27,18 +27,17 @@ const (
 type Service struct {
 	store       Store
 	credentials CredentialStore
-	owners      OwnerVerifier
 	providers   map[string]Provider
 	now         func() time.Time
 	newID       func() string
 	random      func(int) (string, error)
 }
 
-// NewService builds the OAuth lifecycle. owners verifies every connection
-// owner as an existing Agent or Team.
-func NewService(store Store, credentials CredentialStore, owners OwnerVerifier, providers ...Provider) (*Service, error) {
-	if store == nil || credentials == nil || owners == nil {
-		return nil, errors.New("OAuth store, encrypted credential store and owner verifier are required")
+// NewService builds the OAuth lifecycle. Every connection belongs to the
+// person who signed in.
+func NewService(store Store, credentials CredentialStore, providers ...Provider) (*Service, error) {
+	if store == nil || credentials == nil {
+		return nil, errors.New("OAuth store and encrypted credential store are required")
 	}
 	registered := make(map[string]Provider, len(providers))
 	for _, provider := range providers {
@@ -51,7 +50,7 @@ func NewService(store Store, credentials CredentialStore, owners OwnerVerifier, 
 		registered[provider.ID()] = provider
 	}
 	return &Service{
-		store: store, credentials: credentials, owners: owners, providers: registered,
+		store: store, credentials: credentials, providers: registered,
 		now: time.Now, newID: uuid.NewString, random: randomURLToken,
 	}, nil
 }
@@ -197,8 +196,8 @@ func (s *Service) BeginAuthorization(ctx context.Context, request BeginAuthoriza
 		len(request.ResumeReference) > 1024 {
 		return nil, fmt.Errorf("%w: scope, connection, owner, principal, authorization, and redirect are required", ErrInvalid)
 	}
-	if err := s.owners(ctx, request.Scope, request.Owner); err != nil {
-		return nil, fmt.Errorf("%w: connection owner: %v", ErrInvalid, err)
+	if request.Owner.ID != request.Principal {
+		return nil, fmt.Errorf("%w: a sign-in belongs to the person who begins it", ErrInvalid)
 	}
 	provider := s.providers[requirement.Provider]
 	if provider == nil {
@@ -268,13 +267,10 @@ func (s *Service) CompleteAuthorization(ctx context.Context, request CompleteAut
 		return nil, ErrSessionExpired
 	}
 	// The state is bound to the session's owner and principal: another
-	// person's callback, or one replayed for another umbrella, fails.
-	if subtleDigestMismatch(session.StateDigest, request.State) || request.Principal != session.Principal {
+	// person's callback fails.
+	if subtleDigestMismatch(session.StateDigest, request.State) || request.Principal != session.Principal ||
+		session.Owner != (Owner{Kind: OwnerUser, ID: session.Principal}) {
 		return nil, ErrStateMismatch
-	}
-	if err := s.owners(ctx, session.Scope, session.Owner); err != nil {
-		s.failSession(ctx, session, "owner_unavailable")
-		return nil, fmt.Errorf("%w: connection owner: %v", ErrInvalid, err)
 	}
 	if strings.TrimSpace(request.ErrorCode) != "" {
 		session.Status, session.FailureCode, session.ConsumedAt = SessionDenied, safeFailureCode(request.ErrorCode), &now
@@ -428,11 +424,9 @@ func SessionIDFromState(state string) (string, error) {
 	return sessionID, nil
 }
 
-// validOwner accepts Agent and Team IDs as the engine issues them: random
-// IDs mix cases and may start with '_' or '-'. The owner verifier checks the
-// Agent or Team exists.
+// validOwner accepts a person: the host user ID the sign-in belongs to.
 func validOwner(owner Owner) bool {
-	return (owner.Kind == OwnerAgent || owner.Kind == OwnerTeam) && validOwnerID(owner.ID)
+	return owner.Kind == OwnerUser && validOwnerID(owner.ID)
 }
 
 func validOwnerID(value string) bool {

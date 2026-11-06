@@ -244,30 +244,3 @@ func TestTeamRequestDoesNotResumeAfterTheMemberLeft(t *testing.T) {
 		t.Fatalf("a removed member's run resumed: %s", parked.Status)
 	}
 }
-
-func TestOAuthOwnersAreExistingAgentsOrTeams(t *testing.T) {
-	engine, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	umbrellaFixture(t, engine)
-	if err := createUmbrellaAgent(engine, scope, "member"); err != nil {
-		t.Fatal(err)
-	}
-	if err := createUmbrellaTeam(engine, scope, "crew", "member"); err != nil {
-		t.Fatal(err)
-	}
-	for owner, ok := range map[OAuthConnectionOwner]bool{
-		{Kind: OAuthConnectionOwnerAgent, ID: "member"}: true,
-		{Kind: OAuthConnectionOwnerTeam, ID: "crew"}:    true,
-		{Kind: OAuthConnectionOwnerTeam, ID: "member"}:  false,
-		{Kind: OAuthConnectionOwnerAgent, ID: "ghost"}:  false,
-		{Kind: "user", ID: "member"}:                    false,
-	} {
-		if err := engine.VerifyOAuthOwner(ctx, scope, owner); (err == nil) != ok {
-			t.Fatalf("VerifyOAuthOwner(%#v) = %v", owner, err)
-		}
-	}
-}

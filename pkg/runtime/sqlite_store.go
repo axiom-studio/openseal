@@ -136,7 +136,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateInteractionUmbrellasSQLite(db); err != nil {
 		return err
 	}
-	return migrateChannelUmbrellasSQLite(db)
+	if err := migrateChannelUmbrellasSQLite(db); err != nil {
+		return err
+	}
+	return migrateConnectOnceSQLite(db)
 }
 
 // Close closes the underlying database.
