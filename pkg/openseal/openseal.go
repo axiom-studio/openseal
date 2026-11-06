@@ -702,6 +702,8 @@ type (
 	SkillBinding                         = skill.Binding
 	SkillBindingReference                = skill.BindingReference
 	SkillRunActor                        = skill.RunActor
+	SkillUmbrella                        = skill.Umbrella
+	SkillUmbrellaKind                    = skill.UmbrellaKind
 	SkillHostBindingSet                  = skill.HostBindingSet
 	SkillHostBindingProvider             = skill.HostBindingProvider
 	SkillBindingActor                    = skill.BindingActor
@@ -5496,6 +5498,34 @@ func (e *Engine) ValidateSkillActionInput(ctx context.Context, bound *skill.Boun
 func (e *Engine) SetHostSkillBindingProvider(provider skill.HostBindingProvider) {
 	e.skills.SetHostBindingProvider(provider)
 }
+
+const (
+	SkillUmbrellaAgent = skill.UmbrellaAgent
+	SkillUmbrellaTeam  = skill.UmbrellaTeam
+)
+
+// ErrRunUmbrellaUnavailable means a run no longer acts under a valid umbrella.
+var ErrRunUmbrellaUnavailable = runtime.ErrRunUmbrellaUnavailable
+
+// SkillBindingHoldsConnection reports whether a binding carries a connection.
+func SkillBindingHoldsConnection(binding *skill.Binding) bool {
+	return skill.BindingHoldsConnection(binding)
+}
+
+// WithoutSkillConnections marks ctx so activation leaves out every binding
+// that holds a connection and attaches no host bindings.
+func WithoutSkillConnections(ctx context.Context) context.Context {
+	return skill.WithoutConnections(ctx)
+}
+
+// RunUmbrella returns the Agent or Team whose connections run uses, failing
+// closed when the run no longer acts under it.
+func (e *Engine) RunUmbrella(ctx context.Context, run *runtime.AgentRun) (ObjectiveOwner, error) {
+	return runtime.RunUmbrella(ctx, e, run)
+}
+
+// RunSkillActor is the actor run activates and resolves Skills as.
+func RunSkillActor(run *runtime.AgentRun) skill.RunActor { return runtime.RunSkillActor(run) }
 
 // WithSkillRunActor marks ctx as acting for one run so activation and exact
 // action resolution through it include that run's host bindings.
