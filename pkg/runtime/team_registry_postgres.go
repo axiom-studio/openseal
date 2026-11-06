@@ -239,6 +239,9 @@ func (s *PostgresStore) CreateTeamDeployment(ctx context.Context, deployment *ke
 		return err
 	}
 	defer tx.Rollback()
+	if err := s.reserveDeploymentID(ctx, tx, deployment.Scope, deployment.ID, workforce.DeploymentKindTeam); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("team_deployments")+`
 		(scope_kind, scope_id, id, definition_id, active_version, revision, updated_at, payload)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`, deployment.Scope.Kind, deployment.Scope.ID,

@@ -10,6 +10,7 @@ import (
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func migrateAgentRegistry(db *sql.DB) error {
@@ -311,6 +312,9 @@ func (s *SQLiteStore) CreateDeployment(ctx context.Context, deployment *kernelag
 		return err
 	}
 	defer tx.Rollback()
+	if err := reserveDeploymentIDSQLite(ctx, tx, deployment.Scope, deployment.ID, workforce.DeploymentKindAgent); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_deployments(scope_kind, scope_id, id, definition_id, active_version, revision, updated_at, payload) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, deployment.Scope.Kind, deployment.Scope.ID, deployment.ID, deployment.DefinitionID, deployment.ActiveVersion, deployment.Revision, deployment.UpdatedAt, deploymentPayload); err != nil {
 		return err
 	}

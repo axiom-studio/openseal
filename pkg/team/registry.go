@@ -33,6 +33,7 @@ type AgentResolver interface {
 type Registry struct {
 	store  Store
 	agents AgentResolver
+	ids    workforce.DeploymentIDReserver
 	now    func() time.Time
 	newID  func() string
 }
@@ -41,8 +42,28 @@ func NewRegistry(agents AgentResolver) *Registry {
 	return NewRegistryWithStore(NewMemoryStore(), agents)
 }
 
+// NewRegistryWithStore shares the Agent registry's deployment-ID namespace
+// when agents has one, then falls back to store, then to an in-process one.
 func NewRegistryWithStore(store Store, agents AgentResolver) *Registry {
-	return &Registry{store: store, agents: agents, now: time.Now, newID: uuid.NewString}
+	var ids workforce.DeploymentIDReserver
+	if shared, ok := agents.(interface {
+		DeploymentIDs() workforce.DeploymentIDReserver
+	}); ok && shared.DeploymentIDs() != nil {
+		ids = shared.DeploymentIDs()
+	} else if reserver, ok := store.(workforce.DeploymentIDReserver); ok {
+		ids = reserver
+	} else {
+		ids = workforce.NewMemoryDeploymentIDs()
+	}
+	return &Registry{store: store, agents: agents, ids: ids, now: time.Now, newID: uuid.NewString}
+}
+
+// DeploymentIDs returns the Agent and Team deployment-ID namespace.
+func (r *Registry) DeploymentIDs() workforce.DeploymentIDReserver {
+	if r == nil {
+		return nil
+	}
+	return r.ids
 }
 
 // UsesStore reports whether Team authority and a canonical transaction share
@@ -103,6 +124,14 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *Deployment,
 		return nil, nil, err
 	}
 	if err := validateNarrowing(definition, candidate); err != nil {
+		return nil, nil, err
+	}
+	if r.ids == nil {
+		return nil, nil, errors.New("deployment ID reserver is not configured")
+	}
+	// Durable stores reserve again inside their create transaction; the
+	// reservation is idempotent for the same kind.
+	if err := r.ids.ReserveDeploymentID(ctx, candidate.Scope, candidate.ID, workforce.DeploymentKindTeam); err != nil {
 		return nil, nil, err
 	}
 	activation := workforce.DefinitionActivation{

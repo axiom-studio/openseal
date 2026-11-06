@@ -6,6 +6,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 // MemoryStore holds canonical kernel state in memory.
@@ -112,12 +113,14 @@ type MemoryStore struct {
 	skillDefinitions                    map[string]*skill.Definition
 	skillBindings                       map[string]*skill.Binding
 	skillBindingFloors                  map[string]int64
+	deploymentIDs                       *workforce.MemoryDeploymentIDs
 }
 
 // NewMemoryStore creates an in-memory canonical kernel store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		MemoryStore:                 kernelteam.NewMemoryStore(),
+		deploymentIDs:               workforce.NewMemoryDeploymentIDs(),
 		skillSetupRequests:          make(map[string]*SkillSetupRequest),
 		credentialRequests:          make(map[string]*CredentialRequest),
 		objectives:                  make(map[string]*Objective),

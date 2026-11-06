@@ -14,6 +14,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.ChangeSet, expectedRevision int64) (*authoring.ChangeSet, error) {
@@ -102,6 +103,9 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		activation.FromVersion = deployment.PreviousVersion
 		ap, _ := json.Marshal(activation)
 		if expectedDeploymentRevision == 0 {
+			if err = s.reserveDeploymentID(ctx, tx, deployment.Scope, deployment.ID, workforce.DeploymentKindAgent); err != nil {
+				return nil, err
+			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("agent_deployments")+`(scope_kind,scope_id,id,definition_id,active_version,revision,updated_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, value.Scope.Kind, value.Scope.ID, deployment.ID, deployment.DefinitionID, deployment.ActiveVersion, deployment.Revision, deployment.UpdatedAt, string(dp))
 		} else {
 			var result sql.Result
@@ -163,6 +167,9 @@ func (s *PostgresStore) ApplyChangeSet(ctx context.Context, value *authoring.Cha
 		tdp2, _ := json.Marshal(a.teamDeployment)
 		tap, _ := json.Marshal(a.teamActivation)
 		if expectedTeamRevision == 0 {
+			if err = s.reserveDeploymentID(ctx, tx, a.teamDeployment.Scope, a.teamDeployment.ID, workforce.DeploymentKindTeam); err != nil {
+				return nil, err
+			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("team_deployments")+`(scope_kind,scope_id,id,definition_id,active_version,revision,updated_at,payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`, value.Scope.Kind, value.Scope.ID, a.teamDeployment.ID, a.teamDeployment.DefinitionID, a.teamDeployment.ActiveVersion, a.teamDeployment.Revision, a.teamDeployment.UpdatedAt, string(tdp2))
 		} else {
 			var result sql.Result

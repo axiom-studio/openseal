@@ -29,6 +29,7 @@ var (
 
 type Registry struct {
 	store Store
+	ids   workforce.DeploymentIDReserver
 	now   func() time.Time
 	newID func() string
 }
@@ -77,8 +78,31 @@ func NewRegistry() *Registry {
 	return NewRegistryWithStore(NewMemoryStore())
 }
 
+// NewRegistryWithStore uses store as the deployment-ID reserver when it is
+// one, and otherwise an in-process reserver. WithDeploymentIDs overrides it.
 func NewRegistryWithStore(store Store) *Registry {
-	return &Registry{store: store, now: time.Now, newID: uuid.NewString}
+	ids, ok := store.(workforce.DeploymentIDReserver)
+	if !ok {
+		ids = workforce.NewMemoryDeploymentIDs()
+	}
+	return &Registry{store: store, ids: ids, now: time.Now, newID: uuid.NewString}
+}
+
+// WithDeploymentIDs makes the registry reserve deployment IDs through ids,
+// the namespace it shares with the Team registry.
+func (r *Registry) WithDeploymentIDs(ids workforce.DeploymentIDReserver) *Registry {
+	if r != nil && ids != nil {
+		r.ids = ids
+	}
+	return r
+}
+
+// DeploymentIDs returns the Agent and Team deployment-ID namespace.
+func (r *Registry) DeploymentIDs() workforce.DeploymentIDReserver {
+	if r == nil {
+		return nil
+	}
+	return r.ids
 }
 
 func (r *Registry) RegisterDefinition(ctx context.Context, definition *AgentDefinition) (*AgentDefinition, error) {
@@ -128,6 +152,14 @@ func (r *Registry) CreateDeployment(ctx context.Context, deployment *AgentDeploy
 		return nil, nil, err
 	}
 	if err := validateNarrowing(definition, candidate); err != nil {
+		return nil, nil, err
+	}
+	if r.ids == nil {
+		return nil, nil, errors.New("deployment ID reserver is not configured")
+	}
+	// Durable stores reserve again inside their create transaction; the
+	// reservation is idempotent for the same kind.
+	if err := r.ids.ReserveDeploymentID(ctx, candidate.Scope, candidate.ID, workforce.DeploymentKindAgent); err != nil {
 		return nil, nil, err
 	}
 	activation := DefinitionActivation{

@@ -1794,6 +1794,8 @@ var (
 	ErrAgentManifestInstallationConflict    = kernelagent.ErrManifestInstallationConflict
 	ErrTeamDefinitionNotFound               = kernelteam.ErrDefinitionNotFound
 	ErrTeamDeploymentNotFound               = kernelteam.ErrDeploymentNotFound
+	ErrDeploymentIDTaken                    = workforce.ErrDeploymentIDTaken
+	ErrDeploymentIDNotReserved              = workforce.ErrDeploymentIDNotReserved
 	ErrTeamDeploymentRevisionConflict       = kernelteam.ErrRevisionConflict
 	ErrTeamAmendmentNotFound                = kernelteam.ErrAmendmentNotFound
 	ErrTeamIdempotencyConflict              = kernelteam.ErrIdempotencyConflict
@@ -2705,7 +2707,7 @@ func New(opts ...Option) (*Engine, error) {
 	store := runtime.NewMemoryStore()
 	conversationChanges, _ := runtime.NewConversationChangeService(store, store)
 
-	agentRegistry := kernelagent.NewRegistry()
+	agentRegistry := kernelagent.NewRegistry().WithDeploymentIDs(store)
 	e := &Engine{
 		store:                    store,
 		workSignals:              runtime.NewWorkSignalStatus(),

@@ -15,6 +15,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/mattn/go-sqlite3"
 )
 
@@ -113,6 +114,9 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		activation.FromVersion = deployment.PreviousVersion
 		activationPayload, _ := json.Marshal(activation)
 		if expectedDeploymentRevision == 0 {
+			if err = reserveDeploymentIDSQLite(ctx, tx, deployment.Scope, deployment.ID, workforce.DeploymentKindAgent); err != nil {
+				return nil, err
+			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO agent_deployments(scope_kind,scope_id,id,definition_id,active_version,revision,updated_at,payload) VALUES(?,?,?,?,?,?,?,?)`, value.Scope.Kind, value.Scope.ID, deployment.ID, deployment.DefinitionID, deployment.ActiveVersion, deployment.Revision, deployment.UpdatedAt, string(deploymentPayload))
 		} else {
 			var result sql.Result
@@ -174,6 +178,9 @@ func (s *SQLiteStore) applyChangeSetOnce(ctx context.Context, value *authoring.C
 		teamDeploymentPayload, _ := json.Marshal(application.teamDeployment)
 		teamActivationPayload, _ := json.Marshal(application.teamActivation)
 		if expectedTeamRevision == 0 {
+			if err = reserveDeploymentIDSQLite(ctx, tx, application.teamDeployment.Scope, application.teamDeployment.ID, workforce.DeploymentKindTeam); err != nil {
+				return nil, err
+			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO team_deployments(scope_kind,scope_id,id,definition_id,active_version,revision,updated_at,payload) VALUES(?,?,?,?,?,?,?,?)`, value.Scope.Kind, value.Scope.ID, application.teamDeployment.ID, application.teamDeployment.DefinitionID, application.teamDeployment.ActiveVersion, application.teamDeployment.Revision, application.teamDeployment.UpdatedAt, string(teamDeploymentPayload))
 		} else {
 			var result sql.Result
