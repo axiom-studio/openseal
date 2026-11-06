@@ -137,3 +137,10 @@ func (e *Engine) conversationOwnedBy(ctx context.Context, scope runtime.Scope, o
 	}
 	return nil
 }
+
+// VerifyOAuthOwner is the OAuth owner verifier hosts pass to NewOAuthService:
+// a connection belongs to an existing Agent or Team that is neither retired
+// nor archived.
+func (e *Engine) VerifyOAuthOwner(ctx context.Context, scope skill.ScopeReference, owner OAuthConnectionOwner) error {
+	return e.checkUmbrella(ctx, scope, ObjectiveOwner{Type: runtime.OwnerType(owner.Kind), ID: owner.ID})
+}

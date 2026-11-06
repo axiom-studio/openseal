@@ -51,16 +51,20 @@ const (
 type OwnerKind string
 
 const (
-	OwnerTenant OwnerKind = "tenant"
-	OwnerUser   OwnerKind = "user"
+	OwnerAgent OwnerKind = "agent"
+	OwnerTeam  OwnerKind = "team"
 )
 
-// Owner identifies who may bind a connection. It does not identify an Agent:
-// Agent and Team bindings receive only the opaque CredentialReference.
+// Owner is the umbrella a connection belongs to: an Agent or a Team
+// deployment. Only that umbrella's runs may use the connection.
 type Owner struct {
 	Kind OwnerKind `json:"kind"`
 	ID   string    `json:"id"`
 }
+
+// OwnerVerifier checks that owner names an existing, usable Agent or Team in
+// scope. Hosts pass the Engine's verifier.
+type OwnerVerifier func(ctx context.Context, scope capability.ScopeReference, owner Owner) error
 
 // ExternalIdentity contains operator-visible, non-secret installation facts.
 // It must never be projected into model catalogs.
@@ -97,12 +101,15 @@ type Connection struct {
 // PKCEVerifierReference are persistence fields but are deliberately omitted
 // from JSON and operator/model projections.
 type AuthorizationSession struct {
-	APIVersion            string                         `json:"apiVersion"`
-	Scope                 capability.ScopeReference      `json:"scope"`
-	ID                    string                         `json:"id"`
-	ConnectionID          string                         `json:"connectionId"`
-	Kind                  string                         `json:"kind"`
-	Owner                 Owner                          `json:"owner"`
+	APIVersion   string                    `json:"apiVersion"`
+	Scope        capability.ScopeReference `json:"scope"`
+	ID           string                    `json:"id"`
+	ConnectionID string                    `json:"connectionId"`
+	Kind         string                    `json:"kind"`
+	Owner        Owner                     `json:"owner"`
+	// Principal is the person who began the authorization; only they can
+	// complete it.
+	Principal             string                         `json:"principal"`
 	Requirement           capability.OAuth2Requirement   `json:"requirement"`
 	RedirectURI           string                         `json:"redirectUri"`
 	ResumeReference       string                         `json:"resumeReference,omitempty"`
@@ -118,10 +125,13 @@ type AuthorizationSession struct {
 }
 
 type BeginAuthorizationRequest struct {
-	Scope           capability.ScopeReference
-	ConnectionID    string
-	Kind            string
-	Owner           Owner
+	Scope        capability.ScopeReference
+	ConnectionID string
+	Kind         string
+	Owner        Owner
+	// Principal is the person beginning the authorization; the state is
+	// bound to it and to Owner.
+	Principal       string
 	Requirement     capability.OAuth2Requirement
 	RedirectURI     string
 	ResumeReference string
@@ -136,8 +146,11 @@ type BeginAuthorizationResult struct {
 }
 
 type CompleteAuthorizationRequest struct {
-	Scope        capability.ScopeReference
-	SessionID    string
+	Scope     capability.ScopeReference
+	SessionID string
+	// Principal is the person completing the callback; it must be the one
+	// who began the authorization.
+	Principal    string
 	State        string
 	Code         string
 	ErrorCode    string

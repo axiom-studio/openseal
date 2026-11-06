@@ -14,12 +14,12 @@ func TestReauthorizingVerifiedAccountReusesConnectionAndRefreshToken(t *testing.
 	ctx := context.Background()
 	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
 	provider := &fixtureProvider{id: "mail", grant: TokenGrant{AccessToken: "first", RefreshToken: "refresh", GrantedScopes: []string{"read"}, ExternalIdentity: ExternalIdentity{AccountID: "verified-subject", DisplayName: "first@example.test"}}}
-	service, err := NewService(store, credentials, provider)
+	service, err := NewService(store, credentials, allowOwners, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := capability.ScopeReference{Kind: "tenant", ID: "42"}
-	request := BeginAuthorizationRequest{Scope: scope, ConnectionID: "random-attempt-one", Kind: "mail_token", Owner: Owner{Kind: OwnerTenant, ID: "42"}, Requirement: capability.OAuth2Requirement{Provider: "mail", Subject: capability.OAuth2SubjectUser, Scopes: []string{"read"}}, RedirectURI: "https://studio.example/oauth/callback"}
+	request := BeginAuthorizationRequest{Scope: scope, ConnectionID: "random-attempt-one", Kind: "mail_token", Owner: Owner{Kind: OwnerAgent, ID: "agent-42"}, Principal: "user:1", Requirement: capability.OAuth2Requirement{Provider: "mail", Subject: capability.OAuth2SubjectUser, Scopes: []string{"read"}}, RedirectURI: "https://studio.example/oauth/callback"}
 	complete := func(request BeginAuthorizationRequest) *Connection {
 		t.Helper()
 		begin, err := service.BeginAuthorization(ctx, request)
@@ -30,7 +30,7 @@ func TestReauthorizingVerifiedAccountReusesConnectionAndRefreshToken(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Scope: scope, SessionID: begin.SessionID, State: u.Query().Get("state"), Code: "valid-code"})
+		result, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Principal: "user:1", Scope: scope, SessionID: begin.SessionID, State: u.Query().Get("state"), Code: "valid-code"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -61,7 +61,7 @@ func TestReauthorizingVerifiedAccountReusesConnectionAndRefreshToken(t *testing.
 	}
 	u, _ := url.Parse(begin.AuthorizationURL)
 	version := credentials.version
-	if _, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Scope: scope, SessionID: begin.SessionID, State: u.Query().Get("state"), Code: "valid-code"}); err == nil {
+	if _, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Principal: "user:1", Scope: scope, SessionID: begin.SessionID, State: u.Query().Get("state"), Code: "valid-code"}); err == nil {
 		t.Fatal("different account overwrote reconnect")
 	}
 	if credentials.version != version {
@@ -70,7 +70,7 @@ func TestReauthorizingVerifiedAccountReusesConnectionAndRefreshToken(t *testing.
 }
 
 func TestVerifiedAccountDeduplicationPreservesAuthorizationDomains(t *testing.T) {
-	base := &Connection{Scope: capability.ScopeReference{Kind: "tenant", ID: "42"}, Owner: Owner{Kind: OwnerTenant, ID: "42"}, Kind: "token", Grant: capability.OAuth2GrantSummary{Provider: "mail", Subject: capability.OAuth2SubjectUser}, ExternalIdentity: ExternalIdentity{AccountID: "subject", DisplayName: "a@example.test"}}
+	base := &Connection{Scope: capability.ScopeReference{Kind: "tenant", ID: "42"}, Owner: Owner{Kind: OwnerAgent, ID: "agent-42"}, Kind: "token", Grant: capability.OAuth2GrantSummary{Provider: "mail", Subject: capability.OAuth2SubjectUser}, ExternalIdentity: ExternalIdentity{AccountID: "subject", DisplayName: "a@example.test"}}
 	for name, mutate := range map[string]func(*Connection){
 		"tenant":       func(c *Connection) { c.Scope.ID = "43" },
 		"owner":        func(c *Connection) { c.Owner.ID = "43" },
@@ -100,7 +100,7 @@ func TestVerifiedAccountDeduplicationPreservesAuthorizationDomains(t *testing.T)
 func TestAccountUpsertSupersedesLegacyDuplicatesAtomically(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
-	base := &Connection{ID: "legacy", Scope: capability.ScopeReference{Kind: "tenant", ID: "42"}, Owner: Owner{Kind: OwnerTenant, ID: "42"}, Kind: "token", Grant: capability.OAuth2GrantSummary{Provider: "mail", Subject: capability.OAuth2SubjectUser}, ExternalIdentity: ExternalIdentity{AccountID: "subject"}, Status: ConnectionActive, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	base := &Connection{ID: "legacy", Scope: capability.ScopeReference{Kind: "tenant", ID: "42"}, Owner: Owner{Kind: OwnerAgent, ID: "agent-42"}, Kind: "token", Grant: capability.OAuth2GrantSummary{Provider: "mail", Subject: capability.OAuth2SubjectUser}, ExternalIdentity: ExternalIdentity{AccountID: "subject"}, Status: ConnectionActive, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	store.connections[oauthKey(base.Scope, base.ID)] = cloneConnection(base)
 	duplicate := cloneConnection(base)
 	duplicate.ID = "duplicate"
@@ -125,17 +125,17 @@ func TestAccountUpsertSupersedesLegacyDuplicatesAtomically(t *testing.T) {
 	}
 }
 
-func TestUserOwnedGrantsStayWithTheirOwner(t *testing.T) {
+func TestUmbrellaOwnedGrantsStayWithTheirOwner(t *testing.T) {
 	ctx := context.Background()
 	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
 	provider := &fixtureProvider{id: "mcp", grant: TokenGrant{AccessToken: "token", GrantedScopes: []string{"read"}, Resource: "https://mcp.example/mcp", ExternalIdentity: ExternalIdentity{AccountID: "https://mcp.example/mcp"}}}
-	service, err := NewService(store, credentials, provider)
+	service, err := NewService(store, credentials, allowOwners, provider)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := capability.ScopeReference{Kind: "tenant", ID: "42"}
 	request := func(owner, connection string) BeginAuthorizationRequest {
-		return BeginAuthorizationRequest{Scope: scope, ConnectionID: connection, Kind: "mcp_credential", Owner: Owner{Kind: OwnerUser, ID: owner},
+		return BeginAuthorizationRequest{Scope: scope, ConnectionID: connection, Kind: "mcp_credential", Owner: Owner{Kind: OwnerTeam, ID: owner}, Principal: "user:1",
 			Requirement: capability.OAuth2Requirement{Provider: "mcp", Subject: capability.OAuth2SubjectUser, Scopes: []string{"read"}, Resource: "https://mcp.example/mcp"},
 			RedirectURI: "https://studio.example/oauth/callback"}
 	}
@@ -146,24 +146,67 @@ func TestUserOwnedGrantsStayWithTheirOwner(t *testing.T) {
 			t.Fatal(err)
 		}
 		u, _ := url.Parse(begin.AuthorizationURL)
-		result, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Scope: scope, SessionID: begin.SessionID, State: u.Query().Get("state"), Code: "valid-code"})
+		result, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Principal: "user:1", Scope: scope, SessionID: begin.SessionID, State: u.Query().Get("state"), Code: "valid-code"})
 		if err != nil {
 			return nil, err
 		}
 		return result.Connection, nil
 	}
 	mine, err := complete(request("7", "attempt-7"))
-	if err != nil || mine.Owner != (Owner{Kind: OwnerUser, ID: "7"}) {
-		t.Fatalf("user grant = %#v, %v", mine, err)
+	if err != nil || mine.Owner != (Owner{Kind: OwnerTeam, ID: "7"}) {
+		t.Fatalf("Team grant = %#v, %v", mine, err)
 	}
 	theirs, err := complete(request("8", "attempt-8"))
 	if err != nil || theirs.ID == mine.ID || theirs.Owner.ID != "8" {
-		t.Fatalf("two users' grants for one account merged: %#v %#v %v", mine, theirs, err)
+		t.Fatalf("two Teams' grants for one account merged: %#v %#v %v", mine, theirs, err)
 	}
 	if _, err := complete(request("8", mine.ID)); err == nil {
-		t.Fatal("another user re-authorized a personal grant")
+		t.Fatal("another Team re-authorized this Team's grant")
 	}
 	if _, err := service.BeginAuthorization(ctx, request("", "attempt-none")); err == nil {
-		t.Fatal("user grant without a user accepted")
+		t.Fatal("grant without an owner accepted")
+	}
+}
+
+func allowOwners(context.Context, capability.ScopeReference, Owner) error { return nil }
+
+func TestAuthorizationIsBoundToAnExistingOwnerAndItsPrincipal(t *testing.T) {
+	ctx := context.Background()
+	store, credentials := NewMemoryStore(), newMemoryCredentialStore()
+	provider := &fixtureProvider{id: "mail", grant: TokenGrant{AccessToken: "token", GrantedScopes: []string{"read"}, ExternalIdentity: ExternalIdentity{AccountID: "subject"}}}
+	known := map[Owner]bool{{Kind: OwnerTeam, ID: "crew"}: true}
+	service, err := NewService(store, credentials, func(_ context.Context, _ capability.ScopeReference, owner Owner) error {
+		if !known[owner] {
+			return errors.New("unknown owner")
+		}
+		return nil
+	}, provider)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := capability.ScopeReference{Kind: "tenant", ID: "42"}
+	begin := func(owner Owner, principal string) (*BeginAuthorizationResult, error) {
+		return service.BeginAuthorization(ctx, BeginAuthorizationRequest{Scope: scope, ConnectionID: "attempt", Kind: "mail_token", Owner: owner, Principal: principal,
+			Requirement: capability.OAuth2Requirement{Provider: "mail", Subject: capability.OAuth2SubjectUser, Scopes: []string{"read"}}, RedirectURI: "https://studio.example/oauth/callback"})
+	}
+	for name, owner := range map[string]Owner{"unknown Team": {Kind: OwnerTeam, ID: "ghost"}, "tenant": {Kind: "tenant", ID: "42"}, "user": {Kind: "user", ID: "7"}} {
+		if _, err := begin(owner, "user:7"); err == nil {
+			t.Fatalf("%s owner accepted", name)
+		}
+	}
+	if _, err := begin(Owner{Kind: OwnerTeam, ID: "crew"}, ""); err == nil {
+		t.Fatal("authorization without a principal accepted")
+	}
+	started, err := begin(Owner{Kind: OwnerTeam, ID: "crew"}, "user:7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(started.AuthorizationURL)
+	if _, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Scope: scope, SessionID: started.SessionID, State: u.Query().Get("state"), Code: "valid-code", Principal: "user:8"}); !errors.Is(err, ErrStateMismatch) {
+		t.Fatalf("another person's callback: %v", err)
+	}
+	result, err := service.CompleteAuthorization(ctx, CompleteAuthorizationRequest{Scope: scope, SessionID: started.SessionID, State: u.Query().Get("state"), Code: "valid-code", Principal: "user:7"})
+	if err != nil || result.Connection.Owner != (Owner{Kind: OwnerTeam, ID: "crew"}) {
+		t.Fatalf("completion = %#v, %v", result, err)
 	}
 }
