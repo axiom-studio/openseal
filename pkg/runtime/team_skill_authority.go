@@ -99,6 +99,11 @@ func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, i
 		if binding.DeploymentID != input.Run.AssignedAgentID {
 			return nil, errors.New("Agent Run cannot use a Skill binding owned by another deployment")
 		}
+		// A run delegated to another Agent works without connections: the
+		// Agent never lends its own.
+		if input.Run.Owner.ID != input.Run.AssignedAgentID && skill.BindingHoldsConnection(binding) {
+			return nil, fmt.Errorf("delegated work cannot use %s's own connection %s", input.Run.AssignedAgentID, binding.ID)
+		}
 		return nil, nil
 	}
 	authority, err := resolveTeamSkillAuthority(ctx, v.catalog, input.Run)

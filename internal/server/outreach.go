@@ -258,8 +258,8 @@ func (s *Server) handleDeliverOutreachMessage(w http.ResponseWriter, r *http.Req
 	}
 	result, err := s.outreachDelivery(r.Context(), runtime.CreateAgentRunRequest{
 		Scope: payload.Scope, Kind: runtime.RunKindAgentWork, Owner: thread.Owner, AssignedAgentID: thread.AssignedAgentID,
-		ConcurrencyKey: "outreach:" + thread.ID + ":" + message.ID,
-		Goal:           "Deliver reviewed outreach message for Project " + project.Title, Source: runtime.RunSourceRequest, Priority: payload.Priority,
+		ActingUser: "", ConcurrencyKey: "outreach:" + thread.ID + ":" + message.ID,
+		Goal: "Deliver reviewed outreach message for Project " + project.Title, Source: runtime.RunSourceRequest, Priority: payload.Priority,
 		Context: map[string]interface{}{runtime.OutreachInvocationContextKey: map[string]interface{}{"threadId": thread.ID, "messageId": message.ID}},
 		Budget:  payload.Budget, Policy: map[string]interface{}{"outreachApprovalPolicyRef": thread.ApprovalPolicyRef}, IdempotencyKey: key,
 		Actor: standaloneProjectActor, Visibility: outreachVisibility(thread.Owner),

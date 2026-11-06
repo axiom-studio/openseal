@@ -111,7 +111,7 @@ func TestWorkflowActionCreatesAnIdempotentWaitingRunAcrossStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			work := result["run"].(*AgentRun)
-			if work.Kind != RunKindAgentWork || work.Status != AgentRunStatusWaitingForEvent || work.AssignedAgentID != run.AssignedAgentID || work.ParentRunID != "" || work.ObjectiveID != "" || work.Context[conversationRunContextConversationID] != run.Context[conversationRunContextConversationID] || work.Context[runReportingContextRootRunID] != work.ID || work.Deadline != nil {
+			if work.Kind != RunKindAgentWork || work.Status != AgentRunStatusWaitingForEvent || work.AssignedAgentID != run.AssignedAgentID || work.ActingUser != run.ActingUser || work.ActingUser == "" || work.ParentRunID != "" || work.ObjectiveID != "" || work.Context[conversationRunContextConversationID] != run.Context[conversationRunContextConversationID] || work.Context[runReportingContextRootRunID] != work.ID || work.Deadline != nil {
 				t.Fatalf("workflow=%#v", work)
 			}
 			wait, err := store.(RunEventWaitStore).GetRunEventWait(t.Context(), work.Scope, work.ID, "initial")

@@ -135,9 +135,8 @@ func (s *SQLiteStore) RedeemActionCredentialLease(ctx context.Context, request A
 	if err := matchCurrentActionCredentialBinding(request.Lease, call, &binding); err != nil {
 		return err
 	}
-	// The host supplies bindings only to its run's own Agent.
-	if request.HostBinding != nil && binding.DeploymentID != run.AssignedAgentID {
-		return ErrActionCredentialLeaseMismatch
+	if err := matchActionCredentialLeaseUmbrella(request.Lease, run, &binding); err != nil {
+		return err
 	}
 	credentialFieldsDigest, err := digestActionCredentialFieldSelection(request.CredentialFields)
 	if err != nil {

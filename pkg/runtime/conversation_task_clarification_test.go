@@ -57,7 +57,7 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 		RequiresResponse: true, StartThread: threaded, IdempotencyKey: "original-request",
 	})
 	scheduled, _, err := f.scheduler.ScheduleMessage(t.Context(), conversation.Scope, conversation.ID, f.trigger.ID)
-	if err != nil || scheduled == nil || scheduled.Run == nil {
+	if err != nil || scheduled == nil || scheduled.Run == nil || scheduled.Run.ActingUser != "requester" {
 		t.Fatalf("schedule source: %#v, %v", scheduled, err)
 	}
 	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
@@ -86,7 +86,8 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 	}
 	f.task, f.source, f.work = accepted.Task, accepted.SourceRun, accepted.WorkRun
 	if f.source.Status != AgentRunStatusCompleted || f.source.Output["summary"] != proposal.Acknowledgment ||
-		f.work.Kind != RunKindAgentWork || f.work.ParentRunID != "" || f.work.RootRunID != f.work.ID || !ConversationTaskMatchesWorkRun(f.task, f.work) {
+		f.work.Kind != RunKindAgentWork || f.work.ParentRunID != "" || f.work.RootRunID != f.work.ID || !ConversationTaskMatchesWorkRun(f.task, f.work) ||
+		f.work.ActingUser != "requester" {
 		t.Fatalf("admission lost independent execution identity: %#v", accepted)
 	}
 	f.ask(t, "Should I write for schoolchildren or adult general readers?")

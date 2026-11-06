@@ -34,6 +34,9 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	if current.Scope != req.Scope || current.ID != req.RunID {
 		return nil, ErrRunNotFound
 	}
+	if err := authorizeRunSteering(current, req); err != nil {
+		return nil, err
+	}
 	if current.Revision != req.ExpectedRevision {
 		return nil, ErrRevisionConflict
 	}

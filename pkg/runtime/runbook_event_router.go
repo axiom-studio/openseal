@@ -171,7 +171,7 @@ func (r *RunbookEventRouter) Route(ctx context.Context, event EventEnvelope) (*E
 		}
 		created, err := createAgentRunWithAcceptedExecution(ctx, commands, CreateAgentRunRequest{
 			Scope: event.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner,
-			AssignedAgentID: activation.AssignedAgentID, Entrypoint: activation.Trigger.Entrypoint,
+			AssignedAgentID: activation.AssignedAgentID, ActingUser: activationActingUser(activation), Entrypoint: activation.Trigger.Entrypoint,
 			ConcurrencyKey: "runbook:" + activation.ID, Goal: objective.Goal, Priority: objective.Priority,
 			Source: RunSourceEvent, Context: contextValues, Plan: runbookActivationPlan(activation),
 			Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),

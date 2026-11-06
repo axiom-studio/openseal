@@ -338,7 +338,10 @@ type CreateRunbookActivationRequest struct {
 // require a newly reviewed activation; this command intentionally changes only
 // whether new Runs may be created.
 type UpdateRunbookActivationRequest struct {
-	ActionID         string                  `json:"-"`
+	ActionID string `json:"-"`
+	// CreatedBy records the person resuming a routine that has no creator
+	// yet; the kernel sets it, never a client.
+	CreatedBy        string                  `json:"-"`
 	ExpectedRevision int64                   `json:"expectedRevision"`
 	Status           RunbookActivationStatus `json:"status"`
 }
@@ -413,7 +416,7 @@ func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store Kern
 	}
 	result, err := createAgentRunWithAcceptedExecution(ctx, NewRunCommandService(store), CreateAgentRunRequest{
 		Scope: scope, ObjectiveID: objective.ID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
-		Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
+		ActingUser: activationActingUser(activation), Entrypoint: activation.Trigger.Entrypoint, ConcurrencyKey: "runbook:" + activation.ID,
 		Goal: activationGoal(activation, objective), Source: RunSourceManual, Priority: objective.Priority, Context: contextValues,
 		Plan: runbookActivationPlan(activation), Policy: cloneMap(activation.Policy), Budget: cloneBudgetPolicy(activation.Budget),
 		IdempotencyKey: idempotencyKey, Actor: request.Actor, Visibility: request.Visibility,
@@ -425,6 +428,15 @@ func StartRunbookActivationWithExecutionPreparer(ctx context.Context, store Kern
 		return nil, err
 	}
 	return result, nil
+}
+
+// activationActingUser is the person a routine's occurrences act for: the
+// person who created it in a chat. Activations without a task act for no one.
+func activationActingUser(activation *RunbookActivation) string {
+	if activation == nil || activation.Task == nil {
+		return ""
+	}
+	return activation.Task.CreatedBy
 }
 
 func runbookActivationPlan(activation *RunbookActivation) map[string]interface{} {
@@ -583,6 +595,9 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 	next := cloneRunbookActivation(current)
 	next.Status = request.Status
 	next.LifecycleActionID = request.ActionID
+	if next.Task != nil && next.Task.CreatedBy == "" && request.CreatedBy != "" {
+		next.Task.CreatedBy = request.CreatedBy
+	}
 	next.NextOccurrenceBase = nil
 	next.NextRunAt = nil
 	next.Revision++

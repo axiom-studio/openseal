@@ -21,7 +21,7 @@ func DesktopWorkRequest(scope runtime.Scope, request runtime.CreateAgentRunReque
 	if request.ParentRunID != "" || request.ObjectiveID != "" || len(request.Context) > 0 || len(request.Checkpoint) > 0 || len(request.Plan) > 0 || len(request.Policy) > 0 || request.WakeCondition != nil || request.Budget != nil || len(request.ResourceRequirements) > 0 || request.ConcurrencyKey != "" || request.Entrypoint != "" {
 		return runtime.CreateAgentRunRequest{}, errors.New("desktop work cannot supply host-owned execution state or policy")
 	}
-	return runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: request.Owner, AssignedAgentID: request.AssignedAgentID, Goal: strings.TrimSpace(request.Goal), Source: runtime.RunSource("manual"), IdempotencyKey: request.IdempotencyKey, Actor: runtime.ActivityActor{Type: "user", ID: "local-operator"}, Visibility: runtime.ActivityVisibility("scope"), Budget: &runtime.BudgetPolicy{MaxTurns: 16, MaxAttempts: 24, MaxTotalTokens: 128000, MaxOutputTokens: 32000, MaxActions: 16, MaxDurationMS: 15 * 60 * 1000}}, nil
+	return runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: request.Owner, AssignedAgentID: request.AssignedAgentID, ActingUser: "", Goal: strings.TrimSpace(request.Goal), Source: runtime.RunSource("manual"), IdempotencyKey: request.IdempotencyKey, Actor: runtime.ActivityActor{Type: "user", ID: "local-operator"}, Visibility: runtime.ActivityVisibility("scope"), Budget: &runtime.BudgetPolicy{MaxTurns: 16, MaxAttempts: 24, MaxTotalTokens: 128000, MaxOutputTokens: 32000, MaxActions: 16, MaxDurationMS: 15 * 60 * 1000}}, nil
 }
 
 type DesktopWorkCatalog interface {

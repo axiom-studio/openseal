@@ -447,8 +447,13 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 			return nil, err
 		}
 	}
+	// The work acts for the person who asked for it.
+	actingUser := ""
+	if validActingUser(task.AuthenticatedActor.ID) {
+		actingUser = task.AuthenticatedActor.ID
+	}
 	workRequest := CreateAgentRunRequest{Scope: req.Scope, Kind: RunKindAgentWork, Owner: source.Owner, AssignedAgentID: source.AssignedAgentID,
-		ConcurrencyKey: "task:" + id, Goal: req.Goal, Source: RunSourceChat, Priority: source.Priority, Deadline: source.Deadline, Budget: budget, Policy: cloneMap(source.Policy),
+		ActingUser: actingUser, ConcurrencyKey: "task:" + id, Goal: req.Goal, Source: RunSourceChat, Priority: source.Priority, Deadline: source.Deadline, Budget: budget, Policy: cloneMap(source.Policy),
 		Context: map[string]interface{}{ConversationTaskContextKey: id, conversationRunContextConversationID: conversation.ID,
 			conversationRunContextTriggerID: message.ID, "threadRootMessageId": threadID, runReportingContextRootRunID: workID,
 			runReportingContextMilestones: []interface{}{"completed", "failed"}}}

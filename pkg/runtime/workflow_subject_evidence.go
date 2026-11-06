@@ -13,18 +13,20 @@ import (
 // workflowSubjectFromAction checks durable provenance before reading exactly
 // one adapter-declared output field. Arguments and model-authored checkpoint
 // results cannot establish the provider's external conversation identity.
+// The binding is the run's umbrella's: the Agent in a 1:1 chat, the Team in
+// a Team chat.
 func workflowSubjectFromAction(run *AgentRun, source *WorkflowEventSource, call *ActionCall) (WorkflowKnownSubject, error) {
 	invalid := errors.New("workflow subject evidence must be a succeeded action from this originating conversation Run and exact current connector binding")
-	if run == nil || run.Kind != RunKindConversation || source == nil || source.AdapterKind != "conversation" ||
+	if run == nil || !RunSkillActor(run).Valid() || run.Kind != RunKindConversation || source == nil || source.AdapterKind != "conversation" ||
 		!source.EvidenceRequired || source.binding == nil || source.definition == nil || call == nil || !validWorkflowEvidenceActionID(call.ID) ||
 		call.Status != ActionCallStatusSucceeded || call.Scope != run.Scope || call.RunID != run.ID ||
-		call.DeploymentID != run.AssignedAgentID || call.BindingID != source.BindingID || call.BindingRevision != source.BindingRevision ||
+		call.DeploymentID != run.Owner.ID || call.BindingID != source.BindingID || call.BindingRevision != source.BindingRevision ||
 		call.SkillID != source.SkillID || call.SkillVersion != source.SkillVersion {
 		return WorkflowKnownSubject{}, invalid
 	}
 	binding := source.binding
 	if binding.Disabled || binding.ID != source.BindingID || binding.Revision != source.BindingRevision ||
-		binding.Scope.Kind != run.Scope.Kind || binding.Scope.ID != run.Scope.ID || binding.DeploymentID != run.AssignedAgentID ||
+		binding.Scope.Kind != run.Scope.Kind || binding.Scope.ID != run.Scope.ID || binding.DeploymentID != run.Owner.ID ||
 		binding.SkillID != source.SkillID || binding.SkillVersion != source.SkillVersion ||
 		source.definition.ID != source.SkillID || source.definition.Version != source.SkillVersion ||
 		!slices.Contains(binding.AllowedActions, call.Action) {

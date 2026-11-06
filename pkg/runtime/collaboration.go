@@ -1133,7 +1133,7 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		}
 		childRequest := CreateAgentRunRequest{
 			Kind: child.Kind, Scope: child.Scope, ObjectiveID: child.ObjectiveID, ParentRunID: child.ParentRunID,
-			Owner: child.Owner, AssignedAgentID: child.AssignedAgentID, Entrypoint: entrypoint,
+			Owner: child.Owner, AssignedAgentID: child.AssignedAgentID, ActingUser: child.ActingUser, Entrypoint: entrypoint,
 			ConcurrencyKey: child.ConcurrencyKey, ResourceRequirements: cloneResourceQuantities(child.ResourceRequirements),
 			Goal: child.Goal, Source: child.Source, Priority: child.Priority, Deadline: child.Deadline,
 			Context: child.Context, Plan: child.Plan, Checkpoint: child.Checkpoint, WakeCondition: child.WakeCondition,
@@ -1832,7 +1832,7 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	}
 	child := &AgentRun{
 		ID: id, Kind: kind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
-		Owner: owner, AssignedAgentID: assignedAgent, ConcurrencyKey: lane,
+		Owner: owner, AssignedAgentID: assignedAgent, ActingUser: source.ActingUser, ConcurrencyKey: lane,
 		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
 		Checkpoint: cloneMap(request.ChildCheckpoint), Budget: cloneBudgetPolicy(request.BudgetAllocation),

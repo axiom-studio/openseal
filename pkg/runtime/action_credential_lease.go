@@ -132,7 +132,7 @@ func NewActionCredentialLease(request CreateActionCredentialLeaseRequest) (*Acti
 		RunID: call.RunID, ActionCallID: call.ID, ActionLease: actionLease,
 		SkillID: call.SkillID, SkillVersion: call.SkillVersion, Action: call.Action, Transport: strings.TrimSpace(request.Transport),
 		BindingOwnerID: call.DeploymentID, BindingID: call.BindingID, BindingRevision: call.BindingRevision,
-		AssignedAgentID: run.AssignedAgentID, Credentials: credentials,
+		AssignedAgentID: run.AssignedAgentID, ActingUser: run.ActingUser, Credentials: credentials,
 		Issuer: strings.TrimSpace(request.Issuer), Audience: strings.TrimSpace(request.Audience), IssuedAt: issuedAt, ExpiresAt: expiresAt, Nonce: strings.TrimSpace(request.Nonce),
 	}
 	if err := lease.Validate(); err != nil {
@@ -366,7 +366,28 @@ func matchActionCredentialLeaseCore(lease ActionCredentialLease, call *ActionCal
 	if lease.Scope != call.Scope || lease.RunID != call.RunID || lease.ActionCallID != call.ID ||
 		call.Revision < lease.ActionLease.ActionCallRevision || lease.ActionLease.Attempt != call.Attempt || lease.ActionLease.WorkerID != strings.TrimSpace(call.LeaseOwner) || canonicalLeaseTime(*call.LeaseExpiresAt).Before(lease.ActionLease.ExpiresAt) ||
 		lease.SkillID != call.SkillID || lease.SkillVersion != call.SkillVersion || lease.Action != call.Action || lease.Transport != strings.TrimSpace(transport) || lease.BindingOwnerID != call.DeploymentID ||
-		lease.BindingID != call.BindingID || lease.BindingRevision != call.BindingRevision || lease.AssignedAgentID != run.AssignedAgentID {
+		lease.BindingID != call.BindingID || lease.BindingRevision != call.BindingRevision || lease.AssignedAgentID != run.AssignedAgentID ||
+		lease.ActingUser != run.ActingUser {
+		return ErrActionCredentialLeaseMismatch
+	}
+	// A per-person account acts only for the person a run acts for.
+	if run.ActingUser == "" {
+		for _, reference := range call.CredentialRefs {
+			if skill.IsPersonCredentialReference(reference) {
+				return ErrActionCredentialLeaseMismatch
+			}
+		}
+	}
+	return nil
+}
+
+// matchActionCredentialLeaseUmbrella requires the redeemed binding, stored
+// or supplied by the host, to belong to the run's umbrella: the Agent of a
+// 1:1 run or the Team of a Team run. A run delegated to another Agent has no
+// umbrella and redeems nothing.
+func matchActionCredentialLeaseUmbrella(lease ActionCredentialLease, run *AgentRun, binding *skill.Binding) error {
+	actor := RunSkillActor(run)
+	if binding == nil || !actor.Valid() || binding.DeploymentID != lease.BindingOwnerID || binding.DeploymentID != actor.Umbrella.ID {
 		return ErrActionCredentialLeaseMismatch
 	}
 	return nil

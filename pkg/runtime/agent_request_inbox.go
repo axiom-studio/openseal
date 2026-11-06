@@ -547,9 +547,10 @@ func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,
 		Owner:           ObjectiveOwner{Type: request.Requester.Type, ID: request.Requester.ID},
-		AssignedAgentID: reviewerID, ConcurrencyKey: "agent-request-completion-review:" + request.ID + ":" + reviewerID,
-		Goal:   "Independently review completed delegated work: " + request.Goal,
-		Source: RunSourceCompletionReview, Priority: source.Priority, Context: contextValue,
+		AssignedAgentID: reviewerID, ActingUser: source.ActingUser,
+		ConcurrencyKey: "agent-request-completion-review:" + request.ID + ":" + reviewerID,
+		Goal:           "Independently review completed delegated work: " + request.Goal,
+		Source:         RunSourceCompletionReview, Priority: source.Priority, Context: contextValue,
 		Budget: &BudgetPolicy{
 			MaxAttempts: 5, MaxTurns: 3, MaxInputTokens: 64000, MaxOutputTokens: 4096,
 			MaxTotalTokens: 68096, MaxDurationMS: 180000,
@@ -650,7 +651,7 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,
 		Owner:           ObjectiveOwner{Type: request.Recipient.Type, ID: request.Recipient.ID},
-		AssignedAgentID: assignedAgentID, ConcurrencyKey: "agent-request:" + request.ID,
+		AssignedAgentID: assignedAgentID, ActingUser: source.ActingUser, ConcurrencyKey: "agent-request:" + request.ID,
 		Goal: "Evaluate incoming work request: " + request.Goal, Source: RunSourceRequestDecision,
 		Priority: source.Priority, Context: contextValue,
 		Budget: &BudgetPolicy{

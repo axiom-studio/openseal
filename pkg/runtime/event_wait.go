@@ -303,7 +303,13 @@ func runEventWaitForRun(run *AgentRun) (*RunEventWait, error) {
 	if available.IsZero() {
 		available = run.CreatedAt
 	}
-	wait := &RunEventWait{Scope: run.Scope, RunID: run.ID, UmbrellaID: RunSkillActor(run).Umbrella.ID, Spec: *cloneRunEventWaitSpec(spec), Status: status, AvailableAt: &available}
+	// A run delegated to another Agent has no umbrella, so no binding event
+	// wakes it.
+	umbrellaID := ""
+	if actor := RunSkillActor(run); actor.Valid() {
+		umbrellaID = actor.Umbrella.ID
+	}
+	wait := &RunEventWait{Scope: run.Scope, RunID: run.ID, UmbrellaID: umbrellaID, Spec: *cloneRunEventWaitSpec(spec), Status: status, AvailableAt: &available}
 	if run.Status == AgentRunStatusPaused {
 		wait.Status = RunEventWaitPaused
 		wait.AvailableAt = nil
