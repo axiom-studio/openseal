@@ -371,7 +371,7 @@ func newActionBindingFenceRunningRun(t *testing.T, store KernelStore, scope Scop
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "Deploy safely", Source: RunSourceObjective,
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "Deploy safely", Source: RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)

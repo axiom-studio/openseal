@@ -88,6 +88,7 @@ func (e *Engine) UpsertOwnerSkillBinding(ctx context.Context, owner ObjectiveOwn
 		return nil, err
 	}
 	e.reconcileSkillSetupRequestsForBinding(ctx, binding)
+	e.reconcileConnectAccountRequestsForUmbrella(ctx, request.Binding.Scope, owner)
 	return binding, nil
 }
 
@@ -104,6 +105,7 @@ func (e *Engine) DisableOwnerSkillBinding(ctx context.Context, owner ObjectiveOw
 		return nil, err
 	}
 	e.reconcileSkillSetupRequestsForBinding(ctx, binding)
+	e.reconcileConnectAccountRequestsForUmbrella(ctx, request.Scope, owner)
 	return binding, nil
 }
 
@@ -123,6 +125,7 @@ func (e *Engine) DeleteOwnerSkillBinding(ctx context.Context, owner ObjectiveOwn
 		return nil, err
 	}
 	e.reconcileSkillSetupRequestsForBinding(ctx, binding)
+	e.reconcileConnectAccountRequestsForUmbrella(ctx, request.Scope, owner)
 	return binding, nil
 }
 

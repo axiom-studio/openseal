@@ -193,7 +193,7 @@ func createActionPoolWork(t *testing.T, store KernelStore, catalog *skill.Catalo
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)

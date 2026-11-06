@@ -210,14 +210,15 @@ func (d *SkillBindingActionDispatcher) requestCredential(ctx context.Context, in
 	} else if existing != nil {
 		return credentialRequestResult(existing)
 	}
-	// The same unanswered card in this chat's umbrella is reused rather than
-	// shown twice, whichever member asked.
+	// The same unanswered card of this run is reused rather than shown twice.
+	// Another run's card is not: a card resumes only the run that made it,
+	// and settling one settles its siblings.
 	current, err := store.ListCredentialRequests(ctx, run.Scope, umbrella.ID, conversationID)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range current {
-		if r.Status == CredentialRequestStatusPending && r.Kind == a.Kind && r.Website == a.Website {
+		if r.RunID == run.ID && r.Status == CredentialRequestStatusPending && r.Kind == a.Kind && r.Website == a.Website {
 			return credentialRequestResult(r)
 		}
 	}

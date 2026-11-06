@@ -266,14 +266,14 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 			phase = SkillSetupPhaseBindingUpgrade
 		}
 	}
-	// Repeated requests for the same pending interaction in this umbrella's
-	// conversation reuse its identity, whichever member asked.
+	// Repeated requests for the same pending interaction reuse its identity
+	// only within this run: a card resumes only the run that made it.
 	pending, err := d.store.ListSkillSetupRequests(ctx, run.Scope, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range pending {
-		if task != nil && (r.RunID != run.ID || r.TriggerMessageID != messageID) {
+		if r.Kind == SkillSetupKindConnectApp || r.Kind == SkillSetupKindConnectAccount || r.RunID != run.ID || (task != nil && r.TriggerMessageID != messageID) {
 			continue
 		}
 		// Setup the user already completed is not requested again while the

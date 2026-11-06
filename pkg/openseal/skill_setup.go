@@ -6,7 +6,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -79,7 +78,7 @@ func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope runtime
 			if !skillSetupBindingCandidate(request, binding) {
 				continue
 			}
-			resolved, resolveErr := e.ResolveSkillSetupRequest(ctx, scope, request.Owner, request.ID, request.Revision, binding.ID, skillSetupReconciliationActor, false)
+			resolved, resolveErr := e.ResolveSkillSetupRequest(ctx, scope, request.Owner, request.ID, request.Revision, binding.ID, InteractionResolver{System: skillSetupReconciliationActor}, false)
 			if resolveErr == nil {
 				requests[index] = resolved
 				break
@@ -103,7 +102,7 @@ const skillSetupReconciliationActor = "system:binding-reconciliation"
 
 func skillSetupReconcilable(request *runtime.SkillSetupRequest) bool {
 	return request != nil && request.Status == "pending" && request.Phase != runtime.SkillSetupPhaseBindingUpgrade &&
-		request.Kind != runtime.SkillSetupKindConnectApp
+		request.Kind != runtime.SkillSetupKindConnectApp && request.Kind != runtime.SkillSetupKindConnectAccount
 }
 
 // skillSetupBindingCandidate reports whether a binding is a save made for
@@ -150,7 +149,7 @@ func (e *Engine) reconcileSkillSetupRequestsForBinding(ctx context.Context, bind
 		}
 	}
 	for _, request := range matches {
-		resolved, err := e.ResolveSkillSetupRequest(ctx, scope, request.Owner, request.ID, request.Revision, binding.ID, skillSetupReconciliationActor, false)
+		resolved, err := e.ResolveSkillSetupRequest(ctx, scope, request.Owner, request.ID, request.Revision, binding.ID, InteractionResolver{System: skillSetupReconciliationActor}, false)
 		if err == nil && resolved.Status == "resolved" {
 			_, _, _ = e.ReconcileSkillSetupTask(ctx, scope, resolved.ID)
 		}
@@ -171,22 +170,31 @@ func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope runtime.Scope, 
 
 // ResolveSkillSetupRequest accepts evidence of a successful, separately
 // authorized binding write. A click or an OAuth popup closing is not completion.
-// Hosts must authorize the actor and the exact target before calling this method.
-func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, bindingID, actor string, dismiss bool) (*runtime.SkillSetupRequest, error) {
+// A setup card is settled by a manager of its umbrella (or a system
+// reconciliation); connect cards follow their own authority. Hosts authorize
+// the exact target before calling this method.
+func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, bindingID string, resolver InteractionResolver, dismiss bool) (*runtime.SkillSetupRequest, error) {
 	r, err := e.GetSkillSetupRequest(ctx, scope, owner, id)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(actor) == "" {
-		return nil, runtime.ErrInvalidSkillSetup
+	actor, err := resolver.actor()
+	if err != nil {
+		return nil, err
 	}
 	// A connect card is completed by a connection, not a saved binding.
-	if r.Kind == runtime.SkillSetupKindConnectApp {
-		resolution, resolveErr := e.ResolveConnectAppRequest(ctx, scope, owner, id, expected, actor, dismiss)
+	switch r.Kind {
+	case runtime.SkillSetupKindConnectApp:
+		resolution, resolveErr := e.ResolveConnectAppRequest(ctx, scope, owner, id, expected, resolver, dismiss)
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
 		return resolution.Request, nil
+	case runtime.SkillSetupKindConnectAccount:
+		return e.ResolveConnectAccountRequest(ctx, scope, owner, id, expected, resolver, dismiss)
+	}
+	if err := authorizeManagerInteraction(resolver); err != nil {
+		return nil, err
 	}
 	if r.Status != "pending" {
 		if (dismiss && r.Status == "dismissed") || (!dismiss && r.Status == "resolved" && r.ResolvedBindingID == bindingID) {

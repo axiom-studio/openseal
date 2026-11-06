@@ -3,7 +3,6 @@ package openseal
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -73,18 +72,24 @@ func (e *Engine) GetCredentialRequest(ctx context.Context, scope runtime.Scope, 
 
 // ResolveCredentialRequest records that the user saved the requested
 // credential (or dismissed the card) and resumes the Run waiting for it.
-// Hosts must authorize the actor and verify the saved credential first; the
-// kernel never sees credential values.
-func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, actor string, dismiss bool) (*CredentialRequestResolution, error) {
+// Only a manager of the request's umbrella (or a system reconciliation)
+// settles it. Hosts verify the saved credential first; the kernel never sees
+// credential values. Settling it settles the same request of other runs in
+// the conversation.
+func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, resolver InteractionResolver, dismiss bool) (*CredentialRequestResolution, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(actor) == "" {
+	actor, err := resolver.actor()
+	if err != nil {
 		return nil, runtime.ErrInvalidCredentialRequest
 	}
 	r, err := e.GetCredentialRequest(ctx, scope, owner, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := authorizeManagerInteraction(resolver); err != nil {
 		return nil, err
 	}
 	want := runtime.CredentialRequestStatusResolved
@@ -104,6 +109,7 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Sco
 	} else if r.Status != want {
 		return nil, runtime.ErrCredentialRequestConflict
 	}
+	e.settleCredentialRequestSiblings(ctx, r)
 	continued, err := e.continueCredentialRequestRun(ctx, r)
 	if err != nil {
 		return nil, err
@@ -133,6 +139,9 @@ type interactionContinuation struct {
 	updatedAt                                              time.Time
 	wakeType, coordinator, eventType, summary, instruction string
 	interventionPrefix                                     string
+	// requestedFor is the person the request was for; the run resumes only
+	// while it still acts for that person. Empty for manager requests.
+	requestedFor string
 }
 
 // continueInteractionRun resumes the Run waiting for a settled in-chat
@@ -162,6 +171,9 @@ func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContin
 				return false, nil
 			}
 			return true, nil
+		}
+		if c.requestedFor != "" && run.ActingUser != c.requestedFor {
+			return false, nil
 		}
 		resumable, err := runtime.InteractionRunResumable(ctx, e, run, c.owner, c.agentID)
 		if err != nil || !resumable {

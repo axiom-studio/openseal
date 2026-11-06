@@ -428,7 +428,7 @@ func createRunnableAction(t *testing.T, store KernelStore, now time.Time) (*skil
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)

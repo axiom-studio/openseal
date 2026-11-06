@@ -315,3 +315,52 @@ func TestAppsAndSkillsCannotTakeEachOthersSetupPath(t *testing.T) {
 	}
 	_ = setup
 }
+
+// A per_person app is asked of the person in the run; a card is reused only
+// within its own run and for the same person.
+func TestRequestConnectionPerPersonModeAndNoCrossRunReuse(t *testing.T) {
+	ctx, store, catalog, dispatcher, scope, _ := connectAppFixture(t)
+	catalog.SetHostBindingProvider(func(context.Context, skill.ScopeReference, string, skill.RunActor) (*skill.HostBindingSet, error) {
+		return &skill.HostBindingSet{Fingerprint: "personal", PersonalApps: map[string]string{"linear": "Linear"}}, nil
+	})
+	umbrella := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
+	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
+	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
+	run.ActingUser = "7"
+	first, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "first"}, Arguments: map[string]interface{}{"app": "linear"}}, run, "agent", umbrella)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := first["setupRequest"].(map[string]interface{})
+	stored, err := store.GetSkillSetupRequest(ctx, scope, card["id"].(string))
+	if err != nil || stored.Mode != "per_person" || stored.RequestedFor != "7" {
+		t.Fatalf("per_person card = %#v %v", stored, err)
+	}
+	again, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "again"}, Arguments: map[string]interface{}{"app": "linear"}}, run, "agent", umbrella)
+	if err != nil || again["setupRequest"].(map[string]interface{})["id"] != stored.ID {
+		t.Fatalf("same run must reuse its card: %#v %v", again, err)
+	}
+	other := *run
+	other.ID = "other-run"
+	second, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "second"}, Arguments: map[string]interface{}{"app": "linear"}}, &other, "agent", umbrella)
+	if err != nil || second["setupRequest"].(map[string]interface{})["id"] == stored.ID {
+		t.Fatalf("another run reused the card: %#v %v", second, err)
+	}
+	other.ID, other.ActingUser = "third-run", ""
+	if _, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "third"}, Arguments: map[string]interface{}{"app": "linear"}}, &other, "agent", umbrella); !isInteractionRefusal(err) {
+		t.Fatalf("a per_person app without a person must be refused: %v", err)
+	}
+	// An app the umbrella shares (not personal) is asked of its managers.
+	catalog.SetHostBindingProvider(func(context.Context, skill.ScopeReference, string, skill.RunActor) (*skill.HostBindingSet, error) {
+		return nil, nil
+	})
+	other.ID, other.ActingUser = "fourth-run", "7"
+	shared, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "fourth"}, Arguments: map[string]interface{}{"app": "linear"}}, &other, "agent", umbrella)
+	if err != nil {
+		t.Fatal(err)
+	}
+	managed, _ := store.GetSkillSetupRequest(ctx, scope, shared["setupRequest"].(map[string]interface{})["id"].(string))
+	if managed == nil || managed.Mode != "" || managed.RequestedFor != "7" {
+		t.Fatalf("manager card = %#v", managed)
+	}
+}

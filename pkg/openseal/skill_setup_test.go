@@ -29,23 +29,23 @@ func TestSkillSetupResolutionRequiresExactSavedBindingAndPersists(t *testing.T) 
 	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", "user", false); err == nil {
+	if _, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", InteractionResolver{UserID: "user", CanManage: true}, false); err == nil {
 		t.Fatal("unchanged connection resolved request")
 	}
-	if _, err := e.ResolveSkillSetupRequest(ctx, Scope{Kind: "tenant", ID: "other"}, agentOwner("agent"), request.ID, 1, "github", "user", false); err == nil {
+	if _, err := e.ResolveSkillSetupRequest(ctx, Scope{Kind: "tenant", ID: "other"}, agentOwner("agent"), request.ID, 1, "github", InteractionResolver{UserID: "user", CanManage: true}, false); err == nil {
 		t.Fatal("cross-tenant resolution")
 	}
-	if _, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("other-agent"), request.ID, 1, "github", "user", false); err == nil {
+	if _, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("other-agent"), request.ID, 1, "github", InteractionResolver{UserID: "user", CanManage: true}, false); err == nil {
 		t.Fatal("cross-agent resolution")
 	}
 	if _, err := e.UpsertOwnerSkillBinding(ctx, ensureTestAgent(t, e, skillScope, "agent"), UpsertSkillBindingRequest{Binding: binding, ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "user"}, Reason: "Reconnect requested account"}); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", "user", false)
+	resolved, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", InteractionResolver{UserID: "user", CanManage: true}, false)
 	if err != nil || resolved.Status != "resolved" || resolved.ResolvedBindingRevision != 2 {
 		t.Fatalf("resolution: %#v %v", resolved, err)
 	}
-	replay, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", "user", false)
+	replay, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", InteractionResolver{UserID: "user", CanManage: true}, false)
 	if err != nil || replay.Revision != 2 {
 		t.Fatalf("resolution not idempotent: %#v %v", replay, err)
 	}
@@ -121,7 +121,7 @@ func TestCompletedSkillSetupDoesNotReappearInConversationChanges(t *testing.T) {
 		t.Fatalf("completed setup: %#v %v", completed, err)
 	}
 	// The chat form's own confirmation after the save stays idempotent.
-	if confirmed, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", "user", false); err != nil || confirmed.Status != "resolved" {
+	if confirmed, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", InteractionResolver{UserID: "user", CanManage: true}, false); err != nil || confirmed.Status != "resolved" {
 		t.Fatalf("form confirmation: %#v %v", confirmed, err)
 	}
 	fresh, err := e.ListConversationChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})

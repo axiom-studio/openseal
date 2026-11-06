@@ -105,7 +105,7 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			if err != nil || len(requests) != 1 || requests[0].Status != "pending" || requests[0].Phase != SkillSetupPhaseBindingUpgrade {
 				t.Fatalf("upgrade alone resolved setup: %#v %v", requests, err)
 			}
-			if _, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, binding.ID, "operator", false); err == nil {
+			if _, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, binding.ID, InteractionResolver{UserID: "operator", CanManage: true}, false); err == nil {
 				t.Fatal("explicit resolve bypassed upgrade phase")
 			}
 			rebased, err := RebaseSkillSetupRequestAfterBindingUpgrade(requests[0], 1, current)
@@ -122,14 +122,14 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			if err != nil || requests[0].Status != "pending" {
 				t.Fatalf("rebase itself resolved setup: %#v %v", requests, err)
 			}
-			if _, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, rebased.Revision, binding.ID, "operator", false); err == nil {
+			if _, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, rebased.Revision, binding.ID, InteractionResolver{UserID: "operator", CanManage: true}, false); err == nil {
 				t.Fatal("upgrade revision counted as actual configuration")
 			}
 			saved, err := engine.UpsertOwnerSkillBinding(ctx, ensureTestAgent(t, engine, skillScope, "agent"), UpsertSkillBindingRequest{Binding: current, ExpectedRevision: current.Revision, Actor: SkillBindingActor{Type: "user", ID: "operator"}, Reason: "Save the reviewed account configuration"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			resolved, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, rebased.Revision, binding.ID, "operator", false)
+			resolved, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, rebased.Revision, binding.ID, InteractionResolver{UserID: "operator", CanManage: true}, false)
 			if err != nil || resolved.Status != "resolved" || resolved.ResolvedBindingRevision != saved.Revision {
 				t.Fatalf("actual save did not resolve: %#v %v", resolved, err)
 			}

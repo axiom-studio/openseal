@@ -1,0 +1,297 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
+
+// CredentialErrorPersonUnavailable is the error code of an action that uses
+// each person's own account when no person asked for its run.
+const CredentialErrorPersonUnavailable = "person_unavailable"
+
+// connectAccountRequiredPrefix starts the error of a call parked on a
+// connect_account card.
+const connectAccountRequiredPrefix = "connect_account_required: "
+
+// connectAccountRequestPrefix is the ID prefix of a connect_account card; the
+// rest is the parked action call's ID.
+const connectAccountRequestPrefix = "connect-account:"
+
+// personUnavailableError fails an action whose per_person account has no
+// person to act for. It is returned to the model like any failure, with no
+// card.
+type personUnavailableError struct{ message string }
+
+func (e *personUnavailableError) Error() string { return e.message }
+
+// connectAccountParked holds a call before dispatch until someone connects
+// the account its card asks for.
+type connectAccountParked struct{ request *SkillSetupRequest }
+
+func (e *connectAccountParked) Error() string { return connectAccountRequiredPrefix + e.request.Reason }
+
+// credentialAvailabilityBox lets a host install its checker after workers
+// exist.
+type credentialAvailabilityBox struct{ checker CredentialAvailabilityChecker }
+
+func (w *ActionWorker) setCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
+	if w != nil {
+		w.availability.Store(&credentialAvailabilityBox{checker: checker})
+	}
+}
+
+func (w *ActionWorker) credentialAvailabilityChecker() CredentialAvailabilityChecker {
+	if box := w.availability.Load(); box != nil {
+		return box.checker
+	}
+	return nil
+}
+
+// actionCredentialRequirements are the bound action's credential
+// requirements by slot.
+func actionCredentialRequirements(bound *skill.BoundAction) map[string]skill.CredentialRequirement {
+	if bound == nil || len(bound.Action.Credentials) == 0 {
+		return nil
+	}
+	requirements := make(map[string]skill.CredentialRequirement, len(bound.Action.Credentials))
+	for _, requirement := range bound.Action.Credentials {
+		requirements[requirement.Name] = requirement
+	}
+	return requirements
+}
+
+func callUsesPersonCredential(call *ActionCall) bool {
+	for _, reference := range call.CredentialRefs {
+		if skill.IsPersonCredentialReference(reference) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkCredentialAvailability is the pre-dispatch gate for an action with
+// credentials. It returns the run's umbrella, or the failure to persist: a
+// plain error, a person_unavailable failure, or a connect_account park.
+func (w *ActionWorker) checkCredentialAvailability(ctx context.Context, run *AgentRun, call *ActionCall, bound *skill.BoundAction) (ObjectiveOwner, error) {
+	umbrella, err := RunUmbrella(ctx, w.teams, run)
+	if err != nil {
+		if !errors.Is(err, ErrRunUmbrellaUnavailable) {
+			err = fmt.Errorf("%w: %v", ErrRunUmbrellaUnavailable, err)
+		}
+		return ObjectiveOwner{}, err
+	}
+	if callUsesPersonCredential(call) && run.ActingUser == "" {
+		return umbrella, personUnavailable(bound, umbrella)
+	}
+	checker := w.credentialAvailabilityChecker()
+	if checker == nil {
+		return umbrella, nil
+	}
+	availability, err := checker.CheckCredentialAvailability(ctx, CredentialAvailabilityRequest{
+		Scope: call.Scope, Umbrella: umbrella, ActingUser: run.ActingUser, DeploymentID: call.DeploymentID, BindingID: call.BindingID,
+		References: cloneCredentialReferences(call.CredentialRefs), Requirements: actionCredentialRequirements(bound),
+	})
+	if err != nil {
+		return umbrella, err
+	}
+	var person, shared []string
+	for slot, gap := range availability.Gaps {
+		switch gap {
+		case CredentialGapNoPerson:
+			return umbrella, personUnavailable(bound, umbrella)
+		case CredentialGapPersonSignIn:
+			person = append(person, slot)
+		case CredentialGapSharedSignIn:
+			shared = append(shared, slot)
+		default:
+			return umbrella, fmt.Errorf("credential availability reported an unknown gap for %s", slot)
+		}
+	}
+	mode, slots := "", []string(nil)
+	switch {
+	case len(person) > 0:
+		mode, slots = skillSetupModePerPerson, person
+	case len(shared) > 0:
+		mode, slots = skillSetupModeShared, shared
+	default:
+		return umbrella, nil
+	}
+	request, err := createConnectAccountRequest(ctx, w.store, run, call, bound, umbrella, connectAccountSlots(bound, slots), mode)
+	if err != nil {
+		return umbrella, err
+	}
+	return umbrella, &connectAccountParked{request: request}
+}
+
+func personUnavailable(bound *skill.BoundAction, umbrella ObjectiveOwner) error {
+	return &personUnavailableError{message: boundSkillName(bound) + " uses each person's own account, and no person asked for this run. Ask someone who manages " + umbrellaLabel(umbrella) + " to share an account with it."}
+}
+
+func boundSkillName(bound *skill.BoundAction) string {
+	if bound != nil && bound.Definition != nil {
+		if name := strings.TrimSpace(bound.Definition.Name); name != "" {
+			return name
+		}
+		return bound.Definition.ID
+	}
+	return "This Skill"
+}
+
+// umbrellaLabel names an umbrella in user-facing text.
+func umbrellaLabel(umbrella ObjectiveOwner) string {
+	if umbrella.Type == OwnerTypeTeam {
+		return "this Team"
+	}
+	return "this Agent"
+}
+
+func connectAccountSlots(bound *skill.BoundAction, names []string) []ConnectAccountSlot {
+	sort.Strings(names)
+	requirements := actionCredentialRequirements(bound)
+	slots := make([]ConnectAccountSlot, 0, len(names))
+	for _, name := range names {
+		requirement, ok := requirements[name]
+		if !ok {
+			requirement = skill.CredentialRequirement{Name: name}
+		}
+		slots = append(slots, ConnectAccountSlot{Name: name, Requirement: requirement})
+	}
+	return slots
+}
+
+// ConnectAccountProvider is the account provider a connect_account card names:
+// the OAuth provider of its first slot, or its Skill name.
+func ConnectAccountProvider(r *SkillSetupRequest) string {
+	if r == nil {
+		return ""
+	}
+	for _, slot := range r.Slots {
+		if slot.Requirement.OAuth2 != nil {
+			if provider := strings.TrimSpace(slot.Requirement.OAuth2.Provider); provider != "" {
+				return capitalizeFirst(provider)
+			}
+		}
+	}
+	return r.SkillName
+}
+
+// createConnectAccountRequest saves (or replays) the connect_account card for
+// a parked call. The card belongs to the run's proven conversation; without
+// one the call fails as person_unavailable.
+func createConnectAccountRequest(ctx context.Context, store KernelStore, run *AgentRun, call *ActionCall, bound *skill.BoundAction, umbrella ObjectiveOwner, slots []ConnectAccountSlot, mode string) (*SkillSetupRequest, error) {
+	id := connectAccountRequestPrefix + call.ID
+	if existing, err := store.GetSkillSetupRequest(ctx, run.Scope, id); err != nil {
+		return nil, err
+	} else if existing != nil {
+		return existing, nil
+	}
+	conversationID, messageID, err := skillSetupConversationOrigin(ctx, store, run, run.AssignedAgentID, umbrella)
+	if err != nil {
+		return nil, &personUnavailableError{message: boundSkillName(bound) + " needs an account connected, and this run has no conversation to ask in. Ask someone who manages " + umbrellaLabel(umbrella) + " to connect it."}
+	}
+	requestedFor := ""
+	if mode == skillSetupModePerPerson {
+		requestedFor = run.ActingUser
+	}
+	skillName := boundSkillName(bound)
+	if len(skillName) > 256 {
+		skillName = truncateRunes(skillName, 64)
+	}
+	now := time.Now().UTC()
+	r := &SkillSetupRequest{
+		ID: id, Scope: run.Scope, Owner: umbrella, DeploymentID: umbrella.ID, AgentID: run.AssignedAgentID,
+		ConversationID: conversationID, TriggerMessageID: messageID, RunID: run.ID, ActionCallID: call.ID,
+		Kind: SkillSetupKindConnectAccount, SkillID: call.SkillID, SkillVersion: call.SkillVersion, SkillName: skillName,
+		BindingID: call.BindingID, BindingRevision: call.BindingRevision,
+		Slots: slots, Mode: mode, RequestedFor: requestedFor,
+		Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if bound != nil && bound.Definition != nil {
+		r.SourceIdentity = skill.DefinitionSourceIdentity(bound.Definition)
+	}
+	provider := ConnectAccountProvider(r)
+	if mode == skillSetupModePerPerson {
+		r.Reason = capitalizeFirst(umbrellaLabel(umbrella)) + " uses each person's own " + provider + " account."
+	} else {
+		r.Reason = "The " + provider + " account shared with " + umbrellaLabel(umbrella) + " is no longer available."
+	}
+	if err := store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
+		if errors.Is(err, ErrSkillSetupConflict) {
+			if replay, readErr := store.GetSkillSetupRequest(ctx, run.Scope, id); readErr == nil && replay != nil {
+				return replay, nil
+			}
+		}
+		return nil, err
+	}
+	return r, nil
+}
+
+func capitalizeFirst(value string) string {
+	first, size := utf8.DecodeRuneInString(value)
+	if size == 0 {
+		return value
+	}
+	return string(unicode.ToUpper(first)) + value[size:]
+}
+
+// isParkedConnectAccountCall reports whether call failed before dispatch only
+// because its card asks someone to connect an account.
+func isParkedConnectAccountCall(call *ActionCall) bool {
+	if call == nil || call.Status != ActionCallStatusFailed || call.FailurePhase != ActionFailureBeforeDispatch || call.SkillID == SkillManagementSkillID {
+		return false
+	}
+	value, _ := call.Output["setupRequest"].(map[string]interface{})
+	kind, _ := value["kind"].(string)
+	id, _ := value["id"].(string)
+	return kind == SkillSetupKindConnectAccount && id == connectAccountRequestPrefix+call.ID
+}
+
+// pendingConnectAccountRequestFromAction returns the pending card a parked
+// call waits for. A card settled before this commit does not park the run.
+func pendingConnectAccountRequestFromAction(ctx context.Context, store SkillSetupRequestStore, call *ActionCall) *SkillSetupRequest {
+	if store == nil || !isParkedConnectAccountCall(call) {
+		return nil
+	}
+	current, err := store.GetSkillSetupRequest(ctx, call.Scope, connectAccountRequestPrefix+call.ID)
+	if err != nil || current == nil || current.Kind != SkillSetupKindConnectAccount || current.RunID != call.RunID || current.Status != "pending" {
+		return nil
+	}
+	return current
+}
+
+// IsExactConnectAccountWait reports whether the run waits for this card.
+func IsExactConnectAccountWait(run *AgentRun, requestID string) bool {
+	return run != nil && run.Status == AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
+		run.WakeCondition.Type == ConnectAccountWakeType && run.WakeCondition.Reference == requestID
+}
+
+// ConnectAccountResolutionInstruction is the durable guidance given to a run
+// woken by its connect_account card.
+func ConnectAccountResolutionInstruction(r *SkillSetupRequest) string {
+	provider := ConnectAccountProvider(r)
+	switch {
+	case r.Status == "dismissed":
+		return "The person asked chose not to connect " + provider + ". Continue without it or explain what is blocked."
+	case r.Mode == skillSetupModeShared:
+		return "The shared " + provider + " account is ready. Retry the step that needed it."
+	default:
+		return "The person you act for connected " + provider + ". Retry the step that needed it."
+	}
+}
+
+// connectAccountWaitSummary describes a run parked on its card.
+func connectAccountWaitSummary(r *SkillSetupRequest) string {
+	who := "the person asking"
+	if r.Mode == skillSetupModeShared {
+		who = "someone who manages " + umbrellaLabel(r.Owner)
+	}
+	return "Waiting for " + who + " to connect " + ConnectAccountProvider(r)
+}

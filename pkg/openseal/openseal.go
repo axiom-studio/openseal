@@ -2619,6 +2619,7 @@ type Engine struct {
 	actionPools                   []*runtime.ActionWorkerPool
 	actionSupervisorSpecs         []actionWorkerSupervisorSpec
 	actionSupervisors             []*runtime.ActionWorkerSupervisor
+	credentialAvailability        runtime.CredentialAvailabilityChecker
 	skills                        *skill.Catalog
 	skillReferenceUpgrades        *runtime.SkillReferenceUpgradeService
 	agents                        *kernelagent.Registry
@@ -3986,6 +3987,7 @@ func (e *Engine) rebuildActionWorkerPools() error {
 			return err
 		}
 		pool.SetWorkerLimiter(e.workerLimiter)
+		pool.SetCredentialAvailabilityChecker(e.credentialAvailability)
 		e.actionPools = append(e.actionPools, pool)
 	}
 	return nil
@@ -4005,6 +4007,7 @@ func (e *Engine) rebuildActionWorkerSupervisors() error {
 			return err
 		}
 		supervisor.SetWorkerLimiter(e.workerLimiter)
+		supervisor.SetCredentialAvailabilityChecker(e.credentialAvailability)
 		e.actionSupervisors = append(e.actionSupervisors, supervisor)
 	}
 	return nil
