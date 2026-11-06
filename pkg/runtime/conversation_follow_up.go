@@ -95,10 +95,55 @@ func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, 
 // guidance, so one Run handles the whole exchange instead of parallel Runs
 // competing for the lane. A nil result means no Run absorbed the message.
 func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*AgentRunCommandResult, error) {
-	if conversation.Owner.Type != OwnerTypeAgent {
+	switch conversation.Owner.Type {
+	case OwnerTypeAgent:
+		return s.deliverToConversationLane(ctx, conversation, message, conversationAgentRunRequest(conversation, message).ConcurrencyKey)
+	case OwnerTypeTeam:
+		return s.deliverToWorkingMembers(ctx, conversation, message)
+	}
+	return nil, nil
+}
+
+// deliverToWorkingMembers is a Team chat's steering: a message that addresses
+// nobody (no @mention, @everyone, quote or reply) while members are still
+// answering the same person goes to each of them as a follow-up, exactly like
+// a 1:1 chat's active Run, instead of being routed as a new question. An
+// addressed message is routed; a member it names who is working takes it as
+// a follow-up there (routeTeamMessage).
+func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*AgentRunCommandResult, error) {
+	root := externalConversationThreadRoot(conversation, message)
+	if message.Sender.Type != ConversationParticipantUser || len(message.Mentions) > 0 || quotedMessageID(message.Quote) != "" ||
+		(message.Audience.Kind != "" && message.Audience.Kind != ConversationAudienceChannel) ||
+		(message.ReplyToMessageID != "" && message.ReplyToMessageID != root) {
 		return nil, nil
 	}
-	return s.deliverToConversationLane(ctx, conversation, message, conversationAgentRunRequest(conversation, message).ConcurrencyKey)
+	runs, err := s.runs.store.ListAgentRuns(ctx, AgentRunFilter{
+		Scope: conversation.Scope, Owner: &conversation.Owner, Kind: RunKindConversation, ConversationID: conversation.ID,
+		Order: AgentRunOrderCreatedDesc, Limit: 50,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var first *AgentRunCommandResult
+	lanes := map[string]bool{}
+	for _, run := range runs {
+		if !isTeamMemberRun(run) || isTerminalAgentRunStatus(run.Status) {
+			continue
+		}
+		lane := conversationRunLane(conversation.ID, root, run.AssignedAgentID)
+		if run.ConcurrencyKey != lane || lanes[lane] {
+			continue
+		}
+		lanes[lane] = true
+		delivered, err := s.deliverToConversationLane(ctx, conversation, message, lane)
+		if err != nil {
+			return nil, err
+		}
+		if first == nil && delivered != nil {
+			first = delivered
+		}
+	}
+	return first, nil
 }
 
 // deliverToConversationLane is deliverToActiveConversationRun for one lane:
