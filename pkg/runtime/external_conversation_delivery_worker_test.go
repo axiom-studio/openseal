@@ -307,6 +307,20 @@ func externalConversationEndpointFixtureOn(
 	operations []skill.ConversationDeliveryOperation,
 ) (*skill.Catalog, *ExternalConversationEndpoint) {
 	t.Helper()
+	return externalConversationEndpointFixtureOwnedBy(t, ctx, store, provider, operations, ObjectiveOwner{Type: OwnerTypeAgent, ID: provider + "-agent"})
+}
+
+// externalConversationEndpointFixtureOwnedBy creates the fixture endpoint for
+// an Agent or a Team owner.
+func externalConversationEndpointFixtureOwnedBy(
+	t *testing.T,
+	ctx context.Context,
+	store ExternalConversationEndpointStore,
+	provider string,
+	operations []skill.ConversationDeliveryOperation,
+	owner ObjectiveOwner,
+) (*skill.Catalog, *ExternalConversationEndpoint) {
+	t.Helper()
 	catalog := skill.NewCatalog()
 	definition := slackConversationSkillDefinition()
 	definition.ID, definition.Name = provider, provider
@@ -325,7 +339,11 @@ func externalConversationEndpointFixtureOn(
 		t.Fatal(err)
 	}
 	scope := Scope{Kind: "tenant", ID: provider}
-	deploymentID := provider + "-agent"
+	deploymentID := owner.ID
+	handler := ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: deploymentID}
+	if owner.Type == OwnerTypeTeam {
+		handler.Kind = ExternalConversationHandlerTeam
+	}
 	binding := &skill.Binding{
 		ID: provider, Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: deploymentID,
 		SkillID: definition.ID, SkillVersion: definition.Version,
@@ -343,14 +361,14 @@ func externalConversationEndpointFixtureOn(
 		ctx,
 		CreateExternalConversationEndpointRequest{
 			ID: provider + "-endpoint", Scope: scope,
-			Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, DeploymentID: deploymentID,
+			Owner: owner, DeploymentID: deploymentID,
 			Name: provider + " endpoint",
 			Adapter: ExternalConversationAdapterReference{
 				SkillID: definition.ID, SkillVersion: definition.Version,
 				BindingID: binding.ID, BindingRevision: binding.Revision, AdapterID: "conversations",
 			},
 			Mode: capability.ConversationEndpointChannel, Address: provider + "-address",
-			Handler: ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: deploymentID},
+			Handler: handler,
 			Policy: ExternalConversationPolicy{
 				MessageSelection: ExternalConversationSelectAllMessages,
 				ReplyMode:        ExternalConversationReplyThread, IgnoreBots: true,

@@ -234,13 +234,11 @@ func reprojectAppliedExternalInbox(t *testing.T, worker *ExternalConversationRep
 	}
 	var deliveries []*ExternalConversationDelivery
 	for _, item := range items {
-		delivery, _, err := worker.project(t.Context(), item)
+		projected, _, err := worker.project(t.Context(), item)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if delivery != nil {
-			deliveries = append(deliveries, delivery)
-		}
+		deliveries = append(deliveries, projected...)
 	}
 	return deliveries
 }

@@ -11,13 +11,14 @@ import (
 // Native working state is independent of public chat updates. Providers map
 // the lifecycle enum to their own UI; the optional wording comes from the
 // Agent's existing public commentary, never a second model call or a template.
-func (w *RunProgressAcknowledgementWorker) projectThreadStatus(ctx context.Context, item *ExternalConversationInboxItem) (*ExternalConversationDelivery, error) {
+// agents are every Agent answering the item, whose lanes keep the thread busy.
+func (w *RunProgressAcknowledgementWorker) projectThreadStatus(ctx context.Context, item *ExternalConversationInboxItem, reply externalItemReply, agents []string) (*ExternalConversationDelivery, error) {
 	if item == nil || item.RunID == "" || item.Status != ExternalConversationInboxApplied {
 		return nil, nil
 	}
-	run, err := w.store.GetAgentRun(ctx, item.Scope, item.RunID)
-	if err != nil || run == nil || run.Status == AgentRunStatusCompleted || run.Status == AgentRunStatusFailed || externalInboxItemIsFollowUp(item, run) {
-		return nil, err // Finished replies clear state after their answer or failure notice is delivered.
+	run := reply.run
+	if run.Status == AgentRunStatusCompleted || run.Status == AgentRunStatusFailed || externalInboxItemIsFollowUp(item, run) {
+		return nil, nil // Finished replies clear state after their answer or failure notice is delivered.
 	}
 	endpoint, adapter, err := w.resolveEndpoint(ctx, item)
 	if err != nil || endpoint == nil {
@@ -32,7 +33,7 @@ func (w *RunProgressAcknowledgementWorker) projectThreadStatus(ctx context.Conte
 	}
 	state := "processing"
 	if isTerminalAgentRunStatus(run.Status) {
-		busy, err := externalThreadHasActiveWork(ctx, w.store, run)
+		busy, err := externalThreadHasActiveWork(ctx, w.store, run, agents...)
 		if err != nil || busy {
 			return nil, err
 		}
@@ -61,7 +62,7 @@ func (w *RunProgressAcknowledgementWorker) projectThreadStatus(ctx context.Conte
 		ConversationID: item.ConversationID, ChannelMessageID: item.ChannelMessageID,
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: thread,
 		Parameters:     map[string]interface{}{"state": state, "status": text},
-		IdempotencyKey: "run-thread-status:" + item.ID + ":" + state + ":" + eventID,
+		IdempotencyKey: "run-thread-status:" + reply.id + ":" + state + ":" + eventID,
 	})
 	if err != nil {
 		return nil, err
@@ -69,19 +70,43 @@ func (w *RunProgressAcknowledgementWorker) projectThreadStatus(ctx context.Conte
 	return result.Delivery, nil
 }
 
-func externalThreadHasActiveWork(ctx context.Context, store PortfolioStore, run *AgentRun) (bool, error) {
-	for offset := 0; ; offset += 100 {
-		runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: run.Scope, Owner: &run.Owner, ConcurrencyKey: run.ConcurrencyKey, Limit: 100, Offset: offset})
+// externalThreadHasActiveWork reports an unfinished Run in run's lane. A
+// Team thread has a routing lane and one lane per member, so those of the
+// current roster and of the answering members are all checked.
+func externalThreadHasActiveWork(ctx context.Context, store PortfolioStore, run *AgentRun, members ...string) (bool, error) {
+	lanes := []string{run.ConcurrencyKey}
+	if run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam {
+		conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+		root, _ := run.Context["threadRootMessageId"].(string)
+		roster, _, err := teamRoster(ctx, teamRosterReader(store), run.Scope, run.Owner.ID)
 		if err != nil {
 			return false, err
 		}
-		for _, candidate := range runs {
-			if !isTerminalAgentRunStatus(candidate.Status) {
-				return true, nil
-			}
-		}
-		if len(runs) < 100 {
-			return false, nil
+		lanes = append(lanes, conversationRunLane(conversationID, root, ""))
+		for _, member := range append(roster, members...) {
+			lanes = append(lanes, conversationRunLane(conversationID, root, member))
 		}
 	}
+	checked := make(map[string]bool, len(lanes))
+	for _, lane := range lanes {
+		if checked[lane] {
+			continue
+		}
+		checked[lane] = true
+		for offset := 0; ; offset += 100 {
+			runs, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: run.Scope, Owner: &run.Owner, ConcurrencyKey: lane, Limit: 100, Offset: offset})
+			if err != nil {
+				return false, err
+			}
+			for _, candidate := range runs {
+				if !isTerminalAgentRunStatus(candidate.Status) {
+					return true, nil
+				}
+			}
+			if len(runs) < 100 {
+				break
+			}
+		}
+	}
+	return false, nil
 }

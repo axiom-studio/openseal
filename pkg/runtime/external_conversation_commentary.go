@@ -10,21 +10,23 @@ import (
 // Forward the Agent's already-rendered public updates as durable messages.
 // Typing indicators remain advisory; they must not replace conversation text.
 // No provider identity, internal activity, or extra model invocation is needed.
-func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context, item *ExternalConversationInboxItem) ([]*ExternalConversationDelivery, bool, error) {
+// Each Team member forwards its own updates under its own name.
+func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context, item *ExternalConversationInboxItem, reply externalItemReply) ([]*ExternalConversationDelivery, bool, error) {
 	if item == nil || item.Status != ExternalConversationInboxApplied || item.RunID == "" || item.ConversationID == "" || item.ChannelMessageID == "" {
 		return nil, false, nil
 	}
+	run := reply.run
 	var result []*ExternalConversationDelivery
 	seen := false
 	var after int64
 	for {
-		events, err := w.store.ListActivity(ctx, ActivityFilter{Scope: item.Scope, RunID: item.RunID, EventTypes: []string{"turn.commentary"}, AfterSequence: after, Limit: w.config.PageSize})
+		events, err := w.store.ListActivity(ctx, ActivityFilter{Scope: item.Scope, RunID: run.ID, EventTypes: []string{"turn.commentary"}, AfterSequence: after, Limit: w.config.PageSize})
 		if err != nil {
 			return result, seen, err
 		}
 		for _, event := range events {
 			after = event.Sequence
-			if event.Scope != item.Scope || event.RunID != item.RunID || event.EventType != "turn.commentary" || event.Visibility == ActivityVisibilityPrivate || strings.TrimSpace(event.Summary) == "" {
+			if event.Scope != item.Scope || event.RunID != run.ID || event.EventType != "turn.commentary" || event.Visibility == ActivityVisibilityPrivate || strings.TrimSpace(event.Summary) == "" {
 				continue
 			}
 			seen = true
@@ -35,11 +37,7 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 			if !containsConversationDeliveryOperation(adapter.Adapter.Delivery.Operations, capability.ConversationDeliveryMessageSend) {
 				return result, seen, nil
 			}
-			run, err := w.store.GetAgentRun(ctx, item.Scope, item.RunID)
-			if err != nil {
-				return result, seen, err
-			}
-			if run == nil || run.Owner != endpoint.Owner {
+			if run.Owner != endpoint.Owner {
 				return result, seen, ErrExternalConversationConflict
 			}
 			if externalInboxItemIsFollowUp(item, run) {
@@ -49,7 +47,7 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 				continue // Only an Agent's own turn has commentary to forward.
 			}
 			phase := "commentary-" + event.ID
-			message, err := w.post(ctx, item, RunProgressAcknowledgement{RunID: run.ID, Phase: phase, Text: event.Summary, SourceEventID: event.ID}, run.AssignedAgentID)
+			message, err := w.post(ctx, item, reply.id, RunProgressAcknowledgement{RunID: run.ID, Phase: phase, Text: event.Summary, SourceEventID: event.ID}, run.AssignedAgentID)
 			if err != nil {
 				return result, seen, err
 			}
@@ -62,7 +60,7 @@ func (w *RunProgressAcknowledgementWorker) projectCommentary(ctx context.Context
 				ConversationID: item.ConversationID, ChannelMessageID: message.ID,
 				ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: thread,
 				Correlation:    &ExternalConversationDeliveryCorrelation{Kind: "run_commentary", ID: run.ID, Phase: phase},
-				IdempotencyKey: "run-commentary-delivery:" + item.ID + ":" + event.ID,
+				IdempotencyKey: "run-commentary-delivery:" + reply.id + ":" + event.ID,
 			})
 			if err != nil {
 				return result, seen, err

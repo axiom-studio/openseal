@@ -154,43 +154,61 @@ func (w *RunProgressAcknowledgementWorker) processScope(ctx context.Context, sco
 		}
 	}
 	for _, item := range items {
-		updates, hasCommentary, processErr := w.projectCommentary(ctx, item)
-		if processErr != nil {
-			processErrors = append(processErrors, fmt.Errorf("project channel commentary for inbox item %s: %w", item.ID, processErr))
+		if item == nil || item.Status != ExternalConversationInboxApplied {
 			continue
 		}
-		result = append(result, updates...)
-		// The answer streams after the commentary that precedes it.
-		if stream, streamErr := w.projectAnswerStream(ctx, item); streamErr != nil {
-			processErrors = append(processErrors, fmt.Errorf("stream channel answer for inbox item %s: %w", item.ID, streamErr))
-		} else if stream != nil {
-			result = append(result, stream)
-		}
-		if !renderStatus {
-			status, statusErr := w.projectThreadStatus(ctx, item)
-			if statusErr != nil {
-				processErrors = append(processErrors, statusErr)
-			} else if status != nil {
-				result = append(result, status)
-			}
+		// A Team's item is answered by each member Run its routing started.
+		replies, repliesErr := externalItemReplies(ctx, w.store, item)
+		if repliesErr != nil {
+			processErrors = append(processErrors, fmt.Errorf("resolve answering Runs for inbox item %s: %w", item.ID, repliesErr))
 			continue
 		}
-		if hasCommentary {
-			continue
-		}
-		delivery, processErr := w.process(ctx, item)
-		if processErr != nil {
-			processErrors = append(processErrors, fmt.Errorf("project Run acknowledgement for inbox item %s: %w", item.ID, processErr))
-			continue
-		}
-		if delivery != nil {
-			result = append(result, delivery)
+		agents := externalItemReplyAgents(replies)
+		for _, reply := range replies {
+			deliveries, err := w.processReply(ctx, item, reply, agents, renderStatus)
+			result = append(result, deliveries...)
+			processErrors = append(processErrors, err...)
 		}
 	}
 	return result, errors.Join(processErrors...)
 }
 
-func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *ExternalConversationInboxItem) (*ExternalConversationDelivery, error) {
+func (w *RunProgressAcknowledgementWorker) processReply(ctx context.Context, item *ExternalConversationInboxItem, reply externalItemReply, agents []string, renderStatus bool) ([]*ExternalConversationDelivery, []error) {
+	updates, hasCommentary, err := w.projectCommentary(ctx, item, reply)
+	if err != nil {
+		return nil, []error{fmt.Errorf("project channel commentary for inbox item %s: %w", item.ID, err)}
+	}
+	result := updates
+	var processErrors []error
+	// The answer streams after the commentary that precedes it.
+	if stream, streamErr := w.projectAnswerStream(ctx, item, reply); streamErr != nil {
+		processErrors = append(processErrors, fmt.Errorf("stream channel answer for inbox item %s: %w", item.ID, streamErr))
+	} else if stream != nil {
+		result = append(result, stream)
+	}
+	if !renderStatus {
+		status, statusErr := w.projectThreadStatus(ctx, item, reply, agents)
+		if statusErr != nil {
+			processErrors = append(processErrors, statusErr)
+		} else if status != nil {
+			result = append(result, status)
+		}
+		return result, processErrors
+	}
+	if hasCommentary {
+		return result, processErrors
+	}
+	delivery, err := w.process(ctx, item, reply)
+	if err != nil {
+		return result, append(processErrors, fmt.Errorf("project Run acknowledgement for inbox item %s: %w", item.ID, err))
+	}
+	if delivery != nil {
+		result = append(result, delivery)
+	}
+	return result, processErrors
+}
+
+func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *ExternalConversationInboxItem, reply externalItemReply) (*ExternalConversationDelivery, error) {
 	if item == nil || item.Status != ExternalConversationInboxApplied || item.RunID == "" || item.ConversationID == "" || item.ChannelMessageID == "" {
 		return nil, nil
 	}
@@ -198,12 +216,9 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 	if err != nil || endpoint == nil {
 		return nil, err
 	}
-	run, err := w.store.GetAgentRun(ctx, item.Scope, item.RunID)
-	if err != nil {
-		return nil, err
-	}
+	run := reply.run
 	now := w.now().UTC()
-	if run == nil || strings.TrimSpace(run.AssignedAgentID) == "" || isTerminalAgentRunStatus(run.Status) || now.Sub(run.CreatedAt) < w.config.MinimumRunAge || externalInboxItemIsFollowUp(item, run) {
+	if strings.TrimSpace(run.AssignedAgentID) == "" || isTerminalAgentRunStatus(run.Status) || now.Sub(run.CreatedAt) < w.config.MinimumRunAge || externalInboxItemIsFollowUp(item, run) {
 		return nil, nil
 	}
 	events, err := w.store.ListActivity(ctx, ActivityFilter{Scope: item.Scope, RunID: run.ID, Descending: true, Limit: 1})
@@ -254,7 +269,7 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 		operation = capability.ConversationDeliveryTypingIndicator
 		parameters = map[string]interface{}{"status": acknowledgement.Text}
 	} else {
-		message, postErr := w.post(ctx, item, acknowledgement, snapshot.AgentID)
+		message, postErr := w.post(ctx, item, reply.id, acknowledgement, snapshot.AgentID)
 		if postErr != nil {
 			return nil, postErr
 		}
@@ -266,7 +281,7 @@ func (w *RunProgressAcknowledgementWorker) process(ctx context.Context, item *Ex
 		ExternalConversationID: item.Event.ExternalConversationID, ExternalThreadID: threadID,
 		Parameters:     parameters,
 		Correlation:    &ExternalConversationDeliveryCorrelation{Kind: runProgressAcknowledgementCorrelationKind, ID: run.ID, Phase: phase},
-		IdempotencyKey: "run-acknowledgement-delivery:" + item.ID + ":" + phase,
+		IdempotencyKey: "run-acknowledgement-delivery:" + reply.id + ":" + phase,
 	})
 	if err != nil {
 		return nil, err
@@ -294,7 +309,8 @@ func (w *RunProgressAcknowledgementWorker) resolveEndpoint(ctx context.Context, 
 }
 
 // post sends the acknowledgement as the Run's acting Agent, which rendered it.
-func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *ExternalConversationInboxItem, acknowledgement RunProgressAcknowledgement, agentID string) (*ChannelMessage, error) {
+// replyID keys it to that Agent's answer (externalItemReply).
+func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *ExternalConversationInboxItem, replyID string, acknowledgement RunProgressAcknowledgement, agentID string) (*ChannelMessage, error) {
 	for range 3 {
 		conversation, err := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if err != nil {
@@ -309,7 +325,7 @@ func (w *RunProgressAcknowledgementWorker) post(ctx context.Context, item *Exter
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID},
 			Intent: MessageIntentAcknowledgment, Content: acknowledgement.Text,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: item.ChannelMessageID,
-			References: references, IdempotencyKey: "run-acknowledgement-message:" + item.ID + ":" + acknowledgement.Phase,
+			References: references, IdempotencyKey: "run-acknowledgement-message:" + replyID + ":" + acknowledgement.Phase,
 		})
 		if err == nil {
 			return posted.Message, nil

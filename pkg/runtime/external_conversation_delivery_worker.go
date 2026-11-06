@@ -209,10 +209,15 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 			return w.markFailed(ctx, delivery, "answer_superseded", "The committed reply replaced this preview.")
 		}
 		// The trigger message only anchors a preview; its provisional text is
-		// the body, with no references or files.
+		// the body, with no references or files. A Team member's preview
+		// speaks as that member.
+		sender := endpoint.DeploymentID
+		if agent, _ := delivery.Parameters[externalAnswerStreamAgentParameter].(string); agent != "" {
+			sender = agent
+		}
 		message = &ChannelMessage{
 			ID: message.ID, Scope: message.Scope, ConversationID: message.ConversationID, Sequence: message.Sequence,
-			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: endpoint.DeploymentID},
+			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: sender},
 			Intent: MessageIntentAnswer, Content: preview, Audience: message.Audience,
 			ThreadRootID: message.ThreadRootID, ReplyToMessageID: message.ID, CreatedAt: message.CreatedAt,
 		}

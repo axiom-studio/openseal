@@ -31,6 +31,13 @@ func isTeamMemberRun(run *AgentRun) bool {
 		strings.TrimSpace(run.AssignedAgentID) != ""
 }
 
+// isTeamRoutingRun reports whether run is a Team's routing Run: a
+// conversation Run with no assigned Agent, which starts member Runs.
+func isTeamRoutingRun(run *AgentRun) bool {
+	return run != nil && run.Kind == RunKindConversation && run.Owner.Type == OwnerTypeTeam &&
+		strings.TrimSpace(run.AssignedAgentID) == ""
+}
+
 // conversationRunLane is a conversation Run's concurrency key: the channel or
 // one thread of it, then the Agent working in it. It is the same rule for an
 // Agent's own chat and a Team member's, so once a member is assigned its Run

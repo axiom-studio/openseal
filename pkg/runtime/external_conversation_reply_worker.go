@@ -90,7 +90,7 @@ func (w *ExternalConversationReplyWorker) ProcessScope(
 	deliveries := make([]*ExternalConversationDelivery, 0, len(items))
 	var projectErrors []error
 	for _, item := range items {
-		delivery, resolved, projectErr := w.project(ctx, item)
+		projected, resolved, projectErr := w.project(ctx, item)
 		if projectErr != nil {
 			projectErrors = append(projectErrors, fmt.Errorf("project external conversation inbox item %s: %w", item.ID, projectErr))
 			if tracked {
@@ -98,9 +98,7 @@ func (w *ExternalConversationReplyWorker) ProcessScope(
 			}
 			continue
 		}
-		if delivery != nil {
-			deliveries = append(deliveries, delivery)
-		}
+		deliveries = append(deliveries, projected...)
 		if tracked && resolved {
 			// A lost race only means another worker recorded it first.
 			_ = progress.SaveExternalConversationReplyProgress(ctx, item.Scope, item.ID, item.Revision, ExternalConversationReplyProgress{
@@ -124,26 +122,28 @@ func (w *ExternalConversationReplyWorker) recordFailure(ctx context.Context, pro
 }
 
 // project returns resolved=true when no further projection can ever be
-// needed for the item: its reply exists or was delivered, or no reply is
+// needed for the item: its replies exist or were delivered, or no reply is
 // due (no Run, a canceled Run, a paused endpoint, a superseded failure).
 func (w *ExternalConversationReplyWorker) project(
 	ctx context.Context,
 	item *ExternalConversationInboxItem,
-) (*ExternalConversationDelivery, bool, error) {
-	delivery, err := w.projectItem(ctx, item)
+) ([]*ExternalConversationDelivery, bool, error) {
+	deliveries, err := w.projectItem(ctx, item)
 	if errors.Is(err, errExternalReplyPending) {
-		return nil, false, nil
+		return deliveries, false, nil
 	}
-	return delivery, err == nil, err
+	return deliveries, err == nil, err
 }
 
 // errExternalReplyPending marks an item whose Run has not finished yet.
 var errExternalReplyPending = errors.New("external conversation reply pending")
 
+// projectItem delivers each answer the item has: one for an Agent's Run,
+// one per member for a Team's. Each member answer has its own keys.
 func (w *ExternalConversationReplyWorker) projectItem(
 	ctx context.Context,
 	item *ExternalConversationInboxItem,
-) (*ExternalConversationDelivery, error) {
+) ([]*ExternalConversationDelivery, error) {
 	if item == nil {
 		return nil, nil
 	}
@@ -152,15 +152,43 @@ func (w *ExternalConversationReplyWorker) projectItem(
 		strings.TrimSpace(item.ChannelMessageID) == "" {
 		return nil, nil
 	}
-	run, err := w.store.GetAgentRun(ctx, item.Scope, item.RunID)
+	replies, err := externalItemReplies(ctx, w.store, item)
 	if err != nil {
 		return nil, err
 	}
-	if run == nil {
-		return nil, nil
+	agents := externalItemReplyAgents(replies)
+	var deliveries []*ExternalConversationDelivery
+	var failures []error
+	pending := false
+	for _, reply := range replies {
+		delivery, err := w.projectReply(ctx, item, reply, agents)
+		switch {
+		case errors.Is(err, errExternalReplyPending):
+			pending = true
+		case err != nil:
+			failures = append(failures, err)
+		case delivery != nil:
+			deliveries = append(deliveries, delivery)
+		}
 	}
+	if err := errors.Join(failures...); err != nil {
+		return nil, err
+	}
+	if pending {
+		return deliveries, errExternalReplyPending
+	}
+	return deliveries, nil
+}
+
+func (w *ExternalConversationReplyWorker) projectReply(
+	ctx context.Context,
+	item *ExternalConversationInboxItem,
+	reply externalItemReply,
+	agents []string,
+) (*ExternalConversationDelivery, error) {
+	run := reply.run
 	if run.Status == AgentRunStatusCanceled {
-		return nil, w.retireAnswerStream(ctx, item)
+		return nil, w.retireAnswerStream(ctx, item, reply.id)
 	}
 	if externalInboxItemIsFollowUp(item, run) {
 		return nil, nil // The Run's own trigger item delivers its single reply.
@@ -184,7 +212,7 @@ func (w *ExternalConversationReplyWorker) projectItem(
 	}
 	// Projection is already durable. Do not reinterpret an old item against a
 	// newer Skill version or enqueue another status clear while new work runs.
-	key := externalConversationReplyKey(item.ID)
+	key := externalConversationReplyKey(reply.id)
 	existing, err := w.store.GetExternalConversationDelivery(ctx, item.Scope, stableExternalConversationID(item.Scope, item.EndpointID, "delivery", key))
 	if err != nil {
 		return nil, err
@@ -256,15 +284,19 @@ func (w *ExternalConversationReplyWorker) projectItem(
 	}
 	if message == nil {
 		if run.Status == AgentRunStatusFailed {
-			superseded, checkErr := w.failureSuperseded(ctx, item, endpoint)
+			member := ""
+			if isTeamMemberRun(run) {
+				member = run.AssignedAgentID
+			}
+			superseded, checkErr := w.failureSuperseded(ctx, item, endpoint, member)
 			if checkErr != nil {
 				return nil, checkErr
 			}
 			if superseded {
-				return nil, w.retireAnswerStream(ctx, item)
+				return nil, w.retireAnswerStream(ctx, item, reply.id)
 			}
 		}
-		reply, ok := externalConversationRunReply(run)
+		content, ok := externalConversationRunReply(run)
 		if !ok {
 			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", ErrInvalidExternalConversation)
 		}
@@ -282,11 +314,11 @@ func (w *ExternalConversationReplyWorker) projectItem(
 		posted, postErr := w.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 			Scope: item.Scope, ConversationID: item.ConversationID, ExpectedRevision: current.Revision,
 			Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: senderID},
-			Intent: MessageIntentAnswer, Content: reply,
+			Intent: MessageIntentAnswer, Content: content,
 			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: item.ChannelMessageID, ResolvesMessageID: item.ChannelMessageID,
 			References:     append([]ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, conversationActionArtifactReferences(run)...),
-			IdempotencyKey: "external-conversation-reply:" + item.ID,
+			IdempotencyKey: "external-conversation-reply:" + reply.id,
 		})
 		if postErr != nil {
 			return nil, postErr
@@ -303,7 +335,7 @@ func (w *ExternalConversationReplyWorker) projectItem(
 		IdempotencyKey:         key,
 	}
 	if !resend {
-		if err := w.finishAnswerStream(ctx, item, endpoint, adapter.Adapter, run, message, &request); err != nil {
+		if err := w.finishAnswerStream(ctx, item, reply.id, endpoint, adapter.Adapter, run, message, &request); err != nil {
 			return nil, err
 		}
 	}
@@ -314,7 +346,7 @@ func (w *ExternalConversationReplyWorker) projectItem(
 	// Thread status is advisory and provider-capability dependent. Enqueueing it
 	// after the reply preserves thread ordering so providers clear "Thinking…"
 	// only after the durable answer has been accepted.
-	busy, busyErr := externalThreadHasActiveWork(ctx, w.store, run)
+	busy, busyErr := externalThreadHasActiveWork(ctx, w.store, run, agents...)
 	if busyErr == nil && !busy {
 		_, _ = w.transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
 			Scope: item.Scope, EndpointID: endpoint.ID,
@@ -323,7 +355,7 @@ func (w *ExternalConversationReplyWorker) projectItem(
 			ExternalConversationID: item.Event.ExternalConversationID,
 			ExternalThreadID:       externalThreadID,
 			Parameters:             map[string]interface{}{"status": ""},
-			IdempotencyKey:         "external-conversation-reply-status:" + item.ID,
+			IdempotencyKey:         "external-conversation-reply-status:" + reply.id,
 		})
 	}
 	if request.Operation == capability.ConversationDeliveryMessageUpdate {
@@ -339,13 +371,14 @@ func (w *ExternalConversationReplyWorker) projectItem(
 func (w *ExternalConversationReplyWorker) finishAnswerStream(
 	ctx context.Context,
 	item *ExternalConversationInboxItem,
+	replyID string,
 	endpoint *ExternalConversationEndpoint,
 	adapter capability.ConversationAdapter,
 	run *AgentRun,
 	message *ChannelMessage,
 	request *EnqueueExternalConversationDeliveryRequest,
 ) error {
-	stream, err := loadExternalAnswerStream(ctx, w.store, item)
+	stream, err := loadExternalAnswerStream(ctx, w.store, item, replyID)
 	if err != nil || stream == nil {
 		return err
 	}
@@ -362,7 +395,7 @@ func (w *ExternalConversationReplyWorker) finishAnswerStream(
 		}
 	}
 	if run.Status == AgentRunStatusFailed || files {
-		deleted, err := deleteAnswerStream(ctx, w.transport, item, endpoint, adapter.Delivery.Operations, stream)
+		deleted, err := deleteAnswerStream(ctx, w.transport, item, replyID, endpoint, adapter.Delivery.Operations, stream)
 		if err != nil || deleted || files {
 			return err
 		}
@@ -524,10 +557,13 @@ func externalConversationRunReply(run *AgentRun) (string, bool) {
 // A later question or answer in the same thread makes an old failure notice
 // stale. Other threads in the channel must not suppress this reply. Canceled
 // runs are deliberately excluded by project: replacement turns handle them.
+// For a Team member (member != ""), only that member's own later answer
+// supersedes its failure; a teammate's answer does not.
 func (w *ExternalConversationReplyWorker) failureSuperseded(
 	ctx context.Context,
 	item *ExternalConversationInboxItem,
 	endpoint *ExternalConversationEndpoint,
+	member string,
 ) (bool, error) {
 	// Older workers acknowledged failed runs only by clearing thread status.
 	// Respect that durable terminal projection rather than replaying historical
@@ -566,7 +602,8 @@ func (w *ExternalConversationReplyWorker) failureSuperseded(
 				(threadRoot == "" && message.ThreadRootID != "" && message.ThreadRootID != trigger.ID) {
 				continue
 			}
-			if message.Sender.Type == ConversationParticipantUser || message.Intent == MessageIntentAnswer {
+			if message.Sender.Type == ConversationParticipantUser ||
+				(message.Intent == MessageIntentAnswer && (member == "" || message.Sender.ID == member)) {
 				return true, nil
 			}
 		}

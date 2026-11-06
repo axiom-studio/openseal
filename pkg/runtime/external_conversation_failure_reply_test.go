@@ -217,7 +217,11 @@ func TestExternalConversationFailedStatusWaitsForReplyProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := worker.projectThreadStatus(ctx, item)
+	run, err := store.GetAgentRun(ctx, item.Scope, item.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := worker.projectThreadStatus(ctx, item, externalItemReply{run: run, id: item.ID}, nil)
 	if err != nil || status != nil {
 		t.Fatalf("failed run cleared status before its notice: %#v, %v", status, err)
 	}
