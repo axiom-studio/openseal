@@ -22,7 +22,7 @@ func setupUpgradeProof(from, to string, revision int64) skill.BindingLifecycleEn
 
 func setupUpgradeFixture() (*SkillSetupRequest, *skill.Binding) {
 	now := time.Now().UTC()
-	r := &SkillSetupRequest{ID: "setup", Scope: Scope{Kind: "tenant", ID: "one"}, DeploymentID: "agent", ConversationID: "chat",
+	r := &SkillSetupRequest{ID: "setup", Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat",
 		TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: "reauthorize", SkillID: "connector", SkillVersion: "1.1.0",
 		SourceIdentity: "verified-publisher", SkillName: "Connector", BindingID: "account", BindingRevision: 7,
 		Phase: SkillSetupPhaseBindingUpgrade, BindingVersion: "1.0.0", RequiredActions: []string{"read"}, Reason: "Reconnect the account",

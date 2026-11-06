@@ -65,9 +65,6 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 	if err := validateProjectSkillUpgradeReferencesSQL(ctx, conn, application, "project_skill_references", false); err != nil {
 		return err
 	}
-	if err := applySkillUpgradeTeamAuthoritySQL(ctx, conn, application.TeamAuthority, "team_definitions", "team_deployments", "team_definition_activations", false); err != nil {
-		return err
-	}
 	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
 		return err
 	}

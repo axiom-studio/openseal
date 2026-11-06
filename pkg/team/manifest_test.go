@@ -53,10 +53,6 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 			Roles: []ManifestRoleSlot{{
 				ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review",
 				ChannelParticipation: RoleChannelObserveOnly,
-				SkillGrants: []ManifestRoleSkillGrant{{
-					SkillID: "source", SkillVersion: "1.0.0", AllowedActions: []string{"read"},
-					MaximumRisk: capability.RiskLevelRead,
-				}},
 			}},
 			Routing: RoutingPolicy{Notes: "  Reviewer owns release notes  ", LeadRoleID: "reviewer"},
 			Delegation: ManifestDelegationPolicy{
@@ -77,9 +73,6 @@ func TestCompileManifestPreservesExplicitCollaborationPolicy(t *testing.T) {
 		definition.Delegation.RequireAcceptance || definition.Delegation.RequireCompletionReview ||
 		definition.SharedContext.AllowMemberWrite || definition.SharedContext.Retention != 24*time.Hour {
 		t.Fatalf("explicit policy was not preserved: %#v", definition)
-	}
-	if definition.Roles[0].SkillGrants[0].RuntimeIdentity != nil || definition.Roles[0].SkillGrants[0].CatalogID != "" {
-		t.Fatal("portable Team grant gained a host-owned runtime identity")
 	}
 }
 

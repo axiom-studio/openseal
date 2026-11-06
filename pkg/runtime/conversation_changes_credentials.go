@@ -16,20 +16,14 @@ func (s *ConversationChangeService) listConversationCredentialRequests(ctx conte
 	if s.credentials == nil || conversation == nil {
 		return []*ConversationCredentialRequest{}, nil
 	}
-	deployments, err := s.conversationRequestDeployments(ctx, conversation)
+	stored, err := s.credentials.ListCredentialRequests(ctx, conversation.Scope, conversation.Owner.ID, conversation.ID)
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*CredentialRequest, 0)
-	for _, deployment := range deployments {
-		stored, err := s.credentials.ListCredentialRequests(ctx, conversation.Scope, deployment, conversation.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, request := range stored {
-			if request != nil && request.Scope == conversation.Scope && request.DeploymentID == deployment && request.ConversationID == conversation.ID {
-				candidates = append(candidates, cloneCredentialRequest(request))
-			}
+	candidates := make([]*CredentialRequest, 0, len(stored))
+	for _, request := range stored {
+		if request != nil && request.Scope == conversation.Scope && request.Owner == conversation.Owner && request.ConversationID == conversation.ID {
+			candidates = append(candidates, cloneCredentialRequest(request))
 		}
 	}
 	candidates = boundConversationInteractions(candidates, func(r *CredentialRequest) bool { return r.Status == CredentialRequestStatusPending },

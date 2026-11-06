@@ -63,12 +63,14 @@ func decodeSkillSetupArguments(arguments map[string]interface{}) (skillSetupArgu
 	a.RequiredActions = slices.Compact(a.RequiredActions)
 	return a, nil
 }
-func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, input ActionDispatchInput, run *AgentRun, deploymentID string) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, input ActionDispatchInput, run *AgentRun, member string, umbrella ObjectiveOwner) (map[string]interface{}, error) {
 	a, err := decodeSkillSetupArguments(input.Arguments)
 	if err != nil {
 		return nil, err
 	}
-	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, deploymentID)
+	// Setup saves to the umbrella; the acting member only asked for it.
+	deploymentID := umbrella.ID
+	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, member, umbrella)
 	if err != nil {
 		return nil, err
 	}
@@ -86,14 +88,14 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		if err != nil {
 			return nil, err
 		}
-		if task == nil || task.TargetAgentID != deploymentID || input.Call == nil {
+		if task == nil || task.TargetAgentID != member || task.Owner != umbrella || input.Call == nil {
 			return nil, ErrInvalidSkillSetup
 		}
 		call, callErr := d.store.GetActionCall(ctx, run.Scope, input.Call.ID)
 		if callErr != nil {
 			return nil, callErr
 		}
-		if !taskSetupActionMatches(call, run, deploymentID) || call.Status != ActionCallStatusRunning ||
+		if !taskSetupActionMatches(call, run, member) || call.Status != ActionCallStatusRunning ||
 			input.Call.RunID != run.ID || input.Call.Scope != run.Scope {
 			return nil, ErrInvalidSkillSetup
 		}
@@ -104,7 +106,7 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		return nil, err
 	}
 	if existing != nil {
-		if task != nil && (existing.Validate() != nil || existing.ID != id || existing.Scope != run.Scope || existing.ActionCallID != input.Call.ID || existing.RunID != run.ID || existing.ConversationID != conversationID || existing.TriggerMessageID != messageID || existing.DeploymentID != deploymentID) {
+		if task != nil && (existing.Validate() != nil || existing.ID != id || existing.Scope != run.Scope || existing.ActionCallID != input.Call.ID || existing.RunID != run.ID || existing.ConversationID != conversationID || existing.TriggerMessageID != messageID || existing.Owner != umbrella || existing.DeploymentID != deploymentID || existing.AgentID != member) {
 			return nil, ErrInvalidSkillSetup
 		}
 		return skillSetupResult(existing)
@@ -119,7 +121,7 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		if call.Status == ActionCallStatusSucceeded && !interactionRequestRefused(call) {
 			continue
 		}
-		if call.ID == input.Call.ID || call.DeploymentID != deploymentID || call.Action != SkillActionRequestSetup || call.SkillID != SkillManagementSkillID {
+		if call.ID == input.Call.ID || call.DeploymentID != member || call.Action != SkillActionRequestSetup || call.SkillID != SkillManagementSkillID {
 			continue
 		}
 		previous, decodeErr := decodeSkillSetupArguments(call.Arguments)
@@ -150,7 +152,7 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 			return nil, err
 		}
 		if currentBinding == nil || currentBinding.SkillID != a.SkillID || currentBinding.SourceIdentity != a.SourceIdentity {
-			return nil, refuseInteraction("setup account does not match this Agent's exact Skill source")
+			return nil, refuseInteraction("setup account does not match this chat's exact Skill source")
 		}
 	} else {
 		bindings, listErr := d.catalog.ListBindings(ctx, scope, deploymentID)
@@ -221,7 +223,7 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 	if candidate != nil {
 		a.SkillVersion = candidate.Version
 	}
-	if refusal, refusalErr := d.connectedAppSetupRefusal(ctx, run, deploymentID, a.SkillID, candidate); refusalErr != nil {
+	if refusal, refusalErr := d.connectedAppSetupRefusal(ctx, run, umbrella, a.SkillID, candidate); refusalErr != nil {
 		return nil, refusalErr
 	} else if refusal != "" {
 		return nil, refuseInteraction(refusal)
@@ -264,7 +266,8 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 			phase = SkillSetupPhaseBindingUpgrade
 		}
 	}
-	// Repeated model requests for the same pending interaction reuse its identity.
+	// Repeated requests for the same pending interaction in this umbrella's
+	// conversation reuse its identity, whichever member asked.
 	pending, err := d.store.ListSkillSetupRequests(ctx, run.Scope, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
@@ -301,7 +304,7 @@ func (d *SkillBindingActionDispatcher) requestSkillSetup(ctx context.Context, in
 		}
 	}
 	now := time.Now().UTC()
-	r := &SkillSetupRequest{InstallationReference: reference, SourceDigest: digest, RequiredActions: a.RequiredActions, EnablePrompt: a.EnablePrompt, ID: id, Scope: run.Scope, DeploymentID: deploymentID, ConversationID: conversationID, TriggerMessageID: messageID, RunID: run.ID, ActionCallID: input.Call.ID, Kind: a.Kind, SkillID: a.SkillID, SkillVersion: a.SkillVersion, SourceIdentity: a.SourceIdentity, SkillName: candidate.Name, BindingID: a.BindingID, BindingRevision: bindingRevision, Phase: phase, BindingVersion: bindingVersion, Reason: a.Reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
+	r := &SkillSetupRequest{InstallationReference: reference, SourceDigest: digest, RequiredActions: a.RequiredActions, EnablePrompt: a.EnablePrompt, ID: id, Scope: run.Scope, Owner: umbrella, DeploymentID: deploymentID, AgentID: member, ConversationID: conversationID, TriggerMessageID: messageID, RunID: run.ID, ActionCallID: input.Call.ID, Kind: a.Kind, SkillID: a.SkillID, SkillVersion: a.SkillVersion, SourceIdentity: a.SourceIdentity, SkillName: candidate.Name, BindingID: a.BindingID, BindingRevision: bindingRevision, Phase: phase, BindingVersion: bindingVersion, Reason: a.Reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := d.store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
 		if errors.Is(err, ErrSkillSetupConflict) {
 			if replay, readErr := d.store.GetSkillSetupRequest(ctx, run.Scope, id); readErr == nil && replay != nil {
@@ -336,8 +339,9 @@ func skillSetupResult(r *SkillSetupRequest) (map[string]interface{}, error) {
 func skillListSetupRequestsAction() skill.Action {
 	return skill.Action{Name: SkillActionListSetupRequests, Description: "Read the current conversation's durable Skill setup requests and their pending, resolved, or dismissed status. Use this once after the user reports completing setup; resolved means account configuration was saved, not that provider actions were authorized or verified. Inspect bindingAccess.enabledActions before choosing an operation. If discovery declares an action that is not enabled on the saved binding, request setup for that exact action and explain the access needed; do not call this a missing account or missing credential. A pending request needs user input: an independent conversation task should wait with wakeCondition type skill_setup referencing the exact saved request ID; an ordinary foreground reply should finish. Do not poll it. Retry the requested provider operation through its normal authorized action to verify it.", Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2}, InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}, "additionalProperties": false}, OutputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"requests": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}}}, "required": []interface{}{"requests"}, "additionalProperties": false}}
 }
-func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Context, run *AgentRun, deploymentID string) (map[string]interface{}, error) {
-	conversationID, _, err := d.skillSetupConversationOrigin(ctx, run, deploymentID)
+func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Context, run *AgentRun, member string, umbrella ObjectiveOwner) (map[string]interface{}, error) {
+	deploymentID := umbrella.ID
+	conversationID, _, err := d.skillSetupConversationOrigin(ctx, run, member, umbrella)
 	if err != nil {
 		return nil, err
 	}
@@ -355,7 +359,7 @@ func (d *SkillBindingActionDispatcher) listSkillSetupRequests(ctx context.Contex
 		if err != nil {
 			return nil, err
 		}
-		if task == nil || task.TargetAgentID != deploymentID {
+		if task == nil || task.TargetAgentID != member || task.Owner != umbrella {
 			return nil, ErrInvalidSkillSetup
 		}
 	}

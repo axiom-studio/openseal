@@ -202,11 +202,9 @@ type (
 	TeamManifestMetadata                      = kernelteam.ManifestMetadata
 	TeamManifestSpec                          = kernelteam.ManifestSpec
 	TeamManifestRoleSlot                      = kernelteam.ManifestRoleSlot
-	TeamManifestRoleSkillGrant                = kernelteam.ManifestRoleSkillGrant
 	TeamManifestDelegationPolicy              = kernelteam.ManifestDelegationPolicy
 	TeamManifestSharedContextPolicy           = kernelteam.ManifestSharedContextPolicy
 	TeamRoleSlot                              = kernelteam.RoleSlot
-	TeamRoleSkillGrant                        = kernelteam.RoleSkillGrant
 	TeamRoleChannelParticipation              = kernelteam.RoleChannelParticipation
 	TeamRoutingPolicy                         = kernelteam.RoutingPolicy
 	TeamDelegationPolicy                      = kernelteam.DelegationPolicy
@@ -331,7 +329,6 @@ type (
 	SkillReferenceObjectiveReference          = runtime.SkillReferenceObjectiveReference
 	SkillReferenceObjectiveImpact             = runtime.SkillReferenceObjectiveImpact
 	SkillReferenceProjectImpact               = runtime.SkillReferenceProjectImpact
-	SkillReferenceTeamAuthorityImpact         = runtime.SkillReferenceTeamAuthorityImpact
 	PlanSkillReferenceUpgradeRequest          = runtime.PlanSkillReferenceUpgradeRequest
 	ApplySkillReferenceUpgradeRequest         = runtime.ApplySkillReferenceUpgradeRequest
 	SkillReferenceUpgradeApproval             = runtime.SkillReferenceUpgradeApproval
@@ -2738,7 +2735,7 @@ func New(opts ...Option) (*Engine, error) {
 	conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
 	e.collaboration.SetAcceptedRunExecutionPreparer(e)
 	e.embeds, _ = runtime.NewEmbedSessionService(store, store)
-	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills, e.teams)
+	e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(store, e.skills)
 	e.progression = progression.NewService(e.agents, e.teams)
 
 	for _, opt := range opts {
@@ -2982,7 +2979,7 @@ func WithStore(store runtime.KernelStore) Option {
 			e.skills = skill.NewCatalogWithStore(skillStore)
 		}
 		if upgradeStore, ok := store.(runtime.SkillReferenceUpgradeStore); ok && e.skills != nil {
-			e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(upgradeStore, e.skills, e.teams)
+			e.skillReferenceUpgrades = runtime.NewSkillReferenceUpgradeService(upgradeStore, e.skills)
 		} else {
 			e.skillReferenceUpgrades = nil
 		}
@@ -3572,7 +3569,7 @@ func (e *Engine) configureSkillManagementActions() error {
 	if err := e.skills.Register(context.Background(), runtime.SkillManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
 		return err
 	}
-	validator, err := runtime.NewSkillBindingActionValidator(e.skills)
+	validator, err := runtime.NewSkillBindingActionValidator(e.skills, e)
 	if err != nil {
 		return err
 	}
@@ -5414,29 +5411,6 @@ func (e *Engine) ResolveCallbackAdapterBinding(ctx context.Context, scope skill.
 	return e.skills.ResolveCallbackAdapterBinding(ctx, scope, deploymentID, bindingID, adapterID)
 }
 
-func (e *Engine) UpsertSkillBinding(ctx context.Context, request skill.UpsertBindingRequest) (*skill.Binding, error) {
-	binding, err := e.skills.UpsertBinding(ctx, request)
-	if err == nil {
-		// Completing setup anywhere (Settings, an OAuth callback, the chat
-		// form) completes the chat's request, so it never shows again.
-		e.reconcileSkillSetupRequestsForBinding(ctx, binding)
-	}
-	return binding, err
-}
-
-func (e *Engine) DisableSkillBinding(ctx context.Context, request skill.DisableBindingRequest) (*skill.Binding, error) {
-	return e.skills.DisableBinding(ctx, request)
-}
-
-// DeleteSkillBinding permanently removes one Agent or Team binding at its
-// expected revision. Unlike DisableSkillBinding no row remains: every action,
-// prompt, adapter and credential lease that referenced the binding stops
-// resolving, and the ID can be reused for a different Skill identity. The
-// result is the deletion receipt carrying a final "deleted" lifecycle entry.
-func (e *Engine) DeleteSkillBinding(ctx context.Context, request skill.DeleteBindingRequest) (*skill.Binding, error) {
-	return e.skills.DeleteBinding(ctx, request)
-}
-
 func (e *Engine) PlanSkillReferenceUpgrade(ctx context.Context, request runtime.PlanSkillReferenceUpgradeRequest) (*runtime.SkillReferenceUpgradePlan, error) {
 	if e == nil || e.skillReferenceUpgrades == nil {
 		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
@@ -5475,46 +5449,6 @@ func (e *Engine) ListReferencedSkillRuntimeVersions(ctx context.Context, scope r
 		return nil, runtime.ErrSkillReferenceUpgradeUnavailable
 	}
 	return store.ListReferencedSkillRuntimeVersions(ctx, scope)
-}
-
-// ListTeamSkillBindings exposes the first-class Team-owned binding portfolio.
-// It verifies Team identity in the exact scope before reading the shared
-// canonical Skill contract.
-func (e *Engine) ListTeamSkillBindings(ctx context.Context, scope skill.ScopeReference, teamDeploymentID string) ([]*skill.Binding, error) {
-	if _, err := e.teams.GetDeployment(ctx, scope, teamDeploymentID); err != nil {
-		return nil, err
-	}
-	return e.skills.ListBindings(ctx, scope, teamDeploymentID)
-}
-
-func (e *Engine) UpsertTeamSkillBinding(ctx context.Context, teamDeploymentID string, request skill.UpsertBindingRequest) (*skill.Binding, error) {
-	if request.Binding == nil || request.Binding.DeploymentID != teamDeploymentID {
-		return nil, errors.New("Team Skill binding must identify the owning Team deployment")
-	}
-	if _, err := e.teams.GetDeployment(ctx, request.Binding.Scope, teamDeploymentID); err != nil {
-		return nil, err
-	}
-	return e.skills.UpsertBinding(ctx, request)
-}
-
-func (e *Engine) DisableTeamSkillBinding(ctx context.Context, teamDeploymentID string, request skill.DisableBindingRequest) (*skill.Binding, error) {
-	if request.DeploymentID != teamDeploymentID {
-		return nil, errors.New("Team Skill binding must identify the owning Team deployment")
-	}
-	if _, err := e.teams.GetDeployment(ctx, request.Scope, teamDeploymentID); err != nil {
-		return nil, err
-	}
-	return e.skills.DisableBinding(ctx, request)
-}
-
-func (e *Engine) DeleteTeamSkillBinding(ctx context.Context, teamDeploymentID string, request skill.DeleteBindingRequest) (*skill.Binding, error) {
-	if request.DeploymentID != teamDeploymentID {
-		return nil, errors.New("Team Skill binding must identify the owning Team deployment")
-	}
-	if _, err := e.teams.GetDeployment(ctx, request.Scope, teamDeploymentID); err != nil {
-		return nil, err
-	}
-	return e.skills.DeleteBinding(ctx, request)
 }
 
 func (e *Engine) ListModelSkillActions(ctx context.Context, scope skill.ScopeReference, deploymentID string) ([]skill.ModelAction, error) {

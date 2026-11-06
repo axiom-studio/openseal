@@ -15,7 +15,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.5.2"
+	SkillManagementSkillVersion = "1.6.0"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
@@ -26,14 +26,6 @@ const (
 // Agent conversation. The target deployment is deliberately absent from the
 // model-visible schema: the kernel derives it from the durable Run.
 func SkillManagementSkill() *skill.Definition {
-	credentialReference := map[string]interface{}{
-		"type": "object", "additionalProperties": false,
-		"properties": map[string]interface{}{
-			"kind": map[string]interface{}{"type": "string", "minLength": 1},
-			"id":   map[string]interface{}{"type": "string", "minLength": 1},
-		},
-		"required": []interface{}{"kind", "id"},
-	}
 	upsertProperties := map[string]interface{}{
 		"bindingId":        map[string]interface{}{"type": "string", "minLength": 1},
 		"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 0},
@@ -57,15 +49,10 @@ func SkillManagementSkill() *skill.Definition {
 		}},
 		"argumentRestrictions": map[string]interface{}{"type": "object"},
 		"config":               map[string]interface{}{"type": "object"},
-		// Access references are opaque identifiers resolved by the host. The
-		// field intentionally cannot carry credential values.
-		"accessReferences": map[string]interface{}{
-			"type": "object", "additionalProperties": credentialReference,
-		},
 	}
 	return &skill.Definition{
 		ID: SkillManagementSkillID, Version: SkillManagementSkillVersion,
-		Name: "Skills", Description: "Propose governed changes to the current Agent's Skill access.",
+		Name: "Skills", Description: "Propose governed changes to the Skill access of this chat's Agent or Team.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: SkillManagementEndpoint},
 		Actions: map[string]skill.Action{
 			SkillActionDiscoverBinding:   skillDiscoveryAction(),
@@ -76,13 +63,13 @@ func SkillManagementSkill() *skill.Definition {
 			SkillActionRequestConnection: requestConnectionAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
-				"Propose enabling or updating configuration on an exact registered Skill for this Agent. An existing binding retains its exact Skill ID, source and version; use the canonical Skill reference upgrade flow before changing executable versions. Use only after all required reviewed configuration and verified authorized credential references are available. If user configuration or authorization is needed, call request_setup instead. Discovery never supplies credential references, so never construct a reference from a credential kind or name. Credential values are never accepted; credentials must be opaque references.",
+				"Propose enabling or updating configuration on an exact registered Skill for this chat's Agent or Team. An existing binding retains its exact Skill ID, source and version and its saved account; use the canonical Skill reference upgrade flow before changing executable versions. This action never adds, changes or removes an account: when a Skill needs one, or a person must authorize it, call request_setup instead.",
 				upsertProperties,
 				[]interface{}{"bindingId", "expectedRevision", "skillId", "skillVersion", "allowedActions", "enablePrompt", "maximumRisk"},
 			),
 			SkillActionDisableBinding: skillManagementAction(
 				SkillActionDisableBinding,
-				"Propose disabling one current Skill binding for this Agent using its current revision.",
+				"Propose disabling one current Skill binding of this chat's Agent or Team using its current revision.",
 				map[string]interface{}{
 					"bindingId":        map[string]interface{}{"type": "string", "minLength": 1},
 					"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
@@ -263,7 +250,6 @@ type skillBindingUpsertArguments struct {
 	EnabledConversationAdapters []string                                 `json:"enabledConversationAdapters"`
 	MaximumRisk                 skill.RiskLevel                          `json:"maximumRisk"`
 	ArgumentRestrictions        map[string]map[string]skill.ArgumentRule `json:"argumentRestrictions,omitempty"`
-	AccessReferences            map[string]skill.CredentialReference     `json:"accessReferences,omitempty"`
 	Config                      map[string]interface{}                   `json:"config,omitempty"`
 }
 
@@ -282,13 +268,19 @@ type skillDiscoveryArguments struct {
 
 // SkillBindingActionValidator resolves both deployment authority and the
 // exact registered Skill before a proposal can become an approval request.
-type SkillBindingActionValidator struct{ catalog *skill.Catalog }
+type SkillBindingActionValidator struct {
+	catalog *skill.Catalog
+	roster  TeamRosterReader
+}
 
-func NewSkillBindingActionValidator(catalog *skill.Catalog) (*SkillBindingActionValidator, error) {
+// NewSkillBindingActionValidator checks Skill management proposals. roster
+// reads Team (and, when it can, Agent) deployments to derive the run's
+// umbrella, which every binding change targets.
+func NewSkillBindingActionValidator(catalog *skill.Catalog, roster TeamRosterReader) (*SkillBindingActionValidator, error) {
 	if catalog == nil {
 		return nil, errors.New("skill catalog is required")
 	}
-	return &SkillBindingActionValidator{catalog: catalog}, nil
+	return &SkillBindingActionValidator{catalog: catalog, roster: roster}, nil
 }
 
 func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
@@ -298,16 +290,17 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 	if v == nil || v.catalog == nil || input.Run == nil || input.Bound.Binding == nil {
 		return nil, errors.New("skill binding action validator is not configured")
 	}
-	deploymentID, err := skillActionAgentDeployment(input.Run)
+	member, err := skillActionMember(input.Run)
 	if err != nil {
 		return nil, err
 	}
-	if input.Bound.Binding.DeploymentID != deploymentID {
+	// The management binding is always the acting member's own.
+	if input.Bound.Binding.DeploymentID != member {
 		return nil, errors.New("skill management action is not bound to the current Run's Agent deployment")
 	}
 	scope := skill.ScopeReference{Kind: input.Run.Scope.Kind, ID: input.Run.Scope.ID}
 	preview := map[string]interface{}{
-		"resourceType": "skill_binding", "operation": input.Bound.Action.Name, "deploymentId": deploymentID,
+		"resourceType": "skill_binding", "operation": input.Bound.Action.Name, "deploymentId": member,
 	}
 	switch input.Bound.Action.Name {
 	case SkillActionRequestSetup, SkillActionRequestCredential, SkillActionRequestConnection:
@@ -317,6 +310,12 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 	case SkillActionDiscoverBinding, SkillActionListSetupRequests, SkillActionFindApps:
 		return nil, nil
 	case SkillActionUpsertBinding:
+		umbrella, umbrellaErr := RunUmbrella(ctx, v.roster, input.Run)
+		if umbrellaErr != nil {
+			return nil, umbrellaErr
+		}
+		deploymentID := umbrella.ID
+		preview["deploymentId"], preview["owner"] = deploymentID, umbrella
 		args, definition, current, resolveErr := resolveSkillBindingUpsert(ctx, v.catalog, scope, deploymentID, input.Arguments)
 		if resolveErr != nil {
 			return nil, resolveErr
@@ -327,9 +326,15 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 			"id": definition.ID, "version": definition.Version, "sourceIdentity": skill.DefinitionSourceIdentity(definition), "name": definition.Name,
 		}
 		preview["current"] = secretSafeBindingPreview(current)
-		preview["changes"] = secretSafeBindingPreview(skillBindingCandidate(scope, deploymentID, args))
+		preview["changes"] = secretSafeBindingPreview(skillBindingCandidate(scope, deploymentID, args, current))
 		return preview, nil
 	case SkillActionDisableBinding:
+		umbrella, umbrellaErr := RunUmbrella(ctx, v.roster, input.Run)
+		if umbrellaErr != nil {
+			return nil, umbrellaErr
+		}
+		deploymentID := umbrella.ID
+		preview["deploymentId"], preview["owner"] = deploymentID, umbrella
 		args, current, resolveErr := resolveSkillBindingDisable(ctx, v.catalog, scope, deploymentID, input.Arguments)
 		if resolveErr != nil {
 			return nil, resolveErr
@@ -353,6 +358,9 @@ type SkillBindingActionDispatcher struct {
 	fallback  ActionDispatcher
 	apps      *AppCatalogRef
 }
+
+// roster reads the Team and Agent deployments RunUmbrella checks.
+func (d *SkillBindingActionDispatcher) roster() TeamRosterReader { return teamRosterReader(d.store) }
 
 func NewSkillBindingActionDispatcher(store KernelStore, catalog *skill.Catalog, fallback ActionDispatcher, discovery ...skill.DiscoveryProvider) (*SkillBindingActionDispatcher, error) {
 	if store == nil || catalog == nil {
@@ -388,14 +396,21 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 		}
 		return nil, err
 	}
-	deploymentID, err := skillActionAgentDeployment(run)
+	member, err := skillActionMember(run)
 	if err != nil {
 		return nil, err
 	}
-	if input.Call.DeploymentID != deploymentID || input.Bound.Binding == nil || input.Bound.Binding.DeploymentID != deploymentID {
+	if input.Call.DeploymentID != member || input.Bound.Binding == nil || input.Bound.Binding.DeploymentID != member {
 		return nil, errors.New("skill management action cannot target another Agent deployment")
 	}
-	actor := skill.BindingActor{Type: "agent", ID: deploymentID}
+	// Every target is the run's umbrella: the Agent of a 1:1 chat, the Team
+	// of a Team chat, task or hand-off.
+	umbrella, err := RunUmbrella(ctx, d.roster(), run)
+	if err != nil {
+		return nil, err
+	}
+	deploymentID := umbrella.ID
+	actor := skill.BindingActor{Type: "agent", ID: member}
 	if input.Call.ApprovalID != "" {
 		approval, approvalErr := approvedSkillActionCheckpoint(ctx, d.store, input.Call)
 		if approvalErr != nil {
@@ -409,20 +424,20 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 		var result map[string]interface{}
 		switch input.Bound.Action.Name {
 		case SkillActionRequestSetup:
-			result, err = d.requestSkillSetup(ctx, input, run, deploymentID)
+			result, err = d.requestSkillSetup(ctx, input, run, member, umbrella)
 		case SkillActionRequestConnection:
-			result, err = d.requestConnection(ctx, input, run, deploymentID)
+			result, err = d.requestConnection(ctx, input, run, member, umbrella)
 		default:
-			result, err = d.requestCredential(ctx, input, run, deploymentID)
+			result, err = d.requestCredential(ctx, input, run, member, umbrella)
 		}
 		if err != nil && ctx.Err() == nil {
 			return interactionRequestRefusalResult(err), nil
 		}
 		return result, err
 	case SkillActionListSetupRequests:
-		return d.listSkillSetupRequests(ctx, run, deploymentID)
+		return d.listSkillSetupRequests(ctx, run, member, umbrella)
 	case SkillActionFindApps:
-		return d.findApps(ctx, input, run, deploymentID)
+		return d.findApps(ctx, input, run, umbrella)
 	case SkillActionDiscoverBinding:
 		if d.discovery == nil {
 			return nil, errors.New("authorized Skill discovery is unavailable")
@@ -463,8 +478,12 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
+		current, getErr := d.catalog.GetBinding(ctx, scope, deploymentID, args.BindingID)
+		if getErr != nil {
+			return nil, getErr
+		}
 		binding, upsertErr := d.catalog.UpsertBinding(ctx, skill.UpsertBindingRequest{
-			Binding: skillBindingCandidate(scope, deploymentID, args), ExpectedRevision: args.ExpectedRevision,
+			Binding: skillBindingCandidate(scope, deploymentID, args, current), ExpectedRevision: args.ExpectedRevision,
 			Actor: actor, Reason: "Approved Skill access change from conversation",
 		})
 		if errors.Is(upsertErr, skill.ErrBindingRevisionConflict) {
@@ -532,7 +551,11 @@ func resolveSkillBindingUpsert(ctx context.Context, catalog *skill.Catalog, scop
 	if current != nil && (current.SkillID != args.SkillID || current.SkillVersion != args.SkillVersion || current.SourceIdentity != args.SourceIdentity) {
 		return args, definition, current, errors.New("an existing binding's Skill identity requires a canonical Skill reference upgrade before configuration")
 	}
-	if err := validateSkillBindingArguments(definition, args); err != nil {
+	var credentials map[string]skill.CredentialReference
+	if current != nil {
+		credentials = current.Credentials
+	}
+	if err := validateSkillBindingArguments(definition, args, credentials); err != nil {
 		return args, definition, current, err
 	}
 	return args, definition, current, nil
@@ -563,8 +586,16 @@ func resolveSkillBindingDisable(ctx context.Context, catalog *skill.Catalog, sco
 	return args, current, nil
 }
 
-func validateSkillBindingArguments(definition *skill.Definition, args skillBindingUpsertArguments) error {
-	if len(args.AllowedActions) == 0 && !args.EnablePrompt && len(args.EnabledConversationAdapters) == 0 && len(args.AccessReferences) == 0 {
+// validateSkillBindingArguments checks a proposed upsert against the exact
+// definition. credentials are the saved binding's; a model cannot supply any.
+func validateSkillBindingArguments(definition *skill.Definition, args skillBindingUpsertArguments, credentials map[string]skill.CredentialReference) error {
+	// The canonical Catalog performs the same recursive validation at write
+	// time. Rejecting here prevents secret-shaped config from reaching approval
+	// previews or durable Action arguments.
+	if err := validateSkillActionNonSecretConfig(args.Config, ""); err != nil {
+		return err
+	}
+	if len(args.AllowedActions) == 0 && !args.EnablePrompt && len(args.EnabledConversationAdapters) == 0 && len(credentials) == 0 {
 		return errors.New("binding must enable a prompt or explicitly allow actions or conversation adapters")
 	}
 	if args.EnablePrompt && definition.Prompt == nil {
@@ -572,12 +603,12 @@ func validateSkillBindingArguments(definition *skill.Definition, args skillBindi
 	}
 	if args.EnablePrompt {
 		for _, requirement := range definition.Prompt.Credentials {
-			reference, exists := args.AccessReferences[requirement.Name]
+			reference, exists := credentials[requirement.Name]
 			if requirement.Optional && !exists {
 				continue
 			}
 			if !exists || strings.TrimSpace(reference.Kind) != requirement.Kind || strings.TrimSpace(reference.ID) == "" {
-				return fmt.Errorf("binding prompt requires opaque credential %s of kind %s", requirement.Name, requirement.Kind)
+				return fmt.Errorf("binding prompt needs a saved %s account (%s); call request_setup", requirement.Name, requirement.Kind)
 			}
 		}
 	}
@@ -593,12 +624,12 @@ func validateSkillBindingArguments(definition *skill.Definition, args skillBindi
 			return fmt.Errorf("binding action %s exceeds maximum risk", name)
 		}
 		for _, requirement := range action.Credentials {
-			reference, exists := args.AccessReferences[requirement.Name]
+			reference, exists := credentials[requirement.Name]
 			if requirement.Optional && !exists {
 				continue
 			}
 			if !exists || strings.TrimSpace(reference.Kind) != requirement.Kind || strings.TrimSpace(reference.ID) == "" {
-				return fmt.Errorf("binding action %s requires opaque credential %s of kind %s", name, requirement.Name, requirement.Kind)
+				return fmt.Errorf("binding action %s needs a saved %s account (%s); call request_setup", name, requirement.Name, requirement.Kind)
 			}
 		}
 	}
@@ -611,25 +642,14 @@ func validateSkillBindingArguments(definition *skill.Definition, args skillBindi
 		}
 		seenAdapters[adapterID] = true
 		for _, requirement := range adapter.Credentials {
-			reference, exists := args.AccessReferences[requirement.Name]
+			reference, exists := credentials[requirement.Name]
 			if requirement.Optional && !exists {
 				continue
 			}
 			if !exists || strings.TrimSpace(reference.Kind) != requirement.Kind || strings.TrimSpace(reference.ID) == "" {
-				return fmt.Errorf("binding conversation adapter %s requires opaque credential %s of kind %s", adapterID, requirement.Name, requirement.Kind)
+				return fmt.Errorf("binding conversation adapter %s needs a saved %s account (%s); call request_setup", adapterID, requirement.Name, requirement.Kind)
 			}
 		}
-	}
-	for name, reference := range args.AccessReferences {
-		if strings.TrimSpace(name) == "" || strings.TrimSpace(reference.Kind) == "" || strings.TrimSpace(reference.ID) == "" {
-			return errors.New("credential references require a name, kind, and opaque id")
-		}
-	}
-	// The canonical Catalog performs the same recursive validation at write
-	// time. Rejecting here prevents secret-shaped config from reaching approval
-	// previews or durable Action arguments.
-	if err := validateSkillActionNonSecretConfig(args.Config, ""); err != nil {
-		return err
 	}
 	return nil
 }
@@ -672,7 +692,14 @@ func exactSkillDefinition(ctx context.Context, catalog *skill.Catalog, id, versi
 	return definition, nil
 }
 
-func skillBindingCandidate(scope skill.ScopeReference, deploymentID string, args skillBindingUpsertArguments) *skill.Binding {
+// skillBindingCandidate is the binding a model-proposed upsert writes. A
+// model never adds, changes or removes credentials: the candidate keeps the
+// current binding's, and only a person's card or route attaches them.
+func skillBindingCandidate(scope skill.ScopeReference, deploymentID string, args skillBindingUpsertArguments, current *skill.Binding) *skill.Binding {
+	var credentials map[string]skill.CredentialReference
+	if current != nil {
+		credentials = cloneCredentialReferences(current.Credentials)
+	}
 	allowed := append([]string(nil), args.AllowedActions...)
 	sort.Strings(allowed)
 	adapters := append([]string(nil), args.EnabledConversationAdapters...)
@@ -681,11 +708,13 @@ func skillBindingCandidate(scope skill.ScopeReference, deploymentID string, args
 		ID: args.BindingID, Scope: scope, DeploymentID: deploymentID,
 		SkillID: args.SkillID, SkillVersion: args.SkillVersion, SourceIdentity: args.SourceIdentity,
 		AllowedActions: allowed, EnablePrompt: args.EnablePrompt, EnabledConversationAdapters: adapters, MaximumRisk: args.MaximumRisk,
-		ArgumentRestrictions: args.ArgumentRestrictions, Credentials: args.AccessReferences, Config: args.Config,
+		ArgumentRestrictions: args.ArgumentRestrictions, Credentials: credentials, Config: args.Config,
 	}
 }
 
-func skillActionAgentDeployment(run *AgentRun) (string, error) {
+// skillActionMember is the acting member: the Agent whose own management
+// binding the action runs through.
+func skillActionMember(run *AgentRun) (string, error) {
 	if run == nil {
 		return "", errors.New("Agent Run is required")
 	}
@@ -730,7 +759,7 @@ func (d *SkillBindingActionDispatcher) replayedUpsert(ctx context.Context, scope
 	if err != nil {
 		return nil, err
 	}
-	candidate := skillBindingCandidate(scope, deploymentID, args)
+	candidate := skillBindingCandidate(scope, deploymentID, args, current)
 	if current == nil || current.Disabled || !sameManagedSkillBinding(current, candidate) {
 		return nil, skill.ErrBindingRevisionConflict
 	}

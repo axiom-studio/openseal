@@ -122,7 +122,7 @@ func (f *latestSetupTestFixture) snapshotBindings(t *testing.T) [][]*skill.Bindi
 func (f *latestSetupTestFixture) request(t *testing.T, callID string, args map[string]interface{}) (*SkillSetupRequest, map[string]interface{}, error) {
 	t.Helper()
 	before := f.snapshotBindings(t)
-	result, err := f.dispatcher.requestSkillSetup(f.ctx, ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: f.scope, RunID: f.run.ID}, Arguments: args}, f.run, "agent")
+	result, err := f.dispatcher.requestSkillSetup(f.ctx, ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: f.scope, RunID: f.run.ID}, Arguments: args}, f.run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if after := f.snapshotBindings(t); !reflect.DeepEqual(before, after) {
 		t.Fatalf("setup changed account authority:\nbefore %#v\nafter %#v", before, after)
 	}

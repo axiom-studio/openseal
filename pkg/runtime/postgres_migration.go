@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 70
+const currentPostgresSchemaVersion int64 = 72
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {

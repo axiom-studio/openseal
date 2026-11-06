@@ -7,7 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 func TestNormalizeCredentialRequestWebsite(t *testing.T) {
@@ -31,7 +34,7 @@ func TestNormalizeCredentialRequestWebsite(t *testing.T) {
 
 func credentialRequestFixture() *CredentialRequest {
 	now := time.Now().UTC()
-	return &CredentialRequest{ID: "credential-request:call", Scope: Scope{Kind: "tenant", ID: "a"}, DeploymentID: "agent", ConversationID: "chat",
+	return &CredentialRequest{ID: "credential-request:call", Scope: Scope{Kind: "tenant", ID: "a"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat",
 		TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: CredentialRequestKindWebsiteLogin, Website: "https://www.amazon.in",
 		Reason: "Add your amazon.in login", Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 }
@@ -106,7 +109,7 @@ func proposeInteraction(t *testing.T, ctx context.Context, store *MemoryStore, c
 	if err != nil || run.ID != created.ID {
 		t.Fatal(err)
 	}
-	validator, _ := NewSkillBindingActionValidator(catalog)
+	validator, _ := NewSkillBindingActionValidator(catalog, store)
 	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker",
 		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: action, Arguments: arguments, Summary: "Ask the user"})
 	if err != nil || proposal.Approval != nil || proposal.Call.Status != ActionCallStatusReady {
@@ -184,7 +187,7 @@ func TestRepeatedRefusedSetupIsNotRetriedInTheSameRun(t *testing.T) {
 	refused := &ActionCall{ID: "refused", Scope: scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, Action: SkillActionRequestSetup,
 		Status: ActionCallStatusSucceeded, Arguments: args, Output: interactionRequestRefusalResult(refuseInteraction("not available"))}
 	store.actions[portfolioKey(scope, refused.ID)] = refused
-	_, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent")
+	_, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	var refusal *interactionRequestRefusal
 	if !errors.As(err, &refusal) {
 		t.Fatalf("repeated refused setup: %v", err)
@@ -202,4 +205,54 @@ func mustConversationChanges(t *testing.T, ctx context.Context, store *MemorySto
 		return nil, err
 	}
 	return service.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: "chat"})
+}
+
+// A member asking in a Team chat saves the request to the Team, stamped with
+// the member that asked; the member's own umbrella never sees it.
+func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
+	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
+	crew := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
+	if err := store.CreateTeamDeployment(ctx, &kernelteam.Deployment{ID: crew.ID, Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
+		Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "agent", RoleID: "member", AgentDeploymentID: "agent"}}}, workforce.DefinitionActivation{}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: crew, AssignedAgentID: "agent",
+		Goal: "Order a cable", Source: RunSourceChat, Context: map[string]interface{}{"conversationId": "team-chat", "triggerMessageId": "message"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || run.ID != created.ID {
+		t.Fatal(err)
+	}
+	validator, _ := NewSkillBindingActionValidator(catalog, store)
+	if _, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker",
+		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestCredential,
+		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}); err != nil {
+		t.Fatal(err)
+	}
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	if err != nil || executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
+		t.Fatalf("credential action: %#v %v", executed, err)
+	}
+	requests, err := store.ListCredentialRequests(ctx, scope, crew.ID, "team-chat")
+	if err != nil || len(requests) != 1 || requests[0].Owner != crew || requests[0].DeploymentID != crew.ID || requests[0].AgentID != "agent" || requests[0].RunID != run.ID {
+		t.Fatalf("Team requests = %#v, %v", requests, err)
+	}
+	if own, err := store.ListCredentialRequests(ctx, scope, "agent", "team-chat"); err != nil || len(own) != 0 {
+		t.Fatalf("member requests = %#v, %v", own, err)
+	}
+	parked, err := store.GetAgentRun(ctx, scope, run.ID)
+	if err != nil || !IsExactCredentialRequestWait(parked, requests[0].ID) {
+		t.Fatalf("run not parked on the Team request: %#v %v", parked, err)
+	}
+	// A member removed from the Team can no longer act under it.
+	team, _ := store.GetTeamDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, crew.ID)
+	team.Roster, team.Revision = []kernelteam.RosterAssignment{{ID: "other", RoleID: "member", AgentDeploymentID: "other"}}, 2
+	if err := store.UpdateTeamDeployment(ctx, team, 1, workforce.DefinitionActivation{}); err != nil {
+		t.Fatal(err)
+	}
+	if resumable, err := InteractionRunResumable(ctx, store, parked, crew, "agent"); err != nil || resumable {
+		t.Fatalf("removed member resumable = %v, %v", resumable, err)
+	}
 }

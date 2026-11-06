@@ -39,25 +39,30 @@ var ErrInvalidCredentialRequest = errors.New("invalid credential request")
 // host decides what evidence completes it (a matching vault credential saved
 // after the request); the kernel only records the outcome and wakes the Run.
 type CredentialRequest struct {
-	ID               string    `json:"id"`
-	Scope            Scope     `json:"scope"`
-	DeploymentID     string    `json:"deploymentId"`
-	ConversationID   string    `json:"conversationId"`
-	TriggerMessageID string    `json:"triggerMessageId"`
-	RunID            string    `json:"runId"`
-	ActionCallID     string    `json:"actionCallId"`
-	Kind             string    `json:"kind"`
-	Website          string    `json:"website,omitempty"`
-	Reason           string    `json:"reason"`
-	Status           string    `json:"status"`
-	Revision         int64     `json:"revision"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
-	ResolvedBy       string    `json:"resolvedBy,omitempty"`
+	ID    string `json:"id"`
+	Scope Scope  `json:"scope"`
+	// Owner is the umbrella of the requesting chat; DeploymentID is Owner.ID
+	// and AgentID the acting member, as on SkillSetupRequest.
+	Owner            ObjectiveOwner `json:"owner"`
+	DeploymentID     string         `json:"deploymentId"`
+	AgentID          string         `json:"agentId"`
+	ConversationID   string         `json:"conversationId"`
+	TriggerMessageID string         `json:"triggerMessageId"`
+	RunID            string         `json:"runId"`
+	ActionCallID     string         `json:"actionCallId"`
+	Kind             string         `json:"kind"`
+	Website          string         `json:"website,omitempty"`
+	Reason           string         `json:"reason"`
+	Status           string         `json:"status"`
+	Revision         int64          `json:"revision"`
+	CreatedAt        time.Time      `json:"createdAt"`
+	UpdatedAt        time.Time      `json:"updatedAt"`
+	ResolvedBy       string         `json:"resolvedBy,omitempty"`
 }
 
 func (r *CredentialRequest) Validate() error {
-	if r == nil || r.Scope.Validate() != nil || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.Before(r.CreatedAt) {
+	if r == nil || r.Scope.Validate() != nil || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.Before(r.CreatedAt) ||
+		validateInteractionUmbrella(r.Owner, r.DeploymentID, r.AgentID) != nil {
 		return ErrInvalidCredentialRequest
 	}
 	for _, value := range []string{r.ID, r.DeploymentID, r.ConversationID, r.TriggerMessageID, r.RunID, r.ActionCallID} {
@@ -186,7 +191,7 @@ func decodeCredentialRequestArguments(arguments map[string]interface{}) (credent
 	return a, nil
 }
 
-func (d *SkillBindingActionDispatcher) requestCredential(ctx context.Context, input ActionDispatchInput, run *AgentRun, deploymentID string) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) requestCredential(ctx context.Context, input ActionDispatchInput, run *AgentRun, member string, umbrella ObjectiveOwner) (map[string]interface{}, error) {
 	a, err := decodeCredentialRequestArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -195,7 +200,7 @@ func (d *SkillBindingActionDispatcher) requestCredential(ctx context.Context, in
 	if !ok {
 		return nil, refuseInteraction("in-chat credential requests are unavailable on this host")
 	}
-	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, deploymentID)
+	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, member, umbrella)
 	if err != nil {
 		return nil, refuseInteraction("a credential can only be requested from a conversation with the user")
 	}
@@ -205,18 +210,19 @@ func (d *SkillBindingActionDispatcher) requestCredential(ctx context.Context, in
 	} else if existing != nil {
 		return credentialRequestResult(existing)
 	}
-	// The same unanswered card is reused rather than shown twice.
-	current, err := store.ListCredentialRequests(ctx, run.Scope, deploymentID, conversationID)
+	// The same unanswered card in this chat's umbrella is reused rather than
+	// shown twice, whichever member asked.
+	current, err := store.ListCredentialRequests(ctx, run.Scope, umbrella.ID, conversationID)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range current {
-		if r.Status == CredentialRequestStatusPending && r.RunID == run.ID && r.Kind == a.Kind && r.Website == a.Website {
+		if r.Status == CredentialRequestStatusPending && r.Kind == a.Kind && r.Website == a.Website {
 			return credentialRequestResult(r)
 		}
 	}
 	now := time.Now().UTC()
-	r := &CredentialRequest{ID: id, Scope: run.Scope, DeploymentID: deploymentID, ConversationID: conversationID, TriggerMessageID: messageID,
+	r := &CredentialRequest{ID: id, Scope: run.Scope, Owner: umbrella, DeploymentID: umbrella.ID, AgentID: member, ConversationID: conversationID, TriggerMessageID: messageID,
 		RunID: run.ID, ActionCallID: input.Call.ID, Kind: a.Kind, Website: a.Website, Reason: strings.TrimSpace(a.Reason),
 		Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveCredentialRequest(ctx, r, 0); err != nil {

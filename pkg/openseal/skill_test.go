@@ -89,7 +89,8 @@ func TestEngineExposesCanonicalSkillBindingManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 	scope := SkillScope{Kind: "tenant", ID: "one"}
-	created, err := engine.UpsertSkillBinding(ctx, UpsertSkillBindingRequest{
+	owner := ensureTestAgent(t, engine, scope, "agent")
+	created, err := engine.UpsertOwnerSkillBinding(ctx, owner, UpsertSkillBindingRequest{
 		Binding: &SkillBinding{ID: "reader", Scope: scope, DeploymentID: "agent", SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: SkillRiskRead},
 		Actor:   SkillBindingActor{Type: "user", ID: "admin"}, Reason: "assign reader",
 	})
@@ -100,18 +101,30 @@ func TestEngineExposesCanonicalSkillBindingManagement(t *testing.T) {
 	if err != nil || len(values) != 1 {
 		t.Fatalf("binding list = %#v, %v", values, err)
 	}
-	disabled, err := engine.DisableSkillBinding(ctx, DisableSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "retire reader"})
+	if _, err := engine.UpsertOwnerSkillBinding(ctx, ObjectiveOwner{Type: OwnerTypeTeam, ID: "agent"}, UpsertSkillBindingRequest{
+		Binding: &SkillBinding{ID: "other", Scope: scope, DeploymentID: "agent", SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: SkillRiskRead},
+		Actor:   SkillBindingActor{Type: "user", ID: "admin"}, Reason: "wrong owner kind",
+	}); err == nil {
+		t.Fatal("an Agent's binding was saved as a Team's")
+	}
+	if _, err := engine.UpsertOwnerSkillBinding(ctx, agentOwner("ghost"), UpsertSkillBindingRequest{
+		Binding: &SkillBinding{ID: "other", Scope: scope, DeploymentID: "ghost", SkillID: "reader", SkillVersion: "1", AllowedActions: []string{"read"}, MaximumRisk: SkillRiskRead},
+		Actor:   SkillBindingActor{Type: "user", ID: "admin"}, Reason: "unknown owner",
+	}); err == nil {
+		t.Fatal("a binding was saved to an unknown umbrella")
+	}
+	disabled, err := engine.DisableOwnerSkillBinding(ctx, owner, DisableSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "retire reader"})
 	if err != nil || !disabled.Disabled || disabled.Revision != 2 {
 		t.Fatalf("disabled binding = %#v, %v", disabled, err)
 	}
-	deleted, err := engine.DeleteSkillBinding(ctx, DeleteSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 2, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "remove reader"})
+	deleted, err := engine.DeleteOwnerSkillBinding(ctx, owner, DeleteSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 2, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "remove reader"})
 	if err != nil || deleted.Lifecycle[len(deleted.Lifecycle)-1].Action != SkillBindingLifecycleDeleted {
 		t.Fatalf("deleted binding = %#v, %v", deleted, err)
 	}
 	if values, err := engine.ListSkillBindings(ctx, scope, "agent"); err != nil || len(values) != 0 {
 		t.Fatalf("bindings after delete = %#v, %v", values, err)
 	}
-	if _, err := engine.DeleteTeamSkillBinding(ctx, "team", DeleteSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "remove"}); err == nil {
+	if _, err := engine.DeleteOwnerSkillBinding(ctx, ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, DeleteSkillBindingRequest{Scope: scope, DeploymentID: "agent", BindingID: "reader", ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "admin"}, Reason: "remove"}); err == nil {
 		t.Fatal("Team delete accepted another owner's binding")
 	}
 }

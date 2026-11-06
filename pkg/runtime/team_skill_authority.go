@@ -27,10 +27,10 @@ type TeamSkillAuthorityCatalog interface {
 	GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error)
 }
 
-// AuthorizeTeamSkillActivation intersects an immutable Team Skill snapshot
-// with the assigned Agent's immutable semantic-role grant. A roster assignment
-// is not itself authority: the active role must explicitly grant the exact
-// Skill version, actions, prompt visibility, and maximum risk.
+// AuthorizeTeamSkillActivation projects an immutable Team Skill snapshot to
+// the run's acting member. Every active roster member gets every Team
+// binding as the binding itself allows; the Team's Skill allowlist and the
+// risk ceilings of the Team and of the member Agent still apply.
 func AuthorizeTeamSkillActivation(ctx context.Context, catalog TeamSkillAuthorityCatalog, run *AgentRun, snapshot *skill.ActivationSnapshot) (*skill.ActivationSnapshot, error) {
 	authority, err := resolveTeamSkillAuthority(ctx, catalog, run)
 	if err != nil {
@@ -43,47 +43,41 @@ func AuthorizeTeamSkillActivation(ctx context.Context, catalog TeamSkillAuthorit
 	result.Skills = make([]skill.ActivatedSkill, 0, len(snapshot.Skills))
 	result.Unavailable = make([]skill.UnavailableSkill, 0, len(snapshot.Unavailable))
 	for _, activated := range snapshot.Skills {
-		grant, ok := authority.grants[teamSkillIdentity(activated.SkillID, activated.SkillVersion, activated.SourceIdentity).Key()]
-		if !ok || !authority.skillAllowed(grant, activated.SkillID) {
+		if !authority.skillAllowed(activated.SkillID) {
 			continue
 		}
 		projected := activated
 		projected.Actions = nil
 		for _, action := range activated.Actions {
-			if teamSkillGrantAllowsAction(grant, action.Action, action.Risk) && authority.allowsRisk(action.Risk) {
+			if authority.allowsRisk(action.Risk) {
 				action.DeploymentID = authority.deployment.ID
 				projected.Actions = append(projected.Actions, action)
 			}
-		}
-		if !grant.EnablePrompt {
-			projected.Prompt = nil
 		}
 		if projected.Prompt != nil || len(projected.Actions) > 0 {
 			result.Skills = append(result.Skills, projected)
 		}
 	}
 	for _, unavailable := range snapshot.Unavailable {
-		grant, granted := authority.grants[teamSkillIdentity(unavailable.SkillID, unavailable.SkillVersion, unavailable.SourceIdentity).Key()]
-		if granted && authority.skillAllowed(grant, unavailable.SkillID) {
+		if authority.skillAllowed(unavailable.SkillID) {
 			result.Unavailable = append(result.Unavailable, unavailable)
 		}
 	}
 	payload, _ := json.Marshal(struct {
 		SnapshotID         string                   `json:"snapshotId"`
 		DeploymentRevision int64                    `json:"deploymentRevision"`
-		AssignmentID       string                   `json:"assignmentId"`
-		RoleID             string                   `json:"roleId"`
+		MemberID           string                   `json:"memberId"`
 		Skills             []skill.ActivatedSkill   `json:"skills"`
 		Unavailable        []skill.UnavailableSkill `json:"unavailable,omitempty"`
-	}{snapshot.SnapshotID, authority.deployment.Revision, authority.assignment.ID, authority.assignment.RoleID, result.Skills, result.Unavailable})
+	}{snapshot.SnapshotID, authority.deployment.Revision, authority.agent.ID, result.Skills, result.Unavailable})
 	digest := sha256.Sum256(payload)
 	result.SnapshotID = "sha256:" + hex.EncodeToString(digest[:])
 	return &result, nil
 }
 
-// TeamSkillActionValidator rechecks durable membership and role authority at
+// TeamSkillActionValidator rechecks durable membership and Team authority at
 // proposal time. This closes the gap between turn snapshot creation and action
-// persistence if a roster, role grant, or Team status changes concurrently.
+// persistence if a roster or Team status changes concurrently.
 type TeamSkillActionValidator struct{ catalog TeamSkillAuthorityCatalog }
 
 func NewTeamSkillActionValidator(catalog TeamSkillAuthorityCatalog) (*TeamSkillActionValidator, error) {
@@ -112,14 +106,17 @@ func (v *TeamSkillActionValidator) ValidateActionProposal(ctx context.Context, i
 		return nil, err
 	}
 	if binding.DeploymentID == input.Run.AssignedAgentID {
-		return nil, nil // the Agent's own binding remains Agent-scoped authority
+		// A member's own connections never enter its Team's runs.
+		if skill.BindingHoldsConnection(binding) {
+			return nil, fmt.Errorf("Team Run cannot use the member's own connection %s; connect it to the Team", binding.ID)
+		}
+		return nil, nil
 	}
 	if binding.DeploymentID != input.Run.Owner.ID {
 		return nil, errors.New("Team Run cannot use a Skill binding owned outside its Agent or Team")
 	}
-	grant, ok := authority.grants[teamSkillIdentity(binding.SkillID, binding.SkillVersion, binding.SourceIdentity).Key()]
-	if !ok || !authority.skillAllowed(grant, binding.SkillID) || !teamSkillGrantAllowsAction(grant, input.Bound.Action.Name, input.Bound.Action.Risk) || !authority.allowsRisk(input.Bound.Action.Risk) {
-		return nil, fmt.Errorf("Team role %s is not authorized for %s.%s", authority.assignment.RoleID, binding.SkillID, input.Bound.Action.Name)
+	if !authority.skillAllowed(binding.SkillID) || !authority.allowsRisk(input.Bound.Action.Risk) {
+		return nil, fmt.Errorf("Team %s does not allow %s.%s", authority.deployment.ID, binding.SkillID, input.Bound.Action.Name)
 	}
 	return nil, nil
 }
@@ -162,8 +159,6 @@ type teamSkillAuthority struct {
 	definition      *kernelteam.Definition
 	agent           *kernelagent.AgentDeployment
 	agentDefinition *kernelagent.AgentDefinition
-	assignment      kernelteam.RosterAssignment
-	grants          map[string]kernelteam.RoleSkillGrant
 }
 
 func resolveTeamSkillAuthority(ctx context.Context, catalog TeamSkillAuthorityCatalog, run *AgentRun) (*teamSkillAuthority, error) {
@@ -182,15 +177,9 @@ func resolveTeamSkillAuthority(ctx context.Context, catalog TeamSkillAuthorityCa
 	if err != nil || definition == nil {
 		return nil, fmt.Errorf("resolve active Team definition: %w", err)
 	}
-	var assignment *kernelteam.RosterAssignment
-	for index := range deployment.Roster {
-		if deployment.Roster[index].AgentDeploymentID == run.AssignedAgentID {
-			copy := deployment.Roster[index]
-			assignment = &copy
-			break
-		}
-	}
-	if assignment == nil {
+	if !slices.ContainsFunc(deployment.Roster, func(assignment kernelteam.RosterAssignment) bool {
+		return assignment.AgentDeploymentID == run.AssignedAgentID
+	}) {
 		return nil, errors.New("assigned Agent is not a member of the owning Team")
 	}
 	agentDeployment, err := catalog.GetAgentDeployment(ctx, scope, run.AssignedAgentID)
@@ -204,63 +193,17 @@ func resolveTeamSkillAuthority(ctx context.Context, catalog TeamSkillAuthorityCa
 	if err != nil || agentDefinition == nil {
 		return nil, fmt.Errorf("resolve assigned Agent definition: %w", err)
 	}
-	var role *kernelteam.RoleSlot
-	for index := range definition.Roles {
-		if definition.Roles[index].ID == assignment.RoleID {
-			copy := definition.Roles[index]
-			role = &copy
-			break
-		}
-	}
-	if role == nil {
-		return nil, errors.New("assigned Agent role is absent from the active Team definition")
-	}
-	grants := make(map[string]kernelteam.RoleSkillGrant, len(role.SkillGrants))
-	for _, grant := range role.SkillGrants {
-		grants[grant.ExactIdentity().Key()] = grant
-	}
-	grantTeamProfileToMember(grants)
-	return &teamSkillAuthority{deployment: deployment, definition: definition, agent: agentDeployment, agentDefinition: agentDefinition, assignment: *assignment, grants: grants}, nil
+	return &teamSkillAuthority{deployment: deployment, definition: definition, agent: agentDeployment, agentDefinition: agentDefinition}, nil
 }
 
-// grantTeamProfileToMember lets every roster member propose a change to its
-// own Team's name and description, the way every Agent may propose changes
-// to its own profile. The action is always reviewed, so the change applies
-// only after a person approves it; allowlists and risk bounds still apply.
-func grantTeamProfileToMember(grants map[string]kernelteam.RoleSkillGrant) {
-	grant := kernelteam.RoleSkillGrant{SkillID: TeamManagementSkillID, SkillVersion: TeamManagementSkillVersion}
-	key := grant.ExactIdentity().Key()
-	if existing, ok := grants[key]; ok {
-		grant = existing
-		grant.AllowedActions = append([]string(nil), existing.AllowedActions...)
-	}
-	if !slices.Contains(grant.AllowedActions, TeamActionUpdateProfile) {
-		grant.AllowedActions = append(grant.AllowedActions, TeamActionUpdateProfile)
-	}
-	if grant.MaximumRisk == "" || teamSkillRiskRank(grant.MaximumRisk) < teamSkillRiskRank(capability.RiskLevelWrite) {
-		grant.MaximumRisk = capability.RiskLevelWrite
-	}
-	grants[key] = grant
-}
-
-func (a *teamSkillAuthority) skillAllowed(grant kernelteam.RoleSkillGrant, skillID string) bool {
-	identifiers := map[string]bool{strings.TrimSpace(skillID): true, strings.TrimSpace(grant.CatalogID): true}
-	for _, allowlist := range [][]string{a.deployment.Restrictions.AllowedSkillIDs, a.agentDefinition.Authority.AllowedSkillIDs, a.agent.Restrictions.AllowedSkillIDs} {
-		if len(allowlist) == 0 {
-			continue
-		}
-		allowed := false
-		for _, candidate := range allowlist {
-			if identifiers[strings.TrimSpace(candidate)] {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return false
-		}
-	}
-	return true
+// skillAllowed applies the Team deployment's Skill allowlist. The member
+// Agent's allowlists do not narrow Team bindings: every member uses every
+// Team connection.
+func (a *teamSkillAuthority) skillAllowed(skillID string) bool {
+	allowlist := a.deployment.Restrictions.AllowedSkillIDs
+	return len(allowlist) == 0 || slices.ContainsFunc(allowlist, func(candidate string) bool {
+		return strings.TrimSpace(candidate) == strings.TrimSpace(skillID)
+	})
 }
 
 func (a *teamSkillAuthority) allowsRisk(risk capability.RiskLevel) bool {
@@ -275,22 +218,6 @@ func (a *teamSkillAuthority) allowsRisk(risk capability.RiskLevel) bool {
 		}
 	}
 	return teamSkillRiskRank(risk) <= teamSkillRiskRank(maximum)
-}
-
-func teamSkillGrantAllowsAction(g kernelteam.RoleSkillGrant, action string, risk capability.RiskLevel) bool {
-	if teamSkillRiskRank(risk) > teamSkillRiskRank(g.MaximumRisk) {
-		return false
-	}
-	for _, allowed := range g.AllowedActions {
-		if allowed == action {
-			return true
-		}
-	}
-	return false
-}
-
-func teamSkillIdentity(id, version, sourceIdentity string) capability.SkillIdentity {
-	return capability.NewSkillIdentity(id, version, sourceIdentity)
 }
 
 func teamSkillRiskRank(risk capability.RiskLevel) int {

@@ -1246,9 +1246,6 @@ func TestSQLiteWorkforceApplyResolvesCatalogAliasIntoExactTeamGrantAcrossRestart
 	agentDefinition.SkillRequirements = []agent.SkillRequirement{{SkillID: catalogID, VersionConstraint: "1.0.0", RequiredActions: []string{"execute"}}}
 	agentDefinition.Authority.AllowedSkillIDs = []string{catalogID}
 	value.Result.Candidate.Team.Roles[0].RequiredSkillIDs = []string{catalogID}
-	value.Result.Candidate.Team.Roles[0].SkillGrants = []team.RoleSkillGrant{{
-		SkillID: catalogID, SkillVersion: "1.0.0", AllowedActions: []string{"execute"}, EnablePrompt: true, MaximumRisk: capability.RiskLevelRead,
-	}}
 	value.Catalog = authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
 		catalogID: {ID: catalogID, Version: "1.0.0", Actions: []string{"execute"}, PromptAvailable: true, MaximumRisk: capability.RiskLevelRead},
 	}}
@@ -1278,29 +1275,18 @@ func TestSQLiteWorkforceApplyResolvesCatalogAliasIntoExactTeamGrantAcrossRestart
 		t.Fatalf("resolved Agent definition = %#v, %v", storedAgent, err)
 	}
 	storedTeam, err := teams.GetDefinition(ctx, "team", "1")
-	if err != nil || len(storedTeam.Roles[0].SkillGrants) != 1 {
+	if err != nil || storedTeam.Roles[0].RequiredSkillIDs[0] != definitionID {
 		t.Fatalf("resolved Team definition = %#v, %v", storedTeam, err)
-	}
-	grant := storedTeam.Roles[0].SkillGrants[0]
-	if grant.CatalogID != catalogID || !grant.ExactIdentity().Equal(identity) || storedTeam.Roles[0].RequiredSkillIDs[0] != definitionID {
-		t.Fatalf("exact persisted Team grant = %#v", grant)
 	}
 	bindings, err := restored.ListSkillBindings(ctx, value.Scope, "agent-live")
 	if err != nil || len(bindings) != 1 || bindings[0].EnablePrompt || !capability.NewSkillIdentity(bindings[0].SkillID, bindings[0].SkillVersion, bindings[0].SourceIdentity).Equal(identity) {
 		t.Fatalf("exact persisted binding = %#v, %v", bindings, err)
 	}
+	// Teams hold only the connections people make for them; authoring never
+	// copies a member's binding onto its Team.
 	teamBindings, err := restored.ListSkillBindings(ctx, value.Scope, "team-live")
-	if err != nil || len(teamBindings) != 1 || teamBindings[0].DeploymentID != "team-live" ||
-		!capability.NewSkillIdentity(teamBindings[0].SkillID, teamBindings[0].SkillVersion, teamBindings[0].SourceIdentity).Equal(identity) ||
-		len(teamBindings[0].AllowedActions) != 1 || teamBindings[0].AllowedActions[0] != "execute" || !teamBindings[0].EnablePrompt {
-		t.Fatalf("exact persisted Team binding = %#v, %v", teamBindings, err)
-	}
-	foundTeamBinding := false
-	for _, resource := range applied.ApplyReceipt.Resources {
-		foundTeamBinding = foundTeamBinding || resource.Kind == "skill_binding" && resource.ID == "workforce:team-live:"+catalogID
-	}
-	if !foundTeamBinding {
-		t.Fatalf("Team binding missing from apply receipt: %#v", applied.ApplyReceipt.Resources)
+	if err != nil || len(teamBindings) != 0 {
+		t.Fatalf("authored Team bindings = %#v, %v", teamBindings, err)
 	}
 }
 

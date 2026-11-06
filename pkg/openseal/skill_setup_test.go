@@ -25,27 +25,27 @@ func TestSkillSetupResolutionRequiresExactSavedBindingAndPersists(t *testing.T) 
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	request := &SkillSetupRequest{ID: "request", Scope: scope, DeploymentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: "reauthorize", SkillID: "github", SkillVersion: "1.0.0", SkillName: "GitHub", BindingID: "github", BindingRevision: 1, Reason: "Read your repository", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
+	request := &SkillSetupRequest{ID: "request", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: "reauthorize", SkillID: "github", SkillVersion: "1.0.0", SkillName: "GitHub", BindingID: "github", BindingRevision: 1, Reason: "Read your repository", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.ResolveSkillSetupRequest(ctx, scope, "agent", request.ID, 1, "github", "user", false); err == nil {
+	if _, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", "user", false); err == nil {
 		t.Fatal("unchanged connection resolved request")
 	}
-	if _, err := e.ResolveSkillSetupRequest(ctx, Scope{Kind: "tenant", ID: "other"}, "agent", request.ID, 1, "github", "user", false); err == nil {
+	if _, err := e.ResolveSkillSetupRequest(ctx, Scope{Kind: "tenant", ID: "other"}, agentOwner("agent"), request.ID, 1, "github", "user", false); err == nil {
 		t.Fatal("cross-tenant resolution")
 	}
-	if _, err := e.ResolveSkillSetupRequest(ctx, scope, "other-agent", request.ID, 1, "github", "user", false); err == nil {
+	if _, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("other-agent"), request.ID, 1, "github", "user", false); err == nil {
 		t.Fatal("cross-agent resolution")
 	}
-	if _, err := e.UpsertSkillBinding(ctx, UpsertSkillBindingRequest{Binding: binding, ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "user"}, Reason: "Reconnect requested account"}); err != nil {
+	if _, err := e.UpsertOwnerSkillBinding(ctx, ensureTestAgent(t, e, skillScope, "agent"), UpsertSkillBindingRequest{Binding: binding, ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "user"}, Reason: "Reconnect requested account"}); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := e.ResolveSkillSetupRequest(ctx, scope, "agent", request.ID, 1, "github", "user", false)
+	resolved, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", "user", false)
 	if err != nil || resolved.Status != "resolved" || resolved.ResolvedBindingRevision != 2 {
 		t.Fatalf("resolution: %#v %v", resolved, err)
 	}
-	replay, err := e.ResolveSkillSetupRequest(ctx, scope, "agent", request.ID, 1, "github", "user", false)
+	replay, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", "user", false)
 	if err != nil || replay.Revision != 2 {
 		t.Fatalf("resolution not idempotent: %#v %v", replay, err)
 	}
@@ -61,10 +61,10 @@ func TestSkillSetupResolutionRequiresExactSavedBindingAndPersists(t *testing.T) 
 		t.Fatal(err)
 	}
 	current, _ := e.GetSkillBinding(ctx, skillScope, "agent", "github")
-	if _, err := e.UpsertSkillBinding(ctx, UpsertSkillBindingRequest{Binding: current, ExpectedRevision: 2, Actor: SkillBindingActor{Type: "user", ID: "user"}, Reason: "Updated in Settings"}); err != nil {
+	if _, err := e.UpsertOwnerSkillBinding(ctx, ensureTestAgent(t, e, skillScope, "agent"), UpsertSkillBindingRequest{Binding: current, ExpectedRevision: 2, Actor: SkillBindingActor{Type: "user", ID: "user"}, Reason: "Updated in Settings"}); err != nil {
 		t.Fatal(err)
 	}
-	requests, err := e.ListSkillSetupRequests(ctx, scope, "agent", "chat")
+	requests, err := e.ListSkillSetupRequests(ctx, scope, agentOwner("agent"), "chat")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestCompletedSkillSetupDoesNotReappearInConversationChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	request := &SkillSetupRequest{ID: "request", Scope: scope, DeploymentID: "agent", ConversationID: conversation.ID, TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: "reauthorize", SkillID: "github", SkillVersion: "1.0.0", SkillName: "GitHub", BindingID: "github", BindingRevision: 1, Reason: "Reconnect GitHub", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
+	request := &SkillSetupRequest{ID: "request", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: conversation.ID, TriggerMessageID: "message", RunID: "run", ActionCallID: "call", Kind: "reauthorize", SkillID: "github", SkillVersion: "1.0.0", SkillName: "GitHub", BindingID: "github", BindingRevision: 1, Reason: "Reconnect GitHub", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestCompletedSkillSetupDoesNotReappearInConversationChanges(t *testing.T) {
 	if err != nil || len(initial.SkillSetupRequests) != 1 || initial.SkillSetupRequests[0].Status != "pending" {
 		t.Fatalf("pending setup: %#v %v", initial, err)
 	}
-	if _, err := e.UpsertSkillBinding(ctx, UpsertSkillBindingRequest{Binding: binding, ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "user"}, Reason: "Reconnected in Settings"}); err != nil {
+	if _, err := e.UpsertOwnerSkillBinding(ctx, ensureTestAgent(t, e, skillScope, "agent"), UpsertSkillBindingRequest{Binding: binding, ExpectedRevision: 1, Actor: SkillBindingActor{Type: "user", ID: "user"}, Reason: "Reconnected in Settings"}); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := store.GetSkillSetupRequest(ctx, scope, request.ID)
@@ -121,7 +121,7 @@ func TestCompletedSkillSetupDoesNotReappearInConversationChanges(t *testing.T) {
 		t.Fatalf("completed setup: %#v %v", completed, err)
 	}
 	// The chat form's own confirmation after the save stays idempotent.
-	if confirmed, err := e.ResolveSkillSetupRequest(ctx, scope, "agent", request.ID, 1, "github", "user", false); err != nil || confirmed.Status != "resolved" {
+	if confirmed, err := e.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, "github", "user", false); err != nil || confirmed.Status != "resolved" {
 		t.Fatalf("form confirmation: %#v %v", confirmed, err)
 	}
 	fresh, err := e.ListConversationChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})

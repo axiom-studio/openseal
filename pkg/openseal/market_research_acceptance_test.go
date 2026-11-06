@@ -337,13 +337,7 @@ func composeResearchWorkforce(
 	roles := []TeamRoleSlot{
 		{ID: "researcher", DisplayName: "Researcher", Purpose: "Collect evidence", MinimumMembers: 1},
 		{ID: "analyst", DisplayName: "Analyst", Purpose: "Synthesize cited findings", MinimumMembers: 1},
-		{
-			ID: "publisher", DisplayName: "Publisher", Purpose: "Deliver reviewed reports", MinimumMembers: 1,
-			SkillGrants: []TeamRoleSkillGrant{{
-				SkillID: delivery.SkillID, SkillVersion: delivery.SkillVersion,
-				AllowedActions: []string{delivery.SendEmail}, MaximumRisk: SkillRiskExternal,
-			}},
-		},
+		{ID: "publisher", DisplayName: "Publisher", Purpose: "Deliver reviewed reports", MinimumMembers: 1},
 	}
 	teamDefinition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
 		ID: researchTeamID, Version: "1", DisplayName: "Market Research Team",

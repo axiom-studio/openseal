@@ -14,13 +14,24 @@ import (
 
 // RunActor is the run a deployment's Skills are activated or resolved for.
 // A host maps it to the principal the run acts for (for example the user who
-// sent the chat message, or who asked for a routine) to decide which of its
-// own bindings that run may use.
+// sent the chat message, or who asked for a routine) and to the umbrella whose
+// connections the run uses.
 type RunActor struct {
 	RunID string `json:"runId"`
-	// AgentID is the run's assigned Agent deployment. Host bindings are
-	// provided only for that deployment, never for a Team or another Agent.
+	// AgentID is the acting member: the run's assigned Agent deployment. It
+	// is the audience of a credential, never the owner of one.
 	AgentID string `json:"agentId"`
+	// Umbrella holds the run's connections. Host bindings are provided only
+	// for the umbrella's own deployment: the Agent in a 1:1 chat, the Team in
+	// a Team chat, task or hand-off. A Team member's own host bindings never
+	// reach a Team run, and a Team's never reach a 1:1 chat.
+	Umbrella Umbrella `json:"umbrella"`
+}
+
+// Valid reports whether actor names a run, its acting Agent and an umbrella.
+// An Agent umbrella is always the acting Agent itself.
+func (a RunActor) Valid() bool {
+	return a.RunID != "" && a.AgentID != "" && a.Umbrella.Valid() && (a.Umbrella.Kind != UmbrellaAgent || a.Umbrella.ID == a.AgentID)
 }
 
 // HostBindingSet is the bindings a host supplies for one run. They are not
@@ -38,11 +49,11 @@ type HostBindingSet struct {
 	Services map[string][]string
 }
 
-// HostBindingProvider supplies host-owned bindings for one run of one Agent
-// deployment, for example connected apps available to every Agent the run's
-// user may use. It is called at every activation and action resolution that
-// carries a RunActor, so it must be cheap. deploymentID is always the actor's
-// AgentID; a host may use it to leave out bindings an Agent opted out of.
+// HostBindingProvider supplies host-owned bindings for one run of one
+// umbrella deployment, for example the MCP apps and accounts connected to an
+// Agent or a Team. It is called at every activation and action resolution
+// that carries a RunActor, so it must be cheap. deploymentID is always the
+// actor's Umbrella.ID.
 type HostBindingProvider func(ctx context.Context, scope ScopeReference, deploymentID string, actor RunActor) (*HostBindingSet, error)
 
 type runActorKey struct{}
@@ -55,10 +66,26 @@ func WithRunActor(ctx context.Context, actor RunActor) context.Context {
 	return context.WithValue(ctx, runActorKey{}, actor)
 }
 
-// RunActorFromContext returns the actor set by WithRunActor.
+// RunActorFromContext returns the actor set by WithRunActor. It requires the
+// run, the acting Agent and the umbrella.
 func RunActorFromContext(ctx context.Context) (RunActor, bool) {
 	actor, ok := ctx.Value(runActorKey{}).(RunActor)
-	return actor, ok && actor.RunID != "" && actor.AgentID != ""
+	return actor, ok && actor.Valid()
+}
+
+type withoutConnectionsKey struct{}
+
+// WithoutConnections marks ctx so activation leaves out every binding that
+// holds a connection (see BindingHoldsConnection) and attaches no host
+// bindings. A Team run activates its member's own Skills this way.
+func WithoutConnections(ctx context.Context) context.Context {
+	return context.WithValue(ctx, withoutConnectionsKey{}, true)
+}
+
+// ConnectionsExcluded reports whether ctx was marked by WithoutConnections.
+func ConnectionsExcluded(ctx context.Context) bool {
+	excluded, _ := ctx.Value(withoutConnectionsKey{}).(bool)
+	return excluded
 }
 
 // SetHostBindingProvider installs (or with nil removes) the host binding
@@ -124,13 +151,14 @@ func (c *Catalog) GetHostBinding(ctx context.Context, scope ScopeReference, depl
 
 // hostBindingsFor asks the provider for the bindings of the run ctx acts
 // for and validates them. It returns nil without a provider, without an
-// actor, or for a deployment other than the actor's Agent.
+// actor, under WithoutConnections, or for a deployment other than the
+// actor's umbrella.
 func (c *Catalog) hostBindingsFor(ctx context.Context, scope ScopeReference, deploymentID string) (*hostBindings, error) {
 	c.mu.RLock()
 	provider := c.hostBindings
 	c.mu.RUnlock()
 	actor, ok := RunActorFromContext(ctx)
-	if provider == nil || !ok || actor.AgentID != deploymentID {
+	if provider == nil || !ok || actor.Umbrella.ID != deploymentID || ConnectionsExcluded(ctx) {
 		return nil, nil
 	}
 	if err := validateScopeAndDeployment(scope, deploymentID); err != nil {

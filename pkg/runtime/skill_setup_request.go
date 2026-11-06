@@ -45,18 +45,24 @@ type SkillSetupRequest struct {
 	EnablePrompt          bool     `json:"enablePrompt,omitempty"`
 	ID                    string   `json:"id"`
 	Scope                 Scope    `json:"scope"`
-	DeploymentID          string   `json:"deploymentId"`
-	ConversationID        string   `json:"conversationId"`
-	TriggerMessageID      string   `json:"triggerMessageId"`
-	RunID                 string   `json:"runId"`
-	ActionCallID          string   `json:"actionCallId"`
-	Kind                  string   `json:"kind"`
-	SkillID               string   `json:"skillId"`
-	SkillVersion          string   `json:"skillVersion"`
-	SourceIdentity        string   `json:"sourceIdentity,omitempty"`
-	SkillName             string   `json:"skillName"`
-	BindingID             string   `json:"bindingId,omitempty"`
-	BindingRevision       int64    `json:"bindingRevision"`
+	// Owner is the umbrella the connection is saved to: the Agent of a 1:1
+	// chat or the Team of a Team chat. DeploymentID is always Owner.ID.
+	Owner        ObjectiveOwner `json:"owner"`
+	DeploymentID string         `json:"deploymentId"`
+	// AgentID is the acting member that asked; it is the Agent itself for an
+	// Agent owner.
+	AgentID          string `json:"agentId"`
+	ConversationID   string `json:"conversationId"`
+	TriggerMessageID string `json:"triggerMessageId"`
+	RunID            string `json:"runId"`
+	ActionCallID     string `json:"actionCallId"`
+	Kind             string `json:"kind"`
+	SkillID          string `json:"skillId"`
+	SkillVersion     string `json:"skillVersion"`
+	SourceIdentity   string `json:"sourceIdentity,omitempty"`
+	SkillName        string `json:"skillName"`
+	BindingID        string `json:"bindingId,omitempty"`
+	BindingRevision  int64  `json:"bindingRevision"`
 	// Phase separates an executable-version migration from the user saving
 	// configuration. An absent phase is the legacy configuration phase.
 	Phase                   SkillSetupPhase `json:"phase,omitempty"`
@@ -81,6 +87,9 @@ func (r *SkillSetupRequest) Validate() error {
 	}
 	if r.Scope.Validate() != nil {
 		return invalidSkillSetupField("scope", "must identify an authorized workspace")
+	}
+	if err := validateInteractionUmbrella(r.Owner, r.DeploymentID, r.AgentID); err != nil {
+		return invalidSkillSetupField(err.Error(), "must name the umbrella and acting Agent")
 	}
 	if r.Revision < 1 || r.BindingRevision < 0 {
 		return invalidSkillSetupField("revision", "must be a valid positive request revision and non-negative binding revision")
@@ -145,6 +154,20 @@ func (r *SkillSetupRequest) Validate() error {
 		}
 	default:
 		return invalidSkillSetupField("status", "must be pending, resolved, or dismissed")
+	}
+	return nil
+}
+
+// validateInteractionUmbrella checks the owner stamp shared by setup and
+// credential requests and returns the offending field.
+func validateInteractionUmbrella(owner ObjectiveOwner, deploymentID, agentID string) error {
+	switch {
+	case owner.Validate() != nil:
+		return errors.New("owner")
+	case deploymentID != owner.ID:
+		return errors.New("deploymentId")
+	case !validOpaqueIdentifier(agentID, 256), owner.Type == OwnerTypeAgent && agentID != owner.ID:
+		return errors.New("agentId")
 	}
 	return nil
 }

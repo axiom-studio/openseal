@@ -128,20 +128,15 @@ func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx conte
 	if s.skillSetups == nil || conversation == nil {
 		return []*ConversationSkillSetupRequest{}, nil
 	}
-	deployments, err := s.conversationRequestDeployments(ctx, conversation)
+	// Every request in a conversation is saved to its umbrella.
+	stored, err := s.skillSetups(ctx, conversation.Scope, conversation.Owner.ID, conversation.ID)
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*SkillSetupRequest, 0)
-	for _, deployment := range deployments {
-		stored, err := s.skillSetups(ctx, conversation.Scope, deployment, conversation.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, request := range stored {
-			if request != nil && request.Scope == conversation.Scope && request.DeploymentID == deployment && request.ConversationID == conversation.ID {
-				candidates = append(candidates, cloneSkillSetupRequest(request))
-			}
+	candidates := make([]*SkillSetupRequest, 0, len(stored))
+	for _, request := range stored {
+		if request != nil && request.Scope == conversation.Scope && request.Owner == conversation.Owner && request.ConversationID == conversation.ID {
+			candidates = append(candidates, cloneSkillSetupRequest(request))
 		}
 	}
 	candidates = boundConversationInteractions(candidates, func(r *SkillSetupRequest) bool { return r.Status == "pending" },
@@ -310,19 +305,4 @@ func conversationSkillSetupProjectionDigest(requests []*ConversationSkillSetupRe
 		return "", err
 	}
 	return hashBytes(encoded), nil
-}
-
-// conversationRequestDeployments are the agent deployments whose setup and
-// credential requests belong in this conversation: the owning agent, or
-// every member of the owning Team, since a member answers in the Team chat.
-// It lists a paused Team's members too; status gates acting, not this read.
-func (s *ConversationChangeService) conversationRequestDeployments(ctx context.Context, conversation *Conversation) ([]string, error) {
-	switch conversation.Owner.Type {
-	case OwnerTypeAgent:
-		return []string{conversation.Owner.ID}, nil
-	case OwnerTypeTeam:
-		roster, _, err := teamRoster(ctx, teamRosterReader(s.portfolio), conversation.Scope, conversation.Owner.ID)
-		return roster, err
-	}
-	return nil, nil
 }

@@ -122,13 +122,6 @@ export type TeamDefinition = {
     requiredSkillIds?: string[];
     requiredDefinitionIds?: string[];
     channelParticipation?: string;
-    skillGrants?: {
-      skillId: string;
-      skillVersion: string;
-      allowedActions?: string[];
-      enablePrompt?: boolean;
-      maximumRisk: string;
-    }[];
   }[];
   approvals: {
     maximumRisk: string;

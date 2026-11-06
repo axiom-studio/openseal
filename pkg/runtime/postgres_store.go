@@ -478,6 +478,12 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateDeploymentIdentities(ctx, tx); err != nil {
 		return fmt.Errorf("deployment identity migration: %w", err)
 	}
+	if err := s.migrateTeamSkillGrantRemoval(ctx, tx); err != nil {
+		return fmt.Errorf("Team Skill grant removal migration: %w", err)
+	}
+	if err := s.migrateInteractionUmbrellas(ctx, tx); err != nil {
+		return fmt.Errorf("interaction umbrella migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

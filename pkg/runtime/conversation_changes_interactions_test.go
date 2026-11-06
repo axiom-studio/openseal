@@ -175,7 +175,7 @@ func TestConversationChangesProjectSkillSetupRequests(t *testing.T) {
 			}
 			setups := f.store.(SkillSetupRequestStore)
 			now := time.Now().UTC()
-			request := &SkillSetupRequest{ID: "setup", Scope: f.scope, DeploymentID: "assistant", ConversationID: f.conversation.ID,
+			request := &SkillSetupRequest{ID: "setup", Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, DeploymentID: "assistant", AgentID: "assistant", ConversationID: f.conversation.ID,
 				TriggerMessageID: f.trigger.ID, RunID: f.run.ID, ActionCallID: "call", Kind: "configure", SkillID: "reddit.reader",
 				SkillVersion: "1.0.0", SkillName: "Reddit", Reason: "Connect Reddit", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 			if err := setups.SaveSkillSetupRequest(f.ctx, request, 0); err != nil {
@@ -219,7 +219,7 @@ func TestConversationChangesBoundSettledInteractions(t *testing.T) {
 	start := time.Now().UTC()
 	for index := 0; index < conversationInteractionHistoryLimit+5; index++ {
 		at := start.Add(time.Duration(index) * time.Second)
-		request := &SkillSetupRequest{ID: fmt.Sprintf("setup-%03d", index), Scope: f.scope, DeploymentID: "assistant", ConversationID: f.conversation.ID,
+		request := &SkillSetupRequest{ID: fmt.Sprintf("setup-%03d", index), Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, DeploymentID: "assistant", AgentID: "assistant", ConversationID: f.conversation.ID,
 			TriggerMessageID: f.trigger.ID, RunID: f.run.ID, ActionCallID: fmt.Sprintf("call-%d", index), Kind: "configure", SkillID: "reddit.reader",
 			SkillVersion: "1.0.0", SkillName: "Reddit", Reason: "Connect Reddit", Status: "dismissed", ResolvedBy: "user", Revision: 1, CreatedAt: at, UpdatedAt: at}
 		if index == 0 {
@@ -264,8 +264,8 @@ func (p teamRosterPortfolio) GetTeamDeployment(_ context.Context, scope capabili
 	return nil, nil
 }
 
-// A Team member answers in the Team chat, so its setup and credential
-// requests are projected there exactly as in that agent's own chat.
+// Requests in a Team chat are saved to the Team, whichever member asked;
+// one saved to a member's own umbrella never shows in the Team chat.
 func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	ctx, store, scope := context.Background(), NewMemoryStore(), Scope{Kind: "tenant", ID: "team-requests"}
 	conversations := NewConversationService(store)
@@ -291,12 +291,16 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	for _, deployment := range []string{"member", "outsider"} {
-		if err := store.SaveSkillSetupRequest(ctx, &SkillSetupRequest{ID: "setup-" + deployment, Scope: scope, DeploymentID: deployment,
+		owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}
+		if deployment == "outsider" {
+			owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: deployment}
+		}
+		if err := store.SaveSkillSetupRequest(ctx, &SkillSetupRequest{ID: "setup-" + deployment, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: deployment,
 			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "call-" + deployment, Kind: "configure",
 			SkillID: "vercel.reader", SkillVersion: "1.0.0", SkillName: "Vercel", Reason: "Connect Vercel", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.SaveCredentialRequest(ctx, &CredentialRequest{ID: "credential-" + deployment, Scope: scope, DeploymentID: deployment,
+		if err := store.SaveCredentialRequest(ctx, &CredentialRequest{ID: "credential-" + deployment, Scope: scope, Owner: owner, DeploymentID: owner.ID, AgentID: deployment,
 			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "secret-" + deployment, Kind: CredentialRequestKindPaymentCard, Reason: "Pay",
 			Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
 			t.Fatal(err)

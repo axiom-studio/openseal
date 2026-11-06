@@ -100,29 +100,6 @@ export default function TeamProposal({
           <p className="muted">
             Channel participation: {words(role.channelParticipation)}
           </p>
-          {!!role.skillGrants?.length && (
-            <details>
-              <summary>Role skill permissions</summary>
-              {role.skillGrants.map((grant, index) => (
-                <div key={index} className="proposal-notes">
-                  <strong>
-                    {grant.skillId} · {grant.skillVersion}
-                  </strong>
-                  <p>Maximum risk: {words(grant.maximumRisk)}</p>
-                  <p>
-                    Allowed actions:{" "}
-                    {grant.allowedActions?.length
-                      ? grant.allowedActions.join(", ")
-                      : "None listed"}
-                  </p>
-                  <p>
-                    Skill instructions:{" "}
-                    {grant.enablePrompt ? "Enabled" : "Disabled"}
-                  </p>
-                </div>
-              ))}
-            </details>
-          )}
         </section>
       ))}
       <h4>Approval boundaries</h4>

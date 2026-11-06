@@ -2608,15 +2608,6 @@ func reconcilePlacementToCandidate(placement *ChangeSetPlacement, candidate *Wor
 	} else {
 		owners[candidate.Team.ID] = true
 		ownerSkills[candidate.Team.ID] = map[string]bool{}
-		for _, role := range candidate.Team.Roles {
-			for _, grant := range role.SkillGrants {
-				skillID := strings.TrimSpace(grant.CatalogID)
-				if skillID == "" {
-					skillID = strings.TrimSpace(grant.SkillID)
-				}
-				ownerSkills[candidate.Team.ID][skillID], selectedSkills[skillID] = true, true
-			}
-		}
 		for _, objective := range candidate.Team.ObjectiveTemplates {
 			objectives[WorkforceObjectiveKey("team", candidate.Team.ID, objective.ID)] = true
 		}

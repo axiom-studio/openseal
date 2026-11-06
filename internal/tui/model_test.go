@@ -1622,14 +1622,10 @@ func TestTUIEventSourcesFailClosedOnCapabilityVersionDrift(t *testing.T) {
 
 func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 	scope := capability.ScopeReference{Kind: "local", ID: "default"}
-	identity := capability.NewSkillIdentity("summarize", "1.0.0+source.0123456789ab", "https://clawhub.ai::@alice/summarize")
 	definition := &kernelteam.Definition{
 		ID: "gtm-research", Version: "3", DisplayName: "GTM Research", Purpose: "Find evidence, synthesize it, and coordinate approved outreach.",
 		ObjectiveTemplates: []workforce.ObjectiveTemplate{{ID: "monitor", Title: "Monitor source communities"}, {ID: "report", Title: "Deliver cited report"}},
-		Roles: []kernelteam.RoleSlot{{ID: "research", DisplayName: "Researcher", Purpose: "Find evidence", SkillGrants: []kernelteam.RoleSkillGrant{{
-			SkillID: "summarize", SkillVersion: "1.0.0", CatalogID: "clawhub-listing", RuntimeIdentity: &identity,
-			AllowedActions: []string{"execute"}, MaximumRisk: capability.RiskLevelRead,
-		}}}},
+		Roles:              []kernelteam.RoleSlot{{ID: "research", DisplayName: "Researcher", Purpose: "Find evidence"}},
 	}
 	deployment := &kernelteam.Deployment{
 		ID: "gtm-live", Scope: scope, DefinitionID: definition.ID, ActiveVersion: definition.Version,
@@ -1647,7 +1643,7 @@ func TestTeamsAreFirstClassInspectableAndRevisionSafeInTUI(t *testing.T) {
 		t.Fatalf("team projection section=%v selected=%q", model.section, model.selectedTeamDeployment)
 	}
 	view := model.View()
-	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "relevance-arbitrated", "Researcher · research · Agent agent-research", "Role authority", "clawhub-listing → summarize@1.0.0", "exact source variant", "2 template(s)", "p pause/resume"} {
+	for _, expected := range []string{"T Teams", "GTM Research", "Definition gtm-research@3", "relevance-arbitrated", "Researcher · research · Agent agent-research", "2 template(s)", "p pause/resume"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Team view missing %q:\n%s", expected, view)
 		}
@@ -4603,11 +4599,8 @@ func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
 		To:                      runtime.SkillReferenceIdentity{ID: "source", Version: "2", SourceIdentity: "registry:source"},
 		Objectives:              []runtime.SkillReferenceObjectiveImpact{{ID: "monitor-hourly", ExpectedRevision: 3}},
 		Projects:                []runtime.SkillReferenceProjectImpact{{ID: "market-research", ExpectedRevision: 5, MonitorIDs: []string{"forums"}}},
-		TeamAuthority: &runtime.SkillReferenceTeamAuthorityImpact{
-			DeploymentID: "research-team", ExpectedRevision: 2, DefinitionID: "research", DefinitionVersion: "4", AuthorizedRoleIDs: []string{"analyst"},
-		},
-		Findings:         []runtime.SkillReferenceUpgradeFinding{{Code: "action_added", Message: "Target exposes one additional governed action."}},
-		ApprovalRequired: true, Digest: "sha256:reviewed",
+		Findings:                []runtime.SkillReferenceUpgradeFinding{{Code: "action_added", Message: "Target exposes one additional governed action."}},
+		ApprovalRequired:        true, Digest: "sha256:reviewed",
 	}
 	fake := &fakeKernelClient{skillBindings: []*capability.Binding{existing}, skillUpgradePlan: plan}
 	config := DefaultConfig()
@@ -4628,7 +4621,7 @@ func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
 	model.editor.SetValue("version: 2\nsource: registry:source")
 	applyCommand(t, model, model.submitSkillBindingUpgradePlan())
 	view := model.renderClawHubSkillsContent(120)
-	for _, expected := range []string{"Reviewed update", "source@1", "source@2", "1 Objective(s)", "1 Project(s)", "historical Runs stay unchanged", "roles analyst", "additional governed action", "Explicit approval"} {
+	for _, expected := range []string{"Reviewed update", "source@1", "source@2", "1 Objective(s)", "1 Project(s)", "historical Runs stay unchanged", "additional governed action", "Explicit approval"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("upgrade review missing %q:\n%s", expected, view)
 		}

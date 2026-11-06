@@ -61,11 +61,11 @@ type ConnectAppResolution struct {
 // provider, asked for that Run, must supply its connection, so the user and
 // workspace rules are exactly those of connected apps. Dismissing needs no
 // evidence. Either way the waiting Run resumes. Hosts authorize the actor.
-func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Scope, deploymentID, id string, expected int64, actor string, dismiss bool) (*ConnectAppResolution, error) {
+func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, actor string, dismiss bool) (*ConnectAppResolution, error) {
 	if strings.TrimSpace(actor) == "" {
 		return nil, runtime.ErrInvalidSkillSetup
 	}
-	r, err := e.GetSkillSetupRequest(ctx, scope, deploymentID, id)
+	r, err := e.GetSkillSetupRequest(ctx, scope, owner, id)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Sco
 		}
 	}
 	continued, err := e.continueInteractionRun(ctx, interactionContinuation{
-		scope: r.Scope, runID: r.RunID, requestID: r.ID, actionCallID: r.ActionCallID, status: r.Status, revision: r.Revision,
+		scope: r.Scope, owner: r.Owner, agentID: r.AgentID, runID: r.RunID, requestID: r.ID, actionCallID: r.ActionCallID, status: r.Status, revision: r.Revision,
 		updatedAt: r.UpdatedAt, wakeType: runtime.ConnectAppWakeType, coordinator: "connect-app-coordinator",
 		eventType: "run.connection_request_settled", summary: "Received the connection request result; continuing",
 		interventionPrefix: "connect-app-result:", instruction: runtime.ConnectAppResolutionInstruction(r, tools),
@@ -117,10 +117,11 @@ func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Sco
 	return &ConnectAppResolution{Request: r, Continued: continued}, nil
 }
 
-// connectedAppFor returns the connection the request's Run can use for its
+// connectedAppFor returns the connection of the request's umbrella for its
 // app, with the connection's model tool names.
 func (e *Engine) connectedAppFor(ctx context.Context, r *SkillSetupRequest) (*skill.Binding, []string, error) {
-	set, err := e.skills.HostBindings(ctx, skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}, r.DeploymentID, skill.RunActor{RunID: r.RunID, AgentID: r.DeploymentID})
+	actor := skill.RunActor{RunID: r.RunID, AgentID: r.AgentID, Umbrella: runtime.SkillUmbrella(r.Owner)}
+	set, err := e.skills.HostBindings(ctx, skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}, r.Owner.ID, actor)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,7 +163,7 @@ func (e *Engine) ReconcileConnectAppRequests(ctx context.Context, scope runtime.
 	var resolved []*ConnectAppResolution
 	var failures []error
 	for _, request := range matches {
-		result, err := e.ResolveConnectAppRequest(ctx, scope, request.DeploymentID, request.ID, request.Revision, connectAppReconciliationActor, false)
+		result, err := e.ResolveConnectAppRequest(ctx, scope, request.Owner, request.ID, request.Revision, connectAppReconciliationActor, false)
 		switch {
 		case err == nil:
 			resolved = append(resolved, result)

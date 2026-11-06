@@ -142,7 +142,7 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 		t.Fatalf("capability binding = %#v", binding)
 	}
 	// The Agent's activation acts for the run, so host bindings for it apply.
-	if got := catalog.actors[len(catalog.actors)-1]; got != (skill.RunActor{RunID: "run", AgentID: "researcher"}) {
+	if got := catalog.actors[len(catalog.actors)-1]; got != (skill.RunActor{RunID: "run", AgentID: "researcher", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "researcher"}}) {
 		t.Fatalf("activation actor = %#v", got)
 	}
 
@@ -707,7 +707,7 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 		},
 		teamDefinition: &kernelteam.Definition{
 			ID: "review-team", Version: "1", Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
-			Roles: []kernelteam.RoleSlot{{ID: "reviewer", SkillGrants: []kernelteam.RoleSkillGrant{{SkillID: "openseal.teams", SkillVersion: "1.0.0", AllowedActions: []string{"update_role"}, MaximumRisk: capability.RiskLevelWrite}}}},
+			Roles: []kernelteam.RoleSlot{{ID: "reviewer"}},
 		},
 		activations: map[string]*skill.ActivationSnapshot{
 			"reviewer-agent": {SnapshotID: "agent-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "reviewer-agent", Skills: []skill.ActivatedSkill{{

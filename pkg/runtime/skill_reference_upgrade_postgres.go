@@ -66,9 +66,6 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 	if err := validateProjectSkillUpgradeReferencesSQL(ctx, tx, application, s.table("project_skill_references"), true); err != nil {
 		return err
 	}
-	if err := applySkillUpgradeTeamAuthoritySQL(ctx, tx, application.TeamAuthority, s.table("team_definitions"), s.table("team_deployments"), s.table("team_definition_activations"), true); err != nil {
-		return err
-	}
 	// Binding and Team locks can wait behind another transaction. The logical
 	// fence prevents ownership changes; the current clock still fences expiry.
 	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {

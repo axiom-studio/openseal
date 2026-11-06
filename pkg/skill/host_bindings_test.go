@@ -70,7 +70,7 @@ func TestHostBindingsActivateAndResolveOnlyForTheirRun(t *testing.T) {
 	}}
 	catalog.SetHostBindingProvider(provider.provide)
 
-	mine := skill.WithRunActor(ctx, skill.RunActor{RunID: "run-mine", AgentID: "agent"})
+	mine := skill.WithRunActor(ctx, skill.RunActor{RunID: "run-mine", AgentID: "agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "agent"}})
 	snapshot, err := catalog.Activate(mine, scope, "agent", skill.HostCapabilityState{})
 	if err != nil {
 		t.Fatal(err)
@@ -88,8 +88,11 @@ func TestHostBindingsActivateAndResolveOnlyForTheirRun(t *testing.T) {
 
 	for name, other := range map[string]context.Context{
 		"no actor":         ctx,
-		"another user run": skill.WithRunActor(ctx, skill.RunActor{RunID: "run-theirs", AgentID: "agent"}),
-		"another Agent":    skill.WithRunActor(ctx, skill.RunActor{RunID: "run-mine", AgentID: "team"}),
+		"another user run": skill.WithRunActor(ctx, skill.RunActor{RunID: "run-theirs", AgentID: "agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "agent"}}),
+		"another Agent":    skill.WithRunActor(ctx, skill.RunActor{RunID: "run-mine", AgentID: "team", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "team"}}),
+		// The Agent acting as a Team member uses the Team's apps, never its own.
+		"the Agent in a Team run": skill.WithRunActor(ctx, skill.RunActor{RunID: "run-mine", AgentID: "agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaTeam, ID: "crew"}}),
+		"without connections":     skill.WithoutConnections(mine),
 	} {
 		snapshot, err := catalog.Activate(other, scope, "agent", skill.HostCapabilityState{})
 		if err != nil {
@@ -122,12 +125,12 @@ func TestHostBindingsKeyTheActivationCache(t *testing.T) {
 		return []*skill.Binding{binding}
 	}}
 	catalog.SetHostBindingProvider(provider.provide)
-	actor := skill.WithRunActor(ctx, skill.RunActor{RunID: "run-a", AgentID: "agent"})
+	actor := skill.WithRunActor(ctx, skill.RunActor{RunID: "run-a", AgentID: "agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "agent"}})
 	first, err := catalog.Activate(actor, scope, "agent", skill.HostCapabilityState{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := catalog.Activate(skill.WithRunActor(ctx, skill.RunActor{RunID: "run-b", AgentID: "agent"}), scope, "agent", skill.HostCapabilityState{})
+	second, err := catalog.Activate(skill.WithRunActor(ctx, skill.RunActor{RunID: "run-b", AgentID: "agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "agent"}}), scope, "agent", skill.HostCapabilityState{})
 	if err != nil || second.SnapshotID != first.SnapshotID {
 		t.Fatalf("an identical set must share the snapshot: %v", err)
 	}
@@ -188,7 +191,7 @@ func TestHostBindingsAreValidatedAndNeverShadowStoredBindings(t *testing.T) {
 				}
 			}
 			catalog.SetHostBindingProvider((&hostProvider{allowed: map[string]bool{"run": true}, bindings: func() []*skill.Binding { return []*skill.Binding{test.host()} }}).provide)
-			actor := skill.WithRunActor(ctx, skill.RunActor{RunID: "run", AgentID: "agent"})
+			actor := skill.WithRunActor(ctx, skill.RunActor{RunID: "run", AgentID: "agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "agent"}})
 			if _, err := catalog.Activate(actor, scope, "agent", skill.HostCapabilityState{}); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("activation error = %v, want %q", err, test.want)
 			}
@@ -201,7 +204,7 @@ func TestHostBindingsAreValidatedAndNeverShadowStoredBindings(t *testing.T) {
 			binding.Scope, binding.DeploymentID = scope, "other-agent"
 			return &skill.HostBindingSet{Bindings: []*skill.Binding{binding}}, nil
 		})
-		actor := skill.WithRunActor(ctx, skill.RunActor{RunID: "run", AgentID: "agent"})
+		actor := skill.WithRunActor(ctx, skill.RunActor{RunID: "run", AgentID: "agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "agent"}})
 		if _, err := catalog.Activate(actor, scope, "agent", skill.HostCapabilityState{}); err == nil || !strings.Contains(err.Error(), "must be an enabled binding of this deployment") {
 			t.Fatalf("activation error = %v", err)
 		}

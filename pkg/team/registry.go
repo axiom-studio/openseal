@@ -587,21 +587,6 @@ func PrepareDefinition(definition *Definition, createdAt time.Time) (*Definition
 		candidate.Roles[index].ID = strings.TrimSpace(candidate.Roles[index].ID)
 		candidate.Roles[index].RequiredSkillIDs = normalizedStrings(candidate.Roles[index].RequiredSkillIDs)
 		candidate.Roles[index].RequiredDefinitionIDs = normalizedStrings(candidate.Roles[index].RequiredDefinitionIDs)
-		for grantIndex := range candidate.Roles[index].SkillGrants {
-			grant := &candidate.Roles[index].SkillGrants[grantIndex]
-			grant.SkillID = strings.TrimSpace(grant.SkillID)
-			grant.SkillVersion = strings.TrimSpace(grant.SkillVersion)
-			grant.CatalogID = strings.TrimSpace(grant.CatalogID)
-			if grant.RuntimeIdentity != nil {
-				identity := grant.RuntimeIdentity.Normalized()
-				grant.RuntimeIdentity = &identity
-			}
-			grant.AllowedActions = normalizedStrings(grant.AllowedActions)
-		}
-		sort.Slice(candidate.Roles[index].SkillGrants, func(left, right int) bool {
-			leftGrant, rightGrant := candidate.Roles[index].SkillGrants[left], candidate.Roles[index].SkillGrants[right]
-			return leftGrant.ExactIdentity().Key() < rightGrant.ExactIdentity().Key()
-		})
 	}
 	candidate.OperatingPrinciples = normalizedStrings(candidate.OperatingPrinciples)
 	candidate.Approvals.ApproverRoleIDs = normalizedStrings(candidate.Approvals.ApproverRoleIDs)
@@ -718,6 +703,12 @@ func teamDefinitionChanges(base, candidate *Definition) []DefinitionFieldChange 
 		changes = append(changes, DefinitionFieldChange{Field: field, BeforeDigest: hex.EncodeToString(beforeDigest[:]), AfterDigest: hex.EncodeToString(afterDigest[:])})
 	}
 	return changes
+}
+
+// DefinitionDigest returns the digest PrepareDefinition records for value.
+// Storage migrations use it after rewriting a stored definition.
+func DefinitionDigest(value *Definition) string {
+	return teamDefinitionDigest(value)
 }
 
 func teamDefinitionDigest(value *Definition) string {

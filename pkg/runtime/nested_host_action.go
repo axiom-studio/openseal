@@ -209,7 +209,7 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope S
 	if call.BindingID != "" || call.BindingRevision != 0 {
 		selection = append(selection, skill.BindingReference{ID: call.BindingID, Revision: call.BindingRevision})
 	}
-	bound, err := c.catalog.Resolve(skill.WithRunActor(ctx, skill.RunActor{RunID: run.ID, AgentID: run.AssignedAgentID}), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+	bound, err := c.catalog.Resolve(skill.WithRunActor(ctx, RunSkillActor(run)), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
 		call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
 	if err != nil {
 		return nil, err

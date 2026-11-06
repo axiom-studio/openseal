@@ -44,10 +44,6 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 		ID: "research", Version: "1", DisplayName: "Research", Purpose: "Research",
 		Roles: []kernelteam.RoleSlot{{
 			ID: "analyst", DisplayName: "Analyst", Purpose: "Analyze", MinimumMembers: 1,
-			SkillGrants: []kernelteam.RoleSkillGrant{
-				{SkillID: "forum", SkillVersion: "1", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
-				{SkillID: "forum", SkillVersion: "2", AllowedActions: []string{"search"}, MaximumRisk: capability.RiskLevelRead},
-			},
 		}},
 		Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
 	})
@@ -95,7 +91,7 @@ func TestTeamSkillBindingAPIIsDurableScopedAuditedAndCASGuarded(t *testing.T) {
 	}
 	planPayload, _ := json.Marshal(runtime.PlanSkillReferenceUpgradeRequest{ToVersion: "2"})
 	planned := performAgentRunRequest(t, server.Handler(), http.MethodPost, "/api/v1/team-deployments/research-one/skill-bindings/forum/upgrade-plan?scopeKind=tenant&scopeId=one", string(planPayload), "")
-	if planned.Code != http.StatusOK || !strings.Contains(planned.Body.String(), `"version":"2"`) || !strings.Contains(planned.Body.String(), `"authorizedRoleIds":["analyst"]`) {
+	if planned.Code != http.StatusOK || !strings.Contains(planned.Body.String(), `"version":"2"`) || strings.Contains(planned.Body.String(), "teamAuthority") {
 		t.Fatalf("plan Team binding upgrade = %d %s", planned.Code, planned.Body.String())
 	}
 	var plan runtime.SkillReferenceUpgradePlan

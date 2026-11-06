@@ -240,7 +240,7 @@ type findAppsArguments struct {
 	Limit int    `json:"limit,omitempty"`
 }
 
-func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input ActionDispatchInput, run *AgentRun, deploymentID string) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input ActionDispatchInput, run *AgentRun, umbrella ObjectiveOwner) (map[string]interface{}, error) {
 	var a findAppsArguments
 	if err := decodeSkillBindingArguments(input.Arguments, &a); err != nil {
 		return nil, err
@@ -253,7 +253,7 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input Actio
 		a.Limit = defaultFindAppsLimit
 	}
 	a.Limit = min(a.Limit, maximumFindAppsLimit)
-	skills, err := d.findSetupSkills(ctx, run, deploymentID, a.Query, a.Limit)
+	skills, err := d.findSetupSkills(ctx, run, umbrella.ID, a.Query, a.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +266,7 @@ func (d *SkillBindingActionDispatcher) findApps(ctx context.Context, input Actio
 	if len(entries) > a.Limit {
 		entries = entries[:a.Limit]
 	}
-	set, err := d.runHostBindings(ctx, run, deploymentID)
+	set, err := d.runHostBindings(ctx, run, umbrella)
 	if err != nil {
 		return nil, err
 	}
@@ -384,7 +384,7 @@ func decodeAppAddress(value, reason string) (ConnectAppTarget, string, error) {
 	return ConnectAppTarget{Address: address, Name: parsed.Hostname(), SignIn: AppSignInUnknown}, reason, nil
 }
 
-func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input ActionDispatchInput, run *AgentRun, deploymentID string) (map[string]interface{}, error) {
+func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input ActionDispatchInput, run *AgentRun, member string, umbrella ObjectiveOwner) (map[string]interface{}, error) {
 	target, reason, err := decodeRequestConnectionArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -413,7 +413,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 		}
 	}
 	// An app this run can already use needs no card: the model gets its tools.
-	set, err := d.runHostBindings(ctx, run, deploymentID)
+	set, err := d.runHostBindings(ctx, run, umbrella)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +427,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 			"instruction": target.Name + " is already connected. Use its tools for this request; do not ask the user to connect it again.",
 		}}, nil
 	}
-	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, deploymentID)
+	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, member, umbrella)
 	if err != nil {
 		return nil, refuseInteraction("an app can only be connected from a conversation with the user; ask them to connect " + target.Name + " in Settings, Connected apps")
 	}
@@ -437,8 +437,9 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 	} else if existing != nil {
 		return skillSetupResult(existing)
 	}
-	// One card per app in a conversation: an unanswered one is reused.
-	current, err := d.store.ListSkillSetupRequests(ctx, run.Scope, deploymentID, conversationID)
+	// One card per app in a conversation's umbrella: an unanswered one is
+	// reused, whichever member asked.
+	current, err := d.store.ListSkillSetupRequests(ctx, run.Scope, umbrella.ID, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -457,7 +458,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 		reason = "Connect " + target.Name + " to continue in this chat."
 	}
 	now := time.Now().UTC()
-	r := &SkillSetupRequest{ID: id, Scope: run.Scope, DeploymentID: deploymentID, ConversationID: conversationID, TriggerMessageID: messageID,
+	r := &SkillSetupRequest{ID: id, Scope: run.Scope, Owner: umbrella, DeploymentID: umbrella.ID, AgentID: member, ConversationID: conversationID, TriggerMessageID: messageID,
 		RunID: run.ID, ActionCallID: input.Call.ID, Kind: SkillSetupKindConnectApp, SkillID: mcp.SkillID, SkillVersion: mcp.SkillVersion,
 		SkillName: target.Name, App: &target, Reason: reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := d.store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
@@ -471,11 +472,14 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 	return skillSetupResult(r)
 }
 
-func (d *SkillBindingActionDispatcher) runHostBindings(ctx context.Context, run *AgentRun, deploymentID string) (*skill.HostBindingSet, error) {
-	if run == nil || run.AssignedAgentID != deploymentID {
+// runHostBindings are the host bindings (connected apps) of the run's
+// umbrella.
+func (d *SkillBindingActionDispatcher) runHostBindings(ctx context.Context, run *AgentRun, umbrella ObjectiveOwner) (*skill.HostBindingSet, error) {
+	actor := RunSkillActor(run)
+	if run == nil || OwnerOfSkillUmbrella(actor.Umbrella) != umbrella {
 		return &skill.HostBindingSet{}, nil
 	}
-	return d.catalog.HostBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, deploymentID, skill.RunActor{RunID: run.ID, AgentID: deploymentID})
+	return d.catalog.HostBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, umbrella.ID, actor)
 }
 
 func appSignIn(value string) string {

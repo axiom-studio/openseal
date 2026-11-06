@@ -250,15 +250,31 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 		return nil, errors.New("routine grants cannot be checked on this host")
 	}
 	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
+	actor := RunSkillActor(run)
 	bindings, err := catalog.ListBindings(ctx, scope, run.AssignedAgentID)
 	if err != nil {
 		return nil, err
 	}
+	// A Team run uses its Team's connections and only the member's bindings
+	// that hold none, as activation does.
+	if actor.Umbrella.ID != run.AssignedAgentID {
+		own := bindings[:0]
+		for _, binding := range bindings {
+			if !skill.BindingHoldsConnection(binding) {
+				own = append(own, binding)
+			}
+		}
+		umbrellaBindings, listErr := catalog.ListBindings(ctx, scope, actor.Umbrella.ID)
+		if listErr != nil {
+			return nil, listErr
+		}
+		bindings = append(own, umbrellaBindings...)
+	}
 	// The host's bindings for this run (connected apps) are granted like
 	// stored ones, by their own tool names; the routine's runs resolve them
-	// for its owner again.
+	// for its umbrella again.
 	if hosted, ok := catalog.(routineHostBindingCatalog); ok {
-		set, hostErr := hosted.HostBindings(ctx, scope, run.AssignedAgentID, skill.RunActor{RunID: run.ID, AgentID: run.AssignedAgentID})
+		set, hostErr := hosted.HostBindings(ctx, scope, actor.Umbrella.ID, actor)
 		if hostErr != nil {
 			return nil, hostErr
 		}

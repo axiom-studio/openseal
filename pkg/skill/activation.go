@@ -110,14 +110,18 @@ type UnavailableSkill struct {
 // deployment turn/session. SnapshotID excludes CreatedAt and is stable for
 // equivalent bindings and declared host capabilities across process restarts.
 type ActivationSnapshot struct {
-	SnapshotID   string                       `json:"snapshotId"`
-	Scope        ScopeReference               `json:"scope"`
-	DeploymentID string                       `json:"deploymentId"`
-	HostRevision string                       `json:"hostRevision,omitempty"`
-	Adapters     map[string]AdapterCapability `json:"adapters,omitempty"`
-	Skills       []ActivatedSkill             `json:"skills"`
-	Unavailable  []UnavailableSkill           `json:"unavailable,omitempty"`
-	CreatedAt    time.Time                    `json:"createdAt"`
+	SnapshotID   string         `json:"snapshotId"`
+	Scope        ScopeReference `json:"scope"`
+	DeploymentID string         `json:"deploymentId"`
+	// Umbrella is the run umbrella the snapshot was activated for, if any.
+	Umbrella *Umbrella `json:"umbrella,omitempty"`
+	// WithoutConnections marks a snapshot with every connection left out.
+	WithoutConnections bool                         `json:"withoutConnections,omitempty"`
+	HostRevision       string                       `json:"hostRevision,omitempty"`
+	Adapters           map[string]AdapterCapability `json:"adapters,omitempty"`
+	Skills             []ActivatedSkill             `json:"skills"`
+	Unavailable        []UnavailableSkill           `json:"unavailable,omitempty"`
+	CreatedAt          time.Time                    `json:"createdAt"`
 }
 
 func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deploymentID string, host HostCapabilityState) (*ActivationSnapshot, error) {
@@ -140,7 +144,20 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 	if err != nil {
 		return nil, err
 	}
+	// The umbrella and the connection marker split the cache, so a Team's
+	// and a member's activations never share an entry.
+	var umbrella *Umbrella
+	if actor, ok := RunActorFromContext(ctx); ok {
+		umbrella = &actor.Umbrella
+	}
+	withoutConnections := ConnectionsExcluded(ctx)
 	hostDigest := hostActivationDigest(host)
+	if umbrella != nil {
+		hostDigest += "\x00umbrella:" + string(umbrella.Kind) + ":" + umbrella.ID
+	}
+	if withoutConnections {
+		hostDigest += "\x00without-connections"
+	}
 	if hosted != nil {
 		hostDigest += "\x00" + hosted.key
 	}
@@ -168,7 +185,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 	}
 	bindings := make([]*Binding, 0, len(listed))
 	for _, binding := range listed {
-		if !binding.Disabled {
+		if !binding.Disabled && (!withoutConnections || !BindingHoldsConnection(binding)) {
 			bindings = append(bindings, binding)
 		}
 	}
@@ -178,7 +195,7 @@ func (c *Catalog) Activate(ctx context.Context, scope ScopeReference, deployment
 	invokedHostAdapter := false
 
 	snapshot := &ActivationSnapshot{
-		Scope: scope, DeploymentID: deploymentID, HostRevision: strings.TrimSpace(host.Revision),
+		Scope: scope, DeploymentID: deploymentID, Umbrella: umbrella, WithoutConnections: withoutConnections, HostRevision: strings.TrimSpace(host.Revision),
 		Adapters: adapters, Skills: make([]ActivatedSkill, 0, len(bindings)), CreatedAt: now,
 	}
 	for _, binding := range bindings {
@@ -636,13 +653,15 @@ func activationTruthy(value interface{}) bool {
 
 func activationSnapshotDigest(snapshot *ActivationSnapshot) string {
 	payload := struct {
-		Scope        ScopeReference               `json:"scope"`
-		DeploymentID string                       `json:"deploymentId"`
-		HostRevision string                       `json:"hostRevision,omitempty"`
-		Adapters     map[string]AdapterCapability `json:"adapters,omitempty"`
-		Skills       []ActivatedSkill             `json:"skills"`
-		Unavailable  []UnavailableSkill           `json:"unavailable,omitempty"`
-	}{snapshot.Scope, snapshot.DeploymentID, snapshot.HostRevision, snapshot.Adapters, snapshot.Skills, snapshot.Unavailable}
+		Scope              ScopeReference               `json:"scope"`
+		DeploymentID       string                       `json:"deploymentId"`
+		Umbrella           *Umbrella                    `json:"umbrella,omitempty"`
+		WithoutConnections bool                         `json:"withoutConnections,omitempty"`
+		HostRevision       string                       `json:"hostRevision,omitempty"`
+		Adapters           map[string]AdapterCapability `json:"adapters,omitempty"`
+		Skills             []ActivatedSkill             `json:"skills"`
+		Unavailable        []UnavailableSkill           `json:"unavailable,omitempty"`
+	}{snapshot.Scope, snapshot.DeploymentID, snapshot.Umbrella, snapshot.WithoutConnections, snapshot.HostRevision, snapshot.Adapters, snapshot.Skills, snapshot.Unavailable}
 	encoded, _ := json.Marshal(payload)
 	digest := sha256.Sum256(encoded)
 	return hex.EncodeToString(digest[:])

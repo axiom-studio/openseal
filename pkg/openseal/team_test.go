@@ -46,7 +46,7 @@ func TestPublicEngineComposesFirstClassAgentAndTeamDeployments(t *testing.T) {
 	}
 }
 
-func TestPublicEngineProjectsTeamSkillsPerRosterRole(t *testing.T) {
+func TestPublicEngineProjectsEveryTeamBindingToEachMember(t *testing.T) {
 	ctx := context.Background()
 	engine, err := New()
 	if err != nil {
@@ -87,9 +87,6 @@ func TestPublicEngineProjectsTeamSkillsPerRosterRole(t *testing.T) {
 		ID: "operations", Version: "1", DisplayName: "Operations", Purpose: "Operate portfolios",
 		Roles: []TeamRoleSlot{{
 			ID: "operator", DisplayName: "Operator", Purpose: "Operate portfolios", MinimumMembers: 1,
-			SkillGrants: []TeamRoleSkillGrant{{
-				SkillID: "portfolio", SkillVersion: "1", AllowedActions: []string{"pause"}, MaximumRisk: SkillRiskWrite,
-			}},
 		}},
 		Approvals: TeamApprovalPolicy{MaximumRisk: SkillRiskExternal, ApproverRoleIDs: []string{"operator"}},
 	})
@@ -117,8 +114,9 @@ func TestPublicEngineProjectsTeamSkillsPerRosterRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(activation.Skills) != 1 || activation.Skills[0].SkillID != "portfolio" || len(activation.Skills[0].Actions) != 1 || activation.Skills[0].Actions[0].Action != "pause" || activation.Skills[0].Actions[0].DeploymentID != teamDeployment.ID {
-		t.Fatalf("role-projected activation = %#v", activation)
+	if len(activation.Skills) != 2 || activation.Skills[0].SkillID != "email" || activation.Skills[1].SkillID != "portfolio" ||
+		len(activation.Skills[1].Actions) != 2 || activation.Skills[1].Actions[0].DeploymentID != teamDeployment.ID {
+		t.Fatalf("every member gets every Team binding: %#v", activation.Skills)
 	}
 	if _, err := engine.ActivateTeamSkillsForAgent(ctx, scope, teamDeployment.ID, "not-a-member", SkillHostCapabilityState{}); err == nil {
 		t.Fatal("expected a non-member Team activation to fail closed")

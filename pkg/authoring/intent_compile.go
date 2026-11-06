@@ -298,13 +298,7 @@ func ProjectAuthoringIntent(candidate *WorkforceCandidate) *AuthoringIntent {
 				Key: role.ID, Name: role.DisplayName, Purpose: role.Purpose, AgentKeys: assignments[role.ID],
 				CanSpeakInChannels: role.ChannelParticipation == "" || role.ChannelParticipation == team.RoleChannelActive,
 			}
-			for _, grant := range role.SkillGrants {
-				catalogID := grant.CatalogID
-				if catalogID == "" {
-					catalogID = grant.SkillID
-				}
-				roleAnswer.SkillCatalogIDs = append(roleAnswer.SkillCatalogIDs, catalogID)
-			}
+			roleAnswer.SkillCatalogIDs = append(roleAnswer.SkillCatalogIDs, role.RequiredSkillIDs...)
 			teamAnswer.Roles = append(teamAnswer.Roles, roleAnswer)
 		}
 		for _, objective := range candidate.Team.ObjectiveTemplates {
@@ -598,10 +592,6 @@ func compileAuthoringTeam(answer AuthoringTeamIntent, agents map[string]*agent.A
 		for _, catalogID := range role.SkillCatalogIDs {
 			skill := catalog.Skills[catalogID]
 			slot.RequiredSkillIDs = append(slot.RequiredSkillIDs, catalogID)
-			slot.SkillGrants = append(slot.SkillGrants, team.RoleSkillGrant{
-				SkillID: skill.ID, SkillVersion: skill.Version, CatalogID: catalogID, RuntimeIdentity: skill.RuntimeIdentity,
-				AllowedActions: append([]string(nil), skill.Actions...), EnablePrompt: skill.PromptAvailable, MaximumRisk: skill.MaximumRisk,
-			})
 			definition.Approvals.MaximumRisk = maximumAuthoringRisk(definition.Approvals.MaximumRisk, skill.MaximumRisk)
 		}
 		definition.Roles = append(definition.Roles, slot)

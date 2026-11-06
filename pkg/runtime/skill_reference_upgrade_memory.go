@@ -2,10 +2,7 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"time"
-
-	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 func (s *MemoryStore) ApplySkillReferenceUpgrade(ctx context.Context, application *SkillReferenceUpgradeMutation) error {
@@ -80,14 +77,6 @@ func (s *MemoryStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			s.callbackRegistrations[callbackRegistrationKey(mutation.Value.Scope, mutation.Value.ID)] = cloneCallbackRegistration(mutation.Value)
 		}
 		return nil
-	}
-	if mutation := application.TeamAuthority; mutation != nil {
-		err := s.MemoryStore.CompareAndApplyDefinitionUpgrade(ctx, mutation.PreviousDeployment, mutation.PreviousDefinition,
-			mutation.Definition, mutation.Deployment, mutation.Activation, apply)
-		if errors.Is(err, kernelteam.ErrRevisionConflict) {
-			return ErrSkillReferenceUpgradeConflict
-		}
-		return err
 	}
 	return apply()
 }

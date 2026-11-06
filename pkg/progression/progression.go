@@ -382,13 +382,6 @@ func validateTeamCeiling(candidate *team.Definition, ceiling TeamPolicyCeiling) 
 	if riskRank(ceiling.MaximumRisk) < 0 || ceiling.MaximumDelegationDepth < 0 || ceiling.MaximumConcurrency < 0 || riskRank(candidate.Approvals.MaximumRisk) > riskRank(ceiling.MaximumRisk) || candidate.Delegation.MaximumDepth > ceiling.MaximumDelegationDepth || candidate.Delegation.MaximumConcurrent > ceiling.MaximumConcurrency || candidate.SharedContext.AllowMemberWrite && !ceiling.AllowSharedWrite {
 		return ErrPolicyCeiling
 	}
-	for _, role := range candidate.Roles {
-		for _, grant := range role.SkillGrants {
-			if !subset([]string{grant.SkillID}, ceiling.AllowedSkillIDs) || riskRank(grant.MaximumRisk) > riskRank(ceiling.MaximumRisk) {
-				return ErrPolicyCeiling
-			}
-		}
-	}
 	return nil
 }
 
@@ -407,20 +400,6 @@ func agentAuthorityWidened(base, candidate *agent.AgentDefinition) bool {
 func teamAuthorityWidened(base, candidate *team.Definition) bool {
 	if riskRank(candidate.Approvals.MaximumRisk) > riskRank(base.Approvals.MaximumRisk) || candidate.Delegation.MaximumDepth > base.Delegation.MaximumDepth || candidate.Delegation.MaximumConcurrent > base.Delegation.MaximumConcurrent || candidate.SharedContext.AllowMemberWrite && !base.SharedContext.AllowMemberWrite {
 		return true
-	}
-	baseGrants := make(map[string]team.RoleSkillGrant)
-	for _, role := range base.Roles {
-		for _, grant := range role.SkillGrants {
-			baseGrants[role.ID+"\x00"+grant.ExactIdentity().Key()] = grant
-		}
-	}
-	for _, role := range candidate.Roles {
-		for _, grant := range role.SkillGrants {
-			old, ok := baseGrants[role.ID+"\x00"+grant.ExactIdentity().Key()]
-			if !ok || riskRank(grant.MaximumRisk) > riskRank(old.MaximumRisk) || !subset(grant.AllowedActions, old.AllowedActions) {
-				return true
-			}
-		}
 	}
 	return false
 }

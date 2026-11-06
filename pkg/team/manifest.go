@@ -67,19 +67,7 @@ type ManifestRoleSlot struct {
 	MaximumMembers        int                      `json:"maximumMembers,omitempty" yaml:"maximumMembers,omitempty"`
 	RequiredSkillIDs      []string                 `json:"requiredSkillIds,omitempty" yaml:"requiredSkillIds,omitempty"`
 	RequiredDefinitionIDs []string                 `json:"requiredDefinitionIds,omitempty" yaml:"requiredDefinitionIds,omitempty"`
-	SkillGrants           []ManifestRoleSkillGrant `json:"skillGrants,omitempty" yaml:"skillGrants,omitempty"`
 	ChannelParticipation  RoleChannelParticipation `json:"channelParticipation,omitempty" yaml:"channelParticipation,omitempty"`
-}
-
-// ManifestRoleSkillGrant excludes catalog and runtime placement identities.
-// The installing host resolves those after review without rewriting portable
-// Team authority.
-type ManifestRoleSkillGrant struct {
-	SkillID        string               `json:"skillId" yaml:"skillId"`
-	SkillVersion   string               `json:"skillVersion" yaml:"skillVersion"`
-	AllowedActions []string             `json:"allowedActions,omitempty" yaml:"allowedActions,omitempty"`
-	EnablePrompt   bool                 `json:"enablePrompt,omitempty" yaml:"enablePrompt,omitempty"`
-	MaximumRisk    capability.RiskLevel `json:"maximumRisk" yaml:"maximumRisk"`
 }
 
 type ManifestDelegationPolicy struct {
@@ -192,18 +180,11 @@ func CompileManifest(manifest *Manifest, definitionID string, provenance workfor
 		if participation == "" {
 			participation = RoleChannelActive
 		}
-		grants := make([]RoleSkillGrant, len(portableRole.SkillGrants))
-		for grantIndex, grant := range portableRole.SkillGrants {
-			grants[grantIndex] = RoleSkillGrant{
-				SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, AllowedActions: grant.AllowedActions,
-				EnablePrompt: grant.EnablePrompt, MaximumRisk: grant.MaximumRisk,
-			}
-		}
 		roles[index] = RoleSlot{
 			ID: portableRole.ID, DisplayName: portableRole.DisplayName, Purpose: portableRole.Purpose,
 			MinimumMembers: portableRole.MinimumMembers, MaximumMembers: portableRole.MaximumMembers,
 			RequiredSkillIDs: portableRole.RequiredSkillIDs, RequiredDefinitionIDs: portableRole.RequiredDefinitionIDs,
-			SkillGrants: grants, ChannelParticipation: participation,
+			ChannelParticipation: participation,
 		}
 	}
 	definition := &Definition{
@@ -251,11 +232,5 @@ func canonicalizeManifestDefinition(candidate *Definition) {
 		role.Purpose = strings.TrimSpace(role.Purpose)
 		role.RequiredSkillIDs = normalizedStrings(role.RequiredSkillIDs)
 		role.RequiredDefinitionIDs = normalizedStrings(role.RequiredDefinitionIDs)
-		for grantIndex := range role.SkillGrants {
-			grant := &role.SkillGrants[grantIndex]
-			grant.SkillID = strings.TrimSpace(grant.SkillID)
-			grant.SkillVersion = strings.TrimSpace(grant.SkillVersion)
-			grant.AllowedActions = normalizedStrings(grant.AllowedActions)
-		}
 	}
 }

@@ -25,7 +25,7 @@ func waitingCredentialRequestFixture(t *testing.T) (context.Context, *runtime.Me
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	request := &CredentialRequest{ID: "credential-request:call", Scope: scope, DeploymentID: "agent", ConversationID: "chat", TriggerMessageID: "message",
+	request := &CredentialRequest{ID: "credential-request:call", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message",
 		RunID: run.ID, ActionCallID: "call", Kind: CredentialRequestKindWebsiteLogin, Website: "https://www.amazon.in", Reason: "Add your amazon.in login",
 		Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveCredentialRequest(ctx, request, 0); err != nil {
@@ -48,16 +48,16 @@ func waitingCredentialRequestFixture(t *testing.T) (context.Context, *runtime.Me
 
 func TestSavedCredentialResumesTheWaitingRunWithGuidance(t *testing.T) {
 	ctx, store, e, run, request := waitingCredentialRequestFixture(t)
-	if _, err := e.ResolveCredentialRequest(ctx, Scope{Kind: "tenant", ID: "other"}, "agent", request.ID, 1, "user:5", false); err == nil {
+	if _, err := e.ResolveCredentialRequest(ctx, Scope{Kind: "tenant", ID: "other"}, agentOwner("agent"), request.ID, 1, "user:5", false); err == nil {
 		t.Fatal("cross-tenant resolution")
 	}
-	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, "other-agent", request.ID, 1, "user:5", false); err == nil {
+	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("other-agent"), request.ID, 1, "user:5", false); err == nil {
 		t.Fatal("cross-agent resolution")
 	}
-	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, "agent", request.ID, 7, "user:5", false); !errors.Is(err, ErrCredentialRequestConflict) {
+	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 7, "user:5", false); !errors.Is(err, ErrCredentialRequestConflict) {
 		t.Fatalf("stale revision: %v", err)
 	}
-	result, err := e.ResolveCredentialRequest(ctx, run.Scope, "agent", request.ID, 1, "user:5", false)
+	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "user:5", false)
 	if err != nil || !result.Continued || result.Request.Status != CredentialRequestStatusResolved || result.Request.Revision != 2 {
 		t.Fatalf("resolution: %#v %v", result, err)
 	}
@@ -69,14 +69,14 @@ func TestSavedCredentialResumesTheWaitingRunWithGuidance(t *testing.T) {
 		t.Fatalf("instruction: %q", instruction)
 	}
 	// A repeated confirmation from the card is idempotent and does not wake twice.
-	again, err := e.ResolveCredentialRequest(ctx, run.Scope, "agent", request.ID, 1, "user:5", false)
+	again, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "user:5", false)
 	if err != nil || again.Request.Revision != 2 {
 		t.Fatalf("repeat: %#v %v", again, err)
 	}
 	if latest, _ := store.GetAgentRun(ctx, run.Scope, run.ID); len(latest.PendingInterventions) != 1 {
 		t.Fatalf("woken twice: %#v", latest.PendingInterventions)
 	}
-	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, "agent", request.ID, 2, "user:5", true); !errors.Is(err, ErrCredentialRequestConflict) {
+	if _, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 2, "user:5", true); !errors.Is(err, ErrCredentialRequestConflict) {
 		t.Fatalf("resolved request dismissed: %v", err)
 	}
 }
@@ -89,7 +89,7 @@ func TestCredentialRequestForAnEndedRunAsksTheHostToReply(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := e.ResolveCredentialRequest(ctx, run.Scope, "agent", request.ID, 1, "user:5", true)
+	result, err := e.ResolveCredentialRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "user:5", true)
 	if err != nil || result.Continued || result.Request.Status != CredentialRequestStatusDismissed {
 		t.Fatalf("dismissal: %#v %v", result, err)
 	}

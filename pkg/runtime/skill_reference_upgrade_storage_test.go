@@ -4,9 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
-	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 func TestSkillReferenceUpgradeStorageContractChangesRequireReviewAcrossStores(t *testing.T) {
@@ -64,31 +62,4 @@ func TestSkillReferenceUpgradeStorageContractChangesRequireReviewAcrossStores(t 
 			})
 		})
 	}
-}
-
-func TestTeamSkillReferenceUpgradeStorageMigrationKeepsExistingRoleAuthority(t *testing.T) {
-	eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
-		store := fixture.store.(KernelStore)
-		_, wrapped, plan := teamSkillUpgradeRuntimeFixture(t, store)
-		catalog := skill.NewCatalogWithStore(store.(skill.CatalogStore))
-		definition, err := catalog.GetDefinition(t.Context(), plan.From.ID, plan.To.Version)
-		if err != nil {
-			t.Fatal(err)
-		}
-		definition.Version = "1.2.0"
-		definition.Requirements.Storage = []skill.StorageRequirement{{Name: "new-profile", MountPath: "/var/lib/new-profile", Durability: skill.StorageDurabilityPersistent, MinimumCapacity: "1Gi", Retention: skill.StorageRetentionRetain}}
-		if err := catalog.Register(t.Context(), definition); err != nil {
-			t.Fatal(err)
-		}
-		service := NewSkillReferenceUpgradeService(store.(SkillReferenceUpgradeStore), catalog)
-		if _, err := service.Plan(t.Context(), PlanSkillReferenceUpgradeRequest{Scope: plan.Scope, DeploymentID: plan.DeploymentID, BindingID: plan.BindingID, ToVersion: definition.Version}); !errors.Is(err, ErrSkillReferenceUpgradeInvalid) {
-			t.Fatalf("Team grant automatically crossed storage migration: %v", err)
-		}
-		assertTeamSkillUpgradeUnchanged(t, store, plan)
-		current, _ := store.(kernelteam.Store).GetTeamDefinition(t.Context(), plan.TeamAuthority.DefinitionID, plan.TeamAuthority.DefinitionVersion)
-		if !skillUpgradeTeamDefinitionEqual(current, wrapped.mutation.TeamAuthority.PreviousDefinition) ||
-			!current.Roles[0].SkillGrants[0].ExactIdentity().Equal(capability.NewSkillIdentity(plan.From.ID, plan.From.Version, plan.From.SourceIdentity)) {
-			t.Fatalf("profile migration rewrote Team role authority: %#v", current)
-		}
-	})
 }

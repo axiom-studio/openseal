@@ -216,7 +216,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if req.BindingID != "" || req.BindingRevision != 0 {
 		selection = append(selection, skill.BindingReference{ID: req.BindingID, Revision: req.BindingRevision})
 	}
-	bound, err := c.catalog.Resolve(skill.WithRunActor(ctx, skill.RunActor{RunID: run.ID, AgentID: run.AssignedAgentID}), skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, req.DeploymentID, req.SkillID, req.SkillVersion, req.Action, selection...)
+	bound, err := c.catalog.Resolve(skill.WithRunActor(ctx, RunSkillActor(run)), skill.ScopeReference{Kind: req.Scope.Kind, ID: req.Scope.ID}, req.DeploymentID, req.SkillID, req.SkillVersion, req.Action, selection...)
 	if err != nil {
 		// Maintenance may have started while the catalog was being read. Return
 		// its durable continuation instead of a transient stale-version error.

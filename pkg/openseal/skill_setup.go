@@ -45,22 +45,13 @@ func (e *Engine) ReconcileSkillSetupTask(ctx context.Context, scope runtime.Scop
 	return result, handled, err
 }
 
-func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope, deploymentID, conversationID string) ([]*runtime.SkillSetupRequest, error) {
-	conversation, err := e.GetConversation(ctx, scope, conversationID)
-	if err != nil {
+// ListSkillSetupRequests lists a conversation's setup requests. owner must
+// own the conversation: every request there is saved to it.
+func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, conversationID string) ([]*runtime.SkillSetupRequest, error) {
+	if err := e.conversationOwnedBy(ctx, scope, owner, conversationID); err != nil {
 		return nil, err
 	}
-	if conversation == nil {
-		return nil, runtime.ErrConversationNotFound
-	}
-	onRoster, err := runtime.AgentOnChatRoster(ctx, e, scope, conversation.Owner, deploymentID)
-	if err != nil {
-		return nil, err
-	}
-	if !onRoster {
-		return nil, runtime.ErrConversationNotFound
-	}
-	return e.reconciledSkillSetupRequests(ctx, scope, deploymentID, conversationID)
+	return e.reconciledSkillSetupRequests(ctx, scope, owner.ID, conversationID)
 }
 
 // reconciledSkillSetupRequests lists one conversation's requests after
@@ -88,7 +79,7 @@ func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope runtime
 			if !skillSetupBindingCandidate(request, binding) {
 				continue
 			}
-			resolved, resolveErr := e.ResolveSkillSetupRequest(ctx, scope, deploymentID, request.ID, request.Revision, binding.ID, skillSetupReconciliationActor, false)
+			resolved, resolveErr := e.ResolveSkillSetupRequest(ctx, scope, request.Owner, request.ID, request.Revision, binding.ID, skillSetupReconciliationActor, false)
 			if resolveErr == nil {
 				requests[index] = resolved
 				break
@@ -126,8 +117,9 @@ func skillSetupBindingCandidate(request *runtime.SkillSetupRequest, binding *ski
 	return request.BindingID != "" || !binding.CreatedAt.Before(request.CreatedAt)
 }
 
-// reconcileSkillSetupRequestsForBinding resolves this deployment's pending
-// setup requests that a just-saved binding completes, wherever it was saved.
+// reconcileSkillSetupRequestsForBinding resolves the pending setup requests
+// of the binding's umbrella that a just-saved binding completes, wherever it
+// was saved.
 // The saved binding is authoritative; failures leave the read-side
 // reconciliation to retry.
 func (e *Engine) reconcileSkillSetupRequestsForBinding(ctx context.Context, binding *skill.Binding) {
@@ -149,7 +141,7 @@ func (e *Engine) reconcileSkillSetupRequestsForBinding(ctx context.Context, bind
 			return
 		}
 		for _, request := range requests {
-			if request.DeploymentID == binding.DeploymentID && skillSetupReconcilable(request) && skillSetupBindingCandidate(request, binding) {
+			if request.Owner.ID == binding.DeploymentID && skillSetupReconcilable(request) && skillSetupBindingCandidate(request, binding) {
 				matches = append(matches, request)
 			}
 		}
@@ -158,18 +150,20 @@ func (e *Engine) reconcileSkillSetupRequestsForBinding(ctx context.Context, bind
 		}
 	}
 	for _, request := range matches {
-		resolved, err := e.ResolveSkillSetupRequest(ctx, scope, request.DeploymentID, request.ID, request.Revision, binding.ID, skillSetupReconciliationActor, false)
+		resolved, err := e.ResolveSkillSetupRequest(ctx, scope, request.Owner, request.ID, request.Revision, binding.ID, skillSetupReconciliationActor, false)
 		if err == nil && resolved.Status == "resolved" {
 			_, _, _ = e.ReconcileSkillSetupTask(ctx, scope, resolved.ID)
 		}
 	}
 }
-func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope runtime.Scope, deploymentID, id string) (*runtime.SkillSetupRequest, error) {
+
+// GetSkillSetupRequest returns request id when it is saved to owner.
+func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string) (*runtime.SkillSetupRequest, error) {
 	r, err := e.store.GetSkillSetupRequest(ctx, scope, id)
 	if err != nil {
 		return nil, err
 	}
-	if r == nil || r.DeploymentID != deploymentID {
+	if r == nil || r.Owner != owner || r.DeploymentID != owner.ID {
 		return nil, runtime.ErrInvalidSkillSetup
 	}
 	return r, nil
@@ -178,8 +172,8 @@ func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope runtime.Scope, 
 // ResolveSkillSetupRequest accepts evidence of a successful, separately
 // authorized binding write. A click or an OAuth popup closing is not completion.
 // Hosts must authorize the actor and the exact target before calling this method.
-func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Scope, deploymentID, id string, expected int64, bindingID, actor string, dismiss bool) (*runtime.SkillSetupRequest, error) {
-	r, err := e.GetSkillSetupRequest(ctx, scope, deploymentID, id)
+func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, bindingID, actor string, dismiss bool) (*runtime.SkillSetupRequest, error) {
+	r, err := e.GetSkillSetupRequest(ctx, scope, owner, id)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +182,7 @@ func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Sco
 	}
 	// A connect card is completed by a connection, not a saved binding.
 	if r.Kind == runtime.SkillSetupKindConnectApp {
-		resolution, resolveErr := e.ResolveConnectAppRequest(ctx, scope, deploymentID, id, expected, actor, dismiss)
+		resolution, resolveErr := e.ResolveConnectAppRequest(ctx, scope, owner, id, expected, actor, dismiss)
 		if resolveErr != nil {
 			return nil, resolveErr
 		}
@@ -209,7 +203,7 @@ func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Sco
 		if r.Phase == runtime.SkillSetupPhaseBindingUpgrade {
 			return nil, errors.New("the requested Skill binding upgrade must be completed before saving configuration")
 		}
-		binding, err := e.skills.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, bindingID)
+		binding, err := e.skills.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, bindingID)
 		if err != nil {
 			return nil, err
 		}

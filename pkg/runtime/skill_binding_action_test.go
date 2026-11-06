@@ -25,18 +25,35 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 			EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	validator, err := NewSkillBindingActionValidator(catalog)
+	validator, err := NewSkillBindingActionValidator(catalog, store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, policy, validator)
 	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert")
+	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	// A person connects the account; the model may only change the rest.
+	if _, err := catalog.UpsertBinding(ctx, skill.UpsertBindingRequest{Binding: &skill.Binding{
+		ID: "reddit", Scope: skillScope, DeploymentID: deploymentID, SkillID: "reddit.reader", SkillVersion: "1.0.0",
+		AllowedActions: []string{"read"}, EnablePrompt: true, MaximumRisk: skill.RiskLevelRead,
+		Credentials: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "credential://tenant-a/reddit"}},
+	}, Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "Connect Reddit"}); err != nil {
+		t.Fatal(err)
+	}
 	arguments := map[string]interface{}{
-		"bindingId": "reddit", "expectedRevision": 0,
+		"bindingId": "reddit", "expectedRevision": 1,
 		"skillId": "reddit.reader", "skillVersion": "1.0.0",
 		"allowedActions": []interface{}{"read"}, "enablePrompt": true, "maximumRisk": "read",
-		"accessReferences": map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "credential://tenant-a/reddit"}},
-		"config":           map[string]interface{}{"subreddits": []interface{}{"kubernetes", "devops"}},
+		"config": map[string]interface{}{"subreddits": []interface{}{"kubernetes", "devops"}},
+	}
+	withCredential := cloneMap(arguments)
+	withCredential["accessReferences"] = map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "credential://tenant-a/other"}}
+	if _, err := coordinator.Propose(ctx, ProposeActionRequest{
+		Scope: scope, RunID: run.ID, WorkerID: "worker-upsert", DeploymentID: deploymentID,
+		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
+		Arguments: withCredential, IdempotencyKey: "message-0:swap-account", Summary: "Swap the Reddit account",
+	}); err == nil {
+		t.Fatal("a model-proposed upsert changed credentials")
 	}
 	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker-upsert", DeploymentID: deploymentID,
@@ -69,11 +86,11 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["operation"] != SkillActionUpsertBinding || executed.Call.Output["replayed"] != false {
 		t.Fatalf("upsert execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
 	}
-	binding, err := catalog.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, "reddit")
-	if err != nil || binding == nil || binding.Revision != 1 || binding.Disabled || binding.Credentials["reddit"].ID != "credential://tenant-a/reddit" {
+	binding, err := catalog.GetBinding(ctx, skillScope, deploymentID, "reddit")
+	if err != nil || binding == nil || binding.Revision != 2 || binding.Disabled || binding.Credentials["reddit"].ID != "credential://tenant-a/reddit" || len(binding.Config) == 0 {
 		t.Fatalf("materialized binding = %#v, %v", binding, err)
 	}
-	if len(binding.Lifecycle) != 1 || binding.Lifecycle[0].Actor.Type != "user" || binding.Lifecycle[0].Actor.ID != "operator" {
+	if len(binding.Lifecycle) != 2 || binding.Lifecycle[1].Actor.Type != "user" || binding.Lifecycle[1].Actor.ID != "operator" {
 		t.Fatalf("binding audit = %#v", binding.Lifecycle)
 	}
 
@@ -84,7 +101,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	disableProposal, err := coordinator.Propose(ctx, ProposeActionRequest{
 		Scope: scope, RunID: disableRun.ID, WorkerID: "worker-disable", DeploymentID: deploymentID,
 		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionDisableBinding,
-		Arguments:      map[string]interface{}{"bindingId": "reddit", "expectedRevision": 1},
+		Arguments:      map[string]interface{}{"bindingId": "reddit", "expectedRevision": 2},
 		IdempotencyKey: "message-2:disable-reddit", Summary: "Disable Reddit research",
 	})
 	if err != nil {
@@ -95,8 +112,8 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	if err != nil || executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["operation"] != SkillActionDisableBinding {
 		t.Fatalf("disable execution = %#v, %v", executed, err)
 	}
-	disabled, _ := catalog.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, "reddit")
-	if disabled == nil || !disabled.Disabled || disabled.Revision != 2 || len(disabled.Lifecycle) != 2 || disabled.Lifecycle[1].Action != skill.BindingLifecycleDisabled {
+	disabled, _ := catalog.GetBinding(ctx, skillScope, deploymentID, "reddit")
+	if disabled == nil || !disabled.Disabled || disabled.Revision != 3 || len(disabled.Lifecycle) != 3 || disabled.Lifecycle[2].Action != skill.BindingLifecycleDisabled {
 		t.Fatalf("disabled binding = %#v", disabled)
 	}
 
@@ -105,7 +122,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatalf("reclaim after disable = %#v, %v", reenableRun, err)
 	}
 	reenable := cloneMap(arguments)
-	reenable["expectedRevision"] = 2
+	reenable["expectedRevision"] = 3
 	reenable["config"] = map[string]interface{}{"subreddits": []interface{}{"kubernetes"}}
 	reenableProposal, err := coordinator.Propose(ctx, ProposeActionRequest{
 		Scope: scope, RunID: reenableRun.ID, WorkerID: "worker-reenable", DeploymentID: deploymentID,
@@ -120,8 +137,9 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	if err != nil || executed.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("re-enable execution = %#v, %v", executed, err)
 	}
-	enabled, _ := catalog.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID, "reddit")
-	if enabled == nil || enabled.Disabled || enabled.Revision != 3 || len(enabled.Lifecycle) != 3 || enabled.Lifecycle[2].Action != skill.BindingLifecycleEnabled {
+	enabled, _ := catalog.GetBinding(ctx, skillScope, deploymentID, "reddit")
+	if enabled == nil || enabled.Disabled || enabled.Revision != 4 || len(enabled.Lifecycle) != 4 || enabled.Lifecycle[3].Action != skill.BindingLifecycleEnabled ||
+		enabled.Credentials["reddit"].ID != "credential://tenant-a/reddit" {
 		t.Fatalf("re-enabled binding = %#v", enabled)
 	}
 }
@@ -157,7 +175,7 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 			NextCursor: "page-2",
 		}, nil
 	})
-	validator, err := NewSkillBindingActionValidator(catalog)
+	validator, err := NewSkillBindingActionValidator(catalog, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +250,7 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	scope := Scope{Kind: "tenant", ID: "tenant-a"}
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	catalog := skillActionCatalog(t, ctx, scope, "agent-a")
-	validator, _ := NewSkillBindingActionValidator(catalog)
+	validator, _ := NewSkillBindingActionValidator(catalog, NewMemoryStore())
 	management := SkillManagementSkill()
 	bound, err := catalog.Resolve(ctx, skillScope, "agent-a", management.ID, management.Version, SkillActionUpsertBinding)
 	if err != nil {
@@ -241,7 +259,6 @@ func TestSkillBindingActionRejectsCrossAgentUnknownSourceCASAndSecretsBeforeAppr
 	base := map[string]interface{}{
 		"bindingId": "reader", "expectedRevision": 0, "skillId": "reddit.reader", "skillVersion": "1.0.0",
 		"allowedActions": []interface{}{"read"}, "enablePrompt": false, "maximumRisk": "read",
-		"accessReferences": map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "credential://reddit"}},
 	}
 
 	foreignRun := &AgentRun{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-b"}, AssignedAgentID: "agent-b"}
@@ -385,16 +402,21 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A person saves the Slack account; the model then enables the adapter.
+	if _, err := catalog.UpsertBinding(ctx, skill.UpsertBindingRequest{Binding: &skill.Binding{
+		ID: "slack", Scope: skillScope, DeploymentID: deploymentID, SkillID: "slack", SkillVersion: "1.0.0",
+		AllowedActions: []string{}, MaximumRisk: skill.RiskLevelRead,
+		Credentials: map[string]skill.CredentialReference{"SLACK_CONNECTION": {Kind: "slack-oauth", ID: "connection://tenant-a/slack"}},
+	}, Actor: skill.BindingActor{Type: "user", ID: "operator"}, Reason: "Connect Slack"}); err != nil {
+		t.Fatal(err)
+	}
 	arguments := map[string]interface{}{
-		"bindingId": "slack", "expectedRevision": 0,
+		"bindingId": "slack", "expectedRevision": 1,
 		"skillId": "slack", "skillVersion": "1.0.0",
 		"allowedActions": []interface{}{}, "enablePrompt": false,
 		"enabledConversationAdapters": []interface{}{"conversations"}, "maximumRisk": "read",
-		"accessReferences": map[string]interface{}{"SLACK_CONNECTION": map[string]interface{}{
-			"kind": "slack-oauth", "id": "connection://tenant-a/slack",
-		}},
 	}
-	validator, err := NewSkillBindingActionValidator(catalog)
+	validator, err := NewSkillBindingActionValidator(catalog, store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -416,7 +438,7 @@ func TestSkillManagementMaterializesAdapterOnlyAuthority(t *testing.T) {
 	}
 	binding, err := catalog.GetBinding(ctx, skillScope, deploymentID, "slack")
 	if err != nil || binding == nil || len(binding.EnabledConversationAdapters) != 1 ||
-		binding.EnabledConversationAdapters[0] != "conversations" || len(binding.AllowedActions) != 0 {
+		binding.EnabledConversationAdapters[0] != "conversations" || len(binding.AllowedActions) != 0 || binding.Credentials["SLACK_CONNECTION"].ID != "connection://tenant-a/slack" {
 		t.Fatalf("adapter-only binding = %#v, %v", binding, err)
 	}
 }

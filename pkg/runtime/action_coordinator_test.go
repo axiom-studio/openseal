@@ -372,10 +372,16 @@ func governedActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 
 func claimedActionRun(t *testing.T, store *MemoryStore, scope Scope, now time.Time, worker string) *AgentRun {
 	t.Helper()
+	return claimedOwnedActionRun(t, store, scope, now, worker, ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"})
+}
+
+// claimedOwnedActionRun claims a run of release-agent under owner.
+func claimedOwnedActionRun(t *testing.T, store *MemoryStore, scope Scope, now time.Time, worker string, owner ObjectiveOwner) *AgentRun {
+	t.Helper()
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(context.Background(), CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
+		Scope: scope, Owner: owner, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
 	})
 	if err != nil {
 		t.Fatal(err)

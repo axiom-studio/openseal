@@ -17,7 +17,7 @@ func TestExternalReviewLinksUseOriginAndCanonicalRequests(t *testing.T) {
 			fixture.store.agentRuns[portfolioKey(fixture.run.Scope, fixture.run.ID)].Context = map[string]interface{}{"conversationId": fixture.conversation.ID, "triggerMessageId": fixture.inbound.ID}
 			request := setupRequestFixture()
 			request.Scope = fixture.run.Scope
-			request.DeploymentID = fixture.endpoint.DeploymentID
+			request.Owner, request.DeploymentID, request.AgentID = ObjectiveOwner{Type: OwnerTypeAgent, ID: fixture.endpoint.DeploymentID}, fixture.endpoint.DeploymentID, fixture.endpoint.DeploymentID
 			request.ConversationID = fixture.conversation.ID
 			request.TriggerMessageID = fixture.inbound.ID
 			request.RunID = fixture.run.ID

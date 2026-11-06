@@ -39,7 +39,7 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			}
 			scope := Scope{Kind: "tenant", ID: "one"}
 			skillScope := SkillScope{Kind: scope.Kind, ID: scope.ID}
-			binding, err := engine.UpsertSkillBinding(ctx, UpsertSkillBindingRequest{Binding: &SkillBinding{ID: "account", Scope: skillScope, DeploymentID: "agent", SkillID: "connector", SkillVersion: "1.0.0", AllowedActions: []string{"read"}, MaximumRisk: SkillRiskRead}, Actor: SkillBindingActor{Type: "user", ID: "operator"}, Reason: "Connect account"})
+			binding, err := engine.UpsertOwnerSkillBinding(ctx, ensureTestAgent(t, engine, skillScope, "agent"), UpsertSkillBindingRequest{Binding: &SkillBinding{ID: "account", Scope: skillScope, DeploymentID: "agent", SkillID: "connector", SkillVersion: "1.0.0", AllowedActions: []string{"read"}, MaximumRisk: SkillRiskRead}, Actor: SkillBindingActor{Type: "user", ID: "operator"}, Reason: "Connect account"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -47,7 +47,7 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 				t.Fatal(err)
 			}
 			now := time.Now().UTC()
-			request := &SkillSetupRequest{ID: "setup", Scope: scope, DeploymentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: "requesting-run", ActionCallID: "setup-call",
+			request := &SkillSetupRequest{ID: "setup", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: "requesting-run", ActionCallID: "setup-call",
 				Kind: "configure", SkillID: "connector", SkillVersion: "1.1.0", SkillName: "Connector", BindingID: binding.ID, BindingRevision: binding.Revision,
 				Phase: SkillSetupPhaseBindingUpgrade, BindingVersion: "1.0.0", RequiredActions: []string{"read"}, Reason: "Connect the current service", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 			if err := store.SaveSkillSetupRequest(ctx, request, 0); err != nil {
@@ -101,11 +101,11 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			if current.Revision != receipt.BindingRevision || current.Lifecycle[len(current.Lifecycle)-1].SkillUpgrade == nil || current.Lifecycle[len(current.Lifecycle)-1].SkillUpgrade.PlanDigest != plan.Digest {
 				t.Fatal("canonical upgrade proof did not persist")
 			}
-			requests, err := engine.ListSkillSetupRequests(ctx, scope, "agent", "chat")
+			requests, err := engine.ListSkillSetupRequests(ctx, scope, agentOwner("agent"), "chat")
 			if err != nil || len(requests) != 1 || requests[0].Status != "pending" || requests[0].Phase != SkillSetupPhaseBindingUpgrade {
 				t.Fatalf("upgrade alone resolved setup: %#v %v", requests, err)
 			}
-			if _, err := engine.ResolveSkillSetupRequest(ctx, scope, "agent", request.ID, 1, binding.ID, "operator", false); err == nil {
+			if _, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, 1, binding.ID, "operator", false); err == nil {
 				t.Fatal("explicit resolve bypassed upgrade phase")
 			}
 			rebased, err := RebaseSkillSetupRequestAfterBindingUpgrade(requests[0], 1, current)
@@ -118,18 +118,18 @@ func TestSkillSetupUpgradePhaseRequiresCanonicalDrainThenSeparateSave(t *testing
 			if err := store.SaveSkillSetupRequest(ctx, rebased, 1); !errors.Is(err, ErrSkillSetupConflict) {
 				t.Fatalf("stale rebase did not conflict: %v", err)
 			}
-			requests, err = engine.ListSkillSetupRequests(ctx, scope, "agent", "chat")
+			requests, err = engine.ListSkillSetupRequests(ctx, scope, agentOwner("agent"), "chat")
 			if err != nil || requests[0].Status != "pending" {
 				t.Fatalf("rebase itself resolved setup: %#v %v", requests, err)
 			}
-			if _, err := engine.ResolveSkillSetupRequest(ctx, scope, "agent", request.ID, rebased.Revision, binding.ID, "operator", false); err == nil {
+			if _, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, rebased.Revision, binding.ID, "operator", false); err == nil {
 				t.Fatal("upgrade revision counted as actual configuration")
 			}
-			saved, err := engine.UpsertSkillBinding(ctx, UpsertSkillBindingRequest{Binding: current, ExpectedRevision: current.Revision, Actor: SkillBindingActor{Type: "user", ID: "operator"}, Reason: "Save the reviewed account configuration"})
+			saved, err := engine.UpsertOwnerSkillBinding(ctx, ensureTestAgent(t, engine, skillScope, "agent"), UpsertSkillBindingRequest{Binding: current, ExpectedRevision: current.Revision, Actor: SkillBindingActor{Type: "user", ID: "operator"}, Reason: "Save the reviewed account configuration"})
 			if err != nil {
 				t.Fatal(err)
 			}
-			resolved, err := engine.ResolveSkillSetupRequest(ctx, scope, "agent", request.ID, rebased.Revision, binding.ID, "operator", false)
+			resolved, err := engine.ResolveSkillSetupRequest(ctx, scope, agentOwner("agent"), request.ID, rebased.Revision, binding.ID, "operator", false)
 			if err != nil || resolved.Status != "resolved" || resolved.ResolvedBindingRevision != saved.Revision {
 				t.Fatalf("actual save did not resolve: %#v %v", resolved, err)
 			}

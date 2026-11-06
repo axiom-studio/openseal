@@ -88,7 +88,7 @@ func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupSt
 		return task, nil, err
 	}
 	if request == nil || request.Validate() != nil || request.ID != requestID || request.Scope != run.Scope ||
-		request.RunID != run.ID || request.DeploymentID != task.TargetAgentID || request.ConversationID != task.ConversationID ||
+		request.RunID != run.ID || request.Owner != task.Owner || request.DeploymentID != task.Owner.ID || request.AgentID != task.TargetAgentID || request.ConversationID != task.ConversationID ||
 		request.TriggerMessageID != task.SourceMessageID || request.ID != "skill-setup:"+request.ActionCallID {
 		return task, nil, ErrInvalidSkillSetup
 	}
@@ -113,7 +113,7 @@ func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupSt
 	encoded, err := json.Marshal(call.Output["setupRequest"])
 	if err != nil || json.Unmarshal(encoded, &admitted) != nil || admitted.Validate() != nil || requireCompletedAction && admitted.Status != "pending" ||
 		admitted.ID != request.ID || admitted.Scope != request.Scope || admitted.RunID != request.RunID ||
-		admitted.ActionCallID != request.ActionCallID || admitted.DeploymentID != request.DeploymentID ||
+		admitted.ActionCallID != request.ActionCallID || admitted.Owner != request.Owner || admitted.DeploymentID != request.DeploymentID || admitted.AgentID != request.AgentID ||
 		admitted.ConversationID != request.ConversationID || admitted.TriggerMessageID != request.TriggerMessageID ||
 		admitted.SkillID != request.SkillID || admitted.SourceIdentity != request.SourceIdentity || admitted.BindingID != request.BindingID ||
 		admitted.EnablePrompt != request.EnablePrompt || !slices.Equal(admitted.RequiredActions, request.RequiredActions) ||
@@ -242,6 +242,12 @@ func (s *ConversationRunScheduler) ReconcileSkillSetupTask(ctx context.Context, 
 	}
 	if request.Status == "pending" || !isExactTaskSetupWait(run, request.ID) {
 		return result, true, nil
+	}
+	// The request settles without resuming once the run no longer acts for
+	// the umbrella and member that asked, for example after the member left
+	// the Team.
+	if resumable, resumeErr := InteractionRunResumable(ctx, teamRosterReader(s.runs.store), run, request.Owner, request.AgentID); resumeErr != nil || !resumable {
+		return result, true, resumeErr
 	}
 	if request.Status != "resolved" && request.Status != "dismissed" {
 		return nil, true, ErrInvalidSkillSetup

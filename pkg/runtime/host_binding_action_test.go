@@ -64,9 +64,9 @@ func (durableCatalog) UsesDurableBindings() bool { return true }
 func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "one"}
-	claimed := claimedActionRun(t, store, scope, time.Now().UTC(), "worker")
+	claimed := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
 	// Another run in the workspace, e.g. another user's chat.
-	other := claimedActionRun(t, store, scope, time.Now().UTC(), "worker")
+	other := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
 	catalog := hostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
 	allow := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only"}, nil
@@ -115,9 +115,9 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 func TestActionProposalFenceChecksHostBindings(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "one"}
-	claimed := claimedActionRun(t, store, scope, time.Now().UTC(), "worker")
+	claimed := claimedOwnedActionRun(t, store, scope, time.Now().UTC(), "worker", ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"})
 	catalog := hostConnectorCatalog(t, scope, map[string]bool{claimed.ID: true})
-	bound, err := catalog.Resolve(skill.WithRunActor(t.Context(), skill.RunActor{RunID: claimed.ID, AgentID: "release-agent"}),
+	bound, err := catalog.Resolve(skill.WithRunActor(t.Context(), skill.RunActor{RunID: claimed.ID, AgentID: "release-agent", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "release-agent"}}),
 		skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "release-agent", "openseal.connector", "1.0.0", "read", skill.BindingReference{ID: "mcp:linear", Revision: 1})
 	if err != nil || !bound.Host {
 		t.Fatalf("resolve = %#v, %v", bound, err)
@@ -261,7 +261,7 @@ func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 	}
 	setup := func(callID, skillID string, run *AgentRun) (map[string]interface{}, error) {
 		return dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: scope, RunID: run.ID},
-			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent")
+			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	}
 	_, err = setup("call-linear", "linear", run)
 	var refusal *interactionRequestRefusal

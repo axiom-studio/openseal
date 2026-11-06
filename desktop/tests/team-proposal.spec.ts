@@ -43,15 +43,6 @@ test("team permissions stay readable and unmatched assignments prevent approval"
               purpose: "Check uncertainty.",
               minimumMembers: 1,
               channelParticipation: "observe_only",
-              skillGrants: [
-                {
-                  skillId: "evidence-reader",
-                  skillVersion: "1",
-                  maximumRisk: "read",
-                  allowedActions: ["search"],
-                  enablePrompt: true,
-                },
-              ],
             },
           ],
           approvals: {
@@ -143,12 +134,8 @@ test("team permissions stay readable and unmatched assignments prevent approval"
   await team
     .getByText("Delegation and shared context", { exact: true })
     .click();
-  await team.getByText("Role skill permissions", { exact: true }).click();
   await expect(team.getByText("60 seconds", { exact: true })).toBeVisible();
   await expect(team.getByText("4,096 bytes", { exact: true })).toBeVisible();
-  await expect(
-    team.getByText("Allowed actions: search", { exact: true }),
-  ).toBeVisible();
   await expect(
     team.getByText("Channel participation: observe only", { exact: true }),
   ).toBeVisible();

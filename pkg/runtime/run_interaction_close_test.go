@@ -45,7 +45,7 @@ func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 		t.Fatalf("run not waiting: %#v %v", parked, err)
 	}
 	// A pending Skill setup request of the same Run is closed too.
-	setup := &SkillSetupRequest{ID: "setup-1", Scope: scope, DeploymentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID,
+	setup := &SkillSetupRequest{ID: "setup-1", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID,
 		ActionCallID: "setup-call", Kind: "configure", SkillID: "skill-x", SkillVersion: "1.0.0", SkillName: "X", Reason: "Connect X",
 		Status: "pending", Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := store.SaveSkillSetupRequest(ctx, setup, 0); err != nil {
@@ -77,12 +77,12 @@ func TestCompletedRunKeepsSetupFormsButClosesCredentialRequests(t *testing.T) {
 	ctx, store, _, _, scope := credentialRequestDispatchFixture(t)
 	run := &AgentRun{ID: "run-done", Scope: scope, Status: AgentRunStatusCompleted}
 	now := time.Now().UTC()
-	credential := &CredentialRequest{ID: "credential-1", Scope: scope, DeploymentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID, ActionCallID: "c1",
+	credential := &CredentialRequest{ID: "credential-1", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID, ActionCallID: "c1",
 		Kind: CredentialRequestKindPaymentCard, Reason: "Add your card", Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveCredentialRequest(ctx, credential, 0); err != nil {
 		t.Fatal(err)
 	}
-	setup := &SkillSetupRequest{ID: "setup-2", Scope: scope, DeploymentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID,
+	setup := &SkillSetupRequest{ID: "setup-2", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID,
 		ActionCallID: "c2", Kind: "configure", SkillID: "skill-x", SkillVersion: "1.0.0", SkillName: "X", Reason: "Connect X",
 		Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := store.SaveSkillSetupRequest(ctx, setup, 0); err != nil {

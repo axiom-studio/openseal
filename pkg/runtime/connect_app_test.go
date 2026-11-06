@@ -77,7 +77,7 @@ func connectAppFixture(t *testing.T) (context.Context, *MemoryStore, *skill.Cata
 func TestFindAppsListsCatalogAppsAndWhetherTheyAreConnected(t *testing.T) {
 	ctx, store, _, dispatcher, scope, connected := connectAppFixture(t)
 	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
-	result, err := dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "linear", "limit": 8}}, run, "agent")
+	result, err := dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "linear", "limit": 8}}, run, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestFindAppsListsCatalogAppsAndWhetherTheyAreConnected(t *testing.T) {
 		}
 	}
 	connected.Store(true)
-	result, err = dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "linear"}}, run, "agent")
+	result, err = dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "linear"}}, run, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestFindAppsListsCatalogAppsAndWhetherTheyAreConnected(t *testing.T) {
 	if first["connected"] != true || len(tools) != 1 || tools[0] != "mcp.linear.list_issues" {
 		t.Fatalf("connected app: %#v", first)
 	}
-	if _, err := dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "linear", "limit": 9}}, run, "agent"); err != nil {
+	if _, err := dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "linear", "limit": 9}}, run, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}); err != nil {
 		t.Fatalf("an oversized limit is capped by the schema, not an error here: %v", err)
 	}
 }
@@ -120,7 +120,7 @@ func TestFindAppsAlsoListsSkillsTheUserCanSetUp(t *testing.T) {
 		}}, nil
 	})
 	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
-	result, err := dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "gmail", "limit": 3}}, run, "agent")
+	result, err := dispatcher.findApps(ctx, ActionDispatchInput{Arguments: map[string]interface{}{"query": "gmail", "limit": 3}}, run, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,13 +187,13 @@ func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 		t.Fatalf("change set: %#v %v", changes, err)
 	}
 	// Asking again in the conversation shows the same card, never a second one.
-	again, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "again"}, Arguments: map[string]interface{}{"app": "linear"}}, parked, "agent")
+	again, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "again"}, Arguments: map[string]interface{}{"app": "linear"}}, parked, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil || again["setupRequest"].(map[string]interface{})["id"] != request.ID {
 		t.Fatalf("second card: %#v %v", again, err)
 	}
 	// Once connected for the run, the result is the app's tools.
 	connected.Store(true)
-	done, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "after"}, Arguments: map[string]interface{}{"app": "linear"}}, parked, "agent")
+	done, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "after"}, Arguments: map[string]interface{}{"app": "linear"}}, parked, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil || done["setupRequest"] != nil {
 		t.Fatalf("connected app: %#v %v", done, err)
 	}
@@ -207,7 +207,7 @@ func TestRequestConnectionByAddressAndRefusals(t *testing.T) {
 	ctx, store, _, dispatcher, scope, connected := connectAppFixture(t)
 	run := createClaimedSkillActionRun(t, ctx, store, scope, "agent", "worker")
 	run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
-	result, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "custom"}, Arguments: map[string]interface{}{"app": map[string]interface{}{"address": "https://MCP.Example.com/mcp"}}}, run, "agent")
+	result, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "custom"}, Arguments: map[string]interface{}{"app": map[string]interface{}{"address": "https://MCP.Example.com/mcp"}}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,24 +223,24 @@ func TestRequestConnectionByAddressAndRefusals(t *testing.T) {
 		"query address":  {"app": map[string]interface{}{"address": "https://mcp.example.com/?key=1"}},
 		"extra property": {"app": map[string]interface{}{"address": "https://mcp.example.com", "token": "x"}},
 	} {
-		if _, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "refused"}, Arguments: arguments}, run, "agent"); !isInteractionRefusal(err) {
+		if _, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "refused"}, Arguments: arguments}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}); !isInteractionRefusal(err) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	slashed, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "neon"}, Arguments: map[string]interface{}{"app": "neondatabase/mcp-server-neon"}}, run, "agent")
+	slashed, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "neon"}, Arguments: map[string]interface{}{"app": "neondatabase/mcp-server-neon"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil || slashed["setupRequest"].(map[string]interface{})["app"].(map[string]interface{})["catalogSlug"] != "neondatabase/mcp-server-neon" {
 		t.Fatalf("slug with a slash: %#v %v", slashed, err)
 	}
 	// A connection to the same address counts as connected.
 	connected.Store(true)
-	done, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "linear-address"}, Arguments: map[string]interface{}{"app": "https://mcp.linear.app/mcp"}}, run, "agent")
+	done, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "linear-address"}, Arguments: map[string]interface{}{"app": "https://mcp.linear.app/mcp"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil || done["connected"] == nil {
 		t.Fatalf("address of a connected app: %#v %v", done, err)
 	}
 	// No conversation: the card cannot be shown.
 	run.Context = nil
 	connected.Store(false)
-	if _, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "routine"}, Arguments: map[string]interface{}{"app": "linear"}}, run, "agent"); !isInteractionRefusal(err) {
+	if _, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "routine"}, Arguments: map[string]interface{}{"app": "linear"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}); !isInteractionRefusal(err) {
 		t.Fatalf("no conversation: %v", err)
 	}
 }
@@ -253,7 +253,7 @@ func isInteractionRefusal(err error) bool {
 func TestConnectAppRequestValidation(t *testing.T) {
 	now := time.Now().UTC()
 	base := func() *SkillSetupRequest {
-		return &SkillSetupRequest{ID: "connect-app:call", Scope: Scope{Kind: "tenant", ID: "a"}, DeploymentID: "agent", ConversationID: "chat", TriggerMessageID: "message",
+		return &SkillSetupRequest{ID: "connect-app:call", Scope: Scope{Kind: "tenant", ID: "a"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message",
 			RunID: "run", ActionCallID: "call", Kind: SkillSetupKindConnectApp, SkillID: mcp.SkillID, SkillVersion: mcp.SkillVersion, SkillName: "Linear",
 			App: &ConnectAppTarget{CatalogSlug: "linear", Name: "Linear"}, Reason: "Connect Linear", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	}
@@ -291,12 +291,12 @@ func TestAppsAndSkillsCannotTakeEachOthersSetupPath(t *testing.T) {
 
 	// The app's slug is not a Skill.
 	_, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "setup-app", Scope: scope, RunID: run.ID},
-		Arguments: map[string]interface{}{"kind": "install", "skillId": "linear", "skillVersion": "latest", "reason": "Connect Linear"}}, run, "agent")
+		Arguments: map[string]interface{}{"kind": "install", "skillId": "linear", "skillVersion": "latest", "reason": "Connect Linear"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if !errors.As(err, &refusal) || !strings.Contains(refusal.message, "request_connection") || !strings.Contains(refusal.message, "mcp-server") {
 		t.Fatalf("request_setup for an app = %v", err)
 	}
 	// The Skill's id is not an app.
-	_, err = dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "connect-skill"}, Arguments: map[string]interface{}{"app": "google-workspace"}}, run, "agent")
+	_, err = dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "connect-skill"}, Arguments: map[string]interface{}{"app": "google-workspace"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if !errors.As(err, &refusal) || !strings.Contains(refusal.message, "request_setup") {
 		t.Fatalf("request_connection for a Skill = %v", err)
 	}
@@ -304,12 +304,12 @@ func TestAppsAndSkillsCannotTakeEachOthersSetupPath(t *testing.T) {
 		t.Fatalf("a refused path created a request: %#v", requests)
 	}
 	// Each takes its own type.
-	connect, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "connect-app"}, Arguments: map[string]interface{}{"app": "linear"}}, run, "agent")
+	connect, err := dispatcher.requestConnection(ctx, ActionDispatchInput{Call: &ActionCall{ID: "connect-app"}, Arguments: map[string]interface{}{"app": "linear"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if err != nil || connect["setupRequest"] == nil {
 		t.Fatalf("request_connection for an app = %#v, %v", connect, err)
 	}
 	setup, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "setup-skill", Scope: scope, RunID: run.ID},
-		Arguments: map[string]interface{}{"kind": "install", "skillId": "google-workspace", "skillVersion": "latest", "sourceIdentity": "axiomstudio/skill-google-workspace", "reason": "Use Gmail"}}, run, "agent")
+		Arguments: map[string]interface{}{"kind": "install", "skillId": "google-workspace", "skillVersion": "latest", "sourceIdentity": "axiomstudio/skill-google-workspace", "reason": "Use Gmail"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	if errors.As(err, &refusal) && strings.Contains(refusal.message, "mcp-server") {
 		t.Fatalf("a Skill was refused as an app: %v", err)
 	}

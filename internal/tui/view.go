@@ -844,22 +844,6 @@ func (m *Model) renderTeamsContent(width int) string {
 			lines = append(lines, compact(fmt.Sprintf("• %s · %s · Agent %s", name, assignment.RoleID, assignment.AgentDeploymentID), max(width-6, 24)))
 		}
 	}
-	if definition != nil && len(definition.Roles) > 0 {
-		lines = append(lines, "", mutedStyle.Render("Role authority"))
-		for _, role := range definition.Roles {
-			lines = append(lines, compact(fmt.Sprintf("• %s · %d Skill grant(s)", role.DisplayName, len(role.SkillGrants)), max(width-6, 24)))
-			for _, grant := range role.SkillGrants[:min(3, len(role.SkillGrants))] {
-				label := grant.SkillID + "@" + grant.SkillVersion
-				if grant.CatalogID != "" {
-					label = grant.CatalogID + " → " + label
-				}
-				if grant.RuntimeIdentity != nil {
-					label += " · exact source variant"
-				}
-				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  %s · %d action(s)", label, len(grant.AllowedActions)), max(width-8, 24))))
-			}
-		}
-	}
 	if definition != nil && len(definition.ObjectiveTemplates) > 0 {
 		lines = append(lines, "", mutedStyle.Render(fmt.Sprintf("Objective portfolio · %d template(s)", len(definition.ObjectiveTemplates))))
 		for _, objective := range definition.ObjectiveTemplates[:min(3, len(definition.ObjectiveTemplates))] {
@@ -2130,10 +2114,6 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 			headerStyle.Render(fmt.Sprintf("Reviewed update · %s@%s → %s@%s", plan.From.ID, plan.From.Version, plan.To.ID, plan.To.Version)),
 			mutedStyle.Render(fmt.Sprintf("%d Objective(s) · %d Project(s) · historical Runs stay unchanged", len(plan.Objectives), len(plan.Projects))),
 		)
-		if plan.TeamAuthority != nil {
-			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Team authority · definition %s@%s · roles %s",
-				plan.TeamAuthority.DefinitionID, plan.TeamAuthority.DefinitionVersion, strings.Join(plan.TeamAuthority.AuthorizedRoleIDs, ", "))))
-		}
 		for _, finding := range plan.Findings {
 			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("• "+finding.Message))
 		}

@@ -42,30 +42,21 @@ func (e *Engine) credentialRequestStore() (runtime.CredentialRequestStore, error
 	return e.store, nil
 }
 
-// ListCredentialRequests lists one chat roster member's credential requests in a conversation.
-func (e *Engine) ListCredentialRequests(ctx context.Context, scope runtime.Scope, deploymentID, conversationID string) ([]*CredentialRequest, error) {
+// ListCredentialRequests lists a conversation's credential requests. owner
+// must own the conversation: every request there is saved to it.
+func (e *Engine) ListCredentialRequests(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, conversationID string) ([]*CredentialRequest, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
 		return nil, err
 	}
-	conversation, err := e.GetConversation(ctx, scope, conversationID)
-	if err != nil {
+	if err := e.conversationOwnedBy(ctx, scope, owner, conversationID); err != nil {
 		return nil, err
 	}
-	if conversation == nil {
-		return nil, runtime.ErrConversationNotFound
-	}
-	onRoster, err := runtime.AgentOnChatRoster(ctx, e, scope, conversation.Owner, deploymentID)
-	if err != nil {
-		return nil, err
-	}
-	if !onRoster {
-		return nil, runtime.ErrConversationNotFound
-	}
-	return store.ListCredentialRequests(ctx, scope, deploymentID, conversationID)
+	return store.ListCredentialRequests(ctx, scope, owner.ID, conversationID)
 }
 
-func (e *Engine) GetCredentialRequest(ctx context.Context, scope runtime.Scope, deploymentID, id string) (*CredentialRequest, error) {
+// GetCredentialRequest returns request id when it is saved to owner.
+func (e *Engine) GetCredentialRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string) (*CredentialRequest, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
 		return nil, err
@@ -74,7 +65,7 @@ func (e *Engine) GetCredentialRequest(ctx context.Context, scope runtime.Scope, 
 	if err != nil {
 		return nil, err
 	}
-	if r == nil || r.DeploymentID != deploymentID {
+	if r == nil || r.Owner != owner || r.DeploymentID != owner.ID {
 		return nil, runtime.ErrInvalidCredentialRequest
 	}
 	return r, nil
@@ -84,7 +75,7 @@ func (e *Engine) GetCredentialRequest(ctx context.Context, scope runtime.Scope, 
 // credential (or dismissed the card) and resumes the Run waiting for it.
 // Hosts must authorize the actor and verify the saved credential first; the
 // kernel never sees credential values.
-func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Scope, deploymentID, id string, expected int64, actor string, dismiss bool) (*CredentialRequestResolution, error) {
+func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, actor string, dismiss bool) (*CredentialRequestResolution, error) {
 	store, err := e.credentialRequestStore()
 	if err != nil {
 		return nil, err
@@ -92,7 +83,7 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Sco
 	if strings.TrimSpace(actor) == "" {
 		return nil, runtime.ErrInvalidCredentialRequest
 	}
-	r, err := e.GetCredentialRequest(ctx, scope, deploymentID, id)
+	r, err := e.GetCredentialRequest(ctx, scope, owner, id)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +113,7 @@ func (e *Engine) ResolveCredentialRequest(ctx context.Context, scope runtime.Sco
 
 func (e *Engine) continueCredentialRequestRun(ctx context.Context, r *CredentialRequest) (bool, error) {
 	return e.continueInteractionRun(ctx, interactionContinuation{
-		scope: r.Scope, runID: r.RunID, requestID: r.ID, actionCallID: r.ActionCallID, status: r.Status, revision: r.Revision,
+		scope: r.Scope, owner: r.Owner, agentID: r.AgentID, runID: r.RunID, requestID: r.ID, actionCallID: r.ActionCallID, status: r.Status, revision: r.Revision,
 		updatedAt: r.UpdatedAt, wakeType: runtime.CredentialRequestWakeType, coordinator: "credential-request-coordinator",
 		eventType: "run.credential_request_settled", summary: "Received the credential request result; continuing",
 		interventionPrefix: "credential-request-result:", instruction: runtime.CredentialRequestResolutionInstruction(r),
@@ -132,7 +123,11 @@ func (e *Engine) continueCredentialRequestRun(ctx context.Context, r *Credential
 // interactionContinuation is one settled in-chat request whose Run may be
 // waiting for it.
 type interactionContinuation struct {
-	scope                                                  runtime.Scope
+	scope runtime.Scope
+	// owner and agentID are the umbrella and member that asked; the Run
+	// resumes only while it still acts as both.
+	owner                                                  runtime.ObjectiveOwner
+	agentID                                                string
 	runID, requestID, actionCallID, status                 string
 	revision                                               int64
 	updatedAt                                              time.Time
@@ -142,7 +137,8 @@ type interactionContinuation struct {
 
 // continueInteractionRun resumes the Run waiting for a settled in-chat
 // request with guidance for the model. It reports false when the Run already
-// ended, so the host starts a new reply instead.
+// ended, or no longer acts for the umbrella and member that asked, so the
+// host starts a new reply instead.
 func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContinuation) (bool, error) {
 	for attempt := 0; attempt < 4; attempt++ {
 		run, err := e.store.GetAgentRun(ctx, c.scope, c.runID)
@@ -166,6 +162,10 @@ func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContin
 				return false, nil
 			}
 			return true, nil
+		}
+		resumable, err := runtime.InteractionRunResumable(ctx, e, run, c.owner, c.agentID)
+		if err != nil || !resumable {
+			return false, err
 		}
 		actor := runtime.ActivityActor{Type: "service", ID: c.coordinator}
 		_, _, err = runtime.NewRunActivityService(e.store, e.store).TransitionRun(ctx, c.scope, run.ID, runtime.RunTransitionRequest{

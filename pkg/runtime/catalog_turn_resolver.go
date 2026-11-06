@@ -180,9 +180,16 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		}
 		skillHost = *resolved
 	}
-	// The Agent's activation also carries the host's bindings for this run
-	// (for example connected apps the run's user may use); a Team's does not.
-	activation, err := catalog.ActivateSkills(skill.WithRunActor(ctx, skill.RunActor{RunID: run.ID, AgentID: deployment.ID}), scope, deployment.ID, skillHost)
+	// Connections belong to the run's umbrella. A 1:1 run activates its
+	// Agent with the host's bindings for that Agent. A Team run activates the
+	// member without any connection and the Team with the Team's own.
+	actorCtx := skill.WithRunActor(ctx, RunSkillActor(run))
+	memberCtx := actorCtx
+	teamRun := run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != ""
+	if teamRun {
+		memberCtx = skill.WithoutConnections(actorCtx)
+	}
+	activation, err := catalog.ActivateSkills(memberCtx, scope, deployment.ID, skillHost)
 	if err != nil {
 		return nil, fmt.Errorf("activate bound Skills for Agent %s: %w", deployment.ID, err)
 	}
@@ -198,8 +205,8 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		return nil, fmt.Errorf("project bound Skills for Agent %s: %w", deployment.ID, err)
 	}
 	actionDeploymentID := deployment.ID
-	if run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != "" {
-		teamActivation, activateErr := catalog.ActivateSkills(ctx, scope, run.Owner.ID, skillHost)
+	if teamRun {
+		teamActivation, activateErr := catalog.ActivateSkills(actorCtx, scope, run.Owner.ID, skillHost)
 		if activateErr != nil {
 			return nil, fmt.Errorf("activate bound Skills for Team %s: %w", run.Owner.ID, activateErr)
 		}

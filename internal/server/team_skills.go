@@ -203,17 +203,6 @@ func (s *Server) ownerSkillReferenceUpgradeService(
 		return nil, kernelruntime.Scope{}, "", "", false
 	}
 	service := kernelruntime.NewSkillReferenceUpgradeService(store, catalog)
-	teamStore, teamsOK := s.store.(kernelteam.Store)
-	agentStore, agentsOK := s.store.(kernelagent.Store)
-	if owner == "Team" && (!teamsOK || !agentsOK) {
-		s.respondError(w, http.StatusServiceUnavailable, "Team Skill authority review is unavailable")
-		return nil, kernelruntime.Scope{}, "", "", false
-	}
-	if teamsOK && agentsOK {
-		agents := kernelagent.NewRegistryWithStore(agentStore)
-		teams := kernelteam.NewRegistryWithStore(teamStore, agents)
-		service = kernelruntime.NewSkillReferenceUpgradeService(store, catalog, teams)
-	}
 	scope := kernelruntime.Scope{Kind: skillScope.Kind, ID: skillScope.ID}
 	return service, scope, deploymentID, bindingID, true
 }
