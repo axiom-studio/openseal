@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -40,15 +41,18 @@ func TestCollaborationChildAnswersInTheSameChat(t *testing.T) {
 	}
 }
 
-// An Agent's 1:1 chat belongs to that Agent alone, so work it hands to another
-// Agent runs as ordinary Agent work rather than as an invalid chat Run.
-func TestCollaborationChildFromOneToOneChatIsAgentWork(t *testing.T) {
-	source := &AgentRun{ID: "own-run", Kind: RunKindConversation, Scope: Scope{Kind: "tenant", ID: "one"},
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "own"}, AssignedAgentID: "own", ConcurrencyKey: conversationRunLane("chat", "", "own"),
-		Context: map[string]interface{}{conversationRunContextConversationID: "chat", conversationRunContextTriggerID: "ask"}}
-	request := &AgentRequest{ID: "request", Kind: AgentRequestKindRequest, Goal: "Review",
-		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "own"}, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "other"}, AssignedAgentID: "other"}
-	if child := buildCollaborationChildRun(source, request, time.Now().UTC(), "other-run"); child.Kind != RunKindAgentWork {
-		t.Fatalf("child kind = %s", child.Kind)
+// An Agent's 1:1 chat belongs to that Agent alone, so it cannot hand work to
+// another Agent.
+func TestOneToOneChatCannotHandWorkToAnotherAgent(t *testing.T) {
+	source := &AgentRun{ID: "own-run", Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "own"}, AssignedAgentID: "own"}
+	if err := validateChatDelegationSource(source); !errors.Is(err, ErrInvalidAgentRequestState) {
+		t.Fatalf("1:1 chat hand-off = %v", err)
+	}
+	team := &AgentRun{ID: "team-run", Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}, AssignedAgentID: "marlow"}
+	if err := validateChatDelegationSource(team); err != nil {
+		t.Fatalf("Team chat hand-off = %v", err)
+	}
+	if err := validateChatDelegationSource(&AgentRun{ID: "work", Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "own"}}); err != nil {
+		t.Fatalf("Agent work hand-off = %v", err)
 	}
 }

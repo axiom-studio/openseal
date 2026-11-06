@@ -764,6 +764,9 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 	if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
 		return nil, err
 	}
+	if err := validateChatDelegationSource(source); err != nil {
+		return nil, err
+	}
 	delegationPolicy, err := s.resolveSourceDelegationPolicy(ctx, source)
 	if err != nil {
 		return nil, err
@@ -907,6 +910,9 @@ func (s *CollaborationService) CreateAgentRequestGroup(ctx context.Context, req 
 			return nil, fmt.Errorf("request %d recipient: %w", index+1, err)
 		}
 		if err := validateTaskDelegationSource(ctx, s.runs, source); err != nil {
+			return nil, err
+		}
+		if err := validateChatDelegationSource(source); err != nil {
 			return nil, err
 		}
 		if strings.TrimSpace(spec.Goal) == "" {
@@ -1815,7 +1821,7 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	}
 	kind, lane := normalizeRunKind(source.Kind), source.ConcurrencyKey
 	if kind == RunKindConversation {
-		kind, lane = collaborationChatPlacement(source, owner, assignedAgent, context)
+		lane = collaborationChatPlacement(source, assignedAgent, context)
 	}
 	child := &AgentRun{
 		ID: id, Kind: kind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
@@ -1831,16 +1837,10 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	return child
 }
 
-// collaborationChatPlacement puts work handed over in a chat into that same
-// chat: the recipient answers there as an ordinary chat Run, in its own lane,
-// with the whole conversation, exactly as if the message had reached it first.
-// Work an Agent's 1:1 chat hands to another Agent cannot answer in that chat,
-// so it runs as ordinary Agent work instead.
-func collaborationChatPlacement(source *AgentRun, owner ObjectiveOwner, assignedAgent string, context map[string]interface{}) (RunKind, string) {
-	conversationID, _ := source.Context[conversationRunContextConversationID].(string)
-	if conversationID == "" || assignedAgent == "" || owner.Type == OwnerTypeAgent && owner.ID != assignedAgent {
-		return RunKindAgentWork, source.ConcurrencyKey
-	}
+// collaborationChatPlacement puts work handed over in a Team chat into that
+// same chat: the recipient answers there as an ordinary chat Run, in its own
+// lane, with the whole conversation, exactly as if the message reached it first.
+func collaborationChatPlacement(source *AgentRun, assignedAgent string, context map[string]interface{}) string {
 	for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, conversationRunContextTriggerSeq, "threadRootMessageId", "responseMode"} {
 		if value, ok := source.Context[key]; ok {
 			context[key] = value
@@ -1849,8 +1849,19 @@ func collaborationChatPlacement(source *AgentRun, owner ObjectiveOwner, assigned
 	if from := strings.TrimSpace(source.AssignedAgentID); from != "" {
 		context[collaborationHandedOffByContextKey] = from
 	}
+	conversationID, _ := context[conversationRunContextConversationID].(string)
 	root, _ := context["threadRootMessageId"].(string)
-	return RunKindConversation, conversationRunLane(conversationID, root, assignedAgent)
+	return conversationRunLane(conversationID, root, assignedAgent)
+}
+
+// validateChatDelegationSource allows chat hand-offs only between Team
+// members. An Agent's 1:1 chat belongs to that Agent, so no other Agent can
+// answer in it.
+func validateChatDelegationSource(source *AgentRun) error {
+	if source != nil && source.Kind == RunKindConversation && source.Owner.Type != OwnerTypeTeam {
+		return fmt.Errorf("%w: only Team chats hand work to another Agent", ErrInvalidAgentRequestState)
+	}
+	return nil
 }
 
 // collaborationHandedOffByContextKey records the teammate that handed work over in a chat.
