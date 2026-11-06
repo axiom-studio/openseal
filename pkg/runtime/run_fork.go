@@ -343,7 +343,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		}
 		childRequest := CreateAgentRunRequest{
 			Kind: childKind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
-			Owner: source.Owner, AssignedAgentID: assignedAgentID, Entrypoint: entrypoint,
+			Owner: source.Owner, AssignedAgentID: assignedAgentID, ActingUser: source.ActingUser, Entrypoint: entrypoint,
 			ConcurrencyKey: "fork:" + groupID + ":" + branch.ID,
 			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: deadline,
 			Context: childContext, Plan: childPlan, Checkpoint: childCheckpoint,

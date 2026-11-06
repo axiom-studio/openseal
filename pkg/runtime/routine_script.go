@@ -344,8 +344,9 @@ func (s *RunbookActivationService) RoutineScriptStatus(ctx context.Context, file
 
 // RepinScript makes a routine run another approved version of its script.
 // Only the approved set_script action calls it; actionID makes its replay
-// idempotent.
-func (s *RunbookActivationService) RepinScript(ctx context.Context, scope Scope, id string, expectedRevision int64, script *RoutineScript, actionID string) (*RunbookActivation, error) {
+// idempotent. createdBy records the changing person on a routine that has
+// no creator yet.
+func (s *RunbookActivationService) RepinScript(ctx context.Context, scope Scope, id string, expectedRevision int64, script *RoutineScript, actionID, createdBy string) (*RunbookActivation, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
 	}
@@ -376,6 +377,9 @@ func (s *RunbookActivationService) RepinScript(ctx context.Context, scope Scope,
 	approved := s.now().UTC()
 	next.Task.Script.ApprovedAt = &approved
 	next.LifecycleActionID = actionID
+	if next.Task.CreatedBy == "" {
+		next.Task.CreatedBy = createdBy
+	}
 	next.Revision++
 	next.UpdatedAt = s.now().UTC()
 	if err := next.Validate(); err != nil {

@@ -378,7 +378,7 @@ func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalo
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	messageID, _ := run.Context[conversationRunContextTriggerID].(string)
-	task := &ScheduledAgentTask{Goal: args.Goal, ConversationID: conversationID, SourceMessageID: messageID}
+	task := &ScheduledAgentTask{Goal: args.Goal, ConversationID: conversationID, SourceMessageID: messageID, CreatedBy: run.ActingUser}
 	if _, err := scheduledTaskConversation(ctx, store, run.Scope, run.Owner, task); err != nil {
 		return nil, nil, nil, err
 	}
@@ -540,7 +540,7 @@ func dispatchWorkflowAction(ctx context.Context, store runbookActionStore, catal
 			return nil, errors.New("workflow deadline must be in the future")
 		}
 		values := map[string]interface{}{conversationRunContextConversationID: task.ConversationID, conversationRunContextTriggerID: task.SourceMessageID, runReportingContextRootRunID: id, runReportingContextMilestones: []interface{}{string(runbook.ReportingCompleted), string(runbook.ReportingFailed)}, scheduledTaskContextKey: true, deferredWorkflowContextKey: true, "workflowTitle": args.Title, "workflowSourceRunId": run.ID, "workflowActionId": input.Call.ID, "workflowRequestDigest": requestDigest}
-		req := CreateAgentRunRequest{Scope: run.Scope, Kind: RunKindAgentWork, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID, ConcurrencyKey: "workflow:" + id, Goal: task.Goal, Source: RunSourceRequest, Context: values, WakeCondition: &WakeCondition{Type: "event", Reference: spec.Key, EventWait: spec}, Budget: cloneBudgetPolicy(run.Budget), IdempotencyKey: key, Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Visibility: ActivityVisibilityScope}
+		req := CreateAgentRunRequest{Scope: run.Scope, Kind: RunKindAgentWork, Owner: run.Owner, AssignedAgentID: run.AssignedAgentID, ActingUser: run.ActingUser, ConcurrencyKey: "workflow:" + id, Goal: task.Goal, Source: RunSourceRequest, Context: values, WakeCondition: &WakeCondition{Type: "event", Reference: spec.Key, EventWait: spec}, Budget: cloneBudgetPolicy(run.Budget), IdempotencyKey: key, Actor: ActivityActor{Type: "agent", ID: run.AssignedAgentID}, Visibility: ActivityVisibilityScope}
 		commands := NewRunCommandService(store)
 		existing, err := commands.FindCreatedAgentRun(ctx, req)
 		if err != nil {

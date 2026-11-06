@@ -218,7 +218,8 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 	}
 	request := CreateAgentRunRequest{
 		Scope: conversation.Scope, Kind: RunKindConversation, Owner: conversation.Owner,
-		AssignedAgentID: assignedAgentID, ConcurrencyKey: conversationRunLane(conversation.ID, "", assignedAgentID), Goal: goal, Source: RunSourceChat,
+		AssignedAgentID: assignedAgentID, ActingUser: MessageActingUser(conversation, message),
+		ConcurrencyKey: conversationRunLane(conversation.ID, "", assignedAgentID), Goal: goal, Source: RunSourceChat,
 		Context: map[string]interface{}{
 			conversationRunContextConversationID: conversation.ID,
 			conversationRunContextTriggerID:      message.ID,

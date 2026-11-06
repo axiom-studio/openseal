@@ -28,7 +28,7 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 			defer closeStore()
 			scope := Scope{Kind: "tenant", ID: "7"}
 			source, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "parent", Source: RunSourceManual,
+				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", ActingUser: "7", Goal: "parent", Source: RunSourceManual,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -55,7 +55,7 @@ func TestRunForkCoordinatorCreatesConcurrentChildrenAndReplays(t *testing.T) {
 				t.Fatalf("source=%#v", created.DependencyGroup.Source)
 			}
 			for _, child := range created.Children {
-				if child.ParentRunID != source.ID || child.RootRunID != source.RootRunID || child.Source != RunSourceFork || child.Status != AgentRunStatusQueued || child.ConcurrencyKey == "" {
+				if child.ParentRunID != source.ID || child.RootRunID != source.RootRunID || child.Source != RunSourceFork || child.Status != AgentRunStatusQueued || child.ConcurrencyKey == "" || child.ActingUser != "7" {
 					t.Fatalf("child=%#v", child)
 				}
 			}

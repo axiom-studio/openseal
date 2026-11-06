@@ -182,11 +182,15 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	}
 	// Connections belong to the run's umbrella. A 1:1 run activates its
 	// Agent with the host's bindings for that Agent. A Team run activates the
-	// member without any connection and the Team with the Team's own.
+	// member without any connection and the Team with the Team's own. An
+	// Agent-owned run delegated to another Agent (a request, a completion
+	// review) activates that Agent without any connection: it never lends
+	// its own.
 	actorCtx := skill.WithRunActor(ctx, RunSkillActor(run))
 	memberCtx := actorCtx
 	teamRun := run.Owner.Type == OwnerTypeTeam && strings.TrimSpace(run.Owner.ID) != ""
-	if teamRun {
+	delegatedRun := run.Owner.Type == OwnerTypeAgent && run.Owner.ID != run.AssignedAgentID
+	if teamRun || delegatedRun {
 		memberCtx = skill.WithoutConnections(actorCtx)
 	}
 	activation, err := catalog.ActivateSkills(memberCtx, scope, deployment.ID, skillHost)

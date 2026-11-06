@@ -256,24 +256,28 @@ func resolveRoutineBriefGrants(ctx context.Context, catalog RoutineGrantCatalog,
 		return nil, err
 	}
 	// A Team run uses its Team's connections and only the member's bindings
-	// that hold none, as activation does.
-	if actor.Umbrella.ID != run.AssignedAgentID {
+	// that hold none, as activation does. A run delegated to another Agent
+	// uses no connection at all.
+	if !actor.Valid() || actor.Umbrella.ID != run.AssignedAgentID {
 		own := bindings[:0]
 		for _, binding := range bindings {
 			if !skill.BindingHoldsConnection(binding) {
 				own = append(own, binding)
 			}
 		}
-		umbrellaBindings, listErr := catalog.ListBindings(ctx, scope, actor.Umbrella.ID)
-		if listErr != nil {
-			return nil, listErr
+		bindings = own
+		if actor.Valid() {
+			umbrellaBindings, listErr := catalog.ListBindings(ctx, scope, actor.Umbrella.ID)
+			if listErr != nil {
+				return nil, listErr
+			}
+			bindings = append(bindings, umbrellaBindings...)
 		}
-		bindings = append(own, umbrellaBindings...)
 	}
 	// The host's bindings for this run (connected apps) are granted like
 	// stored ones, by their own tool names; the routine's runs resolve them
 	// for its umbrella again.
-	if hosted, ok := catalog.(routineHostBindingCatalog); ok {
+	if hosted, ok := catalog.(routineHostBindingCatalog); ok && actor.Valid() {
 		set, hostErr := hosted.HostBindings(ctx, scope, actor.Umbrella.ID, actor)
 		if hostErr != nil {
 			return nil, hostErr
@@ -635,23 +639,19 @@ func routineActivationForRun(ctx context.Context, runs agentRunReader, store rou
 	return activation, nil
 }
 
-// RoutineOwner is the user who asked for the routine in its chat.
-func routineOwner(ctx context.Context, store routineGrantStore, activation *RunbookActivation) (ConversationParticipant, error) {
-	message, err := store.GetChannelMessage(ctx, activation.Scope, activation.Task.ConversationID, activation.Task.SourceMessageID)
-	if err != nil {
-		return ConversationParticipant{}, err
-	}
-	if message == nil || message.Scope != activation.Scope || message.ConversationID != activation.Task.ConversationID || message.Sender.Type != ConversationParticipantUser {
+// RoutineOwner is the person who created the routine: its task's CreatedBy.
+func routineOwner(activation *RunbookActivation) (ConversationParticipant, error) {
+	if activation == nil || activation.Task == nil || activation.Task.CreatedBy == "" {
 		return ConversationParticipant{}, errors.New("routine owner is unavailable")
 	}
-	return message.Sender, nil
+	return ConversationParticipant{Type: ConversationParticipantUser, ID: activation.Task.CreatedBy}, nil
 }
 
 // resolveRoutineGrant returns the approved routine grant that covers this
 // action, or nil. A review: always action is never covered, and an owner-only
 // grant covers a send only when every recipient is the owner's address. A
 // call of a binding-tools base action is covered only by a grant naming the
-// exact tool its fixed arguments select on the routine Agent's own binding,
+// exact tool its fixed arguments select on the routine umbrella's binding,
 // never by the base action, and only while that tool still has the fixed
 // arguments (upstream name and pinned hash) the user approved.
 func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routineGrantStore, owners RoutineOwnerAddressResolver, run *AgentRun, bound *skill.BoundAction, arguments map[string]interface{}) (*RoutineGrant, error) {
@@ -667,7 +667,7 @@ func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routine
 	var tool *skill.BindingTool
 	if spec := bound.Definition.BindingTools; spec.RoutesAction(bound.Action.Name) {
 		tool = skill.SelectedBindingTool(bound.Definition, bound.Binding, bound.Action.Name, arguments)
-		if tool == nil || bound.Binding.DeploymentID != activation.AssignedAgentID {
+		if tool == nil || bound.Binding.DeploymentID != activation.Owner.ID {
 			return nil, nil
 		}
 		identity = skill.BindingToolModelName(bound.Definition, bound.Binding, tool.Name)
@@ -681,7 +681,7 @@ func resolveRoutineGrant(ctx context.Context, runs agentRunReader, store routine
 			if owners == nil {
 				return nil, nil
 			}
-			owner, err := routineOwner(ctx, store, activation)
+			owner, err := routineOwner(activation)
 			if err != nil {
 				return nil, nil
 			}
@@ -730,11 +730,7 @@ func (s *RunbookActivationService) RevokeGrants(ctx context.Context, scope Scope
 	if current.Task == nil {
 		return nil, errors.New("only a routine created from a chat has approved actions")
 	}
-	messages, ok := s.store.(routineGrantStore)
-	if !ok {
-		return nil, errors.New("routine owner cannot be checked on this host")
-	}
-	owner, err := routineOwner(ctx, messages, current)
+	owner, err := routineOwner(current)
 	if err != nil {
 		return nil, err
 	}

@@ -30,7 +30,7 @@ func scheduledTaskFixture(t *testing.T, store KernelStore, runbookDefinitions ..
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: owner.ID, Goal: "Handle request", Source: RunSourceChat, Context: map[string]interface{}{conversationRunContextConversationID: c.ID, conversationRunContextTriggerID: posted.Message.ID}})
+	run, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: owner.ID, ActingUser: "user", Goal: "Handle request", Source: RunSourceChat, Context: map[string]interface{}{conversationRunContextConversationID: c.ID, conversationRunContextTriggerID: posted.Message.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 				}
 				result := dispatchTaskForTest(t, store, run, bound, args, "create-task")
 				a := result["activation"].(*RunbookActivation)
-				if a.Task == nil || a.Task.ConversationID != run.Context[conversationRunContextConversationID] || a.NextRunAt == nil || a.DefinitionID != "" {
+				if a.Task == nil || a.Task.ConversationID != run.Context[conversationRunContextConversationID] || a.NextRunAt == nil || a.DefinitionID != "" || a.Task.CreatedBy != "user" {
 					t.Fatalf("activation=%#v", a)
 				}
 				if a.Trigger.Schedule == nil || a.Trigger.Schedule.MaximumOccurrences != maximum {
@@ -153,7 +153,8 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 							break
 						}
 					}
-					if scheduled == nil || scheduled.Goal != a.Task.Goal || scheduled.Source != RunSourceSchedule || scheduled.Entrypoint != "" || scheduled.Plan["runbook"] != nil {
+					// Every occurrence acts for the person who created the routine.
+					if scheduled == nil || scheduled.Goal != a.Task.Goal || scheduled.Source != RunSourceSchedule || scheduled.Entrypoint != "" || scheduled.Plan["runbook"] != nil || scheduled.ActingUser != "user" {
 						t.Fatalf("work=%#v", scheduled)
 					}
 					// Reporting projects the actual result into the original channel exactly once.

@@ -307,7 +307,7 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 			messageID = request.ID
 		}
 	}
-	task := &ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID)}
+	task := &ScheduledAgentTask{Goal: a.Goal, ConversationID: conversationID, SourceMessageID: messageID, AppID: strings.TrimSpace(a.AppID), CreatedBy: run.ActingUser}
 	// A routine always carries the brief the user approved.
 	brief, err := normalizeRoutineBrief(a.Brief, false)
 	if err != nil {
@@ -364,7 +364,36 @@ func resolveOwnedTaskStatus(ctx context.Context, store runbookActionStore, run *
 	if a.Status == RunbookActivationRetired && args.Status != RunbookActivationRetired {
 		return nil, nil, errors.New("cancelled routine cannot be resumed; replace its schedule")
 	}
+	if args.Status == RunbookActivationActive {
+		if err := authorizeRoutineChange(a, run); err != nil {
+			return nil, nil, err
+		}
+	}
 	return &args, a, nil
+}
+
+// ErrRoutineNotCreator refuses a person other than a routine's creator when
+// they change its script or resume it. Pausing and cancelling stay open.
+var ErrRoutineNotCreator = errors.New("Only the person who created this routine can change it.")
+
+// authorizeRoutineChange lets only the person who created a routine change
+// its script or resume it: its occurrences act for that person. A routine
+// with no recorded creator becomes the routine of whoever changes it next
+// (routineChangeCreator stamps them).
+func authorizeRoutineChange(a *RunbookActivation, run *AgentRun) error {
+	if a == nil || a.Task == nil || a.Task.CreatedBy == "" || run != nil && a.Task.CreatedBy == run.ActingUser {
+		return nil
+	}
+	return ErrRoutineNotCreator
+}
+
+// routineChangeCreator is the creator an authorized change records: the
+// changing run's person when the routine has none yet, else "".
+func routineChangeCreator(a *RunbookActivation, run *AgentRun) string {
+	if a == nil || a.Task == nil || a.Task.CreatedBy != "" || run == nil {
+		return ""
+	}
+	return run.ActingUser
 }
 func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams WorkflowTeamCatalog, input ActionProposalValidationInput) (map[string]interface{}, error) {
 	if err := runbookActionOwner(ctx, teams, input.Run, input.Bound); err != nil {
@@ -388,6 +417,9 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	case RunbookActionSetScript:
 		_, a, script, err := resolveOwnedTaskScript(ctx, store, files, input.Run, input.Arguments)
 		if err != nil {
+			return nil, err
+		}
+		if err := authorizeRoutineChange(a, input.Run); err != nil {
 			return nil, err
 		}
 		return routineScriptChangePreview(ctx, store, a, script)
@@ -472,10 +504,15 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		if current.LifecycleActionID == input.Call.ID && current.Status == args.Status {
 			return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetStatus, "activation": current, "replayed": true}, nil
 		}
-		if _, _, err := resolveOwnedTaskStatus(ctx, store, run, input.Arguments); err != nil {
+		_, owned, err := resolveOwnedTaskStatus(ctx, store, run, input.Arguments)
+		if err != nil {
 			return nil, err
 		}
-		activation, err := NewRunbookActivationService(store).Update(ctx, run.Scope, current.ID, UpdateRunbookActivationRequest{ExpectedRevision: args.ExpectedRevision, Status: args.Status, ActionID: input.Call.ID})
+		update := UpdateRunbookActivationRequest{ExpectedRevision: args.ExpectedRevision, Status: args.Status, ActionID: input.Call.ID}
+		if args.Status == RunbookActivationActive {
+			update.CreatedBy = routineChangeCreator(owned, run)
+		}
+		activation, err := NewRunbookActivationService(store).Update(ctx, run.Scope, current.ID, update)
 		if err != nil {
 			return nil, err
 		}
@@ -494,13 +531,19 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 		}
 		// Replay after the re-pin committed but the action receipt did not.
 		if current.LifecycleActionID == input.Call.ID && current.Task != nil && current.Task.Script != nil && current.Task.Script.Digest == args.Digest && current.Task.Script.FilesVersion == args.FilesVersion {
+			if err := authorizeRoutineChange(current, run); err != nil {
+				return nil, err
+			}
 			return map[string]interface{}{"resourceType": runbookActivationResourceType, "operation": RunbookActionSetScript, "activation": current, "replayed": true}, nil
 		}
 		_, a, script, err := resolveOwnedTaskScript(ctx, store, files, run, input.Arguments)
 		if err != nil {
 			return nil, err
 		}
-		activation, err := NewRunbookActivationService(store).RepinScript(ctx, run.Scope, a.ID, args.ExpectedRevision, script, input.Call.ID)
+		if err := authorizeRoutineChange(a, run); err != nil {
+			return nil, err
+		}
+		activation, err := NewRunbookActivationService(store).RepinScript(ctx, run.Scope, a.ID, args.ExpectedRevision, script, input.Call.ID, routineChangeCreator(a, run))
 		if err != nil {
 			return nil, err
 		}

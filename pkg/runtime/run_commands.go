@@ -175,6 +175,25 @@ func (s *RunCommandService) CommandAgentRun(ctx context.Context, req AgentRunCom
 	return result, nil
 }
 
+// ErrRunCommandNotAuthorized refuses a user other than the person a run acts
+// for when they steer it.
+var ErrRunCommandNotAuthorized = errors.New("Only the person this run acts for can steer it.")
+
+// authorizeRunSteering lets only the person a run acts for intervene in,
+// answer, resume or retry it. Pause and cancel stay open to everyone allowed
+// today, and kernel actors (system, service, agent) are not people.
+func authorizeRunSteering(run *AgentRun, req AgentRunCommandRequest) error {
+	switch req.Kind {
+	case AgentRunCommandIntervene, AgentRunCommandResolveHumanIntervention, AgentRunCommandResume, AgentRunCommandRetry:
+	default:
+		return nil
+	}
+	if run == nil || run.ActingUser == "" || req.Actor.Type != "user" || req.Actor.ID == run.ActingUser {
+		return nil
+	}
+	return ErrRunCommandNotAuthorized
+}
+
 func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCommandRequest) (*AgentRunCommandResult, error) {
 	if req.Kind == AgentRunCommandRetry {
 		return s.RetryConversationRun(ctx, req)
@@ -197,6 +216,9 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 	}
 	if current == nil {
 		return nil, ErrRunNotFound
+	}
+	if err := authorizeRunSteering(current, req); err != nil {
+		return nil, err
 	}
 	if req.InterventionID != "" {
 		if req.Kind != AgentRunCommandIntervene {

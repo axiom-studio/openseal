@@ -383,7 +383,7 @@ func (r *hostedTurnProgressAcknowledgementRenderer) RenderRunProgressAcknowledge
 	now := time.Now().UTC()
 	run := &AgentRun{
 		ID: request.Snapshot.RunID, Kind: RunKindAgentWork, Scope: request.Snapshot.Scope,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: request.Snapshot.AgentID}, AssignedAgentID: request.Snapshot.AgentID,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: request.Snapshot.AgentID}, AssignedAgentID: request.Snapshot.AgentID, ActingUser: "",
 		Goal: "Acknowledge the current verified progress", Source: RunSourceChat, Status: AgentRunStatusRunning,
 		Context: map[string]interface{}{"progress": map[string]interface{}{
 			"goal": request.Snapshot.Goal, "status": request.Snapshot.Status,
@@ -453,7 +453,7 @@ func (r *TurnRunnerProgressAcknowledgementRenderer) RenderRunProgressAcknowledge
 	run := &AgentRun{
 		ID: request.Snapshot.RunID, Kind: RunKindAgentWork,
 		Scope: request.Snapshot.Scope,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: request.Snapshot.AgentID}, AssignedAgentID: request.Snapshot.AgentID,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: request.Snapshot.AgentID}, AssignedAgentID: request.Snapshot.AgentID, ActingUser: "",
 		Goal:   request.Snapshot.Goal,
 		Source: RunSourceChat, Status: AgentRunStatusRunning,
 		Revision: request.Snapshot.Revision,

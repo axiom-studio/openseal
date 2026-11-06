@@ -73,10 +73,10 @@ func (s *WorkforceAuthoringRunService) Enqueue(ctx context.Context, changeSet *a
 	result, err := s.runs.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Kind: RunKindWorkforceAuthoring,
 		Owner:           ObjectiveOwner{Type: OwnerTypeAgent, ID: workforceAuthoringAgentID},
-		AssignedAgentID: workforceAuthoringAgentID,
-		ConcurrencyKey:  "workforce-change-set:" + changeSet.ID,
-		Goal:            "Generate governed workforce change set " + changeSet.ID,
-		Source:          RunSourceRequest,
+		AssignedAgentID: workforceAuthoringAgentID, ActingUser: "",
+		ConcurrencyKey: "workforce-change-set:" + changeSet.ID,
+		Goal:           "Generate governed workforce change set " + changeSet.ID,
+		Source:         RunSourceRequest,
 		Context: map[string]interface{}{
 			"changeSetId": changeSet.ID,
 		},
