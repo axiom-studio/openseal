@@ -50,6 +50,8 @@ type conversationHistoryPlan struct {
 	Places []ConversationPlace
 	// Team is set when a Team member answers in its Team channel.
 	Team *agentConversationTeam
+	// Assignment is work a teammate handed this Agent in the chat.
+	Assignment *agentConversationAssignment
 }
 
 func conversationViewerKey(viewer ConversationViewer) string {

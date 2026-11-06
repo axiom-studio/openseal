@@ -1813,9 +1813,13 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	} else if request.Kind == AgentRequestKindEscalation {
 		sourceKind = RunSourceEscalation
 	}
+	kind, lane := normalizeRunKind(source.Kind), source.ConcurrencyKey
+	if kind == RunKindConversation {
+		kind, lane = collaborationChatPlacement(source, owner, assignedAgent, context)
+	}
 	child := &AgentRun{
-		ID: id, Kind: normalizeRunKind(source.Kind), Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
-		Owner: owner, AssignedAgentID: assignedAgent, ConcurrencyKey: source.ConcurrencyKey,
+		ID: id, Kind: kind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID, RootRunID: source.RootRunID,
+		Owner: owner, AssignedAgentID: assignedAgent, ConcurrencyKey: lane,
 		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
 		Checkpoint: cloneMap(request.ChildCheckpoint), Budget: cloneBudgetPolicy(request.BudgetAllocation),
@@ -1826,6 +1830,31 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	}
 	return child
 }
+
+// collaborationChatPlacement puts work handed over in a chat into that same
+// chat: the recipient answers there as an ordinary chat Run, in its own lane,
+// with the whole conversation, exactly as if the message had reached it first.
+// Work an Agent's 1:1 chat hands to another Agent cannot answer in that chat,
+// so it runs as ordinary Agent work instead.
+func collaborationChatPlacement(source *AgentRun, owner ObjectiveOwner, assignedAgent string, context map[string]interface{}) (RunKind, string) {
+	conversationID, _ := source.Context[conversationRunContextConversationID].(string)
+	if conversationID == "" || assignedAgent == "" || owner.Type == OwnerTypeAgent && owner.ID != assignedAgent {
+		return RunKindAgentWork, source.ConcurrencyKey
+	}
+	for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, conversationRunContextTriggerSeq, "threadRootMessageId", "responseMode"} {
+		if value, ok := source.Context[key]; ok {
+			context[key] = value
+		}
+	}
+	if from := strings.TrimSpace(source.AssignedAgentID); from != "" {
+		context[collaborationHandedOffByContextKey] = from
+	}
+	root, _ := context["threadRootMessageId"].(string)
+	return RunKindConversation, conversationRunLane(conversationID, root, assignedAgent)
+}
+
+// collaborationHandedOffByContextKey records the teammate that handed work over in a chat.
+const collaborationHandedOffByContextKey = "handedOffBy"
 
 func (s *CollaborationService) resolveTeamRequestCandidates(ctx context.Context, request *AgentRequest) ([]AgentRequestCandidate, error) {
 	if s.teams == nil {

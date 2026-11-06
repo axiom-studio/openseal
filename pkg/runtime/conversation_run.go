@@ -994,6 +994,7 @@ func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx contex
 			return TurnExecutionContext{}, historyPlan, err
 		}
 	}
+	historyPlan.Assignment = conversationRunAssignment(input.Run)
 	attachments := r.conversationAttachments(ctx, conversation, trigger, recent)
 	goal, err := r.agentConversationGoalWithAttachments(ctx, conversation, trigger, historyPlan.Messages, operations, attachments, &historyPlan)
 	if err != nil {
@@ -1341,6 +1342,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		ImageStyle             string                            `json:"imageStyle,omitempty"`
 		Places                 []ConversationPlace               `json:"places,omitempty"`
 		Team                   *agentConversationTeam            `json:"team,omitempty"`
+		Assignment             *agentConversationAssignment      `json:"assignment,omitempty"`
 	}{
 		TriggerID: trigger.ID,
 		Messages:  make([]agentConversationPromptMessage, 0, len(recent)),
@@ -1364,6 +1366,7 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 		payload.ImageStyle = history[0].ImageStyle
 		payload.Places = append([]ConversationPlace(nil), history[0].Places...)
 		payload.Team = history[0].Team
+		payload.Assignment = history[0].Assignment
 		for _, message := range history[0].FollowUps {
 			payload.FollowUpMessages = append(payload.FollowUpMessages, agentConversationPromptMessage{
 				ID: message.ID, Sequence: message.Sequence, Sender: message.Sender, SenderDisplayName: message.SenderDisplayName,
@@ -1410,6 +1413,9 @@ func (r *ConversationRunTurnRunner) agentConversationGoalWithAttachments(ctx con
 	}
 	if payload.ImageStyle != "" {
 		payload.ContextGuidance += " ImageStyle: the user prefers this picture style; generate_image applies it automatically. Pass style only to override it for one image when they ask."
+	}
+	if payload.Assignment != nil {
+		payload.ContextGuidance += " Assignment is work a teammate handed you in this chat. Do it and answer here; the whole chat is yours to read, and currentMessage is the message the work came from."
 	}
 	if len(payload.Places) > 0 {
 		payload.ContextGuidance += " Places are what find_place already found in this chat, most recent first. Use their place ids for maps, near and route instead of searching for them again."
@@ -2183,6 +2189,21 @@ func (r *ConversationRunTurnRunner) conversationTaskResponseReferences(ctx conte
 		}
 	}
 	return result, nil
+}
+
+// agentConversationAssignment is the work a teammate handed over in the chat.
+type agentConversationAssignment struct {
+	From string `json:"fromAgentId,omitempty"`
+	Kind string `json:"kind"`
+	Work string `json:"work"`
+}
+
+func conversationRunAssignment(run *AgentRun) *agentConversationAssignment {
+	if run == nil || run.Source != RunSourceRequest && run.Source != RunSourceHandoff && run.Source != RunSourceEscalation || strings.TrimSpace(run.Goal) == "" {
+		return nil
+	}
+	from, _ := run.Context[collaborationHandedOffByContextKey].(string)
+	return &agentConversationAssignment{From: from, Kind: string(run.Source), Work: run.Goal}
 }
 
 func validateConversationRun(run *AgentRun) error {
