@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 type interactionChangeFixture struct {
@@ -246,5 +249,67 @@ func TestConversationRunLineageValueInheritsThreadPlacement(t *testing.T) {
 	}
 	if got := conversationRunLineageValue(&AgentRun{ID: "orphan", ParentRunID: "missing"}, runs, "threadRootMessageId"); got != "" {
 		t.Fatalf("orphan = %q", got)
+	}
+}
+
+type teamRosterPortfolio struct {
+	*MemoryStore
+	team *kernelteam.Deployment
+}
+
+func (p teamRosterPortfolio) GetTeamDeployment(_ context.Context, scope capability.ScopeReference, id string) (*kernelteam.Deployment, error) {
+	if p.team != nil && p.team.ID == id && p.team.Scope == scope {
+		return p.team, nil
+	}
+	return nil, nil
+}
+
+// A Team member answers in the Team chat, so its setup and credential
+// requests are projected there exactly as in that agent's own chat.
+func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
+	ctx, store, scope := context.Background(), NewMemoryStore(), Scope{Kind: "tenant", ID: "team-requests"}
+	conversations := NewConversationService(store)
+	conversation, _, err := conversations.CreateConversation(ctx, CreateConversationRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}, Title: "Team", IdempotencyKey: "team",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
+		Content: "Connect Vercel", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true, IdempotencyKey: "ask",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	team := &kernelteam.Deployment{ID: "gtm", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+		Roster: []kernelteam.RosterAssignment{{ID: "a", AgentDeploymentID: "member"}, {ID: "b", AgentDeploymentID: "other"}}}
+	changes, err := NewConversationChangeService(store, teamRosterPortfolio{MemoryStore: store, team: team})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for _, deployment := range []string{"member", "outsider"} {
+		if err := store.SaveSkillSetupRequest(ctx, &SkillSetupRequest{ID: "setup-" + deployment, Scope: scope, DeploymentID: deployment,
+			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "call-" + deployment, Kind: "configure",
+			SkillID: "vercel.reader", SkillVersion: "1.0.0", SkillName: "Vercel", Reason: "Connect Vercel", Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SaveCredentialRequest(ctx, &CredentialRequest{ID: "credential-" + deployment, Scope: scope, DeploymentID: deployment,
+			ConversationID: conversation.ID, TriggerMessageID: posted.Message.ID, RunID: "run", ActionCallID: "secret-" + deployment, Kind: CredentialRequestKindPaymentCard, Reason: "Pay",
+			Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	set, err := changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.SkillSetupRequests) != 1 || set.SkillSetupRequests[0].ID != "setup-member" {
+		t.Fatalf("team setup requests = %#v", set.SkillSetupRequests)
+	}
+	if len(set.CredentialRequests) != 1 || set.CredentialRequests[0].ID != "credential-member" {
+		t.Fatalf("team credential requests = %#v", set.CredentialRequests)
 	}
 }

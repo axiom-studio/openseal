@@ -13,17 +13,23 @@ type ConversationCredentialRequest struct {
 }
 
 func (s *ConversationChangeService) listConversationCredentialRequests(ctx context.Context, conversation *Conversation, runs []*AgentRun, viewer *ConversationViewer) ([]*ConversationCredentialRequest, error) {
-	if s.credentials == nil || conversation == nil || conversation.Owner.Type != OwnerTypeAgent {
+	if s.credentials == nil || conversation == nil {
 		return []*ConversationCredentialRequest{}, nil
 	}
-	stored, err := s.credentials.ListCredentialRequests(ctx, conversation.Scope, conversation.Owner.ID, conversation.ID)
+	deployments, err := s.conversationRequestDeployments(ctx, conversation)
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*CredentialRequest, 0, len(stored))
-	for _, request := range stored {
-		if request != nil && request.Scope == conversation.Scope && request.DeploymentID == conversation.Owner.ID && request.ConversationID == conversation.ID {
-			candidates = append(candidates, cloneCredentialRequest(request))
+	candidates := make([]*CredentialRequest, 0)
+	for _, deployment := range deployments {
+		stored, err := s.credentials.ListCredentialRequests(ctx, conversation.Scope, deployment, conversation.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, request := range stored {
+			if request != nil && request.Scope == conversation.Scope && request.DeploymentID == deployment && request.ConversationID == conversation.ID {
+				candidates = append(candidates, cloneCredentialRequest(request))
+			}
 		}
 	}
 	candidates = boundConversationInteractions(candidates, func(r *CredentialRequest) bool { return r.Status == CredentialRequestStatusPending },

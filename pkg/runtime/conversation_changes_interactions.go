@@ -6,6 +6,9 @@ import (
 	"errors"
 	"sort"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 // conversationInteractionHistoryLimit bounds the decided approvals and the
@@ -125,17 +128,23 @@ func (s *ConversationChangeService) listConversationApprovals(ctx context.Contex
 }
 
 func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx context.Context, conversation *Conversation, runs []*AgentRun, viewer *ConversationViewer) ([]*ConversationSkillSetupRequest, error) {
-	if s.skillSetups == nil || conversation == nil || conversation.Owner.Type != OwnerTypeAgent {
+	if s.skillSetups == nil || conversation == nil {
 		return []*ConversationSkillSetupRequest{}, nil
 	}
-	stored, err := s.skillSetups(ctx, conversation.Scope, conversation.Owner.ID, conversation.ID)
+	deployments, err := s.conversationRequestDeployments(ctx, conversation)
 	if err != nil {
 		return nil, err
 	}
-	candidates := make([]*SkillSetupRequest, 0, len(stored))
-	for _, request := range stored {
-		if request != nil && request.Scope == conversation.Scope && request.DeploymentID == conversation.Owner.ID && request.ConversationID == conversation.ID {
-			candidates = append(candidates, cloneSkillSetupRequest(request))
+	candidates := make([]*SkillSetupRequest, 0)
+	for _, deployment := range deployments {
+		stored, err := s.skillSetups(ctx, conversation.Scope, deployment, conversation.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, request := range stored {
+			if request != nil && request.Scope == conversation.Scope && request.DeploymentID == deployment && request.ConversationID == conversation.ID {
+				candidates = append(candidates, cloneSkillSetupRequest(request))
+			}
 		}
 	}
 	candidates = boundConversationInteractions(candidates, func(r *SkillSetupRequest) bool { return r.Status == "pending" },
@@ -304,4 +313,36 @@ func conversationSkillSetupProjectionDigest(requests []*ConversationSkillSetupRe
 		return "", err
 	}
 	return hashBytes(encoded), nil
+}
+
+// conversationRequestDeployments are the agent deployments whose setup and
+// credential requests belong in this conversation: the owning agent, or
+// every member of the owning Team, since a member answers in the Team chat.
+func (s *ConversationChangeService) conversationRequestDeployments(ctx context.Context, conversation *Conversation) ([]string, error) {
+	switch conversation.Owner.Type {
+	case OwnerTypeAgent:
+		return []string{conversation.Owner.ID}, nil
+	case OwnerTypeTeam:
+		teams, ok := s.portfolio.(collaborationTeamStore)
+		if !ok {
+			return nil, nil
+		}
+		team, err := teams.GetTeamDeployment(ctx, capability.ScopeReference{Kind: conversation.Scope.Kind, ID: conversation.Scope.ID}, conversation.Owner.ID)
+		if errors.Is(err, kernelteam.ErrDeploymentNotFound) || (err == nil && team == nil) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		seen := make(map[string]bool, len(team.Roster))
+		deployments := make([]string, 0, len(team.Roster))
+		for _, member := range team.Roster {
+			if id := strings.TrimSpace(member.AgentDeploymentID); id != "" && !seen[id] {
+				seen[id] = true
+				deployments = append(deployments, id)
+			}
+		}
+		return deployments, nil
+	}
+	return nil, nil
 }
