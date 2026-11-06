@@ -682,4 +682,20 @@ func TestAgentBehaviorRunOnRosterChecksTheCurrentTeamRoster(t *testing.T) {
 	if _, err := agentBehaviorDeploymentID(&AgentRun{Kind: RunKindConversation, Owner: own.Owner, AssignedAgentID: "writer"}); err == nil {
 		t.Fatal("Agent's chat Run assigned to another Agent accepted")
 	}
+	// A member's background task amends its own behavior like its 1:1 task.
+	team.Status = kernelteam.DeploymentActive
+	task := &AgentRun{Scope: scope, Kind: RunKindAgentWork, Owner: member.Owner, AssignedAgentID: "researcher"}
+	if id, err := agentBehaviorDeploymentID(task); err != nil || id != "researcher" {
+		t.Fatalf("Team member task Agent = %q, %v", id, err)
+	}
+	if err := agentBehaviorRunOnRoster(ctx, teams, task); err != nil {
+		t.Fatalf("Team member task rejected: %v", err)
+	}
+	team.Roster = nil
+	if err := agentBehaviorRunOnRoster(ctx, teams, task); err == nil {
+		t.Fatal("removed member's task accepted")
+	}
+	if _, err := agentBehaviorDeploymentID(&AgentRun{Kind: RunKindAgentWork, Owner: member.Owner}); err == nil {
+		t.Fatal("Team Run without an acting Agent accepted")
+	}
 }

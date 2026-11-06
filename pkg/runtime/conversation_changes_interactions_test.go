@@ -312,4 +312,13 @@ func TestConversationChangesProjectTeamMemberRequests(t *testing.T) {
 	if len(set.CredentialRequests) != 1 || set.CredentialRequests[0].ID != "credential-member" {
 		t.Fatalf("team credential requests = %#v", set.CredentialRequests)
 	}
+	// A paused Team's members keep their pending requests in the chat.
+	team.Status = kernelteam.DeploymentPaused
+	set, err = changes.ListChanges(ctx, ConversationChangeRequest{Scope: scope, ConversationID: conversation.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(set.SkillSetupRequests) != 1 || len(set.CredentialRequests) != 1 {
+		t.Fatalf("paused team requests = %#v / %#v", set.SkillSetupRequests, set.CredentialRequests)
+	}
 }

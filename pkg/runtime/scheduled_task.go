@@ -116,6 +116,15 @@ func validateScheduledTaskTarget(ctx context.Context, reader RunbookActivationRe
 	if d == nil || d.Scope.Kind != a.Scope.Kind || d.Scope.ID != a.Scope.ID || d.RolloutStatus != kernelagent.RolloutActive {
 		return fmt.Errorf("%w: assigned Agent is inactive", ErrRunbookActivationUnverified)
 	}
+	// A Team routine runs as the member that made it only while that member is
+	// on the roster; otherwise the scheduler pauses it.
+	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(reader), a.Scope, a.Owner, a.AssignedAgentID)
+	if err != nil {
+		return err
+	}
+	if !onRoster {
+		return fmt.Errorf("%w: assigned Agent is not on the chat's roster", ErrRunbookActivationUnverified)
+	}
 	store, ok := reader.(ConversationStore)
 	if !ok {
 		return fmt.Errorf("%w: reporting store unavailable", ErrRunbookActivationUnverified)

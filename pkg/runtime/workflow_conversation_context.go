@@ -37,6 +37,13 @@ func deferredWorkflowConversationOrigin(ctx context.Context, runs PortfolioStore
 		ConversationRunAgentID(conversation, run) != run.AssignedAgentID {
 		return invalid()
 	}
+	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(conversations), run.Scope, run.Owner, run.AssignedAgentID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if !onRoster {
+		return invalid()
+	}
 	trigger, err := conversations.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
 	if err != nil {
 		return nil, nil, nil, err

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
@@ -253,6 +254,26 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	activations, err := store.ListRunbookActivations(ctx, RunbookActivationFilter{Scope: scope, Owner: &owner})
 	if err != nil || len(activations) != 1 || activations[0].AssignedAgentID != "researcher" || activations[0].Owner != owner {
 		t.Fatalf("Team routine = %#v, %v", activations, err)
+	}
+	agents := kernelagent.NewRegistryWithStore(kernelagent.NewMemoryStore())
+	agentDefinition := sqliteAgentDefinition("1.0.0")
+	if _, err := agents.RegisterDefinition(ctx, agentDefinition); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := agents.CreateDeployment(ctx, &kernelagent.AgentDeployment{ID: "researcher", Scope: binding.Scope, DefinitionID: agentDefinition.ID, ActiveVersion: agentDefinition.Version, RolloutStatus: kernelagent.RolloutActive, Environment: "default", Capacity: kernelagent.DeploymentCapacity{MaxConcurrentRuns: 1}}, "user", "user", "test"); err != nil {
+		t.Fatal(err)
+	}
+	// Each firing rechecks the roster; a removed member's routine is unverified, so the scheduler pauses it.
+	reader := teamRosterPortfolio{MemoryStore: store, team: team}
+	if err := validateScheduledTaskTarget(ctx, reader, agents, activations[0]); err != nil {
+		t.Fatalf("member routine target = %v", err)
+	}
+	if err := validateScheduledTaskTarget(ctx, store, agents, activations[0]); !errors.Is(err, ErrRunbookActivationUnverified) {
+		t.Fatalf("Team routine without a roster = %v", err)
+	}
+	team.Roster = team.Roster[:1]
+	if err := validateScheduledTaskTarget(ctx, reader, agents, activations[0]); !errors.Is(err, ErrRunbookActivationUnverified) {
+		t.Fatalf("removed member's routine target = %v", err)
 	}
 }
 

@@ -56,8 +56,8 @@ func AgentOnChatRoster(ctx context.Context, teams TeamRosterReader, scope Scope,
 	case OwnerTypeAgent:
 		return owner.ID != "" && owner.ID == agentID, nil
 	case OwnerTypeTeam:
-		roster, err := activeTeamRoster(ctx, teams, scope, owner.ID)
-		if err != nil {
+		roster, active, err := teamRoster(ctx, teams, scope, owner.ID)
+		if err != nil || !active {
 			return false, err
 		}
 		for _, id := range roster {
@@ -69,22 +69,23 @@ func AgentOnChatRoster(ctx context.Context, teams TeamRosterReader, scope Scope,
 	return false, nil
 }
 
-// activeTeamRoster is the Agent deployment IDs on teamID's current active
-// deployment, or none when the Team is missing, inactive or unreadable.
-func activeTeamRoster(ctx context.Context, teams TeamRosterReader, scope Scope, teamID string) ([]string, error) {
+// teamRoster is the Agent deployment IDs on teamID's current deployment and
+// whether that deployment is active. A missing Team, a missing catalog and a
+// deployment from another scope have no roster.
+func teamRoster(ctx context.Context, teams TeamRosterReader, scope Scope, teamID string) ([]string, bool, error) {
 	if teams == nil || strings.TrimSpace(teamID) == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	deployment, err := teams.GetTeamDeployment(ctx, catalogScope, teamID)
 	if errors.Is(err, kernelteam.ErrDeploymentNotFound) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if deployment == nil || deployment.ID != teamID || deployment.Scope != catalogScope || deployment.Status != kernelteam.DeploymentActive {
-		return nil, nil
+	if deployment == nil || deployment.ID != teamID || deployment.Scope != catalogScope {
+		return nil, false, nil
 	}
 	seen := make(map[string]bool, len(deployment.Roster))
 	roster := make([]string, 0, len(deployment.Roster))
@@ -94,21 +95,7 @@ func activeTeamRoster(ctx context.Context, teams TeamRosterReader, scope Scope, 
 			roster = append(roster, id)
 		}
 	}
-	return roster, nil
-}
-
-// teamRosterContainsAgent reports whether a non-empty agent is on deployment's roster.
-func teamRosterContainsAgent(deployment *kernelteam.Deployment, agentDeploymentID string) bool {
-	agentDeploymentID = strings.TrimSpace(agentDeploymentID)
-	if deployment == nil || agentDeploymentID == "" {
-		return false
-	}
-	for _, assignment := range deployment.Roster {
-		if assignment.AgentDeploymentID == agentDeploymentID {
-			return true
-		}
-	}
-	return false
+	return roster, deployment.Status == kernelteam.DeploymentActive, nil
 }
 
 // teamMemberRunKey is the idempotency key the routing Run creates a member's

@@ -836,7 +836,8 @@ func agentBehaviorDeploymentID(run *AgentRun) (string, error) {
 		if run.Owner.ID != deploymentID {
 			return "", errors.New("agent behavior action cannot target a Run assigned to another Agent")
 		}
-	case isTeamMemberRun(run):
+	case run.Owner.Type == OwnerTypeTeam:
+		// agentBehaviorRunOnRoster proves the member is on the Team's roster.
 	default:
 		return "", errors.New("agent behavior actions require an Agent's own conversation Run or a Team member's Run")
 	}

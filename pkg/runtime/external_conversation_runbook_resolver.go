@@ -50,24 +50,14 @@ func (r *CatalogExternalConversationRunbookResolver) ResolveExternalConversation
 	if err := handler.Validate(endpoint.Owner); err != nil {
 		return nil, err
 	}
-	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
-	switch endpoint.Owner.Type {
-	case OwnerTypeAgent:
-		if handler.AssignedAgentID != endpoint.Owner.ID {
-			return nil, fmt.Errorf("%w: Agent-owned Runbook must use its endpoint owner deployment", ErrInvalidExternalConversation)
-		}
-	case OwnerTypeTeam:
-		deployment, err := r.catalog.GetTeamDeployment(ctx, catalogScope, endpoint.Owner.ID)
-		if err != nil {
-			return nil, fmt.Errorf("resolve conversation Team deployment: %w", err)
-		}
-		if deployment == nil || deployment.Status != kernelteam.DeploymentActive ||
-			!teamRosterContainsAgent(deployment, handler.AssignedAgentID) {
-			return nil, fmt.Errorf("%w: Runbook Agent is not active in the endpoint Team roster", ErrInvalidExternalConversation)
-		}
-	default:
-		return nil, fmt.Errorf("%w: conversation endpoint owner is invalid", ErrInvalidExternalConversation)
+	onRoster, err := AgentOnChatRoster(ctx, r.catalog, scope, endpoint.Owner, handler.AssignedAgentID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve conversation Team deployment: %w", err)
 	}
+	if !onRoster {
+		return nil, fmt.Errorf("%w: Runbook Agent is not on the endpoint's roster", ErrInvalidExternalConversation)
+	}
+	catalogScope := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	deployment, err := r.catalog.GetDeployment(ctx, catalogScope, handler.AssignedAgentID)
 	if err != nil {
 		return nil, fmt.Errorf("resolve conversation Agent deployment: %w", err)

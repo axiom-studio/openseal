@@ -85,7 +85,7 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 	if err != nil || question == nil {
 		return false, err
 	}
-	if question.Sender.Type != ConversationParticipantAgent || conversation.Owner.Type == OwnerTypeAgent && question.Sender.ID != conversation.Owner.ID || question.Intent != MessageIntentQuestion || !question.RequiresResponse || !strings.HasPrefix(question.IdempotencyKey, "conversation-clarification:") {
+	if question.Sender.Type != ConversationParticipantAgent || question.Intent != MessageIntentQuestion || !question.RequiresResponse || !strings.HasPrefix(question.IdempotencyKey, "conversation-clarification:") {
 		return false, nil
 	}
 	for _, reference := range question.References {

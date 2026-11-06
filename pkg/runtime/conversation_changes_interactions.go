@@ -315,12 +315,14 @@ func conversationSkillSetupProjectionDigest(requests []*ConversationSkillSetupRe
 // conversationRequestDeployments are the agent deployments whose setup and
 // credential requests belong in this conversation: the owning agent, or
 // every member of the owning Team, since a member answers in the Team chat.
+// It lists a paused Team's members too; status gates acting, not this read.
 func (s *ConversationChangeService) conversationRequestDeployments(ctx context.Context, conversation *Conversation) ([]string, error) {
 	switch conversation.Owner.Type {
 	case OwnerTypeAgent:
 		return []string{conversation.Owner.ID}, nil
 	case OwnerTypeTeam:
-		return activeTeamRoster(ctx, teamRosterReader(s.portfolio), conversation.Scope, conversation.Owner.ID)
+		roster, _, err := teamRoster(ctx, teamRosterReader(s.portfolio), conversation.Scope, conversation.Owner.ID)
+		return roster, err
 	}
 	return nil, nil
 }

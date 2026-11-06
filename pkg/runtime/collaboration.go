@@ -588,10 +588,6 @@ type CollaborationKernelStore interface {
 	RunDependencyStore
 }
 
-type collaborationTeamStore interface {
-	GetTeamDeployment(context.Context, capability.ScopeReference, string) (*kernelteam.Deployment, error)
-}
-
 type collaborationAgentStore interface {
 	GetDeployment(context.Context, capability.ScopeReference, string) (*kernelagent.AgentDeployment, error)
 	GetDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
@@ -602,7 +598,7 @@ type CollaborationService struct {
 	runs              PortfolioStore
 	artifacts         ArtifactStore
 	dependencies      *DependencyCoordinator
-	teams             collaborationTeamStore
+	teams             TeamRosterReader
 	executionPreparer AcceptedRunExecutionPreparer
 	now               func() time.Time
 	newID             func() string
@@ -610,7 +606,7 @@ type CollaborationService struct {
 
 func NewCollaborationService(store CollaborationKernelStore) *CollaborationService {
 	service := &CollaborationService{store: store, runs: store, artifacts: store, dependencies: NewDependencyCoordinator(store), now: time.Now, newID: uuid.NewString}
-	service.teams, _ = store.(collaborationTeamStore)
+	service.teams = teamRosterReader(store)
 	return service
 }
 
@@ -1109,6 +1105,9 @@ func (s *CollaborationService) RespondAgentRequest(ctx context.Context, req Resp
 		assignedAgentID, assignmentErr := s.resolveRequestAssignment(ctx, request, req.AssignedAgentID)
 		if assignmentErr != nil {
 			return nil, assignmentErr
+		}
+		if err := s.verifyChatAssignment(ctx, source, assignedAgentID); err != nil {
+			return nil, err
 		}
 		updated.Status = AgentRequestStatusAccepted
 		updated.AcceptedAt = &now
@@ -1874,7 +1873,8 @@ func validateChatDelegationSource(source *AgentRun) error {
 
 // validateChatDelegation keeps chat work on the chat's roster: a Team chat
 // hands work to the Team, which routes among its members, or to an Agent on
-// its current active roster. It is checked when the request is created.
+// its current active roster. It is checked when the request is created and
+// again when it is accepted.
 func (s *CollaborationService) validateChatDelegation(ctx context.Context, source *AgentRun, recipient CollaborationParty) error {
 	if err := validateChatDelegationSource(source); err != nil {
 		return err
@@ -1886,11 +1886,7 @@ func (s *CollaborationService) validateChatDelegation(ctx context.Context, sourc
 		return nil
 	}
 	if recipient.Type == OwnerTypeAgent {
-		var teams TeamRosterReader
-		if s.teams != nil {
-			teams = s.teams
-		}
-		onRoster, err := AgentOnChatRoster(ctx, teams, source.Scope, source.Owner, recipient.ID)
+		onRoster, err := AgentOnChatRoster(ctx, s.teams, source.Scope, source.Owner, recipient.ID)
 		if err != nil {
 			return err
 		}
@@ -1899,6 +1895,23 @@ func (s *CollaborationService) validateChatDelegation(ctx context.Context, sourc
 		}
 	}
 	return fmt.Errorf("%w: chat work goes only to an Agent on the chat's roster", ErrAgentRequestUnauthorized)
+}
+
+// verifyChatAssignment keeps accepted Team chat work on the chat's roster:
+// the child answers in that chat, so a member removed after the request was
+// made cannot accept it.
+func (s *CollaborationService) verifyChatAssignment(ctx context.Context, source *AgentRun, assignedAgentID string) error {
+	if source == nil || normalizeRunKind(source.Kind) != RunKindConversation || source.Owner.Type != OwnerTypeTeam {
+		return nil
+	}
+	onRoster, err := AgentOnChatRoster(ctx, s.teams, source.Scope, source.Owner, assignedAgentID)
+	if err != nil {
+		return err
+	}
+	if !onRoster {
+		return fmt.Errorf("%w: chat work goes only to an Agent on the chat's roster", ErrAgentRequestUnauthorized)
+	}
+	return nil
 }
 
 // collaborationHandedOffByContextKey records the teammate that handed work over in a chat.

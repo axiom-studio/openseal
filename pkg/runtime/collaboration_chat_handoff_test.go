@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 )
 
 // Work a Team member hands to a teammate in the chat is answered in that same
@@ -54,5 +56,51 @@ func TestOneToOneChatCannotHandWorkToAnotherAgent(t *testing.T) {
 	}
 	if err := validateChatDelegationSource(&AgentRun{ID: "work", Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "own"}}); err != nil {
 		t.Fatalf("Agent work hand-off = %v", err)
+	}
+}
+
+// A Team chat hand-off is checked against the roster again when it is
+// accepted: the child answers in the chat, so a removed member cannot take it.
+func TestTeamChatHandOffAcceptanceRechecksTheRoster(t *testing.T) {
+	ctx, store, scope := t.Context(), NewMemoryStore(), Scope{Kind: "tenant", ID: "handoff-roster"}
+	owner := ObjectiveOwner{Type: OwnerTypeTeam, ID: "gtm"}
+	team := activeCollaborationTeam(scope, owner.ID,
+		kernelteam.RosterAssignment{ID: "marlow", AgentDeploymentID: "marlow"}, kernelteam.RosterAssignment{ID: "harp", AgentDeploymentID: "harp"})
+	team.deployment.DefinitionID, team.deployment.ActiveVersion = owner.ID, "1"
+	team.definition = &kernelteam.Definition{ID: owner.ID, Version: "1", Delegation: kernelteam.DelegationPolicy{
+		MaximumDepth: 3, MaximumConcurrent: 3, AllowPeerDelegation: true, RequireAcceptance: true,
+	}}
+	service := NewCollaborationService(store)
+	service.teams = team
+	source, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: "marlow", Goal: "Answer", Source: RunSourceChat,
+		ConcurrencyKey: conversationRunLane("chat", "", "marlow"),
+		Context:        map[string]interface{}{conversationRunContextConversationID: "chat", conversationRunContextTriggerID: "ask"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateAgentRequest(ctx, CreateAgentRequestRequest{
+		Scope: scope, Kind: AgentRequestKindHandoff, SourceRunID: source.ID,
+		Requester: CollaborationParty{Type: OwnerTypeAgent, ID: "marlow"}, Recipient: CollaborationParty{Type: OwnerTypeAgent, ID: "harp"},
+		Goal: "Draft the launch post", IdempotencyKey: "handoff",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accept := RespondAgentRequestRequest{Scope: scope, RequestID: created.Request.ID, ExpectedRevision: created.Request.Revision,
+		Decision: AgentRequestDecisionAccept, Principal: created.Request.Recipient}
+	roster := team.deployment.Roster
+	team.deployment.Roster = roster[:1]
+	if _, err := service.RespondAgentRequest(ctx, accept); !errors.Is(err, ErrAgentRequestUnauthorized) {
+		t.Fatalf("removed member accepted the hand-off: %v", err)
+	}
+	team.deployment.Roster = roster
+	accepted, err := service.RespondAgentRequest(ctx, accept)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.Child.Owner != owner || accepted.Child.AssignedAgentID != "harp" {
+		t.Fatalf("hand-off child = %v / %q", accepted.Child.Owner, accepted.Child.AssignedAgentID)
 	}
 }

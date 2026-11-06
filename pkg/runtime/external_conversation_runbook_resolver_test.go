@@ -60,7 +60,7 @@ func TestCatalogExternalConversationRunbookResolverProvesTeamRosterAndExactDefin
 		},
 		definition: &agent.AgentDefinition{ID: "agent", Version: "1.0.0", Runbook: definition},
 		team: &kernelteam.Deployment{
-			ID: "team-live", Status: kernelteam.DeploymentActive,
+			ID: "team-live", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 			Roster: []kernelteam.RosterAssignment{{ID: "responder", AgentDeploymentID: "agent-live"}},
 		},
 	}
@@ -77,6 +77,11 @@ func TestCatalogExternalConversationRunbookResolverProvesTeamRosterAndExactDefin
 		t.Fatalf("resolved=%#v err=%v", resolved, err)
 	}
 
+	catalog.team.Status = kernelteam.DeploymentPaused
+	if _, err := resolver.ResolveExternalConversationRunbook(t.Context(), scope, endpoint, handler); err == nil {
+		t.Fatal("paused Team's Runbook Agent was accepted")
+	}
+	catalog.team.Status = kernelteam.DeploymentActive
 	catalog.team.Roster = nil
 	if _, err := resolver.ResolveExternalConversationRunbook(t.Context(), scope, endpoint, handler); err == nil {
 		t.Fatal("non-roster Runbook Agent was accepted")

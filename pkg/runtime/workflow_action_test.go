@@ -371,7 +371,11 @@ func TestWorkflowActionUsesTeamManagementAuthorityAndAssignedAgentSource(t *test
 	if work.Owner != owner || work.AssignedAgentID != sourceRun.AssignedAgentID || work.Context[conversationRunContextConversationID] != chat.ID || work.WakeCondition.EventWait.Attributes["deploymentId"] != sourceRun.AssignedAgentID {
 		t.Fatalf("team workflow=%#v", work)
 	}
-	origin, channel, human, err := conversationWorkOrigin(t.Context(), store, store, work)
+	if _, _, _, err := conversationWorkOrigin(t.Context(), store, store, work); err == nil {
+		t.Fatal("Team workflow resumed in its chat without the current roster")
+	}
+	rostered := teamRosterPortfolio{MemoryStore: store, team: deployment}
+	origin, channel, human, err := conversationWorkOrigin(t.Context(), store, rostered, work)
 	if err != nil || origin == nil || origin.ID != run.ID || channel == nil || channel.ID != chat.ID || human == nil || human.ID != posted.Message.ID {
 		t.Fatalf("Team workflow origin=%#v channel=%#v human=%#v error=%v", origin, channel, human, err)
 	}
@@ -379,6 +383,9 @@ func TestWorkflowActionUsesTeamManagementAuthorityAndAssignedAgentSource(t *test
 	deployment.Revision++
 	if err := teamStore.UpdateTeamDeployment(t.Context(), deployment, 1, workforce.DefinitionActivation{}); err != nil {
 		t.Fatal(err)
+	}
+	if _, _, _, err := conversationWorkOrigin(t.Context(), store, rostered, work); err == nil {
+		t.Fatal("removed Team member's workflow resumed in the Team chat")
 	}
 	if _, err := dispatchWorkflowForTest(t, store, catalog, run, bound, args, "removed-member-workflow", teams); err == nil {
 		t.Fatal("Removed Team member created a new workflow")
