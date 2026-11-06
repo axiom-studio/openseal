@@ -428,8 +428,25 @@ func SessionIDFromState(state string) (string, error) {
 	return sessionID, nil
 }
 
+// validOwner accepts Agent and Team IDs as the engine issues them: random
+// IDs mix cases and may start with '_' or '-'. The owner verifier checks the
+// Agent or Team exists.
 func validOwner(owner Owner) bool {
-	return (owner.Kind == OwnerAgent || owner.Kind == OwnerTeam) && validIdentifier(owner.ID, 512)
+	return (owner.Kind == OwnerAgent || owner.Kind == OwnerTeam) && validOwnerID(owner.ID)
+}
+
+func validOwnerID(value string) bool {
+	if value == "" || len(value) > 512 || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, character := range value {
+		if character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9' || strings.ContainsRune("._:/-", character) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validScope(scope capability.ScopeReference) bool {

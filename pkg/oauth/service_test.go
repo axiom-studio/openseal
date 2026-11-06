@@ -293,3 +293,20 @@ func TestTokenGrantJSONNeverSerializesTokenMaterial(t *testing.T) {
 		}
 	}
 }
+
+// Engine-issued Agent IDs are random and mixed case, often with '_' first.
+func TestValidOwnerAcceptsEngineAgentIDs(t *testing.T) {
+	for _, id := range []string{"s0ccXg8tONFWpCHqOxrzb", "_NlNw_ukIS4DTbtL7MOBC", "c0tAXIIXTohKauF4_3-TG", "openseal-assistant"} {
+		if !validOwner(Owner{Kind: OwnerAgent, ID: id}) {
+			t.Fatalf("owner %q rejected", id)
+		}
+	}
+	for _, id := range []string{"", " agent", "agent one", "agent\x00", strings.Repeat("a", 513)} {
+		if validOwner(Owner{Kind: OwnerAgent, ID: id}) {
+			t.Fatalf("owner %q accepted", id)
+		}
+	}
+	if validOwner(Owner{Kind: "user", ID: "agent-1"}) {
+		t.Fatal("non-umbrella owner kind accepted")
+	}
+}
