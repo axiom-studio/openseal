@@ -68,9 +68,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 	if err != nil {
 		return nil, err
 	}
-	childKey := func(participant ConversationParticipant) string {
-		return "team-member-run:" + hashString(run.Scope.Kind+"\x00"+run.Scope.ID+"\x00"+run.ID+"\x00"+participant.ID)
-	}
+	childKey := func(participant ConversationParticipant) string { return teamMemberRunKey(run, participant.ID) }
 	result, err := r.coordinator.Coordinate(ctx, ConversationRoutingRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, TriggerMessageID: triggerID,
 		IdempotencyKey: conversationRoutingKey(run.Scope, conversation.ID, triggerID), childRunKey: childKey,

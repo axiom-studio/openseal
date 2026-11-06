@@ -1012,7 +1012,7 @@ func (r *ConversationRunTurnRunner) prepareAgentConversationTurnInput(ctx contex
 		return TurnExecutionContext{}, historyPlan, questionErr
 	}
 	hostedInput.canAskConversationQuestion = questionConversation != nil && questionTrigger != nil &&
-		questionConversation.Owner.Type == OwnerTypeAgent && hostedRun.AssignedAgentID == questionConversation.Owner.ID
+		hostedRun.AssignedAgentID != "" && hostedRun.AssignedAgentID == conversationRunAgentID(questionConversation, input.Run)
 	hostedInput.externalChannelReply = externalChannelContext(questionConversation)
 	hostedInput.canReact = true
 	hostedInput.sourceAccessChallenge, questionErr = resolveSourceAccessChallengeInteraction(ctx, r.portfolio, input.Run)

@@ -50,7 +50,7 @@ func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.
 	if err != nil {
 		return "", "", err
 	}
-	if !verified || task.TargetAgentID != deploymentID || task.Owner.Type != OwnerTypeAgent || task.Owner.ID != deploymentID {
+	if !verified || task.TargetAgentID != deploymentID || !(task.Owner.Type == OwnerTypeAgent && task.Owner.ID == deploymentID || task.Owner.Type == OwnerTypeTeam) {
 		return "", "", denied
 	}
 	conversation, err := proof.GetConversation(ctx, task.Scope, task.ConversationID)

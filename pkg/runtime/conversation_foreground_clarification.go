@@ -3,10 +3,11 @@ package runtime
 import "context"
 
 // A foreground clarification continues the exact Run scheduled for the original
-// human message. Reload both its execution identity and original thread; a
+// human message: an Agent chat's Run, or the Team member Run its routing Run
+// started. Reload both its execution identity and original thread; a
 // model-authored conversation pointer is insufficient to route a question.
 func foregroundConversationWorkOrigin(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun) (*AgentRun, *Conversation, *ChannelMessage, error) {
-	if runs == nil || conversations == nil || run == nil || run.Kind != RunKindConversation || run.Owner.Type != OwnerTypeAgent ||
+	if runs == nil || conversations == nil || run == nil || run.Kind != RunKindConversation || (run.Owner.Type != OwnerTypeAgent && !isTeamMemberRun(run)) ||
 		run.Source != RunSourceChat || run.ParentRunID != "" || run.RootRunID != run.ID || run.Context[ConversationTaskContextKey] != nil || validateConversationRun(run) != nil {
 		return nil, nil, nil, nil
 	}
@@ -38,6 +39,12 @@ func foregroundConversationWorkOrigin(ctx context.Context, runs PortfolioStore, 
 	}
 	if _, valid := conversationMessageInitiatingUser(conversation, trigger); !valid {
 		return nil, nil, nil, nil
+	}
+	if isTeamMemberRun(canonical) {
+		if verified, err := verifyTeamMemberRun(ctx, runs, conversation, trigger, canonical); err != nil || !verified {
+			return nil, nil, nil, err
+		}
+		return canonical, conversation, trigger, nil
 	}
 	expected := conversationAgentRunRequest(conversation, trigger)
 	if run.ID != runIDForIdempotencyKey(run.Scope, expected.IdempotencyKey) || run.ConcurrencyKey != expected.ConcurrencyKey ||

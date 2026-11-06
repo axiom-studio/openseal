@@ -10,7 +10,7 @@ import (
 // chat has ended. Only the canonical task ledger can establish that authority;
 // copied context fields on an unrelated root Run never grant conversation access.
 func conversationTaskWorkOrigin(ctx context.Context, runs PortfolioStore, conversations ConversationStore, run *AgentRun) (*AgentRun, *Conversation, *ChannelMessage, error) {
-	if run == nil || run.Kind != RunKindAgentWork || run.Owner.Type != OwnerTypeAgent || run.ParentRunID != "" || conversations == nil {
+	if run == nil || run.Kind != RunKindAgentWork || (run.Owner.Type != OwnerTypeAgent && run.Owner.Type != OwnerTypeTeam) || run.ParentRunID != "" || conversations == nil {
 		return nil, nil, nil, nil
 	}
 	proof, ok := runs.(ConversationTaskProofStore)
@@ -24,7 +24,7 @@ func conversationTaskWorkOrigin(ctx context.Context, runs PortfolioStore, conver
 	if err != nil || task == nil {
 		return nil, nil, nil, err
 	}
-	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID != run.Owner.ID {
+	if task.Mode != ConversationTaskModeIndependent || task.TargetAgentID == "" || task.TargetAgentID != runActingAgentID(run) {
 		return nil, nil, nil, nil
 	}
 	valid, err := VerifyConversationTaskWorkRun(ctx, proof, task, run)
@@ -85,7 +85,7 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 	if err != nil || question == nil {
 		return false, err
 	}
-	if question.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID}) || question.Intent != MessageIntentQuestion || !question.RequiresResponse || !strings.HasPrefix(question.IdempotencyKey, "conversation-clarification:") {
+	if question.Sender.Type != ConversationParticipantAgent || conversation.Owner.Type == OwnerTypeAgent && question.Sender.ID != conversation.Owner.ID || question.Intent != MessageIntentQuestion || !question.RequiresResponse || !strings.HasPrefix(question.IdempotencyKey, "conversation-clarification:") {
 		return false, nil
 	}
 	for _, reference := range question.References {
@@ -101,7 +101,7 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 			if err != nil {
 				return false, err
 			}
-			if origin != nil && origin.ID == conversation.ID {
+			if origin != nil && origin.ID == conversation.ID && conversationRunAgentID(conversation, run) == question.Sender.ID {
 				return true, nil
 			}
 		}
@@ -113,7 +113,8 @@ func (s *ConversationRunScheduler) targetsRootClarificationQuestion(ctx context.
 		if err != nil && !errors.Is(err, ErrConversationTaskNotFound) {
 			return false, err
 		}
-		if task != nil && task.Validate() == nil && task.Mode == ConversationTaskModeIndependent && task.ConversationID == conversation.ID && task.Owner == conversation.Owner {
+		if task != nil && task.Validate() == nil && task.Mode == ConversationTaskModeIndependent && task.ConversationID == conversation.ID && task.Owner == conversation.Owner &&
+			task.TargetAgentID == question.Sender.ID {
 			return true, nil
 		}
 	}

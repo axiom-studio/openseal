@@ -1071,6 +1071,7 @@ var (
 	NewConversationTaskContinuationReconciler = runtime.NewConversationTaskContinuationReconciler
 	ConversationTaskMatchesWorkRun            = runtime.ConversationTaskMatchesWorkRun
 	VerifyConversationTaskWorkRun             = runtime.VerifyConversationTaskWorkRun
+	ResolveTeamHandoffRequest                 = runtime.ResolveTeamHandoffRequest
 	ConversationTaskAcknowledgmentMessageID   = runtime.ConversationTaskAcknowledgmentMessageID
 	FindConversationTaskResultMessage         = runtime.FindConversationTaskResultMessage
 )

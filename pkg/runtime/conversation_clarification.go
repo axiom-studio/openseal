@@ -27,7 +27,8 @@ func conversationWorkOriginForState(ctx context.Context, runs PortfolioStore, co
 	if run != nil && run.Kind == RunKindConversation && run.ParentRunID == "" {
 		return foregroundConversationWorkOrigin(ctx, runs, conversations, run)
 	}
-	if run == nil || run.Kind != RunKindAgentWork || run.Owner.Type != OwnerTypeAgent || run.ParentRunID == "" {
+	if run == nil || run.Kind != RunKindAgentWork || run.ParentRunID == "" ||
+		(run.Owner.Type != OwnerTypeAgent && (run.Owner.Type != OwnerTypeTeam || strings.TrimSpace(run.AssignedAgentID) == "")) {
 		return nil, nil, nil, nil
 	}
 	current := run
@@ -57,7 +58,8 @@ func conversationWorkOriginForState(ctx context.Context, runs PortfolioStore, co
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		if conversation == nil || conversation.Status != ConversationStatusActive || conversation.Owner != run.Owner {
+		if conversation == nil || conversation.Status != ConversationStatusActive || conversation.Owner != run.Owner ||
+			conversationRunAgentID(conversation, current) != conversationRunAgentID(conversation, run) {
 			return nil, nil, nil, nil
 		}
 		trigger, err := conversations.GetChannelMessage(ctx, run.Scope, id, triggerID)
@@ -98,7 +100,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			if err != nil {
 				return err
 			}
-			if conversation == nil || trigger == nil {
+			if conversation == nil || trigger == nil || conversationRunAgentID(conversation, run) == "" {
 				continue
 			}
 			if s.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
@@ -110,7 +112,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			}
 			posted, postErr := s.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID},
+				Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversationRunAgentID(conversation, run)},
 				Intent: MessageIntentQuestion, Content: question, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 				ReplyToMessageID: trigger.ID, RequiresResponse: true, References: conversationClarificationReferences(run),
 				IdempotencyKey: clarificationQuestionKey(run),
@@ -146,7 +148,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 	if err != nil {
 		return nil, false, err
 	}
-	if conversation.Owner.Type != OwnerTypeAgent || answer.Sender.Type != ConversationParticipantUser {
+	if (conversation.Owner.Type != OwnerTypeAgent && conversation.Owner.Type != OwnerTypeTeam) || answer.Sender.Type != ConversationParticipantUser {
 		return nil, taskTargeted, nil
 	}
 	actor, valid := conversationMessageInitiatingUser(conversation, answer)
@@ -164,7 +166,7 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 			return nil, false, err
 		}
 		for _, question := range messages {
-			if question.Sender.Type != ConversationParticipantAgent || question.Sender.ID != conversation.Owner.ID || question.Intent != MessageIntentQuestion || !strings.HasPrefix(question.IdempotencyKey, "conversation-clarification:") {
+			if question.Sender.Type != ConversationParticipantAgent || conversation.Owner.Type == OwnerTypeAgent && question.Sender.ID != conversation.Owner.ID || question.Intent != MessageIntentQuestion || !strings.HasPrefix(question.IdempotencyKey, "conversation-clarification:") {
 				continue
 			}
 			for _, ref := range question.References {
@@ -175,7 +177,9 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 				if err != nil {
 					return nil, false, err
 				}
-				if run == nil {
+				// A Team's question is its asking member's; another member
+				// never receives an answer to it.
+				if run == nil || conversationRunAgentID(conversation, run) != question.Sender.ID {
 					continue
 				}
 				source, origin, trigger, err := conversationWorkOriginForState(ctx, s.runs.store, s.conversations.store, run, true)
@@ -276,8 +280,9 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 	if err != nil {
 		return nil, false, err
 	}
-	result, _, err := s.acknowledgeConversationAnswer(ctx, conversation, answer, run)
+	result, _, err := s.acknowledgeConversationAnswer(ctx, conversation, answer, q.run)
 	if result != nil {
+		result.Run = run
 		result.Event = event
 	}
 	return result, true, err
@@ -308,7 +313,7 @@ func (s *ConversationRunScheduler) acknowledgeConversationAnswer(ctx context.Con
 	}
 	_, err = s.conversations.PostChannelMessage(ctx, PostChannelMessageRequest{
 		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID}, Intent: MessageIntentAcknowledgment,
+		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversationRunAgentID(conversation, run)}, Intent: MessageIntentAcknowledgment,
 		Content: "Your answer has been passed to the task.", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 		ReplyToMessageID: answer.ID, ResolvesMessageID: answer.ID, References: conversationClarificationReferences(run),
 		IdempotencyKey: "conversation-answer-received:" + answer.ID,
@@ -337,7 +342,7 @@ func (r conversationWorkTurnRunner) input(ctx context.Context, input TurnExecuti
 	if err != nil || conversation == nil || trigger == nil {
 		return input, err
 	}
-	input.canAskConversationQuestion = conversation.Owner.Type == OwnerTypeAgent && input.Run.AssignedAgentID == conversation.Owner.ID
+	input.canAskConversationQuestion = input.Run.AssignedAgentID != "" && input.Run.AssignedAgentID == conversationRunAgentID(conversation, input.Run)
 	input.sourceAccessChallenge, err = resolveSourceAccessChallengeInteraction(ctx, r.runs, input.Run)
 	if err != nil {
 		return input, err
