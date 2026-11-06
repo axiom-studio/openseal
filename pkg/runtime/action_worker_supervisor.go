@@ -55,6 +55,8 @@ type ActionWorkerSupervisor struct {
 	logger      *zap.SugaredLogger
 	limiter     atomic.Pointer[WorkerLimiter]
 	pools       *scopePools[*ActionWorkerPool]
+	// availability is installed on every scope pool, current and future.
+	availability atomic.Pointer[credentialAvailabilityBox]
 }
 
 func NewActionWorkerSupervisor(
@@ -121,7 +123,17 @@ func (s *ActionWorkerSupervisor) newPool(scope Scope) (*ActionWorkerPool, error)
 		return nil, err
 	}
 	pool.SetWorkerLimiter(s.limiter.Load())
+	if box := s.availability.Load(); box != nil {
+		pool.SetCredentialAvailabilityChecker(box.checker)
+	}
 	return pool, nil
+}
+
+// SetCredentialAvailabilityChecker installs the host's pre-dispatch
+// credential check on every scope pool.
+func (s *ActionWorkerSupervisor) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
+	s.availability.Store(&credentialAvailabilityBox{checker: checker})
+	s.pools.each(func(pool *ActionWorkerPool) { pool.SetCredentialAvailabilityChecker(checker) })
 }
 
 func (s *ActionWorkerSupervisor) Start(parent context.Context) { s.pools.start(parent) }

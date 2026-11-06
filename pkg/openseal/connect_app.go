@@ -3,7 +3,6 @@ package openseal
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -57,13 +56,16 @@ type ConnectAppResolution struct {
 }
 
 // ResolveConnectAppRequest settles a connect card. Resolving needs the
-// requested app to be connected for the requesting Run: the host binding
-// provider, asked for that Run, must supply its connection, so the user and
-// workspace rules are exactly those of connected apps. Dismissing needs no
-// evidence. Either way the waiting Run resumes. Hosts authorize the actor.
-func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, actor string, dismiss bool) (*ConnectAppResolution, error) {
-	if strings.TrimSpace(actor) == "" {
-		return nil, runtime.ErrInvalidSkillSetup
+// requested app to be connected for the requesting Run and its person: the
+// host binding provider, asked for that Run, must supply its connection, so
+// the user and workspace rules are exactly those of connected apps.
+// Dismissing needs no evidence. Either way the waiting Run (and every
+// sibling card's run) resumes. A per_person card is resolved by the person it
+// is for; any other card by a manager of its umbrella.
+func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string, expected int64, resolver InteractionResolver, dismiss bool) (*ConnectAppResolution, error) {
+	actor, err := resolver.actor()
+	if err != nil {
+		return nil, err
 	}
 	r, err := e.GetSkillSetupRequest(ctx, scope, owner, id)
 	if err != nil {
@@ -71,6 +73,9 @@ func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Sco
 	}
 	if r.Kind != runtime.SkillSetupKindConnectApp || r.App == nil {
 		return nil, runtime.ErrInvalidSkillSetup
+	}
+	if err := authorizeSkillSetupInteraction(resolver, r, dismiss); err != nil {
+		return nil, err
 	}
 	want := "resolved"
 	if dismiss {
@@ -105,12 +110,17 @@ func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Sco
 			tools = toolNames
 		}
 	}
-	continued, err := e.continueInteractionRun(ctx, interactionContinuation{
-		scope: r.Scope, owner: r.Owner, agentID: r.AgentID, runID: r.RunID, requestID: r.ID, actionCallID: r.ActionCallID, status: r.Status, revision: r.Revision,
-		updatedAt: r.UpdatedAt, wakeType: runtime.ConnectAppWakeType, coordinator: "connect-app-coordinator",
-		eventType: "run.connection_request_settled", summary: "Received the connection request result; continuing",
-		interventionPrefix: "connect-app-result:", instruction: runtime.ConnectAppResolutionInstruction(r, tools),
-	})
+	resume := func(ctx context.Context, request *runtime.SkillSetupRequest) (bool, error) {
+		return e.continueInteractionRun(ctx, interactionContinuation{
+			scope: request.Scope, owner: request.Owner, agentID: request.AgentID, runID: request.RunID, requestID: request.ID, actionCallID: request.ActionCallID,
+			status: request.Status, revision: request.Revision, updatedAt: request.UpdatedAt, wakeType: runtime.ConnectAppWakeType, coordinator: "connect-app-coordinator",
+			eventType: "run.connection_request_settled", summary: "Received the connection request result; continuing",
+			interventionPrefix: "connect-app-result:", instruction: runtime.ConnectAppResolutionInstruction(request, tools),
+			requestedFor: request.RequestedFor,
+		})
+	}
+	e.settleSkillSetupSiblings(ctx, r, resume)
+	continued, err := resume(ctx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -118,9 +128,10 @@ func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Sco
 }
 
 // connectedAppFor returns the connection of the request's umbrella for its
-// app, with the connection's model tool names.
+// app, as the person the request is for uses it, with the connection's model
+// tool names.
 func (e *Engine) connectedAppFor(ctx context.Context, r *SkillSetupRequest) (*skill.Binding, []string, error) {
-	actor := skill.RunActor{RunID: r.RunID, AgentID: r.AgentID, Umbrella: runtime.SkillUmbrella(r.Owner)}
+	actor := skill.RunActor{RunID: r.RunID, AgentID: r.AgentID, Umbrella: runtime.SkillUmbrella(r.Owner), ActingUser: r.RequestedFor}
 	set, err := e.skills.HostBindings(ctx, skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}, r.Owner.ID, actor)
 	if err != nil {
 		return nil, nil, err
@@ -138,32 +149,16 @@ func (e *Engine) connectedAppFor(ctx context.Context, r *SkillSetupRequest) (*sk
 // finished connecting it in Settings or from the card. It returns the
 // resolved ones; a failure leaves a card for the next reconciliation.
 func (e *Engine) ReconcileConnectAppRequests(ctx context.Context, scope runtime.Scope) ([]*ConnectAppResolution, error) {
-	pending, ok := e.store.(interface {
-		ListPendingSkillSetupRequests(context.Context, runtime.Scope, int, int) ([]*runtime.SkillSetupRequest, error)
+	matches, err := e.pendingSkillSetupRequests(ctx, scope, func(request *runtime.SkillSetupRequest) bool {
+		return request.Kind == runtime.SkillSetupKindConnectApp && request.App != nil
 	})
-	if !ok || scope.Validate() != nil {
-		return nil, nil
-	}
-	const pageSize, maximumPages = 100, 20
-	var matches []*runtime.SkillSetupRequest
-	for page := 0; page < maximumPages; page++ {
-		requests, err := pending.ListPendingSkillSetupRequests(ctx, scope, pageSize, page*pageSize)
-		if err != nil {
-			return nil, err
-		}
-		for _, request := range requests {
-			if request.Kind == runtime.SkillSetupKindConnectApp && request.App != nil {
-				matches = append(matches, request)
-			}
-		}
-		if len(requests) < pageSize {
-			break
-		}
+	if err != nil {
+		return nil, err
 	}
 	var resolved []*ConnectAppResolution
 	var failures []error
 	for _, request := range matches {
-		result, err := e.ResolveConnectAppRequest(ctx, scope, request.Owner, request.ID, request.Revision, connectAppReconciliationActor, false)
+		result, err := e.ResolveConnectAppRequest(ctx, scope, request.Owner, request.ID, request.Revision, InteractionResolver{System: connectAppReconciliationActor}, false)
 		switch {
 		case err == nil:
 			resolved = append(resolved, result)

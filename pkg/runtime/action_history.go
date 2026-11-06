@@ -368,7 +368,11 @@ func recordTerminalAction(checkpoint map[string]interface{}, call *ActionCall, m
 		lastAction[key] = deepCloneCheckpointValue(value)
 	}
 	result["lastAction"] = lastAction
-	if !recorded && call.Status == ActionCallStatusFailed {
+	if !recorded && isParkedConnectAccountCall(call) {
+		// A call held for a missing sign-in is not a failure the model must
+		// correct: it is retried after the account is connected, so it spends
+		// no correction allowance and is not remembered as a failed request.
+	} else if !recorded && call.Status == ActionCallStatusFailed {
 		if replay, _ := metadata["idempotentReplay"].(bool); replay {
 			// A durable failed receipt reused in a later Turn is not fresh tool
 			// feedback and cannot grant another correction allowance.

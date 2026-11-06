@@ -317,6 +317,11 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			decision.ApprovalTimeout = ApprovalTimeoutExpire
 		}
 	}
+	// An action that acts as one person's own account is approved only by
+	// that person, whatever the policy named.
+	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && boundUsesPersonCredential(bound) {
+		decision.EligibleApprovers = []ApprovalPrincipal{{Type: "user", ID: run.ActingUser}}
+	}
 	if decision.Disposition == ActionDispositionRequireApproval && len(decision.EligibleApprovers) == 0 {
 		return nil, errors.New("approval policy must identify at least one eligible approver")
 	}
@@ -639,6 +644,17 @@ func boundCredentialReferences(bound *skill.BoundAction) map[string]skill.Creden
 		return nil
 	}
 	return result
+}
+
+// boundUsesPersonCredential reports whether any credential slot the action
+// uses holds the per_person reference.
+func boundUsesPersonCredential(bound *skill.BoundAction) bool {
+	for _, reference := range boundCredentialReferences(bound) {
+		if skill.IsPersonCredentialReference(reference) {
+			return true
+		}
+	}
+	return false
 }
 
 func approvalPreview(bound *skill.BoundAction, arguments map[string]interface{}) map[string]interface{} {

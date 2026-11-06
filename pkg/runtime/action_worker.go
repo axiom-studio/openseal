@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -144,14 +145,18 @@ type ActionWorker struct {
 	onClaim func()
 	// hostSummary, when set, describes a host call's outcome in activity.
 	hostSummary string
+	// availability is the host's pre-dispatch credential check; teams reads
+	// the rosters RunUmbrella checks.
+	availability atomic.Pointer[credentialAvailabilityBox]
+	teams        TeamRosterReader
 }
 
 func NewActionWorker(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher) *ActionWorker {
-	return &ActionWorker{store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString}
+	return &ActionWorker{store: store, catalog: catalog, credentials: credentials, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString, teams: teamRosterReader(store)}
 }
 
 func NewActionWorkerWithCredentialLeaseIssuer(store KernelStore, catalog ActionExecutionCatalog, issuer ActionCredentialLeaseIssuer, dispatcher ActionDispatcher) *ActionWorker {
-	return &ActionWorker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString}
+	return &ActionWorker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString, teams: teamRosterReader(store)}
 }
 
 func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string, leaseDuration time.Duration) (*ActionExecutionResult, error) {
@@ -233,6 +238,13 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	credentials := map[string]string(nil)
 	var credentialLease *SignedActionCredentialLease
 	credentialReferences := map[string]skill.CredentialReference(nil)
+	var umbrella ObjectiveOwner
+	if executionErr == nil && len(call.CredentialRefs) > 0 {
+		// Fail closed before any lease: the run must act under a valid
+		// umbrella, a per_person account needs a person, and a missing
+		// sign-in becomes a card instead of a failed dispatch.
+		umbrella, executionErr = w.checkCredentialAvailability(executionCtx, sourceRun, call, bound)
+	}
 	if executionErr == nil && len(call.CredentialRefs) > 0 {
 		if w.leaseIssuer != nil {
 			credentialTransport, transportErr := boundActionToolTransport(bound)
@@ -251,6 +263,7 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 			credentials, executionErr = w.credentials.ResolveCredentials(executionCtx, CredentialResolutionRequest{
 				Scope: call.Scope, DeploymentID: call.DeploymentID, SkillID: call.SkillID, SkillVersion: call.SkillVersion,
 				Action: call.Action, ActionCallID: call.ID, RunID: call.RunID, References: cloneCredentialReferences(call.CredentialRefs),
+				Umbrella: umbrella, ActingUser: sourceRun.ActingUser, Requirements: actionCredentialRequirements(bound),
 			})
 			if executionErr == nil {
 				for name := range call.CredentialRefs {
@@ -467,6 +480,8 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		return ActionExecutionRecord{}, err
 	}
 	paused := runHasPausedActionDependency(sourceRun, call)
+	var parked *connectAccountParked
+	errors.As(executionErr, &parked)
 	updatedCall := cloneActionCall(call)
 	updatedCall.Revision++
 	updatedCall.UpdatedAt = now
@@ -484,7 +499,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		}
 		eventType = "action.canceled"
 		summary = fmt.Sprintf("Canceled stale %s.%s action", call.SkillID, call.Action)
-	} else if !dispatched && (paused || executionErr == nil || errors.Is(executionErr, ErrSkillRuntimeMaintenance)) {
+	} else if !dispatched && parked == nil && (paused || executionErr == nil || errors.Is(executionErr, ErrSkillRuntimeMaintenance)) {
 		updatedCall.Status = ActionCallStatusReady
 		updatedCall.AvailableAt = now
 		eventType = "action.deferred"
@@ -496,7 +511,24 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 	} else {
 		completedAt := now
 		updatedCall.CompletedAt = &completedAt
-		if executionErr == nil {
+		if parked != nil {
+			// Held for a sign-in: failed before dispatch, carrying its card,
+			// and without its external operation identity so the retry after
+			// the account is connected is admitted as a new operation.
+			updatedCall.Status = ActionCallStatusFailed
+			updatedCall.FailurePhase = ActionFailureBeforeDispatch
+			updatedCall.Error = parked.Error()
+			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
+			projection, projectionErr := skillSetupResult(parked.request)
+			if projectionErr != nil {
+				return ActionExecutionRecord{}, projectionErr
+			}
+			projection["message"] = parked.request.Reason
+			updatedCall.Output = projection
+			updatedCall.ExternalOperationDigest = ""
+			eventType = "action.connection_requested"
+			summary = connectAccountWaitSummary(parked.request)
+		} else if executionErr == nil {
 			updatedCall.Status = ActionCallStatusSucceeded
 			var semanticArguments map[string]string
 			if bound != nil {
@@ -509,6 +541,10 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			updatedCall.Status = ActionCallStatusFailed
 			updatedCall.Error = sanitizeActionError(executionErr, credentials)
 			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
+			var unavailable *personUnavailableError
+			if errors.As(executionErr, &unavailable) {
+				updatedCall.ErrorCode = CredentialErrorPersonUnavailable
+			}
 			var failure *skillerror.ActionError
 			if errors.As(executionErr, &failure) && failure != nil {
 				if safe := skillerror.NewActionError(failure.Code(), "", failure.Details()); safe != nil {
@@ -542,7 +578,23 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
 		recordedCheckpoint := updatedRun.Checkpoint
 		updatedRun.Checkpoint = checkpointTerminalAction(recordedCheckpoint, updatedCall, nil)
-		if updatedCall.Status == ActionCallStatusFailed && !paused {
+		var connectAccount *SkillSetupRequest
+		if isParkedConnectAccountCall(updatedCall) {
+			connectAccount = pendingConnectAccountRequestFromAction(ctx, w.store, updatedCall)
+		}
+		if connectAccount != nil {
+			// The call is retried once the account is connected, or the card
+			// is dismissed and the model explains what is blocked.
+			condition := &WakeCondition{Type: ConnectAccountWakeType, Reference: connectAccount.ID}
+			if paused {
+				updatedRun.PausedFrom = AgentRunStatusWaitingForEvent
+				updatedRun.PausedWakeCondition = condition
+			} else {
+				updatedRun.Status = AgentRunStatusWaitingForEvent
+				updatedRun.WakeCondition = condition
+			}
+		}
+		if updatedCall.Status == ActionCallStatusFailed && !paused && !isParkedConnectAccountCall(updatedCall) {
 			// The failure is returned to the model as this action's result
 			// (bounded by checkpointToolFeedbackFailure). The attempt ends only
 			// when that bound is reached. A typed source challenge asks its

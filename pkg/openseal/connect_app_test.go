@@ -71,14 +71,14 @@ func waitingConnectAppFixture(t *testing.T) (context.Context, *runtime.MemorySto
 
 func TestConnectedAppResolvesTheCardAndResumesTheRunWithItsTools(t *testing.T) {
 	ctx, store, e, run, request, connected := waitingConnectAppFixture(t)
-	if _, err := e.ResolveConnectAppRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "5", false); !errors.Is(err, ErrConnectAppNotConnected) {
+	if _, err := e.ResolveConnectAppRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false); !errors.Is(err, ErrConnectAppNotConnected) {
 		t.Fatalf("resolved before connecting: %v", err)
 	}
 	if resolved, err := e.ReconcileConnectAppRequests(ctx, run.Scope); err != nil || len(resolved) != 0 {
 		t.Fatalf("reconciled before connecting: %#v %v", resolved, err)
 	}
 	connected.Store(true)
-	if _, err := e.ResolveConnectAppRequest(ctx, Scope{Kind: "tenant", ID: "other"}, agentOwner("agent"), request.ID, 1, "5", false); err == nil {
+	if _, err := e.ResolveConnectAppRequest(ctx, Scope{Kind: "tenant", ID: "other"}, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false); err == nil {
 		t.Fatal("cross-tenant resolution")
 	}
 	resolved, err := e.ReconcileConnectAppRequests(ctx, run.Scope)
@@ -97,7 +97,7 @@ func TestConnectedAppResolvesTheCardAndResumesTheRunWithItsTools(t *testing.T) {
 		t.Fatalf("instruction: %q", instruction)
 	}
 	// The card's own confirmation after reconciliation is idempotent.
-	again, err := e.ResolveSkillSetupRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "", "5", false)
+	again, err := e.ResolveSkillSetupRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "", InteractionResolver{UserID: "5", CanManage: true}, false)
 	if err != nil || again.Revision != 2 {
 		t.Fatalf("repeat: %#v %v", again, err)
 	}
@@ -109,7 +109,7 @@ func TestConnectedAppResolvesTheCardAndResumesTheRunWithItsTools(t *testing.T) {
 func TestDismissedConnectCardResumesTheRunWithAnExplanation(t *testing.T) {
 	ctx, store, e, run, request, _ := waitingConnectAppFixture(t)
 	// Not now goes through the ordinary setup request dismissal.
-	dismissed, err := e.ResolveSkillSetupRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "", "5", true)
+	dismissed, err := e.ResolveSkillSetupRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "", InteractionResolver{UserID: "5", CanManage: true}, true)
 	if err != nil || dismissed.Status != "dismissed" {
 		t.Fatalf("dismissal: %#v %v", dismissed, err)
 	}
@@ -129,7 +129,7 @@ func TestConnectCardForAnEndedRunAsksTheHostToReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	connected.Store(true)
-	result, err := e.ResolveConnectAppRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, "5", false)
+	result, err := e.ResolveConnectAppRequest(ctx, run.Scope, agentOwner("agent"), request.ID, 1, InteractionResolver{UserID: "5", CanManage: true}, false)
 	if err != nil || result.Continued || result.Request.Status != "resolved" {
 		t.Fatalf("resolution: %#v %v", result, err)
 	}

@@ -12,6 +12,12 @@ import (
 // route an account setup back to its originating conversation. The run's
 // acting member is member and its umbrella must own the conversation.
 func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.Context, run *AgentRun, member string, umbrella ObjectiveOwner) (string, string, error) {
+	return skillSetupConversationOrigin(ctx, d.store, run, member, umbrella)
+}
+
+// skillSetupConversationOrigin returns the conversation and trigger message a
+// run's in-chat card belongs to, or an error when the origin is unproven.
+func skillSetupConversationOrigin(ctx context.Context, store KernelStore, run *AgentRun, member string, umbrella ObjectiveOwner) (string, string, error) {
 	denied := errors.New("Skill setup requires a verified conversation origin")
 	if run == nil || run.Owner != umbrella {
 		return "", "", denied
@@ -26,25 +32,25 @@ func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.
 		// A chat Run carries its conversation's owner, checked above.
 		return conversationID, messageID, nil
 	}
-	proof, ok := d.store.(ConversationTaskProofStore)
+	proof, ok := store.(ConversationTaskProofStore)
 	if !ok {
 		return "", "", denied
 	}
-	canonical, err := d.store.GetAgentRun(ctx, run.Scope, run.ID)
+	canonical, err := store.GetAgentRun(ctx, run.Scope, run.ID)
 	if err != nil {
 		return "", "", err
 	}
 	if canonical == nil || canonical.Scope != run.Scope || canonical.ID != run.ID || canonical.AssignedAgentID != member || canonical.Owner != run.Owner {
 		return "", "", denied
 	}
-	task, err := persistedTaskWorkOrigin(ctx, d.store, canonical)
+	task, err := persistedTaskWorkOrigin(ctx, store, canonical)
 	if err != nil {
 		return "", "", err
 	}
 	if task == nil {
 		return "", "", denied
 	}
-	root, err := d.store.GetAgentRun(ctx, task.Scope, task.WorkRunID)
+	root, err := store.GetAgentRun(ctx, task.Scope, task.WorkRunID)
 	if err != nil {
 		return "", "", err
 	}
@@ -62,7 +68,7 @@ func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.
 	if conversation == nil || conversation.Status != ConversationStatusActive || conversation.Owner != task.Owner {
 		return "", "", denied
 	}
-	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(d.store), conversation.Scope, conversation.Owner, member)
+	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(store), conversation.Scope, conversation.Owner, member)
 	if err != nil {
 		return "", "", err
 	}
@@ -70,7 +76,7 @@ func (d *SkillBindingActionDispatcher) skillSetupConversationOrigin(ctx context.
 		return "", "", denied
 	}
 	if task.Mode == ConversationTaskModeIndependent {
-		turn, err := d.store.GetAgentTurn(ctx, task.Scope, task.SourceTurnID)
+		turn, err := store.GetAgentTurn(ctx, task.Scope, task.SourceTurnID)
 		if err != nil {
 			return "", "", err
 		}

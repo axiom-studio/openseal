@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -203,7 +205,7 @@ const connectAppGuidance = "Use this when the user wants to connect or use a ser
 
 func findAppsAction() skill.Action {
 	return skill.Action{Name: SkillActionFindApps,
-		Description: "Search what can be connected for every Agent: catalog apps (remote MCP servers) and Skills. " + connectAppGuidance + " Query with the service name, for example Linear. Every result has a type and the one action that sets it up (setup). Apps (type mcp-server, setup request_connection) are connected, never installed: a remote server the user signs in to. They list slug, name, whether the vendor maintains it (official), how it signs in, and whether it is already connected for this chat (then its tools are listed); call request_connection with the slug. Skills (type skill, setup request_setup) are installed and configured for this Agent: call request_setup with its skillId, skillVersion and sourceIdentity, and its setupKind as kind. Never pass an app to request_setup or a Skill to request_connection. Prefer an app that covers the service; when no app does, use a matching Skill.",
+		Description: "Search what can be connected for every Agent: catalog apps (remote MCP servers) and Skills. " + connectAppGuidance + " Query with the service name, for example Linear. Every result has a type and the one action that sets it up (setup). Apps (type mcp-server, setup request_connection) are connected, never installed: a remote server the user signs in to. They list slug, name, whether the vendor maintains it (official), how it signs in, and whether it is already connected for the person asking (then its tools are listed); call request_connection with the slug. Skills (type skill, setup request_setup) are installed and configured for this Agent: call request_setup with its skillId, skillVersion and sourceIdentity, and its setupKind as kind. Never pass an app to request_setup or a Skill to request_connection. Prefer an app that covers the service; when no app does, use a matching Skill.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"query": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumAppQueryBytes},
@@ -217,7 +219,7 @@ func findAppsAction() skill.Action {
 
 func requestConnectionAction() skill.Action {
 	return skill.Action{Name: SkillActionRequestConnection,
-		Description: "Ask the user to connect an app through a Connect card in this chat. " + connectAppGuidance + " Pass app as the exact slug from find_apps, or as {\"address\": \"https://...\"} when the user gave an MCP server address. The user signs in on the card; never ask for keys or passwords in chat. A pending result pauses this work until the app is connected (you then continue with its new tools) or the card is dismissed. If the app is already connected, the result lists its tools instead: use them. If the result is refused, explain the reason and do not repeat the request in this reply.",
+		Description: "Ask the person who sent the message to connect the app through a Connect card in this chat. If the app is shared with the agent or team, ask someone who manages it. " + connectAppGuidance + " Pass app as the exact slug from find_apps, or as {\"address\": \"https://...\"} when the user gave an MCP server address. The user signs in on the card; never ask for keys or passwords in chat. A pending result pauses this work until the app is connected (you then continue with its new tools) or the card is dismissed. If the app is already connected, the result lists its tools instead: use them. If the result is refused, explain the reason and do not repeat the request in this reply.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"app": map[string]interface{}{"anyOf": []interface{}{
@@ -427,6 +429,15 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 			"instruction": target.Name + " is already connected. Use its tools for this request; do not ask the user to connect it again.",
 		}}, nil
 	}
+	// An app the umbrella uses per person is connected by the person asking;
+	// a run with no person cannot ask anyone to.
+	mode := ""
+	if _, personal := set.PersonalApps[ConnectAppKey(target)]; personal {
+		mode = skillSetupModePerPerson
+		if run.ActingUser == "" {
+			return nil, refuseInteraction(target.Name + " uses each person's own account, and no person asked for this run. Ask someone who manages " + umbrellaLabel(umbrella) + " to share an account with it")
+		}
+	}
 	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, member, umbrella)
 	if err != nil {
 		return nil, refuseInteraction("an app can only be connected from a conversation with the user; ask them to connect " + target.Name + " in Settings, Connected apps")
@@ -437,14 +448,14 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 	} else if existing != nil {
 		return skillSetupResult(existing)
 	}
-	// One card per app in a conversation's umbrella: an unanswered one is
-	// reused, whichever member asked.
+	// An unanswered card for the app is reused only within this run and for
+	// the same person: a card resumes only the run that made it.
 	current, err := d.store.ListSkillSetupRequests(ctx, run.Scope, umbrella.ID, conversationID)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range current {
-		if r.Kind != SkillSetupKindConnectApp || r.App == nil || !sameConnectAppTarget(*r.App, target) {
+		if r.Kind != SkillSetupKindConnectApp || r.App == nil || !sameConnectAppTarget(*r.App, target) || r.RunID != run.ID || r.RequestedFor != run.ActingUser {
 			continue
 		}
 		if r.Status == "pending" {
@@ -460,7 +471,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 	now := time.Now().UTC()
 	r := &SkillSetupRequest{ID: id, Scope: run.Scope, Owner: umbrella, DeploymentID: umbrella.ID, AgentID: member, ConversationID: conversationID, TriggerMessageID: messageID,
 		RunID: run.ID, ActionCallID: input.Call.ID, Kind: SkillSetupKindConnectApp, SkillID: mcp.SkillID, SkillVersion: mcp.SkillVersion,
-		SkillName: target.Name, App: &target, Reason: reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
+		SkillName: target.Name, App: &target, RequestedFor: run.ActingUser, Mode: mode, Reason: reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := d.store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
 		if errors.Is(err, ErrSkillSetupConflict) {
 			if replay, readErr := d.store.GetSkillSetupRequest(ctx, run.Scope, id); readErr == nil && replay != nil {
@@ -495,6 +506,16 @@ func truncateRunes(value string, limit int) string {
 		return value
 	}
 	return string([]rune(value)[:limit-1]) + "…"
+}
+
+// ConnectAppKey is the host's key of an app: its catalog slug, or for an
+// address "custom:" and the first 24 hex digits of the address's SHA-256.
+func ConnectAppKey(target ConnectAppTarget) string {
+	if target.CatalogSlug != "" {
+		return target.CatalogSlug
+	}
+	sum := sha256.Sum256([]byte(target.Address))
+	return "custom:" + hex.EncodeToString(sum[:])[:24]
 }
 
 func sameConnectAppTarget(left, right ConnectAppTarget) bool {

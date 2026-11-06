@@ -198,6 +198,14 @@ func (p *ActionWorkerPool) pollClaims(ctx context.Context) {
 	}
 }
 
+// SetCredentialAvailabilityChecker installs the host's pre-dispatch
+// credential check on the pool's worker. Nil removes it.
+func (p *ActionWorkerPool) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
+	if p != nil {
+		p.worker.setCredentialAvailabilityChecker(checker)
+	}
+}
+
 func (p *ActionWorkerPool) SetWorkerLimiter(limiter *WorkerLimiter) {
 	p.limiter.Store(limiter)
 }

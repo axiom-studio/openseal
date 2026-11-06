@@ -74,8 +74,7 @@ func conversationTaskSetupOrigin(ctx context.Context, store ConversationTaskProo
 
 func taskSetupActionMatches(call *ActionCall, run *AgentRun, deploymentID string) bool {
 	return call != nil && run != nil && call.Scope == run.Scope && call.RunID == run.ID &&
-		call.DeploymentID == deploymentID && call.SkillID == SkillManagementSkillID &&
-		call.SkillVersion == SkillManagementSkillVersion && call.Action == SkillActionRequestSetup
+		call.DeploymentID == deploymentID && call.SkillID == SkillManagementSkillID && call.Action == SkillActionRequestSetup
 }
 
 func verifiedTaskSetupRequest(ctx context.Context, store conversationTaskSetupStore, run *AgentRun, requestID string, requireCompletedAction bool) (*ConversationTask, *SkillSetupRequest, error) {

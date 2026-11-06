@@ -1564,7 +1564,36 @@ func bindingHasNoCapabilities(binding *Binding) bool {
 	return len(binding.AllowedActions) == 0 && !binding.EnablePrompt && len(binding.EnabledConversationAdapters) == 0 && len(binding.EnabledCallbackAdapters) == 0
 }
 
+// personCredentialPlacementMessage refuses a per_person slot that is
+// not an OAuth action credential or sits on a binding with adapters.
+const personCredentialPlacementMessage = "per-person accounts work only for actions; share an account for listeners and prompts"
+
+// validatePersonCredentials accepts a per_person slot only where
+// PersonCredentialAllowed holds and the reference kind matches every action
+// requirement that uses the slot.
+func validatePersonCredentials(binding *Binding, definition *Definition) error {
+	for name, reference := range binding.Credentials {
+		if !IsPersonCredentialReference(reference) {
+			continue
+		}
+		if !PersonCredentialAllowed(definition, binding, name) {
+			return fmt.Errorf("%w: %s", ErrBindingInvalid, personCredentialPlacementMessage)
+		}
+		for _, action := range definition.Actions {
+			for _, requirement := range action.Credentials {
+				if requirement.Name == name && requirement.Kind != reference.Kind {
+					return fmt.Errorf("%w: %s", ErrBindingInvalid, personCredentialPlacementMessage)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func validateBindingAgainstDefinition(binding *Binding, definition *Definition) error {
+	if err := validatePersonCredentials(binding, definition); err != nil {
+		return err
+	}
 	if bindingHasNoCapabilities(binding) {
 		requirements := make([]CredentialRequirement, 0)
 		if definition.Prompt != nil {

@@ -15,7 +15,7 @@ import (
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.6.0"
+	SkillManagementSkillVersion = "1.6.1"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
