@@ -8,9 +8,8 @@ import {
 // specs. The daemon's step host sends one request per model step: the
 // system prompt and the Run's session path as `messages`, the kernel's tool
 // list as `tools`, and expects one assistant message back (text and/or
-// `tool_calls`). Authoring requests (pkg/authoring) use the same endpoint and
-// offer `submit_authoring_intent` as their first tool. The builder agent's
-// steps are ordinary loop steps (isBuilder, governedCall).
+// `tool_calls`). The builder agent's steps are ordinary loop steps
+// (isBuilder, governedCall).
 
 export type ChatToolCall = {
   id: string;
@@ -51,7 +50,6 @@ export const FINAL_TOOL = "turn_final_answer";
 export const DELEGATE_TOOL = "agent_delegate";
 export const REQUEST_DECISION_TOOL = "agent_request_decision";
 export const COMPLETION_REVIEW_TOOL = "agent_request_review";
-export const AUTHORING_TOOL = "submit_authoring_intent";
 // The desktop Team router's forced tool (internal/daemon/conversation_provider.go).
 export const ROUTE_TOOL = "route_message";
 export const LOAD_TOOL = "load_capabilities";
@@ -71,10 +69,6 @@ export const CREATE_TEAM_TOOL = governedTool(CREATE_TEAM_ACTION);
 export const NOTE_PREFIX = "Note from OpenSeal: ";
 
 export const DEFAULT_USAGE = { prompt_tokens: 100, completion_tokens: 80 };
-
-export function isAuthoring(r: ChatRequest): boolean {
-  return r.tools?.[0]?.function.name === AUTHORING_TOOL;
-}
 
 export function hasTool(r: ChatRequest, name: string): boolean {
   return (r.tools ?? []).some((tool) => tool.function.name === name);
