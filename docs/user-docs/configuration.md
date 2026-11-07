@@ -83,6 +83,7 @@ credentials:
 | `authoring.baseURL` | `string` | OpenAI-compatible model endpoint |
 | `authoring.model` | `string` | Model name |
 | `authoring.credential` | reference | Opaque `kind` and `id` pair |
+| `authoring.contextTokens` | integer | Optional model context window in tokens; must be positive. Defaults to 128000. The kernel compacts a Run's session log when its steps approach this window |
 | `credentials[].scope` | `kind:id` | Scope the credential belongs to |
 | `credentials[].kind` | `string` | Credential kind, part of its reference |
 | `credentials[].id` | `string` | Credential identifier, part of its reference |
@@ -93,7 +94,7 @@ credentials:
 
 Each credential entry must configure exactly one of `env` or `file`; setting both or neither is a load error. Relative file paths resolve against the directory containing the context file. Unknown fields are rejected, and duplicate `kind`/`id` pairs within a scope are rejected.
 
-When an `authoring` block is present it takes precedence over the `OPENSEAL_LLM_BASE_URL`, `OPENSEAL_LLM_MODEL`, and `OPENAI_API_KEY` environment variables, and its credential is resolved through the opaque reference mechanism rather than read directly from the environment.
+When an `authoring` block is present it takes precedence over the `OPENSEAL_LLM_BASE_URL`, `OPENSEAL_LLM_MODEL`, `OPENSEAL_LLM_CONTEXT_TOKENS`, and `OPENAI_API_KEY` environment variables, and its credential is resolved through the opaque reference mechanism rather than read directly from the environment.
 
 ### File-Backed Credential Checks
 
@@ -127,6 +128,7 @@ credential scopes + outreach-enabled policy scopes → worker scopes → Run and
 | `OPENSEAL_SKILLS_DIR` | Directory holding installed Skills; defaults to `skills/` beside the configuration file |
 | `OPENSEAL_LLM_BASE_URL` | Workforce authoring model endpoint |
 | `OPENSEAL_LLM_MODEL` | Workforce authoring model name |
+| `OPENSEAL_LLM_CONTEXT_TOKENS` | Model context window in tokens (positive integer, default 128000), used to decide when a Run's session log is compacted |
 | `OPENAI_API_KEY` | Workforce authoring credential |
 | `OPENSEAL_API_TOKEN` | Optional bearer token required on every daemon API route; required by `--desktop-operator` |
 | `CLAWHUB_REGISTRY` | ClawHub registry base URL; defaults to `https://clawhub.ai` |

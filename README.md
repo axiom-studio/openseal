@@ -19,7 +19,7 @@ provides one portable execution model for objectives, long-running Runs,
 collaboration, governed Skills, approvals, activity, artifacts, and recovery.
 Deterministic workflows remain available as an optional runbook layer.
 
-![OpenSeal architecture: a prompt or event flows through an Agent or Team, objectives, a durable Run, bounded turns, and governed Skills to activity and artifacts or a durable approval.](assets/readme/open-seal-architecture.png)
+![OpenSeal architecture: a prompt or event flows through an Agent or Team and objectives to a durable Run whose agent loop calls governed Skills, ending in activity and artifacts or a durable approval.](assets/readme/open-seal-architecture.png)
 
 ## Choose a starting point
 

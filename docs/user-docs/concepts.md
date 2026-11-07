@@ -4,22 +4,22 @@ OpenSeal separates the thing that wants an outcome from the durable record of wo
 
 ## The Execution Model
 
-A prompt or an inbound event is attributed to an owner. An owner holds a portfolio of objectives. An objective produces Runs. A Run advances in bounded Turns. A Turn may invoke a governed Skill action, which either executes or stops at a durable approval checkpoint.
+A prompt or an inbound event is attributed to an owner. An owner holds a portfolio of objectives. An objective produces Runs. A Run is one agent loop: model steps call tools until a final answer, an approval, or a wait. A tool call may invoke a governed Skill action, which either executes or stops at a durable approval checkpoint.
 
 ```text
-Prompt or event → Agent or Team → Objective → Run → Turn → Skill action
+Prompt or event → Agent or Team → Objective → Run → model step → Skill action
 ```
 
-An action that policy permits produces activity and artifacts. An action that policy holds produces an approval, and the Turn resumes only once that approval is decided:
+An action that policy permits produces activity and artifacts. An action that policy holds produces an approval, and the Run resumes only once that approval is decided:
 
 ```text
 Skill action → allowed        → activity and artifacts
-Skill action → needs approval → durable checkpoint → Turn resumes
+Skill action → needs approval → durable checkpoint → Run resumes
 ```
 
-Every stage is persisted before it is acted on. A Turn claims work under a lease with an expiry, so a worker that dies mid-Turn releases its claim rather than stranding the Run. Approval checkpoints are durable records rather than in-memory waits, so a Run waiting on a human decision survives a daemon restart.
+Every stage is persisted before it is acted on. Each model step and each tool result is appended to the Run's session log, and a worker claims a Run under a lease with an expiry, so a worker that dies mid-step releases its claim and the next claim resumes from the log rather than stranding the Run. Approval checkpoints are durable records rather than in-memory waits, so a Run waiting on a human decision survives a daemon restart.
 
-Bounding work at the Turn level is what makes a long Run interruptible and recoverable without a bespoke checkpoint format for each kind of work.
+Recording work step by step in one session log is what makes a long Run interruptible and recoverable without a bespoke checkpoint format for each kind of work.
 
 ## Authority Is Never Manufactured
 
@@ -77,7 +77,7 @@ Several record types recur throughout the API, and knowing which is which makes 
 | Objective | A durable statement of a desired outcome, held by an owner |
 | Project | A coarser grouping used for source monitoring and outreach |
 | Run | The durable unit of execution working toward an objective |
-| Turn | A bounded, leased slice of work within a Run |
+| Model step | One model call within a Run's agent loop, with the tool calls it made |
 | Action call | The durable record of one Skill invocation |
 | Approval | A durable checkpoint holding an action call pending a decision |
 | Artifact | Immutable versioned metadata plus digest-addressed content |
@@ -91,7 +91,7 @@ OpenSeal carries a second, separate execution path alongside the durable kernel:
 
 | Property | Durable kernel | Deterministic runbooks |
 |---|---|---|
-| Unit of work | Runs and Turns | A directed graph of typed nodes |
+| Unit of work | Runs and their model steps | A directed graph of typed nodes |
 | Durability | Persisted, leased, restart-safe | Single process, single invocation |
 | Approvals | Participates | Does not participate |
 | Activity feed | Records every transition | Does not appear |

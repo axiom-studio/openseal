@@ -51,7 +51,7 @@ it. This shared token does not provide per-user or per-scope authorization.
 | Runbooks | `GET /runbooks`; `GET /runbooks/{id}`; `POST /runbooks/schedule-reconciliations` | Inspect Objective-owned execution methods and reconcile due schedule triggers |
 | Event sources | `POST, GET /event-source-subscriptions`; item read/update, retirement, health, and checkpoint routes | Durable event watches and connector-owned progress |
 | Agent Runs | `POST, GET /agent-runs`; `GET /agent-runs/{id}`; `POST /agent-runs/{id}/commands` | Durable work and pause/resume/cancel/intervention commands |
-| Agent turns | `GET /agent-turns`; `GET /agent-turns/{id}` | Durable model-turn lifecycle and usage projection |
+| Agent turns | `GET /agent-turns`; `GET /agent-turns/{id}` | Model steps of a Run (agent-turns v2): narration, tool-call count, stop reason, usage |
 | Action calls | `GET /action-calls`; `GET /action-calls/{id}` | Governed Skill execution lifecycle and receipt projection |
 | Activity | `GET /activity` | Scoped canonical activity projection |
 | Events | `POST /events` | Route a normalized event through activated Runbook event triggers |
@@ -297,22 +297,55 @@ wired. A content reference is opaque; clients must not treat it as a local path.
 
 ### Desktop model-generated text files
 
-The desktop `submit_agent_turn` model contract accepts completed-turn
-`runOutput.generatedFiles` entries `{name, mediaType, text}` for `text/plain`,
-`text/markdown`, `text/csv`, and `application/json`: at most eight files and
-256 KiB total UTF-8 content, within the turn token budget. Names must be unique
-portable filenames without paths; text/JSON are validated. Model-supplied
-`artifactRefs` and extra file metadata are rejected. This is generated output,
-not arbitrary filesystem access or a new artifact-upload endpoint.
+On desktop tasks (local `agent_work` Runs) the `turn_final_answer` tool offers
+an optional `generatedFiles` field: entries `{name, mediaType, text}` for
+`text/plain`, `text/markdown`, `text/csv`, and `application/json`, at most
+eight files and 256 KiB total UTF-8 content. Names must be unique portable
+filenames without paths; text/JSON are validated. Model-supplied
+`artifactRefs` and extra file metadata are rejected, and a rejected final
+answer comes back to the model as a tool error. This is generated output, not
+arbitrary filesystem access or a new artifact-upload endpoint.
 
-After the accepted turn is durable, the configured output publisher assigns
-host-owned scoped identities, integrity metadata, provenance, and classification,
-then publishes content/catalog records before completing the run. Run output
-contains `artifactRefs` in place of bodies; turn drafts remain for recovery.
-Storage failure pauses work; Resume retries publication from the saved turn
-without model reinvocation or duplicate records. Cancellation before provider
-return discards files; previously accepted output can have partially published
-files and is not an atomic multi-file batch.
+After the final answer is accepted, the configured output publisher assigns
+host-owned scoped identities, integrity metadata, provenance, and
+classification, then publishes content/catalog records before completing the
+Run. Each artifact's `provenance.turnId` is the id of the final model step.
+Run output contains `artifactRefs` in place of bodies. Storage failure pauses
+the Run; Resume re-runs publication from the saved final answer without
+calling the model again and without duplicate records. A step canceled before
+the provider returns publishes nothing; previously accepted output can have
+partially published files and is not an atomic multi-file batch.
+
+### Agent turns (v2)
+
+`/agent-turns` (capability `agent-turns`, version `2`) lists the model steps of
+a Run. One record is one step of the agent loop: a model call (or a
+deterministic runbook step) whose tool calls the kernel then executes. The
+record never contains reasoning, tool arguments, tool results, session
+entries, Run checkpoints, leases, or provider payloads.
+
+| Field | Meaning |
+| --- | --- |
+| `id`, `scope`, `runId`, `sessionId` | Step identity, its Run, and the session log the step appended to |
+| `sequence` | Step number within the Run, from 1 |
+| `status` | `running`, `completed`, `failed`, or `canceled` |
+| `producer` | `model` or `deterministic` |
+| `definitionId`, `definitionVersion` | Agent definition the step ran under |
+| `modelProvider`, `model` | Model that produced the step |
+| `outputSummary` | Step narration: the assistant text of a step that ended in tool calls |
+| `toolCallCount` | Number of tool calls the step made |
+| `stopReason` | Model stop reason: `tool_calls`, `end`, `refusal`, or `max_tokens`; empty for deterministic steps |
+| `final` | The step answered without tool calls or called the final-answer tool |
+| `usage` | Token counts, cost, and durations for the step |
+| `failureCode`, `error` | Why a failed step failed |
+| `revision`, `createdAt`, `updatedAt`, `startedAt`, `completedAt` | Lifecycle metadata |
+
+Action calls made by a step carry the step id as `turnId`, so clients join
+`/action-calls?runId=` to steps by that field.
+
+Version 2 removed `skillSelections`, `decisions`, `requestedActions`,
+`planRevision`, `nextRunStatus`, `wakeCondition`, and `runError`. Clients that
+pin version `1` must move to `2`.
 
 
 ## Source policy lifecycle

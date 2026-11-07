@@ -1,21 +1,21 @@
 # Callable runbooks
 
 OpenSeal Agents remain cognitive workers. A runbook does not replace an
-Agent's prompt, objectives, or normal bounded turns. It defines a small,
+Agent's prompt, objectives, or the agent loop. It defines a small,
 deterministic operation that the Agent can invoke when exact sequencing is more
 appropriate than model reasoning.
 
 ```mermaid
 flowchart LR
-    Goal[Agent goal] --> Turn[Cognitive bounded turn]
-    Turn -->|ordinary reasoning| Result[Agent result]
-    Turn -->|select exact entrypoint| Child[Durable child Run]
+    Goal[Agent goal] --> Loop[Agent loop]
+    Loop -->|ordinary reasoning| Result[Agent result]
+    Loop -->|select exact entrypoint| Child[Durable child Run]
     Child --> Plan[Deterministic runbook]
     Plan --> Skills[Governed Skill actions]
     Skills --> Approval{Policy or approval}
     Approval -->|allowed| Plan
     Plan --> Output[Schema-validated output]
-    Output --> Turn
+    Output --> Loop
 ```
 
 ## Authoring
@@ -93,8 +93,9 @@ ceilings. See [Runbook activation verification](runbook-verification.md).
 
 ## Execution and recovery
 
-The hosted turn receives only the callable interfaces, not permission to edit
-the graph. When the Agent selects an entrypoint, the kernel:
+The agent loop offers only the callable interfaces, through the `run_operation`
+tool, not permission to edit the graph. When the Agent calls an entrypoint,
+the kernel:
 
 1. validates the exact entrypoint and input schema;
 2. creates a durable child `agent_work` Run;
@@ -104,5 +105,5 @@ the graph. When the Agent selects an entrypoint, the kernel:
 5. returns the child result through dependency fan-in so the cognitive parent
    can continue.
 
-The parent and child checkpoints survive process and pod restarts. A normal
-Agent turn with no selected entrypoint stays model-directed.
+The parent's session log and the child's checkpoints survive process and pod
+restarts. A model step that calls no entrypoint stays model-directed.

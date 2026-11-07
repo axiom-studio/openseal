@@ -199,11 +199,14 @@ connector-owned operations: the TUI observes them but cannot fabricate them.
 ## Run execution history
 
 The Runs inspector loads canonical `AgentTurn` and `ActionCall` records only
-for the selected Run when the server advertises `agent-turns` v1 and
-`action-calls` v1. Turns show their durable sequence, lifecycle status,
-provider/model identity, concise output, and governed action summaries.
-Continuation checkpoints, model inputs, private provider payloads, leases, and
-hidden reasoning are never available to the TUI.
+for the selected Run when the server advertises `agent-turns` v2 and
+`action-calls` v1. The "Agent steps" view lists one entry per model step of the
+Run's agent loop: its sequence, lifecycle status, provider/model identity,
+tool-call count, narration, and usage. Each step lists the governed action
+calls it made, joined by the action call's `turnId`, as
+`Skill@version/action · status`. Reasoning, tool arguments, tool results,
+model inputs, private provider payloads, leases, and Run checkpoints are never
+available to the TUI.
 
 Skill executions show the immutable Skill, action, binding revision, lifecycle
 status, attempts, risk, side effect, and stable call identity. Invocation

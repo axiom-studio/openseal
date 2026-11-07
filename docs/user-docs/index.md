@@ -25,7 +25,7 @@ The design holds to one rule throughout: the kernel never manufactures authority
 
 ### Key Capabilities
 
-- **Durable execution** — Objectives produce Runs, Runs advance in leased Turns, and every stage is persisted before it is acted on. A worker that dies mid-Turn releases its claim rather than stranding the Run.
+- **Durable execution** — Objectives produce Runs, each Run is an agent loop recorded step by step in a durable session log, and every stage is persisted before it is acted on. A worker that dies mid-step releases its claim, and the next claim resumes from the log rather than stranding the Run.
 - **Governed Skill actions** — Skills are registered in a catalog and bound per deployment, so a binding is the unit of least privilege. An action that policy holds stops at a durable approval checkpoint that survives a restart.
 - **Versioned Agents and Teams** — Immutable definitions plus mutable deployments make activation, rollback, and amendment first-class operations rather than destructive edits.
 - **Capability discovery** — The daemon computes what it can actually do per request, so clients read the surface rather than assume it. The same kernel runs standalone and mounted inside a larger host.
@@ -42,7 +42,7 @@ The design holds to one rule throughout: the kernel never manufactures authority
 2. **Start** — The daemon opens its store, runs migrations, derives worker scopes from the configured credentials and policies, and serves a versioned API on loopback.
 3. **Discover** — A client reads the capability document, which is computed from what this particular process actually has wired, and renders only the operations it advertises.
 4. **Define** — Agents and Teams are created as immutable definition versions carried by durable deployments, and granted Skills through per-deployment bindings.
-5. **Execute** — An objective produces Runs, a Run advances in bounded Turns, and a Turn invokes governed Skill actions that either execute or stop at a durable approval.
+5. **Execute** — An objective produces Runs. A Run is one agent loop: model steps call tools until a final answer, an approval, or a wait. Governed Skill actions either execute or stop at a durable approval.
 6. **Observe** — Every state transition writes an activity event in the same transaction as the change itself, so the feed cannot drift from the state it reports.
 
 ## Documentation Sections
@@ -53,7 +53,7 @@ The design holds to one rule throughout: the kernel never manufactures authority
 | [Getting Started](getting-started.md) | Requirements, building from source, starting the daemon, and connecting the terminal client |
 | [Core Concepts](concepts.md) | The execution model, capability discovery, scopes, owners, and the two execution paths |
 | [Agents and Teams](agents-and-teams.md) | Definitions, deployments, activation, rollback, the amendment sequence, and agent requests |
-| [Objectives, Projects, and Runs](objectives-and-runs.md) | The portfolio, the Run and Turn lifecycles, steering commands, and event routing |
+| [Objectives, Projects, and Runs](objectives-and-runs.md) | The portfolio, the Run lifecycle and its model steps, steering commands, and event routing |
 | [Skills, Actions, and Approvals](skills-and-approvals.md) | Bindings as least privilege, action calls, durable approvals, ClawHub distribution, and governed outreach |
 | [Workforces](workforces.md) | Prompt-to-workforce authoring, change sets, and portable bundles |
 | [Configuration](configuration.md) | The daemon configuration file, the standalone context, credential references, and environment variables |
