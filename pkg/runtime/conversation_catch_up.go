@@ -60,6 +60,10 @@ type catchUpRequest struct {
 	Through int64 // inclusive upper bound (channel sequence)
 	Seed    bool  // the session was just created or has no entries (§4.5)
 	Step    int64 // the step the entries are appended in
+	// InheritedRuns are Runs bound to another session whose answers the
+	// session already renders from its parent path (a promoted Run's fork
+	// of the lane): their messages are skipped like the session's own.
+	InheritedRuns map[string]bool
 }
 
 type catchUpResult struct {
@@ -158,7 +162,10 @@ func (c *conversationCatchUp) seedStart(ctx context.Context, req catchUpRequest,
 // keeps the newest maximumCatchUpMessages. It returns them ascending and the
 // number dropped by the cap.
 func (c *conversationCatchUp) read(ctx context.Context, req catchUpRequest, from int64) ([]*ChannelMessage, int, error) {
-	own := make(map[string]bool)
+	own := make(map[string]bool, len(req.InheritedRuns))
+	for id := range req.InheritedRuns {
+		own[id] = true
+	}
 	kept := make([]*ChannelMessage, 0, catchUpPageSize)
 	dropped := 0
 	for after := from; after < req.Through; {
