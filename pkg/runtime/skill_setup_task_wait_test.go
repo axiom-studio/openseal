@@ -54,6 +54,9 @@ type skillSetupTaskWaitFixture struct {
 	catalog *skill.Catalog
 	request *SkillSetupRequest
 	call    *ActionCall
+	// step is the running step whose request_setup tool call opened the
+	// form; wait settles it with the Run's park.
+	step *AgentTurn
 }
 
 func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *ConversationTaskResult {
@@ -155,11 +158,20 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if len(accountVersion) > 0 {
 		arguments["bindingId"] = "reddit-account"
 	}
+	// The run loop proposes request_setup as a governed tool call of its
+	// running step and executes it inline under the Run's lease.
+	steps := NewAgentTurnService(store, store)
+	step, err := steps.BeginTurn(t.Context(), BeginAgentTurnRequest{Scope: run.Scope, RunID: run.ID, SessionID: run.SessionID, Producer: StepProducerModel,
+		WorkerID: "setup-worker", LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
 	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(t.Context(), ProposeActionRequest{
-		Scope: run.Scope, RunID: run.ID, WorkerID: "setup-worker", DeploymentID: run.AssignedAgentID,
+		Scope: run.Scope, RunID: run.ID, TurnID: step.ID, WorkerID: "setup-worker", DeploymentID: run.AssignedAgentID,
 		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
 		Arguments: arguments,
 		Summary:   "Ask for Reddit setup",
+		Origin:    ActionOriginLoop, Execution: ActionExecutionLoop, IdempotencyKey: loopIdempotencyKey(step.ID, "call-setup", nil), CausationID: step.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -189,7 +201,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(t.Context(), run.Scope, "setup-action-worker", time.Minute)
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(t.Context(), run.Scope, proposal.Call.ID, "setup-worker")
 	if err != nil || executed == nil || executed.Call.Status != ActionCallStatusSucceeded {
 		if executed != nil && executed.Call != nil {
 			t.Fatalf("canonical setup execution: status=%s action error=%s worker error=%v", executed.Call.Status, executed.Call.Error, err)
@@ -200,7 +212,7 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 	if err != nil || request == nil || request.Status != "pending" || request.RunID != task.WorkRun.ID || request.ActionCallID != proposal.Call.ID || request.TriggerMessageID != task.Task.SourceMessageID || request.ConversationID != task.Task.ConversationID {
 		t.Fatalf("task setup provenance: %#v %v", request, err)
 	}
-	return &skillSetupTaskWaitFixture{store: store, task: task, catalog: catalog, request: request, call: executed.Call}
+	return &skillSetupTaskWaitFixture{store: store, task: task, catalog: catalog, request: request, call: executed.Call, step: step}
 }
 
 func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *AgentRun {
@@ -214,10 +226,23 @@ func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *AgentRun {
 		checkpoint = map[string]interface{}{}
 	}
 	checkpoint["phase"] = "resume-existing-analysis"
-	waiting, _ := settleFixtureStep(t, f.store, f.request.Scope, f.request.RunID, "setup-worker", RunTransitionRequest{
+	// The loop parks the Run at the end of the step that opened the form.
+	step, err := f.store.GetAgentTurn(t.Context(), f.request.Scope, f.step.ID)
+	if err != nil || step == nil {
+		t.Fatalf("load setup step: %#v %v", step, err)
+	}
+	if step, err = NewAgentTurnService(f.store, f.store).FinishTurn(t.Context(), f.request.Scope, step.ID, FinishAgentTurnRequest{
+		ExpectedRevision: step.Revision, Status: AgentTurnStatusCompleted, WorkerID: "setup-worker"}); err != nil {
+		t.Fatalf("finish setup step: %v", err)
+	}
+	waiting, _, err := NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), f.request.Scope, f.request.RunID, RunTransitionRequest{
+		ExpectedRevision: current.Revision, TurnID: step.ID, AppliedTurn: step.Sequence, LeaseOwner: "setup-worker",
 		Status: AgentRunStatusWaitingForEvent, Summary: "Complete the Reddit setup form to continue this task.",
 		WakeCondition: &WakeCondition{Type: ConversationTaskSkillSetupWakeType, Reference: f.request.ID}, Checkpoint: checkpoint,
 	})
+	if err != nil {
+		t.Fatalf("park setup task: %v", err)
+	}
 	if waiting.Status != AgentRunStatusWaitingForEvent || waiting.WakeCondition == nil || waiting.WakeCondition.Reference != f.request.ID {
 		t.Fatalf("wait for exact setup: %#v", waiting)
 	}
