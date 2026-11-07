@@ -133,3 +133,40 @@ func TestMissingStandaloneContextIsAnEmptyOptionalVault(t *testing.T) {
 		t.Fatalf("missing context = %#v, %v", configured, err)
 	}
 }
+
+func TestStandaloneAuthoringContextTokensMustBePositive(t *testing.T) {
+	write := func(t *testing.T, tokens string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "context.yaml")
+		data := "apiVersion: openseal.dev/v1alpha1\nkind: StandaloneContext\nauthoring:\n  baseURL: https://models.example/v1\n  model: example-model\n  contextTokens: " + tokens + "\n  credential:\n    kind: api-key\n    id: model\n"
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	if _, err := LoadStandaloneContext(write(t, "-1")); err == nil {
+		t.Fatal("negative contextTokens was accepted")
+	}
+	configured, err := LoadStandaloneContext(write(t, "200000"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The authoring block wins over the environment.
+	if tokens, err := configured.ContextTokens("not a number"); err != nil || tokens != 200000 {
+		t.Fatalf("authoring tokens = %d, %v", tokens, err)
+	}
+	empty, err := LoadStandaloneContext("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for env, want := range map[string]int64{"": 0, " 64000 ": 64000} {
+		if tokens, err := empty.ContextTokens(env); err != nil || tokens != want {
+			t.Fatalf("env %q tokens = %d, %v", env, tokens, err)
+		}
+	}
+	for _, env := range []string{"0", "-5", "lots", "1.5"} {
+		if _, err := empty.ContextTokens(env); err == nil {
+			t.Fatalf("env %q was accepted", env)
+		}
+	}
+}
