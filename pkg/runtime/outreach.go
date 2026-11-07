@@ -482,7 +482,7 @@ func (s *OutreachService) reconcileTerminalMessages(ctx context.Context, thread 
 		if err != nil {
 			return nil, err
 		}
-		if call == nil || (call.Status != ActionCallStatusDenied && call.Status != ActionCallStatusFailed && call.Status != ActionCallStatusCanceled) {
+		if call == nil || (call.Status != ActionCallStatusDenied && call.Status != ActionCallStatusFailed && call.Status != ActionCallStatusCanceled && call.Status != ActionCallStatusRefused) {
 			continue
 		}
 		visibility := ActivityVisibilityScope
@@ -544,7 +544,7 @@ func (s *OutreachService) LinkAction(ctx context.Context, scope Scope, id string
 	}
 	switch call.Status {
 	case ActionCallStatusReady, ActionCallStatusWaitingApproval, ActionCallStatusRunning,
-		ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied, ActionCallStatusCanceled:
+		ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied, ActionCallStatusCanceled, ActionCallStatusRefused:
 	default:
 		return nil, nil, errors.New("outreach action is not in a reconcilable lifecycle state")
 	}
@@ -623,6 +623,9 @@ func (s *OutreachService) ReconcileAction(ctx context.Context, scope Scope, id s
 		terminalStatus, outcome = OutreachMessageFailed, firstNonEmpty(call.Error, "governed outreach action failed")
 	case ActionCallStatusCanceled:
 		terminalStatus, outcome = OutreachMessageCanceled, firstNonEmpty(call.Error, "governed outreach action was canceled")
+	case ActionCallStatusRefused:
+		// The kernel refused the call without running it, so nothing was sent.
+		terminalStatus, outcome = OutreachMessageCanceled, firstNonEmpty(call.Error, "governed outreach action was refused")
 	case ActionCallStatusSucceeded:
 		if req.Receipt == nil {
 			return nil, errors.New("succeeded outreach action requires a normalized provider receipt")
