@@ -6,86 +6,57 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
-// AgentTurnRecord is the public, operator-facing projection of one durable
-// bounded turn. It intentionally excludes continuation checkpoints, model
-// input context, prepared runtimes, action inputs, run output, leases, and
-// private provider payloads.
+// AgentTurnRecord is the public projection of one model step (agent_turns
+// row), agent-turns v2. It never contains reasoning blocks, tool arguments,
+// tool results, session entries, Run checkpoints, leases or provider payloads.
 type AgentTurnRecord struct {
-	ID                string                         `json:"id"`
-	Scope             runtime.Scope                  `json:"scope"`
-	RunID             string                         `json:"runId"`
-	Sequence          int64                          `json:"sequence"`
-	Status            runtime.AgentTurnStatus        `json:"status"`
-	DefinitionID      string                         `json:"definitionId,omitempty"`
-	DefinitionVersion string                         `json:"definitionVersion,omitempty"`
-	ModelProvider     string                         `json:"modelProvider,omitempty"`
-	Model             string                         `json:"model,omitempty"`
-	PlanRevision      int64                          `json:"planRevision,omitempty"`
-	SkillSelections   []runtime.HostedSkillSelection `json:"skillSelections,omitempty"`
-	Decisions         []AgentTurnDecisionRecord      `json:"decisions,omitempty"`
-	RequestedActions  []AgentTurnActionRecord        `json:"requestedActions,omitempty"`
-	OutputSummary     string                         `json:"outputSummary,omitempty"`
-	Usage             runtime.TurnUsage              `json:"usage,omitempty"`
-	NextRunStatus     runtime.AgentRunStatus         `json:"nextRunStatus,omitempty"`
-	WakeCondition     *runtime.WakeCondition         `json:"wakeCondition,omitempty"`
-	RunError          string                         `json:"runError,omitempty"`
-	Error             string                         `json:"error,omitempty"`
-	Revision          int64                          `json:"revision"`
-	CreatedAt         time.Time                      `json:"createdAt"`
-	UpdatedAt         time.Time                      `json:"updatedAt"`
-	StartedAt         time.Time                      `json:"startedAt"`
-	CompletedAt       *time.Time                     `json:"completedAt,omitempty"`
-}
-
-type AgentTurnDecisionRecord struct {
-	Summary      string   `json:"summary"`
-	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
-}
-
-type AgentTurnActionRecord struct {
-	Type            string   `json:"type"`
-	Capability      string   `json:"capability,omitempty"`
-	BindingID       string   `json:"bindingId,omitempty"`
-	BindingRevision int64    `json:"bindingRevision,omitempty"`
-	Summary         string   `json:"summary"`
-	EvidenceRefs    []string `json:"evidenceRefs,omitempty"`
+	ID        string        `json:"id"`
+	Scope     runtime.Scope `json:"scope"`
+	RunID     string        `json:"runId"`
+	SessionID string        `json:"sessionId,omitempty"`
+	// Sequence is the step number within the Run, from 1.
+	Sequence          int64                    `json:"sequence"`
+	Status            runtime.AgentTurnStatus  `json:"status"`
+	Producer          runtime.StepProducerKind `json:"producer,omitempty"`
+	DefinitionID      string                   `json:"definitionId,omitempty"`
+	DefinitionVersion string                   `json:"definitionVersion,omitempty"`
+	ModelProvider     string                   `json:"modelProvider,omitempty"`
+	Model             string                   `json:"model,omitempty"`
+	// OutputSummary is the step narration (D11): the assistant text of a
+	// step that ended in tool calls.
+	OutputSummary string `json:"outputSummary,omitempty"`
+	ToolCallCount int    `json:"toolCallCount"`
+	// StopReason is a runtime.ModelStopReason value, or "" for
+	// deterministic steps.
+	StopReason string `json:"stopReason,omitempty"`
+	// Final is true when the step's output had no tool calls or included a
+	// final-answer tool call.
+	Final       bool              `json:"final"`
+	Usage       runtime.TurnUsage `json:"usage,omitempty"`
+	FailureCode string            `json:"failureCode,omitempty"`
+	Error       string            `json:"error,omitempty"`
+	Revision    int64             `json:"revision"`
+	CreatedAt   time.Time         `json:"createdAt"`
+	UpdatedAt   time.Time         `json:"updatedAt"`
+	StartedAt   time.Time         `json:"startedAt"`
+	CompletedAt *time.Time        `json:"completedAt,omitempty"`
 }
 
 func ProjectAgentTurn(turn *runtime.AgentTurn) *AgentTurnRecord {
 	if turn == nil {
 		return nil
 	}
-	record := &AgentTurnRecord{
-		ID: turn.ID, Scope: turn.Scope, RunID: turn.RunID, Sequence: turn.Sequence, Status: turn.Status,
+	return &AgentTurnRecord{
+		ID: turn.ID, Scope: turn.Scope, RunID: turn.RunID, SessionID: turn.SessionID,
+		Sequence: turn.Sequence, Status: turn.Status, Producer: turn.Producer,
 		DefinitionID: turn.DefinitionID, DefinitionVersion: turn.DefinitionVersion,
-		ModelProvider: turn.ModelProvider, Model: turn.Model, PlanRevision: turn.PlanRevision,
-		SkillSelections: append([]runtime.HostedSkillSelection(nil), turn.SkillSelections...),
-		OutputSummary:   turn.OutputSummary, Usage: turn.Usage, NextRunStatus: turn.NextRunStatus,
-		WakeCondition: cloneWakeCondition(turn.WakeCondition), RunError: turn.RunError, Error: turn.Error,
-		Revision: turn.Revision, CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt,
-		StartedAt: turn.StartedAt, CompletedAt: cloneTime(turn.CompletedAt),
+		ModelProvider: turn.ModelProvider, Model: turn.Model,
+		OutputSummary: turn.OutputSummary, ToolCallCount: turn.ToolCallCount,
+		StopReason: turn.StopReason, Final: turn.Final, Usage: turn.Usage,
+		FailureCode: turn.FailureCode, Error: turn.Error, Revision: turn.Revision,
+		CreatedAt: turn.CreatedAt, UpdatedAt: turn.UpdatedAt, StartedAt: turn.StartedAt,
+		CompletedAt: cloneTime(turn.CompletedAt),
 	}
-	for _, decision := range turn.Decisions {
-		record.Decisions = append(record.Decisions, AgentTurnDecisionRecord{
-			Summary: decision.Summary, EvidenceRefs: append([]string(nil), decision.EvidenceRefs...),
-		})
-	}
-	for _, action := range turn.RequestedActions {
-		record.RequestedActions = append(record.RequestedActions, AgentTurnActionRecord{
-			Type: action.Type, Capability: action.Capability, BindingID: action.BindingID,
-			BindingRevision: action.BindingRevision, Summary: action.Summary,
-			EvidenceRefs: append([]string(nil), action.EvidenceRefs...),
-		})
-	}
-	return record
-}
-
-func cloneWakeCondition(value *runtime.WakeCondition) *runtime.WakeCondition {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
 }
 
 func cloneTime(value *time.Time) *time.Time {

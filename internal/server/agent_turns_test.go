@@ -35,15 +35,25 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	}
 	turnService := runtime.NewAgentTurnService(store, store)
 	turn, err := turnService.BeginTurn(t.Context(), runtime.BeginAgentTurnRequest{
-		Scope: scope, RunID: run.ID, DefinitionID: "sre", DefinitionVersion: "4",
-		ModelProvider: "hosted", Model: "bounded", WorkerID: "worker-1",
+		Scope: scope, RunID: run.ID, SessionID: "ses-1", Producer: runtime.StepProducerModel,
+		DefinitionID: "sre", DefinitionVersion: "4", ModelProvider: "hosted", Model: "bounded", WorkerID: "worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err = turnService.RecordStepModel(t.Context(), scope, turn.ID, runtime.StepModelRecord{
+		ExpectedRevision: turn.Revision, WorkerID: "worker-1", ModelProvider: "hosted", Model: "bounded",
+		AssistantEntryID: "private-assistant-entry", OutputSummary: "Inspected warning events",
+		ToolCallCount: 2, StopReason: string(runtime.ModelStopToolCalls),
+		SkillSelections: []runtime.HostedSkillSelection{{}},
+		Usage:           runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	turn, err = turnService.FinishTurn(t.Context(), scope, turn.ID, runtime.FinishAgentTurnRequest{
 		ExpectedRevision: turn.Revision, Status: runtime.AgentTurnStatusCompleted, WorkerID: "worker-1",
-		ModelProvider: "hosted", Model: "bounded", OutputSummary: "Inspected warning events",
+		Usage: runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
 		Decisions: []runtime.TurnDecision{{
 			Summary: "Inspect before changing production", Rationale: "private-reasoning-must-not-leak",
 		}},
@@ -54,6 +64,20 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 		}},
 		ContinuationCheckpoint: map[string]interface{}{"secret-input": "private-action-input"},
 		RunOutput:              map[string]interface{}{"private-output": true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := turnService.BeginTurn(t.Context(), runtime.BeginAgentTurnRequest{
+		Scope: scope, RunID: run.ID, SessionID: "ses-1", Producer: runtime.StepProducerModel,
+		ModelProvider: "hosted", Model: "bounded", WorkerID: "worker-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err = turnService.FinishTurn(t.Context(), scope, failed.ID, runtime.FinishAgentTurnRequest{
+		ExpectedRevision: failed.Revision, Status: runtime.AgentTurnStatusFailed, WorkerID: "worker-1",
+		FailureCode: "host_unavailable", Error: "model host unreachable",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -78,12 +102,21 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].ID != turn.ID || listed[0].OutputSummary != "Inspected warning events" {
 		t.Fatalf("listed turns = %#v, %v", listed, err)
 	}
-	if len(listed[0].Decisions) != 1 || len(listed[0].RequestedActions) != 1 {
-		t.Fatalf("turn audit projection = %#v", listed[0])
+	step := listed[0]
+	if step.SessionID != "ses-1" || step.Producer != runtime.StepProducerModel || step.ToolCallCount != 2 ||
+		step.StopReason != "tool_calls" || step.Final || step.FailureCode != "" || step.Usage.InputTokens != 1840 {
+		t.Fatalf("step projection = %#v", step)
+	}
+	failedListed, err := kernel.ListAgentTurns(t.Context(), runtime.AgentTurnFilter{
+		Scope: scope, RunID: run.ID, Statuses: []runtime.AgentTurnStatus{runtime.AgentTurnStatusFailed}, Limit: 10,
+	})
+	if err != nil || len(failedListed) != 1 || failedListed[0].ID != failed.ID ||
+		failedListed[0].FailureCode != "host_unavailable" || failedListed[0].Error != "model host unreachable" {
+		t.Fatalf("failed steps = %#v, %v", failedListed, err)
 	}
 	if after, err := kernel.ListAgentTurns(t.Context(), runtime.AgentTurnFilter{
 		Scope: scope, RunID: run.ID, AfterSequence: turn.Sequence, Limit: 10,
-	}); err != nil || len(after) != 0 {
+	}); err != nil || len(after) != 1 || after[0].ID != failed.ID {
 		t.Fatalf("cursor page = %#v, %v", after, err)
 	}
 	restored, err := kernel.GetAgentTurn(t.Context(), scope, turn.ID)
@@ -105,9 +138,13 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 		t.Fatal(err)
 	}
 	encoded := response.Body.String()
+	if _, ok := wire["toolCallCount"]; !ok {
+		t.Fatalf("public turn projection lacks toolCallCount: %s", encoded)
+	}
 	for _, forbidden := range []string{
-		"continuationCheckpoint", "preparedRuntime", "inputRef", "runOutput",
-		"private-reasoning-must-not-leak", "private-action-input", "private-runtime-id",
+		"decisions", "requestedActions", "skillSelections", "planRevision", "nextRunStatus", "wakeCondition",
+		"runError", "assistantEntryId", "leaseOwner", "continuationCheckpoint", "preparedRuntime", "inputRef", "runOutput",
+		"private-reasoning-must-not-leak", "private-action-input", "private-runtime-id", "private-assistant-entry",
 	} {
 		if strings.Contains(encoded, forbidden) {
 			t.Fatalf("public turn projection leaked %q: %s", forbidden, encoded)

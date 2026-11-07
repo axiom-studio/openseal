@@ -2,10 +2,14 @@ package kernelapi
 
 import (
 	"encoding/json"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	kernelcapability "github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
 func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
@@ -183,6 +187,12 @@ func TestActionCallsExposeOnlyDurableReadOperations(t *testing.T) {
 }
 
 func TestAgentTurnsExposeOnlyDurableReadOperations(t *testing.T) {
+	if AgentTurnsCapabilityVersion != "2" {
+		t.Fatalf("agent turn capability version = %q, want 2", AgentTurnsCapabilityVersion)
+	}
+	if _, ok := Capabilities().Find(AgentTurnsCapabilityID, "1"); ok {
+		t.Fatal("agent turn capability still advertises v1")
+	}
 	capability, ok := Capabilities().Find(AgentTurnsCapabilityID, AgentTurnsCapabilityVersion)
 	if !ok || !capability.Supports(OperationGet) || !capability.Supports(OperationList) {
 		t.Fatalf("agent turn capability = %#v", capability)
@@ -383,5 +393,78 @@ func TestWorkforceBundlesCapabilityAdvertisesOnlyWiredMutation(t *testing.T) {
 	mutable := WorkforceBundlesCapability(true)
 	if !mutable.Supports(OperationInstall) {
 		t.Fatalf("wired installation capability omitted install: %#v", mutable)
+	}
+}
+
+func TestProjectAgentTurnV2EmitsOnlyPublicStepFields(t *testing.T) {
+	started := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	completed := started.Add(2 * time.Second)
+	leaseExpires := started.Add(time.Minute)
+	turn := &runtime.AgentTurn{
+		ID: "turn-1", Scope: runtime.Scope{Kind: "local", ID: "default"}, RunID: "run-1", SessionID: "ses-3",
+		Sequence: 2, Status: runtime.AgentTurnStatusFailed, Producer: runtime.StepProducerModel,
+		AssistantEntryID: "private-assistant-entry", DefinitionID: "reviewer", DefinitionVersion: "4",
+		ModelProvider: "openai-compatible", Model: "deepseek-v4-flash",
+		InputContextRefs: []string{"private-context-ref"}, InputInterventionIDs: []string{"private-intervention"},
+		PlanRevision:  7,
+		OutputSummary: "Asking the reviewer to check the evidence.", ToolCallCount: 1,
+		StopReason: string(runtime.ModelStopToolCalls), Final: true,
+		Usage:                  runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
+		SkillSelections:        []runtime.HostedSkillSelection{{}},
+		Decisions:              []runtime.TurnDecision{{Summary: "private decision", Rationale: "private rationale"}},
+		RequestedActions:       []runtime.TurnAction{{Type: "skill", Capability: "private.capability", Summary: "private action"}},
+		ContinuationCheckpoint: map[string]interface{}{"private": "checkpoint"},
+		NextRunStatus:          runtime.AgentRunStatusCompleted,
+		WakeCondition:          &runtime.WakeCondition{},
+		RunOutput:              map[string]interface{}{"private": "output"},
+		RunError:               "private run error",
+		FailureCode:            "host_unavailable", Error: "provider unreachable",
+		LeaseOwner: "private-worker", LeaseExpiresAt: &leaseExpires,
+		Revision: 3, CreatedAt: started, UpdatedAt: completed, StartedAt: started, CompletedAt: &completed,
+	}
+	record := ProjectAgentTurn(turn)
+	encoded, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	keys := make([]string, 0, len(wire))
+	for key := range wire {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	want := []string{
+		"completedAt", "createdAt", "definitionId", "definitionVersion", "error", "failureCode", "final",
+		"id", "model", "modelProvider", "outputSummary", "producer", "revision", "runId", "scope",
+		"sequence", "sessionId", "startedAt", "status", "stopReason", "toolCallCount", "updatedAt", "usage",
+	}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("agent turn v2 keys = %v, want %v", keys, want)
+	}
+	if strings.Contains(string(encoded), "private") || strings.Contains(string(encoded), "planRevision") {
+		t.Fatalf("agent turn v2 leaked a private field: %s", encoded)
+	}
+	if record.Producer != runtime.StepProducerModel || record.FailureCode != "host_unavailable" || !record.Final ||
+		record.ToolCallCount != 1 || record.StopReason != "tool_calls" || record.SessionID != "ses-3" {
+		t.Fatalf("agent turn v2 record = %#v", record)
+	}
+	if record.CompletedAt == turn.CompletedAt {
+		t.Fatal("completedAt aliases the stored turn")
+	}
+
+	minimal, err := json.Marshal(ProjectAgentTurn(&runtime.AgentTurn{ID: "turn-2", RunID: "run-1", Sequence: 1, Status: runtime.AgentTurnStatusRunning}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"toolCallCount":0`, `"final":false`} {
+		if !strings.Contains(string(minimal), key) {
+			t.Fatalf("agent turn v2 omits %s: %s", key, minimal)
+		}
+	}
+	if ProjectAgentTurn(nil) != nil {
+		t.Fatal("nil turn projected to a record")
 	}
 }

@@ -59,7 +59,7 @@ const (
 	ActionCallsCapabilityID                    = "action-calls"
 	ActionCallsCapabilityVersion               = "1"
 	AgentTurnsCapabilityID                     = "agent-turns"
-	AgentTurnsCapabilityVersion                = "1"
+	AgentTurnsCapabilityVersion                = "2"
 	ActivityCapabilityID                       = "activity"
 	ActivityCapabilityVersion                  = "1"
 	EventRoutingCapabilityID                   = "event-routing"
