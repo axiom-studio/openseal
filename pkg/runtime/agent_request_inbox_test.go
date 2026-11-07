@@ -103,7 +103,7 @@ func TestAgentRequestInboxCreatesOneRestartSafeDecisionRun(t *testing.T) {
 	inbox, _ := run.Context[AgentRequestInboxContextKey].(map[string]interface{})
 	if run.Source != RunSourceRequestDecision || run.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: "recipient"}) ||
 		run.AssignedAgentID != "recipient" || fmt.Sprint(inbox["requestId"]) != request.ID ||
-		run.Budget == nil || run.Budget.MaxTurns != 3 || run.Context["projectId"] != "project-launch" {
+		run.Budget == nil || run.Budget.MaxTurns != 12 || run.Context["projectId"] != "project-launch" {
 		t.Fatalf("decision run = %#v", run)
 	}
 	persisted, err := NewCollaborationService(store).GetAgentRequest(t.Context(), request.Scope, request.ID)
@@ -796,25 +796,5 @@ func TestAcceptedAgentRequestExecutionStopsOnFirstInvalidIntakeDecision(t *testi
 	})
 	if err == nil || failed != nil || !strings.Contains(err.Error(), "invalid intake decision") {
 		t.Fatalf("invalid execution was retried: %#v err=%v", failed, err)
-	}
-}
-
-func TestAcceptedAgentRequestExecutionFailsAfterRepeatedIntakeDecision(t *testing.T) {
-	runner := &acceptedAgentRequestExecutionTurnRunner{inner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{
-			NextRunStatus: AgentRunStatusCompleted,
-			RunOutput: map[string]interface{}{
-				AgentRequestDecisionOutputKey: map[string]interface{}{"decision": "accept", "message": "again"},
-			},
-		}, nil
-	})}
-	_, err := runner.RunTurn(t.Context(), TurnExecutionContext{
-		Run: &AgentRun{ID: "execution", Checkpoint: map[string]interface{}{
-			acceptedAgentRequestExecutionRecoveryKey: map[string]interface{}{"attempt": 1},
-		}},
-		Turn: &AgentTurn{ID: "turn"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "invalid intake decision") {
-		t.Fatalf("repeated intake decision error = %v", err)
 	}
 }

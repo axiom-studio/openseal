@@ -25,15 +25,14 @@ const (
 	AgentRequestCompletionReviewContextKey = "agentRequestCompletionReview"
 	// AgentRequestCompletionReviewOutputKey is the only model output consumed
 	// to resolve an independent completion-review checkpoint.
-	AgentRequestCompletionReviewOutputKey    = "agentRequestCompletionReviewDecision"
-	acceptedAgentRequestExecutionRecoveryKey = "_opensealAcceptedAgentRequestExecutionRecovery"
+	AgentRequestCompletionReviewOutputKey = "agentRequestCompletionReviewDecision"
 )
 
-const agentRequestDecisionSystemInstruction = `Evaluate the incoming AgentRequest in inputContext.agentRequestInbox before doing any requested work. Decide whether the request is relevant, sufficiently clear, safe, and within your role. Do not execute Skills, delegate, fork, or perform the requested work during this review. Complete the review with runOutput.agentRequestDecision set to exactly {"decision":"accept","message":"concise reason"}, {"decision":"reject","message":"concise reason"}, or {"decision":"request_clarification","message":"one concrete question"}.`
+const agentRequestDecisionSystemInstruction = `Evaluate the incoming AgentRequest before doing any requested work. Decide whether the request is relevant, sufficiently clear, safe, and within your role. Do not execute Skills, delegate, fork, or perform the requested work during this review. Finish with agent_request_decision: accept or reject with a concise reason, or request_clarification with one concrete question.`
 
-const agentRequestCompletionReviewSystemInstruction = `Independently review the completed delegated work in inputContext.agentRequestCompletionReview against its goal, acceptance criteria, required artifacts, evidence, and output. Do not execute Skills, invoke runbooks, delegate, fork, or modify the work during this review. Complete the review with runOutput.agentRequestCompletionReviewDecision set to exactly {"decision":"approve","message":"concise evidence-based reason"} or {"decision":"reject","message":"concise evidence-based reason"}.`
+const agentRequestCompletionReviewSystemInstruction = `Independently review the completed delegated work against its goal, acceptance criteria, required artifacts, evidence, and output. Do not execute Skills, invoke runbooks, delegate, fork, or modify the work during this review. Finish with agent_request_review: approve or reject with a concise evidence-based reason.`
 
-const acceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again, and do not emit runOutput.agentRequestDecision. If continuationCheckpoint._opensealAcceptedAgentRequestExecutionRecovery is present, the previous execution turn was discarded because it repeated the already-completed intake decision; continue directly with the requested work and do not repeat that output.`
+const acceptedAgentRequestExecutionSystemInstruction = `This Run is the execution child of an AgentRequest that has already passed intake and was accepted. Perform the requested goal now using the authorized Skills and durable work primitives available to this Run. Do not evaluate or accept the request again.`
 
 const agentRequestConversationProjectionInterval = 5 * time.Second
 
@@ -147,20 +146,6 @@ func (r *acceptedAgentRequestExecutionTurnRunner) RunTurn(ctx context.Context, i
 	}
 
 	return outcome, nil
-}
-
-func acceptedAgentRequestExecutionRecoveryAttempt(checkpoint map[string]interface{}) int {
-	recovery, _ := checkpoint[acceptedAgentRequestExecutionRecoveryKey].(map[string]interface{})
-	switch value := recovery["attempt"].(type) {
-	case int:
-		return value
-	case int64:
-		return int(value)
-	case float64:
-		return int(value)
-	default:
-		return 0
-	}
 }
 
 // AgentRequestInboxReconciler converts pending recipient work into either a
@@ -552,8 +537,8 @@ func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 		Goal:           "Independently review completed delegated work: " + request.Goal,
 		Source:         RunSourceCompletionReview, Priority: source.Priority, Context: contextValue,
 		Budget: &BudgetPolicy{
-			MaxAttempts: 5, MaxTurns: 3, MaxInputTokens: 64000, MaxOutputTokens: 4096,
-			MaxTotalTokens: 68096, MaxDurationMS: 180000,
+			MaxAttempts: 5, MaxTurns: 12, MaxInputTokens: 256000, MaxOutputTokens: 4096,
+			MaxTotalTokens: 272384, MaxDurationMS: 180000,
 		},
 		IdempotencyKey: key, Actor: ActivityActor{Type: "system", ID: "agent-request-inbox"},
 		Visibility: ActivityVisibilityTeam,
@@ -655,8 +640,8 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 		Goal: "Evaluate incoming work request: " + request.Goal, Source: RunSourceRequestDecision,
 		Priority: source.Priority, Context: contextValue,
 		Budget: &BudgetPolicy{
-			MaxAttempts: 5, MaxTurns: 3, MaxInputTokens: 48000, MaxOutputTokens: 4096,
-			MaxTotalTokens: 52096, MaxDurationMS: 180000,
+			MaxAttempts: 5, MaxTurns: 12, MaxInputTokens: 192000, MaxOutputTokens: 4096,
+			MaxTotalTokens: 208384, MaxDurationMS: 180000,
 		},
 		IdempotencyKey: key, Actor: ActivityActor{Type: "system", ID: "agent-request-inbox"},
 		Visibility: ActivityVisibilityTeam,
