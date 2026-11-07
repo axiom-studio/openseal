@@ -331,7 +331,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	// A manifest review floor is a kernel invariant, not a policy preference:
 	// no policy, standing grant, or approval mode may let the action proceed
 	// unreviewed, and its checkpoint never auto-approves on timeout.
-	if bound.Action.AlwaysReview() {
+	if bound.Action.AlwaysReview() || isAgentBuilderApprovalAction(bound) {
 		if decision.Disposition == ActionDispositionAllow {
 			return nil, fmt.Errorf("action policy allowed %s.%s, which always requires explicit review", req.SkillID, req.Action)
 		}
@@ -503,6 +503,31 @@ func (c *ActionCoordinator) createNestedProposal(ctx context.Context, req Propos
 	})
 }
 
+// agentBuilderApprovalTTL is how long an agent or team card stays open. The
+// card is the builder's draft, so it lasts as long as a draft would rather
+// than the 24 hour default.
+const agentBuilderApprovalTTL = 30 * 24 * time.Hour
+
+// agentBuilderTeamActionCreateTeam is the openseal.teams action that creates
+// a Team from the builder.
+const agentBuilderTeamActionCreateTeam = "create_team"
+
+// isAgentBuilderApprovalAction reports whether bound is a builder action
+// whose approval card creates or changes an Agent or a Team: create_agent,
+// update_agent and create_team.
+func isAgentBuilderApprovalAction(bound *skill.BoundAction) bool {
+	if bound == nil || bound.Definition == nil {
+		return false
+	}
+	switch bound.Definition.ID {
+	case AgentManagementSkillID:
+		return bound.Action.Name == AgentActionCreateAgent || bound.Action.Name == AgentActionUpdateAgent
+	case TeamManagementSkillID:
+		return bound.Action.Name == agentBuilderTeamActionCreateTeam
+	}
+	return false
+}
+
 // newApprovalCheckpoint puts call in review and returns its pending approval.
 func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req ProposeActionRequest, run *AgentRun, bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *ActionCall, decision ActionPolicyDecision, summary string, now time.Time) *ApprovalCheckpoint {
 	approvalID := c.newID()
@@ -510,14 +535,22 @@ func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req Propo
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
+	timeout := decision.ApprovalTimeout
+	destinations := append([]ApprovalDestination(nil), decision.ApprovalDestinations...)
+	if isAgentBuilderApprovalAction(bound) {
+		// An agent or team card is the draft itself: it stays open as long
+		// as a draft would, is decided only in the app, and lapses rather
+		// than approves when nobody answers.
+		ttl, timeout, destinations = agentBuilderApprovalTTL, ApprovalTimeoutExpire, nil
+	}
 	call.Status = ActionCallStatusWaitingApproval
 	call.ApprovalID = approvalID
 	approval := &ApprovalCheckpoint{
 		ID: approvalID, Scope: req.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
 		Risk: bound.Action.Risk, Summary: summary, PolicyReason: decision.Reason, ProposedAction: proposedAction,
 		EvidenceRefs: append([]string(nil), req.EvidenceRefs...), EligibleApprovers: append([]ApprovalPrincipal(nil), decision.EligibleApprovers...),
-		Destinations: append([]ApprovalDestination(nil), decision.ApprovalDestinations...),
-		ExpiresAt:    now.Add(ttl), TimeoutDecision: decision.ApprovalTimeout,
+		Destinations: destinations,
+		ExpiresAt:    now.Add(ttl), TimeoutDecision: timeout,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if approval.ProposedAction == nil {
