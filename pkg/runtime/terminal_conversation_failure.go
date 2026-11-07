@@ -119,8 +119,6 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		}
 		return nil
 	}
-	sessions, actions := terminalFailureReplyStores(store)
-	notes, _ := store.(AgentSessionStore)
 	key := terminalConversationFailureReplyKey(run)
 	if saved, findErr := store.FindChannelMessageByIdempotencyKey(ctx, run.Scope, conversationID, key); findErr != nil && !errors.Is(findErr, ErrChannelMessageNotFound) {
 		return findErr
@@ -129,12 +127,12 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 			return undeliverable("saved answer does not belong to this Run")
 		}
 		// A crash after the post may have left the note unwritten.
-		return appendRunFailedNote(ctx, notes, run, saved)
+		return appendRunFailedNote(ctx, store, run, saved)
 	}
 	request := PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}, Intent: MessageIntentAnswer,
-		Content:  terminalRunFailureReply(ctx, sessions, actions, run),
+		Content:  terminalRunFailureReply(ctx, store, store, run),
 		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
 		BroadcastToChannel: trigger.ThreadRootID == "" || trigger.BroadcastToChannel, ResponseMode: trigger.ResponseMode,
 		References: references, IdempotencyKey: key,
@@ -152,7 +150,7 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 	if err != nil {
 		return err
 	}
-	return appendRunFailedNote(ctx, notes, run, posted.Message)
+	return appendRunFailedNote(ctx, store, run, posted.Message)
 }
 
 // runFailedNoteSourceKey is per terminal attempt, like the reply key, so a
@@ -178,7 +176,7 @@ func runFailedNote(run *AgentRun, message *ChannelMessage) *SessionEntry {
 // terminal and the store accepts lease-less notes for it. The SourceKey makes
 // a repeated report a no-op.
 func appendRunFailedNote(ctx context.Context, sessions AgentSessionStore, run *AgentRun, message *ChannelMessage) error {
-	if sessions == nil || run.SessionID == "" || message == nil {
+	if run.SessionID == "" || message == nil {
 		return nil
 	}
 	_, err := sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{

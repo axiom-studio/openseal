@@ -8,19 +8,6 @@ import (
 // routine brief. Declining is a decision, not a failure: the Run completes.
 const DeclinedRoutineBriefReply = "Okay, I didn't set up the routine."
 
-// SupersededApprovalInstruction tells the Agent how to continue after the
-// person answered any other pending approval with a chat message. The action
-// was not carried out; the message never approves it.
-const SupersededApprovalInstruction = "The person replied with a message instead of approving your proposed action, so it was not carried out and its approval is closed (continuationCheckpoint.lastAction holds its exact arguments). Their message is in followUpMessages; a message never approves an action. Do what their message asks first. If the original request still stands, propose the action again through the normal governed action path, with any change they asked for, once whatever they asked first is done or in the same Turn when nothing blocks it. If they no longer want it, do not propose it again; reply briefly. Never propose a payment again unless their message explicitly asks for it."
-
-// SupersededRoutineBriefInstruction tells the Agent how to continue after the
-// person answered a pending routine brief with a chat message.
-const SupersededRoutineBriefInstruction = "The person replied to your routine brief with a message instead of approving it, so that brief is closed and was not created (continuationCheckpoint.lastAction holds its exact arguments). Their message is in followUpMessages. Propose openseal.runbooks.create_task again in this Turn with their change applied (for example a different time or timezone), keeping the title, goal, schedule, brief and grants they did not ask to change. If their message instead says they no longer want the routine, do not propose it again; reply briefly. If it asks something unrelated, answer it and propose the unchanged brief again."
-
-// DeclinedRoutineBriefInstruction applies when a declined brief resumes a Run
-// that also has newer messages, so the model answers instead of the kernel.
-const DeclinedRoutineBriefInstruction = "The person declined your routine brief (continuationCheckpoint.lastAction); the routine was not created. This is their decision, not a failure: do not apologize, retry or propose the routine again unless a newer message explicitly asks for it. Answer any other request in followUpMessages; otherwise reply only: " + DeclinedRoutineBriefReply
-
 // RoutineTimezoneInstruction keeps routine times in the person's timezone.
 // The runtime does not know where the person is, so the Agent must not guess.
 const RoutineTimezoneInstruction = "A routine runs in the IANA timezone you pass to openseal.runbooks.create_task. The person's timezone is not supplied to you; never assume one (not Europe/London, UTC or the server's). Use the timezone they stated or that this conversation clearly establishes, for example a city or zone they named (IST is Asia/Kolkata). When timing depends on a timezone you do not know, ask one short question before proposing. Always name the time and timezone in brief.summary, for example \"every day at 8:00 AM India time\"."

@@ -46,21 +46,3 @@ func releaseModelActions() []capability.ModelAction {
 		ExternalOperationPolicy: capability.ExternalOperationForbidden,
 	}}
 }
-
-func TestFallbackReplyNamesTheToolAndItsAnswer(t *testing.T) {
-	checkpoint := checkpointTerminalAction(nil, &ActionCall{ID: "post", SkillID: "skill-slack", Action: "slack-send-message", Status: ActionCallStatusFailed,
-		SideEffect: skill.SideEffectExternal, Error: "runId=abc Atlas error: execution: slack API error: channel_not_found"}, nil)
-	want := "I couldn't finish this request because Slack reported: slack API error: channel_not_found. I stopped this attempt. Ask me to try again when you're ready."
-	if got := terminalFailureReplyFromCheckpoint(checkpoint); got != want {
-		t.Fatalf("fallback reply = %q", got)
-	}
-	stopped := checkpointTerminalFailure(checkpointFinalFailureExplanation(checkpoint, "action", "runId=abc Atlas error: execution: slack API error: channel_not_found"), "action_failed")
-	if got := terminalFailureReplyFromCheckpoint(stopped); got != want {
-		t.Fatalf("stopped fallback reply = %q", got)
-	}
-	// A failure the model already handled is not the cause of a later stop.
-	other := checkpointFinalFailureExplanation(checkpoint, "execution", "The model returned an invalid answer.")
-	if got := terminalFailureReplyFromCheckpoint(checkpointTerminalFailure(other, "execution_failed")); got != TerminalFailureReply("execution_failed") {
-		t.Fatalf("unrelated failure attributed: %q", got)
-	}
-}

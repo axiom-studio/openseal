@@ -19,7 +19,7 @@ func TestWorkflowDiscoverySkipsUnrelatedActionPayloadsAcrossStores(t *testing.T)
 				if declaresProof {
 					run = persistWorkflowEvidenceCall(t, store, workflowEvidenceCall(run, "explicit-proof", "D-known"))
 				}
-				run.Checkpoint = map[string]interface{}{"lastAction": map[string]interface{}{"actionCallId": "large-browser-call", "bindingId": "browser-account", "action": "screenshot", "result": strings.Repeat("x", 1<<20)}}
+				run.Checkpoint = map[string]interface{}{"previous": map[string]interface{}{"actionCallId": "large-browser-call", "bindingId": "browser-account", "action": "screenshot", "result": strings.Repeat("x", 1<<20)}}
 				points := pointWorkflowEvidenceStore(store)
 				sources, err := workflowSources(t.Context(), points, catalog, run)
 				if err != nil || len(sources) != 1 || len(points.lookups) != 0 || points.scans != 0 || len(sources[0].KnownSubjects) != 0 {

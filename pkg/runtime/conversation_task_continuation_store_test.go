@@ -53,7 +53,7 @@ func conversationContinuationFixture(t *testing.T, store conversationContinuatio
 	run, err := portfolio.CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: owner.ID,
 		ConcurrencyKey: conversationRunLane(conversation.ID, "", owner.ID), Goal: "Respond to an Agent channel message", Source: RunSourceChat, Budget: &BudgetPolicy{MaxTurns: 20, MaxAttempts: 30, MaxDurationMS: 600000},
 		Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: posted.Message.ID},
-		Plan:    map[string]interface{}{"accepted": "plan"}, Checkpoint: map[string]interface{}{"lastAction": map[string]interface{}{"actionCallId": "existing-action", "status": "running"}}})
+		Plan:    map[string]interface{}{"accepted": "plan"}, Checkpoint: map[string]interface{}{"saved": map[string]interface{}{"actionCallId": "existing-action", "status": "running"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -229,8 +229,7 @@ func conversationTaskReportContent(ctx context.Context, store ConversationStore,
 		return task.Acknowledgment
 	}
 	if run.Status == AgentRunStatusFailed {
-		sessions, actions := terminalFailureReplyStores(store)
-		return terminalRunFailureReply(ctx, sessions, actions, run)
+		return terminalRunFailureReply(ctx, store, store, run)
 	}
 	if run.Status == AgentRunStatusCompleted {
 		for _, key := range []string{"report", "summary"} {

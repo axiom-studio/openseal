@@ -230,6 +230,10 @@ type ConversationStore interface {
 	ListSurfaceInteractions(ctx context.Context, filter SurfaceInteractionFilter) ([]*SurfaceInteraction, error)
 	ListLatestSurfaceInteractions(ctx context.Context, filter LatestSurfaceInteractionFilter) ([]*SurfaceInteraction, error)
 	ConversationReactionStore
+	// Terminal failure reports read the Run's session log and its action
+	// calls to name what stopped the attempt, and note the reply there.
+	AgentSessionStore
+	actionCallReader
 }
 
 type ConversationService struct {

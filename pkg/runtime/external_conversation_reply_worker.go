@@ -296,12 +296,11 @@ func (w *ExternalConversationReplyWorker) projectReply(
 				return nil, w.retireAnswerStream(ctx, item, reply.id)
 			}
 		}
-		sessions, actions := terminalFailureReplyStores(w.store)
-		content, ok := externalConversationRunReply(ctx, sessions, actions, run)
+		content, ok := externalConversationRunReply(ctx, w.store, w.store, run)
 		if !ok {
 			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", ErrInvalidExternalConversation)
 		}
-		artifacts, refErr := runActionArtifactReferences(ctx, sessions, actions, run)
+		artifacts, refErr := runActionArtifactReferences(ctx, w.store, w.store, run)
 		if refErr != nil {
 			return nil, refErr
 		}

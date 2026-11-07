@@ -135,8 +135,7 @@ func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
 		if failed.FailureExplanation.Explained || runExplainingFailure(failed) {
 			t.Fatalf("unexplained failure marked explained: %+v", failed.FailureExplanation)
 		}
-		sessions, actions := terminalFailureReplyStores(store)
-		reply, ok := externalConversationRunReply(ctx, sessions, actions, failed)
+		reply, ok := externalConversationRunReply(ctx, store, store, failed)
 		if !ok || reply != TerminalFailureReply("provider_unavailable") || strings.Contains(reply, "SECRET") {
 			t.Fatalf("kernel reply = %q %v", reply, ok)
 		}

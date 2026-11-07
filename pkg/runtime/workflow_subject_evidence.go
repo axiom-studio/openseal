@@ -116,60 +116,26 @@ func projectWorkflowKnownSubjects(ctx context.Context, store runbookActionStore,
 	if explicitActionID != "" && !validWorkflowEvidenceActionID(explicitActionID) {
 		return errors.New("subjectEvidenceActionCallId must be an exact bounded action call ID")
 	}
-	// At most two candidate identities: one explicit receipt and the latest
-	// checkpoint receipt. Checkpoint contents only choose a lookup; the durable
+	// The one candidate identity is the explicit receipt; the durable
 	// ActionCall supplies every identity, success, authorization, and output fact.
-	candidates := make([]string, 0, 2)
-	if explicitActionID != "" {
-		candidates = append(candidates, explicitActionID)
+	if explicitActionID == "" {
+		return nil
 	}
-	if run != nil {
-		last, _ := run.Checkpoint["lastAction"].(map[string]interface{})
-		for _, source := range evidenceSources {
-			latestID, _, matched := workflowSubjectEvidenceHint(last, source)
-			if matched && !slices.Contains(candidates, latestID) {
-				candidates = append(candidates, latestID)
-				break
-			}
-		}
+	call, err := store.GetActionCall(ctx, run.Scope, explicitActionID)
+	if errors.Is(err, ErrActionNotFound) {
+		return nil
 	}
-	for _, actionID := range candidates {
-		call, err := store.GetActionCall(ctx, run.Scope, actionID)
-		if errors.Is(err, ErrActionNotFound) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if call == nil || call.ID != actionID {
-			continue
-		}
-		for _, source := range evidenceSources {
-			known, err := workflowSubjectFromAction(run, source, call)
-			if err == nil {
-				source.KnownSubjects = append(source.KnownSubjects, known)
-			}
+	if err != nil {
+		return err
+	}
+	if call == nil || call.ID != explicitActionID {
+		return nil
+	}
+	for _, source := range evidenceSources {
+		known, err := workflowSubjectFromAction(run, source, call)
+		if err == nil {
+			source.KnownSubjects = append(source.KnownSubjects, known)
 		}
 	}
 	return nil
-}
-
-// Hint metadata only skips unrelated receipts before a potentially large
-// ActionCall read. It never supplies success, authorization, or subject facts.
-func workflowSubjectEvidenceHint(hint map[string]interface{}, source *WorkflowEventSource) (string, string, bool) {
-	if source == nil || !source.EvidenceRequired || hint == nil {
-		return "", "", false
-	}
-	bindingID, _ := hint["bindingId"].(string)
-	action, _ := hint["action"].(string)
-	actionCallID, _ := hint["actionCallId"].(string)
-	if bindingID != source.BindingID || !validWorkflowEvidenceActionID(actionCallID) {
-		return "", "", false
-	}
-	for _, declaration := range source.SubjectEvidence {
-		if action == declaration.Action {
-			return actionCallID, action, true
-		}
-	}
-	return "", "", false
 }

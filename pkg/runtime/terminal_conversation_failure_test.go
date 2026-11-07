@@ -55,7 +55,7 @@ func failTerminalConversation(t *testing.T, store terminalReportingContractStore
 	}
 	failed, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed,
-		Error: "private-provider-diagnostic token=NEVER-PUBLISH", Checkpoint: checkpointTerminalFailure(run.Checkpoint, code),
+		Error:              "private-provider-diagnostic token=NEVER-PUBLISH",
 		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: terminalFailureCode(code), Message: "The requested work did not complete."},
 	})
 	if err != nil {
@@ -222,9 +222,8 @@ func TestTerminalFailureReplyDistinguishesSafeValidationAndBudgetCauses(t *testi
 		{"tool_arguments_invalid: token=PRIVATE", "execution_failed", "execution failure"},
 	} {
 		t.Run(tc.input, func(t *testing.T) {
-			checkpoint := checkpointTerminalFailure(nil, tc.input)
-			if terminalFailureCodeFromCheckpoint(checkpoint) != tc.code {
-				t.Fatal("checkpoint lost the finite terminal cause")
+			if terminalFailureCode(tc.input) != tc.code {
+				t.Fatal("lost the finite terminal cause")
 			}
 			text := TerminalFailureReply(tc.input)
 			if !strings.Contains(text, tc.reason) || !strings.Contains(text, "Ask me to try again") || len(text) > 512 || strings.Contains(text, "PRIVATE") {

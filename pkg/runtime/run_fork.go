@@ -322,7 +322,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 					}
 					continue
 				}
-				childContext[key] = deepCloneCheckpointValue(value)
+				childContext[key] = cloneForkContextValue(value)
 			}
 			childContext[ConversationTaskContextKey] = sourceTask.ID
 		} else if !implicitAgent {
@@ -500,9 +500,39 @@ func overlayForkBranchContext(source, branch map[string]interface{}) (map[string
 			}
 			continue
 		}
-		out[key] = deepCloneCheckpointValue(value)
+		out[key] = cloneForkContextValue(value)
 	}
 	return out, nil
+}
+
+// cloneForkContextValue deep-copies the JSON-shaped values a branch adds to
+// its child's context, so the child never aliases its source's maps or slices.
+func cloneForkContextValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		if typed == nil {
+			return typed
+		}
+		result := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			result[key] = cloneForkContextValue(item)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, item := range typed {
+			result[index] = cloneForkContextValue(item)
+		}
+		return result
+	case []map[string]interface{}:
+		result := make([]interface{}, len(typed))
+		for index, item := range typed {
+			result[index] = cloneForkContextValue(item)
+		}
+		return result
+	default:
+		return typed
+	}
 }
 
 func immutableForkTaskContextKey(key string) bool {

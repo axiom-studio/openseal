@@ -185,19 +185,6 @@ func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryListe
 	return terminalFailureReplyOf(run.FailureExplanation, stopping, latest)
 }
 
-// terminalFailureReplyStores narrows a reporting store to the session log and
-// action stores the failure reply reads. A store without a session log has
-// no tool entries to read, so the reply carries no call detail. The check
-// goes once SQLite and Postgres have the session log (del-1b in TASKS.md).
-func terminalFailureReplyStores(store interface{}) (loopSessionEntryLister, actionCallReader) {
-	sessions, _ := store.(AgentSessionStore)
-	actions, _ := store.(actionCallReader)
-	if sessions == nil {
-		return nil, actions
-	}
-	return sessions, actions
-}
-
 type actionCallReader interface {
 	GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error)
 }
