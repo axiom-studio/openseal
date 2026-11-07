@@ -95,7 +95,7 @@ func TestActionApprovalAPIAndClientAreReadOnlyUntilAuthorityIsConfigured(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !resolved.Resolved || resolved.Approval.Status != runtime.ApprovalStatusApproved || resolved.Call.Status != runtime.ActionCallStatusReady || resolved.Run.Status != runtime.AgentRunStatusWaitingForDependency {
+	if !resolved.Resolved || resolved.Approval.Status != runtime.ApprovalStatusApproved || resolved.Call.Status != runtime.ActionCallStatusReady || resolved.Run.Status != runtime.AgentRunStatusQueued {
 		t.Fatalf("resolved approval = %#v", resolved)
 	}
 	replayed, err := kernel.ResolveActionApproval(t.Context(), proposal.Approval.Scope, proposal.Approval.ID, kernelapi.ResolveActionApprovalRequest{
@@ -120,30 +120,53 @@ func createActionApprovalFixtureWithApprover(t *testing.T, store *runtime.Memory
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The run loop holds the Run leased and running while its step proposes
+	// the governed tool call, then parks the Run on the approval at step end.
+	const worker = "loop-worker"
+	leased := *run
+	expires := now.Add(time.Hour)
+	leased.Status, leased.LeaseOwner, leased.LeaseExpiresAt = runtime.AgentRunStatusRunning, worker, &expires
+	leased.Revision++
+	leased.UpdatedAt = now
+	if _, err := store.UpdateAgentRunWithEvent(t.Context(), &leased, run.Revision, approvalFixtureRunEvent(scope, run.ID, "event-lease", now), nil); err != nil {
+		t.Fatal(err)
+	}
 	approval := &runtime.ApprovalCheckpoint{
 		ID: "approval-publish", Scope: scope, RunID: run.ID, ActionCallID: "call-publish", Status: runtime.ApprovalStatusPending,
 		Risk: skill.RiskLevelProduction, Summary: "Publish release announcement", ProposedAction: map[string]interface{}{"channel": "public"},
 		EligibleApprovers: []runtime.ApprovalPrincipal{approver}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call := &runtime.ActionCall{
-		ID: "call-publish", Scope: scope, RunID: run.ID, DeploymentID: "operator", SkillID: "publishing", SkillVersion: "1", Action: "publish",
+		ID: "call-publish", Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "operator", SkillID: "publishing", SkillVersion: "1", Action: "publish",
+		Origin: runtime.ActionOriginLoop, Execution: runtime.ActionExecutionLoop,
 		Status: runtime.ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
 		IdempotencyKey: "publish-release", ApprovalID: approval.ID, MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call.InvocationDigest = runtime.ComputeActionInvocationDigest(call)
-	proposalRun := *run
-	proposalRun.Status = runtime.AgentRunStatusWaitingForApproval
-	proposalRun.WakeCondition = &runtime.WakeCondition{Type: "approval", Reference: approval.ID}
-	proposalRun.Revision++
-	proposalRun.UpdatedAt = now
 	result, err := store.CreateActionProposal(t.Context(), runtime.ActionProposalRecord{
-		Call: call, Approval: approval, Run: &proposalRun, ExpectedRunRevision: run.Revision,
+		Call: call, Approval: approval, ExpectedRunRevision: leased.Revision, Lease: &runtime.AgentRunLeaseGuard{WorkerID: worker, Now: now},
 		Event: &runtime.ActivityEvent{ID: "event-approval", Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	parked := leased
+	parked.Status = runtime.AgentRunStatusWaitingForApproval
+	parked.WakeCondition = &runtime.WakeCondition{Type: "approval", Reference: approval.ID}
+	parked.LeaseOwner, parked.LeaseExpiresAt = "", nil
+	parked.Revision++
+	if _, err := store.UpdateAgentRunWithEvent(t.Context(), &parked, leased.Revision, approvalFixtureRunEvent(scope, run.ID, "event-park", now), nil); err != nil {
+		t.Fatal(err)
+	}
+	result.Run = &parked
 	return result
+}
+
+func approvalFixtureRunEvent(scope runtime.Scope, runID, id string, now time.Time) *runtime.ActivityEvent {
+	return &runtime.ActivityEvent{
+		ID: id, Scope: scope, RunID: runID, EventType: "run.updated", Severity: runtime.ActivitySeverityInfo,
+		Actor: runtime.ActivityActor{Type: "worker", ID: "loop-worker"}, Summary: "Run loop step", Visibility: runtime.ActivityVisibilityScope, CreatedAt: now,
+	}
 }
 
 func TestDesktopApprovalDecisionsUseCanonicalStateAndReplay(t *testing.T) {
