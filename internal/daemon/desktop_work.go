@@ -153,7 +153,7 @@ func ResolveDesktopWork(ctx context.Context, catalog DesktopWorkCatalog, scope r
 		if err != nil {
 			return canonical, err
 		}
-		if deployment == nil || deployment.Status != team.DeploymentActive || deployment.Activation != nil {
+		if deployment == nil || deployment.Status != team.DeploymentActive {
 			return canonical, errors.New("the team must be active before starting work")
 		}
 		ids = nil

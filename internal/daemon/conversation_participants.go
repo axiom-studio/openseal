@@ -71,7 +71,7 @@ func (s *DesktopConversationParticipants) resolve(ctx context.Context, query run
 	if err != nil {
 		return nil, fmt.Errorf("load participation team: %w", err)
 	}
-	if deployment == nil || deployment.ID != channel.Owner.ID || deployment.Scope != scope || deployment.Status != team.DeploymentActive || deployment.Activation != nil {
+	if deployment == nil || deployment.ID != channel.Owner.ID || deployment.Scope != scope || deployment.Status != team.DeploymentActive {
 		return nil, errors.New("the participation team must be active in this workspace")
 	}
 	definition, err := s.catalog.GetTeamDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
@@ -98,7 +98,7 @@ func (s *DesktopConversationParticipants) resolve(ctx context.Context, query run
 		if member == nil || member.ID != assignment.AgentDeploymentID || member.Scope != scope || member.Validate() != nil {
 			return nil, errors.New("a participation agent is unavailable in this workspace")
 		}
-		if member.RolloutStatus != agent.RolloutActive || member.Activation != nil {
+		if member.RolloutStatus != agent.RolloutActive {
 			continue
 		}
 		if _, bound := member.Credentials[agent.ModelProviderCredentialBinding]; bound {

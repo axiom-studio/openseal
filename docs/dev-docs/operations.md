@@ -205,15 +205,7 @@ Live tests make real network or model calls and are excluded from the default
 suite by the `integration` build tag. Configure credentials in the environment,
 never in source files:
 
-```bash
-export AUTHORING_TEST_BASE_URL=https://provider.example/v1/chat/completions
-export AUTHORING_TEST_API_KEY='replace-with-a-real-secret'
-export AUTHORING_TEST_MODEL='provider-model-name'
-
-go test -tags=integration ./pkg/authoring -run TestLiveGenerator
-```
-
-The real ClawHub/model acceptance additionally requires an explicit opt-in:
+The real ClawHub/model acceptance requires an explicit opt-in:
 
 ```bash
 export OPENSEAL_RUN_LIVE_E2E=1

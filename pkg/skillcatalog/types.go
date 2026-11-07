@@ -5,8 +5,6 @@ package skillcatalog
 
 import (
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/source"
 )
 
 type SkillCapability struct {
@@ -128,10 +126,8 @@ type SourcePolicySourceCapability struct {
 }
 
 type CapabilityCatalog struct {
-	Skills                      map[string]SkillCapability   `json:"skills,omitempty"`
-	CapabilityNeeds             []CapabilityNeed             `json:"capabilityNeeds,omitempty"`
-	AgentCredentialRequirements []AgentCredentialRequirement `json:"agentCredentialRequirements,omitempty"`
-	AvailableCredentials        map[string]bool              `json:"availableCredentials,omitempty"`
+	Skills               map[string]SkillCapability `json:"skills,omitempty"`
+	AvailableCredentials map[string]bool            `json:"availableCredentials,omitempty"`
 	// AvailableCredentialGrants contains credential-free host attestations
 	// used only for deterministic OAuth 2 readiness. Opaque references and
 	// external account identifiers remain outside the model-visible catalog.
@@ -139,53 +135,6 @@ type CapabilityCatalog struct {
 	SourcePolicies            map[string]SourcePolicyCapability          `json:"sourcePolicies,omitempty"`
 	AuthorityConstraint       *AuthorityConstraint                       `json:"authorityConstraint,omitempty"`
 	Diagnostics               []CatalogDiagnostic                        `json:"diagnostics,omitempty"`
-	RuntimeComposition        *RuntimeCompositionCapability              `json:"runtimeComposition,omitempty"`
-	HostedExecution           *HostedExecutionCapability                 `json:"hostedExecution,omitempty"`
-}
-
-const HostedExecutionProtocolV1 = "openseal.hosted-execution/v1"
-
-// HostedExecutionCapability lets a host attest to the non-Skill portion of a
-// hosted model exchange. Skill-specific ceilings live beside each exact Skill
-// capability so OpenSeal can validate a reviewed composition without learning
-// private prompt instructions or host binding details.
-type HostedExecutionCapability struct {
-	ProtocolVersion     string `json:"protocolVersion"`
-	BaseInputTokens     int64  `json:"baseInputTokens"`
-	MinimumOutputTokens int64  `json:"minimumOutputTokens"`
-}
-
-const RuntimeCompositionProtocolV1 = "openseal.runtime-composition/v1"
-
-type RuntimeCompositionCapability struct {
-	ProtocolVersion string                        `json:"protocolVersion"`
-	Conversation    ConversationRuntimeCapability `json:"conversation"`
-	Runbook         RunbookRuntimeCapability      `json:"runbook"`
-}
-
-type ConversationRuntimeCapability struct {
-	EventTypes     []string                  `json:"eventTypes"`
-	HandlerKinds   []ConversationHandlerKind `json:"handlerKinds"`
-	ReplyModes     []ConversationReplyMode   `json:"replyModes"`
-	CanonicalReply bool                      `json:"canonicalReply"`
-}
-
-type RunbookRuntimeCapability struct {
-	TriggerKinds                   []runbook.TriggerKind  `json:"triggerKinds"`
-	StepKinds                      []runbook.StepKind     `json:"stepKinds"`
-	CanInvokeAgents                bool                   `json:"canInvokeAgents"`
-	ConversationTriggerInputSchema map[string]interface{} `json:"conversationTriggerInputSchema"`
-}
-
-// AgentCredentialRequirement describes a deployment credential slot required
-// by the portable runtime. Hosts advertise authorized opaque choices for the
-// slot through CredentialBindingChoice.BindingKeys. Secret values and
-// host-specific credential storage never cross this contract.
-type AgentCredentialRequirement struct {
-	BindingKey            string `json:"bindingKey"`
-	DisplayName           string `json:"displayName"`
-	Prompt                string `json:"prompt"`
-	RequiredForActivation bool   `json:"requiredForActivation,omitempty"`
 }
 
 // AuthorityConstraint is the credential-free, versioned projection of the
@@ -203,55 +152,6 @@ type AuthorityConstraint struct {
 	MaximumRisk       capability.RiskLevel `json:"maximumRisk,omitempty"`
 	RequireApprovalAt capability.RiskLevel `json:"requireApprovalAt,omitempty"`
 }
-
-// CapabilityNeed is a server-owned, prompt-matched choice between exact
-// verified Skill catalog entries. It contains no registry query, credential,
-// or model-authored inference. The compiler turns it into one deterministic
-// refinement question when more than one viable Skill can satisfy the need,
-// or when the host explicitly requires the operator to choose.
-type CapabilityNeed struct {
-	ID             string                            `json:"id"`
-	Prompt         string                            `json:"prompt"`
-	WhyNeeded      string                            `json:"whyNeeded"`
-	SkillIDs       []string                          `json:"skillIds"`
-	ChoiceRequired bool                              `json:"choiceRequired,omitempty"`
-	Priority       int                               `json:"priority"`
-	SourceScope    *CapabilitySourceScopeRequirement `json:"sourceScope,omitempty"`
-	// SourcePolicyProposal is an exact, credential-free policy draft supplied by
-	// the trusted capability catalog. It is never active authority: compilation
-	// may surface it for review, while registration and activation remain
-	// separate governed lifecycle operations.
-	SourcePolicyProposal *CapabilitySourcePolicyProposal `json:"sourcePolicyProposal,omitempty"`
-}
-
-type CapabilitySourcePolicyProposal struct {
-	Policy   source.Policy `json:"policy"`
-	Reason   string        `json:"reason"`
-	SkillIDs []string      `json:"skillIds"`
-}
-
-// CapabilitySourceScopeRequirement declares that a source-oriented capability
-// cannot be authored safely until its concrete targets are supplied. The host
-// derives this fact from deterministic intent matching; the provider cannot
-// omit it or turn an empty monitoring plan into a ready ChangeSet.
-type CapabilitySourceScopeRequirement struct {
-	Prompt    string `json:"prompt"`
-	WhyNeeded string `json:"whyNeeded"`
-	Minimum   int    `json:"minimum"`
-	Maximum   int    `json:"maximum"`
-	Priority  int    `json:"priority"`
-	// Targets are exact, non-secret source boundaries deterministically
-	// extracted by the trusted host from the user's prompt. Their presence
-	// satisfies the guided question and lets the compiler materialize the same
-	// audited values into a durable capability invocation.
-	Targets                  []string `json:"targets,omitempty"`
-	MaterializationInputKeys []string `json:"materializationInputKeys,omitempty"`
-}
-
-const (
-	MaximumCapabilityNeeds            = 16
-	MaximumCapabilityNeedSkillChoices = 16
-)
 
 const MaximumCatalogDiagnostics = 16
 
@@ -272,19 +172,3 @@ type CatalogDiagnostic struct {
 	Message   string `json:"message"`
 	Reference string `json:"reference,omitempty"`
 }
-
-type ConversationHandlerKind string
-
-const (
-	ConversationHandlerAgent   ConversationHandlerKind = "agent"
-	ConversationHandlerTeam    ConversationHandlerKind = "team"
-	ConversationHandlerRunbook ConversationHandlerKind = "runbook"
-)
-
-type ConversationReplyMode string
-
-const (
-	ConversationReplyProviderDefault ConversationReplyMode = "provider_default"
-	ConversationReplyThread          ConversationReplyMode = "thread"
-	ConversationReplyChannel         ConversationReplyMode = "channel"
-)

@@ -40,7 +40,7 @@ func compileInterfaceSchema(schema map[string]interface{}) (*jsonschema.Schema, 
 		return nil, err
 	}
 	// Absolute URL: a bare name resolves against the working directory and
-	// breaks when that path contains a space. See pkg/authoring/intent_schema.go.
+	// breaks when that path contains a space.
 	const resource = "https://openseal.dev/schemas/runbook-interface.json"
 	compiler := jsonschema.NewCompiler()
 	if err := compiler.AddResource(resource, document); err != nil {

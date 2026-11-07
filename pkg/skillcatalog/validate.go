@@ -10,27 +10,17 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 var (
 	catalogDiagnosticCodePattern      = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,127}$`)
 	catalogDiagnosticReferencePattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,255}$`)
 	authorityConstraintVersionPattern = regexp.MustCompile(`^[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}$`)
-	credentialBindingKeyPattern       = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,127}$`)
 )
 
 // ValidateCapabilityCatalog rejects malformed host projections before they are
 // persisted or placed in model context.
 func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
-	if err := ValidateRuntimeCompositionCapability(catalog.RuntimeComposition); err != nil {
-		return fmt.Errorf("runtime composition capability: %w", err)
-	}
-	if hosted := catalog.HostedExecution; hosted != nil {
-		if hosted.ProtocolVersion != HostedExecutionProtocolV1 || hosted.BaseInputTokens < 1 || hosted.MinimumOutputTokens < 1 {
-			return errors.New("hosted execution capability is invalid")
-		}
-	}
 	if constraint := catalog.AuthorityConstraint; constraint != nil {
 		if constraint.ID != strings.TrimSpace(constraint.ID) || constraint.Version != strings.TrimSpace(constraint.Version) ||
 			!catalogDiagnosticReferencePattern.MatchString(constraint.ID) || !authorityConstraintVersionPattern.MatchString(constraint.Version) {
@@ -224,102 +214,6 @@ func ValidateCapabilityCatalog(catalog CapabilityCatalog) error {
 			seen[string(encoded)] = true
 		}
 	}
-	credentialKeys := make(map[string]bool, len(catalog.AgentCredentialRequirements))
-	for index, requirement := range catalog.AgentCredentialRequirements {
-		key := strings.TrimSpace(requirement.BindingKey)
-		name := strings.TrimSpace(requirement.DisplayName)
-		prompt := strings.TrimSpace(requirement.Prompt)
-		if key != requirement.BindingKey || name != requirement.DisplayName || prompt != requirement.Prompt ||
-			!credentialBindingKeyPattern.MatchString(key) || name == "" || prompt == "" ||
-			len(name) > 200 || len(prompt) > 1024 || strings.ContainsAny(name+prompt, "\r\n\t") ||
-			credentialKeys[key] {
-			return fmt.Errorf("Agent credential requirement %d is invalid", index)
-		}
-		credentialKeys[key] = true
-	}
-	if len(catalog.CapabilityNeeds) > MaximumCapabilityNeeds {
-		return fmt.Errorf("capability catalog has more than %d capability needs", MaximumCapabilityNeeds)
-	}
-	needIDs := make(map[string]bool, len(catalog.CapabilityNeeds))
-	for index, need := range catalog.CapabilityNeeds {
-		need.ID, need.Prompt, need.WhyNeeded = strings.TrimSpace(need.ID), strings.TrimSpace(need.Prompt), strings.TrimSpace(need.WhyNeeded)
-		if !catalogDiagnosticReferencePattern.MatchString(need.ID) || need.Prompt == "" || need.WhyNeeded == "" ||
-			len(need.Prompt) > 1024 || len(need.WhyNeeded) > 1024 || strings.ContainsAny(need.Prompt+need.WhyNeeded, "\r\n\t") ||
-			need.Priority < 1 || need.Priority > 1000 {
-			return fmt.Errorf("capability catalog need %d is invalid", index)
-		}
-		if scope := need.SourceScope; scope != nil {
-			scope.Prompt, scope.WhyNeeded = strings.TrimSpace(scope.Prompt), strings.TrimSpace(scope.WhyNeeded)
-			if scope.Prompt == "" || scope.WhyNeeded == "" || len(scope.Prompt) > 1024 || len(scope.WhyNeeded) > 1024 ||
-				strings.ContainsAny(scope.Prompt+scope.WhyNeeded, "\r\n\t") || scope.Minimum < 1 || scope.Maximum < scope.Minimum ||
-				scope.Maximum > 100 || scope.Priority < 1 || scope.Priority > 1000 {
-				return fmt.Errorf("capability catalog need %d source scope is invalid", index)
-			}
-			seenInputKeys := make(map[string]bool, len(scope.MaterializationInputKeys))
-			seenTargets := make(map[string]bool, len(scope.Targets))
-			for _, target := range scope.Targets {
-				if target != strings.TrimSpace(target) || target == "" || len(target) > 2048 || strings.ContainsAny(target, "\r\n\t") || seenTargets[target] {
-					return fmt.Errorf("capability catalog need %d source scope has invalid targets", index)
-				}
-				seenTargets[target] = true
-			}
-			if len(scope.Targets) > 0 && (len(scope.Targets) < scope.Minimum || len(scope.Targets) > scope.Maximum) {
-				return fmt.Errorf("capability catalog need %d source scope targets are outside its bounds", index)
-			}
-			for _, key := range scope.MaterializationInputKeys {
-				if key != strings.TrimSpace(key) || !catalogDiagnosticCodePattern.MatchString(key) || seenInputKeys[key] {
-					return fmt.Errorf("capability catalog need %d source scope has invalid materialization input keys", index)
-				}
-				seenInputKeys[key] = true
-			}
-		}
-		if proposal := need.SourcePolicyProposal; proposal != nil {
-			proposal.Reason = strings.TrimSpace(proposal.Reason)
-			if proposal.Reason == "" || len(proposal.Reason) > 1024 || strings.ContainsAny(proposal.Reason, "\r\n\t") {
-				return fmt.Errorf("capability catalog need %d source policy proposal reason is invalid", index)
-			}
-			if err := proposal.Policy.Validate(); err != nil {
-				return fmt.Errorf("capability catalog need %d source policy proposal is invalid: %w", index, err)
-			}
-			if !proposal.Policy.Enabled {
-				return fmt.Errorf("capability catalog need %d source policy proposal must describe an enabled immutable version", index)
-			}
-			for _, policySource := range proposal.Policy.Sources {
-				if len(policySource.PathPrefixes) == 0 || len(policySource.Methods) == 0 {
-					return fmt.Errorf("capability catalog need %d source policy proposal requires explicit paths and methods", index)
-				}
-			}
-			allowedSkills := stringSet(need.SkillIDs)
-			seenProposalSkills := make(map[string]bool, len(proposal.SkillIDs))
-			if len(proposal.SkillIDs) == 0 {
-				return fmt.Errorf("capability catalog need %d source policy proposal requires at least one applicable Skill", index)
-			}
-			for _, skillID := range proposal.SkillIDs {
-				if skillID != strings.TrimSpace(skillID) || !allowedSkills[skillID] || seenProposalSkills[skillID] {
-					return fmt.Errorf("capability catalog need %d source policy proposal has an invalid applicable Skill", index)
-				}
-				seenProposalSkills[skillID] = true
-			}
-		}
-		if needIDs[need.ID] {
-			return fmt.Errorf("capability catalog need %d duplicates id %s", index, need.ID)
-		}
-		needIDs[need.ID] = true
-		if len(need.SkillIDs) == 0 || len(need.SkillIDs) > MaximumCapabilityNeedSkillChoices {
-			return fmt.Errorf("capability catalog need %s must contain between 1 and %d Skill choices", need.ID, MaximumCapabilityNeedSkillChoices)
-		}
-		seenSkills := make(map[string]bool, len(need.SkillIDs))
-		for _, skillID := range need.SkillIDs {
-			if skillID != strings.TrimSpace(skillID) || skillID == "" || seenSkills[skillID] {
-				return fmt.Errorf("capability catalog need %s contains an invalid or duplicate Skill id", need.ID)
-			}
-			seenSkills[skillID] = true
-			skill, exists := catalog.Skills[skillID]
-			if !exists || !skillChoiceViable(skill) {
-				return fmt.Errorf("capability catalog need %s references unavailable or incompatible Skill %s", need.ID, skillID)
-			}
-		}
-	}
 	if len(catalog.Diagnostics) > MaximumCatalogDiagnostics {
 		return fmt.Errorf("capability catalog has more than %d diagnostics", MaximumCatalogDiagnostics)
 	}
@@ -356,32 +250,6 @@ func sameOAuth2Authorization(left, right *capability.OAuth2Requirement) bool {
 	return left.Provider == right.Provider && left.Subject == right.Subject && left.Resource == right.Resource
 }
 
-func skillChoiceViable(skill SkillCapability) bool {
-	if skill.Readiness == SkillReadinessUnavailable {
-		return false
-	}
-	for _, evidence := range skill.Compatibility {
-		if !evidence.Compatible && !lifecycleGap(skill.Readiness, evidence.Requirement) {
-			return false
-		}
-	}
-	return true
-}
-
-// Lifecycle gaps are not compatibility failures: they are the explicit work a
-// refinement is proposing. Keep this allowlist narrow so action, platform,
-// source, compilation, and other semantic incompatibilities still fail closed.
-func lifecycleGap(readiness SkillReadiness, requirement string) bool {
-	requirement = strings.TrimSpace(requirement)
-	if requirement == "installation" {
-		return readiness == SkillReadinessNeedsInstallation
-	}
-	if requirement == "binding_configuration" || strings.HasPrefix(requirement, "credential:") {
-		return readiness == SkillReadinessNeedsBinding || readiness == SkillReadinessNeedsInstallation
-	}
-	return false
-}
-
 // CanonicalConversationTriggerInputSchema is the stable credential-free
 // Runbook boundary emitted by the external conversation dispatcher.
 func CanonicalConversationTriggerInputSchema() map[string]interface{} {
@@ -409,119 +277,6 @@ func CanonicalConversationTriggerInputSchema() map[string]interface{} {
 		},
 		"required": []interface{}{"conversationId", "triggerMessageId", "endpointId", "event"},
 	}
-}
-
-func ValidateRuntimeCompositionCapability(value *RuntimeCompositionCapability) error {
-	if value == nil {
-		return nil
-	}
-	if value.ProtocolVersion != RuntimeCompositionProtocolV1 {
-		return errors.New("runtime composition protocol version is unsupported")
-	}
-	if !value.Conversation.CanonicalReply ||
-		!uniqueConversationEventTypes(value.Conversation.EventTypes) ||
-		!uniqueConversationHandlerKinds(value.Conversation.HandlerKinds) ||
-		!uniqueConversationReplyModes(value.Conversation.ReplyModes) ||
-		!uniqueRunbookTriggerKinds(value.Runbook.TriggerKinds) ||
-		!uniqueRunbookStepKinds(value.Runbook.StepKinds) ||
-		!reflect.DeepEqual(value.Runbook.ConversationTriggerInputSchema, CanonicalConversationTriggerInputSchema()) {
-		return errors.New("runtime composition capability is invalid or non-canonical")
-	}
-	return nil
-}
-
-func uniqueConversationEventTypes(values []string) bool {
-	if len(values) == 0 {
-		return false
-	}
-	seen := map[string]bool{}
-	for _, value := range values {
-		if value == "" || value != strings.TrimSpace(value) || seen[value] {
-			return false
-		}
-		seen[value] = true
-	}
-	return sort.StringsAreSorted(values)
-}
-
-func uniqueConversationHandlerKinds(values []ConversationHandlerKind) bool {
-	return uniqueEnumStrings(conversationHandlerStrings(values), []string{
-		string(ConversationHandlerAgent), string(ConversationHandlerRunbook), string(ConversationHandlerTeam),
-	})
-}
-
-func uniqueConversationReplyModes(values []ConversationReplyMode) bool {
-	return uniqueEnumStrings(conversationReplyStrings(values), []string{
-		string(ConversationReplyChannel), string(ConversationReplyProviderDefault), string(ConversationReplyThread),
-	})
-}
-
-func uniqueRunbookTriggerKinds(values []runbook.TriggerKind) bool {
-	if len(values) == 0 {
-		return false
-	}
-	stringsValue := make([]string, len(values))
-	for index, value := range values {
-		stringsValue[index] = string(value)
-	}
-	return uniqueEnumStrings(stringsValue, []string{string(runbook.TriggerEvent), string(runbook.TriggerSchedule)})
-}
-
-func uniqueRunbookStepKinds(values []runbook.StepKind) bool {
-	if len(values) == 0 {
-		return false
-	}
-	allowed := map[runbook.StepKind]bool{
-		runbook.StepAction: true, runbook.StepDelegate: true, runbook.StepDecision: true,
-		runbook.StepTransform: true, runbook.StepWait: true, runbook.StepFork: true,
-		runbook.StepJoin: true, runbook.StepForEach: true, runbook.StepLoopReturn: true, runbook.StepEnd: true,
-	}
-	seen := map[runbook.StepKind]bool{}
-	previous := ""
-	for _, value := range values {
-		if !allowed[value] || seen[value] || previous > string(value) {
-			return false
-		}
-		seen[value] = true
-		previous = string(value)
-	}
-	return true
-}
-
-func uniqueEnumStrings(values, allowedValues []string) bool {
-	if len(values) == 0 {
-		return false
-	}
-	allowed := map[string]bool{}
-	for _, value := range allowedValues {
-		allowed[value] = true
-	}
-	seen := map[string]bool{}
-	previous := ""
-	for _, value := range values {
-		if !allowed[value] || seen[value] || previous > value {
-			return false
-		}
-		seen[value] = true
-		previous = value
-	}
-	return true
-}
-
-func conversationHandlerStrings(values []ConversationHandlerKind) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		result[index] = string(value)
-	}
-	return result
-}
-
-func conversationReplyStrings(values []ConversationReplyMode) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		result[index] = string(value)
-	}
-	return result
 }
 
 func stringSet(values []string) map[string]bool {
