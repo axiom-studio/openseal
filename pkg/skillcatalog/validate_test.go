@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 func TestValidateCapabilityCatalogAcceptsAValidCatalog(t *testing.T) {
@@ -23,27 +22,9 @@ func TestValidateCapabilityCatalogAcceptsAValidCatalog(t *testing.T) {
 			},
 		},
 		AuthorityConstraint: &AuthorityConstraint{ID: "policy", Version: "1", MaximumRisk: capability.RiskLevelExternal, RequireApprovalAt: capability.RiskLevelWrite},
-		CapabilityNeeds: []CapabilityNeed{
-			{ID: "chat", Prompt: "Which chat tool?", WhyNeeded: "To post updates.", SkillIDs: []string{"slack"}, Priority: 1},
-		},
 		Diagnostics: []CatalogDiagnostic{
 			{Code: CatalogDiagnosticDiscoveryTimeout, Message: "The bounded verification deadline elapsed.", Reference: "reddit-research"},
 		},
-		RuntimeComposition: &RuntimeCompositionCapability{
-			ProtocolVersion: RuntimeCompositionProtocolV1,
-			Conversation: ConversationRuntimeCapability{
-				EventTypes:     []string{"conversation.message.received"},
-				HandlerKinds:   []ConversationHandlerKind{ConversationHandlerAgent, ConversationHandlerRunbook, ConversationHandlerTeam},
-				ReplyModes:     []ConversationReplyMode{ConversationReplyChannel, ConversationReplyProviderDefault, ConversationReplyThread},
-				CanonicalReply: true,
-			},
-			Runbook: RunbookRuntimeCapability{
-				TriggerKinds:                   []runbook.TriggerKind{runbook.TriggerEvent, runbook.TriggerSchedule},
-				StepKinds:                      []runbook.StepKind{runbook.StepAction, runbook.StepEnd},
-				ConversationTriggerInputSchema: CanonicalConversationTriggerInputSchema(),
-			},
-		},
-		HostedExecution: &HostedExecutionCapability{ProtocolVersion: HostedExecutionProtocolV1, BaseInputTokens: 1, MinimumOutputTokens: 1},
 	}
 	if err := ValidateCapabilityCatalog(catalog); err != nil {
 		t.Fatalf("valid catalog rejected: %v", err)
@@ -90,34 +71,6 @@ func TestValidateCapabilityCatalogRejectsMalformedSkills(t *testing.T) {
 	}
 }
 
-func TestValidateCapabilityCatalogRejectsUnviableCapabilityNeeds(t *testing.T) {
-	skills := map[string]SkillCapability{
-		"ready":       {ID: "ready"},
-		"unavailable": {ID: "unavailable", Readiness: SkillReadinessUnavailable},
-		"broken":      {ID: "broken", Compatibility: []SkillCompatibility{{Requirement: "platform", Compatible: false, Evidence: "linux only"}}},
-	}
-	need := func(skillIDs ...string) CapabilityNeed {
-		return CapabilityNeed{ID: "need", Prompt: "Pick one", WhyNeeded: "Required.", SkillIDs: skillIDs, Priority: 1}
-	}
-	for name, needs := range map[string][]CapabilityNeed{
-		"unknown Skill":       {need("missing")},
-		"unavailable Skill":   {need("unavailable")},
-		"incompatible Skill":  {need("broken")},
-		"no Skill choices":    {need()},
-		"duplicate Skill ids": {need("ready", "ready")},
-		"duplicate need ids":  {need("ready"), need("ready")},
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := ValidateCapabilityCatalog(CapabilityCatalog{Skills: skills, CapabilityNeeds: needs}); err == nil {
-				t.Fatal("invalid capability need was accepted")
-			}
-		})
-	}
-	if err := ValidateCapabilityCatalog(CapabilityCatalog{Skills: skills, CapabilityNeeds: []CapabilityNeed{need("ready")}}); err != nil {
-		t.Fatalf("viable need rejected: %v", err)
-	}
-}
-
 func TestValidateCapabilityCatalogRejectsInvalidDiagnostics(t *testing.T) {
 	tests := map[string][]CatalogDiagnostic{
 		"invalid code":      {{Code: "Timeout Now", Message: "Unavailable"}},
@@ -145,38 +98,16 @@ func TestValidateCapabilityCatalogRejectsInvalidDiagnostics(t *testing.T) {
 	}
 }
 
-func TestValidateCapabilityCatalogRejectsNonCanonicalRuntimeComposition(t *testing.T) {
-	valid := func() *RuntimeCompositionCapability {
-		return &RuntimeCompositionCapability{
-			ProtocolVersion: RuntimeCompositionProtocolV1,
-			Conversation: ConversationRuntimeCapability{
-				EventTypes: []string{"conversation.message.received"}, HandlerKinds: []ConversationHandlerKind{ConversationHandlerAgent},
-				ReplyModes: []ConversationReplyMode{ConversationReplyThread}, CanonicalReply: true,
-			},
-			Runbook: RunbookRuntimeCapability{
-				TriggerKinds: []runbook.TriggerKind{runbook.TriggerEvent}, StepKinds: []runbook.StepKind{runbook.StepEnd},
-				ConversationTriggerInputSchema: CanonicalConversationTriggerInputSchema(),
-			},
-		}
-	}
-	if err := ValidateCapabilityCatalog(CapabilityCatalog{RuntimeComposition: valid()}); err != nil {
-		t.Fatalf("valid composition rejected: %v", err)
-	}
-	for name, mutate := range map[string]func(*RuntimeCompositionCapability){
-		"protocol":      func(value *RuntimeCompositionCapability) { value.ProtocolVersion = "v0" },
-		"reply":         func(value *RuntimeCompositionCapability) { value.Conversation.CanonicalReply = false },
-		"handler order": func(value *RuntimeCompositionCapability) { value.Conversation.HandlerKinds = []ConversationHandlerKind{ConversationHandlerTeam, ConversationHandlerAgent} },
-		"schema":        func(value *RuntimeCompositionCapability) { value.Runbook.ConversationTriggerInputSchema = map[string]interface{}{} },
+func TestValidateCapabilityCatalogRejectsMalformedCredentialGrants(t *testing.T) {
+	for name, grants := range map[string]map[string][]capability.OAuth2GrantSummary{
+		"blank credential":  {"": nil},
+		"padded credential": {" TOKEN ": nil},
+		"too many grants":   {"TOKEN": make([]capability.OAuth2GrantSummary, 33)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			value := valid()
-			mutate(value)
-			if err := ValidateCapabilityCatalog(CapabilityCatalog{RuntimeComposition: value}); err == nil {
-				t.Fatal("invalid runtime composition was accepted")
+			if err := ValidateCapabilityCatalog(CapabilityCatalog{AvailableCredentialGrants: grants}); err == nil {
+				t.Fatal("invalid credential grants were accepted")
 			}
 		})
-	}
-	if err := ValidateCapabilityCatalog(CapabilityCatalog{HostedExecution: &HostedExecutionCapability{ProtocolVersion: HostedExecutionProtocolV1}}); err == nil {
-		t.Fatal("hosted execution without token envelopes was accepted")
 	}
 }

@@ -90,7 +90,6 @@ func InstallManifest(ctx context.Context, registry ManifestInstallationRegistry,
 	desiredDeployment.PreviousVersion = ""
 	desiredDeployment.Revision = 1
 	desiredDeployment.Health = DeploymentHealth{}
-	desiredDeployment.Activation = nil
 	desiredDeployment.CreatedAt = desiredDeployment.CreatedAt.UTC()
 	desiredDeployment.UpdatedAt = desiredDeployment.UpdatedAt.UTC()
 	if desiredDeployment.RolloutStatus == "" {
@@ -258,7 +257,6 @@ func sameInstalledManifestDeployment(left, right *AgentDeployment) bool {
 	a.RolloutStatus, b.RolloutStatus = "", ""
 	a.SkillBindingIDs, b.SkillBindingIDs = nil, nil
 	a.Health, b.Health = DeploymentHealth{}, DeploymentHealth{}
-	a.Activation, b.Activation = nil, nil
 	a.Revision, b.Revision = 0, 0
 	a.CreatedAt = b.CreatedAt
 	a.UpdatedAt = b.UpdatedAt

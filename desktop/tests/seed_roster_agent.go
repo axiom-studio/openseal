@@ -30,7 +30,6 @@ func main() {
 	deployment.ID = "ui-roster-substitute"
 	deployment.DisplayName = "Research substitute"
 	deployment.RolloutStatus = agent.RolloutPaused
-	deployment.Activation = nil
 	deployment.Revision = 0
 	deployment.CreatedAt = time.Time{}
 	_, _, err = registry.CreateDeployment(ctx, deployment, "user", "test-fixture", "Synthetic roster verification")
