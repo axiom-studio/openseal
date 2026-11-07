@@ -86,6 +86,21 @@ func (f *interactionChangeFixture) list(t *testing.T, cursor string) *Conversati
 	return changes
 }
 
+// loopApprovalProposal records an approval-gated loop call of the fixture's
+// Run, as a run loop step proposes it while it holds the Run lease. It
+// returns the loop holding the Run and the Run as proposed from.
+func (f *interactionChangeFixture) loopApprovalProposal(t *testing.T, callID, idempotencyKey, eventID string) (*loopProposalFixture, *AgentRun) {
+	t.Helper()
+	loop := newLoopProposalFixture(t, f.store, f.run, "worker", time.Now().UTC())
+	proposal := sqliteApprovalProposal(loop.run, callID, idempotencyKey, eventID)
+	record := loopProposalRecord(proposal.Call, loop.run, loop.worker, loop.now, proposal.Event)
+	record.Approval = proposal.Approval
+	if _, err := f.store.(ActionStore).CreateActionProposal(f.ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	return loop, loop.run
+}
+
 func TestConversationChangesProjectApprovalsWithConversationContext(t *testing.T) {
 	for _, fixture := range interactionChangeStores() {
 		t.Run(fixture.name, func(t *testing.T) {
@@ -94,16 +109,9 @@ func TestConversationChangesProjectApprovalsWithConversationContext(t *testing.T
 			if !initial.ApprovalsChanged || initial.Approvals == nil || len(initial.Approvals) != 0 {
 				t.Fatalf("initial approvals = %#v", initial)
 			}
-			run, err := f.store.GetAgentRun(f.ctx, f.scope, f.run.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			loop, run := f.loopApprovalProposal(t, "deploy-call", "deploy-key", "deploy-event")
+			loop.parkOnApproval("approval-deploy-call")
 			actions := f.store.(ActionStore)
-			proposal := sqliteApprovalProposal(run, "deploy-call", "deploy-key", "deploy-event")
-			proposal.Run.WakeCondition.Reference = proposal.Approval.ID
-			if _, err := actions.CreateActionProposal(f.ctx, proposal); err != nil {
-				t.Fatal(err)
-			}
 			// Creating an approval advances the cursor, so a subscriber emits it.
 			requested := f.list(t, initial.Cursor)
 			if !requested.HasChanges || !requested.ApprovalsChanged || len(requested.Approvals) != 1 || requested.Cursor == initial.Cursor {
@@ -144,14 +152,8 @@ func TestConversationChangesRunScopedApprovalFilter(t *testing.T) {
 	for _, fixture := range interactionChangeStores() {
 		t.Run(fixture.name, func(t *testing.T) {
 			f := newInteractionChangeFixture(t, fixture.store(t))
-			run, err := f.store.GetAgentRun(f.ctx, f.scope, f.run.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			_, run := f.loopApprovalProposal(t, "call", "key", "event")
 			actions := f.store.(ActionStore)
-			if _, err := actions.CreateActionProposal(f.ctx, sqliteApprovalProposal(run, "call", "key", "event")); err != nil {
-				t.Fatal(err)
-			}
 			for _, test := range []struct {
 				ids  []string
 				want int
