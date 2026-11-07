@@ -1129,7 +1129,6 @@ type (
 	CallbackAdapterChoice                 = kernelapi.CallbackAdapterChoice
 	CredentialBindingChoice               = capability.CredentialBindingChoice
 	CredentialExternalIdentity            = capability.CredentialExternalIdentity
-	KernelApprovalRequirementReference    = kernelapi.ApprovalRequirementReference
 	KernelSkillActionList                 = kernelapi.SkillActionList
 	KernelSkillBindingList                = kernelapi.SkillBindingList
 	KernelSkillBindingMutationResult      = kernelapi.SkillBindingMutationResult

@@ -42,8 +42,6 @@ const (
 	ChannelsCapabilityVersion                  = "4"
 	TeamDefinitionsCapabilityID                = "team-definitions"
 	TeamDefinitionsCapabilityVersion           = "4"
-	WorkforceAuthoringCapabilityID             = "workforce-authoring"
-	WorkforceAuthoringCapabilityVersion        = "12"
 	WorkforceExecutionTargetsCapabilityID      = "workforce-execution-targets"
 	WorkforceExecutionTargetsCapabilityVersion = "1"
 	WorkforceBundlesCapabilityID               = "workforce-bundles"
@@ -212,14 +210,6 @@ type AgentDefinitionCapabilityFeatures struct {
 	PortableInstallation bool
 }
 
-// WorkforceAuthoringCapabilityFeatures describes host-wide authoring services.
-// Resource-specific lifecycle authority is composed into a contextual
-// capability response and must never be inferred from these feature flags.
-type WorkforceAuthoringCapabilityFeatures struct {
-	ChangeSets  bool
-	SkillSearch bool
-}
-
 // WorkforceExecutionTarget is the product-neutral placement surface used to
 // choose where authored work may execute. Embedding hosts retain cluster,
 // credential, and transport details behind the opaque target ID.
@@ -292,14 +282,12 @@ type CapabilityBlockingRequirement struct {
 // requested resource. It is never durable policy input and clients must not
 // infer authority from the underlying resource itself.
 type CapabilityContext struct {
-	ChangeSetID                  string                                       `json:"changeSetId,omitempty"`
-	Revision                     int64                                        `json:"revision,omitempty"`
-	EligibleApprovalRequirements []ApprovalRequirementReference               `json:"eligibleApprovalRequirements,omitempty"`
-	CredentialBindings           []capability.CredentialBindingChoice         `json:"credentialBindings,omitempty"`
-	BindingConfigurationFields   []capability.BindingConfigurationFieldChoice `json:"bindingConfigurationFields,omitempty"`
-	BlockingRequirements         []CapabilityBlockingRequirement              `json:"blockingRequirements,omitempty"`
-	ConversationGatewayAdapters  []ConversationGatewayAdapterChoice           `json:"conversationGatewayAdapters,omitempty"`
-	CallbackAdapters             []CallbackAdapterChoice                      `json:"callbackAdapters,omitempty"`
+	Revision                    int64                                        `json:"revision,omitempty"`
+	CredentialBindings          []capability.CredentialBindingChoice         `json:"credentialBindings,omitempty"`
+	BindingConfigurationFields  []capability.BindingConfigurationFieldChoice `json:"bindingConfigurationFields,omitempty"`
+	BlockingRequirements        []CapabilityBlockingRequirement              `json:"blockingRequirements,omitempty"`
+	ConversationGatewayAdapters []ConversationGatewayAdapterChoice           `json:"conversationGatewayAdapters,omitempty"`
+	CallbackAdapters            []CallbackAdapterChoice                      `json:"callbackAdapters,omitempty"`
 	// BuilderAgentID is the builder Agent's deployment id (agent-builder
 	// capability): the home box opens a builder chat with it.
 	BuilderAgentID string `json:"builderAgentId,omitempty"`
@@ -347,12 +335,6 @@ type ClawHubFile struct {
 	Path          string `json:"path"`
 	Size          int    `json:"size"`
 	ContentBase64 string `json:"contentBase64"`
-}
-
-type ApprovalRequirementReference struct {
-	EvaluationID string `json:"evaluationId"`
-	PolicyID     string `json:"policyId"`
-	Role         string `json:"role"`
 }
 
 type CreateTeamDeploymentRequest struct {
@@ -771,20 +753,6 @@ func TeamDefinitionsCapability(features TeamDefinitionCapabilityFeatures) Capabi
 	}
 	if features.ParticipationRecovery {
 		capability.Operations = append(capability.Operations, OperationRecoverParticipation)
-	}
-	return capability
-}
-
-func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures) Capability {
-	capability := Capability{
-		ID: WorkforceAuthoringCapabilityID, Version: WorkforceAuthoringCapabilityVersion, Available: true,
-		Operations: []string{OperationCompile},
-	}
-	if features.ChangeSets {
-		capability.Operations = append(capability.Operations, OperationPropose, OperationGet)
-	}
-	if features.SkillSearch {
-		capability.Operations = append(capability.Operations, OperationSearch)
 	}
 	return capability
 }
