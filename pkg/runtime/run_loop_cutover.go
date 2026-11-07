@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"sort"
@@ -12,12 +13,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// RunLoopCutoverCode names the cutover on the activity it writes: the actor
-// of the adopt and cancel events.
+// RunLoopCutoverCode names the cutover: the FailureExplanation.Code of every
+// Run it cancels (SPEC §2.8) and the actor of its adopt and cancel events.
 const RunLoopCutoverCode = "run_loop_cutover"
 
-// RunLoopCutoverMessage is posted once per chat lane whose request the
-// cutover stopped.
+// RunLoopCutoverMessage answers each unanswered chat request the cutover
+// stopped. It is also the canceled Run's FailureExplanation.Message.
 const RunLoopCutoverMessage = "This request was stopped by a platform update. Send it again to continue."
 
 // runLoopCutoverRetries bounds the re-reads after a revision race on one Run
@@ -64,9 +65,12 @@ type RunLoopCutoverReport struct {
 // run before any worker starts. Every non-terminal Run without an Engine
 // marker is either adopted (queued, never claimed, no step row: the loop can
 // start it fresh) or canceled through CommandAgentRun, which closes its
-// running step and open tool entries. A canceled chat request gets one
-// visible system message per lane, keyed like the canceled-run reconciler's
-// so neither doubles the other.
+// running step and open tool entries. A canceled Run carries
+// FailureExplanation{Code: run_loop_cutover}. Each unanswered chat request of
+// a canceled Run gets one visible system message, keyed like the canceled-run
+// reconciler's so neither doubles the other. A lane holds at most one
+// unanswered request per Run, so this is one message per request, not per
+// lane: two old Runs of one lane with different open requests each get one.
 //
 // It is idempotent: after a full pass no Run qualifies. It fails closed: any
 // error is returned and the caller must not start workers.
@@ -140,10 +144,18 @@ func (c *runLoopCutover) cutRun(ctx context.Context, ref RunLoopCutoverRef, repo
 }
 
 // adoptable reports whether the loop can start run fresh: it is queued, never
-// applied a Turn and has no agent_turns row.
+// applied a Turn, has no agent_turns row and has the session binding the loop
+// needs, or one adopt can derive. A conversation task Run without a session
+// cannot be bound here (its child session forks the chat at promotion), so
+// it is canceled.
 func (c *runLoopCutover) adoptable(ctx context.Context, run *AgentRun) (bool, error) {
 	if run.Status != AgentRunStatusQueued || run.LastAppliedTurn != 0 {
 		return false, nil
+	}
+	if needsLaneSession(run) {
+		if task, _ := run.Context[ConversationTaskContextKey].(string); task != "" {
+			return false, nil
+		}
 	}
 	turns, err := c.store.ListAgentTurns(ctx, AgentTurnFilter{Scope: run.Scope, RunID: run.ID, Limit: 1})
 	if err != nil {
@@ -156,16 +168,32 @@ func (c *runLoopCutover) adopt(ctx context.Context, current *AgentRun) error {
 	now := time.Now().UTC()
 	run := cloneAgentRun(current)
 	run.Engine = RunEngineLoop
+	if needsLaneSession(run) {
+		// Old chat Runs predate the lane binding; the loop opens the lane
+		// session only for a Run bound to it, as the scheduler binds new ones.
+		run.SessionID = conversationSessionID(run.Scope, run.ConcurrencyKey)
+	}
 	run.Revision = current.Revision + 1
 	run.UpdatedAt = now
 	event := &ActivityEvent{
 		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.engine_adopted", Severity: ActivitySeverityInfo,
 		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, ParentRunID: run.ParentRunID, TeamID: teamIDForRun(run),
 		Actor: runLoopCutoverActor, Summary: "Run moved to the updated agent runtime", Visibility: ActivityVisibilityPrivate, CreatedAt: now,
-		Payload: map[string]interface{}{"engine": RunEngineLoop, "code": RunLoopCutoverCode},
+		Payload: map[string]interface{}{"engine": RunEngineLoop, "code": RunLoopCutoverCode, "sessionId": run.SessionID},
 	}
 	_, err := c.store.UpdateAgentRunWithEvent(ctx, run, current.Revision, event, nil)
 	return err
+}
+
+// needsLaneSession reports an acting-Agent conversation Run with no session:
+// one created before chat Runs were bound to their lane session. Team routing
+// Runs (no assigned Agent) have no session.
+func needsLaneSession(run *AgentRun) bool {
+	return run.Kind == RunKindConversation && run.SessionID == "" && run.AssignedAgentID != ""
+}
+
+func runLoopCutoverExplanation() *RunFailureExplanation {
+	return &RunFailureExplanation{Kind: "execution", Code: RunLoopCutoverCode, Message: RunLoopCutoverMessage}
 }
 
 // cancel posts the lane's message first and then cancels the Run, so a pass
@@ -179,6 +207,15 @@ func (c *runLoopCutover) cancel(ctx context.Context, run *AgentRun, report *RunL
 	if posted {
 		report.Messages++
 	}
+	if run.FailureExplanation == nil || run.FailureExplanation.Code != RunLoopCutoverCode {
+		// Record the cause first; the cancel keeps it. A pass interrupted
+		// here cancels the Run on the next pass.
+		marked, err := c.markCanceledByCutover(ctx, run)
+		if err != nil {
+			return err
+		}
+		run = marked
+	}
 	if _, err := c.commands.CommandAgentRun(ctx, AgentRunCommandRequest{
 		Scope: run.Scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: AgentRunCommandCancel,
 		Actor: runLoopCutoverActor, Summary: "Stopped by a platform update", Visibility: ActivityVisibilityScope,
@@ -186,6 +223,24 @@ func (c *runLoopCutover) cancel(ctx context.Context, run *AgentRun, report *RunL
 		return err
 	}
 	return nil
+}
+
+func (c *runLoopCutover) markCanceledByCutover(ctx context.Context, current *AgentRun) (*AgentRun, error) {
+	now := time.Now().UTC()
+	run := cloneAgentRun(current)
+	run.FailureExplanation = runLoopCutoverExplanation()
+	run.Revision = current.Revision + 1
+	run.UpdatedAt = now
+	event := &ActivityEvent{
+		ID: uuid.NewString(), Scope: run.Scope, EventType: "run.cutover_stopping", Severity: ActivitySeverityInfo,
+		AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, RunID: run.ID, ParentRunID: run.ParentRunID, TeamID: teamIDForRun(run),
+		Actor: runLoopCutoverActor, Summary: "Run is being stopped by a platform update", Visibility: ActivityVisibilityPrivate, CreatedAt: now,
+		Payload: map[string]interface{}{"code": RunLoopCutoverCode},
+	}
+	if _, err := c.store.UpdateAgentRunWithEvent(ctx, run, current.Revision, event, nil); err != nil {
+		return nil, err
+	}
+	return run, nil
 }
 
 // postMessage answers a chat request the cutover stops, once per request.
@@ -324,20 +379,67 @@ func (s *SQLiteStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]RunLo
 	return scanRunLoopCutoverRefs(rows)
 }
 
-// WithRunLoopCutoverLock holds the schema migration lock for the whole pass,
-// so concurrently starting replicas serialize and the later one finds
-// nothing to do. The lock is held by its own transaction; the cutover's
-// writes use other connections.
+// WithRunLoopCutoverLock holds the schema migration advisory lock for the
+// whole pass, so concurrently starting replicas serialize (with each other
+// and with a migration) and the later one finds nothing to do. It is a
+// session-level lock on a dedicated connection that is not in a transaction,
+// so idle_in_transaction_session_timeout cannot end it; the cutover's writes
+// use other connections. The pass fails when the lock is no longer held at
+// its end.
 func (s *PostgresStore) WithRunLoopCutoverLock(ctx context.Context, fn func(context.Context) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
+	defer conn.Close()
+	key := "openseal:migrate:" + s.schema
+	if err := s.acquireRunLoopCutoverLock(ctx, conn, key); err != nil {
+		return err
+	}
+	runErr := fn(ctx)
+	// Unlock on a context that outlives a canceled pass so the session does
+	// not keep the lock; false means the lock was lost during the pass.
+	unlockCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	var released bool
+	unlockErr := conn.QueryRowContext(unlockCtx, `SELECT pg_advisory_unlock(hashtext($1))`, key).Scan(&released)
+	if unlockErr == nil && !released {
+		unlockErr = errors.New("cutover lock was lost during the pass")
+	}
+	if unlockErr != nil {
+		// Drop the connection rather than return it to the pool holding a
+		// lock or in an unknown state.
+		_ = conn.Raw(func(any) error { return driver.ErrBadConn })
+		return errors.Join(runErr, fmt.Errorf("release cutover lock: %w", unlockErr))
+	}
+	return runErr
+}
+
+func (s *PostgresStore) acquireRunLoopCutoverLock(ctx context.Context, conn *sql.Conn, key string) error {
+	startedAt := time.Now()
+	lockContext, cancel := context.WithTimeout(ctx, s.migrationLockTimeout)
+	defer cancel()
+	for {
+		var acquired bool
+		err := conn.QueryRowContext(lockContext, `SELECT pg_try_advisory_lock(hashtext($1))`, key).Scan(&acquired)
+		if err == nil && acquired {
+			return nil
+		}
+		if err == nil {
+			timer := time.NewTimer(s.migrationLockPollInterval)
+			select {
+			case <-lockContext.Done():
+				timer.Stop()
+				err = lockContext.Err()
+			case <-timer.C:
+				continue
+			}
+		}
+		if errors.Is(lockContext.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			return fmt.Errorf("acquire cutover lock: %w after %s", ErrPostgresMigrationLockTimeout, time.Since(startedAt).Round(time.Millisecond))
+		}
 		return fmt.Errorf("acquire cutover lock: %w", err)
 	}
-	return fn(ctx)
 }
 
 func (s *PostgresStore) ListRunLoopCutoverCandidates(ctx context.Context) ([]RunLoopCutoverRef, error) {
