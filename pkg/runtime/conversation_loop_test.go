@@ -207,7 +207,8 @@ func (f *chatLoopFixture) bind(run *AgentRun, producer StepProducer, actions ...
 		DeploymentID: "agent-1", DefinitionID: "agent-definition", DefinitionVersion: "1",
 		ModelProvider: string(ModelStepProviderAnthropic), Model: "chat-model", ModelActions: actions,
 		Producer: producer, Preparers: []StepPreparer{newRunStartPreparer(f.store, f.store)},
-		Authority: ControlAuthority{AgentID: "agent-1"},
+		// What ResolveControlAuthority grants the speaking Agent of a chat.
+		Authority: ControlAuthority{AgentID: "agent-1", CanAskUser: true, CanReact: true},
 	}
 	if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: f.store, Actions: f.actions, Activity: f.store}); err != nil {
 		f.t.Fatalf("bind conversation loop: %v", err)
@@ -400,6 +401,11 @@ func TestChatRunAnswersFromSessionNotGoal(t *testing.T) {
 		if session != binding.Session.ID || session != conversationSessionID(run.Scope, run.ConcurrencyKey) {
 			t.Fatalf("run session %q, binding %q", session, binding.Session.ID)
 		}
+		// The read receipt follows the committed watermark.
+		cursor, err := f.service.GetCursor(f.ctx, run.Scope, f.conversation.ID, ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"})
+		if err != nil || cursor == nil || cursor.ReadSequence < trigger.Sequence {
+			t.Fatalf("agent cursor = %#v, %v (trigger %d)", cursor, err, trigger.Sequence)
+		}
 	})
 }
 
@@ -560,6 +566,9 @@ func TestRunControlInvalidRunIdIsToolError(t *testing.T) {
 		if refusal := check(resume.Name, work.ID); !strings.Contains(refusal, "cannot be resumed now") {
 			t.Fatalf("resuming running work = %q", refusal)
 		}
+		if refusal := check(pause.Name, ""); refusal != "A runId from the active work in the run context is required." {
+			t.Fatalf("missing run id refusal = %q", refusal)
+		}
 		if refusal := check(other.Name, "nope"); refusal != "" {
 			t.Fatalf("a non run-control call was refused: %q", refusal)
 		}
@@ -691,14 +700,14 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 		if binding.Session == nil || binding.Session.Revision == 0 || binding.Session.Kind != AgentSessionKindConversation {
 			t.Fatalf("lane session not opened: %#v", binding.Session)
 		}
-		if _, ok := binding.Final.(*conversationFinalHandler); !ok || binding.ToolCheck == nil || binding.AfterTool == nil || len(binding.Preparers) != 2 {
+		if _, ok := binding.Final.(conversationObservedFinal); !ok || binding.ToolCheck == nil || binding.AfterTool == nil || len(binding.Preparers) != 2 {
 			t.Fatalf("seams = final %T check %v after %v preparers %d", binding.Final, binding.ToolCheck != nil, binding.AfterTool != nil, len(binding.Preparers))
 		}
 		if _, ok := binding.Preparers[0].(*runStartPreparer); !ok {
 			t.Fatalf("the run-start preparer must stay first: %T", binding.Preparers[0])
 		}
 		authority := binding.Authority
-		if !authority.CanReact || !authority.CanAskUser || authority.ExternalChannelReply || authority.VoiceCallStarted || authority.finalMode() != FinalModeDefault {
+		if !authority.CanReact || !authority.CanAskUser || authority.ExternalChannelReply || authority.finalMode() != FinalModeDefault {
 			t.Fatalf("authority = %#v", authority)
 		}
 		want := conversationSystemSections(f.conversation, run, false)
@@ -712,9 +721,107 @@ func TestConversationLoopBindingSetsSeams(t *testing.T) {
 		if again.Session.ID != binding.Session.ID || string(a) != string(b) {
 			t.Fatal("rebinding changed the session or the system sections")
 		}
-		spoken := ConversationLoopAuthority{Spoken: true, VoiceCallStarted: true}.apply(ControlAuthority{TaskStart: &HostedConversationTaskContext{CanStart: true}})
-		if spoken.finalMode() != FinalModeSpoken || spoken.TaskStart.CanStart {
-			t.Fatalf("spoken voice authority = %#v", spoken)
+		// apply only narrows: an authority that offers no ask or react tool
+		// (Deterministic, decision, review) does not gain one, and a decision
+		// or review authority gets no chat flags.
+		chat := ConversationLoopAuthority{CanAskConversationQuestion: true, CanReact: true, ExternalChannelReply: true, ApprovalMode: ConversationApprovalAuto}
+		if got := chat.apply(ControlAuthority{AgentID: "agent-1"}); got.CanAskUser || got.CanReact || !got.ExternalChannelReply || got.ApprovalMode != ConversationApprovalAuto {
+			t.Fatalf("deterministic authority = %#v", got)
 		}
+		if got := chat.apply(ControlAuthority{AgentID: "agent-1", FinalMode: FinalModeDecision}); got.CanAskUser || got.CanReact || got.ExternalChannelReply || got.ApprovalMode != "" {
+			t.Fatalf("decision authority = %#v", got)
+		}
+		if got := (ConversationLoopAuthority{}).apply(ControlAuthority{CanAskUser: true, CanReact: true}); got.CanAskUser || got.CanReact {
+			t.Fatalf("a chat without the ask right kept it: %#v", got)
+		}
+	})
+}
+
+// promotingChatLoopStore promotes a chat Run past the foreground timeout.
+type promotingChatLoopStore interface {
+	PromoteConversationTask(ctx context.Context, req ConversationTaskPromotionRequest) (*ConversationTaskResult, error)
+}
+
+func (f *chatLoopFixture) promote(run *AgentRun) {
+	f.t.Helper()
+	store, ok := f.store.(promotingChatLoopStore)
+	if !ok {
+		f.t.Fatalf("%T cannot promote", f.store)
+	}
+	result, err := store.PromoteConversationTask(f.ctx, ConversationTaskPromotionRequest{
+		Scope: run.Scope, RunID: run.ID, Now: run.CreatedAt.Add(ConversationTaskForegroundTimeout),
+	})
+	if err != nil || result == nil {
+		f.t.Fatalf("promote %s: %#v, %v", run.ID, result, err)
+	}
+}
+
+func TestPromotedBeforeFirstStepRendersTriggerAndRunContext(t *testing.T) {
+	for _, when := range []string{"after-bind", "before-bind"} {
+		t.Run(when, func(t *testing.T) {
+			forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
+				first := f.post("first", "user-1", "Draft the agenda.")
+				run1 := f.startRun(first)
+				f.drive(run1, f.bind(run1, &chatLoopProducer{answers: []string{"Agenda: intro, demo."}}))
+				lane := f.run(run1.ID).SessionID
+
+				// The second Run waited behind the first: it is promoted to a
+				// child of the non-empty lane before its first step.
+				second := f.post("second", "user-1", "Research the venues in depth.")
+				run2 := f.startRun(second)
+				var binding *TurnRunnerBinding
+				producer := &chatLoopProducer{answers: []string{"Venues: A, B."}}
+				if when == "after-bind" {
+					binding = f.bind(run2, producer)
+					f.promote(run2)
+				} else {
+					f.promote(run2)
+					binding = f.bind(f.run(run2.ID), producer)
+				}
+				f.drive(run2, binding)
+				if len(producer.paths) == 0 {
+					t.Fatal("the promoted Run made no model step")
+				}
+				child := f.run(run2.ID).SessionID
+				if child == lane || child != RunAgentSessionID(run2.Scope, run2.ID) {
+					t.Fatalf("run session %q, lane %q", child, lane)
+				}
+				chatLoopExpectShape(t, producer.paths[0],
+					"user:"+first.ID, "note:run_context:"+run1.ID, "assistant:"+run1.ID,
+					"user:"+second.ID, "note:run_context:"+run2.ID)
+				if note := producer.paths[0][4]; note.SessionID != child || !strings.Contains(chatLoopEntryText(note), second.ID) {
+					t.Fatalf("run_context note %q %q", note.SessionID, chatLoopEntryText(note))
+				}
+				for _, entry := range f.path(lane) {
+					if entry.RunID == run2.ID && !(entry.Type == SessionEntryNote && entry.Note.Kind == NoteTaskPromoted) {
+						t.Fatalf("the promoted Run wrote to the lane: %#v", entry)
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestRunPromotedMidFlightCountsAsStartedInChild(t *testing.T) {
+	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
+		trigger := f.post("trigger", "user-1", "Compile the quarterly numbers.")
+		run := f.startRun(trigger)
+		binding := f.bind(run, &chatLoopProducer{})
+		f.prepare(run, binding, 1)
+		f.promote(run)
+		promoted := f.bind(f.run(run.ID), &chatLoopProducer{})
+		if promoted.Session.Kind != AgentSessionKindRun {
+			t.Fatalf("promoted session = %#v", promoted.Session)
+		}
+		loop := promoted.Preparers[1].(*conversationLoop)
+		started, err := loop.runStarted(f.ctx, f.run(run.ID), promoted.Session)
+		if err != nil || !started {
+			t.Fatalf("started = %v, %v", started, err)
+		}
+		// The second step appends nothing to the child: StartRun does not run again.
+		if result := f.prepare(run, promoted, 2); result.Append != nil && len(result.Append.Entries) > 0 {
+			t.Fatalf("the child re-ran StartRun: %#v", result.Append.Entries)
+		}
+		chatLoopExpectShape(t, f.path(promoted.Session.ID), "user:"+trigger.ID, "note:run_context:"+run.ID)
 	})
 }
