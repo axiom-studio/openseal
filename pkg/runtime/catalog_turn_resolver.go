@@ -278,20 +278,22 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		base.RunbookOperations = nil
 	}
 	if _, requested := run.Context[OutreachInvocationContextKey]; requested {
-		runner, resolveErr := NewOutreachTurnRunner(catalog, actions)
+		calls, _ := catalog.(ActionCallReader)
+		producer, resolveErr := NewOutreachStepProducer(catalog, actions, calls)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve governed outreach for Agent %s: %w", deployment.ID, resolveErr)
 		}
-		base.Runner = runner
+		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "run:"+OutreachInvocationContextKey)
 		return &base, nil
 	}
 	if _, requested := run.Context["capabilityInvocation"]; requested {
-		runner, resolveErr := NewCapabilityInvocationTurnRunner(actions)
+		calls, _ := catalog.(ActionCallReader)
+		producer, resolveErr := NewCapabilityInvocationStepProducer(actions, calls)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve typed capability invocation for Agent %s: %w", deployment.ID, resolveErr)
 		}
-		base.Runner = runner
+		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "run:capabilityInvocation")
 		return &base, nil
 	}

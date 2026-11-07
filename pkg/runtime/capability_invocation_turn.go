@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,28 +12,46 @@ import (
 
 const capabilityInvocationContextKey = "capabilityInvocation"
 
-// CapabilityInvocationTurnRunner deterministically projects a typed scheduled
-// or event capability request into the normal governed action lifecycle. It
-// never executes a tool itself and never lets a model rename or widen the
-// capability selected by the durable Objective/Event template.
-type CapabilityInvocationTurnRunner struct {
-	actions []capability.ModelAction
+// capabilityInvocationToolCallID is the id of the one governed tool call a
+// capability invocation Run makes.
+const capabilityInvocationToolCallID = "capability-invocation"
+
+// ActionCallReader reads the authoritative ActionCall behind a governed tool
+// entry. Deterministic producers read governed output from it, never from the
+// (possibly bounded) tool result content.
+type ActionCallReader interface {
+	GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error)
 }
 
-func NewCapabilityInvocationTurnRunner(actions []capability.ModelAction) (*CapabilityInvocationTurnRunner, error) {
+// CapabilityInvocationStepProducer deterministically projects a typed
+// scheduled or event capability request into one governed tool call, then
+// completes the Run with that call's output. It never executes a tool itself
+// and never lets a model rename or widen the capability selected by the
+// durable Objective/Event template.
+type CapabilityInvocationStepProducer struct {
+	actions []capability.ModelAction
+	calls   ActionCallReader
+}
+
+func NewCapabilityInvocationStepProducer(actions []capability.ModelAction, calls ActionCallReader) (*CapabilityInvocationStepProducer, error) {
 	if len(actions) == 0 {
 		return nil, errors.New("deterministic capability invocation requires authorized actions")
 	}
-	return &CapabilityInvocationTurnRunner{actions: cloneHostedModelActions(actions)}, nil
+	if calls == nil {
+		return nil, errors.New("deterministic capability invocation requires the action-call store")
+	}
+	return &CapabilityInvocationStepProducer{actions: append([]capability.ModelAction(nil), actions...), calls: calls}, nil
 }
 
-func (r *CapabilityInvocationTurnRunner) RunTurn(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-	if r == nil || input.Run == nil || input.Turn == nil {
-		return nil, errors.New("deterministic capability invocation requires a durable Run and Turn")
+func (p *CapabilityInvocationStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+
+func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
+	if p == nil || in.Run == nil || in.Step == nil {
+		return StepOutput{}, errors.New("deterministic capability invocation requires a durable Run and step")
 	}
-	requested, ok := input.Run.Context[capabilityInvocationContextKey].(map[string]interface{})
+	requested, ok := in.Run.Context[capabilityInvocationContextKey].(map[string]interface{})
 	if !ok {
-		return nil, errors.New("Run has no typed capability invocation")
+		return StepOutput{}, errors.New("Run has no typed capability invocation")
 	}
 	skillID, _ := requested["skillId"].(string)
 	version, _ := requested["skillVersion"].(string)
@@ -40,52 +59,120 @@ func (r *CapabilityInvocationTurnRunner) RunTurn(_ context.Context, input TurnEx
 	arguments, _ := requested["inputs"].(map[string]interface{})
 	skillID, version, action = strings.TrimSpace(skillID), strings.TrimSpace(version), strings.TrimSpace(action)
 	var selected *capability.ModelAction
-	for index := range r.actions {
-		candidate := &r.actions[index]
+	for index := range p.actions {
+		candidate := &p.actions[index]
 		if candidate.SkillID == skillID && candidate.Version == version && candidate.Action == action {
 			if selected != nil {
-				return nil, errors.New("typed capability invocation matches multiple authorized actions")
+				return StepOutput{}, errors.New("typed capability invocation matches multiple authorized actions")
 			}
 			selected = candidate
 		}
 	}
 	if selected == nil {
-		return nil, fmt.Errorf("typed capability %s@%s/%s is not authorized", skillID, version, action)
+		return StepOutput{}, fmt.Errorf("typed capability %s@%s/%s is not authorized", skillID, version, action)
 	}
-	checkpoint := cloneMap(input.Run.Checkpoint)
-	if checkpoint == nil {
-		checkpoint = map[string]interface{}{}
+	result, call, err := producerToolResult(ctx, p.calls, in.Run, in.Path, capabilityInvocationToolCallID)
+	if err != nil {
+		return StepOutput{}, err
 	}
-	if last, resumed := checkpoint["lastAction"].(map[string]interface{}); resumed {
-		if (selected.BindingID != "" && (last["bindingId"] != selected.BindingID || fmt.Sprint(last["bindingRevision"]) != fmt.Sprint(selected.BindingRevision))) ||
-			last["skillId"] != selected.SkillID || last["skillVersion"] != selected.Version || last["action"] != selected.Action {
-			return nil, errors.New("durable action result does not match the typed capability invocation")
+	if result == nil {
+		if arguments == nil {
+			arguments = map[string]interface{}{}
 		}
-		status, _ := last["status"].(string)
-		if status != string(ActionCallStatusSucceeded) {
-			return &TurnOutcome{
-				OutputSummary: "Governed capability invocation failed", RunError: "governed capability invocation failed",
-				ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed,
-			}, nil
+		toolCall, err := producerGovernedToolCall(capabilityInvocationToolCallID, selected, arguments, &ToolCallDirective{
+			IdempotencyKey: "capability-invocation:" + in.Run.ID,
+			Summary:        "Execute governed " + selected.Name,
+		})
+		if err != nil {
+			return StepOutput{}, err
 		}
-		result := last["result"]
-		delete(checkpoint, "lastAction")
-		delete(checkpoint, "capabilityActionInputs")
-		return &TurnOutcome{
-			Decisions:     []TurnDecision{{Summary: "Consumed the authoritative governed capability result"}},
-			OutputSummary: "Governed capability invocation completed", ContinuationCheckpoint: checkpoint,
-			RunOutput: map[string]interface{}{"capabilityResult": result}, NextRunStatus: AgentRunStatusCompleted,
-		}, nil
+		return StepOutput{ToolCalls: []LoopToolCall{toolCall}}, nil
 	}
-	checkpoint["capabilityActionInputs"] = map[string]interface{}{"requested": cloneMap(arguments)}
-	return &TurnOutcome{
-		Decisions: []TurnDecision{{Summary: "Selected the exact capability declared by the durable Run template"}},
-		ProposedActions: []TurnAction{{
-			Type: "skill_action", Capability: selected.Name, Summary: "Execute governed " + selected.Name,
-			BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
-			IdempotencyKey: "capability-invocation:" + input.Run.ID, InputRef: "/capabilityActionInputs/requested",
-		}},
-		OutputSummary:          "Requested governed capability " + selected.Name,
-		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
-	}, nil
+	if call == nil {
+		return StepOutput{Failure: &LoopFailure{
+			Kind: "execution", Code: "capability_invocation_refused",
+			Message: "The scheduled capability " + selected.Name + " was refused before it ran.",
+		}}, nil
+	}
+	if !producerCallMatches(call, selected) {
+		return StepOutput{}, errors.New("durable action result does not match the typed capability invocation")
+	}
+	if call.Status != ActionCallStatusSucceeded || result.State != ToolEntryCompleted {
+		return StepOutput{Failure: &LoopFailure{
+			Kind: "execution", Code: "capability_invocation_failed",
+			Message: fmt.Sprintf("The scheduled capability %s did not complete (%s).", selected.Name, call.Status),
+		}}, nil
+	}
+	return StepOutput{Final: &LoopFinal{
+		Answer: "Completed " + selected.Name + ".",
+		Output: map[string]interface{}{"capabilityResult": result.Output},
+		Status: AgentRunStatusCompleted,
+	}}, nil
+}
+
+// producerGovernedToolCall builds a deterministic producer's governed tool
+// call pinned to the selected binding and Skill version.
+func producerGovernedToolCall(id string, selected *capability.ModelAction, arguments map[string]interface{}, directive *ToolCallDirective) (LoopToolCall, error) {
+	raw, err := json.Marshal(arguments)
+	if err != nil {
+		return LoopToolCall{}, fmt.Errorf("encode %s arguments: %w", selected.Name, err)
+	}
+	directive.BindingID = selected.BindingID
+	directive.BindingRevision = selected.BindingRevision
+	directive.ExpectedSkillVersion = selected.Version
+	return LoopToolCall{ID: id, Name: selected.Name, Arguments: raw, Directive: directive}, nil
+}
+
+func producerCallMatches(call *ActionCall, selected *capability.ModelAction) bool {
+	if selected.BindingID != "" && (call.BindingID != selected.BindingID || call.BindingRevision != selected.BindingRevision) {
+		return false
+	}
+	return call.SkillID == selected.SkillID && call.SkillVersion == selected.Version && call.Action == selected.Action
+}
+
+// producerToolResult returns the latest terminal tool entry the Run recorded
+// for toolCallID on its session path, with the ActionCall behind it (nil when
+// the call was refused before any row existed). It returns nil, nil, nil when
+// the producer has not asked for that call yet. An entry that is still open
+// is an error: the loop resumes open tool entries before it asks a
+// deterministic producer for the next step.
+func producerToolResult(ctx context.Context, calls ActionCallReader, run *AgentRun, path *AgentSessionPath, toolCallID string) (*LoopToolResult, *ActionCall, error) {
+	if path == nil {
+		return nil, nil, nil
+	}
+	var entry *SessionEntry
+	for index := len(path.Entries) - 1; index >= 0; index-- {
+		candidate := path.Entries[index]
+		if candidate != nil && candidate.Type == SessionEntryTool && candidate.Tool != nil &&
+			candidate.RunID == run.ID && candidate.ToolCallID == toolCallID {
+			entry = candidate
+			break
+		}
+	}
+	if entry == nil {
+		return nil, nil, nil
+	}
+	switch entry.State {
+	case ToolEntryCompleted, ToolEntryError, ToolEntryInterrupted:
+	default:
+		return nil, nil, fmt.Errorf("tool call %s is still %s", toolCallID, entry.State)
+	}
+	result := &LoopToolResult{ToolCallID: entry.ToolCallID, Name: entry.Tool.Name, State: entry.State, ActionCallID: entry.ActionCallID}
+	if entry.Tool.Result != nil {
+		result.Content = append([]ContentPart(nil), entry.Tool.Result.Content...)
+	}
+	if strings.TrimSpace(entry.ActionCallID) == "" {
+		return result, nil, nil
+	}
+	call, err := calls.GetActionCall(ctx, run.Scope, entry.ActionCallID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load action call %s of tool call %s: %w", entry.ActionCallID, toolCallID, err)
+	}
+	if call == nil || call.RunID != run.ID {
+		return nil, nil, fmt.Errorf("tool call %s points at an action call of another Run", toolCallID)
+	}
+	if call.Status == ActionCallStatusSucceeded {
+		result.Output = cloneMap(call.Output)
+	}
+	return result, call, nil
 }
