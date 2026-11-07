@@ -1169,14 +1169,6 @@ func (d *drive) storeError(ctx context.Context, st *stepState, err error, defaul
 	return exitResultPtr(d.errorExit(err))
 }
 
-// turnUsageFromModelStep converts a model step's usage to the step row's.
-func turnUsageFromModelStep(u ModelStepUsage) TurnUsage {
-	return TurnUsage{
-		InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens), Cost: u.Cost,
-		DurationMS: u.DurationMS, ProviderDurationMS: u.ProviderDurationMS,
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Observers (fenced by the step lease and the Run lease)
 
