@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -42,10 +43,23 @@ func TestQuotedPhotoHistoryImportsMediaIntoModelContext(t *testing.T) {
 	if len(messages) != 2 || !messages[0].Historical || messages[1].ReplyToMessageID != messages[0].ID {
 		t.Fatalf("messages: %#v", messages)
 	}
-	runner := &ConversationRunTurnRunner{artifacts: store, config: ConversationRunTurnRunnerConfig{AttachmentContent: content}}
-	attachments := runner.conversationAttachments(t.Context(), conversation, messages[1], messages)
-	if len(attachments) != 1 || attachments[0].media == nil || attachments[0].Status != "image_context" || attachments[0].MessageID != messages[0].ID || photo.calls != 1 {
-		t.Fatalf("media: %#v calls=%d", attachments, photo.calls)
+	// The quoted parent reaches a chat session as a user entry whose image
+	// part the step renders (catch-up's entry builder with the runner's
+	// attachment reader).
+	reader := &conversationAttachmentReader{artifacts: store, content: content}
+	session := &AgentSession{ID: "session-1", Scope: endpoint.Scope, ConversationID: conversation.ID, AgentID: "agent"}
+	entry := readConversationMessageEntry(t.Context(), reader, conversation, session, "run-1", messages[0], false)
+	var images []ContentPart
+	for _, part := range entry.User.Content {
+		if part.Type == ContentPartImage {
+			images = append(images, part)
+		}
+	}
+	if len(images) != 1 || images[0].MediaType != "image/png" || images[0].ArtifactID == "" || entry.User.MessageID != messages[0].ID || photo.calls != 1 {
+		t.Fatalf("quoted photo entry: %#v calls=%d", entry.User.Content, photo.calls)
+	}
+	if text := entry.User.Content[0].Text; !strings.Contains(text, "historical") || !strings.Contains(text, "Attached: photo.png") {
+		t.Fatalf("quoted photo header: %q", text)
 	}
 }
 
