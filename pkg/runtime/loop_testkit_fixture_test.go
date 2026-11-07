@@ -26,6 +26,7 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
@@ -506,7 +507,8 @@ func (f *loopFixture) chatRun(conversation *Conversation, message *ChannelMessag
 	member := f.config.team[0]
 	request := conversationAgentRunRequest(conversation, message)
 	request.AssignedAgentID = member
-	request.ConcurrencyKey = conversationRunLane(conversation.ID, "", member)
+	threadRoot, _ := request.Context["threadRootMessageId"].(string)
+	request.ConcurrencyKey = conversationRunLane(conversation.ID, threadRoot, member)
 	request.SessionID = conversationSessionID(f.scope, request.ConcurrencyKey)
 	request.IdempotencyKey = "member-" + member + "-" + message.ID
 	created, err := f.portfolio.CreateAgentRun(f.ctx, request)
@@ -646,9 +648,11 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 		}
 		authority = workspace.ChatAuthority(workspaceID)
 	}
-	control, err := ResolveControlAuthority(f.ctx, ControlAuthorityInput{
-		Run: run, DeploymentID: run.AssignedAgentID, Runs: f.store, Conversations: f.chats,
-	})
+	input := ControlAuthorityInput{Run: run, DeploymentID: run.AssignedAgentID, Runs: f.store, Conversations: f.chats}
+	if len(f.config.team) > 0 {
+		input.Catalog = loopFixtureTeamCatalog{members: f.config.team}
+	}
+	control, err := ResolveControlAuthority(f.ctx, input)
 	if err != nil {
 		f.t.Fatalf("resolve control authority: %v", err)
 	}
@@ -685,6 +689,26 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 	return binding
 }
 
+// loopFixtureTeamCatalog is the Team roster the control authority reads for a
+// Team-owned Run. It serves only the Team deployment: the fixture's members
+// are not delegation targets of each other (the rest of the catalog is nil).
+type loopFixtureTeamCatalog struct {
+	AgentTurnCatalog
+	members []string
+}
+
+func (c loopFixtureTeamCatalog) GetTeamDeployment(_ context.Context, scope skill.ScopeReference, id string) (*kernelteam.Deployment, error) {
+	roster := make([]kernelteam.RosterAssignment, 0, len(c.members))
+	for _, member := range c.members {
+		roster = append(roster, kernelteam.RosterAssignment{AgentDeploymentID: member})
+	}
+	return &kernelteam.Deployment{ID: id, Status: kernelteam.DeploymentActive, Roster: roster}, nil
+}
+
+func (loopFixtureTeamCatalog) GetTeamDefinition(context.Context, string, string) (*kernelteam.Definition, error) {
+	return nil, errors.New("the fixture Team has no definition")
+}
+
 // openSession returns the Run's session, creating it on the first claim: a
 // conversation session for a chat Run, else a run session seeded with the
 // goal. (The worker's first-claim session creation does the same.)
@@ -701,8 +725,10 @@ func (f *loopFixture) openSession(run *AgentRun, conversationID string) *AgentSe
 		}
 		return session
 	case conversationID != "":
+		// External-channel and thread Runs work in their thread lane.
+		threadRoot, _ := run.Context["threadRootMessageId"].(string)
 		opened, err := sessions.OpenConversationAgentSession(f.ctx, OpenConversationAgentSessionRequest{
-			Scope: f.scope, ConversationID: conversationID, AgentID: run.AssignedAgentID, RunID: run.ID, Lease: lease, Now: now,
+			Scope: f.scope, ConversationID: conversationID, ThreadRootID: threadRoot, AgentID: run.AssignedAgentID, RunID: run.ID, Lease: lease, Now: now,
 		})
 		if err != nil {
 			f.t.Fatalf("open conversation session: %v", err)
