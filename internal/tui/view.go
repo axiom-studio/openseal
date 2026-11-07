@@ -125,8 +125,8 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeTeamAmendmentActivate && !m.supportsTeamDefinition(kernelapi.OperationActivateAmendment) {
 		return m.renderUnavailableComposer(width, "Activate Team amendment", "This server does not advertise Team amendment activation.")
 	}
-	if m.mode == modeWorkforceAuthoring && !m.supportsWorkforceAuthoring() {
-		return m.renderUnavailableComposer(width, "Create Agents and Teams", "This server does not advertise workforce authoring.")
+	if m.mode == modeAgentBuilderPrompt && m.authoringAutomationFocus == nil && !m.supportsAgentBuilder() {
+		return m.renderUnavailableComposer(width, "New agent", "This server has no agent builder.")
 	}
 	if m.mode == modeWorkforceBundleInspect && (!m.workforceBundleCapability.Supports(kernelapi.OperationInspect) || m.workforceBundleClient == nil) {
 		return m.renderUnavailableComposer(width, "Inspect workforce bundle", "This server does not advertise portable workforce bundle inspection.")
@@ -188,7 +188,7 @@ func (m *Model) renderComposer(width int) string {
 	if isConversationGatewayMode(m.mode) && !m.supportsConversationGateway(mapConversationGatewayModeOperation(m.mode)) {
 		return m.renderUnavailableComposer(width, "Manage message integration", "This server does not advertise the required integration lifecycle operation.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && !isConversationGatewayMode(m.mode) && m.mode != modeWorkforceAuthoring && m.mode != modeWorkforceBundleInspect && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceConversationRouting && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && !isConversationGatewayMode(m.mode) && m.mode != modeAgentBuilderPrompt && m.mode != modeWorkforceBundleInspect && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceConversationRouting && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -254,20 +254,15 @@ func (m *Model) renderComposer(width int) string {
 		title = "Activate Team amendment"
 		description = "Atomically activate this exact reviewed definition and reload authoritative Team state."
 		owner = "Optimistic revision · immutable activation audit"
-	case modeWorkforceAuthoring:
+	case modeAgentBuilderPrompt:
 		if focus := m.authoringAutomationFocus; focus != nil {
 			title = "Refine deterministic operation"
 			description = fmt.Sprintf("Describe the change to %s on %s. OpenSeal will preserve unrelated candidate state.", focus.Entrypoint, focus.AgentName)
 			owner = fmt.Sprintf("Scoped review · %s@%s · authoring never activates state", focus.RunbookID, focus.RunbookVersion)
-		} else if m.authoringResult == nil {
-			title = "Create Agents and Teams"
-			description = "Describe outcomes, roles, boundaries, and collaboration. Review the exact candidate before activation."
 		} else {
-			title = "Refine the workforce"
-			description = "Describe a change. OpenSeal will compile a new immutable candidate and show its governed diff."
-		}
-		if m.authoringAutomationFocus == nil {
-			owner = "Governed review · authoring never activates state"
+			title = "New agent"
+			description = "Describe the agent you need. The builder replies in a chat, asks what it needs, and shows a card to review."
+			owner = "Nothing is created until you approve the card"
 		}
 	case modeWorkforceBundleInspect:
 		title = "Inspect portable workforce"
@@ -432,8 +427,10 @@ func (m *Model) renderComposer(width int) string {
 	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(description) + "\n\n" + m.editor.View() + "\n\n" + mutedStyle.Render(owner)
 	if m.focus == focusComposer {
 		actionHint := "Ctrl+S submit  ·  Tab details"
-		if m.mode == modeWorkforceAuthoring {
-			actionHint = "Enter create proposal  ·  Shift+Enter new line  ·  Tab details"
+		if m.mode == modeAgentBuilderPrompt && m.authoringAutomationFocus != nil {
+			actionHint = "Enter save change  ·  Shift+Enter new line  ·  Tab details"
+		} else if m.mode == modeAgentBuilderPrompt {
+			actionHint = "Enter start chat  ·  Shift+Enter new line  ·  Tab details"
 		} else if m.mode == modeChannelPost {
 			actionHint = "Enter send  ·  Shift+Enter new line  ·  Tab conversation"
 		}

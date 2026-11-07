@@ -2182,7 +2182,7 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 	}
 	model := newTestModel(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
-	if model.section != sectionAuthoring || model.mode != modeWorkforceAuthoring || !strings.Contains(model.View(), "Create Agents and Teams") {
+	if model.section != sectionAuthoring || model.mode != modeAgentBuilderPrompt {
 		t.Fatalf("authoring was not the primary capability:\n%s", model.View())
 	}
 	model.editor.SetValue("Create a customer research Team")
@@ -2211,7 +2211,7 @@ func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing
 		fake.authoringRequests[1].Existing == nil || fake.authoringRequests[1].Existing.Team.ID != "research" {
 		t.Fatalf("follow-up authoring request = %#v", fake.authoringRequests)
 	}
-	if model.editor.Value() != "" || !strings.Contains(model.editor.Placeholder, "change") {
+	if model.editor.Value() != "" {
 		t.Fatalf("follow-up composer = %q / %q", model.editor.Value(), model.editor.Placeholder)
 	}
 	if !strings.Contains(model.View(), "1 field changes") {
@@ -2455,7 +2455,7 @@ func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T)
 	if len(fake.refinementKeys) != 2 || fake.refinementKeys[1] != firstKey {
 		t.Fatalf("refinement retry keys = %#v", fake.refinementKeys)
 	}
-	if model.authoringChangeSet != &evaluating || model.mode != modeWorkforceAuthoring {
+	if model.authoringChangeSet != &evaluating || model.mode != modeAgentBuilderPrompt {
 		t.Fatalf("successful refinement did not resume evaluation: change=%#v mode=%v", model.authoringChangeSet, model.mode)
 	}
 }
@@ -4737,4 +4737,223 @@ func testRun(id string, status runtime.AgentRunStatus, revision int64) *runtime.
 func testDigest(value string) string {
 	digest := sha256.Sum256([]byte(value))
 	return "sha256:" + hex.EncodeToString(digest[:])
+}
+
+type fakeAgentBuilderKernelClient struct {
+	*fakeChannelKernelClient
+	builderStarts    []kernelapi.StartAgentBuilderConversationRequest
+	builderErrors    []error
+	builderApprovals []*runtime.ApprovalCheckpoint
+}
+
+func (f *fakeAgentBuilderKernelClient) StartAgentBuilderConversation(_ context.Context, request kernelapi.StartAgentBuilderConversationRequest) (*kernelapi.StartAgentBuilderConversationResponse, error) {
+	f.builderStarts = append(f.builderStarts, request)
+	if len(f.builderErrors) > 0 {
+		err := f.builderErrors[0]
+		f.builderErrors = f.builderErrors[1:]
+		if err != nil {
+			return nil, err
+		}
+	}
+	conversation := testConversation("builder-chat", "New agent", 1, 2)
+	conversation.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: runtime.AgentBuilderDeploymentID}
+	conversation.Origin = &runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentBuilder, ID: request.IdempotencyKey}
+	message := &runtime.ChannelMessage{
+		ID: "builder-prompt", Scope: request.Scope, ConversationID: conversation.ID, Sequence: 1,
+		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "local-operator"},
+		Intent: runtime.MessageIntentUpdate, Content: request.Prompt, BuilderParameters: &request.Parameters,
+		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, CreatedAt: time.Now(),
+	}
+	f.conversations = append(f.conversations, conversation)
+	f.messages = []*runtime.ChannelMessage{message}
+	return &kernelapi.StartAgentBuilderConversationResponse{Conversation: conversation, Message: message}, nil
+}
+
+// ListConversations and ListActionApprovals honour the owner filter, like the
+// daemon: the builder chat and its cards belong to the builder Agent.
+func (f *fakeAgentBuilderKernelClient) ListConversations(_ context.Context, filter runtime.ConversationFilter) ([]*runtime.Conversation, error) {
+	var conversations []*runtime.Conversation
+	for _, conversation := range f.conversations {
+		if filter.Owner == nil || conversation.Owner == *filter.Owner {
+			conversations = append(conversations, conversation)
+		}
+	}
+	return conversations, nil
+}
+
+func (f *fakeAgentBuilderKernelClient) ListActionApprovals(ctx context.Context, filter runtime.ApprovalFilter) ([]*runtime.ApprovalCheckpoint, error) {
+	if filter.Owner != nil && filter.Owner.ID == runtime.AgentBuilderDeploymentID {
+		f.approvalFilters = append(f.approvalFilters, filter)
+		return f.builderApprovals, nil
+	}
+	return f.fakeKernelClient.ListActionApprovals(ctx, filter)
+}
+
+func (f *fakeAgentBuilderKernelClient) GetActionApproval(ctx context.Context, scope runtime.Scope, id string) (*runtime.ApprovalCheckpoint, error) {
+	for _, approval := range f.builderApprovals {
+		if approval.ID == id {
+			return approval, nil
+		}
+	}
+	return f.fakeKernelClient.GetActionApproval(ctx, scope, id)
+}
+
+func (f *fakeAgentBuilderKernelClient) ResolveActionApproval(_ context.Context, _ runtime.Scope, id string, decision kernelapi.ResolveActionApprovalRequest, key string) (*runtime.ApprovalResolutionResult, error) {
+	f.actionDecisions = append(f.actionDecisions, decision)
+	f.actionDecisionKeys = append(f.actionDecisionKeys, key)
+	approval, err := f.GetActionApproval(context.Background(), runtime.Scope{}, id)
+	if err != nil {
+		return nil, err
+	}
+	approval.Revision++
+	approval.Status = runtime.ApprovalStatusRejected
+	if decision.Decision == runtime.ApprovalDecisionApprove {
+		approval.Status = runtime.ApprovalStatusApproved
+	}
+	return &runtime.ApprovalResolutionResult{Approval: approval, Resolved: true}, nil
+}
+
+func newAgentBuilderTestClient() *fakeAgentBuilderKernelClient {
+	return &fakeAgentBuilderKernelClient{fakeChannelKernelClient: &fakeChannelKernelClient{
+		fakeKernelClient: &fakeKernelClient{document: kernelapi.NewCapabilityDocument(
+			kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID),
+			kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{}),
+			kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{Resolution: true}),
+		)},
+		conversations: []*runtime.Conversation{testConversation("team-room", "team-room", 0, 1)},
+	}}
+}
+
+func builderCard(id string, scope runtime.Scope) *runtime.ApprovalCheckpoint {
+	now := time.Now()
+	return &runtime.ApprovalCheckpoint{
+		ID: id, Scope: scope, RunID: "builder-run", ActionCallID: "call-" + id,
+		Status: runtime.ApprovalStatusPending, Risk: skill.RiskLevelWrite, Summary: "Create the agent Support triage",
+		ProposedAction: map[string]interface{}{
+			"skillId": "openseal.agents", "skillVersion": "1.5.0", "action": "create_agent",
+			"resourceType": "agent_profile", "operation": "create_agent",
+			"agent": map[string]interface{}{"displayName": "Support triage"},
+		},
+		ConversationContext: &runtime.ApprovalConversationContext{ConversationID: "builder-chat"},
+		EligibleApprovers:   []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}},
+		ExpiresAt:           now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+}
+
+func TestAgentBuilderNewAgentOpensBuilderChat(t *testing.T) {
+	fake := newAgentBuilderTestClient()
+	fake.builderErrors = []error{errors.New("daemon restarting")}
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionAuthoring || model.mode != modeAgentBuilderPrompt || !strings.Contains(model.View(), "New agent") {
+		t.Fatalf("new agent prompt section=%v mode=%v view:\n%s", model.section, model.mode, model.View())
+	}
+
+	model.editor.SetValue("  An agent that triages support email  ")
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	applyCommand(t, model, command)
+	if len(fake.builderStarts) != 1 || model.mode != modeAgentBuilderPrompt || model.editor.Value() == "" || !strings.Contains(model.status, "kept for retry") {
+		t.Fatalf("failed start starts=%#v mode=%v editor=%q status=%q", fake.builderStarts, model.mode, model.editor.Value(), model.status)
+	}
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	applyCommand(t, model, command)
+
+	if len(fake.builderStarts) != 2 {
+		t.Fatalf("starts = %#v", fake.builderStarts)
+	}
+	first, retry := fake.builderStarts[0], fake.builderStarts[1]
+	if retry.Prompt != "An agent that triages support email" || retry.Parameters != (runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent}) ||
+		retry.Scope != model.config.Scope || retry.SpaceID != "" || retry.IdempotencyKey == "" || retry.IdempotencyKey != first.IdempotencyKey {
+		t.Fatalf("builder start first=%#v retry=%#v", first, retry)
+	}
+	if len(fake.postRequests) != 0 || len(fake.createConversationRequests) != 0 {
+		t.Fatalf("new agent wrote a channel itself: posts=%#v creates=%#v", fake.postRequests, fake.createConversationRequests)
+	}
+	if model.section != sectionChannels || model.mode != modeChannelPost || model.selectedConversation != "builder-chat" ||
+		model.editor.Value() != "" || model.pendingAgentBuilderKey != "" {
+		t.Fatalf("builder chat not open section=%v mode=%v selected=%q editor=%q key=%q", model.section, model.mode, model.selectedConversation, model.editor.Value(), model.pendingAgentBuilderKey)
+	}
+	if record := model.selectedConversationRecord(); record == nil || record.ID != "builder-chat" || len(model.conversations) != 2 {
+		t.Fatalf("conversations = %#v", model.conversations)
+	}
+	if view := model.View(); !strings.Contains(view, "An agent that triages support email") {
+		t.Fatalf("builder chat view missing the request:\n%s", view)
+	}
+
+	// The reply goes into the builder chat through the existing channel post.
+	model.focus = focusComposer
+	model.editor.SetValue("Mostly billing questions")
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	applyCommand(t, model, command)
+	if len(fake.postRequests) != 1 || fake.postKeys[0] == "" || fake.postRequests[0].Content != "Mostly billing questions" || model.selectedConversation != "builder-chat" {
+		t.Fatalf("reply posts=%#v selected=%q", fake.postRequests, model.selectedConversation)
+	}
+}
+
+func TestAgentBuilderCardIsApprovedThroughActionApproval(t *testing.T) {
+	fake := newAgentBuilderTestClient()
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.editor.SetValue("An agent that triages support email")
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	applyCommand(t, model, command)
+
+	create := builderCard("card-create", model.config.Scope)
+	reject := builderCard("card-update", model.config.Scope)
+	reject.ProposedAction["action"], reject.ProposedAction["operation"] = "update_agent", "update_agent"
+	fake.builderApprovals = []*runtime.ApprovalCheckpoint{create, reject}
+	applyCommand(t, model, model.loadActionApprovals())
+	builderFilters := 0
+	for _, filter := range fake.approvalFilters {
+		if filter.Owner != nil && *filter.Owner == (runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: runtime.AgentBuilderDeploymentID}) {
+			builderFilters++
+		}
+	}
+	if builderFilters == 0 || len(model.actionApprovals) != 2 {
+		t.Fatalf("builder cards not listed filters=%#v approvals=%#v", fake.approvalFilters, model.actionApprovals)
+	}
+
+	model.section = sectionApprovals
+	model.focus = focusPanel
+	model.actionApprovalSelected, model.selectedActionApproval = 0, create.ID
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if model.mode != modeApprovalApprove {
+		t.Fatalf("approve mode = %v", model.mode)
+	}
+	model.editor.SetValue("This is the agent I asked for")
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+
+	model.section = sectionApprovals
+	model.focus = focusPanel
+	model.actionApprovalSelected, model.selectedActionApproval = 1, reject.ID
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if model.mode != modeApprovalReject {
+		t.Fatalf("reject mode = %v", model.mode)
+	}
+	model.editor.SetValue("Not this change")
+	_, command = model.handleKey(tea.KeyMsg{Type: tea.KeyCtrlS})
+	applyCommand(t, model, command)
+
+	if len(fake.actionDecisions) != 2 ||
+		fake.actionDecisions[0].Decision != runtime.ApprovalDecisionApprove || fake.actionDecisions[0].Principal != (runtime.ApprovalPrincipal{Type: "user", ID: "local"}) ||
+		fake.actionDecisions[1].Decision != runtime.ApprovalDecisionReject ||
+		create.Status != runtime.ApprovalStatusApproved || reject.Status != runtime.ApprovalStatusRejected {
+		t.Fatalf("decisions=%#v create=%s reject=%s", fake.actionDecisions, create.Status, reject.Status)
+	}
+}
+
+func TestAgentBuilderPromptUnavailableWithoutBuilder(t *testing.T) {
+	fake := newAgentBuilderTestClient()
+	fake.document = kernelapi.NewCapabilityDocument(kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{}))
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	model.section, model.mode = sectionAuthoring, modeAgentBuilderPrompt
+	model.editor.SetValue("An agent that triages support email")
+	if command := model.submitAgentBuilderPrompt(); command != nil || len(fake.builderStarts) != 0 {
+		t.Fatalf("started without the agent-builder capability: %#v", fake.builderStarts)
+	}
+	if !strings.Contains(model.View(), "This server has no agent builder.") {
+		t.Fatalf("view:\n%s", model.View())
+	}
 }
