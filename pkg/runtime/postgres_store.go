@@ -373,15 +373,6 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateExternalConversationGateways(ctx, tx); err != nil {
 		return err
 	}
-	if err := s.migrateAuthoringChangeSets(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.migrateSensitiveAuthoringPrompts(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.migrateActivationContinuations(ctx, tx); err != nil {
-		return err
-	}
 	if err := s.migrateSkillBindingLifecycleRepair(ctx, tx); err != nil {
 		return err
 	}

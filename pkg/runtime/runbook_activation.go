@@ -109,7 +109,7 @@ func verifyActivatedRunbook(ctx context.Context, store skill.CatalogStore, scope
 			definitions[binding.ID] = resolved
 		}
 	}
-	report := runbook.Verify(definition.Runbook, workforceRunbookVerificationEnvironment(definition, bindings, definitions))
+	report := runbook.Verify(definition.Runbook, runbookVerificationEnvironment(definition, bindings, definitions))
 	return &report
 }
 
@@ -711,4 +711,90 @@ func cloneRunbookActivation(value *RunbookActivation) *RunbookActivation {
 		clone.NextRunAt = &due
 	}
 	return &clone
+}
+
+func runbookVerificationEnvironment(definition *kernelagent.AgentDefinition, bindings []*capability.Binding, definitions map[string]*capability.Definition) runbook.VerificationEnvironment {
+	environment := runbook.VerificationEnvironment{}
+	if definition == nil {
+		return environment
+	}
+	approvalRoutes := len(definition.Authority.ApprovalDestinations) > 0
+	standing := make(map[string]bool, len(definition.Authority.StandingGrants))
+	for _, grant := range definition.Authority.StandingGrants {
+		// A destination-scoped external grant depends on runtime arguments and
+		// therefore cannot statically bypass approval. An unconstrained exact
+		// action grant can.
+		if strings.TrimSpace(grant.ExternalOperation) == "" && strings.TrimSpace(grant.ResourcePrefix) == "" {
+			standing[grant.SkillID+"\x00"+grant.Action] = true
+		}
+	}
+	for _, binding := range bindings {
+		if binding == nil {
+			continue
+		}
+		skillDefinition := definitions[binding.ID]
+		if skillDefinition == nil {
+			continue
+		}
+		allowed := make(map[string]bool, len(binding.AllowedActions))
+		for _, action := range binding.AllowedActions {
+			allowed[action] = true
+		}
+		actionNames := make([]string, 0, len(skillDefinition.Actions))
+		for actionName := range skillDefinition.Actions {
+			actionNames = append(actionNames, actionName)
+		}
+		sort.Strings(actionNames)
+		for _, actionName := range actionNames {
+			action := canonicalActionReview(skillDefinition, skillDefinition.Actions[actionName])
+			requiresApproval := runbookActionRequiresApproval(definition, binding.SkillID, actionName, action)
+			environment.Actions = append(environment.Actions, runbook.ResolvedAction{
+				SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
+				Action: actionName, BindingID: binding.ID, BindingRevision: binding.Revision,
+				Enabled: !binding.Disabled, Allowed: allowed[actionName], MaximumRisk: binding.MaximumRisk,
+				Risk: action.Risk, SideEffect: action.SideEffect, Idempotency: action.Idempotency,
+				RequiredCredentials: append([]capability.CredentialRequirement(nil), action.Credentials...),
+				BoundCredentials:    cloneCredentialReferences(binding.Credentials), CompensationAction: action.CompensationAction,
+				FinalizerAction: action.FinalizerAction, RequiresApproval: requiresApproval,
+				ApprovalRoutePresent: !requiresApproval || approvalRoutes || standing[binding.SkillID+"\x00"+actionName] && !action.AlwaysReview(),
+			})
+		}
+	}
+	return environment
+}
+
+func runbookActionRequiresApproval(definition *kernelagent.AgentDefinition, skillID, actionName string, action capability.Action) bool {
+	if definition == nil || action.SideEffect == capability.SideEffectNone || action.SideEffect == capability.SideEffectRead {
+		return false
+	}
+	if action.AlwaysReview() {
+		return true
+	}
+	for _, grant := range definition.Authority.StandingGrants {
+		if grant.SkillID == skillID && grant.Action == actionName && strings.TrimSpace(grant.ExternalOperation) == "" && strings.TrimSpace(grant.ResourcePrefix) == "" {
+			return false
+		}
+	}
+	threshold := definition.Authority.RequireApprovalAt
+	if threshold == "" {
+		return true
+	}
+	return runbookRiskRank(action.Risk) >= runbookRiskRank(threshold)
+}
+
+func runbookRiskRank(risk capability.RiskLevel) int {
+	switch risk {
+	case capability.RiskLevelRead:
+		return 1
+	case capability.RiskLevelWrite:
+		return 2
+	case capability.RiskLevelExternal:
+		return 3
+	case capability.RiskLevelProduction:
+		return 4
+	case capability.RiskLevelDestructive:
+		return 5
+	default:
+		return 0
+	}
 }

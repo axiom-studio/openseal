@@ -17,12 +17,10 @@ func TestTeamRoutingSQLiteMigrationRemovesCoordinationPolicy(t *testing.T) {
 	for _, statement := range []string{
 		`CREATE TABLE team_definitions (payload TEXT NOT NULL)`,
 		`CREATE TABLE team_definition_amendments (payload TEXT NOT NULL)`,
-		`CREATE TABLE workforce_change_sets (payload TEXT NOT NULL)`,
 		`INSERT INTO team_definitions(payload) VALUES
 		 ('{"id":"a","coordination":{"maximumSpeakersPerRound":2,"quietByDefault":true}}'),
 		 ('{"id":"b","routing":{"notes":"Maya owns pricing"}}')`,
 		`INSERT INTO team_definition_amendments(payload) VALUES ('{"candidate":{"id":"a","coordination":{"requireRoleRelevance":true}}}')`,
-		`INSERT INTO workforce_change_sets(payload) VALUES ('{"result":{"candidate":{"team":{"coordination":{"suppressDuplicateContent":true}}}}}')`,
 	} {
 		if _, err = db.Exec(statement); err != nil {
 			t.Fatal(err)

@@ -85,7 +85,7 @@ func (h connectOnceMigrationHarness) payloads(t *testing.T) map[string]string {
 		column = "payload"
 	}
 	result := map[string]string{}
-	for _, table := range []string{"run_event_waits", "action_calls", "team_definition_amendments", "workforce_change_sets", "external_conversation_gateways", "runbook_activations"} {
+	for _, table := range []string{"run_event_waits", "action_calls", "team_definition_amendments", "external_conversation_gateways", "runbook_activations"} {
 		rows, err := h.db().Query(h.query(`SELECT ` + column + ` FROM @` + table))
 		if err != nil {
 			t.Fatal(err)
@@ -160,7 +160,7 @@ func seedConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 	h.exec(t, `INSERT INTO @action_calls (id, scope_kind, scope_id, run_id, status, available_at, revision, created_at, payload) VALUES ('call-1','tenant','one','waiting','succeeded',?,1,?,?)`,
 		now, now, `{"id":"call-1","output":{"setupRequest":{"id":"setup-1","kind":"setup","owner":{"type":"agent","id":"member"},"deploymentId":"member","agentId":"member"}}}`)
 
-	// Step 3: amendments and change sets with digests from before 71.
+	// Step 3: amendments with digests from before 71.
 	h.exec(t, `INSERT INTO @team_definitions (id, version, digest, created_at, payload) VALUES ('crew','1','sha256:base',?,?)`, now, `{"id":"crew","version":"1","digest":"sha256:base"}`)
 	amendment := func(id, status, version string) {
 		h.exec(t, `INSERT INTO @team_definition_amendments (id, scope_kind, scope_id, deployment_id, status, revision, updated_at, payload) VALUES (?,'tenant','one','crew',?,1,?,?)`,
@@ -170,12 +170,6 @@ func seedConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 	amendment("amend-open", "awaiting_approval", "1")
 	amendment("amend-orphan", "evaluating", "9")
 	amendment("amend-done", "activated", "1")
-	changeSet := func(id, status string) {
-		h.exec(t, `INSERT INTO @workforce_change_sets (scope_kind, scope_id, id, status, revision, idempotency_key, request_digest, candidate_digest, created_at, updated_at, payload) VALUES ('tenant','one',?,?,1,?,'r','c',?,?,?)`,
-			id, status, id, now, now, `{"id":"`+id+`","status":"`+status+`","result":{"candidate":{"team":`+connectOnceTeamDocument("sha256:stale", "")+`}}}`)
-	}
-	changeSet("cs-open", "proposed")
-	changeSet("cs-applied", "applied")
 
 	// Step 4: gateways that 73 marked as Agent-owned.
 	gateways := NewExternalConversationGatewayService(store)
@@ -270,18 +264,6 @@ func verifyConnectOnceMigration(t *testing.T, h connectOnceMigrationHarness) {
 	}
 	if done := h.payload(t, "team_definition_amendments", `id = 'amend-done'`); done["requestDigest"] != "sha256:stale" {
 		t.Fatalf("activated amendment rewritten: %#v", done)
-	}
-	team := pathValue(h.payload(t, "workforce_change_sets", `id = 'cs-open'`), "result", "candidate", "team").(map[string]interface{})
-	encoded, _ = json.Marshal(team)
-	typed = kernelteam.Definition{}
-	if err := json.Unmarshal(encoded, &typed); err != nil {
-		t.Fatal(err)
-	}
-	if team["digest"] != kernelteam.DefinitionDigest(&typed) || team["digest"] == "sha256:stale" {
-		t.Fatalf("open change set Team = %#v", team)
-	}
-	if applied := pathValue(h.payload(t, "workforce_change_sets", `id = 'cs-applied'`), "result", "candidate", "team", "digest"); applied != "sha256:stale" {
-		t.Fatalf("applied change set rewritten: %v", applied)
 	}
 
 	// Step 4.

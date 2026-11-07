@@ -778,8 +778,8 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 	// bindings may select different credentials, configuration, or authority.
 	canonicalManagement := make(map[string]string)
 	for _, activated := range activation.Skills {
-		canonicalID := workforceSkillBindingID(activation.DeploymentID, activated.SkillID, activated.SkillVersion)
-		if !strings.HasPrefix(canonicalID, "bundled:") || activated.BindingID != canonicalID {
+		canonicalID := kernelManagementBindingID(activated.SkillID, activated.SkillVersion)
+		if canonicalID == "" || activated.BindingID != canonicalID {
 			continue
 		}
 		canonicalManagement[activated.SkillID+"@"+activated.SkillVersion] = canonicalID
@@ -894,4 +894,26 @@ func catalogRunbookEntrypoint(definition *kernelagent.AgentDefinition, run *Agen
 		}
 	}
 	return base
+}
+
+// kernelManagementBindingID is the single well-known binding identity of a
+// kernel-owned management Skill, reconciled for every deployment by the
+// embedding host. Other Skills have no canonical identity ("").
+func kernelManagementBindingID(skillID, version string) string {
+	switch strings.TrimSpace(skillID) {
+	case AgentManagementSkillID:
+		return "bundled:agents"
+	case ObjectiveManagementSkillID:
+		return "bundled:objectives"
+	case ProjectManagementSkillID:
+		return "bundled:projects"
+	case RunbookManagementSkillID:
+		return "bundled:runbooks"
+	case RunManagementSkillID:
+		return "bundled:runs"
+	case SkillManagementSkillID:
+		return "bundled:skills@" + strings.TrimSpace(version)
+	default:
+		return ""
+	}
 }

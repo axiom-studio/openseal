@@ -38,7 +38,6 @@ func (m connectOnceMigration) run(ctx context.Context) error {
 		{"binding event waits", m.repairBindingEventWaits},
 		{"setup request copies", m.repairSetupRequestCopies},
 		{"Team amendments", m.repairTeamAmendments},
-		{"workforce change sets", m.repairChangeSetTeamDigests},
 		{"gateway owners", m.repairGatewayOwnerKinds},
 		{"routine creators", m.stampRoutineCreators},
 	} {
@@ -307,48 +306,6 @@ func (m connectOnceMigration) repairTeamAmendments(ctx context.Context) error {
 		document["requestDigest"] = kernelteam.AmendmentRequestDigest(migrationString(document, "deploymentId"), migrationString(document, "baseDigest"), candidateDigest,
 			migrationString(document, "proposerType"), migrationString(document, "proposerId"), migrationString(document, "rationale"), migrationStrings(document["evidenceRefs"]))
 		if err := m.rewriteDocument(ctx, "team_definition_amendments", item.scopeKind, item.scopeID, item.id, item.payload, document); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// repairChangeSetTeamDigests recomputes the digest of the Team definition in
-// every open change set, which migration 71 stripped without re-digesting.
-func (m connectOnceMigration) repairChangeSetTeamDigests(ctx context.Context) error {
-	type row struct{ scopeKind, scopeID, id, payload string }
-	var open []row
-	err := m.rows(ctx, `SELECT scope_kind, scope_id, id, `+m.payloadText("payload")+` FROM `+m.table("workforce_change_sets")+`
-		WHERE status NOT IN ('applied', 'rejected', 'superseded')`, nil, func(rows *sql.Rows) error {
-		var item row
-		if err := rows.Scan(&item.scopeKind, &item.scopeID, &item.id, &item.payload); err != nil {
-			return err
-		}
-		open = append(open, item)
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	for _, item := range open {
-		document, err := decodeMigrationDocument(item.payload)
-		if err != nil {
-			return fmt.Errorf("change set %s: %w", item.id, err)
-		}
-		definition := document
-		for _, key := range []string{"result", "candidate", "team"} {
-			next, _ := definition[key].(map[string]interface{})
-			definition = next
-		}
-		if definition == nil {
-			continue
-		}
-		digest, err := teamDefinitionDigestOf(definition)
-		if err != nil {
-			return fmt.Errorf("change set %s Team: %w", item.id, err)
-		}
-		definition["digest"] = digest
-		if err := m.rewriteDocument(ctx, "workforce_change_sets", item.scopeKind, item.scopeID, item.id, item.payload, document); err != nil {
 			return err
 		}
 	}

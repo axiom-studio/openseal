@@ -188,9 +188,8 @@ const (
 type RunKind string
 
 const (
-	RunKindAgentWork          RunKind = "agent_work"
-	RunKindConversation       RunKind = "conversation"
-	RunKindWorkforceAuthoring RunKind = "workforce_authoring"
+	RunKindAgentWork    RunKind = "agent_work"
+	RunKindConversation RunKind = "conversation"
 )
 
 type WakeCondition struct {
@@ -972,7 +971,7 @@ func normalizeRunKind(kind RunKind) RunKind {
 
 func validRunKind(kind RunKind) bool {
 	switch kind {
-	case RunKindAgentWork, RunKindConversation, RunKindWorkforceAuthoring:
+	case RunKindAgentWork, RunKindConversation:
 		return true
 	default:
 		return false
