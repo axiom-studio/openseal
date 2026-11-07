@@ -18,10 +18,29 @@ import (
 // that tool entry. Nothing is written once the Run no longer runs.
 func taskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn) StartConversationTaskRequest {
 	t.Helper()
-	p := turn.RequestedTask
 	sessions, ok := store.(taskStartFixtureStore)
-	if !ok || p == nil {
-		t.Fatalf("task start fixture needs a session store and a proposed task")
+	if !ok {
+		t.Fatalf("task start fixture needs a session store")
+	}
+	// A loop-built step (settledWorkerTaskFixture) already holds the pending
+	// conversation_start_task entry; read the call from it.
+	if source.SessionID != "" {
+		entryID := SessionEntryID(source.SessionID, ToolEntryKey(turn.ID, taskStartFixtureCallID))
+		if entry, err := optionalSessionEntry(sessions.GetSessionEntry(t.Context(), source.Scope, entryID)); err != nil {
+			t.Fatal(err)
+		} else if args := startTaskArguments(entry); args != nil {
+			current, err := sessions.GetAgentRun(t.Context(), source.Scope, source.ID)
+			if err != nil || current == nil {
+				t.Fatalf("get source: %#v %v", current, err)
+			}
+			return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: current.Revision, WorkerID: "worker",
+				TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
+				Goal: args.Goal, Acknowledgment: args.Acknowledgment}
+		}
+	}
+	p := turn.RequestedTask
+	if p == nil {
+		t.Fatalf("task start fixture needs a start_task tool entry or a proposed task")
 	}
 	entryID, revision := ensureStartTaskToolEntry(t, sessions, source, turn, p.Goal, p.Acknowledgment)
 	return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: revision, WorkerID: "worker",
@@ -131,7 +150,7 @@ func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 		t.Fatalf("work retained foreground ownership: %#v", work)
 	}
 	current, err := store.GetAgentRun(t.Context(), source.Scope, source.ID)
-	if err != nil || current.Status != AgentRunStatusCompleted || current.Output["summary"] != turn.RequestedTask.Acknowledgment {
+	if err != nil || current.Status != AgentRunStatusCompleted || current.Output["summary"] != req.Acknowledgment {
 		t.Fatalf("source acknowledgment was not atomically completed: %#v %v", current, err)
 	}
 	tasks, err := service.List(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, AuthenticatedActor: trigger.Sender, Limit: 10})
