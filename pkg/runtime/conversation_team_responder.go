@@ -148,11 +148,12 @@ func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger
 		context[routingReasonContextKey] = responder.Reason
 	}
 	root, _ := routing.Context["threadRootMessageId"].(string)
+	lane := conversationRunLane(conversation.ID, root, responder.Participant.ID)
 	return CreateAgentRunRequest{
 		Scope: routing.Scope, Kind: RunKindConversation, Owner: routing.Owner,
 		AssignedAgentID: responder.Participant.ID, ActingUser: routing.ActingUser,
-		ConcurrencyKey: conversationRunLane(conversation.ID, root, responder.Participant.ID),
-		Goal:           teamMemberRunGoal, Source: RunSourceChat, Priority: routing.Priority, Context: context,
+		ConcurrencyKey: lane, SessionID: conversationSessionID(routing.Scope, lane),
+		Goal: teamMemberRunGoal, Source: RunSourceChat, Priority: routing.Priority, Context: context,
 		Budget: cloneBudgetPolicy(routing.Budget), IdempotencyKey: key,
 		Actor:      ActivityActor{Type: "service", ID: conversationRunSchedulerParticipant},
 		Visibility: ActivityVisibilityTeam,
