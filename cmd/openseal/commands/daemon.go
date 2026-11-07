@@ -134,8 +134,12 @@ Options:
 	if skillsDir == "" {
 		skillsDir = filepath.Join(filepath.Dir(*configPath), "skills")
 	}
+	// Converts the change-set drafts migration 76 kept into builder chats at
+	// the first start (D12), seeding the builder where a draft needs it.
+	cutoverHost := &daemon.BuilderCutoverHost{}
 	engineOptions := []opensealkernel.Option{
 		opensealkernel.WithPersistentStore(store),
+		opensealkernel.WithAgentBuilderCutoverHost(cutoverHost),
 		opensealkernel.WithWorkerConcurrencyLimit(8),
 		opensealkernel.WithSkillManagementActions(),
 		opensealkernel.WithAgentManagementActions(),
@@ -261,6 +265,7 @@ Options:
 	if err != nil {
 		sugar.Fatalf("configure OpenSeal kernel: %v", err)
 	}
+	cutoverHost.Bind(kernel)
 	if err := resolver.Bind(kernel, contentStore, sugar); err != nil {
 		sugar.Fatalf("configure the run loop: %v", err)
 	}

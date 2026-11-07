@@ -1,9 +1,13 @@
 package daemon
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -193,4 +197,142 @@ func TestBuilderAgentBindingsUpgradedOnVersionChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertBuilderBindings(t, engine)
+}
+
+// writeV75DaemonStore writes a daemon SQLite file as v75 left it: one ready
+// change-set draft and no builder. Opening it again runs migration 76,
+// which keeps the draft in the cutover table.
+func writeV75DaemonStore(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kernel.db")
+	fresh, err := runtime.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE workforce_change_sets (
+		scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
+		parent_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, revision INTEGER NOT NULL,
+		idempotency_key TEXT NOT NULL, request_digest TEXT NOT NULL, candidate_digest TEXT NOT NULL,
+		created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, payload TEXT NOT NULL,
+		PRIMARY KEY (scope_kind, scope_id, id), UNIQUE (scope_kind, scope_id, idempotency_key))`); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]interface{}{
+		"id": "cs-trips", "mode": "create", "status": "ready",
+		"prompt": "Create the profile of exactly one personal agent from this request. Request: Help me plan trips",
+		"actor":  map[string]string{"type": "user", "id": "local-operator"},
+		"result": map[string]interface{}{"candidate": map[string]interface{}{"agents": []map[string]interface{}{{
+			"displayName": "Trip planner", "purpose": "Plans trips", "systemPrompt": "Plan trips.", "personality": "Warm",
+			"operatingPrinciples": []string{"Ask first"},
+		}}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO workforce_change_sets VALUES (?,?,'cs-trips','','ready',1,'key-cs-trips','d','d',?,?,?)`,
+		localScope.Kind, localScope.ID, now, now, string(payload)); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// startDaemonEngine opens path the way the daemon does, with its cutover
+// host, and runs one Engine.Start.
+func startDaemonEngine(t *testing.T, path string) (*opensealkernel.Engine, *runtime.SQLiteStore) {
+	t.Helper()
+	store, err := runtime.NewSQLiteStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &BuilderCutoverHost{}
+	engine, err := opensealkernel.New(
+		opensealkernel.WithPersistentStore(store),
+		opensealkernel.WithAgentBuilderCutoverHost(host),
+		opensealkernel.WithSkillManagementActions(),
+		opensealkernel.WithAgentManagementActions(),
+		opensealkernel.WithTeamManagementActions(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.Bind(engine)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		engine.Stop()
+		_ = store.Close()
+	})
+	if err := engine.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return engine, store
+}
+
+func builderConversationMessages(t *testing.T, engine *opensealkernel.Engine) []*runtime.ChannelMessage {
+	t.Helper()
+	ctx := context.Background()
+	conversations, err := engine.ListConversations(ctx, runtime.ConversationFilter{Scope: localScope, OriginKind: runtime.ConversationReferenceAgentBuilder})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var messages []*runtime.ChannelMessage
+	for _, conversation := range conversations {
+		if conversation.Owner.ID != runtime.AgentBuilderDeploymentID {
+			t.Fatalf("builder conversation %s is owned by %+v", conversation.ID, conversation.Owner)
+		}
+		listed, err := engine.ListChannelMessages(ctx, runtime.ChannelMessageFilter{Scope: localScope, ConversationID: conversation.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, listed...)
+	}
+	return messages
+}
+
+func TestBuilderCutoverHostConvertsAV75DraftAtFirstStart(t *testing.T) {
+	path := writeV75DaemonStore(t)
+
+	engine, store := startDaemonEngine(t, path)
+	// The draft needed the builder, so the host seeded it in full.
+	if _, err := engine.GetAgentDeployment(t.Context(), skill.ScopeReference{Kind: localScope.Kind, ID: localScope.ID}, runtime.AgentBuilderDeploymentID); err != nil {
+		t.Fatalf("builder after the first start: %v", err)
+	}
+	assertBuilderBindings(t, engine)
+	messages := builderConversationMessages(t, engine)
+	if len(messages) != 1 {
+		t.Fatalf("builder messages = %d, want the draft as one conversation", len(messages))
+	}
+	message := messages[0]
+	if message.Content != "Help me plan trips" || message.BuilderParameters == nil ||
+		message.BuilderParameters.Kind != runtime.AgentBuilderKindAgent || message.BuilderParameters.Name != "Trip planner" ||
+		message.BuilderParameters.Model != "" || message.BuilderParameters.Draft == nil || message.BuilderParameters.Draft.Purpose != "Plans trips" {
+		t.Fatalf("builder message = %#v parameters %#v", message, message.BuilderParameters)
+	}
+	if drafts, err := store.ListAgentBuilderCutoverDrafts(t.Context()); err != nil || len(drafts) != 0 {
+		t.Fatalf("drafts left = %v, %v", drafts, err)
+	}
+	engine.Stop()
+	_ = store.Close()
+
+	// A restart converts nothing more.
+	engine, _ = startDaemonEngine(t, path)
+	if again := builderConversationMessages(t, engine); len(again) != 1 || again[0].ID != message.ID {
+		t.Fatalf("builder messages after a restart = %d", len(again))
+	}
+	assertBuilderBindings(t, engine)
+}
+
+func TestBuilderCutoverHostRequiresBind(t *testing.T) {
+	if err := (&BuilderCutoverHost{}).EnsureBuilderAgent(t.Context(), localScope, "local-operator"); err == nil {
+		t.Fatal("an unbound cutover host seeded nothing and reported success")
+	}
 }
