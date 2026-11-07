@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -37,14 +36,7 @@ func settleConversationTaskForChanges(t *testing.T, store KernelStore, conversat
 	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
 		t.Fatalf("claim task source: %#v %v", claimed, err)
 	}
-	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: conversation.Scope, RunID: claimed.ID, WorkerID: "worker", DefinitionID: "agent", DefinitionVersion: "1",
-	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: taskProposalFixture()}, nil
-	}))
-	if err != nil || result == nil || result.Turn == nil || result.Turn.RequestedTask == nil {
-		t.Fatalf("settle task proposal: %#v %v", result, err)
-	}
+	result := settleTaskSource(t, store, conversation.Scope, claimed.ID, "worker", taskProposalFixture())
 	return result.Run, result.Turn
 }
 

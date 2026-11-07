@@ -140,55 +140,6 @@ func resolveSourceAccessChallengeInteraction(ctx context.Context, portfolio Port
 	return interaction, nil
 }
 
-func validateSourceAccessChallengeOutcome(interaction *SourceAccessChallengeInteraction, outcome *TurnOutcome) error {
-	if interaction == nil {
-		return errors.New("source access challenge has no verified conversation continuation")
-	}
-	if outcome == nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil || outcome.ProposedTask != nil {
-		return errors.New("source access challenge cannot fork, delegate, or start work")
-	}
-	if outcome.NextRunStatus == AgentRunStatusWaitingForEvent && outcome.WakeCondition != nil && outcome.WakeCondition.Type == "user_message" && outcome.WakeCondition.WakeAt == nil && len(outcome.WakeCondition.Predicate) == 0 && outcome.WakeCondition.EventWait == nil &&
-		len(outcome.ProposedActions) == 0 && (interaction.Phase == "question" || interaction.Phase == "answer") && interaction.QuestionsAsked < maximumSourceAccessChallengeQuestions {
-		question := conversationResultString(outcome.RunOutput, "summary")
-		silent, _ := outcome.RunOutput["silent"].(bool)
-		_, intake := outcome.RunOutput[AgentRequestDecisionOutputKey]
-		if strings.TrimSpace(question) != "" && len(question) <= 64<<10 && !silent && !intake {
-			return nil
-		}
-	}
-	if interaction.Phase == "answer" && outcome.NextRunStatus == AgentRunStatusRunning && outcome.WakeCondition == nil && len(outcome.ProposedActions) == 0 && len(outcome.RunOutput) == 0 {
-		return nil // One private answer-classification turn; it conveys no consent.
-	}
-	if interaction.Phase == "continue" && len(outcome.ProposedActions) == 1 && outcome.WakeCondition == nil {
-		return nil // Ordinary action admission and the host's choice gate still apply.
-	}
-	return errors.New("source access challenge requires its bounded question or verified answer continuation")
-}
-
-func checkpointSourceAccessChallengeTurn(run *AgentRun, turn *AgentTurn, finish *FinishAgentTurnRequest) {
-	if !hasCanonicalSourceAccessChallenge(run) {
-		return
-	}
-	finish.ContinuationCheckpoint = preserveKernelActionHistory(run.Checkpoint, finish.ContinuationCheckpoint)
-	interaction := sourceAccessChallengeInteraction(run)
-	if interaction == nil || finish.Status != AgentTurnStatusCompleted {
-		return
-	}
-	correction := finish.ContinuationCheckpoint[ToolFeedbackCorrectionCheckpointKey].(map[string]interface{})
-	if finish.NextRunStatus == AgentRunStatusWaitingForEvent && finish.WakeCondition != nil && finish.WakeCondition.Type == "user_message" {
-		correction[sourceAccessChallengeStateKey] = map[string]interface{}{
-			"failureId": interaction.FailureID, "questionsAsked": interaction.QuestionsAsked + 1,
-			"questionTurnId": turn.ID, "questionTurnSequence": turn.Sequence,
-		}
-	} else if interaction.Phase == "answer" && finish.NextRunStatus == AgentRunStatusRunning && len(finish.RequestedActions) == 0 {
-		state := correction[sourceAccessChallengeStateKey].(map[string]interface{})
-		state["answerTurnId"], state["answerTurnSequence"] = turn.ID, turn.Sequence
-	} else if interaction.Phase == "continue" && len(finish.RequestedActions) == 1 {
-		state := correction[sourceAccessChallengeStateKey].(map[string]interface{})
-		state["actionTurnId"], state["actionTurnSequence"] = turn.ID, turn.Sequence
-	}
-}
-
 // The accepted proposal turn is required even if an operator manually resumes
 // a wait and directly calls action admission. An answer still conveys no YES.
 func validateSourceAccessChallengeAction(ctx context.Context, portfolio PortfolioStore, run *AgentRun, call *ActionCall) error {

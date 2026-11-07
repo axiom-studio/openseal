@@ -54,18 +54,17 @@ type TurnAction struct {
 }
 
 type TurnUsage struct {
-	InputTokens          int     `json:"inputTokens,omitempty"`
-	OutputTokens         int     `json:"outputTokens,omitempty"`
-	Cost                 float64 `json:"cost,omitempty"`
-	DurationMS           int64   `json:"durationMs,omitempty"`
-	ProviderDurationMS   int64   `json:"providerDurationMs,omitempty"`
-	ValidationDurationMS int64   `json:"validationDurationMs,omitempty"`
-	RepairAttempts       int     `json:"repairAttempts,omitempty"`
-	NativeOperations     int     `json:"nativeOperations,omitempty"`
+	InputTokens        int     `json:"inputTokens,omitempty"`
+	OutputTokens       int     `json:"outputTokens,omitempty"`
+	Cost               float64 `json:"cost,omitempty"`
+	DurationMS         int64   `json:"durationMs,omitempty"`
+	ProviderDurationMS int64   `json:"providerDurationMs,omitempty"`
+	RepairAttempts     int     `json:"repairAttempts,omitempty"`
+	NativeOperations   int     `json:"nativeOperations,omitempty"`
 }
 
 func (u TurnUsage) Validate() error {
-	if u.InputTokens < 0 || u.OutputTokens < 0 || u.DurationMS < 0 || u.ProviderDurationMS < 0 || u.ValidationDurationMS < 0 || u.RepairAttempts < 0 || u.NativeOperations < 0 || u.Cost < 0 || math.IsNaN(u.Cost) || math.IsInf(u.Cost, 0) {
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.DurationMS < 0 || u.ProviderDurationMS < 0 || u.RepairAttempts < 0 || u.NativeOperations < 0 || u.Cost < 0 || math.IsNaN(u.Cost) || math.IsInf(u.Cost, 0) {
 		return errors.New("turn usage cannot be negative, NaN, or infinite")
 	}
 	return nil
@@ -95,28 +94,20 @@ const ActivityEventTurnNarration = "turn.narration"
 // stores model reasoning, tool arguments or tool results; those live in the
 // Run's session log.
 type AgentTurn struct {
-	ID                   string                  `json:"id"`
-	Scope                Scope                   `json:"scope"`
-	RunID                string                  `json:"runId"`
-	Sequence             int64                   `json:"sequence"`
-	Status               AgentTurnStatus         `json:"status"`
-	Producer             StepProducerKind        `json:"producer,omitempty"`
-	SessionID            string                  `json:"sessionId,omitempty"`
-	AssistantEntryID     string                  `json:"assistantEntryId,omitempty"`
-	DefinitionID         string                  `json:"definitionId,omitempty"`
-	DefinitionVersion    string                  `json:"definitionVersion,omitempty"`
-	ModelProvider        string                  `json:"modelProvider,omitempty"`
-	Model                string                  `json:"model,omitempty"`
-	InputContextRefs     []string                `json:"inputContextRefs,omitempty"`
-	InputInterventionIDs []string                `json:"inputInterventionIds,omitempty"`
-	PlanRevision         int64                   `json:"planRevision,omitempty"`
-	SkillSelections      []HostedSkillSelection  `json:"skillSelections,omitempty"`
-	Decisions            []TurnDecision          `json:"decisions,omitempty"`
-	RequestedActions     []TurnAction            `json:"requestedActions,omitempty"`
-	RequestedFork        *TurnForkProposal       `json:"requestedFork,omitempty"`
-	RequestedDelegation  *TurnDelegationProposal `json:"requestedDelegation,omitempty"`
-	RequestedRunbook     *TurnRunbookProposal    `json:"requestedRunbook,omitempty"`
-	RequestedTask        *TurnTaskProposal       `json:"requestedTask,omitempty"`
+	ID                string                 `json:"id"`
+	Scope             Scope                  `json:"scope"`
+	RunID             string                 `json:"runId"`
+	Sequence          int64                  `json:"sequence"`
+	Status            AgentTurnStatus        `json:"status"`
+	Producer          StepProducerKind       `json:"producer,omitempty"`
+	SessionID         string                 `json:"sessionId,omitempty"`
+	AssistantEntryID  string                 `json:"assistantEntryId,omitempty"`
+	DefinitionID      string                 `json:"definitionId,omitempty"`
+	DefinitionVersion string                 `json:"definitionVersion,omitempty"`
+	ModelProvider     string                 `json:"modelProvider,omitempty"`
+	Model             string                 `json:"model,omitempty"`
+	InputContextRefs  []string               `json:"inputContextRefs,omitempty"`
+	SkillSelections   []HostedSkillSelection `json:"skillSelections,omitempty"`
 	// OutputSummary is the step's narration: the assistant text of a step
 	// that ended in tool calls. Empty for steps without tool calls.
 	OutputSummary string `json:"outputSummary,omitempty"`
@@ -126,16 +117,9 @@ type AgentTurn struct {
 	StopReason string `json:"stopReason,omitempty"`
 	// Final is true when the step's model output had no tool calls or
 	// included a final-answer tool call.
-	Final                  bool                     `json:"final,omitempty"`
-	Usage                  TurnUsage                `json:"usage,omitempty"`
-	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
-	NextRunStatus          AgentRunStatus           `json:"nextRunStatus,omitempty"`
-	WakeCondition          *WakeCondition           `json:"wakeCondition,omitempty"`
-	RunOutput              map[string]interface{}   `json:"runOutput,omitempty"`
-	RunError               string                   `json:"runError,omitempty"`
-	BudgetAdmission        *BudgetAdmission         `json:"budgetAdmission,omitempty"`
-	EvidenceClaims         []EvidenceClaim          `json:"evidenceClaims,omitempty"`
-	EvidenceGrounding      *EvidenceGroundingReview `json:"evidenceGrounding,omitempty"`
+	Final           bool             `json:"final,omitempty"`
+	Usage           TurnUsage        `json:"usage,omitempty"`
+	BudgetAdmission *BudgetAdmission `json:"budgetAdmission,omitempty"`
 	// FailureCode is a stable kernel code for a failed or canceled step:
 	// host_unavailable, host_configuration, model_context_exceeded,
 	// producer_failed, duration_budget, budget_exhausted, run_ended.
@@ -216,36 +200,22 @@ type BeginAgentTurnRequest struct {
 	ModelProvider     string
 	Model             string
 	InputContextRefs  []string
-	PlanRevision      int64
 	WorkerID          string
 	LeaseDuration     time.Duration
 }
 
+// FinishAgentTurnRequest closes a running step. OutputSummary replaces the
+// recorded narration only for a step that has no model record (a canceled
+// step's reason); a zero Usage keeps the recorded usage.
 type FinishAgentTurnRequest struct {
-	ExpectedRevision       int64
-	Status                 AgentTurnStatus
-	ModelProvider          string
-	Model                  string
-	SkillSelections        []HostedSkillSelection
-	Decisions              []TurnDecision
-	RequestedActions       []TurnAction
-	RequestedFork          *TurnForkProposal
-	RequestedDelegation    *TurnDelegationProposal
-	RequestedRunbook       *TurnRunbookProposal
-	RequestedTask          *TurnTaskProposal
-	OutputSummary          string
-	Usage                  TurnUsage
-	ContinuationCheckpoint map[string]interface{}
-	NextRunStatus          AgentRunStatus
-	WakeCondition          *WakeCondition
-	RunOutput              map[string]interface{}
-	RunError               string
-	BudgetAdmission        *BudgetAdmission
-	EvidenceClaims         []EvidenceClaim
-	EvidenceGrounding      *EvidenceGroundingReview
-	FailureCode            string
-	Error                  string
-	WorkerID               string
+	ExpectedRevision int64
+	Status           AgentTurnStatus // completed | failed | canceled
+	WorkerID         string
+	OutputSummary    string
+	Usage            TurnUsage
+	BudgetAdmission  *BudgetAdmission
+	FailureCode      string
+	Error            string
 }
 
 // StepModelRecord is written once per step, right after the producer
@@ -308,7 +278,7 @@ func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequ
 		Producer: req.Producer, SessionID: strings.TrimSpace(req.SessionID),
 		DefinitionID: req.DefinitionID, DefinitionVersion: req.DefinitionVersion,
 		ModelProvider: req.ModelProvider, Model: req.Model, InputContextRefs: req.InputContextRefs,
-		PlanRevision: req.PlanRevision, LeaseOwner: req.WorkerID, LeaseExpiresAt: &leaseExpiresAt,
+		LeaseOwner: req.WorkerID, LeaseExpiresAt: &leaseExpiresAt,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
 	})
 }
@@ -335,50 +305,13 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 		return nil, ErrTurnLeaseHeld
 	}
 	turn.Status = req.Status
-	req.ModelProvider, req.Model, err = normalizeModelIdentity(req.ModelProvider, req.Model)
-	if err != nil {
-		return nil, err
-	}
-	if req.ModelProvider != "" {
-		turn.ModelProvider = req.ModelProvider
-		turn.Model = req.Model
-	}
-	if req.NextRunStatus == "" {
-		switch req.Status {
-		case AgentTurnStatusCompleted:
-			req.NextRunStatus = AgentRunStatusRunning
-		case AgentTurnStatusFailed:
-			req.NextRunStatus = AgentRunStatusFailed
-		case AgentTurnStatusCanceled:
-			req.NextRunStatus = AgentRunStatusCanceled
-		}
-	}
-	if isWaitingRunStatus(req.NextRunStatus) && req.WakeCondition == nil {
-		return nil, errors.New("waiting turn outcome requires a wake condition")
-	}
-	// A step recorded by RecordStepModel keeps its narration and skill
-	// selections when the finish carries none.
-	if len(req.SkillSelections) > 0 || turn.AssistantEntryID == "" {
-		turn.SkillSelections = append([]HostedSkillSelection(nil), req.SkillSelections...)
-	}
-	turn.Decisions = req.Decisions
-	turn.RequestedActions = req.RequestedActions
-	turn.RequestedFork = req.RequestedFork
-	turn.RequestedDelegation = req.RequestedDelegation
-	turn.RequestedRunbook = req.RequestedRunbook
-	turn.RequestedTask = cloneTurnTaskProposal(req.RequestedTask)
 	if req.OutputSummary != "" || turn.AssistantEntryID == "" {
 		turn.OutputSummary = req.OutputSummary
 	}
-	turn.Usage = req.Usage
-	turn.ContinuationCheckpoint = req.ContinuationCheckpoint
-	turn.NextRunStatus = req.NextRunStatus
-	turn.WakeCondition = req.WakeCondition
-	turn.RunOutput = req.RunOutput
-	turn.RunError = req.RunError
+	if req.Usage != (TurnUsage{}) {
+		turn.Usage = req.Usage
+	}
 	turn.BudgetAdmission = req.BudgetAdmission
-	turn.EvidenceClaims = append([]EvidenceClaim(nil), req.EvidenceClaims...)
-	turn.EvidenceGrounding = cloneEvidenceGroundingReview(req.EvidenceGrounding)
 	turn.FailureCode = strings.TrimSpace(req.FailureCode)
 	turn.Error = req.Error
 	turn.LeaseOwner = ""

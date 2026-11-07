@@ -116,7 +116,7 @@ func (startTaskHandler) run(ctx context.Context, x *ControlExecutor, cc ControlC
 		if len(run.PendingInterventions) > run.ConsumedInterventions {
 			return x.refuse(ctx, cc, startTaskNewMessage())
 		}
-		budget, err := projectHostedRunBudget(run, "")
+		budget, err := controlRunBudget(run, "")
 		if err != nil {
 			return ControlResult{}, err
 		}

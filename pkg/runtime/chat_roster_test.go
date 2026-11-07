@@ -301,15 +301,9 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	if _, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
-	settled, err := NewTurnCoordinator(store, store, store).Advance(ctx, AdvanceAgentRunRequest{Scope: scope, RunID: source.ID, WorkerID: "worker"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: &TurnTaskProposal{
-			TaskKey: "team-setup", Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5},
-		}}, nil
-	}))
-	if err != nil || settled == nil || settled.Turn == nil || settled.Turn.RequestedTask == nil {
-		t.Fatalf("settle Team task source turn: %#v %v", settled, err)
-	}
-	task, err := NewConversationTaskService(store).Start(ctx, taskStartRequest(t, store, settled.Run, settled.Turn))
+	settled := settleTaskSource(t, store, scope, source.ID, "worker", taskSourceProposal{
+		Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5}})
+	task, err := NewConversationTaskService(store).Start(ctx, settled.Request)
 	if err != nil {
 		t.Fatalf("Team member task start = %v", err)
 	}

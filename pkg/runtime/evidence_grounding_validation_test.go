@@ -37,11 +37,11 @@ func TestValidateEvidenceGroundingReviewMatchesCanonicalCheckWithoutMutation(t *
 		{"invalid_usage", func(r *EvidenceGroundingReview) { r.Usage.InputTokens = -1 }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			review := cloneEvidenceGroundingReview(&valid)
+			review := cloneReviewForTest(&valid)
 			tc.change(review)
 			beforeReview, _ := json.Marshal(review)
 			beforeRequest, _ := json.Marshal(request)
-			canonical := cloneEvidenceGroundingReview(review)
+			canonical := cloneReviewForTest(review)
 			want := validateEvidenceGroundingReview(canonical, request)
 			got := ValidateEvidenceGroundingReview(review, request)
 			if (got == nil) != tc.valid || (got == nil) != (want == nil) || (got != nil && got.Error() != want.Error()) {
@@ -64,4 +64,11 @@ func TestValidateEvidenceGroundingReviewMatchesCanonicalCheckWithoutMutation(t *
 	if ValidateEvidenceGroundingReview(&review, request) == nil || !math.IsNaN(review.Usage.Cost) {
 		t.Fatal("invalid typed usage was erased or caller-owned usage changed")
 	}
+}
+
+func cloneReviewForTest(review *EvidenceGroundingReview) *EvidenceGroundingReview {
+	encoded, _ := json.Marshal(review)
+	var cloned EvidenceGroundingReview
+	_ = json.Unmarshal(encoded, &cloned)
+	return &cloned
 }

@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -413,20 +412,4 @@ func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Conte
 		}
 	}
 	return nil
-}
-
-// replacedTeamApprovalOutcome is the old per-Turn form of
-// conversationLoop.replacedTeamApproval. It stays only for the old
-// ConversationRunTurnRunner.RunTurn in conversation_run.go and goes with it.
-func replacedTeamApprovalOutcome(run *AgentRun) *TurnOutcome {
-	if !isTeamMemberRun(run) {
-		return nil
-	}
-	last, _ := run.Checkpoint["lastAction"].(map[string]interface{})
-	messageID, _ := last["supersededByMessageId"].(string)
-	if fmt.Sprint(last["approvalStatus"]) != string(ApprovalStatusSuperseded) || messageID == "" || conversationRunHasFollowUp(run, messageID) {
-		return nil
-	}
-	return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Replaced by a newer message for another member",
-		RunOutput: map[string]interface{}{"approvalReplaced": true, "replacedByMessageId": messageID}}
 }

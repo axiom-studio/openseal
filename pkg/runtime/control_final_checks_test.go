@@ -188,7 +188,7 @@ func TestEvidenceReviewRejectedIsRepairResult(t *testing.T) {
 		t.Fatalf("reviewed = %v (requests %d)", value, len(reviewer.requests))
 	}
 	// Nothing is staged in the checkpoint.
-	if f.run.Checkpoint[evidenceGroundingCheckpointKey] != nil {
+	if f.run.Checkpoint["_opensealEvidenceGrounding"] != nil {
 		t.Fatalf("checkpoint = %v", f.run.Checkpoint)
 	}
 }

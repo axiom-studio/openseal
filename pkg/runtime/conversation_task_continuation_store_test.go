@@ -248,7 +248,7 @@ func TestConversationTaskContinuationStoreFinishedTurnWinsHandoff(t *testing.T) 
 		source, conversation, _ := conversationContinuationFixture(t, store, AgentRunStatusRunning, false)
 		now := time.Now().UTC()
 		turn := &AgentTurn{ID: "finished-original-turn", Scope: source.Scope, RunID: source.ID, Sequence: source.LastAppliedTurn + 1,
-			Status: AgentTurnStatusCompleted, NextRunStatus: AgentRunStatusCompleted, Final: true, RunOutput: map[string]interface{}{"summary": "The original request is complete."},
+			Status: AgentTurnStatusCompleted, Final: true,
 			Revision: 1, CreatedAt: source.CreatedAt, UpdatedAt: now, StartedAt: source.CreatedAt, CompletedAt: &now}
 		if _, err := store.CreateAgentTurn(t.Context(), turn); err != nil {
 			t.Fatal(err)

@@ -354,7 +354,7 @@ func TestConversationRunBindsAgentChatOnLoopSeams(t *testing.T) {
 		if len(resolver.resolved) != 1 || resolver.resolved[0].Kind != RunKindConversation || resolver.resolved[0].ID != run.ID {
 			t.Fatalf("resolved Runs = %#v", resolver.resolved)
 		}
-		if binding.Runner != nil || binding.Producer != resolver.producer || binding.Session == nil || binding.Session.ID != run.SessionID {
+		if binding.Producer != resolver.producer || binding.Session == nil || binding.Session.ID != run.SessionID {
 			t.Fatalf("binding = %#v", binding)
 		}
 		if _, ok := binding.Final.(conversationObservedFinal); !ok || binding.ToolCheck == nil || binding.AfterTool == nil {

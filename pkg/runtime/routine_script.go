@@ -17,7 +17,7 @@ import (
 // with workspace.run_command. Approving the routine's brief pins the file as
 // it was then. Each occurrence is an ordinary agent run in the chat whose
 // model runs exactly that version with run_command and then reports (see
-// hosted_turn_routine_script.go). The script changing later in the chat
+// run_loop_routine_script.go). The script changing later in the chat
 // never changes what the routine runs; the routine shows the drift and the
 // user can approve the new version (set_script).
 

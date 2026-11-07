@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
@@ -167,50 +166,5 @@ func TestLinkRunbooks(t *testing.T) {
 	stored.RunbookActivationIDs = append(stored.RunbookActivationIDs, "r0")
 	if err := stored.Validate(); err == nil {
 		t.Fatal("duplicate link validated")
-	}
-}
-
-func TestAnswerVisualLinksItsRoutines(t *testing.T) {
-	store := NewMemoryStore()
-	ctx := context.Background()
-	scope := Scope{Kind: "tenant", ID: "routine-links"}
-	service := NewConversationService(store)
-	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}, Title: "News", IdempotencyKey: "routine-links",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{
-			DeploymentID: "agent-42", DefinitionID: "agent-definition", DefinitionVersion: "1",
-			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Your routine is set."},
-					Visual: &presentation.Visual{Title: "Morning news", Components: []presentation.Component{
-						{ID: "r", Type: "routine", Summary: "Your morning news routine.", Binding: &presentation.Binding{Kind: presentation.BindingRunbook, ID: "daily-news"},
-							Routine: &presentation.Routine{Items: []presentation.RoutineItem{{Label: "Today", Text: "Rates held."}}}},
-					}}}, nil
-			}),
-		}, nil
-	})
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: agentTurns, AttachmentContent: &answerVisualContent{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Every morning, the news", "routine-links-1")
-	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run}); err != nil {
-		t.Fatal(err)
-	}
-	stored, err := service.GetConversation(ctx, scope, conversation.ID)
-	if err != nil || strings.Join(stored.RunbookActivationIDs, ",") != "daily-news" {
-		t.Fatalf("linked routines = %v, %v", stored.RunbookActivationIDs, err)
 	}
 }

@@ -163,41 +163,6 @@ func taskSetupTargetFollowsReceipt(admitted, current *SkillSetupRequest) bool {
 	return current.Kind == admitted.Kind && current.BindingRevision >= admitted.BindingRevision
 }
 
-func validateConversationTaskSetupWait(ctx context.Context, portfolio PortfolioStore, run *AgentRun, outcome *TurnOutcome) error {
-	if outcome == nil || outcome.WakeCondition == nil || outcome.WakeCondition.Type != ConversationTaskSkillSetupWakeType {
-		return nil
-	}
-	wake := outcome.WakeCondition
-	if outcome.NextRunStatus != AgentRunStatusWaitingForEvent || !validOpaqueIdentifier(wake.Reference, 256) || wake.WakeAt != nil ||
-		wake.EventWait != nil || len(wake.Predicate) != 0 || len(outcome.ProposedActions) != 0 || outcome.ProposedTask != nil ||
-		outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil {
-		return ErrInvalidSkillSetup
-	}
-	store, ok := portfolio.(conversationTaskSetupStore)
-	if !ok {
-		return ErrInvalidSkillSetup
-	}
-	task, request, err := verifiedTaskSetupRequest(ctx, store, run, wake.Reference, true)
-	if err != nil {
-		return err
-	}
-	if task == nil {
-		return ErrInvalidSkillSetup
-	}
-	activity, ok := portfolio.(RunActivityStore)
-	if !ok {
-		return ErrInvalidSkillSetup
-	}
-	accepted, err := skillSetupTaskAccepted(ctx, activity, run, request)
-	if err != nil {
-		return err
-	}
-	if accepted {
-		return errors.New("Skill setup result was already delivered to this task")
-	}
-	return nil
-}
-
 func isExactTaskSetupWait(run *AgentRun, requestID string) bool {
 	return run.Status == AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
 		run.WakeCondition.Type == ConversationTaskSkillSetupWakeType && run.WakeCondition.Reference == requestID &&

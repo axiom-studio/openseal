@@ -16,8 +16,6 @@ import (
 )
 
 type TurnRunnerBinding struct {
-	OutputPublisher                 TurnOutputPublisher
-	Runner                          TurnRunner
 	ProgressAcknowledgementRenderer RunProgressAcknowledgementRenderer
 	DeploymentID                    string
 	// ActionDeploymentID is the resource whose Skill bindings authorized the

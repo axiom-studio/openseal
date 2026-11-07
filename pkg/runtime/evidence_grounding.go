@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,24 +9,12 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/presentation"
 )
 
 const (
 	EvidenceGroundingAPIVersion        = "openseal.evidence-grounding/v1"
-	evidenceGroundingCheckpointKey     = "_opensealEvidenceGrounding"
-	evidenceGroundingPendingReview     = "pending_review"
-	evidenceGroundingRepairRequired    = "repair_required"
 	EvidenceGroundingReviewOutputLimit = int64(8192)
-	evidenceGroundingDraftInstruction  = "For evidence-backed completion, put the complete human-readable report in runOutput.report and cite every EvidenceClaim using its exact observation IDs in that report. outputSummary and the claim ledger do not replace the report."
 )
-
-func applyEvidenceGroundingDraftInstruction(request *HostedTurnRequest, snapshot *EvidenceSnapshot) {
-	if request == nil || snapshot == nil || containsString(request.SystemInstructions, evidenceGroundingDraftInstruction) {
-		return
-	}
-	request.SystemInstructions = append(request.SystemInstructions, evidenceGroundingDraftInstruction)
-}
 
 type EvidenceClaim struct {
 	ID           string   `json:"id"`
@@ -86,19 +73,6 @@ type EvidenceGroundingRequest struct {
 
 type EvidenceGroundingReviewer interface {
 	ReviewEvidenceGrounding(context.Context, EvidenceGroundingRequest) (*EvidenceGroundingReview, error)
-}
-
-type evidenceGroundingState struct {
-	APIVersion   string                     `json:"apiVersion"`
-	Status       string                     `json:"status"`
-	SnapshotID   string                     `json:"snapshotId"`
-	ClaimsDigest string                     `json:"claimsDigest"`
-	Claims       []EvidenceClaim            `json:"claims"`
-	DraftSummary string                     `json:"draftSummary"`
-	DraftOutput  map[string]interface{}     `json:"draftOutput"`
-	DraftVisual  *presentation.Visual       `json:"draftVisual,omitempty"`
-	Findings     []EvidenceGroundingFinding `json:"findings,omitempty"`
-	LastReview   *EvidenceGroundingReview   `json:"lastReview,omitempty"`
 }
 
 func evidenceSnapshotForGrounding(contextValues map[string]interface{}) (*EvidenceSnapshot, error) {
@@ -188,40 +162,6 @@ func normalizeEvidenceClaims(claims []EvidenceClaim, snapshot *EvidenceSnapshot)
 	return normalized, hashBytes(encoded), findings
 }
 
-func stageEvidenceGrounding(response *HostedTurnResponse, snapshot *EvidenceSnapshot) {
-	claims, digest, findings := normalizeEvidenceClaims(response.EvidenceClaims, snapshot)
-	findings = append(findings, validateEvidenceGroundingDraft(response.RunOutput, claims)...)
-	status := evidenceGroundingPendingReview
-	if len(findings) > 0 {
-		status = evidenceGroundingRepairRequired
-	}
-	checkpoint := cloneMap(response.ContinuationCheckpoint)
-	if checkpoint == nil {
-		checkpoint = map[string]interface{}{}
-	}
-	state := evidenceGroundingState{
-		APIVersion: EvidenceGroundingAPIVersion, Status: status, SnapshotID: snapshot.ID,
-		ClaimsDigest: digest, Claims: claims, DraftSummary: strings.TrimSpace(response.OutputSummary),
-		DraftOutput: cloneMap(response.RunOutput), DraftVisual: cloneVisual(response.Visual), Findings: findings,
-	}
-	checkpoint[evidenceGroundingCheckpointKey] = evidenceGroundingStateMap(state)
-	response.ContinuationCheckpoint = checkpoint
-	response.EvidenceClaims = claims
-	response.EvidenceGrounding = &EvidenceGroundingReview{
-		APIVersion: EvidenceGroundingAPIVersion, InvocationID: response.InvocationID,
-		SnapshotID: snapshot.ID, ClaimsDigest: digest, Accepted: false, CoverageComplete: false, Findings: findings,
-	}
-	response.NextRunStatus = AgentRunStatusRunning
-	response.WakeCondition = nil
-	response.RunOutput = nil
-	response.Visual = nil
-	if status == evidenceGroundingPendingReview {
-		response.OutputSummary = "Draft preserved for a bounded evidence-grounding review."
-	} else {
-		response.OutputSummary = "Draft requires repair before evidence-grounding review."
-	}
-}
-
 func validateEvidenceGroundingDraft(output map[string]interface{}, claims []EvidenceClaim) []EvidenceGroundingFinding {
 	report, ok := output["report"].(string)
 	report = strings.TrimSpace(report)
@@ -247,71 +187,6 @@ func validateEvidenceGroundingDraft(output map[string]interface{}, claims []Evid
 		}
 	}
 	return findings
-}
-
-func evidenceGroundingStateMap(state evidenceGroundingState) map[string]interface{} {
-	encoded, _ := json.Marshal(state)
-	var projected map[string]interface{}
-	_ = json.Unmarshal(encoded, &projected)
-	return projected
-}
-
-func parseEvidenceGroundingState(checkpoint map[string]interface{}) (*evidenceGroundingState, error) {
-	if checkpoint == nil || checkpoint[evidenceGroundingCheckpointKey] == nil {
-		return nil, nil
-	}
-	encoded, err := json.Marshal(checkpoint[evidenceGroundingCheckpointKey])
-	if err != nil {
-		return nil, err
-	}
-	var state evidenceGroundingState
-	decoder := json.NewDecoder(strings.NewReader(string(encoded)))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&state); err != nil {
-		return nil, fmt.Errorf("decode evidence grounding checkpoint: %w", err)
-	}
-	if state.APIVersion != EvidenceGroundingAPIVersion || (state.Status != evidenceGroundingPendingReview && state.Status != evidenceGroundingRepairRequired) || strings.TrimSpace(state.SnapshotID) == "" || strings.TrimSpace(state.ClaimsDigest) == "" {
-		return nil, errors.New("evidence grounding checkpoint has an invalid envelope")
-	}
-	claims, _ := json.Marshal(state.Claims)
-	if hashBytes(claims) != state.ClaimsDigest {
-		return nil, errors.New("evidence grounding checkpoint claim digest does not match its contents")
-	}
-	if err := ValidateCredentialFreeContext(state.DraftOutput); err != nil {
-		return nil, fmt.Errorf("evidence grounding draft: %w", err)
-	}
-	if state.LastReview != nil {
-		if state.Status != evidenceGroundingRepairRequired {
-			return nil, errors.New("evidence grounding checkpoint review requires repair state")
-		}
-		if state.LastReview.Accepted {
-			return nil, errors.New("accepted evidence grounding review cannot remain in a checkpoint")
-		}
-		request := EvidenceGroundingRequest{
-			APIVersion: EvidenceGroundingAPIVersion, InvocationID: state.LastReview.InvocationID,
-			Snapshot: EvidenceSnapshot{ID: state.SnapshotID}, Claims: state.Claims, ClaimsDigest: state.ClaimsDigest,
-		}
-		if err := validateEvidenceGroundingReview(state.LastReview, request); err != nil {
-			return nil, fmt.Errorf("evidence grounding checkpoint review: %w", err)
-		}
-		encodedFindings, _ := json.Marshal(state.Findings)
-		encodedReviewFindings, _ := json.Marshal(state.LastReview.Findings)
-		if !bytes.Equal(encodedFindings, encodedReviewFindings) {
-			return nil, errors.New("evidence grounding checkpoint findings do not match its last review")
-		}
-	} else if state.Status == evidenceGroundingPendingReview && len(state.Findings) != 0 {
-		return nil, errors.New("pending evidence grounding review cannot contain findings")
-	}
-	return &state, nil
-}
-
-func buildEvidenceGroundingRequest(input TurnExecutionContext, snapshot *EvidenceSnapshot, state *evidenceGroundingState, maxOutput int64) EvidenceGroundingRequest {
-	return EvidenceGroundingRequest{
-		APIVersion: EvidenceGroundingAPIVersion, InvocationID: input.Turn.ID,
-		Scope: input.Run.Scope, RunID: input.Run.ID, TurnID: input.Turn.ID, AgentID: input.Run.AssignedAgentID, Goal: input.Run.Goal,
-		Snapshot: *snapshot, Claims: append([]EvidenceClaim(nil), state.Claims...), ClaimsDigest: state.ClaimsDigest,
-		DraftSummary: state.DraftSummary, DraftOutput: cloneMap(state.DraftOutput), MaxOutputTokens: maxOutput,
-	}
 }
 
 // ValidateEvidenceGroundingReview checks a review against the canonical evidence
@@ -411,90 +286,9 @@ func evidenceSnapshotID(snapshot *EvidenceSnapshot) string {
 	return snapshot.ID
 }
 
-func cloneEvidenceGroundingReview(review *EvidenceGroundingReview) *EvidenceGroundingReview {
-	if review == nil {
-		return nil
-	}
-	encoded, _ := json.Marshal(review)
-	var cloned EvidenceGroundingReview
-	_ = json.Unmarshal(encoded, &cloned)
-	return &cloned
-}
-
-func preserveKernelEvidenceGrounding(existing, proposed map[string]interface{}) map[string]interface{} {
-	if existing == nil || existing[evidenceGroundingCheckpointKey] == nil {
-		return proposed
-	}
-	if proposed == nil {
-		proposed = map[string]interface{}{}
-	}
-	proposed[evidenceGroundingCheckpointKey] = cloneMap(map[string]interface{}{
-		evidenceGroundingCheckpointKey: existing[evidenceGroundingCheckpointKey],
-	})[evidenceGroundingCheckpointKey]
-	return proposed
-}
-
-func (r *HostedTurnRunner) runEvidenceGroundingReview(ctx context.Context, input TurnExecutionContext, snapshot *EvidenceSnapshot, state *evidenceGroundingState) (*TurnOutcome, error) {
-	reviewer, ok := r.host.(EvidenceGroundingReviewer)
-	if !ok {
-		return nil, errors.New("evidence-backed completion requires a configured grounding reviewer")
-	}
-	budget, err := projectHostedRunBudget(input.Run, input.Turn.ID)
-	if err != nil {
-		return nil, err
-	}
-	maxOutput := EvidenceGroundingReviewOutputLimit
-	if budget != nil && budget.TurnReservation.OutputTokens > 0 && budget.TurnReservation.OutputTokens < maxOutput {
-		maxOutput = budget.TurnReservation.OutputTokens
-	}
-	request := buildEvidenceGroundingRequest(input, snapshot, state, maxOutput)
-	request.ModelCredential = cloneHostedCredentialReference(r.config.ModelCredential)
-	review, err := reviewer.ReviewEvidenceGrounding(ctx, request)
-	if err != nil {
-		return nil, retryableTurnHostError{cause: err}
-	}
-	if err := validateEvidenceGroundingReview(review, request); err != nil {
-		return nil, err
-	}
-	if budget != nil {
-		reserved := budget.TurnReservation
-		if reserved.InputTokens > 0 && int64(review.Usage.InputTokens) > reserved.InputTokens {
-			return nil, fmt.Errorf("evidence reviewer reported %d input tokens beyond the reserved %d", review.Usage.InputTokens, reserved.InputTokens)
-		}
-		if reserved.OutputTokens > 0 && int64(review.Usage.OutputTokens) > reserved.OutputTokens {
-			return nil, fmt.Errorf("evidence reviewer reported %d output tokens beyond the reserved %d", review.Usage.OutputTokens, reserved.OutputTokens)
-		}
-	}
-	checkpoint := cloneMap(input.Run.Checkpoint)
-	if review.Accepted {
-		delete(checkpoint, evidenceGroundingCheckpointKey)
-		output := cloneMap(state.DraftOutput)
-		if output == nil {
-			output = map[string]interface{}{}
-		}
-		output["evidenceClaims"] = evidenceClaimsResult(state.Claims)
-		output["evidenceGrounding"] = evidenceGroundingResultMap(review)
-		references := make([]string, 0, len(snapshot.Observations))
-		for _, observation := range snapshot.Observations {
-			references = append(references, observation.ID)
-		}
-		return &TurnOutcome{
-			ModelProvider: review.ReviewerProvider, Model: review.ReviewerModel,
-			Decisions:     []TurnDecision{{Summary: "Accepted the report after bounded semantic evidence review.", EvidenceRefs: references}},
-			OutputSummary: state.DraftSummary, Visual: cloneVisual(state.DraftVisual), Usage: review.Usage, ContinuationCheckpoint: checkpoint,
-			NextRunStatus: AgentRunStatusCompleted, RunOutput: output,
-			EvidenceClaims: append([]EvidenceClaim(nil), state.Claims...), EvidenceGrounding: cloneEvidenceGroundingReview(review),
-		}, nil
-	}
-	state.Status = evidenceGroundingRepairRequired
-	state.Findings = append([]EvidenceGroundingFinding(nil), review.Findings...)
-	state.LastReview = cloneEvidenceGroundingReview(review)
-	checkpoint[evidenceGroundingCheckpointKey] = evidenceGroundingStateMap(*state)
-	return &TurnOutcome{
-		ModelProvider: review.ReviewerProvider, Model: review.ReviewerModel,
-		Decisions:     []TurnDecision{{Summary: "Rejected the draft because one or more claims were unsupported, uncertain, or not covered."}},
-		OutputSummary: "Evidence grounding review requested a bounded repair.", Usage: review.Usage,
-		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
-		EvidenceClaims: append([]EvidenceClaim(nil), state.Claims...), EvidenceGrounding: cloneEvidenceGroundingReview(review),
-	}, nil
+// MarshalEvidenceGroundingModelInput strips host-only credential selection
+// before the immutable review envelope is presented to a model.
+func MarshalEvidenceGroundingModelInput(request EvidenceGroundingRequest) ([]byte, error) {
+	request.ModelCredential = nil
+	return json.Marshal(request)
 }

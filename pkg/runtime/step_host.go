@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 // StepHost runs one model call or one host-native tool for the kernel loop.
@@ -134,4 +136,217 @@ func checkProducedAssistant(a *AssistantEntry) error {
 func isModelToolArgumentsObject(raw json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(raw)
 	return len(trimmed) > 0 && trimmed[0] == '{' && json.Valid(trimmed)
+}
+
+var (
+	ErrTurnHostUnavailable   = errors.New("turn host is temporarily unavailable")
+	ErrTurnHostConfiguration = errors.New("turn host configuration is invalid")
+)
+
+// TurnHostFailure is a safe, stable failure a StepHost returns for a model
+// step. Retryable marks a transient host or provider outage, which the loop
+// requeues (host_unavailable); a terminal failure ends the step. Message
+// must never contain provider credentials or a raw provider response.
+type TurnHostFailure struct {
+	Code      string
+	Message   string
+	Retryable bool
+	// ContextPressure is set with TurnHostContextExceeded when the step's
+	// input does not fit the model's context. The host made no call, so the
+	// loop compacts the session and sends the step once more.
+	ContextPressure *HostedContextPressure
+}
+
+// TurnHostContextExceeded is the TurnHostFailure code for a step whose input
+// does not fit the model's context.
+const TurnHostContextExceeded = "model_context_exceeded"
+
+// HostedContextPressure compares a host's estimate of a step's model input
+// with the input the model accepts, both in tokens.
+type HostedContextPressure struct {
+	EstimatedTokens int64 `json:"estimatedTokens"`
+	LimitTokens     int64 `json:"limitTokens"`
+}
+
+func (e *TurnHostFailure) Error() string {
+	if e == nil || strings.TrimSpace(e.Message) == "" {
+		return "hosted agent turn failed"
+	}
+	return strings.TrimSpace(e.Message)
+}
+
+func (e *TurnHostFailure) Is(target error) bool {
+	return e != nil && e.Retryable && target == ErrTurnHostUnavailable
+}
+
+func NewTurnHostFailure(code, message string, retryable bool) error {
+	return &TurnHostFailure{Code: strings.TrimSpace(code), Message: strings.TrimSpace(message), Retryable: retryable}
+}
+
+type retryableTurnHostError struct{ cause error }
+
+func (e retryableTurnHostError) Error() string        { return ErrTurnHostUnavailable.Error() }
+func (e retryableTurnHostError) Unwrap() error        { return e.cause }
+func (e retryableTurnHostError) Is(target error) bool { return target == ErrTurnHostUnavailable }
+
+// HostedSkillPrompt is an immutable, already-authorized prompt projection. It
+// contains no binding configuration or credential value.
+type HostedSkillPrompt struct {
+	SkillID         string `json:"skillId"`
+	Version         string `json:"version"`
+	BindingID       string `json:"bindingId,omitempty"`
+	BindingRevision int64  `json:"bindingRevision,omitempty"`
+	Reference       string `json:"reference"`
+	Name            string `json:"name"`
+	Description     string `json:"description,omitempty"`
+	Instructions    string `json:"instructions"`
+}
+
+type HostedSkillDisposition string
+
+const (
+	HostedSkillApplied    HostedSkillDisposition = "applied"
+	HostedSkillNotApplied HostedSkillDisposition = "not_applied"
+)
+
+// HostedSkillSelection is the operator-facing disposition of one prompt Skill
+// offered to a step. It records capability choice without storing hidden
+// model reasoning.
+type HostedSkillSelection struct {
+	SkillRef    string                 `json:"skillRef"`
+	Disposition HostedSkillDisposition `json:"disposition"`
+	Summary     string                 `json:"summary"`
+}
+
+// HostedAgentTarget is one active, same-scope Agent deployment eligible for
+// bounded delegation. ID is the only durable identity; DisplayName and Purpose
+// are model-facing discovery labels and are never persisted as substitutes.
+type HostedAgentTarget struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	Purpose     string `json:"purpose,omitempty"`
+}
+
+// HostedRunbookOperation is one immutable deterministic operation the current
+// cognitive Agent may invoke. It contains no graph internals or credentials;
+// the kernel resolves the exact active definition again at materialization.
+type HostedRunbookOperation struct {
+	DefinitionID      string                 `json:"-"`
+	DefinitionVersion string                 `json:"-"`
+	Entrypoint        string                 `json:"entrypoint"`
+	Name              string                 `json:"name"`
+	Description       string                 `json:"description"`
+	InputSchema       map[string]interface{} `json:"inputSchema"`
+	OutputSchema      map[string]interface{} `json:"outputSchema,omitempty"`
+}
+
+// HostedRunBudget is the capacity visible to one step of a bounded Run.
+// Policy distinguishes an unbounded zero from an exhausted zero; Remaining
+// has already accounted for committed usage, live reservations and durable
+// child allocations.
+type HostedRunBudget struct {
+	Policy          BudgetPolicy `json:"policy"`
+	CommittedUsage  BudgetUsage  `json:"committedUsage,omitempty"`
+	EffectiveUsage  BudgetUsage  `json:"effectiveUsage,omitempty"`
+	Allocated       BudgetPolicy `json:"allocated,omitempty"`
+	TurnReservation BudgetUsage  `json:"turnReservation,omitempty"`
+	Remaining       BudgetPolicy `json:"remaining"`
+	// MinimumChild is the floor for one delegated, forked or task child. A
+	// positive value applies only when the parent dimension is bounded.
+	MinimumChild BudgetPolicy `json:"minimumChild,omitempty"`
+}
+
+func remainingBudgetDimension(limit, used, allocated int64) int64 {
+	if limit == 0 {
+		return 0
+	}
+	remaining := limit - used - allocated
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// effectiveExternalOperationPolicy preserves the documented empty-policy
+// behavior only for genuinely external actions. Session-local and preparatory
+// actions cannot own a durable cross-Run external-operation identity, so an
+// omitted policy is forbidden for them.
+func effectiveExternalOperationPolicy(sideEffect capability.SideEffect, policy capability.ExternalOperationPolicy) capability.ExternalOperationPolicy {
+	if policy != "" {
+		return policy
+	}
+	if sideEffect == capability.SideEffectExternal {
+		return capability.ExternalOperationOptional
+	}
+	return capability.ExternalOperationForbidden
+}
+
+func cloneHostedRunbookOperations(values []HostedRunbookOperation) []HostedRunbookOperation {
+	cloned := make([]HostedRunbookOperation, len(values))
+	for index, value := range values {
+		cloned[index] = value
+		cloned[index].InputSchema = cloneMap(value.InputSchema)
+		cloned[index].OutputSchema = cloneMap(value.OutputSchema)
+	}
+	return cloned
+}
+
+func resolveHostedAgentTarget(reference string, eligible []HostedAgentTarget) (string, error) {
+	reference = strings.TrimSpace(reference)
+	for _, target := range eligible {
+		if reference == target.ID {
+			return target.ID, nil
+		}
+	}
+	matches := make([]string, 0, 1)
+	for _, target := range eligible {
+		if strings.EqualFold(reference, strings.TrimSpace(target.DisplayName)) {
+			matches = append(matches, target.ID)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("Agent name %q is ambiguous; use canonical ID %s", reference, strings.Join(matches, " or "))
+	}
+	ids := make([]string, 0, len(eligible))
+	for _, target := range eligible {
+		ids = append(ids, target.ID)
+	}
+	if len(ids) == 0 {
+		return "", fmt.Errorf("Agent %q is not eligible; no delegation targets are available", reference)
+	}
+	return "", fmt.Errorf("Agent %q is not eligible; use canonical ID %s", reference, strings.Join(ids, ", "))
+}
+
+func cloneHostedCredentialReference(reference *capability.CredentialReference) *capability.CredentialReference {
+	if reference == nil {
+		return nil
+	}
+	cloned := *reference
+	return &cloned
+}
+
+func cloneHostedModelActions(values []capability.ModelAction) []capability.ModelAction {
+	if values == nil {
+		return nil
+	}
+	result := make([]capability.ModelAction, len(values))
+	for index, value := range values {
+		result[index] = value
+		result[index].InputSchema = cloneMap(value.InputSchema)
+		if value.BindingTool != nil {
+			tool := *value.BindingTool
+			tool.Arguments = cloneMap(value.BindingTool.Arguments)
+			result[index].BindingTool = &tool
+		}
+		if value.SemanticArguments != nil {
+			result[index].SemanticArguments = make(map[string]string, len(value.SemanticArguments))
+			for role, argument := range value.SemanticArguments {
+				result[index].SemanticArguments[role] = argument
+			}
+		}
+	}
+	return result
 }

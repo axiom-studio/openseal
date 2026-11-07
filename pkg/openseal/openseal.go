@@ -616,18 +616,10 @@ type (
 	TurnUsage                            = runtime.TurnUsage
 	BeginAgentTurnRequest                = runtime.BeginAgentTurnRequest
 	FinishAgentTurnRequest               = runtime.FinishAgentTurnRequest
-	TurnExecutionContext                 = runtime.TurnExecutionContext
-	TurnRunner                           = runtime.TurnRunner
-	TurnRunnerFunc                       = runtime.TurnRunnerFunc
-	TurnBudgetPlanner                    = runtime.TurnBudgetPlanner
-	TurnOutcome                          = runtime.TurnOutcome
 	HostedSkillPrompt                    = runtime.HostedSkillPrompt
 	HostedSkillSelection                 = runtime.HostedSkillSelection
 	HostedSkillDisposition               = runtime.HostedSkillDisposition
 	HostedRunbookOperation               = runtime.HostedRunbookOperation
-	HostedTurnMedia                      = runtime.HostedTurnMedia
-	HostedTurnRequest                    = runtime.HostedTurnRequest
-	HostedResponseContract               = runtime.HostedResponseContract
 	TurnTaskProposal                     = runtime.TurnTaskProposal
 	HostedConversationTaskContext        = runtime.HostedConversationTaskContext
 	ConversationTaskSnapshot             = runtime.ConversationTaskSnapshot
@@ -643,18 +635,11 @@ type (
 	ConversationTaskService              = runtime.ConversationTaskService
 	StartConversationTaskRequest         = runtime.StartConversationTaskRequest
 	ConversationTaskResult               = runtime.ConversationTaskResult
-	HostedTurnResponse                   = runtime.HostedTurnResponse
-	HostedTurnExecutionFailure           = runtime.HostedTurnExecutionFailure
 	HostedTurnForm                       = runtime.HostedTurnForm
 	HostedTurnFormAuthority              = runtime.HostedTurnFormAuthority
 	HostedWorkspaceOperationForm         = runtime.HostedWorkspaceOperationForm
 	HostedTurnActionForm                 = runtime.HostedTurnActionForm
-	HostedTurnModelInput                 = runtime.HostedTurnModelInput
-	HostedActionInvocationContract       = runtime.HostedActionInvocationContract
 	HostedRunBudget                      = runtime.HostedRunBudget
-	TurnHost                             = runtime.TurnHost
-	HostedTurnRunnerConfig               = runtime.HostedTurnRunnerConfig
-	HostedTurnRunner                     = runtime.HostedTurnRunner
 	TurnHostFailure                      = runtime.TurnHostFailure
 	HostedContextPressure                = runtime.HostedContextPressure
 	EvidenceClaim                        = runtime.EvidenceClaim
@@ -666,8 +651,6 @@ type (
 	EvidenceSnapshot                     = runtime.EvidenceSnapshot
 	EvidenceSnapshotObservation          = runtime.EvidenceSnapshotObservation
 	CapabilityInvocationStepProducer     = runtime.CapabilityInvocationStepProducer
-	AdvanceAgentRunRequest               = runtime.AdvanceAgentRunRequest
-	AdvanceAgentRunResult                = runtime.AdvanceAgentRunResult
 	AgentRunScheduleStore                = runtime.AgentRunScheduleStore
 	AgentRunAdmissionStore               = runtime.AgentRunAdmissionStore
 	AgentRunClaimRequest                 = runtime.AgentRunClaimRequest
@@ -1257,13 +1240,8 @@ type (
 
 const (
 	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
-	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
 	TurnHostContextExceeded                 = runtime.TurnHostContextExceeded
-	HostedResponseContractDefault           = runtime.HostedResponseContractDefault
 	HostedTurnFormSchemaVersion             = runtime.HostedTurnFormSchemaVersion
-	HostedTurnProtocolInputReserveTokens    = runtime.HostedTurnProtocolInputReserveTokens
-	HostedTurnBudgetEnvelopeReserveTokens   = runtime.HostedTurnBudgetEnvelopeReserveTokens
-	HostedTurnMinimumOutputTokens           = runtime.HostedTurnMinimumOutputTokens
 	EvidenceGroundingAPIVersion             = runtime.EvidenceGroundingAPIVersion
 	EvidenceGroundingReviewOutputLimit      = runtime.EvidenceGroundingReviewOutputLimit
 	EvidenceGroundingSupported              = runtime.EvidenceGroundingSupported
@@ -1347,7 +1325,6 @@ const (
 	KernelOperationDeliver                  = kernelapi.OperationDeliver
 	HostedSkillApplied                      = runtime.HostedSkillApplied
 	HostedSkillNotApplied                   = runtime.HostedSkillNotApplied
-	HostedSkillHostFilledSummary            = runtime.HostedSkillHostFilledSummary
 	RunbookAPIVersion                       = runbook.APIVersion
 	RunbookTriggerEvent                     = runbook.TriggerEvent
 	RunbookTriggerSchedule                  = runbook.TriggerSchedule
@@ -1585,69 +1562,59 @@ var (
 )
 
 var (
-	ConversationTaskGoalSummary            = runtime.ConversationTaskGoalSummary
-	PersistedTaskOrigin                    = runtime.PersistedTaskOrigin
-	NewConversationTaskService             = runtime.NewConversationTaskService
-	NewHostedTurnRunner                    = runtime.NewHostedTurnRunner
-	NewTurnHostFailure                     = runtime.NewTurnHostFailure
-	TerminalFailureReply                   = runtime.TerminalFailureReply
-	ErrInvalidApprovalReviewContext        = runtime.ErrInvalidApprovalReviewContext
-	MarshalHostedTurnModelInput            = runtime.MarshalHostedTurnModelInput
-	ProjectHostedActionInvocationContracts = runtime.ProjectHostedActionInvocationContracts
-	CompileHostedTurnForm                  = runtime.CompileHostedTurnForm
-	CompileHostedTurnFormWithWorkspace     = runtime.CompileHostedTurnFormWithWorkspace
-	HostedTurnFormFromResponse             = runtime.HostedTurnFormFromResponse
-	HostedTurnFormJSONSchema               = runtime.HostedTurnFormJSONSchema
-	ValidateHostedTurnCompletion           = runtime.ValidateHostedTurnCompletion
-	MarshalEvidenceGroundingModelInput     = runtime.MarshalEvidenceGroundingModelInput
-	ValidateEvidenceGroundingReview        = runtime.ValidateEvidenceGroundingReview
-	EstimateHostedTurnInputTokens          = runtime.EstimateHostedTurnInputTokens
-	ValidateHostedSkillSelections          = runtime.ValidateHostedSkillSelections
-	CompleteHostedSkillSelections          = runtime.CompleteHostedSkillSelections
-	NewCapabilityInvocationStepProducer    = runtime.NewCapabilityInvocationStepProducer
-	NewOutreachStepProducer                = runtime.NewOutreachStepProducer
-	NewOutreachActionProposalObserver      = runtime.NewOutreachActionProposalObserver
-	ResolveLoopBinding                     = runtime.ResolveLoopBinding
-	NewArtifactRetentionService            = runtime.NewArtifactRetentionService
-	ErrInvalidConversationTask             = runtime.ErrInvalidConversationTask
-	ErrConversationTaskNotFound            = runtime.ErrConversationTaskNotFound
-	ErrConversationTaskConflict            = runtime.ErrConversationTaskConflict
-	ErrTurnHostUnavailable                 = runtime.ErrTurnHostUnavailable
-	ErrTurnHostConfiguration               = runtime.ErrTurnHostConfiguration
-	ValidateRunbook                        = runbook.Validate
-	VerifyRunbook                          = runbook.Verify
-	ValidateRunbookInterfaceInput          = runbook.ValidateInterfaceInput
-	NewRunbookStepProducer                 = runtime.NewRunbookStepProducer
-	NewRunForkCoordinator                  = runtime.NewRunForkCoordinator
-	ObjectiveManagementSkill               = runtime.ObjectiveManagementSkill
-	NewObjectiveActionValidator            = runtime.NewObjectiveActionValidator
-	NewObjectiveActionDispatcher           = runtime.NewObjectiveActionDispatcher
-	ProjectManagementSkill                 = runtime.ProjectManagementSkill
-	NewProjectActionValidator              = runtime.NewProjectActionValidator
-	NewProjectActionDispatcher             = runtime.NewProjectActionDispatcher
-	AgentManagementSkill                   = runtime.AgentManagementSkill
-	RunManagementSkill                     = runtime.RunManagementSkill
-	NewAgentBehaviorActionValidator        = runtime.NewAgentBehaviorActionValidator
-	NewAgentBehaviorActionDispatcher       = runtime.NewAgentBehaviorActionDispatcher
-	NewRunActionValidator                  = runtime.NewRunActionValidator
-	NewRunActionDispatcher                 = runtime.NewRunActionDispatcher
-	RunbookManagementSkill                 = runtime.RunbookManagementSkill
-	PinRunCommand                          = workspace.PinRunCommand
-	RecordPinnedCommand                    = workspace.RecordPinnedCommand
-	ExpectedDigestOf                       = workspace.ExpectedDigestOf
-	ResolveRoutineScriptStatus             = runtime.ResolveRoutineScriptStatus
-	NewRunbookActionValidator              = runtime.NewRunbookActionValidator
-	NewRunbookActionDispatcher             = runtime.NewRunbookActionDispatcher
-	TeamManagementSkill                    = runtime.TeamManagementSkill
-	NewTeamRoleActionValidator             = runtime.NewTeamRoleActionValidator
-	NewTeamRoleActionDispatcher            = runtime.NewTeamRoleActionDispatcher
-	NewTeamSkillActionValidator            = runtime.NewTeamSkillActionValidator
-	AuthorizeTeamSkillActivation           = runtime.AuthorizeTeamSkillActivation
-	SkillManagementSkill                   = runtime.SkillManagementSkill
-	NewSkillBindingActionValidator         = runtime.NewSkillBindingActionValidator
-	NewSkillBindingActionDispatcher        = runtime.NewSkillBindingActionDispatcher
-	NewHTTPActionExecutor                  = httpaction.NewExecutor
-	DecodeHTTPActionInvocation             = httpaction.DecodeInvocation
+	ConversationTaskGoalSummary         = runtime.ConversationTaskGoalSummary
+	PersistedTaskOrigin                 = runtime.PersistedTaskOrigin
+	NewConversationTaskService          = runtime.NewConversationTaskService
+	NewTurnHostFailure                  = runtime.NewTurnHostFailure
+	TerminalFailureReply                = runtime.TerminalFailureReply
+	ErrInvalidApprovalReviewContext     = runtime.ErrInvalidApprovalReviewContext
+	HostedTurnFormJSONSchema            = runtime.HostedTurnFormJSONSchema
+	MarshalEvidenceGroundingModelInput  = runtime.MarshalEvidenceGroundingModelInput
+	ValidateEvidenceGroundingReview     = runtime.ValidateEvidenceGroundingReview
+	NewCapabilityInvocationStepProducer = runtime.NewCapabilityInvocationStepProducer
+	NewOutreachStepProducer             = runtime.NewOutreachStepProducer
+	NewOutreachActionProposalObserver   = runtime.NewOutreachActionProposalObserver
+	ResolveLoopBinding                  = runtime.ResolveLoopBinding
+	NewArtifactRetentionService         = runtime.NewArtifactRetentionService
+	ErrInvalidConversationTask          = runtime.ErrInvalidConversationTask
+	ErrConversationTaskNotFound         = runtime.ErrConversationTaskNotFound
+	ErrConversationTaskConflict         = runtime.ErrConversationTaskConflict
+	ErrTurnHostUnavailable              = runtime.ErrTurnHostUnavailable
+	ErrTurnHostConfiguration            = runtime.ErrTurnHostConfiguration
+	ValidateRunbook                     = runbook.Validate
+	VerifyRunbook                       = runbook.Verify
+	ValidateRunbookInterfaceInput       = runbook.ValidateInterfaceInput
+	NewRunbookStepProducer              = runtime.NewRunbookStepProducer
+	NewRunForkCoordinator               = runtime.NewRunForkCoordinator
+	ObjectiveManagementSkill            = runtime.ObjectiveManagementSkill
+	NewObjectiveActionValidator         = runtime.NewObjectiveActionValidator
+	NewObjectiveActionDispatcher        = runtime.NewObjectiveActionDispatcher
+	ProjectManagementSkill              = runtime.ProjectManagementSkill
+	NewProjectActionValidator           = runtime.NewProjectActionValidator
+	NewProjectActionDispatcher          = runtime.NewProjectActionDispatcher
+	AgentManagementSkill                = runtime.AgentManagementSkill
+	RunManagementSkill                  = runtime.RunManagementSkill
+	NewAgentBehaviorActionValidator     = runtime.NewAgentBehaviorActionValidator
+	NewAgentBehaviorActionDispatcher    = runtime.NewAgentBehaviorActionDispatcher
+	NewRunActionValidator               = runtime.NewRunActionValidator
+	NewRunActionDispatcher              = runtime.NewRunActionDispatcher
+	RunbookManagementSkill              = runtime.RunbookManagementSkill
+	PinRunCommand                       = workspace.PinRunCommand
+	RecordPinnedCommand                 = workspace.RecordPinnedCommand
+	ExpectedDigestOf                    = workspace.ExpectedDigestOf
+	ResolveRoutineScriptStatus          = runtime.ResolveRoutineScriptStatus
+	NewRunbookActionValidator           = runtime.NewRunbookActionValidator
+	NewRunbookActionDispatcher          = runtime.NewRunbookActionDispatcher
+	TeamManagementSkill                 = runtime.TeamManagementSkill
+	NewTeamRoleActionValidator          = runtime.NewTeamRoleActionValidator
+	NewTeamRoleActionDispatcher         = runtime.NewTeamRoleActionDispatcher
+	NewTeamSkillActionValidator         = runtime.NewTeamSkillActionValidator
+	AuthorizeTeamSkillActivation        = runtime.AuthorizeTeamSkillActivation
+	SkillManagementSkill                = runtime.SkillManagementSkill
+	NewSkillBindingActionValidator      = runtime.NewSkillBindingActionValidator
+	NewSkillBindingActionDispatcher     = runtime.NewSkillBindingActionDispatcher
+	NewHTTPActionExecutor               = httpaction.NewExecutor
+	DecodeHTTPActionInvocation          = httpaction.DecodeInvocation
 )
 
 var NewExternalConversationEndpointService = runtime.NewExternalConversationEndpointService
@@ -1964,9 +1931,6 @@ const (
 	RunbookActionList               = runtime.RunbookActionList
 	RunbookActionSetStatus          = runtime.RunbookActionSetStatus
 	RunbookActionSetScript          = runtime.RunbookActionSetScript
-	RoutineScriptInstruction        = runtime.RoutineScriptInstruction
-	RoutineScriptFailureInstruction = runtime.RoutineScriptFailureInstruction
-	PinnedCommandsCheckpointKey     = runtime.PinnedCommandsCheckpointKey
 	ExpectedDigestArgument          = workspace.ExpectedDigestArgument
 	RefusedCommandResult            = workspace.RefusedResult
 	RoutineScriptContextKey         = runtime.RoutineScriptContextKey
@@ -2578,7 +2542,6 @@ type Engine struct {
 	conversationChanges           *runtime.ConversationChangeService
 	collaboration                 *runtime.CollaborationService
 	turns                         *runtime.AgentTurnService
-	turnsRun                      *runtime.TurnCoordinator
 	runQueue                      *runtime.AgentRunScheduler
 	wake                          *runtime.AgentRunWakeService
 	actions                       *runtime.ActionCoordinator
@@ -2720,7 +2683,6 @@ func New(opts ...Option) (*Engine, error) {
 		conversationChanges:      conversationChanges,
 		collaboration:            runtime.NewCollaborationService(store),
 		turns:                    runtime.NewAgentTurnService(store, store),
-		turnsRun:                 runtime.NewTurnCoordinator(store, store, store),
 		runQueue:                 runtime.NewAgentRunScheduler(store),
 		wake:                     runtime.NewAgentRunWakeService(store, store),
 		artifacts:                runtime.NewArtifactCatalog(store).WithPlacement(runtime.NewStoreArtifactPlacement(store)),
@@ -2954,7 +2916,6 @@ func WithStore(store runtime.KernelStore) Option {
 			e.collaboration = nil
 		}
 		e.turns = runtime.NewAgentTurnService(store, store)
-		e.turnsRun = runtime.NewTurnCoordinator(store, store, store)
 		e.runQueue = runtime.NewAgentRunScheduler(store)
 		e.wake = runtime.NewAgentRunWakeService(store, store)
 		if artifactStore, ok := store.(runtime.ArtifactStore); ok {
@@ -5295,12 +5256,6 @@ func (e *Engine) GetAgentTurn(ctx context.Context, scope runtime.Scope, turnID s
 
 func (e *Engine) ListAgentTurns(ctx context.Context, filter runtime.AgentTurnFilter) ([]*runtime.AgentTurn, error) {
 	return e.turns.ListTurns(ctx, filter)
-}
-
-// AdvanceAgentRun performs or reconciles one bounded, provider-neutral agent
-// turn. The runner proposes actions; governed side effects execute separately.
-func (e *Engine) AdvanceAgentRun(ctx context.Context, req runtime.AdvanceAgentRunRequest, runner runtime.TurnRunner) (*runtime.AdvanceAgentRunResult, error) {
-	return e.turnsRun.Advance(ctx, req, runner)
 }
 
 func (e *Engine) ClaimNextAgentRun(ctx context.Context, req runtime.AgentRunClaimRequest) (*runtime.AgentRun, error) {

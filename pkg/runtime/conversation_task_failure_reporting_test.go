@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -52,14 +51,8 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 	if err != nil || claimed == nil {
 		t.Fatalf("source claim: %#v %v", claimed, err)
 	}
-	proposal := &TurnTaskProposal{TaskKey: "private-work", Goal: "GOAL_SECRET prepare the complete result", Acknowledgment: "I will prepare the result."}
-	settled, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: claimed.ID, WorkerID: "worker"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: proposal}, nil
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
+	settled := settleTaskSource(t, store, scope, claimed.ID, "worker", taskSourceProposal{Goal: "GOAL_SECRET prepare the complete result", Acknowledgment: "I will prepare the result."})
+	accepted, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {
 		t.Fatal(err)
 	}

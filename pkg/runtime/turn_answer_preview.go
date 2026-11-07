@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"unicode/utf8"
 )
@@ -47,4 +48,25 @@ func (preview TurnAnswerPreview) Validate() error {
 		return errors.New("invalid turn answer preview")
 	}
 	return nil
+}
+
+// projectTurnAnswerPreview exposes only the typed public preview of a
+// turn.answer_preview event, never arbitrary payload fields. It also
+// reconstructs snapshots after a database JSON round-trip.
+func projectTurnAnswerPreview(event *ActivityEvent) *TurnAnswerPreview {
+	if event.EventType != "turn.answer_preview" || event.Visibility == ActivityVisibilityPrivate {
+		return nil
+	}
+	data, err := json.Marshal(map[string]interface{}{
+		"attemptId": event.Payload["attemptId"], "sequence": event.Payload["sequence"],
+		"text": event.Payload["text"], "reset": event.Payload["reset"],
+	})
+	if err != nil {
+		return nil
+	}
+	var preview TurnAnswerPreview
+	if json.Unmarshal(data, &preview) != nil || preview.Validate() != nil {
+		return nil
+	}
+	return &preview
 }

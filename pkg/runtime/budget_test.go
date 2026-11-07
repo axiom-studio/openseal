@@ -87,7 +87,7 @@ func TestTurnUsageRejectsNonFiniteCost(t *testing.T) {
 			t.Fatalf("invalid cost %v was accepted", cost)
 		}
 	}
-	for _, usage := range []TurnUsage{{ProviderDurationMS: -1}, {ValidationDurationMS: -1}, {RepairAttempts: -1}} {
+	for _, usage := range []TurnUsage{{ProviderDurationMS: -1}, {RepairAttempts: -1}} {
 		if err := usage.Validate(); err == nil {
 			t.Fatalf("invalid phase usage %#v was accepted", usage)
 		}

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // A model that grinds one tool call at a time, such as reading a repository
@@ -21,35 +20,6 @@ const (
 	// maximumRepeatedActionNotices bounds the tools named in one turn.
 	maximumRepeatedActionNotices = 2
 )
-
-// projectRepeatedActionNotice adds a notice when the latest call repeated an
-// identical call that had already succeeded, and one per tool (top two) used
-// repeatedActionThreshold or more times in the recent action history.
-func projectRepeatedActionNotice(request *HostedTurnRequest) {
-	entries := actionHistoryEntries(request.ContinuationCheckpoint)
-	if len(entries) < 2 {
-		return
-	}
-	names := make([]string, len(entries))
-	for index, entry := range entries {
-		names[index] = historyEntryActionName(request.Actions, entry)
-	}
-	if notice := repeatedIdenticalActionNotice(entries, names); notice != "" {
-		request.SystemInstructions = append(request.SystemInstructions, notice)
-	}
-	vm := request.Workspace != nil && offersOperation(request.WorkspaceOperations, workspace.OperationRunCommand)
-	for _, use := range frequentActions(names) {
-		if vm {
-			request.SystemInstructions = append(request.SystemInstructions, fmt.Sprintf(
-				"You've called %s %d times in your last %d tool calls; for work like this, write a script in the secure VM (seal call %s …) or clone the repository with git.seal.",
-				use.name, use.count, len(entries), use.name))
-		} else {
-			request.SystemInstructions = append(request.SystemInstructions, fmt.Sprintf(
-				"You've called %s %d times in your last %d tool calls; answer from the results you already have where they suffice instead of calling it one item at a time.",
-				use.name, use.count, len(entries)))
-		}
-	}
-}
 
 // repeatedIdenticalActionNotice names the latest call when its exact
 // capability and arguments had already succeeded earlier in the history.

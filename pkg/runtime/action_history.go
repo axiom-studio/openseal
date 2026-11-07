@@ -124,61 +124,6 @@ const (
 	maximumCheckpointActionResultBytes = 64 << 10
 )
 
-// checkpointTurnContinuity records the last bounded Turn's declared intent in
-// kernel-owned state. Hosted models are stateless between Turns: without this
-// projection, an action result is visible but the reason it was requested is
-// not, so a successful cleanup action can be misread as an invitation to start
-// the whole goal again. The concise summary and proposal identity contain no
-// hidden reasoning and remain part of the durable audit trail.
-func checkpointTurnContinuity(checkpoint map[string]interface{}, turn *AgentTurn) map[string]interface{} {
-	result := deepCloneCheckpointMap(checkpoint)
-	if result == nil {
-		result = make(map[string]interface{})
-	}
-	delete(result, turnContinuityCheckpointKey)
-	if turn == nil || turn.Status != AgentTurnStatusCompleted {
-		return result
-	}
-	continuity := map[string]interface{}{
-		"sequence":      turn.Sequence,
-		"outputSummary": strings.TrimSpace(turn.OutputSummary),
-		"nextRunStatus": turn.NextRunStatus,
-	}
-	switch {
-	case len(turn.RequestedActions) == 1:
-		continuity["proposal"] = map[string]interface{}{
-			"kind":       "action",
-			"capability": strings.TrimSpace(turn.RequestedActions[0].Capability),
-			"summary":    strings.TrimSpace(turn.RequestedActions[0].Summary),
-		}
-	case turn.RequestedTask != nil:
-		continuity["proposal"] = map[string]interface{}{
-			"kind":    "task",
-			"taskKey": strings.TrimSpace(turn.RequestedTask.TaskKey),
-		}
-	case turn.RequestedRunbook != nil:
-		continuity["proposal"] = map[string]interface{}{
-			"kind":       "runbook",
-			"entrypoint": strings.TrimSpace(turn.RequestedRunbook.Entrypoint),
-			"summary":    strings.TrimSpace(turn.RequestedRunbook.Summary),
-		}
-	case turn.RequestedDelegation != nil:
-		continuity["proposal"] = map[string]interface{}{
-			"kind":    "delegation",
-			"stepId":  strings.TrimSpace(turn.RequestedDelegation.StepID),
-			"summary": strings.TrimSpace(turn.OutputSummary),
-		}
-	case turn.RequestedFork != nil:
-		continuity["proposal"] = map[string]interface{}{
-			"kind":    "fork",
-			"forkId":  strings.TrimSpace(turn.RequestedFork.ForkID),
-			"summary": strings.TrimSpace(turn.OutputSummary),
-		}
-	}
-	result[turnContinuityCheckpointKey] = continuity
-	return result
-}
-
 // preserveKernelActionHistory makes action evidence kernel-owned: a hosted
 // model may read its bounded projection, but omitting or rewriting it cannot
 // erase the authoritative journal or latest terminal ActionCall accumulated by
@@ -198,14 +143,9 @@ func preserveKernelActionHistory(current, proposed map[string]interface{}) map[s
 	delete(result, ToolFeedbackCorrectionCheckpointKey)
 	delete(result, toolFailureCountCheckpointKey)
 	delete(result, sourceReadFailureCountCheckpointKey)
-	delete(result, turnHostRetryCheckpointKey)
 	delete(result, "lastAction")
 	delete(result, runEventWaitCheckpointKey)
-	delete(result, PinnedCommandsCheckpointKey)
 	if current != nil {
-		if commands, ok := current[PinnedCommandsCheckpointKey]; ok {
-			result[PinnedCommandsCheckpointKey] = deepCloneCheckpointValue(commands)
-		}
 		if correction, ok := current[ToolFeedbackCorrectionCheckpointKey]; ok {
 			result[ToolFeedbackCorrectionCheckpointKey] = deepCloneCheckpointValue(correction)
 		}

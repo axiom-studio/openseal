@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -549,24 +548,6 @@ func setFixtureApprovalMode(t *testing.T, store *MemoryStore, conversation *Conv
 		Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision, Mode: mode, Actor: approvalModeActor,
 	}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func assertHostedApprovalModeHint(t *testing.T, input TurnExecutionContext, agentID string, want ConversationApprovalMode) {
-	t.Helper()
-	runner, err := NewHostedTurnRunner(&recordingTurnHost{}, HostedTurnRunnerConfig{AgentID: agentID, DefinitionID: "browser", DefinitionVersion: "1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request, err := runner.buildRequest(input)
-	if err != nil || request.ConversationApprovalMode != want {
-		t.Fatalf("hosted approval mode = %q want %q err=%v", request.ConversationApprovalMode, want, err)
-	}
-	request.ConversationApprovalMode = ConversationApprovalSkip
-	raw, err := MarshalHostedTurnModelInput(request)
-	var modelInput map[string]interface{}
-	if err != nil || json.Unmarshal(raw, &modelInput) != nil || modelInput["conversationApprovalMode"] != nil {
-		t.Fatalf("host-only approval mode leaked into model input: %s %v", raw, err)
 	}
 }
 

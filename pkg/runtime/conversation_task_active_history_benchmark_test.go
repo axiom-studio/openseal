@@ -71,8 +71,7 @@ func conversationTaskBenchmarkActiveHistory(b *testing.B, open func(*testing.B) 
 			for index := 0; index < 5; index++ {
 				record := conversationTaskBenchmarkRecord(b, store, fmt.Sprintf("old-active-%d", index), base.Add(time.Duration(index)*time.Nanosecond))
 				conversationTaskBenchmarkPost(b, kernel, record.Task.SourceMessageID, "thread", record.Task.CreatedAt)
-				turn := &AgentTurn{ID: record.Task.SourceTurnID, Scope: record.Task.Scope, RunID: record.Task.SourceRunID, Sequence: 1, Status: AgentTurnStatusCompleted, Revision: 1, CreatedAt: record.Task.CreatedAt, UpdatedAt: record.Task.CreatedAt, StartedAt: record.Task.CreatedAt, CompletedAt: &record.Task.CreatedAt,
-					RequestedTask: &TurnTaskProposal{TaskKey: record.Task.TaskKey, Goal: record.Task.Goal, Acknowledgment: record.Task.Acknowledgment, Budget: cloneBudgetPolicy(record.Task.RequestedBudget)}}
+				turn := &AgentTurn{ID: record.Task.SourceTurnID, Scope: record.Task.Scope, RunID: record.Task.SourceRunID, Sequence: 1, Status: AgentTurnStatusCompleted, Revision: 1, CreatedAt: record.Task.CreatedAt, UpdatedAt: record.Task.CreatedAt, StartedAt: record.Task.CreatedAt, CompletedAt: &record.Task.CreatedAt}
 				if _, err := kernel.CreateAgentTurn(context.Background(), turn); err != nil {
 					b.Fatal(err)
 				}
@@ -253,7 +252,7 @@ func conversationTaskBenchmarkRecord(t testing.TB, store conversationTaskSQLTest
 		ThreadRootID: "thread", SourceRunID: sourceID, SourceTurnID: "turn-" + suffix, SourceTurnNumber: 1,
 		AuthenticatedActor: ConversationParticipant{Type: ConversationParticipantUser, ID: "requester"}, TargetAgentID: owner.ID,
 		WorkRunID: workID, TaskKey: "task-" + suffix, Goal: "Prepare the requested result", Acknowledgment: "I have started the work.",
-		RequestedBudget: &BudgetPolicy{MaxTurns: 5}, Revision: 1, CreatedAt: now}
+		RequestedBudget: &BudgetPolicy{MaxTurns: controlMinimumChildTurns}, Revision: 1, CreatedAt: now}
 	var err error
 	task.RequestDigest, err = conversationTaskDigest(task)
 	if err != nil {

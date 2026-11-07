@@ -11,10 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
-	"testing"
 	"time"
 )
 
@@ -119,24 +117,4 @@ func (c *openAICompatibleMoveCommentator) Comment(ctx context.Context, move game
 		InputTokens: decoded.Usage.PromptTokens, OutputTokens: decoded.Usage.CompletionTokens,
 		DurationMS: time.Since(started).Milliseconds(),
 	}, nil
-}
-
-func TestLiveThreeAgentSnakesAndLaddersUsesBoundedModelCommentary(t *testing.T) {
-	endpoint := os.Getenv("OPENSEAL_LLM_BASE_URL")
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	model := os.Getenv("OPENSEAL_LLM_MODEL")
-	if endpoint == "" || apiKey == "" || model == "" {
-		t.Skip("OpenSeal live provider is not configured")
-	}
-	commentator, err := newOpenAICompatibleMoveCommentator(endpoint, apiKey, model, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runSnakesAndLaddersAcceptance(t, commentator)
-	commentator.mu.Lock()
-	calls := commentator.calls
-	commentator.mu.Unlock()
-	if calls != len(gameDice) {
-		t.Fatalf("live commentary calls = %d, want %d", calls, len(gameDice))
-	}
 }

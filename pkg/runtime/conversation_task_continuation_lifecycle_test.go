@@ -170,33 +170,6 @@ func (p *promotionTurnPublisher) PublishTurnOutput(ctx context.Context, run *Age
 	return map[string]interface{}{"summary": "Action prepared"}, err
 }
 
-func TestTurnCoordinatorRetriesCommittedTurnAfterContinuationPromotion(t *testing.T) {
-	store := NewMemoryStore()
-	run, _, _ := continuationLifecycleFixture(t, store, "turn-cas-continuation")
-	run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-ConversationTaskForegroundTimeout-time.Second))
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil {
-		t.Fatalf("claim: %#v %v", claimed, err)
-	}
-	modelCalls := 0
-	publisher := &promotionTurnPublisher{store: store}
-	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", OutputPublisher: publisher}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		modelCalls++
-		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedActions: []TurnAction{{Type: "skill_action", Capability: "release.review", Summary: "Review release"}}, Usage: TurnUsage{InputTokens: 10}}, nil
-	}))
-	if err != nil || result == nil || result.Run == nil || result.Run.LastAppliedTurn != 1 || len(result.Turn.RequestedActions) != 1 || modelCalls != 1 || publisher.calls != 1 {
-		t.Fatalf("finished Turn retry: %#v model=%d publisher=%d err=%v", result, modelCalls, publisher.calls, err)
-	}
-	task, err := store.FindConversationTaskByWorkRunID(t.Context(), run.Scope, run.ID)
-	if err != nil || !ConversationTaskMatchesWorkRun(task, result.Run) {
-		t.Fatalf("Turn application lost continuation: %#v %v", task, err)
-	}
-	turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: run.Scope, RunID: run.ID})
-	if err != nil || len(turns) != 1 {
-		t.Fatalf("promotion reran the Turn: %#v %v", turns, err)
-	}
-}
-
 func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
 	store := NewMemoryStore()
 	run, conversation, _ := continuationLifecycleFixture(t, store, "native-continuation")
