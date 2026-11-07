@@ -7,20 +7,27 @@ import (
 )
 
 // A Team member's status-only reply is repaired as its own, like a 1:1 Agent's.
+// A failed operation has no saved output, so only completed ones are repaired.
 func TestConversationOperationDeliversDraftAndRecoversStatusOnlyReply(t *testing.T) {
 	for _, chat := range []struct {
 		name  string
 		owner ObjectiveOwner
 	}{{"agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}}, {"team", ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}}} {
-		for _, status := range []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed} {
-			t.Run(chat.name+"/"+string(status), func(t *testing.T) {
-				testConversationOperationRecovery(t, chat.owner, status)
-			})
-		}
+		t.Run(chat.name, func(t *testing.T) {
+			testConversationOperationRecovery(t, chat.owner)
+		})
 	}
 }
 
-func testConversationOperationRecovery(t *testing.T, owner ObjectiveOwner, status AgentRunStatus) {
+func TestConversationOperationFailedHasNoSavedOutput(t *testing.T) {
+	failed := &AgentRun{ID: "operation", Status: AgentRunStatusFailed, Output: map[string]interface{}{"summary": "partial draft"}}
+	if output, err := conversationOperationSavedOutput(t.Context(), NewMemoryStore(), failed); err != nil || output != "" {
+		t.Fatalf("failed operation output = %q, %v", output, err)
+	}
+}
+
+func testConversationOperationRecovery(t *testing.T, owner ObjectiveOwner) {
+	status := AgentRunStatusCompleted
 	scope := Scope{Kind: "tenant", ID: "drafts"}
 	team := chatRosterTeam(scope, "writer")
 	store := teamRosterPortfolio{MemoryStore: NewMemoryStore(), team: team}
@@ -34,25 +41,9 @@ func testConversationOperationRecovery(t *testing.T, owner ObjectiveOwner, statu
 	root := &AgentRun{ID: "root", Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: "writer", Goal: "Respond", Source: RunSourceChat, Status: AgentRunStatusCompleted, RootRunID: "root", Revision: 2, LastAppliedTurn: 1, CreatedAt: now, UpdatedAt: now, CompletedAt: &now, Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID}}
 	operation := &AgentRun{ID: "operation", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: "writer", Goal: "Write", Source: RunSourceFork, Status: status, RootRunID: "root", ParentRunID: "root", Entrypoint: "writing-session", Revision: 2, CreatedAt: now, UpdatedAt: now, CompletedAt: &now}
 	draft := "The actual requested draft, with all of its paragraphs."
-	if status == AgentRunStatusCompleted {
-		operation.Output = map[string]interface{}{"result": map[string]interface{}{"summary": draft}, "internal": map[string]interface{}{"opaqueReference": "private-value"}}
-	}
+	operation.Output = map[string]interface{}{"result": map[string]interface{}{"summary": draft}, "internal": map[string]interface{}{"opaqueReference": "private-value"}}
 	for _, run := range []*AgentRun{root, operation} {
 		if err := store.CreateAgentRun(t.Context(), run); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if status == AgentRunStatusFailed {
-		leaf := cloneAgentRun(operation)
-		leaf.ID = "writer-child"
-		leaf.ParentRunID = operation.ID
-		leaf.Entrypoint = ""
-		leaf.LastAppliedTurn = 2
-		leaf.Context = map[string]interface{}{DelegationModeContextKey: "reason"}
-		leaf.Output = map[string]interface{}{"summary": draft}
-		leaf.Checkpoint = map[string]interface{}{turnContinuityCheckpointKey: map[string]interface{}{"nextRunStatus": "running"}}
-		leaf.Error = "provider returned multiple values"
-		if err := store.CreateAgentRun(t.Context(), leaf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -61,13 +52,7 @@ func testConversationOperationRecovery(t *testing.T, owner ObjectiveOwner, statu
 	if err != nil || !ok || !strings.Contains(outcome.Content, draft) || strings.Contains(outcome.Content, "private-value") {
 		t.Fatalf("draft delivery=%#v %v", outcome, err)
 	}
-	if status == AgentRunStatusFailed && !strings.Contains(outcome.Content, "may be incomplete") {
-		t.Fatal("partial draft presented as success")
-	}
 	old := "Operation “writing-session” completed successfully."
-	if status == AgentRunStatusFailed {
-		old = "Operation “writing-session” failed. Review the Run for the exact failed step and retry when ready."
-	}
 	if _, _, err := runner.postAgentResponseWithReferences(t.Context(), root, conversation, trigger, old, outcome.References, false, nil); err != nil {
 		t.Fatal(err)
 	}

@@ -19,34 +19,15 @@ func conversationOperationSummary(output map[string]interface{}) string {
 	}
 	return ""
 }
-func conversationOperationSavedOutput(ctx context.Context, store PortfolioStore, operation *AgentRun) (string, error) {
-	if operation.Status == AgentRunStatusCompleted {
-		return conversationOperationSummary(operation.Output), nil
-	}
-	if operation.Status != AgentRunStatusFailed {
+
+// conversationOperationSavedOutput is a finished operation's user-facing
+// output. A failed or canceled operation has none: the loop writes
+// Output.summary only on a final answer, so no partial draft can exist.
+func conversationOperationSavedOutput(_ context.Context, _ PortfolioStore, operation *AgentRun) (string, error) {
+	if operation == nil || operation.Status != AgentRunStatusCompleted {
 		return "", nil
 	}
-	// A failed runbook may have a valid, persisted writing result from its
-	// reasoning child before a later turn failed. It remains partial, not success.
-	children, err := store.ListAgentRuns(ctx, AgentRunFilter{Scope: operation.Scope, Owner: &operation.Owner, ParentRunID: operation.ID, Limit: 2})
-	if err != nil {
-		return "", err
-	}
-	if len(children) != 1 {
-		return "", nil
-	}
-	child := children[0]
-	if child.Context[DelegationModeContextKey] != "reason" || child.LastAppliedTurn < 1 {
-		return "", nil
-	}
-	previous, _ := child.Checkpoint[turnContinuityCheckpointKey].(map[string]interface{})
-	if previous["nextRunStatus"] == string(AgentRunStatusWaitingForEvent) || previous["nextRunStatus"] == AgentRunStatusWaitingForEvent {
-		return "", nil
-	}
-	if summary := conversationOperationSummary(child.Output); summary != "" {
-		return "The task stopped before finishing. This saved draft may be incomplete and needs review:\n\n" + summary, nil
-	}
-	return "", nil
+	return conversationOperationSummary(operation.Output), nil
 }
 
 // Repair old status-only terminal replies without rerunning the model or
