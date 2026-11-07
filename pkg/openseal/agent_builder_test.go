@@ -2,6 +2,7 @@ package openseal
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -83,3 +84,119 @@ func TestAgentBuilderEngineEnsuresControlConversation(t *testing.T) {
 		t.Fatalf("control conversation = %#v then %#v, %v", first, second, err)
 	}
 }
+
+func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
+	ctx := context.Background()
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := runtime.Scope{Kind: "tenant", ID: "one"}
+	requester := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
+	space, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Press", Look: runtime.PersonalSpaceLook, CreatedBy: "ana"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := StartAgentBuilderRequest{
+		Scope: scope, Requester: requester, Prompt: "An agent that drafts press releases",
+		Parameters: AgentBuilderParameters{Name: " Press Desk ", Model: "openai/gpt-5"}, SpaceID: space.ID, IdempotencyKey: "key-1",
+	}
+	first, err := engine.StartAgentBuilderConversation(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversation, message := first.Conversation, first.Message
+	if first.Replayed || conversation.Owner != (runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: AgentBuilderDeploymentID}) ||
+		conversation.Origin == nil || *conversation.Origin != (runtime.ConversationReference{Kind: runtime.ConversationReferenceAgentBuilder, ID: "key-1"}) ||
+		conversation.SpaceID != space.ID || conversation.Title != "Press Desk" {
+		t.Fatalf("conversation = %#v", conversation)
+	}
+	if message.Sender != requester || message.Content != "An agent that drafts press releases" || message.BuilderParameters == nil ||
+		*message.BuilderParameters != (AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent, Name: "Press Desk", Model: "openai/gpt-5"}) {
+		t.Fatalf("message = %#v", message)
+	}
+	again, err := engine.StartAgentBuilderConversation(ctx, request)
+	if err != nil || !again.Replayed || again.Conversation.ID != conversation.ID || again.Message.ID != message.ID {
+		t.Fatalf("replay = %#v, %v", again, err)
+	}
+	changed := request
+	changed.Prompt = "Something else"
+	if _, err := engine.StartAgentBuilderConversation(ctx, changed); !errors.Is(err, runtime.ErrMessageConflict) {
+		t.Fatalf("a changed replay = %v", err)
+	}
+
+	personal, err := engine.StartAgentBuilderConversation(ctx, StartAgentBuilderRequest{
+		Scope: scope, Requester: requester, Prompt: "A team for launches", Parameters: AgentBuilderParameters{Kind: runtime.AgentBuilderKindTeam}, IdempotencyKey: "key-2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, _, err := engine.EnsurePersonalSpace(ctx, scope)
+	if err != nil || personal.Conversation.SpaceID != home.ID || personal.Conversation.Title != "New team" || personal.Message.BuilderParameters.Kind != runtime.AgentBuilderKindTeam {
+		t.Fatalf("personal = %#v, %v", personal.Conversation, err)
+	}
+
+	for name, bad := range map[string]StartAgentBuilderRequest{
+		"sensitive prompt": {Scope: scope, Requester: requester, Prompt: "Use api key: sk-1234567890abcdefghijklmnop", IdempotencyKey: "key-3"},
+		"sensitive name":   {Scope: scope, Requester: requester, Prompt: "Hi", Parameters: AgentBuilderParameters{Name: "Password: hunter2-secret"}, IdempotencyKey: "key-4"},
+		"agent requester":  {Scope: scope, Requester: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "x"}, Prompt: "Hi", IdempotencyKey: "key-5"},
+		"bad kind":         {Scope: scope, Requester: requester, Prompt: "Hi", Parameters: AgentBuilderParameters{Kind: "robot"}, IdempotencyKey: "key-6"},
+		"no key":           {Scope: scope, Requester: requester, Prompt: "Hi"},
+	} {
+		if _, err := engine.StartAgentBuilderConversation(ctx, bad); !errors.Is(err, runtime.ErrInvalidConversation) {
+			t.Fatalf("%s accepted: %v", name, err)
+		}
+	}
+	conversations, err := engine.ListConversations(ctx, runtime.ConversationFilter{Scope: scope, OriginKind: runtime.ConversationReferenceAgentBuilder})
+	if err != nil || len(conversations) != 2 {
+		t.Fatalf("builder conversations = %d, %v", len(conversations), err)
+	}
+}
+
+func TestAgentBuilderListDraftsKeepsRequesterActiveConversations(t *testing.T) {
+	ctx := context.Background()
+	engine, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := runtime.Scope{Kind: "tenant", ID: "one"}
+	ana := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
+	bo := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "bo"}
+	start := func(requester runtime.ConversationParticipant, key, name string) *runtime.Conversation {
+		t.Helper()
+		result, err := engine.StartAgentBuilderConversation(ctx, StartAgentBuilderRequest{
+			Scope: scope, Requester: requester, Prompt: "Build " + name, Parameters: AgentBuilderParameters{Name: name}, IdempotencyKey: key,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Conversation
+	}
+	first := start(ana, "a1", "Scout")
+	start(bo, "b1", "Other")
+	archived := start(ana, "a2", "Gone")
+	current, err := engine.GetConversation(ctx, scope, archived.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.UpdateConversation(ctx, runtime.UpdateConversationRequest{
+		Scope: scope, ConversationID: archived.ID, ExpectedRevision: current.Revision, Status: ptr(runtime.ConversationStatusArchived),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// A plain chat with the builder is not a builder conversation.
+	if _, _, err := engine.CreateConversation(ctx, runtime.CreateConversationRequest{
+		Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: AgentBuilderDeploymentID}, Title: "Chat", IdempotencyKey: "chat",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	drafts, err := engine.ListAgentBuilderDrafts(ctx, AgentBuilderDraftFilter{Scope: scope, Requester: ana, Principal: runtime.ApprovalPrincipal{Type: "user", ID: "ana"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(drafts) != 1 || drafts[0].ConversationID != first.ID || drafts[0].Status != runtime.AgentBuilderDraftIdle || drafts[0].Title != "Scout" || drafts[0].Approval != nil {
+		t.Fatalf("drafts = %#v", drafts)
+	}
+}
+
+func ptr[T any](value T) *T { return &value }

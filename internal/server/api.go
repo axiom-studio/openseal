@@ -32,6 +32,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/approvals", s.handleApproveWorkforceChangeSet)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/activation", s.handlePrepareWorkforceChangeSetActivation)
 	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/apply", s.handleApplyWorkforceChangeSet)
+	s.mux.HandleFunc("POST /api/v1/agent-builder/conversations", s.handleStartAgentBuilderConversation)
+	s.mux.HandleFunc("GET /api/v1/agent-builder/drafts", s.handleListAgentBuilderDrafts)
 	s.mux.HandleFunc("POST /api/v1/objectives", s.handleCreateObjective)
 	s.mux.HandleFunc("GET /api/v1/objectives", s.handleListObjectives)
 	s.mux.HandleFunc("GET /api/v1/objectives/{id}", s.handleGetObjective)
@@ -260,6 +262,9 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 			workforceCapability.Context.CredentialBindings = append([]capability.CredentialBindingChoice(nil), s.authoringCredentials...)
 		}
 		capabilities = append(capabilities, workforceCapability)
+	}
+	if scope, ok := s.agentBuilderCapabilityScope(r); ok && s.agentBuilderAvailable(r.Context(), scope) {
+		capabilities = append(capabilities, kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID))
 	}
 	if s.clawHub != nil {
 		lifecycle := s.clawHub.ClawHubLifecycleCapabilities()
