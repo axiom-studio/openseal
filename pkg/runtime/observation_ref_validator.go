@@ -25,10 +25,18 @@ func (e observationAdvanceRecoveryError) actionAdvanceRecovery() (string, bool) 
 	return "", true
 }
 
-func (ObservationRefActionProposalValidator) ValidateActionProposal(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func (ObservationRefActionProposalValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
 	if input.Bound == nil || input.Bound.Action.InputSchema == nil {
 		return nil, nil
 	}
+	skillID := ""
+	if input.Bound.Definition != nil {
+		skillID = input.Bound.Definition.ID
+	}
+	var (
+		observation       *ActionCall
+		observationLoaded bool
+	)
 	properties, _ := input.Bound.Action.InputSchema["properties"].(map[string]interface{})
 	for argument, rawProperty := range properties {
 		property, _ := rawProperty.(map[string]interface{})
@@ -45,7 +53,14 @@ func (ObservationRefActionProposalValidator) ValidateActionProposal(_ context.Co
 		if ref == "" {
 			return nil, fmt.Errorf("action argument %s requires a current observation reference", argument)
 		}
-		element, err := currentObservationElement(input.Run, ref)
+		if !observationLoaded {
+			latest, err := latestSkillActionCall(ctx, input.History, skillID)
+			if err != nil {
+				return nil, err
+			}
+			observation, observationLoaded = latest, true
+		}
+		element, err := currentObservationElement(observation, ref)
 		if err != nil {
 			return nil, fmt.Errorf("action argument %s: %w", argument, observationAdvanceRecoveryError{cause: err})
 		}
@@ -69,15 +84,35 @@ func (ObservationRefActionProposalValidator) ValidateActionProposal(_ context.Co
 	return nil, nil
 }
 
-func currentObservationElement(run *AgentRun, ref string) (map[string]interface{}, error) {
-	if run == nil || run.Checkpoint == nil {
+// latestSkillActionCall returns the newest terminal call of skillID in the
+// Run's history, or nil. Scoping to the Skill keeps the observation check
+// correct when unrelated reads ran after the observation.
+func latestSkillActionCall(ctx context.Context, history RunActionHistory, skillID string) (*ActionCall, error) {
+	if history == nil {
+		return nil, nil
+	}
+	calls, err := history.Calls(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read Run action history: %w", err)
+	}
+	for _, call := range calls {
+		if call != nil && call.SkillID == skillID {
+			return call, nil
+		}
+	}
+	return nil, nil
+}
+
+// currentObservationElement finds ref in last, the latest observation of the
+// Skill (see latestSkillActionCall).
+func currentObservationElement(last *ActionCall, ref string) (map[string]interface{}, error) {
+	if last == nil {
 		return nil, errors.New("current observation is unavailable")
 	}
-	last, _ := run.Checkpoint["lastAction"].(map[string]interface{})
-	if last == nil || fmt.Sprint(last["status"]) != string(ActionCallStatusSucceeded) {
+	if last.Status != ActionCallStatusSucceeded {
 		return nil, errors.New("latest action is not a successful observation; take a new observation")
 	}
-	result, _ := last["result"].(map[string]interface{})
+	result := last.Output
 	if compacted, _ := result["value"].(map[string]interface{}); compacted != nil {
 		result = compacted
 	}

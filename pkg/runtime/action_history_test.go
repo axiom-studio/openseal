@@ -200,9 +200,6 @@ func TestPreserveKernelActionHistoryRejectsModelRewrite(t *testing.T) {
 	if last["actionCallId"] != "trusted" || elements[0].(map[string]interface{})["ref"] != "s6:e57" {
 		t.Fatalf("kernel-owned latest action was replaced: %#v", last)
 	}
-	if _, err := currentObservationElement(&AgentRun{Checkpoint: merged}, "s6:e57"); err != nil {
-		t.Fatalf("current observation reference was lost across hosted turn: %v", err)
-	}
 	withoutHistory := preserveKernelActionHistory(nil, proposed)
 	if len(actionHistoryEntries(withoutHistory)) != 0 {
 		t.Fatalf("model invented kernel action history: %#v", withoutHistory)
