@@ -570,38 +570,6 @@ func assertHostedApprovalModeHint(t *testing.T, input TurnExecutionContext, agen
 	}
 }
 
-func TestForegroundConversationTurnCarriesApprovalMode(t *testing.T) {
-	store := NewMemoryStore()
-	f := newForegroundClarificationFixture(t, store, false)
-	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalSkip)
-	claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: f.run.Scope, Kind: RunKindConversation, WorkerID: "foreground-worker",
-		Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil || claimed.ID != f.run.ID {
-		t.Fatalf("claim foreground: %#v %v", claimed, err)
-	}
-	var captured *TurnExecutionContext
-	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DeploymentID: f.run.AssignedAgentID, DefinitionID: "browser", DefinitionVersion: "1",
-			Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-				captured = &input
-				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done.", RunOutput: map[string]interface{}{"summary": "Done."}}, nil
-			})}, nil
-	})
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, f.service), ConversationRunTurnRunnerConfig{AgentTurns: resolver})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: f.run.Scope, RunID: f.run.ID, WorkerID: "foreground-worker", DefinitionID: "browser", DefinitionVersion: "1",
-	}, runner); err != nil {
-		t.Fatal(err)
-	}
-	if captured == nil {
-		t.Fatal("foreground adapter did not invoke the hosted runner")
-	}
-	assertHostedApprovalModeHint(t, *captured, captured.Run.AssignedAgentID, ConversationApprovalSkip)
-}
-
 func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

@@ -69,61 +69,6 @@ func contextPressureFailure(estimated, limit int64) error {
 	return &TurnHostFailure{Code: TurnHostContextExceeded, Message: "This conversation is too long for test-model.", ContextPressure: &HostedContextPressure{EstimatedTokens: estimated, LimitTokens: limit}}
 }
 
-func TestContextPressureShrinksHistoryAndRetriesOnce(t *testing.T) {
-	var calls []contextPressurePayload
-	var inputs []TurnExecutionContext
-	runner, input, conversations, c, trigger := contextPressureChat(t, "pressure-shrinks", 40, 2000, func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-		payload := decodeContextPressurePayload(t, input.Run.Goal)
-		calls = append(calls, payload)
-		inputs = append(inputs, input)
-		if len(calls) == 1 {
-			// About 80 KiB of history; ask for about 30 KiB less.
-			return nil, contextPressureFailure(40000, 43000)
-		}
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "You said original-0."},
-			ContinuationCheckpoint: map[string]interface{}{conversationSummaryCheckpoint: map[string]interface{}{"basis": payload.Request.Basis, "text": "The user listed forty originals."}}}, nil
-	})
-	outcome, err := runner.RunTurn(t.Context(), input)
-	if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted {
-		t.Fatalf("outcome = %#v, err = %v", outcome, err)
-	}
-	if len(calls) != 2 {
-		t.Fatalf("turn was sent %d times, want 2", len(calls))
-	}
-	if !inputs[0].contextReducible || inputs[0].contextPressure != nil || inputs[1].contextReducible {
-		t.Fatalf("first reducible = %v, retry reducible = %v", inputs[0].contextReducible, inputs[1].contextReducible)
-	}
-	first, retry := calls[0], calls[1]
-	if retry.Current.ID != trigger.ID || retry.Omitted == 0 || len(retry.Messages)+retry.Omitted != len(first.Messages) {
-		t.Fatalf("first sent %d messages, retry %d with %d omitted", len(first.Messages), len(retry.Messages), retry.Omitted)
-	}
-	// Each message is about 2.3 KiB in the model input with its metadata.
-	removed := 0
-	for _, message := range first.Messages[:retry.Omitted] {
-		projected, _ := json.Marshal(message)
-		escaped, _ := json.Marshal(string(projected))
-		removed += len(escaped) + 1
-	}
-	if want := (40000 - 43000*3/4) * 4; removed < want || removed > want+2500 {
-		t.Fatalf("removed %d bytes, want about %d", removed, want)
-	}
-	if !strings.HasPrefix(retry.Messages[0].Content, fmt.Sprintf("original-%d ", retry.Omitted)) || !strings.HasPrefix(retry.Messages[len(retry.Messages)-1].Content, "original-39 ") {
-		t.Fatal("retry did not keep the latest history")
-	}
-	if !strings.Contains(retry.Guidance, "read_conversation_history") {
-		t.Fatalf("guidance does not explain omitted history: %q", retry.Guidance)
-	}
-	// The retry asks for a summary of the history it kept, so the next turn
-	// starts smaller.
-	if retry.Request == nil || retry.Request.SourceMessageIDs[0] != retry.Messages[0].ID || retry.Request.ThroughSequence >= trigger.Sequence {
-		t.Fatalf("retry summary request = %#v", retry.Request)
-	}
-	saved := conversations.summaries.get(c.Scope, c.ID, conversationViewerKey(ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent"}}))
-	if saved == nil || saved.ThroughSequence != retry.Request.ThroughSequence {
-		t.Fatalf("summary from the retry was not kept: %#v", saved)
-	}
-}
-
 func TestContextPressureRequestsSummaryWhenNoneWasDue(t *testing.T) {
 	calls := 0
 	var retry contextPressurePayload

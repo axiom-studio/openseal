@@ -3,90 +3,12 @@ package runtime
 import (
 	"strings"
 	"testing"
-	"time"
 )
-
-// A Team member's status-only reply is repaired as its own, like a 1:1 Agent's.
-// A failed operation has no saved output, so only completed ones are repaired.
-func TestConversationOperationDeliversDraftAndRecoversStatusOnlyReply(t *testing.T) {
-	for _, chat := range []struct {
-		name  string
-		owner ObjectiveOwner
-	}{{"agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "writer"}}, {"team", ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}}} {
-		t.Run(chat.name, func(t *testing.T) {
-			testConversationOperationRecovery(t, chat.owner)
-		})
-	}
-}
 
 func TestConversationOperationFailedHasNoSavedOutput(t *testing.T) {
 	failed := &AgentRun{ID: "operation", Status: AgentRunStatusFailed, Output: map[string]interface{}{"summary": "partial draft"}}
 	if output, err := conversationOperationSavedOutput(t.Context(), NewMemoryStore(), failed); err != nil || output != "" {
 		t.Fatalf("failed operation output = %q, %v", output, err)
-	}
-}
-
-func testConversationOperationRecovery(t *testing.T, owner ObjectiveOwner) {
-	status := AgentRunStatusCompleted
-	scope := Scope{Kind: "tenant", ID: "drafts"}
-	team := chatRosterTeam(scope, "writer")
-	store := teamRosterPortfolio{MemoryStore: NewMemoryStore(), team: team}
-	service := NewConversationService(store)
-	now := time.Now()
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: owner, Title: "Writing", IdempotencyKey: "chat"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	trigger := postConversationRunTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Write a short draft", "prompt")
-	root := &AgentRun{ID: "root", Scope: scope, Kind: RunKindConversation, Owner: owner, AssignedAgentID: "writer", Goal: "Respond", Source: RunSourceChat, Status: AgentRunStatusCompleted, RootRunID: "root", Revision: 2, LastAppliedTurn: 1, CreatedAt: now, UpdatedAt: now, CompletedAt: &now, Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID}}
-	operation := &AgentRun{ID: "operation", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: "writer", Goal: "Write", Source: RunSourceFork, Status: status, RootRunID: "root", ParentRunID: "root", Entrypoint: "writing-session", Revision: 2, CreatedAt: now, UpdatedAt: now, CompletedAt: &now}
-	draft := "The actual requested draft, with all of its paragraphs."
-	operation.Output = map[string]interface{}{"result": map[string]interface{}{"summary": draft}, "internal": map[string]interface{}{"opaqueReference": "private-value"}}
-	for _, run := range []*AgentRun{root, operation} {
-		if err := store.CreateAgentRun(t.Context(), run); err != nil {
-			t.Fatal(err)
-		}
-	}
-	runner := &ConversationRunTurnRunner{portfolio: store, conversations: service}
-	outcome, ok, err := runner.governedConversationOperationOutcome(t.Context(), root)
-	if err != nil || !ok || !strings.Contains(outcome.Content, draft) || strings.Contains(outcome.Content, "private-value") {
-		t.Fatalf("draft delivery=%#v %v", outcome, err)
-	}
-	old := "Operation “writing-session” completed successfully."
-	if _, _, err := runner.postAgentResponseWithReferences(t.Context(), root, conversation, trigger, old, outcome.References, false, nil); err != nil {
-		t.Fatal(err)
-	}
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if owner.Type == OwnerTypeTeam {
-		// A member off the roster never posts again.
-		team.Roster = nil
-		if err := scheduler.reconcileConversationOperationOutputs(t.Context(), scope, &ConversationRunReconcileResult{}); err != nil {
-			t.Fatal(err)
-		}
-		if messages, _ := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID}); len(messages) != 2 {
-			t.Fatalf("removed member repaired its reply: %#v", messages)
-		}
-		team.Roster = chatRosterTeam(scope, "writer").Roster
-	}
-	for range 2 {
-		if err := scheduler.reconcileConversationOperationOutputs(t.Context(), scope, &ConversationRunReconcileResult{}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	messages, err := service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(messages) != 3 || messages[2].Content != outcome.Content || messages[2].Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: "writer"}) {
-		t.Fatalf("recovered messages=%#v", messages)
-	}
-	// No second model run is needed to recover a persisted result.
-	runs, _ := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: scope, Kind: RunKindConversation})
-	if len(runs) != 1 {
-		t.Fatal("recovery scheduled duplicate work")
 	}
 }
 

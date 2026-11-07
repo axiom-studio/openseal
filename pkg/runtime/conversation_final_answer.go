@@ -230,7 +230,7 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 }
 
 func participationStoppedDelivery() FinalDeliveryResult {
-	return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: cloneMap(participationStoppedOutcome().RunOutput)}
+	return FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: cloneMap(participationStoppedOutput())}
 }
 
 func withConversationOutput(base map[string]interface{}, message *ChannelMessage, replayed bool) map[string]interface{} {

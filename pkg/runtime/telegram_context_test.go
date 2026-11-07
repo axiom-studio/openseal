@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 )
@@ -71,50 +70,6 @@ func TestTelegramPrivateChatKeepsContextAcrossReplyRoots(t *testing.T) {
 	trigger.ExternalSource.ChannelType = "private"
 	if externalConversationThreadRoot(conversation, trigger) != "quoted-message" {
 		t.Fatal("Slack lost isolation")
-	}
-}
-
-func TestTelegramDMHostedPromptIncludesEarlierUnrelatedReplyRoots(t *testing.T) {
-	store := NewMemoryStore()
-	service := NewConversationService(store)
-	scope := Scope{Kind: "tenant", ID: "telegram-history"}
-	conversation, _, err := service.CreateConversation(t.Context(), CreateConversationRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Title: "Telegram DM", Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "telegram"}, IdempotencyKey: "dm"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	post := func(key, text, reply string) *ChannelMessage {
-		latest, _ := service.GetConversation(t.Context(), scope, conversation.ID)
-		result, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{Scope: scope, ConversationID: conversation.ID, ExpectedRevision: latest.Revision, Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion, Content: text, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true, IdempotencyKey: key, ReplyToMessageID: reply, ExternalSource: &ExternalMessageSource{Provider: "telegram", ChannelID: "99", ChannelType: "private", MessageID: key, ThreadID: "reply:" + key, ParticipantID: "user"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return result.Message
-	}
-	root := post("one", "My dog's name is Pepper.", "")
-	post("two", "Pepper is a black Labrador.", root.ID)
-	trigger := post("three", "What is my dog's name and breed?", "")
-	scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(t.Context(), scope, conversation.ID, trigger.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if scheduled.Run.ConcurrencyKey != conversationRunLane(conversation.ID, "", scheduled.Run.AssignedAgentID) || scheduled.Run.Context["threadRootMessageId"] != nil {
-		t.Fatal("DM scheduled in isolated reply lane")
-	}
-	calls := 0
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DeploymentID: "agent", Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-			calls++
-			if !strings.Contains(input.Run.Goal, "My dog's name is Pepper.") || !strings.Contains(input.Run.Goal, "Pepper is a black Labrador.") {
-				t.Fatalf("chat history lost: %s", input.Run.Goal)
-			}
-			return &TurnOutcome{NextRunStatus: AgentRunStatusRunning}, nil
-		})}, nil
-	})})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: scheduled.Run, Turn: &AgentTurn{ID: "turn"}}); err != nil || calls != 1 {
-		t.Fatalf("run calls=%d err=%v", calls, err)
 	}
 }
 

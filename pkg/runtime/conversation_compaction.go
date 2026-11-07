@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -239,4 +240,24 @@ func loadConversationCompactionHistory(ctx context.Context, service *Conversatio
 
 func (r *ConversationRunTurnRunner) conversationHistoryForCompaction(ctx context.Context, conversation *Conversation, viewer ConversationViewer, recent []*ChannelMessage, saved *conversationSummary) ([]*ChannelMessage, error) {
 	return loadConversationCompactionHistory(ctx, r.conversations, conversation, viewer, recent, saved)
+}
+
+// agentConversationPromptMessage is the old goal's message shape, read only
+// by the compaction estimate in this file.
+type agentConversationPromptMessage struct {
+	ID                string                  `json:"id"`
+	Sequence          int64                   `json:"sequence"`
+	Sender            ConversationParticipant `json:"sender"`
+	SenderDisplayName string                  `json:"senderDisplayName,omitempty"`
+	ExternalSource    *ExternalMessageSource  `json:"externalSource,omitempty"`
+	CreatedAt         time.Time               `json:"createdAt"`
+	ReplyToMessageID  string                  `json:"replyToMessageId,omitempty"`
+	// Quote is the earlier message the sender is answering, as they saw it.
+	Quote      *ChannelMessageQuote      `json:"quote,omitempty"`
+	Historical bool                      `json:"historical,omitempty"`
+	Intent     ConversationMessageIntent `json:"intent"`
+	Content    string                    `json:"content"`
+	References []ConversationReference   `json:"references,omitempty"`
+	// Reactions renders the message's reactions, e.g. "👍 Rio, ✅ Maya".
+	Reactions string `json:"reactions,omitempty"`
 }

@@ -378,7 +378,7 @@ func (l *conversationLoop) startRun(ctx context.Context, in StepInput, steering 
 		return nil, err
 	}
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
-		return &StepContextAppend{EarlyFinal: &LoopFinal{Status: AgentRunStatusCompleted, Output: participationStoppedOutcome().RunOutput}}, nil
+		return &StepContextAppend{EarlyFinal: &LoopFinal{Status: AgentRunStatusCompleted, Output: participationStoppedOutput()}}, nil
 	}
 	l.conversation, l.trigger = conversation, trigger
 	if !l.chatSession(session) {

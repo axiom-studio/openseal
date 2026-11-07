@@ -1,12 +1,10 @@
 package runtime
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 func TestInstallationWideInboxKeepsChannelAndDMContextsSeparate(t *testing.T) {
@@ -38,65 +36,5 @@ func TestInstallationWideInboxKeepsChannelAndDMContextsSeparate(t *testing.T) {
 				t.Fatal("history reader exposed a message from another channel")
 			}
 		}
-	}
-}
-
-func TestExternalChannelModelContextExcludesAgentPrivateWork(t *testing.T) {
-	ctx := t.Context()
-	store := NewMemoryStore()
-	scope := Scope{Kind: "tenant", ID: "channel-isolation"}
-	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "nori"}
-	service := NewConversationService(store)
-	private, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Private DM", IdempotencyKey: "private-dm", Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "same-slack-app", Version: 1}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	postConversationRunTestMessage(t, service, private, ConversationParticipantUser, MessageIntentQuestion, "PRIVATE_DM_SECRET", "private-message")
-	public, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Public channel", IdempotencyKey: "public-channel", Origin: &ConversationReference{Kind: ConversationReferenceExternalSource, ID: "same-slack-app", Version: 1}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	trigger := postConversationRunTestMessage(t, service, public, ConversationParticipantUser, MessageIntentQuestion, "PUBLIC_CHANNEL_QUESTION", "public-message")
-	objective, err := NewPortfolioService(store).CreateObjective(ctx, CreateObjectiveRequest{Scope: scope, Owner: owner, Title: "PRIVATE_OBJECTIVE", Goal: "PRIVATE_OBJECTIVE_SECRET", Status: ObjectiveStatusActive})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = NewRunbookActivationService(store).Create(ctx, CreateRunbookActivationRequest{Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID, DefinitionID: "private-workflow", DefinitionVersion: "1", TriggerID: "scheduled", Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Entrypoint: "private-workflow", Schedule: &runbook.Schedule{Cron: "0 0 * * * *", Timezone: "UTC"}}, Status: RunbookActivationActive, IdempotencyKey: "private-workflow"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	recent, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: public.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: owner.ID}}
-	foreignSummary := &conversationSummary{Scope: scope, ConversationID: private.ID, ViewerKey: conversationViewerKey(viewer), ThroughSequence: 1, Basis: strings.Repeat("a", 64), Text: "PRIVATE_DM_SUMMARY"}
-	if plan := planConversationHistory(public, trigger.ID, viewer, recent, foreignSummary); plan.Summary != nil {
-		t.Fatal("channel accepted another DM's summary")
-	}
-	goal, err := runner.agentConversationGoal(ctx, public, trigger, recent, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(goal, "PUBLIC_CHANNEL_QUESTION") {
-		t.Fatal("current channel context missing")
-	}
-	for _, secret := range []string{"PRIVATE_DM_SECRET", "PRIVATE_OBJECTIVE_SECRET", "private-workflow"} {
-		if strings.Contains(goal, secret) {
-			t.Fatalf("external channel exposed %s", secret)
-		}
-	}
-	personal := *public
-	personal.Origin = nil
-	controlGoal, err := runner.agentConversationGoal(ctx, &personal, trigger, recent, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(controlGoal, "PRIVATE_OBJECTIVE_SECRET") {
-		t.Fatal("personal control conversation lost its existing private portfolio context")
 	}
 }

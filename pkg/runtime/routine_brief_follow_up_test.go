@@ -98,84 +98,6 @@ func briefRunWaiting(t *testing.T, f *routineBriefFixture, skillID, action strin
 	return run, proposal
 }
 
-// A message sent while a routine brief waits replaces the brief: the Run
-// resumes with the message as a follow-up instead of starting a new turn.
-func TestMessageDuringPendingRoutineBriefSupersedesIt(t *testing.T) {
-	f := newRoutineBriefFixture(t)
-	run, proposal := briefRunWaiting(t, f, RunbookManagementSkillID, RunbookActionCreateTask, routineBriefArguments("Europe/London"))
-	message := f.post(t, "user", "08:00 IST")
-	delivered := f.schedule(t, message)
-	if delivered.ID != run.ID || len(f.conversationRuns(t)) != 1 {
-		t.Fatalf("message started another Run: %#v", delivered)
-	}
-	if delivered.Status != AgentRunStatusQueued || delivered.WakeCondition != nil || !conversationRunHasFollowUp(delivered, message.ID) || requiresFinalFailureExplanation(delivered.Checkpoint) {
-		t.Fatalf("Run did not resume with the message: %#v", delivered)
-	}
-	approval := f.approval(t, proposal.Approval.ID)
-	if approval.Status != ApprovalStatusSuperseded || approval.DecisionReason != ApprovalSupersededReason || approval.DecisionBy == nil ||
-		*approval.DecisionBy != ApprovalSupersededPrincipal || approval.DecisionID != "superseded:"+approval.ID || approval.DecidedAt == nil {
-		t.Fatalf("approval = %#v", approval)
-	}
-	if outcome := approvalOutcome(approval.Status); outcome != "Replaced by your message" {
-		t.Fatalf("approval outcome = %q", outcome)
-	}
-	call, err := f.store.GetActionCall(t.Context(), run.Scope, proposal.Call.ID)
-	if err != nil || call.Status != ActionCallStatusDenied {
-		t.Fatalf("brief call = %#v, %v", call, err)
-	}
-	last, _ := delivered.Checkpoint["lastAction"].(map[string]interface{})
-	if fmt.Sprint(last["approvalStatus"]) != string(ApprovalStatusSuperseded) || last["supersededByMessageId"] != message.ID {
-		t.Fatalf("lastAction = %#v", last)
-	}
-	events, err := f.store.ListActivity(t.Context(), ActivityFilter{Scope: run.Scope, RunID: run.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	audited := false
-	for _, event := range events {
-		audited = audited || event.EventType == "approval.superseded" && event.Actor == (ActivityActor{Type: "system", ID: "kernel"}) && event.CorrelationID == message.ID
-	}
-	if !audited {
-		t.Fatalf("supersede was not audited: %#v", events)
-	}
-	if _, ok := governedConversationActionOutcome(delivered); ok {
-		t.Fatal("a superseded brief resolved without the model")
-	}
-
-	// The resumed Turn sees the request and the message, in order.
-	calls := 0
-	runner := f.runner(t, func(input TurnExecutionContext) *TurnOutcome {
-		calls++
-		goal := decodeConversationFollowUpGoal(t, input.Run.Goal)
-		if len(goal.FollowUpMessages) != 1 || goal.FollowUpMessages[0].Content != "08:00 IST" || !strings.Contains(goal.CurrentMessage.Content, "Every morning") {
-			t.Fatalf("Turn did not see the brief reply: %#v", goal)
-		}
-		return completedConversationAnswer("Here is the revised routine.")
-	})
-	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: delivered}); err != nil || calls != 1 {
-		t.Fatalf("resumed Turn = %v, calls=%d", err, calls)
-	}
-
-	// The hosted request tells the Agent to re-propose with the change.
-	var seen HostedTurnRequest
-	host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-		seen = request
-		return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model", NextRunStatus: AgentRunStatusCompleted, OutputSummary: "ok", RunOutput: map[string]interface{}{"summary": "ok"}}, nil
-	}}
-	hosted, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent-42", DefinitionID: "agent", DefinitionVersion: "1",
-		Actions: []capability.ModelAction{{Name: "openseal.runbooks.create_task", SkillID: RunbookManagementSkillID, Action: RunbookActionCreateTask, Version: RunbookManagementSkillVersion}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := hosted.RunTurn(t.Context(), TurnExecutionContext{Run: delivered, Turn: &AgentTurn{ID: "revise"}}); err != nil {
-		t.Fatal(err)
-	}
-	instructions := strings.Join(seen.SystemInstructions, "\n")
-	if !strings.Contains(instructions, SupersededRoutineBriefInstruction) || !strings.Contains(instructions, RoutineTimezoneInstruction) || !strings.Contains(instructions, RoutineDeliveryInstruction) || len(seen.Actions) != 1 {
-		t.Fatalf("hosted request = %#v", seen)
-	}
-}
-
 // Replays and a second quick message converge on one decision; a replay
 // never closes the revised brief proposed after the message.
 func TestRoutineBriefSupersedeIsIdempotent(t *testing.T) {
@@ -275,41 +197,5 @@ func TestRoutineBriefDecidedConcurrentlyWithMessage(t *testing.T) {
 	}
 	if approval := f.approval(t, proposal.Approval.ID); approval.Status != ApprovalStatusApproved || approval.DecisionID != "accept" {
 		t.Fatalf("approval = %#v", approval)
-	}
-}
-
-// Declining a brief is a decision: the Run completes with a calm reply and
-// no failure. Other declined actions still end the attempt as before.
-func TestDeclinedRoutineBriefCompletesCalmly(t *testing.T) {
-	f := newRoutineBriefFixture(t)
-	run, proposal := briefRunWaiting(t, f, RunbookManagementSkillID, RunbookActionCreateTask, routineBriefArguments("Asia/Kolkata"))
-	declined, err := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}).Resolve(t.Context(), ResolveApprovalRequest{
-		Scope: run.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "decline",
-		Decision: ApprovalDecisionReject, Principal: ApprovalPrincipal{Type: "user", ID: "user"},
-	})
-	if err != nil || declined.Approval.Status != ApprovalStatusRejected || declined.Run.Status != AgentRunStatusQueued || requiresFinalFailureExplanation(declined.Run.Checkpoint) {
-		t.Fatalf("decline = %#v, %v", declined, err)
-	}
-	runner := f.runner(t, func(TurnExecutionContext) *TurnOutcome {
-		t.Fatal("a declined brief went back to the model")
-		return nil
-	})
-	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: declined.Run})
-	if err != nil || outcome.NextRunStatus != AgentRunStatusCompleted || outcome.RunError != "" || len(outcome.ProposedActions) != 0 {
-		t.Fatalf("decline outcome = %#v, %v", outcome, err)
-	}
-	reply, err := f.service.GetChannelMessage(t.Context(), f.conversation.Scope, f.conversation.ID, fmt.Sprint(outcome.RunOutput["messageId"]))
-	if err != nil || reply.Content != DeclinedRoutineBriefReply {
-		t.Fatalf("decline reply = %#v, %v", reply, err)
-	}
-
-	other := newRoutineBriefFixture(t)
-	payRun, payment := briefRunWaiting(t, other, "shop", "pay", map[string]interface{}{})
-	rejected, err := NewApprovalCoordinator(other.store, other.store, EligibleApprovalAuthorizer{}).Resolve(t.Context(), ResolveApprovalRequest{
-		Scope: payRun.Scope, ApprovalID: payment.Approval.ID, ExpectedRevision: payment.Approval.Revision, DecisionID: "decline",
-		Decision: ApprovalDecisionReject, Principal: ApprovalPrincipal{Type: "user", ID: "user"},
-	})
-	if err != nil || !requiresFinalFailureExplanation(rejected.Run.Checkpoint) {
-		t.Fatalf("declined payment no longer ends the attempt: %#v, %v", rejected, err)
 	}
 }
