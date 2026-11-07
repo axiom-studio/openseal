@@ -86,24 +86,25 @@ func testAgentRunWorkerKeepsForegroundPastDeadline(t *testing.T, resolving bool)
 		var releaseOnce sync.Once
 		closeRelease := func() { releaseOnce.Do(func() { close(release) }) }
 		var modelCalls atomic.Int32
-		runner := TurnRunnerFunc(func(ctx context.Context, _ TurnExecutionContext) (*TurnOutcome, error) {
+		producer := &workerTaskProducer{reply: func(ctx context.Context, _ int, _ StepInput) (StepOutput, error) {
 			modelCalls.Add(1)
 			if !resolving {
 				entered <- ctx
 				<-release
 			}
-			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Reviewed release"}}, ctx.Err()
-		})
-		pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(ctx context.Context, _ *AgentRun) (*TurnRunnerBinding, error) {
+			return answerStep("Reviewed release"), ctx.Err()
+		}}
+		resolve := workerTaskResolver(t, store, store, producer)
+		pool := workerTaskPoolWith(t, store, run.Scope, TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 			if resolving {
 				entered <- ctx
 				<-release
 			}
-			return &TurnRunnerBinding{DeploymentID: "agent", Runner: runner}, ctx.Err()
-		}), nil, AgentRunWorkerConfig{Scope: run.Scope, Kind: RunKindConversation, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute})
-		if err != nil {
-			t.Fatal(err)
-		}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return resolve(ctx, run)
+		}))
 		go func() { defer close(done); pool.executeClaim(t.Context(), "worker", claimed) }()
 		defer func() { closeRelease(); <-done }()
 		invocationCtx := <-entered
@@ -205,19 +206,20 @@ func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
 		t.Fatalf("claim: %#v %v", claimed, err)
 	}
 	modelCalls := 0
-	pool := workerTaskPool(t, store, run.Scope, TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-		modelCalls++
-		if modelCalls == 1 {
+	proposal := workerTaskProposal()
+	pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(ctx context.Context, call int, in StepInput) (StepOutput, error) {
+		modelCalls = call
+		if call == 1 {
 			if _, err := store.PromoteConversationTask(ctx, ConversationTaskPromotionRequest{Scope: run.Scope, RunID: run.ID, Now: time.Now()}); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
-			return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: taskProposalFixture()}, nil
+			return startTaskStep(proposal.goal, proposal.ack), nil
 		}
-		if input.Run.ID != run.ID || input.Turn.Sequence != 2 {
-			return nil, errors.New("continuation lost original Run or Turn lineage")
+		if in.Run.ID != run.ID || in.Step.Sequence != 2 {
+			return StepOutput{}, errors.New("continuation lost original Run or step lineage")
 		}
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Release review complete"}}, nil
-	}))
+		return answerStep("Release review complete"), nil
+	}})
 	pool.executeClaim(t.Context(), "worker", claimed)
 	finished, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
 	if err != nil || finished.Status != AgentRunStatusCompleted || modelCalls != 2 || finished.LastAppliedTurn != 2 {
@@ -242,10 +244,10 @@ func TestAgentRunWorkerKeepsQueuedForegroundPastDeadlineWithSaturatedLimiter(t *
 		store := NewMemoryStore()
 		run, conversation, trigger := continuationLifecycleFixture(t, store, "limited-foreground")
 		var modelCalls atomic.Int32
-		pool := workerTaskPool(t, store, run.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
+		pool := workerTaskPool(t, store, run.Scope, &workerTaskProducer{reply: func(context.Context, int, StepInput) (StepOutput, error) {
 			modelCalls.Add(1)
-			return nil, errors.New("worker should remain queued behind limiter")
-		}))
+			return StepOutput{}, errors.New("worker should remain queued behind limiter")
+		}})
 		limiter, err := NewWorkerLimiter(1)
 		if err != nil {
 			t.Fatal(err)
@@ -294,7 +296,6 @@ func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 		})
 	}
 }
-
 
 type boundedContinuationStore struct {
 	runs     []*AgentRun
