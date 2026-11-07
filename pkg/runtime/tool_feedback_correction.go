@@ -145,7 +145,6 @@ func checkpointToolFeedbackFailure(checkpoint map[string]interface{}, call *Acti
 	state["kind"], state["message"], state["lastFailureId"] = "action", message, call.ID
 	delete(state, "admittedActionCallId")
 	delete(state, "rejectedProposal")
-	delete(state, sourceAccessChallengeStateKey)
 	delete(state, sourceAccessQuestionKey)
 	digests, _ := state["failedSemanticDigests"].([]interface{})
 	if digest := ComputeActionSemanticDigest(call); digest != "" {

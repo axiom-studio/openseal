@@ -272,20 +272,6 @@ func evidenceGroundingResultMap(review *EvidenceGroundingReview) map[string]inte
 	return result
 }
 
-func evidenceClaimsResult(claims []EvidenceClaim) []interface{} {
-	encoded, _ := json.Marshal(claims)
-	var result []interface{}
-	_ = json.Unmarshal(encoded, &result)
-	return result
-}
-
-func evidenceSnapshotID(snapshot *EvidenceSnapshot) string {
-	if snapshot == nil {
-		return ""
-	}
-	return snapshot.ID
-}
-
 // MarshalEvidenceGroundingModelInput strips host-only credential selection
 // before the immutable review envelope is presented to a model.
 func MarshalEvidenceGroundingModelInput(request EvidenceGroundingRequest) ([]byte, error) {
