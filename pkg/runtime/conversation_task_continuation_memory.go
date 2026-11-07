@@ -78,12 +78,14 @@ func (s *MemoryStore) PromoteConversationTask(ctx context.Context, req Conversat
 			return nil, nil
 		}
 	}
-	for _, turn := range s.turns[key] {
-		if turn.Sequence == run.LastAppliedTurn+1 && conversationTaskFinishedBeforePromotion(turn) {
-			return nil, nil
-		}
+	if conversationTaskFinishedBeforePromotion(latestConversationTaskStep(s.turns[key])) {
+		return nil, nil
 	}
-	task, updated, event, err := buildConversationTaskContinuation(req, run, conversation, message)
+	var chat *AgentSession
+	if run.SessionID != "" {
+		chat = cloneAgentSession(s.agentSessions[portfolioKey(req.Scope, run.SessionID)])
+	}
+	task, updated, event, fork, err := buildConversationTaskContinuation(req, run, conversation, message, chat)
 	if err != nil || task == nil {
 		return nil, err
 	}
@@ -104,6 +106,22 @@ func (s *MemoryStore) PromoteConversationTask(ctx context.Context, req Conversat
 	ackIdempotencyKey := channelMessageIdempotencyKey(task.Scope, task.ConversationID, ack.Message.IdempotencyKey)
 	if s.channelMessageIDs[ackKey] != nil || s.channelMessageKeys[ackIdempotencyKey] != "" {
 		return nil, ErrMessageConflict
+	}
+	// The session writes are the only fallible ones, so they go first. The
+	// fork stores run.SessionID = child (Revision+1, as updated already has);
+	// updated then replaces that row.
+	if fork != nil {
+		if s.agentSessions[portfolioKey(req.Scope, updated.SessionID)] != nil {
+			return nil, ErrAgentSessionConflict
+		}
+		if _, err := s.createRunAgentSessionLocked(fork.Child); err != nil {
+			return nil, err
+		}
+		if fork.Note != nil {
+			if _, err := s.appendAgentSessionEntriesLocked(*fork.Note); err != nil {
+				return nil, err
+			}
+		}
 	}
 	s.saveMemoryConversationTaskLocked(task, updated)
 	s.saveMemoryAgentRunLocked(key, updated)
