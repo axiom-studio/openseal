@@ -739,7 +739,17 @@ func (s *MemoryStore) TransitionToolEntry(_ context.Context, req ToolEntryTransi
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.memoryRunLeaseLocked(req.Scope, req.RunID, req.Lease); err != nil {
+	if req.Lease.WorkerID == "" {
+		// Terminal close: the Run has no lease any more, so its being
+		// terminal is the fence.
+		run := s.agentRuns[portfolioKey(req.Scope, req.RunID)]
+		if run == nil {
+			return nil, ErrRunNotFound
+		}
+		if !isTerminalAgentRunStatus(run.Status) {
+			return nil, ErrLeaseLost
+		}
+	} else if _, err := s.memoryRunLeaseLocked(req.Scope, req.RunID, req.Lease); err != nil {
 		return nil, err
 	}
 	return s.transitionToolEntryCoreLocked(req)
