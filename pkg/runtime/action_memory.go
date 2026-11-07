@@ -75,8 +75,13 @@ func (s *MemoryStore) CreateActionProposal(_ context.Context, proposal ActionPro
 		if err := proposal.Nested.admit(call, state); err != nil {
 			return nil, err
 		}
-	} else if currentRun.Revision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
-		return nil, ErrRevisionConflict
+	} else {
+		if call.Origin == ActionOriginLoop && currentRun.Status != AgentRunStatusRunning {
+			return nil, ErrLeaseLost
+		}
+		if proposal.Run != nil && (currentRun.Revision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1) {
+			return nil, ErrRevisionConflict
+		}
 	}
 	if proposal.Lease != nil && (currentRun.LeaseOwner != proposal.Lease.WorkerID || currentRun.LeaseExpiresAt == nil || !currentRun.LeaseExpiresAt.After(proposal.Lease.Now)) {
 		return nil, ErrLeaseLost
@@ -157,6 +162,22 @@ func (s *MemoryStore) GetActionCallByExternalOperation(_ context.Context, scope 
 	id := s.externalOperationKeys[externalOperationStoreKey(scope, digest)]
 	call := s.actions[portfolioKey(scope, id)]
 	if call == nil || !externalOperationProtects(call.Status) {
+		return nil, ErrActionNotFound
+	}
+	return cloneActionCall(call), nil
+}
+
+func (s *MemoryStore) GetActionCallByIdempotencyKey(_ context.Context, scope Scope, runID, key string) (*ActionCall, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(runID) == "" || key == "" {
+		return nil, ErrActionNotFound
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	call := s.actions[portfolioKey(scope, s.actionKeys[actionIdempotencyKey(scope, runID, key)])]
+	if call == nil {
 		return nil, ErrActionNotFound
 	}
 	return cloneActionCall(call), nil
@@ -305,7 +326,7 @@ func (s *MemoryStore) ClaimNextAction(_ context.Context, claim ActionClaim) (*Ac
 	defer s.mu.Unlock()
 	var selected *ActionCall
 	for _, call := range s.actions {
-		if call.Scope != claim.Scope || !actionEligible(call, claim.Now) || !claim.claimSelects(call) || runHasPausedActionDependency(s.agentRuns[portfolioKey(call.Scope, call.RunID)], call) {
+		if call.Scope != claim.Scope || !actionEligible(call, claim.Now) || !claim.claimSelects(call, s.agentRuns[portfolioKey(call.Scope, call.RunID)]) || runHasPausedActionDependency(s.agentRuns[portfolioKey(call.Scope, call.RunID)], call) {
 			continue
 		}
 		if s.memorySkillRuntimeMaintenanceActiveLocked(call.Scope, call.SkillID) != nil {
@@ -416,14 +437,21 @@ func validateActionProposalRecord(proposal ActionProposalRecord) error {
 		return err
 	}
 	if proposal.Nested == nil {
-		if proposal.Call.Origin != "" {
-			return errors.New("a nested action call requires its Turn fence")
+		// Only the run loop proposes outside a nested fence. It holds the
+		// Run lease and changes the Run only to reserve budget.
+		if proposal.Call.Origin != ActionOriginLoop {
+			return errors.New("a nested action call requires its step fence")
 		}
-		if err := proposal.Run.Validate(); err != nil {
-			return err
+		if proposal.Lease == nil || strings.TrimSpace(proposal.Lease.WorkerID) == "" || proposal.Lease.Now.IsZero() {
+			return errors.New("a loop action proposal requires its Run lease")
 		}
-		if proposal.Call.Scope != proposal.Run.Scope || proposal.Call.RunID != proposal.Run.ID {
-			return ErrInvalidScope
+		if proposal.Run != nil {
+			if err := proposal.Run.Validate(); err != nil {
+				return err
+			}
+			if proposal.Call.Scope != proposal.Run.Scope || proposal.Call.RunID != proposal.Run.ID {
+				return ErrInvalidScope
+			}
 		}
 	}
 	if err := proposal.Event.Validate(); err != nil {
@@ -454,8 +482,8 @@ func validateActionSubmissionBinding(call *ActionCall, binding *skill.Binding) e
 	return nil
 }
 
-// A nested call's approval is resolved without a Run update (Run nil); every
-// other resolution updates its Run.
+// A nested call's approval is resolved without a Run update (Run nil). A loop
+// call's approval updates its Run only when the Run is parked on it.
 func validateApprovalResolutionRecord(resolution ApprovalResolutionRecord) error {
 	if err := resolution.Approval.Validate(); err != nil {
 		return err
@@ -463,8 +491,8 @@ func validateApprovalResolutionRecord(resolution ApprovalResolutionRecord) error
 	if err := resolution.Call.Validate(); err != nil {
 		return err
 	}
-	if (resolution.Run == nil) != (resolution.Call.Origin == ActionOriginVM) {
-		return errors.New("only a nested action call's approval resolves without a Run update")
+	if resolution.Run != nil && resolution.Call.Origin == ActionOriginVM {
+		return errors.New("a nested action call's approval resolves without a Run update")
 	}
 	if resolution.Run != nil {
 		if err := resolution.Run.Validate(); err != nil {

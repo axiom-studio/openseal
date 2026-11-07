@@ -573,20 +573,6 @@ func (w *ApprovalNotificationWorker) approvalConversation(
 
 func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall) map[string]interface{} {
 	proposedAction := cloneMap(approval.ProposedAction)
-	if reviewContext := approvalReviewContext(approval.ContinuationCheckpoint); len(reviewContext) > 0 {
-		explicit, _ := proposedAction["reviewContext"].(map[string]interface{})
-		for key, value := range reviewContext {
-			if _, exists := explicit[key]; !exists {
-				if explicit == nil {
-					explicit = make(map[string]interface{})
-				}
-				explicit[key] = value
-			}
-		}
-		if len(explicit) > 0 {
-			proposedAction["reviewContext"] = explicit
-		}
-	}
 	payload := map[string]interface{}{
 		"id": approval.ID, "revision": approval.Revision, "actionCallId": approval.ActionCallID,
 		"risk": approval.Risk, "summary": approval.Summary, "status": approval.Status,
@@ -613,37 +599,6 @@ func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall)
 		payload["decisionReason"] = approval.DecisionReason
 	}
 	return payload
-}
-
-// approvalReviewContext projects the explicit, approval-owned state that the
-// Agent persisted alongside the proposed action. This is where a prepared
-// public draft can remain when the final external action only addresses an
-// already-filled UI control. The projection is capability-neutral, bounded,
-// and secret-safe so every approval surface receives the same review facts.
-func approvalReviewContext(checkpoint map[string]interface{}) map[string]interface{} {
-	if len(checkpoint) == 0 {
-		return nil
-	}
-	review := make(map[string]interface{})
-	for _, field := range []string{"state", "output"} {
-		facts, _ := checkpoint[field].(map[string]interface{})
-		if len(facts) == 0 {
-			continue
-		}
-		projected, _ := boundedApprovalReviewValue(facts, 0, new(int)).(map[string]interface{})
-		for key, value := range projected {
-			// State is the canonical approval-owned value when both
-			// projections use the same field name. Output fills facts that
-			// are otherwise absent, such as a prepared artifact or draft.
-			if _, exists := review[key]; !exists {
-				review[key] = value
-			}
-		}
-	}
-	if len(review) == 0 {
-		return nil
-	}
-	return review
 }
 
 const (

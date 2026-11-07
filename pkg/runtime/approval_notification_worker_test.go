@@ -64,20 +64,12 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	approval := &ApprovalCheckpoint{
 		ID: "approval-1", Scope: endpoint.Scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
 		Risk: skill.RiskLevelExternal, Summary: "Post reviewed comment", PolicyReason: "external write",
-		ProposedAction: map[string]interface{}{"comment": "Useful context"}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
+		ProposedAction: map[string]interface{}{"comment": "Useful context", "reviewContext": map[string]interface{}{
+			"commentDraft": "The exact proposed public comment.",
+			"destination":  "https://forum.example/posts/42",
+			"postURL":      "https://forum.example/posts/42#comment-7",
+		}}, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}},
 		Destinations: []ApprovalDestination{{EndpointID: endpoint.ID}}, ExpiresAt: now.Add(24 * time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
-		ContinuationCheckpoint: map[string]interface{}{
-			"state": map[string]interface{}{
-				"commentDraft": "The exact proposed public comment.",
-				"destination":  "https://forum.example/posts/42",
-				"apiToken":     "must-never-leave-the-kernel",
-			},
-			"output": map[string]interface{}{
-				"commentDraft": "stale duplicate must not replace state",
-				"postURL":      "https://forum.example/posts/42#comment-7",
-				"accessToken":  "must-also-remain-secret",
-			},
-		},
 	}
 	waiting := cloneAgentRun(claimed)
 	waiting.Status = AgentRunStatusWaitingForApproval
@@ -158,8 +150,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	if review["commentDraft"] != "The exact proposed public comment." ||
 		review["destination"] != "https://forum.example/posts/42" ||
 		review["postURL"] != "https://forum.example/posts/42#comment-7" ||
-		review["apiToken"] != nil ||
-		review["accessToken"] != nil {
+		len(review) != 3 {
 		t.Fatalf("review context = %#v", review)
 	}
 	original, err := store.ClaimExternalConversationDelivery(ctx, endpoint.Scope, "delivery-worker", now, time.Minute)
@@ -259,9 +250,8 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 	// Reconciliation may later observe more review context for the same durable
 	// terminal phase. The already-enqueued projection owns retries and must not
 	// conflict with a newly rendered payload under the same idempotency key.
-	resolvedApproval.ContinuationCheckpoint = map[string]interface{}{
-		"state": map[string]interface{}{"additionalContext": "arrived after terminal projection"},
-	}
+	resolvedApproval.ProposedAction = cloneMap(resolvedApproval.ProposedAction)
+	resolvedApproval.ProposedAction["reviewContext"] = map[string]interface{}{"additionalContext": "arrived after terminal projection"}
 	if err := worker.notifyOutcome(ctx, resolvedApproval, completedCall, resolvedApproval.Destinations[0]); err != nil {
 		t.Fatalf("outcome replay = %v", err)
 	}

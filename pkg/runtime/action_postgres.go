@@ -167,8 +167,13 @@ func (s *PostgresStore) CreateActionProposal(ctx context.Context, proposal Actio
 		if err := proposal.Nested.admit(call, state); err != nil {
 			return nil, err
 		}
-	} else if currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
-		return nil, ErrRevisionConflict
+	} else {
+		if call.Origin == ActionOriginLoop && AgentRunStatus(currentStatus) != AgentRunStatusRunning {
+			return nil, ErrLeaseLost
+		}
+		if proposal.Run != nil && (currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1) {
+			return nil, ErrRevisionConflict
+		}
 	}
 	if proposal.Lease != nil && (currentLeaseOwner != proposal.Lease.WorkerID || !currentLeaseExpiry.Valid || !currentLeaseExpiry.Time.After(proposal.Lease.Now)) {
 		return nil, ErrLeaseLost
@@ -508,10 +513,14 @@ func (s *PostgresStore) ClaimNextAction(ctx context.Context, claim ActionClaim) 
 			AND r.payload#>>'{pausedWakeCondition,type}'='action' AND r.payload#>>'{pausedWakeCondition,reference}'=c.id)
 		AND NOT EXISTS (SELECT 1 FROM `+s.table("skill_runtime_maintenance")+` m WHERE m.scope_kind=c.scope_kind AND m.scope_id=c.scope_id
 			AND m.skill_id=c.skill_id AND m.active)
-		AND (CASE WHEN $6 <> '' THEN c.id=$6 AND c.status=$3 AND c.payload->>'execution'=$7
-			ELSE NOT (COALESCE(c.payload->>'execution', '')=$7 AND c.status=$3 AND c.available_at > $8) END)
+		AND (CASE WHEN $6 <> '' THEN c.id=$6 AND c.payload->>'execution' IN ($7, $9)
+			ELSE NOT (COALESCE(c.payload->>'execution', '')=$7 AND c.status=$3 AND c.available_at > $8)
+				AND NOT (COALESCE(c.payload->>'execution', '')=$9 AND EXISTS (SELECT 1 FROM `+s.table("agent_runs")+` r2
+					WHERE r2.scope_kind=c.scope_kind AND r2.scope_id=c.scope_id AND r2.id=c.run_id
+					AND r2.status NOT IN ('completed','failed','canceled'))) END)
 		ORDER BY c.available_at, c.created_at, c.id FOR UPDATE OF c SKIP LOCKED LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
-		ActionCallStatusReady, ActionCallStatusRunning, claim.Now, claim.HostActionID, string(ActionExecutionHost), claim.hostReadyCutoff()).Scan(&payload)
+		ActionCallStatusReady, ActionCallStatusRunning, claim.Now, claim.OwnActionID, string(ActionExecutionHost), claim.hostReadyCutoff(),
+		string(ActionExecutionLoop)).Scan(&payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if err := tx.Commit(); err != nil {
 			return nil, err
@@ -666,6 +675,16 @@ func (s *PostgresStore) getActionByID(ctx context.Context, queryer postgresQuery
 		return nil, err
 	}
 	return decodeActionCall(payload)
+}
+
+func (s *PostgresStore) GetActionCallByIdempotencyKey(ctx context.Context, scope Scope, runID, key string) (*ActionCall, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(runID) == "" || key == "" {
+		return nil, ErrActionNotFound
+	}
+	return s.getActionByIdempotency(ctx, s.db, scope, runID, key)
 }
 
 func (s *PostgresStore) getActionByIdempotency(ctx context.Context, queryer postgresQueryRower, scope Scope, runID, key string) (*ActionCall, error) {
