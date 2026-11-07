@@ -243,6 +243,13 @@ func (s *PostgresStore) CommitChannelMessage(ctx context.Context, record Channel
 		return nil, err
 	}
 	defer tx.Rollback()
+	// Run row first, then the conversation advisory lock (SPEC §4.1).
+	var guardedRun *AgentRun
+	if record.RunGuard != nil {
+		if guardedRun, err = s.lockPostgresGuardedRun(ctx, tx, record.RunGuard); err != nil {
+			return nil, err
+		}
+	}
 	if err := postgresConversationAdvisoryLock(ctx, tx, record.Message.Scope, "message:"+record.Message.ConversationID+":"+record.Message.IdempotencyKey); err != nil {
 		return nil, err
 	}
@@ -262,6 +269,11 @@ func (s *PostgresStore) CommitChannelMessage(ctx context.Context, record Channel
 			return nil, err
 		}
 		return &ChannelMessageCommitResult{Conversation: conversation, Message: existing, Replayed: true}, nil
+	}
+	if guardedRun != nil {
+		if err := replyRunGuardHolds(guardedRun, record.RunGuard, time.Now().UTC()); err != nil {
+			return nil, err
+		}
 	}
 	current, err := s.getPostgresConversation(ctx, tx, record.Conversation.Scope, record.Conversation.ID, true)
 	if err != nil {
@@ -284,6 +296,21 @@ func (s *PostgresStore) CommitChannelMessage(ctx context.Context, record Channel
 		return nil, err
 	}
 	return &ChannelMessageCommitResult{Conversation: cloneConversation(record.Conversation), Message: cloneChannelMessage(record.Message)}, nil
+}
+
+// lockPostgresGuardedRun reads the guarded Run row FOR UPDATE, so no
+// intervention append, cancel or lease change can land before COMMIT.
+func (s *PostgresStore) lockPostgresGuardedRun(ctx context.Context, tx *sql.Tx, guard *ReplyRunGuard) (*AgentRun, error) {
+	var payload string
+	err := tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_runs")+` WHERE scope_kind=$1 AND scope_id=$2 AND id=$3 FOR UPDATE`,
+		guard.Scope.Kind, guard.Scope.ID, guard.RunID).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrRunNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return decodeAgentRun(payload)
 }
 
 func (s *PostgresStore) GetChannelMessage(ctx context.Context, scope Scope, conversationID, messageID string) (*ChannelMessage, error) {
