@@ -110,20 +110,31 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req Convers
 	}
 	var turnPayload string
 	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_turns")+
-		` WHERE scope_kind=$1 AND scope_id=$2 AND run_id=$3 AND sequence=$4 FOR UPDATE`, req.Scope.Kind, req.Scope.ID, req.RunID, run.LastAppliedTurn+1).Scan(&turnPayload)
+		` WHERE scope_kind=$1 AND scope_id=$2 AND run_id=$3 ORDER BY sequence DESC LIMIT 1 FOR UPDATE`, req.Scope.Kind, req.Scope.ID, req.RunID).Scan(&turnPayload)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	if err == nil {
-		turn, err := decodeAgentTurnRecord(turnPayload)
+		step, err := decodeAgentTurnRecord(turnPayload)
 		if err != nil {
 			return nil, err
 		}
-		if conversationTaskFinishedBeforePromotion(turn) {
+		if conversationTaskFinishedBeforePromotion(step) {
 			return nil, nil
 		}
 	}
-	task, updated, event, err := buildConversationTaskContinuation(req, run, conversation, message)
+	// Lock order: agent_runs, then agent_sessions (section 01 §3).
+	var chat *AgentSession
+	if run.SessionID != "" {
+		chat, err = s.getPostgresAgentSessionTx(ctx, tx, req.Scope, run.SessionID, true)
+		if errors.Is(err, ErrAgentSessionNotFound) {
+			chat, err = nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	task, updated, event, fork, err := buildConversationTaskContinuation(req, run, conversation, message, chat)
 	if err != nil || task == nil {
 		return nil, err
 	}
@@ -142,6 +153,17 @@ func (s *PostgresStore) PromoteConversationTask(ctx context.Context, req Convers
 	}
 	if err := s.updatePostgresAgentRunTx(ctx, tx, updated, run.Revision); err != nil {
 		return nil, err
+	}
+	// updated already carries SessionID = child, so the fork leaves the Run row alone.
+	if fork != nil {
+		if _, err := s.createRunAgentSessionTx(ctx, tx, fork.Child); err != nil {
+			return nil, err
+		}
+		if fork.Note != nil {
+			if _, err := s.appendAgentSessionEntriesTx(ctx, tx, *fork.Note); err != nil {
+				return nil, err
+			}
+		}
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {

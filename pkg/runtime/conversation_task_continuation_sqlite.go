@@ -97,20 +97,30 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 		}
 	}
 	var turnPayload string
-	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_turns WHERE scope_kind=? AND scope_id=? AND run_id=? AND sequence=?`, req.Scope.Kind, req.Scope.ID, req.RunID, run.LastAppliedTurn+1).Scan(&turnPayload)
+	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_turns WHERE scope_kind=? AND scope_id=? AND run_id=? ORDER BY sequence DESC LIMIT 1`, req.Scope.Kind, req.Scope.ID, req.RunID).Scan(&turnPayload)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	if err == nil {
-		turn, err := decodeAgentTurnRecord(turnPayload)
+		step, err := decodeAgentTurnRecord(turnPayload)
 		if err != nil {
 			return nil, err
 		}
-		if conversationTaskFinishedBeforePromotion(turn) {
+		if conversationTaskFinishedBeforePromotion(step) {
 			return nil, nil
 		}
 	}
-	task, updated, event, err := buildConversationTaskContinuation(req, run, conversation, message)
+	var chat *AgentSession
+	if run.SessionID != "" {
+		chat, err = getSQLiteAgentSession(ctx, conn, req.Scope, run.SessionID)
+		if errors.Is(err, ErrAgentSessionNotFound) {
+			chat, err = nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	task, updated, event, fork, err := buildConversationTaskContinuation(req, run, conversation, message, chat)
 	if err != nil || task == nil {
 		return nil, err
 	}
@@ -129,6 +139,17 @@ func (s *SQLiteStore) PromoteConversationTask(ctx context.Context, req Conversat
 	}
 	if err := updateSQLiteAgentRunConn(ctx, conn, updated, run.Revision); err != nil {
 		return nil, err
+	}
+	// updated already carries SessionID = child, so the fork leaves the Run row alone.
+	if fork != nil {
+		if _, err := s.createRunAgentSessionTx(ctx, conn, fork.Child); err != nil {
+			return nil, err
+		}
+		if fork.Note != nil {
+			if _, err := s.appendAgentSessionEntriesTx(ctx, conn, *fork.Note); err != nil {
+				return nil, err
+			}
+		}
 	}
 	payload, err := json.Marshal(task)
 	if err != nil {
