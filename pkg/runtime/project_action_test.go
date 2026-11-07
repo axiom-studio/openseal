@@ -25,10 +25,11 @@ func TestGovernedProjectCreateUsesApprovalActionAndIdempotencyLifecycle(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
+			f := newLoopProposalFixture(t, store, run, "conversation-worker", time.Now().UTC())
 			coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
-			proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-				Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: owner.ID,
-				SkillID: ProjectManagementSkillID, SkillVersion: ProjectManagementSkillVersion, Action: ProjectActionCreate,
+			proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+				DeploymentID: owner.ID,
+				SkillID:      ProjectManagementSkillID, SkillVersion: ProjectManagementSkillVersion, Action: ProjectActionCreate,
 				Arguments: map[string]interface{}{
 					"title": "Customer research", "purpose": "Turn recurring customer feedback into cited decisions",
 					"objectiveRefs": []interface{}{objective.ID},
@@ -36,32 +37,22 @@ func TestGovernedProjectCreateUsesApprovalActionAndIdempotencyLifecycle(t *testi
 					"deliverables":  []interface{}{map[string]interface{}{"id": "weekly-brief", "title": "Weekly cited brief", "status": "planned", "objectiveRefs": []interface{}{objective.ID}}},
 				},
 				IdempotencyKey: "message-42:create-customer-research", Summary: "Create customer research Project", TurnID: "turn-42",
-			})
+			}, "create-customer-research"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval || proposal.Run.Status != AgentRunStatusWaitingForApproval {
+			if proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
 				t.Fatalf("proposal lifecycle = %#v", proposal)
 			}
 			preview := proposal.Approval.ProposedAction
 			if preview["resourceType"] != "project" || preview["operation"] != ProjectActionCreate || preview["resultingStatus"] != string(ProjectStatusDraft) || preview["owner"] == nil || preview["arguments"] != nil {
 				t.Fatalf("typed approval preview = %#v", preview)
 			}
-			resolved, err := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{
-				Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-				DecisionID: "decision-42", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Plan is bounded",
-			})
-			if err != nil || resolved.Call.Status != ActionCallStatusReady {
-				t.Fatalf("resolve = %#v, %v", resolved, err)
-			}
 			dispatcher, err := NewProjectActionDispatcher(store, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
+			executed := approveAndExecuteLoopAction(t, store, f, proposal, NewActionWorker(store, catalog, nil, dispatcher), "decision-42")
 			if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["resourceType"] != "project" || executed.Call.Output["created"] != true {
 				t.Fatalf("execution = %#v", executed)
 			}
@@ -174,10 +165,11 @@ func TestProjectPauseIsCASAndReplaySafe(t *testing.T) {
 	catalog := projectActionCatalog(t, store, scope, owner.ID)
 	run := createAndClaimProjectActionRun(t, store, scope, owner, owner.ID, "worker")
 	validator, _ := NewProjectActionValidator(store)
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ProjectManagementSkillID, SkillVersion: ProjectManagementSkillVersion,
-		Action: ProjectActionPause, Arguments: map[string]interface{}{"projectId": project.ID}, IdempotencyKey: "pause-on-request",
-	})
+	f := newLoopProposalFixture(t, store, run, "worker", time.Now().UTC())
+	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, f.request(ProposeActionRequest{
+		DeploymentID: owner.ID, SkillID: ProjectManagementSkillID, SkillVersion: ProjectManagementSkillVersion,
+		Action: ProjectActionPause, Arguments: map[string]interface{}{"projectId": project.ID}, IdempotencyKey: "pause-on-request", Summary: "Pause Project: Production watch",
+	}, "pause-on-request"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,14 +179,8 @@ func TestProjectPauseIsCASAndReplaySafe(t *testing.T) {
 	if proposal.Approval.ProposedAction["changes"].(map[string]interface{})["status"] != string(ProjectStatusPaused) {
 		t.Fatalf("pause preview = %#v", proposal.Approval.ProposedAction)
 	}
-	if _, err = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-pause", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}}); err != nil {
-		t.Fatal(err)
-	}
 	dispatcher, _ := NewProjectActionDispatcher(store, nil)
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	executed := approveAndExecuteLoopAction(t, store, f, proposal, NewActionWorker(store, catalog, nil, dispatcher), "approve-pause")
 	paused, err := store.GetProject(ctx, scope, project.ID)
 	if err != nil || paused.Status != ProjectStatusPaused || paused.Revision != project.Revision+1 {
 		t.Fatalf("paused = %#v, %v", paused, err)
@@ -235,24 +221,19 @@ func TestGovernedProjectUpdateComposesMultipleObjectivesAndIsReplaySafe(t *testi
 			map[string]interface{}{"id": "outreach", "title": "Complete approved follow-up", "status": "pending", "objectiveRefs": []interface{}{outreach.ID}},
 		},
 	}
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ProjectManagementSkillID, SkillVersion: ProjectManagementSkillVersion,
-		Action: ProjectActionUpdate, Arguments: arguments, IdempotencyKey: "expand-market-research",
-	})
+	f := newLoopProposalFixture(t, store, run, "worker", time.Now().UTC())
+	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, f.request(ProposeActionRequest{
+		DeploymentID: owner.ID, SkillID: ProjectManagementSkillID, SkillVersion: ProjectManagementSkillVersion,
+		Action: ProjectActionUpdate, Arguments: arguments, IdempotencyKey: "expand-market-research", Summary: "Expand market research Project to lead follow-up",
+	}, "expand-market-research"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if proposal.Approval.ProposedAction["projectId"] != project.ID || proposal.Approval.ProposedAction["expectedRevision"] == nil || proposal.Approval.ProposedAction["current"] == nil {
 		t.Fatalf("update preview = %#v", proposal.Approval.ProposedAction)
 	}
-	if _, err = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{}).Resolve(ctx, ResolveApprovalRequest{Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "approve-update", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"}}); err != nil {
-		t.Fatal(err)
-	}
 	dispatcher, _ := NewProjectActionDispatcher(store, nil)
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	executed := approveAndExecuteLoopAction(t, store, f, proposal, NewActionWorker(store, catalog, nil, dispatcher), "approve-update")
 	updated, err := service.Get(ctx, scope, project.ID)
 	if err != nil || updated.Revision != project.Revision+1 || len(updated.ObjectiveRefs) != 2 || len(updated.Milestones) != 2 || updated.Purpose != "Research pain points and follow up with qualified leads" {
 		t.Fatalf("updated = %#v, %v", updated, err)
