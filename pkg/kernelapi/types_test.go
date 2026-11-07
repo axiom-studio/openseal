@@ -38,15 +38,6 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 	}
 }
 
-func TestWorkforceAuthoringVersionDeclaresTypedRoutingActivationContract(t *testing.T) {
-	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true, SkillSearch: true})
-	if capability.Version != "12" || !capability.Supports(OperationCompile) || !capability.Supports(OperationPropose) ||
-		!capability.Supports(OperationSearch) ||
-		capability.Supports(OperationActivate) || capability.Supports(OperationRefine) || capability.Supports(OperationPatch) {
-		t.Fatalf("workforce authoring capability = %#v", capability)
-	}
-}
-
 func TestOutreachAdvertisesReviewedDeliveryLifecycle(t *testing.T) {
 	capability, ok := Capabilities().Find(OutreachCapabilityID, OutreachCapabilityVersion)
 	if !ok {
@@ -300,16 +291,6 @@ func TestTeamDefinitionsAdvertiseOnlyImplementedLifecycle(t *testing.T) {
 	}
 }
 
-func TestWorkforceAuthoringAdvertisesCompilationWithoutActivation(t *testing.T) {
-	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{})
-	if !capability.Supports(OperationCompile) {
-		t.Fatalf("workforce authoring operations = %#v", capability.Operations)
-	}
-	if capability.Supports(OperationActivate) || capability.Supports(OperationRegister) {
-		t.Fatalf("unsafe authoring operation advertised: %#v", capability.Operations)
-	}
-}
-
 func TestWorkforceExecutionTargetsCapabilityReflectsManagement(t *testing.T) {
 	readOnly := WorkforceExecutionTargetsCapability(false)
 	if readOnly.Supports(OperationCreate) || !readOnly.Supports(OperationList) {
@@ -318,26 +299,6 @@ func TestWorkforceExecutionTargetsCapabilityReflectsManagement(t *testing.T) {
 	managed := WorkforceExecutionTargetsCapability(true)
 	if !managed.Supports(OperationCreate) || !managed.Supports(OperationUpdate) {
 		t.Fatalf("managed execution targets = %#v", managed)
-	}
-}
-
-func TestContextualApprovalEligibilityIsTypedAndNotAnOperationInference(t *testing.T) {
-	capability := WorkforceAuthoringCapability(WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	for _, operation := range []string{OperationCompile, OperationPropose, OperationGet} {
-		if !capability.Supports(operation) {
-			t.Fatalf("change set operation %q not advertised: %#v", operation, capability.Operations)
-		}
-	}
-	if capability.Supports(OperationApply) || capability.Supports(OperationEvaluate) || capability.Supports(OperationRetry) {
-		t.Fatalf("resource-authorized operation advertised globally: %#v", capability.Operations)
-	}
-	capability.Context = &CapabilityContext{ChangeSetID: "change-1", Revision: 4, EligibleApprovalRequirements: []ApprovalRequirementReference{{EvaluationID: "eval-1", PolicyID: "production", Role: "operator"}}}
-	if capability.Supports(OperationApprove) {
-		t.Fatal("eligibility context must not silently advertise an operation")
-	}
-	capability.Operations = append(capability.Operations, OperationApprove)
-	if !capability.Supports(OperationApprove) || capability.Context.Revision != 4 || capability.Context.EligibleApprovalRequirements[0].EvaluationID != "eval-1" {
-		t.Fatalf("contextual capability = %#v", capability)
 	}
 }
 
@@ -458,5 +419,19 @@ func TestProjectAgentTurnV2EmitsOnlyPublicStepFields(t *testing.T) {
 	}
 	if ProjectAgentTurn(nil) != nil {
 		t.Fatal("nil turn projected to a record")
+	}
+}
+
+func TestAgentBuilderCapabilityContextCarriesOnlyTheBuilder(t *testing.T) {
+	capability := AgentBuilderCapability("openseal-assistant")
+	if !capability.Supports(OperationCreate) || !capability.Supports(OperationList) {
+		t.Fatalf("agent builder operations = %#v", capability.Operations)
+	}
+	encoded, err := json.Marshal(capability.Context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"builderAgentId":"openseal-assistant"}` {
+		t.Fatalf("agent builder context = %s", encoded)
 	}
 }
