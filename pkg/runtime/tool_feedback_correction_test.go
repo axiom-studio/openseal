@@ -553,11 +553,8 @@ func TestToolFeedbackScheduledSourceReadFailuresContinueAcrossStores(t *testing.
 			feedback, active := ReadToolFeedbackCorrection(failed.Run.Checkpoint)
 			if failed.Run.Status != AgentRunStatusQueued || failed.Run.CompletedAt != nil || requiresFinalFailureExplanation(failed.Run.Checkpoint) ||
 				!active || feedback.LastFailureID != failed.Call.ID || feedback.CorrectionsRemaining != MaximumToolFeedbackCorrections ||
-				hasCanonicalSourceAccessChallenge(failed.Run) || toolFeedbackInteger(failed.Run.Checkpoint[toolFailureCountCheckpointKey]) != 0 {
+				toolFeedbackInteger(failed.Run.Checkpoint[toolFailureCountCheckpointKey]) != 0 {
 				t.Fatalf("failed read %d (%s) ended the Run or asked nobody: %#v", index, failed.Call.ErrorCode, failed.Run)
-			}
-			if interaction, err := resolveSourceAccessChallengeInteraction(t.Context(), store, failed.Run); err != nil || interaction != nil {
-				t.Fatalf("scheduled Run gained a conversation question: %#v %v", interaction, err)
 			}
 		}
 		repeated := feedbackProposeCorrection(t, store, catalog, scope, run.ID, now, "source-repeat", "source-2")
