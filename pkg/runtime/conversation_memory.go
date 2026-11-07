@@ -133,7 +133,8 @@ func (s *MemoryStore) ListConversations(_ context.Context, filter ConversationFi
 	for _, conversation := range s.conversations {
 		if conversation.Scope != filter.Scope || (filter.Owner != nil && conversation.Owner != *filter.Owner) ||
 			(filter.SpaceID != "" && conversation.SpaceID != filter.SpaceID) ||
-			(len(filter.Statuses) > 0 && !containsConversationStatus(filter.Statuses, conversation.Status)) {
+			(len(filter.Statuses) > 0 && !containsConversationStatus(filter.Statuses, conversation.Status)) ||
+			(filter.OriginKind != "" && (conversation.Origin == nil || conversation.Origin.Kind != filter.OriginKind)) {
 			continue
 		}
 		result = append(result, cloneConversation(conversation))

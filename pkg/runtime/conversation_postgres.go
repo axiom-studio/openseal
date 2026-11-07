@@ -216,6 +216,11 @@ func (s *PostgresStore) ListConversations(ctx context.Context, filter Conversati
 		args = append(args, pq.Array(statuses))
 		placeholder++
 	}
+	if filter.OriginKind != "" {
+		query += fmt.Sprintf(` AND payload->'origin'->>'kind' = $%d`, placeholder)
+		args = append(args, string(filter.OriginKind))
+		placeholder++
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100

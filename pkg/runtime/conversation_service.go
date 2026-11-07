@@ -38,8 +38,11 @@ type ConversationFilter struct {
 	Owner    *ObjectiveOwner
 	SpaceID  string
 	Statuses []ConversationStatus
-	Limit    int
-	Offset   int
+	// OriginKind keeps only conversations whose Origin has this kind; empty
+	// lists every origin.
+	OriginKind ConversationReferenceKind
+	Limit      int
+	Offset     int
 }
 
 type PostChannelMessageRequest struct {

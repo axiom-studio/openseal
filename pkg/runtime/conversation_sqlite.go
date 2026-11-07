@@ -216,6 +216,10 @@ func (s *SQLiteStore) ListConversations(ctx context.Context, filter Conversation
 		statuses = append(statuses, string(status))
 	}
 	query, args = appendSQLiteActivityStrings(query, args, "status", statuses)
+	if filter.OriginKind != "" {
+		query += ` AND json_extract(payload, '$.origin.kind') = ?`
+		args = append(args, string(filter.OriginKind))
+	}
 	query += ` ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?`
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
