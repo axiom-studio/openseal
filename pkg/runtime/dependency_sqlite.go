@@ -95,11 +95,22 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 		if err != nil {
 			return nil, err
 		}
+		replayed := &RunDependencyResult{Group: existing, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}
+		if err := readSQLiteDependencyGroupSessionState(ctx, conn, record, replayed); err != nil {
+			return nil, err
+		}
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 			return nil, err
 		}
 		committed = true
-		return &RunDependencyResult{Group: existing, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}, nil
+		return replayed, nil
+	}
+	currentSource, err := getSQLiteAgentRun(ctx, conn, record.SourceRun.Scope, record.SourceRun.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkDependencyGroupCreateSource(currentSource, record); err != nil {
+		return nil, err
 	}
 	if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 		return nil, err
@@ -133,19 +144,79 @@ func (s *SQLiteStore) CreateRunDependencyGroup(ctx context.Context, record RunDe
 	if err != nil {
 		return nil, err
 	}
+	result := &RunDependencyResult{
+		Group: cloneRunDependencyGroup(record.Group), Source: cloneAgentRun(record.SourceRun), Events: []*ActivityEvent{persisted},
+	}
+	if err := s.applySQLiteDependencyGroupSessionWrites(ctx, conn, record, currentSource.SessionID, result); err != nil {
+		return nil, err
+	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return nil, err
 	}
 	committed = true
-	edges := cloneDependencySlice(record.Dependencies)
-	evaluation, err := EvaluateRunDependencies(record.Group, edges)
+	result.Dependencies = cloneDependencySlice(record.Dependencies)
+	result.Evaluation, err = EvaluateRunDependencies(record.Group, result.Dependencies)
 	if err != nil {
 		return nil, err
 	}
-	return &RunDependencyResult{
-		Group: cloneRunDependencyGroup(record.Group), Dependencies: edges, Source: cloneAgentRun(record.SourceRun),
-		Evaluation: evaluation, Events: []*ActivityEvent{persisted},
-	}, nil
+	return result, nil
+}
+
+// applySQLiteDependencyGroupSessionWrites creates the record's same-Agent
+// child sessions and moves the source's control tool entry, inside the
+// create's BEGIN IMMEDIATE. The source fence was checked by the caller.
+func (s *SQLiteStore) applySQLiteDependencyGroupSessionWrites(ctx context.Context, conn *sql.Conn, record RunDependencyGroupCreateRecord, sourceSessionID string, result *RunDependencyResult) error {
+	for i := range record.ChildSessions {
+		created, err := s.createRunAgentSessionTx(ctx, conn, dependencyGroupChildSession(record, i))
+		if err != nil {
+			return err
+		}
+		if !created.Created {
+			return ErrAgentSessionConflict
+		}
+		result.ChildSessions = append(result.ChildSessions, created.Session)
+	}
+	if record.ToolTransition == nil {
+		return nil
+	}
+	transition := dependencyGroupToolTransition(record)
+	current, err := getSQLiteSessionEntry(ctx, conn, transition.Scope, transition.EntryID)
+	if err != nil {
+		return err
+	}
+	if current.SessionID != sourceSessionID {
+		return ErrSessionMoved
+	}
+	moved, err := s.transitionToolEntryTx(ctx, conn, transition)
+	if err != nil {
+		return err
+	}
+	result.ToolEntry = moved.Entry
+	result.Events = append(result.Events, moved.Events...)
+	return nil
+}
+
+// readSQLiteDependencyGroupSessionState fills a replay with the current
+// tool entry and child sessions; a replay writes nothing.
+func readSQLiteDependencyGroupSessionState(ctx context.Context, conn *sql.Conn, record RunDependencyGroupCreateRecord, result *RunDependencyResult) error {
+	if transition := record.ToolTransition; transition != nil {
+		entry, err := getSQLiteSessionEntry(ctx, conn, transition.Scope, transition.EntryID)
+		if err != nil && !errors.Is(err, ErrSessionEntryNotFound) {
+			return err
+		}
+		result.ToolEntry = entry
+	}
+	for _, child := range record.ChildSessions {
+		session, err := getSQLiteAgentSession(ctx, conn, child.Scope, RunAgentSessionID(child.Scope, child.OwnerRunID))
+		if errors.Is(err, ErrAgentSessionNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		result.ChildSessions = append(result.ChildSessions, session)
+	}
+	return nil
 }
 
 func (s *SQLiteStore) GetRunDependencyGroup(ctx context.Context, scope Scope, groupID string) (*RunDependencyGroup, error) {

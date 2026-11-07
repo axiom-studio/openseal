@@ -151,6 +151,11 @@ type RunDependencyResult struct {
 	Evaluation   RunDependencyEvaluation `json:"evaluation"`
 	Events       []*ActivityEvent        `json:"events,omitempty"`
 	Replayed     bool                    `json:"replayed"`
+	// ToolEntry is the source's control tool entry after the record's
+	// ToolTransition (its current state on a replay).
+	ToolEntry *SessionEntry `json:"-"`
+	// ChildSessions are the same-Agent child sessions of the record, in order.
+	ChildSessions []*AgentSession `json:"-"`
 }
 
 type RunDependencyGroupCreateRecord struct {
@@ -163,6 +168,18 @@ type RunDependencyGroupCreateRecord struct {
 	SourceRun              *AgentRun
 	ExpectedSourceRevision int64
 	Event                  *ActivityEvent
+	// ToolTransition moves the source Run's control tool entry (control_fork,
+	// run_operation) to awaiting_child in the same transaction. Its Lease is
+	// checked against the source Run before the park releases that lease.
+	ToolTransition *ToolEntryTransitionRequest
+	// ChildSessions fork same-Agent children from the source Run's session in
+	// the same transaction (SPEC A3). Each OwnerRunID is one of TargetRuns
+	// and each ParentSessionID is the source Run's SessionID.
+	ChildSessions []CreateRunAgentSessionTxRequest
+	// RequireInterventionCount, when set, refuses the create with
+	// ErrSteeringArrived unless the stored source Run has exactly that many
+	// PendingInterventions.
+	RequireInterventionCount *int
 }
 
 type RunDependencyResolutionRecord struct {
