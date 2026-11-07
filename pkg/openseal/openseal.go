@@ -487,6 +487,8 @@ type (
 	ConversationArchiveImportResult      = runtime.ConversationArchiveImportResult
 	ChannelMessage                       = runtime.ChannelMessage
 	ChannelMessageQuote                  = runtime.ChannelMessageQuote
+	AgentBuilderParameters               = runtime.AgentBuilderParameters
+	AgentBuilderDraftProfile             = runtime.AgentBuilderDraftProfile
 	MessageReaction                      = runtime.MessageReaction
 	MessageReactionRecord                = runtime.MessageReactionRecord
 	MessageReactionRequest               = runtime.MessageReactionRequest

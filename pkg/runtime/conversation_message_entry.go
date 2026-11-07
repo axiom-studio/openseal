@@ -122,8 +122,9 @@ func conversationMessageTime(at time.Time) string {
 	return at.UTC().Format(conversationMessageTimeLayout)
 }
 
-// renderConversationMessageBody is the header, the quote line, the content
-// and, when files are attached, the "Attached:" line.
+// renderConversationMessageBody is the header, the quote line, the content,
+// the builder parameters lines and, when files are attached, the "Attached:"
+// line.
 func renderConversationMessageBody(message *ChannelMessage, attribution string, attached []conversationAttachedArtifact) string {
 	lines := []string{renderConversationMessageHeader(message, attribution)}
 	if quote := message.Quote; quote != nil && !quote.Unavailable {
@@ -134,10 +135,12 @@ func renderConversationMessageBody(message *ChannelMessage, attribution string, 
 		lines = append(lines, fmt.Sprintf("> Quoting %s: \"%s\"", who, quote.Excerpt))
 	}
 	content := message.Content
-	if strings.TrimSpace(content) == "" {
-		content = conversationMessageNoText
+	if strings.TrimSpace(content) != "" {
+		lines = append(lines, content)
+	} else if message.BuilderParameters == nil {
+		lines = append(lines, conversationMessageNoText)
 	}
-	lines = append(lines, content)
+	lines = append(lines, renderAgentBuilderParameters(message.BuilderParameters)...)
 	if len(attached) > 0 {
 		names := make([]string, 0, len(attached))
 		for _, file := range attached {
@@ -209,4 +212,38 @@ func nonEmptyStrings(values []string) []string {
 		}
 	}
 	return out
+}
+
+// renderAgentBuilderParameters is the model's view of a builder message's form
+// fields (D7): "Builder parameters (set in the form): …" and, for a migrated
+// draft, "Started draft: …". People never see these lines.
+func renderAgentBuilderParameters(parameters *AgentBuilderParameters) []string {
+	if parameters == nil {
+		return nil
+	}
+	fields := []string{"kind " + parameters.Kind}
+	if parameters.Name != "" {
+		fields = append(fields, "name \u201c"+parameters.Name+"\u201d")
+	}
+	if parameters.Model != "" {
+		fields = append(fields, "model "+parameters.Model)
+	}
+	lines := []string{"Builder parameters (set in the form): " + strings.Join(fields, "; ")}
+	if draft := parameters.Draft; draft != nil && !draft.empty() {
+		var parts []string
+		if draft.Purpose != "" {
+			parts = append(parts, "purpose "+draft.Purpose)
+		}
+		if draft.SystemPrompt != "" {
+			parts = append(parts, "behaviour "+draft.SystemPrompt)
+		}
+		if draft.Personality != "" {
+			parts = append(parts, "personality "+draft.Personality)
+		}
+		if len(draft.OperatingPrinciples) > 0 {
+			parts = append(parts, "principles: "+strings.Join(draft.OperatingPrinciples, "; "))
+		}
+		lines = append(lines, "Started draft: "+strings.Join(parts, "; "))
+	}
+	return lines
 }

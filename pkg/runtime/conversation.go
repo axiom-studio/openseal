@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
 // AgentApprovalsConversationReferenceID returns a portable, stable origin ID
@@ -347,8 +349,12 @@ type ChannelMessage struct {
 	Quote *ChannelMessageQuote `json:"quote,omitempty"`
 	// Question lists the choices of an Agent's question (only with intent
 	// question). SelectedOptionIDs are the choices a reply to it picked.
-	Question             *ChannelQuestion          `json:"question,omitempty"`
-	SelectedOptionIDs    []string                  `json:"selectedOptionIds,omitempty"`
+	Question          *ChannelQuestion `json:"question,omitempty"`
+	SelectedOptionIDs []string         `json:"selectedOptionIds,omitempty"`
+	// BuilderParameters are the form fields (kind, name, model, migrated
+	// draft) a person's message in an agent builder conversation carries.
+	// They are never written into Content.
+	BuilderParameters    *AgentBuilderParameters   `json:"builderParameters,omitempty"`
 	BroadcastToChannel   bool                      `json:"broadcastToChannel,omitempty"`
 	Mentions             []ConversationParticipant `json:"mentions,omitempty"`
 	References           []ConversationReference   `json:"references,omitempty"`
@@ -450,6 +456,140 @@ func cloneChannelQuestion(in *ChannelQuestion) *ChannelQuestion {
 	return &out
 }
 
+// Builder parameter kinds and limits. Draft field limits match the
+// create_agent schema.
+const (
+	AgentBuilderKindAgent = "agent"
+	AgentBuilderKindTeam  = "team"
+
+	maximumAgentBuilderNameBytes               = 80
+	maximumAgentBuilderModelBytes              = 200
+	maximumAgentBuilderPurposeBytes            = 2000
+	maximumAgentBuilderSystemPromptBytes       = 16384
+	maximumAgentBuilderPersonalityBytes        = 16384
+	maximumAgentBuilderOperatingPrinciples     = 16
+	maximumAgentBuilderOperatingPrincipleBytes = 2048
+)
+
+// AgentBuilderParameters are the structured fields of a person's message in a
+// builder conversation (D7): what the form set, never message text.
+type AgentBuilderParameters struct {
+	Kind  string `json:"kind"`            // "agent" | "team"
+	Name  string `json:"name,omitempty"`  // trimmed, at most 80 bytes
+	Model string `json:"model,omitempty"` // "" is the default; the host validates it when the builder proposes
+	// Draft is the drafted profile of a migrated change-set draft (cutover only).
+	Draft *AgentBuilderDraftProfile `json:"draft,omitempty"`
+}
+
+type AgentBuilderDraftProfile struct {
+	Purpose             string   `json:"purpose,omitempty"`
+	SystemPrompt        string   `json:"systemPrompt,omitempty"`
+	Personality         string   `json:"personality,omitempty"`
+	OperatingPrinciples []string `json:"operatingPrinciples,omitempty"`
+}
+
+// empty reports parameters that set nothing beyond their kind.
+func (p *AgentBuilderParameters) empty() bool {
+	return p.Name == "" && p.Model == "" && (p.Draft == nil || p.Draft.empty())
+}
+
+func (d *AgentBuilderDraftProfile) empty() bool {
+	return d.Purpose == "" && d.SystemPrompt == "" && d.Personality == "" && len(d.OperatingPrinciples) == 0
+}
+
+func (p *AgentBuilderParameters) validate() error {
+	if p == nil {
+		return nil
+	}
+	if p.Kind != AgentBuilderKindAgent && p.Kind != AgentBuilderKindTeam {
+		return fmt.Errorf("%w: builder parameters kind must be %q or %q", ErrInvalidConversation, AgentBuilderKindAgent, AgentBuilderKindTeam)
+	}
+	if err := agentBuilderLine("name", p.Name, maximumAgentBuilderNameBytes); err != nil {
+		return err
+	}
+	if err := agentBuilderLine("model", p.Model, maximumAgentBuilderModelBytes); err != nil {
+		return err
+	}
+	if d := p.Draft; d != nil {
+		if err := agentBuilderLine("draft purpose", d.Purpose, maximumAgentBuilderPurposeBytes); err != nil {
+			return err
+		}
+		if err := agentBuilderText("draft behaviour", d.SystemPrompt, maximumAgentBuilderSystemPromptBytes); err != nil {
+			return err
+		}
+		if err := agentBuilderText("draft personality", d.Personality, maximumAgentBuilderPersonalityBytes); err != nil {
+			return err
+		}
+		if len(d.OperatingPrinciples) > maximumAgentBuilderOperatingPrinciples {
+			return fmt.Errorf("%w: a draft has at most %d operating principles", ErrInvalidConversation, maximumAgentBuilderOperatingPrinciples)
+		}
+		seen := make(map[string]struct{}, len(d.OperatingPrinciples))
+		for _, principle := range d.OperatingPrinciples {
+			if strings.TrimSpace(principle) == "" {
+				return fmt.Errorf("%w: draft operating principles cannot be empty", ErrInvalidConversation)
+			}
+			if _, exists := seen[principle]; exists {
+				return fmt.Errorf("%w: duplicate draft operating principle", ErrInvalidConversation)
+			}
+			seen[principle] = struct{}{}
+			if err := agentBuilderText("draft operating principle", principle, maximumAgentBuilderOperatingPrincipleBytes); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func agentBuilderLine(field, value string, limit int) error {
+	if strings.ContainsAny(value, "\r\n") {
+		return fmt.Errorf("%w: builder parameter %s must be one line", ErrInvalidConversation, field)
+	}
+	return agentBuilderText(field, value, limit)
+}
+
+func agentBuilderText(field, value string, limit int) error {
+	if value != strings.TrimSpace(value) || len(value) > limit || !utf8.ValidString(value) {
+		return fmt.Errorf("%w: builder parameter %s must be trimmed text of at most %d bytes", ErrInvalidConversation, field, limit)
+	}
+	if err := validation.ValidateNoSensitiveInput(value); err != nil {
+		return fmt.Errorf("%w: builder parameter %s: %w", ErrInvalidConversation, field, err)
+	}
+	return nil
+}
+
+// normalizeAgentBuilderParameters trims a request's parameters into the form
+// the message stores. It returns a copy; nil stays nil.
+func normalizeAgentBuilderParameters(in *AgentBuilderParameters) *AgentBuilderParameters {
+	if in == nil {
+		return nil
+	}
+	out := &AgentBuilderParameters{Kind: strings.TrimSpace(in.Kind), Name: strings.TrimSpace(in.Name), Model: strings.TrimSpace(in.Model)}
+	if d := in.Draft; d != nil {
+		draft := &AgentBuilderDraftProfile{Purpose: strings.TrimSpace(d.Purpose), SystemPrompt: strings.TrimSpace(d.SystemPrompt), Personality: strings.TrimSpace(d.Personality)}
+		for _, principle := range d.OperatingPrinciples {
+			draft.OperatingPrinciples = append(draft.OperatingPrinciples, strings.TrimSpace(principle))
+		}
+		out.Draft = draft
+	}
+	return out
+}
+
+func cloneAgentBuilderParameters(in *AgentBuilderParameters) *AgentBuilderParameters {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.Draft != nil {
+		draft := *in.Draft
+		draft.OperatingPrinciples = append([]string(nil), in.Draft.OperatingPrinciples...)
+		if len(draft.OperatingPrinciples) == 0 {
+			draft.OperatingPrinciples = nil
+		}
+		out.Draft = &draft
+	}
+	return &out
+}
+
 func newChannelMessageQuote(message *ChannelMessage) *ChannelMessageQuote {
 	sender := message.Sender
 	excerpt := strings.Join(strings.Fields(message.Content), " ")
@@ -524,8 +664,19 @@ func (m *ChannelMessage) Validate() error {
 	if len(m.SenderDisplayName) > 160 || strings.ContainsAny(m.SenderDisplayName, "\r\n") {
 		return fmt.Errorf("%w: sender display name cannot exceed 160 characters or contain line breaks", ErrInvalidConversation)
 	}
-	if !validConversationMessageIntent(m.Intent) || strings.TrimSpace(m.Content) == "" || len(m.Content) > 65536 {
+	if !validConversationMessageIntent(m.Intent) || len(m.Content) > 65536 {
 		return fmt.Errorf("%w: valid intent and content of at most 64 KiB are required", ErrInvalidConversation)
+	}
+	if m.BuilderParameters != nil {
+		if m.Sender.Type != ConversationParticipantUser {
+			return fmt.Errorf("%w: only a person's message can carry builder parameters", ErrInvalidConversation)
+		}
+		if err := m.BuilderParameters.validate(); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(m.Content) == "" && (m.BuilderParameters == nil || m.BuilderParameters.empty()) {
+		return fmt.Errorf("%w: content is required unless the message sets builder parameters", ErrInvalidConversation)
 	}
 	if !validConversationContributionKey(m.ContributionKey) {
 		return fmt.Errorf("%w: contribution key must be normalized lowercase metadata", ErrInvalidConversation)
