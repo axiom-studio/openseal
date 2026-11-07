@@ -330,3 +330,45 @@ func TestTerminalConversationCreditStopLeavesTheSavedMessageForRetry(t *testing.
 		}
 	})
 }
+
+func TestFailedConversationReplySkipsServiceWakeWithoutRetry(t *testing.T) {
+	store := NewMemoryStore()
+	run, conversation, _ := terminalFailureConversationFixture(t, store, eventWaitContractEpoch, false)
+	run = failTerminalConversation(t, store, run, eventWaitContractEpoch, "provider_invalid_response")
+	current, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wake, err := NewConversationService(store).PostChannelMessage(t.Context(), PostChannelMessageRequest{
+		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: current.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "skill-setup-coordinator"}, Intent: MessageIntentUpdate,
+		Content: "Gmail is connected", StartThread: true,
+		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	woken := cloneAgentRun(run)
+	woken.Context[conversationRunContextTriggerID] = wake.Message.ID
+	woken.Context["threadRootMessageId"] = wake.Message.ID
+	if err := projectFailedConversationReply(t.Context(), store, woken); err != nil {
+		t.Fatalf("a service wake has nobody waiting and must not be retried: %v", err)
+	}
+	after, err := store.GetConversation(t.Context(), run.Scope, conversation.ID)
+	if err != nil || after.LastSequence != wake.Message.Sequence {
+		t.Fatalf("service wake produced a failure reply: %#v %v", after, err)
+	}
+}
+
+func TestFailedConversationReportCandidateNeedsASpeaker(t *testing.T) {
+	context := map[string]interface{}{conversationRunContextConversationID: "c1", conversationRunContextTriggerID: "m1"}
+	team := ObjectiveOwner{Type: OwnerTypeTeam, ID: "team-gtm"}
+	routing := &AgentRun{ID: "r1", Status: AgentRunStatusFailed, Kind: RunKindConversation, Owner: team, Context: context}
+	member := &AgentRun{ID: "r2", Status: AgentRunStatusFailed, Kind: RunKindConversation, Owner: team, AssignedAgentID: "ada", Context: context}
+	if failedConversationReportCandidate(routing) {
+		t.Fatal("a Team routing Run has no Agent to speak a failure reply")
+	}
+	if !failedConversationReportCandidate(member) {
+		t.Fatal("a Team member's failed Run answers as that member")
+	}
+}

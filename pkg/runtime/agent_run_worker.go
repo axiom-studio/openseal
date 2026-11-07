@@ -985,31 +985,49 @@ func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID
 		ContinuationCheckpoint: turn.ContinuationCheckpoint,
 		CausationID:            turn.ID,
 	}
-	var proposal *ActionProposalResult
-	for attempt := 0; attempt < 4; attempt++ {
-		proposal, err = p.actions.Propose(ctx, proposalRequest)
-		if !errors.Is(err, ErrRevisionConflict) || attempt == 3 {
-			break
+	propose := func() (*ActionProposalResult, error) {
+		var proposal *ActionProposalResult
+		var err error
+		for attempt := 0; attempt < 4; attempt++ {
+			proposal, err = p.actions.Propose(ctx, proposalRequest)
+			if !errors.Is(err, ErrRevisionConflict) || attempt == 3 {
+				break
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			latest, retryErr := p.continuationActionProposalRetry(ctx, workerID, run, turn)
+			if retryErr != nil {
+				return nil, retryErr
+			}
+			if latest == nil {
+				break
+			}
+			// Revalidate the same accepted action against the adopted canonical
+			// Run. The model, Turn, arguments and idempotency key remain unchanged.
+			run = latest
 		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		if err != nil {
+			return nil, err
 		}
-		latest, retryErr := p.continuationActionProposalRetry(ctx, workerID, run, turn)
-		if retryErr != nil {
-			return nil, retryErr
+		if proposal == nil || proposal.Call == nil {
+			return nil, errors.New("governed action proposal returned no durable Run or ActionCall")
 		}
-		if latest == nil {
-			break
-		}
-		// Revalidate the same accepted action against the adopted canonical
-		// Run. The model, Turn, arguments and idempotency key remain unchanged.
-		run = latest
+		return proposal, nil
 	}
+	proposal, err := propose()
 	if err != nil {
 		return nil, err
 	}
-	if proposal == nil || proposal.Call == nil {
-		return nil, errors.New("governed action proposal returned no durable Run or ActionCall")
+	// A person's message or review closed this proposal and asked for a
+	// revision. An unchanged re-proposal from a later Turn is a new request for
+	// approval, not a replay of the closed one. The derived key is stable, so
+	// worker retries of this Turn still replay the call it created.
+	for hops := 0; !proposal.Created && revisableClosedProposal(proposal, turn) && hops < maximumRevisedProposalHops; hops++ {
+		proposalRequest.IdempotencyKey = idempotencyKey + ":after:" + proposal.Call.ApprovalID
+		if proposal, err = propose(); err != nil {
+			return nil, err
+		}
 	}
 	if !proposal.Created {
 		return p.resumeReplayedTurnAction(ctx, workerID, run, turn, proposal.Call)
@@ -1087,6 +1105,20 @@ func (p *AgentRunWorkerPool) continuationActionProposalRetry(ctx context.Context
 	return latest, nil
 }
 
+// maximumRevisedProposalHops bounds how many closed-for-revision proposals
+// one re-proposal may step past. Each hop needs a person's message or review.
+const maximumRevisedProposalHops = 16
+
+// revisableClosedProposal reports a replayed call whose approval was closed
+// for revision (superseded by a message or changes requested) by an earlier
+// Turn than the one proposing it again.
+func revisableClosedProposal(proposal *ActionProposalResult, turn *AgentTurn) bool {
+	return proposal != nil && proposal.Call != nil && turn != nil &&
+		proposal.Call.Status == ActionCallStatusDenied && proposal.Call.TurnID != turn.ID &&
+		strings.TrimSpace(proposal.Call.ApprovalID) != "" && proposal.Approval != nil &&
+		proposal.Approval.ID == proposal.Call.ApprovalID && approvalRevisesProposal(string(proposal.Approval.Status))
+}
+
 func turnActionIdempotencyKey(proposed string, sideEffect capability.SideEffect, turnID string) string {
 	if sideEffect == capability.SideEffectRead || sideEffect == capability.SideEffectNone {
 		// A later Turn may need a fresh observation after the resource changes.
@@ -1128,6 +1160,13 @@ func (p *AgentRunWorkerPool) resumeReplayedTurnAction(ctx context.Context, worke
 				}
 				if approval.Status == ApprovalStatusSuperseded {
 					metadata["reviewedProposalRevision"] = approval.Revision - 1
+					// The approval does not keep the message that superseded it;
+					// the Run's resolution checkpoint does.
+					if last, ok := run.Checkpoint["lastAction"].(map[string]interface{}); ok && last["actionCallId"] == call.ID && last["approvalId"] == call.ApprovalID {
+						if messageID, ok := last["supersededByMessageId"]; ok {
+							metadata["supersededByMessageId"] = messageID
+						}
+					}
 				}
 			} else if last, ok := run.Checkpoint["lastAction"].(map[string]interface{}); ok && last["actionCallId"] == call.ID && last["approvalId"] == call.ApprovalID {
 				for _, key := range []string{"approvalStatus", "reviewerGuidance", "reviewedProposalRevision", "supersededByMessageId"} {
