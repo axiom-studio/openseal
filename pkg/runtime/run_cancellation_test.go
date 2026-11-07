@@ -57,29 +57,25 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, _, err := NewRunActivityService(store, store).TransitionRun(ctx, scope, child.Run.ID, RunTransitionRequest{
-		ExpectedRevision: child.Run.Revision, Status: AgentRunStatusRunning,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	loop := newLoopProposalFixture(t, store, child.Run, "worker", time.Now().UTC())
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{
 			Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour,
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}},
 		}, nil
 	}))
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: running.ID, DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
+	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
+		DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "child-action",
 		Summary: "Send reviewed reply",
-	})
+	}, "reply"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposal.Run.Status != AgentRunStatusWaitingForApproval {
-		t.Fatalf("child status = %s", proposal.Run.Status)
+	if proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
+		t.Fatalf("proposal = %#v", proposal)
 	}
+	loop.parkOnApproval(proposal.Approval.ID)
 
 	if _, err := runs.CommandAgentRun(ctx, AgentRunCommandRequest{
 		Scope: scope, RunID: root.Run.ID, ExpectedRevision: root.Run.Revision,
@@ -114,12 +110,7 @@ func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, _, err := NewRunActivityService(store, store).TransitionRun(ctx, scope, created.Run.ID, RunTransitionRequest{
-		ExpectedRevision: created.Run.Revision, Status: AgentRunStatusRunning,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	loop := newLoopProposalFixture(t, store, created.Run, "worker", now)
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{
 			Disposition: ActionDispositionRequireApproval, Reason: "human review is required", ApprovalTTL: time.Hour,
@@ -127,31 +118,34 @@ func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 		}, nil
 	}))
 	coordinator.now = func() time.Time { return now }
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: running.ID, DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0", Action: "reply",
+	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
+		DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0", Action: "reply",
 		Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "outreach-message-1", Summary: "Send reviewed reply",
-	})
+	}, "reply"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposal.Approval == nil || proposal.Run.Status != AgentRunStatusWaitingForApproval {
+	if proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
 		t.Fatalf("proposal = %#v", proposal)
 	}
+	// The loop parks the Run on the approval at step end.
+	loop.parkOnApproval(proposal.Approval.ID)
+	parked := loop.current()
 
 	disclosure := "Disclosure: I am an OpenSeal automated research agent."
 	reviewedBody := "Could you share feedback? " + disclosure
 	targetURI := "https://forum.example/thread/1"
 	thread := &OutreachThread{
 		ID: "thread-1", Scope: scope, ProjectID: "project-1", SourceObservationID: "observation-1", MonitorID: "monitor-1",
-		StableSourceID: "source-1", TargetURI: targetURI, Owner: proposal.Run.Owner,
-		AssignedAgentID: proposal.Run.AssignedAgentID, SourcePolicyRef: "forum-policy", ApprovalPolicyRef: "human-review",
+		StableSourceID: "source-1", TargetURI: targetURI, Owner: parked.Owner,
+		AssignedAgentID: parked.AssignedAgentID, SourcePolicyRef: "forum-policy", ApprovalPolicyRef: "human-review",
 		Identity: OutreachIdentity{ProfileRef: "profile-1", DisplayName: "OpenSeal Research", Affiliation: "OpenSeal", Disclosure: disclosure},
 		Status:   OutreachThreadOpen, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		Messages: []OutreachMessage{{
 			ID: "message-1", Direction: OutreachMessageOutbound, Intent: OutreachIntentRequestFeedback,
 			Body: reviewedBody, Status: OutreachMessagePendingApproval,
 			Capability: &OutreachCapability{SkillID: "outreach", SkillVersion: "1.0.0", Action: "reply", Arguments: map[string]interface{}{"target": targetURI, "body": reviewedBody}, TargetArgument: "target", BodyArgument: "body"},
-			RunID:      proposal.Run.ID, ActionCallID: proposal.Call.ID, ApprovalID: proposal.Approval.ID, CreatedAt: now, UpdatedAt: now,
+			RunID:      parked.ID, ActionCallID: proposal.Call.ID, ApprovalID: proposal.Approval.ID, CreatedAt: now, UpdatedAt: now,
 		}},
 	}
 	createdEvent := outreachEvent(thread, &thread.Messages[0], "outreach.approval_requested", "Outreach message awaiting approval", ActivityActor{Type: "worker", ID: "test"}, ActivityVisibilityTeam, now)
@@ -160,7 +154,7 @@ func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 	}
 
 	result, err := runs.CommandAgentRun(ctx, AgentRunCommandRequest{
-		Scope: scope, RunID: proposal.Run.ID, ExpectedRevision: proposal.Run.Revision, Kind: AgentRunCommandCancel,
+		Scope: scope, RunID: parked.ID, ExpectedRevision: parked.Revision, Kind: AgentRunCommandCancel,
 		Actor: ActivityActor{Type: "user", ID: "operator"}, Summary: "Operator canceled reviewed outreach",
 	})
 	if err != nil {
