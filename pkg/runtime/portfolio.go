@@ -215,6 +215,9 @@ type AgentRunIntervention struct {
 	// thread's active foreground conversation Run instead of starting a
 	// parallel Run. Instruction carries that message's text.
 	ConversationMessage *ConversationMessageDelivery `json:"conversationMessage,omitempty"`
+	// ActionCallID is the settled action call (approval card or human
+	// intervention) this steering message carries the result of.
+	ActionCallID string `json:"actionCallId,omitempty"`
 }
 
 // ConversationAnswerReceipt records the canonical question and authenticated
@@ -287,49 +290,77 @@ type AgentRun struct {
 	AssignedAgentID string         `json:"assignedAgentId,omitempty"`
 	// ActingUser is the human the run acts for, stamped only at creation by
 	// trusted kernel paths and the host. Empty means no person. It is immutable.
-	ActingUser           string                       `json:"actingUser,omitempty"`
-	Entrypoint           string                       `json:"entrypoint,omitempty"`
-	ConcurrencyKey       string                       `json:"concurrencyKey,omitempty"`
-	ResourceRequirements map[string]int               `json:"resourceRequirements,omitempty"`
-	Goal                 string                       `json:"goal"`
-	Source               RunSource                    `json:"source"`
-	Status               AgentRunStatus               `json:"status"`
-	Priority             int                          `json:"priority"`
-	Deadline             *time.Time                   `json:"deadline,omitempty"`
-	AvailableAt          time.Time                    `json:"availableAt"`
-	QueueEnteredAt       time.Time                    `json:"queueEnteredAt"`
-	LeaseOwner           string                       `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt       *time.Time                   `json:"leaseExpiresAt,omitempty"`
-	LastClaimedAt        *time.Time                   `json:"lastClaimedAt,omitempty"`
-	Attempt              int                          `json:"attempt"`
-	LastWakeSignalID     string                       `json:"lastWakeSignalId,omitempty"`
-	Context              map[string]interface{}       `json:"context,omitempty"`
-	Plan                 map[string]interface{}       `json:"plan,omitempty"`
-	Checkpoint           map[string]interface{}       `json:"checkpoint,omitempty"`
-	WakeCondition        *WakeCondition               `json:"wakeCondition,omitempty"`
-	PausedFrom           AgentRunStatus               `json:"pausedFrom,omitempty"`
-	PausedWakeCondition  *WakeCondition               `json:"pausedWakeCondition,omitempty"`
-	PendingInterventions []AgentRunIntervention       `json:"pendingInterventions,omitempty"`
-	HumanInterventions   []HumanInterventionRequest   `json:"humanInterventions,omitempty"`
-	Budget               *BudgetPolicy                `json:"budget,omitempty"`
-	BudgetUsage          BudgetUsage                  `json:"budgetUsage,omitempty"`
-	BudgetState          BudgetState                  `json:"budgetState,omitempty"`
-	BudgetAdmission      *BudgetAdmission             `json:"budgetAdmission,omitempty"`
-	BudgetReservations   map[string]BudgetReservation `json:"budgetReservations,omitempty"`
-	BudgetAllocations    map[string]BudgetPolicy      `json:"budgetAllocations,omitempty"`
-	Policy               map[string]interface{}       `json:"policy,omitempty"`
-	Output               map[string]interface{}       `json:"output,omitempty"`
-	Error                string                       `json:"error,omitempty"`
-	CreditError          *RunCreditError              `json:"creditError,omitempty"`
-	WorkflowExecution    *int                         `json:"workflowExecutionId,omitempty"`
-	LastAppliedTurn      int64                        `json:"lastAppliedTurn"`
-	Revision             int64                        `json:"revision"`
-	CreatedAt            time.Time                    `json:"createdAt"`
-	UpdatedAt            time.Time                    `json:"updatedAt"`
-	StartedAt            *time.Time                   `json:"startedAt,omitempty"`
-	CompletedAt          *time.Time                   `json:"completedAt,omitempty"`
-	IdempotencyKeyHash   string                       `json:"idempotencyKeyHash,omitempty"`
-	CreationFingerprint  string                       `json:"creationFingerprint,omitempty"`
+	ActingUser           string                 `json:"actingUser,omitempty"`
+	Entrypoint           string                 `json:"entrypoint,omitempty"`
+	ConcurrencyKey       string                 `json:"concurrencyKey,omitempty"`
+	ResourceRequirements map[string]int         `json:"resourceRequirements,omitempty"`
+	Goal                 string                 `json:"goal"`
+	Source               RunSource              `json:"source"`
+	Status               AgentRunStatus         `json:"status"`
+	Priority             int                    `json:"priority"`
+	Deadline             *time.Time             `json:"deadline,omitempty"`
+	AvailableAt          time.Time              `json:"availableAt"`
+	QueueEnteredAt       time.Time              `json:"queueEnteredAt"`
+	LeaseOwner           string                 `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt       *time.Time             `json:"leaseExpiresAt,omitempty"`
+	LastClaimedAt        *time.Time             `json:"lastClaimedAt,omitempty"`
+	Attempt              int                    `json:"attempt"`
+	LastWakeSignalID     string                 `json:"lastWakeSignalId,omitempty"`
+	Context              map[string]interface{} `json:"context,omitempty"`
+	Plan                 map[string]interface{} `json:"plan,omitempty"`
+	Checkpoint           map[string]interface{} `json:"checkpoint,omitempty"`
+	WakeCondition        *WakeCondition         `json:"wakeCondition,omitempty"`
+	PausedFrom           AgentRunStatus         `json:"pausedFrom,omitempty"`
+	PausedWakeCondition  *WakeCondition         `json:"pausedWakeCondition,omitempty"`
+	PendingInterventions []AgentRunIntervention `json:"pendingInterventions,omitempty"`
+	// ConsumedInterventions is how many PendingInterventions the Run's loop
+	// has appended to its session. PendingInterventions stays append-only and
+	// the cursor only grows; it is written only with the session append.
+	ConsumedInterventions int                          `json:"consumedInterventions,omitempty"`
+	HumanInterventions    []HumanInterventionRequest   `json:"humanInterventions,omitempty"`
+	Budget                *BudgetPolicy                `json:"budget,omitempty"`
+	BudgetUsage           BudgetUsage                  `json:"budgetUsage,omitempty"`
+	BudgetState           BudgetState                  `json:"budgetState,omitempty"`
+	BudgetAdmission       *BudgetAdmission             `json:"budgetAdmission,omitempty"`
+	BudgetReservations    map[string]BudgetReservation `json:"budgetReservations,omitempty"`
+	BudgetAllocations     map[string]BudgetPolicy      `json:"budgetAllocations,omitempty"`
+	Policy                map[string]interface{}       `json:"policy,omitempty"`
+	Output                map[string]interface{}       `json:"output,omitempty"`
+	Error                 string                       `json:"error,omitempty"`
+	CreditError           *RunCreditError              `json:"creditError,omitempty"`
+	// FailureExplanation is the kernel-recorded failure of a stopped attempt.
+	FailureExplanation  *RunFailureExplanation `json:"failureExplanation,omitempty"`
+	WorkflowExecution   *int                   `json:"workflowExecutionId,omitempty"`
+	LastAppliedTurn     int64                  `json:"lastAppliedTurn"`
+	Revision            int64                  `json:"revision"`
+	CreatedAt           time.Time              `json:"createdAt"`
+	UpdatedAt           time.Time              `json:"updatedAt"`
+	StartedAt           *time.Time             `json:"startedAt,omitempty"`
+	CompletedAt         *time.Time             `json:"completedAt,omitempty"`
+	IdempotencyKeyHash  string                 `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint string                 `json:"creationFingerprint,omitempty"`
+	// SessionID is the session the Run's steps append to. It is set when the
+	// Run is created and changed only by promotion.
+	SessionID string `json:"sessionId,omitempty"`
+	// Engine marks the runtime that created the Run; RunEngineLoop for every
+	// Run the run loop creates.
+	Engine string `json:"engine,omitempty"`
+}
+
+// RunEngineLoop is AgentRun.Engine for Runs created by the run loop.
+const RunEngineLoop = "loop"
+
+// RunFailureExplanation is the failure of a stopped attempt. Only the kernel
+// writes it. Explained is true only after a model explanation was posted.
+type RunFailureExplanation struct {
+	// Kind is execution, workspace, routine_script, task_completion,
+	// agent_behavior_fixed, repeat_limit, context_overflow, budget or credits.
+	Kind          string `json:"kind"`
+	Code          string `json:"code"`
+	Message       string `json:"message"` // user-safe cause, at most 1 KiB
+	StepError     string `json:"stepError,omitempty"`
+	StepErrorCode string `json:"stepErrorCode,omitempty"`
+	Explained     bool   `json:"explained,omitempty"`
 }
 
 func (r *AgentRun) Validate() error {
@@ -619,6 +650,8 @@ type CreateAgentRunRequest struct {
 	IdempotencyKey       string
 	Actor                ActivityActor
 	Visibility           ActivityVisibility
+	// SessionID is the session the new Run appends to.
+	SessionID string
 }
 
 type PortfolioService struct {
@@ -898,6 +931,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
 		Budget: cloneBudgetPolicy(req.Budget), Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
+		SessionID: req.SessionID, Engine: RunEngineLoop,
 	}
 	if req.WakeCondition != nil && req.WakeCondition.EventWait != nil {
 		if kind != RunKindAgentWork || req.WakeCondition.Type != "event" {

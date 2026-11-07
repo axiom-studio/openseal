@@ -12,6 +12,10 @@ import (
 
 var ErrInvalidRunTransition = errors.New("invalid run transition")
 
+// ErrSteeringArrived reports that a guarded transition saw interventions the
+// Run's loop has not read yet; nothing was written.
+var ErrSteeringArrived = errors.New("new guidance arrived before the final answer was posted")
+
 type ActivitySeverity string
 
 const (
@@ -116,6 +120,13 @@ type RunTransitionRequest struct {
 	BudgetReservation         *BudgetReservation
 	ReplaceBudgetReservation  *BudgetReservation
 	SettleBudgetReservationID string
+	// RequireInterventionCount, when non-nil, fails the transition with
+	// ErrSteeringArrived unless len(PendingInterventions) equals it. The
+	// revision CAS makes the check atomic: every intervention append bumps
+	// the Run's revision.
+	RequireInterventionCount *int
+	// FailureExplanation replaces AgentRun.FailureExplanation when non-nil.
+	FailureExplanation *RunFailureExplanation
 }
 
 type AgentRunLeaseGuard struct {
@@ -216,6 +227,9 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		}
 		leaseGuard = &AgentRunLeaseGuard{WorkerID: req.LeaseOwner, Now: now}
 	}
+	if req.RequireInterventionCount != nil && len(run.PendingInterventions) != *req.RequireInterventionCount {
+		return nil, nil, ErrSteeringArrived
+	}
 	if !canTransitionAgentRun(run.Status, req.Status) && !(req.Intervention != nil && run.Status == req.Status && !isTerminalAgentRunStatus(run.Status)) {
 		return nil, nil, fmt.Errorf("%w: %s -> %s", ErrInvalidRunTransition, run.Status, req.Status)
 	}
@@ -256,7 +270,11 @@ func (s *RunActivityService) TransitionRun(ctx context.Context, scope Scope, run
 		run.Output = req.Output
 	}
 	run.Error = req.Error
-	run.CreditError = terminalCreditError(run.Status, run.Checkpoint)
+	if req.FailureExplanation != nil {
+		explanation := *req.FailureExplanation
+		run.FailureExplanation = &explanation
+	}
+	run.CreditError = terminalCreditError(run.Status, run.FailureExplanation)
 	if req.WakeSignalID != "" {
 		run.LastWakeSignalID = req.WakeSignalID
 	}
@@ -488,4 +506,13 @@ func isWaitingRunStatus(status AgentRunStatus) bool {
 
 func isTerminalAgentRunStatus(status AgentRunStatus) bool {
 	return status == AgentRunStatusCompleted || status == AgentRunStatusFailed || status == AgentRunStatusCanceled
+}
+
+// terminalCreditError reads the kernel-classified cause of a failed Run, never
+// provider text, so only a Workspace credit refusal yields a credit error.
+func terminalCreditError(status AgentRunStatus, failure *RunFailureExplanation) *RunCreditError {
+	if status != AgentRunStatusFailed || failure == nil || failure.Code != RunCreditErrorWorkspaceCreditsExhausted {
+		return nil
+	}
+	return &RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
 }
