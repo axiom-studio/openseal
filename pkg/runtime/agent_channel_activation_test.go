@@ -105,11 +105,11 @@ func (f *channelActionFixture) propose(t *testing.T, extra map[string]interface{
 	for key, value := range extra {
 		arguments[key] = value
 	}
-	return f.coordinator.Propose(context.Background(), ProposeActionRequest{
+	return f.coordinator.Propose(context.Background(), loopProposeRequest(ProposeActionRequest{
 		Scope: f.scope, RunID: f.run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionConfigureChannel,
 		Arguments: arguments, IdempotencyKey: "configure-channel", Summary: "Configure channel",
-	})
+	}, "configure-channel"))
 }
 
 func (f *channelActionFixture) approve(t *testing.T, proposal *ActionProposalResult) *ActionCall {

@@ -30,7 +30,7 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatal(err)
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, policy, validator)
-	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert")
+	f := newLoopProposalFixture(t, store, createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-upsert"), "worker-upsert", time.Now().UTC())
 	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
 	// A person connects the account; the model may only change the rest.
 	if _, err := catalog.UpsertBinding(ctx, skill.UpsertBindingRequest{Binding: &skill.Binding{
@@ -48,18 +48,16 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	}
 	withCredential := cloneMap(arguments)
 	withCredential["accessReferences"] = map[string]interface{}{"reddit": map[string]interface{}{"kind": "reddit-oauth", "id": "credential://tenant-a/other"}}
-	if _, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker-upsert", DeploymentID: deploymentID,
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
-		Arguments: withCredential, IdempotencyKey: "message-0:swap-account", Summary: "Swap the Reddit account",
-	}); err == nil {
+	if _, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
+		Arguments: withCredential, Summary: "Swap the Reddit account",
+	}, "swap-account")); err == nil {
 		t.Fatal("a model-proposed upsert changed credentials")
 	}
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker-upsert", DeploymentID: deploymentID,
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
-		Arguments: arguments, IdempotencyKey: "message-1:add-reddit", Summary: "Enable Reddit research",
-	})
+	proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
+		Arguments: arguments, Summary: "Enable Reddit research",
+	}, "add-reddit"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,16 +71,13 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 	if proposal.Approval.ProposedAction["deploymentId"] != deploymentID || proposal.Approval.ProposedAction["resourceType"] != "skill_binding" {
 		t.Fatalf("typed approval preview = %#v", proposal.Approval.ProposedAction)
 	}
-	approveSkillAction(t, ctx, store, scope, proposal)
+	f = approveParkedSkillAction(t, ctx, store, f, proposal, "worker-upsert-resumed")
 	dispatcher, err := NewSkillBindingActionDispatcher(store, catalog, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	worker := NewActionWorker(store, catalog, nil, dispatcher)
-	executed, err := worker.RunOnce(ctx, scope, "action-worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	executed := f.execute(worker, proposal.Call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["operation"] != SkillActionUpsertBinding || executed.Call.Output["replayed"] != false {
 		t.Fatalf("upsert execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
 	}
@@ -94,21 +89,16 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatalf("binding audit = %#v", binding.Lifecycle)
 	}
 
-	disableRun, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker-disable", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || disableRun == nil || disableRun.ID != run.ID {
-		t.Fatalf("reclaim after upsert = %#v, %v", disableRun, err)
-	}
-	disableProposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: disableRun.ID, WorkerID: "worker-disable", DeploymentID: deploymentID,
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionDisableBinding,
-		Arguments:      map[string]interface{}{"bindingId": "reddit", "expectedRevision": 2},
-		IdempotencyKey: "message-2:disable-reddit", Summary: "Disable Reddit research",
-	})
+	// A later step of the same Run disables the binding.
+	disableProposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+		TurnID: "step-2", DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionDisableBinding,
+		Arguments: map[string]interface{}{"bindingId": "reddit", "expectedRevision": 2}, Summary: "Disable Reddit research",
+	}, "disable-reddit"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	approveSkillAction(t, ctx, store, scope, disableProposal)
-	executed, err = worker.RunOnce(ctx, scope, "action-worker", time.Minute)
+	f = approveParkedSkillAction(t, ctx, store, f, disableProposal, "worker-disable")
+	executed, err = worker.ExecuteOwnLoopCall(ctx, scope, disableProposal.Call.ID, f.worker)
 	if err != nil || executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["operation"] != SkillActionDisableBinding {
 		t.Fatalf("disable execution = %#v, %v", executed, err)
 	}
@@ -117,23 +107,18 @@ func TestGovernedSkillBindingActionMaterializesApprovedUpsertAndDisable(t *testi
 		t.Fatalf("disabled binding = %#v", disabled)
 	}
 
-	reenableRun, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker-reenable", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || reenableRun == nil || reenableRun.ID != run.ID {
-		t.Fatalf("reclaim after disable = %#v, %v", reenableRun, err)
-	}
 	reenable := cloneMap(arguments)
 	reenable["expectedRevision"] = 3
 	reenable["config"] = map[string]interface{}{"subreddits": []interface{}{"kubernetes"}}
-	reenableProposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: reenableRun.ID, WorkerID: "worker-reenable", DeploymentID: deploymentID,
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
-		Arguments: reenable, IdempotencyKey: "message-3:reenable-reddit", Summary: "Re-enable Reddit research",
-	})
+	reenableProposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+		TurnID: "step-3", DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionUpsertBinding,
+		Arguments: reenable, Summary: "Re-enable Reddit research",
+	}, "reenable-reddit"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	approveSkillAction(t, ctx, store, scope, reenableProposal)
-	executed, err = worker.RunOnce(ctx, scope, "action-worker", time.Minute)
+	f = approveParkedSkillAction(t, ctx, store, f, reenableProposal, "worker-reenable")
+	executed, err = worker.ExecuteOwnLoopCall(ctx, scope, reenableProposal.Call.ID, f.worker)
 	if err != nil || executed.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("re-enable execution = %#v, %v", executed, err)
 	}
@@ -180,15 +165,14 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 		t.Fatal(err)
 	}
 	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
-	run := createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-discover")
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker-discover", DeploymentID: deploymentID,
-		SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionDiscoverBinding,
+	f := newLoopProposalFixture(t, store, createClaimedSkillActionRun(t, ctx, store, scope, deploymentID, "worker-discover"), "worker-discover", time.Now().UTC())
+	proposal, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+		DeploymentID: deploymentID, SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionDiscoverBinding,
 		Arguments: map[string]interface{}{
 			"query": "reddit research", "requiredActions": []interface{}{"read"}, "maximumRisk": "read", "limit": 4,
 		},
 		Summary: "Find a Reddit research Skill",
-	})
+	}, "discover"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,10 +183,7 @@ func TestSkillDiscoveryIsReadOnlySelfScopedPaginatedAndCredentialFree(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), proposal.Call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["nextCursor"] != "page-2" {
 		t.Fatalf("discovery execution status=%s error=%q output=%#v", executed.Call.Status, executed.Call.Error, executed.Call.Output)
 	}
@@ -529,6 +510,20 @@ func createClaimedSkillActionRun(t *testing.T, ctx context.Context, store *Memor
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	return claimed
+}
+
+// approveParkedSkillAction parks f's Run on proposal's approval at step end,
+// approves it, and leases the queued Run to worker as the loop's next claim
+// does.
+func approveParkedSkillAction(t *testing.T, ctx context.Context, store *MemoryStore, f *loopProposalFixture, proposal *ActionProposalResult, worker string) *loopProposalFixture {
+	t.Helper()
+	f.assertUntouched()
+	f.parkOnApproval(proposal.Approval.ID)
+	approveSkillAction(t, ctx, store, f.run.Scope, proposal)
+	if queued := f.current(); queued.Status != AgentRunStatusQueued {
+		t.Fatalf("approval did not queue the parked Run: %#v", queued)
+	}
+	return newLoopProposalFixture(t, store, f.run, worker, time.Now().UTC())
 }
 
 func approveSkillAction(t *testing.T, ctx context.Context, store *MemoryStore, scope Scope, proposal *ActionProposalResult) {

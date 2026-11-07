@@ -330,7 +330,8 @@ func actionCredentialLeaseFixture() (time.Time, *ActionCall, *AgentRun, map[stri
 	expires := now.Add(2 * time.Minute)
 	scope := Scope{Kind: "tenant", ID: "tenant-7"}
 	call := &ActionCall{
-		ID: "action-1", Scope: scope, RunID: "run-1", DeploymentID: "team-marketing", BindingID: "reddit-binding", BindingRevision: 3,
+		ID: "action-1", Scope: scope, RunID: "run-1", TurnID: loopProposalStep, DeploymentID: "team-marketing", BindingID: "reddit-binding", BindingRevision: 3,
+		Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 		SkillID: "reddit-research", SkillVersion: "1.2.0", Action: "search", Status: ActionCallStatusRunning,
 		CredentialRefs: map[string]skill.CredentialReference{"reddit": {Kind: "reddit-oauth", ID: "opaque://tenant-7/reddit"}},
 		Attempt:        1, MaxAttempts: 3, LeaseOwner: "runtime-worker-1", LeaseExpiresAt: &expires, Revision: 4,

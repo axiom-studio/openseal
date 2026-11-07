@@ -189,9 +189,10 @@ func TestLooseningApprovalModeApprovesAllowedPendingApprovals(t *testing.T) {
 	if approved.Status != ApprovalStatusApproved || approved.DecisionBy == nil || *approved.DecisionBy != ApprovalModePrincipal || approved.DecisionReason != "approval mode auto" {
 		t.Fatalf("write approval = %#v", approved)
 	}
+	// The Run parked on the approval at step end; the decision queues it.
 	call, _ := store.GetActionCall(ctx, conversation.Scope, approved.ActionCallID)
 	run, _ := store.GetAgentRun(ctx, conversation.Scope, approved.RunID)
-	if call.Status != ActionCallStatusReady || run.Status != AgentRunStatusWaitingForDependency {
+	if call.Status != ActionCallStatusReady || run.Status != AgentRunStatusQueued || run.WakeCondition != nil {
 		t.Fatalf("approved action did not resume: call=%s run=%s", call.Status, run.Status)
 	}
 	if pending, _ := store.GetApproval(ctx, conversation.Scope, externalApproval.ID); pending.Status != ApprovalStatusPending {
@@ -357,12 +358,20 @@ func proposeForApprovalMode(t *testing.T, store *MemoryStore, coordinator *Actio
 	return proposeForApprovalModeInConversation(t, store, coordinator, conversation.ID, action, fmt.Sprintf("run-%s-%d", action, approvalModeRunCounter))
 }
 
+// proposeForApprovalModeInConversation proposes action as a loop step of a
+// new Run of the conversation and parks the Run on its approval, as the loop
+// does at step end.
 func proposeForApprovalModeInConversation(t *testing.T, store *MemoryStore, coordinator *ActionCoordinator, conversationID, action, key string) *ApprovalCheckpoint {
 	t.Helper()
-	result := proposeResultForApprovalMode(t, store, coordinator, conversationID, action, key)
+	result, f, err := proposeLoopForApprovalMode(t, store, coordinator, conversationID, action, key, map[string]interface{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if result.Approval == nil {
 		t.Fatalf("%s proposal did not wait for approval: %#v", action, result.Call)
 	}
+	f.assertUntouched()
+	f.parkOnApproval(result.Approval.ID)
 	return result.Approval
 }
 
@@ -377,6 +386,14 @@ func proposeResultForApprovalMode(t *testing.T, store *MemoryStore, coordinator 
 
 func proposeWithArgumentsForApprovalMode(t *testing.T, store *MemoryStore, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, error) {
 	t.Helper()
+	result, _, err := proposeLoopForApprovalMode(t, store, coordinator, conversationID, action, key, arguments)
+	return result, err
+}
+
+// proposeLoopForApprovalMode proposes action as tool call key of a loop step
+// of a new Run acting for conversationID.
+func proposeLoopForApprovalMode(t *testing.T, store *MemoryStore, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
+	t.Helper()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
@@ -389,15 +406,12 @@ func proposeWithArgumentsForApprovalMode(t *testing.T, store *MemoryStore, coord
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil || claimed.ID != run.ID {
-		t.Fatalf("run was not claimed: %#v %v", claimed, err)
-	}
-	result, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "assistant",
-		SkillID: "workspace", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key,
-	})
-	return result, err
+	f := newLoopProposalFixture(t, store, run, "worker", now)
+	result, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+		DeploymentID: "assistant", SkillID: "workspace", SkillVersion: "1.0.0", Action: action, Arguments: arguments,
+		Summary: "Run " + action + " for " + key,
+	}, key))
+	return result, f, err
 }
 
 func TestSQLiteApprovalModeBackfillsLegacyConversationsAndCommitsEvent(t *testing.T) {
@@ -511,13 +525,11 @@ func TestApprovalWithoutReviewContextIsNamedByActionIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil {
-		t.Fatal(err)
-	}
-	result, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "assistant", SkillID: "workspace", SkillVersion: "1.0.0", Action: "send",
-		Arguments: map[string]interface{}{"intent": "Click 'Search' on google.com", "url": "https://www.google.com/"}, IdempotencyKey: "search",
-	})
+	f := newLoopProposalFixture(t, store, run, "worker", now)
+	result, err := coordinator.Propose(ctx, f.request(ProposeActionRequest{
+		DeploymentID: "assistant", SkillID: "workspace", SkillVersion: "1.0.0", Action: "send",
+		Arguments: map[string]interface{}{"intent": "Click 'Search' on google.com", "url": "https://www.google.com/"}, Summary: "Search on google.com",
+	}, "search"))
 	if err != nil || result.Approval == nil {
 		t.Fatalf("proposal = %#v, %v", result, err)
 	}

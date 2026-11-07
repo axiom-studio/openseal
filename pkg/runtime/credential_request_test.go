@@ -100,32 +100,48 @@ func credentialRequestDispatchFixture(t *testing.T) (context.Context, *MemorySto
 
 func proposeInteraction(t *testing.T, ctx context.Context, store *MemoryStore, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) *AgentRun {
 	t.Helper()
+	f, _ := proposeInteractionCall(t, ctx, store, catalog, scope, action, arguments)
+	return f.run
+}
+
+// proposeInteractionCall proposes a SkillManagement interaction action as a
+// loop step of a new chat Run leased by "worker" and returns the Run's
+// fixture and its ready call.
+func proposeInteractionCall(t *testing.T, ctx context.Context, store *MemoryStore, catalog *skill.Catalog, scope Scope, action string, arguments map[string]interface{}) (*loopProposalFixture, *ActionCall) {
+	t.Helper()
 	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
 		Goal: "Order a cable on amazon.in", Source: RunSourceChat, Context: map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || run.ID != created.ID {
-		t.Fatal(err)
-	}
+	f := newLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
 	validator, _ := NewSkillBindingActionValidator(catalog, store)
-	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker",
-		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: action, Arguments: arguments, Summary: "Ask the user"})
+	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, f.request(ProposeActionRequest{
+		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: action, Arguments: arguments, Summary: "Ask the user"}, "interaction"))
 	if err != nil || proposal.Approval != nil || proposal.Call.Status != ActionCallStatusReady {
 		t.Fatalf("proposal: %#v %v", proposal, err)
 	}
-	return run
+	f.assertUntouched()
+	return f, proposal.Call
+}
+
+// assertRunNotParkedByCall checks inline execution of a card call left the
+// Run running under its lease: the loop parks it on the card at step end
+// (GovernedToolExecutor.PlanPark), never the action worker.
+func assertRunNotParkedByCall(t *testing.T, f *loopProposalFixture) *AgentRun {
+	t.Helper()
+	current := f.current()
+	if current.Status != AgentRunStatusRunning || current.WakeCondition != nil || current.LeaseOwner != f.worker || current.Revision != f.run.Revision {
+		t.Fatalf("the action worker parked or changed the Run: %#v", current)
+	}
+	return current
 }
 
 func TestRequestCredentialParksRunUntilTheUserSavesIt(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
-	run := proposeInteraction(t, ctx, store, catalog, scope, SkillActionRequestCredential, map[string]interface{}{
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, SkillActionRequestCredential, map[string]interface{}{
 		"kind": "website_login", "website": "https://www.amazon.in/", "reason": "Add your amazon.in login so I can finish the order"})
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
 		t.Fatalf("credential action: %#v", executed.Call)
 	}
@@ -137,10 +153,12 @@ func TestRequestCredentialParksRunUntilTheUserSavesIt(t *testing.T) {
 	if request.Kind != CredentialRequestKindWebsiteLogin || request.Website != "https://www.amazon.in" || request.Status != CredentialRequestStatusPending || request.ActionCallID != executed.Call.ID {
 		t.Fatalf("request: %#v", request)
 	}
-	parked, err := store.GetAgentRun(ctx, scope, run.ID)
-	if err != nil || !IsExactCredentialRequestWait(parked, request.ID) {
-		t.Fatalf("run not parked on the request: %#v %v", parked, err)
+	// The call's output names the card the loop parks the Run on.
+	card, _ := executed.Call.Output["credentialRequest"].(map[string]interface{})
+	if card["id"] != request.ID {
+		t.Fatalf("credential call output = %#v", executed.Call.Output)
 	}
+	assertRunNotParkedByCall(t, f)
 	changes, err := mustConversationChanges(t, ctx, store, scope)
 	if err != nil || !changes.CredentialRequestsChanged || len(changes.CredentialRequests) != 1 || changes.CredentialRequests[0].ID != request.ID {
 		t.Fatalf("change set: %#v %v", changes, err)
@@ -159,18 +177,16 @@ func TestFailedInteractionRequestsAreExplainedInsteadOfFailingTheRun(t *testing.
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
-			run := proposeInteraction(t, ctx, store, catalog, scope, tc.action, tc.arguments)
-			executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
-			if err != nil {
-				t.Fatal(err)
-			}
+			f, call := proposeInteractionCall(t, ctx, store, catalog, scope, tc.action, tc.arguments)
+			executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 			refused, _ := executed.Call.Output["refused"].(map[string]interface{})
 			if executed.Call.Status != ActionCallStatusSucceeded || refused == nil || refused["message"] == "" {
 				t.Fatalf("refusal not returned to the model: %#v", executed.Call)
 			}
-			current, err := store.GetAgentRun(ctx, scope, run.ID)
-			if err != nil || current.Status != AgentRunStatusQueued || requiresFinalFailureExplanation(current.Checkpoint) {
-				t.Fatalf("run must continue so the model can explain: %#v %v", current, err)
+			// The refusal is the tool result; the Run keeps going so the model
+			// can explain.
+			if current := assertRunNotParkedByCall(t, f); len(current.Checkpoint) != 0 {
+				t.Fatalf("run must continue so the model can explain: %#v", current)
 			}
 			if requests, _ := store.ListCredentialRequests(ctx, scope, "agent", "chat"); len(requests) != 0 {
 				t.Fatalf("refused request persisted: %#v", requests)
@@ -221,17 +237,16 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || run.ID != created.ID {
-		t.Fatal(err)
-	}
+	f := newLoopProposalFixture(t, store, created, "worker", time.Now().UTC())
+	run := f.run
 	validator, _ := NewSkillBindingActionValidator(catalog, store)
-	if _, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker",
+	proposal, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator).Propose(ctx, f.request(ProposeActionRequest{
 		DeploymentID: "agent", SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestCredential,
-		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}); err != nil {
+		Arguments: map[string]interface{}{"kind": "website_login", "website": "https://www.amazon.in", "reason": "Add the login"}, Summary: "Ask the user"}, "request-credential"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, f.worker)
 	if err != nil || executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["credentialRequest"] == nil {
 		t.Fatalf("credential action: %#v %v", executed, err)
 	}
@@ -242,10 +257,7 @@ func TestTeamRunRequestsAreSavedToTheTeam(t *testing.T) {
 	if own, err := store.ListCredentialRequests(ctx, scope, "agent", "team-chat"); err != nil || len(own) != 0 {
 		t.Fatalf("member requests = %#v, %v", own, err)
 	}
-	parked, err := store.GetAgentRun(ctx, scope, run.ID)
-	if err != nil || !IsExactCredentialRequestWait(parked, requests[0].ID) {
-		t.Fatalf("run not parked on the Team request: %#v %v", parked, err)
-	}
+	parked := assertRunNotParkedByCall(t, f)
 	// A member removed from the Team can no longer act under it.
 	team, _ := store.GetTeamDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, crew.ID)
 	team.Roster, team.Revision = []kernelteam.RosterAssignment{{ID: "other", RoleID: "member", AgentDeploymentID: "other"}}, 2

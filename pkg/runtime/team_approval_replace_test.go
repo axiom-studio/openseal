@@ -33,17 +33,16 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		running, _, err := NewRunActivityService(f.store, f.store).TransitionRun(ctx, scope, created.Run.ID, RunTransitionRequest{ExpectedRevision: created.Run.Revision, Status: AgentRunStatusRunning})
-		if err != nil {
-			t.Fatal(err)
-		}
-		proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-			Scope: scope, RunID: running.ID, DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
-			Action: "reply", Arguments: map[string]interface{}{"body": "Launch moved to Thursday"}, IdempotencyKey: "post-" + agentID, Summary: "Post in #launch",
-		})
-		if err != nil || proposal.Run.Status != AgentRunStatusWaitingForApproval {
+		member := newLoopProposalFixture(t, f.store, created.Run, "worker-"+agentID, time.Now().UTC())
+		proposal, err := coordinator.Propose(ctx, member.request(ProposeActionRequest{
+			DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
+			Action: "reply", Arguments: map[string]interface{}{"body": "Launch moved to Thursday"}, Summary: "Post in #launch",
+		}, "post-"+agentID))
+		if err != nil || proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
 			t.Fatalf("pending approval = %#v, %v", proposal, err)
 		}
+		member.assertUntouched()
+		member.parkOnApproval(proposal.Approval.ID)
 		return proposal
 	}
 	ask := f.post(t, PostChannelMessageRequest{Sender: person, IdempotencyKey: "ask"})
@@ -56,19 +55,20 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 	if err := f.scheduler.replaceOtherMemberApprovals(ctx, team, next, "", map[string]bool{"iris": true}); err != nil {
 		t.Fatal(err)
 	}
-	if approval, err := f.store.GetApproval(ctx, scope, nova.Approval.ID); err != nil || approval.Status != ApprovalStatusSuperseded {
+	if approval, err := f.store.GetApproval(ctx, scope, nova.Approval.ID); err != nil || approval.Status != ApprovalStatusSuperseded || approval.SupersededByMessageID != next.ID {
 		t.Fatalf("nova's approval = %#v, %v", approval, err)
 	}
 	if approval, err := f.store.GetApproval(ctx, scope, someoneElses.Approval.ID); err != nil || approval.Status != ApprovalStatusPending {
 		t.Fatalf("another person's approval changed: %#v, %v", approval, err)
 	}
-	run, err := f.store.GetAgentRun(ctx, scope, nova.Run.ID)
+	// nova's parked Run is queued to see its superseded call; it is not
+	// handed the message as a follow-up.
+	run, err := f.store.GetAgentRun(ctx, scope, nova.Call.RunID)
 	if err != nil || run.Status != AgentRunStatusQueued || conversationRunHasFollowUp(run, next.ID) {
 		t.Fatalf("nova's Run = %#v, %v", run, err)
 	}
-	outcome := replacedTeamApprovalOutcome(run)
-	if outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || outcome.RunOutput["approvalReplaced"] != true {
-		t.Fatalf("nova stops quietly: %#v", outcome)
+	if call, err := f.store.GetActionCall(ctx, scope, nova.Call.ID); err != nil || call.Status != ActionCallStatusDenied || call.CompletedAt == nil {
+		t.Fatalf("nova's superseded call = %#v, %v", call, err)
 	}
 
 	// A routed member is left to the normal follow-up path.

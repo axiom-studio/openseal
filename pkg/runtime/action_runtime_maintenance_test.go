@@ -123,7 +123,7 @@ func TestActionRuntimeMaintenanceOwnerExpiryDoesNotReopenSubmissionOrClaim(t *te
 		assertActionRuntimeMaintenanceError(t, err, before.Scope, fixture.binding.SkillID)
 		assertActionRuntimeMaintenanceNoSubmission(t, kernel, fixture.proposal.Call, before)
 		seedActionRuntimeMaintenanceLegacyCall(t, kernel, fixture)
-		claimed, err := kernel.ClaimNextAction(t.Context(), ActionClaim{Scope: before.Scope, WorkerID: "action-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: time.Minute})
+		claimed, err := kernel.ClaimNextAction(t.Context(), ActionClaim{Scope: before.Scope, WorkerID: "agent-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: LoopActionLease, OwnActionID: fixture.proposal.Call.ID})
 		if err != nil || claimed != nil {
 			t.Fatalf("expired owner reopened execution: %#v, %v", claimed, err)
 		}
@@ -150,9 +150,10 @@ func TestActionRuntimeMaintenanceStableGateSkipsLegacyReadyCallBeforeAuthority(t
 		catalogCalls, credentialCalls, dispatches := 0, 0, 0
 		worker := actionRuntimeMaintenanceWorker(kernel, fixture, &catalogCalls, &credentialCalls, &dispatches)
 		for attempt := 0; attempt < 3; attempt++ {
-			result, err := worker.RunOnce(t.Context(), beforeRun.Scope, "action-worker", time.Minute)
-			if err != nil || result != nil {
-				t.Fatalf("stable gate claimed a legacy call: %#v, %v", result, err)
+			result, err := worker.ExecuteOwnLoopCall(t.Context(), beforeRun.Scope, beforeCall.ID, "agent-worker")
+			var held *LoopActionMaintenanceError
+			if result != nil || !errors.As(err, &held) || held.Call.ID != beforeCall.ID {
+				t.Fatalf("stable gate claimed a call queued before it: %#v, %v", result, err)
 			}
 		}
 		afterCall, err := kernel.GetActionCall(t.Context(), beforeCall.Scope, beforeCall.ID)
@@ -179,11 +180,11 @@ func TestActionRuntimeMaintenanceCoordinatorRejectsBeforeCatalogAndPolicy(t *tes
 			return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
 		}))
 		coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
-		result, err := coordinator.Propose(t.Context(), ProposeActionRequest{
+		result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 			Scope: before.Scope, RunID: before.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 			BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision, SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion,
 			Action: "deploy", Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: fixture.proposal.Call.IdempotencyKey,
-		})
+		}, "deploy-production"))
 		if result != nil || catalogCalls != 0 || policyCalls != 0 {
 			t.Fatalf("coordinator reached gated executable authority: result=%#v catalog=%d policy=%d", result, catalogCalls, policyCalls)
 		}
@@ -221,15 +222,22 @@ func TestActionRuntimeMaintenanceObservedAfterClaimDefersWithoutFailure(t *testi
 					return map[string]interface{}{"providerResult": "delivered"}, nil
 				}))
 				worker.now = func() time.Time { return fixture.now.Add(2 * time.Second) }
-				deferred, err := worker.RunOnce(t.Context(), before.Scope, "action-worker", time.Minute)
-				if err != nil || deferred == nil || deferred.Call.Status != ActionCallStatusReady || deferred.Call.Attempt != 1 || deferred.Call.CompletedAt != nil || deferred.Call.Output != nil || deferred.Call.LeaseOwner != "" || deferred.Call.LeaseExpiresAt != nil {
-					t.Fatalf("maintenance observation became a failure or false result: %#v, %v", deferred, err)
+				// The loop parks the call on maintenance (awaiting_event until
+				// RetryAt); the call stays ready and nothing is charged.
+				result, err := worker.ExecuteOwnLoopCall(t.Context(), before.Scope, fixture.proposal.Call.ID, "agent-worker")
+				var held *LoopActionMaintenanceError
+				if result != nil || !errors.As(err, &held) || held.Call == nil || held.Call.ID != fixture.proposal.Call.ID || held.Call.Status != ActionCallStatusReady || held.RetryAt.IsZero() {
+					t.Fatalf("maintenance observation became a failure or false result: %#v, %v", result, err)
+				}
+				deferred, err := kernel.GetActionCall(t.Context(), before.Scope, fixture.proposal.Call.ID)
+				if err != nil || deferred.Status != ActionCallStatusReady || deferred.CompletedAt != nil || deferred.Output != nil || deferred.Error != "" || deferred.LeaseOwner != "" || deferred.LeaseExpiresAt != nil {
+					t.Fatalf("maintenance observation closed the call: %#v, %v", deferred, err)
 				}
 				if dispatches != 0 || boundary == "after_claim" && (catalogCalls != 0 || credentialCalls != 0) {
 					t.Fatalf("maintenance boundary reached execution: catalog=%d credentials=%d dispatch=%d", catalogCalls, credentialCalls, dispatches)
 				}
-				if deferred.Event == nil || deferred.Event.EventType != "action.deferred" || deferred.Event.UsageDelta != nil || !reflect.DeepEqual(before, getActionLifecycleRun(t, kernel, fixture.proposal.Call)) {
-					t.Fatalf("maintenance deferral charged usage or changed its Run: %#v", deferred)
+				if after := getActionLifecycleRun(t, kernel, fixture.proposal.Call); !reflect.DeepEqual(before, after) {
+					t.Fatalf("maintenance deferral charged usage or changed its Run: before=%#v after=%#v", before, after)
 				}
 			})
 		})
@@ -275,7 +283,7 @@ func TestActionRuntimeMaintenanceVerifiedReleaseUsesFreshVersion(t *testing.T) {
 			return map[string]interface{}{"providerResult": "delivered"}, nil
 		}))
 		worker.now = func() time.Time { return fixture.now.Add(3 * time.Second) }
-		completed, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "action-worker", time.Minute)
+		completed, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "agent-worker")
 		if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded || dispatches != 1 {
 			t.Fatalf("fresh-version dispatch failed: %#v, %v, dispatches=%d", completed, err, dispatches)
 		}
@@ -340,13 +348,6 @@ func newActionRuntimeMaintenanceFixture(t *testing.T, kernel KernelStore) *actio
 		expires := fixture.now.Add(time.Minute)
 		run.LeaseExpiresAt = &expires
 	})
-	updated := cloneAgentRun(current)
-	updated.Revision++
-	updated.Status = AgentRunStatusWaitingForDependency
-	updated.WakeCondition = &WakeCondition{Type: "action", Reference: fixture.proposal.Call.ID}
-	updated.LeaseOwner, updated.LeaseExpiresAt = "", nil
-	updated.UpdatedAt = fixture.now.Add(time.Second)
-	fixture.proposal.Run = updated
 	fixture.proposal.ExpectedRunRevision = current.Revision
 	fixture.proposal.Lease.Now = fixture.now.Add(time.Second)
 	fixture.proposal.Call.CreatedAt, fixture.proposal.Call.UpdatedAt = fixture.now.Add(time.Second), fixture.now.Add(time.Second)
@@ -376,16 +377,9 @@ func newActionRuntimeMaintenanceTenantFixture(t *testing.T, original *actionBind
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := cloneAgentRun(run)
-	updated.Revision++
-	updated.Status, updated.WakeCondition = AgentRunStatusWaitingForDependency, &WakeCondition{Type: "action", Reference: call.ID}
-	updated.LeaseOwner, updated.LeaseExpiresAt = "", nil
-	updated.UpdatedAt = original.now.Add(time.Second)
-	return &actionBindingFenceFixture{store: original.store, catalog: catalog, binding: binding, now: original.now, proposal: ActionProposalRecord{
-		Call: call, Run: updated, ExpectedRunRevision: run.Revision, RequireBindingFence: true,
-		Lease: &AgentRunLeaseGuard{WorkerID: "agent-worker", Now: original.now.Add(time.Second)},
-		Event: actionLifecycleEvent(call, uuid.NewString(), "action.proposed", original.now.Add(time.Second)),
-	}}
+	proposal := loopProposalRecord(call, run, "agent-worker", original.now.Add(time.Second), actionLifecycleEvent(call, uuid.NewString(), "action.proposed", original.now.Add(time.Second)))
+	proposal.RequireBindingFence = true
+	return &actionBindingFenceFixture{store: original.store, catalog: catalog, binding: binding, now: original.now, proposal: proposal}
 }
 
 func actionRuntimeMaintenanceRequest(t *testing.T, fixture *actionBindingFenceFixture) SkillRuntimeMaintenanceRequest {
@@ -487,11 +481,11 @@ func actionRuntimeMaintenanceWorker(kernel KernelStore, fixture *actionBindingFe
 	return worker
 }
 
-// Seed a historical row through trusted backend fixtures. Supported proposal
-// APIs cannot create this state because the active gate fences insertion.
+// Seed a ready loop call of the still-running Run as if it had been committed
+// before the gate, through trusted backend fixtures. Supported proposal APIs
+// cannot create this state because the active gate fences insertion.
 func seedActionRuntimeMaintenanceLegacyCall(t *testing.T, kernel KernelStore, fixture *actionBindingFenceFixture) {
 	t.Helper()
-	transitionActionLifecycleRun(t, kernel, fixture.proposal.Call, AgentRunStatusWaitingForDependency, &WakeCondition{Type: "action", Reference: fixture.proposal.Call.ID}, fixture.now)
 	call := fixture.proposal.Call
 	payload, err := json.Marshal(call)
 	if err != nil {
