@@ -78,9 +78,18 @@ func (p *ModelStepProducer) PlanStepBudget(ctx context.Context, in StepInput) (B
 	if err != nil {
 		return BudgetUsage{}, err
 	}
-	req, err := p.request(ctx, in, prepared, 0)
+	// The budget is planned before the preparers append this step's context
+	// (SPEC §3.1 phases 1 and 3), so the first step of a chat sees an empty
+	// lane session. It is planned on the system, tools and protocol reserve;
+	// Produce validates the full request.
+	req, err := p.render(ctx, in, prepared, 0)
 	if err != nil {
 		return BudgetUsage{}, err
+	}
+	if len(req.Entries) > 0 {
+		if err := req.Validate(); err != nil {
+			return BudgetUsage{}, fmt.Errorf("%w: %w", ErrTurnHostConfiguration, err)
+		}
 	}
 	due := in.Binding != nil && in.Binding.Compactor != nil && in.Binding.Compactor.Due(in)
 	input, err := modelStepReservationInput(req, due)
@@ -169,6 +178,19 @@ func (p *ModelStepProducer) prepare(ctx context.Context, in StepInput) (ModelSte
 // compaction), the output cap and the preview flag. maxOutput > 0 caps
 // MaxOutputTokens at the step's reserved output.
 func (p *ModelStepProducer) request(ctx context.Context, in StepInput, prepared ModelStepRequest, maxOutput int64) (ModelStepRequest, error) {
+	req, err := p.render(ctx, in, prepared, maxOutput)
+	if err != nil {
+		return ModelStepRequest{}, err
+	}
+	if err := req.Validate(); err != nil {
+		return ModelStepRequest{}, fmt.Errorf("%w: %w", ErrTurnHostConfiguration, err)
+	}
+	return req, nil
+}
+
+// render builds the step's request from the prepared one and the session
+// path, without validating it.
+func (p *ModelStepProducer) render(ctx context.Context, in StepInput, prepared ModelStepRequest, maxOutput int64) (ModelStepRequest, error) {
 	req := prepared
 	req.APIVersion = ModelStepAPIVersion
 	req.Scope = in.Run.Scope
@@ -212,9 +234,6 @@ func (p *ModelStepProducer) request(ctx context.Context, in StepInput, prepared 
 		return ModelStepRequest{}, fmt.Errorf("render session path: %w", err)
 	}
 	req.Entries = entries
-	if err := req.Validate(); err != nil {
-		return ModelStepRequest{}, fmt.Errorf("%w: %w", ErrTurnHostConfiguration, err)
-	}
 	return req, nil
 }
 

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -78,6 +80,7 @@ type snakesAcceptance struct {
 	path          string
 	contentRoot   string
 	commentator   moveCommentator
+	host          *loopStepHost
 	mu            sync.RWMutex
 	engine        *Engine
 	store         *runtime.SQLiteStore
@@ -86,6 +89,278 @@ type snakesAcceptance struct {
 	sideRunIDs    map[string]string
 	gameObjective map[string]string
 	channelID     string
+}
+
+// gameMoveMarker starts the line of a player's assistant text that records its
+// authoritative move. The replay reads these lines back from the session log.
+const gameMoveMarker = "authoritative move: "
+
+// TestThreeAgentSnakesAndLaddersSurvivesRestartAndPublishesReplay is the
+// multi-agent restart acceptance test on the run loop. Three Agents play
+// through ordinary model steps against a three-rule StepHost fake: a side
+// objective waits for the restart, a player that cannot move waits, and the
+// player whose turn it is records its move in its assistant text. The kernel
+// is stopped mid-game, the store is reopened, and the game finishes from the
+// session logs alone.
+func TestThreeAgentSnakesAndLaddersSurvivesRestartAndPublishesReplay(t *testing.T) {
+	commentator := &deterministicCommentator{secret: "fixture-provider-secret-must-never-persist"}
+	runSnakesAndLaddersAcceptance(t, commentator)
+	commentator.mu.Lock()
+	calls := commentator.calls
+	commentator.mu.Unlock()
+	if calls != len(gameDice) {
+		t.Fatalf("commentary calls = %d, want one for each of %d authoritative moves", calls, len(gameDice))
+	}
+}
+
+func runSnakesAndLaddersAcceptance(t *testing.T, commentator moveCommentator) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), commentator.AcceptanceTimeout())
+	defer cancel()
+	directory := t.TempDir()
+	harness := &snakesAcceptance{
+		t: t, path: filepath.Join(directory, "kernel.db"), contentRoot: filepath.Join(directory, "artifacts"),
+		commentator: commentator, gameRunIDs: map[string]string{}, sideRunIDs: map[string]string{}, gameObjective: map[string]string{},
+	}
+	harness.host = &loopStepHost{decide: harness.decide}
+	engine := harness.open(ctx)
+	harness.composeWorkforce(ctx, engine)
+	harness.startWork(ctx, engine)
+	if err := engine.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	harness.waitFor(ctx, func() bool {
+		moves, err := harness.replay(ctx)
+		return err == nil && len(moves) >= 3 && harness.allParked(ctx)
+	}, "three legal moves and every Run parked before restart")
+	preRestartMoves, err := harness.replay(ctx)
+	if err != nil || len(preRestartMoves) != 3 {
+		t.Fatalf("restart was not forced mid-game: moves=%#v err=%v", preRestartMoves, err)
+	}
+	harness.assertSideObjectivesProgressed(ctx, false)
+	engine.Stop()
+	if err := harness.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := harness.open(ctx)
+	if _, err := restarted.GetTeamDeployment(ctx, SkillScope{Kind: "tenant", ID: "acceptance"}, gameTeamID); err != nil {
+		t.Fatalf("Team did not survive restart: %v", err)
+	}
+	if _, err := restarted.GetConversation(ctx, Scope{Kind: "tenant", ID: "acceptance"}, harness.channelID); err != nil {
+		t.Fatalf("Team channel did not survive restart: %v", err)
+	}
+	harness.setRecovered()
+	// Engine.Start runs the run-loop cutover first: these Runs are loop Runs
+	// with sessions, so it must leave every one of them to continue.
+	if err := restarted.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	harness.waitFor(ctx, func() bool {
+		moves, err := harness.replay(ctx)
+		if err != nil || len(moves) != len(gameDice) {
+			return false
+		}
+		for _, runID := range harness.allRunIDs() {
+			run, loadErr := restarted.GetAgentRun(ctx, Scope{Kind: "tenant", ID: "acceptance"}, runID)
+			if loadErr != nil {
+				return false
+			}
+			if run.Status == AgentRunStatusFailed || run.Status == AgentRunStatusCanceled || run.Status == AgentRunStatusPaused {
+				t.Fatalf("run %s ended %s after restart: %s %+v", run.ID, run.Status, run.Error, run.FailureExplanation)
+			}
+			if run.Status != AgentRunStatusCompleted {
+				return false
+			}
+		}
+		return true
+	}, "one winner, all players observing completion, and independent objectives continuing")
+	harness.assertSideObjectivesProgressed(ctx, true)
+
+	moves, err := harness.replay(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	winner, positions := validateGameReplay(t, moves)
+	harness.assertGameRunsObservedWinner(ctx, winner)
+	artifact := harness.publishGameLog(ctx, restarted, winner, positions, moves)
+	harness.announceWinner(ctx, restarted, winner, artifact)
+	harness.assertDurableOutcome(ctx, restarted, winner, artifact, moves)
+	restarted.Stop()
+	if err := harness.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	finalStore, err := runtime.NewSQLiteStore(harness.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer finalStore.Close()
+	finalEngine, err := New(WithPersistentStore(finalStore))
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness.setEngine(finalEngine, finalStore)
+	finalMoves, err := harness.replay(ctx)
+	if err != nil || len(finalMoves) != len(gameDice) {
+		t.Fatalf("replay after the final reopen: moves=%#v err=%v", finalMoves, err)
+	}
+	harness.assertDurableOutcome(ctx, finalEngine, winner, artifact, moves)
+}
+
+func (h *snakesAcceptance) open(ctx context.Context) *Engine {
+	h.t.Helper()
+	store, err := runtime.NewSQLiteStore(h.path)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	var engine *Engine
+	engine, err = New(
+		WithPersistentStore(store),
+		WithAgentRunWorkers(AgentRunWorkerConfig{
+			Scope: Scope{Kind: "tenant", ID: "acceptance"}, Concurrency: 3, MaxActiveForAgent: 1,
+			PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+		}, loopResolver(&engine, h.host)),
+	)
+	if err != nil {
+		_ = store.Close()
+		h.t.Fatal(err)
+	}
+	h.setEngine(engine, store)
+	return engine
+}
+
+func (h *snakesAcceptance) allRunIDs() []string {
+	ids := make([]string, 0, 2*len(gamePlayers))
+	for _, player := range gamePlayers {
+		ids = append(ids, h.gameRunIDs[player], h.sideRunIDs[player])
+	}
+	return ids
+}
+
+func (h *snakesAcceptance) playerOf(runID string) (player string, side bool) {
+	for _, candidate := range gamePlayers {
+		if h.gameRunIDs[candidate] == runID {
+			return candidate, false
+		}
+		if h.sideRunIDs[candidate] == runID {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// decide is the fake model: three rules over the request and the durable
+// replay of the game, which is all a referee-guided player could know.
+func (h *snakesAcceptance) decide(ctx context.Context, req ModelStepRequest) (loopReply, error) {
+	player, side := h.playerOf(req.RunID)
+	if player == "" {
+		return loopReply{}, fmt.Errorf("model step for an unknown Run %s", req.RunID)
+	}
+	// Rule 1: an independent objective keeps waiting until the kernel has
+	// restarted, then finishes.
+	if side {
+		if !h.hasRecovered() {
+			return loopReply{Text: "Independent objective recorded; waiting for the kernel restart.", Calls: []ModelToolCall{loopWaitCall(1)}}, nil
+		}
+		return loopReply{Text: "Independent objective continued after recovery."}, nil
+	}
+	moves, err := h.replay(ctx)
+	if err != nil {
+		return loopReply{}, err
+	}
+	winner, positions, err := replayGame(moves)
+	if err != nil {
+		return loopReply{}, err
+	}
+	// Rule 2: nothing to play now. After a win, observe it and finish;
+	// otherwise wait for this player's turn (and, mid-game, for the restart).
+	if winner != "" {
+		return loopReply{Text: fmt.Sprintf("Observed %s win; no additional move made.", winner)}, nil
+	}
+	expected := gamePlayers[len(moves)%len(gamePlayers)]
+	if player != expected || (len(moves) >= 3 && !h.hasRecovered()) {
+		return loopReply{Text: fmt.Sprintf("Waiting for %s's authoritative turn.", expected), Calls: []ModelToolCall{loopWaitCall(1)}}, nil
+	}
+	// Rule 3: take the authoritative move and record it.
+	if len(moves) >= len(gameDice) {
+		return loopReply{}, fmt.Errorf("deterministic dice exhausted before a winner")
+	}
+	move := applyGameMove(len(moves)+1, player, positions[player], gameDice[len(moves)])
+	comment, usage, err := h.commentator.Comment(ctx, move)
+	if err != nil {
+		return loopReply{}, err
+	}
+	encoded, err := json.Marshal(move)
+	if err != nil {
+		return loopReply{}, err
+	}
+	text := comment + "\n" + gameMoveMarker + string(encoded)
+	if move.To == gameTarget {
+		return loopReply{Text: text, Usage: usage}, nil
+	}
+	return loopReply{Text: text, Calls: []ModelToolCall{loopWaitCall(1)}, Usage: usage}, nil
+}
+
+// replay reads every recorded move back from the game Runs' session logs.
+func (h *snakesAcceptance) replay(ctx context.Context) ([]gameMove, error) {
+	engine := h.currentEngine()
+	if engine == nil {
+		return nil, fmt.Errorf("acceptance engine is unavailable")
+	}
+	moves := make([]gameMove, 0, len(gameDice))
+	for _, player := range gamePlayers {
+		runID := h.gameRunIDs[player]
+		if runID == "" {
+			continue
+		}
+		entries, err := engine.Store().ListAgentSessionEntries(ctx, runtime.SessionEntryFilter{
+			Scope: Scope{Kind: "tenant", ID: "acceptance"}, RunID: runID,
+			Types: []runtime.SessionEntryType{runtime.SessionEntryAssistant}, Limit: 1000,
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range entries {
+			for _, line := range strings.Split(entry.Assistant.Text, "\n") {
+				encoded, ok := strings.CutPrefix(line, gameMoveMarker)
+				if !ok {
+					continue
+				}
+				var move gameMove
+				if err := json.Unmarshal([]byte(encoded), &move); err != nil {
+					return nil, fmt.Errorf("entry %s: %w", entry.ID, err)
+				}
+				if move.Player != player {
+					return nil, fmt.Errorf("entry %s: %s's session records a move by %s", entry.ID, player, move.Player)
+				}
+				moves = append(moves, move)
+			}
+		}
+	}
+	sort.Slice(moves, func(i, j int) bool { return moves[i].Number < moves[j].Number })
+	_, _, err := replayGame(moves)
+	return moves, err
+}
+
+func (h *snakesAcceptance) assertGameRunsObservedWinner(ctx context.Context, winner string) {
+	h.t.Helper()
+	engine := h.currentEngine()
+	for _, player := range gamePlayers {
+		run, err := engine.GetAgentRun(ctx, Scope{Kind: "tenant", ID: "acceptance"}, h.gameRunIDs[player])
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		summary, _ := run.Output["summary"].(string)
+		if player == winner {
+			if !strings.Contains(summary, gameMoveMarker) || !strings.Contains(summary, fmt.Sprintf(`"to":%d`, gameTarget)) {
+				h.t.Fatalf("winner %s did not finish on its winning move: %#v", player, run.Output)
+			}
+		} else if summary != fmt.Sprintf("Observed %s win; no additional move made.", winner) {
+			h.t.Fatalf("player %s did not observe the win: %#v", player, run.Output)
+		}
+	}
 }
 
 func (h *snakesAcceptance) setEngine(engine *Engine, store *runtime.SQLiteStore) {
@@ -178,7 +453,7 @@ func (h *snakesAcceptance) startWork(ctx context.Context, engine *Engine) {
 		run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: player,
 			Goal: "Record progress before restart and finish after recovery.", Source: RunSourceObjective,
-			Context: map[string]interface{}{"acceptanceKind": "side"}, Budget: &BudgetPolicy{MaxTurns: 4, MaxTotalTokens: 1000},
+			Context: map[string]interface{}{"acceptanceKind": "side"},
 		})
 		if err != nil {
 			h.t.Fatal(err)
@@ -196,7 +471,7 @@ func (h *snakesAcceptance) startWork(ctx context.Context, engine *Engine) {
 		run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
 			Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: player,
 			Goal: "Play Snakes and Ladders using only referee-provided state.", Source: RunSourceObjective,
-			Context: map[string]interface{}{"acceptanceKind": "game", "teamId": gameTeamID}, Budget: &BudgetPolicy{MaxTurns: 30, MaxTotalTokens: 20000},
+			Context: map[string]interface{}{"acceptanceKind": "game", "teamId": gameTeamID},
 		})
 		if err != nil {
 			h.t.Fatal(err)
@@ -205,20 +480,13 @@ func (h *snakesAcceptance) startWork(ctx context.Context, engine *Engine) {
 	}
 }
 
-func identityProvider(commentator moveCommentator) string {
-	provider, _ := commentator.Identity()
-	return provider
-}
-func identityModel(commentator moveCommentator) string {
-	_, model := commentator.Identity()
-	return model
-}
-
-func (h *snakesAcceptance) gameRunsCheckpointed(ctx context.Context) bool {
+// allParked reports whether every Run is sleeping on its wait between steps,
+// so the restart happens between steps, not inside one.
+func (h *snakesAcceptance) allParked(ctx context.Context) bool {
 	engine := h.currentEngine()
-	for _, player := range gamePlayers {
-		run, err := engine.GetAgentRun(ctx, Scope{Kind: "tenant", ID: "acceptance"}, h.gameRunIDs[player])
-		if err != nil || run.Status != AgentRunStatusWaitingForEvent {
+	for _, runID := range h.allRunIDs() {
+		run, err := engine.GetAgentRun(ctx, Scope{Kind: "tenant", ID: "acceptance"}, runID)
+		if err != nil || run.Status != AgentRunStatusSleeping || run.LastAppliedTurn < 1 {
 			return false
 		}
 	}
@@ -362,11 +630,17 @@ func (h *snakesAcceptance) assertSideObjectivesProgressed(ctx context.Context, c
 			h.t.Fatal(err)
 		}
 		if completed {
-			if run.Status != AgentRunStatusCompleted || run.Output["continuedAcrossRestart"] != true || run.LastAppliedTurn != 2 {
+			if run.Status != AgentRunStatusCompleted || run.Output["summary"] != "Independent objective continued after recovery." || run.LastAppliedTurn < 2 {
 				h.t.Fatalf("independent objective for %s did not continue: %#v", player, run)
 			}
-		} else if run.LastAppliedTurn != 1 || run.Status != AgentRunStatusWaitingForEvent {
-			h.t.Fatalf("independent objective for %s was not checkpointed before restart: %#v", player, run)
+			// The step after the restart saw the wait it parked on before it.
+			steps := h.host.requestsFor(run.ID)
+			last := steps[len(steps)-1]
+			if text := loopRequestText(last); !strings.Contains(text, "Independent objective recorded") || !strings.Contains(text, `"status":"elapsed"`) {
+				h.t.Fatalf("independent objective for %s resumed without its session: %s", player, text)
+			}
+		} else if run.LastAppliedTurn < 1 || run.Status != AgentRunStatusSleeping || run.SessionID == "" {
+			h.t.Fatalf("independent objective for %s was not parked before restart: %#v", player, run)
 		}
 	}
 }
@@ -394,7 +668,19 @@ func (h *snakesAcceptance) assertDurableOutcome(ctx context.Context, engine *Eng
 	if completedEvents != 1 {
 		h.t.Fatalf("game completion events = %d, events = %#v", completedEvents, events)
 	}
-	state, err := json.Marshal(map[string]interface{}{"artifact": stored, "messages": messages, "events": events, "moves": moves})
+	logs := map[string]interface{}{}
+	for _, runID := range h.allRunIDs() {
+		entries, err := engine.Store().ListAgentSessionEntries(ctx, runtime.SessionEntryFilter{Scope: artifact.Scope, RunID: runID, Limit: 1000})
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		steps, err := engine.ListAgentTurns(ctx, AgentTurnFilter{Scope: artifact.Scope, RunID: runID, Limit: 200})
+		if err != nil {
+			h.t.Fatal(err)
+		}
+		logs[runID] = map[string]interface{}{"entries": entries, "steps": steps}
+	}
+	state, err := json.Marshal(map[string]interface{}{"artifact": stored, "messages": messages, "events": events, "moves": moves, "runs": logs})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -420,49 +706,3 @@ func (h *snakesAcceptance) waitFor(ctx context.Context, condition func() bool, d
 		}
 	}
 }
-
-func moveMap(move gameMove) map[string]interface{} {
-	return map[string]interface{}{
-		"number": move.Number, "player": move.Player, "roll": move.Roll, "from": move.From,
-		"landed": move.Landed, "to": move.To, "effect": move.Effect,
-	}
-}
-
-func decodeGameMove(value map[string]interface{}) (gameMove, error) {
-	move := gameMove{Player: textValue(value["player"]), Effect: textValue(value["effect"])}
-	var ok bool
-	if move.Number, ok = intValue(value["number"]); !ok {
-		return gameMove{}, fmt.Errorf("move number is invalid")
-	}
-	if move.Roll, ok = intValue(value["roll"]); !ok {
-		return gameMove{}, fmt.Errorf("move roll is invalid")
-	}
-	if move.From, ok = intValue(value["from"]); !ok {
-		return gameMove{}, fmt.Errorf("move origin is invalid")
-	}
-	if move.Landed, ok = intValue(value["landed"]); !ok {
-		return gameMove{}, fmt.Errorf("move landing is invalid")
-	}
-	if move.To, ok = intValue(value["to"]); !ok {
-		return gameMove{}, fmt.Errorf("move destination is invalid")
-	}
-	if move.Player == "" {
-		return gameMove{}, fmt.Errorf("move player is invalid")
-	}
-	return move, nil
-}
-
-func intValue(value interface{}) (int, bool) {
-	switch number := value.(type) {
-	case int:
-		return number, true
-	case int64:
-		return int(number), true
-	case float64:
-		return int(number), number == float64(int(number))
-	default:
-		return 0, false
-	}
-}
-
-func textValue(value interface{}) string { text, _ := value.(string); return text }
