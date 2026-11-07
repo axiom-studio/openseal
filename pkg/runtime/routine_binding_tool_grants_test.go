@@ -59,7 +59,7 @@ func (f *routineGrantFixtureState) proposeTool(t *testing.T, coordinator *Action
 func (f *routineGrantFixtureState) proposeBindingTool(t *testing.T, coordinator *ActionCoordinator, run *AgentRun, bindingID string, revision int64, action, tool, hash, key string) *ActionProposalResult {
 	t.Helper()
 	result, err := coordinator.Propose(t.Context(), ProposeActionRequest{
-		Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, BindingID: bindingID, BindingRevision: revision,
+		Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, BindingID: bindingID, BindingRevision: revision,
 		SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: action, IdempotencyKey: key,
 		Arguments: map[string]interface{}{"tool": tool, "hash": hash, "arguments": map[string]interface{}{"title": "Forecast"}},
 	})
