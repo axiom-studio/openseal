@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
@@ -117,7 +118,7 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 			case "thread-changed":
 				store.conversationTasks[portfolioKey(run.Scope, task.Task.ID)].ThreadRootID = "other"
 			case "turn-changed":
-				store.turns[portfolioKey(run.Scope, task.Task.SourceRunID)][task.Task.SourceTurnID].RequestedTask.Goal = "other"
+				store.turns[portfolioKey(run.Scope, task.Task.SourceRunID)][task.Task.SourceTurnID].Status = AgentTurnStatusFailed
 			case "archived":
 				store.conversations[conversationStoreKey(run.Scope, task.Task.ConversationID)].Status = ConversationStatusArchived
 			case "fork-owner":
@@ -138,6 +139,90 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 			store.mu.RUnlock()
 			if count != 0 {
 				t.Fatal("rejected origin left durable setup")
+			}
+		})
+	}
+}
+
+// skillSetupOriginAllowed reports whether a task work Run's in-chat setup
+// origin resolves to the task's source conversation and message.
+func skillSetupOriginAllowed(t *testing.T, store *MemoryStore, task *ConversationTaskResult) bool {
+	t.Helper()
+	run := task.WorkRun
+	conversationID, messageID, err := skillSetupConversationOrigin(t.Context(), store, run, run.AssignedAgentID, run.Owner)
+	if err != nil {
+		return false
+	}
+	if conversationID != task.Task.ConversationID || messageID != task.Task.SourceMessageID {
+		t.Fatalf("origin = %q/%q, want %q/%q", conversationID, messageID, task.Task.ConversationID, task.Task.SourceMessageID)
+	}
+	return true
+}
+
+func TestSkillSetupOriginAcceptsTaskFromStartTaskEntry(t *testing.T) {
+	_, store, task := skillSetupTaskFixture(t)
+	if task.Task.Mode != ConversationTaskModeIndependent || task.Task.SourceToolEntryID == "" || task.Task.TaskKey != startTaskKey(task.Task.SourceToolEntryID) {
+		t.Fatalf("fixture task is not admitted from a start_task entry: %#v", task.Task)
+	}
+	entry, err := store.GetSessionEntry(t.Context(), task.Task.Scope, task.Task.SourceToolEntryID)
+	if err != nil || entry.State != ToolEntryCompleted || entry.StepID != task.Task.SourceTurnID {
+		t.Fatalf("source entry: %#v %v", entry, err)
+	}
+	// The origin proof reads the step and entry, not the old per-Turn proposal.
+	store.mu.Lock()
+	store.turns[portfolioKey(task.Task.Scope, task.Task.SourceRunID)][task.Task.SourceTurnID].RequestedTask = nil
+	store.mu.Unlock()
+	if !skillSetupOriginAllowed(t, store, task) {
+		t.Fatal("task started by its step's start_task entry was denied")
+	}
+}
+
+func TestSkillSetupOriginDeniesTamperedGoal(t *testing.T) {
+	cases := map[string]func(entry *SessionEntry, task *ConversationTask){
+		"entry-goal": func(entry *SessionEntry, task *ConversationTask) {
+			entry.Tool.Arguments, _ = json.Marshal(map[string]string{"goal": "Something else", "acknowledgment": task.Acknowledgment})
+		},
+		"task-goal":           func(_ *SessionEntry, task *ConversationTask) { task.Goal = "Something else" },
+		"task-acknowledgment": func(_ *SessionEntry, task *ConversationTask) { task.Acknowledgment = "Something else" },
+		"task-key":            func(_ *SessionEntry, task *ConversationTask) { task.TaskKey = "task-other" },
+		"entry-tool":          func(entry *SessionEntry, _ *ConversationTask) { entry.Tool.Name = string(ControlToolFork) },
+		"entry-open":          func(entry *SessionEntry, _ *ConversationTask) { entry.State = ToolEntryPending },
+		"entry-run":           func(entry *SessionEntry, _ *ConversationTask) { entry.RunID = "other-run" },
+		"entry-step":          func(entry *SessionEntry, _ *ConversationTask) { entry.Step++ },
+	}
+	for name, tamper := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, store, task := skillSetupTaskFixture(t)
+			store.mu.Lock()
+			entry := store.memorySessionEntryLocked(task.Task.Scope, task.Task.SourceToolEntryID)
+			ledger := store.conversationTasks[portfolioKey(task.Task.Scope, task.Task.ID)]
+			if entry == nil || ledger == nil {
+				store.mu.Unlock()
+				t.Fatal("fixture has no source entry or ledger task")
+			}
+			tamper(entry, ledger)
+			store.mu.Unlock()
+			if skillSetupOriginAllowed(t, store, task) {
+				t.Fatal("tampered task start proved an origin")
+			}
+		})
+	}
+}
+
+func TestSkillSetupOriginDeniesTaskWithoutEntry(t *testing.T) {
+	for _, scenario := range []string{"no-entry-id", "entry-missing"} {
+		t.Run(scenario, func(t *testing.T) {
+			_, store, task := skillSetupTaskFixture(t)
+			store.mu.Lock()
+			switch scenario {
+			case "no-entry-id":
+				store.conversationTasks[portfolioKey(task.Task.Scope, task.Task.ID)].SourceToolEntryID = ""
+			case "entry-missing":
+				delete(store.agentSessionEntryIndex, portfolioKey(task.Task.Scope, task.Task.SourceToolEntryID))
+			}
+			store.mu.Unlock()
+			if skillSetupOriginAllowed(t, store, task) {
+				t.Fatal("task without its start_task entry proved an origin")
 			}
 		})
 	}

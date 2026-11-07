@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 )
 
@@ -76,15 +75,47 @@ func skillSetupConversationOrigin(ctx context.Context, store KernelStore, run *A
 		return "", "", denied
 	}
 	if task.Mode == ConversationTaskModeIndependent {
-		turn, err := store.GetAgentTurn(ctx, task.Scope, task.SourceTurnID)
+		ok, err := independentTaskStartedByStep(ctx, store, task)
 		if err != nil {
 			return "", "", err
 		}
-		if turn == nil || turn.ID != task.SourceTurnID || turn.Scope != task.Scope || turn.RunID != task.SourceRunID || turn.Sequence != task.SourceTurnNumber || turn.Status != AgentTurnStatusCompleted ||
-			turn.RequestedTask == nil || turn.RequestedTask.TaskKey != task.TaskKey || turn.RequestedTask.Goal != task.Goal ||
-			turn.RequestedTask.Acknowledgment != task.Acknowledgment || !reflect.DeepEqual(turn.RequestedTask.Budget, task.RequestedBudget) {
+		if !ok {
 			return "", "", denied
 		}
 	}
 	return task.ConversationID, task.SourceMessageID, nil
+}
+
+// independentTaskStartedByStep proves an independent task was admitted from
+// its source Run's completed step through that step's completed
+// conversation_start_task tool entry (section 04 §7.6): the entry's decoded
+// goal and acknowledgment are the task's, and the task key derives from the
+// entry id. Tasks without a source tool entry are unproven.
+func independentTaskStartedByStep(ctx context.Context, store KernelStore, task *ConversationTask) (bool, error) {
+	sessions, ok := store.(AgentSessionStore)
+	if !ok || task.SourceToolEntryID == "" || task.SourceTurnID == "" {
+		return false, nil
+	}
+	step, err := store.GetAgentTurn(ctx, task.Scope, task.SourceTurnID)
+	if err != nil {
+		return false, err
+	}
+	if step == nil || step.ID != task.SourceTurnID || step.Scope != task.Scope || step.RunID != task.SourceRunID ||
+		step.Sequence != task.SourceTurnNumber || step.Status != AgentTurnStatusCompleted {
+		return false, nil
+	}
+	entry, err := optionalSessionEntry(sessions.GetSessionEntry(ctx, task.Scope, task.SourceToolEntryID))
+	if err != nil {
+		return false, err
+	}
+	if entry == nil || entry.ID != task.SourceToolEntryID || entry.Type != SessionEntryTool || entry.Tool == nil ||
+		entry.RunID != task.SourceRunID || entry.StepID != task.SourceTurnID || entry.Step != task.SourceTurnNumber ||
+		entry.Tool.Name != string(ControlToolStartTask) || entry.State != ToolEntryCompleted || startTaskKey(entry.ID) != task.TaskKey {
+		return false, nil
+	}
+	args := startTaskArguments(entry)
+	if args == nil || args.Goal != task.Goal || args.Acknowledgment != task.Acknowledgment {
+		return false, nil
+	}
+	return true, nil
 }
