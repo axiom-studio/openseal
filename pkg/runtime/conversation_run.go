@@ -239,6 +239,9 @@ func conversationAgentRunRequest(conversation *Conversation, message *ChannelMes
 	if voiceCallStartedMessage(message) {
 		request.Context["voiceCallStarted"] = true
 	}
+	if assignedAgentID != "" {
+		request.SessionID = conversationSessionID(conversation.Scope, request.ConcurrencyKey)
+	}
 	return request
 }
 
@@ -2214,7 +2217,7 @@ func validateConversationRun(run *AgentRun) error {
 		run.ConcurrencyKey != conversationRunLane(conversationID, root, run.AssignedAgentID) || len(reason) > MaximumRoutingReasonBytes {
 		return fmt.Errorf("%w: conversation Run context or concurrency key is invalid", ErrInvalidAgentRun)
 	}
-	return nil
+	return validateConversationRunSession(run)
 }
 
 func permanentConversationRunError(err error) bool {
