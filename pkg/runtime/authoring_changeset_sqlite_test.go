@@ -212,8 +212,8 @@ func TestSQLiteWorkforceApplyMaterializesObjectiveOwnedScheduledRunbook(t *testi
 	if err != nil {
 		t.Fatalf("resolve applied Agent Runbook entrypoint: %v", err)
 	}
-	if _, ok := binding.Runner.(*RunbookTurnRunner); !ok {
-		t.Fatalf("scheduled entrypoint resolved runner = %T", binding.Runner)
+	if _, ok := binding.Producer.(*RunbookStepProducer); !ok {
+		t.Fatalf("scheduled entrypoint resolved producer = %T", binding.Producer)
 	}
 }
 

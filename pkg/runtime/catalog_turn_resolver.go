@@ -308,11 +308,11 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, err)
 		}
 		entrypoint := catalogRunbookEntrypoint(definition, run)
-		runner, resolveErr := NewRunbookTurnRunner(definition.Runbook, entrypoint)
+		producer, resolveErr := NewRunbookStepProducer(definition.Runbook, entrypoint, catalog)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, resolveErr)
 		}
-		base.Runner = runner
+		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "runbook:"+definition.Runbook.ID+"@"+definition.Runbook.Version)
 		return &base, nil
 	}

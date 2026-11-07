@@ -100,13 +100,13 @@ func TestAcceptedRunExecutionResolverKeepsOriginalDefinitionAndChecksLiveGrants(
 	if err != nil || binding.DefinitionVersion != "1" || len(binding.ModelActions) != 1 {
 		t.Fatalf("accepted method followed current deployment behavior: %#v %v", binding, err)
 	}
-	runner, ok := binding.Runner.(*RunbookTurnRunner)
-	if !ok || runner.definition != original.Runbook {
-		t.Fatalf("resolver did not recover exact accepted implementation: %#v", binding.Runner)
+	producer, ok := binding.Producer.(*RunbookStepProducer)
+	if !ok || producer.definition != original.Runbook {
+		t.Fatalf("resolver did not recover exact accepted implementation: %#v", binding.Producer)
 	}
-	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn", Sequence: 1}})
-	if err != nil || outcome.NextRunStatus != AgentRunStatusSleeping || len(outcome.ProposedActions) != 0 {
-		t.Fatalf("original waiting method was silently replaced by latest ending method: %#v %v", outcome, err)
+	out, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step", Sequence: 1}, Binding: binding, Path: &AgentSessionPath{}})
+	if err != nil || out.Park == nil || out.Park.Status != AgentRunStatusSleeping || len(out.ToolCalls) != 0 {
+		t.Fatalf("original waiting method was silently replaced by latest ending method: %#v %v", out, err)
 	}
 	// Revocation changes the live projection independently of the method pin.
 	catalog.activation = &skill.ActivationSnapshot{SnapshotID: "revoked", Scope: skill.ScopeReference(scope), DeploymentID: "agent"}

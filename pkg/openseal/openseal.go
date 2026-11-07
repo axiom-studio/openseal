@@ -75,7 +75,7 @@ type (
 	RunbookPredicate          = runbook.Predicate
 	RunbookPredicateOperator  = runbook.PredicateOperator
 	RunbookDiagnostic         = runbook.Diagnostic
-	RunbookTurnRunner         = runtime.RunbookTurnRunner
+	RunbookStepProducer       = runtime.RunbookStepProducer
 )
 
 type (
@@ -1621,7 +1621,7 @@ var (
 	ValidateRunbook                        = runbook.Validate
 	VerifyRunbook                          = runbook.Verify
 	ValidateRunbookInterfaceInput          = runbook.ValidateInterfaceInput
-	NewRunbookTurnRunner                   = runtime.NewRunbookTurnRunner
+	NewRunbookStepProducer                 = runtime.NewRunbookStepProducer
 	NewRunForkCoordinator                  = runtime.NewRunForkCoordinator
 	ObjectiveManagementSkill               = runtime.ObjectiveManagementSkill
 	NewObjectiveActionValidator            = runtime.NewObjectiveActionValidator

@@ -13,20 +13,49 @@ import (
 	"strings"
 	"time"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-const maximumRunbookStepsPerTurn = 256
+// The runbook StepProducer (D6, section 04 §12). A runbook Run has no model:
+// each step walks the pinned definition from the engine state in
+// Run.Checkpoint until a node needs the kernel, then returns that need as the
+// step's output:
+//
+//   - action: one governed tool call pinned by a directive (binding, Skill
+//     version, idempotency key); the inline executor runs it (approvals park
+//     as for every governed call) and the next step reads the ActionCall;
+//   - fork / delegate: one kernel control call (runbook_fork /
+//     runbook_delegate). It settles after the step is applied, so the engine
+//     state the children are built from is durable, and calls
+//     ControlExecutor.Fork / Delegate with kernel origin; the tool entry waits
+//     awaiting_child and the next step reads the joined result from Run.Output
+//     exactly as before;
+//   - timer or event wait: a Park;
+//   - end / branch join: a Final with the runbook output; a failed node: a
+//     Failure.
+//
+// Every output carries the engine state as KernelState, which the loop writes
+// to Run.Checkpoint when it applies the step. The session the tool entries
+// live in is the Run's own never-rendered run session (A3).
 
-type RunbookTurnRunner struct {
+// maximumRunbookNodesPerStep bounds the nodes one step may walk without a
+// kernel need (transform/decision/for_each cycles).
+const maximumRunbookNodesPerStep = 256
+
+type RunbookStepProducer struct {
 	definition *runbook.Definition
 	entrypoint string
+	calls      ActionCallReader
 	now        func() time.Time
 }
 
-func NewRunbookTurnRunner(definition *runbook.Definition, entrypoint string) (*RunbookTurnRunner, error) {
+func NewRunbookStepProducer(definition *runbook.Definition, entrypoint string, calls ActionCallReader) (*RunbookStepProducer, error) {
 	if diagnostics := runbook.Validate(definition); len(diagnostics) > 0 {
 		return nil, fmt.Errorf("invalid runbook %s: %s", diagnostics[0].Path, diagnostics[0].Message)
+	}
+	if calls == nil {
+		return nil, errors.New("runbook producer requires the action-call store")
 	}
 	entrypoint = strings.TrimSpace(entrypoint)
 	if entrypoint == "" {
@@ -35,108 +64,118 @@ func NewRunbookTurnRunner(definition *runbook.Definition, entrypoint string) (*R
 	if _, ok := definition.Entrypoints[entrypoint]; !ok {
 		return nil, fmt.Errorf("runbook entrypoint %q is not defined", entrypoint)
 	}
-	return &RunbookTurnRunner{definition: definition, entrypoint: entrypoint, now: time.Now}, nil
+	return &RunbookStepProducer{definition: definition, entrypoint: entrypoint, calls: calls, now: time.Now}, nil
 }
 
+func (p *RunbookStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+
 type runbookExecutionState struct {
-	Current           string                 `json:"current"`
-	PendingAction     string                 `json:"pendingAction,omitempty"`
-	PendingFork       string                 `json:"pendingFork,omitempty"`
-	PendingDelegation string                 `json:"pendingDelegation,omitempty"`
-	BranchFork        string                 `json:"branchFork,omitempty"`
-	BranchID          string                 `json:"branchId,omitempty"`
-	BranchJoin        string                 `json:"branchJoin,omitempty"`
-	Waiting           string                 `json:"waiting,omitempty"`
-	WaitKey           string                 `json:"waitKey,omitempty"`
-	WaitSpec          *RunEventWaitSpec      `json:"waitSpec,omitempty"`
-	Loops             map[string]runbookLoop `json:"loops,omitempty"`
+	Current           string `json:"current"`
+	PendingAction     string `json:"pendingAction,omitempty"`
+	PendingFork       string `json:"pendingFork,omitempty"`
+	PendingDelegation string `json:"pendingDelegation,omitempty"`
+	// PendingCall is the tool call id of the pending action, fork or
+	// delegation; its tool entry holds the outcome.
+	PendingCall string                 `json:"pendingCall,omitempty"`
+	BranchFork  string                 `json:"branchFork,omitempty"`
+	BranchID    string                 `json:"branchId,omitempty"`
+	BranchJoin  string                 `json:"branchJoin,omitempty"`
+	Waiting     string                 `json:"waiting,omitempty"`
+	WaitKey     string                 `json:"waitKey,omitempty"`
+	WaitSpec    *RunEventWaitSpec      `json:"waitSpec,omitempty"`
+	Loops       map[string]runbookLoop `json:"loops,omitempty"`
 }
 type runbookLoop struct {
 	Items []interface{} `json:"items"`
 	Index int           `json:"index"`
 }
 
-func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContext) (outcome *TurnOutcome, runErr error) {
-	if r == nil || r.definition == nil || input.Run == nil || input.Turn == nil {
-		return nil, errors.New("runbook turn requires a definition, Run, and Turn")
+// runbookStoreError marks a kernel store failure while a node is open. It
+// aborts the step (the loop retries or fails it) instead of becoming a
+// runbook failure recorded in the node trace.
+type runbookStoreError struct{ err error }
+
+func (e *runbookStoreError) Error() string { return e.err.Error() }
+func (e *runbookStoreError) Unwrap() error { return e.err }
+
+func (p *RunbookStepProducer) Produce(ctx context.Context, in StepInput) (out StepOutput, runErr error) {
+	if p == nil || p.definition == nil || in.Run == nil || in.Step == nil {
+		return StepOutput{}, errors.New("runbook step requires a definition, Run, and step")
 	}
-	checkpoint := cloneMap(input.Run.Checkpoint)
+	checkpoint := cloneMap(in.Run.Checkpoint)
 	if checkpoint == nil {
 		checkpoint = map[string]interface{}{}
 	}
-	initializeRunbookRuntime(checkpoint, input.Run)
-	initializeRunbookInput(checkpoint, input.Run)
+	initializeRunbookRuntime(checkpoint, in.Run)
+	initializeRunbookInput(checkpoint, in.Run)
 	state, err := decodeRunbookState(checkpoint)
 	if err != nil {
-		return nil, err
+		return StepOutput{}, err
 	}
 	if state.Current == "" {
-		state.Current = r.definition.Entrypoints[r.entrypoint]
+		state.Current = p.definition.Entrypoints[p.entrypoint]
 	}
-	decisions := []TurnDecision{}
 	var activeTraceSequence int64
 	defer func() {
-		if runErr == nil || activeTraceSequence == 0 {
+		var storeErr *runbookStoreError
+		if runErr == nil || activeTraceSequence == 0 || errors.As(runErr, &storeErr) {
 			return
 		}
 		message := runErr.Error()
-		if traceErr := updateRunbookStepTrace(checkpoint, activeTraceSequence, RunbookStepTraceFailed, "", "Runbook node failed", message, nil, r.now()); traceErr != nil {
+		if traceErr := updateRunbookStepTrace(checkpoint, activeTraceSequence, RunbookStepTraceFailed, "", "Runbook node failed", message, nil, p.now()); traceErr != nil {
 			return
 		}
-		outcome = r.failed(checkpoint, state, decisions, message)
+		out = p.failed(checkpoint, state, message)
 		runErr = nil
 	}()
 	beginStep := func(stepID string) (int64, error) {
-		sequence, err := beginRunbookStepTrace(checkpoint, r.definition, stepID, input.Turn.ID, r.now())
+		sequence, err := beginRunbookStepTrace(checkpoint, p.definition, stepID, in.Step.ID, p.now())
 		if err == nil {
 			activeTraceSequence = sequence
 		}
 		return sequence, err
 	}
 	finishStep := func(sequence int64, status RunbookStepTraceStatus, next, summary, runError string, metadata map[string]string) error {
-		err := updateRunbookStepTrace(checkpoint, sequence, status, next, summary, runError, metadata, r.now())
+		err := updateRunbookStepTrace(checkpoint, sequence, status, next, summary, runError, metadata, p.now())
 		if err == nil && sequence == activeTraceSequence && (status == RunbookStepTraceSucceeded || status == RunbookStepTraceFailed) {
 			activeTraceSequence = 0
 		}
 		return err
 	}
-	for count := 0; count < maximumRunbookStepsPerTurn; count++ {
-		step, ok := r.definition.Steps[state.Current]
+	for count := 0; count < maximumRunbookNodesPerStep; count++ {
+		step, ok := p.definition.Steps[state.Current]
 		if !ok {
-			return nil, fmt.Errorf("runbook step %q does not exist", state.Current)
+			return StepOutput{}, fmt.Errorf("runbook step %q does not exist", state.Current)
 		}
 		switch step.Kind {
 		case runbook.StepTransform:
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
-			stepID := state.Current
 			for pointer, value := range step.Transform.Assignments {
 				resolved, resolveErr := resolveRunbookValue(checkpoint, value)
 				if resolveErr != nil {
-					return nil, stepError(state.Current, resolveErr)
+					return StepOutput{}, stepError(state.Current, resolveErr)
 				}
 				if setErr := setRunbookPointer(checkpoint, pointer, resolved); setErr != nil {
-					return nil, stepError(state.Current, setErr)
+					return StepOutput{}, stepError(state.Current, setErr)
 				}
 			}
 			if err := finishStep(traceSequence, RunbookStepTraceSucceeded, step.Transform.Next, "Applied deterministic transform", "", nil); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
-			decisions = append(decisions, TurnDecision{Summary: "Applied deterministic transform " + stepID})
 			state.Current = step.Transform.Next
 		case runbook.StepDecision:
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
-			stepID := state.Current
 			next := step.Decision.Default
 			for _, candidate := range step.Decision.Cases {
 				matched, matchErr := evaluateRunbookPredicate(checkpoint, candidate.When)
 				if matchErr != nil {
-					return nil, stepError(state.Current, matchErr)
+					return StepOutput{}, stepError(state.Current, matchErr)
 				}
 				if matched {
 					next = candidate.Next
@@ -144,123 +183,145 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 				}
 			}
 			if next == "" {
-				return nil, fmt.Errorf("runbook decision %q matched no case and has no default", state.Current)
+				return StepOutput{}, fmt.Errorf("runbook decision %q matched no case and has no default", state.Current)
 			}
 			if err := finishStep(traceSequence, RunbookStepTraceSucceeded, next, "Selected decision branch", "", nil); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
-			decisions = append(decisions, TurnDecision{Summary: fmt.Sprintf("Selected %s from decision %s", next, stepID)})
 			state.Current = next
 		case runbook.StepAction:
 			if state.PendingAction == state.Current {
 				traceSequence, traceErr := pendingRunbookStepTrace(checkpoint, state.Current)
 				if traceErr != nil {
-					return nil, traceErr
+					return StepOutput{}, traceErr
 				}
-				last, ok := checkpoint["lastAction"].(map[string]interface{})
-				if !ok {
-					return nil, fmt.Errorf("runbook action %q resumed without a durable action result", state.Current)
+				activeTraceSequence = traceSequence
+				result, call, resultErr := producerToolResult(ctx, p.calls, in.Run, in.Path, state.PendingCall)
+				if resultErr != nil {
+					return StepOutput{}, &runbookStoreError{resultErr}
 				}
-				if last["status"] != "succeeded" {
-					metadata := runbookTraceMetadata(last)
-					message := fmt.Sprintf("runbook action %s %v", state.Current, last["status"])
-					if err := finishStep(traceSequence, RunbookStepTraceFailed, "", "Governed action did not succeed", message, metadata); err != nil {
-						return nil, err
+				if result == nil {
+					return StepOutput{}, fmt.Errorf("runbook action %q resumed without its tool entry", state.Current)
+				}
+				if call == nil {
+					message := fmt.Sprintf("runbook action %s was refused before it ran", state.Current)
+					if text := runbookToolResultText(result); text != "" {
+						message += ": " + text
 					}
-					return r.failed(checkpoint, state, decisions, message), nil
+					if err := finishStep(traceSequence, RunbookStepTraceFailed, "", "Governed action was refused", message, nil); err != nil {
+						return StepOutput{}, err
+					}
+					return p.failed(checkpoint, state, message), nil
 				}
-				if err := setRunbookPointer(checkpoint, string(step.Action.ResultPath), last["result"]); err != nil {
-					return nil, stepError(state.Current, err)
+				metadata := runbookActionTraceMetadata(call)
+				// The ActionCall is authoritative, whatever state its tool
+				// entry ended in.
+				if call.Status != ActionCallStatusSucceeded {
+					message := fmt.Sprintf("runbook action %s %s", state.Current, call.Status)
+					if err := finishStep(traceSequence, RunbookStepTraceFailed, "", "Governed action did not succeed", message, metadata); err != nil {
+						return StepOutput{}, err
+					}
+					return p.failed(checkpoint, state, message), nil
 				}
-				metadata := runbookTraceMetadata(last)
+				if err := setRunbookPointer(checkpoint, string(step.Action.ResultPath), runbookActionResult(result.Output)); err != nil {
+					return StepOutput{}, stepError(state.Current, err)
+				}
 				if err := finishStep(traceSequence, RunbookStepTraceSucceeded, step.Action.Next, "Governed action completed", "", metadata); err != nil {
-					return nil, err
+					return StepOutput{}, err
 				}
-				completedStep := state.Current
-				delete(checkpoint, "lastAction")
-				state.PendingAction = ""
+				state.PendingAction, state.PendingCall = "", ""
 				state.Current = step.Action.Next
-				decisions = append(decisions, TurnDecision{Summary: "Applied governed result for " + completedStep})
 				continue
 			}
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
 			arguments := map[string]interface{}{}
 			for name, value := range step.Action.Arguments {
 				resolved, resolveErr := resolveRunbookValue(checkpoint, value)
 				if resolveErr != nil {
-					return nil, stepError(state.Current, resolveErr)
+					return StepOutput{}, stepError(state.Current, resolveErr)
 				}
 				arguments[name] = resolved
 			}
-			inputPointer := "/runbookActionInputs/" + escapeRunbookPointer(state.Current)
-			if err := setRunbookPointer(checkpoint, inputPointer, arguments); err != nil {
-				return nil, err
+			selected, selectErr := runbookGovernedAction(in.Binding, step.Action)
+			if selectErr != nil {
+				return StepOutput{}, stepError(state.Current, selectErr)
 			}
-			state.PendingAction = state.Current
+			callID := runbookToolCallID(state.Current, traceSequence)
+			call, callErr := producerGovernedToolCall(callID, selected, arguments, &ToolCallDirective{
+				IdempotencyKey: "runbook:" + p.definition.ID + ":" + in.Run.ID + ":" + state.Current + ":" + strconv.FormatInt(in.Step.Sequence, 10),
+				Summary:        "Execute " + step.Action.SkillID + "." + step.Action.Action,
+			})
+			if callErr != nil {
+				return StepOutput{}, stepError(state.Current, callErr)
+			}
+			state.PendingAction, state.PendingCall = state.Current, callID
 			if err := finishStep(traceSequence, RunbookStepTraceWaiting, "", "Waiting for governed action", "", nil); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
 			encodeRunbookState(checkpoint, state)
-			return &TurnOutcome{Decisions: decisions, ProposedActions: []TurnAction{{Type: "skill_action", Capability: step.Action.SkillID + "." + step.Action.Action, ExpectedSkillVersion: step.Action.SkillVersion, Summary: "Execute " + step.Action.SkillID + "." + step.Action.Action, IdempotencyKey: "runbook:" + r.definition.ID + ":" + input.Run.ID + ":" + state.Current + ":" + strconv.FormatInt(input.Turn.Sequence, 10), InputRef: inputPointer}}, OutputSummary: "Requested governed runbook action " + state.Current, ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning}, nil
+			return StepOutput{ToolCalls: []LoopToolCall{call}, KernelState: checkpoint}, nil
 		case runbook.StepDelegate:
 			if state.PendingDelegation == state.Current {
 				traceSequence, traceErr := pendingRunbookStepTrace(checkpoint, state.Current)
 				if traceErr != nil {
-					return nil, traceErr
+					return StepOutput{}, traceErr
 				}
-				completedStep := state.Current
-				consumed, terminal, consumeErr := r.consumeDelegationResult(checkpoint, &state, input.Run)
+				activeTraceSequence = traceSequence
+				consumed, failure, consumeErr := p.consumeDelegationResult(checkpoint, &state, in.Run)
 				if consumeErr != nil {
-					return nil, consumeErr
+					return StepOutput{}, consumeErr
 				}
-				if terminal != nil {
-					if err := finishStep(traceSequence, RunbookStepTraceFailed, "", "Delegated Agent work failed", terminal.RunError, nil); err != nil {
-						return nil, err
+				if failure != "" {
+					if err := finishStep(traceSequence, RunbookStepTraceFailed, "", "Delegated Agent work failed", failure, nil); err != nil {
+						return StepOutput{}, err
 					}
-					terminal.Decisions = append(decisions, terminal.Decisions...)
-					return terminal, nil
+					return p.failed(checkpoint, state, failure), nil
 				}
 				if consumed {
 					if err := finishStep(traceSequence, RunbookStepTraceSucceeded, state.Current, "Delegated Agent work completed", "", nil); err != nil {
-						return nil, err
+						return StepOutput{}, err
 					}
-					decisions = append(decisions, TurnDecision{Summary: "Applied delegated Agent result for " + completedStep})
 					continue
 				}
-				return r.proposeDelegation(checkpoint, state, decisions, input)
+				return p.unresolvedKernelCall(ctx, in, checkpoint, state, ControlToolRunbookDelegate, traceSequence, "delegated Agent step", finishStep)
 			}
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
+			}
+			// Resolve now, so an unresolvable delegation fails this node; the
+			// settle rebuilds the same spec from the applied engine state.
+			if _, err := p.delegationSpec(checkpoint, state.Current); err != nil {
+				return StepOutput{}, err
 			}
 			state.PendingDelegation = state.Current
+			state.PendingCall = runbookToolCallID(state.Current, traceSequence)
 			if err := finishStep(traceSequence, RunbookStepTraceWaiting, "", "Waiting for delegated Agent work", "", nil); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
-			return r.proposeDelegation(checkpoint, state, decisions, input)
+			return p.kernelCall(checkpoint, state, ControlToolRunbookDelegate, traceSequence)
 		case runbook.StepWait:
 			if state.Waiting == state.Current {
 				traceSequence, traceErr := pendingRunbookStepTrace(checkpoint, state.Current)
 				if traceErr != nil {
-					return nil, traceErr
+					return StepOutput{}, traceErr
 				}
-				completedStep := state.Current
 				if step.Wait.Match != nil {
 					activeTraceSequence = traceSequence
-					if state.WaitSpec == nil || state.WaitKey != runbookEventWaitKey(r.definition.ID, input.Run.ID, state.Current, traceSequence) || state.WaitSpec.Key != state.WaitKey {
-						return nil, stepError(state.Current, errors.New("event wait resumed without its durable selector"))
+					if state.WaitSpec == nil || state.WaitKey != runbookEventWaitKey(p.definition.ID, in.Run.ID, state.Current, traceSequence) || state.WaitSpec.Key != state.WaitKey {
+						return StepOutput{}, stepError(state.Current, errors.New("event wait resumed without its durable selector"))
 					}
 					if err := state.WaitSpec.Validate(); err != nil {
-						return nil, stepError(state.Current, err)
+						return StepOutput{}, stepError(state.Current, err)
 					}
 					last, present := checkpoint[runEventWaitCheckpointKey].(map[string]interface{})
 					if !present || last["key"] != state.WaitKey {
 						// A manual resume or an unrelated signal cannot satisfy an
 						// authenticated event expectation or reset its deadline.
-						return r.parkEventWait(checkpoint, state, decisions), nil
+						return p.parkEventWait(checkpoint, state), nil
 					}
 					next := step.Wait.Next
 					summary := "Matched authenticated event"
@@ -268,11 +329,11 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 					case string(RunEventWaitMatched):
 						event, ok := last["event"].(map[string]interface{})
 						if !ok || !runbookEventResultMatches(state.WaitSpec, event) {
-							return nil, stepError(state.Current, errors.New("event wait result does not match its durable selector"))
+							return StepOutput{}, stepError(state.Current, errors.New("event wait result does not match its durable selector"))
 						}
 						if step.Wait.ResultPath != "" {
 							if err := setRunbookPointer(checkpoint, string(step.Wait.ResultPath), event); err != nil {
-								return nil, stepError(state.Current, err)
+								return StepOutput{}, stepError(state.Current, err)
 							}
 						}
 					case string(RunEventWaitTimedOut):
@@ -280,73 +341,65 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 						// persisted deadline. A resumed worker's local clock is not
 						// a second source of authority for that completed transition.
 						if step.Wait.TimeoutNext == "" {
-							return nil, stepError(state.Current, errors.New("event wait deadline elapsed without a matching event; configure timeoutNext to handle partial results"))
+							return StepOutput{}, stepError(state.Current, errors.New("event wait deadline elapsed without a matching event; configure timeoutNext to handle partial results"))
 						}
 						next = step.Wait.TimeoutNext
 						summary = "Event wait deadline elapsed"
 						if step.Wait.ResultPath != "" {
 							if err := setRunbookPointer(checkpoint, string(step.Wait.ResultPath), nil); err != nil {
-								return nil, stepError(state.Current, err)
+								return StepOutput{}, stepError(state.Current, err)
 							}
 						}
 					default:
-						return nil, stepError(state.Current, errors.New("event wait has an invalid durable resolution status"))
+						return StepOutput{}, stepError(state.Current, errors.New("event wait has an invalid durable resolution status"))
 					}
 					if err := finishStep(traceSequence, RunbookStepTraceSucceeded, next, summary, "", nil); err != nil {
-						return nil, err
+						return StepOutput{}, err
 					}
 					delete(checkpoint, runEventWaitCheckpointKey)
 					state.Waiting, state.WaitKey, state.WaitSpec = "", "", nil
 					state.Current = next
-					decisions = append(decisions, TurnDecision{Summary: summary + " at " + completedStep})
 					continue
 				}
 				if err := finishStep(traceSequence, RunbookStepTraceSucceeded, step.Wait.Next, "Wait condition resolved", "", nil); err != nil {
-					return nil, err
+					return StepOutput{}, err
 				}
 				state.Waiting = ""
 				state.Current = step.Wait.Next
-				decisions = append(decisions, TurnDecision{Summary: "Resumed wait " + completedStep})
 				continue
 			}
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
 			state.Waiting = state.Current
 			if step.Wait.Match != nil {
-				spec, resolveErr := r.resolveEventWait(checkpoint, input.Run, state.Current, traceSequence, step.Wait.Match)
+				spec, resolveErr := p.resolveEventWait(checkpoint, in.Run, state.Current, traceSequence, step.Wait.Match)
 				if resolveErr != nil {
-					return nil, stepError(state.Current, resolveErr)
+					return StepOutput{}, stepError(state.Current, resolveErr)
 				}
 				state.WaitKey, state.WaitSpec = spec.Key, spec
 				delete(checkpoint, runEventWaitCheckpointKey)
 				if err := finishStep(traceSequence, RunbookStepTraceWaiting, "", "Waiting for authenticated event", "", nil); err != nil {
-					return nil, err
+					return StepOutput{}, err
 				}
-				return r.parkEventWait(checkpoint, state, decisions), nil
+				return p.parkEventWait(checkpoint, state), nil
 			}
 			if err := finishStep(traceSequence, RunbookStepTraceWaiting, "", "Waiting for condition", "", nil); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
 			encodeRunbookState(checkpoint, state)
-			wake := &WakeCondition{}
-			status := AgentRunStatusWaitingForEvent
+			park := &LoopPark{Status: AgentRunStatusWaitingForEvent, Wake: &WakeCondition{Type: "event", Reference: step.Wait.Event}}
 			if step.Wait.Duration > 0 {
-				at := r.now().UTC().Add(step.Wait.Duration)
-				wake.Type = "timer"
-				wake.WakeAt = &at
-				wake.Reference = state.Current
-				status = AgentRunStatusSleeping
-			} else {
-				wake.Type = "event"
-				wake.Reference = step.Wait.Event
+				at := p.now().UTC().Add(step.Wait.Duration)
+				park = &LoopPark{Status: AgentRunStatusSleeping, Wake: &WakeCondition{Type: "timer", WakeAt: &at, Reference: state.Current}}
 			}
-			return &TurnOutcome{Decisions: decisions, OutputSummary: "Waiting at runbook step " + state.Current, ContinuationCheckpoint: checkpoint, NextRunStatus: status, WakeCondition: wake}, nil
+			park.Summary = "Waiting at runbook step " + state.Current
+			return StepOutput{Park: park, KernelState: checkpoint}, nil
 		case runbook.StepForEach:
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
 			if state.Loops == nil {
 				state.Loops = map[string]runbookLoop{}
@@ -355,126 +408,126 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 			if !exists {
 				resolved, resolveErr := resolveRunbookValue(checkpoint, step.ForEach.Items)
 				if resolveErr != nil {
-					return nil, stepError(state.Current, resolveErr)
+					return StepOutput{}, stepError(state.Current, resolveErr)
 				}
 				items, ok := resolved.([]interface{})
 				if !ok {
-					return nil, fmt.Errorf("runbook for_each %q items must resolve to an array", state.Current)
+					return StepOutput{}, fmt.Errorf("runbook for_each %q items must resolve to an array", state.Current)
 				}
 				if len(items) > step.ForEach.MaxIterations {
-					return nil, fmt.Errorf("runbook for_each %q exceeds maxIterations", state.Current)
+					return StepOutput{}, fmt.Errorf("runbook for_each %q exceeds maxIterations", state.Current)
 				}
 				frame = runbookLoop{Items: items}
 			}
 			if frame.Index >= len(frame.Items) {
 				delete(state.Loops, state.Current)
 				if err := finishStep(traceSequence, RunbookStepTraceSucceeded, step.ForEach.Next, "Iteration completed", "", nil); err != nil {
-					return nil, err
+					return StepOutput{}, err
 				}
 				state.Current = step.ForEach.Next
 				continue
 			}
 			state.Loops[state.Current] = frame
 			if err := setRunbookPointer(checkpoint, "/loop/"+escapeRunbookPointer(step.ForEach.ItemName), frame.Items[frame.Index]); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
 			if err := finishStep(traceSequence, RunbookStepTraceSucceeded, step.ForEach.Body, fmt.Sprintf("Selected iteration %d", frame.Index+1), "", nil); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
 			state.Current = step.ForEach.Body
 		case runbook.StepLoopReturn:
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
-			loopStep := r.definition.Steps[step.LoopReturn.ForEach]
 			frame, ok := state.Loops[step.LoopReturn.ForEach]
 			if !ok {
-				return nil, fmt.Errorf("runbook loop_return %q has no active loop", state.Current)
+				return StepOutput{}, fmt.Errorf("runbook loop_return %q has no active loop", state.Current)
 			}
 			frame.Index++
 			state.Loops[step.LoopReturn.ForEach] = frame
 			if err := finishStep(traceSequence, RunbookStepTraceSucceeded, step.LoopReturn.ForEach, "Returned to iteration", "", nil); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
 			state.Current = step.LoopReturn.ForEach
-			_ = loopStep
 		case runbook.StepFork:
 			if state.PendingFork == state.Current {
 				traceSequence, traceErr := pendingRunbookStepTrace(checkpoint, state.Current)
 				if traceErr != nil {
-					return nil, traceErr
+					return StepOutput{}, traceErr
 				}
-				completedFork := state.PendingFork
-				consumed, terminal, consumeErr := r.consumeForkResult(checkpoint, &state, input.Run)
+				activeTraceSequence = traceSequence
+				consumed, failure, consumeErr := p.consumeForkResult(checkpoint, &state, in.Run)
 				if consumeErr != nil {
-					return nil, consumeErr
+					return StepOutput{}, consumeErr
 				}
-				if terminal != nil {
-					if err := finishStep(traceSequence, RunbookStepTraceFailed, "", "Concurrent branches failed", terminal.RunError, nil); err != nil {
-						return nil, err
+				if failure != "" {
+					if err := finishStep(traceSequence, RunbookStepTraceFailed, "", "Concurrent branches failed", failure, nil); err != nil {
+						return StepOutput{}, err
 					}
-					terminal.Decisions = append(decisions, terminal.Decisions...)
-					return terminal, nil
+					return p.failed(checkpoint, state, failure), nil
 				}
 				if consumed {
 					if err := finishStep(traceSequence, RunbookStepTraceSucceeded, state.Current, "Concurrent branches joined", "", nil); err != nil {
-						return nil, err
+						return StepOutput{}, err
 					}
-					decisions = append(decisions, TurnDecision{Summary: "Merged durable results for concurrent fork " + completedFork})
 					continue
 				}
-				return r.proposeFork(checkpoint, state, decisions, input)
+				return p.unresolvedKernelCall(ctx, in, checkpoint, state, ControlToolRunbookFork, traceSequence, "concurrent runbook fork", finishStep)
 			}
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
 			state.PendingFork = state.Current
-			if err := finishStep(traceSequence, RunbookStepTraceWaiting, "", "Waiting for concurrent branches", "", nil); err != nil {
-				return nil, err
+			state.PendingCall = runbookToolCallID(state.Current, traceSequence)
+			if _, err := p.forkSpec(checkpoint, state, in.Run.ID); err != nil {
+				return StepOutput{}, err
 			}
-			return r.proposeFork(checkpoint, state, decisions, input)
+			if err := finishStep(traceSequence, RunbookStepTraceWaiting, "", "Waiting for concurrent branches", "", nil); err != nil {
+				return StepOutput{}, err
+			}
+			return p.kernelCall(checkpoint, state, ControlToolRunbookFork, traceSequence)
 		case runbook.StepJoin:
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
 			if state.BranchJoin == state.Current {
 				if err := finishStep(traceSequence, RunbookStepTraceSucceeded, "", "Concurrent branch completed", "", nil); err != nil {
-					return nil, err
+					return StepOutput{}, err
 				}
 				encodeRunbookState(checkpoint, state)
-				return &TurnOutcome{
-					Decisions: decisions, OutputSummary: "Completed concurrent runbook branch " + state.BranchID,
-					ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusCompleted,
-					RunOutput: map[string]interface{}{"branchId": state.BranchID, "forkId": state.BranchFork},
-				}, nil
+				return StepOutput{Final: &LoopFinal{
+					Answer: "Completed concurrent runbook branch " + state.BranchID,
+					Output: map[string]interface{}{"branchId": state.BranchID, "forkId": state.BranchFork},
+					Status: AgentRunStatusCompleted,
+				}, KernelState: checkpoint}, nil
 			}
 			if state.PendingFork != "" {
-				return nil, fmt.Errorf("runbook join %q resumed without durable fork results", state.Current)
+				return StepOutput{}, fmt.Errorf("runbook join %q resumed without durable fork results", state.Current)
 			}
-			return nil, fmt.Errorf("runbook join %q has no active concurrent fork", state.Current)
+			return StepOutput{}, fmt.Errorf("runbook join %q has no active concurrent fork", state.Current)
 		case runbook.StepEnd:
 			traceSequence, traceErr := beginStep(state.Current)
 			if traceErr != nil {
-				return nil, traceErr
+				return StepOutput{}, traceErr
 			}
 			outputs := map[string]interface{}{}
 			for name, value := range step.End.Outputs {
 				resolved, resolveErr := resolveRunbookValue(checkpoint, value)
 				if resolveErr != nil {
-					return nil, stepError(state.Current, resolveErr)
+					return StepOutput{}, stepError(state.Current, resolveErr)
 				}
 				outputs[name] = resolved
 			}
-			if contract, ok := r.definition.Interfaces[r.entrypoint]; ok && len(contract.OutputSchema) > 0 {
+			if contract, ok := p.definition.Interfaces[p.entrypoint]; ok && len(contract.OutputSchema) > 0 {
 				if err := runbook.ValidateInterfaceInput(contract.OutputSchema, outputs); err != nil {
-					return nil, fmt.Errorf("runbook output does not satisfy interface %q: %w", r.entrypoint, err)
+					return StepOutput{}, fmt.Errorf("runbook output does not satisfy interface %q: %w", p.entrypoint, err)
 				}
 			}
 			if err := finishStep(traceSequence, RunbookStepTraceSucceeded, "", "Runbook completed", "", nil); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
 			outputObservations := make([]RunbookDataObservation, 0, len(outputs))
 			for name, value := range outputs {
@@ -482,27 +535,129 @@ func (r *RunbookTurnRunner) RunTurn(_ context.Context, input TurnExecutionContex
 			}
 			sort.Slice(outputObservations, func(i, j int) bool { return outputObservations[i].Ref < outputObservations[j].Ref })
 			if err := replaceRunbookStepTraceOutputs(checkpoint, traceSequence, outputObservations); err != nil {
-				return nil, err
+				return StepOutput{}, err
 			}
 			encodeRunbookState(checkpoint, state)
-			return &TurnOutcome{Decisions: decisions, OutputSummary: "Completed runbook " + r.definition.Name, ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusCompleted, RunOutput: outputs}, nil
+			return StepOutput{Final: &LoopFinal{
+				Answer: "Completed runbook " + p.definition.Name, Output: outputs, Status: AgentRunStatusCompleted,
+			}, KernelState: checkpoint}, nil
 		default:
-			return nil, fmt.Errorf("unsupported runbook step kind %q", step.Kind)
+			return StepOutput{}, fmt.Errorf("unsupported runbook step kind %q", step.Kind)
 		}
 	}
-	return nil, fmt.Errorf("runbook exceeded %d internal steps in one Turn", maximumRunbookStepsPerTurn)
+	return StepOutput{}, fmt.Errorf("runbook exceeded %d internal nodes in one step", maximumRunbookNodesPerStep)
 }
 
-func (r *RunbookTurnRunner) parkEventWait(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision) *TurnOutcome {
-	encodeRunbookState(checkpoint, state)
-	return &TurnOutcome{
-		Decisions: decisions, OutputSummary: "Waiting for authenticated event at runbook step " + state.Current,
-		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusWaitingForEvent,
-		WakeCondition: &WakeCondition{Type: "event", Reference: state.WaitSpec.Type, EventWait: cloneRunEventWaitSpec(state.WaitSpec)},
+// runbookToolCallID is the tool call id of one node visit; the trace
+// sequence makes every visit (for_each iterations included) distinct and is
+// the same when a crashed step is produced again from the same state.
+func runbookToolCallID(stepID string, traceSequence int64) string {
+	return "runbook." + strconv.FormatInt(traceSequence, 10) + "." + stepID
+}
+
+// runbookGovernedAction is the binding's governed action an action node
+// names: exactly one authorized action of that Skill version.
+func runbookGovernedAction(binding *TurnRunnerBinding, action *runbook.ActionStep) (*capability.ModelAction, error) {
+	if binding == nil {
+		return nil, errors.New("runbook action needs the Run's binding")
 	}
+	var selected *capability.ModelAction
+	for index := range binding.ModelActions {
+		candidate := &binding.ModelActions[index]
+		if candidate.SkillID == action.SkillID && candidate.Version == action.SkillVersion && candidate.Action == action.Action {
+			if selected != nil {
+				return nil, fmt.Errorf("governed action %s@%s/%s matches multiple authorized bindings", action.SkillID, action.SkillVersion, action.Action)
+			}
+			selected = candidate
+		}
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("governed action %s@%s/%s is not authorized for this Agent", action.SkillID, action.SkillVersion, action.Action)
+	}
+	return selected, nil
 }
 
-func (r *RunbookTurnRunner) resolveEventWait(checkpoint map[string]interface{}, run *AgentRun, stepID string, sequence int64, match *runbook.EventMatch) (*RunEventWaitSpec, error) {
+func runbookActionTraceMetadata(call *ActionCall) map[string]string {
+	metadata := map[string]string{}
+	if id := strings.TrimSpace(call.ID); id != "" {
+		metadata["actionCallId"] = id
+	}
+	if id := strings.TrimSpace(call.ApprovalID); id != "" {
+		metadata["approvalId"] = id
+	}
+	return metadata
+}
+
+// runbookActionResult is the value an action node writes to its result path:
+// the ActionCall output (an empty object when the action returned none).
+func runbookActionResult(output map[string]interface{}) map[string]interface{} {
+	if output == nil {
+		return map[string]interface{}{}
+	}
+	return output
+}
+
+// runbookToolResultText is the text of a terminal tool result, for failure
+// messages.
+func runbookToolResultText(result *LoopToolResult) string {
+	if result == nil || len(result.Content) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(controlResultText(&ToolResult{Content: result.Content}))
+}
+
+// kernelCall is the step output of a fork or delegation node: one kernel
+// control call that settles after the step (and its engine state) is applied.
+func (p *RunbookStepProducer) kernelCall(checkpoint map[string]interface{}, state runbookExecutionState, name ControlToolName, traceSequence int64) (StepOutput, error) {
+	stepID := state.Current
+	arguments, err := json.Marshal(runbookKernelArgs{Step: stepID, Visit: traceSequence})
+	if err != nil {
+		return StepOutput{}, err
+	}
+	summary := "Fork concurrent branches at " + stepID
+	if name == ControlToolRunbookDelegate {
+		summary = "Delegate runbook step " + stepID
+	}
+	encodeRunbookState(checkpoint, state)
+	return StepOutput{ToolCalls: []LoopToolCall{{
+		ID: state.PendingCall, Name: string(name), Arguments: arguments,
+		Directive: &ToolCallDirective{Summary: summary},
+	}}, KernelState: checkpoint}, nil
+}
+
+// unresolvedKernelCall handles a fork or delegation node whose result is not
+// in Run.Output. The loop resumes open tool entries before it produces a
+// step, so a recorded entry is terminal: the call ended without a durable
+// result (refused, lost) and the node fails with its result. An entry that
+// was never recorded is asked for again (same id).
+func (p *RunbookStepProducer) unresolvedKernelCall(ctx context.Context, in StepInput, checkpoint map[string]interface{}, state runbookExecutionState, name ControlToolName, traceSequence int64, what string, finishStep func(int64, RunbookStepTraceStatus, string, string, string, map[string]string) error) (StepOutput, error) {
+	result, _, err := producerToolResult(ctx, p.calls, in.Run, in.Path, state.PendingCall)
+	if err != nil {
+		return StepOutput{}, &runbookStoreError{err}
+	}
+	if result == nil {
+		return p.kernelCall(checkpoint, state, name, traceSequence)
+	}
+	message := what + " " + state.Current + " ended without a durable result"
+	if text := runbookToolResultText(result); text != "" {
+		message += ": " + text
+	}
+	if err := finishStep(traceSequence, RunbookStepTraceFailed, "", "Kernel call ended without a result", message, nil); err != nil {
+		return StepOutput{}, err
+	}
+	return p.failed(checkpoint, state, message), nil
+}
+
+func (p *RunbookStepProducer) parkEventWait(checkpoint map[string]interface{}, state runbookExecutionState) StepOutput {
+	encodeRunbookState(checkpoint, state)
+	return StepOutput{Park: &LoopPark{
+		Status:  AgentRunStatusWaitingForEvent,
+		Wake:    &WakeCondition{Type: "event", Reference: state.WaitSpec.Type, EventWait: cloneRunEventWaitSpec(state.WaitSpec)},
+		Summary: "Waiting for authenticated event at runbook step " + state.Current,
+	}, KernelState: checkpoint}
+}
+
+func (p *RunbookStepProducer) resolveEventWait(checkpoint map[string]interface{}, run *AgentRun, stepID string, sequence int64, match *runbook.EventMatch) (*RunEventWaitSpec, error) {
 	resolveString := func(value runbook.Value, field string) (string, error) {
 		resolved, err := resolveRunbookValue(checkpoint, value)
 		if err != nil {
@@ -540,7 +695,7 @@ func (r *RunbookTurnRunner) resolveEventWait(checkpoint map[string]interface{}, 
 		}
 		attributes[name] = resolved
 	}
-	now := r.now().UTC()
+	now := p.now().UTC()
 	after := run.CreatedAt.UTC()
 	if after.IsZero() {
 		after = now
@@ -557,7 +712,7 @@ func (r *RunbookTurnRunner) resolveEventWait(checkpoint map[string]interface{}, 
 		after = after.UTC()
 	}
 	spec := &RunEventWaitSpec{
-		Key: runbookEventWaitKey(r.definition.ID, run.ID, stepID, sequence), Type: match.Type, Source: source, Subject: subject,
+		Key: runbookEventWaitKey(p.definition.ID, run.ID, stepID, sequence), Type: match.Type, Source: source, Subject: subject,
 		Attributes: attributes, After: after, Deadline: now.Add(match.TimeoutDuration),
 	}
 	if spec.Deadline.Sub(after) > MaximumRunEventWaitDuration {
@@ -597,20 +752,22 @@ func runbookEventResultMatches(spec *RunEventWaitSpec, event map[string]interfac
 	return true
 }
 
-func (r *RunbookTurnRunner) consumeForkResult(checkpoint map[string]interface{}, state *runbookExecutionState, run *AgentRun) (bool, *TurnOutcome, error) {
+// consumeForkResult reads the joined result of the pending fork from
+// Run.Output. consumed is false while no resolved group is recorded; failure
+// is the node's failure message when the group did not succeed.
+func (p *RunbookStepProducer) consumeForkResult(checkpoint map[string]interface{}, state *runbookExecutionState, run *AgentRun) (bool, string, error) {
 	if state == nil || run == nil || state.PendingFork == "" {
-		return false, nil, nil
+		return false, "", nil
 	}
 	groupID := stableForkIdentifier(run.ID, state.PendingFork, "group")
 	groups, _ := run.Output["dependencyGroups"].(map[string]interface{})
 	group, _ := groups[groupID].(map[string]interface{})
 	status, _ := group["status"].(string)
 	if status == "" || status == string(RunDependencyGroupWaiting) {
-		return false, nil, nil
+		return false, "", nil
 	}
 	if status != string(RunDependencyGroupSatisfied) {
-		message := "concurrent runbook fork " + state.PendingFork + " failed"
-		return false, r.failed(checkpoint, *state, nil, message), nil
+		return false, "concurrent runbook fork " + state.PendingFork + " failed", nil
 	}
 	dependencies, _ := group["dependencies"].(map[string]interface{})
 	ids := make([]string, 0, len(dependencies))
@@ -635,18 +792,18 @@ func (r *RunbookTurnRunner) consumeForkResult(checkpoint map[string]interface{},
 		for _, key := range []string{"state", "steps"} {
 			if branchValues, ok := branchCheckpoint[key].(map[string]interface{}); ok {
 				if err := mergeRunbookBranchValues(checkpoint, key, branchValues); err != nil {
-					return false, nil, fmt.Errorf("fork %s branch %s: %w", state.PendingFork, id, err)
+					return false, "", fmt.Errorf("fork %s branch %s: %w", state.PendingFork, id, err)
 				}
 			}
 		}
 	}
 	forks[state.PendingFork] = results
-	forkStep := r.definition.Steps[state.PendingFork]
-	joinStep := r.definition.Steps[forkStep.Fork.Join]
-	state.PendingFork = ""
+	forkStep := p.definition.Steps[state.PendingFork]
+	joinStep := p.definition.Steps[forkStep.Fork.Join]
+	state.PendingFork, state.PendingCall = "", ""
 	state.Current = joinStep.Join.Next
 	encodeRunbookState(checkpoint, *state)
-	return true, nil, nil
+	return true, "", nil
 }
 
 func mergeRunbookBranchValues(checkpoint map[string]interface{}, key string, branch map[string]interface{}) error {
@@ -664,14 +821,18 @@ func mergeRunbookBranchValues(checkpoint map[string]interface{}, key string, bra
 	return nil
 }
 
-func (r *RunbookTurnRunner) proposeFork(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision, input TurnExecutionContext) (*TurnOutcome, error) {
-	step := r.definition.Steps[state.Current]
+// forkSpec is the kernel ForkSpec of the fork node state.Current: one child
+// Run per branch, each seeded with the engine state at its branch entry and
+// the branch budget of the definition. The source keeps checkpoint while it
+// waits.
+func (p *RunbookStepProducer) forkSpec(checkpoint map[string]interface{}, state runbookExecutionState, runID string) (ForkSpec, error) {
+	step := p.definition.Steps[state.Current]
 	if step.Fork == nil {
-		return nil, fmt.Errorf("runbook fork %q is missing its definition", state.Current)
+		return ForkSpec{}, fmt.Errorf("runbook fork %q is missing its definition", state.Current)
 	}
-	join, ok := r.definition.Steps[step.Fork.Join]
+	join, ok := p.definition.Steps[step.Fork.Join]
 	if !ok || join.Join == nil || join.Join.Fork != state.Current {
-		return nil, fmt.Errorf("runbook fork %q has no matching join", state.Current)
+		return ForkSpec{}, fmt.Errorf("runbook fork %q has no matching join", state.Current)
 	}
 	mode := FanInModeAll
 	failure := DependencyFailureFailFast
@@ -684,24 +845,24 @@ func (r *RunbookTurnRunner) proposeFork(checkpoint map[string]interface{}, state
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	source := cloneMap(checkpoint)
+	encodeRunbookState(source, state)
+	groupID := stableForkIdentifier(runID, state.Current, "group")
 	branches := make([]RunForkBranch, 0, len(names))
-	groupID := stableForkIdentifier(input.Run.ID, state.Current, "group")
 	for _, name := range names {
-		branchCheckpoint := cloneMap(checkpoint)
-		delete(branchCheckpoint, "lastAction")
-		delete(branchCheckpoint, "lastFork")
+		branchCheckpoint := cloneMap(source)
 		// Each child Run owns its own node trace. Parent history remains linked
 		// through the durable dependency rather than copied into every branch.
 		delete(branchCheckpoint, runbookTraceCheckpointKey)
 		childState := state
 		childState.Current = step.Fork.Branches[name]
-		childState.PendingFork = ""
+		childState.PendingFork, childState.PendingCall = "", ""
 		childState.BranchFork = state.Current
 		childState.BranchID = name
 		childState.BranchJoin = step.Fork.Join
 		encodeRunbookState(branchCheckpoint, childState)
 		branchCheckpoint["forkChild"] = map[string]interface{}{
-			"sourceRunId": input.Run.ID, "groupId": groupID, "dependencyId": name,
+			"sourceRunId": runID, "groupId": groupID, "dependencyId": name,
 			"forkId": state.Current, "joinId": step.Fork.Join,
 		}
 		branches = append(branches, RunForkBranch{
@@ -709,57 +870,47 @@ func (r *RunbookTurnRunner) proposeFork(checkpoint map[string]interface{}, state
 			Budget: runbookBudgetPolicy(step.Fork.BranchBudgets, name),
 		})
 	}
-	encodeRunbookState(checkpoint, state)
-	decisions = append(decisions, TurnDecision{Summary: fmt.Sprintf("Forked %d concurrent runbook branches at %s", len(branches), state.Current)})
-	return &TurnOutcome{
-		Decisions: decisions, ProposedFork: &TurnForkProposal{
-			ForkID: state.Current, Policy: RunDependencyPolicy{Mode: mode, FailureMode: failure}, Branches: branches,
-		},
-		OutputSummary:          "Requested durable concurrent runbook fork " + state.Current,
-		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
+	return ForkSpec{
+		ForkID: state.Current, Policy: RunDependencyPolicy{Mode: mode, FailureMode: failure},
+		Branches: branches, SourceCheckpoint: source,
 	}, nil
 }
 
-func (r *RunbookTurnRunner) proposeDelegation(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision, input TurnExecutionContext) (*TurnOutcome, error) {
-	step := r.definition.Steps[state.Current]
+// delegationSpec is the kernel DelegationSpec of the delegation node stepID,
+// resolved from checkpoint.
+func (p *RunbookStepProducer) delegationSpec(checkpoint map[string]interface{}, stepID string) (DelegationSpec, error) {
+	step := p.definition.Steps[stepID]
 	if step.Delegate == nil {
-		return nil, fmt.Errorf("runbook delegation %q is missing its definition", state.Current)
+		return DelegationSpec{}, fmt.Errorf("runbook delegation %q is missing its definition", stepID)
 	}
 	agentValue, err := resolveRunbookValue(checkpoint, step.Delegate.AgentID)
 	if err != nil {
-		return nil, stepError(state.Current, err)
+		return DelegationSpec{}, stepError(stepID, err)
 	}
 	agentID, ok := agentValue.(string)
 	if !ok || strings.TrimSpace(agentID) == "" {
-		return nil, fmt.Errorf("runbook delegation %q Agent ID must resolve to a string", state.Current)
+		return DelegationSpec{}, fmt.Errorf("runbook delegation %q Agent ID must resolve to a string", stepID)
 	}
 	goalValue, err := resolveRunbookValue(checkpoint, step.Delegate.Goal)
 	if err != nil {
-		return nil, stepError(state.Current, err)
+		return DelegationSpec{}, stepError(stepID, err)
 	}
 	goal, ok := goalValue.(string)
 	if !ok || strings.TrimSpace(goal) == "" {
-		return nil, fmt.Errorf("runbook delegation %q goal must resolve to a string", state.Current)
+		return DelegationSpec{}, fmt.Errorf("runbook delegation %q goal must resolve to a string", stepID)
 	}
 	delegatedContext := make(map[string]interface{}, len(step.Delegate.Context))
 	for key, value := range step.Delegate.Context {
 		resolved, resolveErr := resolveRunbookValue(checkpoint, value)
 		if resolveErr != nil {
-			return nil, stepError(state.Current, resolveErr)
+			return DelegationSpec{}, stepError(stepID, resolveErr)
 		}
 		delegatedContext[key] = resolved
 	}
-	encodeRunbookState(checkpoint, state)
-	decisions = append(decisions, TurnDecision{Summary: "Delegated runbook step " + state.Current + " to Agent " + agentID})
-	return &TurnOutcome{
-		Decisions: decisions,
-		ProposedDelegation: &TurnDelegationProposal{
-			StepID: state.Current, AssignedAgentID: strings.TrimSpace(agentID), Goal: strings.TrimSpace(goal),
-			Context: delegatedContext, Checkpoint: map[string]interface{}{}, Timeout: step.Delegate.Timeout,
-			Mode: step.Delegate.Mode, Budget: runbookBudgetPolicyValue(step.Delegate.Budget),
-		},
-		OutputSummary:          "Requested durable Agent delegation " + state.Current,
-		ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusRunning,
+	return DelegationSpec{
+		StepID: stepID, AgentID: strings.TrimSpace(agentID), Goal: strings.TrimSpace(goal),
+		Context: delegatedContext, Mode: step.Delegate.Mode, Timeout: step.Delegate.Timeout,
+		Budget: runbookBudgetPolicyValue(step.Delegate.Budget),
 	}, nil
 }
 
@@ -784,22 +935,26 @@ func runbookBudgetPolicyValue(budget *runbook.BudgetAllocation) *BudgetPolicy {
 	}
 }
 
-func (r *RunbookTurnRunner) consumeDelegationResult(checkpoint map[string]interface{}, state *runbookExecutionState, run *AgentRun) (bool, *TurnOutcome, error) {
+// consumeDelegationResult reads the pending delegation's outcome from
+// Run.Output (collaboration result, or its dependency group). consumed is
+// false while none is recorded; failure is the node's failure message.
+func (p *RunbookStepProducer) consumeDelegationResult(checkpoint map[string]interface{}, state *runbookExecutionState, run *AgentRun) (bool, string, error) {
 	if state == nil || run == nil || state.PendingDelegation == "" {
-		return false, nil, nil
+		return false, "", nil
 	}
 	stepID := state.PendingDelegation
 	groupID := stableForkIdentifier(run.ID, stepID, "group")
 	groups, _ := run.Output["dependencyGroups"].(map[string]interface{})
 	group, _ := groups[groupID].(map[string]interface{})
 	status, _ := group["status"].(string)
-	if status == "" {
-		requestKey := strings.Join([]string{"delegation", run.ID, stepID}, ":")
-		requestID := stableCollaborationID(run.Scope, requestKey, "request")
+	var output map[string]interface{}
+	switch {
+	case status == "":
+		requestID := stableCollaborationID(run.Scope, delegationIdempotencyKey(run.ID, stepID), "request")
 		collaborationResults, _ := run.Output["collaborationResults"].(map[string]interface{})
 		result, _ := collaborationResults[requestID].(map[string]interface{})
 		if len(result) == 0 {
-			return false, nil, nil
+			return false, "", nil
 		}
 		if resultStatus, _ := result["status"].(string); resultStatus != "" && resultStatus != string(AgentRequestStatusCompleted) {
 			message := "delegated Agent step " + stepID + " " + resultStatus
@@ -810,43 +965,159 @@ func (r *RunbookTurnRunner) consumeDelegationResult(checkpoint map[string]interf
 				}
 				message += ": " + reason
 			}
-			return false, r.failed(checkpoint, *state, nil, message), nil
+			return false, message, nil
 		}
-		output, _ := result["output"].(map[string]interface{})
-		step := r.definition.Steps[stepID]
-		if err := setRunbookPointer(checkpoint, string(step.Delegate.ResultPath), cloneMap(output)); err != nil {
-			return false, nil, stepError(stepID, err)
-		}
-		state.PendingDelegation = ""
-		state.Current = step.Delegate.Next
-		encodeRunbookState(checkpoint, *state)
-		return true, nil, nil
+		output, _ = result["output"].(map[string]interface{})
+	case status == string(RunDependencyGroupWaiting):
+		return false, "", nil
+	case status != string(RunDependencyGroupSatisfied):
+		return false, "delegated Agent step " + stepID + " failed", nil
+	default:
+		dependencies, _ := group["dependencies"].(map[string]interface{})
+		dependency, _ := dependencies["delegate"].(map[string]interface{})
+		result, _ := dependency["result"].(map[string]interface{})
+		output, _ = result["output"].(map[string]interface{})
 	}
-	if status == "" || status == string(RunDependencyGroupWaiting) {
-		return false, nil, nil
-	}
-	if status != string(RunDependencyGroupSatisfied) {
-		message := "delegated Agent step " + stepID + " failed"
-		return false, r.failed(checkpoint, *state, nil, message), nil
-	}
-	dependencies, _ := group["dependencies"].(map[string]interface{})
-	dependency, _ := dependencies["delegate"].(map[string]interface{})
-	result, _ := dependency["result"].(map[string]interface{})
-	output, _ := result["output"].(map[string]interface{})
-	step := r.definition.Steps[stepID]
+	step := p.definition.Steps[stepID]
 	if err := setRunbookPointer(checkpoint, string(step.Delegate.ResultPath), cloneMap(output)); err != nil {
-		return false, nil, stepError(stepID, err)
+		return false, "", stepError(stepID, err)
 	}
-	state.PendingDelegation = ""
+	state.PendingDelegation, state.PendingCall = "", ""
 	state.Current = step.Delegate.Next
 	encodeRunbookState(checkpoint, *state)
-	return true, nil, nil
+	return true, "", nil
 }
 
-func (r *RunbookTurnRunner) failed(checkpoint map[string]interface{}, state runbookExecutionState, decisions []TurnDecision, message string) *TurnOutcome {
+// failed fails the Run with message; the engine state (and its failed node
+// trace) is written with the failure.
+func (p *RunbookStepProducer) failed(checkpoint map[string]interface{}, state runbookExecutionState, message string) StepOutput {
 	encodeRunbookState(checkpoint, state)
-	return &TurnOutcome{Decisions: decisions, OutputSummary: message, ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed, RunError: message}
+	return StepOutput{
+		Failure:     &LoopFailure{Kind: RunFailureKindExecution, Code: "execution_failed", Message: message},
+		KernelState: checkpoint,
+	}
 }
+
+// ---------------------------------------------------------------------------
+// Kernel control calls of runbook Runs (section 04 §12)
+
+// runbookKernelArgs are the arguments of a runbook_fork / runbook_delegate
+// entry: the node and its trace visit. The spec is rebuilt at settle from the
+// applied engine state, so branch checkpoints never travel in the entry.
+type runbookKernelArgs struct {
+	Step  string `json:"step"`
+	Visit int64  `json:"visit"`
+}
+
+type runbookForkHandler struct{}
+
+type runbookDelegateHandler struct{}
+
+func init() {
+	registerControlHandler(ControlToolRunbookFork, runbookForkHandler{})
+	registerControlHandler(ControlToolRunbookDelegate, runbookDelegateHandler{})
+}
+
+func runbookKernelSpec(description string) ControlToolSpec {
+	return ControlToolSpec{
+		Description: description,
+		InputSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false, "required": []interface{}{"step", "visit"},
+			"properties": map[string]interface{}{
+				"step":  map[string]interface{}{"type": "string", "minLength": 1},
+				"visit": map[string]interface{}{"type": "integer", "minimum": 1},
+			},
+		},
+	}
+}
+
+func decodeRunbookKernelArgs(raw json.RawMessage) (interface{}, error) {
+	value, err := decodeControlInto[runbookKernelArgs](raw)
+	if err != nil {
+		return nil, err
+	}
+	args := value.(*runbookKernelArgs)
+	if strings.TrimSpace(args.Step) == "" || args.Visit < 1 {
+		return nil, errors.New("runbook kernel call needs its step and visit")
+	}
+	return args, nil
+}
+
+// runbookKernelCall resolves the producer and the engine state a kernel call
+// settles from. The Run's checkpoint is the applied state of the producing
+// step, so it is waiting at exactly this node.
+func runbookKernelCall(cc ControlContext, pending func(runbookExecutionState) string) (*RunbookStepProducer, map[string]interface{}, runbookExecutionState, error) {
+	args := cc.Arguments.(*runbookKernelArgs)
+	var state runbookExecutionState
+	if cc.Origin != ControlOriginKernel {
+		return nil, nil, state, errors.New("runbook kernel calls are made only by the runbook engine")
+	}
+	var producer *RunbookStepProducer
+	if cc.Binding != nil {
+		producer, _ = cc.Binding.Producer.(*RunbookStepProducer)
+	}
+	if producer == nil {
+		return nil, nil, state, errors.New("the Run is not executing a runbook")
+	}
+	checkpoint := cloneMap(cc.Run.Checkpoint)
+	state, err := decodeRunbookState(checkpoint)
+	if err != nil {
+		return nil, nil, state, err
+	}
+	if state.Current != args.Step || pending(state) != args.Step || state.PendingCall != cc.Entry.ToolCallID {
+		return nil, nil, state, fmt.Errorf("the runbook is not waiting at %s for this call", args.Step)
+	}
+	return producer, checkpoint, state, nil
+}
+
+func (runbookForkHandler) spec(ControlAuthority) ControlToolSpec {
+	return runbookKernelSpec("Kernel only: start the concurrent branches of a runbook fork.")
+}
+
+func (runbookForkHandler) decode(raw json.RawMessage) (interface{}, error) {
+	return decodeRunbookKernelArgs(raw)
+}
+
+func (runbookForkHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+	producer, checkpoint, state, err := runbookKernelCall(cc, func(s runbookExecutionState) string { return s.PendingFork })
+	if err != nil {
+		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
+	}
+	spec, err := producer.forkSpec(checkpoint, state, cc.Run.ID)
+	if err != nil {
+		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
+	}
+	return x.Fork(ctx, cc, spec)
+}
+
+func (runbookForkHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+	return x.resumeFork(ctx, cc)
+}
+
+func (runbookDelegateHandler) spec(ControlAuthority) ControlToolSpec {
+	return runbookKernelSpec("Kernel only: hand a runbook delegation node to its Agent.")
+}
+
+func (runbookDelegateHandler) decode(raw json.RawMessage) (interface{}, error) {
+	return decodeRunbookKernelArgs(raw)
+}
+
+func (runbookDelegateHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+	producer, checkpoint, state, err := runbookKernelCall(cc, func(s runbookExecutionState) string { return s.PendingDelegation })
+	if err != nil {
+		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
+	}
+	spec, err := producer.delegationSpec(checkpoint, state.Current)
+	if err != nil {
+		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, "runbook_call_invalid", err.Error(), nil))
+	}
+	return x.Delegate(ctx, cc, spec)
+}
+
+func (runbookDelegateHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+	return x.resumeDelegation(ctx, cc)
+}
+
 func stepError(id string, err error) error { return fmt.Errorf("runbook step %s: %w", id, err) }
 
 func initializeRunbookRuntime(checkpoint map[string]interface{}, run *AgentRun) {
