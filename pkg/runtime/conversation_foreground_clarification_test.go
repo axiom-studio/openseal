@@ -266,4 +266,3 @@ func TestForegroundConversationQuestionsRequireUserMessageWait(t *testing.T) {
 		f.assertOnlyRun(t)
 	})
 }
-

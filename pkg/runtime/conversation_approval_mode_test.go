@@ -570,7 +570,6 @@ func assertHostedApprovalModeHint(t *testing.T, input TurnExecutionContext, agen
 	}
 }
 
-
 func TestForegroundConversationTurnCarriesApprovalMode(t *testing.T) {
 	store := NewMemoryStore()
 	f := newForegroundClarificationFixture(t, store, false)
