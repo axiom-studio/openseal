@@ -2,9 +2,14 @@ package runtime
 
 import (
 	"context"
+	"errors"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
+
+// ErrAgentChangeForbidden is what AuthorizeAgentChange returns when the
+// person may not change the Agent.
+var ErrAgentChangeForbidden = errors.New("the person can't change this Agent")
 
 // AgentBuilderHost is what a host adds to the builder actions: model choice
 // and the work that follows a created Agent. A nil host (the OSS daemon)
@@ -13,8 +18,14 @@ type AgentBuilderHost interface {
 	// ValidateAgentModel runs at proposal time for create_agent, update_agent
 	// and try_agent. An error becomes an is_error tool result and no card.
 	ValidateAgentModel(ctx context.Context, scope skill.ScopeReference, model string) error
-	// PrepareAgentModel runs at execution time, after the deployment,
-	// activation, bindings and space commit. An error fails the call.
+	// AuthorizeAgentChange runs at proposal time for update_agent, before
+	// the card shows anything of the target Agent: actingUserID (the Run's
+	// ActingUser) must be allowed to change deploymentID. A refusal is
+	// ErrAgentChangeForbidden; any error means no card.
+	AuthorizeAgentChange(ctx context.Context, scope skill.ScopeReference, actingUserID, deploymentID string) error
+	// PrepareAgentModel runs at execution time. For create_agent it runs
+	// before the deployment exists (DeploymentID is the id it will have),
+	// so a failure leaves no Agent behind. An error fails the call.
 	PrepareAgentModel(ctx context.Context, request AgentModelRequest) error
 	// AfterAgentCreated runs synchronously after PrepareAgentModel, before
 	// the result returns. It is best effort: failures are only logged.

@@ -18,6 +18,17 @@ import (
 
 type agentBuilderTestHost struct {
 	validated []string
+	// forbidden lists "user/agentId" pairs AuthorizeAgentChange refuses.
+	forbidden  map[string]bool
+	authorized []string
+}
+
+func (h *agentBuilderTestHost) AuthorizeAgentChange(_ context.Context, _ skill.ScopeReference, actingUserID, deploymentID string) error {
+	h.authorized = append(h.authorized, actingUserID+"/"+deploymentID)
+	if h.forbidden[actingUserID+"/"+deploymentID] {
+		return ErrAgentChangeForbidden
+	}
+	return nil
 }
 
 func (h *agentBuilderTestHost) ValidateAgentModel(_ context.Context, _ skill.ScopeReference, model string) error {
@@ -262,6 +273,7 @@ func TestAgentBuilderCreatePreviewGolden(t *testing.T) {
 		"space": {"id": "`+fixture.salesID+`", "name": "Sales"},
 		"skills": [{"skillId": "acme.notes", "skillVersion": "1.0.0", "sourceIdentity": "", "name": "Notes",
 			"allowedActions": ["write_note"], "enablePrompt": false, "maximumRisk": "write"}],
+		"authority": {"maximumRisk": "write"},
 		"connections": [{"skillId": "acme.mail", "skillVersion": "2.0.0", "name": "Mail"}],
 		"rationale": "The person asked for an inbox helper."
 	}`)
@@ -437,6 +449,7 @@ func TestAgentBuilderUpdatePreviewListsOnlyChanges(t *testing.T) {
 		"model": {"id": "gpt-6-luna"},
 		"skills": [{"skillId": "acme.notes", "skillVersion": "1.0.0", "sourceIdentity": "", "name": "Notes",
 			"allowedActions": ["write_note"], "enablePrompt": false, "maximumRisk": "write"}],
+		"authority": {"maximumRisk": "write", "currentMaximumRisk": "read"},
 		"removedSkills": [{"bindingId": "builder:researcher:acme.notes", "skillId": "acme.notes", "name": "Notes"}],
 		"rationale": "Sharper focus."
 	}`)
@@ -563,5 +576,35 @@ func TestAgentBuilderActionsExistOnlyInCurrentContract(t *testing.T) {
 	}
 	if !IsSupportedAgentManagementSkillVersion("1.4.0") {
 		t.Fatal("1.4.0 bindings are no longer supported")
+	}
+}
+
+// update_agent never shows a card for an Agent the Run's person can't change:
+// the target's profile stays unread.
+func TestAgentBuilderUpdateRefusesAgentThePersonCannotChange(t *testing.T) {
+	ctx := context.Background()
+	fixture := newAgentBuilderFixture(t, true)
+	fixture.run.ActingUser = "person-2"
+	fixture.host.forbidden = map[string]bool{"person-2/researcher": true}
+	arguments := map[string]interface{}{"agentId": "researcher", "displayName": "Foo", "rationale": "Rename it."}
+	preview, err := fixture.propose(t, AgentActionUpdateAgent, arguments)
+	if err == nil || preview != nil || !strings.Contains(err.Error(), "can't change it") || strings.Contains(err.Error(), "Researcher work") {
+		t.Fatalf("forbidden update = %#v, %v", preview, err)
+	}
+	arguments["expectedDeploymentRevision"] = 1
+	preview, err = fixture.validator.ValidateActionProposal(ctx, ActionProposalValidationInput{
+		Run: fixture.run, Bound: fixture.bound(t, AgentActionUpdateAgent), Arguments: arguments,
+	})
+	if err == nil || preview != nil || !strings.Contains(err.Error(), "can't change it") {
+		t.Fatalf("forbidden update with a revision = %#v, %v", preview, err)
+	}
+	fixture.host.forbidden = nil
+	if _, err := fixture.propose(t, AgentActionUpdateAgent, map[string]interface{}{"agentId": "researcher", "displayName": "Foo", "rationale": "Rename it."}); err != nil {
+		t.Fatal(err)
+	}
+	for _, checked := range fixture.host.authorized {
+		if checked != "person-2/researcher" {
+			t.Fatalf("authorized = %#v", fixture.host.authorized)
+		}
 	}
 }

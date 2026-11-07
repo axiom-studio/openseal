@@ -33,6 +33,7 @@ type agentBuilderTestProvisioner struct {
 	spaces        *SpaceService
 	conversations *ConversationService
 	created       int
+	putErr        error
 }
 
 func (p *agentBuilderTestProvisioner) CreateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
@@ -72,6 +73,9 @@ func (p *agentBuilderTestProvisioner) ListSpaceMembers(ctx context.Context, scop
 }
 
 func (p *agentBuilderTestProvisioner) PutSpaceMember(ctx context.Context, request PutSpaceMemberRequest) (*SpaceMember, bool, error) {
+	if p.putErr != nil {
+		return nil, false, p.putErr
+	}
 	return p.spaces.PutSpaceMember(ctx, request)
 }
 
@@ -226,7 +230,7 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if definition.Purpose != "Sort the support inbox every morning." || definition.Personality != "Friendly" ||
-		len(definition.OperatingPrinciples) != 1 || definition.Authority.MaximumRisk != capability.RiskLevelRead ||
+		len(definition.OperatingPrinciples) != 1 || definition.Authority.MaximumRisk != capability.RiskLevelWrite ||
 		definition.Authority.MaxConcurrentRuns != 1 || !definition.Amendments.AgentMayPropose ||
 		definition.Provenance.Source != "agent-builder" || definition.Provenance.Reference != "call-create" ||
 		definition.Provenance.CreatedBy != agentBuilderApprover.ID || definition.AuthoringKey != "" {
@@ -383,6 +387,12 @@ func TestAgentBuilderCreateAgentRetriesAfterModelFailure(t *testing.T) {
 	if len(f.recorder.created) != 0 {
 		t.Fatalf("AfterAgentCreated ran before the model was prepared: %#v", f.recorder.created)
 	}
+	// A failed model leaves no Agent holding the reviewed name.
+	failedID := agentBuilderResourceID("agent-deployment", f.scope, "call-retry")
+	if _, err := f.agents.GetDeployment(ctx, f.reference(), failedID); f.provision.created != 0 || !errors.Is(err, kernelagent.ErrDeploymentNotFound) {
+		t.Fatalf("deployment after a failed model: created %d, %v", f.provision.created, err)
+	}
+	f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
 	f.recorder.prepareErr = nil
 	output, err := f.execute(t, AgentActionCreateAgent, "call-retry", arguments, agentBuilderApprover)
 	if err != nil {
@@ -661,4 +671,108 @@ func TestAgentBuilderParkedRunDoesNotBlockNewChatRuns(t *testing.T) {
 			t.Fatalf("claim with a parked builder Run = %#v, %v", claimed, err)
 		}
 	})
+}
+
+// A create_agent that fails after its deployment committed retires it, so the
+// half-built Agent doesn't keep the reviewed name.
+func TestAgentBuilderCreateAgentRetiresAgentOnLateFailure(t *testing.T) {
+	ctx := context.Background()
+	f := newAgentBuilderDispatchFixture(t)
+	arguments := f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	f.provision.putErr = errors.New("space store unavailable")
+	if _, err := f.execute(t, AgentActionCreateAgent, "call-late", arguments, agentBuilderApprover); err == nil ||
+		!strings.Contains(err.Error(), "space store unavailable") || !strings.Contains(err.Error(), "propose create_agent again") {
+		t.Fatalf("late failure error = %v", err)
+	}
+	deploymentID := agentBuilderResourceID("agent-deployment", f.scope, "call-late")
+	deployment, err := f.agents.GetDeployment(ctx, f.reference(), deploymentID)
+	if err != nil || f.provision.created != 1 || deployment.RolloutStatus != kernelagent.RolloutRetired {
+		t.Fatalf("deployment after a late failure = %#v, %v", deployment, err)
+	}
+	if len(f.recorder.created) != 0 {
+		t.Fatalf("AfterAgentCreated ran for a failed create: %#v", f.recorder.created)
+	}
+	f.provision.putErr = nil
+	// The name is free again, and the failed call does not revive its Agent.
+	f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	if _, err := f.execute(t, AgentActionCreateAgent, "call-late", arguments, agentBuilderApprover); err == nil ||
+		!strings.Contains(err.Error(), "propose create_agent again") {
+		t.Fatalf("replay of the failed call = %v", err)
+	}
+	output, err := f.execute(t, AgentActionCreateAgent, "call-again", arguments, agentBuilderApprover)
+	if err != nil || output["displayName"] != "Inbox   Triage" {
+		t.Fatalf("second create = %#v, %v", output, err)
+	}
+}
+
+// The created definition's ceiling is the reviewed grants' highest risk, so a
+// Team made of the Agent keeps its write actions.
+func TestAgentBuilderCreatedAgentKeepsGrantRiskInTeams(t *testing.T) {
+	ctx := context.Background()
+	f := newAgentBuilderDispatchFixture(t)
+	arguments := f.resolve(t, AgentActionCreateAgent, agentBuilderDispatchCreateArguments(f.salesID))
+	output, err := f.execute(t, AgentActionCreateAgent, "call-team-member", arguments, agentBuilderApprover)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := f.agents.GetDeployment(ctx, f.reference(), output["deploymentId"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition, err := f.agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil || definition.Authority.MaximumRisk != capability.RiskLevelWrite {
+		t.Fatalf("definition = %#v, %v", definition, err)
+	}
+	members := []resolvedTeamMember{{deployment: deployment, definition: definition, name: definition.DisplayName}}
+	team := teamBuilderDefinition("team-x", teamCreateArguments{DisplayName: "Crew"}, members, "call-team", agentBuilderApprover.ID)
+	authority := &teamSkillAuthority{deployment: &kernelteam.Deployment{}, definition: team, agent: deployment, agentDefinition: definition}
+	if !authority.allowsRisk(capability.RiskLevelWrite) || authority.allowsRisk(capability.RiskLevelExternal) {
+		t.Fatalf("Team ceiling for the member: write %v, external %v", authority.allowsRisk(capability.RiskLevelWrite), authority.allowsRisk(capability.RiskLevelExternal))
+	}
+	external := cloneAgentDefinitionForAction(definition)
+	external.Authority.MaximumRisk = capability.RiskLevelExternal
+	members[0].definition = external
+	if got := teamMembersMaximumRisk(members); got != capability.RiskLevelExternal {
+		t.Fatalf("Team ceiling = %s, want the members' external", got)
+	}
+}
+
+// update_agent raises the ceiling to an added grant, activated by the person
+// who approved the card (an Agent amendment can't widen authority).
+func TestAgentBuilderUpdateAgentRaisesAuthorityForAddedSkills(t *testing.T) {
+	ctx := context.Background()
+	f := newAgentBuilderDispatchFixture(t)
+	arguments := f.resolve(t, AgentActionUpdateAgent, map[string]interface{}{
+		"agentId": "researcher", "purpose": "Research and take notes.", "rationale": "Notes need writing.",
+		"addSkills": []interface{}{map[string]interface{}{
+			"skillId": "acme.notes", "skillVersion": "1.0.0", "allowedActions": []interface{}{"write_note"},
+			"enablePrompt": false, "maximumRisk": "write",
+		}},
+	})
+	output, err := f.execute(t, AgentActionUpdateAgent, "call-raise", arguments, agentBuilderApprover)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployment, err := f.agents.GetDeployment(ctx, f.reference(), "researcher")
+	if err != nil || deployment.ActiveVersion != agentBehaviorActionCandidateVersion("1.0.0", "call-raise") {
+		t.Fatalf("deployment = %#v, %v", deployment, err)
+	}
+	definition, err := f.agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil || definition.Authority.MaximumRisk != capability.RiskLevelWrite || definition.Purpose != "Research and take notes." {
+		t.Fatalf("definition = %#v, %v", definition, err)
+	}
+	activations, err := f.agents.ListActivations(ctx, f.reference(), "researcher")
+	if err != nil || len(activations) != 2 || activations[1].ActorType != "user" || activations[1].ActorID != agentBuilderApprover.ID {
+		t.Fatalf("activations = %#v, %v", activations, err)
+	}
+	if output["activation"] == nil || output["replayed"] != false {
+		t.Fatalf("output = %#v", output)
+	}
+	replay, err := f.execute(t, AgentActionUpdateAgent, "call-raise", arguments, agentBuilderApprover)
+	if err != nil || replay["replayed"] != true {
+		t.Fatalf("replay = %#v, %v", replay, err)
+	}
+	if again, _ := f.agents.ListActivations(ctx, f.reference(), "researcher"); len(again) != 2 {
+		t.Fatalf("replay activated again: %#v", again)
+	}
 }

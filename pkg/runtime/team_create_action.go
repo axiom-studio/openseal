@@ -159,6 +159,7 @@ func (v *TeamCreateActionValidator) ValidateActionProposal(ctx context.Context, 
 	preview["team"] = map[string]interface{}{"displayName": resolved.args.DisplayName, "purpose": resolved.args.Purpose}
 	preview["members"] = members
 	preview["space"] = map[string]interface{}{"id": space.ID, "name": space.Name}
+	preview["approvals"] = map[string]interface{}{"maximumRisk": teamMembersMaximumRisk(resolved.members)}
 	preview["rationale"] = resolved.args.Rationale
 	return agentBuilderJSONMap(preview)
 }
@@ -301,9 +302,23 @@ func teamBuilderDefinition(id string, args teamCreateArguments, members []resolv
 	}
 	return &kernelteam.Definition{
 		ID: id, Version: teamDefinitionVersion, DisplayName: args.DisplayName, Purpose: purpose, Roles: roles,
-		Approvals:  kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
+		Approvals:  kernelteam.ApprovalPolicy{MaximumRisk: teamMembersMaximumRisk(members)},
 		Provenance: workforce.DefinitionProvenance{Source: agentBuilderProvenanceSource, Reference: callID, CreatedBy: approver},
 	}
+}
+
+// teamMembersMaximumRisk is the Team's approval ceiling: the highest member
+// Agent ceiling, at least write. Each member's own ceiling still caps what it
+// may do with the Team's Skills (teamSkillAuthority).
+func teamMembersMaximumRisk(members []resolvedTeamMember) capability.RiskLevel {
+	ceiling := capability.RiskLevelWrite
+	for _, member := range members {
+		risk := member.definition.Authority.MaximumRisk
+		if teamSkillRiskRank(risk) < 1<<30 && teamSkillRiskRank(risk) > teamSkillRiskRank(ceiling) {
+			ceiling = risk
+		}
+	}
+	return ceiling
 }
 
 // createTeam runs an approved create_team. Ids come from the call, so a

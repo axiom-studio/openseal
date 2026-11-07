@@ -87,6 +87,9 @@ func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context
 		if _, supplied := arguments["expectedDeploymentRevision"]; !supplied {
 			agentID, _ := arguments["agentId"].(string)
 			if strings.TrimSpace(agentID) != "" {
+				if err := v.authorizeAgentChange(ctx, input.Run, agentID); err != nil {
+					return nil, true, err
+				}
 				deployment, err := v.agents.GetDeployment(ctx, agentBuilderScope(input.Run.Scope), strings.TrimSpace(agentID))
 				if err != nil {
 					return nil, true, agentBuilderTargetError(agentID, err)
@@ -120,6 +123,13 @@ func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context
 		}
 		return agentCreatePreview(input.Bound, resolved)
 	case AgentActionUpdateAgent:
+		// The card shows the target's current profile, so the person must
+		// be allowed to change it before anything of it is read.
+		if agentID, _ := input.Arguments["agentId"].(string); strings.TrimSpace(agentID) != builderID {
+			if err := v.authorizeAgentChange(ctx, input.Run, agentID); err != nil {
+				return nil, err
+			}
+		}
 		resolved, err := resolveAgentUpdate(ctx, v.agents, v.teams, v.catalog, v.host, scope, builderID, input.Arguments)
 		if err != nil {
 			return nil, err
@@ -130,6 +140,24 @@ func (v *AgentBuilderActionValidator) ValidateActionProposal(ctx context.Context
 		return nil, err
 	}
 	return nil, nil
+}
+
+// authorizeAgentChange asks the host whether the Run's person may change
+// agentID. A refusal reads like a missing Agent, so the card never shows an
+// Agent the person can't manage. A nil host (the OSS daemon) has one person.
+func (v *AgentBuilderActionValidator) authorizeAgentChange(ctx context.Context, run *AgentRun, agentID string) error {
+	agentID = strings.TrimSpace(agentID)
+	if v.host == nil || agentID == "" {
+		return nil
+	}
+	err := v.host.AuthorizeAgentChange(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, strings.TrimSpace(run.ActingUser), agentID)
+	if errors.Is(err, ErrAgentChangeForbidden) {
+		return fmt.Errorf("agent %q does not exist or this person can't change it; use list_agents and choose an Agent they manage", agentID)
+	}
+	if err != nil {
+		return fmt.Errorf("check who may change agent %q: %w", agentID, err)
+	}
+	return nil
 }
 
 func (v *AgentBuilderActionValidator) runSpaceID(ctx context.Context, run *AgentRun) (string, error) {
@@ -177,6 +205,9 @@ type resolvedAgentUpdate struct {
 	candidate *kernelagent.AgentDefinition
 	// changes lists only the changed profile fields (agentBehaviorChanges).
 	changes map[string]interface{}
+	// authorityRaised reports that the added grants raise the candidate's
+	// Authority.MaximumRisk above the definition's.
+	authorityRaised bool
 	// model is the requested model when update_agent supplies one.
 	model   *string
 	skills  []resolvedAgentSkillGrant
@@ -304,6 +335,11 @@ func resolveAgentUpdate(
 	if err != nil {
 		return nil, err
 	}
+	// The definition ceiling caps the Agent's Team Skills, so it rises to
+	// the added grants, as the Agent's create does.
+	ceiling := agentGrantsMaximumRisk(definition.Authority.MaximumRisk, skills)
+	authorityRaised := ceiling != definition.Authority.MaximumRisk
+	candidate.Authority.MaximumRisk = ceiling
 	if args.Model != nil {
 		if err := validateAgentBuilderModel(ctx, host, scope, *args.Model); err != nil {
 			return nil, err
@@ -314,7 +350,7 @@ func resolveAgentUpdate(
 	}
 	return &resolvedAgentUpdate{
 		args: args, deployment: deployment, definition: definition, candidate: candidate,
-		changes: changes, model: args.Model, skills: skills, removed: removed,
+		changes: changes, authorityRaised: authorityRaised, model: args.Model, skills: skills, removed: removed,
 	}, nil
 }
 
@@ -338,6 +374,23 @@ func resolveAgentTry(ctx context.Context, host AgentBuilderHost, scope Scope, ar
 		return args, err
 	}
 	return args, nil
+}
+
+// agentGrantsMaximumRisk is the Authority.MaximumRisk an Agent needs for
+// grants: the highest of base (read when empty) and each grant's
+// maximumRisk. Team Skill actions are capped by it (teamSkillAuthority).
+func agentGrantsMaximumRisk(base capability.RiskLevel, grants []resolvedAgentSkillGrant) capability.RiskLevel {
+	ceiling := base
+	if ceiling == "" {
+		ceiling = capability.RiskLevelRead
+	}
+	for _, resolved := range grants {
+		risk := resolved.grant.MaximumRisk
+		if teamSkillRiskRank(risk) < 1<<30 && teamSkillRiskRank(risk) > teamSkillRiskRank(ceiling) {
+			ceiling = risk
+		}
+	}
+	return ceiling
 }
 
 // agentDefinitionPolicyFixed reports a definition no Agent may amend, such as
@@ -632,6 +685,7 @@ func agentCreatePreview(bound *skill.BoundAction, resolved *resolvedAgentCreate)
 	preview["model"] = map[string]interface{}{"id": resolved.args.Model}
 	preview["space"] = map[string]interface{}{"id": resolved.space.ID, "name": resolved.space.Name}
 	preview["skills"] = agentSkillGrantsPreview(resolved.skills)
+	preview["authority"] = map[string]interface{}{"maximumRisk": agentGrantsMaximumRisk("", resolved.skills)}
 	preview["connections"] = connections
 	preview["rationale"] = resolved.args.Rationale
 	return agentBuilderJSONMap(preview)
@@ -653,6 +707,9 @@ func agentUpdatePreview(bound *skill.BoundAction, resolved *resolvedAgentUpdate)
 		preview["model"] = map[string]interface{}{"id": *resolved.model}
 	}
 	preview["skills"] = agentSkillGrantsPreview(resolved.skills)
+	preview["authority"] = map[string]interface{}{
+		"maximumRisk": resolved.candidate.Authority.MaximumRisk, "currentMaximumRisk": resolved.definition.Authority.MaximumRisk,
+	}
 	preview["removedSkills"] = removed
 	preview["rationale"] = resolved.args.Rationale
 	return agentBuilderJSONMap(preview)

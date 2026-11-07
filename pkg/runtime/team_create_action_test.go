@@ -162,6 +162,7 @@ func TestTeamCreatePreview(t *testing.T) {
 		"skillId": "openseal.teams", "skillVersion": "2.1.0", "action": "create_team", "risk": "write", "sideEffect": "write",
 		"resourceType": "team", "operation": "create_team",
 		"team": {"displayName": "Launch Crew", "purpose": "Ship product launches."},
+		"approvals": {"maximumRisk": "write"},
 		"members": [
 			{"agentId": "researcher", "displayName": "Researcher", "purpose": "Researcher work"},
 			{"agentId": "platform", "displayName": "Platform Helper", "purpose": "Platform Helper work"}

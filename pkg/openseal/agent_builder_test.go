@@ -14,6 +14,9 @@ type agentBuilderEngineHost struct{}
 func (agentBuilderEngineHost) ValidateAgentModel(context.Context, skill.ScopeReference, string) error {
 	return nil
 }
+func (agentBuilderEngineHost) AuthorizeAgentChange(context.Context, skill.ScopeReference, string, string) error {
+	return nil
+}
 func (agentBuilderEngineHost) PrepareAgentModel(context.Context, AgentModelRequest) error { return nil }
 func (agentBuilderEngineHost) AfterAgentCreated(context.Context, AgentCreated)            {}
 
