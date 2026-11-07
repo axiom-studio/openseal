@@ -69,8 +69,8 @@ func agentSessionLogIndexes(t *testing.T, store *PostgresStore, table string) []
 func TestPostgresAgentSessionLogMigration(t *testing.T) {
 	store, _, _ := newAgentSessionMigrationStore(t, "agent_session_log_")
 	ctx := context.Background()
-	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != 75 || currentPostgresSchemaVersion != 75 {
-		t.Fatalf("schema head = %d, %v; want 75", version, err)
+	if version, err := store.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+		t.Fatalf("schema head = %d, %v; want %d", version, err, currentPostgresSchemaVersion)
 	}
 	current, _, err := store.postgresSchemaCurrent(ctx, store.db)
 	if err != nil || !current {
@@ -185,7 +185,7 @@ func TestPostgresAgentSessionLogRollback(t *testing.T) {
 			t.Fatalf("table %s not recreated on reopen", table)
 		}
 	}
-	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != 75 {
-		t.Fatalf("schema head after reopen = %d, %v; want 75", version, err)
+	if version, err := reopened.PostgresSchemaVersion(ctx); err != nil || version != currentPostgresSchemaVersion {
+		t.Fatalf("schema head after reopen = %d, %v; want %d", version, err, currentPostgresSchemaVersion)
 	}
 }

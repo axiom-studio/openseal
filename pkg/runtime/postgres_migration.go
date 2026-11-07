@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 75
+const currentPostgresSchemaVersion int64 = 76
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -38,7 +38,10 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
 		return err
 	}
+	// Rolling back 76 drops the cutover drafts; it does not restore the
+	// retired workforce change sets.
 	down := map[int64][]string{
+		76: {"agent_builder_cutover_drafts"},
 		75: {"agent_session_entries", "agent_sessions"},
 		70: {"deployment_identities"},
 		68: {"conversation_reaction_events", "conversation_message_reactions"},
@@ -67,7 +70,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		16: {"source_monitor_checkpoints", "source_observations"},
 		15: {"agent_definition_compilations"},
 		14: {"projects"},
-		13: {"workforce_change_sets"},
 		12: {"team_definition_amendments"},
 		11: {"team_definition_activations", "team_deployments", "team_definitions"},
 		10: {"conversation_presence", "conversation_cursors", "participation_rounds", "channel_messages", "conversations"},
