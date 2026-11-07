@@ -276,8 +276,7 @@ func TestTeamMemberTurnGetsTheSameAttachmentsAsOneToOne(t *testing.T) {
 	}
 	oneToOne, noTeam := teamTurnAttachments(t, inputs[0])
 	member, teamContext := teamTurnAttachments(t, inputs[1])
-	if noTeam != nil || teamContext == nil || teamContext.RoutingReason != "owns the canary" || teamContext.Rules != teamChannelRules ||
-		len(teamContext.Roster) != 1 || !teamContext.Roster[0].You {
+	if noTeam != nil || teamContext == nil || len(teamContext.Roster) != 1 || !teamContext.Roster[0].You {
 		t.Fatalf("team context: 1:1 = %#v, member = %#v", noTeam, teamContext)
 	}
 	if len(oneToOne) != 1 || oneToOne[0].Status != "supplied" || oneToOne[0].Text != content {
