@@ -4217,6 +4217,23 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The run loop proposes the governed call from a leased, running step and
+	// parks the Run on its approval at step end.
+	const worker = "loop-worker"
+	runEvent := func(id string) *runtime.ActivityEvent {
+		return &runtime.ActivityEvent{
+			ID: id, Scope: scope, RunID: run.ID, EventType: "run.updated", Severity: runtime.ActivitySeverityInfo,
+			Actor: runtime.ActivityActor{Type: "worker", ID: worker}, Summary: "Run loop step", Visibility: runtime.ActivityVisibilityScope, CreatedAt: now,
+		}
+	}
+	leased := *run
+	expires := now.Add(time.Hour)
+	leased.Status, leased.LeaseOwner, leased.LeaseExpiresAt = runtime.AgentRunStatusRunning, worker, &expires
+	leased.Revision++
+	leased.UpdatedAt = now
+	if _, err := store.UpdateAgentRunWithEvent(t.Context(), &leased, run.Revision, runEvent("event-lease"), nil); err != nil {
+		t.Fatal(err)
+	}
 	approval := &runtime.ApprovalCheckpoint{
 		ID: "approval-publish", Scope: scope, RunID: run.ID, ActionCallID: "call-publish", Status: runtime.ApprovalStatusPending,
 		Risk: "production", Summary: "Publish release announcement", PolicyReason: "External publication requires review",
@@ -4224,20 +4241,24 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 		EligibleApprovers: []runtime.ApprovalPrincipal{{Type: "user", ID: "local"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call := &runtime.ActionCall{
-		ID: "call-publish", Scope: scope, RunID: run.ID, DeploymentID: "operator", SkillID: "publisher", SkillVersion: "1", Action: "publish",
+		ID: "call-publish", Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "operator", SkillID: "publisher", SkillVersion: "1", Action: "publish",
+		Origin: runtime.ActionOriginLoop, Execution: runtime.ActionExecutionLoop,
 		Status: runtime.ActionCallStatusWaitingApproval, Risk: "production", SideEffect: "external", IdempotencyKey: "publish-release",
 		ApprovalID: approval.ID, MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call.InvocationDigest = runtime.ComputeActionInvocationDigest(call)
-	waitingRun := *run
-	waitingRun.Status = runtime.AgentRunStatusWaitingForApproval
-	waitingRun.WakeCondition = &runtime.WakeCondition{Type: "approval", Reference: approval.ID}
-	waitingRun.Revision++
-	waitingRun.UpdatedAt = now
 	if _, err := store.CreateActionProposal(t.Context(), runtime.ActionProposalRecord{
-		Call: call, Approval: approval, Run: &waitingRun, ExpectedRunRevision: run.Revision,
+		Call: call, Approval: approval, ExpectedRunRevision: leased.Revision, Lease: &runtime.AgentRunLeaseGuard{WorkerID: worker, Now: now},
 		Event: &runtime.ActivityEvent{ID: "event-approval", Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	parked := leased
+	parked.Status = runtime.AgentRunStatusWaitingForApproval
+	parked.WakeCondition = &runtime.WakeCondition{Type: "approval", Reference: approval.ID}
+	parked.LeaseOwner, parked.LeaseExpiresAt = "", nil
+	parked.Revision++
+	if _, err := store.UpdateAgentRunWithEvent(t.Context(), &parked, leased.Revision, runEvent("event-park"), nil); err != nil {
 		t.Fatal(err)
 	}
 	api := server.NewServer(store, zap.NewNop().Sugar())
@@ -4272,8 +4293,9 @@ func TestActionApprovalTUIResolvesThroughGovernedHTTPKernelBoundary(t *testing.T
 		t.Fatalf("HTTP approval was not resolved: %#v", resolved)
 	}
 	restoredRun, err := httpClient.GetAgentRun(t.Context(), scope, run.ID)
-	if err != nil || restoredRun.Status != runtime.AgentRunStatusWaitingForDependency || restoredRun.WakeCondition == nil || restoredRun.WakeCondition.Reference != call.ID {
-		t.Fatalf("approved Run was not resumed for action execution: %#v, %v", restoredRun, err)
+	// The approved loop call is ready; the Run is queued to resume its step's tool entry.
+	if err != nil || restoredRun.Status != runtime.AgentRunStatusQueued || restoredRun.WakeCondition != nil {
+		t.Fatalf("approved Run was not queued to resume its loop: %#v, %v", restoredRun, err)
 	}
 }
 
