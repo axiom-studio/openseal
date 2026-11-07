@@ -2,12 +2,8 @@ package runtime
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
-	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -45,52 +41,4 @@ func bindingToolActionCatalog(t *testing.T, scope Scope) *skill.Catalog {
 		}
 	}
 	return catalog
-}
-
-// Regression: with two bindings of one Skill, the materialized ActionCall
-// belongs to the binding whose tool the model named, with that binding's
-// fixed arguments, and a direct proposal cannot reach an undeclared tool.
-func TestBindingToolMaterializesAgainstItsExactBinding(t *testing.T) {
-	store := NewMemoryStore()
-	scope := Scope{Kind: "tenant", ID: "one"}
-	catalog := bindingToolActionCatalog(t, scope)
-	claimed := claimedActionRun(t, store, scope, time.Now().UTC(), "worker")
-	modelActions, err := catalog.ListModelActions(t.Context(), capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "release-agent")
-	if err != nil || len(modelActions) != 2 {
-		t.Fatalf("model actions = %#v, %v", modelActions, err)
-	}
-	actions := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow, Reason: "read-only"}, nil
-	}))
-	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return nil, errors.New("not needed")
-	}), nil, AgentRunWorkerConfig{Scope: scope, Concurrency: 1, PollInterval: time.Second, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute})
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool.SetActionCoordinator(actions)
-	_, err = actions.Propose(t.Context(), ProposeActionRequest{
-		Scope: scope, RunID: claimed.ID, WorkerID: "worker", DeploymentID: "release-agent", BindingID: "github-binding", BindingRevision: 1,
-		SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "read", IdempotencyKey: "direct", Summary: "Direct",
-		Arguments: map[string]interface{}{"tool": "search", "hash": "sha256:linear", "arguments": map[string]interface{}{"query": "open"}},
-		Actor:     ActivityActor{Type: "worker", ID: "worker"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "does not select a tool declared by its binding") {
-		t.Fatalf("a direct proposal reached a tool pinned by another binding: %v", err)
-	}
-	turn := &AgentTurn{ID: "tool-turn", RequestedActions: []TurnAction{{Type: "skill_action", Capability: "connector.linear.search", Summary: "Search Linear", IdempotencyKey: "search", InputRef: "/inputs/search"}},
-		ContinuationCheckpoint: map[string]interface{}{"inputs": map[string]interface{}{"search": map[string]interface{}{"query": "open"}}}}
-	if _, err := pool.materializeTurnAction(t.Context(), "worker", claimed, turn, &TurnRunnerBinding{DeploymentID: "release-agent", ModelActions: modelActions}); err != nil {
-		t.Fatal(err)
-	}
-	calls, err := store.ListActionCalls(t.Context(), ActionFilter{Scope: scope, RunID: claimed.ID})
-	if err != nil || len(calls) != 1 {
-		t.Fatalf("calls = %#v, %v", calls, err)
-	}
-	call := calls[0]
-	nested, _ := call.Arguments["arguments"].(map[string]interface{})
-	if call.BindingID != "linear-binding" || call.Action != "read" || call.Arguments["tool"] != "search" || call.Arguments["hash"] != "sha256:linear" || nested["query"] != "open" {
-		t.Fatalf("call = %#v", call)
-	}
-
 }

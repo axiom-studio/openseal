@@ -205,7 +205,7 @@ func (h *snakesAcceptance) open(ctx context.Context) *Engine {
 		WithPersistentStore(store),
 		WithAgentRunWorkers(AgentRunWorkerConfig{
 			Scope: Scope{Kind: "tenant", ID: "acceptance"}, Concurrency: 1, MaxActiveForAgent: 1,
-			MaxTurnsPerClaim: 1, PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
+			PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
 		}, TurnRunnerResolverFunc(h.resolve)),
 	)
 	if err != nil {

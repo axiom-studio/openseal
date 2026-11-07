@@ -231,7 +231,7 @@ Options:
 			sugar.Fatalf("configure governed action dispatcher: %v", dispatcherErr)
 		}
 		engineOptions = append(engineOptions,
-			opensealkernel.WithDynamicAgentRunWorkers(runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindAgentWork, Concurrency: 2, MaxTurnsPerClaim: 1, WorkerIDPrefix: "standalone-agent"}, workerScopeSource, turnResolver),
+			opensealkernel.WithDynamicAgentRunWorkers(runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindAgentWork, Concurrency: 2, WorkerIDPrefix: "standalone-agent"}, workerScopeSource, turnResolver),
 			opensealkernel.WithDynamicActionWorkers(runtime.DynamicActionWorkerConfig{Concurrency: 2, WorkerIDPrefix: "standalone-action"}, workerScopeSource, standaloneContext, dispatcher),
 		)
 	}
@@ -260,7 +260,7 @@ Options:
 				// Each routed member answers in its own agent_work Run through
 				// the same Agent turn as a 1:1 chat.
 				Runner:     runtime.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true, AgentTurns: turnResolver},
-				Workers:    runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindConversation, Concurrency: 2, MaxTurnsPerClaim: 1, WorkerIDPrefix: "desktop-channel"},
+				Workers:    runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindConversation, Concurrency: 2, WorkerIDPrefix: "desktop-channel"},
 				Reconciler: runtime.ConversationRunReconcilerConfig{Interval: 5 * time.Second},
 			}, localScopes),
 		)

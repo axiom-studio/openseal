@@ -24,7 +24,6 @@ type DynamicAgentRunWorkerConfig struct {
 	MaxActiveForObjective             int
 	MaxActiveForConcurrencyKey        int
 	ConversationTaskForegroundReserve int
-	MaxTurnsPerClaim                  int
 	LeaseDuration                     time.Duration
 	TurnLeaseDuration                 time.Duration
 	AgingInterval                     time.Duration
@@ -52,9 +51,6 @@ func (c *DynamicAgentRunWorkerConfig) applyDefaults() error {
 	}
 	if c.MaxActiveForOwner < 0 || c.MaxActiveForObjective < 0 || c.MaxActiveForConcurrencyKey < 0 {
 		return errors.New("agent run portfolio concurrency limits cannot be negative")
-	}
-	if c.MaxTurnsPerClaim <= 0 {
-		c.MaxTurnsPerClaim = 1
 	}
 	if c.LeaseDuration <= 0 {
 		c.LeaseDuration = 30 * time.Second
@@ -88,17 +84,9 @@ type AgentRunWorkerSupervisor struct {
 
 	mu                sync.RWMutex
 	actions           *ActionCoordinator
-	actionObserver    ActionProposalObserver
 	runFinalizer      RunTerminalFinalizer
 	limiter           *WorkerLimiter
 	executionPreparer AcceptedRunExecutionPreparer
-}
-
-func (s *AgentRunWorkerSupervisor) SetActionProposalObserver(observer ActionProposalObserver) {
-	s.mu.Lock()
-	s.actionObserver = observer
-	s.mu.Unlock()
-	s.pools.each(func(pool *AgentRunWorkerPool) { pool.SetActionProposalObserver(observer) })
 }
 
 func (s *AgentRunWorkerSupervisor) SetRunTerminalFinalizer(finalizer RunTerminalFinalizer) {
@@ -152,8 +140,8 @@ func (s *AgentRunWorkerSupervisor) newPool(scope Scope) (*AgentRunWorkerPool, er
 		MaxActiveForOwner: s.config.MaxActiveForOwner, MaxActiveForObjective: s.config.MaxActiveForObjective,
 		MaxActiveForConcurrencyKey:        s.config.MaxActiveForConcurrencyKey,
 		ConversationTaskForegroundReserve: s.config.ConversationTaskForegroundReserve,
-		MaxTurnsPerClaim:                  s.config.MaxTurnsPerClaim, LeaseDuration: s.config.LeaseDuration,
-		TurnLeaseDuration: s.config.TurnLeaseDuration, AgingInterval: s.config.AgingInterval,
+		LeaseDuration:                     s.config.LeaseDuration,
+		TurnLeaseDuration:                 s.config.TurnLeaseDuration, AgingInterval: s.config.AgingInterval,
 		PollInterval:   s.config.PollInterval,
 		WorkerIDPrefix: fmt.Sprintf("%s-%s-%s-%s", s.config.WorkerIDPrefix, s.config.Kind, scope.Kind, scope.ID),
 	})
@@ -163,7 +151,6 @@ func (s *AgentRunWorkerSupervisor) newPool(scope Scope) (*AgentRunWorkerPool, er
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	pool.SetActionCoordinator(s.actions)
-	pool.SetActionProposalObserver(s.actionObserver)
 	pool.SetRunTerminalFinalizer(s.runFinalizer)
 	pool.SetWorkerLimiter(s.limiter)
 	pool.SetAcceptedRunExecutionPreparer(s.executionPreparer)

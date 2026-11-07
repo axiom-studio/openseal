@@ -2,10 +2,8 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -103,7 +101,6 @@ type AgentRunWorkerConfig struct {
 	MaxActiveForObjective             int
 	MaxActiveForConcurrencyKey        int
 	ConversationTaskForegroundReserve int
-	MaxTurnsPerClaim                  int
 	LeaseDuration                     time.Duration
 	TurnLeaseDuration                 time.Duration
 	AgingInterval                     time.Duration
@@ -129,9 +126,6 @@ func (c *AgentRunWorkerConfig) applyDefaults() error {
 	if c.MaxActiveForOwner < 0 || c.MaxActiveForObjective < 0 || c.MaxActiveForConcurrencyKey < 0 {
 		return errors.New("agent run portfolio concurrency limits cannot be negative")
 	}
-	if c.MaxTurnsPerClaim <= 0 {
-		c.MaxTurnsPerClaim = 1
-	}
 	if c.LeaseDuration <= 0 {
 		c.LeaseDuration = 30 * time.Second
 	}
@@ -156,11 +150,10 @@ type AgentRunWorkerPool struct {
 	config               AgentRunWorkerConfig
 	scheduler            *AgentRunScheduler
 	portfolio            PortfolioStore
-	coordinator          *TurnCoordinator
+	loop                 *RunLoop
 	wakeService          *AgentRunWakeService
 	activity             *RunActivityService
 	actions              *ActionCoordinator
-	actionObserver       ActionProposalObserver
 	runFinalizer         RunTerminalFinalizer
 	runCommands          *RunCommandService
 	lastFinalizationScan time.Time
@@ -187,14 +180,11 @@ type AgentRunWorkerPool struct {
 	usage     poolActivity
 }
 
-// SetActionCoordinator enables atomic materialization of one proposal-only
-// hosted action into the governed ActionCall lifecycle after its Turn commits.
+// SetActionCoordinator opens each step's nested-action window (a running
+// command's governed calls) on the pool's ActionCoordinator.
 func (p *AgentRunWorkerPool) SetActionCoordinator(actions *ActionCoordinator) {
 	p.actions = actions
-}
-
-func (p *AgentRunWorkerPool) SetActionProposalObserver(observer ActionProposalObserver) {
-	p.actionObserver = observer
+	p.loop.actions = actions
 }
 
 func (p *AgentRunWorkerPool) SetRunTerminalFinalizer(finalizer RunTerminalFinalizer) {
@@ -227,8 +217,15 @@ func NewAgentRunWorkerPool(store KernelStore, resolver TurnRunnerResolver, logge
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
+	loop, err := NewRunLoop(store, nil, logger, RunLoopConfig{
+		StepLeaseDuration: config.TurnLeaseDuration,
+		PlanToolEntries:   workerPlanToolEntries(store), PlainTextFinal: workerPlainTextFinal,
+	})
+	if err != nil {
+		return nil, err
+	}
 	pool := &AgentRunWorkerPool{
-		config: config, scheduler: NewAgentRunScheduler(store), portfolio: store, coordinator: NewTurnCoordinator(store, store, store),
+		config: config, scheduler: NewAgentRunScheduler(store), portfolio: store, loop: loop,
 		wakeService: NewAgentRunWakeService(store, store), activity: NewRunActivityService(store, store),
 		runCommands: NewRunCommandService(store),
 		resolver:    resolver, logger: logger, wake: make(chan struct{}, 1), maintenanceWake: newWorkerPollSignal(),
@@ -355,9 +352,6 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	if run.Status != AgentRunStatusRunning {
 		return
 	}
-	if p.stopSourceRateLimitedRun(ctx, workerID, run) {
-		return
-	}
 	_, _ = p.activity.AppendActivity(ctx, &ActivityEvent{
 		Scope: run.Scope, RunID: run.ID, AgentID: run.AssignedAgentID, ObjectiveID: run.ObjectiveID, TeamID: teamIDForRun(run),
 		EventType: "run.claimed", Summary: "Run claimed by autonomous worker",
@@ -386,7 +380,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 	} else {
 		run = latest
 	}
-	if err != nil || binding == nil || binding.Runner == nil {
+	if err != nil || binding == nil || binding.Producer == nil {
 		if p.parkAcceptedRunRecovery(ctx, workerID, run, nil, err) {
 			return
 		}
@@ -394,7 +388,7 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 			return
 		}
 		if err == nil {
-			err = errors.New("turn runner resolver returned no runner")
+			err = errors.New("turn runner resolver returned no step producer")
 		}
 		failed, _, transitionErr := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, Error: err.Error(), LeaseOwner: workerID,
@@ -403,325 +397,82 @@ func (p *AgentRunWorkerPool) executeClaim(ctx context.Context, workerID string, 
 		if transitionErr != nil {
 			p.logger.Errorw("failed to persist runner resolution failure", "runId", run.ID, "error", transitionErr)
 		} else {
-			p.finalizeTerminalRun(ctx, failed)
-			p.projectTerminalReporting(ctx, failed)
-			p.resolveCollaborationChild(ctx, failed)
+			p.finishTerminalRun(ctx, failed)
 		}
 		return
 	}
 	resolvedBinding := *binding
 	resolvedBinding.InputContextRefs = append([]string(nil), binding.InputContextRefs...)
 	binding = &resolvedBinding
-
 	if ref := evidenceSnapshotInputContextRef(run.Context); ref != "" && !containsString(binding.InputContextRefs, ref) {
 		binding.InputContextRefs = append(binding.InputContextRefs, ref)
 	}
-	current := run
-	if recoveredTurn, recoveryErr := p.pendingAppliedTaskTurn(ctx, current); recoveryErr != nil {
-		p.logger.Warnw("failed to recover an applied conversation task proposal", "runId", current.ID, "error", recoveryErr)
-		return
-	} else if recoveredTurn != nil {
-		materialized, materializeErr := p.materializeTurnTask(ctx, workerID, current, recoveredTurn, binding)
-		if materializeErr != nil {
-			p.failMaterialization(ctx, workerID, current, recoveredTurn, materializeErr)
-			return
-		}
-		current = materialized
-		if isTerminalAgentRunStatus(current.Status) {
-			p.finalizeTerminalRun(ctx, current)
-			p.projectTerminalReporting(ctx, current)
-			p.resolveForkChild(ctx, current)
-			p.resolveCollaborationChild(ctx, current)
-			p.Wake()
-			return
-		}
+
+	claimCtx, cancelClaim := context.WithCancel(ctx)
+	heartbeatDone := make(chan error, 1)
+	go p.heartbeatRunLease(claimCtx, cancelClaim, workerID, run, heartbeatDone)
+	exit := p.loop.Drive(claimCtx, RunLoopClaim{Run: run, WorkerID: workerID, Binding: binding})
+	cancelClaim()
+	if heartbeatErr := <-heartbeatDone; heartbeatErr != nil && exit.Reason != RunLoopExitLeaseLost {
+		p.logger.Warnw("agent Run lease was lost during its claim", "runId", run.ID, "exit", exit.Reason, "error", heartbeatErr)
+		exit.Reason = RunLoopExitLeaseLost
 	}
-	for turnIndex := 0; turnIndex < p.config.MaxTurnsPerClaim; turnIndex++ {
-		advanceCtx, cancelAdvance := context.WithCancel(ctx)
-		heartbeatDone := make(chan error, 1)
-		go p.heartbeatRunLease(advanceCtx, cancelAdvance, workerID, current, heartbeatDone)
-		result, advanceErr := p.coordinator.Advance(advanceCtx, AdvanceAgentRunRequest{
-			Scope: current.Scope, RunID: current.ID, WorkerID: workerID, LeaseDuration: p.config.TurnLeaseDuration,
-			DefinitionID: binding.DefinitionID, DefinitionVersion: binding.DefinitionVersion,
-			ModelProvider: binding.ModelProvider, Model: binding.Model, InputContextRefs: binding.InputContextRefs,
-			BudgetReservation: binding.BudgetReservation,
-			OutputPublisher:   binding.OutputPublisher,
-		}, preparedRuntimeTurnRunner{binding: binding, actions: p.actions})
-		cancelAdvance()
-		heartbeatErr := <-heartbeatDone
-		if heartbeatErr != nil && (advanceErr == nil || errors.Is(heartbeatErr, ErrLeaseLost)) {
-			advanceErr = heartbeatErr
-		}
-		if result != nil && result.Run != nil {
-			current = result.Run
-		}
-		if advanceErr != nil {
-			p.logger.Warnw("agent turn returned an error", "runId", run.ID, "error", advanceErr)
-		}
-		if result != nil && result.Turn != nil && result.Turn.RequestedTask != nil {
-			materialized, materializeErr := p.materializeTurnTask(ctx, workerID, current, result.Turn, binding)
-			if materializeErr != nil {
-				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
-				return
-			}
-			current = materialized
-			if isTerminalAgentRunStatus(current.Status) {
-				p.finalizeTerminalRun(ctx, current)
-				p.projectTerminalReporting(ctx, current)
-				p.resolveForkChild(ctx, current)
-				p.resolveCollaborationChild(ctx, current)
-				p.Wake()
-				return
-			}
-			// A saved continuation may already own this same Run. Consume the
-			// redundant proposal and continue its existing Turn lineage.
-			continue
-		}
-		if result != nil && result.Turn != nil && len(result.Turn.RequestedActions) > 0 {
-			materialized, materializeErr := p.materializeTurnAction(ctx, workerID, current, result.Turn, binding)
-			if materializeErr != nil {
-				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
-				return
-			}
-			current = materialized
-			return
-		}
-		if result != nil && result.Turn != nil && result.Turn.RequestedRunbook != nil {
-			materialized, materializeErr := p.materializeTurnRunbook(ctx, workerID, current, result.Turn, binding)
-			if materializeErr != nil {
-				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
-				return
-			}
-			current = materialized
-			p.Wake()
-			return
-		}
-		if result != nil && result.Turn != nil && result.Turn.RequestedFork != nil {
-			materialized, materializeErr := p.materializeTurnFork(ctx, workerID, current, result.Turn)
-			if materializeErr != nil {
-				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
-				return
-			}
-			current = materialized
-			p.Wake()
-			return
-		}
-		if result != nil && result.Turn != nil && result.Turn.RequestedDelegation != nil {
-			materialized, materializeErr := p.materializeTurnDelegation(ctx, workerID, current, result.Turn)
-			if materializeErr != nil {
-				p.failMaterialization(ctx, workerID, current, result.Turn, materializeErr)
-				return
-			}
-			current = materialized
-			p.Wake()
-			return
-		}
-		if current != nil && isTerminalAgentRunStatus(current.Status) {
-			p.finalizeTerminalRun(ctx, current)
-			p.projectTerminalReporting(ctx, current)
-			p.resolveForkChild(ctx, current)
-			p.resolveCollaborationChild(ctx, current)
-			return
-		}
-		if result == nil || current.Status != AgentRunStatusRunning {
-			return
-		}
+	if exit.Err != nil {
+		p.logger.Warnw("agent run claim ended with an error", "runId", run.ID, "exit", exit.Reason, "steps", exit.Steps, "error", exit.Err)
 	}
-	_, _, err = p.activity.TransitionRun(ctx, current.Scope, current.ID, RunTransitionRequest{
-		ExpectedRevision: current.Revision, Status: AgentRunStatusQueued, LeaseOwner: workerID,
-		Summary: "Run yielded after its bounded turn slice", EventType: "run.yielded",
-		Actor: ActivityActor{Type: "worker", ID: workerID},
-	})
-	if err != nil {
-		p.logger.Warnw("failed to yield agent run", "runId", current.ID, "error", err)
+	switch {
+	case exit.Run != nil && isTerminalAgentRunStatus(exit.Run.Status):
+		p.finishTerminalRun(ctx, exit.Run)
+		p.Wake()
+	case exit.Reason == RunLoopExitYielded || exit.Reason == RunLoopExitRequeued || exit.Reason == RunLoopExitParked:
+		p.Wake()
 	}
-	p.Wake()
 }
 
-func (p *AgentRunWorkerPool) pendingAppliedTaskTurn(ctx context.Context, run *AgentRun) (*AgentTurn, error) {
-	if p == nil || p.coordinator == nil || run == nil || run.Kind != RunKindConversation || run.Status != AgentRunStatusRunning || run.LastAppliedTurn < 1 {
-		return nil, nil
-	}
-	turns, err := p.coordinator.turns.turns.ListAgentTurns(ctx, AgentTurnFilter{
-		Scope: run.Scope, RunID: run.ID, AfterSequence: run.LastAppliedTurn - 1, Limit: 1,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(turns) != 1 || turns[0] == nil || turns[0].Sequence != run.LastAppliedTurn || turns[0].Status != AgentTurnStatusCompleted ||
-		turns[0].RequestedTask == nil || !slices.Equal(turns[0].InputInterventionIDs, interventionIDs(run)) {
-		return nil, nil
-	}
-	return turns[0], nil
+// finishTerminalRun runs the worker's terminal follow-ups: resource cleanup,
+// the reporting fast path and the parent fork group or AgentRequest the Run
+// answers.
+func (p *AgentRunWorkerPool) finishTerminalRun(ctx context.Context, run *AgentRun) {
+	p.finalizeTerminalRun(ctx, run)
+	p.projectTerminalReporting(ctx, run)
+	p.resolveForkChild(ctx, run)
+	p.resolveCollaborationChild(ctx, run)
 }
 
-func (p *AgentRunWorkerPool) materializeTurnTask(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) (*AgentRun, error) {
-	if p == nil || p.conversationTasks == nil {
-		return nil, errors.New("durable conversation task admission is unavailable")
-	}
-	if run == nil || turn == nil || binding == nil || turn.RequestedTask == nil ||
-		len(turn.RequestedActions) != 0 || turn.RequestedRunbook != nil || turn.RequestedFork != nil || turn.RequestedDelegation != nil {
-		return nil, errors.New("a bounded Turn must request exactly one conversation task")
-	}
-	proposal := turn.RequestedTask
-	if err := validateTaskProposalOutput(proposal, turn.NextRunStatus, turn.WakeCondition, turn.OutputSummary, turn.RunOutput, turn.RunError); err != nil {
-		return nil, err
-	}
-	canonical, err := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
-	if err != nil {
-		return nil, err
-	}
-	if canonical == nil {
-		return nil, ErrRunNotFound
-	}
-	if task, proofErr := canonicalConversationTaskContinuation(ctx, p.portfolio, canonical); proofErr != nil {
-		return nil, proofErr
-	} else if task != nil {
-		return canonical, nil
-	}
-	result, err := p.conversationTasks.Start(ctx, StartConversationTaskRequest{
-		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision,
-		WorkerID: workerID, TurnID: turn.ID, AssignedAgentID: binding.DeploymentID,
-		TaskKey: proposal.TaskKey, Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment,
-		Budget: cloneBudgetPolicy(proposal.Budget),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if result != nil && result.Task != nil && result.WorkRun != nil && result.Task.Mode == ConversationTaskModeContinuation && ConversationTaskMatchesWorkRun(result.Task, result.WorkRun) {
-		return result.WorkRun, nil
-	}
-	if result == nil || result.Task == nil || result.WorkRun == nil || result.SourceRun == nil || result.SourceRun.Status != AgentRunStatusCompleted {
-		return nil, errors.New("conversation task admission returned no committed foreground completion")
-	}
-	return result.SourceRun, nil
-}
-
-func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) (*AgentRun, error) {
-	if p.forks == nil {
-		return nil, errors.New("durable runbook materialization is unavailable")
-	}
-	if run == nil || turn == nil || binding == nil || turn.RequestedRunbook == nil ||
-		len(turn.RequestedActions) != 0 || turn.RequestedFork != nil || turn.RequestedDelegation != nil || turn.RequestedTask != nil {
-		return nil, errors.New("a bounded Turn must request exactly one runbook")
-	}
-	proposal := turn.RequestedRunbook
-	var authorized *HostedRunbookOperation
-	for _, operation := range binding.RunbookOperations {
-		if operation.Entrypoint == proposal.Entrypoint {
-			resolved := operation
-			authorized = &resolved
-			break
+// workerPlanToolEntries is the pool's RunLoopConfig.PlanToolEntries: the
+// dispatcher's planners over the binding's claim executor.
+func workerPlanToolEntries(store PortfolioStore) StepToolEntryPlanner {
+	return func(binding *TurnRunnerBinding, session *AgentSession, step *AgentTurn, assistant *SessionEntry, calls []LoopToolCall) ([]*SessionEntry, error) {
+		if assistant != nil {
+			return PlanToolEntries(binding, assistant)
 		}
-	}
-	if authorized == nil {
-		return nil, fmt.Errorf("requested runbook entrypoint %q is not authorized", proposal.Entrypoint)
-	}
-	if err := p.rejectRecursiveRunbookInvocation(ctx, run, *authorized); err != nil {
-		return nil, err
-	}
-	// A callable Runbook is an already reviewed operation. Its execution budget
-	// is therefore owned by the kernel and the invoking Run, not selected by the
-	// conversational model. An unbounded invoking Run starts an unbounded
-	// operation; an explicitly bounded invoking Run contributes all remaining
-	// capacity. Keeping the model-proposed slice here previously created tiny
-	// child ceilings (commonly three attempts), which then stranded a valid
-	// delegated step before its hosted minimum could be admitted.
-	var operationBudget *BudgetPolicy
-	if run.Budget != nil {
-		var budgetErr error
-		operationBudget, budgetErr = completeChildBudgetAllocation(run, &BudgetPolicy{})
-		if budgetErr != nil {
-			return nil, fmt.Errorf("resolve callable Runbook budget: %w", budgetErr)
+		if session == nil || step == nil {
+			return nil, errors.New("deterministic tool entries need a session and a step")
 		}
-	}
-	operationContext := cloneMap(proposal.Arguments)
-	if operationContext == nil {
-		operationContext = make(map[string]interface{})
-	}
-	operationContext[RunbookInvocationContextKey] = map[string]interface{}{
-		"summary":   strings.TrimSpace(proposal.Summary),
-		"arguments": cloneMap(proposal.Arguments),
-	}
-	sourceMessage, err := runbookSourceMessage(ctx, p.reportingStore, run)
-	if err != nil {
-		return nil, err
-	}
-	if sourceMessage != nil {
-		operationContext[RunbookInvocationContextKey].(map[string]interface{})["sourceMessage"] = sourceMessage
-	}
-	if strings.TrimSpace(authorized.DefinitionID) != "" && strings.TrimSpace(authorized.DefinitionVersion) != "" {
-		operationContext["runbookDefinitionId"] = strings.TrimSpace(authorized.DefinitionID)
-		operationContext["runbookDefinitionVersion"] = strings.TrimSpace(authorized.DefinitionVersion)
-		operationContext["runbookEntrypoint"] = strings.TrimSpace(authorized.Entrypoint)
-	}
-	result, err := p.forks.Create(ctx, CreateRunForkRequest{
-		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: workerID,
-		ForkID: "runbook-" + proposal.Entrypoint,
-		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
-		Branches: []RunForkBranch{{
-			ID: "operation", Goal: proposal.Summary, AssignedAgentID: run.AssignedAgentID,
-			Entrypoint: proposal.Entrypoint, Context: operationContext, Checkpoint: map[string]interface{}{},
-			Budget: operationBudget,
-		}},
-		ContinuationCheckpoint: turn.ContinuationCheckpoint,
-		Actor:                  ActivityActor{Type: "worker", ID: workerID},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if result == nil || result.DependencyGroup == nil || result.DependencyGroup.Source == nil {
-		return nil, errors.New("runbook materialization returned no durable source Run")
-	}
-	if len(result.Children) != 1 || result.Children[0] == nil {
-		return nil, errors.New("runbook materialization returned no durable child Run")
-	}
-	if err := projectConversationRunbookStart(ctx, p.reportingStore, run, proposal.Summary, result.Children[0]); err != nil {
-		// The durable child is already committed. A transient observation-surface
-		// failure must never convert successful work creation into a failed source
-		// Run or duplicate the operation on retry.
-		p.logger.Warnw("failed to project Runbook start into conversation", "runId", run.ID, "childRunId", result.Children[0].ID, "error", err)
-	}
-	return result.DependencyGroup.Source, nil
-}
-
-func (p *AgentRunWorkerPool) rejectRecursiveRunbookInvocation(ctx context.Context, run *AgentRun, operation HostedRunbookOperation) error {
-	if run == nil {
-		return nil
-	}
-	wantedID := strings.TrimSpace(operation.DefinitionID)
-	wantedVersion := strings.TrimSpace(operation.DefinitionVersion)
-	wantedEntrypoint := strings.TrimSpace(operation.Entrypoint)
-	visited := make(map[string]struct{})
-	current := run
-	for depth := 0; current != nil && depth < 256; depth++ {
-		if _, duplicate := visited[current.ID]; duplicate {
-			return fmt.Errorf("reject recursive Runbook invocation %q: Run ancestry contains a cycle at %s", wantedEntrypoint, current.ID)
-		}
-		visited[current.ID] = struct{}{}
-		ancestorID, ancestorVersion, ancestorEntrypoint := runbookInvocationIdentity(current)
-		exactIdentity := wantedID != "" && wantedVersion != "" &&
-			ancestorID == wantedID && ancestorVersion == wantedVersion &&
-			(ancestorEntrypoint == "" || ancestorEntrypoint == wantedEntrypoint)
-		legacyIdentity := wantedEntrypoint != "" && ancestorID == "" &&
-			strings.TrimSpace(current.Entrypoint) == wantedEntrypoint &&
-			strings.TrimSpace(current.AssignedAgentID) == strings.TrimSpace(run.AssignedAgentID)
-		if exactIdentity || legacyIdentity {
-			return fmt.Errorf("reject recursive Runbook invocation %q: the same operation is already active in ancestor Run %s", wantedEntrypoint, current.ID)
-		}
-		if strings.TrimSpace(current.ParentRunID) == "" {
-			return nil
-		}
-		parent, err := p.portfolio.GetAgentRun(ctx, current.Scope, current.ParentRunID)
+		run, err := store.GetAgentRun(context.Background(), step.Scope, step.RunID)
 		if err != nil {
-			return fmt.Errorf("resolve Runbook invocation ancestry at %s: %w", current.ID, err)
+			return nil, err
 		}
-		current = parent
+		if run == nil {
+			return nil, ErrRunNotFound
+		}
+		return PlanToolCallEntries(binding, run, step, session.ID, calls)
 	}
-	if current != nil {
-		return fmt.Errorf("reject Runbook invocation %q: Run ancestry exceeds the supported depth", wantedEntrypoint)
+}
+
+// workerPlainTextFinal is the pool's RunLoopConfig.PlainTextFinal: the
+// control executor of the binding's claim executor judges the text.
+func workerPlainTextFinal(ctx context.Context, cc ControlContext, text string) (ControlResult, error) {
+	var control *ControlExecutor
+	if cc.Binding != nil {
+		if tools, ok := cc.Binding.Tools.(*claimToolExecutor); ok {
+			control = tools.cfg.Control
+		}
 	}
-	return nil
+	if control == nil {
+		return ControlResult{}, errors.New("plain-text final needs a binding whose tool executor has a control executor")
+	}
+	return control.PlainTextFinal(ctx, cc, text)
 }
 
 func runbookInvocationIdentity(run *AgentRun) (string, string, string) {
@@ -768,138 +519,6 @@ func (p *AgentRunWorkerPool) resolveCollaborationChild(ctx context.Context, run 
 	}
 }
 
-func (p *AgentRunWorkerPool) materializeTurnDelegation(ctx context.Context, _ string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {
-	if p.collaboration == nil {
-		return nil, errors.New("durable collaboration materialization is unavailable")
-	}
-	if run == nil || turn == nil || turn.RequestedDelegation == nil || len(turn.RequestedActions) != 0 || turn.RequestedFork != nil {
-		return nil, errors.New("a bounded Turn must request exactly one delegation")
-	}
-	proposal := turn.RequestedDelegation
-	if err := validateTaskDelegationSource(ctx, p.portfolio, run); err != nil {
-		return nil, err
-	}
-	sharedContext := cloneMap(proposal.Context)
-	if sharedContext == nil {
-		sharedContext = make(map[string]interface{})
-	}
-	if proposal.Mode != "" {
-		sharedContext[DelegationModeContextKey] = string(proposal.Mode)
-	}
-	requestedEntrypoint, err := requestedAcceptedChildEntrypoint(sharedContext)
-	if err != nil {
-		return nil, err
-	}
-	if requestedEntrypoint != "" {
-		sharedContext["runbookEntrypoint"] = requestedEntrypoint
-	}
-	runbookOrigin := delegatedRunbookOrigin(run.Context)
-	if runbookOrigin != nil {
-		if entrypoint := strings.TrimSpace(run.Entrypoint); entrypoint != "" {
-			runbookOrigin["runbookEntrypoint"] = entrypoint
-		}
-		sharedContext["triggerInput"] = runbookOrigin
-	}
-	if invocation, ok := run.Context[RunbookInvocationContextKey].(map[string]interface{}); ok {
-		// Explicit model arguments remain shareable; an original chat message
-		// is retained only when the same Agent continues its own operation.
-		forwarded := forwardRunbookInvocation(invocation, proposal.AssignedAgentID == run.AssignedAgentID)
-		// The caller's invocation is task lineage. Only this proposal's explicit
-		// target method can select an entrypoint on the delegated Agent.
-		delete(forwarded, "entrypoint")
-		if requestedEntrypoint != "" {
-			forwarded["entrypoint"] = requestedEntrypoint
-		}
-		sharedContext[RunbookInvocationContextKey] = forwarded
-	}
-	key := strings.Join([]string{"delegation", run.ID, proposal.StepID}, ":")
-	requestID := stableCollaborationID(run.Scope, key, "request")
-	existing, err := p.collaboration.GetAgentRequest(ctx, run.Scope, requestID)
-	if err != nil && !errors.Is(err, ErrAgentRequestNotFound) {
-		return nil, err
-	}
-	if existing != nil {
-		if existing.Status == AgentRequestStatusClarificationRequested {
-			if strings.TrimSpace(proposal.Clarification) == "" {
-				return nil, errors.New("delegation recipient requested clarification, but the follow-up proposal supplied no answer")
-			}
-			clarified, clarifyErr := p.collaboration.RespondAgentRequest(ctx, RespondAgentRequestRequest{
-				Scope: run.Scope, RequestID: existing.ID, ExpectedRevision: existing.Revision,
-				Decision: AgentRequestDecisionProvideClarification, Principal: existing.Requester,
-				Message: strings.TrimSpace(proposal.Clarification),
-			})
-			if clarifyErr != nil {
-				return nil, clarifyErr
-			}
-			if clarified == nil || clarified.Source == nil {
-				return nil, errors.New("delegation clarification did not return the durable waiting source Run")
-			}
-			return clarified.Source, nil
-		}
-		source, getErr := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
-		if getErr != nil || source == nil {
-			if getErr == nil {
-				getErr = ErrRunNotFound
-			}
-			return nil, getErr
-		}
-		return source, nil
-	}
-	budget, err := completeChildBudgetAllocation(run, proposal.Budget)
-	if err != nil {
-		return nil, err
-	}
-	acceptancePolicy := AgentRequestAcceptanceRecipientReview
-	if runbookOrigin != nil {
-		// The kernel-authored Runbook turn has already selected the exact
-		// recipient under an immutable governed definition. A second model
-		// admission turn adds no authority and can only make deterministic
-		// scheduled work less reliable. Conversational/model-authored
-		// delegation continues to require recipient review.
-		acceptancePolicy = AgentRequestAcceptancePreauthorized
-	}
-	created, err := p.collaboration.CreateAgentRequest(ctx, CreateAgentRequestRequest{
-		ID: requestID, Scope: run.Scope, Kind: AgentRequestKindRequest,
-		Requester:   CollaborationParty{Type: run.Owner.Type, ID: run.Owner.ID},
-		Recipient:   CollaborationParty{Type: OwnerTypeAgent, ID: proposal.AssignedAgentID},
-		SourceRunID: run.ID, Goal: proposal.Goal, SharedContext: sharedContext, ChildCheckpoint: proposal.Checkpoint,
-		AcceptancePolicy: acceptancePolicy,
-		BudgetAllocation: budget, IdempotencyKey: key,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if created == nil || created.Request == nil {
-		return nil, errors.New("delegation materialization returned no durable Agent request")
-	}
-	if created.Request.Status == AgentRequestStatusPending {
-		if created.Source != nil {
-			return created.Source, nil
-		}
-		source, getErr := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
-		if getErr != nil || source == nil {
-			if getErr == nil {
-				getErr = ErrRunNotFound
-			}
-			return nil, getErr
-		}
-		return source, nil
-	}
-	if created.Request.Status != AgentRequestStatusAccepted && created.Request.Status != AgentRequestStatusCompleted &&
-		created.Request.Status != AgentRequestStatusRejected && created.Request.Status != AgentRequestStatusCanceled &&
-		created.Request.Status != AgentRequestStatusFailed {
-		return nil, fmt.Errorf("delegation request %s is %s", created.Request.ID, created.Request.Status)
-	}
-	source, err := p.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
-	if err != nil || source == nil {
-		if err == nil {
-			err = ErrRunNotFound
-		}
-		return nil, err
-	}
-	return source, nil
-}
-
 func delegatedRunbookOrigin(contextValues map[string]interface{}) map[string]interface{} {
 	if contextValues == nil {
 		return nil
@@ -934,336 +553,6 @@ func (p *AgentRunWorkerPool) resolveForkChild(ctx context.Context, run *AgentRun
 	} else if result != nil && !result.Replayed && result.Evaluation.Wake {
 		p.Wake()
 	}
-}
-
-func (p *AgentRunWorkerPool) materializeTurnFork(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn) (*AgentRun, error) {
-	if p.forks == nil {
-		return nil, errors.New("durable fork materialization is unavailable")
-	}
-	if run == nil || turn == nil || turn.RequestedFork == nil || len(turn.RequestedActions) != 0 {
-		return nil, errors.New("a bounded Turn must request exactly one fork without actions")
-	}
-	result, err := p.forks.Create(ctx, CreateRunForkRequest{
-		Scope: run.Scope, SourceRunID: run.ID, ExpectedSourceRevision: run.Revision, WorkerID: workerID,
-		ForkID: turn.RequestedFork.ForkID, Policy: turn.RequestedFork.Policy, Branches: turn.RequestedFork.Branches,
-		ContinuationCheckpoint: turn.ContinuationCheckpoint,
-		Actor:                  ActivityActor{Type: "worker", ID: workerID},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if result == nil || result.DependencyGroup == nil || result.DependencyGroup.Source == nil {
-		return nil, errors.New("fork materialization returned no durable source Run")
-	}
-	return result.DependencyGroup.Source, nil
-}
-
-func (p *AgentRunWorkerPool) materializeTurnAction(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, binding *TurnRunnerBinding) (*AgentRun, error) {
-	if p.actions == nil {
-		return nil, errors.New("governed action materialization is unavailable")
-	}
-	if run == nil || turn == nil || binding == nil || len(turn.RequestedActions) != 1 {
-		return nil, errors.New("a bounded Turn must request exactly one action at a time")
-	}
-	request := turn.RequestedActions[0]
-	if request.Type != "skill_action" || strings.TrimSpace(request.Capability) == "" || strings.TrimSpace(request.Summary) == "" {
-		return nil, errors.New("requested action requires type skill_action, capability, and summary")
-	}
-	selected, err := selectTurnModelAction(binding.ModelActions, request)
-	if err != nil {
-		return nil, err
-	}
-	if selected == nil {
-		return nil, fmt.Errorf("requested capability %q is not authorized", request.Capability)
-	}
-	arguments, err := resolveTurnActionInput(turn.ContinuationCheckpoint, request.InputRef)
-	if err != nil {
-		return nil, err
-	}
-	idempotencyKey := turnActionIdempotencyKey(request.IdempotencyKey, selected.SideEffect, turn.ID)
-	actionDeploymentID := strings.TrimSpace(binding.ActionDeploymentID)
-	if strings.TrimSpace(selected.DeploymentID) != "" {
-		actionDeploymentID = strings.TrimSpace(selected.DeploymentID)
-	}
-	if actionDeploymentID == "" {
-		actionDeploymentID = binding.DeploymentID
-	}
-	proposalRequest := ProposeActionRequest{
-		Scope: run.Scope, RunID: run.ID, TurnID: turn.ID, WorkerID: workerID, DeploymentID: actionDeploymentID,
-		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
-		SkillID: selected.SkillID, SkillVersion: selected.Version, Action: selected.Action, Arguments: selected.ActionInput(arguments),
-		PreparedRuntime: request.PreparedRuntime,
-		IdempotencyKey:  idempotencyKey, Summary: request.Summary,
-		ExternalOperation: request.ExternalOperation,
-		ReviewContext:     cloneApprovalReviewContext(request.ReviewContext),
-		Actor:             ActivityActor{Type: "worker", ID: workerID}, EvidenceRefs: append([]string(nil), request.EvidenceRefs...),
-		CausationID: turn.ID,
-	}
-	propose := func() (*ActionProposalResult, error) {
-		var proposal *ActionProposalResult
-		var err error
-		for attempt := 0; attempt < 4; attempt++ {
-			proposal, err = p.actions.Propose(ctx, proposalRequest)
-			if !errors.Is(err, ErrRevisionConflict) || attempt == 3 {
-				break
-			}
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			latest, retryErr := p.continuationActionProposalRetry(ctx, workerID, run, turn)
-			if retryErr != nil {
-				return nil, retryErr
-			}
-			if latest == nil {
-				break
-			}
-			// Revalidate the same accepted action against the adopted canonical
-			// Run. The model, Turn, arguments and idempotency key remain unchanged.
-			run = latest
-		}
-		if err != nil {
-			return nil, err
-		}
-		if proposal == nil || proposal.Call == nil {
-			return nil, errors.New("governed action proposal returned no durable Run or ActionCall")
-		}
-		return proposal, nil
-	}
-	proposal, err := propose()
-	if err != nil {
-		return nil, err
-	}
-	// A person's message or review closed this proposal and asked for a
-	// revision. An unchanged re-proposal from a later Turn is a new request for
-	// approval, not a replay of the closed one. The derived key is stable, so
-	// worker retries of this Turn still replay the call it created.
-	for hops := 0; !proposal.Created && revisableClosedProposal(proposal, turn) && hops < maximumRevisedProposalHops; hops++ {
-		proposalRequest.IdempotencyKey = idempotencyKey + ":after:" + proposal.Call.ApprovalID
-		if proposal, err = propose(); err != nil {
-			return nil, err
-		}
-	}
-	if !proposal.Created {
-		return p.resumeReplayedTurnAction(ctx, workerID, run, turn, proposal.Call)
-	}
-	if proposal.Run == nil {
-		return nil, errors.New("governed action proposal returned no durable Run")
-	}
-	if p.actionObserver != nil {
-		if observeErr := p.actionObserver.ObserveActionProposal(ctx, run, turn, proposal); observeErr != nil {
-			p.logger.Warnw("governed action projection will require reconciliation", "runId", run.ID, "turnId", turn.ID, "actionCallId", proposal.Call.ID, "error", observeErr)
-		}
-	}
-	return proposal.Run, nil
-}
-
-func (p *AgentRunWorkerPool) continuationActionProposalRetry(ctx context.Context, workerID string, before *AgentRun, turn *AgentTurn) (*AgentRun, error) {
-	if before == nil || turn == nil || p.coordinator == nil || before.LastAppliedTurn != turn.Sequence || turn.Status != AgentTurnStatusCompleted {
-		return nil, nil
-	}
-	latest, err := p.portfolio.GetAgentRun(ctx, before.Scope, before.ID)
-	if err != nil {
-		return nil, err
-	}
-	if latest == nil || latest.Status != AgentRunStatusRunning || latest.LeaseOwner != workerID ||
-		latest.LeaseExpiresAt == nil || !latest.LeaseExpiresAt.After(time.Now()) || latest.LastAppliedTurn != turn.Sequence {
-		return nil, nil
-	}
-	task, err := canonicalConversationTaskContinuation(ctx, p.portfolio, latest)
-	if err != nil {
-		return nil, err
-	}
-	if task == nil || before.Context[ConversationTaskContextKey] != nil && before.Context[ConversationTaskContextKey] != task.ID {
-		return nil, nil
-	}
-	// Only the committed handoff and a same-worker lease heartbeat may have
-	// changed the source. New guidance, budgets, status and pending governance
-	// remain ordinary conflicts and cannot be rebased by this retry.
-	expected := cloneAgentRun(before)
-	expected.ConcurrencyKey = latest.ConcurrencyKey
-	if expected.Context == nil {
-		expected.Context = make(map[string]interface{})
-	}
-	expected.Context[ConversationTaskContextKey] = task.ID
-	expected.Revision, expected.UpdatedAt = latest.Revision, latest.UpdatedAt
-	expected.LeaseExpiresAt = cloneAdmissionTime(latest.LeaseExpiresAt)
-	expectedJSON, err := json.Marshal(expected)
-	if err != nil {
-		return nil, err
-	}
-	latestJSON, err := json.Marshal(latest)
-	if err != nil {
-		return nil, err
-	}
-	if string(expectedJSON) != string(latestJSON) {
-		return nil, nil
-	}
-	persistedTurn, err := p.coordinator.turns.turns.GetAgentTurn(ctx, before.Scope, turn.ID)
-	if err != nil {
-		return nil, err
-	}
-	if persistedTurn == nil || persistedTurn.RunID != latest.ID || persistedTurn.Sequence != turn.Sequence || persistedTurn.Status != AgentTurnStatusCompleted {
-		return nil, nil
-	}
-	providedJSON, err := json.Marshal(turn)
-	if err != nil {
-		return nil, err
-	}
-	persistedJSON, err := json.Marshal(persistedTurn)
-	if err != nil {
-		return nil, err
-	}
-	if string(providedJSON) != string(persistedJSON) {
-		return nil, nil
-	}
-	return latest, nil
-}
-
-// maximumRevisedProposalHops bounds how many closed-for-revision proposals
-// one re-proposal may step past. Each hop needs a person's message or review.
-const maximumRevisedProposalHops = 16
-
-// revisableClosedProposal reports a replayed call whose approval was closed
-// for revision (superseded by a message or changes requested) by an earlier
-// Turn than the one proposing it again.
-func revisableClosedProposal(proposal *ActionProposalResult, turn *AgentTurn) bool {
-	return proposal != nil && proposal.Call != nil && turn != nil &&
-		proposal.Call.Status == ActionCallStatusDenied && proposal.Call.TurnID != turn.ID &&
-		strings.TrimSpace(proposal.Call.ApprovalID) != "" && proposal.Approval != nil &&
-		proposal.Approval.ID == proposal.Call.ApprovalID && approvalRevisesProposal(string(proposal.Approval.Status))
-}
-
-func turnActionIdempotencyKey(proposed string, sideEffect capability.SideEffect, turnID string) string {
-	if sideEffect == capability.SideEffectRead || sideEffect == capability.SideEffectNone {
-		// A later Turn may need a fresh observation after the resource changes.
-		// The Turn ID still makes worker retries of this proposal idempotent.
-		return fmt.Sprintf("turn:%s:read:0", turnID)
-	}
-	if key := strings.TrimSpace(proposed); key != "" {
-		return key
-	}
-	return fmt.Sprintf("turn:%s:action:0", turnID)
-}
-
-func (p *AgentRunWorkerPool) resumeReplayedTurnAction(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, call *ActionCall) (*AgentRun, error) {
-	if run == nil || turn == nil || call == nil || call.RunID != run.ID {
-		return nil, errors.New("governed action replay identity is invalid")
-	}
-	status := AgentRunStatusQueued
-	var wake *WakeCondition
-	checkpoint := preserveKernelActionHistory(run.Checkpoint, turn.ContinuationCheckpoint)
-	switch call.Status {
-	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied, ActionCallStatusCanceled, ActionCallStatusCompensated:
-		metadata := map[string]interface{}{"idempotentReplay": true}
-		if call.Status == ActionCallStatusDenied && call.ApprovalID != "" {
-			getter, ok := p.portfolio.(interface {
-				GetApproval(context.Context, Scope, string) (*ApprovalCheckpoint, error)
-			})
-			if ok {
-				approval, err := getter.GetApproval(ctx, call.Scope, call.ApprovalID)
-				if err != nil {
-					return nil, err
-				}
-				if approval == nil || approval.Scope != call.Scope || approval.RunID != run.ID || approval.ActionCallID != call.ID {
-					return nil, errors.New("replayed action approval provenance is invalid")
-				}
-				metadata["approvalStatus"] = approval.Status
-				if approval.Status == ApprovalStatusChangesRequested {
-					metadata["reviewerGuidance"] = approval.DecisionReason
-					metadata["reviewedProposalRevision"] = approval.Revision - 1
-				}
-				if approval.Status == ApprovalStatusSuperseded {
-					metadata["reviewedProposalRevision"] = approval.Revision - 1
-					// The approval does not keep the message that superseded it;
-					// the Run's resolution checkpoint does.
-					if last, ok := run.Checkpoint["lastAction"].(map[string]interface{}); ok && last["actionCallId"] == call.ID && last["approvalId"] == call.ApprovalID {
-						if messageID, ok := last["supersededByMessageId"]; ok {
-							metadata["supersededByMessageId"] = messageID
-						}
-					}
-				}
-			} else if last, ok := run.Checkpoint["lastAction"].(map[string]interface{}); ok && last["actionCallId"] == call.ID && last["approvalId"] == call.ApprovalID {
-				for _, key := range []string{"approvalStatus", "reviewerGuidance", "reviewedProposalRevision", "supersededByMessageId"} {
-					if value, ok := last[key]; ok {
-						metadata[key] = value
-					}
-				}
-			}
-		}
-		checkpoint = checkpointTerminalAction(checkpoint, call, metadata)
-	case ActionCallStatusReady, ActionCallStatusRunning, ActionCallStatusCompensating:
-		status = AgentRunStatusWaitingForDependency
-		wake = &WakeCondition{Type: "action", Reference: call.ID}
-	case ActionCallStatusWaitingApproval:
-		if strings.TrimSpace(call.ApprovalID) == "" {
-			return nil, errors.New("governed action replay is waiting for an approval without an approval identity")
-		}
-		status = AgentRunStatusWaitingForApproval
-		wake = &WakeCondition{Type: "approval", Reference: call.ApprovalID}
-	default:
-		return nil, fmt.Errorf("governed action replay has unsupported status %q", call.Status)
-	}
-	resumed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: status, WakeCondition: wake, Checkpoint: checkpoint,
-		LeaseOwner: workerID, Summary: "Reused an existing governed action result",
-		EventType: "action.replayed", Actor: ActivityActor{Type: "worker", ID: workerID},
-		TurnID: turn.ID, CausationID: call.ID, Payload: map[string]interface{}{
-			"actionCallId": call.ID, "skillId": call.SkillID, "skillVersion": call.SkillVersion,
-			"action": call.Action, "status": call.Status,
-		},
-	})
-	if err != nil {
-		return nil, err
-	}
-	if status == AgentRunStatusQueued {
-		p.Wake()
-	}
-	return resumed, nil
-}
-
-// preparedRuntimeTurnRunner hosts one Turn with its resolved binding. While
-// the Turn runs, its offered actions are open to nested calls (see
-// ActionCoordinator.ProposeNested).
-type preparedRuntimeTurnRunner struct {
-	binding *TurnRunnerBinding
-	actions *ActionCoordinator
-}
-
-func (r preparedRuntimeTurnRunner) PlanTurnBudget(ctx context.Context, input TurnExecutionContext) (BudgetUsage, error) {
-	if r.binding == nil || r.binding.Runner == nil {
-		return BudgetUsage{}, errors.New("turn runner binding is unavailable")
-	}
-	planner, ok := r.binding.Runner.(TurnBudgetPlanner)
-	if !ok {
-		return BudgetUsage{}, nil
-	}
-	return planner.PlanTurnBudget(ctx, input)
-}
-
-func (r preparedRuntimeTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-	if r.binding == nil || r.binding.Runner == nil {
-		return nil, errors.New("turn runner binding is unavailable")
-	}
-	if err := validatePreparedSkillRuntimes(r.binding); err != nil {
-		return nil, err
-	}
-	closeNested := r.actions.OpenNestedActionTurn(input.Run, input.Turn, r.binding)
-	outcome, err := r.binding.Runner.RunTurn(ctx, input)
-	closeNested()
-	if outcome == nil {
-		return nil, err
-	}
-	for index := range outcome.ProposedActions {
-		request := &outcome.ProposedActions[index]
-		// The model is never an authority for execution artifacts.
-		request.PreparedRuntime = nil
-		selected, selectionErr := selectTurnModelAction(r.binding.ModelActions, *request)
-		if selectionErr != nil || selected == nil {
-			continue
-		}
-		request.PreparedRuntime = preparedRuntimeForAction(r.binding, selected)
-	}
-	return outcome, err
 }
 
 // preparedRuntimeForAction is the activation-time runtime prepared for the
@@ -1334,64 +623,6 @@ func selectTurnModelAction(actions []capability.ModelAction, request TurnAction)
 		return nil, fmt.Errorf("%w: requested capability %q version %q is not authorized by the current binding", ErrRunSkillDependencyUnavailable, request.Capability, request.ExpectedSkillVersion)
 	}
 	return selected, nil
-}
-
-func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID string, run *AgentRun, turn *AgentTurn, cause error) {
-	if run == nil {
-		return
-	}
-	if p.parkAcceptedRunRecovery(ctx, workerID, run, turn, cause) {
-		return
-	}
-	if p.parkSkillRuntimeMaintenance(ctx, workerID, run, turn, cause) {
-		return
-	}
-	status := AgentRunStatusFailed
-	runError := "governed action materialization failed"
-	safeCause := sanitizeActionError(cause, nil)
-	summary := "Agent action proposal could not be governed"
-	// A fixed Agent cannot amend itself under any correction, so its refusal
-	// ends the attempt with a dedicated reply instead of returning to the model.
-	behaviorFixed := errors.Is(cause, ErrAgentBehaviorFixed)
-	var checkpoint map[string]interface{}
-	returned := false
-	if !behaviorFixed {
-		checkpoint, returned = checkpointProposalRejection(run, turn, safeCause)
-	}
-	if returned {
-		// The rejection is the proposal's result for the model, like a failed
-		// action: nothing ran, and it may correct the request or explain.
-		status, runError, summary = AgentRunStatusQueued, "", "Agent action proposal was rejected; the model may correct it"
-	} else if behaviorFixed {
-		checkpoint = checkpointTerminalFailure(preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "agent_behavior_fixed")
-	} else {
-		checkpoint = checkpointTerminalFailure(checkpointFinalFailureExplanation(
-			preserveKernelActionHistory(run.Checkpoint, run.Checkpoint), "proposal", toolFeedbackMessage(safeCause)), "action_admission_failed")
-		if modelExplainsFailure(run) {
-			// The correction bound is spent; the model still explains why the
-			// proposal could not run in one answer-only turn.
-			status, runError, summary = AgentRunStatusQueued, "", "Agent action proposal was rejected; the model will explain the stopped attempt"
-		}
-	}
-	var failure *RunFailureExplanation
-	if behaviorFixed {
-		failure = beginRunFailureExplanation(run, RunFailureKindAgentBehaviorFixed, "agent_behavior_fixed", "This Agent's setup is fixed, so it cannot change its own instructions or behavior.", safeCause, "")
-	}
-	failed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: status, LeaseOwner: workerID, Checkpoint: checkpoint,
-		Error: runError, Summary: summary, FailureExplanation: failure,
-		EventType: "action.materialization_failed", Actor: ActivityActor{Type: "worker", ID: workerID},
-		TurnID: turn.ID, CausationID: turn.ID, Payload: map[string]interface{}{"reason": safeCause},
-	})
-	if err != nil {
-		p.logger.Errorw("failed to persist action materialization failure", "runId", run.ID, "error", err)
-	} else if isTerminalAgentRunStatus(failed.Status) {
-		p.finalizeTerminalRun(ctx, failed)
-		p.projectTerminalReporting(ctx, failed)
-		p.resolveCollaborationChild(ctx, failed)
-	} else {
-		p.Wake()
-	}
 }
 
 func (p *AgentRunWorkerPool) projectTerminalReporting(ctx context.Context, run *AgentRun) {

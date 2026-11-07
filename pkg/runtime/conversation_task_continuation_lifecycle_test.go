@@ -218,7 +218,6 @@ func TestAgentRunWorkerContinuationAbsorbsNativeTaskProposal(t *testing.T) {
 		}
 		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Release review complete"}}, nil
 	}))
-	pool.config.MaxTurnsPerClaim = 2
 	pool.executeClaim(t.Context(), "worker", claimed)
 	finished, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
 	if err != nil || finished.Status != AgentRunStatusCompleted || modelCalls != 2 || finished.LastAppliedTurn != 2 {
@@ -296,51 +295,6 @@ func TestConversationRunReconcilerKeepsAgedRunsForeground(t *testing.T) {
 	}
 }
 
-func TestAgentRunWorkerStartsIndependentTaskWhenModelChoosesBackground(t *testing.T) {
-	for _, age := range []time.Duration{0, time.Minute} {
-		t.Run(age.String(), func(t *testing.T) {
-			store := NewMemoryStore()
-			run, conversation, trigger := continuationLifecycleFixture(t, store, "model-background")
-			if age > 0 {
-				run = backdateContinuationLifecycleRun(t, store, run, time.Now().Add(-age))
-			}
-			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindConversation, WorkerID: "worker", Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-			if err != nil || claimed == nil {
-				t.Fatalf("claim: %#v %v", claimed, err)
-			}
-			modelCalls := 0
-			proposal := taskProposalFixture()
-			pool := workerTaskPool(t, store, run.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				modelCalls++
-				return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: proposal}, nil
-			}))
-			pool.executeClaim(t.Context(), "worker", claimed)
-			completed, err := store.GetAgentRun(t.Context(), run.Scope, run.ID)
-			if err != nil || completed.Status != AgentRunStatusCompleted || completed.Output["summary"] != proposal.Acknowledgment || modelCalls != 1 {
-				t.Fatalf("model-selected task did not complete admission: %#v calls=%d err=%v", completed, modelCalls, err)
-			}
-			turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: run.Scope, RunID: run.ID})
-			if err != nil || len(turns) != 1 || turns[0].RequestedTask == nil {
-				t.Fatalf("model task decision was not durable: %#v %v", turns, err)
-			}
-			if _, err := pool.materializeTurnTask(t.Context(), "worker", completed, turns[0], &TurnRunnerBinding{DeploymentID: "agent"}); err != nil {
-				t.Fatalf("admission replay: %v", err)
-			}
-			tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: run.Scope, Owner: run.Owner, ConversationID: conversation.ID, Limit: 10})
-			if err != nil || len(tasks) != 1 {
-				t.Fatalf("model admission or replay duplicated background work: %#v %v", tasks, err)
-			}
-			task, work := tasks[0].Task, tasks[0].WorkRun
-			if task.Mode != ConversationTaskModeIndependent || task.SourceRunID != run.ID || task.WorkRunID == run.ID || task.AuthenticatedActor != trigger.Sender || work.ID != task.WorkRunID || work.Kind != RunKindAgentWork || work.ParentRunID != "" || work.RootRunID != work.ID || work.Status != AgentRunStatusQueued {
-				t.Fatalf("duration changed the model's independent task into a continuation: task=%#v work=%#v", task, work)
-			}
-			messages, err := store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: run.Scope, ConversationID: conversation.ID, Limit: 10})
-			if err != nil || len(messages) != 2 || messages[0].ID != trigger.ID || messages[1].Content != proposal.Acknowledgment {
-				t.Fatalf("background acknowledgment did not commit exactly once: %#v %v", messages, err)
-			}
-		})
-	}
-}
 
 type boundedContinuationStore struct {
 	runs     []*AgentRun
