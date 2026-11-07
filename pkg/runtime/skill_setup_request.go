@@ -69,12 +69,14 @@ type SkillSetupRequest struct {
 	EnablePrompt          bool     `json:"enablePrompt,omitempty"`
 	ID                    string   `json:"id"`
 	Scope                 Scope    `json:"scope"`
-	// Owner is the umbrella the connection is saved to: the Agent of a 1:1
-	// chat or the Team of a Team chat. DeploymentID is always Owner.ID.
+	// Owner is the Agent or Team the connection is saved to: the Agent of a
+	// 1:1 chat, the Team of a Team chat, or the Agent a builder acts for
+	// (targetAgentId). DeploymentID is always Owner.ID.
 	Owner        ObjectiveOwner `json:"owner"`
 	DeploymentID string         `json:"deploymentId"`
-	// AgentID is the acting member that asked; it is the Agent itself for an
-	// Agent owner.
+	// AgentID is the acting member that asked. For an Agent owner it is the
+	// Agent itself, unless a builder asked for another Agent: then it is the
+	// builder, whose own chat holds the card (ChatOwner).
 	AgentID          string `json:"agentId"`
 	ConversationID   string `json:"conversationId"`
 	TriggerMessageID string `json:"triggerMessageId"`
@@ -121,7 +123,7 @@ func (r *SkillSetupRequest) Validate() error {
 	if r.Scope.Validate() != nil {
 		return invalidSkillSetupField("scope", "must identify an authorized workspace")
 	}
-	if err := validateInteractionUmbrella(r.Owner, r.DeploymentID, r.AgentID); err != nil {
+	if err := validateInteractionUmbrella(r.Owner, r.DeploymentID, r.AgentID, true); err != nil {
 		return invalidSkillSetupField(err.Error(), "must name the umbrella and acting Agent")
 	}
 	if !validActingUser(r.RequestedFor) {
@@ -245,16 +247,44 @@ func validateConnectAccountSlots(slots []ConnectAccountSlot) error {
 
 // validateInteractionUmbrella checks the owner stamp shared by setup and
 // credential requests and returns the offending field.
-func validateInteractionUmbrella(owner ObjectiveOwner, deploymentID, agentID string) error {
+// validateInteractionUmbrella checks a request's owner and acting member.
+// targetable allows an Agent owner asked for by another Agent: a builder
+// acting for it from the builder's own chat.
+func validateInteractionUmbrella(owner ObjectiveOwner, deploymentID, agentID string, targetable bool) error {
 	switch {
 	case owner.Validate() != nil:
 		return errors.New("owner")
 	case deploymentID != owner.ID:
 		return errors.New("deploymentId")
-	case !validOpaqueIdentifier(agentID, 256), owner.Type == OwnerTypeAgent && agentID != owner.ID:
+	case !validOpaqueIdentifier(agentID, 256), owner.Type == OwnerTypeAgent && agentID != owner.ID && !targetable:
 		return errors.New("agentId")
 	}
 	return nil
+}
+
+// interactionChatOwner is the umbrella of the chat an in-chat request was
+// made in, whose Run it resumes: owner, except for a request a builder made
+// for another Agent, which is in the builder's own 1:1 chat.
+func interactionChatOwner(owner ObjectiveOwner, agentID string) ObjectiveOwner {
+	if owner.Type == OwnerTypeAgent && agentID != "" && agentID != owner.ID {
+		return ObjectiveOwner{Type: OwnerTypeAgent, ID: agentID}
+	}
+	return owner
+}
+
+// ChatOwner is the umbrella of the chat the request's card is in and whose
+// Run it resumes. It is Owner, except for a request a builder made for
+// another Agent (targetAgentId): that card is in the builder's own chat.
+func (r *SkillSetupRequest) ChatOwner() ObjectiveOwner {
+	if r == nil {
+		return ObjectiveOwner{}
+	}
+	return interactionChatOwner(r.Owner, r.AgentID)
+}
+
+// Targeted reports a request a builder made for another Agent.
+func (r *SkillSetupRequest) Targeted() bool {
+	return r != nil && r.ChatOwner() != r.Owner
 }
 
 type SkillSetupRequestStore interface {

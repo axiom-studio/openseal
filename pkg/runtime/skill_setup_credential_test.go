@@ -34,7 +34,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 			run.Context = map[string]interface{}{"conversationId": "chat", "triggerMessageId": "message"}
 			before, _ := catalog.ListBindings(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "agent")
 			if tc.allowed {
-				_, invalidErr := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "invalid-action", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect", "requiredActions": []interface{}{"binding_configuration"}}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+				_, invalidErr := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "invalid-action", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect", "requiredActions": []interface{}{"binding_configuration"}}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 				if invalidErr == nil {
 					t.Fatal("configuration requirement accepted as an action")
 				}
@@ -44,7 +44,7 @@ func TestCredentialBlockedSkillCanRequestSetupWithoutGrantingAccess(t *testing.T
 				}
 			}
 
-			result, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "call", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect the requested integration"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+			result, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "call", Scope: scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "1.0.0", "reason": "Connect the requested integration"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 			if (err == nil) != tc.allowed {
 				t.Fatalf("allowed=%v result=%v err=%v", tc.allowed, result, err)
 			}

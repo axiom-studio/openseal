@@ -636,7 +636,7 @@ func TestSkillSetupTaskRequestRequiresPersistedActionAndListRejectsCopiedContext
 		}
 		if _, err := dispatcher.requestSkillSetup(t.Context(), ActionDispatchInput{
 			Call: &ActionCall{ID: "model-invented-action", Scope: run.Scope, RunID: run.ID}, Arguments: cloneMap(f.call.Arguments),
-		}, run, run.AssignedAgentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}); err == nil {
+		}, run, run.AssignedAgentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}); err == nil {
 			t.Fatal("unpersisted action was allowed to create a task setup request")
 		}
 		persisted, err := store.ListSkillSetupRequests(t.Context(), run.Scope, run.AssignedAgentID, f.request.ConversationID)

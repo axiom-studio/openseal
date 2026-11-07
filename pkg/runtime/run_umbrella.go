@@ -116,8 +116,10 @@ func OwnerOfSkillUmbrella(umbrella skill.Umbrella) ObjectiveOwner {
 
 // InteractionRunResumable reports whether a settled setup, connection or
 // credential request may resume run: the run still acts as agentID under the
-// same umbrella. A member removed from its Team, or a Team that is no longer
-// active, makes the request settle without resuming anything.
+// umbrella of the chat the request was made in (owner, or the builder's own
+// chat for a request it made for another Agent). A member removed from its
+// Team, or a Team that is no longer active, makes the request settle without
+// resuming anything.
 func InteractionRunResumable(ctx context.Context, roster TeamRosterReader, run *AgentRun, owner ObjectiveOwner, agentID string) (bool, error) {
 	if run == nil || run.AssignedAgentID != agentID {
 		return false, nil
@@ -126,5 +128,5 @@ func InteractionRunResumable(ctx context.Context, roster TeamRosterReader, run *
 	if errors.Is(err, ErrRunUmbrellaUnavailable) {
 		return false, nil
 	}
-	return err == nil && umbrella == owner, err
+	return err == nil && umbrella == interactionChatOwner(owner, agentID), err
 }

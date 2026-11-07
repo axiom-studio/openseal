@@ -203,7 +203,7 @@ func TestRepeatedRefusedSetupIsNotRetriedInTheSameRun(t *testing.T) {
 	refused := &ActionCall{ID: "refused", Scope: scope, RunID: run.ID, DeploymentID: "agent", SkillID: SkillManagementSkillID, Action: SkillActionRequestSetup,
 		Status: ActionCallStatusSucceeded, Arguments: args, Output: interactionRequestRefusalResult(refuseInteraction("not available"))}
 	store.actions[portfolioKey(scope, refused.ID)] = refused
-	_, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+	_, err := dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: "retry"}, Arguments: args}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	var refusal *interactionRequestRefusal
 	if !errors.As(err, &refusal) {
 		t.Fatalf("repeated refused setup: %v", err)

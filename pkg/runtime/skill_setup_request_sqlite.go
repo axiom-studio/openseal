@@ -8,7 +8,10 @@ import (
 )
 
 func migrateSkillSetupRequests(db *sql.DB) error {
-	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS skill_setup_requests (scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL, deployment_id TEXT NOT NULL, conversation_id TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL, created_at DATETIME NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope_kind,scope_id,id))`)
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS skill_setup_requests (scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL, deployment_id TEXT NOT NULL, conversation_id TEXT NOT NULL, status TEXT NOT NULL, revision INTEGER NOT NULL, created_at DATETIME NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(scope_kind,scope_id,id))`); err != nil {
+		return err
+	}
+	_, err := db.Exec(`CREATE INDEX IF NOT EXISTS skill_setup_requests_chat_idx ON skill_setup_requests(scope_kind,scope_id,conversation_id,created_at)`)
 	return err
 }
 func (s *SQLiteStore) GetSkillSetupRequest(ctx context.Context, scope Scope, id string) (*SkillSetupRequest, error) {
@@ -28,10 +31,10 @@ func (s *SQLiteStore) GetSkillSetupRequest(ctx context.Context, scope Scope, id 
 	return &r, err
 }
 func (s *SQLiteStore) ListSkillSetupRequests(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*SkillSetupRequest, error) {
-	if scope.Validate() != nil || deploymentID == "" || conversationID == "" {
+	if scope.Validate() != nil || conversationID == "" {
 		return nil, ErrInvalidSkillSetup
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM skill_setup_requests WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND conversation_id=? ORDER BY created_at,id`, scope.Kind, scope.ID, deploymentID, conversationID)
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM skill_setup_requests WHERE scope_kind=? AND scope_id=? AND (?='' OR deployment_id=?) AND conversation_id=? ORDER BY created_at,id`, scope.Kind, scope.ID, deploymentID, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
 	}

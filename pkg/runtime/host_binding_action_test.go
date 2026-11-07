@@ -276,7 +276,7 @@ func TestSkillSetupDefersToAConnectedApp(t *testing.T) {
 	}
 	setup := func(callID, skillID string, run *AgentRun) (map[string]interface{}, error) {
 		return dispatcher.requestSkillSetup(ctx, ActionDispatchInput{Call: &ActionCall{ID: callID, Scope: scope, RunID: run.ID},
-			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+			Arguments: map[string]interface{}{"kind": "configure", "skillId": skillID, "skillVersion": "latest", "reason": "File a ticket"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 	}
 	_, err = setup("call-linear", "linear", run)
 	var refusal *interactionRequestRefusal

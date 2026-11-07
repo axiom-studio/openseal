@@ -62,7 +62,7 @@ type CredentialRequest struct {
 
 func (r *CredentialRequest) Validate() error {
 	if r == nil || r.Scope.Validate() != nil || r.Revision < 1 || r.CreatedAt.IsZero() || r.UpdatedAt.Before(r.CreatedAt) ||
-		validateInteractionUmbrella(r.Owner, r.DeploymentID, r.AgentID) != nil {
+		validateInteractionUmbrella(r.Owner, r.DeploymentID, r.AgentID, false) != nil {
 		return ErrInvalidCredentialRequest
 	}
 	for _, value := range []string{r.ID, r.DeploymentID, r.ConversationID, r.TriggerMessageID, r.RunID, r.ActionCallID} {

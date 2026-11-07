@@ -18,8 +18,9 @@ type conversationApprovalStore interface {
 }
 
 // SkillSetupRequestReader lists one agent conversation's Skill setup
-// requests. Hosts may supply a reader that first reconciles pending requests
-// against saved bindings, so the projection never shows completed setup.
+// requests saved to deploymentID, or to any deployment when it is empty.
+// Hosts may supply a reader that first reconciles pending requests against
+// saved bindings, so the projection never shows completed setup.
 type SkillSetupRequestReader func(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*SkillSetupRequest, error)
 
 // SetSkillSetupRequestReader replaces the store read used for the
@@ -128,14 +129,15 @@ func (s *ConversationChangeService) listConversationSkillSetupRequests(ctx conte
 	if s.skillSetups == nil || conversation == nil {
 		return []*ConversationSkillSetupRequest{}, nil
 	}
-	// Every request in a conversation is saved to its umbrella.
-	stored, err := s.skillSetups(ctx, conversation.Scope, conversation.Owner.ID, conversation.ID)
+	// A request in a conversation is saved to its umbrella, or to the Agent
+	// the conversation's builder acted for; both cards are in this chat.
+	stored, err := s.skillSetups(ctx, conversation.Scope, "", conversation.ID)
 	if err != nil {
 		return nil, err
 	}
 	candidates := make([]*SkillSetupRequest, 0, len(stored))
 	for _, request := range stored {
-		if request != nil && request.Scope == conversation.Scope && request.Owner == conversation.Owner && request.ConversationID == conversation.ID {
+		if request != nil && request.Scope == conversation.Scope && request.ChatOwner() == conversation.Owner && request.ConversationID == conversation.ID {
 			candidates = append(candidates, cloneSkillSetupRequest(request))
 		}
 	}

@@ -3544,6 +3544,7 @@ func (e *Engine) configureSkillManagementActions() error {
 	if err != nil {
 		return err
 	}
+	validator.UseAgentRegistry(e.agents)
 	e.actionValidators = append(e.actionValidators, validator)
 	if e.appCatalog == nil {
 		e.appCatalog = &runtime.AppCatalogRef{}
@@ -3554,6 +3555,7 @@ func (e *Engine) configureSkillManagementActions() error {
 			return dispatchErr
 		}
 		dispatcher.UseAppCatalog(e.appCatalog)
+		dispatcher.UseAgentRegistry(e.agents)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
 	}
 	for index := range e.actionSupervisorSpecs {
@@ -3562,6 +3564,7 @@ func (e *Engine) configureSkillManagementActions() error {
 			return dispatchErr
 		}
 		dispatcher.UseAppCatalog(e.appCatalog)
+		dispatcher.UseAgentRegistry(e.agents)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
 	return nil

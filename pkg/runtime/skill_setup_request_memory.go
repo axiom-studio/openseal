@@ -22,14 +22,14 @@ func (s *MemoryStore) GetSkillSetupRequest(_ context.Context, scope Scope, id st
 	return cloneSkillSetupRequest(s.skillSetupRequests[portfolioKey(scope, id)]), nil
 }
 func (s *MemoryStore) ListSkillSetupRequests(_ context.Context, scope Scope, deploymentID, conversationID string) ([]*SkillSetupRequest, error) {
-	if scope.Validate() != nil || deploymentID == "" || conversationID == "" {
+	if scope.Validate() != nil || conversationID == "" {
 		return nil, ErrInvalidSkillSetup
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := []*SkillSetupRequest{}
 	for _, r := range s.skillSetupRequests {
-		if r.Scope == scope && r.DeploymentID == deploymentID && r.ConversationID == conversationID {
+		if r.Scope == scope && (deploymentID == "" || r.DeploymentID == deploymentID) && r.ConversationID == conversationID {
 			result = append(result, cloneSkillSetupRequest(r))
 		}
 	}
