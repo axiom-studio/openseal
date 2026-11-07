@@ -45,6 +45,7 @@ type TurnRunnerBinding struct {
 	Final       FinalAnswerHandler   // CONV-08 for chats, runOutputFinalHandler otherwise
 	FinalOutput FinalOutputPublisher // nil = none
 	Host        StepHost
+	Authority   ControlAuthority   // section 04 §4, incl. the conversation flags of section 05 §7
 	Prompt      PromptContribution // kernel-authored system parts from the owning section
 	ToolCheck   ToolCallCheck      // optional (conversation CheckToolCall)
 	AfterTool   AfterToolEntryHook // optional (conversation artifact receipts)
