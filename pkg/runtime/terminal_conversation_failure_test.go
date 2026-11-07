@@ -56,6 +56,7 @@ func failTerminalConversation(t *testing.T, store terminalReportingContractStore
 	failed, _, err := activity.TransitionRun(t.Context(), run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: running.Revision, Status: AgentRunStatusFailed,
 		Error: "private-provider-diagnostic token=NEVER-PUBLISH", Checkpoint: checkpointTerminalFailure(run.Checkpoint, code),
+		FailureExplanation: &RunFailureExplanation{Kind: "execution", Code: terminalFailureCode(code), Message: "The requested work did not complete."},
 	})
 	if err != nil {
 		t.Fatal(err)
