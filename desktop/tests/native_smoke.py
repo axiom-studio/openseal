@@ -64,86 +64,252 @@ def close_native_window(window):
         x11.XCloseDisplay(display)
 
 
+# Kernel tool names (pkg/runtime/control_tools.go, control_delegate.go). They
+# must equal desktop/tests/fixtures/loop-provider.ts; one place to change here.
+FINAL_TOOL = 'turn_final_answer'
+DELEGATE_TOOL = 'agent_delegate'
+DELEGATE_REPLY_TOOL = 'agent_delegate_reply'
+REQUEST_DECISION_TOOL = 'agent_request_decision'
+COMPLETION_REVIEW_TOOL = 'agent_request_review'
+AUTHORING_TOOL = 'submit_authoring_intent'
+# The desktop Team router's forced tool (internal/daemon/conversation_provider.go).
+ROUTE_TOOL = 'route_message'
+# Kernel notes reach the provider as user messages with this prefix
+# (internal/daemon/openai_render.go).
+NOTE_PREFIX = 'Note from OpenSeal: '
+
+ANALYSIS_GOAL = 'Analyze the supplied evidence and note uncertainty.'
+GUIDANCE_GOAL = 'Wait for native guidance'
+GUIDANCE = 'Explain uncertainty before concluding.'
+HELD_GOAL = 'Wait for native cancellation'
+CLARIFICATION_GOAL = 'Native clarification review.'
+CLARIFICATION_QUESTION = 'Which reporting period should I use?'
+CLARIFICATION_GUIDANCE = 'July reporting period'
+CLARIFICATION_ANSWER = 'Use the July reporting period.'
+CHANNEL_MESSAGE = 'Review this new evidence with the team.'
+TASK_ANSWER = 'Native task completed with uncertainty noted.'
+GUIDED_ANSWER = 'Native guidance considered: uncertainty explained.'
+INITIAL_ANSWER = 'Native initial answer.'
+CHANNEL_REPLY = 'Native team reply: verify the source and preserve uncertainty.'
+ANALYSIS_FILE = {'name': 'native-analysis.md', 'mediaType': 'text/markdown', 'text': '# Native analysis\nUncertainty remains explicit.\n'}
+
+
+class Fixture:
+    """A fake OpenAI-compatible Chat Completions provider that speaks the run
+    loop. The daemon's step host sends one request per model step: the system
+    prompt and the Run's session path as `messages`, the kernel's tools as
+    `tools`, and expects one assistant message back (text and/or tool_calls).
+    Authoring requests offer submit_authoring_intent as their first tool."""
+
+    def __init__(self):
+        self.url = ''
+        self.calls = []
+        # A handler failure (a failed check) answers HTTP 500 and is recorded
+        # here, so the smoke can assert none happened.
+        self.errors = []
+        self.held_turn = threading.Event()
+        self.release_turn = threading.Event()
+        self.guidance_started = threading.Event()
+        self.release_guidance = threading.Event()
+        self.clarification_started = threading.Event()
+        self.release_clarification = threading.Event()
+        self.intake_seen = set()
+        self.lock = threading.Lock()
+        self.replies = 0
+
+    @staticmethod
+    def is_authoring(r):
+        tools = r.get('tools') or []
+        return bool(tools) and tools[0]['function']['name'] == AUTHORING_TOOL
+
+    @staticmethod
+    def tool(r, name):
+        return next((t for t in r.get('tools') or [] if t['function']['name'] == name), None)
+
+    @staticmethod
+    def has_tool(r, name):
+        return Fixture.tool(r, name) is not None
+
+    @staticmethod
+    def user_texts(r):
+        # All role:user contents in order, kernel notes included.
+        return [m['content'] if isinstance(m.get('content'), str) else '' for m in r['messages'] if m['role'] == 'user']
+
+    @staticmethod
+    def first_user_text(r):
+        # The Run goal for a task Run, whose session is seeded with it.
+        return next((t for t in Fixture.user_texts(r) if not t.startswith(NOTE_PREFIX)), '')
+
+    @staticmethod
+    def last_user_text(r):
+        # The newest message of a chat step (the run_context note follows it).
+        texts = [t for t in Fixture.user_texts(r) if not t.startswith(NOTE_PREFIX)]
+        return texts[-1] if texts else ''
+
+    @staticmethod
+    def tool_results(r, *names):
+        # Contents of the role:tool messages that answer calls of `names`.
+        ids = {call['id'] for m in r['messages'] for call in m.get('tool_calls') or [] if call['function']['name'] in names}
+        return [m.get('content') or '' for m in r['messages'] if m['role'] == 'tool' and m.get('tool_call_id') in ids]
+
+    def reply(self, text=None, calls=()):
+        # One choice: finish_reason tool_calls when there are calls, stop
+        # otherwise. Call ids are "fx-<n>", unique across the fixture.
+        tool_calls = []
+        with self.lock:
+            for name, args in calls:
+                self.replies += 1
+                tool_calls.append({'id': f'fx-{self.replies}', 'type': 'function', 'function': {'name': name, 'arguments': json.dumps(args)}})
+        message = {'role': 'assistant', 'content': text}
+        if tool_calls:
+            message['tool_calls'] = tool_calls
+        return {'choices': [{'finish_reason': 'tool_calls' if tool_calls else 'stop', 'message': message}], 'usage': {'prompt_tokens': 100, 'completion_tokens': 80}}
+
+    def final(self, r, answer, files=False):
+        args = {'answer': answer}
+        if files:
+            properties = Fixture.tool(r, FINAL_TOOL)['function']['parameters'].get('properties', {})
+            assert 'generatedFiles' in properties, 'generatedFiles is not offered on the final answer tool'
+            args['generatedFiles'] = [ANALYSIS_FILE]
+        return self.reply(calls=[(FINAL_TOOL, args)])
+
+    def loop_calls(self, goal):
+        # Model steps of one task, by its goal (authoring and tool-free calls excluded).
+        return [r for r in list(self.calls) if not Fixture.is_authoring(r) and r.get('tools') and goal in Fixture.first_user_text(r)]
+
+    def latest_delegation(self, r):
+        # The newest agent_delegate or agent_delegate_reply result: the
+        # delegated request's state as the coordinator last saw it.
+        results = Fixture.tool_results(r, DELEGATE_TOOL, DELEGATE_REPLY_TOOL)
+        if not results:
+            return None
+        try:
+            return json.loads(results[-1])
+        except ValueError:
+            # A refused call renders as "Error: ..." text, not a JSON result.
+            return {'requestId': '', 'status': 'error', 'answer': results[-1]}
+
+    def authoring(self, r):
+        intent = {'schemaVersion': 'openseal.authoring-intent/v4', 'kind': 'agent', 'name': 'Native analyst', 'purpose': 'Analyze supplied evidence', 'agents': [{'key': 'native-analyst', 'name': 'Native analyst', 'purpose': 'Analyze supplied evidence', 'behavior': 'Analyze accurately and report uncertainty.'}]}
+        if json.loads(r['messages'][1]['content'])['prompt'].startswith('Create one team.'):
+            intent = {'schemaVersion': 'openseal.authoring-intent/v4', 'kind': 'team', 'name': 'Native evidence team', 'purpose': 'Review supplied evidence together.',
+                      'agents': [{'key': 'native-team-researcher', 'name': 'Native team researcher', 'purpose': 'Find evidence.', 'behavior': 'Cite evidence and report uncertainty.'},
+                                 {'key': 'native-team-reviewer', 'name': 'Native team reviewer', 'purpose': 'Check evidence.', 'behavior': 'Review evidence independently.'}],
+                      'team': {'key': 'native-evidence', 'name': 'Native evidence team', 'purpose': 'Review supplied evidence together.', 'operatingPrinciples': ['Keep uncertainty explicit.'],
+                               'roles': [{'key': 'research', 'name': 'Research', 'purpose': 'Find evidence.', 'agentKeys': ['native-team-researcher'], 'canSpeakInChannels': True},
+                                         {'key': 'review', 'name': 'Review', 'purpose': 'Check findings.', 'agentKeys': ['native-team-reviewer'], 'canSpeakInChannels': False}]}}
+        return self.reply(calls=[(AUTHORING_TOOL, intent)])
+
+    def coordinate(self, r):
+        # T1-T5: the lead delegates, answers the recipient's question once
+        # the human has guided it, and finishes once the result is reviewed.
+        assert Fixture.has_tool(r, DELEGATE_TOOL), 'coordinator step does not offer agent_delegate'
+        delegation = self.latest_delegation(r)
+        if delegation is None:
+            targets = Fixture.tool(r, DELEGATE_TOOL)['function']['parameters']['properties']['agentId']['enum']
+            return self.reply(text='Asking the reviewer to check the reporting evidence.', calls=[(DELEGATE_TOOL, {'agentId': targets[0], 'goal': 'Check the supplied reporting evidence.'})])
+        if delegation['status'] == 'clarification_requested':
+            assert delegation.get('question') == CLARIFICATION_QUESTION, delegation
+            if not any(CLARIFICATION_GUIDANCE in text for text in Fixture.user_texts(r)):
+                # T3: hold until the smoke saves guidance. The kernel re-checks
+                # interventions before it accepts this final answer (D8) and
+                # calls again with the guidance in the session.
+                self.clarification_started.set()
+                self.release_clarification.wait(60)
+                return self.final(r, 'Waiting for the reporting period.')
+            return self.reply(calls=[(DELEGATE_REPLY_TOOL, {'requestId': delegation['requestId'], 'answer': CLARIFICATION_ANSWER})])
+        assert delegation['status'] == 'completed', delegation
+        return self.final(r, TASK_ANSWER)
+
+    def guided(self, r):
+        # P2: hold the first step until the smoke saves guidance; the kernel
+        # turns its final answer down and calls again with the guidance after
+        # that call and its tool reply (D8).
+        if not any(GUIDANCE in text for text in Fixture.user_texts(r)):
+            self.guidance_started.set()
+            self.release_guidance.wait(30)
+            return self.final(r, INITIAL_ANSWER)
+        messages = r['messages']
+        final_at = next(i for i, m in enumerate(messages) if m['role'] == 'assistant' and any(c['function']['name'] == FINAL_TOOL for c in m.get('tool_calls') or []))
+        reply_at = next(i for i, m in enumerate(messages) if i > final_at and m['role'] == 'tool')
+        assert any(i > reply_at and m['role'] == 'user' and GUIDANCE in (m.get('content') or '') for i, m in enumerate(messages)), 'guidance does not follow the turned-down final answer'
+        return self.final(r, GUIDED_ANSWER)
+
+    def handle(self, r):
+        if Fixture.is_authoring(r):
+            return self.authoring(r)
+        assert r.get('tools'), 'unexpected tool-free model step'
+        # T2: the recipient's intake decision asks once, and accepts once the
+        # coordinator's answer is in its session.
+        if Fixture.has_tool(r, REQUEST_DECISION_TOOL):
+            key = Fixture.first_user_text(r)
+            with self.lock:
+                answered = key in self.intake_seen or any(CLARIFICATION_ANSWER in text for text in Fixture.user_texts(r))
+                self.intake_seen.add(key)
+            decision = {'decision': 'accept', 'message': 'Scope is clear.'} if answered else {'decision': 'request_clarification', 'message': CLARIFICATION_QUESTION}
+            return self.reply(calls=[(REQUEST_DECISION_TOOL, decision)])
+        # T4: the coordinator's review of the delegated result.
+        if Fixture.has_tool(r, COMPLETION_REVIEW_TOOL):
+            return self.reply(calls=[(COMPLETION_REVIEW_TOOL, {'decision': 'approve', 'message': 'The result meets the stated scope.'})])
+        # The desktop Team router picks the member for a channel message.
+        if Fixture.has_tool(r, ROUTE_TOOL):
+            members = Fixture.tool(r, ROUTE_TOOL)['function']['parameters']['properties']['agentId']['enum']
+            return self.reply(calls=[(ROUTE_TOOL, {'agentId': members[0], 'reason': 'finds evidence'})])
+        assert Fixture.has_tool(r, FINAL_TOOL), 'model step does not offer turn_final_answer'
+        goal = Fixture.first_user_text(r)
+        if CHANNEL_MESSAGE in Fixture.last_user_text(r):
+            # A channel member's step: plain text is its final answer (D5).
+            return self.reply(text=CHANNEL_REPLY)
+        if GUIDANCE_GOAL in goal:
+            return self.guided(r)
+        if HELD_GOAL in goal:
+            self.held_turn.set()
+            self.release_turn.wait(30)
+            return self.final(r, TASK_ANSWER)
+        # The lead's own Run; the delegated child's brief starts "Requested work.".
+        if CLARIFICATION_GOAL in goal and not goal.startswith('Requested work.'):
+            return self.coordinate(r)
+        # P1 and every other task step (team work, the delegated check).
+        return self.final(r, TASK_ANSWER, files=ANALYSIS_GOAL in goal)
+
+    def release(self):
+        self.release_turn.set()
+        self.release_guidance.set()
+        self.release_clarification.set()
+
+
 @contextmanager
 def model_fixture():
-    held_turn = threading.Event()
-    release_turn = threading.Event()
-    guidance_started = threading.Event()
-    release_guidance = threading.Event()
-    intake_seen = set()
+    fixture = Fixture()
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
         def do_POST(self):
-            payload = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-            tool_name = payload['tools'][0]['function']['name']
-            assert tool_name in ('submit_authoring_intent', 'submit_agent_turn', 'submit_channel_contribution')
-            intent = {'schemaVersion': 'openseal.authoring-intent/v4', 'kind': 'agent', 'name': 'Native analyst', 'purpose': 'Analyze supplied evidence', 'agents': [{'key': 'native-analyst', 'name': 'Native analyst', 'purpose': 'Analyze supplied evidence', 'behavior': 'Analyze accurately and report uncertainty.'}]}
-            if tool_name == 'submit_authoring_intent' and json.loads(payload['messages'][1]['content'])['prompt'].startswith('Create one team.'):
-                intent = {'schemaVersion': 'openseal.authoring-intent/v4', 'kind': 'team', 'name': 'Native evidence team', 'purpose': 'Review supplied evidence together.',
-                          'agents': [{'key': 'native-team-researcher', 'name': 'Native team researcher', 'purpose': 'Find evidence.', 'behavior': 'Cite evidence and report uncertainty.'}],
-                          'team': {'key': 'native-evidence', 'name': 'Native evidence team', 'purpose': 'Review supplied evidence together.', 'operatingPrinciples': ['Keep uncertainty explicit.'], 'roles': [{'key': 'research', 'name': 'Research', 'purpose': 'Find evidence.', 'agentKeys': ['native-team-researcher'], 'canSpeakInChannels': True}]}}
-            if tool_name == 'submit_authoring_intent' and intent.get('kind') == 'team':
-                intent['agents'].append({'key': 'native-team-reviewer', 'name': 'Native team reviewer', 'purpose': 'Check evidence.', 'behavior': 'Review evidence independently.'})
-                intent['team']['roles'].append({'key': 'review', 'name': 'Review', 'purpose': 'Check findings.', 'agentKeys': ['native-team-reviewer'], 'canSpeakInChannels': False})
-            if tool_name == 'submit_agent_turn':
-                task_input = json.loads(payload['messages'][1]['content'])
-                guided = task_input['goal'] == 'Wait for native guidance'
-                if guided:
-                    if not task_input.get('pendingInterventions'):
-                        guidance_started.set()
-                        release_guidance.wait(30)
-                    else:
-                        assert task_input['pendingInterventions'][0]['instruction'] == 'Explain uncertainty before concluding.'
-                if json.loads(payload['messages'][1]['content'])['goal'] == 'Wait for native cancellation':
-                    held_turn.set()
-                    release_turn.wait(30)
-                intent = {'schemaVersion': 'openseal.hosted-turn-form/v1', 'nextRunStatus': 'completed', 'outputSummary': 'Analysis complete', 'runOutput': {'reply': 'Native task completed with uncertainty noted.', 'generatedFiles': [{'name': 'native-analysis.md', 'mediaType': 'text/markdown', 'text': '# Native analysis\nUncertainty remains explicit.\n'}]}}
-            if tool_name == 'submit_agent_turn' and guided and task_input.get('pendingInterventions'):
-                intent['runOutput']['reply'] = 'Native guidance considered: uncertainty explained.'
-            if tool_name == 'submit_agent_turn':
-                context_input = task_input.get('inputContext', {})
-                checkpoint = task_input.get('continuationCheckpoint', {})
-                if context_input.get('agentRequestInbox'):
-                    request_id = context_input['agentRequestInbox']['requestId']
-                    seen = request_id in intake_seen
-                    intake_seen.add(request_id)
-                    intent['runOutput'] = {'agentRequestDecision': {'decision': 'accept' if seen else 'request_clarification', 'message': 'Scope is clear.' if seen else 'Which reporting period should I use?'}}
-                elif context_input.get('agentRequestCompletionReview'):
-                    intent['runOutput'] = {'agentRequestCompletionReviewDecision': {'decision': 'approve', 'message': 'The result meets the stated scope.'}}
-                elif task_input['goal'] == 'Native clarification review.' and not checkpoint.get('clarified'):
-                    intent['runOutput'] = {}
-                    if checkpoint.get('delegated') and not task_input.get('pendingInterventions'):
-                        intent['nextRunStatus'] = 'paused'
-                        intent['continuationCheckpoint'] = {'delegated': True}
-                    else:
-                        intent['nextRunStatus'] = 'running'
-                        clarified = bool(task_input.get('pendingInterventions'))
-                        if clarified:
-                            assert 'July reporting period' in task_input['pendingInterventions'][0]['instruction']
-                        intent['continuationCheckpoint'] = {'delegated': True, 'clarified': clarified}
-                        budget = dict(task_input['budget']['minimumChild'])
-                        if not clarified:
-                            budget.update({'maxTurns': 6, 'maxAttempts': 8, 'maxTotalTokens': max(64000, budget.get('maxTotalTokens', 0))})
-                        intent['proposedDelegation'] = {'stepId': 'native-check', 'assignedAgentId': task_input['eligibleAgents'][0]['id'], 'goal': 'Check the supplied reporting evidence.', 'checkpoint': {}, 'budget': budget}
-                        if clarified:
-                            intent['proposedDelegation']['clarification'] = 'Use the July reporting period.'
-            if tool_name == 'submit_channel_contribution':
-                intent = {'wantsToSpeak': True, 'content': 'Native team reply: verify the source and preserve uncertainty.', 'roleRelevant': True, 'hasNewInformation': True}
-            response = json.dumps({'choices': [{'finish_reason': 'tool_calls', 'message': {'tool_calls': [{'id': 'native-fixture', 'type': 'function', 'function': {'name': tool_name, 'arguments': json.dumps(intent)}}]}}]}).encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(response)))
-            self.end_headers()
-            self.wfile.write(response)
+            status, body = 500, {'error': {'message': 'fixture failure'}}
+            try:
+                request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                fixture.calls.append(request)
+                status, body = 200, fixture.handle(request)
+            except Exception as error:  # recorded and asserted empty by main()
+                fixture.errors.append(f'{type(error).__name__}: {error}')
+                body = {'error': {'message': str(error)}}
+            response = json.dumps(body).encode()
+            try:
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+            except OSError:
+                pass  # the daemon gave up on this step (cancellation)
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
+    fixture.url = f'http://127.0.0.1:{server.server_port}/v1'
     try:
-        yield f'http://127.0.0.1:{server.server_port}/v1', held_turn, release_turn, guidance_started, release_guidance
+        yield fixture
     finally:
-        release_turn.set()
-        release_guidance.set()
+        fixture.release()
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
@@ -153,7 +319,7 @@ def main():
     driver_path = shutil.which('tauri-driver') or str(Path.home() / '.cargo/bin/tauri-driver')
     port, native_port = free_port(), free_port()
     with model_fixture() as fixture, tempfile.TemporaryDirectory(prefix='openseal-native-smoke-') as directory:
-        provider_url, held_turn, release_turn, guidance_started, release_guidance = fixture
+        provider_url = fixture.url
         env = {**os.environ, 'XDG_DATA_HOME': directory, 'XDG_CONFIG_HOME': directory + '/config', 'WEBKIT_DISABLE_DMABUF_RENDERER': '1', 'GDK_BACKEND': 'x11', 'GDK_SCALE': '1', 'GDK_DPI_SCALE': '1', 'GTK_USE_PORTAL': '0'}
         env.pop('WAYLAND_DISPLAY', None)
         driver = subprocess.Popen([driver_path, '--port', str(port), '--native-port', str(native_port)], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -290,33 +456,36 @@ def main():
             fill('textarea#prompt', 'Analyze the supplied evidence and note uncertainty.')
             execute("document.querySelector('form button[type=submit]').click(); return true")
             until("return document.querySelector('.inspector')?.innerText.includes('Native task completed with uncertainty noted.')")
+            assert len(fixture.loop_calls(ANALYSIS_GOAL)) == 1, 'P1 analysis took more than one model step'
             execute('document.activeElement?.blur(); window.scrollTo(0, 0); return true')
             (output.parent / 'work-result-native-linux.png').write_bytes(base64.b64decode(call('/session/' + session + '/screenshot')))
             execute("[...document.querySelectorAll('nav button')].find(b=>b.textContent.trim().startsWith('Home')).click(); return true")
             until("return !!document.querySelector('textarea#prompt')")
             fill('textarea#prompt', 'Wait for native guidance')
             execute("document.querySelector('form button[type=submit]').click(); return true")
-            assert guidance_started.wait(10), 'Native guidance task did not reach provider'
+            assert fixture.guidance_started.wait(10), 'Native guidance task did not reach provider'
             until("return [...document.querySelectorAll('.work-guidance button')].some(b=>b.textContent==='Add guidance')")
             execute("[...document.querySelectorAll('.work-guidance button')].find(b=>b.textContent==='Add guidance').click(); return true")
             fill('.work-guidance textarea', 'Explain uncertainty before concluding.')
             execute("document.querySelector('.work-guidance button[type=submit]').click(); return true")
             until("return document.querySelector('.work-guidance')?.innerText.includes('Guidance saved in this task')")
-            release_guidance.set()
+            fixture.release_guidance.set()
             until("return document.querySelector('.inspector')?.innerText.includes('Native guidance considered: uncertainty explained.')")
+            assert not execute("return document.querySelector('.inspector').innerText.includes('Native initial answer.')"), 'turned-down answer was shown'
+            assert len(fixture.loop_calls(GUIDANCE_GOAL)) == 2, 'P2 guidance should take exactly two model steps'
             execute("document.querySelector('.work-guidance details summary').click(); document.querySelector('.work-guidance').scrollIntoView(); return true")
             (output.parent / 'work-guidance-native-linux.png').write_bytes(base64.b64decode(call('/session/' + session + '/screenshot')))
             execute("[...document.querySelectorAll('nav button')].find(b=>b.textContent.trim().startsWith('Home')).click(); return true")
             until("return !!document.querySelector('textarea#prompt')")
             fill('textarea#prompt', 'Wait for native cancellation')
             execute("document.querySelector('form button[type=submit]').click(); return true")
-            assert held_turn.wait(10), 'Native task did not reach the model'
+            assert fixture.held_turn.wait(10), 'Native task did not reach the model'
             until("return document.querySelector('.inspector')?.innerText.includes('Running')")
             execute("[...document.querySelectorAll('.inspector button')].find(b=>b.textContent.trim()==='Cancel work').click(); return true")
             until("return document.activeElement?.textContent.trim()==='Confirm cancellation'")
             execute("[...document.querySelectorAll('.inspector button')].find(b=>b.textContent.trim()==='Confirm cancellation').click(); return true")
             until("return document.querySelector('.inspector')?.innerText.includes('Work canceled. Saved results remain available.')")
-            release_turn.set()
+            fixture.release_turn.set()
             execute('document.activeElement?.blur(); window.scrollTo(0, 0); return true')
             (output.parent / 'work-cancel-native-linux.png').write_bytes(base64.b64decode(call('/session/' + session + '/screenshot')))
             execute("[...document.querySelectorAll('.inspector button')].find(b=>b.textContent.trim()==='Review a new attempt').click(); return true")
@@ -536,6 +705,7 @@ def main():
             fill('.channel-thread textarea', 'Review this new evidence with the team.')
             execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Post message').click(); return true")
             until("return document.querySelector('.channel-thread')?.innerText.includes('Native team reply: verify the source and preserve uncertainty.')")
+            assert len([r for r in fixture.calls if Fixture.has_tool(r, FINAL_TOOL) and CHANNEL_MESSAGE in Fixture.last_user_text(r)]) == 1, 'channel message should get one member step'
             execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Disable team replies').click(); return true")
             until("return document.querySelector('.channel-settings')?.innerText.includes('Team replies are off.')")
             execute("document.querySelector('.channel-settings .channel-availability').scrollIntoView({block:'center'}); return true")
@@ -573,7 +743,8 @@ def main():
             execute("const el=document.querySelector('.team-work select'); el.value=el.options[1].value; el.dispatchEvent(new Event('change',{bubbles:true})); return true")
             fill('.team-work textarea', 'Native clarification review.')
             execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Start team work').click(); return true")
-            until("return [...document.querySelectorAll('.inspector button')].some(b=>b.textContent.trim()==='Resume')")
+            # T3: the lead's step holds until guidance is saved; the model cannot pause the Run.
+            assert fixture.clarification_started.wait(30), 'Native lead did not reach the clarification step'
             execute("[...document.querySelectorAll('nav button')].find(b=>b.textContent.trim().startsWith('Work'))?.click(); return true")
             until("return [...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Requests')")
             execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Requests').click(); return true")
@@ -586,9 +757,14 @@ def main():
             execute("document.activeElement?.blur(); document.querySelector('.work-guidance').scrollIntoView({block:'end'}); return true")
             (output.parent / 'work-collaboration-native-linux.png').write_bytes(base64.b64decode(call('/session/' + session + '/screenshot')))
             execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Save guidance').click(); return true")
+            until("return /Guidance saved in this task|This task changed/.test(document.querySelector('.work-guidance')?.innerText ?? '')")
+            if execute("return /This task changed. Your draft is preserved/.test(document.body.innerText)"):
+                execute("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Save guidance').click(); return true")
             until("return document.querySelector('.work-guidance')?.innerText.includes('Guidance saved in this task')")
-            execute("[...document.querySelectorAll('.inspector button')].find(b=>b.textContent.trim()==='Resume').click(); return true")
+            fixture.release_clarification.set()
             until("return document.querySelector('.inspector')?.innerText.includes('Native task completed with uncertainty noted.')")
+            assert any(r for r in fixture.calls if Fixture.has_tool(r, COMPLETION_REVIEW_TOOL)), 'delegated result was never reviewed'
+            assert not fixture.errors, fixture.errors
             close_and_wait()
             print('Native smoke passed: collaboration question, human guidance, resumed delegation and result; team-owned work start and result; reviewed roster edit; team proposal, approval, installation, member inspection, pause/resume and audited reasons; scoped Teams catalog, roles and native rendering; artifact text preview, native Save As and cancellation, binary checksum verified export; provider form, private key storage, inactive installation, reviewed activation, task execution, result, cancellation and retry draft, scoped action approval, owned-daemon shutdown, and settings plus installed agent and completed task restored after reopening.')
         finally:
