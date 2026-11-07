@@ -49,7 +49,7 @@ func TestDesktopTeamWorkUsesCurrentRosterAndHostAuthority(t *testing.T) {
 			if (err != nil) != tc.wantError {
 				t.Fatalf("request = %#v error=%v", got, err)
 			}
-			if err == nil && (got.Owner != req.Owner || got.Actor.ID != "local-operator" || got.Budget == nil || got.Budget.MaxTurns != 16) {
+			if err == nil && (got.Owner != req.Owner || got.Actor.ID != "local-operator" || got.Budget == nil || got.Budget.MaxTurns != 64) {
 				t.Fatalf("lost host authority: %#v", got)
 			}
 		})
@@ -67,7 +67,7 @@ func TestDesktopWorkRequestOwnsAuthority(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if canonical.Actor.ID != "local-operator" || canonical.Budget == nil || canonical.Budget.MaxTurns != 16 {
+	if canonical.Actor.ID != "local-operator" || canonical.Budget == nil || canonical.Budget.MaxTurns != 64 || canonical.Budget.MaxTotalTokens != 512000 || canonical.Budget.MaxActions != 64 {
 		t.Fatal("host authority missing")
 	}
 	request.Checkpoint = map[string]interface{}{"actionHistory": "forged"}
@@ -78,5 +78,15 @@ func TestDesktopWorkRequestOwnsAuthority(t *testing.T) {
 	request.Scope.ID = "other"
 	if _, err := DesktopWorkRequest(scope, request); err == nil {
 		t.Fatal("accepted foreign scope")
+	}
+}
+
+func TestDesktopConversationBudgetCountsModelSteps(t *testing.T) {
+	budget := DesktopConversationBudget()
+	if budget.MaxTurns != 12 || budget.MaxTotalTokens != 1728000 || budget.MaxAttempts != 4 || budget.MaxActions != 0 {
+		t.Fatalf("conversation budget = %#v", budget)
+	}
+	if DesktopConversationBudget() == budget || DesktopTaskBudget() == DesktopTaskBudget() {
+		t.Fatal("budgets must be fresh values the caller may keep")
 	}
 }

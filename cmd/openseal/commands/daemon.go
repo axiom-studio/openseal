@@ -175,9 +175,13 @@ Options:
 		sugar.Fatalf("failed to open artifact content store: %v", err)
 	}
 	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: runtime.NewArtifactCatalog(store)}
-	var taskHost *daemon.ProviderStepHost
+	contextTokens, err := standaloneContext.ContextTokens(os.Getenv("OPENSEAL_LLM_CONTEXT_TOKENS"))
+	if err != nil {
+		sugar.Fatal(err)
+	}
+	var stepHost *daemon.ProviderStepHost
 	if *desktopOperator && configured == 3 {
-		taskHost, err = daemon.NewProviderStepHost(daemon.OpenAIProviderConfig{Endpoint: endpoint, Key: apiKey, Model: model})
+		stepHost, err = daemon.NewProviderStepHost(daemon.OpenAIProviderConfig{Endpoint: endpoint, Key: apiKey, Model: model, ContextWindowTokens: contextTokens})
 		if err != nil {
 			sugar.Fatalf("configure desktop task provider: %v", err)
 		}
@@ -191,27 +195,17 @@ Options:
 		sugar.Fatalf("resolve standalone context worker scopes: %v", err)
 	}
 	workerScopes = mergeDaemonWorkerScopes(workerScopes, credentialScopes)
-	if taskHost != nil {
+	if stepHost != nil {
 		workerScopes = mergeDaemonWorkerScopes(workerScopes, []runtime.Scope{scope})
 	}
 	workerScopeSource := runtime.WorkerScopeSourceFunc(func(context.Context) ([]runtime.Scope, error) {
 		return append([]runtime.Scope(nil), workerScopes...), nil
 	})
 	var kernel *opensealkernel.Engine
+	resolver := &daemon.DesktopTurnResolver{Scope: scope, Host: stepHost, Publisher: artifactPublisher}
 	var turnResolver runtime.TurnRunnerResolver
 	if len(workerScopes) > 0 {
-		turnResolver = runtime.TurnRunnerResolverFunc(func(resolveCtx context.Context, run *runtime.AgentRun) (*runtime.TurnRunnerBinding, error) {
-			if kernel == nil {
-				return nil, runtime.ErrTurnHostUnavailable
-			}
-			local := taskHost != nil && run.Scope == scope
-			binding, err := runtime.ResolveLoopBinding(resolveCtx, kernel, run, runtime.LoopBindingConfig{})
-			if err == nil && binding != nil && local {
-				binding.Host = taskHost
-				binding.FinalOutput = artifactPublisher
-			}
-			return binding, err
-		})
+		turnResolver = resolver
 		authorizer := outreach.InvocationAuthorizerFunc(func(authorizeCtx context.Context, invocation runtime.ToolInvocation) (*outreach.InvocationAuthorization, error) {
 			if kernel == nil {
 				return nil, runtime.ErrTurnHostUnavailable
@@ -235,7 +229,7 @@ Options:
 			opensealkernel.WithDynamicActionWorkers(runtime.DynamicActionWorkerConfig{Concurrency: 2, WorkerIDPrefix: "standalone-action"}, workerScopeSource, standaloneContext, dispatcher),
 		)
 	}
-	if taskHost != nil {
+	if stepHost != nil {
 		participants := runtime.ConversationParticipantSourceFunc(func(ctx context.Context, query runtime.ConversationParticipantQuery) ([]runtime.ConversationParticipantBinding, error) {
 			if kernel == nil {
 				return nil, runtime.ErrConversationCoordinationUnavailable
@@ -246,7 +240,7 @@ Options:
 			}
 			return source.ResolveConversationParticipants(ctx, query)
 		})
-		router, err := daemon.NewDesktopConversationRouter(taskHost)
+		router, err := daemon.NewDesktopConversationRouter(stepHost)
 		if err != nil {
 			sugar.Fatalf("configure desktop channel routing: %v", err)
 		}
@@ -256,7 +250,7 @@ Options:
 		engineOptions = append(engineOptions,
 			opensealkernel.WithConversationCoordinator(participants, router, config),
 			opensealkernel.WithDynamicConversationRuns(opensealkernel.ConversationRunConfig{
-				Scheduler: runtime.ConversationRunSchedulerConfig{RequireParticipationOptIn: true, Budget: &runtime.BudgetPolicy{MaxTurns: 3, MaxAttempts: 4, MaxTotalTokens: 432000, MaxOutputTokens: 49152, MaxDurationMS: 180000}},
+				Scheduler: runtime.ConversationRunSchedulerConfig{RequireParticipationOptIn: true, Budget: daemon.DesktopConversationBudget()},
 				// Each routed member answers in its own agent_work Run through
 				// the same Agent turn as a 1:1 chat.
 				Runner:     runtime.ConversationRunTurnRunnerConfig{RequireParticipationOptIn: true, AgentTurns: turnResolver},
@@ -269,6 +263,9 @@ Options:
 	if err != nil {
 		sugar.Fatalf("configure OpenSeal kernel: %v", err)
 	}
+	if err := resolver.Bind(kernel, contentStore, sugar); err != nil {
+		sugar.Fatalf("configure the run loop: %v", err)
+	}
 	if err := ensureCanonicalSkill(ctx, kernel, outreach.SkillDefinition()); err != nil {
 		sugar.Fatalf("register governed outreach Skill: %v", err)
 	}
@@ -279,7 +276,7 @@ Options:
 	// Versioned kernel API for the TUI and embedding integrations.
 	apiServer := server.NewServer(store, sugar)
 	apiServer.SetBearerToken(os.Getenv("OPENSEAL_API_TOKEN"))
-	if taskHost != nil {
+	if stepHost != nil {
 		apiServer.SetTeamWorkEnabled(true)
 		apiServer.SetAgentRunCreationDispatcher(func(ctx context.Context, request runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
 			canonical, err := daemon.DesktopWorkRequest(scope, request)
@@ -305,7 +302,7 @@ Options:
 		apiServer.SetActionApprovalAuthorizer(server.DesktopApprovalAuthorizer{Scope: scope})
 		apiServer.SetDesktopConversationScope(scope)
 		authorize := func(ctx context.Context, channel *runtime.Conversation) error {
-			if taskHost == nil {
+			if stepHost == nil {
 				return fmt.Errorf("configure a model provider in Settings before enabling team replies")
 			}
 			source, err := daemon.NewDesktopConversationParticipants(kernel, scope, 8)
@@ -316,7 +313,7 @@ Options:
 			return err
 		}
 		var post func(context.Context, runtime.PostChannelMessageRequest) (*runtime.ChannelMessageCommitResult, error)
-		if taskHost != nil {
+		if stepHost != nil {
 			post = kernel.PostChannelMessage
 		}
 		apiServer.SetChannelParticipation(authorize, post)

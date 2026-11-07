@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -38,6 +39,9 @@ type StandaloneAuthoringContext struct {
 	BaseURL    string                         `yaml:"baseURL"`
 	Model      string                         `yaml:"model"`
 	Credential capability.CredentialReference `yaml:"credential"`
+	// ContextTokens is the provider model's context window, which the kernel
+	// compacts the session against. 0 means the step host default.
+	ContextTokens int64 `yaml:"contextTokens,omitempty"`
 }
 
 type StandaloneCredential struct {
@@ -125,6 +129,9 @@ func (c *StandaloneContext) Validate() error {
 		c.Authoring.Credential.ID = strings.TrimSpace(c.Authoring.Credential.ID)
 		if c.Authoring.BaseURL == "" || c.Authoring.Model == "" || c.Authoring.Credential.Kind == "" || c.Authoring.Credential.ID == "" {
 			return errors.New("standalone authoring requires baseURL, model, and an opaque credential reference")
+		}
+		if c.Authoring.ContextTokens < 0 {
+			return errors.New("standalone authoring contextTokens must be a positive integer")
 		}
 	}
 	return nil
@@ -234,3 +241,22 @@ func normalizedContextStrings(values []string) []string {
 
 var _ runtime.CredentialResolver = (*StandaloneContext)(nil)
 var _ runtime.WorkerScopeSource = (*StandaloneContext)(nil)
+
+// ContextTokens is the model context window of the desktop provider: the
+// authoring block's contextTokens when that block is set, else env (the
+// OPENSEAL_LLM_CONTEXT_TOKENS value), else 0 for the step host default. A
+// set env value must be a positive integer.
+func (c *StandaloneContext) ContextTokens(env string) (int64, error) {
+	if c != nil && c.Authoring != nil {
+		return c.Authoring.ContextTokens, nil
+	}
+	env = strings.TrimSpace(env)
+	if env == "" {
+		return 0, nil
+	}
+	tokens, err := strconv.ParseInt(env, 10, 64)
+	if err != nil || tokens <= 0 {
+		return 0, errors.New("OPENSEAL_LLM_CONTEXT_TOKENS must be a positive integer")
+	}
+	return tokens, nil
+}
