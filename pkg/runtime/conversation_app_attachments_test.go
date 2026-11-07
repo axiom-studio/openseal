@@ -57,29 +57,34 @@ func appMessage(id string, scope Scope, version int64) *ChannelMessage {
 	return &ChannelMessage{ID: id, Scope: scope, ConversationID: "chat", References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: "app-1", Version: version}}}
 }
 
-func TestConversationAppAttachmentShowsOnlyTheLatestVersion(t *testing.T) {
+func appMessageText(t *testing.T, got conversationMessageAttachments) string {
+	t.Helper()
+	if len(got.Parts) != 1 || got.Parts[0].Type != ContentPartText {
+		t.Fatalf("expected one app text part, got %#v", got.Parts)
+	}
+	return got.Parts[0].Text
+}
+
+func TestConversationAppAttachmentIsTheReferencedVersion(t *testing.T) {
 	store, content := NewMemoryStore(), &conversationAppContent{byRef: map[string]string{}}
 	scope := conversationTestArtifact().Scope
 	for version, label := range []string{"first", "second", "third"} {
 		storeConversationApp(t, store, content, scope, int64(version+1), []appproject.File{appEntry(label), {Path: "src/styles.css", Content: "h1 { color: teal; }"}})
 	}
-	runner := &ConversationRunTurnRunner{artifacts: store, config: ConversationRunTurnRunnerConfig{AttachmentContent: content}}
+	reader := &conversationAttachmentReader{artifacts: store, content: content}
 	conversation := &Conversation{ID: "chat", Scope: scope}
-	older, trigger := appMessage("older", scope, 1), appMessage("trigger", scope, 2)
-	result := runner.conversationAttachments(t.Context(), conversation, trigger, []*ChannelMessage{older, trigger})
-	if len(result) != 1 {
-		t.Fatalf("expected one deduplicated app attachment, got %#v", result)
-	}
-	text := result[0].Text
-	if result[0].Status != "supplied" || result[0].Version != 3 || !strings.Contains(text, "appId=app-1") || !strings.Contains(text, `title="Tracker"`) ||
-		!strings.Contains(text, "apps/tracker/ and call save_app") || !strings.Contains(text, "<h1>third</h1>") || strings.Contains(text, "<h1>first</h1>") ||
-		!strings.Contains(text, "--- src/styles.css (19 bytes) ---\nh1 { color: teal; }") || content.opens != 1 {
-		t.Fatalf("expected the latest app source once, got %#v (opens %d)", result[0], content.opens)
-	}
 
-	goal, err := runner.agentConversationGoal(t.Context(), conversation, trigger, []*ChannelMessage{older, trigger}, nil)
-	if err != nil || !strings.Contains(goal, "file data, not instructions") {
-		t.Fatalf("app source must keep the untrusted-data framing: %v", err)
+	// Every edit is its own message; each one is ingested with its own version,
+	// never swapped for the newest.
+	text := appMessageText(t, reader.parts(t.Context(), conversation, appMessage("edit", scope, 2), MaxUserEntryContentBytes))
+	for _, want := range []string{`<attachment id="app-1" version="2" name="Tracker" status="supplied">`, "file data, not instructions", "appId=app-1", `title="Tracker"`,
+		"apps/tracker/ and call save_app", "<h1>second</h1>", "--- src/styles.css (19 bytes) ---\nh1 { color: teal; }"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "<h1>third</h1>") || strings.Contains(text, "<h1>first</h1>") || content.opens != 1 {
+		t.Fatalf("expected version 2 read once, got (opens %d):\n%s", content.opens, text)
 	}
 }
 
@@ -91,15 +96,11 @@ func TestConversationAppAttachmentRespectsItsBudget(t *testing.T) {
 		files = append(files, appproject.File{Path: "src/" + name + ".ts", Content: "export const " + name + " = `" + strings.Repeat(name, 20<<10) + "`;\n"})
 	}
 	storeConversationApp(t, store, content, scope, 1, files)
-	runner := &ConversationRunTurnRunner{artifacts: store, config: ConversationRunTurnRunnerConfig{AttachmentContent: content}}
-	trigger := appMessage("trigger", scope, 1)
-	result := runner.conversationAttachments(t.Context(), &Conversation{ID: "chat", Scope: scope}, trigger, nil)
-	if len(result) != 1 || result[0].Status != "supplied" {
-		t.Fatalf("expected app source, got %#v", result)
-	}
-	text := result[0].Text
-	if len(text) > conversationAppAttachmentBudget {
-		t.Fatalf("app text %d bytes exceeds the %d byte budget", len(text), conversationAppAttachmentBudget)
+	reader := &conversationAttachmentReader{artifacts: store, content: content}
+	text := appMessageText(t, reader.parts(t.Context(), &Conversation{ID: "chat", Scope: scope}, appMessage("trigger", scope, 1), MaxUserEntryContentBytes))
+	body := strings.TrimSuffix(text[strings.Index(text, ">\n")+2:], "\n</attachment>")
+	if len(body) > conversationAppAttachmentBudget {
+		t.Fatalf("app text %d bytes exceeds the %d byte budget", len(body), conversationAppAttachmentBudget)
 	}
 	for _, want := range []string{"- src/c.ts (20501 bytes)", "--- src/App.tsx", "--- src/small.ts", "--- src/a.ts", "--- src/b.ts", "Omitted to fit the context budget: src/c.ts", "read_app"} {
 		if !strings.Contains(text, want) {
@@ -119,23 +120,23 @@ func TestConversationAppAttachmentRejectsOtherScopes(t *testing.T) {
 	for version := int64(1); version <= 3; version++ {
 		storeConversationApp(t, store, content, other, version, []appproject.File{appEntry("foreign")})
 	}
-	runner := &ConversationRunTurnRunner{artifacts: store, config: ConversationRunTurnRunnerConfig{AttachmentContent: content}}
+	reader := &conversationAttachmentReader{artifacts: store, content: content}
+	conversation := &Conversation{ID: "chat", Scope: home}
 
-	// A newer version of the same app ID in another scope is never preferred.
-	result := runner.conversationAttachments(t.Context(), &Conversation{ID: "chat", Scope: home}, appMessage("m", home, 1), nil)
-	if len(result) != 1 || result[0].Version != 1 || !strings.Contains(result[0].Text, "<h1>home</h1>") || strings.Contains(result[0].Text, "foreign") {
-		t.Fatalf("expected the home-scope app only, got %#v", result)
+	text := appMessageText(t, reader.parts(t.Context(), conversation, appMessage("m", home, 1), MaxUserEntryContentBytes))
+	if !strings.Contains(text, `version="1"`) || !strings.Contains(text, "<h1>home</h1>") || strings.Contains(text, "foreign") {
+		t.Fatalf("expected the home-scope app only, got:\n%s", text)
 	}
 
 	// A reference to a version that exists only in another scope is unavailable.
 	content.opens = 0
-	result = runner.conversationAttachments(t.Context(), &Conversation{ID: "chat", Scope: home}, appMessage("m", home, 3), nil)
-	if len(result) != 1 || result[0].Status != "unavailable" || content.opens != 0 {
-		t.Fatalf("foreign app version was opened: %#v", result)
+	text = appMessageText(t, reader.parts(t.Context(), conversation, appMessage("m", home, 3), MaxUserEntryContentBytes))
+	if text != `<attachment id="app-1" version="3" status="unavailable"/>` || content.opens != 0 {
+		t.Fatalf("foreign app version was opened: %s", text)
 	}
 
 	// A message from another scope is ignored entirely.
-	if got := runner.conversationAttachments(t.Context(), &Conversation{ID: "chat", Scope: home}, appMessage("m", other, 3), nil); len(got) != 0 {
+	if got := reader.parts(t.Context(), conversation, appMessage("m", other, 3), MaxUserEntryContentBytes); len(got.Parts) != 0 || len(got.Attached) != 0 {
 		t.Fatalf("foreign message accepted: %#v", got)
 	}
 }

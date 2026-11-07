@@ -4,46 +4,52 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
 	"image/png"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 )
 
-func TestConversationImageProjection(t *testing.T) {
+func conversationTestPNG(t *testing.T) string {
+	t.Helper()
 	var encoded bytes.Buffer
 	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
 		t.Fatal(err)
 	}
-	content := encoded.String()
+	return encoded.String()
+}
+
+func TestConversationImageBecomesReferencePart(t *testing.T) {
+	content := conversationTestPNG(t)
 	artifact := conversationTestArtifact()
-	artifact.MediaType, artifact.SizeBytes, artifact.Digest = "image/png", int64(len(content)), conversationTestDigest(content)
+	artifact.Name, artifact.MediaType, artifact.SizeBytes, artifact.Digest = "chart.png", "image/png", int64(len(content)), conversationTestDigest(content)
 	store := NewMemoryStore()
 	if err := store.CreateArtifactVersion(t.Context(), artifact, 0); err != nil {
 		t.Fatal(err)
 	}
-	reader := &conversationTestContent{text: content}
-	runner := &ConversationRunTurnRunner{artifacts: store, config: ConversationRunTurnRunnerConfig{AttachmentContent: reader}}
+	bytesStore := &conversationTestContent{text: content}
+	reader := &conversationAttachmentReader{artifacts: store, content: bytesStore}
 	conversation := &Conversation{ID: "chat", Scope: artifact.Scope}
 	message := &ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: 1}}}
-	attachments := runner.conversationAttachments(t.Context(), conversation, message, []*ChannelMessage{message})
-	if len(attachments) != 1 || attachments[0].Status != "image_context" || attachments[0].media == nil || reader.opens != 1 {
-		t.Fatalf("image not projected once: %#v", attachments)
+	got := reader.parts(t.Context(), conversation, message, MaxUserEntryContentBytes)
+	digest := sha256.Sum256([]byte(content))
+	want := ContentPart{Type: ContentPartImage, MediaType: "image/png", Detail: "auto", SHA256: hex.EncodeToString(digest[:]), ArtifactID: artifact.ID, ArtifactVersion: "1"}
+	if len(got.Parts) != 1 || !reflect.DeepEqual(got.Parts[0], want) || bytesStore.opens != 1 {
+		t.Fatalf("image not projected once as a reference: %#v (opens %d)", got.Parts, bytesStore.opens)
 	}
-	media := *attachments[0].media
-	if media.SourceArtifactID != artifact.ID || media.SourceArtifactVersion != 1 || media.SourceMessageID != message.ID || media.SourceActionCallID != "" {
-		t.Fatal("incorrect image provenance")
+	if len(got.Attached) != 1 || got.Attached[0] != (conversationAttachedArtifact{ID: artifact.ID, Version: 1, Name: "chart.png"}) {
+		t.Fatalf("attached = %#v", got.Attached)
 	}
-	if err := validateHostedTurnMedia(media); err != nil {
-		t.Fatal(err)
-	}
-	text, err := json.Marshal(attachments)
-	if err != nil || strings.Contains(string(text), media.DataBase64) {
-		t.Fatal("binary image leaked into textual context")
+	encoded, err := json.Marshal(got.Parts)
+	if err != nil || strings.Contains(string(encoded), base64.StdEncoding.EncodeToString([]byte(content))) || strings.Contains(string(encoded), "dataBase64") {
+		t.Fatalf("image bytes leaked into the part: %s", encoded)
 	}
 	for _, tc := range []struct {
 		name, content, mime, digest, want string
@@ -57,12 +63,20 @@ func TestConversationImageProjection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			copy := *artifact
 			copy.MediaType, copy.Digest, copy.SizeBytes = tc.mime, tc.digest, int64(len(tc.content))
-			status, media, consumed := readConversationImage(t.Context(), &conversationTestContent{text: tc.content}, &copy, message.ID, tc.limit)
-			if status != tc.want || media != nil || consumed != 0 {
-				t.Fatalf("invalid image exposed: %s %v %d", status, media, consumed)
+			status, verified := verifyConversationImage(t.Context(), &conversationTestContent{text: tc.content}, &copy, tc.limit)
+			if status != tc.want || verified != nil {
+				t.Fatalf("invalid image exposed: %s %d bytes", status, len(verified))
 			}
 		})
 	}
+	t.Run("failed image is a self-closed text part", func(t *testing.T) {
+		bytesStore.text = "bad"
+		got := reader.parts(t.Context(), conversation, message, MaxUserEntryContentBytes)
+		if len(got.Parts) != 1 || got.Parts[0].Type != ContentPartText ||
+			got.Parts[0].Text != `<attachment id="file" version="1" name="chart.png" status="integrity_failed"/>` {
+			t.Fatalf("parts = %#v", got.Parts)
+		}
+	})
 }
 
 type conversationTestContent struct {
@@ -124,26 +138,34 @@ func TestConversationAttachmentScopeAndProjection(t *testing.T) {
 	if err := store.CreateArtifactVersion(ctx, artifact, 0); err != nil {
 		t.Fatal(err)
 	}
-	bytes := &conversationTestContent{text: content}
-	runner := &ConversationRunTurnRunner{artifacts: store, config: ConversationRunTurnRunnerConfig{AttachmentContent: bytes}}
+	bytesStore := &conversationTestContent{text: content}
+	reader := &conversationAttachmentReader{artifacts: store, content: bytesStore}
 	conversation := &Conversation{ID: "chat", Scope: artifact.Scope}
-	message := &ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []ConversationReference{{Kind: ConversationReferenceArtifact, ID: "file", Version: 1}}}
-	goal, err := runner.agentConversationGoal(ctx, conversation, message, []*ChannelMessage{message}, nil)
-	if err != nil {
-		t.Fatal(err)
+	message := &ChannelMessage{ID: "message", Scope: artifact.Scope, ConversationID: "chat", References: []ConversationReference{
+		{Kind: ConversationReferenceArtifact, ID: "file", Version: 1},
+		{Kind: ConversationReferenceArtifact, ID: "file", Version: 1},
+		{Kind: ConversationReferenceRun, ID: "run-1"},
+	}}
+	got := reader.parts(ctx, conversation, message, MaxUserEntryContentBytes)
+	want := "<attachment id=\"file\" version=\"1\" name=\"file.csv\" status=\"supplied\">\ncompany,total\nAcme,42\n</attachment>"
+	if len(got.Parts) != 1 || !reflect.DeepEqual(got.Parts[0], ContentPart{Type: ContentPartText, Text: want}) || bytesStore.opens != 1 {
+		t.Fatalf("scoped content not supplied exactly once: %#v (opens %d)", got.Parts, bytesStore.opens)
 	}
-	if !strings.Contains(goal, `"status":"supplied"`) || !strings.Contains(goal, `Acme,42`) || bytes.opens != 1 {
-		t.Fatal("scoped content not supplied exactly once")
-	}
+
 	conversation.Scope.ID = "other"
 	message.Scope = conversation.Scope
-	result := runner.conversationAttachments(ctx, conversation, message, nil)
-	if len(result) != 1 || result[0].Status != "unavailable" || bytes.opens != 1 {
-		t.Fatal("foreign tenant content was opened")
+	got = reader.parts(ctx, conversation, message, MaxUserEntryContentBytes)
+	if len(got.Parts) != 1 || got.Parts[0].Text != `<attachment id="file" version="1" status="unavailable"/>` || bytesStore.opens != 1 {
+		t.Fatalf("foreign tenant content was opened: %#v", got.Parts)
 	}
 	message.Scope = artifact.Scope
-	if got := runner.conversationAttachments(ctx, conversation, message, nil); len(got) != 0 {
+	if got := reader.parts(ctx, conversation, message, MaxUserEntryContentBytes); len(got.Parts) != 0 || len(got.Attached) != 0 {
 		t.Fatal("foreign message accepted")
+	}
+	conversation.Scope = artifact.Scope
+	message.ConversationID = "another-chat"
+	if got := reader.parts(ctx, conversation, message, MaxUserEntryContentBytes); len(got.Parts) != 0 {
+		t.Fatal("message of another conversation accepted")
 	}
 }
 
