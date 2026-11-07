@@ -347,19 +347,17 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if err != nil {
 		return nil, err
 	}
-	progressRunner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
-		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID,
-		DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-		SystemInstructions: append(append([]string(nil), instructions...), runProgressAcknowledgementSystemInstruction),
-		ModelCredential:    deploymentModelCredential(deployment),
-		VisualBindings:     config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance, VisualImages: config.VisualImages,
-		VisualPlaceProvenance: config.VisualPlaceProvenance,
-	})
-	if err != nil {
-		return nil, err
-	}
 	base.Runner = runner
-	base.ProgressAcknowledgementRenderer = &hostedTurnProgressAcknowledgementRenderer{runner: progressRunner}
+	// prep-4 retypes config.Host to StepHost; until then only a host that
+	// already runs model steps renders progress acknowledgements.
+	if stepHost, ok := config.Host.(StepHost); ok {
+		base.ProgressAcknowledgementRenderer = &modelStepProgressAcknowledgementRenderer{
+			host: stepHost, agentID: deployment.ID,
+			definitionID: definition.ID, definitionVersion: definition.Version,
+			modelCredential: deploymentModelCredential(deployment),
+			system:          append(append([]string(nil), instructions...), runProgressAcknowledgementSystemInstruction),
+		}
+	}
 	if acceptedRequestExecution {
 		base.Runner = &acceptedAgentRequestExecutionTurnRunner{inner: runner}
 	}

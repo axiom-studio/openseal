@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -154,5 +155,130 @@ func TestRenderedRunProgressAcknowledgementIsBounded(t *testing.T) {
 		if (err == nil) != test.ok {
 			t.Fatalf("value %q: err=%v", test.value, err)
 		}
+	}
+}
+
+type progressAckStepHost struct {
+	requests []ModelStepRequest
+	reply    func(ModelStepRequest) ModelStepResult
+}
+
+func (h *progressAckStepHost) ExecuteModelStep(_ context.Context, req ModelStepRequest) (ModelStepResult, error) {
+	h.requests = append(h.requests, req)
+	return h.reply(req), nil
+}
+
+func (h *progressAckStepHost) ExecuteHostTool(context.Context, HostToolRequest) (HostToolResult, error) {
+	return HostToolResult{}, ErrHostToolUnsupported
+}
+
+func progressAckResult(req ModelStepRequest, text string, calls ...ModelToolCall) ModelStepResult {
+	stop := ModelStopEnd
+	if len(calls) > 0 {
+		stop = ModelStopToolCalls
+	}
+	return ModelStepResult{
+		APIVersion: ModelStepAPIVersion, StepID: req.StepID,
+		Assistant: AssistantEntry{
+			Provider: ModelStepProviderAnthropic, Model: "test-model", SystemDigest: "sys", ToolsDigest: "tools",
+			Text: text, ToolCalls: calls, StopReason: stop,
+		},
+		Model: ModelStepModelInfo{Provider: ModelStepProviderAnthropic, Model: "test-model"},
+	}
+}
+
+func progressAckRequest() RunProgressAcknowledgementRequest {
+	return RunProgressAcknowledgementRequest{
+		Snapshot: RunProgressSnapshot{
+			RunID: "run-1", Scope: Scope{Kind: "workspace", ID: "workspace-1"}, AgentID: "agent-1",
+			Goal: "Check the deployment", Status: AgentRunStatusRunning,
+			ActivityID: "event-1", ActivityType: "run.observed", ActivitySummary: "Inspecting the current deployment",
+		},
+		MaxSentences: 2, MaxCharacters: 100,
+	}
+}
+
+func TestProgressAckIsSessionlessToolFreeModelStep(t *testing.T) {
+	host := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult {
+		return progressAckResult(req, "  Looking at the deployment now.  ")
+	}}
+	renderer := &modelStepProgressAcknowledgementRenderer{
+		host: host, agentID: "agent-1", definitionID: "def", definitionVersion: "1",
+		system: []string{"You are cheerful.", runProgressAcknowledgementSystemInstruction},
+	}
+	text, err := renderer.RenderRunProgressAcknowledgement(context.Background(), progressAckRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "Looking at the deployment now." {
+		t.Fatalf("text = %q", text)
+	}
+	if len(host.requests) != 1 {
+		t.Fatalf("requests = %d", len(host.requests))
+	}
+	req := host.requests[0]
+	if req.SessionID != "" || req.Tools != nil || req.Purpose != ModelStepPurposeAcknowledgement {
+		t.Fatalf("request is not a sessionless tool-free acknowledgement: session=%q tools=%v purpose=%q", req.SessionID, req.Tools, req.Purpose)
+	}
+	if req.Stream != (ModelStepStream{}) {
+		t.Fatalf("acknowledgement must not stream: %+v", req.Stream)
+	}
+	if err := req.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if req.RunID != "run-1" || req.AgentID != "agent-1" || req.DefinitionID != "def" || req.DefinitionVersion != "1" {
+		t.Fatalf("identity = %+v", req)
+	}
+	wantStep := "progress-ack-" + hashString("run-1\x00event-1\x00"+string(AgentRunStatusRunning))[:16]
+	if req.StepID != wantStep {
+		t.Fatalf("step id = %q, want %q", req.StepID, wantStep)
+	}
+	if got := req.System.AgentInstructions; len(got) != 2 || got[1] != runProgressAcknowledgementSystemInstruction {
+		t.Fatalf("system = %v", got)
+	}
+	if len(req.Entries) != 1 || req.Entries[0].Type != SessionEntryUser {
+		t.Fatalf("entries = %+v", req.Entries)
+	}
+	var facts map[string]interface{}
+	if err := json.Unmarshal([]byte(req.Entries[0].User.Content[0].Text), &facts); err != nil {
+		t.Fatal(err)
+	}
+	if len(facts) != 4 || facts["goal"] != "Check the deployment" || facts["status"] != "running" ||
+		facts["activityType"] != "run.observed" || facts["activitySummary"] != "Inspecting the current deployment" {
+		t.Fatalf("facts = %v", facts)
+	}
+}
+
+func TestProgressAckRejectsToolCallsAndOverlongText(t *testing.T) {
+	for name, reply := range map[string]func(ModelStepRequest) ModelStepResult{
+		"tool call": func(req ModelStepRequest) ModelStepResult {
+			return progressAckResult(req, "On it.", ModelToolCall{ID: "call-1", Name: "lookup", Arguments: json.RawMessage(`{}`)})
+		},
+		"overlong": func(req ModelStepRequest) ModelStepResult {
+			return progressAckResult(req, strings.Repeat("a", 101))
+		},
+		"too many sentences": func(req ModelStepRequest) ModelStepResult {
+			return progressAckResult(req, "One. Two. Three.")
+		},
+		"empty": func(req ModelStepRequest) ModelStepResult {
+			return progressAckResult(req, "  ")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			renderer := &modelStepProgressAcknowledgementRenderer{host: &progressAckStepHost{reply: reply}, agentID: "agent-1"}
+			text, err := renderer.RenderRunProgressAcknowledgement(context.Background(), progressAckRequest())
+			if err == nil {
+				t.Fatalf("accepted %q", text)
+			}
+			if name == "tool call" && err.Error() != "Agent returned an actionable progress acknowledgement" {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+	other := progressAckRequest()
+	other.Snapshot.AgentID = "agent-2"
+	host := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "Fine.") }}
+	if _, err := (&modelStepProgressAcknowledgementRenderer{host: host, agentID: "agent-1"}).RenderRunProgressAcknowledgement(context.Background(), other); err == nil || len(host.requests) != 0 {
+		t.Fatalf("rendered for another Agent: err=%v requests=%d", err, len(host.requests))
 	}
 }
