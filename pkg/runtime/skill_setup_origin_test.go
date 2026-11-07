@@ -44,31 +44,33 @@ func TestSkillSetupTaskOriginSupportsIndependentWorkAndExactForkLineage(t *testi
 				run = child
 			}
 			if !fork {
-				// Independent roots require a persisted request_setup action. The
-				// end-to-end wait tests cover proposal and worker admission; seed its
-				// running state here to keep this test focused on origin resolution.
+				// Independent roots require a persisted request_setup loop call
+				// running under the Run's own lease. The end-to-end wait tests cover
+				// proposal and inline execution; seed its running state here to keep
+				// this test focused on origin resolution.
 				now := time.Now().UTC()
+				claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, Kind: RunKindAgentWork, WorkerID: "setup-worker",
+					AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute, MaxActiveForAgent: 4})
+				if err != nil || claimed == nil || claimed.ID != run.ID {
+					t.Fatalf("claim task work: %#v %v", claimed, err)
+				}
 				expires := now.Add(time.Minute)
 				call := &ActionCall{
-					ID: "task-setup-call", Scope: run.Scope, RunID: run.ID, DeploymentID: "agent",
+					ID: "task-setup-call", Scope: run.Scope, RunID: run.ID, TurnID: "setup-step", DeploymentID: "agent",
 					SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
+					Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 					Status: ActionCallStatusRunning, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone,
 					Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect the account"},
-					Attempt:   1, MaxAttempts: 1, LeaseOwner: "setup-action-worker", LeaseExpiresAt: &expires,
+					Attempt:   1, MaxAttempts: 1, LeaseOwner: "setup-worker", LeaseExpiresAt: &expires,
 					AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: &now,
 				}
-				next := cloneAgentRun(run)
-				next.Revision++
-				next.Status, next.WakeCondition = AgentRunStatusWaitingForDependency, &WakeCondition{Type: "action", Reference: call.ID}
-				next.UpdatedAt = now
-				created, err := store.CreateActionProposal(t.Context(), ActionProposalRecord{
-					Call: call, Run: next, ExpectedRunRevision: run.Revision,
+				if _, err := store.CreateActionProposal(t.Context(), ActionProposalRecord{
+					Call: call, ExpectedRunRevision: claimed.Revision, Lease: &AgentRunLeaseGuard{WorkerID: "setup-worker", Now: now},
 					Event: &ActivityEvent{ID: "setup-origin-action", Scope: run.Scope, RunID: run.ID, EventType: "action.started", Summary: "Execute setup request", CreatedAt: now},
-				})
-				if err != nil {
+				}); err != nil {
 					t.Fatal(err)
 				}
-				run = created.Run
+				run = claimed
 			}
 			// Copied presentation hints must never redirect the persisted task.
 			run = cloneAgentRun(run)
