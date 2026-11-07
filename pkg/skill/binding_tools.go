@@ -372,7 +372,7 @@ func bindingModelActions(definition *Definition, binding *Binding, include func(
 			BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID,
 			Version: definition.Version, Action: name, InputSchema: modelVisibleInputSchemaForBinding(action.InputSchema, binding.ArgumentBindings[name]),
 			SemanticArguments: cloneStringMap(action.SemanticArguments), Risk: action.Risk, SideEffect: action.SideEffect,
-			ExternalOperationPolicy: action.ExternalOperationPolicy,
+			ExternalOperationPolicy: action.ExternalOperationPolicy, Repeatable: action.Repeatable,
 		})
 	}
 	if spec == nil {
@@ -393,6 +393,7 @@ func bindingModelActions(definition *Definition, binding *Binding, include func(
 			BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: definition.ID,
 			Version: definition.Version, Action: name, InputSchema: toolfile.ModelSchema(cloneMap(tool.InputSchema)),
 			Risk: action.Risk, SideEffect: action.SideEffect, ExternalOperationPolicy: action.ExternalOperationPolicy,
+			Repeatable:  action.Repeatable,
 			BindingTool: &ModelActionBindingTool{Name: tool.Name, InputArgument: spec.InputArgument, Arguments: fixed},
 		})
 	}

@@ -1210,6 +1210,9 @@ func validateDefinition(definition *Definition) error {
 		if action.AlwaysReview() && (action.SideEffect == SideEffectNone || action.SideEffect == SideEffectRead) {
 			return fmt.Errorf("skill action %s requires review but declares no side effects", name)
 		}
+		if action.Repeatable && action.SideEffect != SideEffectWrite {
+			return fmt.Errorf("skill action %s is repeatable but declares sideEffect %q; only write actions may be repeatable", name, action.SideEffect)
+		}
 		if action.ExternalOperationPolicy == ExternalOperationRequired && action.SideEffect != SideEffectExternal {
 			return fmt.Errorf("skill action %s requires external side effects to require an external-operation receipt", name)
 		}
