@@ -250,7 +250,7 @@ func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentR
 			return err
 		}
 		if affected != 1 {
-			if lease != nil && !s.agentRunRevisionMoved(ctx, tx, run, expectedRevision) && !s.agentRunActingUserChanged(ctx, tx, run, expectedRevision) {
+			if lease != nil && s.leasedRunUpdateLostLease(ctx, tx, run, expectedRevision) {
 				return ErrLeaseLost
 			}
 			return ErrRevisionConflict
@@ -259,23 +259,15 @@ func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentR
 	})
 }
 
-// agentRunRevisionMoved reports whether a refused leased update was refused
-// because a concurrent write moved the run's revision (an approval decided
-// while the Run holds it): that is a revision conflict, not a lost lease.
-func (s *PostgresStore) agentRunRevisionMoved(ctx context.Context, tx *sql.Tx, run *AgentRun, expectedRevision int64) bool {
-	var revision int64
-	err := tx.QueryRowContext(ctx, `SELECT revision FROM `+s.table("agent_runs")+`
-		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, run.Scope.Kind, run.Scope.ID, run.ID).Scan(&revision)
-	return err == nil && revision != expectedRevision
-}
-
-// agentRunActingUserChanged reports whether a refused leased update was refused
-// because it would change the stored run's immutable acting user.
-func (s *PostgresStore) agentRunActingUserChanged(ctx context.Context, tx *sql.Tx, run *AgentRun, expectedRevision int64) bool {
+// leasedRunUpdateLostLease reports whether a refused leased update was
+// refused for its lease: the row is still at expectedRevision with the same
+// acting user. A row that moved on is a revision conflict the caller reloads
+// (and then sees whether it still holds the lease), as on the other stores.
+func (s *PostgresStore) leasedRunUpdateLostLease(ctx context.Context, tx *sql.Tx, run *AgentRun, expectedRevision int64) bool {
 	var stored string
 	err := tx.QueryRowContext(ctx, `SELECT COALESCE(payload->>'actingUser','') FROM `+s.table("agent_runs")+`
 		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 AND revision = $4`, run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision).Scan(&stored)
-	return err == nil && stored != run.ActingUser
+	return err == nil && stored == run.ActingUser
 }
 
 func (s *PostgresStore) AppendActivity(ctx context.Context, event *ActivityEvent) (*ActivityEvent, error) {

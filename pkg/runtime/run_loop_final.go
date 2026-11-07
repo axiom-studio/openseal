@@ -166,9 +166,15 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 		req.Summary = finalFailedSummary
 	}
 	run, err = d.commitRun(ctx, st, req, false)
+	if errors.Is(err, ErrSteeringArrived) && req.Status == AgentRunStatusCompleted {
+		// The reply is posted, and a message was delivered to this Run after
+		// it. Nothing else answers a message on a terminal Run, so the Run
+		// goes on: the next step reads the message and its answer is a
+		// distinct post (conversationRunResponseKey names the follow-up).
+		return d.continueAfter(ctx, st, stepNext)
+	}
 	if errors.Is(err, ErrSteeringArrived) {
-		// The reply is posted; a message that arrived after it is answered by
-		// a follow-up Run (conversation_follow_up delivery).
+		// A failure the user already has the explanation of ends the Run.
 		req.RequireInterventionCount = nil
 		run, err = d.commitRun(ctx, st, req, false)
 	}
