@@ -35,6 +35,19 @@ type TurnRunnerBinding struct {
 	PreparedRuntimes   []PreparedSkillRuntime
 	InputContextRefs   []string
 	BudgetReservation  BudgetUsage
+
+	// RunLoop seams (SPEC §2.4).
+	Producer    StepProducer
+	Session     *AgentSession        // nil only for producers with no tool calls (routing)
+	Preparers   []StepPreparer       // run-start, then conversation
+	Tools       LoopToolExecutor     // disp-1
+	Compactor   StepCompactor        // G3
+	Final       FinalAnswerHandler   // CONV-08 for chats, runOutputFinalHandler otherwise
+	FinalOutput FinalOutputPublisher // nil = none
+	Host        StepHost
+	Prompt      PromptContribution // kernel-authored system parts from the owning section
+	ToolCheck   ToolCallCheck      // optional (conversation CheckToolCall)
+	AfterTool   AfterToolEntryHook // optional (conversation artifact receipts)
 }
 
 // PreparedSkillRuntime binds one activation-time immutable runtime to the
