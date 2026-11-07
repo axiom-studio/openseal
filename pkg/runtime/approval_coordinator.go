@@ -115,81 +115,115 @@ func (c *ApprovalCoordinator) ResolveTimeout(ctx context.Context, scope Scope, a
 	}, approvalResolutionTimeout)
 }
 
+// approvalResolveAttempts bounds how often resolve re-reads and recomputes a
+// loop call's decision after its Run row moved under it (a heartbeat, a park
+// or another decision of the same Run).
+const approvalResolveAttempts = 4
+
+// resolve decides an approval. Every loop decision writes its Run under the
+// Run row lock, the first lock the stores take: a Run parked on the approval
+// is queued (or, when paused, set to resume queued); a Run that still holds
+// the approval in its running step only gets a revision bump, so a racing
+// park of that step fails its revision check and re-plans. A nested (vm)
+// decision never touches its Run.
 func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRequest, kind approvalResolutionKind) (*ApprovalResolutionResult, error) {
 	if c == nil || c.portfolio == nil || c.actions == nil || kind == approvalResolutionPrincipal && c.authorize == nil {
 		return nil, errors.New("approval coordinator is not configured")
 	}
-	timeout := kind == approvalResolutionTimeout
 	if err := req.Scope.Validate(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(req.ApprovalID) == "" || req.ExpectedRevision < 1 || strings.TrimSpace(req.DecisionID) == "" || strings.TrimSpace(req.Principal.Type) == "" || strings.TrimSpace(req.Principal.ID) == "" {
 		return nil, errors.New("approval, expected revision, decision id, and principal are required")
 	}
+	for attempt := 1; ; attempt++ {
+		record, result, err := c.planResolution(ctx, req, kind)
+		if err != nil || result != nil {
+			return result, err
+		}
+		resolved, err := c.actions.ResolveApproval(ctx, *record)
+		if errors.Is(err, ErrRevisionConflict) && record.Call.Origin == ActionOriginLoop && attempt < approvalResolveAttempts {
+			continue
+		}
+		return resolved, err
+	}
+}
+
+// planResolution reads the approval, its call and its Run and computes the
+// resolution record. It returns a result instead when the same decision was
+// already applied.
+func (c *ApprovalCoordinator) planResolution(ctx context.Context, req ResolveApprovalRequest, kind approvalResolutionKind) (*ApprovalResolutionRecord, *ApprovalResolutionResult, error) {
+	timeout := kind == approvalResolutionTimeout
 	approval, err := c.actions.GetApproval(ctx, req.Scope, req.ApprovalID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	call, err := c.actions.GetActionCall(ctx, req.Scope, approval.ActionCallID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	run, err := c.portfolio.GetAgentRun(ctx, req.Scope, approval.RunID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if run == nil {
-		return nil, ErrRunNotFound
+		return nil, nil, ErrRunNotFound
 	}
 	if approval.Status != ApprovalStatusPending {
 		if approval.DecisionID == req.DecisionID {
-			return &ApprovalResolutionResult{Approval: approval, Call: call, Run: run, Resolved: false}, nil
+			return nil, &ApprovalResolutionResult{Approval: approval, Call: call, Run: run, Resolved: false}, nil
 		}
-		return nil, ErrApprovalResolved
+		return nil, nil, ErrApprovalResolved
 	}
 	if approval.Revision != req.ExpectedRevision {
-		return nil, ErrRevisionConflict
+		return nil, nil, ErrRevisionConflict
+	}
+	loop := call.Origin == ActionOriginLoop
+	nested := call.Origin == ActionOriginVM
+	if !loop && !nested {
+		return nil, nil, fmt.Errorf("action call %s has no loop or vm origin", call.ID)
 	}
 	now := c.now().UTC()
 	expired := !now.Before(approval.ExpiresAt)
 	if !timeout && !expired && kind != approvalResolutionSuperseded {
 		if err := req.Decision.Validate(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if req.Decision == ApprovalDecisionRequestChanges && strings.TrimSpace(req.Reason) == "" {
-			return nil, errors.New("reviewer guidance is required when requesting changes")
+			return nil, nil, errors.New("reviewer guidance is required when requesting changes")
 		}
 	}
 	if timeout && !expired {
-		return nil, errors.New("approval timeout deadline has not elapsed")
+		return nil, nil, errors.New("approval timeout deadline has not elapsed")
 	}
 	if (kind == approvalResolutionMode || kind == approvalResolutionSuperseded) && expired {
-		return nil, ErrApprovalExpired
+		return nil, nil, ErrApprovalExpired
 	}
-	runWaiting := run.Status == AgentRunStatusWaitingForApproval && run.WakeCondition != nil &&
-		run.WakeCondition.Type == "approval" && run.WakeCondition.Reference == approval.ID
-	runPausedWaiting := run.Status == AgentRunStatusPaused && run.PausedFrom == AgentRunStatusWaitingForApproval &&
-		run.PausedWakeCondition != nil && run.PausedWakeCondition.Type == "approval" && run.PausedWakeCondition.Reference == approval.ID
 	callWaiting := call.Status == ActionCallStatusWaitingApproval && call.ApprovalID == approval.ID
-	// A nested call waits on its approval while its Run keeps running; the
-	// decision only readies or closes the call and never touches the Run.
-	nested := call.Origin == ActionOriginVM
-	if nested {
-		runWaiting = callWaiting
-		runPausedWaiting = false
-	}
-	waitingPair := runWaiting && callWaiting
-	if !expired && !runWaiting {
-		return nil, fmt.Errorf("%w: run is not waiting on this approval", ErrInvalidRunTransition)
-	}
-	if !expired && !callWaiting {
-		return nil, fmt.Errorf("%w: action is not waiting on this approval", ErrApprovalResolved)
+	// parked: the Run waits on this approval, directly or under a pause.
+	parked := run.Status == AgentRunStatusWaitingForApproval && run.WakeCondition != nil &&
+		run.WakeCondition.Type == "approval" && run.WakeCondition.Reference == approval.ID
+	pausedParked := run.Status == AgentRunStatusPaused && run.PausedFrom == AgentRunStatusWaitingForApproval &&
+		run.PausedWakeCondition != nil && run.PausedWakeCondition.Type == "approval" && run.PausedWakeCondition.Reference == approval.ID
+	// held: the Run proposed the call and has not parked on it (its step still
+	// runs, or it parked on another approval). The decision is accepted and
+	// the Run picks it up when it resumes the tool entry.
+	held := loop && !parked && !pausedParked && callWaiting && !isTerminalAgentRunStatus(run.Status)
+	// A nested call waits on its approval while its Run keeps running.
+	decidable := callWaiting && (nested || held || parked || pausedParked)
+	if !expired && !decidable {
+		if !callWaiting {
+			return nil, nil, fmt.Errorf("%w: action is not waiting on this approval", ErrApprovalResolved)
+		}
+		return nil, nil, fmt.Errorf("%w: run is not waiting on this approval", ErrInvalidRunTransition)
 	}
 	status := ApprovalStatusRejected
 	eventType := "approval.rejected"
 	callStatus := ActionCallStatusDenied
 	if expired {
-		if timeout && approval.TimeoutDecision == ApprovalTimeoutApprove && waitingPair {
+		// A manifest review floor never auto-approves, whatever the
+		// checkpoint's timeout rule says.
+		if timeout && approval.TimeoutDecision == ApprovalTimeoutApprove && decidable && approval.ProposedAction["review"] != "always" {
 			status = ApprovalStatusApproved
 			eventType = "approval.auto_approved"
 			callStatus = ActionCallStatusReady
@@ -203,7 +237,7 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	} else {
 		if kind == approvalResolutionPrincipal {
 			if err := c.authorize.AuthorizeApproval(ctx, req.Principal, cloneApprovalCheckpoint(approval)); err != nil {
-				return nil, fmt.Errorf("authorize approval: %w", err)
+				return nil, nil, fmt.Errorf("authorize approval: %w", err)
 			}
 		}
 		switch {
@@ -227,12 +261,16 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 	updatedApproval.DecidedAt = &now
 	updatedApproval.UpdatedAt = now
 	updatedApproval.Revision++
+	if status == ApprovalStatusSuperseded {
+		updatedApproval.SupersededByMessageID = req.CorrelationID
+	}
 	updatedCall := cloneActionCall(call)
 	updatedCall.Status = callStatus
 	updatedCall.AvailableAt = now
 	updatedCall.UpdatedAt = now
 	updatedCall.Revision++
-	if callStatus == ActionCallStatusDenied && callWaiting {
+	denied := callStatus == ActionCallStatusDenied && callWaiting
+	if denied {
 		updatedCall.Error = string(status)
 		if req.Reason != "" {
 			updatedCall.Error += ": " + req.Reason
@@ -248,54 +286,42 @@ func (c *ApprovalCoordinator) resolve(ctx context.Context, req ResolveApprovalRe
 		Payload: map[string]interface{}{"approvalId": approval.ID, "actionCallId": call.ID, "status": status, "decisionId": req.DecisionID, "decisionReason": strings.TrimSpace(req.Reason)},
 	}
 	addActionOrigin(event.Payload, call)
-	if nested {
-		return c.actions.ResolveApproval(ctx, ApprovalResolutionRecord{
-			Approval: updatedApproval, ExpectedApprovalRevision: approval.Revision,
-			Call: updatedCall, ExpectedCallRevision: call.Revision, Event: event,
-		})
+	record := &ApprovalResolutionRecord{
+		Approval: updatedApproval, ExpectedApprovalRevision: approval.Revision,
+		Call: updatedCall, ExpectedCallRevision: call.Revision, Event: event,
+	}
+	// A nested decision, or a late expiry of a call whose Run ended or moved
+	// on, resolves without the Run.
+	if nested || !callWaiting || !(held || parked || pausedParked) {
+		return record, nil, nil
 	}
 	updatedRun := cloneAgentRun(run)
-	if callStatus == ActionCallStatusDenied && callWaiting && updatedRun.Budget != nil {
-		if err := releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
-			return nil, err
+	if denied && updatedRun.Budget != nil {
+		if _, reserved := updatedRun.BudgetReservations[actionBudgetReservationID(call.ID)]; reserved {
+			if err := releaseRunBudgetReservation(updatedRun, actionBudgetReservationID(call.ID)); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
-	if waitingPair || runPausedWaiting && callWaiting {
-		if callStatus == ActionCallStatusReady {
-			updatedRun.Status = AgentRunStatusWaitingForDependency
-			updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
-		} else {
-			if runPausedWaiting {
-				// Expiry closes the saved dependency without overriding the
-				// operator's pause. Resume will consume the denied outcome.
-				updatedRun.PausedFrom = AgentRunStatusQueued
-				updatedRun.PausedWakeCondition = nil
-			} else {
-				updatedRun.Status = AgentRunStatusQueued
-				updatedRun.WakeCondition = nil
-				updatedRun.AvailableAt = now
-				updatedRun.QueueEnteredAt = now
-			}
-			metadata := map[string]interface{}{"approvalId": approval.ID, "approvalStatus": status}
-			if status == ApprovalStatusChangesRequested {
-				metadata["reviewerGuidance"] = strings.TrimSpace(req.Reason)
-				metadata["reviewedProposalRevision"] = approval.Revision
-			}
-			if status == ApprovalStatusSuperseded {
-				metadata["supersededByMessageId"] = req.CorrelationID
-				metadata["reviewedProposalRevision"] = approval.Revision
-			}
-			updatedRun.Checkpoint = checkpointTerminalAction(updatedRun.Checkpoint, updatedCall, metadata)
-		}
+	switch {
+	case parked:
+		updatedRun.Status = AgentRunStatusQueued
+		updatedRun.WakeCondition = nil
+		updatedRun.AvailableAt = now
+		updatedRun.QueueEnteredAt = now
 		updatedRun.LeaseOwner = ""
 		updatedRun.LeaseExpiresAt = nil
+		updatedRun.LastWakeSignalID = req.DecisionID
+	case pausedParked:
+		// The operator's pause stands; resume queues the Run, which then
+		// reads the decided tool entry.
+		updatedRun.PausedFrom = AgentRunStatusQueued
+		updatedRun.PausedWakeCondition = nil
+		updatedRun.LastWakeSignalID = req.DecisionID
 	}
-	updatedRun.LastWakeSignalID = req.DecisionID
 	updatedRun.UpdatedAt = now
 	updatedRun.Revision++
-	return c.actions.ResolveApproval(ctx, ApprovalResolutionRecord{
-		Approval: updatedApproval, ExpectedApprovalRevision: approval.Revision,
-		Call: updatedCall, ExpectedCallRevision: call.Revision,
-		Run: updatedRun, ExpectedRunRevision: run.Revision, Event: event,
-	})
+	record.Run = updatedRun
+	record.ExpectedRunRevision = run.Revision
+	return record, nil, nil
 }

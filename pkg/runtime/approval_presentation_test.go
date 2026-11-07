@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -38,8 +39,8 @@ func TestPaymentApprovalPresentationMatchesTheWebCard(t *testing.T) {
 	}
 }
 
-func TestApprovalPresentationNeverShowsProgressPhrasesIdentifiersOrRedactions(t *testing.T) {
-	approval := &ApprovalCheckpoint{Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Working on your request.",
+func TestApprovalPresentationNeverShowsIdentifiersOrRedactions(t *testing.T) {
+	approval := &ApprovalCheckpoint{Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Proposed send_message",
 		ProposedAction: map[string]interface{}{"skillId": "skill-slack", "action": "send_message", "review": "always",
 			"arguments": map[string]interface{}{"intent": "Post the weekly summary to #general", "url": "https://slack.com/x", "token": "secret"}}}
 	got := PresentApproval(approval)
@@ -52,10 +53,29 @@ func TestApprovalPresentationNeverShowsProgressPhrasesIdentifiersOrRedactions(t 
 		t.Fatalf("approved presentation = %#v", got)
 	}
 	for _, intent := range []string{"Send message", "send_message now", "Use [REDACTED] to sign in", "Proposed send_message"} {
-		approval := &ApprovalCheckpoint{Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Working on your request.",
+		approval := &ApprovalCheckpoint{Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Proposed send_message",
 			ProposedAction: map[string]interface{}{"skillId": "skill-slack", "action": "send_message", "arguments": map[string]interface{}{"intent": intent}}}
 		if got := PresentApproval(approval); got.Title != "Your agent wants to act outside this chat" {
 			t.Fatalf("%q leaked into %#v", intent, got)
 		}
+	}
+}
+
+// The approval summary is the model's own sentence for the call (review
+// summary, _reviewSummary or step narration), so no kernel progress phrase
+// list filters it.
+func TestApprovalPresentationNoProgressPhraseFilter(t *testing.T) {
+	for _, summary := range []string{"Working on your request.", "Reading your request and available context.", "Loaded 3 tools or instruction sets for the next step."} {
+		approval := &ApprovalCheckpoint{Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: summary,
+			ProposedAction: map[string]interface{}{"skillId": "skill-slack", "action": "send_message", "arguments": map[string]interface{}{"channel": "#general"}}}
+		if got := PresentApproval(approval); got.Title != strings.TrimRight(summary, ".") {
+			t.Fatalf("summary %q presented as %#v", summary, got)
+		}
+	}
+	reviewed := &ApprovalCheckpoint{Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Post the weekly summary",
+		ProposedAction: map[string]interface{}{"skillId": "skill-slack", "action": "send_message",
+			"reviewContext": map[string]interface{}{"summary": "Working on your request."}}}
+	if got := PresentApproval(reviewed); got.Title != "Working on your request" {
+		t.Fatalf("review summary presented as %#v", got)
 	}
 }
