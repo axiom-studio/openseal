@@ -119,7 +119,7 @@ type editorMode int
 
 const (
 	modeCreate editorMode = iota
-	modeWorkforceAuthoring
+	modeAgentBuilderPrompt
 	modeWorkforceBundleInspect
 	modeWorkforceRefinement
 	modeGuide
@@ -185,6 +185,7 @@ type Model struct {
 	sourcePolicyClient                 client.SourcePolicyLifecycleClient
 	workforceSkillSearchClient         client.WorkforceSkillSearchClient
 	workforceBundleClient              client.WorkforceBundleClient
+	agentBuilderClient                 agentBuilderConversationClient
 	config                             Config
 	editor                             textarea.Model
 	focus                              focusArea
@@ -218,6 +219,7 @@ type Model struct {
 	artifactCapability                 kernelapi.Capability
 	channelCapability                  kernelapi.Capability
 	authoringCapability                kernelapi.Capability
+	agentBuilderCapability             kernelapi.Capability
 	workforceBundleCapability          kernelapi.Capability
 	agentDefinitionCapability          kernelapi.Capability
 	teamDefinitionCapability           kernelapi.Capability
@@ -347,16 +349,22 @@ type Model struct {
 	pendingClawHubPrompt               string
 	pendingConversationKey             string
 	pendingConversationTitle           string
-	pendingMessageKey                  string
-	pendingMessageContent              string
-	pendingMessageChannelID            string
-	pendingAgentRequestKey             string
-	pendingAgentRequestPrompt          string
-	pendingAgentRequestSourceID        string
-	pendingRequestCompletionKey        string
-	pendingRequestCompletionID         string
-	pendingApprovalKey                 string
-	pendingApprovalIntent              string
+	pendingAgentBuilderKey             string
+	pendingAgentBuilderPrompt          string
+	// builderConversation is the builder chat opened from "New agent". It is
+	// owned by the builder Agent, so the owner-scoped channel and approval
+	// lists add it (and its cards) explicitly.
+	builderConversation         *runtime.Conversation
+	pendingMessageKey           string
+	pendingMessageContent       string
+	pendingMessageChannelID     string
+	pendingAgentRequestKey      string
+	pendingAgentRequestPrompt   string
+	pendingAgentRequestSourceID string
+	pendingRequestCompletionKey string
+	pendingRequestCompletionID  string
+	pendingApprovalKey          string
+	pendingApprovalIntent       string
 }
 
 type capabilitiesLoaded struct {
@@ -665,6 +673,19 @@ type channelDetailLoaded struct {
 	err            error
 }
 
+// agentBuilderConversationClient starts a builder conversation: the "New
+// agent" request becomes the first message of a chat with the builder Agent.
+type agentBuilderConversationClient interface {
+	StartAgentBuilderConversation(context.Context, kernelapi.StartAgentBuilderConversationRequest) (*kernelapi.StartAgentBuilderConversationResponse, error)
+}
+
+const agentBuilderPromptPlaceholder = "Describe the agent you need…"
+
+type agentBuilderConversationStarted struct {
+	response *kernelapi.StartAgentBuilderConversationResponse
+	err      error
+}
+
 type conversationCreated struct {
 	conversation *runtime.Conversation
 	err          error
@@ -722,7 +743,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	editor.Focus()
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
-		focus: focusComposer, section: sectionOverview, mode: modeWorkforceAuthoring, width: 100, height: 30,
+		focus: focusComposer, section: sectionOverview, mode: modeAgentBuilderPrompt, width: 100, height: 30,
 		agentLifecycleClient:       agentLifecycleClient(kernelClient),
 		agentCapabilityClient:      agentCapabilityClient(kernelClient),
 		conversationClient:         conversationClient(kernelClient),
@@ -732,6 +753,7 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 		sourcePolicyClient:         sourcePolicyClient(kernelClient),
 		workforceSkillSearchClient: workforceSkillSearchClient(kernelClient),
 		workforceBundleClient:      workforceBundleClient(kernelClient),
+		agentBuilderClient:         agentBuilderClient(kernelClient),
 	}, nil
 }
 
@@ -788,6 +810,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
 		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
+		agentBuilderCapability, hasAgentBuilder := msg.document.Find(kernelapi.AgentBuilderCapabilityID, kernelapi.AgentBuilderCapabilityVersion)
 		workforceBundleCapability, hasWorkforceBundles := msg.document.Find(kernelapi.WorkforceBundlesCapabilityID, kernelapi.WorkforceBundlesCapabilityVersion)
 		agentDefinitionCapability, hasAgentDefinitions := msg.document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
 		teamDefinitionCapability, hasTeamDefinitions := msg.document.Find(kernelapi.TeamDefinitionsCapabilityID, kernelapi.TeamDefinitionsCapabilityVersion)
@@ -811,6 +834,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
 		m.authoringCapability = authoringCapability
+		m.agentBuilderCapability = agentBuilderCapability
 		m.workforceBundleCapability = workforceBundleCapability
 		m.agentDefinitionCapability = agentDefinitionCapability
 		m.teamDefinitionCapability = teamDefinitionCapability
@@ -879,6 +903,9 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasAuthoring || !authoringCapability.Available {
 			m.authoringCapability = kernelapi.Capability{}
 		}
+		if !hasAgentBuilder || !agentBuilderCapability.Available || m.agentBuilderClient == nil {
+			m.agentBuilderCapability = kernelapi.Capability{}
+		}
 		if !hasWorkforceBundles || !workforceBundleCapability.Available || !workforceBundleCapability.Supports(kernelapi.OperationInspect) || m.workforceBundleClient == nil {
 			m.workforceBundleCapability = kernelapi.Capability{}
 			m.workforceBundleInspection = nil
@@ -893,7 +920,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasSourcePolicies || !sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !sourcePolicyCapability.Supports(kernelapi.OperationList) {
 			m.sourcePolicyCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.projectCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.projectCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise workforce authoring, objectives, Projects, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -901,7 +928,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 		m.unavailable = ""
 		m.err = nil
-		if m.authoringCapability.Available {
+		if m.authoringCapability.Available || m.agentBuilderCapability.Available {
 			m.section = sectionAuthoring
 			// A full standalone workspace starts on the guided Home page.
 			// Narrow embedded clients still open directly on their one useful
@@ -909,12 +936,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.availableSections()) >= 7 {
 				m.section = sectionOverview
 			}
-			m.mode = modeWorkforceAuthoring
-			if m.authoringResult != nil {
-				m.editor.Placeholder = "Describe what should change…"
-			} else {
-				m.editor.Placeholder = "Describe the Agents and Team you need…"
-			}
+			m.mode = modeAgentBuilderPrompt
+			m.editor.Placeholder = agentBuilderPromptPlaceholder
 		} else if m.workforceBundleCapability.Available {
 			m.section = sectionBundles
 			m.mode = modeWorkforceBundleInspect
@@ -1618,6 +1641,33 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.markSelectedConversationRead()
 		}
 		return m, nil
+	case agentBuilderConversationStarted:
+		m.busy = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.status = "The builder chat didn't start. Your request is kept for retry."
+			return m, nil
+		}
+		if msg.response == nil || msg.response.Conversation == nil {
+			m.err = errors.New("the builder returned no conversation")
+			m.status = "The builder chat didn't start. Your request is kept for retry."
+			return m, nil
+		}
+		m.err = nil
+		m.pendingAgentBuilderKey, m.pendingAgentBuilderPrompt = "", ""
+		m.editor.Reset()
+		m.builderConversation = msg.response.Conversation
+		m.selectedConversation = msg.response.Conversation.ID
+		m.channelMessages, m.channelRounds, m.channelPresence = nil, nil, nil
+		m.status = "Builder chat opened. Answer its questions here; approve its card in Approvals before anything is created."
+		if !m.channelCapability.Available {
+			return m, m.loadActionApprovals()
+		}
+		m.section = sectionChannels
+		m.mode = modeChannelPost
+		m.editor.Placeholder = "Reply to the builder…"
+		m.focusPanelList()
+		return m, tea.Batch(m.loadConversations(), m.loadActionApprovals())
 	case conversationCreated:
 		m.busy = false
 		if msg.err != nil {
@@ -1953,8 +2003,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitSourcePolicyActivate()
 			case modeSourcePolicyRevoke:
 				return m, m.submitSourcePolicyRevoke()
-			case modeWorkforceAuthoring:
-				return m, m.submitWorkforceAuthoring()
+			case modeAgentBuilderPrompt:
+				return m, m.submitAgentBuilderPrompt()
 			case modeWorkforceBundleInspect:
 				return m, m.submitWorkforceBundleInspection()
 			case modeWorkforceRefinement:
@@ -2014,8 +2064,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		if m.focus == focusComposer {
 			switch m.mode {
-			case modeWorkforceAuthoring:
-				return m, m.submitWorkforceAuthoring()
+			case modeAgentBuilderPrompt:
+				return m, m.submitAgentBuilderPrompt()
 			case modeChannelPost:
 				return m, m.submitChannelMessage()
 			}
@@ -2024,10 +2074,10 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.focus == focusPanel {
 		if key == "enter" && m.section == sectionOverview {
-			if m.authoringCapability.Available {
+			if m.authoringCapability.Available || m.agentBuilderCapability.Available {
 				m.section = sectionAuthoring
-				m.mode = modeWorkforceAuthoring
-				m.editor.Placeholder = "Describe what you want your workforce to accomplish…"
+				m.mode = modeAgentBuilderPrompt
+				m.editor.Placeholder = agentBuilderPromptPlaceholder
 				m.focusComposerEditor()
 			}
 			return m, nil
@@ -2106,7 +2156,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.section = sectionActivity
 			}
 		case "f":
-			if m.authoringCapability.Available {
+			if m.authoringCapability.Available || m.agentBuilderCapability.Available {
 				m.section = sectionAuthoring
 			}
 		case "B":
@@ -2511,6 +2561,39 @@ func (m *Model) loadWorkforceChangeSet() tea.Cmd {
 	return func() tea.Msg {
 		changeSet, err := m.client.GetWorkforceChangeSet(m.ctx, scope, id)
 		return workforceLoaded{changeSet: changeSet, err: err}
+	}
+}
+
+// submitAgentBuilderPrompt is "New agent": it opens a builder chat whose
+// first message is the request and switches to that chat. The builder asks
+// its questions there and proposes the agent as an approval card.
+func (m *Model) submitAgentBuilderPrompt() tea.Cmd {
+	if m.authoringAutomationFocus != nil {
+		// Refining a runbook operation still edits the change set; OS-14
+		// deletes that flow with the other authoring modes.
+		return m.submitWorkforceAuthoring()
+	}
+	prompt := strings.TrimSpace(m.editor.Value())
+	if !m.supportsAgentBuilder() || m.busy || prompt == "" {
+		if prompt == "" {
+			m.status = "Describe the agent you need."
+		}
+		return nil
+	}
+	if m.pendingAgentBuilderKey == "" || m.pendingAgentBuilderPrompt != prompt {
+		m.pendingAgentBuilderKey, m.pendingAgentBuilderPrompt = uuid.NewString(), prompt
+	}
+	request := kernelapi.StartAgentBuilderConversationRequest{
+		Scope: m.config.Scope, Prompt: prompt,
+		Parameters:     runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent},
+		IdempotencyKey: m.pendingAgentBuilderKey,
+	}
+	m.busy, m.err = true, nil
+	m.status = "Opening a chat with the builder…"
+	builder := m.agentBuilderClient
+	return func() tea.Msg {
+		response, err := builder.StartAgentBuilderConversation(m.ctx, request)
+		return agentBuilderConversationStarted{response: response, err: err}
 	}
 }
 
@@ -3224,11 +3307,24 @@ func (m *Model) loadActionApprovals() tea.Cmd {
 	}
 	m.loading = true
 	owner := m.config.Owner
+	builder := m.builderConversation
 	return func() tea.Msg {
 		approvals, err := m.client.ListActionApprovals(m.ctx, runtime.ApprovalFilter{
 			Scope: m.config.Scope, Owner: &owner, Limit: 100,
 		})
-		return actionApprovalsLoaded{approvals: approvals, err: err}
+		if err != nil || builder == nil || builder.Owner == owner {
+			return actionApprovalsLoaded{approvals: approvals, err: err}
+		}
+		// Builder cards belong to the builder Agent, not to this TUI's
+		// owner; the person who asked for the agent approves them here.
+		builderOwner := builder.Owner
+		cards, err := m.client.ListActionApprovals(m.ctx, runtime.ApprovalFilter{
+			Scope: builder.Scope, Owner: &builderOwner, Limit: 100,
+		})
+		if err != nil {
+			return actionApprovalsLoaded{err: err}
+		}
+		return actionApprovalsLoaded{approvals: append(cards, approvals...)}
 	}
 }
 
@@ -3610,11 +3706,19 @@ func (m *Model) loadConversations() tea.Cmd {
 		return nil
 	}
 	m.loading = true
+	builder := m.builderConversation
 	return func() tea.Msg {
 		conversations, err := m.conversationClient.ListConversations(m.ctx, runtime.ConversationFilter{
 			Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100,
 		})
-		return conversationsLoaded{conversations: conversations, err: err}
+		if err != nil || builder == nil || builder.Owner == m.config.Owner {
+			return conversationsLoaded{conversations: conversations, err: err}
+		}
+		current, err := m.conversationClient.GetConversation(m.ctx, builder.Scope, builder.ID)
+		if err != nil {
+			return conversationsLoaded{err: err}
+		}
+		return conversationsLoaded{conversations: append([]*runtime.Conversation{current}, conversations...)}
 	}
 }
 
@@ -4823,7 +4927,7 @@ func (m *Model) defaultOperationalSection() panelSection {
 		section   panelSection
 		available bool
 	}{
-		{sectionAuthoring, m.authoringCapability.Available},
+		{sectionAuthoring, m.authoringCapability.Available || m.agentBuilderCapability.Available},
 		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
 		{sectionSources, m.eventSourceCapability.Available},
@@ -4853,7 +4957,7 @@ func (m *Model) availableSections() []panelSection {
 		section   panelSection
 		available bool
 	}{
-		{sectionAuthoring, m.authoringCapability.Available},
+		{sectionAuthoring, m.authoringCapability.Available || m.agentBuilderCapability.Available},
 		{sectionReadiness, m.agentDefinitionCapability.Available},
 		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionSkills, m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available},
@@ -4951,6 +5055,10 @@ func (m *Model) supportsChannel(operation string) bool {
 
 func (m *Model) supportsAuthoring(operation string) bool {
 	return m.ready && m.authoringCapability.Supports(operation)
+}
+
+func (m *Model) supportsAgentBuilder() bool {
+	return m.ready && m.agentBuilderClient != nil && m.agentBuilderCapability.Supports(kernelapi.OperationCreate)
 }
 
 func (m *Model) supportsWorkforceAuthoring() bool {
@@ -6664,7 +6772,7 @@ func (m *Model) prepareWorkforceAutomationRefinement() {
 	}
 	focus := row.Focus
 	m.authoringAutomationFocus = &focus
-	m.mode = modeWorkforceAuthoring
+	m.mode = modeAgentBuilderPrompt
 	m.editor.Reset()
 	m.editor.Placeholder = fmt.Sprintf("Describe the change to %s…", focus.Entrypoint)
 	m.status = fmt.Sprintf("Refining %s · %s. Unrelated candidate state will be preserved.", focus.AgentName, focus.Entrypoint)
@@ -6825,10 +6933,10 @@ func (m *Model) prepareSourcePolicyComposer(mode editorMode, template string) {
 
 func (m *Model) prepareComposerForSection() {
 	switch {
-	case m.section == sectionOverview && m.supportsWorkforceAuthoring():
+	case m.section == sectionOverview && m.supportsAgentBuilder():
 		m.section = sectionAuthoring
-		m.mode = modeWorkforceAuthoring
-		m.editor.Placeholder = "Describe what you want your workforce to accomplish…"
+		m.mode = modeAgentBuilderPrompt
+		m.editor.Placeholder = agentBuilderPromptPlaceholder
 		m.focusComposerEditor()
 	case m.section == sectionBundles && m.workforceBundleCapability.Supports(kernelapi.OperationInspect):
 		m.mode = modeWorkforceBundleInspect
@@ -6840,9 +6948,9 @@ func (m *Model) prepareComposerForSection() {
 		m.prepareAgentAmendmentComposer(modeAgentAmendmentPropose, "systemPrompt|personality\nConcise rationale\nNew immutable value")
 	case m.section == sectionTeams && m.canProposeTeamPurposeAmendment():
 		m.prepareTeamAmendmentComposer(modeTeamAmendmentPropose, "First line: concise rationale\nRemaining lines: the Team's new purpose")
-	case m.section == sectionAuthoring && m.supportsWorkforceAuthoring():
-		m.mode = modeWorkforceAuthoring
-		m.editor.Placeholder = "Describe the Agents and Team you need…"
+	case m.section == sectionAuthoring && m.supportsAgentBuilder():
+		m.mode = modeAgentBuilderPrompt
+		m.editor.Placeholder = agentBuilderPromptPlaceholder
 		m.focusComposerEditor()
 	case m.section == sectionObjectives && m.supportsObjective(kernelapi.OperationCreate):
 		m.mode = modeObjectiveCreate
@@ -6902,9 +7010,9 @@ func (m *Model) prepareComposerForSection() {
 
 func (m *Model) resetComposerMode() {
 	if m.section == sectionOverview {
-		if m.supportsWorkforceAuthoring() {
-			m.mode = modeWorkforceAuthoring
-			m.editor.Placeholder = "Describe what you want your workforce to accomplish…"
+		if m.supportsAgentBuilder() {
+			m.mode = modeAgentBuilderPrompt
+			m.editor.Placeholder = agentBuilderPromptPlaceholder
 		} else {
 			m.mode = modeCreate
 			m.editor.Placeholder = "Choose a destination to get started."
@@ -6932,8 +7040,8 @@ func (m *Model) resetComposerMode() {
 			m.activateReadyRefinement()
 			return
 		}
-		m.mode = modeWorkforceAuthoring
-		m.editor.Placeholder = "Describe the Agents and Team you need…"
+		m.mode = modeAgentBuilderPrompt
+		m.editor.Placeholder = agentBuilderPromptPlaceholder
 		return
 	}
 	if m.section == sectionObjectives {
@@ -7074,6 +7182,11 @@ func sourcePolicyClient(kernelClient client.KernelClient) client.SourcePolicyLif
 
 func workforceSkillSearchClient(kernelClient client.KernelClient) client.WorkforceSkillSearchClient {
 	value, _ := kernelClient.(client.WorkforceSkillSearchClient)
+	return value
+}
+
+func agentBuilderClient(kernelClient client.KernelClient) agentBuilderConversationClient {
+	value, _ := kernelClient.(agentBuilderConversationClient)
 	return value
 }
 
