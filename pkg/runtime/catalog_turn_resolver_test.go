@@ -96,6 +96,10 @@ func (c *resolverCatalog) ActivateSkills(ctx context.Context, _ skill.ScopeRefer
 	return c.activation, nil
 }
 
+func (c *resolverCatalog) GetActionCall(context.Context, Scope, string) (*ActionCall, error) {
+	return nil, ErrActionNotFound
+}
+
 func (c *resolverCatalog) GetOutreachThread(context.Context, Scope, string) (*OutreachThread, error) {
 	return nil, ErrOutreachThreadNotFound
 }
@@ -126,7 +130,7 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := binding.Runner.(*OutreachTurnRunner); !ok || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "forum-account" ||
+	if _, ok := binding.Producer.(*OutreachStepProducer); !ok || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "forum-account" ||
 		len(binding.InputContextRefs) != 2 || binding.InputContextRefs[0] != "skill-snapshot:snapshot-1" || binding.InputContextRefs[1] != "run:"+OutreachInvocationContextKey {
 		t.Fatalf("outreach binding = %#v", binding)
 	}
@@ -138,7 +142,7 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := binding.Runner.(*CapabilityInvocationTurnRunner); !ok || len(binding.ModelActions) != 1 {
+	if _, ok := binding.Producer.(*CapabilityInvocationStepProducer); !ok || len(binding.ModelActions) != 1 {
 		t.Fatalf("capability binding = %#v", binding)
 	}
 	// The Agent's activation acts for the run, so host bindings for it apply.

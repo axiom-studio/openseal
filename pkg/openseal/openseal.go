@@ -415,7 +415,7 @@ type (
 	ReconcileOutreachActionRequest       = runtime.ReconcileOutreachActionRequest
 	ReconcileOutreachActionResult        = runtime.ReconcileOutreachActionResult
 	OutreachTurnLifecycle                = runtime.OutreachTurnLifecycle
-	OutreachTurnRunner                   = runtime.OutreachTurnRunner
+	OutreachStepProducer                 = runtime.OutreachStepProducer
 	OutreachActionProposalObserver       = runtime.OutreachActionProposalObserver
 	AgentRun                             = runtime.AgentRun
 	AgentRunIntervention                 = runtime.AgentRunIntervention
@@ -666,7 +666,7 @@ type (
 	EvidenceGroundingReviewer            = runtime.EvidenceGroundingReviewer
 	EvidenceSnapshot                     = runtime.EvidenceSnapshot
 	EvidenceSnapshotObservation          = runtime.EvidenceSnapshotObservation
-	CapabilityInvocationTurnRunner       = runtime.CapabilityInvocationTurnRunner
+	CapabilityInvocationStepProducer     = runtime.CapabilityInvocationStepProducer
 	AdvanceAgentRunRequest               = runtime.AdvanceAgentRunRequest
 	AdvanceAgentRunResult                = runtime.AdvanceAgentRunResult
 	AgentRunScheduleStore                = runtime.AgentRunScheduleStore
@@ -1608,8 +1608,8 @@ var (
 	EstimateHostedTurnInputTokens          = runtime.EstimateHostedTurnInputTokens
 	ValidateHostedSkillSelections          = runtime.ValidateHostedSkillSelections
 	CompleteHostedSkillSelections          = runtime.CompleteHostedSkillSelections
-	NewCapabilityInvocationTurnRunner      = runtime.NewCapabilityInvocationTurnRunner
-	NewOutreachTurnRunner                  = runtime.NewOutreachTurnRunner
+	NewCapabilityInvocationStepProducer    = runtime.NewCapabilityInvocationStepProducer
+	NewOutreachStepProducer                = runtime.NewOutreachStepProducer
 	NewOutreachActionProposalObserver      = runtime.NewOutreachActionProposalObserver
 	ResolveCatalogTurnRunner               = runtime.ResolveCatalogTurnRunner
 	NewArtifactRetentionService            = runtime.NewArtifactRetentionService

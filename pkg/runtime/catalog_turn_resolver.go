@@ -23,6 +23,9 @@ type AgentTurnCatalog interface {
 	GetAgentDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
 	ActivateSkills(context.Context, skill.ScopeReference, string, skill.HostCapabilityState) (*skill.ActivationSnapshot, error)
 	OutreachTurnLifecycle
+	// ActionCallReader lets deterministic producers (outreach, capability
+	// invocation) read the authoritative ActionCall behind their tool entry.
+	ActionCallReader
 }
 
 type CatalogTurnResolverConfig struct {
@@ -278,20 +281,20 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		base.RunbookOperations = nil
 	}
 	if _, requested := run.Context[OutreachInvocationContextKey]; requested {
-		runner, resolveErr := NewOutreachTurnRunner(catalog, actions)
+		producer, resolveErr := NewOutreachStepProducer(catalog, actions, catalog)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve governed outreach for Agent %s: %w", deployment.ID, resolveErr)
 		}
-		base.Runner = runner
+		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "run:"+OutreachInvocationContextKey)
 		return &base, nil
 	}
 	if _, requested := run.Context["capabilityInvocation"]; requested {
-		runner, resolveErr := NewCapabilityInvocationTurnRunner(actions)
+		producer, resolveErr := NewCapabilityInvocationStepProducer(actions, catalog)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("resolve typed capability invocation for Agent %s: %w", deployment.ID, resolveErr)
 		}
-		base.Runner = runner
+		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "run:capabilityInvocation")
 		return &base, nil
 	}

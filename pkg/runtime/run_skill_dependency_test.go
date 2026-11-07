@@ -98,9 +98,9 @@ func TestRunSkillDependencyPinsQueuedInvocationBeforeFirstActionAcrossStores(t *
 			assertBusy()
 		}
 		// Future deterministic execution still sees its original exact version.
-		runner, _ := NewCapabilityInvocationTurnRunner([]capability.ModelAction{{Name: "reader.read", SkillID: "reader", Version: "1.0.0", Action: "read", BindingID: "account", BindingRevision: 1}})
-		outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn", Sequence: 1}})
-		if err != nil || len(outcome.ProposedActions) != 1 {
+		producer, _ := NewCapabilityInvocationStepProducer([]capability.ModelAction{{Name: "reader.read", SkillID: "reader", Version: "1.0.0", Action: "read", BindingID: "account", BindingRevision: 1}}, store)
+		outcome, err := producer.Produce(t.Context(), StepInput{Run: run, Step: &AgentTurn{ID: "step", Sequence: 1}})
+		if err != nil || len(outcome.ToolCalls) != 1 {
 			t.Fatalf("preserved invocation cannot continue: %#v %v", outcome, err)
 		}
 		original := cloneAgentRun(run)

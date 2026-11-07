@@ -20,11 +20,6 @@ type OutreachTurnLifecycle interface {
 	ReconcileOutreachAction(context.Context, Scope, string, ReconcileOutreachActionRequest) (*ReconcileOutreachActionResult, error)
 }
 
-type OutreachTurnRunner struct {
-	lifecycle OutreachTurnLifecycle
-	actions   []capability.ModelAction
-}
-
 type OutreachActionProposalObserver struct {
 	lifecycle OutreachTurnLifecycle
 }
@@ -55,77 +50,136 @@ func (o *OutreachActionProposalObserver) ObserveActionProposal(ctx context.Conte
 	return err
 }
 
-func NewOutreachTurnRunner(lifecycle OutreachTurnLifecycle, actions []capability.ModelAction) (*OutreachTurnRunner, error) {
+// outreachToolCallID is the id of the one governed delivery call an outreach
+// Run makes.
+const outreachToolCallID = "outreach-delivery"
+
+// OutreachStepProducer delivers one reviewed outreach draft through one
+// governed tool call. Target, body and action arguments are always reloaded
+// from the authoritative OutreachThread; the provider receipt is read from the
+// ActionCall and reconciled into the thread before the Run completes.
+type OutreachStepProducer struct {
+	lifecycle OutreachTurnLifecycle
+	actions   []capability.ModelAction
+	calls     ActionCallReader
+}
+
+func NewOutreachStepProducer(lifecycle OutreachTurnLifecycle, actions []capability.ModelAction, calls ActionCallReader) (*OutreachStepProducer, error) {
 	if lifecycle == nil || len(actions) == 0 {
 		return nil, errors.New("outreach execution requires a durable lifecycle and authorized actions")
 	}
-	return &OutreachTurnRunner{lifecycle: lifecycle, actions: cloneHostedModelActions(actions)}, nil
+	if calls == nil {
+		return nil, errors.New("outreach execution requires the action-call store")
+	}
+	return &OutreachStepProducer{lifecycle: lifecycle, actions: cloneHostedModelActions(actions), calls: calls}, nil
 }
 
-func (r *OutreachTurnRunner) RunTurn(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-	if r == nil || input.Run == nil || input.Turn == nil {
-		return nil, errors.New("outreach execution requires a durable Run and Turn")
+func (p *OutreachStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
+
+func (p *OutreachStepProducer) Produce(ctx context.Context, in StepInput) (StepOutput, error) {
+	if p == nil || in.Run == nil || in.Step == nil {
+		return StepOutput{}, errors.New("outreach execution requires a durable Run and step")
 	}
-	invocation, ok := input.Run.Context[OutreachInvocationContextKey].(map[string]interface{})
+	run := in.Run
+	invocation, ok := run.Context[OutreachInvocationContextKey].(map[string]interface{})
 	if !ok || len(invocation) != 2 {
-		return nil, errors.New("Run requires an exact outreach thread and message invocation")
+		return StepOutput{}, errors.New("Run requires an exact outreach thread and message invocation")
 	}
 	threadID, _ := invocation["threadId"].(string)
 	messageID, _ := invocation["messageId"].(string)
 	threadID, messageID = strings.TrimSpace(threadID), strings.TrimSpace(messageID)
 	if !validOpaqueIdentifier(threadID, 128) || !validOpaqueIdentifier(messageID, 128) {
-		return nil, errors.New("outreach invocation identifiers are invalid")
+		return StepOutput{}, errors.New("outreach invocation identifiers are invalid")
 	}
-	thread, err := r.lifecycle.GetOutreachThread(ctx, input.Run.Scope, threadID)
+	thread, err := p.lifecycle.GetOutreachThread(ctx, run.Scope, threadID)
 	if err != nil {
-		return nil, err
+		return StepOutput{}, err
 	}
 	message := findOutreachMessage(thread, messageID)
 	if message == nil || message.Direction != OutreachMessageOutbound || message.Capability == nil {
-		return nil, errors.New("outreach invocation does not identify an outbound message")
+		return StepOutput{}, errors.New("outreach invocation does not identify an outbound message")
 	}
-	if thread.Status != OutreachThreadOpen || thread.AssignedAgentID != input.Run.AssignedAgentID || thread.Owner != input.Run.Owner {
-		return nil, errors.New("outreach thread is not open or does not belong to the assigned Run owner and Agent")
+	if thread.Status != OutreachThreadOpen || thread.AssignedAgentID != run.AssignedAgentID || thread.Owner != run.Owner {
+		return StepOutput{}, errors.New("outreach thread is not open or does not belong to the assigned Run owner and Agent")
 	}
-	selected, err := selectOutreachAction(r.actions, message.Capability)
+	selected, err := selectOutreachAction(p.actions, message.Capability)
 	if err != nil {
-		return nil, err
+		return StepOutput{}, err
 	}
-	checkpoint := cloneMap(input.Run.Checkpoint)
-	if checkpoint == nil {
-		checkpoint = map[string]interface{}{}
+	result, call, err := producerToolResult(ctx, p.calls, run, in.Path, outreachToolCallID)
+	if err != nil {
+		return StepOutput{}, err
 	}
-	if last, resumed := checkpoint["lastAction"].(map[string]interface{}); resumed {
-		return r.consumeAction(ctx, input.Run, thread, message, selected, checkpoint, last)
+	if result == nil {
+		if message.Status != OutreachMessageDraft {
+			return p.reconcileLinkedAction(ctx, run, thread, message)
+		}
+		toolCall, err := producerGovernedToolCall(outreachToolCallID, selected, cloneMap(message.Capability.Arguments), &ToolCallDirective{
+			IdempotencyKey: "outreach:" + thread.ID + ":" + message.ID,
+			Summary:        "Deliver reviewed outreach message",
+			EvidenceRefs:   []string{thread.SourceObservationID},
+		})
+		if err != nil {
+			return StepOutput{}, err
+		}
+		return StepOutput{ToolCalls: []LoopToolCall{toolCall}}, nil
 	}
-	if message.Status != OutreachMessageDraft {
-		return r.reconcileLinkedAction(ctx, input.Run, thread, message, checkpoint)
+	if call == nil {
+		return outreachFailure(OutreachMessageFailed), nil
 	}
-	checkpoint["outreachActionInputs"] = map[string]interface{}{"reviewed": cloneMap(message.Capability.Arguments)}
-	return &TurnOutcome{
-		Decisions: []TurnDecision{{Summary: "Selected the reviewed outreach action and immutable source evidence", EvidenceRefs: []string{thread.SourceObservationID}}},
-		ProposedActions: []TurnAction{{
-			Type: "skill_action", Capability: selected.Name, Summary: "Deliver reviewed outreach message",
-			BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
-			IdempotencyKey: "outreach:" + thread.ID + ":" + message.ID, InputRef: "/outreachActionInputs/reviewed",
-			EvidenceRefs: []string{thread.SourceObservationID},
-		}},
-		OutputSummary: "Requested governed outreach delivery", ContinuationCheckpoint: checkpoint,
-		NextRunStatus: AgentRunStatusRunning,
-	}, nil
+	if !producerCallMatches(call, selected) {
+		return StepOutput{}, errors.New("durable action result does not match the reviewed outreach capability")
+	}
+	if call.Status != ActionCallStatusSucceeded {
+		reconciled, err := p.reconcile(ctx, run, thread, message, call.ID, nil)
+		if err != nil {
+			return StepOutput{}, err
+		}
+		switch reconciled.Status {
+		case OutreachMessageDeclined, OutreachMessageFailed, OutreachMessageCanceled:
+			return outreachFailure(reconciled.Status), nil
+		}
+		return StepOutput{}, fmt.Errorf("outreach action %s ended %s but the message is still %s", call.ID, call.Status, reconciled.Status)
+	}
+	receipt, err := normalizedOutreachReceipt(result.Output)
+	if err != nil {
+		return StepOutput{}, err
+	}
+	if _, err := p.reconcile(ctx, run, thread, message, call.ID, receipt); err != nil {
+		return StepOutput{}, err
+	}
+	return outreachDelivered(thread.ID, message.ID, receipt), nil
 }
 
-// A denied or canceled ActionCall never executes, so there is intentionally no
-// lastAction result in the Run checkpoint. Approval resolution still wakes the
-// Run. Reconcile the already-linked durable ActionCall directly so its terminal
-// disposition is projected into the OutreachThread instead of treating the
-// pending message as a new delivery attempt.
-func (r *OutreachTurnRunner) reconcileLinkedAction(ctx context.Context, run *AgentRun, thread *OutreachThread, message *OutreachMessage, checkpoint map[string]interface{}) (*TurnOutcome, error) {
-	if strings.TrimSpace(message.ActionCallID) == "" {
-		return nil, fmt.Errorf("outreach message cannot resume from %s without a linked action", message.Status)
+// A message that already left draft without a tool entry of this Run was
+// linked to an ActionCall elsewhere (an earlier attempt). Reconcile that
+// durable call directly so its disposition is projected into the thread
+// instead of treating the message as a new delivery attempt.
+func (p *OutreachStepProducer) reconcileLinkedAction(ctx context.Context, run *AgentRun, thread *OutreachThread, message *OutreachMessage) (StepOutput, error) {
+	if message.Status == OutreachMessageDelivered && message.Receipt != nil {
+		return outreachDelivered(thread.ID, message.ID, cloneOutreachReceipt(message.Receipt)), nil
 	}
-	reconciled, err := r.lifecycle.ReconcileOutreachAction(ctx, run.Scope, thread.ID, ReconcileOutreachActionRequest{
-		MessageID: message.ID, ActionCallID: message.ActionCallID, Actor: ActivityActor{Type: "worker", ID: "outreach-reconciler"},
+	if strings.TrimSpace(message.ActionCallID) == "" {
+		return StepOutput{}, fmt.Errorf("outreach message cannot resume from %s without a linked action", message.Status)
+	}
+	reconciled, err := p.reconcile(ctx, run, thread, message, message.ActionCallID, nil)
+	if err != nil {
+		return StepOutput{}, err
+	}
+	switch reconciled.Status {
+	case OutreachMessageDeclined, OutreachMessageFailed, OutreachMessageCanceled:
+		return outreachFailure(reconciled.Status), nil
+	case OutreachMessageDelivered:
+		if reconciled.Receipt != nil {
+			return outreachDelivered(thread.ID, message.ID, cloneOutreachReceipt(reconciled.Receipt)), nil
+		}
+	}
+	return StepOutput{}, fmt.Errorf("linked outreach action remains in non-terminal message state %s", reconciled.Status)
+}
+
+func (p *OutreachStepProducer) reconcile(ctx context.Context, run *AgentRun, thread *OutreachThread, message *OutreachMessage, actionCallID string, receipt *OutreachReceipt) (*OutreachMessage, error) {
+	reconciled, err := p.lifecycle.ReconcileOutreachAction(ctx, run.Scope, thread.ID, ReconcileOutreachActionRequest{
+		MessageID: message.ID, ActionCallID: actionCallID, Receipt: receipt, Actor: ActivityActor{Type: "worker", ID: "outreach-reconciler"},
 	})
 	if err != nil {
 		return nil, err
@@ -133,58 +187,30 @@ func (r *OutreachTurnRunner) reconcileLinkedAction(ctx context.Context, run *Age
 	if reconciled == nil || reconciled.Thread == nil {
 		return nil, errors.New("outreach action reconciliation returned no thread")
 	}
-	message = findOutreachMessage(reconciled.Thread, message.ID)
-	if message == nil {
+	updated := findOutreachMessage(reconciled.Thread, message.ID)
+	if updated == nil {
 		return nil, errors.New("outreach action reconciliation lost the selected message")
 	}
-	switch message.Status {
-	case OutreachMessageDeclined:
-		delete(checkpoint, "outreachActionInputs")
-		return &TurnOutcome{OutputSummary: "Governed outreach delivery declined", RunError: "governed outreach delivery declined", ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed}, nil
-	case OutreachMessageFailed:
-		delete(checkpoint, "outreachActionInputs")
-		return &TurnOutcome{OutputSummary: "Governed outreach delivery failed", RunError: "governed outreach delivery failed", ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed}, nil
-	case OutreachMessageCanceled:
-		delete(checkpoint, "outreachActionInputs")
-		return &TurnOutcome{OutputSummary: "Governed outreach delivery canceled", RunError: "governed outreach delivery canceled", ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed}, nil
-	default:
-		return nil, fmt.Errorf("linked outreach action remains in non-terminal message state %s", message.Status)
-	}
+	return updated, nil
 }
 
-func (r *OutreachTurnRunner) consumeAction(ctx context.Context, run *AgentRun, thread *OutreachThread, message *OutreachMessage, selected *capability.ModelAction, checkpoint map[string]interface{}, last map[string]interface{}) (*TurnOutcome, error) {
-	actionID, _ := last["actionCallId"].(string)
-	if strings.TrimSpace(actionID) == "" || (selected.BindingID != "" && (last["bindingId"] != selected.BindingID || fmt.Sprint(last["bindingRevision"]) != fmt.Sprint(selected.BindingRevision))) ||
-		last["skillId"] != selected.SkillID || last["skillVersion"] != selected.Version || last["action"] != selected.Action {
-		return nil, errors.New("durable action result does not match the reviewed outreach capability")
+func outreachDelivered(threadID, messageID string, receipt *OutreachReceipt) StepOutput {
+	return StepOutput{Final: &LoopFinal{
+		Answer: "Delivered the reviewed outreach message.",
+		Output: map[string]interface{}{"outreachThreadId": threadID, "outreachMessageId": messageID, "receipt": receipt},
+		Status: AgentRunStatusCompleted,
+	}}
+}
+
+func outreachFailure(status OutreachMessageStatus) StepOutput {
+	code, message := "outreach_delivery_failed", "The reviewed outreach message was not delivered."
+	switch status {
+	case OutreachMessageDeclined:
+		code, message = "outreach_delivery_declined", "The reviewed outreach message was declined, so it was not delivered."
+	case OutreachMessageCanceled:
+		code, message = "outreach_delivery_canceled", "The reviewed outreach message was canceled before delivery."
 	}
-	status, _ := last["status"].(string)
-	if status != string(ActionCallStatusSucceeded) {
-		_, reconcileErr := r.lifecycle.ReconcileOutreachAction(ctx, run.Scope, thread.ID, ReconcileOutreachActionRequest{
-			MessageID: message.ID, ActionCallID: actionID, Actor: ActivityActor{Type: "worker", ID: "outreach-reconciler"},
-		})
-		if reconcileErr != nil {
-			return nil, reconcileErr
-		}
-		return &TurnOutcome{OutputSummary: "Governed outreach delivery failed", RunError: "governed outreach delivery failed", ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusFailed}, nil
-	}
-	receipt, err := normalizedOutreachReceipt(last["result"])
-	if err != nil {
-		return nil, err
-	}
-	reconciled, err := r.lifecycle.ReconcileOutreachAction(ctx, run.Scope, thread.ID, ReconcileOutreachActionRequest{
-		MessageID: message.ID, ActionCallID: actionID, Receipt: receipt, Actor: ActivityActor{Type: "worker", ID: "outreach-reconciler"},
-	})
-	if err != nil {
-		return nil, err
-	}
-	delete(checkpoint, "lastAction")
-	delete(checkpoint, "outreachActionInputs")
-	return &TurnOutcome{
-		Decisions:     []TurnDecision{{Summary: "Verified the governed provider receipt against the reviewed outreach message", EvidenceRefs: []string{thread.SourceObservationID}}},
-		OutputSummary: "Governed outreach message delivered", ContinuationCheckpoint: checkpoint, NextRunStatus: AgentRunStatusCompleted,
-		RunOutput: map[string]interface{}{"outreachThreadId": reconciled.Thread.ID, "outreachMessageId": message.ID, "receipt": receipt},
-	}, nil
+	return StepOutput{Failure: &LoopFailure{Kind: "execution", Code: code, Message: message}}
 }
 
 func selectOutreachAction(actions []capability.ModelAction, requested *OutreachCapability) (*capability.ModelAction, error) {
