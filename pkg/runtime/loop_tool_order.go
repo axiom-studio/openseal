@@ -171,6 +171,22 @@ func (r *stepToolRun) openSettleEntry() *SessionEntry {
 	return nil
 }
 
+// refuseUnsettled closes the pending/running settle-phase entry of a step
+// that was canceled or failed before its settle phase, as not run. The
+// model sees the refusal in its next step.
+func (r *stepToolRun) refuseUnsettled(ctx context.Context, settle *SessionEntry, status AgentTurnStatus) error {
+	if settle.State != ToolEntryPending && settle.State != ToolEntryRunning || !r.onlyOpen(settle) {
+		return nil
+	}
+	for i := range r.entries {
+		if r.entry(i).ID == settle.ID {
+			return r.refuse(ctx, i, controlErrorResult(ToolResultRefused, loopToolNotRunCode,
+				fmt.Sprintf("not run: the step that made this call was %s before it ran", status), nil), nil)
+		}
+	}
+	return nil
+}
+
 // onlyOpen reports that entry is the step's only open entry.
 func (r *stepToolRun) onlyOpen(entry *SessionEntry) bool {
 	for i := range r.entries {
@@ -420,14 +436,24 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 		return out, nil
 	}
 	if settle := r.openSettleEntry(); settle != nil {
-		if step.Status != AgentTurnStatusCompleted || step.Sequence > in.Run.LastAppliedTurn {
+		switch {
+		case in.Step != nil && step.ID == in.Step.ID && step.Status == AgentTurnStatusRunning:
 			// The entry's step is the claim's resumed running step (a crash
 			// before its FinishTurn): it settles after FinishTurn+applyStep,
 			// like a step that just ran its inline phase.
 			out = r.outcome()
 			out.SettlePending = r.onlyOpen(settle)
 			return out, nil
+		case step.Status == AgentTurnStatusCanceled || step.Status == AgentTurnStatusFailed:
+			// The step ended (duration budget, host outage) before its
+			// settle phase: the call never ran and never will.
+			if err := r.refuseUnsettled(ctx, settle, step.Status); err != nil {
+				return StepToolsOutcome{}, err
+			}
+			settle = nil
 		}
+	}
+	if settle := r.openSettleEntry(); settle != nil {
 		if err := r.settle(ctx); err != nil {
 			return StepToolsOutcome{}, err
 		}

@@ -26,6 +26,9 @@ type resumeTrapStore struct {
 	mu    sync.Mutex
 	trap  func(method string, arg any) bool
 	fired bool
+	// fail, when set, makes a write return its error without a crash (the
+	// worker lives on).
+	fail func(method string, arg any) error
 }
 
 // installResumeTrap puts a trap store under the fixture's worker-bound
@@ -50,6 +53,11 @@ func (s *resumeTrapStore) hit(method string, arg any) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.fail != nil {
+		if err := s.fail(method, arg); err != nil {
+			return err
+		}
+	}
 	if s.fired || s.trap == nil || !s.trap(method, arg) {
 		return nil
 	}
@@ -197,9 +205,9 @@ func (s *resumeTrapStore) PersistActionExecution(ctx context.Context, execution 
 // ---------------------------------------------------------------------------
 // Helpers
 
-// startClaim runs one claim of the Run in a goroutine; done closes when it
+// resumeStartClaim runs one claim of the Run in a goroutine; done closes when it
 // returns.
-func (f *loopFixture) startClaim(runID string) (context.CancelFunc, <-chan struct{}) {
+func resumeStartClaim(f *loopFixture, runID string) (context.CancelFunc, <-chan struct{}) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -231,8 +239,8 @@ func resumeEventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// dispatchesWithID counts dispatches of action whose id argument is id.
-func (d *fakeDispatcher) dispatchesWithID(action, id string) int {
+// resumeDispatchesWithID counts dispatches of action whose id argument is id.
+func resumeDispatchesWithID(d *fakeDispatcher, action, id string) int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	n := 0
@@ -244,8 +252,8 @@ func (d *fakeDispatcher) dispatchesWithID(action, id string) int {
 	return n
 }
 
-// toolEntries is the Run's tool entries whose name ends with action.
-func (f *loopFixture) toolEntries(runID, action string) []*SessionEntry {
+// resumeToolEntries is the Run's tool entries whose name ends with action.
+func resumeToolEntries(f *loopFixture, runID, action string) []*SessionEntry {
 	f.t.Helper()
 	var out []*SessionEntry
 	for _, e := range f.entries(runID) {
@@ -256,8 +264,8 @@ func (f *loopFixture) toolEntries(runID, action string) []*SessionEntry {
 	return out
 }
 
-// actionCalls is the Run's action calls of action.
-func (f *loopFixture) actionCalls(runID, action string) []*ActionCall {
+// resumeActionCalls is the Run's action calls of action.
+func resumeActionCalls(f *loopFixture, runID, action string) []*ActionCall {
 	f.t.Helper()
 	var out []*ActionCall
 	for _, c := range f.calls(runID) {
@@ -337,7 +345,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 				reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "Issue 1 is open."}) }},
 		))
 		run := f.startRun(RunKindAgentWork, "Check issue 1")
-		cancel, done := f.startClaim(run.ID)
+		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, entered, "step 2's model call")
 		f.crash(cancel, done)
 
@@ -390,10 +398,10 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			return map[string]interface{}{"id": id, "status": "open", "title": "Issue " + id}, nil
 		})
 		run := f.startRun(RunKindAgentWork, "Check issues 1 and 2")
-		cancel, done := f.startClaim(run.ID)
+		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, entered, "lookup{2} dispatch")
 		resumeEventually(t, "lookup{1} to succeed", func() bool {
-			for _, c := range f.actionCalls(run.ID, "lookup") {
+			for _, c := range resumeActionCalls(f, run.ID, "lookup") {
 				if c.Arguments["id"] == "1" && c.Status == ActionCallStatusSucceeded {
 					return true
 				}
@@ -409,13 +417,13 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 
 		final := f.driveToRest(run.ID, 4)
 		f.mustStatus(final, AgentRunStatusCompleted)
-		if n := f.dispatch.dispatchesWithID("lookup", "1"); n != 1 {
+		if n := resumeDispatchesWithID(f.dispatch, "lookup", "1"); n != 1 {
 			t.Fatalf("lookup{1} dispatched %d times, want 1: its finished call is not redispatched", n)
 		}
-		if n := f.dispatch.dispatchesWithID("lookup", "2"); n != 2 {
+		if n := resumeDispatchesWithID(f.dispatch, "lookup", "2"); n != 2 {
 			t.Fatalf("lookup{2} dispatched %d times, want 2: an interrupted read runs again", n)
 		}
-		calls := f.actionCalls(run.ID, "lookup")
+		calls := resumeActionCalls(f, run.ID, "lookup")
 		if len(calls) != 2 {
 			t.Fatalf("lookup calls = %d, want 2", len(calls))
 		}
@@ -428,7 +436,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			}
 		}
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,tool:completed,assistant,tool:completed")
-		for _, e := range f.toolEntries(run.ID, "lookup") {
+		for _, e := range resumeToolEntries(f, run.ID, "lookup") {
 			if !strings.Contains(resumeEntryText(e), "Issue ") {
 				t.Fatalf("lookup entry %s result = %s", e.ID, resumeEntryText(e))
 			}
@@ -440,7 +448,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		release := f.dispatch.hold("send")
 		defer close(release)
 		run := f.startRun(RunKindAgentWork, "Send hi to bo")
-		cancel, done := f.startClaim(run.ID)
+		cancel, done := resumeStartClaim(f, run.ID)
 		resumeEventually(t, "send dispatch", func() bool { return f.dispatch.count("send") == 1 })
 		f.crash(cancel, done)
 
@@ -450,11 +458,11 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			t.Fatalf("send dispatched %d times, want 1 (the blocked one): a write whose outcome is unknown is never sent again", n)
 		}
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:interrupted,assistant,tool:completed")
-		entries := f.toolEntries(run.ID, "send")
+		entries := resumeToolEntries(f, run.ID, "send")
 		if len(entries) != 1 || !strings.Contains(resumeEntryText(entries[0]), "may already have taken effect") {
 			t.Fatalf("send entry = %v", entries)
 		}
-		calls := f.actionCalls(run.ID, "send")
+		calls := resumeActionCalls(f, run.ID, "send")
 		if len(calls) != 1 {
 			t.Fatalf("send calls = %d, want 1", len(calls))
 		}
@@ -475,7 +483,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		f := newLoopFixture(t, store, withRules(sendRules()...))
 		trap := installResumeTrap(f, func(method string, _ any) bool { return method == "CreateActionProposal" })
 		run := f.startRun(RunKindAgentWork, "Send hi to bo")
-		cancel, done := f.startClaim(run.ID)
+		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, done, "the trapped claim")
 		if !trap.didFire() {
 			t.Fatal("the claim never proposed the send")
@@ -483,7 +491,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		// The entry is open (the executor marks it running before it
 		// proposes) and no action call was made for it.
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:running")
-		if entries := f.toolEntries(run.ID, "send"); len(entries) != 1 || entries[0].ActionCallID != "" {
+		if entries := resumeToolEntries(f, run.ID, "send"); len(entries) != 1 || entries[0].ActionCallID != "" {
 			t.Fatalf("send entry at the crash = %#v, want one with no action call", entries)
 		}
 		if calls := f.calls(run.ID); len(calls) != 0 {
@@ -496,7 +504,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if n := f.dispatch.count("send"); n != 1 {
 			t.Fatalf("send dispatched %d times, want 1", n)
 		}
-		calls := f.actionCalls(run.ID, "send")
+		calls := resumeActionCalls(f, run.ID, "send")
 		if len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded || calls[0].RecoveredRunning {
 			t.Fatalf("send calls = %#v, want one succeeded call proposed on resume", calls)
 		}
@@ -513,15 +521,15 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			return ok && method == "TransitionToolEntry" && req.To == ToolEntryCompleted
 		})
 		run := f.startRun(RunKindAgentWork, "Send hi to bo")
-		cancel, done := f.startClaim(run.ID)
+		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, done, "the trapped claim")
 		if !trap.didFire() {
 			t.Fatal("the send entry never completed")
 		}
-		if calls := f.actionCalls(run.ID, "send"); len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
+		if calls := resumeActionCalls(f, run.ID, "send"); len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
 			t.Fatalf("send calls at the crash = %#v, want one succeeded", calls)
 		}
-		if entries := f.toolEntries(run.ID, "send"); len(entries) != 1 || entries[0].State.Terminal() {
+		if entries := resumeToolEntries(f, run.ID, "send"); len(entries) != 1 || entries[0].State.Terminal() {
 			t.Fatalf("send entry at the crash = %v, want it still open", f.entryTypes(run.ID))
 		}
 		f.crash(cancel, done)
@@ -532,11 +540,11 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			t.Fatalf("send dispatched %d times, want 1", n)
 		}
 		resumeMustLog(t, f, run.ID, "user,assistant,tool:completed,assistant,tool:completed")
-		entries := f.toolEntries(run.ID, "send")
+		entries := resumeToolEntries(f, run.ID, "send")
 		if len(entries) != 1 || !strings.Contains(resumeEntryText(entries[0]), `"sent":true`) {
 			t.Fatalf("send entry result = %q, want the call's output", resumeEntryText(entries[0]))
 		}
-		if entries[0].ActionCallID != f.actionCalls(run.ID, "send")[0].ID {
+		if entries[0].ActionCallID != resumeActionCalls(f, run.ID, "send")[0].ID {
 			t.Fatalf("send entry action call = %s", entries[0].ActionCallID)
 		}
 	})
@@ -560,7 +568,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 			return rows == 2
 		})
 		run := f.startRun(RunKindAgentWork, "Check issue 4")
-		cancel, done := f.startClaim(run.ID)
+		cancel, done := resumeStartClaim(f, run.ID)
 		resumeWait(t, done, "the trapped claim")
 		if !trap.didFire() {
 			t.Fatal("step 2 never started")
@@ -589,6 +597,76 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		}
 	})
 
+	resumeScenario(t, "final_of_failed_step_is_not_run", func(t *testing.T, store KernelStore) {
+		// Worker 1 dies after step 1's final_answer is appended; worker 2's
+		// resume of step 1 hits a host outage and fails the step, so its
+		// final_answer never settles. The next step refuses it as not run
+		// and the model answers again.
+		sawRefusal := false
+		f := newLoopFixture(t, store, withRules(
+			&modelRule{name: "first", when: func(v stepView) bool { return v.Step() == 1 },
+				reply: func(stepView) ModelStepResult { return finalAnswer(map[string]any{"answer": "First."}) }},
+			&modelRule{name: "second", reply: func(v stepView) ModelStepResult {
+				_, isError, ok := v.ToolResult(string(ControlToolFinalAnswer))
+				sawRefusal = ok && isError
+				return finalAnswer(map[string]any{"answer": "Second."})
+			}},
+		))
+		appended := false
+		trap := installResumeTrap(f, func(method string, arg any) bool {
+			if req, ok := arg.(AppendAgentSessionEntriesRequest); ok {
+				for _, e := range req.Entries {
+					if e.Type == SessionEntryTool && e.Tool != nil && e.Tool.Name == string(ControlToolFinalAnswer) {
+						appended = true
+					}
+				}
+				return false
+			}
+			return appended && method == "RecordAgentTurnStepModel"
+		})
+		run := f.startRun(RunKindAgentWork, "Say something")
+		cancel, done := resumeStartClaim(f, run.ID)
+		resumeWait(t, done, "the trapped claim")
+		if !trap.didFire() {
+			t.Fatal("step 1 never recorded its model call")
+		}
+		f.crash(cancel, done)
+		failed := false
+		trap.fail = func(method string, _ any) error {
+			if method != "RecordAgentTurnStepModel" || failed {
+				return nil
+			}
+			failed = true
+			return fmt.Errorf("record step: %w", ErrTurnHostUnavailable)
+		}
+
+		final := f.driveToRest(run.ID, 6)
+		f.mustStatus(final, AgentRunStatusCompleted)
+		if !failed {
+			t.Fatal("the resumed step never failed")
+		}
+		steps := f.steps(run.ID)
+		if len(steps) != 2 || steps[0].Status != AgentTurnStatusFailed || steps[1].Status != AgentTurnStatusCompleted {
+			t.Fatalf("steps = %#v, want failed then completed", steps)
+		}
+		finals := resumeToolEntries(f, run.ID, string(ControlToolFinalAnswer))
+		if len(finals) != 2 || finals[0].State != ToolEntryError || finals[1].State != ToolEntryCompleted {
+			t.Fatalf("final_answer entries = %d, log %s", len(finals), resumeLog(f, run.ID))
+		}
+		if text := resumeEntryText(finals[0]); !strings.Contains(text, "not run") {
+			t.Fatalf("step 1's final_answer result = %q, want a not-run refusal", text)
+		}
+		if !sawRefusal {
+			t.Fatal("step 2's model call did not see the refused final_answer")
+		}
+		if requests := f.model.calls(ModelStepPurposeStep); len(requests) != 2 {
+			t.Fatalf("model step requests = %d, want 2", len(requests))
+		}
+		if answer := resumeFinalAnswer(f, run.ID); answer != "Second." {
+			t.Fatalf("final answer = %q", answer)
+		}
+	})
+
 	resumeScenario(t, "approval_answered_while_owner_dead", func(t *testing.T, store KernelStore) {
 		f := newLoopFixture(t, store, withApprovalForWrites(), withRules(sendRules()...))
 		run := f.startRun(RunKindAgentWork, "Send hi to bo")
@@ -611,7 +689,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 		if n := f.dispatch.count("send"); n != 1 {
 			t.Fatalf("send dispatched %d times, want 1", n)
 		}
-		calls := f.actionCalls(run.ID, "send")
+		calls := resumeActionCalls(f, run.ID, "send")
 		if len(calls) != 1 || calls[0].Status != ActionCallStatusSucceeded {
 			t.Fatalf("send calls = %#v", calls)
 		}
@@ -624,7 +702,7 @@ func TestLoopResumeAfterCrash(t *testing.T) {
 // resumeFinalAnswer is the answer argument of the Run's final answer call.
 func resumeFinalAnswer(f *loopFixture, runID string) string {
 	f.t.Helper()
-	entries := f.toolEntries(runID, string(ControlToolFinalAnswer))
+	entries := resumeToolEntries(f, runID, string(ControlToolFinalAnswer))
 	if len(entries) == 0 {
 		return ""
 	}
@@ -709,7 +787,7 @@ func TestLoopResumeNeverDispatchesAWriteTwice(t *testing.T) {
 						if isTerminalAgentRunStatus(f.mustRun(run.ID).Status) {
 							t.Fatalf("the Run ended before write %d", offset)
 						}
-						cancel, done := f.startClaim(run.ID)
+						cancel, done := resumeStartClaim(f, run.ID)
 						resumeWait(t, done, "the claim")
 						if trap.didFire() {
 							f.crash(cancel, done)
@@ -729,7 +807,7 @@ func TestLoopResumeNeverDispatchesAWriteTwice(t *testing.T) {
 						t.Fatalf("crash at %s (write %d): send dispatched %d times", crashedAt, offset, n)
 					}
 					terminal := 0
-					for _, e := range f.toolEntries(run.ID, "send") {
+					for _, e := range resumeToolEntries(f, run.ID, "send") {
 						if e.State.Terminal() {
 							terminal++
 						}
