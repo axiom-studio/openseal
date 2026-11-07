@@ -1371,9 +1371,13 @@ func (p *AgentRunWorkerPool) failMaterialization(ctx context.Context, workerID s
 			status, runError, summary = AgentRunStatusQueued, "", "Agent action proposal was rejected; the model will explain the stopped attempt"
 		}
 	}
+	var failure *RunFailureExplanation
+	if behaviorFixed {
+		failure = beginRunFailureExplanation(run, RunFailureKindAgentBehaviorFixed, "agent_behavior_fixed", "This Agent's setup is fixed, so it cannot change its own instructions or behavior.", safeCause, "")
+	}
 	failed, _, err := p.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
 		ExpectedRevision: run.Revision, Status: status, LeaseOwner: workerID, Checkpoint: checkpoint,
-		Error: runError, Summary: summary,
+		Error: runError, Summary: summary, FailureExplanation: failure,
 		EventType: "action.materialization_failed", Actor: ActivityActor{Type: "worker", ID: workerID},
 		TurnID: turn.ID, CausationID: turn.ID, Payload: map[string]interface{}{"reason": safeCause},
 	})

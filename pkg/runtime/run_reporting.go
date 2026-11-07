@@ -192,7 +192,8 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		milestone = runbook.ReportingFailed
 		content = fmt.Sprintf("%s: %s", terminalRunStatusLabel(run.Status), strings.TrimSpace(run.Goal))
 		if run.Status == AgentRunStatusFailed {
-			content = terminalRunFailureReply(run)
+			sessions, actions := terminalFailureReplyStores(store)
+			content = terminalRunFailureReply(ctx, sessions, actions, run)
 		}
 	}
 	if task, _ := run.Context[scheduledTaskContextKey].(bool); task && run.Status == AgentRunStatusCompleted {
@@ -253,7 +254,7 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 		// directed question without widening access past those ancestors.
 		audience = ConversationAudience{Kind: ConversationAudienceChannel}
 		broadcast = source.ThreadRootID == "" || source.BroadcastToChannel
-		content = conversationTaskReportContent(task, sourceTaskReport, run, content)
+		content = conversationTaskReportContent(ctx, store, task, sourceTaskReport, run, content)
 		intent = MessageIntentAnswer
 		references = append(references, ConversationReference{Kind: ConversationReferenceTask, ID: task.ID})
 		if sourceTaskReport {

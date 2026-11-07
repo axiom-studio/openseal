@@ -199,7 +199,7 @@ func projectConversationTaskContinuationResult(ctx context.Context, store Conver
 		return err
 	}
 	content := terminalRunStatusLabel(run.Status) + ": " + strings.TrimSpace(task.Goal)
-	content = conversationTaskReportContent(task, false, run, content)
+	content = conversationTaskReportContent(ctx, store, task, false, run, content)
 	sender := ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}
 	if sender.ID == "" {
 		sender = ConversationParticipant{Type: ConversationParticipantService, ID: "openseal.conversation"}
@@ -224,12 +224,13 @@ func projectConversationTaskContinuationResult(ctx context.Context, store Conver
 	return err
 }
 
-func conversationTaskReportContent(task *ConversationTask, source bool, run *AgentRun, fallback string) string {
+func conversationTaskReportContent(ctx context.Context, store ConversationStore, task *ConversationTask, source bool, run *AgentRun, fallback string) string {
 	if source {
 		return task.Acknowledgment
 	}
 	if run.Status == AgentRunStatusFailed {
-		return terminalRunFailureReply(run)
+		sessions, actions := terminalFailureReplyStores(store)
+		return terminalRunFailureReply(ctx, sessions, actions, run)
 	}
 	if run.Status == AgentRunStatusCompleted {
 		for _, key := range []string{"report", "summary"} {

@@ -2,9 +2,12 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ErrRunTerminalReportUndeliverable marks a failure report whose Run and
@@ -22,30 +25,6 @@ func (e undeliverableReport) Is(target error) bool {
 }
 
 func undeliverable(reason string) error { return undeliverableReport{reason: reason} }
-
-func checkpointTerminalFailure(checkpoint map[string]interface{}, code string) map[string]interface{} {
-	result := checkpointFinalFailureExplanation(checkpoint, "execution", "The requested work did not complete.")
-	failure := result[FinalFailureExplanationCheckpointKey].(map[string]interface{})
-	failure["code"] = terminalFailureCode(code)
-	return result
-}
-
-// terminalFailureOutcome is the kernel-authored reply of a stopped attempt.
-// A failure returned to the model for correction is not stopped; a typed
-// source challenge continues only through its verified interaction, which
-// callers check before this.
-func terminalFailureOutcome(run *AgentRun) (*TurnOutcome, bool) {
-	if run == nil || (!requiresFinalFailureExplanation(run.Checkpoint) && !sourceAccessChallengeFeedback(run.Checkpoint)) {
-		return nil, false
-	}
-	code := terminalFailureCodeFromCheckpoint(run.Checkpoint)
-	checkpoint := checkpointTerminalFailure(run.Checkpoint, code)
-	return &TurnOutcome{
-		NextRunStatus: AgentRunStatusCompleted, OutputSummary: terminalFailureReplyFromCheckpoint(checkpoint),
-		RunOutput:              map[string]interface{}{"summary": terminalFailureReplyFromCheckpoint(checkpoint)},
-		ContinuationCheckpoint: checkpoint, ModelProvider: "host", Model: "terminal-failure-report",
-	}, true
-}
 
 // failedConversationReportCandidate is a failed chat Run with an Agent to
 // speak for it: an Agent's own Run or a Team member's. A Team's routing Run
@@ -140,6 +119,8 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		}
 		return nil
 	}
+	sessions, actions := terminalFailureReplyStores(store)
+	notes, _ := store.(AgentSessionStore)
 	key := terminalConversationFailureReplyKey(run)
 	if saved, findErr := store.FindChannelMessageByIdempotencyKey(ctx, run.Scope, conversationID, key); findErr != nil && !errors.Is(findErr, ErrChannelMessageNotFound) {
 		return findErr
@@ -147,27 +128,92 @@ func projectFailedConversationReply(ctx context.Context, store ConversationStore
 		if !terminalConversationReplyMatches(saved, run, triggerID, agentID) {
 			return undeliverable("saved answer does not belong to this Run")
 		}
-		return nil
+		// A crash after the post may have left the note unwritten.
+		return appendRunFailedNote(ctx, notes, run, saved)
 	}
 	request := PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversationID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: agentID}, Intent: MessageIntentAnswer,
-		Content:  terminalRunFailureReply(run),
+		Content:  terminalRunFailureReply(ctx, sessions, actions, run),
 		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID, ResolvesMessageID: triggerID,
 		BroadcastToChannel: trigger.ThreadRootID == "" || trigger.BroadcastToChannel, ResponseMode: trigger.ResponseMode,
 		References: references, IdempotencyKey: key,
 	}
 	service := NewConversationService(store)
-	_, err = service.PostChannelMessage(ctx, request)
+	posted, err := service.PostChannelMessage(ctx, request)
 	if errors.Is(err, ErrRevisionConflict) {
 		current, getErr := store.GetConversation(ctx, run.Scope, conversationID)
 		if getErr != nil {
 			return getErr
 		}
 		request.ExpectedRevision = current.Revision
-		_, err = service.PostChannelMessage(ctx, request)
+		posted, err = service.PostChannelMessage(ctx, request)
+	}
+	if err != nil {
+		return err
+	}
+	return appendRunFailedNote(ctx, notes, run, posted.Message)
+}
+
+// runFailedNoteSourceKey is per terminal attempt, like the reply key, so a
+// retried Run that fails again records its own note.
+func runFailedNoteSourceKey(run *AgentRun) string {
+	return "run-failed:" + run.ID + ":" + strconv.FormatInt(run.Revision, 10)
+}
+
+// runFailedNote tells the Run's session what the user was told when the Run
+// stopped, so the next Run in that session knows the attempt ended.
+func runFailedNote(run *AgentRun, message *ChannelMessage) *SessionEntry {
+	key := runFailedNoteSourceKey(run)
+	data, _ := json.Marshal(map[string]string{"messageId": message.ID})
+	text := "Your previous attempt (run " + run.ID + ") stopped and the user was told: " + strconv.Quote(boundedTurnFailureText(message.Content))
+	return &SessionEntry{
+		ID: SessionEntryID(run.SessionID, key), SessionID: run.SessionID, RunID: run.ID,
+		Type: SessionEntryNote, SourceKey: key,
+		Note: &NoteEntry{Kind: NoteRunFailed, Text: text, Data: data},
+	}
+}
+
+// appendRunFailedNote appends the run_failed note without a lease: the Run is
+// terminal and the store accepts lease-less notes for it. The SourceKey makes
+// a repeated report a no-op.
+func appendRunFailedNote(ctx context.Context, sessions AgentSessionStore, run *AgentRun, message *ChannelMessage) error {
+	if sessions == nil || run.SessionID == "" || message == nil {
+		return nil
+	}
+	_, err := sessions.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{
+		Scope: run.Scope, SessionID: run.SessionID, RunID: run.ID,
+		Entries: []*SessionEntry{runFailedNote(run, message)}, Now: time.Now().UTC(),
+	})
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrAgentSessionNotFound):
+		// The Run failed before its first step opened the session. A session
+		// created later is seeded from the channel, failure reply included.
+		return nil
+	case runFailedNoteRejected(err):
+		// The reply is already posted, and retrying cannot change a refusal;
+		// the next Run still sees the reply in the channel.
+		slog.Warn("run_failed note was refused; the failure reply is posted without it",
+			"scope", run.Scope.ID, "run", run.ID, "session", run.SessionID, "error", err)
+		return nil
 	}
 	return err
+}
+
+// runFailedNoteRejected reports a store refusal of the note that a retry
+// cannot change, as opposed to a store that could not be reached.
+func runFailedNoteRejected(err error) bool {
+	for _, permanent := range []error{
+		ErrInvalidSessionEntry, ErrSessionEntryTooLarge, ErrInvalidAgentSession, ErrAgentSessionConflict,
+		ErrSessionMoved, ErrLeaseLost, ErrRunNotFound, ErrAgentSessionPathTooLarge,
+	} {
+		if errors.Is(err, permanent) {
+			return true
+		}
+	}
+	return false
 }
 
 func terminalConversationReplyMatches(message *ChannelMessage, run *AgentRun, triggerID, agentID string) bool {

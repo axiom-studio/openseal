@@ -2,87 +2,115 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"unicode/utf8"
 )
 
-// FinalFailureExplanationCheckpointKey is written only by the kernel after an
-// action or proposal fails. Its next hosted turn can explain the failure but
-// cannot execute or schedule more work. A new explicit user attempt starts with
-// a fresh checkpoint; it does not inherit this terminal boundary.
-const FinalFailureExplanationCheckpointKey = "_opensealFinalFailureExplanation"
+// Kinds of RunFailureExplanation written by the kernel (SPEC §2.2). The guard
+// kinds repeat_limit and context_overflow are in loop_guard_failures.go.
+const (
+	RunFailureKindExecution          = "execution"
+	RunFailureKindWorkspace          = "workspace"
+	RunFailureKindRoutineScript      = "routine_script"
+	RunFailureKindTaskCompletion     = "task_completion"
+	RunFailureKindAgentBehaviorFixed = "agent_behavior_fixed"
+	RunFailureKindBudget             = "budget"
+	RunFailureKindCredits            = "credits"
+)
 
-func requiresFinalFailureExplanation(checkpoint map[string]interface{}) bool {
-	_, ok := checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
-	return ok
+const maximumRunFailureCodeBytes = 64
+
+// beginRunFailureExplanation records the failure of a stopped attempt. The
+// caller stores the result through RunTransitionRequest.FailureExplanation.
+// While the Run is still running with it, the Run is in explain mode: the
+// loop's next step offers no tools (runExplainingFailure). A Run that already
+// records a failure keeps it, so the first cause stays the reported one.
+//
+// Code is kept as the kernel classified it (run codes such as error_streak
+// stay distinct); host codes with a terminalFailureCode class are normalized
+// to it, so a gateway credit refusal becomes workspace_credits_exhausted.
+func beginRunFailureExplanation(run *AgentRun, kind, code, message, stepError, stepErrorCode string) *RunFailureExplanation {
+	if run != nil && run.FailureExplanation != nil {
+		existing := *run.FailureExplanation
+		return &existing
+	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = RunFailureKindExecution
+	}
+	message = boundedTurnFailureText(message)
+	if message == "" {
+		message = "The requested work did not complete."
+	}
+	return &RunFailureExplanation{
+		Kind: kind, Code: runFailureCode(code), Message: message,
+		StepError: boundedTurnFailureText(stepError), StepErrorCode: runFailureCodeOrEmpty(stepErrorCode),
+	}
 }
 
-func checkpointFinalFailureExplanation(checkpoint map[string]interface{}, kind, message string) map[string]interface{} {
-	result := deepCloneCheckpointMap(checkpoint)
-	if result == nil {
-		result = map[string]interface{}{}
+// explainedRunFailure is the failure after its model explanation was posted.
+func explainedRunFailure(f *RunFailureExplanation) *RunFailureExplanation {
+	if f == nil {
+		return nil
 	}
-	if !requiresFinalFailureExplanation(result) {
-		result[FinalFailureExplanationCheckpointKey] = map[string]interface{}{
-			"kind": strings.TrimSpace(kind), "message": strings.TrimSpace(message),
+	explained := *f
+	explained.Explained = true
+	return &explained
+}
+
+func runFailureCode(code string) string {
+	if classified := terminalFailureCode(code); classified != "execution_failed" {
+		return classified
+	}
+	if code := runFailureCodeOrEmpty(code); code != "" {
+		return code
+	}
+	return "execution_failed"
+}
+
+// runFailureCodeOrEmpty keeps a kernel code only when it is a plain bounded
+// identifier; anything else (provider text, for example) is dropped.
+func runFailureCodeOrEmpty(code string) string {
+	code = strings.TrimSpace(code)
+	if code == "" || len(code) > maximumRunFailureCodeBytes {
+		return ""
+	}
+	for _, r := range code {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '.' || r == '-') {
+			return ""
 		}
 	}
-	return result
+	return code
 }
 
-// ValidateHostedTurnFinalFailureExplanation enforces the trusted failure
-// boundary independently of model instructions and capability projection.
-func ValidateHostedTurnFinalFailureExplanation(request HostedTurnRequest, response *HostedTurnResponse) error {
-	if !requiresFinalFailureExplanation(request.ContinuationCheckpoint) {
+// runExplainingFailure reports whether the Run's next step is its one
+// tool-free failure explanation.
+func runExplainingFailure(run *AgentRun) bool {
+	return run != nil && run.FailureExplanation != nil && !run.FailureExplanation.Explained && !isTerminalAgentRunStatus(run.Status)
+}
+
+// failureExplanationNoteText is the kernel instruction of the explanation
+// step. It is followed only by the model's tool-free reply.
+func failureExplanationNoteText(f *RunFailureExplanation) string {
+	return "This attempt has stopped: " + strings.TrimRight(f.Message, ". ") + ". Give one brief, useful final reply in your configured voice explaining what did not work and any next step the user actually needs. Ground it in this failure and the successful tool results above. Do not expose internal tool names, ids or governance details, and do not guess that the user's plan, account or permissions are wrong without evidence. Do not call tools, retry, repair, set anything up, schedule, wait, fork or delegate."
+}
+
+// failureExplanationNote is the note the loop appends at the start of the
+// explanation step (stepID). Its SourceKey is attempt-scoped, so a replayed
+// append of the same step is a no-op and a later attempt gets its own note.
+func failureExplanationNote(sessionID, runID, stepID string, f *RunFailureExplanation) *SessionEntry {
+	if f == nil {
 		return nil
 	}
-	if response == nil || response.NextRunStatus != AgentRunStatusCompleted || response.WakeCondition != nil ||
-		response.ProposedAction != nil || response.ProposedWorkspaceOperation != nil || response.ProposedFork != nil ||
-		response.ProposedDelegation != nil || response.ProposedRunbook != nil || response.ProposedTask != nil || response.EvidenceGrounding != nil {
-		return errors.New("a failed attempt requires one final explanation without actions or further work")
+	key := FailureNoteSourceKey(runID, stepID)
+	data, _ := json.Marshal(map[string]string{"code": f.Code})
+	return &SessionEntry{
+		ID: SessionEntryID(sessionID, key), SessionID: sessionID, RunID: runID, StepID: stepID,
+		Type: SessionEntryNote, SourceKey: key,
+		Note: &NoteEntry{Kind: NoteFailureExplanation, Text: failureExplanationNoteText(f), Data: data},
 	}
-	if silent, _ := response.RunOutput["silent"].(bool); silent {
-		return errors.New("a final failure explanation must be visible to the user")
-	}
-	if _, present := response.RunOutput[AgentRequestDecisionOutputKey]; present {
-		return errors.New("a final failure explanation cannot repeat an intake decision")
-	}
-	if strings.TrimSpace(response.OutputSummary) == "" && strings.TrimSpace(conversationResultString(response.RunOutput, "summary")) == "" {
-		return errors.New("a failed attempt requires a user-visible final explanation")
-	}
-	return nil
-}
-
-func validateFinalFailureExplanationOutcome(run *AgentRun, outcome *TurnOutcome) error {
-	if !requiresFinalFailureExplanation(run.Checkpoint) {
-		return nil
-	}
-	if outcome == nil || !isTerminalAgentRunStatus(outcome.NextRunStatus) || outcome.WakeCondition != nil ||
-		len(outcome.ProposedActions) != 0 || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil || outcome.ProposedTask != nil {
-		return errors.New("a failed attempt cannot continue or propose more work")
-	}
-	return nil
-}
-
-// FinalFailureExplanationSystemInstruction defines the generic hosted form contract.
-// A host using a text-only explanation subcall can replace this exact instruction.
-const FinalFailureExplanationSystemInstruction = "This attempt has stopped after the kernel-recorded failure in continuationCheckpoint._opensealFinalFailureExplanation. Give one brief, useful final reply in your configured voice, explaining what did not work and any next step the user actually needs. Ground the explanation in the recorded failure and succeeded evidence. Do not expose internal tool names, IDs, or governance details; do not guess that the user's billing plan, account, or permissions are wrong without evidence. Do not attempt, retry, repair, request setup, schedule, wait, fork, or delegate further work. Return nextRunStatus completed, no wakeCondition or proposals, and your final reply in runOutput.summary. Earlier instructions to continue work no longer apply to this failed attempt."
-
-func projectFinalFailureExplanation(request *HostedTurnRequest) {
-	request.Actions = nil
-	request.EligibleAgents = nil
-	request.Workspace = nil
-	request.WorkspaceOperations = nil
-	request.RunbookOperations = nil
-	request.ConversationTasks = nil
-	request.SkillPrompts = nil
-	request.PendingInterventions = nil
-	request.ModelMedia = nil
-	request.SourceAccessChallenge = nil
-	request.CanAskConversationQuestion = false
-	request.SystemInstructions = append(request.SystemInstructions,
-		FinalFailureExplanationSystemInstruction)
 }
 
 // An adapter's explicit top-level failure envelope is operational evidence,
@@ -106,73 +134,16 @@ func explicitActionResultFailure(output map[string]interface{}) error {
 	return nil
 }
 
-// runFinalFailureExplanation asks the model, with no actions or other work
-// on offer, to explain the recorded failure to the user. The kernel's own
-// reply is only the fallback when that answer cannot be had: the host or model
-// is unavailable or refused, or its answer was not an answer-only
-// explanation. A credit stop is returned as is, so the Run stops with its
-// typed credit cause.
-func (r *HostedTurnRunner) runFinalFailureExplanation(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-	request, err := r.buildRequest(input)
-	var response *HostedTurnResponse
-	if err == nil {
-		response, err = r.host.ExecuteHostedTurn(ctx, request)
-	}
-	if err != nil {
-		var failure *TurnHostFailure
-		if ctx.Err() != nil || errors.As(err, &failure) && creditStopFailureCode(failure.Code) {
-			return nil, err
-		}
-		return finalFailureFallback(input.Run, nil, err), nil
-	}
-	if response == nil || response.APIVersion != HostedTurnAPIVersion || response.InvocationID != input.Turn.ID {
-		return finalFailureFallback(input.Run, nil, errors.New("turn host returned a mismatched response envelope")), nil
-	}
-	if err := ValidateHostedTurnFinalFailureExplanation(request, response); err != nil {
-		return finalFailureFallback(input.Run, response, err), nil
-	}
-	provider, model, err := normalizeModelIdentity(response.ModelProvider, response.Model)
-	if err == nil && (provider == "" || model == "") {
-		err = errors.New("turn host must report the actual model provider and model")
-	}
-	if err == nil {
-		err = response.Usage.Validate()
-	}
-	if err != nil {
-		return finalFailureFallback(input.Run, response, err), nil
-	}
-	answer := strings.TrimSpace(conversationResultString(response.RunOutput, "summary"))
-	if answer == "" {
-		answer = strings.TrimSpace(response.OutputSummary)
-	}
-	return &TurnOutcome{
-		ModelProvider: provider, Model: model, SkillSelections: response.SkillSelections, Decisions: response.Decisions,
-		NextRunStatus: AgentRunStatusCompleted, OutputSummary: answer,
-		RunOutput:              map[string]interface{}{"summary": answer},
-		ContinuationCheckpoint: preserveKernelActionHistory(request.ContinuationCheckpoint, response.ContinuationCheckpoint),
-		Usage:                  response.Usage,
-	}, nil
-}
-
-// finalFailureFallback is the kernel's reply when the model could not explain
-// the failure. Why the model answer was not used is recorded on the Turn.
-func finalFailureFallback(run *AgentRun, response *HostedTurnResponse, cause error) *TurnOutcome {
-	outcome, _ := terminalFailureOutcome(run)
-	reason := "The model could not write the failure explanation"
-	if cause != nil {
-		reason += ": " + toolFeedbackMessage(cause.Error())
-	}
-	outcome.Decisions = append(outcome.Decisions, TurnDecision{Summary: boundedTurnFailureText(reason)})
-	if response != nil && response.Usage.Validate() == nil {
-		outcome.Usage = response.Usage
-	}
-	return outcome
-}
-
 // noModelTurnFailureCode names the host failures under which no model can
 // answer this turn: the Workspace has no credits, or the model provider or
-// its configuration is unavailable. Every other failure can be explained.
+// its configuration is unavailable, or the context no longer fits. Every
+// other failure can be explained.
 func noModelTurnFailureCode(code string) bool {
+	switch strings.TrimSpace(code) {
+	case TurnHostContextExceeded, RunFailureCodeCompactionFailed:
+		// No model call fits the context, so none can explain it either.
+		return true
+	}
 	switch terminalFailureCode(code) {
 	case "workspace_credits_exhausted", "workspace_daily_limit_reached", "model_configuration_failed", "budget_exhausted",
 		"provider_authentication_failed", "provider_access_denied", "provider_quota_exhausted", "provider_rate_limited", "provider_unavailable":

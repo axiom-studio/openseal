@@ -573,7 +573,7 @@ func TestAgentRunWorkerFixedAgentBehaviorStopsWithFixedBehaviorReply(t *testing.
 	}
 	feedbackAssertNotClaimable(t, store, scope, time.Now())
 	feedbackAssertKernelFailureReply(t, failed, "agent_behavior_fixed")
-	if reply := terminalRunFailureReply(failed); !strings.Contains(reply, "can't change my own instructions") || strings.Contains(reply, "operation failed") {
+	if reply := terminalRunFailureReply(ctx, store, store, failed); !strings.Contains(reply, "can't change my own instructions") || strings.Contains(reply, "operation failed") {
 		t.Fatalf("fixed Agent behavior reply = %q", reply)
 	}
 }
