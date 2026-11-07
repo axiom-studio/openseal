@@ -29,15 +29,13 @@ function request(draft: HomeDraft) {
         },
       }
     : {
-        path: "/authoring/workforce/change-sets",
+        // A builder chat (R7): the request as typed is the first message and
+        // the kind travels as a parameter, never as text in the message.
+        path: "/agent-builder/conversations",
         body: {
           scope,
-          prompt:
-            draft.mode === "team"
-              ? `Create one team.\n\n${draft.prompt.trim()}`
-              : draft.prompt.trim(),
-          catalog: {},
-          actor: { type: "user", id: "local-operator" },
+          prompt: draft.prompt.trim(),
+          parameters: { kind: draft.mode },
         },
       };
 }
@@ -89,15 +87,18 @@ export function persistHomeSubmission(pending: HomeSubmission) {
     );
   localStorage.setItem(homeSubmissionKey, JSON.stringify(pending));
 }
+// builderConversationKey remembers the builder chat Home shows.
+export const builderConversationKey = "openseal.builder-conversation";
 export function finishHomeSubmission(
   pending: HomeSubmission,
-  proposalId?: string,
+  conversationId?: string,
 ) {
   if (localStorage.getItem(homeSubmissionKey) !== JSON.stringify(pending))
     throw new Error(
       "The saved request changed. Reload the app to inspect recovery.",
     );
-  if (proposalId) localStorage.setItem("openseal.proposal", proposalId);
+  if (conversationId)
+    localStorage.setItem(builderConversationKey, conversationId);
   // Clear the editor durably before releasing the request identity. If storage
   // fails at any step, the same idempotent request remains recoverable.
   localStorage.setItem(

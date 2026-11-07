@@ -1,15 +1,58 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 const scope = { kind: "local", id: "default" };
+const builder = "openseal-assistant";
+// builderStart is the daemon's answer to POST /agent-builder/conversations:
+// the builder chat and its first message, the request exactly as typed.
+function builderStart(
+  id: string,
+  prompt: string,
+  kind: "agent" | "team",
+  conversationScope = scope,
+) {
+  return {
+    conversation: {
+      id,
+      scope: conversationScope,
+      owner: { type: "agent", id: builder },
+      origin: { kind: "agent_builder", id: "request" },
+      title: "New agent",
+      status: "active",
+      revision: 1,
+      lastSequence: 1,
+    },
+    message: {
+      id: `${id}-message`,
+      conversationId: id,
+      sequence: 1,
+      sender: { type: "user", id: "local-operator" },
+      intent: "update",
+      content: prompt,
+      builderParameters: { kind },
+      createdAt: "2026-11-08T10:00:00Z",
+      audience: { kind: "channel" },
+    },
+    replayed: false,
+  };
+}
+async function builderChat(page: Page, id: string) {
+  await page.route(`**/api/v1/conversations/${id}?*`, (r) =>
+    r.fulfill({ json: builderStart(id, "", "agent").conversation }),
+  );
+  await page.route(`**/api/v1/conversations/${id}/messages?*`, (r) =>
+    r.fulfill({ json: [] }),
+  );
+}
 async function setup(page: Page) {
   await page.route("**/api/v1/capabilities", (r) =>
     r.fulfill({
       json: {
         capabilities: [
           {
-            id: "workforce-authoring",
+            id: "agent-builder",
             available: true,
-            operations: ["propose", "get"],
+            operations: ["create", "list"],
+            context: { builderAgentId: builder },
           },
           { id: "agent-definitions", available: true, operations: ["list"] },
           {
@@ -53,7 +96,7 @@ for (const mode of ["agent", "team", "work"] as const) {
     const writes: { key: string; body: any }[] = [];
     const prompt = `Review evidence for this ${mode}.`;
     const path =
-      mode === "work" ? "/agent-runs" : "/authoring/workforce/change-sets";
+      mode === "work" ? "/agent-runs" : "/agent-builder/conversations";
     const record =
       mode === "work"
         ? {
@@ -68,13 +111,7 @@ for (const mode of ["agent", "team", "work"] as const) {
             createdAt: "2026-09-17T10:00:00Z",
             updatedAt: "2026-09-17T10:00:00Z",
           }
-        : {
-            id: "saved-proposal",
-            scope,
-            prompt: mode === "team" ? `Create one team.\n\n${prompt}` : prompt,
-            status: "evaluating",
-            revision: 1,
-          };
+        : builderStart("saved-conversation", prompt, mode);
     await page.route(`**/api/v1${path}`, async (r) => {
       writes.push({
         key: r.request().headers()["idempotency-key"],
@@ -83,9 +120,7 @@ for (const mode of ["agent", "team", "work"] as const) {
       if (writes.length === 1) return r.abort("failed");
       return r.fulfill({ json: mode === "work" ? { run: record } : record });
     });
-    await page.route(`**/api/v1${path}/${record.id}?*`, (r) =>
-      r.fulfill({ json: record }),
-    );
+    await builderChat(page, "saved-conversation");
     await setup(page);
     if (mode !== "agent")
       await page
@@ -113,6 +148,13 @@ for (const mode of ["agent", "team", "work"] as const) {
     );
     expect(saved.key).toBe(writes[0].key);
     expect(saved.body).toEqual(writes[0].body);
+    // R7: the request as typed, the kind as a parameter, no text prefix.
+    if (mode !== "work")
+      expect(writes[0].body).toEqual({
+        scope,
+        prompt,
+        parameters: { kind: mode },
+      });
     await page
       .getByRole("button", { name: "Create agent", exact: true })
       .first()
@@ -152,10 +194,16 @@ for (const mode of ["agent", "team", "work"] as const) {
     expect(writes[1]).toEqual(writes[0]);
     if (mode === "work")
       await expect(page.locator(".inspector")).toContainText(prompt);
-    else
+    else {
       expect(
-        await page.evaluate(() => localStorage.getItem("openseal.proposal")),
-      ).toBe(record.id);
+        await page.evaluate(() =>
+          localStorage.getItem("openseal.builder-conversation"),
+        ),
+      ).toBe("saved-conversation");
+      await expect(
+        page.getByRole("heading", { name: "Builder chat", exact: true }),
+      ).toBeVisible();
+    }
     await page.reload();
     await expect(page.locator("#prompt")).toHaveValue("");
     expect(writes).toHaveLength(2);
@@ -166,7 +214,7 @@ test("storage failure sends nothing and keeps the editable draft", async ({
   page,
 }) => {
   let writes = 0;
-  await page.route("**/api/v1/authoring/workforce/change-sets", (r) => {
+  await page.route("**/api/v1/agent-builder/conversations", (r) => {
     writes++;
     return r.abort();
   });
@@ -193,32 +241,21 @@ test("mismatched response and failed local cleanup preserve the original retry i
   let writes = 0;
   let key = "";
   let valid = false;
-  await page.route("**/api/v1/authoring/workforce/change-sets", (r) => {
+  await page.route("**/api/v1/agent-builder/conversations", (r) => {
     writes++;
     key ||= r.request().headers()["idempotency-key"];
     expect(r.request().headers()["idempotency-key"]).toBe(key);
     const body = r.request().postDataJSON();
     return r.fulfill({
-      json: {
-        id: "saved",
-        scope: valid ? scope : { kind: "local", id: "foreign" },
-        prompt: body.prompt,
-        status: "evaluating",
-        revision: 1,
-      },
+      json: builderStart(
+        "saved",
+        body.prompt,
+        body.parameters.kind,
+        valid ? scope : { kind: "local", id: "foreign" },
+      ),
     });
   });
-  await page.route("**/api/v1/authoring/workforce/change-sets/saved?*", (r) =>
-    r.fulfill({
-      json: {
-        id: "saved",
-        scope,
-        prompt: "Check response identity.",
-        status: "evaluating",
-        revision: 1,
-      },
-    }),
-  );
+  await builderChat(page, "saved");
   await setup(page);
   await page.locator("#prompt").fill("Check response identity.");
   await page.locator(".composer button[type=submit]").click();
@@ -254,7 +291,7 @@ test("unreadable recovery blocks new requests until explicitly forgotten without
   page,
 }) => {
   let writes = 0;
-  await page.route("**/api/v1/authoring/workforce/change-sets", (r) => {
+  await page.route("**/api/v1/agent-builder/conversations", (r) => {
     writes++;
     return r.abort();
   });

@@ -45,13 +45,13 @@ function outcome(run: ReplyRun) {
 const pageSize = 5;
 export default function ChannelReplyActivity({
   id,
-  teamId,
+  owner,
   canInspect,
   onOpenRun,
   sender,
 }: {
   id: string;
-  teamId: string;
+  owner: { type: string; id: string };
   canInspect: boolean;
   onOpenRun: (run: Run) => void;
   sender: (message: Message) => string;
@@ -79,8 +79,8 @@ export default function ChannelReplyActivity({
       run.kind !== "conversation" ||
       run.scope?.kind !== scope.kind ||
       run.scope.id !== scope.id ||
-      run.owner?.type !== "team" ||
-      run.owner.id !== teamId ||
+      run.owner?.type !== owner.type ||
+      run.owner.id !== owner.id ||
       run.context?.conversationId !== id ||
       typeof run.context.triggerMessageId !== "string" ||
       !run.context.triggerMessageId ||
@@ -145,12 +145,12 @@ export default function ChannelReplyActivity({
       canceled = true;
       clearInterval(timer);
     };
-  }, [id, teamId, offset, refresh]);
+  }, [id, owner.type, owner.id, offset, refresh]);
   useEffect(
     () => () => {
       generation.current++;
     },
-    [id, teamId],
+    [id, owner.type, owner.id],
   );
   useEffect(() => {
     if (openError) openFeedback.current?.focus();
