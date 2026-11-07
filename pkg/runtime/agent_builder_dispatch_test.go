@@ -621,9 +621,11 @@ func TestAgentBuilderDispatcherPassesOtherActionsOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := dispatcher.DispatchAction(context.Background(), ActionDispatchInput{Bound: f.bound(t, AgentActionTryAgent)})
+	other := *f.bound(t, AgentActionTryAgent)
+	other.Action.Name = AgentActionAmendBehavior
+	result, err := dispatcher.DispatchAction(context.Background(), ActionDispatchInput{Bound: &other})
 	if err != nil || result["fallback"] != true {
-		t.Fatalf("try_agent = %#v, %v", result, err)
+		t.Fatalf("amend_behavior = %#v, %v", result, err)
 	}
 	result, err = dispatcher.DispatchAction(context.Background(), ActionDispatchInput{})
 	if err != nil || result["fallback"] != true {

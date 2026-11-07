@@ -4023,17 +4023,21 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 	return nil
 }
 
+// newRunTerminalFinalizer is the finalizer every worker pool runs on a
+// terminal Run: the try_agent trial hand-off to its builder Run, then the
+// Skill resource finalizers when this Engine executes actions.
 func (e *Engine) newRunTerminalFinalizer() (runtime.RunTerminalFinalizer, error) {
-	if len(e.actionSupervisorSpecs) == 0 && len(e.actionPoolSpecs) == 0 {
-		return nil, nil
+	var resources runtime.RunTerminalFinalizer
+	if len(e.actionSupervisorSpecs) > 0 || len(e.actionPoolSpecs) > 0 {
+		var dispatcher runtime.ActionDispatcher
+		if len(e.actionSupervisorSpecs) > 0 {
+			dispatcher = e.actionSupervisorSpecs[0].dispatcher
+		} else {
+			dispatcher = e.actionPoolSpecs[0].dispatcher
+		}
+		resources = runtime.NewActionRunTerminalFinalizer(e.store, e.skills, dispatcher)
 	}
-	var dispatcher runtime.ActionDispatcher
-	if len(e.actionSupervisorSpecs) > 0 {
-		dispatcher = e.actionSupervisorSpecs[0].dispatcher
-	} else {
-		dispatcher = e.actionPoolSpecs[0].dispatcher
-	}
-	return runtime.NewActionRunTerminalFinalizer(e.store, e.skills, dispatcher), nil
+	return runtime.NewAgentTrialFinalizer(e.store, resources, e.wakeAgentWorkersForScope), nil
 }
 
 func (e *Engine) WakeAgentWorkers() {

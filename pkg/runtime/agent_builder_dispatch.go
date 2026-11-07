@@ -38,9 +38,10 @@ const (
 	agentBuilderUpdateReason      = "Changed in chat after review"
 )
 
-// AgentBuilderActionDispatcher executes list_agents, create_agent and
-// update_agent. Every write step is idempotent on the ActionCall, so a retry
-// or a crash-resumed execution converges on the same Agent.
+// AgentBuilderActionDispatcher executes list_agents, create_agent,
+// update_agent and try_agent. Every write step is idempotent on the
+// ActionCall, so a retry or a crash-resumed execution converges on the same
+// Agent.
 type AgentBuilderActionDispatcher struct {
 	store     KernelStore
 	agents    *kernelagent.Registry
@@ -100,6 +101,8 @@ func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input
 		return d.createAgent(ctx, input, run)
 	case AgentActionUpdateAgent:
 		return d.updateAgent(ctx, input, run)
+	case AgentActionTryAgent:
+		return d.tryAgent(ctx, input, run)
 	}
 	return nil, errors.New("unsupported agent builder action")
 }
@@ -109,7 +112,7 @@ func isAgentBuilderDispatchedAction(bound *skill.BoundAction) bool {
 		return false
 	}
 	switch bound.Action.Name {
-	case AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent:
+	case AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent, AgentActionTryAgent:
 		return true
 	}
 	return false
