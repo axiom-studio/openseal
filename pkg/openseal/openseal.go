@@ -2386,6 +2386,7 @@ type Engine struct {
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
 	agentBuilderHost              runtime.AgentBuilderHost
+	agentBuilderCutoverHost       runtime.AgentBuilderCutoverHost
 	runbookManagementActions      bool
 	runManagementActions          bool
 	teamManagementActions         bool
@@ -2617,9 +2618,10 @@ func New(opts ...Option) (*Engine, error) {
 // stores, workers fall back to their configured poll intervals.
 //
 // Before any worker starts, Start moves the store onto the run loop
-// (RunLoopCutover): Runs from before the loop are adopted or canceled. The
-// cutover fails closed: on error no worker is started and the error is
-// returned.
+// (RunLoopCutover): Runs from before the loop are adopted or canceled. Then
+// AgentBuilderCutover turns the retired change-set drafts into builder
+// conversations. Both fail closed: on a store error no worker is started and
+// the error is returned.
 func (e *Engine) Start(ctx context.Context) error {
 	report, err := e.RunLoopCutover(ctx)
 	if err != nil {
@@ -2627,6 +2629,13 @@ func (e *Engine) Start(ctx context.Context) error {
 	}
 	if e.logger != nil && (report.Adopted > 0 || report.Canceled > 0) {
 		e.logger.Infow("run loop cutover", "adopted", report.Adopted, "canceled", report.Canceled, "messages", report.Messages)
+	}
+	builderReport, err := e.AgentBuilderCutover(ctx)
+	if err != nil {
+		return err
+	}
+	if e.logger != nil && (builderReport.Converted > 0 || builderReport.Kept > 0 || builderReport.Dropped) {
+		e.logger.Infow("agent builder cutover", "converted", builderReport.Converted, "kept", builderReport.Kept, "dropped", builderReport.Dropped)
 	}
 	e.applyWorkSignals()
 	if e.conversationRunReconciler != nil {

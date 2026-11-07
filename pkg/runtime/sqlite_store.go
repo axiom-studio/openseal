@@ -133,7 +133,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateConnectOnceSQLite(db); err != nil {
 		return err
 	}
-	return migrateAgentSessionLogSQLite(db)
+	if err := migrateAgentSessionLogSQLite(db); err != nil {
+		return err
+	}
+	return migrateAgentBuilderSQLite(db)
 }
 
 // Close closes the underlying database.
