@@ -14,6 +14,7 @@ const (
 	finalSupersededText   = "superseded: new guidance arrived; read it and answer again"
 	finalDeliveredStatus  = "delivered"
 	finalCompletedSummary = "Run completed with its final answer"
+	finalFailedSummary    = "Run failed with its final answer"
 	finalExplainedSummary = "Run failed after the agent explained what went wrong"
 	outputPublicationText = "Task output could not be saved. Resolve storage access and resume work to retry."
 	finalEntryAttempts    = 4
@@ -21,14 +22,25 @@ const (
 
 // finishFinal runs the final chain for an accepted final answer: park
 // without posting (pending setup), the D8 re-check, Deliver, output
-// publication, then the guarded terminal transition. In the explanation step
-// the Run ends failed with its explained failure.
-func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnswer) stepResult {
+// publication, then the guarded terminal transition. status is the terminal
+// status ("" = completed; failed for a deterministic failed LoopFinal). In
+// the explanation step the Run ends failed with its explained failure.
+//
+// An answer from a final-tool entry finishes the step first: a crash before
+// the terminal transition resumes through that pending entry
+// (ResumeOpenTools). A plain-text or deterministic final has no such entry,
+// so its step stays running under its heartbeat through Deliver and
+// publication, and FinishTurn completed comes just before the terminal
+// transition (§7.2). A crash in between resumes the recorded step, which
+// re-delivers idempotently instead of calling the model again (D14).
+func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnswer, status AgentRunStatus) stepResult {
 	if final == nil {
 		return d.stepError(ctx, st, errors.New("final chain without a final answer"), StepFailureProducerFailed)
 	}
-	if err := d.finishCompleted(ctx, st); err != nil {
-		return exitResultPtr(d.writeErrorExit(err))
+	if final.ToolEntryID != "" {
+		if err := d.finishCompleted(ctx, st); err != nil {
+			return exitResultPtr(d.writeErrorExit(err))
+		}
 	}
 	explaining := st.mode == StepModeExplainFailure
 	// 2. Pending setup: park without posting.
@@ -40,6 +52,11 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 		return exitResultPtr(d.errorExit(err))
 	}
 	if run.Status != AgentRunStatusRunning || run.LeaseOwner != d.workerID {
+		if !st.finished {
+			if res, done := d.checkRunAfterProduce(ctx, st); done {
+				return res
+			}
+		}
 		return exitResultPtr(d.statusExit(run))
 	}
 	// D8: guidance the step did not see supersedes the answer.
@@ -51,7 +68,7 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 	result := FinalDeliveryResult{Kind: FinalDeliveryComplete, Output: final.Output}
 	if d.binding.Final != nil {
 		delivered, err := d.binding.Final.Deliver(ctx, FinalDelivery{
-			Run: cloneAgentRun(run), Step: cloneAgentTurn(st.step), Answer: *final,
+			Run: cloneAgentRun(run), Step: cloneAgentTurn(st.current()), Answer: *final,
 			Guard: ReplyRunGuard{
 				Scope: run.Scope, RunID: run.ID, WorkerID: d.workerID,
 				ConcurrencyKey: run.ConcurrencyKey, InterventionCount: count,
@@ -113,12 +130,34 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 	if result.Kind == FinalDeliveryPark {
 		return d.park(ctx, st, final.Park.Park)
 	}
+	// 6. FinishTurn completed (a tool final finished above), then the
+	// guarded terminal transition, which also applies the step.
+	if err := d.finishCompleted(ctx, st); err != nil {
+		return exitResultPtr(d.writeErrorExit(err))
+	}
 	req := RunTransitionRequest{Status: AgentRunStatusCompleted, Output: output, Summary: finalCompletedSummary, RequireInterventionCount: &count}
-	if explaining && d.run.FailureExplanation != nil {
+	explained := false
+	switch {
+	case explaining && d.run.FailureExplanation != nil:
 		req.Status = AgentRunStatusFailed
 		req.Error = d.run.FailureExplanation.Message
 		req.FailureExplanation = explainedRunFailure(d.run.FailureExplanation)
 		req.Summary = finalExplainedSummary
+		explained = true
+	case status == AgentRunStatusFailed:
+		// A deterministic failed final: its answer, when posted, is the
+		// failure's explanation; otherwise terminal reporting posts the
+		// kernel reply.
+		message := strings.TrimSpace(final.Answer)
+		explanation := beginRunFailureExplanation(d.run, RunFailureKindExecution, "execution_failed", message, "", "")
+		if message != "" && d.binding.Final != nil {
+			explanation = explainedRunFailure(explanation)
+			explained = true
+		}
+		req.Status = AgentRunStatusFailed
+		req.Error = explanation.Message
+		req.FailureExplanation = explanation
+		req.Summary = finalFailedSummary
 	}
 	run, err = d.commitRun(ctx, st, req, false)
 	if errors.Is(err, ErrSteeringArrived) {
@@ -130,29 +169,22 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 	if err != nil {
 		return exitResultPtr(d.writeErrorExit(err))
 	}
+	if explained && run.Status == AgentRunStatusFailed {
+		// Failed after an explanation the user already has.
+		return exitResult(RunLoopExit{Run: run, Reason: RunLoopExitFinal})
+	}
 	return exitResultPtr(d.statusExit(run))
 }
 
 // finishLoopFinal ends the Run with a deterministic producer's (or a
-// preparer's early) final result.
+// preparer's early) final result through the final chain (§5.5 -> §7.2); a
+// failed result is delivered too and ends the Run failed.
 func (d *drive) finishLoopFinal(ctx context.Context, st *stepState, final *LoopFinal) stepResult {
+	status := AgentRunStatus("")
 	if final.Status == AgentRunStatusFailed {
-		if err := d.finishCompleted(ctx, st); err != nil {
-			return exitResultPtr(d.writeErrorExit(err))
-		}
-		message := strings.TrimSpace(final.Answer)
-		if message == "" {
-			message = "The requested work did not complete."
-		}
-		run, err := d.commitRun(ctx, st, RunTransitionRequest{
-			Status: AgentRunStatusFailed, Output: cloneMap(final.Output), Error: message, Summary: "Run failed",
-		}, false)
-		if err != nil {
-			return exitResultPtr(d.writeErrorExit(err))
-		}
-		return exitResultPtr(d.statusExit(run))
+		status = AgentRunStatusFailed
 	}
-	return d.finishFinal(ctx, st, &FinalAnswer{StepID: st.step.ID, Answer: final.Answer, Output: cloneMap(final.Output)})
+	return d.finishFinal(ctx, st, &FinalAnswer{StepID: st.step.ID, Answer: final.Answer, Output: cloneMap(final.Output)}, status)
 }
 
 // supersedeFinal discards a final answer because new guidance arrived: the
@@ -280,6 +312,9 @@ func (d *drive) publishFinalOutput(ctx context.Context, st *stepState, final *Fi
 		return published, stepResult{}, false
 	}
 	d.l.logger.Warnw("publish final output", "run", d.run.ID, "step", stepID, "error", err)
+	if err := d.finishCompleted(ctx, st); err != nil {
+		return nil, exitResultPtr(d.writeErrorExit(err)), true
+	}
 	run, err := d.commitRun(ctx, st, RunTransitionRequest{
 		Status: AgentRunStatusPaused, Summary: outputPublicationText, Error: outputPublicationText,
 		EventType: "turn.output_publication_failed", TurnID: stepID,

@@ -79,8 +79,7 @@ type RunLoopConfig struct {
 	MaxClaimDuration  time.Duration // default RunLoopMaxClaimDuration
 	Now               func() time.Time
 	// PlanToolEntries and PlainTextFinal are the dispatcher's and the
-	// control section's parts of phases 7 and 8. A Run whose step needs one
-	// that is missing fails as host_configuration.
+	// control section's parts of phases 7 and 8. Both are required.
 	PlanToolEntries StepToolEntryPlanner
 	PlainTextFinal  PlainTextFinalizer
 }
@@ -104,6 +103,9 @@ func NewRunLoop(store KernelStore, actions *ActionCoordinator, logger *zap.Sugar
 	sessions, ok := store.(AgentSessionStore)
 	if !ok {
 		return nil, errors.New("run loop needs a kernel store with the agent session log")
+	}
+	if config.PlanToolEntries == nil || config.PlainTextFinal == nil {
+		return nil, errors.New("run loop needs a tool entry planner and a plain-text finalizer")
 	}
 	if config.StepLeaseDuration <= 0 {
 		config.StepLeaseDuration = defaultStepLeaseDuration
@@ -375,8 +377,18 @@ func (d *drive) commitRun(ctx context.Context, st *stepState, req RunTransitionR
 var errRunEnded = errors.New("run ended")
 
 // fillStepApplication adds applyStep's fields to a transition (§6.4).
+//
+// The step row's usage includes the step's compaction calls (phase 4). The
+// compactor already charged them to the bounded budget (SettleCompaction), so
+// the budget settlement and the exhaustion check use the usage without them,
+// while the activity usage carries all of it.
 func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st *stepState) {
 	step := st.step
+	budgetStep := step
+	if st.compaction != (TurnUsage{}) {
+		budgetStep = cloneAgentTurn(step)
+		budgetStep.Usage = subtractCompactionUsage(step.Usage, st.compaction)
+	}
 	req.AppliedTurn = step.Sequence
 	req.TurnID = step.ID
 	req.CausationID = step.ID
@@ -415,11 +427,25 @@ func (d *drive) fillStepApplication(req *RunTransitionRequest, run *AgentRun, st
 			req.Summary = fmt.Sprintf("Applied step %d", step.Sequence)
 		}
 	}
-	if req.Status == AgentRunStatusRunning && stepExhaustsBudget(run, step, st.produced) {
+	if req.Status == AgentRunStatusRunning && stepExhaustsBudget(run, budgetStep, st.produced) {
 		req.Status = AgentRunStatusPaused
 		req.Summary = stepBudgetExhaustedAfterStepSummary
 	}
-	fillStepBudgetSettlement(req, run, step, st.produced)
+	fillStepBudgetSettlement(req, run, budgetStep, st.produced)
+	if st.compaction != (TurnUsage{}) {
+		if activity := budgetUsageForStep(step.Usage, st.produced); activity != (BudgetUsage{}) {
+			req.ActivityUsageDelta = &activity
+		}
+	}
+}
+
+// subtractCompactionUsage removes a step's compaction usage from its row
+// usage (never below zero).
+func subtractCompactionUsage(usage, compaction TurnUsage) TurnUsage {
+	usage.InputTokens = max(usage.InputTokens-compaction.InputTokens, 0)
+	usage.OutputTokens = max(usage.OutputTokens-compaction.OutputTokens, 0)
+	usage.Cost = max(usage.Cost-compaction.Cost, 0)
+	return usage
 }
 
 // runbookCurrentStep is the current runbook step named by a deterministic
