@@ -272,6 +272,9 @@ Options:
 	if err := kernel.Start(ctx); err != nil {
 		sugar.Fatalf("start OpenSeal kernel: %v", err)
 	}
+	if err := daemon.SeedBuilderAgent(ctx, kernel, scope); err != nil {
+		sugar.Fatalf("seed the builder agent: %v", err)
+	}
 
 	// Versioned kernel API for the TUI and embedding integrations.
 	apiServer := server.NewServer(store, sugar)
