@@ -69,6 +69,9 @@ type PostChannelMessageRequest struct {
 	// RoutingReason is set by a routed Team member's answer.
 	RoutingReason  string
 	IdempotencyKey string
+	// RunGuard fences a Run's final reply (ChannelMessageCommitRecord.RunGuard).
+	// A replay of an existing IdempotencyKey returns that message unguarded.
+	RunGuard *ReplyRunGuard
 }
 
 type ChannelMessageFilter struct {
@@ -446,7 +449,7 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	updated.LastSequence = message.Sequence
 	updated.Revision++
 	updated.UpdatedAt = now
-	return s.store.CommitChannelMessage(ctx, ChannelMessageCommitRecord{Conversation: updated, ExpectedRevision: conversation.Revision, Message: message})
+	return s.store.CommitChannelMessage(ctx, ChannelMessageCommitRecord{Conversation: updated, ExpectedRevision: conversation.Revision, Message: message, RunGuard: req.RunGuard})
 }
 
 // CommitConversationRouting durably records a routing decision. It posts no

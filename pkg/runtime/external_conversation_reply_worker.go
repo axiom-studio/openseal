@@ -301,6 +301,10 @@ func (w *ExternalConversationReplyWorker) projectReply(
 		if !ok {
 			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", ErrInvalidExternalConversation)
 		}
+		artifacts, refErr := runActionArtifactReferences(ctx, sessions, actions, run)
+		if refErr != nil {
+			return nil, refErr
+		}
 		current, getErr := w.conversations.GetConversation(ctx, item.Scope, item.ConversationID)
 		if getErr != nil {
 			return nil, getErr
@@ -318,7 +322,7 @@ func (w *ExternalConversationReplyWorker) projectReply(
 			Intent: MessageIntentAnswer, Content: content,
 			Audience:         ConversationAudience{Kind: ConversationAudienceChannel},
 			ReplyToMessageID: item.ChannelMessageID, ResolvesMessageID: item.ChannelMessageID,
-			References:     append([]ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, conversationActionArtifactReferences(run)...),
+			References:     append([]ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}, artifacts...),
 			IdempotencyKey: "external-conversation-reply:" + reply.id,
 		})
 		if postErr != nil {

@@ -2,181 +2,174 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 )
 
-func TestConversationArtifactReceiptSurvivesModelFailure(t *testing.T) {
-	for _, modelFails := range []bool{true, false} {
-		t.Run(map[bool]string{true: "failure", false: "success"}[modelFails], func(t *testing.T) {
-			ctx := context.Background()
-			store := NewMemoryStore()
-			service := NewConversationService(store)
-			scope := Scope{Kind: "tenant", ID: "artifact-receipt"}
-			conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-42"}, Title: "Files", IdempotencyKey: "files",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			trigger := receiptTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "Create a PDF and explain it.", "create")
-			scheduled, _, err := receiptTestScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, trigger.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			run := cloneAgentRun(scheduled.Run)
-			artifact := receiptTestArtifact("completed-pdf", 1)
-			artifact.Scope = scope
-			artifact.Provenance.Owner = &run.Owner
-			artifact.Provenance.RunID = run.ID
-			artifact.Provenance.ActionID = "create-pdf-action"
-			if err := store.CreateArtifactVersion(ctx, artifact, 0); err != nil {
-				t.Fatal(err)
-			}
-			run.Checkpoint = map[string]interface{}{"lastAction": map[string]interface{}{
-				"actionCallId": artifact.Provenance.ActionID, "status": ActionCallStatusSucceeded,
-				"result": map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": artifact.ID, "version": artifact.Version}}},
-			}}
-			modelErr := errors.New("model authorization denied")
-			calls := 0
-			resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-				return &TurnRunnerBinding{DeploymentID: "agent-42", DefinitionID: "definition", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-					calls++
-					messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-					if err != nil || len(messages) < 2 || messages[1].Sender.Type != ConversationParticipantService {
-						t.Fatalf("receipt must exist before model call: %#v, %v", messages, err)
-					}
-					if modelFails {
-						return nil, modelErr
-					}
-					return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Drafted reply", "report": "Your PDF is ready."}}, nil
-				})}, nil
-			})
-			runner, err := NewConversationRunTurnRunner(store, receiptTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: resolver})
-			if err != nil {
-				t.Fatal(err)
-			}
-			binding, err := runner.ResolveTurnRunner(ctx, run)
-			if err != nil {
-				t.Fatal(err)
-			}
-			for range 2 {
-				outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: run})
-				if modelFails && (!errors.Is(err, modelErr) || outcome != nil) {
-					t.Fatalf("failure must remain failure: %#v %v", outcome, err)
-				}
-				if !modelFails && (err != nil || outcome.NextRunStatus != AgentRunStatusCompleted) {
-					t.Fatalf("success: %#v %v", outcome, err)
-				}
-			}
-			messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-			want := 3
-			if modelFails {
-				want = 2
-			}
-			if err != nil || len(messages) != want || calls != 2 {
-				t.Fatalf("duplicate receipt or lost continuation: messages=%d calls=%d err=%v", len(messages), calls, err)
-			}
-			if !modelFails && messages[2].Content != "Your PDF is ready." {
-				t.Fatalf("complete report was replaced by its status summary: %#v", messages[2])
-			}
-			receipt := messages[1]
-			if receipt.ResolvesMessageID != "" || receipt.RequiresResponse || receipt.Intent != MessageIntentUpdate || conversationMessageStartsRun(conversation, receipt) {
-				t.Fatalf("receipt must not finish or restart work: %#v", receipt)
-			}
-			if receipt.ReplyToMessageID != trigger.ID || len(receipt.References) != 2 || receipt.References[1] != (ConversationReference{Kind: ConversationReferenceArtifact, ID: artifact.ID, Version: 1}) {
-				t.Fatalf("receipt provenance: %#v", receipt)
-			}
-		})
-	}
+// receiptFixture is a chat with one trigger, a Run of its Agent and one
+// completed governed tool entry whose call saved a file.
+type receiptFixture struct {
+	ctx          context.Context
+	store        *MemoryStore
+	service      *ConversationService
+	runner       *ConversationRunTurnRunner
+	conversation *Conversation
+	trigger      *ChannelMessage
+	run          *AgentRun
+	call         *ActionCall
+	entry        *SessionEntry
+	artifact     *Artifact
+	actions      *fakeActionCalls
 }
 
-func TestConversationArtifactReceiptRequiresExactProvenance(t *testing.T) {
-	for _, mismatch := range []string{"tenant", "owner", "run", "action", "version", "failed", "missing-action-id"} {
-		t.Run(mismatch, func(t *testing.T) {
-			ctx := context.Background()
-			store := NewMemoryStore()
-			service := NewConversationService(store)
-			scope := Scope{Kind: "tenant", ID: "one"}
-			owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
-			conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Files", IdempotencyKey: "files"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			trigger := receiptTestMessage(t, service, conversation, ConversationParticipantUser, MessageIntentQuestion, "PDF please", "trigger")
-			artifact := receiptTestArtifact("file", 1)
-			artifact.Provenance = ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "agent"}, Owner: &owner, RunID: "run", ActionID: "action"}
-			last := map[string]interface{}{"actionCallId": "action", "status": ActionCallStatusSucceeded, "result": map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "file", "version": 1}}}}
-			switch mismatch {
-			case "tenant":
-				artifact.Scope.ID = "other"
-			case "owner":
-				artifact.Provenance.Owner = &ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}
-			case "run":
-				artifact.Provenance.RunID = "other"
-			case "action":
-				artifact.Provenance.ActionID = "other"
-			case "version":
-				last["result"] = map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "file", "version": 2}}}
-			case "failed":
-				last["status"] = ActionCallStatusFailed
-			case "missing-action-id":
-				delete(last, "actionCallId")
-			}
-			if err := store.CreateArtifactVersion(ctx, artifact, 0); err != nil {
-				t.Fatal(err)
-			}
-			runner := &ConversationRunTurnRunner{conversations: service, artifacts: store}
-			run := &AgentRun{ID: "run", Scope: scope, Owner: owner, Checkpoint: map[string]interface{}{"lastAction": last}}
-			if err := runner.postConversationActionArtifacts(ctx, run, conversation, trigger); err != nil {
-				t.Fatal(err)
-			}
-			messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-			if err != nil || len(messages) != 1 {
-				t.Fatalf("unproven artifact published: %#v %v", messages, err)
-			}
-		})
-	}
-}
-
-func receiptTestScheduler(t *testing.T, store *MemoryStore) *ConversationRunScheduler {
+func newReceiptFixture(t *testing.T) *receiptFixture {
 	t.Helper()
-	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewConversationService(store)
+	scope := Scope{Kind: "tenant", ID: "one"}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Files", IdempotencyKey: "files"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return scheduler
-}
-
-func receiptTestCoordinator(t *testing.T, service *ConversationService) *ConversationCoordinator {
-	t.Helper()
-	return conversationRunTestCoordinator(t, service)
-}
-
-func receiptTestMessage(
-	t *testing.T,
-	service *ConversationService,
-	conversation *Conversation,
-	senderType ConversationParticipantType,
-	intent ConversationMessageIntent,
-	content string,
-	key string,
-) *ChannelMessage {
-	t.Helper()
-	result, err := service.PostChannelMessage(t.Context(), PostChannelMessageRequest{
-		Scope: conversation.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-		Sender: ConversationParticipant{Type: senderType, ID: "sender-" + string(senderType)},
-		Intent: intent, Content: content, Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: key,
+	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"}, Intent: MessageIntentQuestion,
+		Content: "PDF please", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, IdempotencyKey: "trigger",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return result.Message
+	artifact := &Artifact{ID: "file", Version: 1, Scope: scope, Name: "file.pdf",
+		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "agent"}, Owner: &owner, RunID: "run", ActionID: "action"},
+		ContentRef: "object-store:file", Digest: "sha256:" + strings.Repeat("a", 64), SizeBytes: 10, Classification: ArtifactClassificationInternal}
+	call := &ActionCall{ID: "action", Scope: scope, RunID: "run", Status: ActionCallStatusSucceeded,
+		Output: map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "file", "version": 1}}}}
+	return &receiptFixture{
+		ctx: ctx, store: store, service: service, runner: &ConversationRunTurnRunner{conversations: service, artifacts: store},
+		conversation: conversation, trigger: posted.Message, artifact: artifact, call: call,
+		run:   &AgentRun{ID: "run", Scope: scope, Owner: owner},
+		entry: &SessionEntry{ID: "entry", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "action"},
+	}
 }
 
-func receiptTestArtifact(id string, version int64) *Artifact {
-	return &Artifact{ID: id, Version: version, Scope: Scope{Kind: "tenant", ID: "one"}, Name: "file.pdf",
-		Provenance: ArtifactProvenance{Producer: ActivityActor{Type: "agent", ID: "agent-42"}},
-		ContentRef: "object-store:" + id, Digest: "sha256:" + strings.Repeat("a", 64), SizeBytes: 10, Classification: ArtifactClassificationInternal}
+func (f *receiptFixture) post(t *testing.T) []*ChannelMessage {
+	t.Helper()
+	if err := f.store.CreateArtifactVersion(f.ctx, f.artifact, 0); err != nil {
+		t.Fatal(err)
+	}
+	f.actions = &fakeActionCalls{calls: map[string]*ActionCall{f.call.ID: f.call}}
+	for range 2 {
+		if err := f.runner.postToolArtifactReceipt(f.ctx, f.actions, f.run, f.conversation, f.trigger, f.entry); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages, err := f.service.ListChannelMessages(f.ctx, ChannelMessageFilter{Scope: f.run.Scope, ConversationID: f.conversation.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return messages
+}
+
+func TestToolArtifactReceiptPostsOnceWithProvenance(t *testing.T) {
+	f := newReceiptFixture(t)
+	messages := f.post(t)
+	if len(messages) != 2 {
+		t.Fatalf("messages = %#v", messages)
+	}
+	receipt := messages[1]
+	if receipt.Sender != (ConversationParticipant{Type: ConversationParticipantService, ID: conversationArtifactReceiptService}) ||
+		receipt.Intent != MessageIntentUpdate || receipt.ResolvesMessageID != "" || receipt.RequiresResponse ||
+		conversationMessageStartsRun(f.conversation, receipt) || receipt.ReplyToMessageID != f.trigger.ID {
+		t.Fatalf("receipt must not finish or restart work: %#v", receipt)
+	}
+	want := []ConversationReference{{Kind: ConversationReferenceRun, ID: "run"}, {Kind: ConversationReferenceArtifact, ID: "file", Version: 1}}
+	if len(receipt.References) != 2 || receipt.References[0] != want[0] || receipt.References[1] != want[1] {
+		t.Fatalf("receipt references = %#v", receipt.References)
+	}
+}
+
+func TestToolArtifactReceiptRequiresExactProvenance(t *testing.T) {
+	for _, mismatch := range []string{"tenant", "owner", "run", "action", "version", "failed", "other-run-call", "entry-not-completed", "no-action"} {
+		t.Run(mismatch, func(t *testing.T) {
+			f := newReceiptFixture(t)
+			switch mismatch {
+			case "tenant":
+				f.artifact.Scope.ID = "other"
+			case "owner":
+				f.artifact.Provenance.Owner = &ObjectiveOwner{Type: OwnerTypeAgent, ID: "other"}
+			case "run":
+				f.artifact.Provenance.RunID = "other"
+			case "action":
+				f.artifact.Provenance.ActionID = "other"
+			case "version":
+				f.call.Output = map[string]interface{}{"artifactRefs": []interface{}{map[string]interface{}{"id": "file", "version": 2}}}
+			case "failed":
+				f.call.Status = ActionCallStatusFailed
+			case "other-run-call":
+				f.call.RunID = "other"
+			case "entry-not-completed":
+				f.entry.State = ToolEntryError
+			case "no-action":
+				f.entry.ActionCallID = ""
+			}
+			if messages := f.post(t); len(messages) != 1 {
+				t.Fatalf("unproven artifact published: %#v", messages)
+			}
+		})
+	}
+}
+
+// runActionArtifactReferences reads the Run's tool entries from the session
+// log; this lister returns fixed entries.
+type fixedEntryLister []*SessionEntry
+
+func (l fixedEntryLister) ListAgentSessionEntries(_ context.Context, filter SessionEntryFilter) ([]*SessionEntry, error) {
+	var out []*SessionEntry
+	for _, entry := range l {
+		if entry.RunID != filter.RunID {
+			continue
+		}
+		if len(filter.States) > 0 && entry.State != filter.States[0] {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
+func TestRunActionArtifactReferencesFromSucceededCalls(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "one"}
+	run := &AgentRun{ID: "run", Scope: scope}
+	refs := func(values ...interface{}) map[string]interface{} {
+		list := make([]interface{}, 0, len(values)/2)
+		for i := 0; i+1 < len(values); i += 2 {
+			list = append(list, map[string]interface{}{"id": values[i], "version": values[i+1]})
+		}
+		return map[string]interface{}{"artifactRefs": list}
+	}
+	actions := &fakeActionCalls{calls: map[string]*ActionCall{
+		"a1": {ID: "a1", RunID: "run", Status: ActionCallStatusSucceeded, Output: refs("one", 1, "two", 3)},
+		"a2": {ID: "a2", RunID: "run", Status: ActionCallStatusSucceeded, Output: refs("one", 1, strings.Repeat("x", 257), 1, "zero", 0)},
+		"a3": {ID: "a3", RunID: "run", Status: ActionCallStatusFailed, Output: refs("failed", 1)},
+	}}
+	entries := fixedEntryLister{
+		{ID: "e1", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "a1"},
+		{ID: "e2", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "a2"},
+		{ID: "e3", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "a3"},
+		{ID: "e4", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted, ActionCallID: "missing"},
+		{ID: "e5", RunID: "run", Type: SessionEntryTool, State: ToolEntryCompleted},
+	}
+	got, err := runActionArtifactReferences(context.Background(), entries, actions, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ConversationReference{
+		{Kind: ConversationReferenceArtifact, ID: "one", Version: 1},
+		{Kind: ConversationReferenceArtifact, ID: "two", Version: 3},
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("references = %#v", got)
+	}
 }

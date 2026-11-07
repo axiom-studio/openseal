@@ -1062,11 +1062,6 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	if r.config.RequireParticipationOptIn && !conversationParticipationAllows(conversation, trigger) {
 		return participationStoppedOutcome(), nil
 	}
-	// Deliver committed files independently of the next model call. A failed
-	// continuation must not hide work that the action worker already saved.
-	if err := r.postConversationActionArtifacts(ctx, input.Run, conversation, trigger); err != nil {
-		return nil, err
-	}
 	recent, err := r.conversations.ListChannelMessages(ctx, ChannelMessageFilter{
 		Scope: input.Run.Scope, ConversationID: conversation.ID, Limit: 100, Descending: true, Viewer: &viewer,
 		ThreadRootID: externalConversationThreadRoot(conversation, trigger),
@@ -1103,7 +1098,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	// the model answers from the same durable action result instead.
 	followUps := len(conversationRunFollowUps(input.Run)) > 0
 	if completion, ok := governedConversationActionOutcome(input.Run); ok && !followUps && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References, false)
+		message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References, false, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1120,7 +1115,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 	if completion, ok, completionErr := r.governedConversationOperationOutcome(ctx, input.Run); completionErr != nil {
 		return nil, completionErr
 	} else if ok && !followUps && !requiresFinalFailureExplanation(input.Run.Checkpoint) {
-		message, replayed, postErr := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References, false)
+		message, replayed, postErr := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, completion.Content, completion.References, false, nil)
 		if postErr != nil {
 			return nil, postErr
 		}
@@ -1232,7 +1227,7 @@ func (r *ConversationRunTurnRunner) runAgentTurn(
 		// visuals left on the outcome.
 		outcome.Visual = nil
 	}
-	message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, content, references, broadcastToChannel)
+	message, replayed, err := r.postAgentResponseWithReferences(ctx, input.Run, conversation, trigger, content, references, broadcastToChannel, nil)
 	if err != nil {
 		if errors.Is(err, errConversationParticipationStopped) {
 			skipped := participationStoppedOutcome()
@@ -1782,6 +1777,7 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 	content string,
 	references []ConversationReference,
 	broadcastToChannel bool,
+	guard *ReplyRunGuard,
 ) (*ChannelMessage, bool, error) {
 	key := conversationRunResponseKey(run, trigger.ID)
 	for range 3 {
@@ -1822,6 +1818,7 @@ func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 			References:         responseReferences,
 			RoutingReason:      routingReason,
 			IdempotencyKey:     key,
+			RunGuard:           guard,
 		}
 		result, err := r.conversations.PostChannelMessage(ctx, request)
 		if err == nil {
