@@ -35,6 +35,10 @@ type TurnRunnerBinding struct {
 	PreparedRuntimes   []PreparedSkillRuntime
 	InputContextRefs   []string
 	BudgetReservation  BudgetUsage
+	// ModelCredential is the deployment's model binding
+	// (deploymentModelCredential); kernel-issued model calls outside the
+	// step, such as the evidence grounding review, send it. nil on desktop.
+	ModelCredential *capability.CredentialReference
 
 	// RunLoop seams (SPEC §2.4).
 	Producer    StepProducer
