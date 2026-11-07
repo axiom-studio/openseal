@@ -35,6 +35,21 @@ type GovernedToolCall struct {
 	// chain is the Run as the executor's own writes left it during one
 	// Execute or Resume; finish sets it.
 	chain *governedRunChain
+	// keyStepID is the step whose tool entry this call resumes, when that
+	// is an earlier step than Step: the idempotency key stays the one the
+	// call was first proposed under. "" means Step.
+	keyStepID string
+}
+
+// idempotencyKey is the loop key of this tool call: under the step that
+// first appended its tool entry, so a resume in a later step finds the
+// same ActionCall and never proposes a duplicate.
+func (call GovernedToolCall) idempotencyKey() string {
+	stepID := call.keyStepID
+	if stepID == "" {
+		stepID = call.Step.ID
+	}
+	return loopIdempotencyKey(stepID, call.ToolCallID, call.Directive)
 }
 
 // governedRunChain follows the Run through the executor's own writes. A
@@ -189,6 +204,12 @@ func (x *GovernedToolExecutor) Resume(ctx context.Context, call GovernedToolCall
 	if err := validateGovernedToolCall(call); err != nil {
 		return GovernedToolOutcome{}, err
 	}
+	if entry != nil && entry.StepID != "" {
+		if entry.ToolCallID != call.ToolCallID {
+			return GovernedToolOutcome{}, fmt.Errorf("tool entry %q does not belong to tool call %q", entry.ToolCallID, call.ToolCallID)
+		}
+		call.keyStepID = entry.StepID
+	}
 	var current *ActionCall
 	var err error
 	if entry != nil && entry.ActionCallID != "" {
@@ -231,7 +252,7 @@ func validateGovernedToolCall(call GovernedToolCall) error {
 // callByKey is the Run's call for this tool call's idempotency key, nil when
 // none was proposed.
 func (x *GovernedToolExecutor) callByKey(ctx context.Context, call GovernedToolCall) (*ActionCall, error) {
-	key := loopIdempotencyKey(call.Step.ID, call.ToolCallID, call.Directive)
+	key := call.idempotencyKey()
 	existing, err := x.store.GetActionCallByIdempotencyKey(ctx, call.Run.Scope, call.Run.ID, key)
 	if errors.Is(err, ErrActionNotFound) {
 		return nil, nil
@@ -279,7 +300,7 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 		}
 		return GovernedToolOutcome{}, err
 	}
-	key := loopIdempotencyKey(call.Step.ID, call.ToolCallID, call.Directive)
+	key := call.idempotencyKey()
 	injectGovernedIdempotencyKey(*action, input.Arguments, key)
 	summary := input.ReviewSummary
 	if summary == "" {

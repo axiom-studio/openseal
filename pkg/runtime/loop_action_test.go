@@ -584,6 +584,41 @@ func TestGovernedResumeLiveForeignLeaseRetriesLater(t *testing.T) {
 	})
 }
 
+// A tool entry of an earlier step left running without its ActionCallID (the
+// RetryAt path) resumes in a later step under the key it was proposed with:
+// the existing call is found, nothing is proposed or dispatched again.
+func TestGovernedResumeEarlierStepEntryKeepsItsKey(t *testing.T) {
+	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+		f := newGovernedFixture(t, store)
+		f.requireApprovalFor("deploy")
+		outcome := f.execute(f.call("tool-1", governedDeploy, deployArguments("production")))
+		f.parkOn(outcome.Park)
+		f.advance(time.Second)
+		f.decide(outcome.Wait.ApprovalID, ApprovalDecisionApprove, "")
+		running, err := f.store.ClaimNextAction(f.ctx, ActionClaim{Scope: f.scope, WorkerID: "replica-gone", Now: f.clock, LeaseDuration: time.Minute, OwnActionID: outcome.ActionCallID})
+		if err != nil || running == nil || running.Status != ActionCallStatusRunning {
+			t.Fatalf("claim = %#v, %v", running, err)
+		}
+		f.advance(time.Second)
+		f.run = f.claim(governedWorker2)
+		f.step = &AgentTurn{ID: "step-2", Scope: f.scope, RunID: f.run.ID}
+		entry := governedEntry("tool-1", "", ToolEntryRunning)
+		resumed := f.resume(f.call("tool-1", governedDeploy, deployArguments("production")), entry)
+		if resumed.State != ToolEntryRunning || resumed.Result != nil || resumed.ActionCallID != outcome.ActionCallID ||
+			resumed.RetryAt == nil || !resumed.RetryAt.Equal(running.LeaseExpiresAt.UTC()) || f.dispatches != 0 {
+			t.Fatalf("resumed = %#v, dispatches = %d", resumed, f.dispatches)
+		}
+		calls, err := f.store.ListActionCalls(f.ctx, ActionFilter{Scope: f.scope, RunID: f.run.ID, Limit: 10})
+		if err != nil || len(calls) != 1 {
+			t.Fatalf("calls = %d, %v", len(calls), err)
+		}
+		entry.ToolCallID = "tool-2"
+		if _, err := f.executor.Resume(f.ctx, f.call("tool-1", governedDeploy, deployArguments("production")), entry, nil); err == nil {
+			t.Fatal("resume accepted an entry of another tool call")
+		}
+	})
+}
+
 func TestGovernedResumeReplayDoesNotRevalidate(t *testing.T) {
 	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
 		f := newGovernedFixture(t, store)
