@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // AgentApprovalsConversationReferenceID returns a portable, stable origin ID
@@ -285,6 +286,10 @@ const (
 	// this conversation is the durable, always-present review surface.
 	ConversationReferenceAgentApprovals ConversationReferenceKind = "agent_approvals"
 	ConversationReferenceEmbedSession   ConversationReferenceKind = "embed_session"
+	// ConversationReferenceAgentBuilder marks a builder conversation: a person
+	// asking the builder Agent to create or change an Agent or Team. Its id is
+	// the client's idempotency key.
+	ConversationReferenceAgentBuilder ConversationReferenceKind = "agent_builder"
 )
 
 type ConversationReference struct {
@@ -298,7 +303,7 @@ func (r ConversationReference) Validate() error {
 	case ConversationReferenceObjective, ConversationReferenceProject, ConversationReferenceRun, ConversationReferenceTask, ConversationReferenceRequest,
 		ConversationReferenceApproval, ConversationReferenceArtifact, ConversationReferenceActivity,
 		ConversationReferenceExternalSource, ConversationReferenceAgentControl, ConversationReferenceAgentApprovals,
-		ConversationReferenceEmbedSession:
+		ConversationReferenceEmbedSession, ConversationReferenceAgentBuilder:
 	default:
 		return fmt.Errorf("%w: invalid reference kind %q", ErrInvalidConversation, r.Kind)
 	}
@@ -339,7 +344,11 @@ type ChannelMessage struct {
 	ReplyToMessageID string `json:"replyToMessageId,omitempty"`
 	// Quote shows the earlier message this one answers, like a chat-app reply.
 	// It never changes thread placement; ReplyToMessageID does that.
-	Quote                *ChannelMessageQuote      `json:"quote,omitempty"`
+	Quote *ChannelMessageQuote `json:"quote,omitempty"`
+	// Question lists the choices of an Agent's question (only with intent
+	// question). SelectedOptionIDs are the choices a reply to it picked.
+	Question             *ChannelQuestion          `json:"question,omitempty"`
+	SelectedOptionIDs    []string                  `json:"selectedOptionIds,omitempty"`
 	BroadcastToChannel   bool                      `json:"broadcastToChannel,omitempty"`
 	Mentions             []ConversationParticipant `json:"mentions,omitempty"`
 	References           []ConversationReference   `json:"references,omitempty"`
@@ -370,6 +379,76 @@ type ChannelMessageQuote struct {
 }
 
 const channelMessageQuoteExcerptRunes = 200
+
+// ChannelQuestion is the set of choices a question message offers. Option ids
+// are kernel-assigned ("o1".."o6"); an answer names the ids it picked.
+type ChannelQuestion struct {
+	Options       []ChannelQuestionOption `json:"options"`
+	AllowMultiple bool                    `json:"allowMultiple,omitempty"`
+	// AllowOther accepts a free-text answer alongside the options.
+	AllowOther bool `json:"allowOther,omitempty"`
+}
+
+type ChannelQuestionOption struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+func validChannelQuestionOptionText(label, description string) error {
+	if label == "" || len(label) > maximumAskUserOptionLabelBytes || !utf8.ValidString(label) || strings.ContainsAny(label, "\r\n") {
+		return fmt.Errorf("option label must be one line of 1 to %d bytes", maximumAskUserOptionLabelBytes)
+	}
+	if len(description) > maximumAskUserOptionDescriptionBytes || !utf8.ValidString(description) {
+		return fmt.Errorf("option description must be valid text of at most %d bytes", maximumAskUserOptionDescriptionBytes)
+	}
+	return nil
+}
+
+func (q *ChannelQuestion) validate() error {
+	if q == nil {
+		return nil
+	}
+	if len(q.Options) < minimumAskUserOptions || len(q.Options) > maximumAskUserOptions {
+		return fmt.Errorf("%w: a question offers %d to %d options", ErrInvalidConversation, minimumAskUserOptions, maximumAskUserOptions)
+	}
+	ids := make(map[string]struct{}, len(q.Options))
+	labels := make(map[string]struct{}, len(q.Options))
+	for _, option := range q.Options {
+		if !validOpaqueIdentifier(option.ID, 16) {
+			return fmt.Errorf("%w: question option ids must be portable", ErrInvalidConversation)
+		}
+		if err := validChannelQuestionOptionText(option.Label, option.Description); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidConversation, err)
+		}
+		if _, exists := ids[option.ID]; exists {
+			return fmt.Errorf("%w: duplicate question option id", ErrInvalidConversation)
+		}
+		if _, exists := labels[option.Label]; exists {
+			return fmt.Errorf("%w: duplicate question option label", ErrInvalidConversation)
+		}
+		ids[option.ID], labels[option.Label] = struct{}{}, struct{}{}
+	}
+	return nil
+}
+
+func (q *ChannelQuestion) hasOption(id string) bool {
+	for _, option := range q.Options {
+		if option.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneChannelQuestion(in *ChannelQuestion) *ChannelQuestion {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.Options = append([]ChannelQuestionOption(nil), in.Options...)
+	return &out
+}
 
 func newChannelMessageQuote(message *ChannelMessage) *ChannelMessageQuote {
 	sender := message.Sender
@@ -465,6 +544,27 @@ func (m *ChannelMessage) Validate() error {
 	}
 	if err := m.Quote.validate(m.ID); err != nil {
 		return err
+	}
+	if m.Question != nil && m.Intent != MessageIntentQuestion {
+		return fmt.Errorf("%w: only a question message can offer options", ErrInvalidConversation)
+	}
+	if err := m.Question.validate(); err != nil {
+		return err
+	}
+	if len(m.SelectedOptionIDs) > 0 {
+		if m.ReplyToMessageID == "" && m.ResolvesMessageID == "" {
+			return fmt.Errorf("%w: selected options must answer a question", ErrInvalidConversation)
+		}
+		if len(m.SelectedOptionIDs) > maximumAskUserOptions {
+			return fmt.Errorf("%w: too many selected options", ErrInvalidConversation)
+		}
+		seen := make(map[string]struct{}, len(m.SelectedOptionIDs))
+		for _, id := range m.SelectedOptionIDs {
+			if _, exists := seen[id]; exists || !validOpaqueIdentifier(id, 16) {
+				return fmt.Errorf("%w: selected option ids must be portable and unique", ErrInvalidConversation)
+			}
+			seen[id] = struct{}{}
+		}
 	}
 	if m.BroadcastToChannel && m.ThreadRootID == "" {
 		return fmt.Errorf("%w: only a thread reply can be broadcast to its channel", ErrInvalidConversation)

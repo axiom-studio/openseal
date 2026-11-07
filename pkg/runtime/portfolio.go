@@ -225,21 +225,23 @@ type AgentRunIntervention struct {
 // never create this receipt. It proves answer provenance, not action approval or
 // affirmative consent; the host must interpret the answer for its exact purpose.
 type ConversationAnswerReceipt struct {
-	Scope                Scope                   `json:"scope"`
-	RunID                string                  `json:"runId"`
-	AgentID              string                  `json:"agentId"`
-	ConversationTaskID   string                  `json:"conversationTaskId,omitempty"`
-	ConversationID       string                  `json:"conversationId"`
-	SourceRunID          string                  `json:"sourceRunId"`
-	SourceMessageID      string                  `json:"sourceMessageId"`
-	ThreadRootMessageID  string                  `json:"threadRootMessageId"`
-	QuestionMessageID    string                  `json:"questionMessageId"`
-	QuestionTurnID       string                  `json:"questionTurnId,omitempty"`
-	QuestionTurnSequence int64                   `json:"questionTurnSequence"`
-	QuestionContent      string                  `json:"questionContent"`
-	AnswerMessageID      string                  `json:"answerMessageId"`
-	AnswerContent        string                  `json:"answerContent"`
-	AuthenticatedActor   ConversationParticipant `json:"authenticatedActor"`
+	Scope                Scope  `json:"scope"`
+	RunID                string `json:"runId"`
+	AgentID              string `json:"agentId"`
+	ConversationTaskID   string `json:"conversationTaskId,omitempty"`
+	ConversationID       string `json:"conversationId"`
+	SourceRunID          string `json:"sourceRunId"`
+	SourceMessageID      string `json:"sourceMessageId"`
+	ThreadRootMessageID  string `json:"threadRootMessageId"`
+	QuestionMessageID    string `json:"questionMessageId"`
+	QuestionTurnID       string `json:"questionTurnId,omitempty"`
+	QuestionTurnSequence int64  `json:"questionTurnSequence"`
+	QuestionContent      string `json:"questionContent"`
+	AnswerMessageID      string `json:"answerMessageId"`
+	AnswerContent        string `json:"answerContent"`
+	// SelectedOptionIDs are the option ids the answer chose when the question offered options.
+	SelectedOptionIDs  []string                `json:"selectedOptionIds,omitempty"`
+	AuthenticatedActor ConversationParticipant `json:"authenticatedActor"`
 }
 
 type HumanInterventionStatus string

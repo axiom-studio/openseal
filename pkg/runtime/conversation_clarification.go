@@ -120,7 +120,7 @@ func (s *ConversationRunScheduler) reconcileConversationQuestionsForKind(ctx con
 			if entry == nil {
 				continue
 			}
-			posted, postErr := s.conversations.PostChannelMessage(ctx, conversationQuestionPostRequest(run, conversation, trigger, askUserQuestion(entry), clarificationQuestionKey(run)))
+			posted, postErr := s.conversations.PostChannelMessage(ctx, conversationQuestionPostRequest(run, conversation, trigger, askUserEntryArgs(entry), clarificationQuestionKey(run)))
 			if errors.Is(postErr, ErrRevisionConflict) {
 				continue
 			}
@@ -258,7 +258,8 @@ func (s *ConversationRunScheduler) resumeConversationAnswer(ctx context.Context,
 		ConversationID: conversation.ID, SourceRunID: q.source.ID, SourceMessageID: q.trigger.ID,
 		ThreadRootMessageID: q.message.ThreadRootID, QuestionMessageID: q.message.ID,
 		QuestionTurnID: entry.StepID, QuestionTurnSequence: entry.Step, QuestionContent: q.message.Content,
-		AnswerMessageID: answer.ID, AnswerContent: answer.Content, AuthenticatedActor: actor,
+		AnswerMessageID: answer.ID, AnswerContent: answer.Content, SelectedOptionIDs: append([]string(nil), answer.SelectedOptionIDs...),
+		AuthenticatedActor: actor,
 	}
 	payload := map[string]interface{}{"conversationId": conversation.ID, "questionMessageId": q.message.ID, "answerMessageId": answer.ID}
 	if q.run.Kind == RunKindAgentWork && q.run.ParentRunID == "" {
