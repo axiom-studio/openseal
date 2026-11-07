@@ -42,6 +42,9 @@ func (c workflowContinuationCatalog) GetOutreachThread(ctx context.Context, scop
 func (c workflowContinuationCatalog) ReconcileOutreachAction(ctx context.Context, scope Scope, id string, request ReconcileOutreachActionRequest) (*ReconcileOutreachActionResult, error) {
 	return c.outreach.ReconcileAction(ctx, scope, id, request)
 }
+func (c workflowContinuationCatalog) GetActionCall(context.Context, Scope, string) (*ActionCall, error) {
+	return nil, ErrActionNotFound
+}
 
 // The fake implements only the provider verification boundary. Tenant,
 // deployment, binding, account pins and durable event publication are all

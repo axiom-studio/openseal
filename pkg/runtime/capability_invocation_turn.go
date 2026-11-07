@@ -40,7 +40,7 @@ func NewCapabilityInvocationStepProducer(actions []capability.ModelAction, calls
 	if calls == nil {
 		return nil, errors.New("deterministic capability invocation requires the action-call store")
 	}
-	return &CapabilityInvocationStepProducer{actions: append([]capability.ModelAction(nil), actions...), calls: calls}, nil
+	return &CapabilityInvocationStepProducer{actions: cloneHostedModelActions(actions), calls: calls}, nil
 }
 
 func (p *CapabilityInvocationStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
@@ -97,7 +97,9 @@ func (p *CapabilityInvocationStepProducer) Produce(ctx context.Context, in StepI
 	if !producerCallMatches(call, selected) {
 		return StepOutput{}, errors.New("durable action result does not match the typed capability invocation")
 	}
-	if call.Status != ActionCallStatusSucceeded || result.State != ToolEntryCompleted {
+	// The ActionCall is authoritative: a succeeded call completes the Run
+	// whatever state its tool entry ended in.
+	if call.Status != ActionCallStatusSucceeded {
 		return StepOutput{Failure: &LoopFailure{
 			Kind: "execution", Code: "capability_invocation_failed",
 			Message: fmt.Sprintf("The scheduled capability %s did not complete (%s).", selected.Name, call.Status),
@@ -170,6 +172,9 @@ func producerToolResult(ctx context.Context, calls ActionCallReader, run *AgentR
 	}
 	if call == nil || call.RunID != run.ID {
 		return nil, nil, fmt.Errorf("tool call %s points at an action call of another Run", toolCallID)
+	}
+	if !terminalApprovalActionStatus(call.Status) {
+		return nil, nil, fmt.Errorf("action call %s of tool call %s is still %s", call.ID, toolCallID, call.Status)
 	}
 	if call.Status == ActionCallStatusSucceeded {
 		result.Output = cloneMap(call.Output)

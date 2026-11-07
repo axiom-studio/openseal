@@ -71,7 +71,7 @@ func NewOutreachStepProducer(lifecycle OutreachTurnLifecycle, actions []capabili
 	if calls == nil {
 		return nil, errors.New("outreach execution requires the action-call store")
 	}
-	return &OutreachStepProducer{lifecycle: lifecycle, actions: append([]capability.ModelAction(nil), actions...), calls: calls}, nil
+	return &OutreachStepProducer{lifecycle: lifecycle, actions: cloneHostedModelActions(actions), calls: calls}, nil
 }
 
 func (p *OutreachStepProducer) Kind() StepProducerKind { return StepProducerDeterministic }
@@ -117,6 +117,7 @@ func (p *OutreachStepProducer) Produce(ctx context.Context, in StepInput) (StepO
 		toolCall, err := producerGovernedToolCall(outreachToolCallID, selected, cloneMap(message.Capability.Arguments), &ToolCallDirective{
 			IdempotencyKey: "outreach:" + thread.ID + ":" + message.ID,
 			Summary:        "Deliver reviewed outreach message",
+			EvidenceRefs:   []string{thread.SourceObservationID},
 		})
 		if err != nil {
 			return StepOutput{}, err
@@ -134,7 +135,11 @@ func (p *OutreachStepProducer) Produce(ctx context.Context, in StepInput) (StepO
 		if err != nil {
 			return StepOutput{}, err
 		}
-		return outreachFailure(reconciled.Status), nil
+		switch reconciled.Status {
+		case OutreachMessageDeclined, OutreachMessageFailed, OutreachMessageCanceled:
+			return outreachFailure(reconciled.Status), nil
+		}
+		return StepOutput{}, fmt.Errorf("outreach action %s ended %s but the message is still %s", call.ID, call.Status, reconciled.Status)
 	}
 	receipt, err := normalizedOutreachReceipt(result.Output)
 	if err != nil {

@@ -24,12 +24,25 @@ type GovernedToolInput struct {
 
 // governedInputDirective is the governance part of a deterministic
 // producer's tool call directive (ToolCallDirective's Summary,
-// ExternalOperation and ReviewContext). With a directive the raw input is the
+// ExternalOperation, ReviewContext and EvidenceRefs). With a directive the raw input is the
 // plain action arguments, never the review envelope.
 type governedInputDirective struct {
 	Summary           string
 	ExternalOperation *ExternalOperationIdentity
 	ReviewContext     *ApprovalReviewContext
+	EvidenceRefs      []string
+}
+
+// governedDirectiveOf is the governance part of a producer's tool call
+// directive; nil for a model call.
+func governedDirectiveOf(directive *ToolCallDirective) *governedInputDirective {
+	if directive == nil {
+		return nil
+	}
+	return &governedInputDirective{
+		Summary: directive.Summary, ExternalOperation: directive.ExternalOperation,
+		ReviewContext: directive.ReviewContext, EvidenceRefs: directive.EvidenceRefs,
+	}
 }
 
 const governedReviewSummaryInvalidMessage = GovernedReviewSummaryField + " must be one sentence of 1 to 600 characters."
@@ -130,6 +143,7 @@ func governedDirectiveInput(action capability.ModelAction, arguments map[string]
 		Arguments:         arguments,
 		ReviewContext:     cloneApprovalReviewContext(directive.ReviewContext),
 		ExternalOperation: cloneExternalOperationIdentity(directive.ExternalOperation),
+		EvidenceRefs:      append([]string(nil), directive.EvidenceRefs...),
 		ReviewSummary:     strings.TrimSpace(directive.Summary),
 	}
 	if input.ReviewSummary == "" && input.ReviewContext != nil {

@@ -89,6 +89,7 @@ type ToolCallDirective struct {
 	Summary              string                     `json:"summary,omitempty"`
 	ExternalOperation    *ExternalOperationIdentity `json:"externalOperation,omitempty"`
 	ReviewContext        *ApprovalReviewContext     `json:"reviewContext,omitempty"`
+	EvidenceRefs         []string                   `json:"evidenceRefs,omitempty"`
 }
 
 // LoopToolResult is the terminal result of one tool entry as a deterministic
