@@ -131,7 +131,12 @@ func (e *Engine) ResolveConnectAppRequest(ctx context.Context, scope runtime.Sco
 // app, as the person the request is for uses it, with the connection's model
 // tool names.
 func (e *Engine) connectedAppFor(ctx context.Context, r *SkillSetupRequest) (*skill.Binding, []string, error) {
-	actor := skill.RunActor{RunID: r.RunID, AgentID: r.AgentID, Umbrella: runtime.SkillUmbrella(r.Owner), ActingUser: r.RequestedFor}
+	// A builder's request for another Agent reads that Agent's connections.
+	agentID := r.AgentID
+	if r.Targeted() {
+		agentID = r.Owner.ID
+	}
+	actor := skill.RunActor{RunID: r.RunID, AgentID: agentID, Umbrella: runtime.SkillUmbrella(r.Owner), ActingUser: r.RequestedFor}
 	set, err := e.skills.HostBindings(ctx, skill.ScopeReference{Kind: r.Scope.Kind, ID: r.Scope.ID}, r.Owner.ID, actor)
 	if err != nil {
 		return nil, nil, err

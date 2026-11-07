@@ -6,25 +6,42 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
+	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	inferschema "github.com/invopop/jsonschema"
 )
 
 const (
 	SkillManagementSkillID      = "openseal.skills"
-	SkillManagementSkillVersion = "1.6.1"
+	SkillManagementSkillVersion = "1.7.0"
 	SkillActionDiscoverBinding  = "discover"
 	SkillActionUpsertBinding    = "upsert_binding"
 	SkillActionDisableBinding   = "disable_binding"
 	SkillManagementEndpoint     = "kernel://skills"
 )
 
+// SkillActionTargetAgentArgument names the Agent a builder acts for in
+// discover, upsert_binding, disable_binding, request_setup and
+// request_connection. Without it the kernel derives the target from the
+// durable Run (the chat's Agent or Team).
+const SkillActionTargetAgentArgument = "targetAgentId"
+
+func skillActionTargetAgentProperty() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "string", "minLength": 1, "maxLength": 128,
+		"description": "Agent deployment id to act for, when building or changing another Agent. Omit for this chat's Agent or Team.",
+	}
+}
+
 // SkillManagementSkill exposes the canonical Skill binding lifecycle to an
-// Agent conversation. The target deployment is deliberately absent from the
-// model-visible schema: the kernel derives it from the durable Run.
+// Agent conversation. The target deployment is absent from the model-visible
+// schema, except for a builder's optional targetAgentId: the kernel derives
+// it from the durable Run.
 func SkillManagementSkill() *skill.Definition {
 	upsertProperties := map[string]interface{}{
 		"bindingId":        map[string]interface{}{"type": "string", "minLength": 1},
@@ -47,8 +64,9 @@ func SkillManagementSkill() *skill.Definition {
 		"maximumRisk": map[string]interface{}{"type": "string", "enum": []interface{}{
 			string(skill.RiskLevelRead), string(skill.RiskLevelWrite), string(skill.RiskLevelExternal), string(skill.RiskLevelProduction), string(skill.RiskLevelDestructive),
 		}},
-		"argumentRestrictions": map[string]interface{}{"type": "object"},
-		"config":               map[string]interface{}{"type": "object"},
+		"argumentRestrictions":         map[string]interface{}{"type": "object"},
+		"config":                       map[string]interface{}{"type": "object"},
+		SkillActionTargetAgentArgument: skillActionTargetAgentProperty(),
 	}
 	return &skill.Definition{
 		ID: SkillManagementSkillID, Version: SkillManagementSkillVersion,
@@ -63,16 +81,17 @@ func SkillManagementSkill() *skill.Definition {
 			SkillActionRequestConnection: requestConnectionAction(),
 			SkillActionUpsertBinding: skillManagementAction(
 				SkillActionUpsertBinding,
-				"Propose enabling or updating configuration on an exact registered Skill for this chat's Agent or Team. An existing binding retains its exact Skill ID, source and version and its saved account; use the canonical Skill reference upgrade flow before changing executable versions. This action never adds, changes or removes an account: when a Skill needs one, or a person must authorize it, call request_setup instead.",
+				"Propose enabling or updating configuration on an exact registered Skill for this chat's Agent or Team. An existing binding retains its exact Skill ID, source and version and its saved account; use the canonical Skill reference upgrade flow before changing executable versions. This action never adds, changes or removes an account: when a Skill needs one, or a person must authorize it, call request_setup instead. With targetAgentId, the change applies to that Agent.",
 				upsertProperties,
 				[]interface{}{"bindingId", "expectedRevision", "skillId", "skillVersion", "allowedActions", "enablePrompt", "maximumRisk"},
 			),
 			SkillActionDisableBinding: skillManagementAction(
 				SkillActionDisableBinding,
-				"Propose disabling one current Skill binding of this chat's Agent or Team using its current revision.",
+				"Propose disabling one current Skill binding of this chat's Agent or Team using its current revision. With targetAgentId, the change applies to that Agent.",
 				map[string]interface{}{
-					"bindingId":        map[string]interface{}{"type": "string", "minLength": 1},
-					"expectedRevision": map[string]interface{}{"type": "integer", "minimum": 1},
+					"bindingId":                    map[string]interface{}{"type": "string", "minLength": 1},
+					"expectedRevision":             map[string]interface{}{"type": "integer", "minimum": 1},
+					SkillActionTargetAgentArgument: skillActionTargetAgentProperty(),
 				},
 				[]interface{}{"bindingId", "expectedRevision"},
 			),
@@ -154,17 +173,18 @@ func skillDiscoveryAction() skill.Action {
 	}
 	return skill.Action{
 		Name:        SkillActionDiscoverBinding,
-		Description: "Find exact authorized Skills that could satisfy a capability request for the current Agent. Query with the requested service or Skill name or concise task keywords. Omit requiredActions on the initial lookup. After discovery, requiredActions may contain only exact actions[].name values copied from a result; never natural-language task descriptions. If a requiredActions filter fails, retry once without it to inspect the real names before reporting an access blocker. Omit maximumRisk for a connection request unless the user explicitly requested a catalog risk filter: read-only discovery does not execute the Skill, and an integration can include both read and destructive actions. Results contain no credential references or values and do not install or activate anything.",
+		Description: "Find exact authorized Skills that could satisfy a capability request for the current Agent. Query with the requested service or Skill name or concise task keywords. Omit requiredActions on the initial lookup. After discovery, requiredActions may contain only exact actions[].name values copied from a result; never natural-language task descriptions. If a requiredActions filter fails, retry once without it to inspect the real names before reporting an access blocker. Omit maximumRisk for a connection request unless the user explicitly requested a catalog risk filter: read-only discovery does not execute the Skill, and an integration can include both read and destructive actions. Results contain no credential references or values and do not install or activate anything. With targetAgentId, readiness is reported for that Agent.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported,
 		Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false,
 			"properties": map[string]interface{}{
-				"query":           map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 512},
-				"requiredActions": map[string]interface{}{"description": "Optional exact actions[].name values copied from a previous discovery result. Omit on the first lookup or when the exact names are unknown. Put natural-language tasks in query instead.", "type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128}, "uniqueItems": true, "maxItems": 32},
-				"maximumRisk":     map[string]interface{}{"description": "Optional catalog risk filter. With requiredActions, checks the highest risk among those exact operations; otherwise checks the whole Skill. Candidate actions and maximumRisk still describe the full Skill. Omit for ordinary connection discovery; execution risk is enforced separately.", "type": "string", "enum": riskValues},
-				"cursor":          map[string]interface{}{"type": "string", "maxLength": 1024},
-				"limit":           map[string]interface{}{"type": "integer", "minimum": 1, "maximum": skill.MaximumDiscoveryLimit},
+				"query":                        map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 512},
+				"requiredActions":              map[string]interface{}{"description": "Optional exact actions[].name values copied from a previous discovery result. Omit on the first lookup or when the exact names are unknown. Put natural-language tasks in query instead.", "type": "array", "items": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 128}, "uniqueItems": true, "maxItems": 32},
+				"maximumRisk":                  map[string]interface{}{"description": "Optional catalog risk filter. With requiredActions, checks the highest risk among those exact operations; otherwise checks the whole Skill. Candidate actions and maximumRisk still describe the full Skill. Omit for ordinary connection discovery; execution risk is enforced separately.", "type": "string", "enum": riskValues},
+				"cursor":                       map[string]interface{}{"type": "string", "maxLength": 1024},
+				"limit":                        map[string]interface{}{"type": "integer", "minimum": 1, "maximum": skill.MaximumDiscoveryLimit},
+				SkillActionTargetAgentArgument: skillActionTargetAgentProperty(),
 			},
 			"required": []interface{}{"query"},
 		},
@@ -251,11 +271,13 @@ type skillBindingUpsertArguments struct {
 	MaximumRisk                 skill.RiskLevel                          `json:"maximumRisk"`
 	ArgumentRestrictions        map[string]map[string]skill.ArgumentRule `json:"argumentRestrictions,omitempty"`
 	Config                      map[string]interface{}                   `json:"config,omitempty"`
+	TargetAgentID               string                                   `json:"targetAgentId,omitempty"`
 }
 
 type skillBindingDisableArguments struct {
 	BindingID        string `json:"bindingId"`
 	ExpectedRevision int64  `json:"expectedRevision"`
+	TargetAgentID    string `json:"targetAgentId,omitempty"`
 }
 
 type skillDiscoveryArguments struct {
@@ -264,6 +286,7 @@ type skillDiscoveryArguments struct {
 	MaximumRisk     skill.RiskLevel `json:"maximumRisk,omitempty"`
 	Cursor          string          `json:"cursor,omitempty"`
 	Limit           int             `json:"limit,omitempty"`
+	TargetAgentID   string          `json:"targetAgentId,omitempty"`
 }
 
 // SkillBindingActionValidator resolves both deployment authority and the
@@ -271,6 +294,7 @@ type skillDiscoveryArguments struct {
 type SkillBindingActionValidator struct {
 	catalog *skill.Catalog
 	roster  TeamRosterReader
+	agents  *kernelagent.Registry
 }
 
 // NewSkillBindingActionValidator checks Skill management proposals. roster
@@ -281,6 +305,14 @@ func NewSkillBindingActionValidator(catalog *skill.Catalog, roster TeamRosterRea
 		return nil, errors.New("skill catalog is required")
 	}
 	return &SkillBindingActionValidator{catalog: catalog, roster: roster}, nil
+}
+
+// UseAgentRegistry lets a builder act for another Agent (targetAgentId).
+// Without it every targetAgentId is refused.
+func (v *SkillBindingActionValidator) UseAgentRegistry(agents *kernelagent.Registry) {
+	if v != nil {
+		v.agents = agents
+	}
 }
 
 func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
@@ -307,15 +339,30 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 		// Invalid interaction arguments are explained by the model from the
 		// action result; they never block the proposal or end the Run.
 		return nil, nil
-	case SkillActionDiscoverBinding, SkillActionListSetupRequests, SkillActionFindApps:
+	case SkillActionListSetupRequests, SkillActionFindApps:
 		return nil, nil
-	case SkillActionUpsertBinding:
-		umbrella, umbrellaErr := RunUmbrella(ctx, v.roster, input.Run)
-		if umbrellaErr != nil {
-			return nil, umbrellaErr
-		}
-		deploymentID := umbrella.ID
-		preview["deploymentId"], preview["owner"] = deploymentID, umbrella
+	case SkillActionDiscoverBinding:
+		_, err := skillActionTarget(ctx, v.catalog, v.agents, input.Run, member, input.Arguments)
+		return nil, err
+	case SkillActionUpsertBinding, SkillActionDisableBinding:
+	default:
+		return nil, errors.New("unsupported skill binding action")
+	}
+	owner, err := RunUmbrella(ctx, v.roster, input.Run)
+	if err != nil {
+		return nil, err
+	}
+	target, err := skillActionTarget(ctx, v.catalog, v.agents, input.Run, member, input.Arguments)
+	if err != nil {
+		return nil, err
+	}
+	if target != nil {
+		owner = target.owner()
+		preview["targetAgent"] = target.preview()
+	}
+	deploymentID := owner.ID
+	preview["deploymentId"], preview["owner"] = deploymentID, owner
+	if input.Bound.Action.Name == SkillActionUpsertBinding {
 		args, definition, current, resolveErr := resolveSkillBindingUpsert(ctx, v.catalog, scope, deploymentID, input.Arguments)
 		if resolveErr != nil {
 			return nil, resolveErr
@@ -328,25 +375,16 @@ func (v *SkillBindingActionValidator) ValidateActionProposal(ctx context.Context
 		preview["current"] = secretSafeBindingPreview(current)
 		preview["changes"] = secretSafeBindingPreview(skillBindingCandidate(scope, deploymentID, args, current))
 		return preview, nil
-	case SkillActionDisableBinding:
-		umbrella, umbrellaErr := RunUmbrella(ctx, v.roster, input.Run)
-		if umbrellaErr != nil {
-			return nil, umbrellaErr
-		}
-		deploymentID := umbrella.ID
-		preview["deploymentId"], preview["owner"] = deploymentID, umbrella
-		args, current, resolveErr := resolveSkillBindingDisable(ctx, v.catalog, scope, deploymentID, input.Arguments)
-		if resolveErr != nil {
-			return nil, resolveErr
-		}
-		preview["bindingId"] = args.BindingID
-		preview["expectedRevision"] = args.ExpectedRevision
-		preview["current"] = secretSafeBindingPreview(current)
-		preview["changes"] = map[string]interface{}{"disabled": true}
-		return preview, nil
-	default:
-		return nil, errors.New("unsupported skill binding action")
 	}
+	args, current, resolveErr := resolveSkillBindingDisable(ctx, v.catalog, scope, deploymentID, input.Arguments)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	preview["bindingId"] = args.BindingID
+	preview["expectedRevision"] = args.ExpectedRevision
+	preview["current"] = secretSafeBindingPreview(current)
+	preview["changes"] = map[string]interface{}{"disabled": true}
+	return preview, nil
 }
 
 // SkillBindingActionDispatcher materializes approved proposals through the
@@ -357,6 +395,15 @@ type SkillBindingActionDispatcher struct {
 	discovery skill.DiscoveryProvider
 	fallback  ActionDispatcher
 	apps      *AppCatalogRef
+	agents    *kernelagent.Registry
+}
+
+// UseAgentRegistry lets a builder act for another Agent (targetAgentId).
+// Without it every targetAgentId is refused.
+func (d *SkillBindingActionDispatcher) UseAgentRegistry(agents *kernelagent.Registry) {
+	if d != nil {
+		d.agents = agents
+	}
 }
 
 // roster reads the Team and Agent deployments RunUmbrella checks.
@@ -404,12 +451,27 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 		return nil, errors.New("skill management action cannot target another Agent deployment")
 	}
 	// Every target is the run's umbrella: the Agent of a 1:1 chat, the Team
-	// of a Team chat, task or hand-off.
+	// of a Team chat, task or hand-off. A builder in its own chat may name
+	// another Agent instead (targetAgentId).
 	umbrella, err := RunUmbrella(ctx, d.roster(), run)
 	if err != nil {
 		return nil, err
 	}
-	deploymentID := umbrella.ID
+	owner := umbrella
+	var target *skillTargetAgent
+	if skillActionTargetable(input.Bound.Action.Name) {
+		target, err = skillActionTarget(ctx, d.catalog, d.agents, run, member, input.Arguments)
+		if err != nil {
+			if isInteractionRequestAction(input.Bound.Action.Name) && ctx.Err() == nil {
+				return interactionRequestRefusalResult(refuseInteraction(err.Error())), nil
+			}
+			return nil, err
+		}
+		if target != nil {
+			owner = target.owner()
+		}
+	}
+	deploymentID := owner.ID
 	actor := skill.BindingActor{Type: "agent", ID: member}
 	if input.Call.ApprovalID != "" {
 		approval, approvalErr := approvedSkillActionCheckpoint(ctx, d.store, input.Call)
@@ -424,9 +486,9 @@ func (d *SkillBindingActionDispatcher) DispatchAction(ctx context.Context, input
 		var result map[string]interface{}
 		switch input.Bound.Action.Name {
 		case SkillActionRequestSetup:
-			result, err = d.requestSkillSetup(ctx, input, run, member, umbrella)
+			result, err = d.requestSkillSetup(ctx, input, run, member, umbrella, owner)
 		case SkillActionRequestConnection:
-			result, err = d.requestConnection(ctx, input, run, member, umbrella)
+			result, err = d.requestConnection(ctx, input, run, member, umbrella, owner)
 		default:
 			result, err = d.requestCredential(ctx, input, run, member, umbrella)
 		}
@@ -722,6 +784,89 @@ func skillActionMember(run *AgentRun) (string, error) {
 		return deploymentID, nil
 	}
 	return "", errors.New("skill management requires a Run assigned to an Agent deployment")
+}
+
+// skillTargetAgent is the Agent a builder acts for (targetAgentId).
+type skillTargetAgent struct {
+	ID          string
+	DisplayName string
+}
+
+func (t *skillTargetAgent) owner() ObjectiveOwner {
+	return ObjectiveOwner{Type: OwnerTypeAgent, ID: t.ID}
+}
+
+func (t *skillTargetAgent) preview() map[string]interface{} {
+	return map[string]interface{}{"id": t.ID, "displayName": t.DisplayName}
+}
+
+// skillActionTargetable reports the actions that accept targetAgentId.
+func skillActionTargetable(action string) bool {
+	switch action {
+	case SkillActionDiscoverBinding, SkillActionUpsertBinding, SkillActionDisableBinding, SkillActionRequestSetup, SkillActionRequestConnection:
+		return true
+	}
+	return false
+}
+
+// skillActionTarget returns the Agent named by targetAgentId, or nil when
+// the call names none. Only a builder (an Agent holding an openseal.agents
+// binding that allows create_agent or update_agent) may name one, and only
+// in a reply in its own chat. The target exists in scope, is not retired,
+// is not the builder and is not fixed-policy, the same rule as update_agent.
+func skillActionTarget(ctx context.Context, catalog *skill.Catalog, agents *kernelagent.Registry, run *AgentRun, member string, arguments map[string]interface{}) (*skillTargetAgent, error) {
+	raw, present := arguments[SkillActionTargetAgentArgument]
+	if !present {
+		return nil, nil
+	}
+	value, _ := raw.(string)
+	targetID := strings.TrimSpace(value)
+	if targetID == "" || len(targetID) > 128 {
+		return nil, errors.New("targetAgentId must be an Agent deployment id; use list_agents for the exact id")
+	}
+	if targetID == member {
+		return nil, errors.New("targetAgentId names the Agent you are; omit it for this chat's own Skills")
+	}
+	if catalog == nil || run == nil {
+		return nil, errors.New("acting for another Agent is unavailable")
+	}
+	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
+	bindings, err := catalog.ListBindings(ctx, scope, member)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(bindings, agentBuilderBinding) {
+		return nil, errors.New("only an Agent that builds Agents can act for another Agent; omit targetAgentId")
+	}
+	_, taskHint := run.Context[ConversationTaskContextKey]
+	if run.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: member}) || run.Kind != RunKindConversation || taskHint || strings.HasPrefix(run.ConcurrencyKey, "task:") {
+		return nil, errors.New("targetAgentId is only available in a reply in your own chat")
+	}
+	if agents == nil {
+		return nil, errors.New("acting for another Agent is unavailable on this host")
+	}
+	deployment, err := agents.GetDeployment(ctx, capability.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, targetID)
+	if err != nil {
+		return nil, agentBuilderTargetError(targetID, err)
+	}
+	if deployment.RolloutStatus == kernelagent.RolloutRetired {
+		return nil, fmt.Errorf("agent %q is retired and cannot be changed", targetID)
+	}
+	definition, err := agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
+	if err != nil {
+		return nil, err
+	}
+	if agentDefinitionPolicyFixed(definition) {
+		return nil, fmt.Errorf("agent %q cannot be changed in chat: %w", targetID, ErrAgentBehaviorFixed)
+	}
+	return &skillTargetAgent{ID: deployment.ID, DisplayName: definition.DisplayName}, nil
+}
+
+// agentBuilderBinding reports an enabled openseal.agents binding that lets
+// its Agent create or change other Agents.
+func agentBuilderBinding(binding *skill.Binding) bool {
+	return binding != nil && !binding.Disabled && binding.SkillID == AgentManagementSkillID && binding.SkillVersion == AgentManagementSkillVersion &&
+		binding.SourceIdentity == "" && (slices.Contains(binding.AllowedActions, AgentActionCreateAgent) || slices.Contains(binding.AllowedActions, AgentActionUpdateAgent))
 }
 
 func decodeSkillBindingArguments(arguments map[string]interface{}, target interface{}) error {

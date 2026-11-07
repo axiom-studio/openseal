@@ -45,16 +45,22 @@ func (e *Engine) ReconcileSkillSetupTask(ctx context.Context, scope runtime.Scop
 }
 
 // ListSkillSetupRequests lists a conversation's setup requests. owner must
-// own the conversation: every request there is saved to it.
+// own the conversation: every request there is saved to it, or to an Agent
+// its builder acted for (targetAgentId).
 func (e *Engine) ListSkillSetupRequests(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, conversationID string) ([]*runtime.SkillSetupRequest, error) {
 	if err := e.conversationOwnedBy(ctx, scope, owner, conversationID); err != nil {
 		return nil, err
 	}
-	return e.reconciledSkillSetupRequests(ctx, scope, owner.ID, conversationID)
+	requests, err := e.reconciledSkillSetupRequests(ctx, scope, "", conversationID)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(requests, func(request *runtime.SkillSetupRequest) bool { return request.ChatOwner() != owner }), nil
 }
 
-// reconciledSkillSetupRequests lists one conversation's requests after
-// resolving any pending request that a saved binding already satisfies.
+// reconciledSkillSetupRequests lists one conversation's requests saved to
+// deploymentID (any deployment when it is empty) after resolving any pending
+// request that a saved binding already satisfies.
 // A validated binding saved in Settings or an OAuth callback is the same
 // evidence as one saved in the chat form. Reconcile from canonical state so
 // closing a tab or losing a completion response cannot strand the request.
@@ -66,13 +72,18 @@ func (e *Engine) reconciledSkillSetupRequests(ctx context.Context, scope runtime
 	if !slices.ContainsFunc(requests, skillSetupReconcilable) {
 		return requests, nil
 	}
-	bindings, err := e.skills.ListBindings(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, deploymentID)
-	if err != nil {
-		return nil, err
-	}
+	bindingsOf := map[string][]*skill.Binding{}
 	for index, request := range requests {
 		if !skillSetupReconcilable(request) {
 			continue
+		}
+		bindings, listed := bindingsOf[request.DeploymentID]
+		if !listed {
+			bindings, err = e.skills.ListBindings(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, request.DeploymentID)
+			if err != nil {
+				return nil, err
+			}
+			bindingsOf[request.DeploymentID] = bindings
 		}
 		for _, binding := range bindings {
 			if !skillSetupBindingCandidate(request, binding) {

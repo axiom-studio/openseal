@@ -28,10 +28,10 @@ func (s *SQLiteStore) GetSkillSetupRequest(ctx context.Context, scope Scope, id 
 	return &r, err
 }
 func (s *SQLiteStore) ListSkillSetupRequests(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*SkillSetupRequest, error) {
-	if scope.Validate() != nil || deploymentID == "" || conversationID == "" {
+	if scope.Validate() != nil || conversationID == "" {
 		return nil, ErrInvalidSkillSetup
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM skill_setup_requests WHERE scope_kind=? AND scope_id=? AND deployment_id=? AND conversation_id=? ORDER BY created_at,id`, scope.Kind, scope.ID, deploymentID, conversationID)
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM skill_setup_requests WHERE scope_kind=? AND scope_id=? AND (?='' OR deployment_id=?) AND conversation_id=? ORDER BY created_at,id`, scope.Kind, scope.ID, deploymentID, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
 	}

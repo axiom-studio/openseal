@@ -88,7 +88,7 @@ func TestSkillSetupTaskOriginSupportsIndependentWorkAndExactForkLineage(t *testi
 			run = cloneAgentRun(run)
 			run.Context["conversationId"], run.Context["triggerMessageId"] = "forged-chat", "forged-message"
 			before, _ := dispatcher.catalog.ListBindings(t.Context(), skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, "agent")
-			_, err := dispatcher.requestSkillSetup(t.Context(), ActionDispatchInput{Call: &ActionCall{ID: "task-setup-call", Scope: run.Scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect the account"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
+			_, err := dispatcher.requestSkillSetup(t.Context(), ActionDispatchInput{Call: &ActionCall{ID: "task-setup-call", Scope: run.Scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect the account"}}, run, "agent", ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,7 +142,7 @@ func TestSkillSetupTaskOriginRejectsUnprovedContextAndChangedCanonicalSource(t *
 			}
 			store.mu.Unlock()
 			input := ActionDispatchInput{Call: &ActionCall{ID: "rejected", Scope: run.Scope, RunID: run.ID}, Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect"}}
-			if _, err := dispatcher.requestSkillSetup(t.Context(), input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {
+			if _, err := dispatcher.requestSkillSetup(t.Context(), input, run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {
 				t.Fatal("unproved origin created setup")
 			}
 			if _, err := dispatcher.listSkillSetupRequests(t.Context(), run, deploymentID, ObjectiveOwner{Type: OwnerTypeAgent, ID: deploymentID}); err == nil {

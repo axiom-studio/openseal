@@ -34,10 +34,10 @@ func (s *PostgresStore) GetSkillSetupRequest(ctx context.Context, scope Scope, i
 	return &r, err
 }
 func (s *PostgresStore) ListSkillSetupRequests(ctx context.Context, scope Scope, deploymentID, conversationID string) ([]*SkillSetupRequest, error) {
-	if scope.Validate() != nil || deploymentID == "" || conversationID == "" {
+	if scope.Validate() != nil || conversationID == "" {
 		return nil, ErrInvalidSkillSetup
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("skill_setup_requests")+` WHERE scope_kind=$1 AND scope_id=$2 AND deployment_id=$3 AND conversation_id=$4 ORDER BY created_at,id`, scope.Kind, scope.ID, deploymentID, conversationID)
+	rows, err := s.db.QueryContext(ctx, `SELECT payload FROM `+s.table("skill_setup_requests")+` WHERE scope_kind=$1 AND scope_id=$2 AND ($3='' OR deployment_id=$3) AND conversation_id=$4 ORDER BY created_at,id`, scope.Kind, scope.ID, deploymentID, conversationID)
 	if err != nil {
 		return nil, err
 	}

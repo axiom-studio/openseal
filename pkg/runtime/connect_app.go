@@ -219,7 +219,7 @@ func findAppsAction() skill.Action {
 
 func requestConnectionAction() skill.Action {
 	return skill.Action{Name: SkillActionRequestConnection,
-		Description: "Ask the person who sent the message to connect the app through a Connect card in this chat. If the app is shared with the agent or team, ask someone who manages it. " + connectAppGuidance + " Pass app as the exact slug from find_apps, or as {\"address\": \"https://...\"} when the user gave an MCP server address. The user signs in on the card; never ask for keys or passwords in chat. A pending result pauses this work until the app is connected (you then continue with its new tools) or the card is dismissed. If the app is already connected, the result lists its tools instead: use them. If the result is refused, explain the reason and do not repeat the request in this reply.",
+		Description: "Ask the person who sent the message to connect the app through a Connect card in this chat. If the app is shared with the agent or team, ask someone who manages it. " + connectAppGuidance + " Pass app as the exact slug from find_apps, or as {\"address\": \"https://...\"} when the user gave an MCP server address. The user signs in on the card; never ask for keys or passwords in chat. A pending result pauses this work until the app is connected (you then continue with its new tools) or the card is dismissed. If the app is already connected, the result lists its tools instead: use them. If the result is refused, explain the reason and do not repeat the request in this reply. With targetAgentId, the card still appears in this chat and the app is connected for that Agent.",
 		Risk:        skill.RiskLevelRead, SideEffect: skill.SideEffectNone, Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 		InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"app": map[string]interface{}{"anyOf": []interface{}{
@@ -228,7 +228,8 @@ func requestConnectionAction() skill.Action {
 					"address": map[string]interface{}{"type": "string", "minLength": 9, "maxLength": maximumAppAddress, "description": "The MCP server's https address."},
 				}, "required": []interface{}{"address"}},
 			}},
-			"reason": map[string]interface{}{"type": "string", "maxLength": 1000, "description": "Optional; shown on the card, for example \"Connect Linear so I can list your open issues\"."},
+			"reason":                       map[string]interface{}{"type": "string", "maxLength": 1000, "description": "Optional; shown on the card, for example \"Connect Linear so I can list your open issues\"."},
+			SkillActionTargetAgentArgument: skillActionTargetAgentProperty(),
 		}, "required": []interface{}{"app"}},
 		OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 			"setupRequest": map[string]interface{}{"type": "object"},
@@ -344,8 +345,9 @@ func skillSetupKindFor(candidate *skill.DiscoveryCandidate) string {
 }
 
 type requestConnectionArguments struct {
-	App    interface{} `json:"app"`
-	Reason string      `json:"reason,omitempty"`
+	App           interface{} `json:"app"`
+	Reason        string      `json:"reason,omitempty"`
+	TargetAgentID string      `json:"targetAgentId,omitempty"`
 }
 
 func decodeRequestConnectionArguments(arguments map[string]interface{}) (ConnectAppTarget, string, error) {
@@ -386,7 +388,10 @@ func decodeAppAddress(value, reason string) (ConnectAppTarget, string, error) {
 	return ConnectAppTarget{Address: address, Name: parsed.Hostname(), SignIn: AppSignInUnknown}, reason, nil
 }
 
-func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input ActionDispatchInput, run *AgentRun, member string, umbrella ObjectiveOwner) (map[string]interface{}, error) {
+// requestConnection saves a connect card in the run's chat (under umbrella)
+// for owner, the Agent or Team the app is connected for: the umbrella, or
+// the Agent a builder names with targetAgentId.
+func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, input ActionDispatchInput, run *AgentRun, member string, umbrella, owner ObjectiveOwner) (map[string]interface{}, error) {
 	target, reason, err := decodeRequestConnectionArguments(input.Arguments)
 	if err != nil {
 		return nil, err
@@ -414,8 +419,8 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 			target.LogoSHA256, target.LogoMonochrome = "", false
 		}
 	}
-	// An app this run can already use needs no card: the model gets its tools.
-	set, err := d.runHostBindings(ctx, run, umbrella)
+	// An app the owner can already use needs no card: the model gets its tools.
+	set, err := d.runHostBindings(ctx, run, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +440,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 	if _, personal := set.PersonalApps[ConnectAppKey(target)]; personal {
 		mode = skillSetupModePerPerson
 		if run.ActingUser == "" {
-			return nil, refuseInteraction(target.Name + " uses each person's own account, and no person asked for this run. Ask someone who manages " + umbrellaLabel(umbrella) + " to share an account with it")
+			return nil, refuseInteraction(target.Name + " uses each person's own account, and no person asked for this run. Ask someone who manages " + umbrellaLabel(owner) + " to share an account with it")
 		}
 	}
 	conversationID, messageID, err := d.skillSetupConversationOrigin(ctx, run, member, umbrella)
@@ -450,7 +455,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 	}
 	// An unanswered card for the app is reused only within this run and for
 	// the same person: a card resumes only the run that made it.
-	current, err := d.store.ListSkillSetupRequests(ctx, run.Scope, umbrella.ID, conversationID)
+	current, err := d.store.ListSkillSetupRequests(ctx, run.Scope, owner.ID, conversationID)
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +474,7 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 		reason = "Connect " + target.Name + " to continue in this chat."
 	}
 	now := time.Now().UTC()
-	r := &SkillSetupRequest{ID: id, Scope: run.Scope, Owner: umbrella, DeploymentID: umbrella.ID, AgentID: member, ConversationID: conversationID, TriggerMessageID: messageID,
+	r := &SkillSetupRequest{ID: id, Scope: run.Scope, Owner: owner, DeploymentID: owner.ID, AgentID: member, ConversationID: conversationID, TriggerMessageID: messageID,
 		RunID: run.ID, ActionCallID: input.Call.ID, Kind: SkillSetupKindConnectApp, SkillID: mcp.SkillID, SkillVersion: mcp.SkillVersion,
 		SkillName: target.Name, App: &target, RequestedFor: run.ActingUser, Mode: mode, Reason: reason, Status: "pending", Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if err := d.store.SaveSkillSetupRequest(ctx, r, 0); err != nil {
@@ -483,14 +488,22 @@ func (d *SkillBindingActionDispatcher) requestConnection(ctx context.Context, in
 	return skillSetupResult(r)
 }
 
-// runHostBindings are the host bindings (connected apps) of the run's
-// umbrella.
-func (d *SkillBindingActionDispatcher) runHostBindings(ctx context.Context, run *AgentRun, umbrella ObjectiveOwner) (*skill.HostBindingSet, error) {
-	actor := RunSkillActor(run)
-	if run == nil || OwnerOfSkillUmbrella(actor.Umbrella) != umbrella {
+// runHostBindings are the host bindings (connected apps) of owner as the
+// run uses them: the run's umbrella, or the Agent a builder in its own chat
+// acts for (skillActionTarget checked it), read as that Agent for the
+// person the run acts for.
+func (d *SkillBindingActionDispatcher) runHostBindings(ctx context.Context, run *AgentRun, owner ObjectiveOwner) (*skill.HostBindingSet, error) {
+	if run == nil {
 		return &skill.HostBindingSet{}, nil
 	}
-	return d.catalog.HostBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, umbrella.ID, actor)
+	actor := RunSkillActor(run)
+	if OwnerOfSkillUmbrella(actor.Umbrella) != owner {
+		if owner.Type != OwnerTypeAgent || run.Owner != (ObjectiveOwner{Type: OwnerTypeAgent, ID: run.AssignedAgentID}) {
+			return &skill.HostBindingSet{}, nil
+		}
+		actor = skill.RunActor{RunID: run.ID, AgentID: owner.ID, Umbrella: SkillUmbrella(owner), ActingUser: run.ActingUser}
+	}
+	return d.catalog.HostBindings(ctx, skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, owner.ID, actor)
 }
 
 func appSignIn(value string) string {

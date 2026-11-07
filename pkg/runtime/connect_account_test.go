@@ -316,12 +316,6 @@ func TestConnectAppKeyMatchesHostKey(t *testing.T) {
 	}
 }
 
-func TestBundledSkillVersionBumpedForConnectOnce(t *testing.T) {
-	if SkillManagementSkillVersion != "1.6.1" {
-		t.Fatalf("openseal.skills = %s, want 1.6.1", SkillManagementSkillVersion)
-	}
-}
-
 // A request_setup receipt of the previous bundled version still verifies a
 // parked setup task.
 func TestTaskSetupActionMatchesPreviousBundledVersion(t *testing.T) {
