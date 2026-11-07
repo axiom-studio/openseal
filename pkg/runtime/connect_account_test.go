@@ -62,7 +62,9 @@ func claimedPersonChatRun(t *testing.T, store *MemoryStore, scope Scope, now tim
 	return claimed
 }
 
-func proposePersonAction(t *testing.T, store *MemoryStore, catalog *skill.Catalog, scope Scope, run *AgentRun, now time.Time, key string, policy ActionPolicyEvaluator) *ActionProposalResult {
+// proposePersonAction proposes send as the governed tool call of run loop
+// step stepID, as the loop does for the Run's lease owner.
+func proposePersonAction(t *testing.T, store *MemoryStore, catalog *skill.Catalog, scope Scope, run *AgentRun, now time.Time, stepID, key string, policy ActionPolicyEvaluator) *ActionProposalResult {
 	t.Helper()
 	if policy == nil {
 		policy = ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
@@ -72,7 +74,8 @@ func proposePersonAction(t *testing.T, store *MemoryStore, catalog *skill.Catalo
 	coordinator := NewActionCoordinator(store, store, catalog, policy)
 	coordinator.now = func() time.Time { return now }
 	proposal, err := coordinator.Propose(context.Background(), ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",
+		Scope: scope, RunID: run.ID, TurnID: stepID, WorkerID: "agent-worker", DeploymentID: "release-agent",
+		Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Send a message to ana@example.com",
 		SkillID: "mail", SkillVersion: "1.0.0", Action: "send", Arguments: map[string]interface{}{"to": "ana@example.com"}, IdempotencyKey: key,
 		ExternalOperation: &ExternalOperationIdentity{Resource: "mailbox-ana", Operation: "send"},
 	})
@@ -80,6 +83,17 @@ func proposePersonAction(t *testing.T, store *MemoryStore, catalog *skill.Catalo
 		t.Fatal(err)
 	}
 	return proposal
+}
+
+// executePersonAction executes the loop call inline for the Run's lease
+// owner, as the governed executor does.
+func executePersonAction(t *testing.T, worker *ActionWorker, scope Scope, proposal *ActionProposalResult) *ActionExecutionResult {
+	t.Helper()
+	result, err := worker.ExecuteOwnLoopCall(context.Background(), scope, proposal.Call.ID, "agent-worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }
 
 type availabilityFunc func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error)
@@ -93,7 +107,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, "")
-	proposal := proposePersonAction(t, store, catalog, scope, run, now, "send-1", nil)
+	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	dispatched := false
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
@@ -105,10 +119,7 @@ func TestActionWorkerFailsPersonActionWithoutPerson(t *testing.T) {
 		t.Fatal("a run without a person is refused before the host check")
 		return CredentialAvailability{}, nil
 	}))
-	result, err := worker.RunOnce(context.Background(), scope, "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := executePersonAction(t, worker, scope, proposal)
 	if dispatched || result.Call.Status != ActionCallStatusFailed || result.Call.ErrorCode != CredentialErrorPersonUnavailable ||
 		!strings.Contains(result.Call.Error, "uses each person's own account, and no person asked for this run") {
 		t.Fatalf("call = %#v dispatched=%v", result.Call, dispatched)
@@ -128,7 +139,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
-	proposal := proposePersonAction(t, store, catalog, scope, run, now, "send-1", nil)
+	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	if proposal.Call.ExternalOperationDigest == "" {
 		t.Fatal("test needs an external operation")
 	}
@@ -150,10 +161,7 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 		}
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapPersonSignIn}}, nil
 	}))
-	result, err := worker.RunOnce(context.Background(), scope, "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := executePersonAction(t, worker, scope, proposal)
 	call := result.Call
 	if dispatches != 0 || call.Status != ActionCallStatusFailed || call.FailurePhase != ActionFailureBeforeDispatch ||
 		!strings.HasPrefix(call.Error, "connect_account_required: ") || call.ExternalOperationDigest != "" || !isParkedConnectAccountCall(call) {
@@ -172,20 +180,23 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 		card.Reason != "This Agent uses each person's own Google account." {
 		t.Fatalf("card = %#v", card)
 	}
+	// The worker leaves the Run to its loop, which parks it on the card at
+	// step end.
 	stored, err := store.GetAgentRun(context.Background(), scope, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != AgentRunStatusWaitingForEvent || stored.WakeCondition == nil || stored.WakeCondition.Type != ConnectAccountWakeType ||
-		stored.WakeCondition.Reference != card.ID {
-		t.Fatalf("run = %s %#v", stored.Status, stored.WakeCondition)
+	if stored.Status != AgentRunStatusRunning || stored.FailureExplanation != nil {
+		t.Fatalf("a parked call changed its Run: %s %#v", stored.Status, stored.FailureExplanation)
 	}
-	if stored.FailureExplanation != nil {
-		t.Fatalf("a parked call ended the attempt: %#v", stored.FailureExplanation)
+	parker := newGovernedParker(store, nil, nil)
+	wake, summary, err := parker.governedCardWait(context.Background(), stored, call)
+	if err != nil || wake == nil || wake.Type != ConnectAccountWakeType || wake.Reference != card.ID || summary != connectAccountWaitSummary(card) {
+		t.Fatalf("card wait = %#v %q %v", wake, summary, err)
 	}
 
 	// The person connects; the run resumes and the model asks again in a new
-	// Turn for the same external operation.
+	// step for the same external operation.
 	connected = true
 	card.Status, card.ResolvedBy = "resolved", connectAccountTestUser
 	card.ResolvedBindingID, card.ResolvedBindingRevision = "mail-binding", 1
@@ -193,25 +204,14 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 	if err := store.SaveSkillSetupRequest(context.Background(), card, card.Revision-1); err != nil {
 		t.Fatal(err)
 	}
-	resumed := cloneAgentRun(stored)
-	resumed.Status, resumed.WakeCondition = AgentRunStatusRunning, nil
-	expiry := now.Add(time.Hour)
-	resumed.LeaseOwner, resumed.LeaseExpiresAt = "agent-worker", &expiry
-	resumed.Revision++
-	if _, err := store.UpdateAgentRunWithEvent(context.Background(), resumed, stored.Revision, &ActivityEvent{
-		ID: "resume", Scope: scope, EventType: "run.resumed", Severity: ActivitySeverityInfo, RunID: run.ID, Actor: ActivityActor{Type: "system", ID: "test"},
-		Summary: "resumed", Visibility: ActivityVisibilityScope, CreatedAt: now,
-	}, nil); err != nil {
-		t.Fatal(err)
+	if wake, _, err := parker.governedCardWait(context.Background(), stored, call); err != nil || wake != nil {
+		t.Fatalf("a resolved card still parks: %#v %v", wake, err)
 	}
-	retry := proposePersonAction(t, store, catalog, scope, resumed, now, "send-1-retry", nil)
+	retry := proposePersonAction(t, store, catalog, scope, stored, now, "step-2", "send-1-retry", nil)
 	if !retry.Created || retry.Call.ID == call.ID || retry.Call.Status != ActionCallStatusReady || retry.Call.DuplicateOfActionCallID != "" {
 		t.Fatalf("retry not admitted: %#v", retry.Call)
 	}
-	result, err = worker.RunOnce(context.Background(), scope, "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result = executePersonAction(t, worker, scope, retry)
 	if result.Call.ID != retry.Call.ID || result.Call.Status != ActionCallStatusSucceeded || dispatches != 1 {
 		t.Fatalf("retry = %#v dispatches=%d", result.Call, dispatches)
 	}
@@ -228,7 +228,7 @@ func TestParkedCallReleasesExternalOperation(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
-	proposal := proposePersonAction(t, store, catalog, scope, run, now, "send-1", nil)
+	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
@@ -237,9 +237,7 @@ func TestParkedCallReleasesExternalOperation(t *testing.T) {
 	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapPersonSignIn}}, nil
 	}))
-	if _, err := worker.RunOnce(context.Background(), scope, "worker", time.Minute); err != nil {
-		t.Fatal(err)
-	}
+	executePersonAction(t, worker, scope, proposal)
 	digest := proposal.Call.ExternalOperationDigest
 	if prior, err := store.GetActionCallByExternalOperation(context.Background(), scope, digest); prior != nil || err == nil {
 		t.Fatalf("parked call still holds its external operation: %#v %v", prior, err)
@@ -251,7 +249,7 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
-	proposePersonAction(t, store, catalog, scope, run, now, "send-1", nil)
+	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
 		return map[string]string{"google": "token"}, nil
 	}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
@@ -261,10 +259,7 @@ func TestActionWorkerSharedGapAsksManagers(t *testing.T) {
 	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapSharedSignIn}}, nil
 	}))
-	result, err := worker.RunOnce(context.Background(), scope, "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := executePersonAction(t, worker, scope, proposal)
 	card, err := store.GetSkillSetupRequest(context.Background(), scope, "connect-account:"+result.Call.ID)
 	if err != nil || card == nil || card.Mode != "shared" || card.RequestedFor != "" ||
 		card.Reason != "The Google account shared with this Agent is no longer available." {
@@ -280,7 +275,7 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
-	proposePersonAction(t, store, catalog, scope, run, now, "send-1", nil)
+	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", nil)
 	worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 		t.Fatal("a no_person gap must not dispatch")
 		return nil, nil
@@ -288,10 +283,7 @@ func TestActionWorkerNoPersonGapFailsWithoutCard(t *testing.T) {
 	worker.setCredentialAvailabilityChecker(availabilityFunc(func(context.Context, CredentialAvailabilityRequest) (CredentialAvailability, error) {
 		return CredentialAvailability{Gaps: map[string]CredentialGap{"google": CredentialGapNoPerson}}, nil
 	}))
-	result, err := worker.RunOnce(context.Background(), scope, "worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := executePersonAction(t, worker, scope, proposal)
 	if result.Call.ErrorCode != CredentialErrorPersonUnavailable || isParkedConnectAccountCall(result.Call) {
 		t.Fatalf("call = %#v", result.Call)
 	}
@@ -306,7 +298,7 @@ func TestPersonActionApprovalOnlyByActingUser(t *testing.T) {
 	now := time.Now().UTC()
 	catalog, scope := personActionCatalog(t)
 	run := claimedPersonChatRun(t, store, scope, now, connectAccountTestUser)
-	proposal := proposePersonAction(t, store, catalog, scope, run, now, "send-1", ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
+	proposal := proposePersonAction(t, store, catalog, scope, run, now, "step-1", "send-1", ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}, {Type: "user", ID: "9"}}, ApprovalTTL: time.Hour}, nil
 	}))
 	if proposal.Approval == nil || len(proposal.Approval.EligibleApprovers) != 1 || proposal.Approval.EligibleApprovers[0] != (ApprovalPrincipal{Type: "user", ID: connectAccountTestUser}) {
