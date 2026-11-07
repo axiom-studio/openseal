@@ -205,7 +205,7 @@ Options:
 				return nil, runtime.ErrTurnHostUnavailable
 			}
 			local := taskHost != nil && run.Scope == scope
-			binding, err := runtime.ResolveCatalogTurnRunner(resolveCtx, kernel, run, runtime.CatalogTurnResolverConfig{})
+			binding, err := runtime.ResolveLoopBinding(resolveCtx, kernel, run, runtime.LoopBindingConfig{})
 			if err == nil && binding != nil && local {
 				binding.Host = taskHost
 				binding.OutputPublisher = artifactPublisher

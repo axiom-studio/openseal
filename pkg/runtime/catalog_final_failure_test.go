@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
@@ -24,46 +25,37 @@ func TestFinalFailureCatalogDoesNotPrepareFailedCapabilities(t *testing.T) {
 				// must not block the final answer.
 			}
 			run := &AgentRun{
-				ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: "seal",
+				ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: owner, AssignedAgentID: "seal", Status: AgentRunStatusRunning,
 				Goal: "Explain the stopped attempt", Context: map[string]interface{}{},
-				Checkpoint: checkpointFinalFailureExplanation(nil, "action", "The image service rejected the request."),
+				FailureExplanation: &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "action_failed", Message: "The image service rejected the request."},
 			}
-			host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-				if len(request.Actions) != 0 || len(request.SkillPrompts) != 0 || len(request.RunbookOperations) != 0 || len(request.EligibleAgents) != 0 ||
-					request.ModelCredential == nil || request.ModelCredential.ID != "model-account" {
-					t.Fatalf("failure explanation offered work or lost the Agent's model: %#v", request)
-				}
-				return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model",
-					NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "The image service turned the request down."}}, nil
-			}}
-			config := CatalogTurnResolverConfig{Host: host, SkillHosts: SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
+			config := loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{})
+			config.SkillHosts = SkillHostCapabilityResolverFunc(func(context.Context, skill.ScopeReference, string) (*skill.HostCapabilityState, error) {
 				t.Fatal("failure explanation attempted runtime preparation")
 				return nil, nil
-			})}
-			binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, config)
+			})
+			binding, err := ResolveLoopBinding(t.Context(), catalog, run, config)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(catalog.activationDeployments) != 0 || len(binding.ModelActions) != 0 || len(binding.PreparedRuntimes) != 0 || len(binding.RunbookOperations) != 0 {
 				t.Fatalf("failure explanation prepared executable work: %#v", binding)
 			}
-			if binding.DeploymentID != "seal" || binding.ActionDeploymentID != "seal" || binding.DefinitionID != "seal" || binding.DefinitionVersion != "1" {
+			if binding.DeploymentID != "seal" || binding.ActionDeploymentID != "seal" || binding.DefinitionID != "seal" || binding.DefinitionVersion != "1" ||
+				binding.ModelCredential == nil || binding.ModelCredential.ID != "model-account" {
 				t.Fatalf("failure explanation lost verified Agent identity: %#v", binding)
 			}
-			outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
-			if err != nil || outcome == nil || host.calls != 1 || outcome.OutputSummary != "The image service turned the request down." ||
-				len(outcome.ProposedActions) != 0 || outcome.ProposedTask != nil || outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil {
-				t.Fatalf("model did not explain the failure without new operations: %#v %v calls=%d", outcome, err, host.calls)
+			if _, ok := binding.Producer.(*ModelStepProducer); !ok {
+				t.Fatalf("failure explanation producer = %T", binding.Producer)
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutPaused
-			if _, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, config); err == nil {
+			if _, err := ResolveLoopBinding(t.Context(), catalog, run, config); err == nil {
 				t.Fatal("inactive Agent identity bypassed for final answer")
 			}
 			catalog.deployment.RolloutStatus = kernelagent.RolloutActive
 			config.Host = nil
-			withoutHost, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, config)
-			if err != nil || withoutHost == nil || withoutHost.ModelProvider != "host" || withoutHost.Model != "terminal-failure-report" || host.calls != 1 {
-				t.Fatalf("kernel failure reply depended on model host: %#v %v", withoutHost, err)
+			if _, err := ResolveLoopBinding(t.Context(), catalog, run, config); !errors.Is(err, ErrTurnHostUnavailable) {
+				t.Fatalf("explanation without a model host = %v", err)
 			}
 		})
 	}

@@ -393,21 +393,21 @@ func TestScheduledTaskEachOccurrenceResolvesCurrentToolAuthority(t *testing.T) {
 	runs, _ := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, ObjectiveID: a.ObjectiveID, Limit: 10})
 	run := runs[0]
 	c := &resolverCatalog{deployment: &kernelagent.AgentDeployment{ID: run.AssignedAgentID, DefinitionID: "researcher", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}, definition: &kernelagent.AgentDefinition{ID: "researcher", Version: "1", Purpose: "Research", SystemPrompt: "Use current tools"}, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, DeploymentID: run.AssignedAgentID, Skills: []skill.ActivatedSkill{{SkillID: "browser", SkillVersion: "1", Actions: []capability.ModelAction{{Name: "browser.read", SkillID: "browser", Version: "1", Action: "read"}}}}}}
-	host := &recordingTurnHost{response: &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: "scheduled-turn", NextRunStatus: AgentRunStatusCompleted, ModelProvider: "test", Model: "test", OutputSummary: "Read result"}}
-	b, err := ResolveCatalogTurnRunner(t.Context(), c, run, CatalogTurnResolverConfig{Host: host})
+	config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+	b, err := ResolveLoopBinding(t.Context(), c, run, config)
 	if err != nil || len(b.ModelActions) != 1 {
 		t.Fatalf("live authority=%#v,%v", b, err)
 	}
-	if _, ok := b.Runner.(*HostedTurnRunner); !ok {
-		t.Fatalf("task did not use normal hosted runner: %T", b.Runner)
+	if _, ok := b.Producer.(*ModelStepProducer); !ok {
+		t.Fatalf("task did not use the model step producer: %T", b.Producer)
 	}
 	c.activation.Skills = nil // Revoked permission is not resurrected by persisted schedule.
-	b, err = ResolveCatalogTurnRunner(t.Context(), c, run, CatalogTurnResolverConfig{Host: host})
+	b, err = ResolveLoopBinding(t.Context(), c, run, config)
 	if err != nil || len(b.ModelActions) != 0 {
 		t.Fatalf("revoked authority=%#v,%v", b, err)
 	}
 	c.deployment.RolloutStatus = kernelagent.RolloutPaused
-	if _, err := ResolveCatalogTurnRunner(t.Context(), c, run, CatalogTurnResolverConfig{Host: host}); err == nil {
+	if _, err := ResolveLoopBinding(t.Context(), c, run, config); err == nil {
 		t.Fatal("paused Agent executed task")
 	}
 }

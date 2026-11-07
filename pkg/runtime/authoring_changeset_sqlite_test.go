@@ -203,12 +203,12 @@ func TestSQLiteWorkforceApplyMaterializesObjectiveOwnedScheduledRunbook(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	binding, err := ResolveCatalogTurnRunner(ctx, &resolverCatalog{
+	binding, err := ResolveLoopBinding(ctx, &resolverCatalog{
 		deployment: deployment, definition: stored,
 		activation: &skill.ActivationSnapshot{
 			SnapshotID: "snapshot-runbook", Scope: deployment.Scope, DeploymentID: deployment.ID,
 		},
-	}, run, CatalogTurnResolverConfig{})
+	}, run, loopBindingTestConfig(t, store, nil))
 	if err != nil {
 		t.Fatalf("resolve applied Agent Runbook entrypoint: %v", err)
 	}

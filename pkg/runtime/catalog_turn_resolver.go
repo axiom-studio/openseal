@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/presentation"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workspace"
+	"go.uber.org/zap"
 )
 
 // AgentTurnCatalog is the portable, product-neutral catalog required to bind
@@ -28,20 +30,36 @@ type AgentTurnCatalog interface {
 	ActionCallReader
 }
 
-type CatalogTurnResolverConfig struct {
-	Host       TurnHost
+// LoopBindingConfig wires the kernel services every catalog loop binding uses.
+// One config serves every claim of a process; ResolveLoopBinding adds what
+// belongs to one claim (session, chat Workspace, authority, tools).
+type LoopBindingConfig struct {
+	// Host runs the model steps of model Runs, their compaction and their
+	// progress acknowledgements. Without it only deterministic Runs bind;
+	// a model Run is ErrTurnHostUnavailable.
+	Host       StepHost
 	SkillHost  skill.HostCapabilityState
 	SkillHosts SkillHostCapabilityResolver
 	// ConversationTasks is optional canonical storage for hosted task context.
 	// A model or copied Run context cannot supply task admission authority.
 	ConversationTasks ConversationTaskKernelStore
-	// VisualBindings, VisualLinkProvenance, VisualImages and
-	// VisualPlaceProvenance are the host checks for visuals on hosted
-	// answers; see HostedTurnRunnerConfig.
-	VisualBindings        func(run *AgentRun) presentation.BindingResolver
-	VisualLinkProvenance  func(run *AgentRun) presentation.LinkProvenance
-	VisualImages          func(run *AgentRun) presentation.ImageResolver
-	VisualPlaceProvenance func(run *AgentRun) presentation.PlaceProvenance
+	// Store is the kernel store: the session log the Run writes to, the path
+	// its model steps render and the governed calls they read. Required.
+	Store KernelStore
+	// Conversations resolves a conversation Run's origin (ask_user, approval
+	// mode). Optional: without it those flags stay off.
+	Conversations ConversationStore
+	// Tools builds the claim's LoopToolExecutor. Required.
+	Tools *StepToolDispatcher
+	// ChatWorkspaces resolves the claim's chat Workspace, whose host tools
+	// the Run is offered. nil: no Run is offered host tools.
+	ChatWorkspaces ChatWorkspaces
+	// Media are the image sources of the path renderer; Media.ImageInput also
+	// decides whether the model step system carries the media section.
+	Media        ModelStepMedia
+	Capabilities CapabilitySetConfig
+	Logger       *zap.SugaredLogger
+	Now          func() time.Time
 }
 
 // SkillHostCapabilityResolver lets an embedding runtime project the exact
@@ -58,15 +76,32 @@ func (f SkillHostCapabilityResolverFunc) ResolveSkillHostCapabilities(ctx contex
 	return f(ctx, scope, deploymentID)
 }
 
-// ResolveCatalogTurnRunner resolves deterministic runbooks and typed Skill
-// invocations inside the kernel. General prompt work additionally requires a
-// bounded TurnHost; callers must not advertise general work creation without
-// one.
-func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run *AgentRun, config CatalogTurnResolverConfig) (*TurnRunnerBinding, error) {
+// ResolveLoopBinding binds a catalog Agent Run to its immutable Agent
+// definition and activated Skills, and gives it the run loop seams of its
+// kind (SPEC §2.4):
+//
+//   - AgentRequest decision and completion review Runs: a model producer
+//     offered only their typed final tool; no Skill is activated.
+//   - Outreach and typed capability invocations: their deterministic
+//     producers, executing their tool calls through the claim's executor.
+//   - Pinned runbook entrypoints: the runbook runner.
+//   - Every other Run (Agent work, routines, conversation task work, fork
+//     branches, accepted delegation execution, runbook-delegated children,
+//     conversation replies): the model producer with the Run's authorized
+//     catalog.
+//
+// The claim's session, chat Workspace and tool executor are resolved once
+// here, so the advertised tools stay stable for the claim. Final is nil: the
+// loop completes the Run with the final output. The conversation runner adds
+// its own Final and hooks on top for chat replies.
+func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *AgentRun, config LoopBindingConfig) (*TurnRunnerBinding, error) {
 	if catalog == nil {
 		return nil, errors.New("canonical Agent turn catalog is unavailable")
 	}
-	if run == nil || run.Kind != RunKindAgentWork || strings.TrimSpace(run.AssignedAgentID) == "" {
+	if config.Store == nil || config.Tools == nil {
+		return nil, errors.New("loop binding requires a kernel store and a tool dispatcher")
+	}
+	if run == nil || (run.Kind != RunKindAgentWork && run.Kind != RunKindConversation) || strings.TrimSpace(run.AssignedAgentID) == "" {
 		return nil, errors.New("Agent work requires an assigned Agent")
 	}
 	scope := skill.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}
@@ -95,82 +130,26 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 	if accepted != nil && (definition.ID != accepted.DefinitionID || definition.Version != accepted.DefinitionVersion || definition.Runbook == nil || definition.Runbook.ID != accepted.RunbookID || definition.Runbook.Version != accepted.RunbookVersion) {
 		return nil, ErrAcceptedRunExecution
 	}
-	interaction, interactionErr := resolveCatalogSourceAccessChallenge(ctx, catalog, run, config.ConversationTasks)
-	if interactionErr != nil {
-		return nil, interactionErr
+	r := &loopBindingResolution{config: config, catalog: catalog, run: run, scope: scope, deployment: deployment, definition: definition}
+	if runExplainingFailure(run) {
+		// The explanation step is tool-free: no Skill is activated or
+		// prepared, so a broken Skill cannot block the answer.
+		r.explaining = true
+		return r.model(ctx, r.identity(deployment.ID), nil, PromptContribution{}, false)
 	}
-	if outcome, stopped := terminalFailureOutcome(run); stopped && interaction == nil {
-		// The model explains the failure with nothing to execute: no Skill is
-		// activated or prepared, so a broken Skill cannot block the answer.
-		if requiresFinalFailureExplanation(run.Checkpoint) && config.Host != nil {
-			runner, runnerErr := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
-				AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
-				DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-				SystemInstructions: hostedAgentInstructions(definition), ModelCredential: deploymentModelCredential(deployment),
-			})
-			if runnerErr != nil {
-				return nil, runnerErr
-			}
-			return &TurnRunnerBinding{
-				Runner: runner, DeploymentID: deployment.ID, ActionDeploymentID: deployment.ID,
-				DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-				BudgetReservation: BudgetUsage{Turns: 1},
-			}, nil
+	for _, structured := range []struct{ key, instruction string }{
+		{AgentRequestCompletionReviewContextKey, agentRequestCompletionReviewSystemInstruction},
+		{AgentRequestInboxContextKey, agentRequestDecisionSystemInstruction},
+	} {
+		if _, requested := run.Context[structured.key]; !requested {
+			continue
 		}
-		return &TurnRunnerBinding{
-			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				return outcome, nil
-			}),
-			DeploymentID: deployment.ID, ActionDeploymentID: deployment.ID,
-			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-			ModelProvider: "host", Model: "terminal-failure-report",
-		}, nil
-	}
-	if _, requested := run.Context[AgentRequestCompletionReviewContextKey]; requested {
-		if config.Host == nil {
-			return nil, ErrTurnHostUnavailable
-		}
-		instructions := hostedAgentInstructions(definition)
-		instructions = append(instructions, agentRequestCompletionReviewSystemInstruction)
-		runner, runnerErr := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
-			AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
-			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-			SystemInstructions: instructions, ModelCredential: deploymentModelCredential(deployment),
-			VisualBindings: config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance, VisualImages: config.VisualImages,
-			VisualPlaceProvenance: config.VisualPlaceProvenance,
-		})
-		if runnerErr != nil {
-			return nil, runnerErr
-		}
-		return &TurnRunnerBinding{
-			Runner: &agentRequestCompletionReviewTurnRunner{inner: runner}, DeploymentID: deployment.ID, ActionDeploymentID: deployment.ID,
-			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-			InputContextRefs:  []string{"run:" + AgentRequestCompletionReviewContextKey},
-			BudgetReservation: BudgetUsage{Turns: 1},
-		}, nil
-	}
-	if _, requested := run.Context[AgentRequestInboxContextKey]; requested {
-		if config.Host == nil {
-			return nil, ErrTurnHostUnavailable
-		}
-		instructions := hostedAgentInstructions(definition)
-		instructions = append(instructions, agentRequestDecisionSystemInstruction)
-		runner, runnerErr := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
-			AgentID: deployment.ID, ActionDeploymentID: deployment.ID,
-			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-			SystemInstructions: instructions, ModelCredential: deploymentModelCredential(deployment),
-			VisualBindings: config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance, VisualImages: config.VisualImages,
-			VisualPlaceProvenance: config.VisualPlaceProvenance,
-		})
-		if runnerErr != nil {
-			return nil, runnerErr
-		}
-		return &TurnRunnerBinding{
-			Runner: &agentRequestDecisionTurnRunner{inner: runner}, DeploymentID: deployment.ID, ActionDeploymentID: deployment.ID,
-			DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-			InputContextRefs:  []string{"run:" + AgentRequestInboxContextKey},
-			BudgetReservation: BudgetUsage{Turns: 1},
-		}, nil
+		// Decision and review Runs act for the request, not the Agent's
+		// catalog: no Skill is activated, and they are offered only their
+		// typed final tool (ResolveControlAuthority).
+		binding := r.identity(deployment.ID)
+		binding.InputContextRefs = []string{"run:" + structured.key}
+		return r.model(ctx, binding, nil, PromptContribution{AgentInstructions: []string{structured.instruction}}, false)
 	}
 	skillHost := config.SkillHost
 	if config.SkillHosts != nil {
@@ -271,13 +250,9 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		}
 		actions = filtered
 	}
-	base := TurnRunnerBinding{
-		DeploymentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-		ModelActions: actions, PreparedRuntimes: prepared, InputContextRefs: contextRefs,
-		RunbookOperations: runbookOperations,
-		BudgetReservation: BudgetUsage{Turns: 1},
-		ModelCredential:   deploymentModelCredential(deployment),
-	}
+	base := r.identity(actionDeploymentID)
+	base.ModelActions, base.PreparedRuntimes, base.InputContextRefs = actions, prepared, contextRefs
+	base.RunbookOperations = runbookOperations
 	if delegatedFromCurrentRunbook(run, definition.Runbook) {
 		base.RunbookOperations = nil
 	}
@@ -288,7 +263,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		}
 		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "run:"+OutreachInvocationContextKey)
-		return &base, nil
+		return r.deterministic(ctx, base)
 	}
 	if _, requested := run.Context["capabilityInvocation"]; requested {
 		producer, resolveErr := NewCapabilityInvocationStepProducer(actions, catalog)
@@ -297,7 +272,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		}
 		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "run:capabilityInvocation")
-		return &base, nil
+		return r.deterministic(ctx, base)
 	}
 	delegationMode, _ := run.Context[DelegationModeContextKey].(string)
 	if strings.TrimSpace(run.Entrypoint) != "" && delegationMode != string(runbook.DelegateReason) {
@@ -312,60 +287,234 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		if resolveErr != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, resolveErr)
 		}
+		// The runbook engine becomes a deterministic StepProducer (prod-1);
+		// until then it keeps its Turn runner beside the loop seams.
 		base.Runner = runner
 		base.InputContextRefs = append(base.InputContextRefs, "runbook:"+definition.Runbook.ID+"@"+definition.Runbook.Version)
-		return &base, nil
+		return r.deterministic(ctx, base)
 	}
-	if config.Host == nil {
-		return nil, ErrTurnHostUnavailable
-	}
-	eligibleAgents, err := resolveHostedAgentTargets(ctx, catalog, scope, run, deployment.ID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve eligible Agent delegation targets: %w", err)
-	}
-	instructions := hostedAgentInstructions(definition)
-	conversationTasks, err := resolveCatalogConversationTaskContext(ctx, catalog, run, config.ConversationTasks)
-	if err != nil {
-		return nil, fmt.Errorf("resolve canonical conversation task context: %w", err)
-	}
-	acceptedRequestExecution := run.Source == RunSourceRequest || run.Source == RunSourceHandoff || run.Source == RunSourceEscalation
-	if acceptedRequestExecution {
+	var prompt PromptContribution
+	if run.Source == RunSourceRequest || run.Source == RunSourceHandoff || run.Source == RunSourceEscalation {
 		if _, ok := run.Context["collaboration"]; ok {
-			instructions = append(instructions, acceptedAgentRequestExecutionSystemInstruction)
-		} else {
-			acceptedRequestExecution = false
+			prompt.AgentInstructions = append(prompt.AgentInstructions, acceptedAgentRequestExecutionSystemInstruction)
 		}
 	}
 	if delegated, ok := run.Context["delegatedSystemPrompt"].(string); ok && strings.TrimSpace(delegated) != "" {
-		instructions = append(instructions, "Delegated execution instructions: "+strings.TrimSpace(delegated))
+		prompt.AgentInstructions = append(prompt.AgentInstructions, "Delegated execution instructions: "+strings.TrimSpace(delegated))
 	}
-	runner, err := NewHostedTurnRunner(config.Host, HostedTurnRunnerConfig{
-		AgentID: deployment.ID, ActionDeploymentID: actionDeploymentID, DefinitionID: definition.ID, DefinitionVersion: definition.Version,
-		SystemInstructions: instructions, EligibleAgents: eligibleAgents, SkillPrompts: prompts, Actions: actions,
-		RunbookOperations: base.RunbookOperations,
-		ConversationTasks: conversationTasks,
-		ModelCredential:   deploymentModelCredential(deployment),
-		VisualBindings:    config.VisualBindings, VisualLinkProvenance: config.VisualLinkProvenance, VisualImages: config.VisualImages,
-		VisualPlaceProvenance: config.VisualPlaceProvenance,
+	for _, action := range actions {
+		if action.SkillID == RunbookManagementSkillID && action.Action == RunbookActionCreateTask {
+			prompt.AgentInstructions = append(prompt.AgentInstructions, RoutineTimezoneInstruction, RoutineDeliveryInstruction)
+			if instruction := routineBindingToolGrantInstruction(actions); instruction != "" {
+				prompt.AgentInstructions = append(prompt.AgentInstructions, instruction)
+			}
+			break
+		}
+	}
+	return r.model(ctx, base, prompts, prompt, true)
+}
+
+// loopBindingResolution is one ResolveLoopBinding call.
+type loopBindingResolution struct {
+	config     LoopBindingConfig
+	catalog    AgentTurnCatalog
+	run        *AgentRun
+	scope      skill.ScopeReference
+	deployment *kernelagent.AgentDeployment
+	definition *kernelagent.AgentDefinition
+	// explaining is a Run whose only remaining step is the tool-free
+	// failure explanation: it is offered no control tool either.
+	explaining bool
+}
+
+func (r *loopBindingResolution) now() time.Time {
+	if r.config.Now != nil {
+		return r.config.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// identity is the Agent identity every binding of the Run carries.
+func (r *loopBindingResolution) identity(actionDeploymentID string) *TurnRunnerBinding {
+	return &TurnRunnerBinding{
+		DeploymentID: r.deployment.ID, ActionDeploymentID: actionDeploymentID,
+		DefinitionID: r.definition.ID, DefinitionVersion: r.definition.Version,
+		BudgetReservation: BudgetUsage{Turns: 1},
+		ModelCredential:   deploymentModelCredential(r.deployment),
+	}
+}
+
+// model completes binding for a model-driven Run: the claim's session, chat
+// Workspace (when workspace is true), control authority, the model step
+// producer over the catalog preparer, its compactor, the run-start preparer,
+// the tool executor and the progress acknowledgement renderer.
+func (r *loopBindingResolution) model(ctx context.Context, binding *TurnRunnerBinding, prompts []HostedSkillPrompt, prompt PromptContribution, workspaceTools bool) (*TurnRunnerBinding, error) {
+	if r.config.Host == nil {
+		return nil, ErrTurnHostUnavailable
+	}
+	session, err := r.session(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	var chat *workspace.Authority
+	if workspaceTools {
+		chat = r.workspace(ctx)
+	}
+	hostTools := HostToolSpecs(chat)
+	script, err := prepareLoopRoutineScript(r.run, hostTools)
+	if err != nil {
+		return nil, err
+	}
+	refs := make([]string, 0, len(prompts))
+	for _, skillPrompt := range prompts {
+		refs = append(refs, skillPrompt.Reference)
+	}
+	binding.Authority, err = ResolveControlAuthority(ctx, ControlAuthorityInput{
+		Run: r.run, DeploymentID: r.deployment.ID, Catalog: r.catalog, Scope: r.scope,
+		SkillPromptRefs: refs, Operations: binding.RunbookOperations,
+		ConversationTasks: r.config.ConversationTasks, Runs: r.config.Store, Conversations: r.config.Conversations,
+		Deterministic: r.explaining,
 	})
 	if err != nil {
 		return nil, err
 	}
-	base.Runner = runner
-	// prep-4 retypes config.Host to StepHost; until then only a host that
-	// already runs model steps renders progress acknowledgements.
-	if stepHost, ok := config.Host.(StepHost); ok {
-		base.ProgressAcknowledgementRenderer = &modelStepProgressAcknowledgementRenderer{
-			host: stepHost, agentID: deployment.ID,
-			definitionID: definition.ID, definitionVersion: definition.Version,
-			modelCredential: deploymentModelCredential(deployment),
-			system:          append(append([]string(nil), instructions...), runProgressAcknowledgementSystemInstruction),
+	binding.Host = r.config.Host
+	binding.Session = session
+	binding.Prompt = prompt
+	instructions := hostedAgentInstructions(r.definition)
+	preparerConfig := catalogModelStepPreparerConfig{
+		AgentInstructions: instructions, SkillPrompts: prompts, HostTools: hostTools,
+		ModelCredential: deploymentModelCredential(r.deployment),
+		Capabilities:    r.config.Capabilities,
+		Render:          sessionRenderOptions{Artifacts: r.config.Media.Artifacts, Content: r.config.Media.Content, Actions: r.config.Store},
+	}
+	if script != nil {
+		preparerConfig.RoutineScript = script.Section().Text
+	}
+	if r.config.Media.ImageInput != nil {
+		preparerConfig.ImageInput = r.config.Media.ImageInput(ctx, StepInput{Run: r.run, Session: session, Binding: binding}, ModelStepRequest{
+			Scope: r.run.Scope, RunID: r.run.ID, AgentID: r.deployment.ID,
+			DefinitionID: binding.DefinitionID, DefinitionVersion: binding.DefinitionVersion,
+			ModelCredential: preparerConfig.ModelCredential, Model: binding.Model,
+		})
+	}
+	preparer := newCatalogModelStepPreparer(preparerConfig)
+	producer, err := NewModelStepProducer(r.config.Host, preparer, r.config.Store)
+	if err != nil {
+		return nil, err
+	}
+	producer.Media = r.config.Media
+	binding.Producer = producer
+	binding.Compactor = &LoopCompactor{
+		Host: r.config.Host, Sessions: r.config.Store, Requests: preparer,
+		Budget: newRunActivityCompactionBudget(NewRunActivityService(r.config.Store, r.config.Store), r.config.Now),
+		Now:    r.config.Now,
+	}
+	binding.Preparers = []StepPreparer{newRunStartPreparer(r.config.Store, r.config.Store)}
+	binding.Tools = r.config.Tools.ForClaim(LoopToolClaim{
+		Workspace: chat, SkillPrompts: prompts, CapabilityConfig: r.config.Capabilities, CommandPins: script.CommandPins(),
+	})
+	binding.ProgressAcknowledgementRenderer = &modelStepProgressAcknowledgementRenderer{
+		host: r.config.Host, agentID: r.deployment.ID,
+		definitionID: binding.DefinitionID, definitionVersion: binding.DefinitionVersion,
+		modelCredential: preparerConfig.ModelCredential,
+		system:          append(append(append([]string(nil), instructions...), prompt.AgentInstructions...), runProgressAcknowledgementSystemInstruction),
+	}
+	return binding, nil
+}
+
+// deterministic completes binding for a deterministic producer: a run-owned
+// session that holds only its tool and note entries (A3), no model control
+// tools, and the tool executor without host tools.
+func (r *loopBindingResolution) deterministic(ctx context.Context, binding *TurnRunnerBinding) (*TurnRunnerBinding, error) {
+	session, err := r.session(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	binding.Authority, err = ResolveControlAuthority(ctx, ControlAuthorityInput{Run: r.run, DeploymentID: r.deployment.ID, Deterministic: true})
+	if err != nil {
+		return nil, err
+	}
+	binding.Host = r.config.Host
+	binding.Session = session
+	binding.Tools = r.config.Tools.ForClaim(LoopToolClaim{CapabilityConfig: r.config.Capabilities})
+	return binding, nil
+}
+
+// claimed reports whether the Run being resolved is a live claim. A
+// resolution outside a claim (a progress acknowledgement's synthetic Run)
+// writes nothing: no session is created and no Workspace prepared.
+func (r *loopBindingResolution) claimed() bool {
+	return r.run.Status == AgentRunStatusRunning && strings.TrimSpace(r.run.LeaseOwner) != ""
+}
+
+// session is the session the Run writes to. A Run bound to one (its
+// conversation lane, or a same-Agent child created with its session) keeps
+// it. Any other Run gets its parentless run session at its first claim (A3):
+// a model Run's is seeded with its brief, a deterministic Run's stays empty.
+func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*AgentSession, error) {
+	run := r.run
+	if run.SessionID != "" {
+		return conversationRunSession(ctx, r.config.Store, run)
+	}
+	if !r.claimed() {
+		return nil, nil
+	}
+	var initial []*SessionEntry
+	if seeded {
+		seed, err := loopRunSessionSeed(run)
+		if err != nil {
+			return nil, err
+		}
+		if seed != nil {
+			initial = []*SessionEntry{seed}
 		}
 	}
-	if acceptedRequestExecution {
-		base.Runner = &acceptedAgentRequestExecutionTurnRunner{inner: runner}
+	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	threadRootID, _ := run.Context["threadRootMessageId"].(string)
+	now := r.now()
+	opened, err := r.config.Store.CreateRunAgentSession(ctx, CreateRunAgentSessionRequest{
+		Scope: run.Scope, OwnerRunID: run.ID, AgentID: r.deployment.ID,
+		ConversationID: strings.TrimSpace(conversationID), ThreadRootID: strings.TrimSpace(threadRootID),
+		Lease:          AgentRunLeaseGuard{WorkerID: run.LeaseOwner, Now: now},
+		InitialEntries: initial, Now: now,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create run session: %w", err)
 	}
-	return &base, nil
+	return opened.Session, nil
+}
+
+// loopRunSessionSeed is the first entry of a model Run's fresh run session:
+// a control-tool child's brief (task, fork branch, decision, review,
+// delegation), otherwise the Run's goal as a routine brief. nil when the Run
+// has no goal.
+func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
+	seed, err := controlChildSeed(run)
+	if err != nil || seed != nil {
+		return seed, err
+	}
+	if strings.TrimSpace(run.Goal) == "" {
+		return nil, nil
+	}
+	return childSessionSeed(run.Scope, run.ID, "routine", run.Goal)
+}
+
+// workspace is the claim's chat Workspace, nil outside a claim, without a
+// resolver or when the Run works in no chat. A resolver error runs the claim
+// without host tools.
+func (r *loopBindingResolution) workspace(ctx context.Context) *workspace.Authority {
+	if !r.claimed() {
+		return nil
+	}
+	authority, err := prepareChatWorkspace(ctx, r.config.ChatWorkspaces, r.run)
+	if err != nil {
+		if r.config.Logger != nil {
+			r.config.Logger.Warnw("chat workspace is unavailable; the claim runs without host tools", "runId", r.run.ID, "error", err)
+		}
+		return nil
+	}
+	return authority
 }
 
 const authorizedSkillCatalogIDsContextKey = "authorizedSkillCatalogIds"
@@ -651,10 +800,12 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 		promptKey := activated.SkillID + "@" + activated.SkillVersion
 		if activated.Prompt != nil && strings.TrimSpace(activated.Prompt.Instructions) != "" && !promptSeen[promptKey] {
 			promptSeen[promptKey] = true
-			prompts = append(prompts, HostedSkillPrompt{
+			prompt := HostedSkillPrompt{
 				SkillID: activated.SkillID, Version: activated.SkillVersion, BindingID: activated.BindingID, BindingRevision: activated.BindingRevision,
 				Name: activated.Name, Description: activated.Description, Instructions: activated.Prompt.Instructions,
-			})
+			}
+			prompt.Reference = skillPromptReference(prompt)
+			prompts = append(prompts, prompt)
 		}
 		if activated.Prompt != nil && strings.TrimSpace(activated.Prompt.Instructions) != "" {
 			refs = append(refs, fmt.Sprintf("skill:%s@%s#binding:%s@%d", activated.SkillID, activated.SkillVersion, activated.BindingID, activated.BindingRevision))
@@ -685,6 +836,16 @@ func projectActivatedSkills(activation *skill.ActivationSnapshot) ([]HostedSkill
 		exposed[action.Name] = action.BindingID
 	}
 	return prompts, actions, prepared, refs, nil
+}
+
+// skillPromptReference is the appliedSkillRefs handle of a Skill prompt:
+// skill:<id>@<version>, plus #binding:<id>@<revision> for a bound prompt.
+func skillPromptReference(prompt HostedSkillPrompt) string {
+	reference := "skill:" + strings.TrimSpace(prompt.SkillID) + "@" + strings.TrimSpace(prompt.Version)
+	if strings.TrimSpace(prompt.BindingID) != "" && prompt.BindingRevision > 0 {
+		reference += fmt.Sprintf("#binding:%s@%d", strings.TrimSpace(prompt.BindingID), prompt.BindingRevision)
+	}
+	return reference
 }
 
 func catalogRunbookEntrypoint(definition *kernelagent.AgentDefinition, run *AgentRun) string {

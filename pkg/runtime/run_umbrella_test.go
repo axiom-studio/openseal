@@ -80,8 +80,7 @@ func newUmbrellaFixture(t *testing.T) (*umbrellaCatalog, Scope) {
 
 func umbrellaRunActions(t *testing.T, catalog *umbrellaCatalog, run *AgentRun) []string {
 	t.Helper()
-	host := &recordingTurnHost{response: &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted}}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{}))
 	if err != nil {
 		t.Fatal(err)
 	}

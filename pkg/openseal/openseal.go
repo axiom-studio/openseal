@@ -683,7 +683,7 @@ type (
 	TurnRunnerResolver                   = runtime.TurnRunnerResolver
 	TurnRunnerResolverFunc               = runtime.TurnRunnerResolverFunc
 	AgentTurnCatalog                     = runtime.AgentTurnCatalog
-	CatalogTurnResolverConfig            = runtime.CatalogTurnResolverConfig
+	LoopBindingConfig                    = runtime.LoopBindingConfig
 	SkillHostCapabilityResolver          = runtime.SkillHostCapabilityResolver
 	SkillHostCapabilityResolverFunc      = runtime.SkillHostCapabilityResolverFunc
 	WorkerScopeSource                    = runtime.WorkerScopeSource
@@ -1611,7 +1611,7 @@ var (
 	NewCapabilityInvocationStepProducer    = runtime.NewCapabilityInvocationStepProducer
 	NewOutreachStepProducer                = runtime.NewOutreachStepProducer
 	NewOutreachActionProposalObserver      = runtime.NewOutreachActionProposalObserver
-	ResolveCatalogTurnRunner               = runtime.ResolveCatalogTurnRunner
+	ResolveLoopBinding                     = runtime.ResolveLoopBinding
 	NewArtifactRetentionService            = runtime.NewArtifactRetentionService
 	ErrInvalidConversationTask             = runtime.ErrInvalidConversationTask
 	ErrConversationTaskNotFound            = runtime.ErrConversationTaskNotFound
