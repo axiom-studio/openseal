@@ -9,12 +9,43 @@ import (
 )
 
 type (
-	AgentBuilderHost  = runtime.AgentBuilderHost
-	AgentModelRequest = runtime.AgentModelRequest
-	AgentCreated      = runtime.AgentCreated
+	AgentBuilderHost               = runtime.AgentBuilderHost
+	AgentModelRequest              = runtime.AgentModelRequest
+	AgentCreated                   = runtime.AgentCreated
+	AgentBuilderDraft              = runtime.AgentBuilderDraft
+	AgentBuilderDraftStatus        = runtime.AgentBuilderDraftStatus
+	AgentBuilderDraftFilter        = runtime.AgentBuilderDraftFilter
+	AgentBuilderApprovalAuthorizer = runtime.AgentBuilderApprovalAuthorizer
+	StartAgentBuilderRequest       = runtime.StartAgentBuilderRequest
+	StartAgentBuilderResult        = runtime.StartAgentBuilderResult
 )
 
-const AgentTrialModelContextKey = runtime.AgentTrialModelContextKey
+const (
+	AgentTrialModelContextKey = runtime.AgentTrialModelContextKey
+	AgentBuilderDeploymentID  = runtime.AgentBuilderDeploymentID
+)
+
+var ErrAgentBuilderApprovalForbidden = runtime.ErrAgentBuilderApprovalForbidden
+
+// StartAgentBuilderConversation opens a builder conversation owned by the
+// builder Agent and posts the person's request as its first message, with
+// name and model as builder parameters (never in the text). The conversation
+// scheduler starts the builder's Run. A repeated idempotency key replays.
+func (e *Engine) StartAgentBuilderConversation(ctx context.Context, req StartAgentBuilderRequest) (*StartAgentBuilderResult, error) {
+	if e.conversations == nil {
+		return nil, errors.New("conversation store is not configured")
+	}
+	return runtime.StartAgentBuilderConversation(ctx, e, req)
+}
+
+// ListAgentBuilderDrafts lists the viewer's builder conversations that have
+// not produced their Agent or Team yet, with the drafts rail status (D5).
+func (e *Engine) ListAgentBuilderDrafts(ctx context.Context, filter AgentBuilderDraftFilter) ([]AgentBuilderDraft, error) {
+	if e.conversations == nil {
+		return nil, errors.New("conversation store is not configured")
+	}
+	return runtime.ListAgentBuilderDrafts(ctx, e, filter)
+}
 
 // WithAgentBuilderHost adds the host's model choice and post-creation work to
 // the builder actions (create_agent, update_agent, try_agent). Without it a

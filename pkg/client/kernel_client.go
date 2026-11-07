@@ -782,6 +782,33 @@ func (c *KernelHTTPClient) mutateWorkforceChangeSet(ctx context.Context, id, ope
 	return &result, nil
 }
 
+// StartAgentBuilderConversation opens a builder conversation for the
+// authenticated local operator and posts the request as its first message.
+func (c *KernelHTTPClient) StartAgentBuilderConversation(ctx context.Context, request kernelapi.StartAgentBuilderConversationRequest) (*kernelapi.StartAgentBuilderConversationResponse, error) {
+	var result kernelapi.StartAgentBuilderConversationResponse
+	if err := c.do(ctx, http.MethodPost, "/api/v1/agent-builder/conversations", request, strings.TrimSpace(request.IdempotencyKey), &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// ListAgentBuilderDrafts lists the local operator's builder conversations that
+// have not produced their Agent or Team yet.
+func (c *KernelHTTPClient) ListAgentBuilderDrafts(ctx context.Context, scope runtime.Scope, limit, offset int) (*kernelapi.ListAgentBuilderDraftsResponse, error) {
+	query := scopeQuery(scope)
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		query.Set("offset", strconv.Itoa(offset))
+	}
+	var result kernelapi.ListAgentBuilderDraftsResponse
+	if err := c.do(ctx, http.MethodGet, "/api/v1/agent-builder/drafts?"+query.Encode(), nil, "", &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 func (c *KernelHTTPClient) CreateObjective(ctx context.Context, request kernelapi.CreateObjectiveRequest, idempotencyKey string) (*runtime.Objective, error) {
 	var objective runtime.Objective
 	if err := c.do(ctx, http.MethodPost, "/api/v1/objectives", request, idempotencyKey, &objective); err != nil {

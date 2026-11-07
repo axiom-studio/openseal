@@ -72,6 +72,8 @@ const (
 	SourcePoliciesCapabilityVersion            = source.LifecycleAPIVersion
 	SpacesCapabilityID                         = "spaces"
 	SpacesCapabilityVersion                    = "1"
+	AgentBuilderCapabilityID                   = "agent-builder"
+	AgentBuilderCapabilityVersion              = "1"
 )
 
 const (
@@ -298,6 +300,40 @@ type CapabilityContext struct {
 	BlockingRequirements         []CapabilityBlockingRequirement              `json:"blockingRequirements,omitempty"`
 	ConversationGatewayAdapters  []ConversationGatewayAdapterChoice           `json:"conversationGatewayAdapters,omitempty"`
 	CallbackAdapters             []CallbackAdapterChoice                      `json:"callbackAdapters,omitempty"`
+	// BuilderAgentID is the builder Agent's deployment id (agent-builder
+	// capability): the home box opens a builder chat with it.
+	BuilderAgentID string `json:"builderAgentId,omitempty"`
+}
+
+// AgentBuilderCapability advertises builder conversations with the builder
+// Agent builderAgentID: start one, and list the viewer's drafts.
+func AgentBuilderCapability(builderAgentID string) Capability {
+	return Capability{
+		ID: AgentBuilderCapabilityID, Version: AgentBuilderCapabilityVersion, Available: true,
+		Operations: []string{OperationCreate, OperationList},
+		Context:    &CapabilityContext{BuilderAgentID: builderAgentID},
+	}
+}
+
+// StartAgentBuilderConversationRequest opens a builder conversation. The
+// requester is the authenticated principal, never a body field. Prompt is the
+// request as typed; name and model go only in Parameters.
+type StartAgentBuilderConversationRequest struct {
+	Scope          runtime.Scope                  `json:"scope"`
+	Prompt         string                         `json:"prompt"`
+	Parameters     runtime.AgentBuilderParameters `json:"parameters"`
+	SpaceID        string                         `json:"spaceId,omitempty"`
+	IdempotencyKey string                         `json:"idempotencyKey"`
+}
+
+type StartAgentBuilderConversationResponse struct {
+	Conversation *runtime.Conversation   `json:"conversation"`
+	Message      *runtime.ChannelMessage `json:"message"`
+	Replayed     bool                    `json:"replayed"`
+}
+
+type ListAgentBuilderDraftsResponse struct {
+	Drafts []runtime.AgentBuilderDraft `json:"drafts"`
 }
 
 type ClawHubVersionRequest struct {
