@@ -40,6 +40,11 @@ func (h *recordingCutoverHost) EnsureBuilderAgent(ctx context.Context, scope Sco
 	if h.ensureErr != nil {
 		return h.ensureErr
 	}
+	// Idempotent like the real host: an existing builder is upgraded, here
+	// only recorded.
+	if present, err := h.engine.agentBuilderPresent(ctx, scope); err != nil || present {
+		return err
+	}
 	return createCutoverBuilder(ctx, h.engine, scope)
 }
 
@@ -322,6 +327,56 @@ func TestAgentBuilderCutoverKeepsDraftsUntilTheBuilderCanBeProvisioned(t *testin
 	}
 	if calls := working.recorded(); calls[0] != "ensure:ana" || calls[len(calls)-1] != "after" {
 		t.Fatalf("host calls after recovery = %v", calls)
+	}
+}
+
+func TestAgentBuilderCutoverEnsuresAnExistingBuilderBeforeConverting(t *testing.T) {
+	ctx := context.Background()
+	path := seedCutoverDraftStore(t)
+	host := &recordingCutoverHost{}
+	engine, store := openCutoverEngine(t, path, WithAgentBuilderCutoverHost(host))
+	host.engine = engine
+	// Finn already exists, possibly on bindings without create_agent.
+	if err := createCutoverBuilder(ctx, engine, builderCutoverTestScope); err != nil {
+		t.Fatal(err)
+	}
+
+	startCutoverEngine(t, engine)
+
+	// EnsureBuilderAgent still runs, once for the scope and before any draft
+	// is converted, so the host upgrades Finn before its first builder turn.
+	if calls := host.recorded(); !reflect.DeepEqual(calls, []string{"ensure:ana", "model:key-cs-amend", "model:key-cs-review", "after"}) {
+		t.Fatalf("host calls = %v", calls)
+	}
+	if ids := cutoverDraftIDs(t, store); len(ids) != 0 {
+		t.Fatalf("drafts left = %v", ids)
+	}
+	if conversations := builderCutoverConversations(t, engine); len(conversations) != 2 {
+		t.Fatalf("builder conversations = %d", len(conversations))
+	}
+}
+
+func TestAgentBuilderCutoverKeepsDraftsWhenAnExistingBuilderCannotBeUpgraded(t *testing.T) {
+	ctx := context.Background()
+	path := seedCutoverDraftStore(t)
+	host := &recordingCutoverHost{ensureErr: errors.New("upgrade failed")}
+	engine, store := openCutoverEngine(t, path, WithAgentBuilderCutoverHost(host))
+	host.engine = engine
+	if err := createCutoverBuilder(ctx, engine, builderCutoverTestScope); err != nil {
+		t.Fatal(err)
+	}
+	report, err := engine.AgentBuilderCutover(ctx)
+	if err != nil || report.Kept != 2 || report.Converted != 0 || report.Dropped {
+		t.Fatalf("report = %#v, %v", report, err)
+	}
+	if calls := host.recorded(); !reflect.DeepEqual(calls, []string{"ensure:ana"}) {
+		t.Fatalf("host calls = %v", calls)
+	}
+	if ids := cutoverDraftIDs(t, store); len(ids) != 2 {
+		t.Fatalf("drafts = %v", ids)
+	}
+	if conversations := builderCutoverConversations(t, engine); len(conversations) != 0 {
+		t.Fatalf("builder conversations = %d", len(conversations))
 	}
 }
 

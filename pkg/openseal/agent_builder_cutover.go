@@ -42,8 +42,10 @@ func WithAgentBuilderCutoverHost(host AgentBuilderCutoverHost) Option {
 
 // AgentBuilderCutover turns each change-set draft migration 76 kept into a
 // builder conversation (D12, spec §3.6). Engine.Start is its only caller.
-// Per draft: the builder is provisioned through the cutover host when it is
-// missing, the draft's billing model is read, the conversation is started
+// Per draft: the cutover host makes the builder exist and be builder-ready
+// first (once per scope and pass, even when the builder already exists, so
+// an existing Finn is upgraded to the create/update/try agent actions
+// before its first builder turn), the draft's billing model is read, the conversation is started
 // with the typed request as content and name, model and drafted profile as
 // builder parameters (D7), and the draft is deleted. A draft that cannot be
 // converted is kept for the next start, never dropped. Once no draft is
@@ -72,8 +74,11 @@ func (e *Engine) AgentBuilderCutover(ctx context.Context) (AgentBuilderCutoverRe
 		}
 		return report, nil
 	}
+	// One EnsureBuilderAgent per scope and pass; its error keeps every draft
+	// of that scope.
+	ensured := map[Scope]error{}
 	for _, draft := range drafts {
-		if err := e.convertAgentBuilderCutoverDraft(ctx, host, draft); err != nil {
+		if err := e.convertAgentBuilderCutoverDraft(ctx, host, draft, ensured); err != nil {
 			report.Kept++
 			e.logCutoverWarning("agent builder cutover: draft kept", "scopeKind", draft.Scope.Kind, "scopeId", draft.Scope.ID, "draft", draft.ID, "error", err)
 			continue
@@ -102,7 +107,7 @@ func (e *Engine) AgentBuilderCutover(ctx context.Context) (AgentBuilderCutoverRe
 	return report, nil
 }
 
-func (e *Engine) convertAgentBuilderCutoverDraft(ctx context.Context, host AgentBuilderCutoverHost, draft AgentBuilderCutoverDraft) error {
+func (e *Engine) convertAgentBuilderCutoverDraft(ctx context.Context, host AgentBuilderCutoverHost, draft AgentBuilderCutoverDraft, ensured map[Scope]error) error {
 	if !draft.Readable {
 		return errors.New("the draft payload is unreadable")
 	}
@@ -110,19 +115,23 @@ func (e *Engine) convertAgentBuilderCutoverDraft(ctx context.Context, host Agent
 	if actor == "" {
 		return errors.New("the draft has no actor")
 	}
+	// Always ensure, not only when the builder is missing: an existing Finn
+	// may still hold bindings without create_agent, and the workers start
+	// right after the cutover, before any later reconcile upgrades it.
+	ensureErr, done := ensured[draft.Scope]
+	if !done {
+		ensureErr = host.EnsureBuilderAgent(ctx, draft.Scope, actor)
+		ensured[draft.Scope] = ensureErr
+	}
+	if ensureErr != nil {
+		return fmt.Errorf("ensure builder agent: %w", ensureErr)
+	}
 	present, err := e.agentBuilderPresent(ctx, draft.Scope)
 	if err != nil {
 		return err
 	}
 	if !present {
-		if err := host.EnsureBuilderAgent(ctx, draft.Scope, actor); err != nil {
-			return fmt.Errorf("ensure builder agent: %w", err)
-		}
-		if present, err = e.agentBuilderPresent(ctx, draft.Scope); err != nil {
-			return err
-		} else if !present {
-			return errors.New("the builder agent is still missing after EnsureBuilderAgent")
-		}
+		return errors.New("the builder agent is still missing after EnsureBuilderAgent")
 	}
 	// Read before AfterAgentBuilderCutover lets the host delete its rows.
 	model, err := host.DraftModel(ctx, draft.Scope, draft.IdempotencyKey)
