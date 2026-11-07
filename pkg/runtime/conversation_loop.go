@@ -323,13 +323,15 @@ func (l *conversationLoop) inheritedRuns(ctx context.Context, session *AgentSess
 func (l *conversationLoop) runStarted(ctx context.Context, run *AgentRun, session *AgentSession) (bool, error) {
 	var through int64 // 0: the whole session
 	for current := session; ; {
-		// Oldest first; the one task_promoted note of run is skipped.
-		entries, err := l.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: run.Scope, SessionID: current.ID, RunID: run.ID, Limit: 2})
+		// Oldest first. The promotion writes at most two entries of run that
+		// are not its own work: the lane's task_promoted note and the child's
+		// goal seed; both are skipped.
+		entries, err := l.sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: run.Scope, SessionID: current.ID, RunID: run.ID, Limit: 3})
 		if err != nil {
 			return false, err
 		}
 		for _, entry := range entries {
-			if entry == nil || entry.Type == SessionEntryNote && entry.Note != nil && entry.Note.Kind == NoteTaskPromoted {
+			if entry == nil || promotionEntryOf(run, entry) {
 				continue
 			}
 			if through == 0 || entry.Sequence <= through {
@@ -345,6 +347,19 @@ func (l *conversationLoop) runStarted(ctx context.Context, run *AgentRun, sessio
 			return false, err
 		}
 	}
+}
+
+// promotionEntryOf reports whether entry was written for run by its task
+// promotion rather than by the Run itself: the lane's task_promoted note or
+// the goal seed of a child of an empty lane.
+func promotionEntryOf(run *AgentRun, entry *SessionEntry) bool {
+	switch entry.Type {
+	case SessionEntryNote:
+		return entry.Note != nil && entry.Note.Kind == NoteTaskPromoted
+	case SessionEntryUser:
+		return entry.User != nil && entry.User.Origin == UserEntryGoal && entry.SourceKey == GoalSourceKey(run.ID)
+	}
+	return false
 }
 
 // startRun is §13 StartRun: the trigger as the Agent sees it, participation,

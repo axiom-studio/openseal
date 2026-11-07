@@ -802,6 +802,45 @@ func TestPromotedBeforeFirstStepRendersTriggerAndRunContext(t *testing.T) {
 	}
 }
 
+// A Run promoted on an empty lane gets a seeded child (only its task brief);
+// its goal seed is not a sign it started, so StartRun still renders the
+// trigger and the run_context note after the brief (§3.3, §4.5).
+func TestPromotedBeforeFirstStepOnEmptyLaneSeedsTriggerAndRunContext(t *testing.T) {
+	for _, when := range []string{"after-bind", "before-bind"} {
+		t.Run(when, func(t *testing.T) {
+			forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
+				trigger := f.post("trigger", "user-1", "Research the venues in depth.")
+				run := f.startRun(trigger)
+				var binding *TurnRunnerBinding
+				producer := &chatLoopProducer{answers: []string{"Venues: A, B."}}
+				if when == "after-bind" {
+					binding = f.bind(run, producer)
+					f.promote(run)
+				} else {
+					f.promote(run)
+					binding = f.bind(f.run(run.ID), producer)
+				}
+				f.drive(run, binding)
+				if len(producer.paths) == 0 {
+					t.Fatal("the promoted Run made no model step")
+				}
+				child := f.run(run.ID).SessionID
+				if child != RunAgentSessionID(run.Scope, run.ID) {
+					t.Fatalf("run session %q", child)
+				}
+				path := producer.paths[0]
+				chatLoopExpectShape(t, path, "user:", "user:"+trigger.ID, "note:run_context:"+run.ID)
+				if seed := path[0]; seed.User.Origin != UserEntryGoal || !strings.Contains(chatLoopEntryText(seed), "<brief>") {
+					t.Fatalf("first entry is not the task brief: %#v", seed)
+				}
+				if note := path[2]; note.SessionID != child || !strings.Contains(chatLoopEntryText(note), trigger.ID) {
+					t.Fatalf("run_context note %q %q", note.SessionID, chatLoopEntryText(note))
+				}
+			})
+		})
+	}
+}
+
 func TestRunPromotedMidFlightCountsAsStartedInChild(t *testing.T) {
 	forChatLoopStores(t, chatLoopOptions{}, func(t *testing.T, f *chatLoopFixture) {
 		trigger := f.post("trigger", "user-1", "Compile the quarterly numbers.")
