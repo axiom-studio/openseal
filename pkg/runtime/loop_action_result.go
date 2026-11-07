@@ -38,6 +38,11 @@ type GovernedToolOutcome struct {
 	// BudgetExhausted reports that the call was denied because the Run's
 	// action budget is used up; the loop takes its budget exit.
 	BudgetExhausted bool
+	// Run is the latest Run after the call wrote it (budget reservation,
+	// settled budget, human intervention request, held supersede); nil when
+	// the Run row did not change. The caller replaces its Run with it before
+	// its next revision-fenced write.
+	Run *AgentRun
 }
 
 // GovernedPark is the park a governed tool entry asks for. The kernel tool
