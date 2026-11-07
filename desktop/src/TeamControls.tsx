@@ -6,7 +6,6 @@ import {
   scoped,
   supports,
   type Capabilities,
-  type Proposal,
 } from "./api";
 import type { Team } from "./TeamBrowser";
 
@@ -40,12 +39,10 @@ export default function TeamControls({
   team,
   capabilities,
   onChange,
-  onOpenProposal,
 }: {
   team: Team;
   capabilities: Capabilities | null;
   onChange: (team: Team) => void;
-  onOpenProposal: (proposal: Proposal) => void;
 }) {
   const { deployment } = team;
   const [intent, setIntent] = useState<{
@@ -92,9 +89,8 @@ export default function TeamControls({
     deployment.scope?.kind === "local" &&
     deployment.scope.id === "default";
   const canHistory = supports(capabilities, "team-definitions", "list");
-  const allowed: Operation[] = deployment.activation
-    ? []
-    : deployment.status === "active"
+  const allowed: Operation[] =
+    deployment.status === "active"
       ? ["pause", "archive"]
       : deployment.status === "paused"
         ? ["resume", "archive"]
@@ -244,46 +240,9 @@ export default function TeamControls({
       if (alive.current) setBusy(false);
     }
   }
-  async function reviewActivation() {
-    if (lock.current || !deployment.activation) return;
-    lock.current = true;
-    setBusy(true);
-    try {
-      const id = deployment.activation.changeSetId;
-      const proposal = await api<Proposal>(
-        scoped(`/authoring/workforce/change-sets/${encodeURIComponent(id)}`),
-      );
-      if (!alive.current) return;
-      if (proposal.id !== id)
-        throw new Error("The installation proposal did not match this team.");
-      onOpenProposal(proposal);
-    } catch (error) {
-      if (alive.current)
-        report(`Could not open activation review. ${message(error)}`, true);
-    } finally {
-      lock.current = false;
-      if (alive.current) setBusy(false);
-    }
-  }
   return (
     <div className="team-controls">
-      {deployment.activation ? (
-        <>
-          <p className="inline-help">
-            This team belongs to an inactive installation. Review activation for
-            the team and its agents together.
-          </p>
-          {supports(capabilities, "workforce-authoring", "get") && (
-            <button
-              className="button"
-              disabled={busy}
-              onClick={() => void reviewActivation()}
-            >
-              Review team activation
-            </button>
-          )}
-        </>
-      ) : canUpdate && allowed.length > 0 ? (
+      {canUpdate && allowed.length > 0 ? (
         <>
           <div className="inspector-actions">
             {!intent &&

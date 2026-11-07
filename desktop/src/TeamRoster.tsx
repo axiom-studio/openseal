@@ -147,7 +147,6 @@ export default function TeamRoster({
     team.deployment.scope?.kind === "local" &&
     team.deployment.scope.id === "default" &&
     !!team.deployment.definitionId &&
-    !team.deployment.activation &&
     team.deployment.status !== "archived";
   useEffect(() => {
     alive.current = true;

@@ -6,7 +6,6 @@ import {
   scoped,
   type Agent,
   type Capabilities,
-  type Proposal,
   type Run,
   type RunInspection,
 } from "./api";
@@ -23,7 +22,6 @@ export type Team = {
     revision: number;
     definitionId?: string;
     scope?: { kind: string; id: string };
-    activation?: { changeSetId: string };
     roster: {
       id: string;
       roleId: string;
@@ -53,7 +51,6 @@ export default function TeamBrowser({
   agents,
   onOpenAgent,
   capabilities,
-  onOpenProposal,
   onOpenRun,
 }: {
   available: boolean;
@@ -61,7 +58,6 @@ export default function TeamBrowser({
   agents: Agent[];
   onOpenAgent: (agent: Agent) => void;
   capabilities: Capabilities | null;
-  onOpenProposal: (proposal: Proposal) => void;
   onOpenRun: (run: Run, detail?: RunInspection) => void;
 }) {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -289,7 +285,6 @@ export default function TeamBrowser({
                     key={`controls:${deployment.id}`}
                     team={{ deployment, definition }}
                     capabilities={capabilities}
-                    onOpenProposal={onOpenProposal}
                     onChange={(next) =>
                       setTeams((current) =>
                         current.map((item) =>

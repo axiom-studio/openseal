@@ -29,7 +29,6 @@ async function setup(page: Page, get: () => typeof initial, update = true) {
             available: true,
             operations: update ? ["list", "get", "update"] : ["list"],
           },
-          { id: "workforce-authoring", available: true, operations: ["get"] },
         ],
       },
     }),
@@ -211,53 +210,6 @@ test("lost update response checks saved status without replay and read-only team
   ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Archive team", exact: true }),
-  ).toHaveCount(0);
-});
-
-test("inactive team uses its saved proposal and a late lookup cannot navigate away from another page", async ({
-  page,
-}) => {
-  const current = {
-    ...structuredClone(initial),
-    deployment: {
-      ...initial.deployment,
-      status: "draft",
-      activation: { changeSetId: "original-team" },
-    },
-  };
-  let release!: () => void;
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  let started = false;
-  await page.route(
-    "**/api/v1/authoring/workforce/change-sets/original-team?*",
-    async (route) => {
-      started = true;
-      await held;
-      await route.fulfill({
-        json: {
-          id: "original-team",
-          prompt: "Original team",
-          revision: 1,
-          status: "applied",
-        },
-      });
-    },
-  );
-  await setup(page, () => current);
-  await expect(
-    page.getByRole("button", { name: "Resume team", exact: true }),
-  ).toHaveCount(0);
-  await page.getByRole("button", { name: "Review team activation" }).click();
-  await expect.poll(() => started).toBe(true);
-  await page.keyboard.press("Control+2");
-  release();
-  await expect(
-    page.getByRole("heading", { name: "Agents", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Agent proposal", exact: true }),
   ).toHaveCount(0);
 });
 
