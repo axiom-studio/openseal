@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,6 +67,11 @@ type PostChannelMessageRequest struct {
 	RequiresResponse    bool
 	ResolvesMessageID   string
 	SupersedesMessageID string
+	// Question lists the options of an Agent's question (ask_user).
+	Question *ChannelQuestion
+	// SelectedOptionIDs are the options a reply picked from the question it
+	// resolves (or replies to).
+	SelectedOptionIDs []string
 	// RoutingReason is set by a routed Team member's answer.
 	RoutingReason  string
 	IdempotencyKey string
@@ -420,6 +426,9 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 			}
 		}
 	}
+	if err := s.validateSelectedOptions(ctx, req); err != nil {
+		return nil, err
+	}
 	now := s.now().UTC()
 	id := strings.TrimSpace(req.ID)
 	if id == "" {
@@ -432,6 +441,7 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 		ExternalSource: cloneExternalMessageSource(req.ExternalSource),
 		Intent:         req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
 		StartsThread: req.StartThread, ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), Quote: quote, BroadcastToChannel: req.BroadcastToChannel,
+		Question: cloneChannelQuestion(req.Question), SelectedOptionIDs: selectedOptionIDs(req.SelectedOptionIDs),
 		Mentions:   cloneParticipants(req.Mentions),
 		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
 		ResolvesMessageID: strings.TrimSpace(req.ResolvesMessageID), SupersedesMessageID: strings.TrimSpace(req.SupersedesMessageID),
@@ -454,6 +464,47 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	updated.Revision++
 	updated.UpdatedAt = now
 	return s.store.CommitChannelMessage(ctx, ChannelMessageCommitRecord{Conversation: updated, ExpectedRevision: conversation.Revision, Message: message, RunGuard: req.RunGuard})
+}
+
+func selectedOptionIDs(in []string) []string {
+	var out []string
+	for _, id := range in {
+		out = append(out, strings.TrimSpace(id))
+	}
+	return out
+}
+
+// validateSelectedOptions checks a reply's chosen options against the question
+// it resolves (or replies to): every id is one of its options, and at most one
+// unless it allows several. A reply that picks nothing is free text.
+func (s *ConversationService) validateSelectedOptions(ctx context.Context, req PostChannelMessageRequest) error {
+	ids := selectedOptionIDs(req.SelectedOptionIDs)
+	if len(ids) == 0 {
+		return nil
+	}
+	target := strings.TrimSpace(req.ResolvesMessageID)
+	if target == "" {
+		target = strings.TrimSpace(req.ReplyToMessageID)
+	}
+	if target == "" {
+		return fmt.Errorf("%w: selected options must answer a question", ErrInvalidConversation)
+	}
+	question, err := s.store.GetChannelMessage(ctx, req.Scope, req.ConversationID, target)
+	if err != nil {
+		return err
+	}
+	if question == nil || question.Question == nil {
+		return fmt.Errorf("%w: selected options answer a message that offers none", ErrInvalidConversation)
+	}
+	for _, id := range ids {
+		if !question.Question.hasOption(id) {
+			return fmt.Errorf("%w: %q is not an option of that question", ErrInvalidConversation, id)
+		}
+	}
+	if len(ids) > 1 && !question.Question.AllowMultiple {
+		return fmt.Errorf("%w: that question takes one option", ErrInvalidConversation)
+	}
+	return nil
 }
 
 // CommitConversationRouting durably records a routing decision. It posts no
@@ -969,6 +1020,7 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 		existing.StartsThread == req.StartThread && existing.BroadcastToChannel == req.BroadcastToChannel &&
 		reflect.DeepEqual(existing.Mentions, req.Mentions) && reflect.DeepEqual(existing.References, req.References) &&
 		existing.RoutingReason == strings.TrimSpace(req.RoutingReason) &&
+		reflect.DeepEqual(existing.Question, req.Question) && slices.Equal(existing.SelectedOptionIDs, selectedOptionIDs(req.SelectedOptionIDs)) &&
 		existing.RequiresResponse == req.RequiresResponse && existing.ResolvesMessageID == strings.TrimSpace(req.ResolvesMessageID) &&
 		existing.SupersedesMessageID == strings.TrimSpace(req.SupersedesMessageID)
 }
@@ -1017,6 +1069,11 @@ func cloneChannelMessage(in *ChannelMessage) *ChannelMessage {
 	out.Mentions = cloneParticipants(in.Mentions)
 	out.References = cloneConversationReferences(in.References)
 	out.Quote = cloneChannelMessageQuote(in.Quote)
+	out.Question = cloneChannelQuestion(in.Question)
+	out.SelectedOptionIDs = append([]string(nil), in.SelectedOptionIDs...)
+	if len(out.SelectedOptionIDs) == 0 {
+		out.SelectedOptionIDs = nil
+	}
 	out.Reactions = cloneMessageReactions(in.Reactions)
 	return &out
 }

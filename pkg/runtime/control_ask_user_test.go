@@ -39,6 +39,13 @@ func askUserSessions(t *testing.T, store askUserTestStore) AgentSessionStore {
 // newAskUserCall records an ask_user call on claimed, a Run leased by worker.
 func newAskUserCall(t *testing.T, store askUserTestStore, claimed *AgentRun, worker, question string) *askUserCall {
 	t.Helper()
+	arguments, _ := json.Marshal(map[string]string{"question": question})
+	return newAskUserCallWithArguments(t, store, claimed, worker, arguments)
+}
+
+// newAskUserCallWithArguments records an ask_user call with raw arguments.
+func newAskUserCallWithArguments(t *testing.T, store askUserTestStore, claimed *AgentRun, worker string, arguments json.RawMessage) *askUserCall {
+	t.Helper()
 	ctx := t.Context()
 	now := time.Now().UTC()
 	sessions := askUserSessions(t, store)
@@ -58,7 +65,6 @@ func newAskUserCall(t *testing.T, store askUserTestStore, claimed *AgentRun, wor
 	sequence := claimed.LastAppliedTurn + 1
 	stepID := fmt.Sprintf("%s-step-%d", claimed.ID, sequence)
 	callID := fmt.Sprintf("call-%d", sequence)
-	arguments, _ := json.Marshal(map[string]string{"question": question})
 	assistant := &SessionEntry{
 		ID: SessionEntryID(session.ID, AssistantEntryKey(stepID)), RunID: claimed.ID, StepID: stepID, Step: sequence,
 		Type: SessionEntryAssistant, Assistant: &AssistantEntry{

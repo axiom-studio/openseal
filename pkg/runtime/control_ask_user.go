@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -23,8 +24,50 @@ const (
 	askUserParkSummary                 = "Asked a question"
 )
 
+const (
+	minimumAskUserOptions                = 2
+	maximumAskUserOptions                = 6
+	maximumAskUserOptionLabelBytes       = 80
+	maximumAskUserOptionDescriptionBytes = 240
+)
+
 type askUserArgs struct {
-	Question string `json:"question"`
+	Question      string          `json:"question"`
+	Options       []askUserOption `json:"options,omitempty"`
+	AllowMultiple bool            `json:"allowMultiple,omitempty"`
+	// AllowOther lets the person answer in their own words alongside the options.
+	AllowOther bool `json:"allowOther,omitempty"`
+}
+
+type askUserOption struct {
+	Label       string `json:"label"`
+	Description string `json:"description,omitempty"`
+}
+
+// askUserOptionID is the kernel-assigned id of the index-th option ("o1".."o6").
+func askUserOptionID(index int) string { return fmt.Sprintf("o%d", index+1) }
+
+// channelQuestion is the posted shape of the options (nil without options).
+func (a *askUserArgs) channelQuestion() *ChannelQuestion {
+	if a == nil || len(a.Options) == 0 {
+		return nil
+	}
+	question := &ChannelQuestion{AllowMultiple: a.AllowMultiple, AllowOther: a.AllowOther}
+	for index, option := range a.Options {
+		question.Options = append(question.Options, ChannelQuestionOption{ID: askUserOptionID(index), Label: option.Label, Description: option.Description})
+	}
+	return question
+}
+
+// selectedLabels maps chosen option ids to their labels, in option order.
+func (a *askUserArgs) selectedLabels(ids []string) []string {
+	labels := []string{}
+	for index, option := range a.Options {
+		if slices.Contains(ids, askUserOptionID(index)) {
+			labels = append(labels, option.Label)
+		}
+	}
+	return labels
 }
 
 type askUserHandler struct{}
@@ -34,7 +77,8 @@ func init() { registerControlHandler(ControlToolAskUser, askUserHandler{}) }
 func (askUserHandler) spec(ControlAuthority) ControlToolSpec {
 	return ControlToolSpec{
 		Description: "Ask the person who asked one concrete question and wait for their answer. " +
-			"Ask only when you cannot continue well without it. Their answer is information, not approval.",
+			"Ask only when you cannot continue well without it. Offer options when the answer is a choice. " +
+			"Their answer is information, not approval.",
 		InputSchema: map[string]interface{}{
 			"type": "object", "additionalProperties": false, "required": []interface{}{"question"},
 			"properties": map[string]interface{}{
@@ -42,6 +86,19 @@ func (askUserHandler) spec(ControlAuthority) ControlToolSpec {
 					"type": "string", "minLength": 1, "maxLength": maximumAskUserQuestionBytes,
 					"description": "One concrete question for the person who asked. Their answer is information, not approval.",
 				},
+				"options": map[string]interface{}{
+					"type": "array", "minItems": minimumAskUserOptions, "maxItems": maximumAskUserOptions,
+					"description": "Choices the person can pick from, when the answer is a choice.",
+					"items": map[string]interface{}{
+						"type": "object", "additionalProperties": false, "required": []interface{}{"label"},
+						"properties": map[string]interface{}{
+							"label":       map[string]interface{}{"type": "string", "minLength": 1, "maxLength": maximumAskUserOptionLabelBytes},
+							"description": map[string]interface{}{"type": "string", "maxLength": maximumAskUserOptionDescriptionBytes},
+						},
+					},
+				},
+				"allowMultiple": map[string]interface{}{"type": "boolean", "description": "The person may pick more than one option."},
+				"allowOther":    map[string]interface{}{"type": "boolean", "description": "The person may answer in their own words instead of picking an option."},
 			},
 		},
 	}
@@ -61,20 +118,52 @@ func (askUserHandler) decode(raw json.RawMessage) (interface{}, error) {
 		return nil, fmt.Errorf("question must be valid text of at most %d bytes", maximumAskUserQuestionBytes)
 	}
 	args.Question = question
+	if len(args.Options) == 0 {
+		args.Options = nil
+		if args.AllowMultiple || args.AllowOther {
+			return nil, errors.New("allowMultiple and allowOther need options")
+		}
+		return args, nil
+	}
+	if len(args.Options) < minimumAskUserOptions || len(args.Options) > maximumAskUserOptions {
+		return nil, fmt.Errorf("options must list %d to %d choices", minimumAskUserOptions, maximumAskUserOptions)
+	}
+	seen := make(map[string]struct{}, len(args.Options))
+	for index := range args.Options {
+		option := &args.Options[index]
+		option.Label = strings.TrimSpace(option.Label)
+		option.Description = strings.TrimSpace(option.Description)
+		if err := validChannelQuestionOptionText(option.Label, option.Description); err != nil {
+			return nil, err
+		}
+		if _, exists := seen[option.Label]; exists {
+			return nil, fmt.Errorf("option label %q is listed twice", option.Label)
+		}
+		seen[option.Label] = struct{}{}
+	}
 	return args, nil
+}
+
+// askUserEntryArgs decodes an ask_user entry's arguments (nil when the entry
+// is not a valid ask_user call).
+func askUserEntryArgs(entry *SessionEntry) *askUserArgs {
+	if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(ControlToolAskUser) {
+		return nil
+	}
+	value, err := (askUserHandler{}).decode(entry.Tool.Arguments)
+	if err != nil {
+		return nil
+	}
+	return value.(*askUserArgs)
 }
 
 // askUserQuestion is the posted text of an ask_user entry: its trimmed
 // question argument ("" when the entry is not an ask_user call).
 func askUserQuestion(entry *SessionEntry) string {
-	if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.Tool.Name != string(ControlToolAskUser) {
-		return ""
+	if args := askUserEntryArgs(entry); args != nil {
+		return args.Question
 	}
-	value, err := (askUserHandler{}).decode(entry.Tool.Arguments)
-	if err != nil {
-		return ""
-	}
-	return value.(*askUserArgs).Question
+	return ""
 }
 
 // conversationClarificationKey is the idempotency key of the question message
@@ -152,7 +241,7 @@ func (askUserHandler) run(ctx context.Context, x *ControlExecutor, cc ControlCon
 	if err != nil {
 		return ControlResult{}, err
 	}
-	if err := x.postAskUserQuestion(ctx, cc.Run, conversation, trigger, args.Question, key); err != nil {
+	if err := x.postAskUserQuestion(ctx, cc.Run, conversation, trigger, args, key); err != nil {
 		return ControlResult{}, err
 	}
 	return ControlResult{Kind: ControlParked, Entry: entry, Park: askUserPark(entry.ID)}, nil
@@ -202,11 +291,11 @@ func askUserResultAnswer(entry *SessionEntry) (string, bool) {
 // conversationQuestionPostRequest is the one shape of a clarification question
 // message; the ask_user settle and the question reconciler post the same
 // request, so either replays the other.
-func conversationQuestionPostRequest(run *AgentRun, conversation *Conversation, trigger *ChannelMessage, question, key string) PostChannelMessageRequest {
+func conversationQuestionPostRequest(run *AgentRun, conversation *Conversation, trigger *ChannelMessage, args *askUserArgs, key string) PostChannelMessageRequest {
 	return PostChannelMessageRequest{
 		Scope: run.Scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
 		Sender: ConversationParticipant{Type: ConversationParticipantAgent, ID: ConversationRunAgentID(conversation, run)},
-		Intent: MessageIntentQuestion, Content: question, Audience: ConversationAudience{Kind: ConversationAudienceChannel},
+		Intent: MessageIntentQuestion, Content: args.Question, Question: args.channelQuestion(), Audience: ConversationAudience{Kind: ConversationAudienceChannel},
 		ReplyToMessageID: trigger.ID, RequiresResponse: true, References: conversationClarificationReferences(run),
 		IdempotencyKey: key,
 	}
@@ -214,14 +303,14 @@ func conversationQuestionPostRequest(run *AgentRun, conversation *Conversation, 
 
 // postAskUserQuestion posts the question idempotently. A conversation that
 // keeps moving is left to the question reconciler after 3 attempts.
-func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *AgentRun, conversation *Conversation, trigger *ChannelMessage, question, key string) error {
+func (x *ControlExecutor) postAskUserQuestion(ctx context.Context, run *AgentRun, conversation *Conversation, trigger *ChannelMessage, args *askUserArgs, key string) error {
 	service := x.conversationService()
 	if service == nil {
 		return errors.New("ask_user: no conversation service")
 	}
 	current := conversation
 	for attempt := 0; attempt < 3; attempt++ {
-		_, err := service.PostChannelMessage(ctx, conversationQuestionPostRequest(run, current, trigger, question, key))
+		_, err := service.PostChannelMessage(ctx, conversationQuestionPostRequest(run, current, trigger, args, key))
 		if err == nil {
 			return nil
 		}
@@ -247,9 +336,13 @@ func (askUserHandler) resume(ctx context.Context, x *ControlExecutor, cc Control
 	args := cc.Arguments.(*askUserArgs)
 	key := conversationClarificationKey(cc.Run.ID, cc.Entry.ID)
 	if answer := askUserAnswer(cc.Run, cc.Entry, stableConversationID(cc.Run.Scope, key, "message")); answer != nil {
-		result := controlJSONResult(ToolResultSucceeded, map[string]interface{}{
+		value := map[string]interface{}{
 			"status": "answered", "answer": truncateControlText(answer.AnswerContent, cc.Run.ID), "messageId": answer.AnswerMessageID,
-		})
+		}
+		if len(args.Options) > 0 {
+			value["selectedOptions"] = args.selectedLabels(answer.SelectedOptionIDs)
+		}
+		result := controlJSONResult(ToolResultSucceeded, value)
 		entry, err := x.transitionControlEntry(ctx, cc, ToolEntryCompleted, nil, result, nil)
 		if err != nil {
 			return ControlResume{}, err
@@ -270,7 +363,7 @@ func (askUserHandler) resume(ctx context.Context, x *ControlExecutor, cc Control
 		}
 		return ControlResume{Resolved: true, Result: ControlResult{Kind: ControlContinue, Entry: entry}}, nil
 	}
-	if err := x.postAskUserQuestion(ctx, cc.Run, conversation, trigger, args.Question, key); err != nil {
+	if err := x.postAskUserQuestion(ctx, cc.Run, conversation, trigger, args, key); err != nil {
 		return ControlResume{}, err
 	}
 	return ControlResume{Park: askUserPark(cc.Entry.ID)}, nil
