@@ -110,12 +110,12 @@ func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *
 	policy := ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review routing", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "operator"}}, ApprovalTTL: time.Hour}, nil
 	})
-	proposal, err := NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, ProposeActionRequest{
+	proposal, err := NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionConfigureChannel,
 		Arguments:      map[string]interface{}{"endpointId": endpoint.ID, "trigger": "on-message", "messageSelection": "all_messages", "replyMode": "thread", "purposes": []interface{}{"conversation", "approvals"}, "rationale": "Use Slack for work and approvals"},
 		IdempotencyKey: "configure-slack", Summary: "Configure Slack workflow channel",
-	})
+	}, "configure-slack"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *
 		t.Fatalf("resolve=%#v err=%v", resolved, err)
 	}
 	dispatcher, _ := NewAgentBehaviorActionDispatcher(store, agents, nil, endpoints)
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil || executed.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("execute status=%s callError=%q output=%#v err=%v", executed.Call.Status, executed.Call.Error, executed.Call.Output, err)
 	}
@@ -174,7 +174,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 		}, nil
 	})
 	coordinator := NewActionCoordinator(store, store, catalog, policy, validator)
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
 		Arguments: map[string]interface{}{
@@ -185,7 +185,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 			"rationale":           "Improve research quality",
 		},
 		IdempotencyKey: "message-42:improve-behavior", Summary: "Improve the researcher's evidence discipline",
-	})
+	}, "improve-behavior"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestGovernedAgentBehaviorActionActivatesImmutableDefinitionAndReplays(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,22 +287,22 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 		}, nil
 	})
 	propose := func(key string) (*ActionProposalResult, error) {
-		return NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, ProposeActionRequest{
+		return NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, loopProposeRequest(ProposeActionRequest{
 			Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 			SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
 			Arguments:      map[string]interface{}{"displayName": "Team Researcher", "rationale": "The user asked for the rename"},
 			IdempotencyKey: key, Summary: "Rename the member",
-		})
+		}, key))
 	}
 	// Without the Team roster, or off it, the member cannot amend itself.
-	if _, err := propose("team-rename-unproven"); err == nil {
-		t.Fatal("proposal without the Team roster was accepted")
+	if _, err := propose("team-rename-unproven"); err == nil || !strings.Contains(err.Error(), "requires the current Team roster") {
+		t.Fatalf("proposal without the Team roster = %v, want the roster rejection", err)
 	}
 	team := &kernelteam.Deployment{ID: "research-team", Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, Status: kernelteam.DeploymentActive,
 		Roster: []kernelteam.RosterAssignment{{ID: "other", AgentDeploymentID: "writer"}}}
 	validator.SetTeamRoster(teamRosterPortfolio{MemoryStore: store, team: team})
-	if _, err := propose("team-rename-removed"); err == nil {
-		t.Fatal("proposal from an Agent off the Team roster was accepted")
+	if _, err := propose("team-rename-removed"); err == nil || !strings.Contains(err.Error(), "is not on the active Team roster") {
+		t.Fatalf("proposal from an Agent off the Team roster = %v, want the roster rejection", err)
 	}
 	team.Roster = append(team.Roster, kernelteam.RosterAssignment{ID: "member", AgentDeploymentID: "researcher"})
 	proposal, err := propose("team-rename")
@@ -323,7 +323,7 @@ func TestTeamMemberRunAmendsItsOwnBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil || executed == nil || executed.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("execution = %#v, %v", executed, err)
 	}
@@ -369,12 +369,12 @@ func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T
 			EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ApprovalTTL: time.Hour,
 		}, nil
 	})
-	proposal, err := NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, ProposeActionRequest{
+	proposal, err := NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "researcher",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionAmendBehavior,
 		Arguments:      map[string]interface{}{"displayName": "Agent 008", "rationale": "The user approved the rename"},
 		IdempotencyKey: "rename-agent-008", Summary: "Rename the Agent",
-	})
+	}, "rename-agent-008"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestGovernedAgentBehaviorActionUsesCheckpointApprovalAuthority(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
+	executed, err := NewActionWorker(store, catalog, nil, dispatcher).ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil || executed == nil || executed.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("execution = %#v, %v", executed, err)
 	}
@@ -622,11 +622,11 @@ func TestOlderAgentManagementBindingsAlwaysRequireReviewInSkipMode(t *testing.T)
 				if claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: conversation.Scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Minute, AgingInterval: time.Minute}); err != nil || claimed == nil || claimed.ID != run.ID {
 					t.Fatalf("claim: %#v %v", claimed, err)
 				}
-				result, err := NewActionCoordinator(store, store, catalog, policy).Propose(ctx, ProposeActionRequest{
+				result, err := NewActionCoordinator(store, store, catalog, policy).Propose(ctx, loopProposeRequest(ProposeActionRequest{
 					Scope: conversation.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "assistant",
 					SkillID: AgentManagementSkillID, SkillVersion: version, Action: name,
-					Arguments: legacyAgentManagementArguments[name], IdempotencyKey: "legacy-" + name,
-				})
+					Arguments: legacyAgentManagementArguments[name], IdempotencyKey: "legacy-" + name, Summary: "Apply legacy " + name,
+				}, name))
 				if err != nil {
 					t.Fatalf("propose legacy %s: %v", name, err)
 				}

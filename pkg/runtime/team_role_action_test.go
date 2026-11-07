@@ -49,11 +49,11 @@ func TestGovernedTeamRoleActionActivatesImmutableDefinitionAndReplays(t *testing
 	arguments := map[string]interface{}{
 		"roleId": "ux-reviewer", "expectedDeploymentRevision": 1, "channelParticipation": "active",
 	}
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
+	proposal, err := coordinator.Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: owner.ID,
 		SkillID: TeamManagementSkillID, SkillVersion: TeamManagementSkillVersion, Action: TeamActionUpdateRole,
 		Arguments: arguments, IdempotencyKey: "message-42:enable-ux-reviewer", Summary: "Let the UX Reviewer speak",
-	})
+	}, "enable-ux-reviewer"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestGovernedTeamRoleActionActivatesImmutableDefinitionAndReplays(t *testing
 		t.Fatal(err)
 	}
 	worker := NewActionWorker(store, catalog, nil, dispatcher)
-	executed, err := worker.RunOnce(ctx, scope, "action-worker", time.Minute)
+	executed, err := worker.ExecuteOwnLoopCall(ctx, scope, proposal.Call.ID, "conversation-worker")
 	if err != nil {
 		t.Fatal(err)
 	}
