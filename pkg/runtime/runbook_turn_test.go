@@ -670,7 +670,7 @@ func TestRunbookForkSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 	}
 }
 
-func TestRunbookDelegationSettlesAsKernelCallAfterEngineStateIsApplied(t *testing.T) {
+func TestRunbookDelegationSettlesAsKernelCallAndJoinsThroughTheLoop(t *testing.T) {
 	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "parent", Version: "1", Name: "Parent", Entrypoints: map[string]string{"manual": "delegate"}, Steps: map[string]runbook.Step{
 		"delegate": {Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{
 			AgentID: runbookLiteral("specialist"), Goal: runbookLiteral("Analyze the release"),
@@ -703,6 +703,49 @@ func TestRunbookDelegationSettlesAsKernelCallAfterEngineStateIsApplied(t *testin
 		entries[0].Tool.Wait == nil || entries[0].Tool.Wait.AgentRequestID != requestID {
 		t.Fatalf("delegate entry=%#v", entries)
 	}
+	// The specialist accepts and its child Run completes; the collaboration
+	// service writes the result to the source and re-queues it.
+	accepted, err := f.control.Collaboration.RespondAgentRequest(f.ctx, RespondAgentRequestRequest{
+		Scope: f.scope, RequestID: requestID, ExpectedRevision: request.Revision, Decision: AgentRequestDecisionAccept,
+		Principal: request.Recipient, Message: "On it.",
+	})
+	if err != nil || accepted.Child == nil {
+		t.Fatalf("accept=%#v err=%v", accepted, err)
+	}
+	activity := NewRunActivityService(f.store, f.store)
+	actor := ActivityActor{Type: "worker", ID: "child-worker"}
+	running, _, err := activity.TransitionRun(f.ctx, f.scope, accepted.Child.ID, RunTransitionRequest{
+		ExpectedRevision: accepted.Child.Revision, Status: AgentRunStatusRunning, Summary: "started", Actor: actor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended, _, err := activity.TransitionRun(f.ctx, f.scope, accepted.Child.ID, RunTransitionRequest{
+		ExpectedRevision: running.Revision, Status: AgentRunStatusCompleted, Output: map[string]interface{}{"answer": "ship"}, Summary: "done", Actor: actor,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.control.Collaboration.ResolveTerminalAgentRequestChild(f.ctx, ended); err != nil {
+		t.Fatal(err)
+	}
+	queued := f.run(source.ID)
+	if queued.Status != AgentRunStatusQueued {
+		t.Fatalf("source after child=%#v", queued)
+	}
+	if results, _ := queued.Output["collaborationResults"].(map[string]interface{}); results[requestID] == nil {
+		t.Fatalf("collaboration results=%#v", queued.Output)
+	}
+	if _, exit := f.drive(source.ID); exit.Err != nil {
+		t.Fatalf("resume claim: %#v", exit)
+	}
+	completed := f.run(source.ID)
+	if completed.Status != AgentRunStatusCompleted || completed.Output["answer"] != "ship" {
+		t.Fatalf("source completed=%#v", completed)
+	}
+	if entries := f.toolEntries(source.ID); len(entries) != 1 || entries[0].State != ToolEntryCompleted {
+		t.Fatalf("delegate entry after resume=%#v", entries)
+	}
 }
 
 func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
@@ -724,5 +767,137 @@ func TestRunbookKernelCallRefusesStateItWasNotPlannedFor(t *testing.T) {
 	cc.Origin = ControlOriginModel
 	if _, _, _, err := runbookKernelCall(cc, pending); err == nil {
 		t.Fatal("a model call reached the runbook engine")
+	}
+	cc.Origin, cc.Entry = ControlOriginKernel, nil
+	if _, _, _, err := runbookKernelCall(cc, pending); err == nil {
+		t.Fatal("a kernel call without its tool entry settled")
+	}
+	result, err := (runbookForkHandler{}).run(f.ctx, f.control, cc)
+	if err == nil || result.Entry != nil {
+		t.Fatalf("an entry-less fork call was not refused: %#v", result)
+	}
+}
+
+func TestRunbookProducerKeepsModelMediaAndOversizeOutputOutOfCheckpoint(t *testing.T) {
+	definition := &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "shots", Version: "1", Name: "Shots", Entrypoints: map[string]string{"daily": "shot"},
+		Steps: map[string]runbook.Step{
+			"shot": {Kind: runbook.StepAction, Action: &runbook.ActionStep{
+				SkillID: "browser", SkillVersion: "1", Action: "screenshot", ResultPath: "/results/shot", Next: "dump",
+			}},
+			"dump": {Kind: runbook.StepAction, Action: &runbook.ActionStep{
+				SkillID: "browser", SkillVersion: "1", Action: "dump", ResultPath: "/results/dump", Next: "done",
+			}},
+			"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
+		},
+	}
+	calls := fixedActionCalls{}
+	producer := newTestRunbookProducer(t, definition, "daily", calls)
+	binding := &TurnRunnerBinding{ModelActions: []capability.ModelAction{
+		{Name: "browser_screenshot", SkillID: "browser", Version: "1", Action: "screenshot"},
+		{Name: "browser_dump", SkillID: "browser", Version: "1", Action: "dump"},
+	}}
+	run := &AgentRun{ID: "run-shots", Context: map[string]interface{}{}}
+	path := &AgentSessionPath{}
+	step := func(sequence int64) StepOutput {
+		out := produceRunbook(t, producer, runbookInput(run, sequence, binding, path))
+		run.Checkpoint = out.KernelState
+		return out
+	}
+	image := strings.Repeat("iVBORw0KGgo", 20000)
+	screenshot := map[string]interface{}{
+		"url": "https://example.test",
+		"modelMedia": map[string]interface{}{
+			"images": []interface{}{map[string]interface{}{"mediaType": "image/png", "contentBase64": image}},
+		},
+	}
+	shot := step(1)
+	calls["shot-call"] = &ActionCall{ID: "shot-call", RunID: run.ID, Status: ActionCallStatusSucceeded, Output: screenshot}
+	appendRunbookToolResult(path, run.ID, shot.ToolCalls[0].ID, ToolEntryCompleted, "shot-call")
+	dump := step(2)
+	if len(dump.ToolCalls) != 1 || dump.ToolCalls[0].Name != "browser_dump" {
+		t.Fatalf("dump=%#v", dump)
+	}
+	if _, ok := screenshot["modelMedia"]; !ok {
+		t.Fatal("the stored ActionCall output was mutated")
+	}
+	rows := make([]interface{}, 5000)
+	for index := range rows {
+		rows[index] = map[string]interface{}{"index": index, "text": strings.Repeat("x", 100)}
+	}
+	calls["dump-call"] = &ActionCall{ID: "dump-call", RunID: run.ID, Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"rows": rows}}
+	appendRunbookToolResult(path, run.ID, dump.ToolCalls[0].ID, ToolEntryCompleted, "dump-call")
+	if done := step(3); done.Final == nil || done.Final.Status != AgentRunStatusCompleted {
+		t.Fatalf("done=%#v", done)
+	}
+	encoded, err := json.Marshal(run.Checkpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "contentBase64") || strings.Contains(string(encoded), "modelMedia") {
+		t.Fatal("model media reached the runbook checkpoint")
+	}
+	if len(encoded) > 2*runbookActionResultLimit {
+		t.Fatalf("checkpoint is %d bytes", len(encoded))
+	}
+	results, _ := run.Checkpoint["results"].(map[string]interface{})
+	shotResult, _ := results["shot"].(map[string]interface{})
+	dumpResult, _ := results["dump"].(map[string]interface{})
+	if shotResult["url"] != "https://example.test" || dumpResult["truncated"] != true || dumpResult["available"] != true {
+		t.Fatalf("results=%#v", results)
+	}
+}
+
+func TestRunbookJoinAnyForkJoinsFirstChildThroughTheLoopAndCancelsTheOther(t *testing.T) {
+	definition := &runbook.Definition{APIVersion: runbook.APIVersion, ID: "race", Version: "1", Name: "Race", Entrypoints: map[string]string{"manual": "fork"}, Steps: map[string]runbook.Step{
+		"fork": {Kind: runbook.StepFork, Fork: &runbook.ForkStep{Branches: map[string]string{"fast": "fast", "slow": "slow"}, Join: "join"}},
+		"fast": {Kind: runbook.StepTransform, Transform: &runbook.TransformStep{Assignments: map[string]runbook.Value{"/state/fast": runbookLiteral(true)}, Next: "join"}},
+		"slow": {Kind: runbook.StepWait, Wait: &runbook.WaitStep{Duration: time.Hour, Next: "join"}},
+		"join": {Kind: runbook.StepJoin, Join: &runbook.JoinStep{Fork: "fork", Mode: runbook.JoinAny, Next: "done"}},
+		"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"state": {Ref: "/state"}}}},
+	}}
+	f := newRunbookLoopFixture(t, definition)
+	source := f.create(CreateAgentRunRequest{Goal: "race"})
+	if _, exit := f.drive(source.ID); exit.Err != nil {
+		t.Fatalf("first claim: %#v", exit)
+	}
+	if waiting := f.run(source.ID); waiting.Status != AgentRunStatusWaitingForDependency {
+		t.Fatalf("source=%#v", waiting)
+	}
+	fastID := stableForkIdentifier(source.ID, "fork", "child:fast")
+	slowID := stableForkIdentifier(source.ID, "fork", "child:slow")
+	// Both children are queued; whichever is claimed first, the slow one
+	// parks on its timer and the fast one completes.
+	for range 2 {
+		childID, exit := f.drive(fastID, slowID)
+		if exit.Err != nil {
+			t.Fatalf("child %s claim: %#v", childID, exit)
+		}
+	}
+	if slow := f.run(slowID); slow.Status != AgentRunStatusSleeping {
+		t.Fatalf("slow=%#v", slow)
+	}
+	fast := f.run(fastID)
+	if fast.Status != AgentRunStatusCompleted {
+		t.Fatalf("fast=%#v", fast)
+	}
+	if _, err := f.control.Forks.CompleteChild(f.ctx, fast, ActivityActor{Type: "worker", ID: runbookLoopWorker}); err != nil {
+		t.Fatal(err)
+	}
+	if queued := f.run(source.ID); queued.Status != AgentRunStatusQueued {
+		t.Fatalf("source after first child=%#v", queued)
+	}
+	if slow := f.run(slowID); slow.Status != AgentRunStatusCanceled {
+		t.Fatalf("losing child was not canceled: %#v", slow)
+	}
+	if _, exit := f.drive(source.ID); exit.Err != nil {
+		t.Fatalf("resume claim: %#v", exit)
+	}
+	completed := f.run(source.ID)
+	if completed.Status != AgentRunStatusCompleted || !reflect.DeepEqual(completed.Output["state"], map[string]interface{}{"fast": true}) {
+		t.Fatalf("source completed=%#v", completed)
+	}
+	if entries := f.toolEntries(source.ID); len(entries) != 1 || entries[0].State != ToolEntryCompleted {
+		t.Fatalf("fork entry after resume=%#v", entries)
 	}
 }
