@@ -116,7 +116,8 @@ func terminalFailureCode(code string) string {
 	}
 }
 
-// terminalFailureCodeOf is the public reply class of a recorded failure.
+// terminalFailureCodeOf is the public reply class of a recorded failure. A
+// failure without a code is classed by its SPEC §2.2 kind.
 func terminalFailureCodeOf(f *RunFailureExplanation) string {
 	if f == nil {
 		return "execution_failed"
@@ -124,27 +125,21 @@ func terminalFailureCodeOf(f *RunFailureExplanation) string {
 	if strings.TrimSpace(f.Code) != "" {
 		return terminalFailureCode(f.Code)
 	}
-	switch f.Kind {
-	case RunFailureKindWorkspace:
+	if f.Kind == RunFailureKindWorkspace {
 		return "workspace_operation_failed"
-	case "proposal":
-		return "action_admission_failed"
-	case "action":
-		return "action_failed"
-	case "dependency", "delegation":
-		return "dependency_failed"
 	}
 	return "execution_failed"
 }
 
 // terminalFailureReplyOf is the kernel's reply for a recorded failure.
-// latestFailedCall is the Run's newest failed governed call, or nil.
-func terminalFailureReplyOf(f *RunFailureExplanation, latestFailedCall *ActionCall) string {
+// stoppingCall is the failed governed call that stopped the attempt, and
+// latestFailedCall the Run's newest failed governed call; either may be nil.
+func terminalFailureReplyOf(f *RunFailureExplanation, stoppingCall, latestFailedCall *ActionCall) string {
 	code := terminalFailureCodeOf(f)
 	reply := TerminalFailureReply(code)
 	switch code {
 	case "action_failed":
-		if cause := failedActionCause(latestFailedCall); cause != "" {
+		if cause := failedActionCause(stoppingCall); cause != "" {
 			return "I couldn't finish this request because " + cause + ". I stopped this attempt. Ask me to try again when you're ready."
 		}
 	case "task_completion_rejected":
@@ -157,18 +152,20 @@ func terminalFailureReplyOf(f *RunFailureExplanation, latestFailedCall *ActionCa
 	return reply
 }
 
-// terminalRunFailureReply is the kernel's reply for a failed Run. The newest
-// failed governed call of the Run (its newest error tool entry with an
-// action call) gives the typed rate-limit, browser and file-size replies. A
-// store that cannot be read only loses that detail, never the reply.
+// terminalRunFailureReply is the kernel's reply for a failed Run. A failed
+// governed call in the Run's last step with tool entries is what stopped the
+// attempt, and gives the typed rate-limit, browser and file-size replies. A
+// failure the model already moved past (later steps ran tools) is not named.
+// A store that cannot be read only loses that detail, never the reply.
 func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) string {
 	if run == nil {
 		return TerminalFailureReply("execution_failed")
 	}
-	call := latestFailedRunActionCall(ctx, sessions, actions, run)
 	code := terminalFailureCodeOf(run.FailureExplanation)
+	var stopping, latest *ActionCall
 	if run.Status == AgentRunStatusFailed && (code == "action_failed" || code == "execution_failed") {
-		if failure := typedActionFailure(call); failure != nil {
+		stopping = stoppingFailedRunActionCall(ctx, sessions, actions, run)
+		if failure := typedActionFailure(stopping); failure != nil {
 			if failure.HasRateLimitedSource() {
 				return "I couldn't finish this request because one or more sources rate-limited requests (HTTP 429). I stopped this attempt. Try again later."
 			}
@@ -182,12 +179,16 @@ func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryListe
 			}
 		}
 	}
-	return terminalFailureReplyOf(run.FailureExplanation, call)
+	if code == "task_completion_rejected" {
+		latest = latestFailedRunActionCall(ctx, sessions, actions, run)
+	}
+	return terminalFailureReplyOf(run.FailureExplanation, stopping, latest)
 }
 
 // terminalFailureReplyStores narrows a reporting store to the session log and
 // action stores the failure reply reads. A store without a session log has
-// no tool entries to read, so the reply carries no call detail.
+// no tool entries to read, so the reply carries no call detail. The check
+// goes once SQLite and Postgres have the session log (del-1b in TASKS.md).
 func terminalFailureReplyStores(store interface{}) (loopSessionEntryLister, actionCallReader) {
 	sessions, _ := store.(AgentSessionStore)
 	actions, _ := store.(actionCallReader)
@@ -203,6 +204,8 @@ type actionCallReader interface {
 
 const latestFailedCallScanLimit = 50
 
+// latestFailedRunActionCall is the call of the Run's newest error tool entry
+// that carries an action call, when that call is this Run's and failed.
 func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) *ActionCall {
 	if sessions == nil || actions == nil || run.ID == "" {
 		return nil
@@ -214,8 +217,46 @@ func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLis
 	if err != nil {
 		return nil
 	}
+	return firstFailedRunActionCall(ctx, actions, run, entries, "")
+}
+
+// stoppingFailedRunActionCall is like latestFailedRunActionCall, but only
+// looks at the Run's last step with tool entries: a failure in an earlier
+// step was followed by more work, so it did not stop the attempt.
+func stoppingFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) *ActionCall {
+	if sessions == nil || actions == nil || run.ID == "" {
+		return nil
+	}
+	entries, err := sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, Types: []SessionEntryType{SessionEntryTool},
+		Descending: true, Limit: latestFailedCallScanLimit,
+	})
+	if err != nil {
+		return nil
+	}
 	for _, entry := range entries {
-		if entry == nil || entry.RunID != run.ID || entry.ActionCallID == "" {
+		if entry != nil && entry.RunID == run.ID {
+			if entry.StepID == "" {
+				return nil
+			}
+			return firstFailedRunActionCall(ctx, actions, run, entries, entry.StepID)
+		}
+	}
+	return nil
+}
+
+// firstFailedRunActionCall walks entries newest first (stopping at the first
+// entry of another step when stepID is set) to the first error entry with an
+// action call, and returns that call if it is this Run's and failed.
+func firstFailedRunActionCall(ctx context.Context, actions actionCallReader, run *AgentRun, entries []*SessionEntry, stepID string) *ActionCall {
+	for _, entry := range entries {
+		if entry == nil || entry.RunID != run.ID {
+			continue
+		}
+		if stepID != "" && entry.StepID != stepID {
+			return nil
+		}
+		if entry.State != ToolEntryError || entry.ActionCallID == "" {
 			continue
 		}
 		call, err := actions.GetActionCall(ctx, run.Scope, entry.ActionCallID)

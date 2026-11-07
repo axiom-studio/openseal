@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -281,5 +282,29 @@ func TestExplicitActionFailureEnvelopePreservesResourceData(t *testing.T) {
 		if err := explicitActionResultFailure(output); err != nil {
 			t.Fatalf("fetched data was mistaken for operation failure: %#v %v", output, err)
 		}
+	}
+}
+
+// refusingNoteStore refuses or fails every session append with err.
+type refusingNoteStore struct {
+	AgentSessionStore
+	err error
+}
+
+func (s refusingNoteStore) AppendAgentSessionEntries(context.Context, AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error) {
+	return nil, s.err
+}
+
+func TestRunFailedNoteRefusalDoesNotRetryAPostedReply(t *testing.T) {
+	run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "t"}, SessionID: "session", Status: AgentRunStatusFailed}
+	message := &ChannelMessage{ID: "reply", Content: "I stopped."}
+	for _, refusal := range []error{ErrInvalidSessionEntry, ErrSessionMoved, ErrLeaseLost, ErrAgentSessionNotFound} {
+		if err := appendRunFailedNote(t.Context(), refusingNoteStore{err: fmt.Errorf("append: %w", refusal)}, run, message); err != nil {
+			t.Fatalf("%v: permanent refusal retried: %v", refusal, err)
+		}
+	}
+	transient := errors.New("connection reset")
+	if err := appendRunFailedNote(t.Context(), refusingNoteStore{err: transient}, run, message); !errors.Is(err, transient) {
+		t.Fatalf("transient store error = %v, want it retried", err)
 	}
 }

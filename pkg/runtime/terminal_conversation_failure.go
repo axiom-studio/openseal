@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -184,12 +185,35 @@ func appendRunFailedNote(ctx context.Context, sessions AgentSessionStore, run *A
 		Scope: run.Scope, SessionID: run.SessionID, RunID: run.ID,
 		Entries: []*SessionEntry{runFailedNote(run, message)}, Now: time.Now().UTC(),
 	})
-	if errors.Is(err, ErrAgentSessionNotFound) {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, ErrAgentSessionNotFound):
 		// The Run failed before its first step opened the session. A session
 		// created later is seeded from the channel, failure reply included.
 		return nil
+	case runFailedNoteRejected(err):
+		// The reply is already posted, and retrying cannot change a refusal;
+		// the next Run still sees the reply in the channel.
+		slog.Warn("run_failed note was refused; the failure reply is posted without it",
+			"scope", run.Scope.ID, "run", run.ID, "session", run.SessionID, "error", err)
+		return nil
 	}
 	return err
+}
+
+// runFailedNoteRejected reports a store refusal of the note that a retry
+// cannot change, as opposed to a store that could not be reached.
+func runFailedNoteRejected(err error) bool {
+	for _, permanent := range []error{
+		ErrInvalidSessionEntry, ErrSessionEntryTooLarge, ErrInvalidAgentSession, ErrAgentSessionConflict,
+		ErrSessionMoved, ErrLeaseLost, ErrRunNotFound, ErrAgentSessionPathTooLarge,
+	} {
+		if errors.Is(err, permanent) {
+			return true
+		}
+	}
+	return false
 }
 
 func terminalConversationReplyMatches(message *ChannelMessage, run *AgentRun, triggerID, agentID string) bool {

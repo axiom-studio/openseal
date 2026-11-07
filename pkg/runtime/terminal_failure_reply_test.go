@@ -37,9 +37,10 @@ func TestTerminalFailureCodeOfRecordedFailure(t *testing.T) {
 		{&RunFailureExplanation{Kind: "repeat_limit", Code: RunFailureCodeErrorStreak}, "execution_failed"},
 		{&RunFailureExplanation{Kind: "execution", Code: "task_completion_rejected TOKEN_SECRET"}, "execution_failed"},
 		{&RunFailureExplanation{Kind: "workspace"}, "workspace_operation_failed"},
-		{&RunFailureExplanation{Kind: "proposal"}, "action_admission_failed"},
-		{&RunFailureExplanation{Kind: "action"}, "action_failed"},
-		{&RunFailureExplanation{Kind: "delegation"}, "dependency_failed"},
+		{&RunFailureExplanation{Kind: "execution", Code: "action_failed"}, "action_failed"},
+		// Kinds outside SPEC §2.2 carry no class of their own.
+		{&RunFailureExplanation{Kind: "action"}, "execution_failed"},
+		{&RunFailureExplanation{Kind: "delegation"}, "execution_failed"},
 		{&RunFailureExplanation{Kind: "VERDICT_SECRET"}, "execution_failed"},
 	} {
 		if got := terminalFailureCodeOf(tc.failure); got != tc.want {
@@ -119,7 +120,7 @@ func TestTerminalRunFailureReplyReadsTheNewestFailedToolEntry(t *testing.T) {
 	// An untyped failure names the tool only for an action failure.
 	log.calls["plain"] = &ActionCall{Scope: scope, RunID: "run", SkillID: "skill-slack", Status: ActionCallStatusFailed, Error: "execution failed: channel_not_found."}
 	log.entries = append(log.entries, entry("e4", ToolEntryError, "plain"))
-	if got := terminalRunFailureReply(ctx, log, log, failedRun(&RunFailureExplanation{Kind: "action"})); got != "I couldn't finish this request because Slack reported: channel_not_found. I stopped this attempt. Ask me to try again when you're ready." {
+	if got := terminalRunFailureReply(ctx, log, log, failedRun(&RunFailureExplanation{Kind: "execution", Code: "action_failed"})); got != "I couldn't finish this request because Slack reported: channel_not_found. I stopped this attempt. Ask me to try again when you're ready." {
 		t.Fatalf("action cause reply = %q", got)
 	}
 	if got := terminalRunFailureReply(ctx, log, log, failedRun(execution)); got != TerminalFailureReply("execution_failed") {
@@ -152,6 +153,38 @@ func TestTerminalRunFailureReplyReadsTheNewestFailedToolEntry(t *testing.T) {
 	}
 	if got := terminalRunFailureReply(ctx, rateLimited, rateLimited, failedRun(execution)); !strings.HasPrefix(got, "I couldn't finish this request because one or more sources rate-limited") {
 		t.Fatalf("rate-limit reply = %q", got)
+	}
+}
+
+func TestTerminalRunFailureReplyIgnoresAFailureTheRunMovedPast(t *testing.T) {
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: "reply"}
+	failure := skillerror.NewActionError("source_rate_limited", "", nil)
+	log := &failureReplyLog{calls: map[string]*ActionCall{
+		"rl": {Scope: scope, RunID: "run", SkillID: "skill-live-browser", Status: ActionCallStatusFailed, Error: failure.Error(), ErrorCode: failure.Code(), ErrorDetails: failure.Details()},
+	}}
+	sequence := int64(0)
+	entry := func(id, step string, state ToolEntryState, callID string) *SessionEntry {
+		sequence++
+		e := testToolEntry(id, step, "call-"+id, state)
+		e.Scope, e.SessionID, e.RunID, e.ActionCallID, e.Sequence = scope, "session", "run", callID, sequence
+		return e
+	}
+	run := func(f *RunFailureExplanation) *AgentRun {
+		return &AgentRun{ID: "run", Scope: scope, Status: AgentRunStatusFailed, FailureExplanation: f}
+	}
+	log.entries = []*SessionEntry{entry("e1", "step-1", ToolEntryError, "rl")}
+	streak := &RunFailureExplanation{Kind: RunFailureKindRepeatLimit, Code: RunFailureCodeErrorStreak}
+	if got := terminalRunFailureReply(ctx, log, log, run(streak)); !strings.Contains(got, "HTTP 429") {
+		t.Fatalf("429 that stopped the attempt not named: %q", got)
+	}
+	// The model recovered: later steps ran successful calls before the Run
+	// stopped for another reason, so the earlier 429 is not the cause.
+	log.entries = append(log.entries, entry("e2", "step-2", ToolEntryCompleted, ""), entry("e3", "step-3", ToolEntryCompleted, ""))
+	for _, f := range []*RunFailureExplanation{streak, {Kind: RunFailureKindExecution, Code: "final_answer_rejected"}, {Kind: RunFailureKindExecution, Code: "action_failed"}} {
+		if got := terminalRunFailureReply(ctx, log, log, run(f)); got != TerminalFailureReply(terminalFailureCodeOf(f)) {
+			t.Fatalf("%s: earlier recovered failure attributed: %q", f.Code, got)
+		}
 	}
 }
 
