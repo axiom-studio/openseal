@@ -133,7 +133,7 @@ func (s *Server) respondActionApprovalError(w http.ResponseWriter, err error) {
 		s.respondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, runtime.ErrInvalidScope), errors.Is(err, runtime.ErrInvalidOwner):
 		s.respondError(w, http.StatusBadRequest, err.Error())
-	case strings.Contains(err.Error(), "authorize approval"):
+	case errors.Is(err, runtime.ErrAgentBuilderApprovalForbidden), strings.Contains(err.Error(), "authorize approval"):
 		s.respondError(w, http.StatusForbidden, err.Error())
 	case strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "invalid"):
 		s.respondError(w, http.StatusBadRequest, err.Error())
