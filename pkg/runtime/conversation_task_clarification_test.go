@@ -24,6 +24,7 @@ type conversationTaskClarificationFixture struct {
 	task         *ConversationTask
 	source, work *AgentRun
 	questionTurn *AgentTurn
+	asked        string
 }
 
 func forConversationTaskClarificationStores(t *testing.T, test func(*testing.T, conversationTaskClarificationStore)) {
@@ -94,28 +95,15 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 	return f
 }
 
+// ask parks the independent task's work Run on an ask_user call.
 func (f *conversationTaskClarificationFixture) ask(t *testing.T, question string) {
 	t.Helper()
-	claimed, err := f.store.ClaimNextAgentRun(t.Context(), AgentRunClaim{
-		Scope: f.task.Scope, Kind: RunKindAgentWork, WorkerID: "task-worker", Now: time.Now(),
-		LeaseDuration: time.Minute, AgingInterval: time.Minute,
-	})
-	if err != nil || claimed == nil || claimed.ID != f.work.ID {
-		t.Fatalf("claim independent work: %#v, %v", claimed, err)
+	claimed := claimAskUserRun(t, f.store, f.work, "task-worker")
+	parked, call := askUserParked(t, f.store, claimed, "task-worker", question)
+	if parked.Status != AgentRunStatusWaitingForEvent || parked.LastAppliedTurn != call.step.Sequence {
+		t.Fatalf("park independent task clarification: %#v", parked)
 	}
-	settled, err := NewTurnCoordinator(f.store, f.store, f.store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: f.task.Scope, RunID: claimed.ID, WorkerID: "task-worker", DefinitionID: "writer", DefinitionVersion: "1",
-	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{
-			NextRunStatus: AgentRunStatusWaitingForEvent, WakeCondition: &WakeCondition{Type: "user_message", Reference: "user:next_message"},
-			OutputSummary: question, RunOutput: map[string]interface{}{"summary": question},
-		}, nil
-	}))
-	if err != nil || settled == nil || settled.Run == nil || settled.Turn == nil || settled.Turn.Status != AgentTurnStatusCompleted ||
-		settled.Run.Status != AgentRunStatusWaitingForEvent || settled.Run.LastAppliedTurn != settled.Turn.Sequence {
-		t.Fatalf("settle independent task clarification: %#v, %v", settled, err)
-	}
-	f.work, f.questionTurn = settled.Run, settled.Turn
+	f.work, f.questionTurn, f.asked = parked, call.step, question
 }
 
 func (f *conversationTaskClarificationFixture) resetScheduler(t *testing.T) {
@@ -161,7 +149,7 @@ func (f *conversationTaskClarificationFixture) question(t *testing.T) *ChannelMe
 	if err != nil || question == nil {
 		t.Fatalf("independent task did not project its question: %#v, %v", question, err)
 	}
-	if question.Content != f.work.Output["summary"] || question.Intent != MessageIntentQuestion ||
+	if question.Content != f.asked || question.Intent != MessageIntentQuestion ||
 		!question.RequiresResponse || question.Sender != (ConversationParticipant{Type: ConversationParticipantAgent, ID: f.task.TargetAgentID}) ||
 		question.ReplyToMessageID != f.trigger.ID || question.ThreadRootID != f.task.ThreadRootID {
 		t.Fatalf("question lost content or canonical delivery: %#v", question)

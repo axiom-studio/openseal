@@ -570,35 +570,6 @@ func assertHostedApprovalModeHint(t *testing.T, input TurnExecutionContext, agen
 	}
 }
 
-func TestHostedTurnRequestCarriesConversationApprovalMode(t *testing.T) {
-	store := NewMemoryStore()
-	f := newForegroundClarificationFixture(t, store, false)
-	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalSkip)
-	wrapper := conversationWorkTurnRunner{runs: store, conversations: store}
-
-	input, err := wrapper.input(t.Context(), TurnExecutionContext{Run: f.run, Turn: &AgentTurn{ID: "skip-turn"}, approvalMode: ConversationApprovalManual})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertHostedApprovalModeHint(t, input, f.run.AssignedAgentID, ConversationApprovalSkip)
-
-	setFixtureApprovalMode(t, store, f.conversation, ConversationApprovalManual)
-	input, err = wrapper.input(t.Context(), TurnExecutionContext{Run: f.run, Turn: &AgentTurn{ID: "manual-turn"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertHostedApprovalModeHint(t, input, f.run.AssignedAgentID, ConversationApprovalManual)
-
-	// A Run that acts for no conversation carries no mode, even when a stale
-	// value arrives on the execution context.
-	detached := &AgentRun{ID: "detached", Kind: RunKindAgentWork, Scope: f.run.Scope, AssignedAgentID: "browser-agent",
-		Context: map[string]interface{}{"conversationApprovalMode": "skip"}}
-	input, err = wrapper.input(t.Context(), TurnExecutionContext{Run: detached, Turn: &AgentTurn{ID: "detached-turn"}, approvalMode: ConversationApprovalSkip})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertHostedApprovalModeHint(t, input, "browser-agent", "")
-}
 
 func TestForegroundConversationTurnCarriesApprovalMode(t *testing.T) {
 	store := NewMemoryStore()

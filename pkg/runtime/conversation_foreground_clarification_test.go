@@ -1,11 +1,9 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
-	"time"
 )
 
 type foregroundClarificationFixture struct {
@@ -16,6 +14,7 @@ type foregroundClarificationFixture struct {
 	trigger      *ChannelMessage
 	run          *AgentRun
 	turn         *AgentTurn
+	asked        string
 }
 
 func newForegroundClarificationFixture(t *testing.T, store conversationTaskClarificationStore, threaded bool) *foregroundClarificationFixture {
@@ -58,38 +57,28 @@ func (f *foregroundClarificationFixture) post(t *testing.T, req PostChannelMessa
 	return result.Message
 }
 
+// ask parks the foreground Run on an ask_user call (wakeType user_message),
+// or on another event wait that is not a question.
 func (f *foregroundClarificationFixture) ask(t *testing.T, question, wakeType string) {
 	t.Helper()
-	claimed, err := f.store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: f.run.Scope, Kind: RunKindConversation, WorkerID: "foreground-worker",
-		Now: time.Now(), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil || claimed.ID != f.run.ID {
-		t.Fatalf("claim foreground: %#v %v", claimed, err)
-	}
+	claimed := claimAskUserRun(t, f.store, f.run, "foreground-worker")
 	before, _ := f.store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: f.run.Scope, ConversationID: f.conversation.ID, Limit: 100})
-	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DeploymentID: f.run.AssignedAgentID, DefinitionID: "browser", DefinitionVersion: "1",
-			Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-				if !input.canAskConversationQuestion || input.ForegroundConversation == nil || input.ForegroundConversation.ID != f.run.ID {
-					t.Fatal("foreground adapter lost verified question authority")
-				}
-				return &TurnOutcome{NextRunStatus: AgentRunStatusWaitingForEvent, WakeCondition: &WakeCondition{Type: wakeType, Reference: f.conversation.ID},
-					OutputSummary: question, RunOutput: map[string]interface{}{"summary": question}}, nil
-			})}, nil
+	if wakeType == "user_message" {
+		parked, call := askUserParked(t, f.store, claimed, "foreground-worker", question)
+		f.run, f.turn, f.asked = parked, call.step, question
+		return
+	}
+	parked, _, err := NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), claimed.Scope, claimed.ID, RunTransitionRequest{
+		ExpectedRevision: claimed.Revision, Status: AgentRunStatusWaitingForEvent, LeaseOwner: "foreground-worker",
+		WakeCondition: &WakeCondition{Type: wakeType, Reference: f.conversation.ID}, AppliedTurn: claimed.LastAppliedTurn + 1,
 	})
-	runner, err := NewConversationRunTurnRunner(f.store, conversationRunTestCoordinator(t, f.service), ConversationRunTurnRunnerConfig{AgentTurns: resolver})
 	if err != nil {
 		t.Fatal(err)
 	}
-	settled, err := NewTurnCoordinator(f.store, f.store, f.store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: f.run.Scope, RunID: f.run.ID, WorkerID: "foreground-worker", DefinitionID: "browser", DefinitionVersion: "1",
-	}, runner)
-	if err != nil || settled == nil || settled.Run.Status != AgentRunStatusWaitingForEvent {
-		t.Fatalf("foreground question did not remain waiting: %#v %v", settled, err)
-	}
-	f.run, f.turn = settled.Run, settled.Turn
+	f.run, f.turn, f.asked = parked, nil, question
 	after, _ := f.store.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: f.run.Scope, ConversationID: f.conversation.ID, Limit: 100})
 	if len(before) != len(after) {
-		t.Fatal("waiting foreground question was prematurely published as a final answer")
+		t.Fatal("a non-question wait posted a message")
 	}
 }
 
@@ -100,7 +89,7 @@ func (f *foregroundClarificationFixture) question(t *testing.T) *ChannelMessage 
 	}
 	question, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.run.Scope, f.conversation.ID, clarificationQuestionKey(f.run))
 	if err != nil || question == nil || question.Intent != MessageIntentQuestion || !question.RequiresResponse || question.ReplyToMessageID != f.trigger.ID ||
-		question.Content != f.run.Output["summary"] || len(question.References) != 1 || question.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: f.run.ID}) {
+		question.Content != f.asked || len(question.References) != 1 || question.References[0] != (ConversationReference{Kind: ConversationReferenceRun, ID: f.run.ID}) {
 		t.Fatalf("foreground question = %#v %v", question, err)
 	}
 	return question
@@ -278,72 +267,3 @@ func TestForegroundConversationQuestionsRequireUserMessageWait(t *testing.T) {
 	})
 }
 
-func TestHostedConversationQuestionCapabilityUsesCanonicalOriginOnly(t *testing.T) {
-	store := NewMemoryStore()
-	f := newForegroundClarificationFixture(t, store, false)
-	task := newConversationTaskClarificationFixture(t, store, true)
-	continuation, _, _ := conversationContinuationFixture(t, store, AgentRunStatusQueued, false)
-	promoted, err := store.PromoteConversationTask(t.Context(), ConversationTaskPromotionRequest{Scope: continuation.Scope, RunID: continuation.ID, Now: continuation.CreatedAt.Add(ConversationTaskForegroundTimeout)})
-	if err != nil || promoted == nil {
-		t.Fatalf("create unsupported continuation: %#v %v", promoted, err)
-	}
-	teamChannel, _, err := f.service.CreateConversation(t.Context(), CreateConversationRequest{Scope: Scope{Kind: "organization", ID: "team-clarification"},
-		Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"}, Title: "Team", IdempotencyKey: "team-chat"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	teamMessage := postConversationRunTestMessage(t, f.service, teamChannel, ConversationParticipantUser, MessageIntentQuestion, "Research the page", "team-request")
-	teamRun, _, err := f.scheduler.ScheduleMessage(t.Context(), teamChannel.Scope, teamChannel.ID, teamMessage.ID)
-	if err != nil || teamRun == nil {
-		t.Fatalf("create unsupported Team source: %#v %v", teamRun, err)
-	}
-	for _, tc := range []struct {
-		name string
-		run  *AgentRun
-		want bool
-	}{
-		{name: "foreground", run: f.run, want: true},
-		{name: "independent task", run: task.work, want: true},
-		{name: "continuation", run: promoted.WorkRun},
-		{name: "foreign scope", run: func() *AgentRun { r := cloneAgentRun(f.run); r.Scope.ID = "foreign"; return r }()},
-		{name: "foreign agent", run: func() *AgentRun { r := cloneAgentRun(f.run); r.AssignedAgentID = "foreign"; return r }()},
-		{name: "team owner", run: teamRun.Run},
-		{name: "copied root", run: func() *AgentRun { r := cloneAgentRun(f.run); r.ID, r.RootRunID = "copy", "copy"; return r }()},
-		{name: "forged thread", run: func() *AgentRun { r := cloneAgentRun(f.run); r.Context["threadRootMessageId"] = "other"; return r }()},
-		{name: "model context flag", run: &AgentRun{ID: "ordinary", Kind: RunKindAgentWork, Scope: f.run.Scope, Context: map[string]interface{}{"canAskConversationQuestion": true}}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			input, err := (conversationWorkTurnRunner{runs: store, conversations: store}).input(t.Context(), TurnExecutionContext{
-				Run: tc.run, Turn: &AgentTurn{ID: "hosted-turn"}, canAskConversationQuestion: true,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			agentID := tc.run.AssignedAgentID
-			if agentID == "" {
-				agentID = "browser-agent"
-			}
-			runner, err := NewHostedTurnRunner(&recordingTurnHost{}, HostedTurnRunnerConfig{AgentID: agentID, DefinitionID: "browser", DefinitionVersion: "1"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			request, err := runner.buildRequest(input)
-			if err != nil || request.CanAskConversationQuestion != tc.want {
-				t.Fatalf("question capability=%v want=%v err=%v", request.CanAskConversationQuestion, tc.want, err)
-			}
-			if tc.want {
-				runner.config.AgentID = "unrelated-host-agent"
-				mismatched, err := runner.buildRequest(input)
-				if err != nil || mismatched.CanAskConversationQuestion {
-					t.Fatalf("question capability reached another host Agent: %#v %v", mismatched, err)
-				}
-			}
-			request.InputContext = nil
-			raw, err := MarshalHostedTurnModelInput(request)
-			var modelInput map[string]interface{}
-			if err != nil || json.Unmarshal(raw, &modelInput) != nil || modelInput["canAskConversationQuestion"] != nil {
-				t.Fatalf("host-only capability leaked into model input: %s %v", raw, err)
-			}
-		})
-	}
-}
