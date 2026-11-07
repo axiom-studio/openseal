@@ -1,0 +1,334 @@
+package runtime
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/axiom-studio/openseal/pkg/runbook"
+)
+
+// run_operation (section 04 §9): a settle-phase control tool that starts one
+// of the Agent's callable operations (an already reviewed runbook entrypoint)
+// as a deterministic child Run. The fork coordinator moves the tool entry to
+// awaiting_child, creates the child and parks the source on its dependency
+// group in one transaction, so the park is committed. Each call has its own
+// fork id ("op-" + entry id), so a Run may start several operations. When the
+// child ends, the resume turns its saved output into this entry's result; a
+// failed operation is an is_error result, never a Run failure (D6).
+
+const (
+	operationNotAuthorizedCode = "operation_not_authorized"
+	operationInputInvalidCode  = "operation_input_invalid"
+	operationRecursiveCode     = "operation_recursive"
+	operationBudgetCode        = "budget_insufficient"
+	operationLostCode          = "operation_lost"
+
+	operationBranchID = "operation"
+)
+
+type operationArgs struct {
+	Entrypoint string                 `json:"entrypoint"`
+	Arguments  map[string]interface{} `json:"arguments"`
+}
+
+type operationHandler struct{}
+
+func init() { registerControlHandler(ControlToolRunOperation, operationHandler{}) }
+
+func (operationHandler) spec(a ControlAuthority) ControlToolSpec {
+	entrypoints := make([]interface{}, 0, len(a.Operations))
+	var description strings.Builder
+	description.WriteString("Start one of your callable operations as a separate Run; its result comes back to you as this tool's result. Operations:")
+	for _, op := range a.Operations {
+		entrypoints = append(entrypoints, op.Entrypoint)
+		description.WriteString("\n" + operationDescriptionLine(op))
+	}
+	return ControlToolSpec{
+		Description: description.String(),
+		InputSchema: map[string]interface{}{
+			"type": "object", "additionalProperties": false, "required": []interface{}{"entrypoint", "arguments"},
+			"properties": map[string]interface{}{
+				"entrypoint": map[string]interface{}{"type": "string", "enum": entrypoints},
+				"arguments": map[string]interface{}{
+					"type":        "object",
+					"description": "Must match the operation's input schema listed in this tool's description.",
+				},
+			},
+		},
+	}
+}
+
+// operationDescriptionLine is one operation's block of the tool description.
+func operationDescriptionLine(op HostedRunbookOperation) string {
+	schema := []byte(`{"type":"object"}`)
+	if len(op.InputSchema) > 0 {
+		if encoded, err := json.Marshal(op.InputSchema); err == nil {
+			schema = encoded
+		}
+	}
+	name := strings.TrimSpace(op.Name)
+	if name == "" {
+		name = op.Entrypoint
+	}
+	text := strings.TrimRight(strings.TrimSpace(op.Description), ".")
+	line := "- " + op.Entrypoint + " — " + name
+	if text != "" {
+		line += ": " + text
+	}
+	return line + ". Input schema: " + string(schema)
+}
+
+func (operationHandler) decode(raw json.RawMessage) (interface{}, error) {
+	value, err := decodeControlInto[operationArgs](raw)
+	if err != nil {
+		return nil, err
+	}
+	args := value.(*operationArgs)
+	args.Entrypoint = strings.TrimSpace(args.Entrypoint)
+	if args.Entrypoint == "" {
+		return nil, errors.New("entrypoint is required")
+	}
+	if args.Arguments == nil {
+		return nil, errors.New("arguments must be an object")
+	}
+	return args, nil
+}
+
+func (operationHandler) run(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResult, error) {
+	args := cc.Arguments.(*operationArgs)
+	run := cc.Run
+	op, ok := authorizedOperation(cc.Authority.Operations, args.Entrypoint)
+	if !ok {
+		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, operationNotAuthorizedCode,
+			"That operation is not available to you; use one listed in this tool's description.",
+			map[string]interface{}{"entrypoint": args.Entrypoint}))
+	}
+	schema := op.InputSchema
+	if len(schema) == 0 {
+		schema = map[string]interface{}{"type": "object"}
+	}
+	if err := runbook.ValidateInterfaceInput(schema, args.Arguments); err != nil {
+		return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, operationInputInvalidCode,
+			fmt.Sprintf("The arguments do not match the input schema of %s: %v.", op.Entrypoint, err), nil))
+	}
+	if err := controlRejectRecursiveRunbook(ctx, x.Portfolio, run, op); err != nil {
+		if errors.Is(err, errRecursiveOperation) {
+			return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, operationRecursiveCode,
+				"This operation is already running above you; it cannot start itself again.", nil))
+		}
+		return ControlResult{}, err
+	}
+	// A callable operation is already reviewed work: its budget is the
+	// kernel's, not the model's. An unbounded Run starts an unbounded
+	// operation; a bounded Run gives it all its remaining child capacity.
+	var budget *BudgetPolicy
+	if run.Budget != nil {
+		allocated, err := completeChildBudgetAllocation(run, &BudgetPolicy{})
+		if err != nil {
+			return x.refuse(ctx, cc, controlErrorResult(ToolResultRefused, operationBudgetCode,
+				"This Run's remaining budget cannot fund the operation.", nil))
+		}
+		budget = allocated
+	}
+	summary := "Run " + operationName(op)
+	childContext, err := x.operationChildContext(ctx, run, op, args.Arguments, summary)
+	if err != nil {
+		return ControlResult{}, err
+	}
+	forkID := "op-" + cc.Entry.ID
+	result, err := x.Fork(ctx, cc, ForkSpec{
+		ForkID: forkID,
+		Policy: RunDependencyPolicy{Mode: FanInModeAll, FailureMode: DependencyFailureFailFast},
+		Branches: []RunForkBranch{{
+			ID: operationBranchID, Goal: summary, AssignedAgentID: run.AssignedAgentID,
+			Entrypoint: op.Entrypoint, Context: childContext, Checkpoint: map[string]interface{}{}, Budget: budget,
+		}},
+		NoSessionForks: true, // deterministic runbook Run: no session (D3)
+	})
+	if err != nil || result.Kind != ControlParked {
+		return result, err
+	}
+	if result.Park != nil {
+		result.Park.Summary = "Waiting for " + operationName(op)
+	}
+	x.projectOperationStart(ctx, run, summary, stableForkIdentifier(run.ID, forkID, "child:"+operationBranchID))
+	return result, nil
+}
+
+func authorizedOperation(operations []HostedRunbookOperation, entrypoint string) (HostedRunbookOperation, bool) {
+	for _, op := range operations {
+		if op.Entrypoint == entrypoint {
+			return op, true
+		}
+	}
+	return HostedRunbookOperation{}, false
+}
+
+func operationName(op HostedRunbookOperation) string {
+	if name := strings.TrimSpace(op.Name); name != "" {
+		return name
+	}
+	return op.Entrypoint
+}
+
+// operationChildContext is the child's context: the arguments, the
+// invocation record and the runbook definition identity.
+func (x *ControlExecutor) operationChildContext(ctx context.Context, run *AgentRun, op HostedRunbookOperation, arguments map[string]interface{}, summary string) (map[string]interface{}, error) {
+	childContext := cloneMap(arguments)
+	if childContext == nil {
+		childContext = map[string]interface{}{}
+	}
+	invocation := map[string]interface{}{"summary": summary, "arguments": cloneMap(arguments)}
+	var reader runbookMessageReader
+	if x.Reporting != nil {
+		reader = x.Reporting
+	}
+	sourceMessage, err := runbookSourceMessage(ctx, reader, run)
+	if err != nil {
+		return nil, err
+	}
+	if sourceMessage != nil {
+		invocation["sourceMessage"] = sourceMessage
+	}
+	childContext[RunbookInvocationContextKey] = invocation
+	if id, version := strings.TrimSpace(op.DefinitionID), strings.TrimSpace(op.DefinitionVersion); id != "" && version != "" {
+		childContext["runbookDefinitionId"] = id
+		childContext["runbookDefinitionVersion"] = version
+		childContext["runbookEntrypoint"] = strings.TrimSpace(op.Entrypoint)
+	}
+	return childContext, nil
+}
+
+// projectOperationStart posts "Started: …" for the child. The child is
+// already committed, so a failure here is only logged: it must never fail the
+// source or start the operation twice.
+func (x *ControlExecutor) projectOperationStart(ctx context.Context, run *AgentRun, summary, childID string) {
+	if x.Reporting == nil || run.Kind != RunKindConversation {
+		return
+	}
+	child, err := x.Portfolio.GetAgentRun(ctx, run.Scope, childID)
+	if err == nil && child == nil {
+		err = ErrRunNotFound
+	}
+	if err == nil {
+		err = projectConversationRunbookStart(ctx, x.Reporting, run, summary, child)
+	}
+	if err != nil {
+		slog.Warn("failed to project operation start into conversation", "runId", run.ID, "childRunId", childID, "error", err)
+	}
+}
+
+var errRecursiveOperation = errors.New("recursive operation invocation")
+
+// controlRejectRecursiveRunbook refuses an operation that is already running
+// in the Run's ancestry (same definition and version, or, for operations
+// without a definition identity, the same entrypoint on the same Agent).
+// Refusals wrap errRecursiveOperation; other errors are store errors.
+func controlRejectRecursiveRunbook(ctx context.Context, portfolio PortfolioStore, run *AgentRun, op HostedRunbookOperation) error {
+	if run == nil {
+		return nil
+	}
+	wantedID := strings.TrimSpace(op.DefinitionID)
+	wantedVersion := strings.TrimSpace(op.DefinitionVersion)
+	wantedEntrypoint := strings.TrimSpace(op.Entrypoint)
+	visited := make(map[string]struct{})
+	current := run
+	for depth := 0; current != nil && depth < 256; depth++ {
+		if _, duplicate := visited[current.ID]; duplicate {
+			return fmt.Errorf("%w: %q: Run ancestry contains a cycle at %s", errRecursiveOperation, wantedEntrypoint, current.ID)
+		}
+		visited[current.ID] = struct{}{}
+		ancestorID, ancestorVersion, ancestorEntrypoint := runbookInvocationIdentity(current)
+		exactIdentity := wantedID != "" && wantedVersion != "" &&
+			ancestorID == wantedID && ancestorVersion == wantedVersion &&
+			(ancestorEntrypoint == "" || ancestorEntrypoint == wantedEntrypoint)
+		entrypointIdentity := wantedEntrypoint != "" && ancestorID == "" &&
+			strings.TrimSpace(current.Entrypoint) == wantedEntrypoint &&
+			strings.TrimSpace(current.AssignedAgentID) == strings.TrimSpace(run.AssignedAgentID)
+		if exactIdentity || entrypointIdentity {
+			return fmt.Errorf("%w: %q is already active in ancestor Run %s", errRecursiveOperation, wantedEntrypoint, current.ID)
+		}
+		if strings.TrimSpace(current.ParentRunID) == "" {
+			return nil
+		}
+		if portfolio == nil {
+			return errors.New("operation ancestry check needs the portfolio store")
+		}
+		parent, err := portfolio.GetAgentRun(ctx, current.Scope, current.ParentRunID)
+		if err != nil {
+			return fmt.Errorf("resolve operation ancestry at %s: %w", current.ID, err)
+		}
+		current = parent
+	}
+	if current != nil {
+		return fmt.Errorf("%w: %q: Run ancestry exceeds the supported depth", errRecursiveOperation, wantedEntrypoint)
+	}
+	return nil
+}
+
+// resume: a group still waiting re-parks; otherwise the child's saved output
+// becomes the entry's result.
+func (operationHandler) resume(ctx context.Context, x *ControlExecutor, cc ControlContext) (ControlResume, error) {
+	if x.Forks == nil || x.Forks.store == nil || x.Portfolio == nil {
+		return ControlResume{}, errors.New("control executor has no fork coordinator")
+	}
+	args := cc.Arguments.(*operationArgs)
+	meta, err := DecodeControlEntryMeta(cc.Entry)
+	if err != nil {
+		return ControlResume{}, err
+	}
+	groupID := ""
+	if meta != nil {
+		groupID = meta.GroupID
+	}
+	if groupID == "" && cc.Entry.Tool.Wait != nil {
+		groupID = cc.Entry.Tool.Wait.GroupID
+	}
+	var group *RunDependencyGroup
+	if groupID != "" {
+		group, err = x.Forks.store.GetRunDependencyGroup(ctx, cc.Run.Scope, groupID)
+		if err != nil && !errors.Is(err, ErrDependencyGroupNotFound) {
+			return ControlResume{}, err
+		}
+	}
+	var child *AgentRun
+	if group != nil && meta != nil && len(meta.ChildRunIDs) > 0 {
+		if group.Status == RunDependencyGroupWaiting || group.Status == RunDependencyGroupOpen {
+			return ControlResume{Park: &LoopPark{
+				Status: AgentRunStatusWaitingForDependency, Wake: &WakeCondition{Type: "run_dependencies", Reference: group.ID},
+				Summary: "Waiting for operation " + args.Entrypoint,
+			}}, nil
+		}
+		child, err = x.Portfolio.GetAgentRun(ctx, cc.Run.Scope, meta.ChildRunIDs[0])
+		if err != nil {
+			return ControlResume{}, err
+		}
+	}
+	if child == nil {
+		result, err := x.complete(ctx, cc, controlErrorResult(ToolResultFailed, operationLostCode,
+			"The operation can no longer be found; start it again if it is still needed.", nil), nil)
+		return ControlResume{Resolved: true, Result: result}, err
+	}
+	output, _ := conversationOperationSavedOutput(ctx, x.Portfolio, child)
+	value := map[string]interface{}{
+		"status": string(child.Status), "entrypoint": args.Entrypoint, "runId": child.ID,
+		"output": truncateControlText(output, child.ID),
+	}
+	if message := strings.TrimSpace(child.Error); message != "" {
+		value["error"] = truncateControlText(message, child.ID)
+	}
+	status := ToolResultSucceeded
+	switch child.Status {
+	case AgentRunStatusCompleted:
+	case AgentRunStatusCanceled:
+		status = ToolResultCanceled
+	default:
+		status = ToolResultFailed
+	}
+	result, err := x.complete(ctx, cc, controlJSONResult(status, value), nil)
+	return ControlResume{Resolved: true, Result: result}, err
+}

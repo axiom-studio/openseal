@@ -676,7 +676,7 @@ func (p *AgentRunWorkerPool) materializeTurnRunbook(ctx context.Context, workerI
 	if len(result.Children) != 1 || result.Children[0] == nil {
 		return nil, errors.New("runbook materialization returned no durable child Run")
 	}
-	if err := projectConversationRunbookStart(ctx, p.reportingStore, run, proposal, result.Children[0]); err != nil {
+	if err := projectConversationRunbookStart(ctx, p.reportingStore, run, proposal.Summary, result.Children[0]); err != nil {
 		// The durable child is already committed. A transient observation-surface
 		// failure must never convert successful work creation into a failed source
 		// Run or duplicate the operation on retry.

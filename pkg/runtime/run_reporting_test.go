@@ -22,11 +22,11 @@ func TestProjectConversationRunbookStartAcknowledgesDurableChild(t *testing.T) {
 		Context: map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID},
 	}
 	child := &AgentRun{ID: "operation-run", Kind: RunKindAgentWork, Scope: scope, Owner: owner, AssignedAgentID: owner.ID}
-	proposal := &TurnRunbookProposal{Entrypoint: "engage-now", Summary: "Run the on-demand engagement operation"}
-	if err := projectConversationRunbookStart(ctx, store, source, proposal, child); err != nil {
+	summary := "Run the on-demand engagement operation"
+	if err := projectConversationRunbookStart(ctx, store, source, summary, child); err != nil {
 		t.Fatal(err)
 	}
-	if err := projectConversationRunbookStart(ctx, store, source, proposal, child); err != nil {
+	if err := projectConversationRunbookStart(ctx, store, source, summary, child); err != nil {
 		t.Fatal(err)
 	}
 	messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})

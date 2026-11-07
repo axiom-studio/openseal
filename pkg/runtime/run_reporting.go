@@ -115,15 +115,11 @@ func projectRunReportingStart(
 // projectConversationRunbookStart acknowledges an on-demand operation as soon
 // as its durable child Run exists. The conversation parent may remain blocked
 // on work or approval for hours; users must not need to send the command again
-// merely to learn whether it started.
-func projectConversationRunbookStart(
-	ctx context.Context,
-	store ConversationStore,
-	source *AgentRun,
-	proposal *TurnRunbookProposal,
-	child *AgentRun,
-) error {
-	if store == nil || source == nil || proposal == nil || child == nil || source.Kind != RunKindConversation {
+// merely to learn whether it started. A Run may start several operations, so
+// the message is keyed per child.
+func projectConversationRunbookStart(ctx context.Context, store ConversationStore, source *AgentRun, summary string, child *AgentRun) error {
+	summary = strings.TrimSpace(summary)
+	if store == nil || source == nil || summary == "" || child == nil || source.Kind != RunKindConversation {
 		return nil
 	}
 	conversationID, _ := source.Context[conversationRunContextConversationID].(string)
@@ -142,10 +138,10 @@ func projectConversationRunbookStart(
 			Scope: current.Scope, ConversationID: current.ID, ExpectedRevision: current.Revision,
 			Sender:            ConversationParticipant{Type: ConversationParticipantAgent, ID: source.AssignedAgentID},
 			SenderDisplayName: "Agent", Intent: MessageIntentUpdate,
-			Content:  "Started: " + strings.TrimSpace(proposal.Summary),
+			Content:  "Started: " + summary,
 			Audience: ConversationAudience{Kind: ConversationAudienceChannel}, ReplyToMessageID: triggerID,
 			References:     []ConversationReference{{Kind: ConversationReferenceRun, ID: child.ID}},
-			IdempotencyKey: "conversation-runbook-start:" + source.ID,
+			IdempotencyKey: "conversation-runbook-start:" + source.ID + ":" + child.ID,
 		})
 		return postErr
 	}
