@@ -256,6 +256,14 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 	}
 	committed := false
 	defer rollbackSQLiteConn(conn, &committed)
+	// BEGIN IMMEDIATE holds the write lock, so the Run read here stays
+	// current until COMMIT (Run before conversation, SPEC §4.1).
+	var guardedRun *AgentRun
+	if record.RunGuard != nil {
+		if guardedRun, err = getSQLiteAgentRun(ctx, conn, record.RunGuard.Scope, record.RunGuard.RunID); err != nil {
+			return nil, err
+		}
+	}
 	existing, err := getSQLiteChannelMessageByKey(ctx, conn, record.Message.Scope, record.Message.ConversationID, record.Message.IdempotencyKey)
 	if err != nil {
 		return nil, err
@@ -273,6 +281,11 @@ func (s *SQLiteStore) CommitChannelMessage(ctx context.Context, record ChannelMe
 		}
 		committed = true
 		return &ChannelMessageCommitResult{Conversation: conversation, Message: existing, Replayed: true}, nil
+	}
+	if guardedRun != nil {
+		if err := replyRunGuardHolds(guardedRun, record.RunGuard, time.Now().UTC()); err != nil {
+			return nil, err
+		}
 	}
 	current, err := getSQLiteConversation(ctx, conn, record.Conversation.Scope, record.Conversation.ID)
 	if err != nil {

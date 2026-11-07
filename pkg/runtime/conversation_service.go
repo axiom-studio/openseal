@@ -149,6 +149,37 @@ type ChannelMessageCommitRecord struct {
 	Conversation     *Conversation
 	ExpectedRevision int64
 	Message          *ChannelMessage
+	// RunGuard fences a Run's final reply. When set, the store locks the Run
+	// before the conversation and commits only while replyRunGuardHolds; a
+	// replay of an already stored IdempotencyKey returns that message
+	// without consulting the guard.
+	RunGuard *ReplyRunGuard
+}
+
+// validateReplyRunGuard checks a guard's shape before any I/O.
+func validateReplyRunGuard(guard *ReplyRunGuard) error {
+	if guard == nil {
+		return nil
+	}
+	if err := guard.Scope.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(guard.RunID) == "" || strings.TrimSpace(guard.WorkerID) == "" || guard.InterventionCount < 0 {
+		return ErrInvalidConversation
+	}
+	return nil
+}
+
+// replyRunGuardHolds is the guard check every backend runs on the locked
+// Run row: the Run is still running under the guard's live lease, on the
+// same lane, with no intervention beyond InterventionCount.
+func replyRunGuardHolds(run *AgentRun, guard *ReplyRunGuard, now time.Time) error {
+	if run.Status != AgentRunStatusRunning || run.LeaseOwner != guard.WorkerID ||
+		run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) ||
+		run.ConcurrencyKey != guard.ConcurrencyKey || len(run.PendingInterventions) != guard.InterventionCount {
+		return ErrSteeringArrived
+	}
+	return nil
 }
 
 type ParticipationRoundCommitRecord struct {

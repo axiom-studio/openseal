@@ -153,6 +153,13 @@ func (s *MemoryStore) CommitChannelMessage(_ context.Context, record ChannelMess
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	var guardedRun *AgentRun
+	if record.RunGuard != nil {
+		guardedRun = s.agentRuns[portfolioKey(record.RunGuard.Scope, record.RunGuard.RunID)]
+		if guardedRun == nil {
+			return nil, ErrRunNotFound
+		}
+	}
 	conversationKey := conversationStoreKey(record.Conversation.Scope, record.Conversation.ID)
 	current := s.conversations[conversationKey]
 	if current == nil {
@@ -166,6 +173,11 @@ func (s *MemoryStore) CommitChannelMessage(_ context.Context, record ChannelMess
 			return nil, ErrMessageConflict
 		}
 		return &ChannelMessageCommitResult{Conversation: cloneConversation(current), Message: cloneChannelMessage(existing), Replayed: true}, nil
+	}
+	if guardedRun != nil {
+		if err := replyRunGuardHolds(guardedRun, record.RunGuard, time.Now().UTC()); err != nil {
+			return nil, err
+		}
 	}
 	if current.Revision != record.ExpectedRevision || record.Conversation.Revision != current.Revision+1 ||
 		record.Message.Sequence != current.LastSequence+1 || record.Conversation.LastSequence != record.Message.Sequence {
@@ -528,7 +540,7 @@ func validateChannelMessageCommitRecord(record ChannelMessageCommitRecord) error
 	if record.Conversation.Scope != record.Message.Scope || record.Conversation.ID != record.Message.ConversationID || record.ExpectedRevision <= 0 {
 		return ErrInvalidConversation
 	}
-	return nil
+	return validateReplyRunGuard(record.RunGuard)
 }
 
 func validateParticipationRoundCommitRecord(record ParticipationRoundCommitRecord) error {
