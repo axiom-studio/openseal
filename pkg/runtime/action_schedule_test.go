@@ -112,7 +112,7 @@ func createDispatchableNestedAction(t *testing.T, store KernelStore, now time.Ti
 	result, err := store.CreateActionProposal(ctx, ActionProposalRecord{
 		Call: call, Lease: &AgentRunLeaseGuard{WorkerID: "agent-worker", Now: at},
 		Nested: &NestedActionFence{WorkerID: "agent-worker", Now: at, MaxCalls: MaxNestedActionCallsPerTurn, MaxConcurrent: MaxConcurrentNestedActionCalls},
-		Event: &ActivityEvent{ID: "proposed-call", Scope: scope, RunID: run.ID, TurnID: "step-1", EventType: "action.proposed", Summary: "Proposed deploy", CreatedAt: at},
+		Event:  &ActivityEvent{ID: "proposed-call", Scope: scope, RunID: run.ID, TurnID: "step-1", EventType: "action.proposed", Summary: "Proposed deploy", CreatedAt: at},
 	})
 	if err != nil || !result.Created {
 		t.Fatalf("nested proposal = %#v, %v", result, err)
