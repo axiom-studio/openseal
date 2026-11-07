@@ -1078,16 +1078,6 @@ nav button:hover kbd {
 .error-text {
   color: var(--danger) !important;
 }
-.proposal {
-  margin-top: 30px;
-  padding: 20px;
-  background: var(--surface);
-  border-radius: 12px;
-}
-.proposal > p {
-  font-size: 12px;
-  margin: 12px 0;
-}
 .skeleton-list {
   display: grid;
   gap: 14px;
@@ -1631,20 +1621,6 @@ dialog::backdrop {
   width: 100%;
   font: inherit;
 }
-.skill-configuration,
-.skill-install,
-.skill-discovery {
-  margin-top: 12px;
-  display: grid;
-  gap: 10px;
-  justify-items: start;
-}
-.skill-connection form {
-  margin-top: 10px;
-  display: grid;
-  gap: 10px;
-  max-width: 420px;
-}
 .form-field small {
   color: var(--secondary);
   font-size: 11px;
@@ -1739,83 +1715,6 @@ dialog::backdrop {
   }
 }
 
-.proposal-review {
-  margin-top: 28px;
-}
-.proposal-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--secondary);
-  font-size: 11px;
-}
-.proposal-prompt {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.proposal-agent,
-.proposal-team,
-.proposal-notes,
-.proposal-question {
-  border-top: 1px solid var(--line);
-  margin-top: 20px;
-  padding-top: 20px;
-}
-.proposal-review h3,
-.proposal-question legend {
-  font-size: 14px;
-  font-weight: 600;
-}
-.proposal-review p,
-.proposal-review li {
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-.proposal-agent p {
-  margin: 8px 0;
-  font-size: 13px;
-}
-.proposal-team {
-  overflow-wrap: anywhere;
-}
-.proposal-team h4 {
-  margin: 24px 0 8px;
-  font-size: 14px;
-}
-.proposal-team h5 {
-  margin: 0 0 8px;
-  font-size: 14px;
-}
-.proposal-team p {
-  margin: 8px 0;
-}
-.proposal-team details {
-  margin-top: 18px;
-}
-.installation-summary.team-policy > div {
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 8px 18px;
-}
-.proposal-review ul {
-  padding-left: 20px;
-  font-size: 12px;
-}
-.proposal-review details {
-  margin-top: 12px;
-}
-.proposal-review summary {
-  cursor: pointer;
-  font-size: 12px;
-}
-.proposal-question fieldset {
-  border: 0;
-  padding: 0;
-  min-width: 0;
-}
-.proposal-question legend {
-  margin-bottom: 8px;
-}
-.proposal-question textarea,
 .channel-composer textarea,
 .channel-composer input,
 .work-guidance textarea,
@@ -1835,79 +1734,7 @@ dialog::backdrop {
   font: inherit;
   min-height: 88px;
 }
-.proposal-question .form-field {
-  margin: 16px 0;
-}
-.proposal-options {
-  display: grid;
-  gap: 12px;
-  margin: 16px 0;
-}
-.proposal-options label {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.proposal-options input {
-  accent-color: var(--accent);
-  margin-top: 3px;
-  flex-shrink: 0;
-}
-.proposal-options small {
-  display: block;
-  color: var(--secondary);
-  font-size: 11px;
-  margin-top: 4px;
-}
-.proposal-technical pre {
-  max-height: 320px;
-  overflow: auto;
-}
-@media (max-width: 700px) {
-  .proposal-review .section-heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 8px;
-  }
-}
 
-.proposal-feedback {
-  margin-top: 16px;
-}
-
-.proposal-installation {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
-}
-.proposal-installation h3 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.proposal-installation > p {
-  font-size: 12px;
-  margin: 12px 0;
-}
-.installation-summary {
-  font-size: 12px;
-  margin: 16px 0;
-}
-.installation-summary > div {
-  display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
-  gap: 12px;
-  padding: 8px 0;
-}
-.installation-summary dt {
-  color: var(--secondary);
-}
-.installation-summary dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
 .installation-consent {
   display: flex;
   align-items: flex-start;

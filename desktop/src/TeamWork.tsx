@@ -80,7 +80,6 @@ export default function TeamWork({
   }));
   const ready =
     team.deployment.status === "active" &&
-    !team.deployment.activation &&
     members.length > 0 &&
     members.every(({ agent }) => agent?.deployment.rolloutStatus === "active");
   const leadAvailable = members.some(

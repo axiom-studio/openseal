@@ -18,7 +18,6 @@ import WorkHistory from "./WorkHistory";
 import WorkStatus from "./WorkStatus";
 import WorkControls from "./WorkControls";
 import WorkResult from "./WorkResult";
-import ProposalReview from "./ProposalReview";
 import ProviderSettings from "./ProviderSettings";
 import {
   useCallback,
@@ -67,7 +66,6 @@ import {
   type Run,
   type Capabilities,
   type DesktopStatus,
-  type Proposal,
 } from "./api";
 
 type Page = "Home" | "Agents" | "Work" | "Reviews" | "Teams" | "Settings";
@@ -280,12 +278,6 @@ export default function App() {
     if (!submission.current) updateAgentID(value);
   }, []);
   const [busy, setBusy] = useState(false);
-  const [proposal, setProposal] = useState<Proposal | null>(null);
-  const activeProposal = useRef(proposal);
-  activeProposal.current = proposal;
-  const [proposalID, setProposalID] = useState(() =>
-    readLocal("openseal.proposal"),
-  );
   const [builderConversationID, setBuilderConversationID] = useState(() =>
     readLocal(builderConversationKey),
   );
@@ -515,44 +507,6 @@ export default function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [navigate, newAgent, closeInspector, closeNavigation]);
-  useEffect(() => {
-    if (
-      !proposalID ||
-      desktop.state !== "ready" ||
-      !supports(caps, "workforce-authoring", "get")
-    )
-      return;
-    let stopped = false;
-    let pending = false;
-    const load = async () => {
-      if (pending) return;
-      pending = true;
-      try {
-        const p = await api<Proposal>(
-          scoped(
-            `/authoring/workforce/change-sets/${encodeURIComponent(proposalID)}`,
-          ),
-        );
-        if (!stopped)
-          setProposal((current) =>
-            !current || current.id !== p.id || p.revision >= current.revision
-              ? p
-              : current,
-          );
-      } catch (e) {
-        if (!stopped) setError(message(e));
-      } finally {
-        pending = false;
-      }
-    };
-    void load();
-    const timer = setInterval(load, 3000);
-    return () => {
-      stopped = true;
-      clearInterval(timer);
-    };
-  }, [proposalID, desktop.state, caps]);
-
   useEffect(() => {
     if (submissionError && page === "Home") submissionFeedback.current?.focus();
   }, [submissionError, page]);
@@ -1244,33 +1198,29 @@ export default function App() {
                       </p>
                     )}
                 </form>
-                {!listedAgents.length &&
-                  !proposal &&
-                  !builderConversationID && (
-                    <div className="starter-section">
-                      <span className="section-label">
-                        A few places to begin
-                      </span>
-                      <div className="starters">
-                        {starters.map(({ title, text, icon: Icon }) => (
-                          <button
-                            key={title}
-                            onClick={() => {
-                              setPrompt(text);
-                              setComposerMode("agent");
-                              requestAnimationFrame(() =>
-                                composer.current?.focus(),
-                              );
-                            }}
-                          >
-                            <Icon size={17} />
-                            <span>{title}</span>
-                            <ArrowRight size={14} />
-                          </button>
-                        ))}
-                      </div>
+                {!listedAgents.length && !builderConversationID && (
+                  <div className="starter-section">
+                    <span className="section-label">A few places to begin</span>
+                    <div className="starters">
+                      {starters.map(({ title, text, icon: Icon }) => (
+                        <button
+                          key={title}
+                          onClick={() => {
+                            setPrompt(text);
+                            setComposerMode("agent");
+                            requestAnimationFrame(() =>
+                              composer.current?.focus(),
+                            );
+                          }}
+                        >
+                          <Icon size={17} />
+                          <span>{title}</span>
+                          <ArrowRight size={14} />
+                        </button>
+                      ))}
                     </div>
-                  )}
+                  </div>
+                )}
                 {!canPropose && !loading && (
                   <div className="setup-strip">
                     <span className="setup-symbol">
@@ -1306,57 +1256,6 @@ export default function App() {
                       setBuilderConversationID("");
                       requestAnimationFrame(() => composer.current?.focus());
                     }}
-                  />
-                )}
-                {proposal && (
-                  <ProposalReview
-                    key={proposal.id}
-                    proposal={proposal}
-                    onDerived={(next) => {
-                      if (
-                        activeProposal.current?.id !== proposal.id ||
-                        next.parentId !== proposal.id
-                      )
-                        return;
-                      activeProposal.current = next;
-                      setProposal(next);
-                      setProposalID(next.id);
-                      saveLocal("openseal.proposal", next.id);
-                      requestAnimationFrame(() =>
-                        document.getElementById("proposal-heading")?.focus(),
-                      );
-                    }}
-                    onInstalled={() => void refresh(true)}
-                    onViewAgents={() => navigate("Agents")}
-                    onViewTeams={() => navigate("Teams")}
-                    onPrepareFreshProposal={(originalPrompt) => {
-                      const teamPrefix = "Create one team.\n\n";
-                      setComposerMode(
-                        originalPrompt.startsWith(teamPrefix)
-                          ? "team"
-                          : "agent",
-                      );
-                      setPrompt(
-                        originalPrompt.startsWith(teamPrefix)
-                          ? originalPrompt.slice(teamPrefix.length)
-                          : originalPrompt,
-                      );
-                      requestAnimationFrame(() => {
-                        composer.current?.scrollIntoView({
-                          behavior: "smooth",
-                          block: "center",
-                        });
-                        composer.current?.focus();
-                      });
-                    }}
-                    onChange={(next) =>
-                      setProposal((current) =>
-                        current?.id === next.id &&
-                        next.revision >= current.revision
-                          ? next
-                          : current,
-                      )
-                    }
                   />
                 )}
                 <section className="home-section">
@@ -1484,17 +1383,6 @@ export default function App() {
                 onOpenRun={(run, detail) =>
                   selectRecord({ kind: "run", value: run, ...detail })
                 }
-                onOpenProposal={(next) => {
-                  activeProposal.current = next;
-                  setProposal(next);
-                  setProposalID(next.id);
-                  saveLocal("openseal.proposal", next.id);
-                  navigate("Home");
-                  setComposerMode("team");
-                  requestAnimationFrame(() =>
-                    document.getElementById("proposal-heading")?.focus(),
-                  );
-                }}
                 available={supports(caps, "team-definitions", "list")}
                 refreshToken={workRefresh}
                 agents={agents}
