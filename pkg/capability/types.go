@@ -140,6 +140,13 @@ type Action struct {
 	// approval mode, including skip, regardless of standing grants, approval
 	// thresholds, or approval-timeout auto-approval.
 	Review ActionReview `json:"review,omitempty"`
+	// Repeatable marks a write whose identical repeat is an ordinary next step
+	// rather than a duplicate, such as clicking "Next page" again in a live
+	// browser. The kernel's repeat guard treats such a write as stateful: it is
+	// never suppressed as already done, and its success resets other repeat
+	// keys. Only sideEffect write may set it; external and destructive actions
+	// (payments, sends, deletions) always stay strict.
+	Repeatable bool `json:"repeatable,omitempty"`
 }
 
 // ActionReview is a manifest-declared review floor for one Action. Empty
@@ -672,6 +679,9 @@ type ModelAction struct {
 	Risk                    RiskLevel               `json:"risk"`
 	SideEffect              SideEffect              `json:"sideEffect"`
 	ExternalOperationPolicy ExternalOperationPolicy `json:"externalOperationPolicy,omitempty"`
+	// Repeatable is the action's manifest Repeatable flag (Action.Repeatable).
+	// The kernel reads it to classify a repeated call; it is not model-facing.
+	Repeatable bool `json:"repeatable,omitempty"`
 	// BindingTool is set when this action projects one binding-declared tool.
 	// It is kernel routing data: the model fills InputSchema only.
 	BindingTool *ModelActionBindingTool `json:"bindingTool,omitempty"`
