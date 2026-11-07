@@ -12,14 +12,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
@@ -45,7 +43,7 @@ type Config struct {
 	PollInterval time.Duration
 }
 
-type authoringAutomationFocus struct {
+type runbookOperationFocus struct {
 	AgentID        string
 	AgentName      string
 	RunbookID      string
@@ -53,8 +51,8 @@ type authoringAutomationFocus struct {
 	Entrypoint     string
 }
 
-type authoringAutomationRow struct {
-	Focus      authoringAutomationFocus
+type runbookOperationRow struct {
+	Focus      runbookOperationFocus
 	Definition *kernelagent.AgentDefinition
 	FirstStep  string
 }
@@ -121,7 +119,6 @@ const (
 	modeCreate editorMode = iota
 	modeAgentBuilderPrompt
 	modeWorkforceBundleInspect
-	modeWorkforceRefinement
 	modeGuide
 	modeRunbookOperationStart
 	modeChannelCreate
@@ -147,12 +144,6 @@ const (
 	modeSourcePolicyRegister
 	modeSourcePolicyActivate
 	modeSourcePolicyRevoke
-	modeWorkforceApprove
-	modeWorkforceReject
-	modeWorkforceApply
-	modeWorkforceActivate
-	modeWorkforceRetry
-	modeWorkforceConversationRouting
 	modeRequestCreate
 	modeRequestAccept
 	modeRequestReject
@@ -183,7 +174,6 @@ type Model struct {
 	clawHubClient                      client.ClawHubClient
 	skillBindingClient                 client.SkillBindingClient
 	sourcePolicyClient                 client.SourcePolicyLifecycleClient
-	workforceSkillSearchClient         client.WorkforceSkillSearchClient
 	workforceBundleClient              client.WorkforceBundleClient
 	agentBuilderClient                 agentBuilderConversationClient
 	config                             Config
@@ -218,23 +208,11 @@ type Model struct {
 	skillBindingCapability             kernelapi.Capability
 	artifactCapability                 kernelapi.Capability
 	channelCapability                  kernelapi.Capability
-	authoringCapability                kernelapi.Capability
 	agentBuilderCapability             kernelapi.Capability
 	workforceBundleCapability          kernelapi.Capability
 	agentDefinitionCapability          kernelapi.Capability
 	teamDefinitionCapability           kernelapi.Capability
 	sourcePolicyCapability             kernelapi.Capability
-	authoringResult                    *authoring.CompileResult
-	authoringChangeSet                 *authoring.ChangeSet
-	authoringAmendment                 bool
-	authoringApprovalSelected          int
-	authoringCredentialSelected        int
-	authoringCredentialChoices         map[string]int
-	authoringConfigSelected            int
-	authoringConfigChoices             map[string]int
-	authoringRoutingSelected           int
-	authoringAutomationSelected        int
-	authoringAutomationFocus           *authoringAutomationFocus
 	activeRunbookSelected              int
 	runs                               []*runtime.AgentRun
 	agentTurns                         []*kernelapi.AgentTurnRecord
@@ -325,19 +303,8 @@ type Model struct {
 	channelAuditExpanded               bool
 	pendingKey                         string
 	pendingGoal                        string
-	pendingAuthoringKey                string
-	pendingAuthoringPrompt             string
-	pendingAuthoringParentID           string
-	pendingGovernanceKey               string
-	pendingGovernanceIntent            string
-	pendingRefinementKey               string
-	pendingRefinementIntent            string
-	activeRefinementQuestionID         string
 	workforceBundleInspection          *kernelbundle.Inspection
 	workforceBundlePath                string
-	refinementSkillQuery               string
-	refinementSkillResults             []authoring.SkillSearchCandidate
-	refinementSkillNextCursor          string
 	pendingObjectiveKey                string
 	pendingObjectivePrompt             string
 	pendingEventSourceID               string
@@ -372,35 +339,10 @@ type capabilitiesLoaded struct {
 	err      error
 }
 
-type workforceCompiled struct {
-	result    *authoring.CompileResult
-	changeSet *authoring.ChangeSet
-	mode      authoring.Mode
-	err       error
-}
-
-type workforceGoverned struct {
-	changeSet *authoring.ChangeSet
-	action    string
-	err       error
-}
-
-type workforceLoaded struct {
-	changeSet *authoring.ChangeSet
-	err       error
-}
-
 type workforceBundleInspected struct {
 	path       string
 	inspection *kernelbundle.Inspection
 	err        error
-}
-
-type workforceSkillsSearched struct {
-	query  string
-	page   *authoring.SkillSearchPage
-	append bool
-	err    error
 }
 
 type teamDeploymentsLoaded struct {
@@ -744,16 +686,15 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 	return &Model{
 		ctx: ctx, client: kernelClient, config: config, editor: editor,
 		focus: focusComposer, section: sectionOverview, mode: modeAgentBuilderPrompt, width: 100, height: 30,
-		agentLifecycleClient:       agentLifecycleClient(kernelClient),
-		agentCapabilityClient:      agentCapabilityClient(kernelClient),
-		conversationClient:         conversationClient(kernelClient),
-		conversationGatewayClient:  conversationGatewayClient(kernelClient),
-		clawHubClient:              clawHubClient(kernelClient),
-		skillBindingClient:         skillBindingClient(kernelClient),
-		sourcePolicyClient:         sourcePolicyClient(kernelClient),
-		workforceSkillSearchClient: workforceSkillSearchClient(kernelClient),
-		workforceBundleClient:      workforceBundleClient(kernelClient),
-		agentBuilderClient:         agentBuilderClient(kernelClient),
+		agentLifecycleClient:      agentLifecycleClient(kernelClient),
+		agentCapabilityClient:     agentCapabilityClient(kernelClient),
+		conversationClient:        conversationClient(kernelClient),
+		conversationGatewayClient: conversationGatewayClient(kernelClient),
+		clawHubClient:             clawHubClient(kernelClient),
+		skillBindingClient:        skillBindingClient(kernelClient),
+		sourcePolicyClient:        sourcePolicyClient(kernelClient),
+		workforceBundleClient:     workforceBundleClient(kernelClient),
+		agentBuilderClient:        agentBuilderClient(kernelClient),
 	}, nil
 }
 
@@ -809,7 +750,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		skillBindingCapability, hasSkillBindings := msg.document.Find(kernelapi.SkillBindingsCapabilityID, kernelapi.SkillBindingsCapabilityVersion)
 		artifactCapability, hasArtifacts := msg.document.Find(kernelapi.ArtifactsCapabilityID, kernelapi.ArtifactsCapabilityVersion)
 		channelCapability, hasChannels := msg.document.Find(kernelapi.ChannelsCapabilityID, kernelapi.ChannelsCapabilityVersion)
-		authoringCapability, hasAuthoring := msg.document.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
 		agentBuilderCapability, hasAgentBuilder := msg.document.Find(kernelapi.AgentBuilderCapabilityID, kernelapi.AgentBuilderCapabilityVersion)
 		workforceBundleCapability, hasWorkforceBundles := msg.document.Find(kernelapi.WorkforceBundlesCapabilityID, kernelapi.WorkforceBundlesCapabilityVersion)
 		agentDefinitionCapability, hasAgentDefinitions := msg.document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
@@ -833,19 +773,11 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.skillBindingCapability = skillBindingCapability
 		m.artifactCapability = artifactCapability
 		m.channelCapability = channelCapability
-		m.authoringCapability = authoringCapability
 		m.agentBuilderCapability = agentBuilderCapability
 		m.workforceBundleCapability = workforceBundleCapability
 		m.agentDefinitionCapability = agentDefinitionCapability
 		m.teamDefinitionCapability = teamDefinitionCapability
 		m.sourcePolicyCapability = sourcePolicyCapability
-		m.syncWorkforceCredentialChoices()
-		m.syncWorkforceBindingConfigurationChoices()
-		if authoringCapability.Context == nil || len(authoringCapability.Context.EligibleApprovalRequirements) == 0 {
-			m.authoringApprovalSelected = 0
-		} else {
-			m.authoringApprovalSelected = min(m.authoringApprovalSelected, len(authoringCapability.Context.EligibleApprovalRequirements)-1)
-		}
 		if !hasRuns || !runCapability.Available {
 			m.runCapability = kernelapi.Capability{}
 		}
@@ -900,9 +832,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasChannels || !channelCapability.Available || m.conversationClient == nil {
 			m.channelCapability = kernelapi.Capability{}
 		}
-		if !hasAuthoring || !authoringCapability.Available {
-			m.authoringCapability = kernelapi.Capability{}
-		}
 		if !hasAgentBuilder || !agentBuilderCapability.Available || m.agentBuilderClient == nil {
 			m.agentBuilderCapability = kernelapi.Capability{}
 		}
@@ -920,15 +849,15 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasSourcePolicies || !sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !sourcePolicyCapability.Supports(kernelapi.OperationList) {
 			m.sourcePolicyCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.projectCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.authoringCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
-			m.unavailable = "This server does not advertise workforce authoring, objectives, Projects, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
+		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.projectCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+			m.unavailable = "This server does not advertise an agent builder, objectives, Projects, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
 		m.ready = true
 		m.unavailable = ""
 		m.err = nil
-		if m.authoringCapability.Available || m.agentBuilderCapability.Available {
+		if m.agentBuilderCapability.Available {
 			m.section = sectionAuthoring
 			// A full standalone workspace starts on the guided Home page.
 			// Narrow embedded clients still open directly on their one useful
@@ -990,95 +919,12 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionTeams
 			m.focusPanelList()
 		}
-		if m.authoringChangeSet == nil && len(m.availableSections()) >= 7 {
+		if len(m.availableSections()) >= 7 {
 			m.section = sectionOverview
 			m.focusPanelList()
 			m.resetComposerMode()
 		}
-		m.activateReadyRefinement()
 		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadProjects(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
-	case workforceCompiled:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = "Authoring failed. Your prompt is preserved for retry."
-			return m, nil
-		}
-		m.err = nil
-		m.authoringResult = msg.result
-		m.authoringChangeSet = msg.changeSet
-		if msg.changeSet != nil && msg.changeSet.Status == authoring.ChangeSetEvaluating && strings.TrimSpace(msg.changeSet.CandidateDigest) == "" {
-			m.authoringResult = nil
-		}
-		m.authoringAmendment = msg.mode == authoring.ModeAmend
-		m.authoringAutomationFocus = nil
-		m.pendingAuthoringKey, m.pendingAuthoringPrompt, m.pendingAuthoringParentID = "", "", ""
-		m.editor.Reset()
-		m.editor.Placeholder = "Describe what should change…"
-		if msg.changeSet != nil {
-			if msg.changeSet.Status == authoring.ChangeSetEvaluating {
-				m.status = "Proposal queued. OpenSeal is generating it durably; you may safely leave."
-			} else {
-				m.status = "Workforce change set saved for governed review. Nothing has been activated."
-			}
-		} else {
-			m.status = "Workforce candidate compiled. Nothing has been activated."
-		}
-		m.section = sectionAuthoring
-		m.focusPanelList()
-		return m, m.loadCapabilities()
-	case workforceGoverned:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = msg.action + " failed. Your reason and retry identity are preserved."
-			return m, nil
-		}
-		m.err = nil
-		m.authoringChangeSet = msg.changeSet
-		if msg.changeSet != nil && (msg.changeSet.Status != authoring.ChangeSetEvaluating || strings.TrimSpace(msg.changeSet.CandidateDigest) != "") {
-			m.authoringResult = &msg.changeSet.Result
-		} else {
-			m.authoringResult = nil
-		}
-		m.pendingGovernanceKey, m.pendingGovernanceIntent = "", ""
-		m.pendingRefinementKey, m.pendingRefinementIntent, m.activeRefinementQuestionID = "", "", ""
-		m.editor.Reset()
-		m.resetComposerMode()
-		m.status = msg.action + " recorded in the durable workforce audit."
-		m.focusPanelList()
-		return m, m.loadCapabilities()
-	case workforceSkillsSearched:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = "Skill search failed."
-			return m, nil
-		}
-		m.err = nil
-		m.refinementSkillQuery = msg.query
-		if !msg.append {
-			m.refinementSkillResults = nil
-		}
-		m.refinementSkillResults = append(m.refinementSkillResults, msg.page.Items...)
-		m.refinementSkillNextCursor = msg.page.NextCursor
-		m.editor.Reset()
-		m.status = fmt.Sprintf("%d verified catalog result(s) available to review.", len(m.refinementSkillResults))
-		return m, nil
-	case workforceLoaded:
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.err = nil
-		m.authoringChangeSet = msg.changeSet
-		if msg.changeSet != nil && (msg.changeSet.Status != authoring.ChangeSetEvaluating || strings.TrimSpace(msg.changeSet.CandidateDigest) != "") {
-			m.authoringResult = &msg.changeSet.Result
-		} else {
-			m.authoringResult = nil
-		}
-		return m, m.loadCapabilities()
 	case workforceBundleInspected:
 		m.busy = false
 		if msg.err != nil {
@@ -1894,9 +1740,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
 			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadProjects(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
-			if m.authoringChangeSet != nil {
-				commands = append(commands, m.loadWorkforceChangeSet())
-			}
 		}
 		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
@@ -2007,20 +1850,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitAgentBuilderPrompt()
 			case modeWorkforceBundleInspect:
 				return m, m.submitWorkforceBundleInspection()
-			case modeWorkforceRefinement:
-				return m, m.submitWorkforceRefinement()
-			case modeWorkforceApprove:
-				return m, m.submitWorkforceApproval(true)
-			case modeWorkforceReject:
-				return m, m.submitWorkforceApproval(false)
-			case modeWorkforceApply:
-				return m, m.submitWorkforceApply()
-			case modeWorkforceActivate:
-				return m, m.submitWorkforceActivation()
-			case modeWorkforceRetry:
-				return m, m.submitWorkforceRetry()
-			case modeWorkforceConversationRouting:
-				return m, m.submitWorkforceConversationRouting()
 			case modeRequestCreate:
 				return m, m.submitAgentRequestCreation()
 			case modeRequestAccept:
@@ -2074,7 +1903,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.focus == focusPanel {
 		if key == "enter" && m.section == sectionOverview {
-			if m.authoringCapability.Available || m.agentBuilderCapability.Available {
+			if m.agentBuilderCapability.Available {
 				m.section = sectionAuthoring
 				m.mode = modeAgentBuilderPrompt
 				m.editor.Placeholder = agentBuilderPromptPlaceholder
@@ -2084,15 +1913,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		switch key {
 		case "up", "k":
-			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
-				m.moveWorkforceApprovalSelection(-1)
-			} else if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
-				m.moveWorkforceBindingConfigurationSelection(-1)
-			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
-				m.moveWorkforceCredentialSelection(-1)
-			} else if m.section == sectionAuthoring && len(m.authoringAutomationRows()) > 0 {
-				m.moveWorkforceAutomationSelection(-1)
-			} else if m.section == sectionReadiness && len(m.activeRunbookOperations()) > 0 {
+			if m.section == sectionReadiness && len(m.activeRunbookOperations()) > 0 {
 				m.moveActiveRunbookSelection(-1)
 			} else {
 				m.movePanelSelection(-1)
@@ -2107,15 +1928,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadSelectedRunHistory()
 			}
 		case "down", "j":
-			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
-				m.moveWorkforceApprovalSelection(1)
-			} else if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
-				m.moveWorkforceBindingConfigurationSelection(1)
-			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
-				m.moveWorkforceCredentialSelection(1)
-			} else if m.section == sectionAuthoring && len(m.authoringAutomationRows()) > 0 {
-				m.moveWorkforceAutomationSelection(1)
-			} else if m.section == sectionReadiness && len(m.activeRunbookOperations()) > 0 {
+			if m.section == sectionReadiness && len(m.activeRunbookOperations()) > 0 {
 				m.moveActiveRunbookSelection(1)
 			} else {
 				m.movePanelSelection(1)
@@ -2156,7 +1969,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.section = sectionActivity
 			}
 		case "f":
-			if m.authoringCapability.Available || m.agentBuilderCapability.Available {
+			if m.agentBuilderCapability.Available {
 				m.section = sectionAuthoring
 			}
 		case "B":
@@ -2259,17 +2072,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.focusComposerEditor()
 			}
 		case "r":
-			if m.section == sectionAuthoring && m.canRetryWorkforce() {
-				m.prepareWorkforceGovernanceComposer(modeWorkforceRetry, "Why should generation be retried?…")
-				return m, nil
-			}
 			return m, m.loadPanel()
 		case "[":
-			if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
-				m.moveWorkforceBindingConfigurationChoice(-1)
-			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
-				m.moveWorkforceCredentialChoice(-1)
-			} else if m.section == sectionReadiness {
+			if m.section == sectionReadiness {
 				m.moveAgentAmendmentSelection(-1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(-1)
@@ -2284,11 +2089,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveEvidenceObservation(-1)
 			}
 		case "]":
-			if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
-				m.moveWorkforceBindingConfigurationChoice(1)
-			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
-				m.moveWorkforceCredentialChoice(1)
-			} else if m.section == sectionReadiness {
+			if m.section == sectionReadiness {
 				m.moveAgentAmendmentSelection(1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(1)
@@ -2315,18 +2116,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveGroundingPage(1)
 			}
 		case "b":
-			if m.section == sectionAuthoring && m.canPlaceWorkforceBindingConfigurations() {
-				return m, m.submitWorkforceBindingConfigurationPlacement()
-			} else if m.section == sectionAuthoring && m.canPlaceWorkforceCredentials() {
-				return m, m.submitWorkforceCredentialPlacement()
-			} else if m.section == sectionSkills && m.supportsSkillBinding(kernelapi.OperationUpsert) {
+			if m.section == sectionSkills && m.supportsSkillBinding(kernelapi.OperationUpsert) {
 				m.prepareSkillBindingComposer(nil)
 			}
 		case "m":
 			if m.section == sectionActivity && m.activityHasMore {
 				return m, m.loadActivity(true)
-			} else if m.section == sectionAuthoring && m.selectedWorkforceAutomation() != nil {
-				m.prepareWorkforceAutomationRefinement()
 			} else if m.section == sectionReadiness && m.canProposeAgentBehaviorAmendment() {
 				m.prepareAgentAmendmentComposer(modeAgentAmendmentPropose, "systemPrompt|personality\nConcise rationale\nNew immutable value")
 			} else if m.section == sectionTeams && m.canProposeTeamPurposeAmendment() {
@@ -2372,8 +2167,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareRequestComposer(modeRequestReject, "Explain why this request cannot be accepted…")
 			} else if m.section == sectionApprovals && m.canResolveSelectedActionApproval() {
 				m.prepareRequestComposer(modeApprovalReject, "Explain why this action must not proceed…")
-			} else if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
-				m.prepareWorkforceGovernanceComposer(modeWorkforceReject, "Explain why this proposal must be rejected…")
 			} else if m.section == sectionReadiness && m.canResolveSelectedAgentAmendment() {
 				m.prepareAgentAmendmentComposer(modeAgentAmendmentReject, "Record why this exact Agent amendment must not proceed…")
 			} else if m.section == sectionTeams && m.canResolveSelectedTeamAmendment() {
@@ -2399,9 +2192,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.focusComposerEditor()
 			}
 		case "y":
-			if m.section == sectionAuthoring && m.canResolveWorkforceApproval() {
-				m.prepareWorkforceGovernanceComposer(modeWorkforceApprove, "Record why this requirement is satisfied…")
-			} else if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionAccept) {
+			if m.section == sectionRequests && m.canRespondToSelectedRequest(runtime.AgentRequestDecisionAccept) {
 				placeholder := "Optionally record a concise acceptance note…"
 				if request := m.selectedAgentRequestRecord(); request != nil && request.Recipient.Type == runtime.OwnerTypeTeam {
 					placeholder = "First line: assigned Agent ID\nOptional remaining lines: acceptance note"
@@ -2442,10 +2233,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareAgentAmendmentComposer(modeAgentAmendmentEvaluate, agentEvaluationPlaceholder(m.agentDeployment))
 			} else if m.section == sectionTeams && m.canEvaluateSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentEvaluate, teamEvaluationPlaceholder(m.selectedTeamDeploymentRecord()))
-			} else if m.section == sectionAuthoring && m.canApplyWorkforce() {
-				m.prepareWorkforceGovernanceComposer(modeWorkforceApply, "Why should this reviewed workforce be created now?…")
-			} else if m.section == sectionAuthoring && m.canPrepareWorkforceActivation() {
-				m.prepareWorkforceGovernanceComposer(modeWorkforceActivate, "Why should these reviewed resources start working now?…")
 			} else if m.section == sectionObjectives && key == "enter" && m.selectedRunbookRecord() != nil && m.supportsRunbook(kernelapi.OperationGet) {
 				return m, m.toggleSelectedRunbookDetail()
 			} else if m.section == sectionObjectives && m.selectedObjectiveRecord() != nil && m.supportsObjective(kernelapi.OperationUpdate) {
@@ -2494,9 +2281,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.updateAllClawHub()
 			}
 		case "v":
-			if m.section == sectionAuthoring && m.canConfigureWorkforceConversationRouting() {
-				m.prepareWorkforceConversationRouting()
-			} else if m.section == sectionReadiness && m.canActivateSelectedAgentAmendment() {
+			if m.section == sectionReadiness && m.canActivateSelectedAgentAmendment() {
 				m.prepareAgentAmendmentComposer(modeAgentAmendmentActivate, "Record why this reviewed Agent definition should become active…")
 			} else if m.section == sectionTeams && m.canActivateSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentActivate, "Record why this reviewed Team definition should become active…")
@@ -2541,9 +2326,7 @@ func (m *Model) loadCapabilities() tea.Cmd {
 	return func() tea.Msg {
 		var document kernelapi.CapabilityDocument
 		var err error
-		if m.authoringChangeSet != nil {
-			document, err = m.client.WorkforceChangeSetCapabilities(m.ctx, m.authoringChangeSet.Scope, m.authoringChangeSet.ID)
-		} else if m.config.Owner.Type == runtime.OwnerTypeAgent && m.agentCapabilityClient != nil {
+		if m.config.Owner.Type == runtime.OwnerTypeAgent && m.agentCapabilityClient != nil {
 			document, err = m.agentCapabilityClient.AgentDefinitionCapabilities(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}, m.config.Owner.ID)
 		} else {
 			document, err = m.client.Capabilities(m.ctx)
@@ -2552,27 +2335,10 @@ func (m *Model) loadCapabilities() tea.Cmd {
 	}
 }
 
-func (m *Model) loadWorkforceChangeSet() tea.Cmd {
-	if m.authoringChangeSet == nil {
-		return nil
-	}
-	m.loading = true
-	scope, id := m.authoringChangeSet.Scope, m.authoringChangeSet.ID
-	return func() tea.Msg {
-		changeSet, err := m.client.GetWorkforceChangeSet(m.ctx, scope, id)
-		return workforceLoaded{changeSet: changeSet, err: err}
-	}
-}
-
 // submitAgentBuilderPrompt is "New agent": it opens a builder chat whose
 // first message is the request and switches to that chat. The builder asks
 // its questions there and proposes the agent as an approval card.
 func (m *Model) submitAgentBuilderPrompt() tea.Cmd {
-	if m.authoringAutomationFocus != nil {
-		// Refining a runbook operation still edits the change set; OS-14
-		// deletes that flow with the other authoring modes.
-		return m.submitWorkforceAuthoring()
-	}
 	prompt := strings.TrimSpace(m.editor.Value())
 	if !m.supportsAgentBuilder() || m.busy || prompt == "" {
 		if prompt == "" {
@@ -2597,63 +2363,6 @@ func (m *Model) submitAgentBuilderPrompt() tea.Cmd {
 	}
 }
 
-func (m *Model) submitWorkforceAuthoring() tea.Cmd {
-	userPrompt := strings.TrimSpace(m.editor.Value())
-	if !m.supportsWorkforceAuthoring() || m.busy || userPrompt == "" {
-		if userPrompt == "" {
-			m.status = "Describe the workforce before compiling it."
-		}
-		return nil
-	}
-	prompt := userPrompt
-	if focus := m.authoringAutomationFocus; focus != nil {
-		prompt = fmt.Sprintf(
-			"Update only the deterministic operation %q on Agent %q (%s) in runbook %s@%s. Preserve every unrelated Agent, Team, objective, policy, Skill binding, runbook, and operation exactly. Requested change: %s",
-			focus.Entrypoint, focus.AgentName, focus.AgentID, focus.RunbookID, focus.RunbookVersion, userPrompt,
-		)
-	}
-	m.busy = true
-	m.err = nil
-	m.status = "Saving a reviewable Agent and Team change set…"
-	if m.supportsAuthoring(kernelapi.OperationPropose) {
-		parentID := ""
-		if m.authoringChangeSet != nil {
-			parentID = m.authoringChangeSet.ID
-		}
-		if m.pendingAuthoringKey == "" || m.pendingAuthoringPrompt != prompt || m.pendingAuthoringParentID != parentID {
-			m.pendingAuthoringKey = uuid.NewString()
-			m.pendingAuthoringPrompt = prompt
-			m.pendingAuthoringParentID = parentID
-		}
-		request := authoring.CreateChangeSetRequest{
-			Scope:    capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID},
-			ParentID: parentID, Prompt: prompt, Catalog: authoring.CapabilityCatalog{},
-			Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
-		}
-		idempotencyKey := m.pendingAuthoringKey
-		return func() tea.Msg {
-			changeSet, err := m.client.CreateWorkforceChangeSet(m.ctx, request, idempotencyKey)
-			if err != nil {
-				return workforceCompiled{err: err}
-			}
-			if changeSet == nil {
-				return workforceCompiled{err: errors.New("workforce authoring returned no change set")}
-			}
-			return workforceCompiled{result: &changeSet.Result, changeSet: changeSet, mode: changeSet.Mode}
-		}
-	}
-	request := authoring.GenerateRequest{Mode: authoring.ModeCreate, Prompt: prompt, Catalog: authoring.CapabilityCatalog{}}
-	if m.authoringResult != nil {
-		request.Mode = authoring.ModeAmend
-		existing := m.authoringResult.Candidate
-		request.Existing = &existing
-	}
-	return func() tea.Msg {
-		result, err := m.client.CompileWorkforce(m.ctx, request)
-		return workforceCompiled{result: result, mode: request.Mode, err: err}
-	}
-}
-
 func (m *Model) submitWorkforceBundleInspection() tea.Cmd {
 	path := strings.TrimSpace(m.editor.Value())
 	if path == "" || m.busy || m.workforceBundleClient == nil || !m.workforceBundleCapability.Supports(kernelapi.OperationInspect) {
@@ -2672,413 +2381,6 @@ func (m *Model) submitWorkforceBundleInspection() tea.Cmd {
 		inspection, err := m.workforceBundleClient.InspectWorkforceBundle(m.ctx, artifact)
 		return workforceBundleInspected{path: path, inspection: inspection, err: err}
 	}
-}
-
-func (m *Model) submitWorkforceApproval(approved bool) tea.Cmd {
-	reason := strings.TrimSpace(m.editor.Value())
-	reference, ok := m.selectedWorkforceApprovalRequirement()
-	if !ok || m.busy || reason == "" {
-		if reason == "" {
-			m.status = "Record a reason for the permanent approval audit."
-		}
-		return nil
-	}
-	changeSet := m.authoringChangeSet
-	intent := fmt.Sprintf("approval\x00%s\x00%d\x00%s\x00%s\x00%s\x00%t\x00%s", changeSet.ID, changeSet.Revision, reference.EvaluationID, reference.PolicyID, reference.Role, approved, reason)
-	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
-		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
-	}
-	request := authoring.ResolveChangeSetApprovalRequest{
-		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
-		EvaluationID: reference.EvaluationID, PolicyID: reference.PolicyID, Role: reference.Role,
-		Approved: approved, Reason: reason, Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
-	}
-	key := m.pendingGovernanceKey
-	m.busy, m.err = true, nil
-	action := "Approval"
-	if !approved {
-		action = "Rejection"
-	}
-	m.status = action + " is being recorded…"
-	return func() tea.Msg {
-		result, err := m.client.ResolveWorkforceChangeSetApproval(m.ctx, request, key)
-		return workforceGoverned{changeSet: result, action: action, err: err}
-	}
-}
-
-func (m *Model) submitWorkforceRefinement() tea.Cmd {
-	question := m.readyRefinement()
-	input := strings.TrimSpace(m.editor.Value())
-	if question == nil || m.busy || input == "" {
-		if input == "" {
-			m.status = "Answer the current workforce question before continuing."
-		}
-		return nil
-	}
-	if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && strings.HasPrefix(strings.ToLower(input), "/find ") {
-		return m.searchWorkforceSkills(strings.TrimSpace(input[len("/find "):]), "", false)
-	}
-	if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && strings.EqualFold(input, "/more") {
-		if m.refinementSkillNextCursor == "" {
-			m.status = "There are no more Skill results."
-			return nil
-		}
-		return m.searchWorkforceSkills(m.refinementSkillQuery, m.refinementSkillNextCursor, true)
-	}
-	var discovered *authoring.SkillSearchIdentity
-	value, err := m.parseRefinementAnswer(*question, input)
-	if question.Answer.Kind == authoring.RefinementAnswerSkillSelection {
-		if candidate, ok := matchSearchedSkill(m.refinementSkillResults, input); ok {
-			value = authoring.RefinementAnswerValue{SkillIDs: []string{candidate.ID}}
-			discovered = &authoring.SkillSearchIdentity{ID: candidate.ID, Version: candidate.Version, SourceIdentity: candidate.SourceIdentity}
-			err = nil
-		}
-	}
-	if err != nil {
-		m.err = err
-		m.status = "That answer does not match the requested format."
-		return nil
-	}
-	changeSet := m.authoringChangeSet
-	intent := fmt.Sprintf("refine\x00%s\x00%d\x00%s\x00%s", changeSet.ID, changeSet.Revision, question.ID, input)
-	if m.pendingRefinementKey == "" || m.pendingRefinementIntent != intent {
-		m.pendingRefinementKey, m.pendingRefinementIntent = uuid.NewString(), intent
-	}
-	request := authoring.AnswerChangeSetRefinementRequest{
-		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
-		QuestionID: question.ID, Value: value, Source: authoring.RefinementAnswerSourceUser,
-		DiscoveredSkill: discovered,
-		Actor:           authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
-	}
-	key := m.pendingRefinementKey
-	m.busy, m.err, m.status = true, nil, "Saving the answer and regenerating the proposal…"
-	return func() tea.Msg {
-		result, err := m.client.AnswerWorkforceChangeSetRefinement(m.ctx, request, key)
-		return workforceGoverned{changeSet: result, action: "Refinement answer", err: err}
-	}
-}
-
-func (m *Model) searchWorkforceSkills(query, cursor string, appendResults bool) tea.Cmd {
-	if m.workforceSkillSearchClient == nil || !m.supportsAuthoring(kernelapi.OperationSearch) {
-		m.status = "This server does not advertise Skill search."
-		return nil
-	}
-	if strings.TrimSpace(query) == "" {
-		m.status = "Enter a Skill name or outcome after /find."
-		return nil
-	}
-	request := authoring.SkillSearchRequest{
-		Scope: m.authoringChangeSet.Scope, Query: query, Cursor: cursor,
-		Limit: authoring.DefaultSkillSearchLimit,
-	}
-	m.busy, m.err, m.status = true, nil, "Searching authorized Skill catalogs…"
-	return func() tea.Msg {
-		page, err := m.workforceSkillSearchClient.SearchWorkforceSkills(m.ctx, request)
-		return workforceSkillsSearched{query: query, page: page, append: appendResults, err: err}
-	}
-}
-
-func matchSearchedSkill(results []authoring.SkillSearchCandidate, input string) (authoring.SkillSearchCandidate, bool) {
-	input = strings.TrimSpace(input)
-	for _, candidate := range results {
-		if candidate.Verification != authoring.SkillSearchVerificationVerified || candidate.Readiness == authoring.SkillReadinessUnavailable {
-			continue
-		}
-		if strings.EqualFold(input, candidate.ID+"@"+candidate.Version) ||
-			(strings.EqualFold(input, candidate.ID) && uniqueSearchedSkillID(results, candidate.ID)) {
-			return candidate, true
-		}
-	}
-	return authoring.SkillSearchCandidate{}, false
-}
-
-func uniqueSearchedSkillID(results []authoring.SkillSearchCandidate, id string) bool {
-	count := 0
-	for _, candidate := range results {
-		if strings.EqualFold(candidate.ID, id) {
-			count++
-		}
-	}
-	return count == 1
-}
-
-func (m *Model) parseRefinementAnswer(question authoring.RefinementQuestion, input string) (authoring.RefinementAnswerValue, error) {
-	value, err := parseRefinementAnswer(question, input)
-	if err != nil || value.CredentialReference == nil {
-		return value, err
-	}
-	if m.authoringCapability.Context == nil {
-		return authoring.RefinementAnswerValue{}, errors.New("no authorized credential bindings were advertised")
-	}
-	for _, binding := range m.authoringCapability.Context.CredentialBindings {
-		if binding.Reference == *value.CredentialReference {
-			return value, nil
-		}
-	}
-	return authoring.RefinementAnswerValue{}, errors.New("credential reference is not advertised for this proposal")
-}
-
-func (m *Model) submitWorkforceApply() tea.Cmd {
-	reason := strings.TrimSpace(m.editor.Value())
-	if !m.canApplyWorkforce() || m.busy || reason == "" {
-		if reason == "" {
-			m.status = "Record why this reviewed workforce should be created."
-		}
-		return nil
-	}
-	changeSet := m.authoringChangeSet
-	intent := fmt.Sprintf("apply\x00%s\x00%d\x00%s\x00%s", changeSet.ID, changeSet.Revision, changeSet.CandidateDigest, reason)
-	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
-		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
-	}
-	request := authoring.ApplyChangeSetRequest{
-		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
-		CandidateDigest: changeSet.CandidateDigest, Reason: reason,
-		Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
-	}
-	key := m.pendingGovernanceKey
-	m.busy, m.err = true, nil
-	m.status = "Creating the reviewed workforce atomically…"
-	return func() tea.Msg {
-		result, err := m.client.ApplyWorkforceChangeSet(m.ctx, request, key)
-		return workforceGoverned{changeSet: result, action: "Workforce Apply", err: err}
-	}
-}
-
-func (m *Model) submitWorkforceActivation() tea.Cmd {
-	reason := strings.TrimSpace(m.editor.Value())
-	if !m.canPrepareWorkforceActivation() || m.busy || reason == "" {
-		if reason == "" {
-			m.status = "Record why these reviewed resources should start working."
-		}
-		return nil
-	}
-	changeSet := m.authoringChangeSet
-	intent := fmt.Sprintf("activate\x00%s\x00%d\x00%s\x00%s", changeSet.ID, changeSet.Revision, changeSet.CandidateDigest, reason)
-	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
-		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
-	}
-	request := authoring.PrepareChangeSetActivationRequest{
-		Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision,
-		CandidateDigest: changeSet.CandidateDigest, Catalog: changeSet.Catalog, Reason: reason,
-		Actor: authoring.ChangeSetActor{Type: m.config.Actor.Type, ID: m.config.Actor.ID},
-	}
-	key := m.pendingGovernanceKey
-	m.busy, m.err, m.status = true, nil, "Preparing the governed activation review…"
-	return func() tea.Msg {
-		result, err := m.client.PrepareWorkforceChangeSetActivation(m.ctx, request, key)
-		return workforceGoverned{changeSet: result, action: "Workforce Activation", err: err}
-	}
-}
-
-func (m *Model) submitWorkforceRetry() tea.Cmd {
-	reason := strings.TrimSpace(m.editor.Value())
-	if !m.canRetryWorkforce() || m.busy || reason == "" {
-		if reason == "" {
-			m.status = "Record why generation should be retried."
-		}
-		return nil
-	}
-	changeSet := m.authoringChangeSet
-	intent := fmt.Sprintf("retry\x00%s\x00%d\x00%s", changeSet.ID, changeSet.Revision, reason)
-	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
-		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
-	}
-	request := authoring.RetryChangeSetGenerationRequest{Scope: changeSet.Scope, ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, Reason: reason}
-	key := m.pendingGovernanceKey
-	m.busy, m.err, m.status = true, nil, "Retrying generation as durable work…"
-	return func() tea.Msg {
-		result, err := m.client.RetryWorkforceChangeSetGeneration(m.ctx, request, key)
-		return workforceGoverned{changeSet: result, action: "Generation retry", err: err}
-	}
-}
-
-func (m *Model) submitWorkforceCredentialPlacement() tea.Cmd {
-	rows := m.workforceCredentialRows()
-	if !m.canPlaceWorkforceCredentials() || m.busy || len(rows) == 0 {
-		return nil
-	}
-	credentialReferences := make(map[string]map[string]capability.CredentialReference, len(m.authoringChangeSet.Placement.CredentialReferences))
-	for agentID, references := range m.authoringChangeSet.Placement.CredentialReferences {
-		credentialReferences[agentID] = make(map[string]capability.CredentialReference, len(references))
-		for kind, reference := range references {
-			credentialReferences[agentID][kind] = reference
-		}
-	}
-	labels := make([]string, 0, len(rows))
-	for _, row := range rows {
-		if len(row.Choices) == 0 {
-			m.status = fmt.Sprintf("No authorized %s credential is available for %s.", row.Label, row.AgentName)
-			return nil
-		}
-		selected := m.authoringCredentialChoices[row.Key]
-		if selected < 0 || selected >= len(row.Choices) {
-			selected = 0
-		}
-		choice := row.Choices[selected]
-		if credentialReferences[row.AgentID] == nil {
-			credentialReferences[row.AgentID] = make(map[string]capability.CredentialReference)
-		}
-		credentialReferences[row.AgentID][row.Kind] = choice.Reference
-		labels = append(labels, row.AgentName+" / "+row.Label+" → "+choice.DisplayName)
-	}
-	placement := m.authoringChangeSet.Placement
-	placement.CredentialReferences = credentialReferences
-	intent := fmt.Sprintf("credentials\x00%s\x00%d\x00%s", m.authoringChangeSet.ID, m.authoringChangeSet.Revision, strings.Join(labels, "\x00"))
-	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
-		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
-	}
-	request := authoring.UpdateChangeSetPlacementRequest{
-		Scope: m.authoringChangeSet.Scope, ChangeSetID: m.authoringChangeSet.ID, ExpectedRevision: m.authoringChangeSet.Revision,
-		Placement: placement, Reason: "Selected authorized credentials: " + strings.Join(labels, "; "),
-	}
-	key := m.pendingGovernanceKey
-	m.busy, m.err, m.status = true, nil, "Saving authorized credential placement…"
-	return func() tea.Msg {
-		result, err := m.client.UpdateWorkforceChangeSetPlacement(m.ctx, request, key)
-		return workforceGoverned{changeSet: result, action: "Credential placement", err: err}
-	}
-}
-
-func (m *Model) submitWorkforceBindingConfigurationPlacement() tea.Cmd {
-	rows := m.workforceBindingConfigurationRows()
-	if !m.canPlaceWorkforceBindingConfigurations() || m.busy || len(rows) == 0 {
-		return nil
-	}
-	bindingConfigs := cloneWorkforceBindingConfigs(m.authoringChangeSet.Placement.BindingConfigs)
-	labels := make([]string, 0, len(rows))
-	for _, row := range rows {
-		selected := m.authoringConfigChoices[row.Key]
-		if selected < 0 || selected >= len(row.Field.Options) {
-			selected = 0
-		}
-		option := row.Field.Options[selected]
-		value, _, err := option.Value.Value()
-		if err != nil {
-			m.err, m.status = err, "The server advertised an invalid binding configuration choice."
-			return nil
-		}
-		if bindingConfigs[row.AgentID] == nil {
-			bindingConfigs[row.AgentID] = make(map[string]map[string]interface{})
-		}
-		if bindingConfigs[row.AgentID][row.Field.CatalogSkillID] == nil {
-			bindingConfigs[row.AgentID][row.Field.CatalogSkillID] = make(map[string]interface{})
-		}
-		bindingConfigs[row.AgentID][row.Field.CatalogSkillID][row.Field.Key] = value
-		labels = append(labels, row.AgentName+" / "+row.Field.Prompt+" → "+option.Label)
-	}
-	placement := m.authoringChangeSet.Placement
-	placement.BindingConfigs = bindingConfigs
-	intent := fmt.Sprintf("binding-config\x00%s\x00%d\x00%s", m.authoringChangeSet.ID, m.authoringChangeSet.Revision, strings.Join(labels, "\x00"))
-	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
-		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
-	}
-	request := authoring.UpdateChangeSetPlacementRequest{
-		Scope: m.authoringChangeSet.Scope, ChangeSetID: m.authoringChangeSet.ID, ExpectedRevision: m.authoringChangeSet.Revision,
-		Placement: placement, Reason: "Selected authorized Skill configuration: " + strings.Join(labels, "; "),
-	}
-	key := m.pendingGovernanceKey
-	m.busy, m.err, m.status = true, nil, "Saving reviewed Skill configuration…"
-	return func() tea.Msg {
-		result, err := m.client.UpdateWorkforceChangeSetPlacement(m.ctx, request, key)
-		return workforceGoverned{changeSet: result, action: "Skill configuration placement", err: err}
-	}
-}
-
-type workforceConversationRoutingInput struct {
-	InstallationID string
-	ApplicationID  string
-	Address        string
-}
-
-func parseWorkforceConversationRouting(value string) (workforceConversationRoutingInput, error) {
-	fields := make(map[string]string)
-	for _, line := range strings.Split(value, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		key, raw, ok := strings.Cut(line, ":")
-		if !ok {
-			return workforceConversationRoutingInput{}, errors.New("use installation, application, and address fields")
-		}
-		key, raw = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(raw)
-		switch key {
-		case "installation", "application", "address":
-		default:
-			return workforceConversationRoutingInput{}, fmt.Errorf("unknown routing field %q; credentials and secrets do not belong here", key)
-		}
-		if _, exists := fields[key]; exists {
-			return workforceConversationRoutingInput{}, fmt.Errorf("routing field %q appears more than once", key)
-		}
-		fields[key] = raw
-	}
-	result := workforceConversationRoutingInput{
-		InstallationID: fields["installation"],
-		ApplicationID:  fields["application"],
-		Address:        fields["address"],
-	}
-	if result.InstallationID == "" || result.Address == "" {
-		return workforceConversationRoutingInput{}, errors.New("installation and address are required")
-	}
-	return result, nil
-}
-
-func (m *Model) submitWorkforceConversationRouting() tea.Cmd {
-	row := m.selectedWorkforceConversationRoutingRow()
-	if row == nil || !m.canConfigureWorkforceConversationRouting() || m.busy {
-		return nil
-	}
-	input, err := parseWorkforceConversationRouting(m.editor.Value())
-	if err != nil {
-		m.err, m.status = err, "Review the non-secret routing fields and try again."
-		return nil
-	}
-	placement := m.authoringChangeSet.Placement
-	placement.ConversationEndpoints = cloneWorkforceConversationEndpointPlacements(placement.ConversationEndpoints)
-	placed := placement.ConversationEndpoints[row.Endpoint.ID]
-	placed.InstallationID = input.InstallationID
-	placed.ApplicationID = input.ApplicationID
-	placed.Address = input.Address
-	placement.ConversationEndpoints[row.Endpoint.ID] = placed
-	label := fmt.Sprintf("%s → installation %s / address %s", row.Endpoint.Name, input.InstallationID, input.Address)
-	intent := fmt.Sprintf("conversation-routing\x00%s\x00%d\x00%s\x00%s\x00%s", m.authoringChangeSet.ID, m.authoringChangeSet.Revision, row.Endpoint.ID, input.InstallationID, input.Address)
-	if m.pendingGovernanceKey == "" || m.pendingGovernanceIntent != intent {
-		m.pendingGovernanceKey, m.pendingGovernanceIntent = uuid.NewString(), intent
-	}
-	request := authoring.UpdateChangeSetPlacementRequest{
-		Scope: m.authoringChangeSet.Scope, ChangeSetID: m.authoringChangeSet.ID, ExpectedRevision: m.authoringChangeSet.Revision,
-		Placement: placement, Reason: "Connected reviewed conversation routing: " + label,
-	}
-	key := m.pendingGovernanceKey
-	m.busy, m.err, m.status = true, nil, "Saving non-secret conversation routing…"
-	return func() tea.Msg {
-		result, updateErr := m.client.UpdateWorkforceChangeSetPlacement(m.ctx, request, key)
-		return workforceGoverned{changeSet: result, action: "Conversation routing placement", err: updateErr}
-	}
-}
-
-func cloneWorkforceConversationEndpointPlacements(value map[string]authoring.ConversationEndpointPlacement) map[string]authoring.ConversationEndpointPlacement {
-	result := make(map[string]authoring.ConversationEndpointPlacement, len(value))
-	for key, placement := range value {
-		placement.Configuration = mapsClone(placement.Configuration)
-		result[key] = placement
-	}
-	return result
-}
-
-func cloneWorkforceBindingConfigs(value map[string]map[string]map[string]interface{}) map[string]map[string]map[string]interface{} {
-	result := make(map[string]map[string]map[string]interface{}, len(value))
-	for agentID, skills := range value {
-		result[agentID] = make(map[string]map[string]interface{}, len(skills))
-		for skillID, config := range skills {
-			result[agentID][skillID] = make(map[string]interface{}, len(config))
-			for key, item := range config {
-				result[agentID][skillID][key] = item
-			}
-		}
-	}
-	return result
 }
 
 func (m *Model) loadRuns() tea.Cmd {
@@ -3759,9 +3061,6 @@ func (m *Model) loadSelectedConversation() tea.Cmd {
 }
 
 func (m *Model) loadPanel() tea.Cmd {
-	if m.section == sectionAuthoring && m.authoringChangeSet != nil {
-		return m.loadWorkforceChangeSet()
-	}
 	if m.section == sectionReadiness {
 		return m.loadCompilations()
 	}
@@ -4927,7 +4226,7 @@ func (m *Model) defaultOperationalSection() panelSection {
 		section   panelSection
 		available bool
 	}{
-		{sectionAuthoring, m.authoringCapability.Available || m.agentBuilderCapability.Available},
+		{sectionAuthoring, m.agentBuilderCapability.Available},
 		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
 		{sectionSources, m.eventSourceCapability.Available},
@@ -4957,7 +4256,7 @@ func (m *Model) availableSections() []panelSection {
 		section   panelSection
 		available bool
 	}{
-		{sectionAuthoring, m.authoringCapability.Available || m.agentBuilderCapability.Available},
+		{sectionAuthoring, m.agentBuilderCapability.Available},
 		{sectionReadiness, m.agentDefinitionCapability.Available},
 		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionSkills, m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available},
@@ -5053,531 +4352,8 @@ func (m *Model) supportsChannel(operation string) bool {
 	return m.ready && m.conversationClient != nil && m.channelCapability.Supports(operation)
 }
 
-func (m *Model) supportsAuthoring(operation string) bool {
-	return m.ready && m.authoringCapability.Supports(operation)
-}
-
 func (m *Model) supportsAgentBuilder() bool {
 	return m.ready && m.agentBuilderClient != nil && m.agentBuilderCapability.Supports(kernelapi.OperationCreate)
-}
-
-func (m *Model) supportsWorkforceAuthoring() bool {
-	return m.supportsAuthoring(kernelapi.OperationPropose) || m.supportsAuthoring(kernelapi.OperationCompile)
-}
-
-// readyRefinement exposes exactly one server-backed question when the
-// contextual capability proves that this exact ChangeSet revision may be
-// refined. The TUI never infers authority from host-wide feature flags.
-func (m *Model) readyRefinement() *authoring.RefinementQuestion {
-	changeSet := m.authoringChangeSet
-	context := m.authoringCapability.Context
-	if changeSet == nil || context == nil || context.ChangeSetID != changeSet.ID || context.Revision != changeSet.Revision ||
-		!m.supportsAuthoring(kernelapi.OperationRefine) {
-		return nil
-	}
-	return changeSet.Refinement.NextQuestion()
-}
-
-func (m *Model) activateReadyRefinement() {
-	question := m.readyRefinement()
-	if question == nil {
-		if m.mode == modeWorkforceRefinement {
-			m.resetComposerMode()
-		}
-		return
-	}
-	m.section = sectionAuthoring
-	changed := m.activeRefinementQuestionID != question.ID
-	if changed {
-		m.editor.Reset()
-		m.pendingRefinementKey, m.pendingRefinementIntent = "", ""
-		m.refinementSkillQuery, m.refinementSkillNextCursor = "", ""
-		m.refinementSkillResults = nil
-	}
-	m.activeRefinementQuestionID = question.ID
-	m.mode = modeWorkforceRefinement
-	m.editor.Placeholder = refinementAnswerPlaceholder(*question)
-	if changed {
-		m.focusComposerEditor()
-	}
-}
-
-func parseRefinementAnswer(question authoring.RefinementQuestion, input string) (authoring.RefinementAnswerValue, error) {
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return authoring.RefinementAnswerValue{}, errors.New("answer is required")
-	}
-	switch question.Answer.Kind {
-	case authoring.RefinementAnswerText:
-		return authoring.RefinementAnswerValue{Text: input}, nil
-	case authoring.RefinementAnswerStringList:
-		items := splitRefinementSelections(input)
-		if len(items) == 0 {
-			return authoring.RefinementAnswerValue{}, errors.New("at least one value is required")
-		}
-		return authoring.RefinementAnswerValue{Items: items}, nil
-	case authoring.RefinementAnswerSingleSelect, authoring.RefinementAnswerMultiSelect:
-		selected, err := matchRefinementOptions(question.Answer.Options, input)
-		if err != nil {
-			return authoring.RefinementAnswerValue{}, err
-		}
-		if question.Answer.Kind == authoring.RefinementAnswerSingleSelect && len(selected) != 1 {
-			return authoring.RefinementAnswerValue{}, errors.New("choose exactly one option")
-		}
-		return authoring.RefinementAnswerValue{OptionIDs: selected}, nil
-	case authoring.RefinementAnswerBoolean:
-		value, ok := parseRefinementBoolean(input)
-		if !ok {
-			return authoring.RefinementAnswerValue{}, errors.New("answer yes or no")
-		}
-		return authoring.RefinementAnswerValue{Boolean: &value}, nil
-	case authoring.RefinementAnswerCredentialReference:
-		kind, id, ok := strings.Cut(input, "/")
-		kind, id = strings.TrimSpace(kind), strings.TrimSpace(id)
-		if !ok || kind == "" || id == "" {
-			return authoring.RefinementAnswerValue{}, errors.New("use credential kind/id")
-		}
-		return authoring.RefinementAnswerValue{CredentialReference: &capability.CredentialReference{Kind: kind, ID: id}}, nil
-	case authoring.RefinementAnswerSkillSelection:
-		selected, err := matchRefinementOptions(question.Answer.Options, input)
-		if err != nil {
-			return authoring.RefinementAnswerValue{}, err
-		}
-		return authoring.RefinementAnswerValue{SkillIDs: selected}, nil
-	default:
-		return authoring.RefinementAnswerValue{}, errors.New("unsupported refinement answer kind")
-	}
-}
-
-func splitRefinementSelections(input string) []string {
-	seen := make(map[string]bool)
-	values := make([]string, 0)
-	for _, value := range strings.FieldsFunc(input, func(r rune) bool { return r == ',' || r == '\n' }) {
-		value = strings.TrimSpace(value)
-		if value != "" && !seen[value] {
-			seen[value] = true
-			values = append(values, value)
-		}
-	}
-	return values
-}
-
-func matchRefinementOptions(options []authoring.RefinementQuestionOption, input string) ([]string, error) {
-	byAnswer := make(map[string]string, len(options)*2)
-	for _, option := range options {
-		byAnswer[strings.ToLower(strings.TrimSpace(option.ID))] = option.ID
-		byAnswer[strings.ToLower(strings.TrimSpace(option.Label))] = option.ID
-	}
-	selected := make([]string, 0)
-	seen := make(map[string]bool)
-	for _, answer := range splitRefinementSelections(input) {
-		id, ok := byAnswer[strings.ToLower(answer)]
-		if !ok {
-			return nil, fmt.Errorf("unknown option %q", answer)
-		}
-		if !seen[id] {
-			seen[id] = true
-			selected = append(selected, id)
-		}
-	}
-	if len(selected) == 0 {
-		return nil, errors.New("choose at least one advertised option")
-	}
-	return selected, nil
-}
-
-func parseRefinementBoolean(input string) (bool, bool) {
-	switch strings.ToLower(strings.TrimSpace(input)) {
-	case "yes", "y", "true":
-		return true, true
-	case "no", "n", "false":
-		return false, true
-	default:
-		return false, false
-	}
-}
-
-func refinementAnswerPlaceholder(question authoring.RefinementQuestion) string {
-	switch question.Answer.Kind {
-	case authoring.RefinementAnswerStringList:
-		return "Enter comma-separated values…"
-	case authoring.RefinementAnswerSingleSelect:
-		return "Enter one advertised option…"
-	case authoring.RefinementAnswerMultiSelect, authoring.RefinementAnswerSkillSelection:
-		return "Enter one or more advertised options, separated by commas…"
-	case authoring.RefinementAnswerBoolean:
-		return "Answer yes or no…"
-	case authoring.RefinementAnswerCredentialReference:
-		return "Enter an authorized credential reference as kind/id…"
-	default:
-		return "Type your answer…"
-	}
-}
-
-func (m *Model) selectedWorkforceApprovalRequirement() (kernelapi.ApprovalRequirementReference, bool) {
-	if !m.canResolveWorkforceApproval() {
-		return kernelapi.ApprovalRequirementReference{}, false
-	}
-	return m.authoringCapability.Context.EligibleApprovalRequirements[m.authoringApprovalSelected], true
-}
-
-func (m *Model) moveWorkforceApprovalSelection(delta int) {
-	if m.authoringCapability.Context == nil {
-		return
-	}
-	count := len(m.authoringCapability.Context.EligibleApprovalRequirements)
-	if count == 0 {
-		m.authoringApprovalSelected = 0
-		return
-	}
-	m.authoringApprovalSelected = (m.authoringApprovalSelected + delta + count) % count
-}
-
-func (m *Model) canResolveWorkforceApproval() bool {
-	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetAwaitingApproval &&
-		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
-		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationApprove) &&
-		len(m.authoringCapability.Context.EligibleApprovalRequirements) > 0
-}
-
-func (m *Model) canApplyWorkforce() bool {
-	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetReady &&
-		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
-		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationApply)
-}
-
-func (m *Model) canPrepareWorkforceActivation() bool {
-	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetApplied &&
-		m.authoringChangeSet.ApplyReceipt != nil &&
-		m.authoringChangeSet.ApplyReceipt.Activation == authoring.WorkforceActivationInactive &&
-		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
-		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision &&
-		m.supportsAuthoring(kernelapi.OperationActivate)
-}
-
-func (m *Model) canRetryWorkforce() bool {
-	return m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetFailed &&
-		m.authoringCapability.Context != nil && m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
-		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision && m.supportsAuthoring(kernelapi.OperationRetry)
-}
-
-type workforceCredentialRow struct {
-	Key       string
-	AgentID   string
-	AgentName string
-	Kind      string
-	Label     string
-	Choices   []capability.CredentialBindingChoice
-}
-
-type workforceBindingConfigurationRow struct {
-	Key       string
-	AgentID   string
-	AgentName string
-	Field     capability.BindingConfigurationFieldChoice
-}
-
-type workforceConversationRoutingRow struct {
-	Endpoint authoring.ConversationEndpointBlueprint
-	Placed   authoring.ConversationEndpointPlacement
-}
-
-func (m *Model) workforceConversationRoutingRows() []workforceConversationRoutingRow {
-	if m.authoringChangeSet == nil {
-		return nil
-	}
-	rows := make([]workforceConversationRoutingRow, 0, len(m.authoringChangeSet.Result.Candidate.ConversationEndpoints))
-	for _, endpoint := range m.authoringChangeSet.Result.Candidate.ConversationEndpoints {
-		rows = append(rows, workforceConversationRoutingRow{
-			Endpoint: endpoint,
-			Placed:   m.authoringChangeSet.Placement.ConversationEndpoints[endpoint.ID],
-		})
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].Endpoint.Name == rows[j].Endpoint.Name {
-			return rows[i].Endpoint.ID < rows[j].Endpoint.ID
-		}
-		return rows[i].Endpoint.Name < rows[j].Endpoint.Name
-	})
-	return rows
-}
-
-func (m *Model) canConfigureWorkforceConversationRouting() bool {
-	return m.authoringChangeSet != nil && m.authoringCapability.Context != nil &&
-		m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
-		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision &&
-		m.supportsAuthoring(kernelapi.OperationPatch) && len(m.workforceConversationRoutingRows()) > 0
-}
-
-func (m *Model) selectedWorkforceConversationRoutingRow() *workforceConversationRoutingRow {
-	rows := m.workforceConversationRoutingRows()
-	if len(rows) == 0 {
-		return nil
-	}
-	// Progress through incomplete endpoints first. This keeps multi-endpoint
-	// setup sequential without inventing a second form or exposing placement JSON.
-	for index, row := range rows {
-		address := strings.TrimSpace(row.Placed.Address)
-		if address == "" {
-			address = strings.TrimSpace(row.Endpoint.Address)
-		}
-		if strings.TrimSpace(row.Placed.InstallationID) == "" || address == "" {
-			m.authoringRoutingSelected = index
-			selected := row
-			return &selected
-		}
-	}
-	m.authoringRoutingSelected = min(max(m.authoringRoutingSelected, 0), len(rows)-1)
-	selected := rows[m.authoringRoutingSelected]
-	return &selected
-}
-
-func (m *Model) prepareWorkforceConversationRouting() {
-	row := m.selectedWorkforceConversationRoutingRow()
-	if row == nil || !m.canConfigureWorkforceConversationRouting() {
-		return
-	}
-	address := strings.TrimSpace(row.Placed.Address)
-	if address == "" {
-		address = strings.TrimSpace(row.Endpoint.Address)
-	}
-	m.mode = modeWorkforceConversationRouting
-	m.editor.Reset()
-	m.editor.SetValue(fmt.Sprintf("installation: %s\napplication: %s\naddress: %s", row.Placed.InstallationID, row.Placed.ApplicationID, address))
-	m.editor.Placeholder = "installation: workspace-id\napplication: optional-app-id\naddress: channel-or-destination"
-	m.focusComposerEditor()
-}
-
-func (m *Model) workforceBindingConfigurationRows() []workforceBindingConfigurationRow {
-	if m.authoringChangeSet == nil || m.authoringCapability.Context == nil {
-		return nil
-	}
-	fields := m.authoringCapability.Context.BindingConfigurationFields
-	if capability.ValidateBindingConfigurationFields(fields) != nil {
-		return nil
-	}
-	fieldsBySkill := make(map[string][]capability.BindingConfigurationFieldChoice)
-	for _, field := range fields {
-		catalogSkill, exists := m.authoringChangeSet.Catalog.Skills[field.CatalogSkillID]
-		if !field.Required || !exists || !bindingConfigurationFieldMatchesCatalog(field, catalogSkill) {
-			continue
-		}
-		fieldsBySkill[field.CatalogSkillID] = append(fieldsBySkill[field.CatalogSkillID], field)
-	}
-	rows := make([]workforceBindingConfigurationRow, 0)
-	for _, definition := range m.authoringChangeSet.Result.Candidate.Agents {
-		if definition == nil {
-			continue
-		}
-		name := strings.TrimSpace(definition.DisplayName)
-		if name == "" {
-			name = definition.ID
-		}
-		for _, requirement := range definition.SkillRequirements {
-			for _, field := range fieldsBySkill[requirement.SkillID] {
-				if identity := m.authoringChangeSet.Placement.SkillRuntimeIdentities[definition.ID][requirement.SkillID]; identity.Valid() && !identity.Equal(field.Skill) {
-					continue
-				}
-				rows = append(rows, workforceBindingConfigurationRow{
-					Key:     definition.ID + "\x00" + requirement.SkillID + "\x00" + field.Key,
-					AgentID: definition.ID, AgentName: name, Field: field,
-				})
-			}
-		}
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].AgentName != rows[j].AgentName {
-			return rows[i].AgentName < rows[j].AgentName
-		}
-		if rows[i].Field.CatalogSkillID != rows[j].Field.CatalogSkillID {
-			return rows[i].Field.CatalogSkillID < rows[j].Field.CatalogSkillID
-		}
-		return rows[i].Field.Key < rows[j].Field.Key
-	})
-	return rows
-}
-
-func bindingConfigurationFieldMatchesCatalog(field capability.BindingConfigurationFieldChoice, catalogSkill authoring.SkillCapability) bool {
-	if field.Skill.ID != catalogSkill.ID || field.Skill.Version != catalogSkill.Version || field.Skill.SourceIdentity != catalogSkill.SourceIdentity {
-		return false
-	}
-	return capability.ValidateBindingConfigurationFieldSchema(field, catalogSkill.BindingConfigSchema) == nil
-}
-
-func (m *Model) syncWorkforceBindingConfigurationChoices() {
-	rows := m.workforceBindingConfigurationRows()
-	m.authoringConfigChoices = make(map[string]int, len(rows))
-	for _, row := range rows {
-		selected := 0
-		current := m.authoringChangeSet.Placement.BindingConfigs[row.AgentID][row.Field.CatalogSkillID][row.Field.Key]
-		for index, option := range row.Field.Options {
-			value, _, err := option.Value.Value()
-			if err == nil && reflect.DeepEqual(current, value) {
-				selected = index
-				break
-			}
-		}
-		m.authoringConfigChoices[row.Key] = selected
-	}
-	if len(rows) == 0 {
-		m.authoringConfigSelected = 0
-	} else {
-		m.authoringConfigSelected = min(m.authoringConfigSelected, len(rows)-1)
-	}
-}
-
-func (m *Model) canPlaceWorkforceBindingConfigurations() bool {
-	if m.authoringChangeSet == nil || m.authoringCapability.Context == nil ||
-		m.authoringCapability.Context.ChangeSetID != m.authoringChangeSet.ID ||
-		m.authoringCapability.Context.Revision != m.authoringChangeSet.Revision || !m.supportsAuthoring(kernelapi.OperationPatch) {
-		return false
-	}
-	rows := m.workforceBindingConfigurationRows()
-	for _, row := range rows {
-		selected := m.authoringConfigChoices[row.Key]
-		if selected < 0 || selected >= len(row.Field.Options) {
-			return true
-		}
-		value, _, err := row.Field.Options[selected].Value.Value()
-		if err != nil || !reflect.DeepEqual(m.authoringChangeSet.Placement.BindingConfigs[row.AgentID][row.Field.CatalogSkillID][row.Field.Key], value) {
-			return true
-		}
-	}
-	return false
-}
-
-func (m *Model) moveWorkforceBindingConfigurationSelection(delta int) {
-	rows := m.workforceBindingConfigurationRows()
-	if len(rows) == 0 {
-		m.authoringConfigSelected = 0
-		return
-	}
-	m.authoringConfigSelected = (m.authoringConfigSelected + delta + len(rows)) % len(rows)
-}
-
-func (m *Model) moveWorkforceBindingConfigurationChoice(delta int) {
-	rows := m.workforceBindingConfigurationRows()
-	if len(rows) == 0 {
-		return
-	}
-	row := rows[min(m.authoringConfigSelected, len(rows)-1)]
-	selected := m.authoringConfigChoices[row.Key]
-	m.authoringConfigChoices[row.Key] = (selected + delta + len(row.Field.Options)) % len(row.Field.Options)
-}
-
-func (m *Model) workforceCredentialRows() []workforceCredentialRow {
-	if m.authoringChangeSet == nil || m.authoringCapability.Context == nil {
-		return nil
-	}
-	choicesByKind := make(map[string][]capability.CredentialBindingChoice)
-	for _, choice := range m.authoringCapability.Context.CredentialBindings {
-		kind := strings.TrimSpace(choice.Reference.Kind)
-		if kind != "" && strings.TrimSpace(choice.Reference.ID) != "" && strings.TrimSpace(choice.DisplayName) != "" {
-			bindingKeys := append([]string(nil), choice.BindingKeys...)
-			if len(bindingKeys) == 0 {
-				bindingKeys = []string{kind}
-			}
-			for _, bindingKey := range bindingKeys {
-				if bindingKey = strings.TrimSpace(bindingKey); bindingKey != "" {
-					choicesByKind[bindingKey] = append(choicesByKind[bindingKey], choice)
-				}
-			}
-		}
-	}
-	for kind := range choicesByKind {
-		sort.Slice(choicesByKind[kind], func(i, j int) bool {
-			left, right := choicesByKind[kind][i], choicesByKind[kind][j]
-			if left.DisplayName == right.DisplayName {
-				return left.Reference.ID < right.Reference.ID
-			}
-			return left.DisplayName < right.DisplayName
-		})
-	}
-	names := make(map[string]string)
-	for _, definition := range m.authoringChangeSet.Result.Candidate.Agents {
-		if definition != nil {
-			names[definition.ID] = definition.DisplayName
-		}
-	}
-	rows := make([]workforceCredentialRow, 0)
-	labels := make(map[string]string, len(m.authoringChangeSet.Catalog.AgentCredentialRequirements))
-	for _, requirement := range m.authoringChangeSet.Catalog.AgentCredentialRequirements {
-		labels[requirement.BindingKey] = requirement.DisplayName
-	}
-	for agentID, kinds := range m.authoringChangeSet.RequiredCredentials {
-		for _, kind := range kinds {
-			kind = strings.TrimSpace(kind)
-			if kind == "" {
-				continue
-			}
-			name := names[agentID]
-			if name == "" {
-				name = agentID
-			}
-			label := strings.TrimSpace(labels[kind])
-			if label == "" {
-				label = kind
-			}
-			rows = append(rows, workforceCredentialRow{Key: agentID + "\x00" + kind, AgentID: agentID, AgentName: name, Kind: kind, Label: label, Choices: choicesByKind[kind]})
-		}
-	}
-	sort.Slice(rows, func(i, j int) bool {
-		if rows[i].AgentName == rows[j].AgentName {
-			return rows[i].Kind < rows[j].Kind
-		}
-		return rows[i].AgentName < rows[j].AgentName
-	})
-	return rows
-}
-
-func (m *Model) syncWorkforceCredentialChoices() {
-	rows := m.workforceCredentialRows()
-	m.authoringCredentialChoices = make(map[string]int, len(rows))
-	for _, row := range rows {
-		selected := 0
-		current := m.authoringChangeSet.Placement.CredentialReferences[row.AgentID][row.Kind]
-		for index, choice := range row.Choices {
-			if choice.Reference == current {
-				selected = index
-				break
-			}
-		}
-		m.authoringCredentialChoices[row.Key] = selected
-	}
-	if len(rows) == 0 {
-		m.authoringCredentialSelected = 0
-	} else {
-		m.authoringCredentialSelected = min(m.authoringCredentialSelected, len(rows)-1)
-	}
-}
-
-func (m *Model) canPlaceWorkforceCredentials() bool {
-	return m.authoringChangeSet != nil && m.authoringCapability.Context != nil &&
-		m.authoringCapability.Context.ChangeSetID == m.authoringChangeSet.ID &&
-		m.authoringCapability.Context.Revision == m.authoringChangeSet.Revision &&
-		m.supportsAuthoring(kernelapi.OperationPatch) && len(m.workforceCredentialRows()) > 0
-}
-
-func (m *Model) moveWorkforceCredentialSelection(delta int) {
-	rows := m.workforceCredentialRows()
-	if len(rows) == 0 {
-		m.authoringCredentialSelected = 0
-		return
-	}
-	m.authoringCredentialSelected = (m.authoringCredentialSelected + delta + len(rows)) % len(rows)
-}
-
-func (m *Model) moveWorkforceCredentialChoice(delta int) {
-	rows := m.workforceCredentialRows()
-	if len(rows) == 0 {
-		return
-	}
-	row := rows[min(m.authoringCredentialSelected, len(rows)-1)]
-	if len(row.Choices) == 0 {
-		return
-	}
-	selected := m.authoringCredentialChoices[row.Key]
-	m.authoringCredentialChoices[row.Key] = (selected + delta + len(row.Choices)) % len(row.Choices)
 }
 
 func (m *Model) commandAllowed(run *runtime.AgentRun, kind runtime.AgentRunCommandKind) bool {
@@ -6710,76 +5486,7 @@ func (m *Model) focusComposerEditor() {
 	m.editor.Focus()
 }
 
-func (m *Model) prepareWorkforceGovernanceComposer(mode editorMode, placeholder string) {
-	m.mode = mode
-	m.editor.Reset()
-	m.editor.Placeholder = placeholder
-	m.focusComposerEditor()
-}
-
-func (m *Model) authoringAutomationRows() []authoringAutomationRow {
-	if m == nil || m.authoringResult == nil {
-		return nil
-	}
-	rows := make([]authoringAutomationRow, 0)
-	for _, definition := range m.authoringResult.Candidate.Agents {
-		if definition == nil || definition.Runbook == nil {
-			continue
-		}
-		entrypoints := make([]string, 0, len(definition.Runbook.Entrypoints))
-		for entrypoint := range definition.Runbook.Entrypoints {
-			entrypoints = append(entrypoints, entrypoint)
-		}
-		sort.Strings(entrypoints)
-		for _, entrypoint := range entrypoints {
-			rows = append(rows, authoringAutomationRow{
-				Focus: authoringAutomationFocus{
-					AgentID: definition.ID, AgentName: definition.DisplayName,
-					RunbookID: definition.Runbook.ID, RunbookVersion: definition.Runbook.Version,
-					Entrypoint: entrypoint,
-				},
-				Definition: definition,
-				FirstStep:  definition.Runbook.Entrypoints[entrypoint],
-			})
-		}
-	}
-	return rows
-}
-
-func (m *Model) selectedWorkforceAutomation() *authoringAutomationRow {
-	rows := m.authoringAutomationRows()
-	if len(rows) == 0 {
-		return nil
-	}
-	m.authoringAutomationSelected = max(0, min(len(rows)-1, m.authoringAutomationSelected))
-	row := rows[m.authoringAutomationSelected]
-	return &row
-}
-
-func (m *Model) moveWorkforceAutomationSelection(delta int) {
-	rows := m.authoringAutomationRows()
-	if len(rows) == 0 {
-		m.authoringAutomationSelected = 0
-		return
-	}
-	m.authoringAutomationSelected = max(0, min(len(rows)-1, m.authoringAutomationSelected+delta))
-}
-
-func (m *Model) prepareWorkforceAutomationRefinement() {
-	row := m.selectedWorkforceAutomation()
-	if row == nil || !m.supportsWorkforceAuthoring() {
-		return
-	}
-	focus := row.Focus
-	m.authoringAutomationFocus = &focus
-	m.mode = modeAgentBuilderPrompt
-	m.editor.Reset()
-	m.editor.Placeholder = fmt.Sprintf("Describe the change to %s…", focus.Entrypoint)
-	m.status = fmt.Sprintf("Refining %s · %s. Unrelated candidate state will be preserved.", focus.AgentName, focus.Entrypoint)
-	m.focusComposerEditor()
-}
-
-func (m *Model) activeRunbookOperations() []authoringAutomationRow {
+func (m *Model) activeRunbookOperations() []runbookOperationRow {
 	if m == nil || m.agentDeployment == nil || m.agentDeployment.Deployment == nil ||
 		m.agentDeployment.Definition == nil || m.agentDeployment.Definition.Runbook == nil {
 		return nil
@@ -6799,10 +5506,10 @@ func (m *Model) activeRunbookOperations() []authoringAutomationRow {
 		}
 	}
 	sort.Strings(entrypoints)
-	rows := make([]authoringAutomationRow, 0, len(entrypoints))
+	rows := make([]runbookOperationRow, 0, len(entrypoints))
 	for _, entrypoint := range entrypoints {
-		rows = append(rows, authoringAutomationRow{
-			Focus: authoringAutomationFocus{
+		rows = append(rows, runbookOperationRow{
+			Focus: runbookOperationFocus{
 				AgentID: definition.ID, AgentName: definition.DisplayName,
 				RunbookID: definition.Runbook.ID, RunbookVersion: definition.Runbook.Version,
 				Entrypoint: entrypoint,
@@ -6814,7 +5521,7 @@ func (m *Model) activeRunbookOperations() []authoringAutomationRow {
 	return rows
 }
 
-func (m *Model) selectedActiveRunbookOperation() *authoringAutomationRow {
+func (m *Model) selectedActiveRunbookOperation() *runbookOperationRow {
 	rows := m.activeRunbookOperations()
 	if len(rows) == 0 {
 		return nil
@@ -6942,8 +5649,6 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeWorkforceBundleInspect
 		m.editor.Placeholder = "Path to a signed workforce bundle…"
 		m.focusComposerEditor()
-	case m.section == sectionAuthoring && m.readyRefinement() != nil:
-		m.activateReadyRefinement()
 	case m.section == sectionReadiness && m.canProposeAgentBehaviorAmendment():
 		m.prepareAgentAmendmentComposer(modeAgentAmendmentPropose, "systemPrompt|personality\nConcise rationale\nNew immutable value")
 	case m.section == sectionTeams && m.canProposeTeamPurposeAmendment():
@@ -7035,11 +5740,6 @@ func (m *Model) resetComposerMode() {
 		return
 	}
 	if m.section == sectionAuthoring {
-		m.authoringAutomationFocus = nil
-		if m.readyRefinement() != nil {
-			m.activateReadyRefinement()
-			return
-		}
 		m.mode = modeAgentBuilderPrompt
 		m.editor.Placeholder = agentBuilderPromptPlaceholder
 		return
@@ -7177,11 +5877,6 @@ func skillBindingClient(kernelClient client.KernelClient) client.SkillBindingCli
 
 func sourcePolicyClient(kernelClient client.KernelClient) client.SourcePolicyLifecycleClient {
 	value, _ := kernelClient.(client.SourcePolicyLifecycleClient)
-	return value
-}
-
-func workforceSkillSearchClient(kernelClient client.KernelClient) client.WorkforceSkillSearchClient {
-	value, _ := kernelClient.(client.WorkforceSkillSearchClient)
 	return value
 }
 

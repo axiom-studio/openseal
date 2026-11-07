@@ -18,7 +18,6 @@ import (
 
 	"github.com/axiom-studio/openseal/internal/server"
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/client"
@@ -111,27 +110,6 @@ type fakeKernelClient struct {
 	artifacts                  []*runtime.Artifact
 	downloadBody               string
 	downloadCalls              int
-	authoringResult            *authoring.CompileResult
-	authoringRequests          []authoring.GenerateRequest
-	authoringErrors            []error
-	changeSets                 []*authoring.ChangeSet
-	changeSetRequests          []authoring.CreateChangeSetRequest
-	changeSetKeys              []string
-	changeSetErrors            []error
-	approvalRequests           []authoring.ResolveChangeSetApprovalRequest
-	approvalKeys               []string
-	applyRequests              []authoring.ApplyChangeSetRequest
-	applyKeys                  []string
-	activationRequests         []authoring.PrepareChangeSetActivationRequest
-	activationKeys             []string
-	placementRequests          []authoring.UpdateChangeSetPlacementRequest
-	placementKeys              []string
-	refinementRequests         []authoring.AnswerChangeSetRefinementRequest
-	refinementKeys             []string
-	retryRequests              []authoring.RetryChangeSetGenerationRequest
-	retryKeys                  []string
-	governanceResults          []*authoring.ChangeSet
-	governanceErrors           []error
 	skillActions               []capability.ModelAction
 	skillActionCalls           int
 	skillBindings              []*capability.Binding
@@ -174,24 +152,6 @@ func (f *fakeWorkforceBundleKernelClient) PlanWorkforceBundleUpgrade(context.Con
 
 func (f *fakeWorkforceBundleKernelClient) InstallWorkforceBundle(context.Context, *kernelbundle.Bundle, capability.ScopeReference, kernelbundle.Placement, string, string) (*kernelbundle.InstallationReceipt, error) {
 	return nil, errors.New("not implemented by test client")
-}
-
-func TestMatchSearchedSkillRequiresExactSelectableIdentity(t *testing.T) {
-	results := []authoring.SkillSearchCandidate{
-		{SkillCapability: authoring.SkillCapability{ID: "summarize", Version: "1.0.0", SourceIdentity: "catalog:a", Readiness: authoring.SkillReadinessReady}, Verification: authoring.SkillSearchVerificationVerified},
-		{SkillCapability: authoring.SkillCapability{ID: "summarize", Version: "2.0.0", SourceIdentity: "catalog:b", Readiness: authoring.SkillReadinessNeedsInstallation}, Verification: authoring.SkillSearchVerificationVerified},
-		{SkillCapability: authoring.SkillCapability{ID: "unsafe", Version: "1.0.0", SourceIdentity: "catalog:c", Readiness: authoring.SkillReadinessUnavailable}, Verification: authoring.SkillSearchVerificationVerified},
-	}
-	if _, ok := matchSearchedSkill(results, "summarize"); ok {
-		t.Fatal("ambiguous bare Skill ID was selectable")
-	}
-	selected, ok := matchSearchedSkill(results, "summarize@2.0.0")
-	if !ok || selected.SourceIdentity != "catalog:b" {
-		t.Fatalf("selected=%#v ok=%t", selected, ok)
-	}
-	if _, ok := matchSearchedSkill(results, "unsafe@1.0.0"); ok {
-		t.Fatal("unavailable Skill was selectable")
-	}
 }
 
 var (
@@ -574,10 +534,6 @@ func (f *fakeKernelClient) AgentDefinitionCapabilities(_ context.Context, scope 
 	return f.document, nil
 }
 
-func (f *fakeKernelClient) WorkforceChangeSetCapabilities(context.Context, capability.ScopeReference, string) (kernelapi.CapabilityDocument, error) {
-	return f.document, nil
-}
-
 func (f *fakeKernelClient) ListAgentSkillActions(context.Context, capability.ScopeReference, string, []string, capability.SideEffect) (*kernelapi.SkillActionList, error) {
 	f.skillActionCalls++
 	return &kernelapi.SkillActionList{DeploymentID: "researcher", Actions: f.skillActions}, nil
@@ -731,147 +687,6 @@ func (f *fakeKernelClient) ResolveActionApproval(_ context.Context, _ runtime.Sc
 		approval.Status = runtime.ApprovalStatusChangesRequested
 	}
 	return &runtime.ApprovalResolutionResult{Approval: approval, Resolved: true}, nil
-}
-
-func (f *fakeKernelClient) CompileWorkforce(_ context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
-	f.authoringRequests = append(f.authoringRequests, request)
-	if len(f.authoringErrors) > 0 {
-		err := f.authoringErrors[0]
-		f.authoringErrors = f.authoringErrors[1:]
-		if err != nil {
-			return nil, err
-		}
-	}
-	return f.authoringResult, nil
-}
-
-func (f *fakeKernelClient) CreateWorkforceChangeSet(_ context.Context, request authoring.CreateChangeSetRequest, key string) (*authoring.ChangeSet, error) {
-	f.changeSetRequests = append(f.changeSetRequests, request)
-	f.changeSetKeys = append(f.changeSetKeys, key)
-	if len(f.changeSetErrors) > 0 {
-		err := f.changeSetErrors[0]
-		f.changeSetErrors = f.changeSetErrors[1:]
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(f.changeSets) == 0 {
-		return nil, errors.New("workforce change sets are not configured in this test")
-	}
-	result := f.changeSets[0]
-	if len(f.changeSets) > 1 {
-		f.changeSets = f.changeSets[1:]
-	}
-	return result, nil
-}
-
-func (f *fakeKernelClient) GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error) {
-	if len(f.governanceResults) > 0 {
-		return f.governanceResults[0], nil
-	}
-	return nil, authoring.ErrChangeSetNotFound
-}
-
-func (f *fakeKernelClient) UpdateWorkforceChangeSetPlacement(_ context.Context, request authoring.UpdateChangeSetPlacementRequest, key string) (*authoring.ChangeSet, error) {
-	f.placementRequests = append(f.placementRequests, request)
-	f.placementKeys = append(f.placementKeys, key)
-	return f.nextGovernanceResult()
-}
-
-func (f *fakeKernelClient) AnswerWorkforceChangeSetRefinement(_ context.Context, request authoring.AnswerChangeSetRefinementRequest, key string) (*authoring.ChangeSet, error) {
-	f.refinementRequests = append(f.refinementRequests, request)
-	f.refinementKeys = append(f.refinementKeys, key)
-	return f.nextGovernanceResult()
-}
-
-func (f *fakeKernelClient) EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error) {
-	return nil, errors.New("policy evaluation is not initiated by the TUI")
-}
-
-func (f *fakeKernelClient) ResolveWorkforceChangeSetApproval(_ context.Context, request authoring.ResolveChangeSetApprovalRequest, key string) (*authoring.ChangeSet, error) {
-	f.approvalRequests = append(f.approvalRequests, request)
-	f.approvalKeys = append(f.approvalKeys, key)
-	return f.nextGovernanceResult()
-}
-
-func (f *fakeKernelClient) ApplyWorkforceChangeSet(_ context.Context, request authoring.ApplyChangeSetRequest, key string) (*authoring.ChangeSet, error) {
-	f.applyRequests = append(f.applyRequests, request)
-	f.applyKeys = append(f.applyKeys, key)
-	return f.nextGovernanceResult()
-}
-
-func (f *fakeKernelClient) PrepareWorkforceChangeSetActivation(_ context.Context, request authoring.PrepareChangeSetActivationRequest, key string) (*authoring.ChangeSet, error) {
-	f.activationRequests = append(f.activationRequests, request)
-	f.activationKeys = append(f.activationKeys, key)
-	return f.nextGovernanceResult()
-}
-
-func (f *fakeKernelClient) RetryWorkforceChangeSetGeneration(_ context.Context, request authoring.RetryChangeSetGenerationRequest, key string) (*authoring.ChangeSet, error) {
-	f.retryRequests = append(f.retryRequests, request)
-	f.retryKeys = append(f.retryKeys, key)
-	return f.nextGovernanceResult()
-}
-
-func (f *fakeKernelClient) nextGovernanceResult() (*authoring.ChangeSet, error) {
-	if len(f.governanceErrors) > 0 {
-		err := f.governanceErrors[0]
-		f.governanceErrors = f.governanceErrors[1:]
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(f.governanceResults) == 0 {
-		return nil, errors.New("no governance result")
-	}
-	result := f.governanceResults[0]
-	f.governanceResults = f.governanceResults[1:]
-	return result, nil
-}
-
-func TestFailedWorkforceGenerationRetriesWithStableIdentity(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "local", ID: "default"}
-	failed := &authoring.ChangeSet{ID: "failed-one", Scope: scope, Status: authoring.ChangeSetFailed, Revision: 4, Generation: &authoring.ChangeSetGeneration{RunID: "run-one", Attempt: 1, LastError: "provider unavailable"}}
-	evaluating := *failed
-	evaluating.Status = authoring.ChangeSetEvaluating
-	evaluating.Revision = 5
-	fake := &fakeKernelClient{governanceResults: []*authoring.ChangeSet{&evaluating, &evaluating}}
-	m := newModelWithClient(t, fake)
-	m.ready, m.section, m.focus = true, sectionAuthoring, focusComposer
-	m.authoringChangeSet = failed
-	m.authoringCapability = kernelapi.Capability{ID: kernelapi.WorkforceAuthoringCapabilityID, Version: kernelapi.WorkforceAuthoringCapabilityVersion, Available: true, Operations: []string{kernelapi.OperationRetry}, Context: &kernelapi.CapabilityContext{ChangeSetID: failed.ID, Revision: failed.Revision}}
-	m.mode = modeWorkforceRetry
-	m.editor.SetValue("provider recovered")
-	msg := m.submitWorkforceRetry()()
-	if _, ok := msg.(workforceGoverned); !ok {
-		t.Fatalf("message = %T", msg)
-	}
-	firstKey := fake.retryKeys[0]
-	m.busy = false
-	msg = m.submitWorkforceRetry()()
-	if _, ok := msg.(workforceGoverned); !ok || fake.retryKeys[1] != firstKey || firstKey == "" {
-		t.Fatalf("retry keys = %#v", fake.retryKeys)
-	}
-	if fake.retryRequests[0].Actor.ID != "" {
-		t.Fatalf("client forged retry actor = %#v", fake.retryRequests[0].Actor)
-	}
-	m.busy = false
-	view := m.renderAuthoringContent(80)
-	if !strings.Contains(view, "provider unavailable") || !strings.Contains(view, "r retry generation") {
-		t.Fatalf("failed generation not rendered: %s", view)
-	}
-}
-
-func TestEvaluatingWorkforceRefreshDoesNotRenderAnEmptyCandidate(t *testing.T) {
-	m := newModelWithClient(t, &fakeKernelClient{})
-	changeSet := &authoring.ChangeSet{ID: "queued", Status: authoring.ChangeSetEvaluating, Generation: &authoring.ChangeSetGeneration{RunID: "run-queued"}}
-	updated, _ := m.Update(workforceLoaded{changeSet: changeSet})
-	model := updated.(*Model)
-	if model.authoringResult != nil {
-		t.Fatalf("empty evaluating candidate became review result: %#v", model.authoringResult)
-	}
-	if view := model.renderAuthoringContent(80); !strings.Contains(view, "continues in the background") {
-		t.Fatalf("evaluating state not rendered: %s", view)
-	}
 }
 
 func (f *fakeKernelClient) CreateObjective(_ context.Context, request kernelapi.CreateObjectiveRequest, key string) (*runtime.Objective, error) {
@@ -1457,19 +1272,20 @@ func TestTUIInspectsPortableWorkforceBundleThroughAdvertisedKernelCapability(t *
 }
 
 func TestFullStandaloneWorkspaceStartsAtGuidedHomeWithDiscoverableNavigationAndHelp(t *testing.T) {
-	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(
-		kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{}),
+	fake := newAgentBuilderTestClient()
+	fake.document = kernelapi.NewCapabilityDocument(
+		kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID),
 		kernelapi.AgentDefinitionsCapability(),
 		kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
 		kernelapi.AgentRunsCapability(kernelapi.OperationList),
 		kernelapi.ObjectivesCapability(),
 		kernelapi.ProjectsCapability(),
 		kernelapi.AgentRequestsCapability(),
-	)}
-	model := newTestModel(t, fake)
+	)
+	model := newModelWithClient(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
 	view := model.View()
-	for _, expected := range []string{"Welcome to OpenSeal", "Start here", "How it works", "Home", "f Create", "h Agents", "T Teams", "w Work", "o Goals", "i Projects", "R Inbox", "← / → pages", "? help"} {
+	for _, expected := range []string{"Welcome to OpenSeal", "Describe the agent you need", "Approve the card", "Start here", "How it works", "Home", "f Create", "h Agents", "T Teams", "w Work", "o Goals", "i Projects", "R Inbox", "← / → pages", "? help"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Home missing %q:\n%s", expected, view)
 		}
@@ -1489,6 +1305,44 @@ func TestFullStandaloneWorkspaceStartsAtGuidedHomeWithDiscoverableNavigationAndH
 	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRight})
 	if model.section != sectionAuthoring {
 		t.Fatalf("right navigation section = %v", model.section)
+	}
+	view = model.View()
+	for _, expected := range []string{"New agent", "Try an example", "Type on the left and press Enter"} {
+		if !strings.Contains(view, expected) {
+			t.Fatalf("Create page missing %q:\n%s", expected, view)
+		}
+	}
+}
+
+func TestHomeEnterOpensNewAgentAndStartsBuilderChat(t *testing.T) {
+	fake := newAgentBuilderTestClient()
+	fake.document = kernelapi.NewCapabilityDocument(
+		kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID),
+		kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{}),
+		kernelapi.AgentDefinitionsCapability(),
+		kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
+		kernelapi.AgentRunsCapability(kernelapi.OperationList),
+		kernelapi.ObjectivesCapability(),
+		kernelapi.ProjectsCapability(),
+	)
+	model := newModelWithClient(t, fake)
+	applyCommand(t, model, model.loadCapabilities())
+	if model.section != sectionOverview || model.focus != focusPanel {
+		t.Fatalf("home section=%v focus=%v", model.section, model.focus)
+	}
+	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.section != sectionAuthoring || model.mode != modeAgentBuilderPrompt || model.focus != focusComposer {
+		t.Fatalf("Enter on Home section=%v mode=%v focus=%v", model.section, model.mode, model.focus)
+	}
+	model.editor.SetValue("An agent that books my travel")
+	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	applyCommand(t, model, command)
+	if len(fake.builderStarts) != 1 || fake.builderStarts[0].Prompt != "An agent that books my travel" ||
+		fake.builderStarts[0].Parameters.Kind != runtime.AgentBuilderKindAgent {
+		t.Fatalf("builder starts = %#v", fake.builderStarts)
+	}
+	if model.section != sectionChannels || model.mode != modeChannelPost || model.selectedConversation != "builder-chat" {
+		t.Fatalf("builder chat not open section=%v mode=%v selected=%q", model.section, model.mode, model.selectedConversation)
 	}
 }
 
@@ -2152,314 +2006,6 @@ func TestCreateRetryPreservesIdempotencyAndPrompt(t *testing.T) {
 	}
 }
 
-func TestPromptFirstWorkforceAuthoringIsCapabilityGatedAndPreviewOnly(t *testing.T) {
-	result := &authoring.CompileResult{
-		Valid: false,
-		Candidate: authoring.WorkforceCandidate{
-			Agents: []*kernelagent.AgentDefinition{{
-				ID: "researcher", Version: "1", DisplayName: "Researcher", Purpose: "Gather evidence", SystemPrompt: "Research carefully.",
-				Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelRead, MaxConcurrentRuns: 2},
-			}},
-			Team: &kernelteam.Definition{
-				ID: "research", Version: "1", DisplayName: "Research Team", Purpose: "Find customer pain points",
-				Roles:     []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
-				Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
-			},
-		},
-		UnresolvedQuestions: []authoring.RefinementQuestion{{
-			ID: "authorized-sources", Category: authoring.RefinementCategoryOther, Prompt: "Which sources are authorized?",
-			WhyNeeded: "The workforce needs an explicit source scope.", Blocking: []authoring.RefinementBlockingScope{authoring.RefinementBlocksCandidate},
-			Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerText}, Provenance: []authoring.RefinementQuestionProvenance{{Kind: authoring.RefinementProvenancePrompt}}, Priority: 1,
-		}},
-		MissingRequirements: []authoring.MissingRequirement{{
-			Kind: "skill_installation", ID: "reddit-search", RequiredBy: "agent:researcher",
-		}},
-		Diff: []authoring.FieldDiff{{Path: "team.approvals", AfterDigest: "candidate"}},
-	}
-	fake := &fakeKernelClient{
-		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{}), kernelapi.ObjectivesCapability()),
-		authoringResult: result,
-	}
-	model := newTestModel(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-	if model.section != sectionAuthoring || model.mode != modeAgentBuilderPrompt {
-		t.Fatalf("authoring was not the primary capability:\n%s", model.View())
-	}
-	model.editor.SetValue("Create a customer research Team")
-	applyCommand(t, model, model.submitWorkforceAuthoring())
-	view := model.View()
-	if len(fake.authoringRequests) != 1 || fake.authoringRequests[0].Catalog.Skills != nil {
-		t.Fatalf("authoring requests = %#v", fake.authoringRequests)
-	}
-	for _, expected := range []string{"Research Team", "Activation intent · active", "1 Agents", "Which sources are authorized?", "Setup needed · Install Reddit Search for Researcher", "Nothing is active"} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("authoring preview missing %q:\n%s", expected, view)
-		}
-	}
-	if strings.Contains(view, "skill_installation") || strings.Contains(view, "agent:researcher") {
-		t.Fatalf("authoring preview exposed compiler internals:\n%s", view)
-	}
-	if strings.Contains(view, "field changes") {
-		t.Fatalf("create preview was presented as an amendment:\n%s", view)
-	}
-	if strings.Contains(view, "Automations") {
-		t.Fatalf("cognitive-only Agent invented an automation:\n%s", view)
-	}
-	model.editor.SetValue("Require approval before external outreach")
-	applyCommand(t, model, model.submitWorkforceAuthoring())
-	if len(fake.authoringRequests) != 2 || fake.authoringRequests[1].Mode != authoring.ModeAmend ||
-		fake.authoringRequests[1].Existing == nil || fake.authoringRequests[1].Existing.Team.ID != "research" {
-		t.Fatalf("follow-up authoring request = %#v", fake.authoringRequests)
-	}
-	if model.editor.Value() != "" {
-		t.Fatalf("follow-up composer = %q / %q", model.editor.Value(), model.editor.Placeholder)
-	}
-	if !strings.Contains(model.View(), "1 field changes") {
-		t.Fatalf("amendment diff was not rendered:\n%s", model.View())
-	}
-}
-
-func TestWorkforceAuthoringShowsAndScopesDeterministicRunbookRefinement(t *testing.T) {
-	definition := &kernelagent.AgentDefinition{
-		ID: "publisher", Version: "1", DisplayName: "Document Publisher", Purpose: "Publish reports",
-		SystemPrompt: "Publish approved reports.",
-		SkillRequirements: []kernelagent.SkillRequirement{{
-			SkillID: "openseal.document", VersionConstraint: "1.0.2", RequiredActions: []string{"render_pdf"},
-		}},
-		Authority: kernelagent.AuthorityPolicy{
-			MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1,
-			AllowedSkillIDs: []string{"openseal.document"}, RequireApprovalAt: capability.RiskLevelWrite,
-		},
-		ObjectiveTemplates: []workforce.ObjectiveTemplate{{
-			ID: "weekly-report", Title: "Publish weekly report", Goal: "Render an approved report", Priority: 1,
-		}},
-		Runbook: &runbook.Definition{
-			APIVersion: runbook.APIVersion, ID: "render-report", Version: "1", Name: "Render report",
-			Entrypoints: map[string]string{"render_report": "render"},
-			Triggers: map[string]runbook.Trigger{"weekly-report": {
-				Kind: runbook.TriggerSchedule, Entrypoint: "render_report", ObjectiveID: "weekly-report",
-				Schedule: &runbook.Schedule{Cron: "0 0 9 * * 1", Timezone: "UTC"},
-				Budget:   &runbook.BudgetAllocation{MaxAttempts: 3, MaxActions: 2, MaxDurationMS: 60000},
-			}},
-			Interfaces: map[string]runbook.Interface{"render_report": {
-				Description: "Render one approved Markdown report.",
-				InputSchema: map[string]interface{}{
-					"type": "object", "properties": map[string]interface{}{
-						"markdown": map[string]interface{}{"type": "string"},
-						"title":    map[string]interface{}{"type": "string"},
-					}, "required": []interface{}{"markdown"},
-				},
-				OutputSchema: map[string]interface{}{
-					"type": "object", "properties": map[string]interface{}{
-						"pdfArtifact": map[string]interface{}{"type": "string"},
-					}, "required": []interface{}{"pdfArtifact"},
-				},
-			}},
-			Steps: map[string]runbook.Step{
-				"render": {
-					Kind: runbook.StepAction,
-					Action: &runbook.ActionStep{
-						SkillID: "openseal.document", SkillVersion: "1.0.2", Action: "render_pdf",
-						ResultPath: "/results/render", Next: "done",
-					},
-				},
-				"done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
-			},
-		},
-	}
-	result := authoring.CompileResult{
-		Valid: true, Candidate: authoring.WorkforceCandidate{Agents: []*kernelagent.AgentDefinition{definition}},
-	}
-	parent := &authoring.ChangeSet{
-		ID: "change-render", Scope: capability.ScopeReference{Kind: "local", ID: "default"},
-		Mode: authoring.ModeCreate, Result: result, Status: authoring.ChangeSetReview, Revision: 4,
-	}
-	child := &authoring.ChangeSet{
-		ID: "change-render-refined", ParentID: parent.ID, Scope: parent.Scope,
-		Mode: authoring.ModeAmend, Result: result, Status: authoring.ChangeSetReview, Revision: 1,
-	}
-	fake := &fakeKernelClient{changeSets: []*authoring.ChangeSet{child}}
-	model := newTestModel(t, fake)
-	model.ready, model.section, model.focus = true, sectionAuthoring, focusPanel
-	model.authoringCapability = kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	model.authoringResult, model.authoringChangeSet = &result, parent
-
-	view := model.renderAuthoringContent(110)
-	for _, expected := range []string{
-		"Automations · 1", "Document Publisher · render_report · render-report@1",
-		"Takes · markdown:string · title:string?", "Returns · pdfArtifact:string",
-		"2 durable steps · approval at write · failure stops at checkpoint",
-		"openseal.document@1.0.2/render_pdf",
-		"Cron · 0 0 9 * * 1 · UTC · 3 attempts · 2 actions · 60s",
-	} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("automation review missing %q:\n%s", expected, view)
-		}
-	}
-
-	model.prepareWorkforceAutomationRefinement()
-	if model.authoringAutomationFocus == nil || model.focus != focusComposer ||
-		!strings.Contains(model.renderComposer(60), "Refine deterministic operation") {
-		t.Fatalf("automation refinement was not focused:\n%s", model.renderComposer(60))
-	}
-	model.editor.SetValue("Require a signed approval receipt as an input.")
-	applyCommand(t, model, model.submitWorkforceAuthoring())
-	if len(fake.changeSetRequests) != 1 || fake.changeSetRequests[0].ParentID != parent.ID {
-		t.Fatalf("focused refinement did not create a child ChangeSet: %#v", fake.changeSetRequests)
-	}
-	prompt := fake.changeSetRequests[0].Prompt
-	for _, expected := range []string{
-		`Update only the deterministic operation "render_report"`,
-		`Agent "Document Publisher" (publisher)`,
-		"runbook render-report@1",
-		"Preserve every unrelated Agent, Team, objective, policy, Skill binding, runbook, and operation exactly.",
-		"Require a signed approval receipt as an input.",
-	} {
-		if !strings.Contains(prompt, expected) {
-			t.Fatalf("scoped refinement prompt missing %q: %s", expected, prompt)
-		}
-	}
-	if model.authoringAutomationFocus != nil {
-		t.Fatal("successful child proposal retained stale automation focus")
-	}
-}
-
-func TestWorkforceAuthoringPersistsChangeSetsAndRefinesByParent(t *testing.T) {
-	createResult := authoring.CompileResult{
-		Valid: true,
-		Candidate: authoring.WorkforceCandidate{Team: &kernelteam.Definition{
-			ID: "research", Version: "1", DisplayName: "Research Team", Purpose: "Find customer pain points",
-			Roles:     []kernelteam.RoleSlot{{ID: "researcher", DisplayName: "Researcher", Purpose: "Gather evidence", MinimumMembers: 1}},
-			Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelRead},
-		}},
-	}
-	amendResult := createResult
-	amendResult.Diff = []authoring.FieldDiff{{Path: "team.approvals", AfterDigest: "approval-required"}}
-	created := &authoring.ChangeSet{
-		ID: "change-create", Scope: capability.ScopeReference{Kind: "local", ID: "default"},
-		Mode: authoring.ModeCreate, Result: createResult, Status: authoring.ChangeSetReview, Revision: 1,
-	}
-	amended := &authoring.ChangeSet{
-		ID: "change-amend", ParentID: created.ID, Scope: created.Scope,
-		Mode: authoring.ModeAmend, Result: amendResult, Status: authoring.ChangeSetReview, Revision: 1,
-	}
-	fake := &fakeKernelClient{
-		document:        kernelapi.NewCapabilityDocument(kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})),
-		changeSets:      []*authoring.ChangeSet{created, amended},
-		changeSetErrors: []error{errors.New("temporary disconnect"), nil},
-	}
-	model := newTestModel(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-
-	model.editor.SetValue("Create a customer research Team")
-	applyCommand(t, model, model.submitWorkforceAuthoring())
-	if model.editor.Value() == "" || model.pendingAuthoringKey == "" {
-		t.Fatal("failed proposal did not preserve prompt and idempotency key")
-	}
-	applyCommand(t, model, model.submitWorkforceAuthoring())
-	if len(fake.changeSetKeys) != 2 || fake.changeSetKeys[0] == "" || fake.changeSetKeys[0] != fake.changeSetKeys[1] {
-		t.Fatalf("change set retry keys = %#v", fake.changeSetKeys)
-	}
-	request := fake.changeSetRequests[0]
-	if request.Scope != created.Scope || request.Actor.Type != "user" || request.Actor.ID != "local" || request.ParentID != "" {
-		t.Fatalf("create change set request = %#v", request)
-	}
-	if len(fake.authoringRequests) != 0 || model.authoringChangeSet == nil || model.authoringChangeSet.ID != created.ID {
-		t.Fatalf("authoring used ephemeral compilation or lost change set: requests=%#v changeSet=%#v", fake.authoringRequests, model.authoringChangeSet)
-	}
-	if !strings.Contains(model.View(), "change-create") || !strings.Contains(model.View(), "review") {
-		t.Fatalf("durable change set identity was not rendered:\n%s", model.View())
-	}
-
-	model.editor.SetValue("Require approval before external outreach")
-	applyCommand(t, model, model.submitWorkforceAuthoring())
-	if len(fake.changeSetRequests) != 3 || fake.changeSetRequests[2].ParentID != created.ID || fake.changeSetKeys[2] == fake.changeSetKeys[1] {
-		t.Fatalf("refinement did not create a child change set: requests=%#v keys=%#v", fake.changeSetRequests, fake.changeSetKeys)
-	}
-	if model.authoringChangeSet == nil || model.authoringChangeSet.ID != amended.ID || !model.authoringAmendment || !strings.Contains(model.View(), "1 field changes") {
-		t.Fatalf("durable refinement was not rendered: changeSet=%#v\n%s", model.authoringChangeSet, model.View())
-	}
-}
-
-func TestWorkforceRefinementUsesOneCapabilityGatedComposerQuestion(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	scopeQuestion := authoring.RefinementQuestion{ID: "communities", Prompt: "Which subreddits should be monitored?", WhyNeeded: "An explicit source scope is required.", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerMultiSelect, Options: []authoring.RefinementQuestionOption{{ID: "sre", Label: "r/sre"}}}, Priority: 20}
-	skillQuestion := authoring.RefinementQuestion{ID: "skills", Prompt: "Which available Skills should handle Reddit and language analysis?", WhyNeeded: "The proposal must use compatible capabilities.", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerSkillSelection, Options: []authoring.RefinementQuestionOption{{ID: "reddit-monitor", Label: "Reddit Monitor"}}}, Priority: 10, DependsOn: []authoring.RefinementQuestionDependency{{QuestionID: scopeQuestion.ID, RequiredOptionIDs: []string{"sre"}}}}
-	credentialQuestion := authoring.RefinementQuestion{ID: "credential", Prompt: "Which Reddit credential should be bound?", WhyNeeded: "API access requires a binding.", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerCredentialReference}, Priority: 1}
-	blocked := &authoring.ChangeSet{
-		ID: "change-refine", Scope: scope, Status: authoring.ChangeSetBlocked, Revision: 3, Result: authoring.CompileResult{Valid: false},
-		Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{"reddit-monitor": {
-			ID: "reddit-monitor", Version: "2.1.0", SourceIdentity: "https://clawhub.ai::@acme/reddit-monitor", Name: "Reddit Monitor",
-			Actions: []string{"search", "read"}, Credentials: []authoring.SkillCredential{{Name: "REDDIT_API_TOKEN", Kind: "environment-secret", Actions: []string{"search", "read"}}},
-			PromptAvailable: true, MaximumRisk: capability.RiskLevelRead, Readiness: authoring.SkillReadinessNeedsInstallation,
-			Compatibility: []authoring.SkillCompatibility{{Requirement: "reddit.read", Compatible: true, Evidence: "verified compilation", Reference: "receipt:sha256:abc123"}},
-		}}, Diagnostics: []authoring.CatalogDiagnostic{{Code: authoring.CatalogDiagnosticDiscoveryStale, Message: "A newer catalog revision must be verified before additional Skills can be offered.", Reference: "language-analysis"}}},
-		Refinement: authoring.ChangeSetRefinement{Questions: []authoring.RefinementQuestion{scopeQuestion, skillQuestion, credentialQuestion}, Answers: []authoring.RefinementAnswerEvent{{QuestionID: scopeQuestion.ID, Value: authoring.RefinementAnswerValue{OptionIDs: []string{"sre"}}, AnsweredAt: time.Now()}}},
-	}
-	evaluating := *blocked
-	evaluating.Status, evaluating.Revision = authoring.ChangeSetEvaluating, 4
-	fake := &fakeKernelClient{governanceErrors: []error{errors.New("temporary failure")}, governanceResults: []*authoring.ChangeSet{&evaluating}}
-	model := newTestModel(t, fake)
-	model.ready, model.section = true, sectionAuthoring
-	model.authoringChangeSet, model.authoringResult = blocked, &blocked.Result
-	model.authoringCapability = kernelapi.Capability{ID: kernelapi.WorkforceAuthoringCapabilityID, Version: kernelapi.WorkforceAuthoringCapabilityVersion, Available: true, Operations: []string{kernelapi.OperationRefine}, Context: &kernelapi.CapabilityContext{ChangeSetID: blocked.ID, Revision: blocked.Revision}}
-	model.activateReadyRefinement()
-	if model.mode != modeWorkforceRefinement || model.readyRefinement() == nil || model.readyRefinement().ID != skillQuestion.ID {
-		t.Fatalf("ready refinement = mode %v question %#v", model.mode, model.readyRefinement())
-	}
-	view := model.View()
-	for _, expected := range []string{
-		"Which available Skills", "Reddit and language analysis?", "Reddit Monitor",
-		"Capability availability", "capability_discovery_stale", "newer catalog revision", "language-analysis",
-		"Answered questions", scopeQuestion.Prompt,
-	} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("refinement view missing %q:\n%s", expected, view)
-		}
-	}
-	if strings.Contains(view, credentialQuestion.Prompt) {
-		t.Fatalf("later question was rendered with the ready question:\n%s", view)
-	}
-	for _, terminalWidth := range []int{120, 88} {
-		t.Run(fmt.Sprintf("width_%d", terminalWidth), func(t *testing.T) {
-			model.width = terminalWidth
-			view := model.View()
-			guidance := model.renderRefinementGuidance(skillQuestion, max(model.composerWidth()-8, 24))
-			assertSemanticTextContains(t, guidance,
-				"Exact Skill: reddit-monitor@2.1.0",
-				"Source: https://clawhub.ai::@acme/reddit-monitor",
-				"Readiness: needs_installation",
-				"Actions: read, search",
-				"Prompt guidance: available",
-				"Maximum risk: read",
-				"Credential: REDDIT_API_TOKEN (environment-secret; read, search)",
-				"reddit.read: true — verified compilation",
-				"Evidence reference: receipt:sha256:abc123",
-			)
-			for _, line := range strings.Split(view, "\n") {
-				if rendered := lipgloss.Width(line); rendered > terminalWidth {
-					t.Fatalf("rendered line width %d exceeds terminal width %d: %q", rendered, terminalWidth, line)
-				}
-			}
-		})
-	}
-	model.width = 120
-
-	model.editor.SetValue("Reddit Monitor")
-	applyCommand(t, model, model.submitWorkforceRefinement())
-	if len(fake.refinementRequests) != 1 || fake.refinementRequests[0].ExpectedRevision != blocked.Revision || fake.refinementRequests[0].QuestionID != skillQuestion.ID || len(fake.refinementRequests[0].Value.SkillIDs) != 1 || fake.refinementRequests[0].Value.SkillIDs[0] != "reddit-monitor" || fake.refinementKeys[0] == "" {
-		t.Fatalf("first refinement request = %#v keys=%#v", fake.refinementRequests, fake.refinementKeys)
-	}
-	firstKey := fake.refinementKeys[0]
-	applyCommand(t, model, model.submitWorkforceRefinement())
-	if len(fake.refinementKeys) != 2 || fake.refinementKeys[1] != firstKey {
-		t.Fatalf("refinement retry keys = %#v", fake.refinementKeys)
-	}
-	if model.authoringChangeSet != &evaluating || model.mode != modeAgentBuilderPrompt {
-		t.Fatalf("successful refinement did not resume evaluation: change=%#v mode=%v", model.authoringChangeSet, model.mode)
-	}
-}
-
 // assertSemanticTextContains ignores presentation whitespace so responsive
 // line wrapping cannot turn exact capability facts into brittle test fragments.
 func assertSemanticTextContains(t *testing.T, rendered string, expected ...string) {
@@ -2477,330 +2023,6 @@ func assertSemanticTextContains(t *testing.T, rendered string, expected ...strin
 		if !strings.Contains(semantic, normalize(value)) {
 			t.Fatalf("rendered view missing semantic text %q:\n%s", value, rendered)
 		}
-	}
-}
-
-func TestWorkforceRefinementRequiresExactContextCapability(t *testing.T) {
-	question := authoring.RefinementQuestion{ID: "scope", Prompt: "Which sources?", Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerText}}
-	changeSet := &authoring.ChangeSet{ID: "change", Scope: capability.ScopeReference{Kind: "tenant", ID: "one"}, Status: authoring.ChangeSetBlocked, Revision: 2, Refinement: authoring.ChangeSetRefinement{Questions: []authoring.RefinementQuestion{question}}}
-	model := newTestModel(t, &fakeKernelClient{})
-	model.ready, model.authoringChangeSet = true, changeSet
-	model.authoringCapability = kernelapi.Capability{Available: true, Operations: []string{kernelapi.OperationRefine}, Context: &kernelapi.CapabilityContext{ChangeSetID: changeSet.ID, Revision: 1}}
-	model.editor.SetValue("r/sre")
-	if model.readyRefinement() != nil || model.submitWorkforceRefinement() != nil {
-		t.Fatal("stale contextual capability exposed refinement")
-	}
-	model.authoringCapability.Context.Revision = changeSet.Revision
-	model.authoringCapability.Operations = nil
-	if model.readyRefinement() != nil || model.submitWorkforceRefinement() != nil {
-		t.Fatal("missing refine operation exposed refinement")
-	}
-}
-
-func TestParseRefinementAnswerUsesOnlyAdvertisedTypedChoices(t *testing.T) {
-	options := []authoring.RefinementQuestionOption{{ID: "reddit", Label: "Reddit Monitor"}, {ID: "nlp", Label: "Language Analysis"}}
-	question := authoring.RefinementQuestion{Answer: authoring.RefinementAnswerSchema{Kind: authoring.RefinementAnswerSkillSelection, Options: options}}
-	value, err := parseRefinementAnswer(question, "Reddit Monitor, nlp")
-	if err != nil || strings.Join(value.SkillIDs, ",") != "reddit,nlp" {
-		t.Fatalf("skill answer = %#v, %v", value, err)
-	}
-	if _, err := parseRefinementAnswer(question, "invented-skill"); err == nil {
-		t.Fatal("invented Skill selection was accepted")
-	}
-	question.Answer.Kind = authoring.RefinementAnswerCredentialReference
-	value, err = parseRefinementAnswer(question, "reddit/oauth-primary")
-	if err != nil || value.CredentialReference == nil || value.CredentialReference.Kind != "reddit" || value.CredentialReference.ID != "oauth-primary" {
-		t.Fatalf("credential answer = %#v, %v", value, err)
-	}
-	model := newTestModel(t, &fakeKernelClient{})
-	model.authoringCapability.Context = &kernelapi.CapabilityContext{CredentialBindings: []capability.CredentialBindingChoice{{Reference: *value.CredentialReference, DisplayName: "Primary Reddit"}}}
-	if _, err := model.parseRefinementAnswer(question, "reddit/invented"); err == nil {
-		t.Fatal("unadvertised credential reference was accepted")
-	}
-	if _, err := model.parseRefinementAnswer(question, "reddit/oauth-primary"); err != nil {
-		t.Fatalf("advertised credential reference was rejected: %v", err)
-	}
-}
-
-func TestWorkforceGovernanceSelectsExactRequirementAndAppliesWithStableRetries(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "local", ID: "default"}
-	evaluation := authoring.ChangeSetEvaluation{ID: "evaluation-1", Allowed: true, ApprovalRequirements: []authoring.ChangeSetApprovalRequirement{{PolicyID: "production", Role: "operator", Count: 1}, {PolicyID: "outreach", Role: "reviewer", Count: 1}}}
-	awaiting := &authoring.ChangeSet{ID: "change-1", Scope: scope, Status: authoring.ChangeSetAwaitingApproval, Revision: 2, CandidateDigest: "digest-1", Evaluations: []authoring.ChangeSetEvaluation{evaluation}, Result: authoring.CompileResult{Valid: true, Commitments: authoring.PromptCommitments{Activation: authoring.ActivationCommitmentInactive}}}
-	ready := *awaiting
-	ready.Status, ready.Revision = authoring.ChangeSetReady, 3
-	applied := ready
-	applied.Status, applied.Revision = authoring.ChangeSetApplied, 4
-	applied.ApplyReceipt = &authoring.ChangeSetApplyReceipt{ID: "receipt-1", CandidateDigest: ready.CandidateDigest, Activation: authoring.WorkforceActivationInactive, Reason: "Create the reviewed workforce", Actor: authoring.ChangeSetActor{Type: "user", ID: "server-operator"}, AppliedAt: time.Now(), Resources: []authoring.AppliedResourceReference{{Kind: "agent_definition", ID: "researcher", Version: "1"}, {Kind: "team_deployment", ID: "research-live", Revision: 1}}}
-	activation := applied
-	activation.ID, activation.ParentID, activation.Status, activation.Revision, activation.ApplyReceipt = "activation-1", applied.ID, authoring.ChangeSetReview, 1, nil
-	activation.Result.Candidate.Activation = authoring.WorkforceActivationActive
-	approvalCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	approvalCapability.Operations = append(approvalCapability.Operations, kernelapi.OperationApprove)
-	approvalCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: awaiting.ID, Revision: awaiting.Revision, EligibleApprovalRequirements: []kernelapi.ApprovalRequirementReference{
-		{EvaluationID: evaluation.ID, PolicyID: "production", Role: "operator"},
-		{EvaluationID: evaluation.ID, PolicyID: "outreach", Role: "reviewer"},
-	}}
-	fake := &fakeKernelClient{
-		document:          kernelapi.NewCapabilityDocument(approvalCapability),
-		governanceErrors:  []error{errors.New("temporary disconnect"), nil, nil},
-		governanceResults: []*authoring.ChangeSet{&ready, &applied, &activation},
-	}
-	model := newTestModel(t, fake)
-	model.authoringChangeSet, model.authoringResult = awaiting, &awaiting.Result
-	applyCommand(t, model, model.loadCapabilities())
-	if !strings.Contains(model.View(), "outreach / reviewer") || !strings.Contains(model.View(), "production / operator") {
-		t.Fatalf("eligible requirements not rendered:\n%s", model.View())
-	}
-	model.focusPanelList()
-	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyDown})
-	if model.authoringApprovalSelected != 1 {
-		t.Fatalf("selected requirement = %d", model.authoringApprovalSelected)
-	}
-	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
-	model.editor.SetValue("Reviewed external outreach boundaries")
-	applyCommand(t, model, model.submitWorkforceApproval(true))
-	if model.editor.Value() == "" || model.pendingGovernanceKey == "" {
-		t.Fatal("failed approval did not preserve reason and retry identity")
-	}
-	firstKey := model.pendingGovernanceKey
-	applyCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	applyCapability.Operations = append(applyCapability.Operations, kernelapi.OperationApply)
-	applyCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: ready.ID, Revision: ready.Revision}
-	fake.document = kernelapi.NewCapabilityDocument(applyCapability)
-	applyCommand(t, model, model.submitWorkforceApproval(true))
-	if len(fake.approvalRequests) != 2 || fake.approvalKeys[0] != firstKey || fake.approvalKeys[1] != firstKey || fake.approvalRequests[1].PolicyID != "outreach" || fake.approvalRequests[1].Role != "reviewer" || fake.approvalRequests[1].EvaluationID != evaluation.ID {
-		t.Fatalf("approval requests=%#v keys=%#v", fake.approvalRequests, fake.approvalKeys)
-	}
-	if fake.approvalRequests[1].PolicyID == "production" {
-		t.Fatal("TUI submitted an unselected requirement")
-	}
-	if !model.canApplyWorkforce() || !strings.Contains(model.View(), "Enter create this exact reviewed workforce") {
-		t.Fatalf("ready Apply was not capability gated:\n%s", model.View())
-	}
-	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model.editor.SetValue("Create the reviewed workforce")
-	applyCommand(t, model, model.submitWorkforceApply())
-	if len(fake.applyRequests) != 1 || fake.applyRequests[0].ExpectedRevision != ready.Revision || fake.applyRequests[0].CandidateDigest != ready.CandidateDigest || fake.applyRequests[0].Reason != "Create the reviewed workforce" || fake.applyKeys[0] == "" {
-		t.Fatalf("Apply requests=%#v keys=%#v", fake.applyRequests, fake.applyKeys)
-	}
-	if !strings.Contains(model.View(), "Created atomically · inactive") || !strings.Contains(model.View(), "receipt-1") || !strings.Contains(model.View(), "research-live") || !strings.Contains(model.View(), "inactive") {
-		t.Fatalf("Apply receipt was not rendered:\n%s", model.View())
-	}
-	activationCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	activationCapability.Operations = append(activationCapability.Operations, kernelapi.OperationActivate)
-	activationCapability.Context = &kernelapi.CapabilityContext{ChangeSetID: applied.ID, Revision: applied.Revision}
-	fake.document = kernelapi.NewCapabilityDocument(activationCapability)
-	applyCommand(t, model, model.loadCapabilities())
-	if !model.canPrepareWorkforceActivation() || !strings.Contains(model.View(), "Enter review and start these exact inactive resources") {
-		t.Fatalf("inactive activation was not capability gated:\n%s", model.View())
-	}
-	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-	model.editor.SetValue("Start the reviewed workforce")
-	applyCommand(t, model, model.submitWorkforceActivation())
-	if len(fake.activationRequests) != 1 || fake.activationRequests[0].ExpectedRevision != applied.Revision ||
-		fake.activationRequests[0].CandidateDigest != applied.CandidateDigest ||
-		fake.activationRequests[0].Reason != "Start the reviewed workforce" || fake.activationKeys[0] == "" ||
-		model.authoringChangeSet.ID != activation.ID || model.authoringChangeSet.ParentID != applied.ID {
-		t.Fatalf("activation requests=%#v keys=%#v changeSet=%#v", fake.activationRequests, fake.activationKeys, model.authoringChangeSet)
-	}
-}
-
-func TestWorkforceCredentialPlacementUsesTypedAuthorizedChoices(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	definition := &kernelagent.AgentDefinition{ID: "sre", DisplayName: "SRE Agent"}
-	changeSet := &authoring.ChangeSet{
-		ID: "credential-change", Scope: scope, Status: authoring.ChangeSetReview, Revision: 3, CandidateDigest: "digest",
-		Result:              authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{Agents: []*kernelagent.AgentDefinition{definition}}},
-		RequiredCredentials: map[string][]string{"sre": {"kubernetes-cluster"}},
-		Placement:           authoring.ChangeSetPlacement{AgentDeploymentIDs: map[string]string{"sre": "sre-live"}, Environment: "development"},
-	}
-	updated := *changeSet
-	updated.Revision = 4
-	updated.Placement.CredentialReferences = map[string]map[string]capability.CredentialReference{
-		"sre": {"kubernetes-cluster": {Kind: "kubernetes-cluster", ID: "cluster://8"}},
-	}
-	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
-	capabilityDocument.Context = &kernelapi.CapabilityContext{
-		ChangeSetID: changeSet.ID, Revision: changeSet.Revision,
-		CredentialBindings: []capability.CredentialBindingChoice{
-			{Reference: capability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://7"}, DisplayName: "Development"},
-			{Reference: capability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://8"}, DisplayName: "Production"},
-		},
-	}
-	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capabilityDocument), governanceResults: []*authoring.ChangeSet{&updated}}
-	model := newTestModel(t, fake)
-	model.authoringChangeSet, model.authoringResult = changeSet, &changeSet.Result
-	applyCommand(t, model, model.loadCapabilities())
-	if view := model.View(); !strings.Contains(view, "SRE Agent") || !strings.Contains(view, "Development") || strings.Contains(view, "cluster://7") {
-		t.Fatalf("secret-safe credential choices were not rendered:\n%s", view)
-	}
-	model.focusPanelList()
-	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-	applyCommand(t, model, command)
-	if len(fake.placementRequests) != 1 || len(fake.placementKeys) != 1 || fake.placementKeys[0] == "" {
-		t.Fatalf("placement calls=%#v keys=%#v", fake.placementRequests, fake.placementKeys)
-	}
-	reference := fake.placementRequests[0].Placement.CredentialReferences["sre"]["kubernetes-cluster"]
-	if reference.Kind != "kubernetes-cluster" || reference.ID != "cluster://8" || fake.placementRequests[0].Placement.CredentialReferences["sre"]["clusterId"].ID != "" {
-		t.Fatalf("typed credential placement = %#v", fake.placementRequests[0].Placement.CredentialReferences)
-	}
-}
-
-func TestWorkforceConversationRoutingUsesTypedNonSecretPlacement(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	endpoint := authoring.ConversationEndpointBlueprint{
-		ID: "support", Name: "Slack support", SkillID: "openseal.slack", SkillVersion: "1.0.0",
-		AdapterID: "slack-events", Mode: capability.ConversationEndpointChannel,
-		Owner:   authoring.ConversationEndpointOwner{Type: authoring.ConversationEndpointOwnerAgent, ID: "support"},
-		Handler: authoring.ConversationHandlerBlueprint{Kind: authoring.ConversationHandlerAgent, AgentDefinitionID: "support"},
-	}
-	changeSet := &authoring.ChangeSet{
-		ID: "routing-change", Scope: scope, Status: authoring.ChangeSetBlocked, Revision: 3, CandidateDigest: "digest",
-		Result: authoring.CompileResult{Candidate: authoring.WorkforceCandidate{
-			Agents:                []*kernelagent.AgentDefinition{{ID: "support", DisplayName: "Support Agent"}},
-			ConversationEndpoints: []authoring.ConversationEndpointBlueprint{endpoint}, Activation: authoring.WorkforceActivationActive,
-		}},
-		Placement: authoring.ChangeSetPlacement{ConversationEndpoints: map[string]authoring.ConversationEndpointPlacement{
-			"support": {ID: "endpoint-live", ExpectedRevision: 7, Configuration: map[string]interface{}{"internal": "must-not-render"}},
-		}},
-	}
-	updated := *changeSet
-	updated.Revision = 4
-	updated.Placement.ConversationEndpoints = cloneWorkforceConversationEndpointPlacements(changeSet.Placement.ConversationEndpoints)
-	placed := updated.Placement.ConversationEndpoints["support"]
-	placed.InstallationID, placed.ApplicationID, placed.Address = "T-123", "A-123", "C-123"
-	updated.Placement.ConversationEndpoints["support"] = placed
-	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
-	capabilityDocument.Context = &kernelapi.CapabilityContext{ChangeSetID: changeSet.ID, Revision: changeSet.Revision}
-	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capabilityDocument), governanceResults: []*authoring.ChangeSet{&updated}}
-	model := newTestModel(t, fake)
-	model.authoringChangeSet, model.authoringResult = changeSet, &changeSet.Result
-	applyCommand(t, model, model.loadCapabilities())
-	view := model.View()
-	if !strings.Contains(view, "Message routing") || !strings.Contains(view, "Slack support") || !strings.Contains(view, "setup needed") || strings.Contains(view, "must-not-render") {
-		t.Fatalf("conversation routing was not rendered safely:\n%s", view)
-	}
-	model.focusPanelList()
-	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
-	if model.mode != modeWorkforceConversationRouting || model.focus != focusComposer {
-		t.Fatalf("routing setup did not open: mode=%v focus=%v", model.mode, model.focus)
-	}
-	model.editor.SetValue("installation: T-123\napplication: A-123\naddress: C-123")
-	applyCommand(t, model, model.submitWorkforceConversationRouting())
-	if len(fake.placementRequests) != 1 || fake.placementKeys[0] == "" {
-		t.Fatalf("routing placement calls=%#v keys=%#v", fake.placementRequests, fake.placementKeys)
-	}
-	requestPlacement := fake.placementRequests[0].Placement.ConversationEndpoints["support"]
-	if requestPlacement.ID != "endpoint-live" || requestPlacement.ExpectedRevision != 7 || requestPlacement.InstallationID != "T-123" || requestPlacement.ApplicationID != "A-123" || requestPlacement.Address != "C-123" || requestPlacement.Configuration["internal"] != "must-not-render" {
-		t.Fatalf("typed routing placement = %#v", requestPlacement)
-	}
-	if _, err := parseWorkforceConversationRouting("installation: T-123\naddress: C-123\ntoken: secret"); err == nil || !strings.Contains(err.Error(), "secrets do not belong here") {
-		t.Fatalf("secret-like routing field was accepted: %v", err)
-	}
-}
-
-func TestWorkforceCredentialPlacementUsesDeploymentBindingKeys(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	changeSet := &authoring.ChangeSet{
-		ID: "model-credential-change", Scope: scope, Status: authoring.ChangeSetReview, Revision: 3,
-		Result: authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{
-			Agents:     []*kernelagent.AgentDefinition{{ID: "operator", DisplayName: "Operator"}},
-			Activation: authoring.WorkforceActivationActive,
-		}},
-		Catalog: authoring.CapabilityCatalog{AgentCredentialRequirements: []authoring.AgentCredentialRequirement{{
-			BindingKey: kernelagent.ModelProviderCredentialBinding, DisplayName: "Model provider",
-			Prompt: "Choose a model provider.", RequiredForActivation: true,
-		}}},
-		RequiredCredentials: map[string][]string{"operator": {kernelagent.ModelProviderCredentialBinding}},
-		Placement: authoring.ChangeSetPlacement{
-			AgentDeploymentIDs: map[string]string{"operator": "operator-live"}, Environment: "development",
-		},
-	}
-	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
-	capabilityDocument.Context = &kernelapi.CapabilityContext{
-		ChangeSetID: changeSet.ID, Revision: changeSet.Revision,
-		CredentialBindings: []capability.CredentialBindingChoice{{
-			Reference: capability.CredentialReference{Kind: "managed-secret", ID: "29"}, DisplayName: "Primary model",
-			BindingKeys: []string{kernelagent.ModelProviderCredentialBinding},
-		}},
-	}
-	model := newTestModel(t, &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capabilityDocument)})
-	model.authoringChangeSet, model.authoringResult = changeSet, &changeSet.Result
-	applyCommand(t, model, model.loadCapabilities())
-	rows := model.workforceCredentialRows()
-	if len(rows) != 1 || rows[0].Kind != kernelagent.ModelProviderCredentialBinding ||
-		rows[0].Label != "Model provider" || len(rows[0].Choices) != 1 ||
-		rows[0].Choices[0].Reference.Kind != "managed-secret" {
-		t.Fatalf("deployment credential rows = %#v", rows)
-	}
-	if view := model.View(); !strings.Contains(view, "Model provider") || !strings.Contains(view, "Primary model") || strings.Contains(view, "managed-secret") {
-		t.Fatalf("deployment credential choice was not rendered safely:\n%s", view)
-	}
-}
-
-func TestWorkforceBindingConfigurationUsesSequentialTypedAuthorizedChoices(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	definition := &kernelagent.AgentDefinition{
-		ID: "sre", DisplayName: "SRE Agent",
-		SkillRequirements: []kernelagent.SkillRequirement{{SkillID: "openseal.kubernetes", VersionConstraint: "1.1.0", RequiredActions: []string{"list_events"}}},
-	}
-	changeSet := &authoring.ChangeSet{
-		ID: "binding-config-change", Scope: scope, Status: authoring.ChangeSetReview, Revision: 3, CandidateDigest: "digest",
-		Result: authoring.CompileResult{Valid: true, Candidate: authoring.WorkforceCandidate{Agents: []*kernelagent.AgentDefinition{definition}}},
-		Catalog: authoring.CapabilityCatalog{Skills: map[string]authoring.SkillCapability{
-			"openseal.kubernetes": {
-				ID: "openseal.kubernetes", Version: "1.1.0", SourceIdentity: "builtin:openseal.kubernetes",
-				BindingConfigSchema: map[string]interface{}{
-					"type": "object", "additionalProperties": false, "required": []interface{}{"clusterId"},
-					"properties": map[string]interface{}{"clusterId": map[string]interface{}{"type": "integer", "minimum": 1}},
-				},
-			},
-		}},
-		Placement: authoring.ChangeSetPlacement{AgentDeploymentIDs: map[string]string{"sre": "sre-live"}, Environment: "development"},
-	}
-	development, production := int64(7), int64(8)
-	field := capability.BindingConfigurationFieldChoice{
-		CatalogSkillID: "openseal.kubernetes",
-		Skill:          capability.NewSkillIdentity("openseal.kubernetes", "1.1.0", "builtin:openseal.kubernetes"),
-		Key:            "clusterId", Type: "integer", Required: true, Prompt: "Which Kubernetes cluster should this Agent operate?",
-		Options: []capability.BindingConfigurationOption{
-			{Label: "Development", Description: "Tenant development cluster", Value: capability.BindingConfigurationValue{Integer: &development}},
-			{Label: "Production", Description: "Tenant production cluster", Value: capability.BindingConfigurationValue{Integer: &production}},
-		},
-	}
-	updated := *changeSet
-	updated.Revision = 4
-	updated.Placement.BindingConfigs = map[string]map[string]map[string]interface{}{"sre": {"openseal.kubernetes": {"clusterId": production}}}
-	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
-	capabilityDocument.Context = &kernelapi.CapabilityContext{ChangeSetID: changeSet.ID, Revision: changeSet.Revision, BindingConfigurationFields: []capability.BindingConfigurationFieldChoice{field}}
-	fake := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capabilityDocument), governanceResults: []*authoring.ChangeSet{&updated}}
-	model := newTestModel(t, fake)
-	model.authoringChangeSet, model.authoringResult = changeSet, &changeSet.Result
-	applyCommand(t, model, model.loadCapabilities())
-	view := model.View()
-	for _, expected := range []string{"Configure required Skill targets", "Which Kubernetes clust", "Development", "Tenant development cluster"} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("binding configuration view missing %q:\n%s", expected, view)
-		}
-	}
-	if strings.Contains(view, "clusterId\":7") || strings.Contains(strings.ToLower(view), "credential") {
-		t.Fatalf("binding configuration exposed implementation or credential detail:\n%s", view)
-	}
-	model.focusPanelList()
-	_, _ = model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
-	_, command := model.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-	applyCommand(t, model, command)
-	if len(fake.placementRequests) != 1 || len(fake.placementKeys) != 1 || fake.placementKeys[0] == "" {
-		t.Fatalf("placement calls=%#v keys=%#v", fake.placementRequests, fake.placementKeys)
-	}
-	config := fake.placementRequests[0].Placement.BindingConfigs["sre"]["openseal.kubernetes"]
-	if config["clusterId"] != production || len(fake.placementRequests[0].Placement.CredentialReferences) != 0 {
-		t.Fatalf("typed binding configuration placement = %#v credentials=%#v", config, fake.placementRequests[0].Placement.CredentialReferences)
 	}
 }
 

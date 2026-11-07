@@ -14,7 +14,6 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
@@ -34,7 +33,6 @@ type KernelClient interface {
 	ArtifactClient
 	TeamClient
 	Capabilities(context.Context) (kernelapi.CapabilityDocument, error)
-	WorkforceChangeSetCapabilities(context.Context, capability.ScopeReference, string) (kernelapi.CapabilityDocument, error)
 	CreateObjective(context.Context, kernelapi.CreateObjectiveRequest, string) (*runtime.Objective, error)
 	ListObjectives(context.Context, runtime.ObjectiveFilter) ([]*runtime.Objective, error)
 	GetObjective(context.Context, runtime.Scope, string) (*kernelapi.ObjectiveDetail, error)
@@ -87,16 +85,6 @@ type KernelClient interface {
 	ListAgentDeployments(context.Context, kernelagent.AgentDeploymentFilter) (*kernelapi.AgentDeploymentList, error)
 	UpdateAgentDeployment(context.Context, string, kernelapi.UpdateAgentDeploymentRequest) (*kernelapi.AgentDeploymentUpdateResult, error)
 	ListAgentSkillActions(context.Context, capability.ScopeReference, string, []string, capability.SideEffect) (*kernelapi.SkillActionList, error)
-	CompileWorkforce(context.Context, authoring.GenerateRequest) (*authoring.CompileResult, error)
-	CreateWorkforceChangeSet(context.Context, authoring.CreateChangeSetRequest, string) (*authoring.ChangeSet, error)
-	GetWorkforceChangeSet(context.Context, capability.ScopeReference, string) (*authoring.ChangeSet, error)
-	AnswerWorkforceChangeSetRefinement(context.Context, authoring.AnswerChangeSetRefinementRequest, string) (*authoring.ChangeSet, error)
-	UpdateWorkforceChangeSetPlacement(context.Context, authoring.UpdateChangeSetPlacementRequest, string) (*authoring.ChangeSet, error)
-	RetryWorkforceChangeSetGeneration(context.Context, authoring.RetryChangeSetGenerationRequest, string) (*authoring.ChangeSet, error)
-	EvaluateWorkforceChangeSet(context.Context, authoring.SubmitChangeSetEvaluationRequest, string) (*authoring.ChangeSet, error)
-	ResolveWorkforceChangeSetApproval(context.Context, authoring.ResolveChangeSetApprovalRequest, string) (*authoring.ChangeSet, error)
-	PrepareWorkforceChangeSetActivation(context.Context, authoring.PrepareChangeSetActivationRequest, string) (*authoring.ChangeSet, error)
-	ApplyWorkforceChangeSet(context.Context, authoring.ApplyChangeSetRequest, string) (*authoring.ChangeSet, error)
 }
 
 // RunbookExecutionAuditClient exposes the optional Runbook-first audit read.
@@ -224,22 +212,6 @@ func (c *KernelHTTPClient) InstallWorkforceBundle(ctx context.Context, bundle *k
 	}
 	return &result, nil
 }
-
-// WorkforceRefinementClient lets narrower embedding surfaces depend only on
-// the governed refinement operation. Interactive clients still capability-gate
-// the operation against the contextual workforce-authoring v7 document.
-type WorkforceRefinementClient interface {
-	AnswerWorkforceChangeSetRefinement(context.Context, authoring.AnswerChangeSetRefinementRequest, string) (*authoring.ChangeSet, error)
-}
-
-// WorkforceSkillSearchClient is the narrow discovery boundary used by
-// prompt-first authoring surfaces.
-type WorkforceSkillSearchClient interface {
-	SearchWorkforceSkills(context.Context, authoring.SkillSearchRequest) (*authoring.SkillSearchPage, error)
-}
-
-var _ WorkforceRefinementClient = (*KernelHTTPClient)(nil)
-var _ WorkforceSkillSearchClient = (*KernelHTTPClient)(nil)
 
 // AgentDefinitionLifecycleClient is the narrow public boundary for governed
 // immutable definition rollout, rollback, and amendment review. Read-only
@@ -677,106 +649,6 @@ func (c *KernelHTTPClient) ListAgentSkillActions(ctx context.Context, scope capa
 	var result kernelapi.SkillActionList
 	path := "/api/v1/agent-deployments/" + url.PathEscape(strings.TrimSpace(deploymentID)) + "/skill-actions?" + query.Encode()
 	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (c *KernelHTTPClient) WorkforceChangeSetCapabilities(ctx context.Context, scope capability.ScopeReference, id string) (kernelapi.CapabilityDocument, error) {
-	query := capabilityScopeQuery(scope)
-	query.Set("changeSetId", strings.TrimSpace(id))
-	var document kernelapi.CapabilityDocument
-	err := c.do(ctx, http.MethodGet, "/api/v1/capabilities?"+query.Encode(), nil, "", &document)
-	return document, err
-}
-
-func (c *KernelHTTPClient) CompileWorkforce(ctx context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
-	var result authoring.CompileResult
-	if err := c.do(ctx, http.MethodPost, "/api/v1/authoring/workforce/compile", request, "", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (c *KernelHTTPClient) CreateWorkforceChangeSet(ctx context.Context, request authoring.CreateChangeSetRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
-	var result authoring.ChangeSet
-	if err := c.do(ctx, http.MethodPost, "/api/v1/authoring/workforce/change-sets", request, idempotencyKey, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (c *KernelHTTPClient) GetWorkforceChangeSet(ctx context.Context, scope capability.ScopeReference, id string) (*authoring.ChangeSet, error) {
-	query := capabilityScopeQuery(scope)
-	var result authoring.ChangeSet
-	path := "/api/v1/authoring/workforce/change-sets/" + url.PathEscape(strings.TrimSpace(id)) + "?" + query.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (c *KernelHTTPClient) UpdateWorkforceChangeSetPlacement(ctx context.Context, request authoring.UpdateChangeSetPlacementRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
-	var result authoring.ChangeSet
-	path := "/api/v1/authoring/workforce/change-sets/" + url.PathEscape(strings.TrimSpace(request.ChangeSetID)) + "/placement"
-	if err := c.do(ctx, http.MethodPatch, path, request, idempotencyKey, &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
-}
-
-func (c *KernelHTTPClient) AnswerWorkforceChangeSetRefinement(ctx context.Context, request authoring.AnswerChangeSetRefinementRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
-	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "refinements", request, idempotencyKey)
-}
-
-func (c *KernelHTTPClient) SearchWorkforceSkills(ctx context.Context, request authoring.SkillSearchRequest) (*authoring.SkillSearchPage, error) {
-	query := url.Values{}
-	query.Set("scopeKind", request.Scope.Kind)
-	query.Set("scopeId", request.Scope.ID)
-	query.Set("query", request.Query)
-	for _, action := range request.RequiredActions {
-		query.Add("requiredAction", action)
-	}
-	if request.MaximumRisk != "" {
-		query.Set("maximumRisk", string(request.MaximumRisk))
-	}
-	if request.Cursor != "" {
-		query.Set("cursor", request.Cursor)
-	}
-	if request.Limit > 0 {
-		query.Set("limit", strconv.Itoa(request.Limit))
-	}
-	var page authoring.SkillSearchPage
-	if err := c.do(ctx, http.MethodGet, "/api/v1/authoring/workforce/skills?"+query.Encode(), nil, "", &page); err != nil {
-		return nil, err
-	}
-	return &page, nil
-}
-
-func (c *KernelHTTPClient) EvaluateWorkforceChangeSet(ctx context.Context, request authoring.SubmitChangeSetEvaluationRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
-	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "evaluations", request, idempotencyKey)
-}
-
-func (c *KernelHTTPClient) RetryWorkforceChangeSetGeneration(ctx context.Context, request authoring.RetryChangeSetGenerationRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
-	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "retry", request, idempotencyKey)
-}
-
-func (c *KernelHTTPClient) ResolveWorkforceChangeSetApproval(ctx context.Context, request authoring.ResolveChangeSetApprovalRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
-	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "approvals", request, idempotencyKey)
-}
-
-func (c *KernelHTTPClient) PrepareWorkforceChangeSetActivation(ctx context.Context, request authoring.PrepareChangeSetActivationRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
-	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "activation", request, idempotencyKey)
-}
-
-func (c *KernelHTTPClient) ApplyWorkforceChangeSet(ctx context.Context, request authoring.ApplyChangeSetRequest, idempotencyKey string) (*authoring.ChangeSet, error) {
-	return c.mutateWorkforceChangeSet(ctx, request.ChangeSetID, "apply", request, idempotencyKey)
-}
-
-func (c *KernelHTTPClient) mutateWorkforceChangeSet(ctx context.Context, id, operation string, request interface{}, idempotencyKey string) (*authoring.ChangeSet, error) {
-	var result authoring.ChangeSet
-	path := "/api/v1/authoring/workforce/change-sets/" + url.PathEscape(strings.TrimSpace(id)) + "/" + operation
-	if err := c.do(ctx, http.MethodPost, path, request, strings.TrimSpace(idempotencyKey), &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
