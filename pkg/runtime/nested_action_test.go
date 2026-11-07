@@ -63,7 +63,7 @@ func nestedActionStores(t *testing.T) []struct {
 	return stores
 }
 
-// newNestedActionFixture opens a running Run whose Turn is in flight and
+// newNestedActionFixture opens a running Run whose step is running and
 // offers two actions: a read and an external write that needs approval.
 func newNestedActionFixture(t *testing.T, store KernelStore) *nestedActionFixture {
 	t.Helper()
@@ -79,11 +79,11 @@ func newNestedActionFixture(t *testing.T, store KernelStore) *nestedActionFixtur
 	binding := &skill.Binding{
 		ID: "repo-binding", DeploymentID: "agent", SkillID: "repo", SkillVersion: "1.0.0", AllowedActions: []string{"read_file", "push", "delete_all"}, MaximumRisk: skill.RiskLevelDestructive, Revision: 1,
 	}
-	// The Turn offers only the read and the push.
+	// The step offers only the read and the push.
 	return newNestedActionFixtureWith(t, store, definition, binding, func(action capability.ModelAction) bool { return action.Action != "delete_all" })
 }
 
-// newNestedActionFixtureWith opens the same Run and Turn offering the actions
+// newNestedActionFixtureWith opens the same Run and step offering the actions
 // of definition's binding that offer selects.
 func newNestedActionFixtureWith(t *testing.T, store KernelStore, definition *skill.Definition, skillBinding *skill.Binding, offer func(capability.ModelAction) bool) *nestedActionFixture {
 	t.Helper()
@@ -125,7 +125,7 @@ func newNestedActionFixtureWith(t *testing.T, store KernelStore, definition *ski
 	}
 	expires := now.Add(time.Hour)
 	turn, err := store.CreateAgentTurn(ctx, &AgentTurn{
-		ID: "turn-" + uuid.NewString(), Scope: scope, RunID: run.ID, Status: AgentTurnStatusRunning, LeaseOwner: "agent-worker", LeaseExpiresAt: &expires,
+		ID: "step-" + uuid.NewString(), Scope: scope, RunID: run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel, LeaseOwner: "agent-worker", LeaseExpiresAt: &expires,
 		Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
 	})
 	if err != nil {
@@ -146,6 +146,41 @@ func newNestedActionFixtureWith(t *testing.T, store KernelStore, definition *ski
 	fixture.closeTurn = coordinator.OpenNestedActionTurn(run, turn, binding)
 	t.Cleanup(fixture.closeTurn)
 	return fixture
+}
+
+// finishStep completes the fixture's running step in the store, as the run
+// loop does at step end. It leaves the step's nested authority open.
+func (f *nestedActionFixture) finishStep(t *testing.T) {
+	t.Helper()
+	finished := cloneAgentTurn(f.turn)
+	finished.Status = AgentTurnStatusCompleted
+	completedAt := f.now.Add(time.Second)
+	finished.CompletedAt = &completedAt
+	finished.Revision++
+	if err := f.store.UpdateAgentTurn(context.Background(), finished, f.turn.Revision, f.turn.LeaseOwner); err != nil {
+		t.Fatal(err)
+	}
+	f.turn = finished
+}
+
+// openStep starts the Run's next running step under the Run's lease and opens
+// its nested authority, as the run loop does when a step begins.
+func (f *nestedActionFixture) openStep(t *testing.T, sequence int64) {
+	t.Helper()
+	expires := f.now.Add(time.Hour)
+	step, err := f.store.CreateAgentTurn(context.Background(), &AgentTurn{
+		ID: "step-" + uuid.NewString(), Scope: f.scope, RunID: f.run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel,
+		LeaseOwner: "agent-worker", LeaseExpiresAt: &expires, Revision: 1, CreatedAt: f.now, UpdatedAt: f.now, StartedAt: f.now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.Sequence != sequence {
+		t.Fatalf("step sequence = %d, want %d", step.Sequence, sequence)
+	}
+	f.turn = step
+	f.closeTurn = f.coordinator.OpenNestedActionTurn(f.run, step, f.binding)
+	t.Cleanup(f.closeTurn)
 }
 
 func (f *nestedActionFixture) request(capability, key string) NestedActionRequest {
@@ -232,7 +267,7 @@ func TestNestedReadActionRunsWithoutChangingTheRun(t *testing.T) {
 	}
 }
 
-func TestNestedActionRefusesCapabilitiesTheTurnDidNotOffer(t *testing.T) {
+func TestNestedActionRefusesCapabilitiesTheStepDidNotOffer(t *testing.T) {
 	for _, testCase := range nestedActionStores(t) {
 		t.Run(testCase.name, func(t *testing.T) {
 			f := newNestedActionFixture(t, testCase.open(t))
@@ -250,15 +285,15 @@ func TestNestedActionRefusesCapabilitiesTheTurnDidNotOffer(t *testing.T) {
 	}
 }
 
-func TestNestedActionRequiresTheRunsInFlightTurn(t *testing.T) {
+func TestNestedActionRequiresTheRunsRunningStep(t *testing.T) {
 	for _, testCase := range nestedActionStores(t) {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx := context.Background()
 			f := newNestedActionFixture(t, testCase.open(t))
 			other := f.request("repo.read_file", "bridge-other")
-			other.TurnID = "turn-unknown"
+			other.TurnID = "step-unknown"
 			if _, err := f.coordinator.ProposeNested(ctx, other); !errors.Is(err, ErrNestedTurnNotActive) {
-				t.Fatalf("unknown turn err = %v", err)
+				t.Fatalf("unknown step err = %v", err)
 			}
 			wrongRun := f.request("repo.read_file", "bridge-run")
 			wrongRun.RunID = "run-unknown"
@@ -266,25 +301,19 @@ func TestNestedActionRequiresTheRunsInFlightTurn(t *testing.T) {
 				t.Fatalf("wrong run err = %v", err)
 			}
 
-			// A call made while the Turn ran is canceled, not dispatched, once
-			// the Turn has finished.
+			// A call made while the step ran is canceled, not dispatched, once
+			// the step has finished, even while its authority is still open.
 			pending, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-1"))
 			if err != nil {
 				t.Fatal(err)
 			}
-			finished := cloneAgentTurn(f.turn)
-			finished.Status = AgentTurnStatusCompleted
-			completedAt := f.now.Add(time.Second)
-			finished.CompletedAt = &completedAt
-			finished.Revision++
-			if err := f.store.UpdateAgentTurn(ctx, finished, f.turn.Revision, "agent-worker"); err != nil {
-				t.Fatal(err)
-			}
+			finishedStep := f.turn
+			f.finishStep(t)
 			if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-2")); !errors.Is(err, ErrNestedTurnNotActive) {
-				t.Fatalf("finished turn err = %v", err)
+				t.Fatalf("finished step err = %v", err)
 			}
 			worker := NewActionWorker(f.store, f.catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
-				t.Fatal("a nested call of a finished Turn was dispatched")
+				t.Fatal("a nested call of a finished step was dispatched")
 				return nil, nil
 			}))
 			worker.now = func() time.Time { return f.now.Add(2 * time.Second) }
@@ -299,8 +328,71 @@ func TestNestedActionRequiresTheRunsInFlightTurn(t *testing.T) {
 
 			f.closeTurn()
 			if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-3")); !errors.Is(err, ErrNestedTurnNotActive) {
-				t.Fatalf("closed turn err = %v", err)
+				t.Fatalf("closed step err = %v", err)
 			}
+
+			// The Run's next step is the only one nested calls may use: the
+			// finished step stays closed while the new one admits calls.
+			f.openStep(t, 2)
+			stale := f.request("repo.read_file", "bridge-4")
+			stale.TurnID = finishedStep.ID
+			if _, err := f.coordinator.ProposeNested(ctx, stale); !errors.Is(err, ErrNestedTurnNotActive) {
+				t.Fatalf("previous step err = %v", err)
+			}
+			next, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-1"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !next.Created || next.Call.ID == pending.Call.ID || next.Call.TurnID != f.turn.ID {
+				t.Fatalf("next step call = %#v", next)
+			}
+			executed, err = f.worker(t).RunOnce(ctx, f.scope, "action-worker", time.Minute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if executed.Call.ID != next.Call.ID || executed.Call.Status != ActionCallStatusSucceeded {
+				t.Fatalf("next step execution = %#v", executed)
+			}
+			f.assertRunUnchanged(t)
+		})
+	}
+}
+
+// A step admits nested calls only while it is leased, live, by the worker
+// holding the Run's lease.
+func TestNestedActionRequiresTheStepLeasedByTheRunsWorker(t *testing.T) {
+	for _, testCase := range nestedActionStores(t) {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			f := newNestedActionFixture(t, testCase.open(t))
+			for index, lease := range []struct {
+				owner   string
+				expires time.Time
+			}{
+				{owner: "other-worker", expires: f.now.Add(time.Hour)},
+				{owner: "agent-worker", expires: f.now},
+			} {
+				f.finishStep(t)
+				f.closeTurn()
+				step, err := f.store.CreateAgentTurn(ctx, &AgentTurn{
+					ID: fmt.Sprint("step-lease-", index), Scope: f.scope, RunID: f.run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel,
+					LeaseOwner: lease.owner, LeaseExpiresAt: &lease.expires, Revision: 1, CreatedAt: f.now, UpdatedAt: f.now, StartedAt: f.now,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.turn = step
+				f.closeTurn = f.coordinator.OpenNestedActionTurn(f.run, step, f.binding)
+				t.Cleanup(f.closeTurn)
+				if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-1")); !errors.Is(err, ErrNestedTurnNotActive) {
+					t.Fatalf("lease %#v err = %v", lease, err)
+				}
+			}
+			calls, err := f.store.ListActionCalls(ctx, ActionFilter{Scope: f.scope, RunID: f.run.ID})
+			if err != nil || len(calls) != 0 {
+				t.Fatalf("calls of unleased steps were recorded: %#v, %v", calls, err)
+			}
+			f.assertRunUnchanged(t)
 		})
 	}
 }
@@ -360,36 +452,60 @@ func TestNestedWriteActionWaitsForApprovalWithoutChangingTheRun(t *testing.T) {
 	}
 }
 
-func TestNestedActionBoundsPerTurn(t *testing.T) {
+func TestNestedActionBoundsArePerStep(t *testing.T) {
 	for _, testCase := range nestedActionStores(t) {
 		t.Run(testCase.name, func(t *testing.T) {
 			ctx := context.Background()
 			f := newNestedActionFixture(t, testCase.open(t))
 			f.coordinator.nestedMaxCalls, f.coordinator.nestedMaxConcurrent = 5, 2
-			for index := 0; index < 2; index++ {
-				if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", fmt.Sprint("bridge-", index))); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-over")); !errors.Is(err, ErrNestedActionLimit) {
-				t.Fatalf("concurrency bound err = %v", err)
-			}
 			worker := f.worker(t)
-			for index := 0; index < 2; index++ {
-				if _, err := worker.RunOnce(ctx, f.scope, "action-worker", time.Minute); err != nil {
-					t.Fatal(err)
+			exhaust := func(step int) {
+				t.Helper()
+				for index := 0; index < 2; index++ {
+					if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", fmt.Sprint("bridge-", index))); err != nil {
+						t.Fatalf("step %d call %d: %v", step, index, err)
+					}
+				}
+				if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-over")); !errors.Is(err, ErrNestedActionLimit) {
+					t.Fatalf("step %d concurrency bound err = %v", step, err)
+				}
+				for index := 0; index < 2; index++ {
+					if _, err := worker.RunOnce(ctx, f.scope, "action-worker", time.Minute); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for index := 2; index < 5; index++ {
+					if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", fmt.Sprint("bridge-", index))); err != nil {
+						t.Fatalf("step %d call %d: %v", step, index, err)
+					}
+					if _, err := worker.RunOnce(ctx, f.scope, "action-worker", time.Minute); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-total")); !errors.Is(err, ErrNestedActionLimit) {
+					t.Fatalf("step %d total bound err = %v", step, err)
 				}
 			}
-			for index := 2; index < 5; index++ {
-				if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", fmt.Sprint("bridge-", index))); err != nil {
-					t.Fatalf("call %d: %v", index, err)
-				}
-				if _, err := worker.RunOnce(ctx, f.scope, "action-worker", time.Minute); err != nil {
-					t.Fatal(err)
-				}
+			exhaust(1)
+			// The next step of the same Run starts with fresh bounds and its
+			// own idempotency keys.
+			f.finishStep(t)
+			f.closeTurn()
+			f.openStep(t, 2)
+			exhaust(2)
+			calls, err := f.store.ListActionCalls(ctx, ActionFilter{Scope: f.scope, RunID: f.run.ID})
+			if err != nil {
+				t.Fatal(err)
 			}
-			if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-total")); !errors.Is(err, ErrNestedActionLimit) {
-				t.Fatalf("total bound err = %v", err)
+			perStep := map[string]int{}
+			for _, call := range calls {
+				if call.Status != ActionCallStatusSucceeded {
+					t.Fatalf("call %s status = %s", call.ID, call.Status)
+				}
+				perStep[call.TurnID]++
+			}
+			if len(perStep) != 2 || perStep[f.turn.ID] != 5 {
+				t.Fatalf("calls per step = %#v", perStep)
 			}
 			f.assertRunUnchanged(t)
 		})
