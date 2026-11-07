@@ -17,8 +17,6 @@ import (
 
 	"github.com/axiom-studio/openseal/internal/daemon"
 	"github.com/axiom-studio/openseal/internal/server"
-	"github.com/axiom-studio/openseal/pkg/authoring"
-	"github.com/axiom-studio/openseal/pkg/capability"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/outreach"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -31,9 +29,9 @@ func daemonCmd(args []string) {
 	fs := flag.NewFlagSet("daemon", flag.ExitOnError)
 	configPath := fs.String("config", "daemon.yaml", "path to daemon config file")
 	contextPath := fs.String("context", "context.yaml", "path to optional standalone Vault and provider context")
-	authoringScope := fs.String("scope", "local:default", "standalone authoring scope as kind:id")
+	daemonScope := fs.String("scope", "local:default", "durable daemon scope as kind:id")
 	desktopOperator := fs.Bool("desktop-operator", false, "enable governed local desktop review and installation")
-	standaloneOperator := fs.Bool("standalone-operator", false, "allow the loopback TUI to retry failed generation as local-operator")
+	standaloneOperator := fs.Bool("standalone-operator", false, "let the loopback TUI act as the local operator")
 	listenAddr := fs.String("listen", "", "override the configured API listen address (use 127.0.0.1:0 for an ephemeral port)")
 	help := fs.Bool("help", false, "print help for daemon")
 	fs.Parse(args)
@@ -46,9 +44,9 @@ Start the durable OpenSeal agent kernel and versioned API.
 Options:
   --config <path>   Path to daemon config file (default: daemon.yaml)
   --context <path>  Optional local Vault/provider context (default: context.yaml)
-  --scope <kind:id> Durable standalone authoring scope (default: local:default)
+  --scope <kind:id> Durable daemon scope (default: local:default)
   --listen <addr>   Override the configured API address; port 0 selects a free port
-  --standalone-operator Allow governed generation retry when API binds to loopback
+  --standalone-operator Let the loopback TUI act as the local operator
   --desktop-operator Enable local desktop lifecycle authority (loopback and API token required)
   --help            Print this help message`)
 		return
@@ -99,7 +97,7 @@ Options:
 		)
 	}
 
-	scope, err := parseDaemonScope(*authoringScope)
+	scope, err := parseDaemonScope(*daemonScope)
 	if err != nil {
 		sugar.Fatal(err)
 	}
@@ -158,7 +156,7 @@ Options:
 		endpoint, model = standaloneContext.Authoring.BaseURL, standaloneContext.Authoring.Model
 		apiKey, err = standaloneContext.ResolveReference(scope, standaloneContext.Authoring.Credential)
 		if err != nil {
-			sugar.Fatalf("resolve standalone authoring credential: %v", err)
+			sugar.Fatalf("resolve the model provider credential: %v", err)
 		}
 	}
 	configured := 0
@@ -168,7 +166,7 @@ Options:
 		}
 	}
 	if configured != 0 && configured != 3 {
-		sugar.Fatal("workforce authoring requires OPENSEAL_LLM_BASE_URL, OPENAI_API_KEY, and OPENSEAL_LLM_MODEL together")
+		sugar.Fatal("the model provider requires OPENSEAL_LLM_BASE_URL, OPENAI_API_KEY, and OPENSEAL_LLM_MODEL together")
 	}
 	contentStore, contentPath, err := daemon.OpenArtifactContentStore(cfg.Storage, filepath.Dir(*configPath))
 	if err != nil {
@@ -323,7 +321,6 @@ Options:
 	}
 	apiServer.SetReactionProjector(kernel.ReactionProjector())
 	apiServer.SetClawHubLifecycle(kernel, *standaloneOperator)
-	apiServer.SetWorkforceCredentialBindings(standaloneContext.CredentialChoices(scope))
 	if *standaloneOperator {
 		if !*desktopOperator {
 			apiServer.SetActionApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{})
@@ -343,29 +340,6 @@ Options:
 	}
 	apiServer.SetArtifactContentStore(contentStore)
 	sugar.Infow("artifact content store opened", "path", contentPath)
-	if configured == 3 {
-		generator, generatorErr := authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, nil)
-		if generatorErr != nil {
-			sugar.Fatalf("configure workforce authoring: %v", generatorErr)
-		}
-		compiler, compilerErr := authoring.NewCompiler(generator)
-		if compilerErr != nil {
-			sugar.Fatalf("configure workforce authoring compiler: %v", compilerErr)
-		}
-		apiServer.SetWorkforceAuthoringCompiler(compiler)
-		if workerErr := apiServer.StartWorkforceAuthoringWorker(ctx, scope, ""); workerErr != nil {
-			sugar.Fatalf("start workforce authoring worker: %v", workerErr)
-		}
-		if *desktopOperator {
-			apiServer.SetWorkforceLifecycleAuthorizer(server.DesktopLifecycleAuthorizer{Scope: capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}})
-		} else if *standaloneOperator {
-			apiServer.SetWorkforceLifecycleAuthorizer(server.StandaloneRetryAuthorizer{ActorID: "local-operator"})
-		} else {
-			sugar.Warn("generation retry is disabled; use --standalone-operator with a loopback API address or configure an embedding-host lifecycle authority")
-		}
-		sugar.Infow("workforce authoring enabled", "model", model, "scope", scope.Kind+":"+scope.ID)
-	}
-
 	listener, err := net.Listen("tcp", cfg.API.ListenAddr)
 	if err != nil {
 		sugar.Fatalf("bind API server: %v", err)
