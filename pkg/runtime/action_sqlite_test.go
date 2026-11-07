@@ -42,6 +42,7 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	run = claimRunForLoopProposal(t, store, run)
 	const contenders = 20
 	results := make(chan *ActionProposalResult, contenders)
 	errs := make(chan error, contenders)
@@ -102,7 +103,7 @@ func TestSQLiteActionProposalIsAtomicIdempotentAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(calls) != 1 || calls[0].ID != persistedID || calls[0].Arguments == nil || len(calls[0].Arguments) != 0 ||
-		len(approvals) != 1 || len(events) != 1 || persistedRun.Revision != run.Revision+1 || persistedRun.Status != AgentRunStatusWaitingForApproval {
+		len(approvals) != 1 || len(events) != 1 || persistedRun.Revision != run.Revision+1 || persistedRun.Status != AgentRunStatusRunning || persistedRun.WakeCondition != nil {
 		t.Fatalf("durable proposal mismatch: calls=%#v approvals=%#v events=%#v run=%#v", calls, approvals, events, persistedRun)
 	}
 	owned, err := store.ListApprovals(ctx, ApprovalFilter{Scope: scope, Owner: &ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}})
@@ -138,12 +139,13 @@ func TestSQLiteActionProposalRollsBackEveryRecordOnActivityFailure(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	run = claimRunForLoopProposal(t, store, run)
 	if _, err := store.AppendActivity(ctx, &ActivityEvent{ID: "duplicate-event", Scope: scope, RunID: run.ID, EventType: "test", Summary: "existing", CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	proposal := sqliteApprovalProposal(run, "rolled-back-call", "rollback-key", "duplicate-event")
-	if _, err := store.CreateActionProposal(ctx, proposal); err == nil {
-		t.Fatal("proposal should fail on duplicate activity id")
+	if _, err := store.CreateActionProposal(ctx, proposal); err == nil || errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("proposal should fail on duplicate activity id, got %v", err)
 	}
 	if _, err := store.GetActionCall(ctx, scope, "rolled-back-call"); err != ErrActionNotFound {
 		t.Fatalf("action survived rollback: %v", err)
@@ -174,6 +176,7 @@ func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(
 	if err != nil {
 		t.Fatal(err)
 	}
+	firstRun = claimRunForLoopProposal(t, store, firstRun)
 	digest := hashString("stable external operation")
 	first := sqliteApprovalProposal(firstRun, "first-external-call", "first", "first-external-event")
 	first.Call.ExternalOperationDigest = digest
@@ -198,6 +201,7 @@ func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(
 	if err != nil {
 		t.Fatal(err)
 	}
+	secondRun = claimRunForLoopProposal(t, store, secondRun)
 	second := sqliteApprovalProposal(secondRun, "second-external-call", "second", "second-external-event")
 	second.Call.ExternalOperationDigest = digest
 	if _, err := store.CreateActionProposal(ctx, second); !errors.Is(err, ErrExternalOperationClaimed) {
@@ -208,11 +212,24 @@ func TestSQLiteExternalOperationReceiptSurvivesRestartAndRejectsConcurrentClaim(
 	}
 }
 
+// claimRunForLoopProposal claims run, the only queued Run of its scope, so
+// the loop may propose its governed tool calls.
+func claimRunForLoopProposal(t *testing.T, store KernelStore, run *AgentRun) *AgentRun {
+	t.Helper()
+	claimed, err := store.ClaimNextAgentRun(context.Background(), AgentRunClaim{Scope: run.Scope, WorkerID: "loop-worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	return claimed
+}
+
+// sqliteApprovalProposal is the record the loop commits for a governed tool
+// call that needs review: the call, its approval and its activity. A loop
+// call never parks its Run; the Run update stands in for its budget
+// reservation, which commits atomically with it.
 func sqliteApprovalProposal(run *AgentRun, callID, idempotencyKey, eventID string) ActionProposalRecord {
 	now := time.Now().UTC()
 	updatedRun := cloneAgentRun(run)
-	updatedRun.Status = AgentRunStatusWaitingForApproval
-	updatedRun.WakeCondition = &WakeCondition{Type: "approval", Reference: callID}
 	updatedRun.Revision++
 	updatedRun.UpdatedAt = now
 	approval := &ApprovalCheckpoint{
@@ -223,8 +240,8 @@ func sqliteApprovalProposal(run *AgentRun, callID, idempotencyKey, eventID strin
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	call := &ActionCall{
-		ID: callID, Scope: run.Scope, RunID: run.ID, DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0",
-		Action: "deploy", Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
+		ID: callID, Scope: run.Scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0",
+		Action: "deploy", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
 		Arguments: map[string]interface{}{"environment": "production"}, CredentialRefs: map[string]skill.CredentialReference{"token": {Kind: "api-token", ID: "release-token"}},
 		IdempotencyKey: idempotencyKey, ApprovalID: approval.ID, MaxAttempts: 1, AvailableAt: now,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -232,6 +249,7 @@ func sqliteApprovalProposal(run *AgentRun, callID, idempotencyKey, eventID strin
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
 	return ActionProposalRecord{
 		Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision,
+		Lease: &AgentRunLeaseGuard{WorkerID: run.LeaseOwner, Now: now},
 		Event: &ActivityEvent{ID: eventID, Scope: run.Scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested for release.deploy", Payload: map[string]interface{}{"actionCallId": callID, "skill": "release", "action": "deploy"}, CreatedAt: now},
 	}
 }
