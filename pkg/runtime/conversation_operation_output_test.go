@@ -68,7 +68,7 @@ func testConversationOperationRecovery(t *testing.T, owner ObjectiveOwner, statu
 	if status == AgentRunStatusFailed {
 		old = "Operation “writing-session” failed. Review the Run for the exact failed step and retry when ready."
 	}
-	if _, _, err := runner.postAgentResponseWithReferences(t.Context(), root, conversation, trigger, old, outcome.References, false); err != nil {
+	if _, _, err := runner.postAgentResponseWithReferences(t.Context(), root, conversation, trigger, old, outcome.References, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	scheduler, err := NewConversationRunScheduler(store, store, ConversationRunSchedulerConfig{})
