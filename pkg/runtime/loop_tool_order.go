@@ -350,6 +350,7 @@ func (x *claimToolExecutor) ResumeOpenTools(ctx context.Context, in StepToolsInp
 		if out.Park != nil || out.Final != nil || out.Failure != nil || out.BudgetExhausted != nil ||
 			isTerminalAgentRunStatus(run.Status) || out.SettlePending {
 			total.Park, total.Final, total.Failure, total.BudgetExhausted = out.Park, out.Final, out.Failure, out.BudgetExhausted
+			total.SettlePending = out.SettlePending
 			return total, nil
 		}
 		if x.stepStillOpen(ctx, run, sessionID, stepID) {
@@ -418,7 +419,15 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 		out.Park = park
 		return out, nil
 	}
-	if r.openSettleEntry() != nil {
+	if settle := r.openSettleEntry(); settle != nil {
+		if step.Status != AgentTurnStatusCompleted || step.Sequence > in.Run.LastAppliedTurn {
+			// The entry's step is the claim's resumed running step (a crash
+			// before its FinishTurn): it settles after FinishTurn+applyStep,
+			// like a step that just ran its inline phase.
+			out = r.outcome()
+			out.SettlePending = r.onlyOpen(settle)
+			return out, nil
+		}
 		if err := r.settle(ctx); err != nil {
 			return StepToolsOutcome{}, err
 		}
