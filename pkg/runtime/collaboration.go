@@ -539,6 +539,14 @@ type AgentRequestCreateRecord struct {
 	DelegationTeamID       string
 	MaximumConcurrent      int
 	Event                  *ActivityEvent
+	// ToolTransition, when set, moves the source Run's delegating tool entry
+	// (typically pending -> awaiting_child) in the same transaction. Its
+	// lease is checked against the source Run as stored before this write.
+	ToolTransition *ToolEntryTransitionRequest
+	// RequireInterventionCount, when set, refuses the create with
+	// ErrSteeringArrived unless the stored source Run has exactly this many
+	// PendingInterventions.
+	RequireInterventionCount *int
 }
 
 type AgentRequestResponseRecord struct {

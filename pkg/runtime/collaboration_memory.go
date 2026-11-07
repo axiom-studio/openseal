@@ -23,6 +23,14 @@ func (s *MemoryStore) CreateAgentRequest(_ context.Context, record AgentRequestC
 	if currentSource == nil {
 		return nil, ErrRunNotFound
 	}
+	if record.RequireInterventionCount != nil && len(currentSource.PendingInterventions) != *record.RequireInterventionCount {
+		return nil, ErrSteeringArrived
+	}
+	if transition := record.ToolTransition; transition != nil {
+		if _, err := s.memoryRunLeaseLocked(transition.Scope, transition.RunID, transition.Lease); err != nil {
+			return nil, err
+		}
+	}
 	if record.SourceRun != nil &&
 		(currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1) {
 		return nil, ErrRevisionConflict
@@ -46,12 +54,22 @@ func (s *MemoryStore) CreateAgentRequest(_ context.Context, record AgentRequestC
 	if s.requests[requestKey] != nil {
 		return nil, ErrAgentRequestIdempotency
 	}
+	idempotencyKey := ""
 	if record.Request.IdempotencyKey != "" {
-		key := requestIdempotencyStoreKey(record.Request.Scope, record.Request.IdempotencyKey)
-		if s.requestKeys[key] != "" {
+		idempotencyKey = requestIdempotencyStoreKey(record.Request.Scope, record.Request.IdempotencyKey)
+		if s.requestKeys[idempotencyKey] != "" {
 			return nil, ErrAgentRequestIdempotency
 		}
-		s.requestKeys[key] = record.Request.ID
+	}
+	// The tool transition is the last check that can fail; nothing is
+	// written before it.
+	if record.ToolTransition != nil {
+		if _, err := s.transitionToolEntryLocked(*record.ToolTransition); err != nil {
+			return nil, err
+		}
+	}
+	if idempotencyKey != "" {
+		s.requestKeys[idempotencyKey] = record.Request.ID
 	}
 	if record.SourceRun != nil {
 		s.saveMemoryAgentRunLocked(runKey, record.SourceRun)
@@ -346,6 +364,23 @@ func validateAgentRequestCreateRecord(record AgentRequestCreateRecord) error {
 		if record.SourceRun.Scope != record.Request.Scope || record.SourceRun.ID != record.Request.SourceRunID ||
 			record.SourceRun.Revision != record.ExpectedSourceRevision+1 {
 			return ErrInvalidScope
+		}
+	}
+	if record.RequireInterventionCount != nil && *record.RequireInterventionCount < 0 {
+		return errors.New("required intervention count must not be negative")
+	}
+	if transition := record.ToolTransition; transition != nil {
+		if transition.Scope != record.Request.Scope || transition.RunID != record.Request.SourceRunID {
+			return fmt.Errorf("%w: tool transition must belong to the request's source Run", ErrInvalidToolEntryTransition)
+		}
+		if strings.TrimSpace(transition.Lease.WorkerID) == "" {
+			return fmt.Errorf("%w: tool transition needs the source Run lease", ErrInvalidToolEntryTransition)
+		}
+		if err := validateToolEntryTransitionRequest(*transition); err != nil {
+			return err
+		}
+		if err := validateSessionEvents(transition.Scope, transition.RunID, transition.Events, ErrInvalidToolEntryTransition); err != nil {
+			return err
 		}
 	}
 	if (record.Request.DependencyGroupID == "") != (record.SourceRun != nil) {

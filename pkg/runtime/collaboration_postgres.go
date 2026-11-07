@@ -80,6 +80,20 @@ func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record AgentRequ
 			return nil, fmt.Errorf("%w: Team has %d active delegations, reaching maximum %d", ErrAgentRequestAssignment, active, record.MaximumConcurrent)
 		}
 	}
+	if record.RequireInterventionCount != nil || record.ToolTransition != nil {
+		var lease *AgentRunLeaseGuard
+		if record.ToolTransition != nil {
+			guard := record.ToolTransition.Lease
+			lease = &guard
+		}
+		source, err := s.lockPostgresSessionRunTx(ctx, tx, record.Request.Scope, record.Request.SourceRunID, lease)
+		if err != nil {
+			return nil, err
+		}
+		if record.RequireInterventionCount != nil && len(source.PendingInterventions) != *record.RequireInterventionCount {
+			return nil, ErrSteeringArrived
+		}
+	}
 	if record.SourceRun != nil {
 		if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err
@@ -92,6 +106,11 @@ func (s *PostgresStore) CreateAgentRequest(ctx context.Context, record AgentRequ
 			return nil, ErrRunNotFound
 		}
 		if err != nil {
+			return nil, err
+		}
+	}
+	if record.ToolTransition != nil {
+		if _, err := s.transitionToolEntryTx(ctx, tx, *record.ToolTransition); err != nil {
 			return nil, err
 		}
 	}
