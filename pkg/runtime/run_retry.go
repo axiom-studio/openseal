@@ -49,12 +49,14 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	}
 	run := cloneAgentRun(current)
 	now := s.now()
-	run.Status, run.Error, run.CreditError, run.CompletedAt = AgentRunStatusQueued, "", nil, nil
+	run.Status, run.Error, run.CreditError, run.FailureExplanation, run.CompletedAt = AgentRunStatusQueued, "", nil, nil, nil
 	run.LeaseOwner, run.LeaseExpiresAt = "", nil
 	run.AvailableAt, run.QueueEnteredAt, run.UpdatedAt = now, now, now
 	run.Revision++
-	// Explicit user retry clears the failure-only model boundary while preserving
-	// usage, turn cursor, plan and durable action evidence.
+	// Explicit user retry clears the recorded failure (above) while preserving
+	// usage, turn cursor, plan and durable action evidence. The old per-Turn
+	// path keeps its own copy in the checkpoint (turn_failure_checkpoint.go);
+	// this line goes with that file.
 	delete(run.Checkpoint, FinalFailureExplanationCheckpointKey)
 	delete(run.Checkpoint, ToolFeedbackCorrectionCheckpointKey)
 	delete(run.Checkpoint, toolFailureCountCheckpointKey)
@@ -116,10 +118,8 @@ func (s *RunCommandService) conversationRetryBlocker(ctx context.Context, run *A
 	if run.Status != AgentRunStatusFailed {
 		return "not_failed", nil
 	}
-	if explanation, ok := run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{}); ok {
-		if explained, _ := explanation["explained"].(bool); explained {
-			return "This attempt already has a reply. Send a new message to try again.", nil
-		}
+	if run.FailureExplanation != nil && run.FailureExplanation.Explained {
+		return "This attempt already has a reply. Send a new message to try again.", nil
 	}
 	if run.Kind != RunKindConversation || run.ParentRunID != "" {
 		return "task_recovery_required", nil

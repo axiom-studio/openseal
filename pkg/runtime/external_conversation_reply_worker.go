@@ -296,7 +296,8 @@ func (w *ExternalConversationReplyWorker) projectReply(
 				return nil, w.retireAnswerStream(ctx, item, reply.id)
 			}
 		}
-		content, ok := externalConversationRunReply(run)
+		sessions, actions := terminalFailureReplyStores(w.store)
+		content, ok := externalConversationRunReply(ctx, sessions, actions, run)
 		if !ok {
 			return nil, fmt.Errorf("%w: completed conversation Run has no canonical reply output", ErrInvalidExternalConversation)
 		}
@@ -529,22 +530,21 @@ func canonicalExternalRunReply(message *ChannelMessage, item *ExternalConversati
 	return false
 }
 
-func externalConversationRunReply(run *AgentRun) (string, bool) {
+func externalConversationRunReply(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) (string, bool) {
 	if run == nil {
 		return "", false
 	}
 	if run.Status == AgentRunStatusFailed {
-		if requiresFinalFailureExplanation(run.Checkpoint) {
-			failure := run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
-			explained, _ := failure["explained"].(bool)
-			if summary := strings.TrimSpace(conversationResultString(run.Output, "summary")); explained && summary != "" && len(summary) <= 65536 {
+		// Only a posted model explanation is the failed attempt's reply.
+		if f := run.FailureExplanation; f != nil && f.Explained {
+			if summary := strings.TrimSpace(conversationResultString(run.Output, "summary")); summary != "" && len(summary) <= 65536 {
 				return summary, true
 			}
 		}
 		// Failures may follow partially executed actions. Report only the reply
 		// interruption, without exposing internal errors or guessing whether
 		// those actions had external effects.
-		return terminalRunFailureReply(run), true
+		return terminalRunFailureReply(ctx, sessions, actions, run), true
 	}
 	if run.Status != AgentRunStatusCompleted {
 		return "", false

@@ -2,162 +2,269 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/workspace"
+	"github.com/google/uuid"
 )
 
-type failureExplanationTestHost struct {
-	calls   int
-	respond func(HostedTurnRequest) (*HostedTurnResponse, error)
+func TestBeginRunFailureExplanationClassifiesAndBounds(t *testing.T) {
+	for code, want := range map[string]string{
+		"gateway_credits_exhausted":       "workspace_credits_exhausted",
+		"provider_model_unavailable":      "provider_unavailable",
+		RunFailureCodeErrorStreak:         RunFailureCodeErrorStreak,
+		TurnHostContextExceeded:           TurnHostContextExceeded,
+		"task_completion_rejected":        "task_completion_rejected",
+		"":                                "execution_failed",
+		"provider said: TOKEN=SECRET":     "execution_failed",
+		strings.Repeat("x", 100):          "execution_failed",
+		"unverified_approval_claim":       "unverified_approval_claim",
+		"  final_answer_rejected  ":       "final_answer_rejected",
+		"agent_behavior_fixed":            "agent_behavior_fixed",
+		"workspace_turn_budget_exhausted": "budget_exhausted",
+	} {
+		f := beginRunFailureExplanation(&AgentRun{}, "", code, "m", "", "")
+		if f.Code != want || f.Kind != RunFailureKindExecution || f.Explained {
+			t.Fatalf("code %q = %+v, want %s", code, f, want)
+		}
+	}
+	long := beginRunFailureExplanation(nil, RunFailureKindWorkspace, "workspace_operation_failed", strings.Repeat("é", 2000), strings.Repeat("e", 4000), "bad code!")
+	if len(long.Message) > maximumTurnFailureTextBytes+len("…") || len(long.StepError) > maximumTurnFailureTextBytes+len("…") || long.StepErrorCode != "" || long.Kind != RunFailureKindWorkspace {
+		t.Fatalf("failure not bounded: %d %d %q", len(long.Message), len(long.StepError), long.StepErrorCode)
+	}
+	if empty := beginRunFailureExplanation(nil, "", "", "  ", "", ""); empty.Message == "" {
+		t.Fatal("a failure needs a message")
+	}
+	first := &RunFailureExplanation{Kind: RunFailureKindExecution, Code: "execution_failed", Message: "first"}
+	if again := beginRunFailureExplanation(&AgentRun{FailureExplanation: first}, "", "provider_unavailable", "second", "", ""); again == first || *again != *first {
+		t.Fatalf("a second failure replaced the first cause: %+v", again)
+	}
 }
 
-func (h *failureExplanationTestHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
-	h.calls++
-	return h.respond(request)
-}
-
-// A failed dispatch is the action's result for the model: the Run continues
-// with the failure in lastAction and its tools still available, and the model
-// answers with a correction or its own final explanation.
-func TestFailedDispatchReturnsToTheModelAcrossStores(t *testing.T) {
+func TestExplainableFailureRunsToolLessStepThenFailsExplained(t *testing.T) {
 	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-		now := time.Now().UTC()
-		catalog, proposal := createRunnableAction(t, store, now)
-		if proposal.Call.MaxAttempts != 1 {
-			t.Fatalf("manifest retry policy remained enabled: %#v", proposal.Call)
+		ctx := t.Context()
+		run := claimedFailureRun(t, store, "explained")
+		cause := errors.New("the model returned malformed tool arguments")
+		if !modelExplainsFailure(run) || !turnFailureCanBeExplained(cause, "tool_arguments_invalid") {
+			t.Fatal("an ordinary step failure must be explainable")
 		}
-		dispatches := 0
-		worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
-			return map[string]string{"token": "sensitive-token"}, nil
-		}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
-			dispatches++
-			return nil, errors.New("provider rejected sensitive-token")
-		}))
-		worker.now = func() time.Time { return now.Add(2 * time.Second) }
-		failed, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "action-worker", time.Minute)
-		if err != nil || failed == nil || failed.Call.Status != ActionCallStatusFailed || failed.Run.Status != AgentRunStatusQueued || dispatches != 1 ||
-			requiresFinalFailureExplanation(failed.Run.Checkpoint) || failed.Run.CompletedAt != nil {
-			t.Fatalf("first failure was not returned to the model: %#v %v", failed, err)
-		}
-		if strings.Contains(fmt.Sprint(failed.Run.Checkpoint), "sensitive-token") || strings.Contains(failed.Run.Error, "sensitive-token") {
-			t.Fatal("failure exposed credentials")
-		}
-		if again, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "action-worker", time.Minute); err != nil || again != nil || dispatches != 1 {
-			t.Fatalf("failed operation retried by itself: %#v %v", again, err)
-		}
-		var seen HostedTurnRequest
-		host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-			seen = request
-			return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model",
-				NextRunStatus: AgentRunStatusCompleted, OutputSummary: "The deploy was rejected by the provider; check its access and ask me again.",
-				RunOutput: map[string]interface{}{"summary": "The deploy was rejected by the provider; check its access and ask me again."}}, nil
-		}}
-		runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "release-agent", DefinitionID: "agent", DefinitionVersion: "1",
-			SystemInstructions: []string{"Speak warmly as Finn."}, Actions: []capability.ModelAction{{Name: "release.deploy"}},
-			EligibleAgents: []HostedAgentTarget{{ID: "other", DisplayName: "Other"}}, RunbookOperations: []HostedRunbookOperation{{Entrypoint: "work", Name: "Work", Description: "Do work", InputSchema: map[string]interface{}{"type": "object"}}},
+		activity := NewRunActivityService(store, store)
+		explaining, _, err := activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, LeaseOwner: run.LeaseOwner,
+			FailureExplanation: beginRunFailureExplanation(run, RunFailureKindExecution, "tool_arguments_invalid", "The model supplied invalid arguments.", cause.Error(), "producer_failed"),
+			EventType:          "run.failure_recorded", Summary: "The attempt stopped; the model will explain it",
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: failed.Run, Turn: &AgentTurn{ID: "correction-turn"}})
-		if err != nil || outcome == nil || host.calls != 1 || !strings.Contains(outcome.OutputSummary, "rejected by the provider") {
-			t.Fatalf("model did not answer the failure: %#v %v hostcalls=%d", outcome, err, host.calls)
+		if !runExplainingFailure(explaining) || explaining.CreditError != nil || explaining.FailureExplanation.StepErrorCode != "producer_failed" {
+			t.Fatalf("Run is not in explain mode: %+v", explaining.FailureExplanation)
 		}
-		last, _ := seen.ContinuationCheckpoint["lastAction"].(map[string]interface{})
-		if len(seen.Actions) != 1 || seen.Workspace != nil || len(seen.WorkspaceOperations) != 0 || len(seen.EligibleAgents) != 0 || len(seen.RunbookOperations) != 0 ||
-			fmt.Sprint(last["status"]) != string(ActionCallStatusFailed) || last["error"] != failed.Call.Error ||
-			!strings.Contains(strings.Join(seen.SystemInstructions, "\n"), "The last tool call did not succeed") {
-			t.Fatalf("failure feedback projection = %#v", seen)
+		note := failureExplanationNote(explaining.SessionID, explaining.ID, "step-2", explaining.FailureExplanation)
+		if err := note.Validate(); err != nil {
+			t.Fatal(err)
 		}
-		// The model's own explanation is the reply; the failed work stays failed.
-		claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: failed.Run.Scope, WorkerID: "agent-worker", Now: now.Add(3 * time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-		if err != nil || claimed == nil || claimed.ID != failed.Run.ID {
-			t.Fatalf("returned failure was not claimable for its model turn: %#v %v", claimed, err)
+		var data map[string]string
+		if note.Type != SessionEntryNote || note.Note.Kind != NoteFailureExplanation || note.SourceKey != FailureNoteSourceKey(explaining.ID, "step-2") ||
+			note.ID != SessionEntryID(explaining.SessionID, note.SourceKey) || json.Unmarshal(note.Note.Data, &data) != nil || data["code"] != "tool_arguments_invalid" {
+			t.Fatalf("note = %+v", note)
 		}
-		result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: claimed.Scope, RunID: claimed.ID, WorkerID: "agent-worker"}, runner)
-		if err != nil || result == nil || result.Run.Status != AgentRunStatusFailed || host.calls != 2 ||
-			result.Run.Output["summary"] != "The deploy was rejected by the provider; check its access and ask me again." {
-			t.Fatalf("model explanation was not delivered: %#v %v calls=%d", result, err, host.calls)
+		for _, want := range []string{"This attempt has stopped: The model supplied invalid arguments. Give one brief", "Do not call tools"} {
+			if !strings.Contains(note.Note.Text, want) {
+				t.Fatalf("note text %q lacks %q", note.Note.Text, want)
+			}
+		}
+		if strings.Contains(note.Note.Text, "continuationCheckpoint") || strings.Contains(note.Note.Text, "runOutput") {
+			t.Fatalf("note text names the old form: %q", note.Note.Text)
+		}
+
+		// The tool-free step posted its reply.
+		failed, _, err := activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+			ExpectedRevision: explaining.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner,
+			Error: explaining.FailureExplanation.Message, FailureExplanation: explainedRunFailure(explaining.FailureExplanation),
+			Output:    map[string]interface{}{"summary": "I couldn't read that file, so I stopped.", "messageId": "m-1"},
+			EventType: "run.failed", Summary: "Run failed",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, err := store.GetAgentRun(ctx, run.Scope, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if runExplainingFailure(stored) || stored.FailureExplanation == nil || !stored.FailureExplanation.Explained || stored.FailureExplanation.Code != "tool_arguments_invalid" || stored.Error != "The model supplied invalid arguments." {
+			t.Fatalf("explained failure not persisted: %+v %q", stored.FailureExplanation, stored.Error)
+		}
+		if reply, ok := externalConversationRunReply(ctx, nil, nil, failed); !ok || reply != "I couldn't read that file, so I stopped." {
+			t.Fatalf("explained reply = %q %v", reply, ok)
+		}
+		if reason, err := NewRunCommandService(store).conversationRetryBlocker(ctx, stored); err != nil || !strings.Contains(reason, "already has a reply") {
+			t.Fatalf("explained attempt was retryable: %q %v", reason, err)
 		}
 	})
 }
 
-func TestFinalFailureExplanationRejectsEffectsAndContinuation(t *testing.T) {
-	for _, test := range []struct {
-		name   string
-		mutate func(*HostedTurnResponse)
-	}{
-		{"action", func(r *HostedTurnResponse) { r.ProposedAction = &TurnAction{Capability: "do"} }},
-		{"workspace", func(r *HostedTurnResponse) {
-			r.ProposedWorkspaceOperation = &HostedWorkspaceOperationForm{Operation: workspace.OperationWriteFile}
-		}},
-		{"fork", func(r *HostedTurnResponse) { r.ProposedFork = &TurnForkProposal{} }},
-		{"delegate", func(r *HostedTurnResponse) { r.ProposedDelegation = &TurnDelegationProposal{} }},
-		{"runbook", func(r *HostedTurnResponse) { r.ProposedRunbook = &TurnRunbookProposal{} }},
-		{"task", func(r *HostedTurnResponse) { r.ProposedTask = &TurnTaskProposal{} }},
-		{"wake", func(r *HostedTurnResponse) { r.WakeCondition = &WakeCondition{Type: "timer"} }},
-		{"continue", func(r *HostedTurnResponse) { r.NextRunStatus = AgentRunStatusRunning }},
-		{"silent", func(r *HostedTurnResponse) { r.RunOutput["silent"] = true }},
-		{"intake", func(r *HostedTurnResponse) {
-			r.RunOutput[AgentRequestDecisionOutputKey] = map[string]interface{}{"decision": "accept"}
-		}},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			request := HostedTurnRequest{ContinuationCheckpoint: checkpointFinalFailureExplanation(nil, "action", "provider rejected the request")}
-			response := &HostedTurnResponse{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "The request failed.", RunOutput: map[string]interface{}{"summary": "The request failed."}}
-			test.mutate(response)
-			if err := ValidateHostedTurnFinalFailureExplanation(request, response); err == nil {
-				t.Fatal("final-only authority boundary was bypassed")
-			}
+func TestNonExplainableFailureFailsWithKernelReply(t *testing.T) {
+	for _, code := range []string{"gateway_credits_exhausted", "provider_unavailable", "budget_exhausted", TurnHostContextExceeded, RunFailureCodeCompactionFailed, "agent_behavior_fixed", "model_image_input_unsupported"} {
+		if turnFailureCanBeExplained(errors.New("failed"), code) {
+			t.Fatalf("%s must not get an explanation step", code)
+		}
+	}
+	for _, err := range []error{ErrTurnHostUnavailable, ErrBudgetExhausted, context.Canceled, ErrLeaseLost} {
+		if turnFailureCanBeExplained(err, "execution_failed") {
+			t.Fatalf("%v must not get an explanation step", err)
+		}
+	}
+	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+		ctx := t.Context()
+		run := claimedFailureRun(t, store, "kernel-reply")
+		failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner, Error: "provider down",
+			FailureExplanation: beginRunFailureExplanation(run, RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "upstream 503 SECRET", "host_unavailable"),
+			Output:             map[string]interface{}{"summary": "stale model text"},
+			EventType:          "run.failed", Summary: "Run failed",
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if failed.FailureExplanation.Explained || runExplainingFailure(failed) {
+			t.Fatalf("unexplained failure marked explained: %+v", failed.FailureExplanation)
+		}
+		sessions, actions := terminalFailureReplyStores(store)
+		reply, ok := externalConversationRunReply(ctx, sessions, actions, failed)
+		if !ok || reply != TerminalFailureReply("provider_unavailable") || strings.Contains(reply, "SECRET") {
+			t.Fatalf("kernel reply = %q %v", reply, ok)
+		}
+		if reason, err := NewRunCommandService(store).conversationRetryBlocker(ctx, failed); err != nil || reason != "" {
+			t.Fatalf("unexplained failure must be retryable: %q %v", reason, err)
+		}
+	})
+}
+
+func TestCreditErrorFromTypedFailure(t *testing.T) {
+	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
+		ctx := t.Context()
+		run := claimedFailureRun(t, store, "credits")
+		failed, _, err := NewRunActivityService(store, store).TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
+			ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: run.LeaseOwner, Error: "no credits",
+			FailureExplanation: beginRunFailureExplanation(run, RunFailureKindCredits, "gateway_credits_exhausted", "This workspace has no model credits available.", "", ""),
+			EventType:          "run.failed", Summary: "Run failed",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, err := store.GetAgentRun(ctx, run.Scope, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.CreditError == nil || stored.CreditError.Code != RunCreditErrorWorkspaceCreditsExhausted || failed.CreditError == nil {
+			t.Fatalf("typed credit stop lost its credit error: %+v %+v", stored.CreditError, stored.FailureExplanation)
+		}
+		if terminalCreditError(AgentRunStatusRunning, stored.FailureExplanation) != nil || terminalCreditError(AgentRunStatusFailed, nil) != nil ||
+			terminalCreditError(AgentRunStatusFailed, &RunFailureExplanation{Code: "provider_unavailable"}) != nil {
+			t.Fatal("credit error from an unrelated failure")
+		}
+	})
+}
+
+func TestFailedRunAppendsRunFailedNoteToSession(t *testing.T) {
+	ctx := t.Context()
+	store := NewMemoryStore()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	scope := Scope{Kind: "tenant", ID: "run-failed-" + uuid.NewString()[:8]}
+	owner := ObjectiveOwner{Type: OwnerTypeAgent, ID: "finn"}
+	service := NewConversationService(store)
+	conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{Scope: scope, Owner: owner, Title: "Finn", IdempotencyKey: uuid.NewString()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
+		Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "kev"}, Intent: MessageIntentQuestion,
+		Content: "Check my email", Audience: ConversationAudience{Kind: ConversationAudienceChannel}, StartThread: true,
+		RequiresResponse: true, IdempotencyKey: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := posted.Message
+	lane := conversationRunLane(conversation.ID, trigger.ID, owner.ID)
+	created, err := NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: owner, AssignedAgentID: owner.ID, Kind: RunKindConversation, Source: RunSourceChat,
+		Goal: "Check my email", ConcurrencyKey: lane, SessionID: ConversationAgentSessionID(scope, lane),
+		Context:        map[string]interface{}{conversationRunContextConversationID: conversation.ID, conversationRunContextTriggerID: trigger.ID, "threadRootMessageId": trigger.ID},
+		IdempotencyKey: uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = time.Now().UTC().Add(time.Second).Truncate(time.Millisecond)
+	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "w", Now: now, LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	if err != nil || run == nil || run.ID != created.Run.ID {
+		t.Fatalf("claim = %+v %v", run, err)
+	}
+	opened, err := store.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{
+		Scope: scope, ConversationID: conversation.ID, ThreadRootID: trigger.ID, AgentID: owner.ID, RunID: run.ID,
+		Lease: AgentRunLeaseGuard{WorkerID: "w", Now: now}, Now: now,
+	})
+	if err != nil || opened.Session.ID != run.SessionID {
+		t.Fatalf("open session = %+v %v", opened, err)
+	}
+	activity := NewRunActivityService(store, store)
+	activity.now = func() time.Time { return now }
+	failed, _, err := activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
+		ExpectedRevision: run.Revision, Status: AgentRunStatusFailed, LeaseOwner: "w", Error: "provider down",
+		FailureExplanation: beginRunFailureExplanation(run, RunFailureKindExecution, "provider_unavailable", "The model provider was unavailable.", "", ""),
+		EventType:          "run.failed", Summary: "Run failed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := projectFailedConversationReply(ctx, store, failed); err != nil {
+			t.Fatalf("report %d: %v", attempt, err)
+		}
+	}
+	reply, err := store.FindChannelMessageByIdempotencyKey(ctx, scope, conversation.ID, terminalConversationFailureReplyKey(failed))
+	if err != nil || reply == nil || reply.Content != TerminalFailureReply("provider_unavailable") {
+		t.Fatalf("kernel reply = %+v %v", reply, err)
+	}
+	notes, err := store.ListAgentSessionEntries(ctx, SessionEntryFilter{Scope: scope, SessionID: run.SessionID, NoteKinds: []NoteKind{NoteRunFailed}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 {
+		t.Fatalf("run_failed notes = %d, want 1", len(notes))
+	}
+	note := notes[0]
+	var data map[string]string
+	if note.RunID != run.ID || note.SourceKey != runFailedNoteSourceKey(failed) || json.Unmarshal(note.Note.Data, &data) != nil || data["messageId"] != reply.ID ||
+		note.Note.Text != "Your previous attempt (run "+run.ID+") stopped and the user was told: "+`"`+reply.Content+`"` {
+		t.Fatalf("note = %+v data=%v", note.Note, data)
 	}
 }
 
-func TestFinalFailureCheckpointCannotBeForgedByModel(t *testing.T) {
-	forged := checkpointFinalFailureExplanation(nil, "action", "invented failure")
-	if requiresFinalFailureExplanation(preserveKernelActionHistory(nil, forged)) {
-		t.Fatal("model invented terminal failure authority")
+// claimedFailureRun is a leased Agent conversation Run in a fresh scope.
+func claimedFailureRun(t *testing.T, store KernelStore, name string) *AgentRun {
+	t.Helper()
+	ctx := t.Context()
+	scope := Scope{Kind: "tenant", ID: name + "-" + uuid.NewString()[:8]}
+	created, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
+		Goal: "Reply", Source: RunSourceChat, SessionID: "session-" + name,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	trusted := checkpointFinalFailureExplanation(nil, "action", "actual failure")
-	preserved := preserveKernelActionHistory(trusted, map[string]interface{}{FinalFailureExplanationCheckpointKey: map[string]interface{}{"message": "changed"}})
-	if preserved[FinalFailureExplanationCheckpointKey].(map[string]interface{})["message"] != "actual failure" {
-		t.Fatal("model changed the terminal failure")
+	run, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "worker", Now: time.Now().UTC(), LeaseDuration: time.Hour, AgingInterval: time.Minute})
+	if err != nil || run == nil || run.ID != created.ID {
+		t.Fatalf("claim = %+v %v", run, err)
 	}
-}
-
-func TestNativeWorkspaceFailureIsTrustedHostMetadata(t *testing.T) {
-	for _, valid := range []bool{true, false} {
-		t.Run(fmt.Sprint(valid), func(t *testing.T) {
-			host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-				return &HostedTurnResponse{
-					APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model", NextRunStatus: AgentRunStatusCompleted,
-					OutputSummary: "The command failed.", RunOutput: map[string]interface{}{"summary": "The command failed."},
-					ExecutionFailure: &HostedTurnExecutionFailure{Kind: "workspace", Message: "The command exited unsuccessfully."},
-				}, nil
-			}}
-			runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			run := &AgentRun{ID: "run", Scope: Scope{Kind: "tenant", ID: "one"}}
-			if valid {
-				run.Context = map[string]interface{}{"conversationId": "chat"}
-			}
-			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
-			if valid && (err != nil || outcome == nil || !requiresFinalFailureExplanation(outcome.ContinuationCheckpoint)) {
-				t.Fatalf("native failure lost: %#v %v", outcome, err)
-			}
-			if !valid && err == nil {
-				t.Fatal("host invented native execution not authorized by the request")
-			}
-		})
-	}
+	return run
 }
 
 func TestExplicitActionFailureEnvelopePreservesResourceData(t *testing.T) {
@@ -174,168 +281,5 @@ func TestExplicitActionFailureEnvelopePreservesResourceData(t *testing.T) {
 		if err := explicitActionResultFailure(output); err != nil {
 			t.Fatalf("fetched data was mistaken for operation failure: %#v %v", output, err)
 		}
-	}
-}
-
-func TestFailedDependencyOnlyStopsAnUnsuccessfulJoin(t *testing.T) {
-	for _, test := range []struct {
-		name        string
-		mode        FanInMode
-		quorum      int
-		existing    RunDependencyState
-		resolution  RunDependencyState
-		wantFailure bool
-	}{
-		{"required_failure", FanInModeAll, 0, RunDependencyStateRunning, RunDependencyStateFailed, true},
-		{"any_success", FanInModeAny, 0, RunDependencyStateFailed, RunDependencyStateSatisfied, false},
-		{"quorum_success", FanInModeQuorum, 1, RunDependencyStateFailed, RunDependencyStateSatisfied, false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			group := dependencyFixture(test.mode, test.quorum, DependencyFailureFailFast, 2)
-			edges := []*RunDependency{dependencyEdge(group, "one", test.existing, true), dependencyEdge(group, "two", RunDependencyStateRunning, true)}
-			source := &AgentRun{ID: group.SourceRunID, Scope: group.Scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Do work",
-				Kind: RunKindAgentWork, Source: RunSourceManual, Status: AgentRunStatusWaitingForDependency, WakeCondition: &WakeCondition{Type: "run_dependencies", Reference: group.ID},
-				Revision: 1, CreatedAt: group.CreatedAt, UpdatedAt: group.CreatedAt, AvailableAt: group.CreatedAt, QueueEnteredAt: group.CreatedAt}
-			result, err := applyRunDependencyResolution(group, edges, source, RunDependencyResolutionRecord{Scope: group.Scope, GroupID: group.ID, DependencyID: "two", ExpectedDependencyRevision: 1,
-				State: test.resolution, Error: func() string {
-					if test.resolution == RunDependencyStateFailed {
-						return "Required work was rejected."
-					}
-					return ""
-				}(), Actor: ActivityActor{Type: "worker", ID: "worker"}, OccurredAt: group.CreatedAt.Add(time.Second)})
-			if err != nil || result == nil {
-				t.Fatalf("dependency resolution: %#v %v", result, err)
-			}
-			if requiresFinalFailureExplanation(result.Source.Checkpoint) != test.wantFailure {
-				t.Fatalf("join failure marker wrong: %#v", result.Source)
-			}
-			if test.wantFailure {
-				feedbackAssertKernelFailureReply(t, result.Source, "dependency_failed")
-			}
-		})
-	}
-}
-
-func TestFailedDelegationStopsFurtherAutomaticWork(t *testing.T) {
-	now := time.Now().UTC()
-	source := &AgentRun{ID: "source", Status: AgentRunStatusWaitingForDependency, WakeCondition: &WakeCondition{Type: "agent_request", Reference: "request"}}
-	request := &AgentRequest{ID: "request", Revision: 2, Status: AgentRequestStatusFailed, ResolutionReason: "The requested operation failed."}
-	result, err := failedCollaborationSourceRun(source, request, now)
-	if err != nil || result == nil || result.Status != AgentRunStatusQueued || !requiresFinalFailureExplanation(result.Checkpoint) {
-		t.Fatalf("delegated failure escaped final-only: %#v %v", result, err)
-	}
-	feedbackAssertKernelFailureReply(t, result, "dependency_failed")
-	request.Status = AgentRequestStatusCanceled
-	result, err = failedCollaborationSourceRun(source, request, now)
-	if err != nil || requiresFinalFailureExplanation(result.Checkpoint) {
-		t.Fatalf("cancellation was treated as operational failure: %#v %v", result, err)
-	}
-}
-
-func TestLegacyFailureReplyDoesNotDependOnModelAvailability(t *testing.T) {
-	store := NewMemoryStore()
-	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: Scope{Kind: "tenant", ID: "one"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
-		AssignedAgentID: "agent", Goal: "Do work", Checkpoint: checkpointFinalFailureExplanation(nil, "action", "Service rejected the action.")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	host := &failureExplanationTestHost{respond: func(HostedTurnRequest) (*HostedTurnResponse, error) {
-		return nil, NewTurnHostFailure("provider_unavailable", "The model service is unavailable.", true)
-	}}
-	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker"}, runner)
-	// The model is asked first; while it is unavailable the kernel's reply
-	// still closes the attempt at once.
-	if err != nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.WakeCondition != nil || host.calls != 1 || result.Run.Error != "Service rejected the action." ||
-		result.Run.Output["summary"] != TerminalFailureReply("action_failed") || result.Turn.Usage.InputTokens != 0 || result.Turn.Usage.OutputTokens != 0 || result.Turn.Usage.Cost != 0 {
-		t.Fatalf("legacy failure reply spent a model request: %#v calls=%d err=%v", result, host.calls, err)
-	}
-	claimed, err := NewAgentRunScheduler(store).ClaimNext(t.Context(), AgentRunClaimRequest{Scope: run.Scope, WorkerID: "again"})
-	if err != nil || claimed != nil {
-		t.Fatalf("failed explanation was rescheduled: %#v %v", claimed, err)
-	}
-}
-
-func TestReplayedApprovalChangeRequestKeepsHumanRevisionAuthority(t *testing.T) {
-	for _, decision := range []ApprovalDecision{ApprovalDecisionRequestChanges, ApprovalDecisionReject} {
-		t.Run(string(decision), func(t *testing.T) {
-			store := NewMemoryStore()
-			now := time.Now().UTC()
-			proposal := createApprovalForStore(t, store, now)
-			coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-			coordinator.now = func() time.Time { return now.Add(time.Second) }
-			resolved, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{Scope: proposal.Approval.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
-				DecisionID: "review", Decision: decision, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}, Reason: "Use the staging target."})
-			if err != nil {
-				t.Fatal(err)
-			}
-			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: resolved.Run.Scope, WorkerID: "worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-			if err != nil || claimed == nil {
-				t.Fatalf("claim: %#v %v", claimed, err)
-			}
-			pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) { return nil, nil }), nil, AgentRunWorkerConfig{Scope: claimed.Scope})
-			if err != nil {
-				t.Fatal(err)
-			}
-			replayed, err := pool.resumeReplayedTurnAction(t.Context(), "worker", claimed, &AgentTurn{ID: "replay", RunID: claimed.ID}, resolved.Call)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if requiresFinalFailureExplanation(replayed.Checkpoint) != (decision == ApprovalDecisionReject) {
-				t.Fatalf("review disposition changed during replay: %#v", replayed.Checkpoint)
-			}
-			if decision == ApprovalDecisionRequestChanges && replayed.Checkpoint["lastAction"].(map[string]interface{})["reviewerGuidance"] != "Use the staging target." {
-				t.Fatal("replay lost human guidance")
-			}
-		})
-	}
-}
-
-func TestExplicitSoftActionErrorsAreFailures(t *testing.T) {
-	for _, output := range []map[string]interface{}{{"error": "Service rejected sensitive-token"}, {"success": false, "statusCode": 401}} {
-		store := NewMemoryStore()
-		now := time.Now().UTC()
-		catalog, proposal := createRunnableAction(t, store, now)
-		worker := NewActionWorker(store, catalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
-			return map[string]string{"token": "sensitive-token"}, nil
-		}),
-			ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) { return output, nil }))
-		worker.now = func() time.Time { return now.Add(2 * time.Second) }
-		result, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "worker", time.Minute)
-		if _, returned := ReadToolFeedbackCorrection(result.Run.Checkpoint); err != nil || result == nil || result.Call.Status != ActionCallStatusFailed || !returned || strings.Contains(result.Call.Error, "sensitive-token") {
-			t.Fatalf("soft error accepted as success: %#v %v", result, err)
-		}
-	}
-}
-
-func TestNativeFailureFinalTextPersistsAsFailedRunWithAcceptedProof(t *testing.T) {
-	store := NewMemoryStore()
-	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: Scope{Kind: "tenant", ID: "native"}, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Run the command.", Context: map[string]interface{}{"conversationId": "chat"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-		return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model", NextRunStatus: AgentRunStatusCompleted,
-			OutputSummary: "The command failed.", RunOutput: map[string]interface{}{"summary": "The command failed."}, ExecutionFailure: &HostedTurnExecutionFailure{Kind: "workspace", Message: "The command was rejected."}}, nil
-	}}
-	runner, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent", DefinitionID: "agent", DefinitionVersion: "1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker"}, runner)
-	if err != nil || result == nil || result.Run.Status != AgentRunStatusFailed || result.Run.Output["summary"] != "The command failed." || result.Run.Error != "The command was rejected." || host.calls != 1 {
-		t.Fatalf("native failure incorrectly succeeded: %#v %v", result, err)
-	}
-	failure := result.Run.Checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
-	if failure["explained"] != true {
-		t.Fatal("accepted native explanation has no trusted proof")
-	}
-	feedbackAssertNotClaimable(t, store, run.Scope, time.Now())
-	if _, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: run.Scope, RunID: run.ID, WorkerID: "unexpected-explanation"}, runner); err == nil || host.calls != 1 {
-		t.Fatalf("native failure requested an additional model call: %v calls=%d", err, host.calls)
 	}
 }

@@ -1,7 +1,8 @@
 package runtime
 
 import (
-	"fmt"
+	"context"
+	"maps"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -115,84 +116,59 @@ func terminalFailureCode(code string) string {
 	}
 }
 
-func terminalFailureCodeFromCheckpoint(checkpoint map[string]interface{}) string {
-	// Atlas writes this bounded marker only after the one allowed completion
-	// repair fails. Its protected review checkpoint is never model-authored.
-	// Prefer that terminal cause over earlier, contributory action failures.
-	if review, ok := checkpoint["_atlasTaskCompletionReview"].(map[string]interface{}); ok &&
-		review["phase"] == "review" && review["failureCode"] == "task_completion_rejected" &&
-		terminalFailureCounterIsOne(review["version"]) && terminalFailureCounterIsOne(review["repairs"]) {
-		return "task_completion_rejected"
+// terminalFailureCodeOf is the public reply class of a recorded failure.
+func terminalFailureCodeOf(f *RunFailureExplanation) string {
+	if f == nil {
+		return "execution_failed"
 	}
-	if failure, ok := checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{}); ok {
-		if code, ok := failure["code"].(string); ok && code != "" {
-			classified := terminalFailureCode(code)
-			if classified == "task_completion_rejected" {
-				return "execution_failed" // This cause requires the protected review marker above.
-			}
-			return classified
-		}
-		switch failure["kind"] {
-		case "workspace":
-			return "workspace_operation_failed"
-		case "proposal":
-			return "action_admission_failed"
-		case "action":
-			return "action_failed"
-		case "dependency", "delegation":
-			return "dependency_failed"
-		}
+	if strings.TrimSpace(f.Code) != "" {
+		return terminalFailureCode(f.Code)
 	}
-	if _, active := ReadToolFeedbackCorrection(checkpoint); active {
+	switch f.Kind {
+	case RunFailureKindWorkspace:
+		return "workspace_operation_failed"
+	case "proposal":
+		return "action_admission_failed"
+	case "action":
 		return "action_failed"
+	case "dependency", "delegation":
+		return "dependency_failed"
 	}
 	return "execution_failed"
 }
 
-func terminalFailureReplyFromCheckpoint(checkpoint map[string]interface{}) string {
-	code := terminalFailureCodeFromCheckpoint(checkpoint)
+// terminalFailureReplyOf is the kernel's reply for a recorded failure.
+// latestFailedCall is the Run's newest failed governed call, or nil.
+func terminalFailureReplyOf(f *RunFailureExplanation, latestFailedCall *ActionCall) string {
+	code := terminalFailureCodeOf(f)
 	reply := TerminalFailureReply(code)
-	if code == "action_failed" {
-		if cause := failedActionCause(checkpoint); cause != "" {
+	switch code {
+	case "action_failed":
+		if cause := failedActionCause(latestFailedCall); cause != "" {
 			return "I couldn't finish this request because " + cause + ". I stopped this attempt. Ask me to try again when you're ready."
 		}
-	}
-	if code != "task_completion_rejected" {
-		return reply
-	}
-	// Action history is kernel-owned execution evidence. Report a bounded
-	// contributing cause without presenting it as the completion review's
-	// terminal verdict, or copying arbitrary tool output into a public reply.
-	for _, entry := range actionHistoryEntries(checkpoint) {
-		failed := entry["status"] == ActionCallStatusFailed || entry["status"] == string(ActionCallStatusFailed)
-		errorCode, _ := entry["errorCode"].(string)
-		raw, _ := entry["errorDetails"].(map[string]interface{})
-		if !failed || errorCode == "" || entry["failureKind"] != errorCode || raw["failureKind"] != errorCode || raw["retryable"] != "false" {
-			continue
-		}
-		details := map[string]string{}
-		for key, value := range raw {
-			if text, ok := value.(string); ok {
-				details[key] = text
-			}
-		}
-		if failure := skillerror.NewActionError(errorCode, "", details); failure != nil && failure.HasRateLimitedSource() {
+	case "task_completion_rejected":
+		// Report a bounded contributing cause without presenting it as the
+		// completion review's verdict or copying tool output into the reply.
+		if failure := typedActionFailure(latestFailedCall); failure != nil && failure.HasRateLimitedSource() {
 			return reply + " Some sources rate-limited requests (HTTP 429). Try those sources again later."
 		}
 	}
 	return reply
 }
 
-func terminalRunFailureReply(run *AgentRun) string {
+// terminalRunFailureReply is the kernel's reply for a failed Run. The newest
+// failed governed call of the Run (its newest error tool entry with an
+// action call) gives the typed rate-limit, browser and file-size replies. A
+// store that cannot be read only loses that detail, never the reply.
+func terminalRunFailureReply(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) string {
 	if run == nil {
 		return TerminalFailureReply("execution_failed")
 	}
-	code := terminalFailureCodeFromCheckpoint(run.Checkpoint)
+	call := latestFailedRunActionCall(ctx, sessions, actions, run)
+	code := terminalFailureCodeOf(run.FailureExplanation)
 	if run.Status == AgentRunStatusFailed && (code == "action_failed" || code == "execution_failed") {
-		// A prior failure is not necessarily why the Run stopped. Attribute a
-		// direct cause only when the current canonical failed receipt and exact
-		// terminal Run error agree; never infer one from raw error text.
-		if failure := latestCanonicalActionFailure(run.Checkpoint); failure != nil && run.Error == failure.Error() {
+		if failure := typedActionFailure(call); failure != nil {
 			if failure.HasRateLimitedSource() {
 				return "I couldn't finish this request because one or more sources rate-limited requests (HTTP 429). I stopped this attempt. Try again later."
 			}
@@ -206,22 +182,65 @@ func terminalRunFailureReply(run *AgentRun) string {
 			}
 		}
 	}
-	return terminalFailureReplyFromCheckpoint(run.Checkpoint)
+	return terminalFailureReplyOf(run.FailureExplanation, call)
 }
 
-// Accept the in-memory and persisted JSON number forms without coercing
-// strings, booleans, fractional values or arbitrary host-supplied objects.
-func terminalFailureCounterIsOne(value interface{}) bool {
-	switch value := value.(type) {
-	case int:
-		return value == 1
-	case int64:
-		return value == 1
-	case float64:
-		return value == 1
-	default:
-		return false
+// terminalFailureReplyStores narrows a reporting store to the session log and
+// action stores the failure reply reads. A store without a session log has
+// no tool entries to read, so the reply carries no call detail.
+func terminalFailureReplyStores(store interface{}) (loopSessionEntryLister, actionCallReader) {
+	sessions, _ := store.(AgentSessionStore)
+	actions, _ := store.(actionCallReader)
+	if sessions == nil {
+		return nil, actions
 	}
+	return sessions, actions
+}
+
+type actionCallReader interface {
+	GetActionCall(ctx context.Context, scope Scope, id string) (*ActionCall, error)
+}
+
+const latestFailedCallScanLimit = 50
+
+func latestFailedRunActionCall(ctx context.Context, sessions loopSessionEntryLister, actions actionCallReader, run *AgentRun) *ActionCall {
+	if sessions == nil || actions == nil || run.ID == "" {
+		return nil
+	}
+	entries, err := sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
+		Scope: run.Scope, RunID: run.ID, Types: []SessionEntryType{SessionEntryTool},
+		States: []ToolEntryState{ToolEntryError}, Descending: true, Limit: latestFailedCallScanLimit,
+	})
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if entry == nil || entry.RunID != run.ID || entry.ActionCallID == "" {
+			continue
+		}
+		call, err := actions.GetActionCall(ctx, run.Scope, entry.ActionCallID)
+		if err != nil || call == nil || call.Scope != run.Scope || call.RunID != run.ID {
+			return nil
+		}
+		if call.Status != ActionCallStatusFailed {
+			return nil
+		}
+		return call
+	}
+	return nil
+}
+
+// typedActionFailure is the call's typed failure when its stored error is
+// exactly the sanitized text of that type; model or tool text never is.
+func typedActionFailure(call *ActionCall) *skillerror.ActionError {
+	if call == nil || call.Status != ActionCallStatusFailed || call.ErrorCode == "" {
+		return nil
+	}
+	failure := skillerror.NewActionError(call.ErrorCode, "", call.ErrorDetails)
+	if failure == nil || failure.Code() != call.ErrorCode || call.Error != failure.Error() || !maps.Equal(failure.Details(), call.ErrorDetails) {
+		return nil
+	}
+	return failure
 }
 
 // fileTooLargeReply says how large the file was and how large a file an
@@ -236,27 +255,20 @@ func fileTooLargeReply(details map[string]string) string {
 
 const maximumFailedActionCauseBytes = 300
 
-// failedActionCause names the tool whose action failed last and what it
-// answered, for the kernel's fallback reply when no model could explain the
-// failure. Transport wrappers around the answer are dropped; credentials were
-// already removed at the ActionWorker boundary.
-func failedActionCause(checkpoint map[string]interface{}) string {
-	last, _ := checkpoint["lastAction"].(map[string]interface{})
-	if last == nil || fmt.Sprint(last["status"]) != string(ActionCallStatusFailed) || last["errorCode"] != nil {
+// failedActionCause names the tool whose action failed and what it answered,
+// for the kernel's reply when no model explained the failure. Transport
+// wrappers around the answer are dropped; credentials were already removed at
+// the ActionWorker boundary.
+func failedActionCause(call *ActionCall) string {
+	if call == nil || call.Status != ActionCallStatusFailed || call.ErrorCode != "" {
 		// A typed failure has its own exact wording.
 		return ""
 	}
-	message, _ := last["error"].(string)
-	// Only the failure that stopped this attempt is its cause, never an
-	// earlier one the model already handled.
-	if recorded := recordedToolFailure(checkpoint); recorded == "" || recorded != toolFeedbackMessage(message) {
-		return ""
-	}
-	message = failedActionAnswer(message)
+	message := failedActionAnswer(call.Error)
 	if message == "" {
 		return ""
 	}
-	label := failedActionToolLabel(fmt.Sprint(last["skillId"]))
+	label := failedActionToolLabel(call.SkillID)
 	if label == "" {
 		return "a tool reported: " + message
 	}
