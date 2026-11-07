@@ -72,6 +72,9 @@ type PostChannelMessageRequest struct {
 	// SelectedOptionIDs are the options a reply picked from the question it
 	// resolves (or replies to).
 	SelectedOptionIDs []string
+	// BuilderParameters are the form fields of a person's message in an agent
+	// builder conversation (D7). Content may then be empty.
+	BuilderParameters *AgentBuilderParameters
 	// RoutingReason is set by a routed Team member's answer.
 	RoutingReason  string
 	IdempotencyKey string
@@ -429,6 +432,9 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 	if err := s.validateSelectedOptions(ctx, req); err != nil {
 		return nil, err
 	}
+	if req.BuilderParameters != nil && (conversation.Origin == nil || conversation.Origin.Kind != ConversationReferenceAgentBuilder) {
+		return nil, fmt.Errorf("%w: builder parameters belong to an agent builder conversation", ErrInvalidConversation)
+	}
 	now := s.now().UTC()
 	id := strings.TrimSpace(req.ID)
 	if id == "" {
@@ -442,8 +448,9 @@ func (s *ConversationService) PostChannelMessage(ctx context.Context, req PostCh
 		Intent:         req.Intent, Content: strings.TrimSpace(req.Content), Audience: req.Audience,
 		StartsThread: req.StartThread, ThreadRootID: threadRootID, ReplyToMessageID: strings.TrimSpace(req.ReplyToMessageID), Quote: quote, BroadcastToChannel: req.BroadcastToChannel,
 		Question: cloneChannelQuestion(req.Question), SelectedOptionIDs: selectedOptionIDs(req.SelectedOptionIDs),
-		Mentions:   cloneParticipants(req.Mentions),
-		References: cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
+		BuilderParameters: normalizeAgentBuilderParameters(req.BuilderParameters),
+		Mentions:          cloneParticipants(req.Mentions),
+		References:        cloneConversationReferences(req.References), RequiresResponse: req.RequiresResponse, ResponseMode: req.ResponseMode,
 		ResolvesMessageID: strings.TrimSpace(req.ResolvesMessageID), SupersedesMessageID: strings.TrimSpace(req.SupersedesMessageID),
 		RoutingReason: strings.TrimSpace(req.RoutingReason), IdempotencyKey: key, CreatedAt: now,
 	}
@@ -1021,6 +1028,7 @@ func sameChannelMessageRequest(existing *ChannelMessage, req PostChannelMessageR
 		reflect.DeepEqual(existing.Mentions, req.Mentions) && reflect.DeepEqual(existing.References, req.References) &&
 		existing.RoutingReason == strings.TrimSpace(req.RoutingReason) &&
 		reflect.DeepEqual(existing.Question, req.Question) && slices.Equal(existing.SelectedOptionIDs, selectedOptionIDs(req.SelectedOptionIDs)) &&
+		reflect.DeepEqual(existing.BuilderParameters, normalizeAgentBuilderParameters(req.BuilderParameters)) &&
 		existing.RequiresResponse == req.RequiresResponse && existing.ResolvesMessageID == strings.TrimSpace(req.ResolvesMessageID) &&
 		existing.SupersedesMessageID == strings.TrimSpace(req.SupersedesMessageID)
 }
@@ -1074,6 +1082,7 @@ func cloneChannelMessage(in *ChannelMessage) *ChannelMessage {
 	if len(out.SelectedOptionIDs) == 0 {
 		out.SelectedOptionIDs = nil
 	}
+	out.BuilderParameters = cloneAgentBuilderParameters(in.BuilderParameters)
 	out.Reactions = cloneMessageReactions(in.Reactions)
 	return &out
 }
