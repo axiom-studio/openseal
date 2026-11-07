@@ -22,10 +22,6 @@ type WorkSignal = runtime.WorkSignal
 // WorkFamily names the worker loops a WorkItem wakes.
 type WorkFamily = runtime.WorkFamily
 
-// WorkFamilyAuthoring is delivered for workforce change sets and authoring
-// Runs. Hosts that run authoring workers subscribe with HandleWork.
-const WorkFamilyAuthoring = runtime.WorkFamilyAuthoring
-
 const (
 	WorkSignalChanged      = runtime.WorkSignalChanged
 	WorkSignalConnected    = runtime.WorkSignalConnected
@@ -61,7 +57,7 @@ func WithWorkQueue(queue runtime.WorkQueue) Option {
 }
 
 // HandleWork calls handle with the scope of every delivered item of family,
-// for workers the host owns, such as workforce authoring. Handlers must not
+// for workers the host owns. Handlers must not
 // block; a delivery is a hint to look at durable state in that scope.
 func (e *Engine) HandleWork(family runtime.WorkFamily, handle func(runtime.Scope)) {
 	if e == nil || handle == nil {

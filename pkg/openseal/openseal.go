@@ -11,13 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/chatfs"
@@ -88,263 +86,191 @@ type (
 )
 
 type (
-	AgentDefinition                           = kernelagent.AgentDefinition
-	AgentStandingActionGrant                  = kernelagent.StandingActionGrant
-	AgentApprovalDestination                  = kernelagent.ApprovalDestination
-	AgentChannelRoute                         = kernelagent.ChannelRoute
-	AgentManifest                             = kernelagent.Manifest
-	AgentManifestMetadata                     = kernelagent.ManifestMetadata
-	AgentManifestSpec                         = kernelagent.ManifestSpec
-	AgentManifestInstallationRequest          = kernelagent.ManifestInstallationRequest
-	AgentManifestInstallationResult           = kernelagent.ManifestInstallationResult
-	AgentManifestInstallationRegistry         = kernelagent.ManifestInstallationRegistry
-	AgentManifestExportRequest                = kernelagent.ManifestExportRequest
-	AgentBundle                               = kernelagent.Bundle
-	AgentBundleMetadata                       = kernelagent.BundleMetadata
-	AgentBundleDeploymentPolicy               = kernelagent.BundleDeploymentPolicy
-	AgentBundleRuntimeRequirement             = kernelagent.BundleRuntimeRequirement
-	AgentBundleSkillRequirement               = kernelagent.BundleSkillRequirement
-	AgentBundleSkillPolicy                    = kernelagent.BundleSkillPolicy
-	AgentBundleCredentialNeed                 = kernelagent.BundleCredentialNeed
-	AgentBundleEndpointNeed                   = kernelagent.BundleEndpointNeed
-	AgentBundleCallbackSubscription           = kernelagent.BundleCallbackSubscription
-	AgentBundleCallbackNeed                   = kernelagent.BundleCallbackNeed
-	AgentBundleExportRequest                  = kernelagent.BundleExportRequest
-	AgentBundlePlacement                      = kernelagent.BundlePlacement
-	AgentBundleSkillPlacement                 = kernelagent.BundleSkillPlacement
-	AgentBundleEndpointPlacement              = kernelagent.BundleEndpointPlacement
-	AgentBundleCallbackPlacement              = kernelagent.BundleCallbackPlacement
-	AgentBundleRequirementKind                = kernelagent.BundleRequirementKind
-	AgentBundleRequirementResolution          = kernelagent.BundleRequirementResolution
-	AgentBundleInstallationPreview            = kernelagent.BundleInstallationPreview
-	AgentBundleInstallationRequest            = kernelagent.BundleInstallationRequest
-	AgentBundleEndpointInstallation           = kernelagent.BundleEndpointInstallation
-	AgentBundleCallbackInstallation           = kernelagent.BundleCallbackInstallation
-	AgentBundleInstallationPlan               = kernelagent.BundleInstallationPlan
-	AgentDefinitionCompilation                = kernelagent.DefinitionCompilation
-	AgentCompilationSource                    = kernelagent.CompilationSource
-	AgentCompilationDiagnostic                = kernelagent.CompilationDiagnostic
-	AgentCompilationStatus                    = kernelagent.CompilationStatus
-	AgentSkillRequirement                     = kernelagent.SkillRequirement
-	AgentAuthorityPolicy                      = kernelagent.AuthorityPolicy
-	AgentApprovalTimeoutPolicy                = kernelagent.ApprovalTimeoutPolicy
-	AgentMemoryPolicy                         = kernelagent.MemoryPolicy
-	AgentEscalationPolicy                     = kernelagent.EscalationPolicy
-	AgentObjectiveTemplate                    = kernelagent.ObjectiveTemplate
-	AgentEvaluationCriterion                  = kernelagent.EvaluationCriterion
-	AgentAmendmentPolicy                      = kernelagent.AmendmentPolicy
-	AgentDefinitionProvenance                 = kernelagent.DefinitionProvenance
-	AgentDeployment                           = kernelagent.AgentDeployment
-	AgentDeploymentFilter                     = kernelagent.AgentDeploymentFilter
-	AgentDeploymentRestrictions               = kernelagent.DeploymentRestrictions
-	AgentDeploymentCapacity                   = kernelagent.DeploymentCapacity
-	AgentDeploymentHealth                     = kernelagent.DeploymentHealth
-	WorkspaceAuthority                        = workspace.Authority
-	WorkspaceOperation                        = workspace.Operation
-	AgentDefinitionActivation                 = kernelagent.DefinitionActivation
-	AgentRolloutStatus                        = kernelagent.RolloutStatus
-	AgentDefinitionAmendment                  = kernelagent.DefinitionAmendment
-	AgentAmendmentStatus                      = kernelagent.AmendmentStatus
-	AgentDefinitionFieldChange                = kernelagent.DefinitionFieldChange
-	AgentAmendmentEvaluation                  = kernelagent.AmendmentEvaluation
-	AgentAmendmentDecision                    = kernelagent.AmendmentDecision
-	ProposeAgentAmendmentRequest              = kernelagent.ProposeAmendmentRequest
-	SubmitAgentAmendmentEvaluationRequest     = kernelagent.SubmitAmendmentEvaluationRequest
-	ResolveAgentAmendmentRequest              = kernelagent.ResolveAmendmentRequest
-	AgentRegistryStore                        = kernelagent.Store
-	WorkforceBundle                           = kernelbundle.Bundle
-	WorkforceBundleMetadata                   = kernelbundle.Metadata
-	WorkforceBundleCompatibility              = kernelbundle.Compatibility
-	WorkforceBundleCapabilityRequirement      = kernelbundle.CapabilityRequirement
-	WorkforceBundleProvenance                 = kernelbundle.Provenance
-	WorkforceBundleOwnerKind                  = kernelbundle.OwnerKind
-	WorkforceBundleOwnerReference             = kernelbundle.OwnerReference
-	WorkforceBundleAgent                      = kernelbundle.Agent
-	WorkforceBundleRosterAssignment           = kernelbundle.RosterAssignment
-	WorkforceBundleTeamDeployment             = kernelbundle.TeamDeployment
-	WorkforceBundleTeam                       = kernelbundle.Team
-	WorkforceBundleObjective                  = kernelbundle.Objective
-	WorkforceBundleRunbookActivation          = kernelbundle.RunbookActivation
-	WorkforceBundleSignature                  = kernelbundle.Signature
-	WorkforceBundleTrustPolicy                = kernelbundle.TrustPolicy
-	WorkforceBundleVerification               = kernelbundle.Verification
-	WorkforceBundleChangeType                 = kernelbundle.ChangeType
-	WorkforceBundleChange                     = kernelbundle.Change
-	WorkforceBundleDiff                       = kernelbundle.Diff
-	WorkforceBundleUpgradePlan                = kernelbundle.UpgradePlan
-	WorkforceBundleInspection                 = kernelbundle.Inspection
-	WorkforceBundlePlacement                  = kernelbundle.Placement
-	WorkforceBundleTeamPlacement              = kernelbundle.TeamPlacement
-	WorkforceBundleRequirement                = kernelbundle.Requirement
-	WorkforceBundleInstallationPreview        = kernelbundle.InstallationPreview
-	WorkforceBundleInstallationRequest        = kernelbundle.InstallationRequest
-	WorkforceBundleInstallationPlan           = kernelbundle.InstallationPlan
-	WorkforceBundleAgentInstallation          = kernelbundle.AgentInstallation
-	WorkforceBundleTeamInstallation           = kernelbundle.TeamInstallation
-	WorkforceBundleInstallationReceipt        = kernelbundle.InstallationReceipt
-	WorkforceBundleInstallationStore          = kernelbundle.InstallationStore
-	WorkforceBundleExportRequest              = kernelbundle.ExportRequest
-	WorkforceBundleAgentExport                = kernelbundle.AgentExport
-	WorkforceBundleTeamExport                 = kernelbundle.TeamExport
-	WorkforceBundleObjectiveExport            = kernelbundle.ObjectiveExport
-	WorkforceBundleRunbookExport              = kernelbundle.RunbookExport
-	KernelAgentDeploymentList                 = kernelapi.AgentDeploymentList
-	KernelAgentDeploymentCatalogEntry         = kernelapi.AgentDeploymentCatalogEntry
-	KernelUpdateAgentDeploymentRequest        = kernelapi.UpdateAgentDeploymentRequest
-	KernelAgentDeploymentUpdateResult         = kernelapi.AgentDeploymentUpdateResult
-	KernelActivateAgentDefinitionRequest      = kernelapi.ActivateAgentDefinitionRequest
-	KernelRollbackAgentDefinitionRequest      = kernelapi.RollbackAgentDefinitionRequest
-	KernelAgentDefinitionActivationResult     = kernelapi.AgentDefinitionActivationResult
-	KernelAgentDefinitionAmendmentList        = kernelapi.AgentDefinitionAmendmentList
-	KernelActivateAgentAmendmentRequest       = kernelapi.ActivateAgentDefinitionAmendmentRequest
-	KernelAgentAmendmentActivationResult      = kernelapi.AgentDefinitionAmendmentActivationResult
-	KernelAgentDefinitionCompilationHistory   = kernelapi.AgentDefinitionCompilationHistory
-	TeamDefinition                            = kernelteam.Definition
-	TeamManifest                              = kernelteam.Manifest
-	TeamManifestMetadata                      = kernelteam.ManifestMetadata
-	TeamManifestSpec                          = kernelteam.ManifestSpec
-	TeamManifestRoleSlot                      = kernelteam.ManifestRoleSlot
-	TeamManifestDelegationPolicy              = kernelteam.ManifestDelegationPolicy
-	TeamManifestSharedContextPolicy           = kernelteam.ManifestSharedContextPolicy
-	TeamRoleSlot                              = kernelteam.RoleSlot
-	TeamRoleChannelParticipation              = kernelteam.RoleChannelParticipation
-	TeamRoutingPolicy                         = kernelteam.RoutingPolicy
-	TeamDelegationPolicy                      = kernelteam.DelegationPolicy
-	TeamApprovalPolicy                        = kernelteam.ApprovalPolicy
-	TeamDeployment                            = kernelteam.Deployment
-	TeamDeploymentStatus                      = kernelteam.DeploymentStatus
-	TeamRosterAssignment                      = kernelteam.RosterAssignment
-	TeamDeploymentRestrictions                = kernelteam.DeploymentRestrictions
-	TeamDefinitionAmendment                   = kernelteam.DefinitionAmendment
-	TeamAmendmentStatus                       = kernelteam.AmendmentStatus
-	TeamAmendmentEvaluation                   = kernelteam.AmendmentEvaluation
-	TeamAmendmentDecision                     = kernelteam.AmendmentDecision
-	ProposeTeamAmendmentRequest               = kernelteam.ProposeAmendmentRequest
-	SubmitTeamAmendmentEvaluationRequest      = kernelteam.SubmitAmendmentEvaluationRequest
-	ResolveTeamAmendmentRequest               = kernelteam.ResolveAmendmentRequest
-	RecoverTeamParticipationRequest           = kernelteam.RecoverParticipationRequest
-	TeamParticipationRecoveryResult           = kernelteam.ParticipationRecoveryResult
-	TeamRegistryStore                         = kernelteam.Store
-	AuthorityProgressionOwnerKind             = progression.OwnerKind
-	AuthorityProgressionDirection             = progression.Direction
-	AuthorityProgressionCriterionOutcome      = progression.CriterionOutcome
-	AuthorityProgressionEvaluationPolicy      = progression.EvaluationPolicy
-	AuthorityProgressionEvaluationRequest     = progression.EvaluationRequest
-	AuthorityProgressionRecommendation        = progression.Recommendation
-	AgentAuthorityProgressionCeiling          = progression.AgentPolicyCeiling
-	TeamAuthorityProgressionCeiling           = progression.TeamPolicyCeiling
-	ProposeAgentAuthorityProgressionRequest   = progression.ProposeAgentRequest
-	ProposeTeamAuthorityProgressionRequest    = progression.ProposeTeamRequest
-	WorkforceSharedContextPolicy              = workforce.SharedContextPolicy
-	WorkforceObjectiveTemplate                = workforce.ObjectiveTemplate
-	WorkforceEvaluationCriterion              = workforce.EvaluationCriterion
-	WorkforceAmendmentPolicy                  = workforce.AmendmentPolicy
-	WorkforceDefinitionProvenance             = workforce.DefinitionProvenance
-	WorkforceDefinitionActivation             = workforce.DefinitionActivation
-	DeploymentChangeKind                      = workforce.DeploymentChangeKind
-	WorkforceAuthoringMode                    = authoring.Mode
-	WorkforceSkillCapability                  = skillcatalog.SkillCapability
-	WorkforceSkillActionContract              = skillcatalog.SkillActionContract
-	WorkforceSkillCredential                  = skillcatalog.SkillCredential
-	WorkforceConversationAdapterCapability    = skillcatalog.ConversationAdapterCapability
-	WorkforceCallbackAdapterCapability        = skillcatalog.CallbackAdapterCapability
-	WorkforceRuntimeCompositionCapability     = authoring.RuntimeCompositionCapability
-	WorkforceHostedExecutionCapability        = authoring.HostedExecutionCapability
-	WorkforceConversationRuntimeCapability    = authoring.ConversationRuntimeCapability
-	WorkforceRunbookRuntimeCapability         = authoring.RunbookRuntimeCapability
-	WorkforceConversationEndpointBlueprint    = authoring.ConversationEndpointBlueprint
-	WorkforceConversationEndpointOwner        = authoring.ConversationEndpointOwner
-	WorkforceConversationEndpointOwnerType    = authoring.ConversationEndpointOwnerType
-	WorkforceConversationHandlerBlueprint     = authoring.ConversationHandlerBlueprint
-	WorkforceConversationHandlerKind          = authoring.ConversationHandlerKind
-	WorkforceConversationEndpointPolicy       = authoring.ConversationEndpointPolicyBlueprint
-	WorkforceConversationMessageSelection     = authoring.ConversationMessageSelection
-	WorkforceConversationReplyMode            = authoring.ConversationReplyMode
-	WorkforceCredentialBindingRequirement     = authoring.CredentialBindingRequirement
-	WorkforceSourcePolicyCapability           = skillcatalog.SourcePolicyCapability
-	WorkforceSourcePolicySourceCapability     = skillcatalog.SourcePolicySourceCapability
-	WorkforceCapabilityNeed                   = authoring.CapabilityNeed
-	WorkforceAgentCredentialRequirement       = authoring.AgentCredentialRequirement
-	WorkforceCapabilitySourceScopeRequirement = authoring.CapabilitySourceScopeRequirement
-	WorkforceCapabilitySourcePolicyProposal   = authoring.CapabilitySourcePolicyProposal
-	WorkforceAuthorityConstraint              = skillcatalog.AuthorityConstraint
-	WorkforceCatalogDiagnostic                = skillcatalog.CatalogDiagnostic
-	WorkforceSkillReadiness                   = skillcatalog.SkillReadiness
-	WorkforceSkillCompatibility               = skillcatalog.SkillCompatibility
-	WorkforceCapabilityCatalog                = skillcatalog.CapabilityCatalog
-	WorkforceAssignment                       = authoring.Assignment
-	WorkforceCandidate                        = authoring.WorkforceCandidate
-	WorkforceProjectBlueprint                 = authoring.ProjectBlueprint
-	WorkforceProjectOwnerReference            = authoring.ProjectOwnerReference
-	WorkforceProjectMilestoneBlueprint        = authoring.ProjectMilestoneBlueprint
-	WorkforceProjectHypothesisBlueprint       = authoring.ProjectHypothesisBlueprint
-	WorkforceProjectSourceMonitorBlueprint    = authoring.ProjectSourceMonitorBlueprint
-	WorkforceProjectDeliverableBlueprint      = authoring.ProjectDeliverableBlueprint
-	WorkforceAuthoringRequest                 = authoring.GenerateRequest
-	WorkforceAuthoringGenerator               = authoring.Generator
-	WorkforceAuthoringIntent                  = authoring.AuthoringIntent
-	WorkforceAuthoringIntentGenerator         = authoring.IntentGenerator
-	WorkforceProfileGenerator                 = authoring.ProfileGenerator
-	WorkforceIdentityProfile                  = authoring.IdentityProfile
-	WorkforceAuthoringIntentRepairGenerator   = authoring.IntentRepairGenerator
-	WorkforceAuthoringResult                  = authoring.CompileResult
-	WorkforceAuthoringValidationIssue         = authoring.ValidationIssue
-	WorkforceAuthoringMissingRequirement      = authoring.MissingRequirement
-	WorkforceAuthoringSourcePolicyProposal    = authoring.SourcePolicyProposal
-	WorkforceAuthoringRiskChange              = authoring.RiskChange
-	WorkforceAuthoringFieldDiff               = authoring.FieldDiff
-	WorkforceChangeSet                        = authoring.ChangeSet
-	WorkforceChangeSetGeneration              = authoring.ChangeSetGeneration
-	WorkforceChangeSetStatus                  = authoring.ChangeSetStatus
-	WorkforceChangeSetActor                   = authoring.ChangeSetActor
-	WorkforceChangeSetPlacement               = authoring.ChangeSetPlacement
-	WorkforceSkillInstallationIntent          = authoring.SkillInstallationIntent
-	WorkforceObjectivePlacement               = authoring.ObjectivePlacement
-	WorkforceConversationEndpointPlacement    = authoring.ConversationEndpointPlacement
-	WorkforceChangeSetPolicyFinding           = authoring.ChangeSetPolicyFinding
-	WorkforceChangeSetApprovalRequirement     = authoring.ChangeSetApprovalRequirement
-	WorkforceChangeSetEvaluation              = authoring.ChangeSetEvaluation
-	WorkforceChangeSetApprovalDecision        = authoring.ChangeSetApprovalDecision
-	WorkforceChangeSetPlacementUpdate         = authoring.ChangeSetPlacementUpdate
-	WorkforceChangeSetLifecycleEvent          = authoring.ChangeSetLifecycleEvent
-	CreateWorkforceChangeSetRequest           = authoring.CreateChangeSetRequest
-	SubmitWorkforceChangeSetEvaluationRequest = authoring.SubmitChangeSetEvaluationRequest
-	ResolveWorkforceChangeSetApprovalRequest  = authoring.ResolveChangeSetApprovalRequest
-	UpdateWorkforceChangeSetPlacementRequest  = authoring.UpdateChangeSetPlacementRequest
-	ApplyWorkforceChangeSetRequest            = authoring.ApplyChangeSetRequest
-	PrepareWorkforceActivationRequest         = authoring.PrepareChangeSetActivationRequest
-	RetryWorkforceChangeSetGenerationRequest  = authoring.RetryChangeSetGenerationRequest
-	WorkforceChangeSetApplyReceipt            = authoring.ChangeSetApplyReceipt
-	WorkforceAppliedResourceReference         = authoring.AppliedResourceReference
-	WorkforceExecutionTarget                  = kernelapi.WorkforceExecutionTarget
-	WorkforceExecutionTargetCandidate         = kernelapi.WorkforceExecutionTargetCandidate
-	WorkforceExecutionTargetList              = kernelapi.WorkforceExecutionTargetList
-	WorkforceChangeSetStore                   = authoring.ChangeSetStore
-	PendingWorkforceChangeSetGenerationStore  = authoring.PendingChangeSetGenerationStore
-	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
-	WorkforceChangeSetReadinessValidator      = authoring.ChangeSetReadinessValidator
-	WorkforceChangeSetReadinessError          = authoring.ChangeSetReadinessError
-	WorkforceSensitiveInputKind               = validation.SensitiveInputKind
-	WorkforceSensitiveInputFinding            = validation.SensitiveInputFinding
-	SensitiveInputError                       = validation.SensitiveInputError
-	SkillReferenceUpgradePlan                 = runtime.SkillReferenceUpgradePlan
-	SkillReferenceUpgradeFinding              = runtime.SkillReferenceUpgradeFinding
-	SkillReferenceIdentity                    = runtime.SkillReferenceIdentity
-	SkillReferenceObjectiveReference          = runtime.SkillReferenceObjectiveReference
-	SkillReferenceObjectiveImpact             = runtime.SkillReferenceObjectiveImpact
-	SkillReferenceProjectImpact               = runtime.SkillReferenceProjectImpact
-	PlanSkillReferenceUpgradeRequest          = runtime.PlanSkillReferenceUpgradeRequest
-	ApplySkillReferenceUpgradeRequest         = runtime.ApplySkillReferenceUpgradeRequest
-	SkillReferenceUpgradeApproval             = runtime.SkillReferenceUpgradeApproval
-	SkillReferenceUpgradeReceipt              = runtime.SkillReferenceUpgradeReceipt
-	SkillRuntimeUsageFilter                   = runtime.SkillRuntimeUsageFilter
-	SkillRuntimeReference                     = runtime.SkillRuntimeReference
-	SkillRuntimeUsageStore                    = runtime.SkillRuntimeUsageStore
-	WorkforceAuthoringRunStore                = runtime.WorkforceAuthoringRunStore
-	WorkforceAuthoringRunService              = runtime.WorkforceAuthoringRunService
-	WorkforceAuthoringCatalogResolver         = runtime.WorkforceAuthoringCatalogResolver
-	WorkforceAuthoringWorkerConfig            = runtime.WorkforceAuthoringWorkerConfig
-	WorkforceAuthoringWorker                  = runtime.WorkforceAuthoringWorker
+	AgentDefinition                         = kernelagent.AgentDefinition
+	AgentStandingActionGrant                = kernelagent.StandingActionGrant
+	AgentApprovalDestination                = kernelagent.ApprovalDestination
+	AgentChannelRoute                       = kernelagent.ChannelRoute
+	AgentManifest                           = kernelagent.Manifest
+	AgentManifestMetadata                   = kernelagent.ManifestMetadata
+	AgentManifestSpec                       = kernelagent.ManifestSpec
+	AgentManifestInstallationRequest        = kernelagent.ManifestInstallationRequest
+	AgentManifestInstallationResult         = kernelagent.ManifestInstallationResult
+	AgentManifestInstallationRegistry       = kernelagent.ManifestInstallationRegistry
+	AgentManifestExportRequest              = kernelagent.ManifestExportRequest
+	AgentBundle                             = kernelagent.Bundle
+	AgentBundleMetadata                     = kernelagent.BundleMetadata
+	AgentBundleDeploymentPolicy             = kernelagent.BundleDeploymentPolicy
+	AgentBundleRuntimeRequirement           = kernelagent.BundleRuntimeRequirement
+	AgentBundleSkillRequirement             = kernelagent.BundleSkillRequirement
+	AgentBundleSkillPolicy                  = kernelagent.BundleSkillPolicy
+	AgentBundleCredentialNeed               = kernelagent.BundleCredentialNeed
+	AgentBundleEndpointNeed                 = kernelagent.BundleEndpointNeed
+	AgentBundleCallbackSubscription         = kernelagent.BundleCallbackSubscription
+	AgentBundleCallbackNeed                 = kernelagent.BundleCallbackNeed
+	AgentBundleExportRequest                = kernelagent.BundleExportRequest
+	AgentBundlePlacement                    = kernelagent.BundlePlacement
+	AgentBundleSkillPlacement               = kernelagent.BundleSkillPlacement
+	AgentBundleEndpointPlacement            = kernelagent.BundleEndpointPlacement
+	AgentBundleCallbackPlacement            = kernelagent.BundleCallbackPlacement
+	AgentBundleRequirementKind              = kernelagent.BundleRequirementKind
+	AgentBundleRequirementResolution        = kernelagent.BundleRequirementResolution
+	AgentBundleInstallationPreview          = kernelagent.BundleInstallationPreview
+	AgentBundleInstallationRequest          = kernelagent.BundleInstallationRequest
+	AgentBundleEndpointInstallation         = kernelagent.BundleEndpointInstallation
+	AgentBundleCallbackInstallation         = kernelagent.BundleCallbackInstallation
+	AgentBundleInstallationPlan             = kernelagent.BundleInstallationPlan
+	AgentDefinitionCompilation              = kernelagent.DefinitionCompilation
+	AgentCompilationSource                  = kernelagent.CompilationSource
+	AgentCompilationDiagnostic              = kernelagent.CompilationDiagnostic
+	AgentCompilationStatus                  = kernelagent.CompilationStatus
+	AgentSkillRequirement                   = kernelagent.SkillRequirement
+	AgentAuthorityPolicy                    = kernelagent.AuthorityPolicy
+	AgentApprovalTimeoutPolicy              = kernelagent.ApprovalTimeoutPolicy
+	AgentMemoryPolicy                       = kernelagent.MemoryPolicy
+	AgentEscalationPolicy                   = kernelagent.EscalationPolicy
+	AgentObjectiveTemplate                  = kernelagent.ObjectiveTemplate
+	AgentEvaluationCriterion                = kernelagent.EvaluationCriterion
+	AgentAmendmentPolicy                    = kernelagent.AmendmentPolicy
+	AgentDefinitionProvenance               = kernelagent.DefinitionProvenance
+	AgentDeployment                         = kernelagent.AgentDeployment
+	AgentDeploymentFilter                   = kernelagent.AgentDeploymentFilter
+	AgentDeploymentRestrictions             = kernelagent.DeploymentRestrictions
+	AgentDeploymentCapacity                 = kernelagent.DeploymentCapacity
+	AgentDeploymentHealth                   = kernelagent.DeploymentHealth
+	WorkspaceAuthority                      = workspace.Authority
+	WorkspaceOperation                      = workspace.Operation
+	AgentDefinitionActivation               = kernelagent.DefinitionActivation
+	AgentRolloutStatus                      = kernelagent.RolloutStatus
+	AgentDefinitionAmendment                = kernelagent.DefinitionAmendment
+	AgentAmendmentStatus                    = kernelagent.AmendmentStatus
+	AgentDefinitionFieldChange              = kernelagent.DefinitionFieldChange
+	AgentAmendmentEvaluation                = kernelagent.AmendmentEvaluation
+	AgentAmendmentDecision                  = kernelagent.AmendmentDecision
+	ProposeAgentAmendmentRequest            = kernelagent.ProposeAmendmentRequest
+	SubmitAgentAmendmentEvaluationRequest   = kernelagent.SubmitAmendmentEvaluationRequest
+	ResolveAgentAmendmentRequest            = kernelagent.ResolveAmendmentRequest
+	AgentRegistryStore                      = kernelagent.Store
+	WorkforceBundle                         = kernelbundle.Bundle
+	WorkforceBundleMetadata                 = kernelbundle.Metadata
+	WorkforceBundleCompatibility            = kernelbundle.Compatibility
+	WorkforceBundleCapabilityRequirement    = kernelbundle.CapabilityRequirement
+	WorkforceBundleProvenance               = kernelbundle.Provenance
+	WorkforceBundleOwnerKind                = kernelbundle.OwnerKind
+	WorkforceBundleOwnerReference           = kernelbundle.OwnerReference
+	WorkforceBundleAgent                    = kernelbundle.Agent
+	WorkforceBundleRosterAssignment         = kernelbundle.RosterAssignment
+	WorkforceBundleTeamDeployment           = kernelbundle.TeamDeployment
+	WorkforceBundleTeam                     = kernelbundle.Team
+	WorkforceBundleObjective                = kernelbundle.Objective
+	WorkforceBundleRunbookActivation        = kernelbundle.RunbookActivation
+	WorkforceBundleSignature                = kernelbundle.Signature
+	WorkforceBundleTrustPolicy              = kernelbundle.TrustPolicy
+	WorkforceBundleVerification             = kernelbundle.Verification
+	WorkforceBundleChangeType               = kernelbundle.ChangeType
+	WorkforceBundleChange                   = kernelbundle.Change
+	WorkforceBundleDiff                     = kernelbundle.Diff
+	WorkforceBundleUpgradePlan              = kernelbundle.UpgradePlan
+	WorkforceBundleInspection               = kernelbundle.Inspection
+	WorkforceBundlePlacement                = kernelbundle.Placement
+	WorkforceBundleTeamPlacement            = kernelbundle.TeamPlacement
+	WorkforceBundleRequirement              = kernelbundle.Requirement
+	WorkforceBundleInstallationPreview      = kernelbundle.InstallationPreview
+	WorkforceBundleInstallationRequest      = kernelbundle.InstallationRequest
+	WorkforceBundleInstallationPlan         = kernelbundle.InstallationPlan
+	WorkforceBundleAgentInstallation        = kernelbundle.AgentInstallation
+	WorkforceBundleTeamInstallation         = kernelbundle.TeamInstallation
+	WorkforceBundleInstallationReceipt      = kernelbundle.InstallationReceipt
+	WorkforceBundleInstallationStore        = kernelbundle.InstallationStore
+	WorkforceBundleExportRequest            = kernelbundle.ExportRequest
+	WorkforceBundleAgentExport              = kernelbundle.AgentExport
+	WorkforceBundleTeamExport               = kernelbundle.TeamExport
+	WorkforceBundleObjectiveExport          = kernelbundle.ObjectiveExport
+	WorkforceBundleRunbookExport            = kernelbundle.RunbookExport
+	KernelAgentDeploymentList               = kernelapi.AgentDeploymentList
+	KernelAgentDeploymentCatalogEntry       = kernelapi.AgentDeploymentCatalogEntry
+	KernelUpdateAgentDeploymentRequest      = kernelapi.UpdateAgentDeploymentRequest
+	KernelAgentDeploymentUpdateResult       = kernelapi.AgentDeploymentUpdateResult
+	KernelActivateAgentDefinitionRequest    = kernelapi.ActivateAgentDefinitionRequest
+	KernelRollbackAgentDefinitionRequest    = kernelapi.RollbackAgentDefinitionRequest
+	KernelAgentDefinitionActivationResult   = kernelapi.AgentDefinitionActivationResult
+	KernelAgentDefinitionAmendmentList      = kernelapi.AgentDefinitionAmendmentList
+	KernelActivateAgentAmendmentRequest     = kernelapi.ActivateAgentDefinitionAmendmentRequest
+	KernelAgentAmendmentActivationResult    = kernelapi.AgentDefinitionAmendmentActivationResult
+	KernelAgentDefinitionCompilationHistory = kernelapi.AgentDefinitionCompilationHistory
+	TeamDefinition                          = kernelteam.Definition
+	TeamManifest                            = kernelteam.Manifest
+	TeamManifestMetadata                    = kernelteam.ManifestMetadata
+	TeamManifestSpec                        = kernelteam.ManifestSpec
+	TeamManifestRoleSlot                    = kernelteam.ManifestRoleSlot
+	TeamManifestDelegationPolicy            = kernelteam.ManifestDelegationPolicy
+	TeamManifestSharedContextPolicy         = kernelteam.ManifestSharedContextPolicy
+	TeamRoleSlot                            = kernelteam.RoleSlot
+	TeamRoleChannelParticipation            = kernelteam.RoleChannelParticipation
+	TeamRoutingPolicy                       = kernelteam.RoutingPolicy
+	TeamDelegationPolicy                    = kernelteam.DelegationPolicy
+	TeamApprovalPolicy                      = kernelteam.ApprovalPolicy
+	TeamDeployment                          = kernelteam.Deployment
+	TeamDeploymentStatus                    = kernelteam.DeploymentStatus
+	TeamRosterAssignment                    = kernelteam.RosterAssignment
+	TeamDeploymentRestrictions              = kernelteam.DeploymentRestrictions
+	TeamDefinitionAmendment                 = kernelteam.DefinitionAmendment
+	TeamAmendmentStatus                     = kernelteam.AmendmentStatus
+	TeamAmendmentEvaluation                 = kernelteam.AmendmentEvaluation
+	TeamAmendmentDecision                   = kernelteam.AmendmentDecision
+	ProposeTeamAmendmentRequest             = kernelteam.ProposeAmendmentRequest
+	SubmitTeamAmendmentEvaluationRequest    = kernelteam.SubmitAmendmentEvaluationRequest
+	ResolveTeamAmendmentRequest             = kernelteam.ResolveAmendmentRequest
+	RecoverTeamParticipationRequest         = kernelteam.RecoverParticipationRequest
+	TeamParticipationRecoveryResult         = kernelteam.ParticipationRecoveryResult
+	TeamRegistryStore                       = kernelteam.Store
+	AuthorityProgressionOwnerKind           = progression.OwnerKind
+	AuthorityProgressionDirection           = progression.Direction
+	AuthorityProgressionCriterionOutcome    = progression.CriterionOutcome
+	AuthorityProgressionEvaluationPolicy    = progression.EvaluationPolicy
+	AuthorityProgressionEvaluationRequest   = progression.EvaluationRequest
+	AuthorityProgressionRecommendation      = progression.Recommendation
+	AgentAuthorityProgressionCeiling        = progression.AgentPolicyCeiling
+	TeamAuthorityProgressionCeiling         = progression.TeamPolicyCeiling
+	ProposeAgentAuthorityProgressionRequest = progression.ProposeAgentRequest
+	ProposeTeamAuthorityProgressionRequest  = progression.ProposeTeamRequest
+	WorkforceSharedContextPolicy            = workforce.SharedContextPolicy
+	WorkforceObjectiveTemplate              = workforce.ObjectiveTemplate
+	WorkforceEvaluationCriterion            = workforce.EvaluationCriterion
+	WorkforceAmendmentPolicy                = workforce.AmendmentPolicy
+	WorkforceDefinitionProvenance           = workforce.DefinitionProvenance
+	WorkforceDefinitionActivation           = workforce.DefinitionActivation
+	DeploymentChangeKind                    = workforce.DeploymentChangeKind
+	WorkforceSkillCapability                = skillcatalog.SkillCapability
+	WorkforceSkillActionContract            = skillcatalog.SkillActionContract
+	WorkforceSkillCredential                = skillcatalog.SkillCredential
+	WorkforceConversationAdapterCapability  = skillcatalog.ConversationAdapterCapability
+	WorkforceCallbackAdapterCapability      = skillcatalog.CallbackAdapterCapability
+	WorkforceSourcePolicyCapability         = skillcatalog.SourcePolicyCapability
+	WorkforceSourcePolicySourceCapability   = skillcatalog.SourcePolicySourceCapability
+	WorkforceAuthorityConstraint            = skillcatalog.AuthorityConstraint
+	WorkforceCatalogDiagnostic              = skillcatalog.CatalogDiagnostic
+	WorkforceSkillReadiness                 = skillcatalog.SkillReadiness
+	WorkforceSkillCompatibility             = skillcatalog.SkillCompatibility
+	WorkforceCapabilityCatalog              = skillcatalog.CapabilityCatalog
+	WorkforceExecutionTarget                = kernelapi.WorkforceExecutionTarget
+	WorkforceExecutionTargetCandidate       = kernelapi.WorkforceExecutionTargetCandidate
+	WorkforceExecutionTargetList            = kernelapi.WorkforceExecutionTargetList
+	WorkforceSensitiveInputKind             = validation.SensitiveInputKind
+	WorkforceSensitiveInputFinding          = validation.SensitiveInputFinding
+	SensitiveInputError                     = validation.SensitiveInputError
+	SkillReferenceUpgradePlan               = runtime.SkillReferenceUpgradePlan
+	SkillReferenceUpgradeFinding            = runtime.SkillReferenceUpgradeFinding
+	SkillReferenceIdentity                  = runtime.SkillReferenceIdentity
+	SkillReferenceObjectiveReference        = runtime.SkillReferenceObjectiveReference
+	SkillReferenceObjectiveImpact           = runtime.SkillReferenceObjectiveImpact
+	SkillReferenceProjectImpact             = runtime.SkillReferenceProjectImpact
+	PlanSkillReferenceUpgradeRequest        = runtime.PlanSkillReferenceUpgradeRequest
+	ApplySkillReferenceUpgradeRequest       = runtime.ApplySkillReferenceUpgradeRequest
+	SkillReferenceUpgradeApproval           = runtime.SkillReferenceUpgradeApproval
+	SkillReferenceUpgradeReceipt            = runtime.SkillReferenceUpgradeReceipt
+	SkillRuntimeUsageFilter                 = runtime.SkillRuntimeUsageFilter
+	SkillRuntimeReference                   = runtime.SkillRuntimeReference
+	SkillRuntimeUsageStore                  = runtime.SkillRuntimeUsageStore
 
 	PortfolioStore                       = runtime.PortfolioStore
 	KernelStore                          = runtime.KernelStore
@@ -1214,7 +1140,6 @@ type (
 	ChannelCapabilityFeatures             = kernelapi.ChannelCapabilityFeatures
 	AgentDefinitionCapabilityFeatures     = kernelapi.AgentDefinitionCapabilityFeatures
 	TeamDefinitionCapabilityFeatures      = kernelapi.TeamDefinitionCapabilityFeatures
-	WorkforceAuthoringCapabilityFeatures  = kernelapi.WorkforceAuthoringCapabilityFeatures
 	ActionApprovalCapabilityFeatures      = kernelapi.ActionApprovalCapabilityFeatures
 )
 
@@ -1262,8 +1187,6 @@ const (
 	RunbooksCapabilityVersion               = kernelapi.RunbooksCapabilityVersion
 	SourcePoliciesCapabilityID              = kernelapi.SourcePoliciesCapabilityID
 	SourcePoliciesCapabilityVersion         = kernelapi.SourcePoliciesCapabilityVersion
-	WorkforceAuthoringCapabilityID          = kernelapi.WorkforceAuthoringCapabilityID
-	WorkforceAuthoringCapabilityVersion     = kernelapi.WorkforceAuthoringCapabilityVersion
 	KernelOperationCreate                   = kernelapi.OperationCreate
 	KernelOperationExecute                  = kernelapi.OperationExecute
 	KernelOperationList                     = kernelapi.OperationList
@@ -1348,22 +1271,6 @@ const (
 	RunbookPredicateAll                     = runbook.PredicateAll
 	RunbookPredicateAny                     = runbook.PredicateAny
 	RunbookPredicateNot                     = runbook.PredicateNot
-)
-
-const (
-	WorkforceRuntimeCompositionProtocolV1      = authoring.RuntimeCompositionProtocolV1
-	WorkforceHostedExecutionProtocolV1         = authoring.HostedExecutionProtocolV1
-	WorkforceConversationEndpointOwnerAgent    = authoring.ConversationEndpointOwnerAgent
-	WorkforceConversationEndpointOwnerTeam     = authoring.ConversationEndpointOwnerTeam
-	WorkforceConversationHandlerAgent          = authoring.ConversationHandlerAgent
-	WorkforceConversationHandlerTeam           = authoring.ConversationHandlerTeam
-	WorkforceConversationHandlerRunbook        = authoring.ConversationHandlerRunbook
-	WorkforceConversationSelectAllMessages     = authoring.ConversationSelectAllMessages
-	WorkforceConversationSelectMentions        = authoring.ConversationSelectMentions
-	WorkforceConversationSelectDirectOrMention = authoring.ConversationSelectDirectOrMention
-	WorkforceConversationReplyProviderDefault  = authoring.ConversationReplyProviderDefault
-	WorkforceConversationReplyThread           = authoring.ConversationReplyThread
-	WorkforceConversationReplyChannel          = authoring.ConversationReplyChannel
 )
 
 const (
@@ -1496,10 +1403,6 @@ func TeamDefinitionsCapability(features TeamDefinitionCapabilityFeatures) Kernel
 	return kernelapi.TeamDefinitionsCapability(features)
 }
 
-func WorkforceAuthoringCapability(features WorkforceAuthoringCapabilityFeatures) KernelCapability {
-	return kernelapi.WorkforceAuthoringCapability(features)
-}
-
 func WorkforceExecutionTargetsCapability(management bool) KernelCapability {
 	return kernelapi.WorkforceExecutionTargetsCapability(management)
 }
@@ -1512,27 +1415,6 @@ func WorkforceBundlesCapability(installation bool) KernelCapability {
 // by OpenSeal's TUI and embedding-host user interfaces.
 func NewKernelCapabilityDocument(capabilities ...KernelCapability) KernelCapabilityDocument {
 	return kernelapi.NewCapabilityDocument(capabilities...)
-}
-
-// ValidateWorkforceCredentialPlacement applies the canonical kind-keyed,
-// secret-safe credential placement contract at an embedding host boundary.
-func ValidateWorkforceCredentialPlacement(candidate *WorkforceCandidate, required map[string][]string, placement WorkforceChangeSetPlacement, choices []CredentialBindingChoice) error {
-	return authoring.ValidateCredentialPlacement(candidate, required, placement, choices)
-}
-
-// ValidateWorkforceCredentialPlacementWithRequirements verifies opaque
-// references plus exact OAuth 2 provider, subject, resource, and scope
-// coverage. New embedding hosts should use this typed boundary.
-func ValidateWorkforceCredentialPlacementWithRequirements(candidate *WorkforceCandidate, required map[string][]WorkforceCredentialBindingRequirement, placement WorkforceChangeSetPlacement, choices []CredentialBindingChoice) error {
-	return authoring.ValidateCredentialPlacementWithRequirements(candidate, required, placement, choices)
-}
-
-func RequiredWorkforceCredentialBindings(candidate WorkforceCandidate, catalog WorkforceCapabilityCatalog) map[string][]WorkforceCredentialBindingRequirement {
-	return authoring.RequiredCredentialBindings(candidate, catalog)
-}
-
-func CanonicalWorkforceRuntimeCompositionCapability() *WorkforceRuntimeCompositionCapability {
-	return authoring.CanonicalRuntimeCompositionCapability()
 }
 
 func CanonicalConversationTriggerInputSchema() map[string]interface{} {
@@ -1627,7 +1509,6 @@ var NewTurnRunnerProgressAcknowledgementRenderer = runtime.NewTurnRunnerProgress
 var NewExternalConversationSupervisor = runtime.NewExternalConversationSupervisor
 var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversationRunbookEventDispatcher
 var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalConversationRunbookResolver
-var CanonicalConversationReplyOutputSchema = authoring.CanonicalConversationReplyOutputSchema
 var NewOAuthService = kerneloauth.NewService
 var NewOAuthMemoryStore = kerneloauth.NewMemoryStore
 var OAuthSessionIDFromState = kerneloauth.SessionIDFromState
@@ -1644,12 +1525,6 @@ var (
 	ErrOAuthRefreshInProgress  = kerneloauth.ErrRefreshInProgress
 	ErrOAuthUnsupported        = kerneloauth.ErrUnsupported
 )
-
-// WorkforceObjectiveKey returns the canonical placement key for an objective
-// template owned by an agent or team definition.
-func WorkforceObjectiveKey(ownerType, definitionID, templateID string) string {
-	return authoring.WorkforceObjectiveKey(ownerType, definitionID, templateID)
-}
 
 // PersistentKernelStore is the complete durable control-plane contract for an
 // embedded OpenSeal engine. Enterprise adapters implement this interface so
@@ -1867,28 +1742,11 @@ func NewSkillSourceWatcher(catalog *skillsource.Catalog, roots []skillsource.Roo
 }
 
 const (
-	WorkforceAuthoringCreate                          = authoring.ModeCreate
-	WorkforceAuthoringAmend                           = authoring.ModeAmend
-	WorkforceChangeSetBlocked                         = authoring.ChangeSetBlocked
-	WorkforceChangeSetReview                          = authoring.ChangeSetReview
-	WorkforceChangeSetEvaluating                      = authoring.ChangeSetEvaluating
-	WorkforceChangeSetAwaitingApproval                = authoring.ChangeSetAwaitingApproval
-	WorkforceChangeSetReady                           = authoring.ChangeSetReady
-	WorkforceChangeSetApplied                         = authoring.ChangeSetApplied
-	WorkforceChangeSetRejected                        = authoring.ChangeSetRejected
-	WorkforceChangeSetFailed                          = authoring.ChangeSetFailed
-	WorkforceActivationActive                         = authoring.WorkforceActivationActive
-	WorkforceActivationInactive                       = authoring.WorkforceActivationInactive
-	WorkforceProjectOwnerAgent                        = authoring.ProjectOwnerAgent
-	WorkforceProjectOwnerTeam                         = authoring.ProjectOwnerTeam
-	WorkforceProjectDeduplicateStableSource           = authoring.ProjectDeduplicateStableSource
-	WorkforceProjectDeduplicateContentDigest          = authoring.ProjectDeduplicateContentDigest
-	WorkforceProjectDeduplicateStableSourceAndContent = authoring.ProjectDeduplicateStableSourceAndContent
-	WorkforceCatalogDiagnosticExecutionTargetMissing  = skillcatalog.CatalogDiagnosticExecutionTargetMissing
-	WorkforceSkillReady                               = skillcatalog.SkillReadinessReady
-	WorkforceSkillNeedsBinding                        = skillcatalog.SkillReadinessNeedsBinding
-	WorkforceSkillNeedsInstallation                   = skillcatalog.SkillReadinessNeedsInstallation
-	WorkforceSkillUnavailable                         = skillcatalog.SkillReadinessUnavailable
+	WorkforceCatalogDiagnosticExecutionTargetMissing = skillcatalog.CatalogDiagnosticExecutionTargetMissing
+	WorkforceSkillReady                              = skillcatalog.SkillReadinessReady
+	WorkforceSkillNeedsBinding                       = skillcatalog.SkillReadinessNeedsBinding
+	WorkforceSkillNeedsInstallation                  = skillcatalog.SkillReadinessNeedsInstallation
+	WorkforceSkillUnavailable                        = skillcatalog.SkillReadinessUnavailable
 
 	OwnerTypeAgent = runtime.OwnerTypeAgent
 	OwnerTypeTeam  = runtime.OwnerTypeTeam
@@ -2012,9 +1870,8 @@ const (
 	RunSourceFork             = runtime.RunSourceFork
 	DelegationModeContextKey  = runtime.DelegationModeContextKey
 
-	RunKindAgentWork          = runtime.RunKindAgentWork
-	RunKindConversation       = runtime.RunKindConversation
-	RunKindWorkforceAuthoring = runtime.RunKindWorkforceAuthoring
+	RunKindAgentWork    = runtime.RunKindAgentWork
+	RunKindConversation = runtime.RunKindConversation
 
 	TeamRoleChannelActive          = kernelteam.RoleChannelActive
 	TeamRoleChannelObserveOnly     = kernelteam.RoleChannelObserveOnly
@@ -2455,32 +2312,13 @@ const (
 	ArtifactEvidenceTargetClaim          = runtime.EvidenceTargetClaim
 )
 
-func ValidateWorkforceCandidateAuthority(candidate *WorkforceCandidate, constraint *WorkforceAuthorityConstraint) []WorkforceAuthoringValidationIssue {
-	return authoring.ValidateCandidateAuthorityConstraint(candidate, constraint)
-}
-
-func ValidateWorkforceProfileChangeSet(changeSet *WorkforceChangeSet) error {
-	return authoring.ValidateProfileChangeSet(changeSet)
-}
-
-func ValidateWorkforceProfilePlacement(placement WorkforceChangeSetPlacement) error {
-	return authoring.ValidateProfilePlacement(placement)
-}
-
 const (
 	SourceMonitorDeduplicateStableSource           = runtime.SourceMonitorDeduplicateStableSource
 	SourceMonitorDeduplicateContentDigest          = runtime.SourceMonitorDeduplicateContentDigest
 	SourceMonitorDeduplicateStableSourceAndContent = runtime.SourceMonitorDeduplicateStableSourceAndContent
 )
 
-var ErrWorkforceChangeSetPlacementConflict = authoring.ErrChangeSetPlacementConflict
-
 var (
-	ErrWorkforceChangeSetNotFound       = authoring.ErrChangeSetNotFound
-	ErrWorkforceChangeSetIdempotency    = authoring.ErrChangeSetIdempotency
-	ErrWorkforceChangeSetRevision       = authoring.ErrChangeSetRevision
-	ErrWorkforceChangeSetTransition     = authoring.ErrChangeSetTransition
-	ErrWorkforceSensitiveAuthoringInput = validation.ErrSensitiveInput
 	ErrSkillDefinitionImmutable         = skill.ErrDefinitionImmutable
 	ErrSkillDefinitionAmbiguous         = skill.ErrDefinitionAmbiguous
 	ErrSkillBindingAmbiguous            = skill.ErrBindingAmbiguous
@@ -2507,10 +2345,6 @@ var (
 	ErrSkillReferenceUpgradeBusy        = runtime.ErrSkillReferenceUpgradeBusy
 	ErrSkillReferenceUpgradeCurrent     = runtime.ErrSkillReferenceUpgradeCurrent
 )
-
-func ValidateWorkforceAuthoringPrompt(prompt string) error {
-	return validation.ValidateNoSensitiveInput(prompt)
-}
 
 // Engine is the primary entry point for OpenSeal. It composes the durable
 // Agent, Team, objective, collaboration, action, approval, and Skill services.
@@ -2582,10 +2416,6 @@ type Engine struct {
 	agents                        *kernelagent.Registry
 	teams                         *kernelteam.Registry
 	progression                   *progression.Service
-	authoring                     *authoring.Compiler
-	authoringChanges              *authoring.ChangeSetService
-	authoringReadinessValidators  []authoring.ChangeSetReadinessValidator
-	authoringRuns                 *runtime.WorkforceAuthoringRunService
 	logger                        *zap.SugaredLogger
 	workerLimiter                 *runtime.WorkerLimiter
 	workSignals                   *runtime.WorkSignalStatus
@@ -2705,9 +2535,6 @@ func New(opts ...Option) (*Engine, error) {
 	}
 	if e.actionPolicy == nil {
 		e.actionPolicy = runtime.ActionPolicyEvaluatorFunc(e.evaluateAgentActionAuthority)
-	}
-	if err := e.rebuildAuthoringChangeSets(); err != nil {
-		return nil, fmt.Errorf("workforce change set configuration: %w", err)
 	}
 	if err := e.rebuildConversationCoordinator(); err != nil {
 		return nil, fmt.Errorf("conversation coordinator configuration: %w", err)
@@ -3300,115 +3127,6 @@ func WithSkillCatalog(catalog *skill.Catalog) Option {
 		e.skills = catalog
 		return nil
 	}
-}
-
-// WithWorkforceAuthoringGenerator enables prompt-first workforce compilation.
-// The generator is the only probabilistic boundary; OpenSeal validates every
-// returned Agent and Team candidate and never activates compiled state.
-func WithWorkforceAuthoringGenerator(generator authoring.Generator) Option {
-	return func(e *Engine) error {
-		compiler, err := authoring.NewCompiler(generator)
-		if err != nil {
-			return err
-		}
-		e.authoring = compiler
-		return nil
-	}
-}
-
-// WithWorkforceChangeSetReadinessValidators composes deterministic checks
-// owned by an embedding host with OpenSeal's native Skill readiness checks.
-// Validators are re-run before a ChangeSet becomes ready and immediately
-// before atomic apply, so stale placement can never widen runtime authority.
-func WithWorkforceChangeSetReadinessValidators(validators ...authoring.ChangeSetReadinessValidator) Option {
-	return func(e *Engine) error {
-		for _, validator := range validators {
-			if validator == nil {
-				return errors.New("workforce readiness validator is required")
-			}
-			e.authoringReadinessValidators = append(e.authoringReadinessValidators, validator)
-		}
-		return nil
-	}
-}
-
-func (e *Engine) rebuildAuthoringChangeSets() error {
-	e.authoringChanges = nil
-	e.authoringRuns = nil
-	if e.authoring == nil {
-		return nil
-	}
-	store, ok := e.store.(authoring.ChangeSetStore)
-	if !ok {
-		return nil
-	}
-	service, err := authoring.NewChangeSetService(e.authoring, store, e.authoringReadinessValidators...)
-	if err != nil {
-		return err
-	}
-	e.authoringChanges = service
-	if runStore, ok := e.store.(runtime.WorkforceAuthoringRunStore); ok {
-		runService, err := runtime.NewWorkforceAuthoringRunService(e.authoring, runStore)
-		if err != nil {
-			return err
-		}
-		e.authoringRuns = runService
-	}
-	return nil
-}
-
-// NewOpenAICompatibleWorkforceGenerator creates the portable chat-completions
-// adapter used by both standalone OpenSeal and embedding hosts.
-func NewOpenAICompatibleWorkforceGenerator(endpoint, apiKey, model string, client *http.Client) (authoring.Generator, error) {
-	return authoring.NewOpenAICompatibleGenerator(endpoint, apiKey, model, client)
-}
-
-// OpenAICompatibleWorkforceGeneratorOptions contains explicit capabilities
-// negotiated by an embedding host for its selected provider model.
-type OpenAICompatibleWorkforceGeneratorOptions = authoring.OpenAICompatibleGeneratorOptions
-
-type OpenAICompatibleWorkforceThinkingMode = authoring.OpenAICompatibleThinkingMode
-
-type OpenAICompatibleWorkforceStructuredOutputMode = authoring.OpenAICompatibleStructuredOutputMode
-
-const (
-	WorkforceAuthoringResultSchemaVersion = authoring.AuthoringResultSchemaVersion
-	WorkforceAuthoringFormVersion         = authoring.AuthoringFormVersionV1
-
-	OpenAICompatibleWorkforceThinkingDefault  = authoring.OpenAICompatibleThinkingDefault
-	OpenAICompatibleWorkforceThinkingEnabled  = authoring.OpenAICompatibleThinkingEnabled
-	OpenAICompatibleWorkforceThinkingDisabled = authoring.OpenAICompatibleThinkingDisabled
-
-	OpenAICompatibleWorkforceStructuredOutputDefault = authoring.OpenAICompatibleStructuredOutputDefault
-	OpenAICompatibleWorkforceStructuredOutputTool    = authoring.OpenAICompatibleStructuredOutputTool
-	OpenAICompatibleWorkforceStructuredOutputJSON    = authoring.OpenAICompatibleStructuredOutputJSON
-	OpenAICompatibleWorkforceStructuredOutputPlain   = authoring.OpenAICompatibleStructuredOutputPlain
-)
-
-// NewOpenAICompatibleWorkforceGeneratorWithOptions creates the portable
-// adapter with explicit provider capabilities. The default constructor uses
-// the portable synthetic-tool contract; JSON-object mode is an explicit
-// fallback for gateways that cannot forward tool calls reliably.
-func NewOpenAICompatibleWorkforceGeneratorWithOptions(endpoint, apiKey, model string, client *http.Client, options OpenAICompatibleWorkforceGeneratorOptions) (authoring.Generator, error) {
-	return authoring.NewOpenAICompatibleGeneratorWithOptions(endpoint, apiKey, model, client, options)
-}
-
-// NewOpenAIResponsesWorkforceGeneratorWithOptions creates the OpenAI-native
-// Responses API adapter used by OpenAI Vault credentials.
-func NewOpenAIResponsesWorkforceGeneratorWithOptions(endpoint, apiKey, model string, client *http.Client, options OpenAICompatibleWorkforceGeneratorOptions) (authoring.Generator, error) {
-	return authoring.NewOpenAIResponsesGeneratorWithOptions(endpoint, apiKey, model, client, options)
-}
-
-func NewWorkforceAuthoringRunService(generator authoring.Generator, store runtime.WorkforceAuthoringRunStore) (*runtime.WorkforceAuthoringRunService, error) {
-	compiler, err := authoring.NewCompiler(generator)
-	if err != nil {
-		return nil, err
-	}
-	return runtime.NewWorkforceAuthoringRunService(compiler, store)
-}
-
-func NewWorkforceAuthoringWorker(service *runtime.WorkforceAuthoringRunService, logger *zap.SugaredLogger, config runtime.WorkforceAuthoringWorkerConfig) (*runtime.WorkforceAuthoringWorker, error) {
-	return runtime.NewWorkforceAuthoringWorker(service, logger, config)
 }
 
 func WithActionPolicy(policy runtime.ActionPolicyEvaluator) Option {
@@ -5751,136 +5469,6 @@ func (e *Engine) GetTeamDefinition(ctx context.Context, id, version string) (*ke
 
 func (e *Engine) ListTeamDefinitionVersions(ctx context.Context, id string) ([]*kernelteam.Definition, error) {
 	return e.teams.ListDefinitionVersions(ctx, id)
-}
-
-// WorkforceAuthoringAvailable reports whether this Engine has a configured
-// generation boundary. Hosts should use it for exact capability discovery.
-func (e *Engine) WorkforceAuthoringAvailable() bool {
-	return e != nil && e.authoring != nil
-}
-
-// CompileWorkforcePrompt produces a verified, reviewable candidate without
-// registering definitions, creating deployments, or activating state.
-func (e *Engine) CompileWorkforcePrompt(ctx context.Context, request authoring.GenerateRequest) (*authoring.CompileResult, error) {
-	if e == nil || e.authoring == nil {
-		return nil, errors.New("workforce authoring is not configured")
-	}
-	return e.authoring.Compile(ctx, request)
-}
-
-func (e *Engine) WorkforceChangeSetsAvailable() bool {
-	return e != nil && e.authoringChanges != nil
-}
-
-func (e *Engine) WorkforceChangeSetApplyAvailable() bool {
-	return e != nil && e.authoringChanges != nil && e.authoringChanges.ApplyAvailable()
-}
-
-func (e *Engine) CreateWorkforceChangeSet(ctx context.Context, request authoring.CreateChangeSetRequest) (*authoring.ChangeSet, bool, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, false, errors.New("workforce change sets are not configured")
-	}
-	return e.authoringChanges.Create(ctx, request)
-}
-
-// PrepareWorkforceChangeSet persists a credential-free generation request
-// without waiting for probabilistic compilation.
-func (e *Engine) PrepareWorkforceChangeSet(ctx context.Context, request authoring.CreateChangeSetRequest) (*authoring.ChangeSet, bool, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, false, errors.New("workforce change sets are not configured")
-	}
-	if e.authoringRuns != nil {
-		changeSet, _, replay, err := e.authoringRuns.Prepare(ctx, request)
-		return changeSet, replay, err
-	}
-	return e.authoringChanges.Prepare(ctx, request)
-}
-
-// GeneratePreparedWorkforceChangeSet completes one persisted generation intent.
-// Durable hosts invoke this from a leased canonical Run worker.
-func (e *Engine) GeneratePreparedWorkforceChangeSet(ctx context.Context, scope skill.ScopeReference, id string, expectedRevision int64) (*authoring.ChangeSet, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, errors.New("workforce change sets are not configured")
-	}
-	return e.authoringChanges.GeneratePrepared(ctx, scope, id, expectedRevision)
-}
-
-func (e *Engine) RetryWorkforceChangeSetGeneration(ctx context.Context, request authoring.RetryChangeSetGenerationRequest) (*authoring.ChangeSet, bool, error) {
-	if e == nil || e.authoringRuns == nil {
-		return nil, false, errors.New("durable workforce authoring runs are not configured")
-	}
-	changeSet, _, replayed, err := e.authoringRuns.Retry(ctx, request)
-	return changeSet, replayed, err
-}
-
-func (e *Engine) GetWorkforceChangeSet(ctx context.Context, scope skill.ScopeReference, id string) (*authoring.ChangeSet, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, errors.New("workforce change sets are not configured")
-	}
-	return e.authoringChanges.Get(ctx, scope, id)
-}
-
-// ListPendingWorkforceChangeSetEvaluations exposes the durable recovery index
-// for trusted host policy workers. It is not a user-facing catalog operation.
-func (e *Engine) ListPendingWorkforceChangeSetEvaluations(ctx context.Context, scope skill.ScopeReference, limit int) ([]*authoring.ChangeSet, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, errors.New("workforce change sets are unavailable")
-	}
-	return e.authoringChanges.ListPendingEvaluations(ctx, scope, limit)
-}
-
-func (e *Engine) SubmitWorkforceChangeSetEvaluation(ctx context.Context, request authoring.SubmitChangeSetEvaluationRequest) (*authoring.ChangeSet, bool, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, false, errors.New("workforce change sets are not configured")
-	}
-	return e.authoringChanges.SubmitEvaluation(ctx, request)
-}
-
-func (e *Engine) ResolveWorkforceChangeSetApproval(ctx context.Context, request authoring.ResolveChangeSetApprovalRequest) (*authoring.ChangeSet, bool, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, false, errors.New("workforce change sets are not configured")
-	}
-	return e.authoringChanges.ResolveApproval(ctx, request)
-}
-
-func (e *Engine) UpdateWorkforceChangeSetPlacement(ctx context.Context, request authoring.UpdateChangeSetPlacementRequest) (*authoring.ChangeSet, bool, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, false, errors.New("workforce change sets are not configured")
-	}
-	return e.authoringChanges.UpdatePlacement(ctx, request)
-}
-
-// PrepareWorkforceChangeSetActivation creates a deterministic, reviewable
-// activation child over one applied inactive workforce aggregate.
-func (e *Engine) PrepareWorkforceChangeSetActivation(ctx context.Context, request authoring.PrepareChangeSetActivationRequest) (*authoring.ChangeSet, bool, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, false, errors.New("workforce change sets are not configured")
-	}
-	return e.authoringChanges.PrepareActivation(ctx, request)
-}
-
-func (e *Engine) ApplyWorkforceChangeSet(ctx context.Context, request authoring.ApplyChangeSetRequest) (*authoring.ChangeSet, bool, error) {
-	if e == nil || e.authoringChanges == nil {
-		return nil, false, errors.New("workforce change sets are not configured")
-	}
-	applied, replayed, err := e.authoringChanges.Apply(ctx, request)
-	if err == nil && applied != nil && e.agents != nil {
-		// Workforce apply writes Agent deployments directly in its own
-		// transaction; give each one its control conversation here.
-		for _, deploymentID := range applied.Placement.AgentDeploymentIDs {
-			deployment, getErr := e.agents.GetDeployment(ctx, applied.Scope, deploymentID)
-			if getErr == nil {
-				e.ensureDeploymentHasSpace(ctx, deployment.Scope, runtime.SpaceMemberAgent, deployment.ID)
-				e.ensureAgentControlConversationAfterWrite(ctx, deployment)
-			}
-		}
-		if teamID := applied.Placement.TeamDeploymentID; teamID != "" && e.teams != nil {
-			if team, getErr := e.teams.GetDeployment(ctx, applied.Scope, teamID); getErr == nil {
-				e.ensureDeploymentHasSpace(ctx, team.Scope, runtime.SpaceMemberTeam, team.ID)
-			}
-		}
-	}
-	return applied, replayed, err
 }
 
 func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kernelteam.Deployment, actorType, actorID, reason string) (*kernelteam.Deployment, *workforce.DefinitionActivation, error) {
