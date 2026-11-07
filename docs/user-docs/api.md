@@ -64,7 +64,7 @@ A substantial part of this surface is conditional. Fifty-five distinct `501` res
 | GET | `/api/v1/projects/{id}` |
 | PATCH | `/api/v1/projects/{id}` |
 
-## Agent Runs and Turns
+## Agent Runs and Model Steps
 
 | Method | Path |
 |---|---|
@@ -77,7 +77,7 @@ A substantial part of this surface is conditional. Fifty-five distinct `501` res
 | GET | `/api/v1/agent-turns` |
 | GET | `/api/v1/agent-turns/{id}` |
 
-The commands route carries pause, resume, cancel, and intervene. The admission route reports why a Run would or would not be admitted, and is the first thing to check when a Run stays `queued`. See [Objectives and Runs](objectives-and-runs.md).
+The agent-turns routes list the model steps of a Run (agent-turns v2): each record is one step of the Run's agent loop, with its narration, tool-call count, stop reason, and usage. The commands route carries pause, resume, cancel, and intervene. The admission route reports why a Run would or would not be admitted, and is the first thing to check when a Run stays `queued`. See [Objectives and Runs](objectives-and-runs.md).
 
 ## Agent Requests
 

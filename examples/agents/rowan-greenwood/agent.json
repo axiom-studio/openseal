@@ -145,7 +145,7 @@
           },
           "budget": {
             "maxAttempts": 2,
-            "maxTurns": 24,
+            "maxTurns": 96,
             "maxInputTokens": 60000,
             "maxOutputTokens": 20000,
             "maxTotalTokens": 200000,
@@ -165,7 +165,7 @@
             "context": {"triggerInput": {"ref": "/input"}},
             "mode": "reason",
             "resultPath": "/results/work",
-            "budget": {"maxTurns": 24, "maxTotalTokens": 182065},
+            "budget": {"maxTurns": 96, "maxTotalTokens": 182065},
             "next": "done"
           }
         },
