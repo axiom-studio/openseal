@@ -554,12 +554,12 @@ type TurnReaction struct {
 	Emoji     string `json:"emoji"`
 }
 
-// MaximumTurnReactions bounds the reactions one turn may add.
+// MaximumTurnReactions bounds the reactions one Run may add with react.
 const MaximumTurnReactions = 3
 
-// ConversationReactInstruction describes the react action to Agents in
-// conversation turns.
-const ConversationReactInstruction = "react adds emoji reactions ({messageId, emoji}) to messages in this conversation as the answering Agent; use message ids from the conversation context. A reaction is not a reply and never asks anyone to act. Prefer a reaction (👀 picked up, ✅ done, 👍 agree) over a filler message. A turn may complete with only reactions and an empty outputSummary when nothing else needs saying."
+// ConversationReactInstruction is the description of the react control tool
+// (control_interaction.go).
+const ConversationReactInstruction = "Add an emoji reaction as yourself. A reaction is not a reply and never asks anyone to act; prefer it over a filler message. If a reaction says everything, finish with an empty answer."
 
 func cloneTurnReactions(in []TurnReaction) []TurnReaction {
 	return append([]TurnReaction(nil), in...)
