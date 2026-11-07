@@ -25,7 +25,7 @@ func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
 	if err := runbook.ValidateInterfaceInput(action.InputSchema, controlOnly); err == nil {
 		t.Fatal("amend_behavior accepted rationale without a changed behavior field")
 	}
-	withChange := cloneHostedTurnObjectValue(controlOnly)
+	withChange := cloneMap(controlOnly)
 	withChange["personality"] = "Utah-native engineer with Black heritage."
 	if err := runbook.ValidateInterfaceInput(action.InputSchema, withChange); err != nil {
 		t.Fatalf("amend_behavior rejected an actual personality change: %v", err)
