@@ -8,12 +8,9 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
-	"github.com/axiom-studio/openseal/pkg/capability"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/source"
@@ -30,15 +27,6 @@ type Server struct {
 	store                    runtime.KernelStore
 	artifactContent          runtime.ArtifactContentStore
 	artifactResolver         runtime.ArtifactContentResolver
-	authoring                *authoring.Compiler
-	authoringChanges         *authoring.ChangeSetService
-	authoringRuns            *runtime.WorkforceAuthoringRunService
-	authoringWorker          *runtime.WorkforceAuthoringWorker
-	authoringSkillSearch     authoring.SkillSearchProvider
-	authoringCredentials     []capability.CredentialBindingChoice
-	authoringScope           runtime.Scope
-	authoringMu              sync.Mutex
-	workforceAuthority       WorkforceLifecycleAuthorizer
 	actionApprovalAuth       runtime.ApprovalAuthorizer
 	logger                   *zap.SugaredLogger
 	mux                      *http.ServeMux
@@ -54,24 +42,6 @@ type Server struct {
 	workforceBundles         kernelbundle.InstallationStore
 	workforceBundleActor     string
 	workforceBundleTrust     kernelbundle.TrustPolicy
-}
-
-// SetWorkforceCredentialBindings supplies the secret-free local or host Vault
-// choices that Composer may place into a reviewed workforce. Values never
-// cross this API; workers resolve only the selected opaque reference.
-func (s *Server) SetWorkforceCredentialBindings(choices []capability.CredentialBindingChoice) {
-	s.authoringCredentials = make([]capability.CredentialBindingChoice, len(choices))
-	for index := range choices {
-		s.authoringCredentials[index] = choices[index]
-		s.authoringCredentials[index].BindingKeys = append([]string(nil), choices[index].BindingKeys...)
-	}
-}
-
-// SetWorkforceSkillSearchProvider enables verified, paginated Skill discovery
-// during authoring. The provider remains the authority for current catalog
-// identity and readiness.
-func (s *Server) SetWorkforceSkillSearchProvider(provider authoring.SkillSearchProvider) {
-	s.authoringSkillSearch = provider
 }
 
 // SetClawHubLifecycle enables the canonical registry/install engine. Mutation
@@ -155,51 +125,6 @@ func (s *Server) SetArtifactContentResolver(resolver runtime.ArtifactContentReso
 	s.artifactResolver = resolver
 }
 
-// SetWorkforceAuthoringCompiler enables non-activating prompt compilation.
-func (s *Server) SetWorkforceAuthoringCompiler(compiler *authoring.Compiler) {
-	s.authoring = compiler
-	s.authoringChanges = nil
-	s.authoringRuns = nil
-	if store, ok := s.store.(authoring.ChangeSetStore); ok && compiler != nil {
-		s.authoringChanges, _ = authoring.NewChangeSetService(compiler, store)
-	}
-	if store, ok := s.store.(runtime.WorkforceAuthoringRunStore); ok && compiler != nil {
-		s.authoringRuns, _ = runtime.NewWorkforceAuthoringRunService(compiler, store)
-	}
-}
-
-// StartWorkforceAuthoringWorker hosts durable proposal generation for one
-// explicit scope. Standalone OpenSeal deliberately defaults to local/default;
-// multi-tenant scheduling belongs to an embedding host.
-func (s *Server) StartWorkforceAuthoringWorker(ctx context.Context, scope runtime.Scope, workerID string) error {
-	s.authoringMu.Lock()
-	defer s.authoringMu.Unlock()
-	if s.authoringWorker != nil {
-		return fmt.Errorf("workforce authoring worker is already started")
-	}
-	if s.authoringRuns == nil {
-		return fmt.Errorf("workforce authoring durable store is not configured")
-	}
-	worker, err := runtime.NewWorkforceAuthoringWorker(s.authoringRuns, s.logger, runtime.WorkforceAuthoringWorkerConfig{
-		Scope: scope, WorkerID: workerID, LeaseDuration: 12 * time.Minute, GenerationTimeout: 10 * time.Minute,
-	})
-	if err != nil {
-		return err
-	}
-	if err := worker.Start(ctx); err != nil {
-		return err
-	}
-	s.authoringScope, s.authoringWorker = scope, worker
-	return nil
-}
-
-// SetWorkforceLifecycleAuthorizer enables governed evaluation, approval, and
-// Apply operations. With no authorizer these mutations remain unavailable;
-// OpenSeal never manufactures a local approver or policy evaluator.
-func (s *Server) SetWorkforceLifecycleAuthorizer(authorizer WorkforceLifecycleAuthorizer) {
-	s.workforceAuthority = authorizer
-}
-
 // SetActionApprovalAuthorizer enables resolution of durable action approval
 // checkpoints. Read-only approval inspection remains available without it.
 func (s *Server) SetActionApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) {
@@ -258,13 +183,6 @@ func (s *Server) Serve(listener net.Listener) error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.authoringMu.Lock()
-	worker := s.authoringWorker
-	s.authoringWorker = nil
-	s.authoringMu.Unlock()
-	if worker != nil {
-		worker.Stop()
-	}
 	if s.httpServer != nil {
 		return s.httpServer.Shutdown(ctx)
 	}

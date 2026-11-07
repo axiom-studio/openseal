@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -21,17 +20,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/v1/workforce-bundles/installation-preview", s.handlePreviewWorkforceBundleInstallation)
 	s.mux.HandleFunc("POST /api/v1/workforce-bundles/upgrade-plan", s.handlePlanWorkforceBundleUpgrade)
 	s.mux.HandleFunc("POST /api/v1/workforce-bundles/install", s.handleInstallWorkforceBundle)
-	s.mux.HandleFunc("POST /api/v1/authoring/workforce/compile", s.handleCompileWorkforce)
-	s.mux.HandleFunc("GET /api/v1/authoring/workforce/skills", s.handleSearchWorkforceSkills)
-	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets", s.handleCreateWorkforceChangeSet)
-	s.mux.HandleFunc("GET /api/v1/authoring/workforce/change-sets/{id}", s.handleGetWorkforceChangeSet)
-	s.mux.HandleFunc("PATCH /api/v1/authoring/workforce/change-sets/{id}/placement", s.handleUpdateWorkforceChangeSetPlacement)
-	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/retry", s.handleRetryWorkforceChangeSet)
-	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/refinements", s.handleAnswerWorkforceChangeSetRefinement)
-	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/evaluations", s.handleEvaluateWorkforceChangeSet)
-	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/approvals", s.handleApproveWorkforceChangeSet)
-	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/activation", s.handlePrepareWorkforceChangeSetActivation)
-	s.mux.HandleFunc("POST /api/v1/authoring/workforce/change-sets/{id}/apply", s.handleApplyWorkforceChangeSet)
 	s.mux.HandleFunc("POST /api/v1/agent-builder/conversations", s.handleStartAgentBuilderConversation)
 	s.mux.HandleFunc("GET /api/v1/agent-builder/drafts", s.handleListAgentBuilderDrafts)
 	s.mux.HandleFunc("POST /api/v1/objectives", s.handleCreateObjective)
@@ -246,22 +234,6 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 			}
 			capabilities = append(capabilities, bindings)
 		}
-	}
-	if s.authoring != nil || s.authoringSkillSearch != nil {
-		workforceCapability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{
-			ChangeSets:  s.authoringRuns != nil && s.authoringWorker != nil,
-			SkillSearch: s.authoringSkillSearch != nil,
-		})
-		if s.authoringChanges != nil {
-			s.composeWorkforceLifecycleCapability(r, &workforceCapability)
-		}
-		if len(s.authoringCredentials) > 0 {
-			if workforceCapability.Context == nil {
-				workforceCapability.Context = &kernelapi.CapabilityContext{}
-			}
-			workforceCapability.Context.CredentialBindings = append([]capability.CredentialBindingChoice(nil), s.authoringCredentials...)
-		}
-		capabilities = append(capabilities, workforceCapability)
 	}
 	if scope, ok := s.agentBuilderCapabilityScope(r); ok && s.agentBuilderAvailable(r.Context(), scope) {
 		capabilities = append(capabilities, kernelapi.AgentBuilderCapability(runtime.AgentBuilderDeploymentID))

@@ -9,7 +9,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/team"
-	"github.com/axiom-studio/openseal/pkg/workforce"
 )
 
 type participationCatalog struct {
@@ -116,9 +115,6 @@ func TestDesktopParticipationRejectsBrokenAuthority(t *testing.T) {
 		"wrong-team-id": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) { c.deployment.ID = "other" },
 		"foreign-team": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
 			c.deployment.Scope.ID = "other"
-		},
-		"team-activation": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
-			c.deployment.Activation = &workforce.ActivationContinuation{ChangeSetID: "pending"}
 		},
 		"team-version": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) { c.definition.Version = "2" },
 		"unknown-role": func(c *participationCatalog, _ *runtime.ConversationParticipantQuery) {
