@@ -31,7 +31,33 @@ const (
 	ActionCallStatusCanceled        ActionCallStatus = "canceled"
 	ActionCallStatusCompensating    ActionCallStatus = "compensating"
 	ActionCallStatusCompensated     ActionCallStatus = "compensated"
+	// ActionCallStatusRefused is the terminal status of a governed call the
+	// kernel refused without running it, such as a repeat of an identical
+	// call earlier in the Run. It is never claimable and never protects an
+	// external operation.
+	ActionCallStatusRefused ActionCallStatus = "refused"
 )
+
+// ActionOriginLoop marks a governed call the kernel's run loop proposed for
+// one tool call of a step (TurnID); the loop executes it inline.
+const ActionOriginLoop ActionOrigin = "loop"
+
+// ActionExecutionLoop marks a call the run loop that proposed it executes
+// inline in the claiming replica. Action workers never dispatch it; they only
+// close it once its Run ended.
+const ActionExecutionLoop ActionExecution = "loop"
+
+const (
+	// LoopActionLease is the call lease the loop holds while it executes a
+	// call inline; the loop renews it every LoopActionLease/3.
+	LoopActionLease = time.Minute
+	// GovernedMaxConcurrentReads bounds concurrent inline reads of one step.
+	GovernedMaxConcurrentReads = 4
+)
+
+// ActionErrorCodeInterrupted is the ErrorCode of a write recovered from a
+// lost execution: its outcome is unknown, so it fails without redispatch.
+const ActionErrorCodeInterrupted = "interrupted"
 
 // ActionFailurePhase is trusted execution provenance retained in the durable
 // ActionCall payload. Missing legacy provenance never proves a mutation safe.
@@ -53,17 +79,18 @@ type ActionCall struct {
 	SkillID         string `json:"skillId"`
 	SkillVersion    string `json:"skillVersion"`
 	Action          string `json:"action"`
-	// Origin is empty for an action the model requested at the end of its
-	// Turn. ActionOriginVM marks a nested call made during the Turn by code in
-	// the chat's VM; such a call never changes its Run's lifecycle.
+	// Origin is ActionOriginLoop for a governed tool call of a run loop step
+	// and ActionOriginVM for a nested call made during a step by code in the
+	// chat's VM. Neither changes its Run's lifecycle by itself.
 	Origin ActionOrigin `json:"origin,omitempty"`
 	// OriginRef is the host's grouping reference for a nested call, such as
 	// the workspace command it ran under.
 	OriginRef string `json:"originRef,omitempty"`
 	// Execution is empty for a call an action worker dispatches to its
 	// Skill. ActionExecutionHost marks a nested call the host that proposed it
-	// performs itself under a credential lease (see ProposeNestedHost); action
-	// workers never dispatch it.
+	// performs itself under a credential lease (see ProposeNestedHost);
+	// ActionExecutionLoop marks a loop call its run loop executes inline.
+	// Action workers dispatch neither.
 	Execution  ActionExecution  `json:"execution,omitempty"`
 	Status     ActionCallStatus `json:"status"`
 	Risk       skill.RiskLevel  `json:"risk"`
@@ -125,17 +152,20 @@ func (c *ActionCall) Validate() error {
 	if !validActionCallStatus(c.Status) || c.Revision < 1 || c.MaxAttempts < 1 || c.Attempt < 0 {
 		return errors.New("action call lifecycle metadata is invalid")
 	}
-	if c.Origin != "" && c.Origin != ActionOriginVM {
+	switch c.Origin {
+	case ActionOriginVM:
+		if strings.TrimSpace(c.TurnID) == "" {
+			return errors.New("a nested action call requires its step")
+		}
+		if c.Execution != "" && c.Execution != ActionExecutionHost {
+			return errors.New("a nested action call is performed by an action worker or its host")
+		}
+	case ActionOriginLoop:
+		if strings.TrimSpace(c.TurnID) == "" || c.Execution != ActionExecutionLoop || c.OriginRef != "" {
+			return errors.New("a loop action call requires its step, loop execution and no origin reference")
+		}
+	default:
 		return errors.New("action origin is invalid")
-	}
-	if c.Origin == ActionOriginVM && strings.TrimSpace(c.TurnID) == "" {
-		return errors.New("a nested action call requires its Turn")
-	}
-	if c.Origin == "" && c.OriginRef != "" {
-		return errors.New("only a nested action call has an origin reference")
-	}
-	if c.Execution != "" && (c.Execution != ActionExecutionHost || c.Origin != ActionOriginVM) {
-		return errors.New("only a nested action call may be performed by its host")
 	}
 	if c.FailurePhase != "" && (c.Status != ActionCallStatusFailed || c.FailurePhase != ActionFailureBeforeDispatch && c.FailurePhase != ActionFailureAfterDispatch) {
 		return errors.New("action failure phase is invalid")
@@ -151,7 +181,9 @@ func (c *ActionCall) Validate() error {
 			return errors.New("external operation digest is invalid")
 		}
 	}
-	if c.DuplicateOfActionCallID != "" && c.ExternalOperationDigest == "" {
+	// A refused call names the earlier identical call of its Run; any other
+	// duplicate is a cross-Run external operation receipt.
+	if c.DuplicateOfActionCallID != "" && c.ExternalOperationDigest == "" && c.Status != ActionCallStatusRefused {
 		return errors.New("duplicate action calls require an external operation digest")
 	}
 	if c.PreparedRuntime != nil {
@@ -309,29 +341,31 @@ type ApprovalConversationContext struct {
 }
 
 type ApprovalCheckpoint struct {
-	ConversationContext    *ApprovalConversationContext `json:"conversationContext,omitempty"`
-	ID                     string                       `json:"id"`
-	Scope                  Scope                        `json:"scope"`
-	RunID                  string                       `json:"runId"`
-	ActionCallID           string                       `json:"actionCallId"`
-	Status                 ApprovalStatus               `json:"status"`
-	Risk                   skill.RiskLevel              `json:"risk"`
-	Summary                string                       `json:"summary"`
-	PolicyReason           string                       `json:"policyReason,omitempty"`
-	ProposedAction         map[string]interface{}       `json:"proposedAction"`
-	EvidenceRefs           []string                     `json:"evidenceRefs,omitempty"`
-	EligibleApprovers      []ApprovalPrincipal          `json:"eligibleApprovers"`
-	Destinations           []ApprovalDestination        `json:"destinations,omitempty"`
-	ContinuationCheckpoint map[string]interface{}       `json:"continuationCheckpoint,omitempty"`
-	ExpiresAt              time.Time                    `json:"expiresAt"`
-	TimeoutDecision        ApprovalTimeoutDecision      `json:"timeoutDecision,omitempty"`
-	DecisionBy             *ApprovalPrincipal           `json:"decisionBy,omitempty"`
-	DecisionID             string                       `json:"decisionId,omitempty"`
-	DecisionReason         string                       `json:"decisionReason,omitempty"`
-	Revision               int64                        `json:"revision"`
-	CreatedAt              time.Time                    `json:"createdAt"`
-	UpdatedAt              time.Time                    `json:"updatedAt"`
-	DecidedAt              *time.Time                   `json:"decidedAt,omitempty"`
+	ConversationContext *ApprovalConversationContext `json:"conversationContext,omitempty"`
+	ID                  string                       `json:"id"`
+	Scope               Scope                        `json:"scope"`
+	RunID               string                       `json:"runId"`
+	ActionCallID        string                       `json:"actionCallId"`
+	Status              ApprovalStatus               `json:"status"`
+	Risk                skill.RiskLevel              `json:"risk"`
+	Summary             string                       `json:"summary"`
+	PolicyReason        string                       `json:"policyReason,omitempty"`
+	ProposedAction      map[string]interface{}       `json:"proposedAction"`
+	EvidenceRefs        []string                     `json:"evidenceRefs,omitempty"`
+	EligibleApprovers   []ApprovalPrincipal          `json:"eligibleApprovers"`
+	Destinations        []ApprovalDestination        `json:"destinations,omitempty"`
+	ExpiresAt           time.Time                    `json:"expiresAt"`
+	TimeoutDecision     ApprovalTimeoutDecision      `json:"timeoutDecision,omitempty"`
+	DecisionBy          *ApprovalPrincipal           `json:"decisionBy,omitempty"`
+	DecisionID          string                       `json:"decisionId,omitempty"`
+	DecisionReason      string                       `json:"decisionReason,omitempty"`
+	Revision            int64                        `json:"revision"`
+	CreatedAt           time.Time                    `json:"createdAt"`
+	UpdatedAt           time.Time                    `json:"updatedAt"`
+	DecidedAt           *time.Time                   `json:"decidedAt,omitempty"`
+	// SupersededByMessageID is the newer message that superseded this
+	// approval, set when it is resolved as superseded.
+	SupersededByMessageID string `json:"supersededByMessageId,omitempty"`
 }
 
 func (a *ApprovalCheckpoint) Validate() error {
@@ -441,12 +475,15 @@ type ActionClaim struct {
 	WorkerID      string
 	Now           time.Time
 	LeaseDuration time.Duration
-	// HostActionID claims exactly this ready host-performed call for the
-	// host that proposed it (see ClaimNestedHostAction). Without it a claim
-	// takes the next call an action worker may run: never a host call that
-	// became ready within NestedHostActionReadyGrace, which its host claims
-	// itself, so a worker only recovers host calls their host abandoned.
-	HostActionID string
+	// OwnActionID claims exactly this host- or loop-executed call for the
+	// host or loop that proposed it (see ClaimNestedHostAction and the run
+	// loop's inline execution). It may take a ready call or a running call
+	// whose lease expired; callers that need a ready call check that first.
+	// Without it a claim takes the next call an action worker may run: never
+	// a host call that became ready within NestedHostActionReadyGrace, which
+	// its host claims itself, and never a loop call of a Run that has not
+	// ended, which only its loop runs.
+	OwnActionID string
 }
 
 func (c ActionClaim) Validate() error {
@@ -460,12 +497,21 @@ func (c ActionClaim) Validate() error {
 }
 
 // claimSelects reports whether a claim may take call, apart from its status,
-// availability, Run and maintenance, which every store checks itself.
-func (c ActionClaim) claimSelects(call *ActionCall) bool {
-	if c.HostActionID != "" {
-		return call.ID == c.HostActionID && call.Execution == ActionExecutionHost && call.Status == ActionCallStatusReady
+// availability, paused dependency and maintenance, which every store checks.
+// run is the call's Run row (nil when missing).
+func (c ActionClaim) claimSelects(call *ActionCall, run *AgentRun) bool {
+	if c.OwnActionID != "" {
+		return call.ID == c.OwnActionID && (call.Execution == ActionExecutionHost || call.Execution == ActionExecutionLoop)
 	}
-	return call.Execution != ActionExecutionHost || call.Status != ActionCallStatusReady || !call.AvailableAt.After(c.hostReadyCutoff())
+	switch call.Execution {
+	case ActionExecutionHost:
+		return call.Status != ActionCallStatusReady || !call.AvailableAt.After(c.hostReadyCutoff())
+	case ActionExecutionLoop:
+		// Only the loop runs its calls. A worker takes one only after its Run
+		// ended, to close it without dispatch.
+		return run == nil || isTerminalAgentRunStatus(run.Status)
+	}
+	return true
 }
 
 // hostReadyCutoff is the latest time a ready host call became available for
@@ -497,6 +543,9 @@ type ActionStore interface {
 	GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error)
 	ListActionCalls(ctx context.Context, filter ActionFilter) ([]*ActionCall, error)
 	GetActionCallByExternalOperation(ctx context.Context, scope Scope, digest string) (*ActionCall, error)
+	// GetActionCallByIdempotencyKey returns the Run's call with this
+	// idempotency key, or ErrActionNotFound.
+	GetActionCallByIdempotencyKey(ctx context.Context, scope Scope, runID, key string) (*ActionCall, error)
 	GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error)
 	ListApprovals(ctx context.Context, filter ApprovalFilter) ([]*ApprovalCheckpoint, error)
 	ResolveApproval(ctx context.Context, resolution ApprovalResolutionRecord) (*ApprovalResolutionResult, error)
@@ -509,7 +558,7 @@ func validActionCallStatus(status ActionCallStatus) bool {
 	switch status {
 	case ActionCallStatusReady, ActionCallStatusWaitingApproval, ActionCallStatusDenied,
 		ActionCallStatusRunning, ActionCallStatusSucceeded, ActionCallStatusFailed,
-		ActionCallStatusCanceled, ActionCallStatusCompensating, ActionCallStatusCompensated:
+		ActionCallStatusCanceled, ActionCallStatusCompensating, ActionCallStatusCompensated, ActionCallStatusRefused:
 		return true
 	default:
 		return false

@@ -173,7 +173,7 @@ func (c *ActionCoordinator) AcquireNestedHostAction(ctx context.Context, scope S
 	now := c.now().UTC()
 	switch {
 	case call.Status == ActionCallStatusReady:
-		claimed, err := worker.store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: authority.workerID, Now: now, LeaseDuration: NestedHostActionLease, HostActionID: call.ID})
+		claimed, err := worker.store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: authority.workerID, Now: now, LeaseDuration: NestedHostActionLease, OwnActionID: call.ID})
 		if err != nil {
 			return nil, err
 		}
@@ -247,7 +247,7 @@ func (c *ActionCoordinator) FinishNestedHostAction(ctx context.Context, outcome 
 	worker.hostSummary = strings.TrimSpace(outcome.Summary)
 	now := c.now().UTC()
 	if call.Status == ActionCallStatusReady {
-		claimed, err := worker.store.ClaimNextAction(ctx, ActionClaim{Scope: outcome.Scope, WorkerID: authority.workerID, Now: now, LeaseDuration: time.Minute, HostActionID: call.ID})
+		claimed, err := worker.store.ClaimNextAction(ctx, ActionClaim{Scope: outcome.Scope, WorkerID: authority.workerID, Now: now, LeaseDuration: time.Minute, OwnActionID: call.ID})
 		if err != nil {
 			return nil, err
 		}

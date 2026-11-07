@@ -474,8 +474,8 @@ func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req Propo
 		ID: approvalID, Scope: req.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
 		Risk: bound.Action.Risk, Summary: summary, PolicyReason: decision.Reason, ProposedAction: proposedAction,
 		EvidenceRefs: append([]string(nil), req.EvidenceRefs...), EligibleApprovers: append([]ApprovalPrincipal(nil), decision.EligibleApprovers...),
-		Destinations:           append([]ApprovalDestination(nil), decision.ApprovalDestinations...),
-		ContinuationCheckpoint: cloneMap(req.ContinuationCheckpoint), ExpiresAt: now.Add(ttl), TimeoutDecision: decision.ApprovalTimeout,
+		Destinations: append([]ApprovalDestination(nil), decision.ApprovalDestinations...),
+		ExpiresAt:    now.Add(ttl), TimeoutDecision: decision.ApprovalTimeout,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if approval.ProposedAction == nil {

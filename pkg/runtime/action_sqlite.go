@@ -200,8 +200,13 @@ func (s *SQLiteStore) CreateActionProposal(ctx context.Context, proposal ActionP
 		if err := proposal.Nested.admit(call, state); err != nil {
 			return nil, err
 		}
-	} else if currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1 {
-		return nil, ErrRevisionConflict
+	} else {
+		if call.Origin == ActionOriginLoop && AgentRunStatus(currentStatus) != AgentRunStatusRunning {
+			return nil, ErrLeaseLost
+		}
+		if proposal.Run != nil && (currentRevision != proposal.ExpectedRunRevision || proposal.Run.Revision != proposal.ExpectedRunRevision+1) {
+			return nil, ErrRevisionConflict
+		}
 	}
 	if proposal.Lease != nil && (currentLeaseOwner != proposal.Lease.WorkerID || !currentLeaseExpiry.Valid || !currentLeaseExpiry.Time.After(proposal.Lease.Now)) {
 		return nil, ErrLeaseLost
@@ -327,6 +332,16 @@ func (s *SQLiteStore) GetActionCallByExternalOperation(ctx context.Context, scop
 	}
 	return getActionCallFrom(ctx, s.db, scope,
 		`external_operation_digest = ? AND status IN ('ready','waiting_for_approval','running','succeeded','compensating','compensated')`, digest)
+}
+
+func (s *SQLiteStore) GetActionCallByIdempotencyKey(ctx context.Context, scope Scope, runID, key string) (*ActionCall, error) {
+	if err := scope.Validate(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(runID) == "" || key == "" {
+		return nil, ErrActionNotFound
+	}
+	return getActionCallFrom(ctx, s.db, scope, `run_id = ? AND idempotency_key = ?`, runID, key)
 }
 
 func (s *SQLiteStore) GetApproval(ctx context.Context, scope Scope, approvalID string) (*ApprovalCheckpoint, error) {
@@ -583,12 +598,16 @@ func (s *SQLiteStore) ClaimNextAction(ctx context.Context, claim ActionClaim) (*
 			AND json_extract(r.payload, '$.pausedWakeCondition.reference') = c.id)
 		AND NOT EXISTS (SELECT 1 FROM skill_runtime_maintenance m WHERE m.scope_kind = c.scope_kind AND m.scope_id = c.scope_id
 			AND m.skill_id = c.skill_id AND m.active = 1)
-		AND (CASE WHEN ? <> '' THEN c.id = ? AND c.status = ? AND json_extract(c.payload, '$.execution') = ?
-			ELSE NOT (COALESCE(json_extract(c.payload, '$.execution'), '') = ? AND c.status = ? AND c.available_at > ?) END)
+		AND (CASE WHEN ? <> '' THEN c.id = ? AND json_extract(c.payload, '$.execution') IN (?, ?)
+			ELSE NOT (COALESCE(json_extract(c.payload, '$.execution'), '') = ? AND c.status = ? AND c.available_at > ?)
+				AND NOT (COALESCE(json_extract(c.payload, '$.execution'), '') = ? AND EXISTS (SELECT 1 FROM agent_runs r2
+					WHERE r2.scope_kind = c.scope_kind AND r2.scope_id = c.scope_id AND r2.id = c.run_id
+					AND r2.status NOT IN ('completed', 'failed', 'canceled'))) END)
 		ORDER BY c.available_at, c.created_at, c.id LIMIT 1`, claim.Scope.Kind, claim.Scope.ID,
 		ActionCallStatusReady, claim.Now, ActionCallStatusRunning, claim.Now,
-		claim.HostActionID, claim.HostActionID, ActionCallStatusReady, string(ActionExecutionHost),
-		string(ActionExecutionHost), ActionCallStatusReady, claim.hostReadyCutoff()).Scan(&selectedPayload)
+		claim.OwnActionID, claim.OwnActionID, string(ActionExecutionHost), string(ActionExecutionLoop),
+		string(ActionExecutionHost), ActionCallStatusReady, claim.hostReadyCutoff(),
+		string(ActionExecutionLoop)).Scan(&selectedPayload)
 	if errors.Is(err, sql.ErrNoRows) {
 		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 			return nil, err

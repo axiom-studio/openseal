@@ -248,8 +248,7 @@ func checkpointApprovedActionFailure(checkpoint map[string]interface{}, approval
 	result[approvalRecoveryCheckpointKey] = map[string]interface{}{
 		"approvalId": approval.ID, "approvalStatus": approval.Status,
 		"actionCallId": call.ID, "actionStatus": call.Status, "error": call.Error,
-		"proposedAction":         deepCloneCheckpointMap(approval.ProposedAction),
-		"continuationCheckpoint": hostedTurnTextCheckpoint(approval.ContinuationCheckpoint),
+		"proposedAction": deepCloneCheckpointMap(approval.ProposedAction),
 	}
 	return result
 }

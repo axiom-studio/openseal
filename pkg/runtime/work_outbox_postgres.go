@@ -387,7 +387,8 @@ func scanDeadline(row *sql.Row) (*time.Time, error) {
 }
 
 // NextActionDeadline returns the earliest future retry or lease expiry among
-// the scope's claimable ActionCalls. Work that is claimable now is excluded:
+// the scope's claimable ActionCalls. Loop calls are never claimable by time,
+// so they are excluded. Work that is claimable now is excluded too:
 // claims find it, and anything gated on another row is signalled when that
 // row changes.
 func (s *PostgresStore) NextActionDeadline(ctx context.Context, scope Scope, now time.Time) (*time.Time, error) {
@@ -395,8 +396,10 @@ func (s *PostgresStore) NextActionDeadline(ctx context.Context, scope Scope, now
 		return nil, err
 	}
 	return scanDeadline(s.db.QueryRowContext(ctx, `SELECT LEAST(
-		(SELECT MIN(available_at) FROM `+s.table("action_calls")+` WHERE scope_kind=$1 AND scope_id=$2 AND status=$3 AND available_at > $5),
-		(SELECT MIN(lease_expires_at) FROM `+s.table("action_calls")+` WHERE scope_kind=$1 AND scope_id=$2 AND status=$4 AND lease_expires_at > $5))`,
+		(SELECT MIN(available_at) FROM `+s.table("action_calls")+` WHERE scope_kind=$1 AND scope_id=$2 AND status=$3 AND available_at > $5
+			AND COALESCE(payload->>'execution','') <> 'loop'),
+		(SELECT MIN(lease_expires_at) FROM `+s.table("action_calls")+` WHERE scope_kind=$1 AND scope_id=$2 AND status=$4 AND lease_expires_at > $5
+			AND COALESCE(payload->>'execution','') <> 'loop'))`,
 		scope.Kind, scope.ID, ActionCallStatusReady, ActionCallStatusRunning, now.UTC()))
 }
 
