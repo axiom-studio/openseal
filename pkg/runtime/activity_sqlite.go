@@ -205,7 +205,9 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 				WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
 				run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision).Scan(&owner, &expiry, &actingUser)
 			if err == sql.ErrNoRows {
-				return ErrLeaseLost
+				// The row moved past expectedRevision (a concurrent steering
+				// delivery, say): the caller reloads and re-checks its lease.
+				return ErrRevisionConflict
 			}
 			if err != nil {
 				return err

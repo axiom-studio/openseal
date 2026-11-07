@@ -311,8 +311,10 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 	crash := newCrashStore(t, store)
 	f := &loopFixture{
 		t: t, ctx: context.Background(), raw: store, store: crash, crashes: crash,
-		scope:    Scope{Kind: "tenant", ID: "loop"},
-		clock:    newFakeClock(time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC)),
+		scope: Scope{Kind: "tenant", ID: "loop"},
+		// The stores check a chat reply's Run lease against the wall clock
+		// (replyRunGuardHolds), so the fixture clock starts at the wall time.
+		clock:    newFakeClock(time.Now().UTC().Truncate(time.Millisecond)),
 		model:    newScriptedModel(t, config.rules...),
 		tools:    newFakeHostTools(t),
 		dispatch: newFakeDispatcher(t),
@@ -360,6 +362,7 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 	}
 	scheduler.conversations.now = f.clock.Now
 	scheduler.approvals.now = f.clock.Now
+	scheduler.runs.now = f.clock.Now
 	f.scheduler = scheduler
 	runner, err := NewConversationRunTurnRunner(chats, f.coordinator(), ConversationRunTurnRunnerConfig{AttachmentContent: &answerVisualContent{}})
 	if err != nil {
