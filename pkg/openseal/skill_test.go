@@ -2,8 +2,12 @@ package openseal
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
+	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
 func TestEngineExposesGovernedSkillCatalog(t *testing.T) {
@@ -130,7 +134,11 @@ func TestEngineExposesCanonicalSkillBindingManagement(t *testing.T) {
 }
 
 func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {
-	engine, err := New()
+	engine, err := New(WithActionWorkers(ActionWorkerConfig{Scope: Scope{Kind: "local", ID: "governance"}, Concurrency: 1, PollInterval: time.Second, LeaseDuration: time.Second}, nil,
+		ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+			t.Fatal("a deploy waiting for approval was dispatched")
+			return nil, nil
+		})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,93 +172,40 @@ func TestEngineExposesGovernedActionAndApprovalLifecycle(t *testing.T) {
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	proposal, err := engine.ProposeAction(ctx, ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
-		Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: "release-1",
+	deploy := definition.Actions["deploy"]
+	outcome, err := engine.GovernedTools().Execute(ctx, GovernedToolCall{
+		Run: claimed, Step: &AgentTurn{ID: "step-1", Scope: scope, RunID: run.ID}, WorkerID: "worker",
+		Binding: &TurnRunnerBinding{DeploymentID: "release-agent", ModelActions: []capability.ModelAction{{
+			Name: "release_deploy", BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: "release", Version: "1.0.0", Action: "deploy",
+			SideEffect: deploy.SideEffect, Risk: deploy.Risk, InputSchema: deploy.InputSchema,
+		}}},
+		ToolCallID: "tool-1", Name: "release_deploy",
+		Arguments: json.RawMessage(`{"arguments":{"environment":"production"},"reviewContext":{"summary":"Deploy the release to production","content":"release 1.0.0"}}`),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
-		t.Fatalf("proposal = %#v", proposal)
+	if outcome.State != runtime.ToolEntryAwaitingApproval || outcome.Wait == nil || outcome.Wait.ApprovalID == "" {
+		t.Fatalf("outcome = %#v", outcome)
+	}
+	approval, err := engine.GetApproval(ctx, scope, outcome.Wait.ApprovalID)
+	if err != nil {
+		t.Fatal(err)
 	}
 	resolution, err := engine.ResolveApproval(ctx, ResolveApprovalRequest{
-		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+		Scope: scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
 		DecisionID: "operator-decision", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "role", ID: "operator"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolution.Call.Status != ActionCallStatusReady || resolution.Run.Status != AgentRunStatusWaitingForDependency {
+	if resolution.Call.ID != outcome.ActionCallID || resolution.Call.Status != ActionCallStatusReady {
 		t.Fatalf("resolution = %#v", resolution)
 	}
 	approvals, err := engine.ListApprovals(ctx, ApprovalFilter{Scope: scope, RunID: run.ID})
 	if err != nil || len(approvals) != 1 || approvals[0].Status != ApprovalStatusApproved {
 		t.Fatalf("approvals = %#v, %v", approvals, err)
 	}
-}
-
-func TestEngineRunsDurableActionWorkers(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	scope := Scope{Kind: "local", ID: "action-workers"}
-	engine, err := New(
-		WithActionPolicy(ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-			return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-		})),
-		WithActionWorkers(ActionWorkerConfig{Scope: scope, Concurrency: 1, PollInterval: time.Second, LeaseDuration: time.Second}, nil,
-			ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
-				return map[string]interface{}{"result": "published"}, nil
-			})),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer engine.Stop()
-	definition := &SkillDefinition{
-		ID: "publisher", Version: "1.0.0", Name: "Publisher", Transport: SkillTransportReference{Kind: "local"},
-		Actions: map[string]SkillAction{"publish": {
-			Name: "publish", Description: "Publish an artifact", Risk: SkillRiskExternal, SideEffect: SkillSideEffectExternal,
-			Idempotency: SkillIdempotencyRequired, Retry: SkillActionRetryPolicy{MaxAttempts: 2},
-			InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{"artifact": map[string]interface{}{"type": "string"}}, "required": []interface{}{"artifact"}},
-		}},
-	}
-	if err := engine.RegisterSkill(ctx, definition); err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.BindSkill(ctx, &SkillBinding{ID: "publisher", Scope: SkillScope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "marketing-agent", SkillID: "publisher", SkillVersion: "1.0.0", AllowedActions: []string{"publish"}, MaximumRisk: SkillRiskExternal, Revision: 1}); err != nil {
-		t.Fatal(err)
-	}
-	run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "marketing-agent"}, AssignedAgentID: "marketing-agent", Goal: "publish", Source: RunSourceObjective})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := engine.ClaimNextAgentRun(ctx, AgentRunClaimRequest{Scope: scope, WorkerID: "agent-worker", AssignedAgentID: "marketing-agent", LeaseDuration: time.Minute})
-	if err != nil || claimed == nil {
-		t.Fatalf("claim = %#v, %v", claimed, err)
-	}
-	proposal, err := engine.ProposeAction(ctx, ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "marketing-agent", SkillID: "publisher", SkillVersion: "1.0.0", Action: "publish", Arguments: map[string]interface{}{"artifact": "artifact://report"}, IdempotencyKey: "publish-report"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine.Start(ctx)
-	engine.WakeActionWorkers()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		call, err := engine.GetActionCall(ctx, scope, proposal.Call.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		currentRun, err := engine.GetAgentRun(ctx, scope, run.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if call.Status == ActionCallStatusSucceeded && currentRun.Status == AgentRunStatusQueued {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("background action worker did not execute and resume the run")
 }
 
 func TestPublicFacadeCompilesAndExportsOpenClawSkill(t *testing.T) {

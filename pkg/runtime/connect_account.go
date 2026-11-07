@@ -42,6 +42,12 @@ func (e *connectAccountParked) Error() string { return connectAccountRequiredPre
 // exist.
 type credentialAvailabilityBox struct{ checker CredentialAvailabilityChecker }
 
+// SetCredentialAvailabilityChecker installs the host's pre-dispatch
+// credential check on a worker used outside a pool (the inline loop worker).
+func (w *ActionWorker) SetCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
+	w.setCredentialAvailabilityChecker(checker)
+}
+
 func (w *ActionWorker) setCredentialAvailabilityChecker(checker CredentialAvailabilityChecker) {
 	if w != nil {
 		w.availability.Store(&credentialAvailabilityBox{checker: checker})

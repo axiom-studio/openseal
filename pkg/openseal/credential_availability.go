@@ -17,4 +17,7 @@ func (e *Engine) SetCredentialAvailabilityChecker(c CredentialAvailabilityChecke
 	for _, supervisor := range e.actionSupervisors {
 		supervisor.SetCredentialAvailabilityChecker(c)
 	}
+	if e.governedWorker != nil {
+		e.governedWorker.SetCredentialAvailabilityChecker(c)
+	}
 }

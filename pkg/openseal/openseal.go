@@ -2616,6 +2616,8 @@ type Engine struct {
 	actionPools                   []*runtime.ActionWorkerPool
 	actionSupervisorSpecs         []actionWorkerSupervisorSpec
 	actionSupervisors             []*runtime.ActionWorkerSupervisor
+	governedWorker                *runtime.ActionWorker
+	governedTools                 *runtime.GovernedToolExecutor
 	credentialAvailability        runtime.CredentialAvailabilityChecker
 	skills                        *skill.Catalog
 	skillReferenceUpgrades        *runtime.SkillReferenceUpgradeService
@@ -3987,7 +3989,7 @@ func (e *Engine) rebuildActionWorkerPools() error {
 		pool.SetCredentialAvailabilityChecker(e.credentialAvailability)
 		e.actionPools = append(e.actionPools, pool)
 	}
-	return nil
+	return e.buildGovernedToolExecutor()
 }
 
 func (e *Engine) rebuildActionWorkerSupervisors() error {
@@ -5997,10 +5999,6 @@ func (e *Engine) ValidateSkillInput(ctx context.Context, action *skill.BoundActi
 
 func (e *Engine) ValidateSkillOutput(ctx context.Context, action *skill.BoundAction, output map[string]interface{}) error {
 	return e.skills.ValidateOutput(ctx, action, output)
-}
-
-func (e *Engine) ProposeAction(ctx context.Context, req runtime.ProposeActionRequest) (*runtime.ActionProposalResult, error) {
-	return e.actions.Propose(ctx, req)
 }
 
 func (e *Engine) ResolveApproval(ctx context.Context, req runtime.ResolveApprovalRequest) (*runtime.ApprovalResolutionResult, error) {
