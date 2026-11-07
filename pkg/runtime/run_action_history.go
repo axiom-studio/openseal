@@ -20,7 +20,29 @@ var runActionHistoryStatuses = []ActionCallStatus{
 	ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied, ActionCallStatusCanceled, ActionCallStatusRefused,
 }
 
-// newRunActionHistory memoizes one ActionStore.ListActionCalls{Scope, RunID,
+// runActionHistoryPage is the largest page every ActionStore honors.
+const runActionHistoryPage = 500
+
+// listAllRunActionHistory pages through the Run's terminal calls, oldest
+// first, until a short page; Runs are unbounded, so one page is not enough.
+func listAllRunActionHistory(ctx context.Context, store ActionStore, scope Scope, runID string) ([]*ActionCall, error) {
+	var all []*ActionCall
+	for offset := 0; ; offset += runActionHistoryPage {
+		page, err := store.ListActionCalls(ctx, ActionFilter{
+			Scope: scope, RunID: runID, Status: runActionHistoryStatuses,
+			Limit: runActionHistoryPage, Offset: offset,
+		})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < runActionHistoryPage {
+			return all, nil
+		}
+	}
+}
+
+// newRunActionHistory memoizes the paged ActionStore.ListActionCalls{Scope, RunID,
 // Status: terminal} per Propose; VM-origin calls are filtered out.
 func newRunActionHistory(store ActionStore, scope Scope, runID string) RunActionHistory {
 	return &storeRunActionHistory{store: store, scope: scope, runID: runID}
@@ -43,7 +65,7 @@ func (h *storeRunActionHistory) Calls(ctx context.Context) ([]*ActionCall, error
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if !h.loaded {
-		listed, err := h.store.ListActionCalls(ctx, ActionFilter{Scope: h.scope, RunID: h.runID, Status: runActionHistoryStatuses})
+		listed, err := listAllRunActionHistory(ctx, h.store, h.scope, h.runID)
 		if err != nil {
 			return nil, err
 		}

@@ -417,7 +417,7 @@ func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeA
 		case errors.Is(err, ErrBudgetExhausted):
 			budgetExhausted = true
 			decision.Disposition = ActionDispositionDeny
-			decision.Reason = "run action budget is exhausted"
+			decision.Reason = actionBudgetExhaustedReason
 		case err != nil:
 			return nil, err
 		default:
@@ -456,11 +456,20 @@ func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeA
 	if err != nil {
 		return nil, err
 	}
-	if result != nil && result.Created {
-		result.BudgetExhausted = budgetExhausted
+	if result != nil {
+		if result.Created {
+			result.BudgetExhausted = budgetExhausted
+		} else if existing := result.Call; existing != nil {
+			// A replay of a budget denial must still map to the budget pause.
+			result.BudgetExhausted = existing.Status == ActionCallStatusDenied && existing.Error == actionBudgetExhaustedReason
+		}
 	}
 	return result, nil
 }
+
+// actionBudgetExhaustedReason is the denial reason of a loop call refused for
+// action budget; replays recognize the denial by it.
+const actionBudgetExhaustedReason = "run action budget is exhausted"
 
 // createNestedProposal records a nested call with the same disposition,
 // approval and activity a model proposal would get, without touching the Run.

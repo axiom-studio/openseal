@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -228,6 +229,10 @@ func TestLoopProposeBudgetExhaustedDenies(t *testing.T) {
 		if !second.BudgetExhausted || second.Call.Status != ActionCallStatusDenied || second.Call.Error != "run action budget is exhausted" ||
 			second.Event.EventType != "budget.exhausted" || second.Run != nil {
 			t.Fatalf("exhausted proposal = %#v", second)
+		}
+		replayed := f.propose(f.request("call-2"))
+		if replayed.Created || !replayed.BudgetExhausted || replayed.Call.ID != second.Call.ID {
+			t.Fatalf("replayed exhausted proposal = %#v", replayed)
 		}
 		assertLoopRunUntouched(t, store, reserved)
 	})
@@ -464,6 +469,31 @@ func TestRunActionHistoryListsTerminalNonVMCallsNewestFirst(t *testing.T) {
 	again, err := history.Calls(context.Background())
 	if err != nil || len(again) != 4 || again[0].ID != "new" || again[0].Status != ActionCallStatusFailed {
 		t.Fatalf("memoized history = %#v, %v", again, err)
+	}
+}
+
+// Stores cap one page at 500 and default to 100, oldest first; the history
+// pages until a short page so a long Run's newest calls are kept.
+func TestRunActionHistoryPagesPastStorePageLimits(t *testing.T) {
+	store := NewMemoryStore()
+	scope := Scope{Kind: "tenant", ID: "one"}
+	base := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	const total = 1020
+	for i := 0; i < total; i++ {
+		created := base.Add(time.Duration(i) * time.Second)
+		completed := created.Add(time.Millisecond)
+		id := fmt.Sprintf("call-%04d", i)
+		store.actions[portfolioKey(scope, id)] = &ActionCall{
+			ID: id, Scope: scope, RunID: "run", TurnID: "step-1", Origin: ActionOriginLoop,
+			Status: ActionCallStatusSucceeded, CreatedAt: created, UpdatedAt: completed, CompletedAt: &completed,
+		}
+	}
+	calls, err := newRunActionHistory(store, scope, "run").Calls(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != total || calls[0].ID != "call-1019" || calls[total-1].ID != "call-0000" {
+		t.Fatalf("history has %d calls, first %q", len(calls), calls[0].ID)
 	}
 }
 
