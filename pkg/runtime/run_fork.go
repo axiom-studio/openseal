@@ -157,8 +157,24 @@ type CreateRunForkRequest struct {
 	Policy                 RunDependencyPolicy
 	Branches               []RunForkBranch
 	ContinuationCheckpoint map[string]interface{}
-	Actor                  ActivityActor
-	Visibility             ActivityVisibility
+	// ChildKind is the Kind of every child; empty keeps the source rule
+	// (source.Kind, or agent work for callable entrypoints and task work).
+	// Model forks pass RunKindAgentWork (DI-16).
+	ChildKind RunKind
+	// SessionForks maps a branch ID to the source session point its
+	// same-Agent child forks from (A3). The child session, seeded with the
+	// child's brief, is created in the same transaction as the child Run.
+	// Branches without a ref (another Agent, deterministic children) get a
+	// fresh session at their first claim.
+	SessionForks map[string]*SessionForkRef
+	// ToolTransition moves the source's control tool entry to awaiting_child
+	// in the same transaction (control_fork, run_operation).
+	ToolTransition *ToolEntryTransitionRequest
+	// RequireInterventionCount refuses the create with ErrSteeringArrived
+	// unless the source still has exactly that many PendingInterventions.
+	RequireInterventionCount *int
+	Actor                    ActivityActor
+	Visibility               ActivityVisibility
 }
 
 type RunForkResult struct {
@@ -196,6 +212,18 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	}
 	if err := ValidateCredentialFreeContext(req.ContinuationCheckpoint); err != nil {
 		return nil, err
+	}
+	for branchID, ref := range req.SessionForks {
+		if ref == nil || strings.TrimSpace(ref.ParentSessionID) == "" || ref.ForkSequence < 1 {
+			return nil, fmt.Errorf("branch %s session fork needs a parent session and a fork sequence", branchID)
+		}
+		known := false
+		for _, branch := range req.Branches {
+			known = known || strings.TrimSpace(branch.ID) == branchID
+		}
+		if !known {
+			return nil, fmt.Errorf("session fork names unknown branch %s", branchID)
+		}
 	}
 	source, err := c.store.GetAgentRun(ctx, req.Scope, req.SourceRunID)
 	if err != nil {
@@ -262,7 +290,9 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	groupID := stableForkIdentifier(source.ID, req.ForkID, "group")
 	children := make([]*AgentRun, 0, len(req.Branches))
 	edges := make([]*RunDependency, 0, len(req.Branches))
+	var childSessions []CreateRunAgentSessionTxRequest
 	for _, branch := range req.Branches {
+		branch.ID = strings.TrimSpace(branch.ID)
 		childID := stableForkIdentifier(source.ID, req.ForkID, "child:"+branch.ID)
 		assignedAgentID := strings.TrimSpace(branch.AssignedAgentID)
 		implicitAgent := assignedAgentID == ""
@@ -270,7 +300,13 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		var childPlan map[string]interface{}
 		if assignedAgentID == "" {
 			assignedAgentID = source.AssignedAgentID
-			childContext = cloneMap(source.Context)
+			// The branch runs as the source Agent with the source's context;
+			// its own data is added, but never in place of the source's
+			// lineage keys.
+			var overlayErr error
+			if childContext, overlayErr = overlayForkBranchContext(source.Context, branch.Context); overlayErr != nil {
+				return nil, fmt.Errorf("branch %s: %w", branch.ID, overlayErr)
+			}
 			childPlan = cloneMap(source.Plan)
 		}
 		if sourceTask != nil && assignedAgentID == source.AssignedAgentID {
@@ -341,6 +377,14 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		if entrypoint != "" || sourceTask != nil {
 			childKind = RunKindAgentWork
 		}
+		if req.ChildKind != "" {
+			childKind = req.ChildKind
+		}
+		sessionFork := req.SessionForks[branch.ID]
+		if sessionFork != nil && assignedAgentID != source.AssignedAgentID {
+			// Another Agent never inherits the source Agent's session (DI-5).
+			return nil, fmt.Errorf("branch %s: only a same-Agent child can fork the source session", branch.ID)
+		}
 		childRequest := CreateAgentRunRequest{
 			Kind: childKind, Scope: source.Scope, ObjectiveID: source.ObjectiveID, ParentRunID: source.ID,
 			Owner: source.Owner, AssignedAgentID: assignedAgentID, ActingUser: source.ActingUser, Entrypoint: entrypoint,
@@ -348,6 +392,9 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			Goal:           strings.TrimSpace(branch.Goal), Source: RunSourceFork, Priority: source.Priority, Deadline: deadline,
 			Context: childContext, Plan: childPlan, Checkpoint: childCheckpoint,
 			Budget: cloneBudgetPolicy(branch.Budget), Policy: cloneMap(source.Policy),
+		}
+		if sessionFork != nil {
+			childRequest.SessionID = RunAgentSessionID(source.Scope, childID)
 		}
 		inherit := entrypoint != "" && assignedAgentID == source.AssignedAgentID && entrypoint == source.Entrypoint
 		if err := prepareAcceptedChildRun(ctx, source, &childRequest, c.executionPreparer, inherit); err != nil {
@@ -358,6 +405,18 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			return nil, err
 		}
 		children = append(children, child)
+		if sessionFork != nil {
+			seed, err := controlChildSeed(child)
+			if err != nil {
+				return nil, fmt.Errorf("branch %s seed: %w", branch.ID, err)
+			}
+			session, err := newChildSession(sessionFork.childSessionRequest(source.Scope, child.ID, assignedAgentID, seed))
+			if err != nil {
+				return nil, fmt.Errorf("branch %s session: %w", branch.ID, err)
+			}
+			session.Now = now
+			childSessions = append(childSessions, session)
+		}
 		edges = append(edges, &RunDependency{
 			ID: branch.ID, Scope: source.Scope, GroupID: groupID, SourceRunID: source.ID, TargetRunID: child.ID,
 			Kind: RunDependencyKindRun, State: RunDependencyStateRunning, Required: true,
@@ -402,6 +461,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 	result, err := c.store.CreateRunDependencyGroup(ctx, RunDependencyGroupCreateRecord{
 		Group: group, Dependencies: edges, TargetRuns: children, SourceRun: updatedSource,
 		ExpectedSourceRevision: source.Revision, Event: event,
+		ToolTransition: req.ToolTransition, ChildSessions: childSessions, RequireInterventionCount: req.RequireInterventionCount,
 	})
 	if err != nil {
 		return nil, err
@@ -417,6 +477,32 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 		}
 	}
 	return &RunForkResult{DependencyGroup: result, Children: children}, nil
+}
+
+// overlayForkBranchContext is the context of a branch that runs as the
+// source Agent: the source's context plus the branch's own data. A branch
+// cannot replace a lineage key of its source.
+func overlayForkBranchContext(source, branch map[string]interface{}) (map[string]interface{}, error) {
+	out := cloneMap(source)
+	if len(branch) == 0 {
+		return out, nil
+	}
+	if out == nil {
+		out = map[string]interface{}{}
+	}
+	for key, value := range branch {
+		if strings.HasPrefix(key, "_openseal") || strings.HasPrefix(key, "openseal.") {
+			return nil, fmt.Errorf("branch context cannot set the kernel key %s", key)
+		}
+		if immutableForkTaskContextKey(key) {
+			if existing, ok := out[key]; !ok || !reflect.DeepEqual(value, existing) {
+				return nil, fmt.Errorf("branch context cannot set its source's %s", key)
+			}
+			continue
+		}
+		out[key] = deepCloneCheckpointValue(value)
+	}
+	return out, nil
 }
 
 func immutableForkTaskContextKey(key string) bool {

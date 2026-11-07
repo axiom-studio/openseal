@@ -745,16 +745,9 @@ func applyRunDependencyResolution(group *RunDependencyGroup, edges []*RunDepende
 		updatedSource.UpdatedAt = record.OccurredAt
 	}
 	if evaluation.Wake && !isTerminalAgentRunStatus(source.Status) {
-		if evaluation.Status == RunDependencyGroupFailed {
-			message := "Required work did not complete."
-			for _, edge := range clonedEdges {
-				if edge.State == RunDependencyStateFailed && (group.Policy.Mode != FanInModeAll || edge.Required) && strings.TrimSpace(edge.Error) != "" {
-					message = edge.Error
-					break
-				}
-			}
-			updatedSource.Checkpoint = checkpointFinalFailureExplanation(updatedSource.Checkpoint, "dependency", message)
-		}
+		// A failed group only wakes the source: the failure reaches the model
+		// as the waiting tool entry's result (D6), and the runbook engine reads
+		// the group status from Output.
 		if paused {
 			updatedSource.PausedFrom = AgentRunStatusQueued
 			updatedSource.PausedWakeCondition = nil
