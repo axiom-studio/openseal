@@ -5,6 +5,25 @@ import (
 	"strings"
 )
 
+// ApprovalReviewContext is the operator-facing explanation of an action's
+// effect. The model supplies the semantic facts it already knows; the kernel
+// validates, bounds, persists, and presents them without asking delivery
+// adapters to infer meaning from execution arguments.
+type ApprovalReviewContext struct {
+	Summary      string               `json:"summary"`
+	Target       string               `json:"target,omitempty"`
+	Audience     string               `json:"audience,omitempty"`
+	Content      string               `json:"content,omitempty"`
+	Purpose      string               `json:"purpose,omitempty"`
+	Consequences []string             `json:"consequences,omitempty"`
+	Facts        []ApprovalReviewFact `json:"facts,omitempty"`
+}
+
+type ApprovalReviewFact struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
 const (
 	maxApprovalReviewSummary      = 2_000
 	maxApprovalReviewTarget       = 4_000
@@ -150,4 +169,28 @@ func intentApprovalReviewContext(preview map[string]interface{}, operation *Exte
 		review.Target = strings.TrimSpace(operation.Resource)
 	}
 	return review
+}
+
+// reviewedActionReviewContextJSONSchema is the review envelope schema of a
+// reviewed (external or destructive) governed tool: the approval card shows
+// the exact content, so content is required alongside the summary.
+func reviewedActionReviewContextJSONSchema() map[string]interface{} {
+	schema := approvalReviewContextJSONSchema()
+	schema["required"] = []string{"summary", "content"}
+	return schema
+}
+
+// validateReviewedActionReviewContext checks the review envelope of a
+// reviewed governed call: present, valid, and carrying its exact content.
+func validateReviewedActionReviewContext(review *ApprovalReviewContext) error {
+	if review == nil {
+		return invalidApprovalReviewContext("reviewContext is required")
+	}
+	if err := validateApprovalReviewContext(review); err != nil {
+		return err
+	}
+	if strings.TrimSpace(review.Content) == "" {
+		return invalidApprovalReviewContext("reviewContext.content is required: give the exact text or payload this action publishes or changes")
+	}
+	return nil
 }
