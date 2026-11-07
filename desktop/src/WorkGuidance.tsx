@@ -261,7 +261,7 @@ export default function WorkGuidance({
                   ? "Guidance is saved while work stays paused. Resume when you are ready."
                   : run.status === "sleeping"
                     ? "Saving guidance wakes this task so it can consider your instruction."
-                    : "Guidance is included in subsequent turns. Existing approval and dependency waits remain in effect; actions already started may finish."}
+                    : "Guidance is added before the agent's next step. Existing approval and dependency waits remain in effect; actions already started may finish."}
           </p>
           <textarea
             ref={input}
