@@ -3,6 +3,8 @@ package openseal
 import (
 	"context"
 	"testing"
+
+	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
 func TestAgentManagementOptionOwnsDefinitionValidationAndDispatcherComposition(t *testing.T) {
@@ -23,10 +25,10 @@ func TestAgentManagementOptionOwnsDefinitionValidationAndDispatcherComposition(t
 		definition.Actions[AgentActionConfigureChannel].Name != AgentActionConfigureChannel {
 		t.Fatalf("built-in Agent management definition = %#v, %v", definition, err)
 	}
-	if len(engine.actionValidators) != 2 || len(engine.actionPoolSpecs) != 1 {
+	if len(engine.actionValidators) != 3 || len(engine.actionPoolSpecs) != 1 {
 		t.Fatalf("Agent action wiring validators=%d workers=%d", len(engine.actionValidators), len(engine.actionPoolSpecs))
 	}
-	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*AgentBehaviorActionDispatcher); !ok {
+	if _, ok := engine.actionPoolSpecs[0].dispatcher.(*runtime.AgentBuilderActionDispatcher); !ok {
 		t.Fatalf("Agent dispatcher was not composed over the guarded host fallback: %T", engine.actionPoolSpecs[0].dispatcher)
 	}
 	result, err := engine.actionPoolSpecs[0].dispatcher.DispatchAction(context.Background(), ActionDispatchInput{})

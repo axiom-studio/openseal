@@ -2551,6 +2551,7 @@ type Engine struct {
 	chatWorkspaces                runtime.ChatWorkspaces
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
+	agentBuilderHost              runtime.AgentBuilderHost
 	runbookManagementActions      bool
 	runManagementActions          bool
 	teamManagementActions         bool
@@ -3600,7 +3601,7 @@ func (e *Engine) configureAgentManagementActions() error {
 		}
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher
 	}
-	return nil
+	return e.configureAgentBuilderActions()
 }
 
 func (e *Engine) configureRunbookManagementActions() error {
