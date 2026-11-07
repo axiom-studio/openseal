@@ -3,14 +3,12 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -125,17 +123,11 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeTeamAmendmentActivate && !m.supportsTeamDefinition(kernelapi.OperationActivateAmendment) {
 		return m.renderUnavailableComposer(width, "Activate Team amendment", "This server does not advertise Team amendment activation.")
 	}
-	if m.mode == modeAgentBuilderPrompt && m.authoringAutomationFocus == nil && !m.supportsAgentBuilder() {
+	if m.mode == modeAgentBuilderPrompt && !m.supportsAgentBuilder() {
 		return m.renderUnavailableComposer(width, "New agent", "This server has no agent builder.")
 	}
 	if m.mode == modeWorkforceBundleInspect && (!m.workforceBundleCapability.Supports(kernelapi.OperationInspect) || m.workforceBundleClient == nil) {
 		return m.renderUnavailableComposer(width, "Inspect workforce bundle", "This server does not advertise portable workforce bundle inspection.")
-	}
-	if m.mode == modeWorkforceRefinement && m.readyRefinement() == nil {
-		return m.renderUnavailableComposer(width, "Answer proposal question", "This exact proposal revision does not advertise refinement authority.")
-	}
-	if m.mode == modeWorkforceConversationRouting && !m.canConfigureWorkforceConversationRouting() {
-		return m.renderUnavailableComposer(width, "Connect message routing", "This exact proposal revision does not advertise routing placement authority.")
 	}
 	if m.mode == modeRunbookOperationStart && !m.canStartActiveRunbookOperation() {
 		return m.renderUnavailableComposer(width, "Start deterministic operation", "The active Agent or kernel does not advertise this operation.")
@@ -188,7 +180,7 @@ func (m *Model) renderComposer(width int) string {
 	if isConversationGatewayMode(m.mode) && !m.supportsConversationGateway(mapConversationGatewayModeOperation(m.mode)) {
 		return m.renderUnavailableComposer(width, "Manage message integration", "This server does not advertise the required integration lifecycle operation.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && !isConversationGatewayMode(m.mode) && m.mode != modeAgentBuilderPrompt && m.mode != modeWorkforceBundleInspect && m.mode != modeWorkforceRefinement && m.mode != modeWorkforceConversationRouting && m.mode != modeWorkforceApprove && m.mode != modeWorkforceReject && m.mode != modeWorkforceApply && m.mode != modeWorkforceActivate && m.mode != modeWorkforceRetry && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && !isConversationGatewayMode(m.mode) && m.mode != modeAgentBuilderPrompt && m.mode != modeWorkforceBundleInspect && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -255,32 +247,13 @@ func (m *Model) renderComposer(width int) string {
 		description = "Atomically activate this exact reviewed definition and reload authoritative Team state."
 		owner = "Optimistic revision · immutable activation audit"
 	case modeAgentBuilderPrompt:
-		if focus := m.authoringAutomationFocus; focus != nil {
-			title = "Refine deterministic operation"
-			description = fmt.Sprintf("Describe the change to %s on %s. OpenSeal will preserve unrelated candidate state.", focus.Entrypoint, focus.AgentName)
-			owner = fmt.Sprintf("Scoped review · %s@%s · authoring never activates state", focus.RunbookID, focus.RunbookVersion)
-		} else {
-			title = "New agent"
-			description = "Describe the agent you need. The builder replies in a chat, asks what it needs, and shows a card to review."
-			owner = "Nothing is created until you approve the card"
-		}
+		title = "New agent"
+		description = "Describe the agent you need. The builder replies in a chat, asks what it needs, and shows a card to review."
+		owner = "Nothing is created until you approve the card"
 	case modeWorkforceBundleInspect:
 		title = "Inspect portable workforce"
 		description = "Enter a local bundle path. The kernel verifies and inspects the immutable artifact; the TUI does not infer state."
 		owner = "Ctrl+S validates through workforce-bundles/v1 · no installation"
-	case modeWorkforceRefinement:
-		question := m.readyRefinement()
-		title = "One question before continuing"
-		description = question.Prompt
-		owner = question.WhyNeeded
-		if guidance := m.renderRefinementGuidance(*question, max(width-8, 24)); guidance != "" {
-			owner += "\n\n" + guidance
-		}
-	case modeWorkforceConversationRouting:
-		row := m.selectedWorkforceConversationRoutingRow()
-		title = "Connect message routing"
-		description = "Choose the provider installation and destination for " + row.Endpoint.Name + "."
-		owner = fmt.Sprintf("%s · %s · non-secret host placement only", row.Endpoint.SkillID, row.Endpoint.Mode)
 	case modeRunbookOperationStart:
 		row := m.selectedActiveRunbookOperation()
 		title = "Start deterministic operation"
@@ -291,30 +264,6 @@ func (m *Model) renderComposer(width int) string {
 			row.Focus.AgentName, row.Focus.RunbookID, row.Focus.RunbookVersion,
 			runbookSchemaContract(contract.InputSchema, "No input"),
 		)
-	case modeWorkforceApprove:
-		title = "Approve policy requirement"
-		description = "Record why the exact advertised requirement is satisfied. The decision is permanent."
-		owner = "Revision-bound governed decision"
-	case modeWorkforceReject:
-		title = "Reject workforce proposal"
-		description = "Explain why this reviewed proposal must not proceed. The decision is permanent."
-		owner = "Revision-bound governed decision"
-	case modeWorkforceApply:
-		title = "Create reviewed workforce"
-		description = "Record why this exact candidate should now create its Agents, Team, and objectives atomically."
-		owner = "Atomic Apply · permanent audit receipt"
-		if m.authoringActivationIntent() == authoring.WorkforceActivationInactive {
-			description = "Create this exact candidate atomically in a non-executing state. Activate each reviewed resource later through governed commands."
-			owner = "Inactive Apply · permanent audit receipt"
-		}
-	case modeWorkforceActivate:
-		title = "Start reviewed workforce"
-		description = "Create an activation review over the exact inactive resources and their current revisions."
-		owner = "Governed activation · no regeneration"
-	case modeWorkforceRetry:
-		title = "Retry proposal generation"
-		description = "Record why the failed generation should be resumed as a new durable attempt."
-		owner = "Revision-bound retry · idempotent request"
 	case modeGuide:
 		title = "Guide selected work"
 		description = "Add a concise instruction without replacing the objective."
@@ -427,9 +376,7 @@ func (m *Model) renderComposer(width int) string {
 	content := headerStyle.Render(title) + "\n" + mutedStyle.Render(description) + "\n\n" + m.editor.View() + "\n\n" + mutedStyle.Render(owner)
 	if m.focus == focusComposer {
 		actionHint := "Ctrl+S submit  ·  Tab details"
-		if m.mode == modeAgentBuilderPrompt && m.authoringAutomationFocus != nil {
-			actionHint = "Enter save change  ·  Shift+Enter new line  ·  Tab details"
-		} else if m.mode == modeAgentBuilderPrompt {
+		if m.mode == modeAgentBuilderPrompt {
 			actionHint = "Enter start chat  ·  Shift+Enter new line  ·  Tab details"
 		} else if m.mode == modeChannelPost {
 			actionHint = "Enter send  ·  Shift+Enter new line  ·  Tab conversation"
@@ -451,7 +398,7 @@ func (m *Model) renderPanel(width int) string {
 	if m.section == sectionOverview {
 		content = m.renderOverviewContent(width)
 	} else if m.section == sectionAuthoring {
-		content = m.renderAuthoringContent(width)
+		content = m.renderAgentBuilderContent()
 	} else if m.section == sectionBundles {
 		content = m.renderWorkforceBundlesContent(width)
 	} else if m.section == sectionReadiness {
@@ -524,17 +471,17 @@ func (m *Model) renderOverviewContent(width int) string {
 			lipgloss.NewStyle().Foreground(danger).Render(fmt.Sprintf("1  Review %d item%s that need your attention", attention, pluralSuffix(attention))),
 			mutedStyle.Render("   Open Approvals or Work to review the exact state and next action."),
 		)
-	} else if agentCount == 0 && len(m.teamDeployments) == 0 && m.authoringCapability.Available {
+	} else if agentCount == 0 && len(m.teamDeployments) == 0 && m.agentBuilderCapability.Available {
 		lines = append(lines,
-			lipgloss.NewStyle().Foreground(accentSoft).Render("1  Describe the outcome you want"),
-			"   OpenSeal will propose the right Agents, Team roles, Skills, and boundaries.",
+			lipgloss.NewStyle().Foreground(accentSoft).Render("1  Describe the agent you need"),
+			"   The builder opens a chat with you and proposes the agent as a card to review.",
 			"",
-			mutedStyle.Render("   Press Enter or Tab to begin · no resources are created before review"),
+			mutedStyle.Render("   Press Enter or Tab to begin · nothing is created until you approve the card"),
 		)
-	} else if m.authoringCapability.Available {
+	} else if m.agentBuilderCapability.Available {
 		lines = append(lines,
-			lipgloss.NewStyle().Foreground(accentSoft).Render("1  Create or improve your workforce"),
-			"   Describe a new outcome, or open an Agent or Team to inspect current work.",
+			lipgloss.NewStyle().Foreground(accentSoft).Render("1  Create a new agent"),
+			"   Describe a new agent, or open an Agent or Team to inspect current work.",
 			"",
 			mutedStyle.Render("   Press Enter to open Create"),
 		)
@@ -545,8 +492,8 @@ func (m *Model) renderOverviewContent(width int) string {
 		)
 	}
 	lines = append(lines, "", headerStyle.Render("How it works"),
-		"Describe  →  Review the exact proposal  →  Create  →  Activate  →  Observe",
-		mutedStyle.Render("Creation and activation stay separate. OpenSeal never starts unreviewed work."),
+		"Describe  →  Chat with the builder  →  Approve the card  →  Observe",
+		mutedStyle.Render("Nothing is created until you approve the card. OpenSeal never starts unreviewed work."),
 	)
 	return strings.Join(lines, "\n")
 }
@@ -642,6 +589,27 @@ func (m *Model) renderWorkforceBundlesContent(width int) string {
 		lines = append(lines, "Requires    "+strings.Join(inspection.RequiredCapabilities, ", "))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderAgentBuilderContent is the Create page: "New agent" opens a chat
+// with the builder, which proposes the agent as an approval card.
+func (m *Model) renderAgentBuilderContent() string {
+	title := headerStyle.Render("New agent")
+	if m.busy {
+		return title + "\n\n" + mutedStyle.Render("Opening a chat with the builder…")
+	}
+	return strings.Join([]string{
+		title,
+		"",
+		"Describe the agent you need. The builder replies in a chat, asks what it needs, and proposes the agent as a card for you to review.",
+		"",
+		headerStyle.Render("Try an example"),
+		mutedStyle.Render("Research · Watch three communities I follow and send me a cited weekly brief."),
+		mutedStyle.Render("Operations · Triage new incidents and ask me before changing anything."),
+		mutedStyle.Render("Content · Draft campaign posts on a topic for me to review."),
+		"",
+		lipgloss.NewStyle().Foreground(accentSoft).Render("Type on the left and press Enter · nothing is created until you approve the card"),
+	}, "\n")
 }
 
 func (m *Model) renderReadinessContent(width int) string {
@@ -909,409 +877,6 @@ func (m *Model) renderTeamsContent(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) renderAuthoringContent(width int) string {
-	title := headerStyle.Render("Workforce candidate")
-	if m.busy {
-		return title + "\n\n" + mutedStyle.Render("Saving a verified Agent and Team change set…")
-	}
-	result := m.authoringResult
-	if result == nil {
-		if changeSet := m.authoringChangeSet; changeSet != nil {
-			lines := []string{title, "", mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision))}
-			if diagnostics := renderCatalogDiagnostics(changeSet.Catalog, max(width-8, 24)); len(diagnostics) > 0 {
-				lines = append(lines, "")
-				lines = append(lines, diagnostics...)
-			}
-			if history := renderAnsweredRefinements(changeSet, max(width-8, 24)); len(history) > 0 {
-				lines = append(lines, "", mutedStyle.Render("Answered questions"))
-				lines = append(lines, history...)
-			}
-			if changeSet.Generation != nil {
-				lines = append(lines, mutedStyle.Render(fmt.Sprintf("Run %s · attempt %d", compact(changeSet.Generation.RunID, 16), changeSet.Generation.Attempt)))
-				if changeSet.Generation.LastError != "" {
-					lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(changeSet.Generation.LastError, max(width-8, 24))))
-				}
-			}
-			if changeSet.Status == authoring.ChangeSetEvaluating {
-				lines = append(lines, "", mutedStyle.Render("Generation is durable and continues in the background. Refresh is automatic."))
-			}
-			if m.canRetryWorkforce() {
-				lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("r retry generation"))
-			}
-			return strings.Join(lines, "\n")
-		}
-		return strings.Join([]string{
-			title,
-			"",
-			"Describe the outcome—not the implementation. OpenSeal will propose the Agents, Team roles, Skills, and boundaries for review.",
-			"",
-			headerStyle.Render("Try an example"),
-			mutedStyle.Render("Research · Monitor three approved communities and deliver a cited weekly brief."),
-			mutedStyle.Render("Operations · Triage incidents, request approval before changes, and publish a handoff."),
-			mutedStyle.Render("Content · Research a topic, draft a campaign, and have a lead review every publication."),
-			"",
-			lipgloss.NewStyle().Foreground(accentSoft).Render("Type on the left and press Enter · nothing is created before review"),
-		}, "\n")
-	}
-	state := lipgloss.NewStyle().Foreground(success).Render("READY FOR REVIEW")
-	issues := len(result.UnresolvedQuestions) + len(result.Validation) + len(result.MissingRequirements)
-	if !result.Valid {
-		state = lipgloss.NewStyle().Foreground(accentSoft).Render(fmt.Sprintf("%d ITEM(S) NEED ATTENTION", issues))
-	}
-	teamName, teamPurpose, roles, objectives := "Workforce", "", 0, 0
-	if result.Candidate.Team != nil {
-		teamName, teamPurpose = result.Candidate.Team.DisplayName, result.Candidate.Team.Purpose
-		roles, objectives = len(result.Candidate.Team.Roles), len(result.Candidate.Team.ObjectiveTemplates)
-	}
-	lines := []string{title, state, "", headerStyle.Render(compact(teamName, max(width-8, 24)))}
-	activation := m.authoringActivationIntent()
-	lines = append(lines, mutedStyle.Render("Activation intent · "+string(activation)))
-	if m.authoringChangeSet != nil {
-		changeSet := m.authoringChangeSet
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Change set %s · %s · revision %d", compact(changeSet.ID, 16), changeSet.Status, changeSet.Revision)))
-		if diagnostics := renderCatalogDiagnostics(changeSet.Catalog, max(width-8, 24)); len(diagnostics) > 0 {
-			lines = append(lines, "")
-			lines = append(lines, diagnostics...)
-		}
-		if history := renderAnsweredRefinements(changeSet, max(width-8, 24)); len(history) > 0 {
-			lines = append(lines, "", mutedStyle.Render("Answered questions"))
-			lines = append(lines, history...)
-		}
-		if len(changeSet.Evaluations) > 0 {
-			evaluation := changeSet.Evaluations[len(changeSet.Evaluations)-1]
-			outcome := "denied"
-			if evaluation.Allowed {
-				outcome = "allowed"
-			}
-			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Policy %s · %s:%s · %d requirement(s)", outcome, evaluation.Actor.Type, evaluation.Actor.ID, len(evaluation.ApprovalRequirements))))
-		}
-		if len(changeSet.ApprovalDecisions) > 0 {
-			decision := changeSet.ApprovalDecisions[len(changeSet.ApprovalDecisions)-1]
-			outcome := "rejected"
-			if decision.Approved {
-				outcome = "approved"
-			}
-			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Latest decision %s · %s / %s · %s:%s", outcome, decision.PolicyID, decision.Role, decision.Actor.Type, decision.Actor.ID)))
-			if decision.Reason != "" {
-				lines = append(lines, mutedStyle.Render("  "+compact(decision.Reason, max(width-10, 24))))
-			}
-		}
-		if len(changeSet.Lifecycle) > 0 {
-			event := changeSet.Lifecycle[len(changeSet.Lifecycle)-1]
-			lines = append(lines, mutedStyle.Render(fmt.Sprintf("Audit r%d · %s · %s:%s · %s", event.Revision, event.Reason, event.Actor.Type, event.Actor.ID, event.At.Format(time.RFC3339))))
-		}
-		if changeSet.ApplyReceipt != nil {
-			receipt := changeSet.ApplyReceipt
-			appliedState := "active"
-			if receipt.Activation == authoring.WorkforceActivationInactive {
-				appliedState = "inactive"
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(success).Render(fmt.Sprintf("Created atomically · %s · %d resources · receipt %s", appliedState, len(receipt.Resources), compact(receipt.ID, 12))))
-			lines = append(lines, mutedStyle.Render(fmt.Sprintf("%s · %s:%s · %s", compact(receipt.Reason, max(width-24, 24)), receipt.Actor.Type, receipt.Actor.ID, receipt.AppliedAt.Format(time.RFC3339))))
-			for _, resource := range receipt.Resources {
-				detail := resource.Version
-				if resource.Revision > 0 {
-					detail = fmt.Sprintf("r%d", resource.Revision)
-				}
-				lines = append(lines, mutedStyle.Render(fmt.Sprintf("  %s  %s  %s", resource.Kind, compact(resource.ID, max(width-28, 16)), detail)))
-			}
-		}
-		if m.canResolveWorkforceApproval() {
-			lines = append(lines, "", mutedStyle.Render("Eligible policy requirements (j/k select)"))
-			for index, reference := range m.authoringCapability.Context.EligibleApprovalRequirements {
-				prefix := "  "
-				style := mutedStyle
-				if index == m.authoringApprovalSelected {
-					prefix, style = "› ", selectedStyle
-				}
-				lines = append(lines, style.Render(fmt.Sprintf("%s%s / %s · evaluation %s", prefix, reference.PolicyID, reference.Role, compact(reference.EvaluationID, 12))))
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("y approve · x reject selected requirement"))
-		} else if m.canApplyWorkforce() {
-			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter create this exact reviewed workforce"))
-		} else if m.canPrepareWorkforceActivation() {
-			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("Enter review and start these exact inactive resources"))
-		} else if m.supportsAuthoring(kernelapi.OperationEvaluate) {
-			lines = append(lines, "", mutedStyle.Render("Waiting for the configured policy evaluator to submit its decision."))
-		}
-		if m.canConfigureWorkforceConversationRouting() {
-			rows := m.workforceConversationRoutingRows()
-			lines = append(lines, "", mutedStyle.Render("Message routing · provider credentials stay outside authoring"))
-			for index, row := range rows {
-				address := strings.TrimSpace(row.Placed.Address)
-				if address == "" {
-					address = strings.TrimSpace(row.Endpoint.Address)
-				}
-				state := "setup needed"
-				if strings.TrimSpace(row.Placed.InstallationID) != "" && address != "" {
-					state = "connected"
-				}
-				prefix, style := "  ", mutedStyle
-				if index == m.authoringRoutingSelected {
-					prefix, style = "› ", selectedStyle
-				}
-				destination := address
-				if destination == "" {
-					destination = "choose destination"
-				}
-				lines = append(lines, style.Render(fmt.Sprintf("%s%s · %s · %s → %s", prefix, compact(row.Endpoint.Name, max(width-42, 16)), row.Endpoint.SkillID, state, compact(destination, max(width-34, 16)))))
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("v connect or edit the next endpoint"))
-		}
-		if m.canPlaceWorkforceBindingConfigurations() {
-			rows := m.workforceBindingConfigurationRows()
-			lines = append(lines, "", mutedStyle.Render("Configure required Skill targets (one question at a time · j/k move · [/] choose)"))
-			for index, row := range rows {
-				prefix, style := "  ", mutedStyle
-				if index == m.authoringConfigSelected {
-					prefix, style = "› ", selectedStyle
-				}
-				selected := m.authoringConfigChoices[row.Key]
-				if selected < 0 || selected >= len(row.Field.Options) {
-					selected = 0
-				}
-				option := row.Field.Options[selected]
-				label := option.Label
-				value, _, err := option.Value.Value()
-				if err == nil && reflect.DeepEqual(m.authoringChangeSet.Placement.BindingConfigs[row.AgentID][row.Field.CatalogSkillID][row.Field.Key], value) {
-					label += " · saved"
-				}
-				required := ""
-				if row.Field.Required {
-					required = " · required"
-				}
-				lines = append(lines, style.Render(fmt.Sprintf("%s%s · %s%s → %s", prefix, compact(row.AgentName, max(width-38, 16)), compact(row.Field.Prompt, max(width-44, 18)), required, compact(label, max(width-38, 18)))))
-				if index == m.authoringConfigSelected && option.Description != "" {
-					lines = append(lines, mutedStyle.Render("    "+compact(option.Description, max(width-12, 24))))
-				}
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("b save Skill configuration"))
-		}
-		if m.canPlaceWorkforceCredentials() {
-			rows := m.workforceCredentialRows()
-			lines = append(lines, "", mutedStyle.Render("Authorized credential placement (j/k select · [/] choose)"))
-			for index, row := range rows {
-				prefix, style := "  ", mutedStyle
-				if index == m.authoringCredentialSelected {
-					prefix, style = "› ", selectedStyle
-				}
-				choiceLabel := "No authorized credential available"
-				if len(row.Choices) > 0 {
-					selected := m.authoringCredentialChoices[row.Key]
-					if selected < 0 || selected >= len(row.Choices) {
-						selected = 0
-					}
-					choice := row.Choices[selected]
-					choiceLabel = choice.DisplayName
-					if m.authoringChangeSet.Placement.CredentialReferences[row.AgentID][row.Kind] == choice.Reference {
-						choiceLabel += " · saved"
-					}
-				}
-				lines = append(lines, style.Render(fmt.Sprintf("%s%s · %s → %s", prefix, compact(row.AgentName, max(width-34, 16)), row.Label, compact(choiceLabel, max(width-38, 18)))))
-			}
-			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("b save credential placement"))
-		}
-	}
-	if teamPurpose != "" {
-		lines = append(lines, mutedStyle.Render(compact(teamPurpose, max(width-8, 24))))
-	}
-	lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d Agents · %d roles · %d Team objectives", len(result.Candidate.Agents), roles, objectives)), "")
-	if m.authoringAmendment && (len(result.Diff) > 0 || len(result.RiskChanges) > 0) {
-		widening := 0
-		for _, change := range result.RiskChanges {
-			if change.Widening {
-				widening++
-			}
-		}
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d field changes · %d risk changes · %d widening", len(result.Diff), len(result.RiskChanges), widening)), "")
-	}
-	for _, agent := range result.Candidate.Agents {
-		lines = append(lines, fmt.Sprintf("• %s  %s · %d concurrent", compact(agent.DisplayName, max(width-28, 18)), agent.Authority.MaximumRisk, agent.Authority.MaxConcurrentRuns))
-	}
-	lines = append(lines, m.renderAuthoringAutomations(width)...)
-	if m.authoringChangeSet == nil {
-		for _, question := range result.UnresolvedQuestions {
-			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render("? "+compact(question.Prompt, max(width-8, 24))))
-		}
-	}
-	for _, missing := range result.MissingRequirements {
-		lines = append(
-			lines,
-			"",
-			lipgloss.NewStyle().Foreground(accentSoft).Render(
-				"Setup needed · "+authoringRequirementAction(missing, &result.Candidate),
-			),
-		)
-	}
-	for _, issue := range result.Validation {
-		lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact(issue.Path+": "+issue.Message, max(width-8, 24))))
-	}
-	if m.authoringChangeSet != nil && m.authoringChangeSet.Status == authoring.ChangeSetApplied && m.authoringChangeSet.ApplyReceipt != nil && m.authoringChangeSet.ApplyReceipt.Activation == authoring.WorkforceActivationInactive {
-		if m.canPrepareWorkforceActivation() {
-			lines = append(lines, "", mutedStyle.Render("Resources are created but inactive. Continue here to configure and review activation."))
-		} else {
-			lines = append(lines, "", mutedStyle.Render("Resources are created but inactive; activation is not authorized for this principal."))
-		}
-	} else if m.authoringChangeSet == nil || m.authoringChangeSet.Status != authoring.ChangeSetApplied {
-		lines = append(lines, "", mutedStyle.Render("Nothing is active. Tab to refine this candidate."))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func authoringRequirementAction(missing authoring.MissingRequirement, candidate *authoring.WorkforceCandidate) string {
-	resource := authoringRequirementResource(missing)
-	owner := authoringRequirementOwner(missing.RequiredBy, candidate)
-	switch missing.Kind {
-	case "skill_installation":
-		return fmt.Sprintf("Install %s for %s", resource, owner)
-	case "skill_binding":
-		return fmt.Sprintf("Configure %s for %s", resource, owner)
-	case "credential":
-		return fmt.Sprintf("Choose an authorized %s credential for %s", resource, owner)
-	case "source_policy":
-		return fmt.Sprintf("Approve source access for %s", owner)
-	case "source_scope":
-		return fmt.Sprintf("Choose allowed sources for %s", owner)
-	case "version":
-		return fmt.Sprintf("Choose a compatible %s version for %s", resource, owner)
-	case "action":
-		return fmt.Sprintf("Choose a %s version with the required action for %s", resource, owner)
-	case "prompt":
-		return fmt.Sprintf("Add the required %s instructions for %s", resource, owner)
-	case "skill":
-		return fmt.Sprintf("Add %s for %s", resource, owner)
-	default:
-		return fmt.Sprintf("Review %s setup for %s", resource, owner)
-	}
-}
-
-func authoringRequirementResource(missing authoring.MissingRequirement) string {
-	value := strings.TrimSpace(missing.ID)
-	switch missing.Kind {
-	case "version":
-		value, _, _ = strings.Cut(value, "@")
-	case "action":
-		value, _, _ = strings.Cut(value, "/")
-	}
-	if value == "" {
-		return "required capability"
-	}
-	return humanIdentifier(value)
-}
-
-func authoringRequirementOwner(requiredBy string, candidate *authoring.WorkforceCandidate) string {
-	ownerRef, _, _ := strings.Cut(strings.TrimSpace(requiredBy), "/")
-	kind, id, found := strings.Cut(ownerRef, ":")
-	if found && candidate != nil {
-		switch kind {
-		case "agent":
-			for _, definition := range candidate.Agents {
-				if definition != nil && definition.ID == id && strings.TrimSpace(definition.DisplayName) != "" {
-					return definition.DisplayName
-				}
-			}
-		case "team":
-			if candidate.Team != nil && candidate.Team.ID == id && strings.TrimSpace(candidate.Team.DisplayName) != "" {
-				return candidate.Team.DisplayName
-			}
-		}
-	}
-	if found && id != "" {
-		return humanIdentifier(id)
-	}
-	return "this workforce"
-}
-
-func humanIdentifier(value string) string {
-	replacer := strings.NewReplacer("-", " ", "_", " ", ".", " ", "/", " ", ":", " ")
-	fields := strings.Fields(replacer.Replace(strings.TrimSpace(value)))
-	for index, field := range fields {
-		lower := strings.ToLower(field)
-		switch lower {
-		case "api":
-			fields[index] = "API"
-		case "oauth":
-			fields[index] = "OAuth"
-		case "openseal":
-			fields[index] = "OpenSeal"
-		case "pdf":
-			fields[index] = "PDF"
-		default:
-			fields[index] = strings.ToUpper(lower[:1]) + lower[1:]
-		}
-	}
-	if len(fields) == 0 {
-		return "Required capability"
-	}
-	return strings.Join(fields, " ")
-}
-
-func (m *Model) renderAuthoringAutomations(width int) []string {
-	rows := m.authoringAutomationRows()
-	if len(rows) == 0 {
-		return nil
-	}
-	selected := max(0, min(len(rows)-1, m.authoringAutomationSelected))
-	lines := []string{
-		"",
-		headerStyle.Render(fmt.Sprintf("Automations · %d", len(rows))),
-		mutedStyle.Render("Exact Agent-callable operations · j/k select · m refine"),
-	}
-	for index, row := range rows {
-		prefix, style := "  ", mutedStyle
-		if index == selected {
-			prefix, style = "› ", selectedStyle
-		}
-		runbook := row.Definition.Runbook
-		lines = append(lines, style.Render(compact(
-			fmt.Sprintf("%s%s · %s · %s@%s", prefix, row.Focus.AgentName, row.Focus.Entrypoint, row.Focus.RunbookID, row.Focus.RunbookVersion),
-			max(width-8, 24),
-		)))
-		if index != selected {
-			continue
-		}
-		if operation, ok := runbook.Interfaces[row.Focus.Entrypoint]; ok {
-			lines = append(lines,
-				mutedStyle.Render(compact("    "+operation.Description, max(width-12, 20))),
-				mutedStyle.Render(compact("    Takes · "+runbookSchemaContract(operation.InputSchema, "No input"), max(width-12, 20))),
-				mutedStyle.Render(compact("    Returns · "+runbookSchemaContract(operation.OutputSchema, "No structured output"), max(width-12, 20))),
-			)
-		}
-		approval := "evaluated per action"
-		if row.Definition.Authority.RequireApprovalAt != "" {
-			approval = "at " + string(row.Definition.Authority.RequireApprovalAt)
-		}
-		lines = append(lines, mutedStyle.Render(compact(
-			fmt.Sprintf("    Flow · starts %s · %d durable steps · approval %s · failure stops at checkpoint", row.FirstStep, len(runbook.Steps), approval),
-			max(width-12, 20),
-		)))
-		stepIDs := make([]string, 0, len(runbook.Steps))
-		for stepID := range runbook.Steps {
-			stepIDs = append(stepIDs, stepID)
-		}
-		sort.Strings(stepIDs)
-		for _, stepID := range stepIDs {
-			step := runbook.Steps[stepID]
-			if step.Action == nil {
-				continue
-			}
-			lines = append(lines, mutedStyle.Render(compact(
-				fmt.Sprintf("    Action · %s · %s@%s/%s", stepID, step.Action.SkillID, step.Action.SkillVersion, step.Action.Action),
-				max(width-12, 20),
-			)))
-		}
-		triggers := authoringAutomationTriggers(m.authoringResult.Candidate, row.Definition, row.Focus.Entrypoint)
-		if len(triggers) == 0 {
-			lines = append(lines, mutedStyle.Render("    Trigger · Agent or manual"))
-		} else {
-			for _, trigger := range triggers[:min(3, len(triggers))] {
-				lines = append(lines, mutedStyle.Render(compact("    Trigger · "+trigger, max(width-12, 20))))
-			}
-		}
-	}
-	return lines
-}
-
 func runbookSchemaContract(schema map[string]interface{}, emptyLabel string) string {
 	if len(schema) == 0 {
 		return emptyLabel
@@ -1365,238 +930,6 @@ func runbookSchemaContract(schema map[string]interface{}, emptyLabel string) str
 		fields = append(fields, fmt.Sprintf("+%d more", remaining))
 	}
 	return strings.Join(fields, " · ")
-}
-
-func authoringAutomationTriggers(_ authoring.WorkforceCandidate, definition *kernelagent.AgentDefinition, entrypoint string) []string {
-	if definition == nil || definition.Runbook == nil {
-		return nil
-	}
-	triggers := make([]string, 0)
-	for triggerID, trigger := range definition.Runbook.Triggers {
-		if trigger.Entrypoint != entrypoint {
-			continue
-		}
-		label := triggerID
-		switch trigger.Kind {
-		case runbook.TriggerSchedule:
-			label = "Cron · " + trigger.Schedule.Cron + " · " + trigger.Schedule.Timezone
-			if trigger.Schedule.JitterSeconds > 0 {
-				label += " · varies within " + cadenceJitterLabel(trigger.Schedule.JitterSeconds)
-			}
-		case runbook.TriggerEvent:
-			label = "Event · " + trigger.EventType
-		}
-		if budget := automationBudgetLabel(trigger.Budget); budget != "" {
-			label += " · " + budget
-		}
-		triggers = append(triggers, label)
-	}
-	return triggers
-}
-
-func cadenceJitterLabel(seconds int64) string {
-	if seconds >= 3600 && seconds%3600 == 0 {
-		return fmt.Sprintf("%dh", seconds/3600)
-	}
-	if seconds >= 3600 {
-		return fmt.Sprintf("%.1fh", float64(seconds)/3600)
-	}
-	if seconds >= 60 {
-		return fmt.Sprintf("%dm", seconds/60)
-	}
-	return fmt.Sprintf("%ds", seconds)
-}
-
-func automationBudgetLabel(budget *runbook.BudgetAllocation) string {
-	if budget == nil {
-		return ""
-	}
-	parts := make([]string, 0, 3)
-	if budget.MaxAttempts > 0 {
-		parts = append(parts, fmt.Sprintf("%d attempts", budget.MaxAttempts))
-	}
-	if budget.MaxActions > 0 {
-		parts = append(parts, fmt.Sprintf("%d actions", budget.MaxActions))
-	}
-	if budget.MaxDurationMS > 0 {
-		parts = append(parts, fmt.Sprintf("%ds", (budget.MaxDurationMS+999)/1000))
-	}
-	return strings.Join(parts, " · ")
-}
-
-func (m *Model) authoringActivationIntent() authoring.WorkforceActivationIntent {
-	if m != nil && m.authoringChangeSet != nil {
-		if intent, err := authoring.EffectiveChangeSetActivationIntent(m.authoringChangeSet); err == nil {
-			return intent
-		}
-	}
-	if m != nil && m.authoringResult != nil {
-		if intent, err := authoring.EffectiveWorkforceActivationIntent(m.authoringResult.Candidate.Activation); err == nil {
-			return intent
-		}
-	}
-	return authoring.WorkforceActivationActive
-}
-
-func (m *Model) renderRefinementGuidance(question authoring.RefinementQuestion, width int) string {
-	lines := make([]string, 0)
-	if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && m.supportsAuthoring(kernelapi.OperationSearch) {
-		lines = append(lines, mutedStyle.Render("Find another Skill: /find <name or outcome>"))
-		for _, candidate := range m.refinementSkillResults {
-			selector := candidate.ID + "@" + candidate.Version
-			state := string(candidate.Readiness)
-			if candidate.Verification != authoring.SkillSearchVerificationVerified {
-				state = "verification " + string(candidate.Verification)
-			}
-			lines = append(lines, compact(fmt.Sprintf("• %s — %s · %s", selector, candidate.Name, state), width))
-			if candidate.SourceIdentity != "" {
-				lines = append(lines, refinementDetail("Source", candidate.SourceIdentity, width)...)
-			}
-		}
-		if m.refinementSkillNextCursor != "" {
-			lines = append(lines, mutedStyle.Render("More matches are available: /more"))
-		}
-	}
-	for _, option := range question.Answer.Options {
-		label := fmt.Sprintf("• %s — %s", option.ID, option.Label)
-		if option.Description != "" {
-			label += " · " + option.Description
-		}
-		lines = append(lines, compact(label, width))
-		if question.Answer.Kind == authoring.RefinementAnswerSkillSelection && m.authoringChangeSet != nil {
-			if skill, ok := m.authoringChangeSet.Catalog.Skills[option.ID]; ok {
-				identity := skill.ID
-				if skill.Version != "" {
-					identity += "@" + skill.Version
-				}
-				lines = append(lines, refinementDetail("Exact Skill", identity, width)...)
-				if skill.SourceIdentity != "" {
-					lines = append(lines, refinementDetail("Source", skill.SourceIdentity, width)...)
-				}
-				if skill.Readiness != "" {
-					lines = append(lines, refinementDetail("Readiness", string(skill.Readiness), width)...)
-				}
-				if len(skill.Actions) > 0 {
-					actions := append([]string(nil), skill.Actions...)
-					sort.Strings(actions)
-					lines = append(lines, refinementDetail("Actions", strings.Join(actions, ", "), width)...)
-				}
-				if skill.PromptAvailable {
-					lines = append(lines, "  Prompt guidance: available")
-				}
-				if skill.MaximumRisk != "" {
-					lines = append(lines, refinementDetail("Maximum risk", string(skill.MaximumRisk), width)...)
-				}
-				for _, credential := range skill.Credentials {
-					detail := credential.Name + " (" + credential.Kind
-					if credential.Optional {
-						detail += ", optional"
-					}
-					if len(credential.Actions) > 0 {
-						actions := append([]string(nil), credential.Actions...)
-						sort.Strings(actions)
-						detail += "; " + strings.Join(actions, ", ")
-					}
-					lines = append(lines, refinementDetail("Credential", detail+")", width)...)
-				}
-				if len(skill.Credentials) == 0 && len(skill.CredentialKinds) > 0 {
-					kinds := append([]string(nil), skill.CredentialKinds...)
-					sort.Strings(kinds)
-					lines = append(lines, refinementDetail("Credential kinds", strings.Join(kinds, ", "), width)...)
-				}
-				for _, evidence := range skill.Compatibility {
-					lines = append(lines, refinementDetail(evidence.Requirement, fmt.Sprintf("%t — %s", evidence.Compatible, evidence.Evidence), width)...)
-					if evidence.Reference != "" {
-						lines = append(lines, refinementDetail("Evidence reference", evidence.Reference, width)...)
-					}
-				}
-			}
-		}
-	}
-	if question.Answer.Kind == authoring.RefinementAnswerCredentialReference && m.authoringCapability.Context != nil {
-		for _, binding := range m.authoringCapability.Context.CredentialBindings {
-			lines = append(lines, compact(fmt.Sprintf("• %s — %s/%s", binding.DisplayName, binding.Reference.Kind, binding.Reference.ID), width))
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
-// refinementDetail wraps immutable identity and evidence values instead of
-// truncating them. An operator must be able to distinguish exact sourced Skill
-// variants and receipt references even in the TUI's narrow question pane.
-func refinementDetail(label, value string, width int) []string {
-	prefix, continuation := "  "+label+": ", "    "
-	remaining := []rune(value)
-	lines := make([]string, 0, 1)
-	for {
-		available := max(width-len([]rune(prefix)), 1)
-		count := min(available, len(remaining))
-		lines = append(lines, prefix+string(remaining[:count]))
-		remaining = remaining[count:]
-		if len(remaining) == 0 {
-			return lines
-		}
-		prefix = continuation
-	}
-}
-
-func renderCatalogDiagnostics(catalog authoring.CapabilityCatalog, width int) []string {
-	if len(catalog.Diagnostics) == 0 {
-		return nil
-	}
-	diagnostics := append([]authoring.CatalogDiagnostic(nil), catalog.Diagnostics...)
-	sort.Slice(diagnostics, func(i, j int) bool {
-		if diagnostics[i].Code == diagnostics[j].Code {
-			return diagnostics[i].Reference < diagnostics[j].Reference
-		}
-		return diagnostics[i].Code < diagnostics[j].Code
-	})
-	lines := []string{lipgloss.NewStyle().Foreground(accentSoft).Render("Capability availability")}
-	for _, diagnostic := range diagnostics {
-		lines = append(lines, refinementDetail("Diagnostic", diagnostic.Code, width)...)
-		lines = append(lines, refinementDetail("Guidance", diagnostic.Message, width)...)
-		if diagnostic.Reference != "" {
-			lines = append(lines, refinementDetail("Intent", diagnostic.Reference, width)...)
-		}
-	}
-	return lines
-}
-
-func renderAnsweredRefinements(changeSet *authoring.ChangeSet, width int) []string {
-	if changeSet == nil {
-		return nil
-	}
-	lines := make([]string, 0)
-	for _, question := range changeSet.Refinement.Questions {
-		answer := changeSet.Refinement.CurrentAnswer(question.ID)
-		if answer == nil {
-			continue
-		}
-		lines = append(lines, mutedStyle.Render(compact("✓ "+question.Prompt+" — "+refinementAnswerSummary(answer.Value), width)))
-	}
-	return lines
-}
-
-func refinementAnswerSummary(value authoring.RefinementAnswerValue) string {
-	switch {
-	case value.Text != "":
-		return value.Text
-	case len(value.Items) > 0:
-		return strings.Join(value.Items, ", ")
-	case len(value.OptionIDs) > 0:
-		return strings.Join(value.OptionIDs, ", ")
-	case value.Boolean != nil:
-		if *value.Boolean {
-			return "yes"
-		}
-		return "no"
-	case value.CredentialReference != nil:
-		return value.CredentialReference.Kind + " credential configured"
-	case len(value.SkillIDs) > 0:
-		return strings.Join(value.SkillIDs, ", ")
-	default:
-		return "answered"
-	}
 }
 
 func (m *Model) renderObjectivesContent(width int) string {
@@ -2021,15 +1354,7 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 	}
 	lines := []string{title, mutedStyle.Render("Skills and authorized actions · install verified capabilities, then grant each Agent or Team only what it needs."), "", mutedStyle.Render(ownerLabel + " authority")}
 	if m.config.Scope.Kind == "local" {
-		credentialCount := 0
-		if m.authoringCapability.Context != nil {
-			credentialCount = len(m.authoringCapability.Context.CredentialBindings)
-		}
-		if credentialCount > 0 {
-			lines = append(lines, lipgloss.NewStyle().Foreground(success).Render(fmt.Sprintf("Local Vault · %d credential reference%s ready", credentialCount, pluralSuffix(credentialCount))))
-		} else {
-			lines = append(lines, mutedStyle.Render("Local Vault · add credential references in context.yaml; never paste secrets here"))
-		}
+		lines = append(lines, mutedStyle.Render("Local Vault · add credential references in context.yaml; never paste secrets here"))
 		lines = append(lines, "")
 	}
 	if m.sourcePolicyCapability.Available {

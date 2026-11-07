@@ -16,7 +16,6 @@ import (
 	"github.com/axiom-studio/openseal/internal/server"
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	artifactstore "github.com/axiom-studio/openseal/pkg/artifact"
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
@@ -413,23 +412,9 @@ func TestKernelHTTPClientUpdatesAgentDeploymentThroughCanonicalAPI(t *testing.T)
 }
 
 func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "tenant", ID: "7"}
-	changeSet := &authoring.ChangeSet{
-		ID: "change-hosted", Scope: scope, Status: authoring.ChangeSetReview, Revision: 4,
-		Placement: authoring.ChangeSetPlacement{CredentialReferences: map[string]map[string]capability.CredentialReference{
-			"sre": {"kubernetes-cluster": {Kind: "kubernetes-cluster", ID: "cluster://7"}},
-		}},
-	}
-	capabilityDocument := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-	capabilityDocument.Operations = append(capabilityDocument.Operations, kernelapi.OperationPatch)
-	capabilityDocument.Context = &kernelapi.CapabilityContext{
-		ChangeSetID: changeSet.ID, Revision: changeSet.Revision,
-		CredentialBindings: []capability.CredentialBindingChoice{{
-			Reference: capability.CredentialReference{Kind: "kubernetes-cluster", ID: "cluster://7"}, DisplayName: "Development",
-		}},
-	}
-	document := kernelapi.NewCapabilityDocument(capabilityDocument)
-	var placement authoring.UpdateChangeSetPlacementRequest
+	scope := runtime.Scope{Kind: "tenant", ID: "7"}
+	document := kernelapi.NewCapabilityDocument(kernelapi.AgentBuilderCapability("openseal-assistant"))
+	var started kernelapi.StartAgentBuilderConversationRequest
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("X-Workspace-Scope") != "tenant:7" {
 			t.Errorf("scope header = %q", request.Header.Get("X-Workspace-Scope"))
@@ -437,19 +422,18 @@ func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch {
 		case request.Method == http.MethodGet && request.URL.Path == "/host/kernel/v1/capabilities":
-			if request.URL.Query().Get("changeSetId") != changeSet.ID || request.URL.Query().Get("scopeKind") != scope.Kind || request.URL.Query().Get("scopeId") != scope.ID {
-				t.Errorf("capability query = %s", request.URL.RawQuery)
-			}
 			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusOK, "status": "OK", "result": document})
-		case request.Method == http.MethodPatch && request.URL.Path == "/host/kernel/v1/authoring/workforce/change-sets/change-hosted/placement":
-			if request.Header.Get("Idempotency-Key") != "placement-hosted" {
+		case request.Method == http.MethodPost && request.URL.Path == "/host/kernel/v1/agent-builder/conversations":
+			if request.Header.Get("Idempotency-Key") != "builder-hosted" {
 				t.Errorf("idempotency key = %q", request.Header.Get("Idempotency-Key"))
 			}
-			if err := json.NewDecoder(request.Body).Decode(&placement); err != nil {
-				t.Errorf("decode placement: %v", err)
+			if err := json.NewDecoder(request.Body).Decode(&started); err != nil {
+				t.Errorf("decode start: %v", err)
 			}
-			writer.WriteHeader(http.StatusAccepted)
-			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusAccepted, "status": "Accepted", "result": changeSet})
+			writer.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(writer).Encode(map[string]interface{}{"code": http.StatusCreated, "status": "Created", "result": kernelapi.StartAgentBuilderConversationResponse{
+				Conversation: &runtime.Conversation{ID: "conversation-hosted", Scope: scope},
+			}})
 		default:
 			http.NotFound(writer, request)
 		}
@@ -461,22 +445,25 @@ func TestKernelHTTPClientConsumesHostedRootAndEnvelope(t *testing.T) {
 		// Protocol-owned headers must remain request-specific.
 		"Idempotency-Key": {"caller-must-not-override"},
 	}))
-	gotDocument, err := client.WorkforceChangeSetCapabilities(t.Context(), scope, changeSet.ID)
+	gotDocument, err := client.Capabilities(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotCapability, ok := gotDocument.Find(kernelapi.WorkforceAuthoringCapabilityID, kernelapi.WorkforceAuthoringCapabilityVersion)
-	if !ok || gotCapability.Context == nil || len(gotCapability.Context.CredentialBindings) != 1 || gotCapability.Context.CredentialBindings[0].DisplayName != "Development" {
+	gotCapability, ok := gotDocument.Find(kernelapi.AgentBuilderCapabilityID, kernelapi.AgentBuilderCapabilityVersion)
+	if !ok || gotCapability.Context == nil || gotCapability.Context.BuilderAgentID != "openseal-assistant" {
 		t.Fatalf("hosted capability = %#v", gotDocument)
 	}
-	updated, err := client.UpdateWorkforceChangeSetPlacement(t.Context(), authoring.UpdateChangeSetPlacementRequest{
-		ChangeSetID: changeSet.ID, ExpectedRevision: changeSet.Revision, Placement: changeSet.Placement,
-	}, "placement-hosted")
+	response, err := client.StartAgentBuilderConversation(t.Context(), kernelapi.StartAgentBuilderConversationRequest{
+		Scope: scope, Prompt: "Track my invoices",
+		Parameters:     runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent},
+		IdempotencyKey: " builder-hosted ",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.ID != changeSet.ID || placement.Placement.CredentialReferences["sre"]["kubernetes-cluster"].ID != "cluster://7" {
-		t.Fatalf("updated=%#v placement=%#v", updated, placement)
+	if response.Conversation == nil || response.Conversation.ID != "conversation-hosted" ||
+		started.Prompt != "Track my invoices" || started.Parameters.Kind != runtime.AgentBuilderKindAgent || started.Scope != scope {
+		t.Fatalf("response=%#v request=%#v", response, started)
 	}
 }
 
@@ -726,52 +713,36 @@ func TestKernelHTTPClientReturnsTypedAPIErrors(t *testing.T) {
 	}
 }
 
-func TestKernelHTTPClientUsesGovernedWorkforceLifecycleContract(t *testing.T) {
-	scope := capability.ScopeReference{Kind: "tenant", ID: "one"}
-	requests := make([]string, 0, 4)
+func TestKernelHTTPClientUsesAgentBuilderContract(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	requests := make([]string, 0, 2)
 	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.RequestURI()+" key="+r.Header.Get("Idempotency-Key"))
 		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/api/v1/capabilities" {
-			capability := kernelapi.WorkforceAuthoringCapability(kernelapi.WorkforceAuthoringCapabilityFeatures{ChangeSets: true})
-			capability.Operations = append(capability.Operations, kernelapi.OperationApply)
-			_ = json.NewEncoder(w).Encode(kernelapi.NewCapabilityDocument(capability))
+		if r.URL.Path == "/api/v1/agent-builder/drafts" {
+			_ = json.NewEncoder(w).Encode(kernelapi.ListAgentBuilderDraftsResponse{Drafts: []runtime.AgentBuilderDraft{{ConversationID: "conversation-one", Title: "Invoices"}}})
 			return
 		}
-		_ = json.NewEncoder(w).Encode(authoring.ChangeSet{ID: "change/one", Scope: scope, Revision: 2})
+		_ = json.NewEncoder(w).Encode(kernelapi.StartAgentBuilderConversationResponse{Conversation: &runtime.Conversation{ID: "conversation-one", Scope: scope}})
 	}))
 	defer httpServer.Close()
 	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
 	ctx := context.Background()
-	if _, err := client.WorkforceChangeSetCapabilities(ctx, scope, "change/one"); err != nil {
+	if _, err := client.StartAgentBuilderConversation(ctx, kernelapi.StartAgentBuilderConversationRequest{
+		Scope: scope, Prompt: "Track my invoices", Parameters: runtime.AgentBuilderParameters{Kind: runtime.AgentBuilderKindAgent}, IdempotencyKey: "start-1",
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.UpdateWorkforceChangeSetPlacement(ctx, authoring.UpdateChangeSetPlacementRequest{Scope: scope, ChangeSetID: "change/one"}, "placement-1"); err != nil {
+	drafts, err := client.ListAgentBuilderDrafts(ctx, scope, 20, 40)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.AnswerWorkforceChangeSetRefinement(ctx, authoring.AnswerChangeSetRefinementRequest{Scope: scope, ChangeSetID: "change/one", QuestionID: "sources"}, "refine-1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.EvaluateWorkforceChangeSet(ctx, authoring.SubmitChangeSetEvaluationRequest{Scope: scope, ChangeSetID: "change/one"}, "evaluate-1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.ResolveWorkforceChangeSetApproval(ctx, authoring.ResolveChangeSetApprovalRequest{Scope: scope, ChangeSetID: "change/one"}, "approve-1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.PrepareWorkforceChangeSetActivation(ctx, authoring.PrepareChangeSetActivationRequest{Scope: scope, ChangeSetID: "change/one"}, "activation-1"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := client.ApplyWorkforceChangeSet(ctx, authoring.ApplyChangeSetRequest{Scope: scope, ChangeSetID: "change/one"}, "apply-1"); err != nil {
-		t.Fatal(err)
+	if len(drafts.Drafts) != 1 || drafts.Drafts[0].ConversationID != "conversation-one" || drafts.Drafts[0].Title != "Invoices" {
+		t.Fatalf("drafts = %#v", drafts)
 	}
 	want := []string{
-		"GET /api/v1/capabilities?changeSetId=change%2Fone&scopeId=one&scopeKind=tenant key=",
-		"PATCH /api/v1/authoring/workforce/change-sets/change%2Fone/placement key=placement-1",
-		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/refinements key=refine-1",
-		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/evaluations key=evaluate-1",
-		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/approvals key=approve-1",
-		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/activation key=activation-1",
-		"POST /api/v1/authoring/workforce/change-sets/change%2Fone/apply key=apply-1",
+		"POST /api/v1/agent-builder/conversations key=start-1",
+		"GET /api/v1/agent-builder/drafts?limit=20&offset=40&scopeId=default&scopeKind=local key=",
 	}
 	if len(requests) != len(want) {
 		t.Fatalf("requests = %#v", requests)
