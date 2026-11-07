@@ -191,6 +191,8 @@ func desktopOwnerReviewed(changeSet *authoring.ChangeSet, owner authoring.Change
 	return false
 }
 
+var _ runtime.AgentBuilderApprovalAuthorizer = DesktopApprovalAuthorizer{}
+
 // DesktopApprovalAuthorizer binds decisions to the owner of one authenticated
 // local workspace. The local owner holds the default operator role, not arbitrary
 // named users or tenant roles. Checkpoint eligibility remains mandatory.
@@ -201,6 +203,16 @@ func (a DesktopApprovalAuthorizer) ValidateApprovalRequest(scope runtime.Scope, 
 		return errors.New("desktop approvals require the configured local workspace operator")
 	}
 	return nil
+}
+
+// AuthorizeAgentBuilderApproval lets the authenticated local operator approve
+// agent-builder cards (create_agent, update_agent, create_team; D11). The
+// coordinator has already required a "user" principal and AuthorizeApproval.
+func (a DesktopApprovalAuthorizer) AuthorizeAgentBuilderApproval(_ context.Context, principal runtime.ApprovalPrincipal, approval *runtime.ApprovalCheckpoint) error {
+	if approval == nil {
+		return errors.New("approval is required")
+	}
+	return a.ValidateApprovalRequest(approval.Scope, principal)
 }
 
 func (a DesktopApprovalAuthorizer) AuthorizeApproval(_ context.Context, principal runtime.ApprovalPrincipal, approval *runtime.ApprovalCheckpoint) error {

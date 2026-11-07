@@ -203,6 +203,8 @@ type ConversationApprovalModeKernelStore interface {
 func NewConversationApprovalModeService(store ConversationApprovalModeKernelStore) *ConversationApprovalModeService {
 	return &ConversationApprovalModeService{
 		conversations: store, modes: store, actions: store,
+		// Approval modes never approve an agent-builder card (D11): those
+		// actions are Review always, and the coordinator refuses the approve.
 		approvals: NewApprovalCoordinator(store, store, nil), now: time.Now, newID: uuid.NewString,
 	}
 }
@@ -321,8 +323,9 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 				approved = append(approved, approval.ID)
 			}
 		case errors.Is(err, ErrApprovalResolved), errors.Is(err, ErrRevisionConflict), errors.Is(err, ErrApprovalExpired),
-			errors.Is(err, ErrInvalidRunTransition):
-			// A concurrent decision, expiry, or paused Run owns this checkpoint.
+			errors.Is(err, ErrInvalidRunTransition), errors.Is(err, ErrAgentBuilderApprovalForbidden):
+			// A concurrent decision, expiry, or paused Run owns this checkpoint,
+			// or it is an agent-builder card only a person approves (D11).
 		default:
 			incomplete = true
 		}

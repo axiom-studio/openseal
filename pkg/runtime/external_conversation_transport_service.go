@@ -184,6 +184,9 @@ func (s *ExternalConversationTransportService) resolveExternalApprovalDecision(
 		// trigger above limits this authority to the originating conversation.
 		authorizer = ApprovalAuthorizerFunc(func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error { return nil })
 	}
+	// Neither authorizer above is an AgentBuilderApprovalAuthorizer, so an
+	// external channel reply can reject but never approve an agent-builder
+	// card (D11); those cards also get no external destinations.
 	coordinator := NewApprovalCoordinator(store, store, authorizer)
 	resolution, err := coordinator.Resolve(ctx, ResolveApprovalRequest{
 		Scope: endpoint.Scope, ApprovalID: approval.ID, ExpectedRevision: revision,

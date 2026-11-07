@@ -233,6 +233,8 @@ func (w *ApprovalNotificationWorker) notifyOutcome(ctx context.Context, approval
 }
 
 func (w *ApprovalNotificationWorker) resolveTimeout(ctx context.Context, approval *ApprovalCheckpoint, now time.Time) error {
+	// The timeout rule never approves an agent-builder card (D11): the
+	// coordinator expires it whatever its TimeoutDecision says.
 	coordinator := NewApprovalCoordinator(w.store, w.store, EligibleApprovalAuthorizer{})
 	coordinator.now = func() time.Time { return now }
 	resolved, err := coordinator.ResolveTimeout(ctx, approval.Scope, approval.ID, approval.Revision, approval.ID)

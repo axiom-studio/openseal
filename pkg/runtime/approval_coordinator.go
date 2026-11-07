@@ -14,6 +14,55 @@ type ApprovalAuthorizer interface {
 	AuthorizeApproval(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error
 }
 
+// AgentBuilderApprovalAuthorizer is the host authorizer that may approve
+// agent-builder cards (create_agent, update_agent, create_team; D11). Only a
+// coordinator built with one accepts such an approve, and only from a "user"
+// principal: approval modes, the timeout rule, external channel replies,
+// callbacks, notification links and every other in-kernel resolver use an
+// authorizer without this method and are refused. Reject, changes_requested,
+// supersede, expire and cancel stay allowed everywhere.
+type AgentBuilderApprovalAuthorizer interface {
+	ApprovalAuthorizer
+	AuthorizeAgentBuilderApproval(ctx context.Context, principal ApprovalPrincipal, approval *ApprovalCheckpoint) error
+}
+
+// ErrAgentBuilderApprovalForbidden reports an approve of an agent-builder card
+// that did not come from a person through the host approval route (D11).
+var ErrAgentBuilderApprovalForbidden = errors.New("this approval can only be given by a person in the app")
+
+// agentBuilderTeamOperation is the create_team operation of an openseal.teams
+// card, the only Team card under the agent-builder rule (D11).
+const agentBuilderTeamOperation = "create_team"
+
+// isAgentBuilderApproval reports whether approval reviews an agent-builder
+// action: any agent_profile card, or a team card for create_team. Team role and
+// profile amendments keep their own approval paths.
+func isAgentBuilderApproval(approval *ApprovalCheckpoint) bool {
+	if approval == nil {
+		return false
+	}
+	resourceType, _ := approval.ProposedAction["resourceType"].(string)
+	operation, _ := approval.ProposedAction["operation"].(string)
+	return resourceType == agentProfileResourceType || resourceType == "team" && operation == agentBuilderTeamOperation
+}
+
+// authorizeAgentBuilderApproval applies D11 to an approve of an agent-builder
+// card: a person's decision through a host AgentBuilderApprovalAuthorizer, on
+// top of the coordinator's ordinary authorization.
+func (c *ApprovalCoordinator) authorizeAgentBuilderApproval(ctx context.Context, kind approvalResolutionKind, principal ApprovalPrincipal, approval *ApprovalCheckpoint) error {
+	host, ok := c.authorize.(AgentBuilderApprovalAuthorizer)
+	if kind != approvalResolutionPrincipal || principal.Type != "user" || !ok {
+		return fmt.Errorf("authorize approval: %w", ErrAgentBuilderApprovalForbidden)
+	}
+	if err := host.AuthorizeApproval(ctx, principal, cloneApprovalCheckpoint(approval)); err != nil {
+		return fmt.Errorf("authorize approval: %w", err)
+	}
+	if err := host.AuthorizeAgentBuilderApproval(ctx, principal, cloneApprovalCheckpoint(approval)); err != nil {
+		return fmt.Errorf("authorize approval: %w", err)
+	}
+	return nil
+}
+
 type ApprovalAuthorizerFunc func(context.Context, ApprovalPrincipal, *ApprovalCheckpoint) error
 
 func (f ApprovalAuthorizerFunc) AuthorizeApproval(ctx context.Context, principal ApprovalPrincipal, approval *ApprovalCheckpoint) error {
@@ -222,8 +271,10 @@ func (c *ApprovalCoordinator) planResolution(ctx context.Context, req ResolveApp
 	callStatus := ActionCallStatusDenied
 	if expired {
 		// A manifest review floor never auto-approves, whatever the
-		// checkpoint's timeout rule says.
-		if timeout && approval.TimeoutDecision == ApprovalTimeoutApprove && decidable && approval.ProposedAction["review"] != "always" {
+		// checkpoint's timeout rule says, and neither does an agent-builder
+		// card (D11): only a person approves those.
+		if timeout && approval.TimeoutDecision == ApprovalTimeoutApprove && decidable && approval.ProposedAction["review"] != "always" &&
+			!isAgentBuilderApproval(approval) {
 			status = ApprovalStatusApproved
 			eventType = "approval.auto_approved"
 			callStatus = ActionCallStatusReady
@@ -235,7 +286,12 @@ func (c *ApprovalCoordinator) planResolution(ctx context.Context, req ResolveApp
 			}
 		}
 	} else {
-		if kind == approvalResolutionPrincipal {
+		builderApprove := kind != approvalResolutionSuperseded && req.Decision == ApprovalDecisionApprove && isAgentBuilderApproval(approval)
+		if builderApprove {
+			if err := c.authorizeAgentBuilderApproval(ctx, kind, req.Principal, approval); err != nil {
+				return nil, nil, err
+			}
+		} else if kind == approvalResolutionPrincipal {
 			if err := c.authorize.AuthorizeApproval(ctx, req.Principal, cloneApprovalCheckpoint(approval)); err != nil {
 				return nil, nil, fmt.Errorf("authorize approval: %w", err)
 			}
