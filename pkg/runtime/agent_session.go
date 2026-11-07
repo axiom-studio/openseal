@@ -1184,9 +1184,12 @@ type AppendAgentSessionEntriesResult struct {
 }
 
 type ToolEntryTransitionRequest struct {
-	Scope            Scope
-	EntryID          string
-	RunID            string // must equal entry.RunID
+	Scope   Scope
+	EntryID string
+	RunID   string // must equal entry.RunID
+	// Lease fences the transition by the Run lease. A zero Lease (no
+	// WorkerID) is the terminal close (loop-16): allowed only to error or
+	// interrupted, and only while the Run is terminal (ErrLeaseLost otherwise).
 	Lease            AgentRunLeaseGuard
 	From             ToolEntryState
 	ExpectedRevision int64 // 0 = CAS on state only
@@ -1413,7 +1416,7 @@ func validateToolEntryTransitionRequest(req ToolEntryTransitionRequest) error {
 	if strings.TrimSpace(req.EntryID) == "" || strings.TrimSpace(req.RunID) == "" {
 		return fmt.Errorf("%w: entryId and runId are required", ErrInvalidToolEntryTransition)
 	}
-	if strings.TrimSpace(req.Lease.WorkerID) == "" {
+	if strings.TrimSpace(req.Lease.WorkerID) == "" && req.To != ToolEntryError && req.To != ToolEntryInterrupted {
 		return fmt.Errorf("%w: lease needs a worker id", ErrInvalidToolEntryTransition)
 	}
 	if !ValidToolEntryTransition(req.From, req.To) {

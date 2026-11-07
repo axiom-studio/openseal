@@ -269,8 +269,9 @@ func (s *RunCommandService) commandAgentRun(ctx context.Context, req AgentRunCom
 	return &AgentRunCommandResult{Run: run, Event: event}, nil
 }
 
-// CascadeTerminalRun cancels every non-terminal Run owned beneath a terminal
-// parent. Descendants are visited leaf-first so a waiting parent never keeps a
+// CascadeTerminalRun closes a terminal Run's running step and open tool
+// entries (closeTerminalRunWork) and cancels every non-terminal Run owned
+// beneath it. Descendants are visited leaf-first so a waiting parent never keeps a
 // child lease, approval, or capability resource alive after its owner has
 // stopped. The operation is replay-safe and is used both by direct commands
 // and terminal reconciliation after process restarts. An accepted handoff
@@ -292,9 +293,11 @@ func (s *RunCommandService) CascadeTerminalRun(ctx context.Context, parent *Agen
 	if current.Scope != parent.Scope || current.ID != parent.ID || !isTerminalAgentRunStatus(current.Status) {
 		return fmt.Errorf("%w: persisted parent Run is not terminal", ErrInvalidRunTransition)
 	}
+	// Its running step and open tool entries can no longer finish: close them.
+	workErr := closeTerminalRunWork(ctx, s.store, current, s.now().UTC())
 	// Its open in-chat requests can no longer resume it: close their cards.
 	closeErr := closeTerminalRunInteractionRequests(ctx, s.store, current)
-	return errors.Join(closeErr, s.cancelRunDescendants(ctx, current, map[string]struct{}{current.ID: {}}))
+	return errors.Join(workErr, closeErr, s.cancelRunDescendants(ctx, current, map[string]struct{}{current.ID: {}}))
 }
 
 func (s *RunCommandService) cancelRunDescendants(ctx context.Context, parent *AgentRun, visited map[string]struct{}) error {
