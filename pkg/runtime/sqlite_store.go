@@ -139,7 +139,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateChannelUmbrellasSQLite(db); err != nil {
 		return err
 	}
-	return migrateConnectOnceSQLite(db)
+	if err := migrateConnectOnceSQLite(db); err != nil {
+		return err
+	}
+	return migrateAgentSessionLogSQLite(db)
 }
 
 // Close closes the underlying database.
