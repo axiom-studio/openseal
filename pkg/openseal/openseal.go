@@ -510,7 +510,6 @@ type (
 	ConversationParticipantQuery         = runtime.ConversationParticipantQuery
 	ConversationParticipantSource        = runtime.ConversationParticipantSource
 	ConversationParticipantSourceFunc    = runtime.ConversationParticipantSourceFunc
-	ConversationCompactionRequest        = runtime.ConversationCompactionRequest
 	ConversationCoordinatorConfig        = runtime.ConversationCoordinatorConfig
 	ConversationRunSchedulerConfig       = runtime.ConversationRunSchedulerConfig
 	ConversationRunTurnRunnerConfig      = runtime.ConversationRunTurnRunnerConfig
