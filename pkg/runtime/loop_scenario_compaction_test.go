@@ -1,9 +1,9 @@
 package runtime
 
 // Compaction and overflow journeys (run-loop section 12 §5.5, tests-T09).
-// The real RunLoop drives the kernel LoopCompactor over the loop fixture's
-// production bindings; only the model, the host tools and the action
-// dispatcher are fakes. Tool results are sized through the kernel estimate
+// The real RunLoop drives the kernel LoopCompactor, which the fixture's
+// binding wires as the catalog resolver does (budget included); only the
+// model, the host tools and the action dispatcher are fakes. Tool results are sized through the kernel estimate
 // (estimateEntryTokens), so the thresholds the scenarios cross are exact.
 
 import (
@@ -12,60 +12,10 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 )
 
 // ---------------------------------------------------------------------------
 // Fixture glue
-
-// compactionBinding is the fixture binding plus the kernel compactor, wired
-// as the catalog resolver wires it: the binding's host and the model
-// producer's own request preparer, so summary calls share the step's System
-// and Tools.
-func compactionBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
-	f.t.Helper()
-	binding := f.binding(run)
-	producer, ok := binding.Producer.(*ModelStepProducer)
-	if !ok {
-		f.t.Fatalf("fixture producer is %T, want *ModelStepProducer", binding.Producer)
-	}
-	binding.Compactor = &LoopCompactor{
-		Host: binding.Host, Sessions: f.store.(AgentSessionStore), Requests: producer.preparer, Now: f.clock.Now,
-	}
-	return binding
-}
-
-// compactionClaim is loopFixture.runClaim with the compacting binding.
-func compactionClaim(f *loopFixture, runID string) (LoopExit, *AgentRun) {
-	f.t.Helper()
-	claimed := f.claim(runID)
-	binding := compactionBinding(f, claimed)
-	if binding.Session != nil && claimed.SessionID != binding.Session.ID {
-		claimed = f.mustRun(runID)
-	}
-	exit := f.loop.Drive(f.ctx, RunLoopClaim{Run: claimed, WorkerID: f.workerID, Binding: binding})
-	return exit, f.mustRun(runID)
-}
-
-// compactionToRest is loopFixture.driveToRest with the compacting binding.
-func compactionToRest(f *loopFixture, runID string, maxClaims int) *AgentRun {
-	f.t.Helper()
-	for i := 0; i < maxClaims; i++ {
-		exit, run := compactionClaim(f, runID)
-		if exit.Err != nil && exit.Reason != RunLoopExitRequeued && run.Status != AgentRunStatusFailed {
-			f.t.Fatalf("claim %d of %s exited %s: %v", i+1, runID, exit.Reason, exit.Err)
-		}
-		if run.Status != AgentRunStatusQueued {
-			return run
-		}
-		if run.AvailableAt.After(f.clock.Now()) {
-			f.clock.Advance(run.AvailableAt.Sub(f.clock.Now()) + time.Millisecond)
-		}
-	}
-	run := f.mustRun(runID)
-	f.t.Fatalf("run %s not at rest after %d claims: %s", runID, maxClaims, run.Status)
-	return run
-}
 
 // bigLookups makes every lookup result about tokens kernel-estimated tokens.
 func bigLookups(f *loopFixture, tokens int) {
@@ -213,7 +163,7 @@ func TestLoopCompactsAtStepStartWhenOverThreshold(t *testing.T) {
 		f := newLoopFixture(t, store, withContextWindow(64_000), withRules(summaryRule(), lookupScript(3, "Issues 1 to 3 are open.")))
 		bigLookups(f, 12_000)
 		conversation, run := f.startChat("check issues 1 to 3")
-		done := compactionToRest(f, run.ID, 3)
+		done := f.driveToRest(run.ID, 3)
 		f.mustStatus(done, AgentRunStatusCompleted)
 
 		log := f.entries(run.ID)
@@ -336,7 +286,7 @@ func TestLoopLaterCompactionCarriesThePreviousSummary(t *testing.T) {
 		f := newLoopFixture(t, store, withContextWindow(64_000), withRules(summaryRule(), lookupScript(5, "Issues 1 to 5 are open.")))
 		bigLookups(f, 12_000)
 		run := f.startRun(RunKindAgentWork, "Check issues 1 to 5")
-		done := compactionToRest(f, run.ID, 3)
+		done := f.driveToRest(run.ID, 3)
 		f.mustStatus(done, AgentRunStatusCompleted)
 
 		log := f.entries(run.ID)
@@ -401,7 +351,7 @@ func TestLoopLengthRejectionCompactsAndRetriesOnce(t *testing.T) {
 		f := newLoopFixture(t, store, withRules(overflowScript(1)...))
 		bigLookups(f, 5_000)
 		run := f.startRun(RunKindAgentWork, "Check issues 1 to 3")
-		done := compactionToRest(f, run.ID, 3)
+		done := f.driveToRest(run.ID, 3)
 		f.mustStatus(done, AgentRunStatusCompleted)
 
 		var order []string
@@ -448,7 +398,7 @@ func TestLoopSecondLengthRejectionFailsVisibly(t *testing.T) {
 		f := newLoopFixture(t, store, withRules(overflowScript(0)...))
 		bigLookups(f, 5_000)
 		run := f.startRun(RunKindAgentWork, "Check issues 1 to 3")
-		done := compactionToRest(f, run.ID, 3)
+		done := f.driveToRest(run.ID, 3)
 		f.mustStatus(done, AgentRunStatusFailed)
 
 		failure := done.FailureExplanation
@@ -497,7 +447,7 @@ func TestLoopCompactionNeverSplitsAToolCallFromItsResult(t *testing.T) {
 		// newest two cross it, so the boundary falls between step 3's results.
 		bigLookups(f, 6_000)
 		run := f.startRun(RunKindAgentWork, "Check issues 1 to 6")
-		done := compactionToRest(f, run.ID, 3)
+		done := f.driveToRest(run.ID, 3)
 		f.mustStatus(done, AgentRunStatusCompleted)
 
 		log := f.entries(run.ID)
