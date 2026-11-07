@@ -499,7 +499,11 @@ func (s *PostgresStore) ListAgentTurns(ctx context.Context, filter AgentTurnFilt
 		query += ` AND status IN (` + strings.Join(placeholders, ",") + `)`
 	}
 	args = append(args, limit)
-	query += fmt.Sprintf(` ORDER BY sequence ASC LIMIT $%d`, len(args))
+	order := "ASC"
+	if filter.Descending {
+		order = "DESC"
+	}
+	query += fmt.Sprintf(` ORDER BY sequence %s LIMIT $%d`, order, len(args))
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -547,6 +551,68 @@ func (s *PostgresStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, ex
 		return ErrRevisionConflict
 	}
 	return nil
+}
+
+func (s *PostgresStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error {
+	if err := validateStepModelRecordInput(turn, expectedRevision, events); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(turn)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// The Run row lock serializes activity sequence allocation, as in withActivity.
+	var exists int
+	err = tx.QueryRowContext(ctx, `SELECT 1 FROM `+s.table("agent_runs")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, turn.Scope.Kind, turn.Scope.ID, turn.RunID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrRunNotFound
+	}
+	if err != nil {
+		return err
+	}
+	var currentPayload string
+	err = tx.QueryRowContext(ctx, `SELECT payload FROM `+s.table("agent_turns")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3 FOR UPDATE`, turn.Scope.Kind, turn.Scope.ID, turn.ID).Scan(&currentPayload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrTurnNotFound
+	}
+	if err != nil {
+		return err
+	}
+	current, err := decodeAgentTurnRecord(currentPayload)
+	if err != nil {
+		return err
+	}
+	if err := validateStepModelWrite(current, turn, expectedRevision); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE `+s.table("agent_turns")+`
+		SET status = $1, revision = $2, lease_owner = $3, lease_expires_at = $4, payload = $5::jsonb
+		WHERE scope_kind = $6 AND scope_id = $7 AND id = $8 AND revision = $9 AND lease_owner = $10`,
+		turn.Status, turn.Revision, turn.LeaseOwner, turn.LeaseExpiresAt, string(payload), turn.Scope.Kind, turn.Scope.ID,
+		turn.ID, expectedRevision, turn.LeaseOwner)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrRevisionConflict
+	}
+	for _, event := range events {
+		if _, err := s.insertPostgresActivityTx(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *PostgresStore) ClaimAgentTurn(ctx context.Context, scope Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentTurn, error) {

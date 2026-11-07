@@ -169,7 +169,11 @@ func (s *SQLiteStore) ListAgentTurns(ctx context.Context, filter AgentTurnFilter
 			args = append(args, status)
 		}
 	}
-	query += ` ORDER BY sequence ASC LIMIT ?`
+	if filter.Descending {
+		query += ` ORDER BY sequence DESC LIMIT ?`
+	} else {
+		query += ` ORDER BY sequence ASC LIMIT ?`
+	}
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -216,6 +220,79 @@ func (s *SQLiteStore) UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expe
 	if affected != 1 {
 		return ErrRevisionConflict
 	}
+	return nil
+}
+
+func (s *SQLiteStore) RecordAgentTurnStepModel(ctx context.Context, turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error {
+	if err := validateStepModelRecordInput(turn, expectedRevision, events); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(turn)
+	if err != nil {
+		return err
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err = conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	var exists int
+	err = conn.QueryRowContext(ctx, `SELECT 1 FROM agent_runs WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+		turn.Scope.Kind, turn.Scope.ID, turn.RunID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return ErrRunNotFound
+	}
+	if err != nil {
+		return err
+	}
+	var currentPayload string
+	err = conn.QueryRowContext(ctx, `SELECT payload FROM agent_turns WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+		turn.Scope.Kind, turn.Scope.ID, turn.ID).Scan(&currentPayload)
+	if err == sql.ErrNoRows {
+		return ErrTurnNotFound
+	}
+	if err != nil {
+		return err
+	}
+	current, err := decodeAgentTurnRecord(currentPayload)
+	if err != nil {
+		return err
+	}
+	if err := validateStepModelWrite(current, turn, expectedRevision); err != nil {
+		return err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE agent_turns SET status = ?, revision = ?, lease_owner = ?, lease_expires_at = ?, payload = ?
+		WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ? AND lease_owner = ?`,
+		turn.Status, turn.Revision, turn.LeaseOwner, turn.LeaseExpiresAt, string(payload), turn.Scope.Kind, turn.Scope.ID, turn.ID,
+		expectedRevision, turn.LeaseOwner)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return ErrRevisionConflict
+	}
+	for _, event := range events {
+		if _, err := insertSQLiteActivityConn(ctx, conn, event); err != nil {
+			return err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return err
+	}
+	committed = true
 	return nil
 }
 

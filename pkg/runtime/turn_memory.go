@@ -64,7 +64,12 @@ func (s *MemoryStore) ListAgentTurns(_ context.Context, filter AgentTurnFilter) 
 			result = append(result, cloneAgentTurn(turn))
 		}
 	}
-	sort.Slice(result, func(i, j int) bool { return result[i].Sequence < result[j].Sequence })
+	sort.Slice(result, func(i, j int) bool {
+		if filter.Descending {
+			return result[i].Sequence > result[j].Sequence
+		}
+		return result[i].Sequence < result[j].Sequence
+	})
 	limit := filter.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -105,6 +110,26 @@ func (s *MemoryStore) UpdateAgentTurn(_ context.Context, turn *AgentTurn, expect
 		return ErrTurnLeaseHeld
 	}
 	s.turns[runKey][turn.ID] = cloneAgentTurn(turn)
+	return nil
+}
+
+func (s *MemoryStore) RecordAgentTurnStepModel(_ context.Context, turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error {
+	if err := validateStepModelRecordInput(turn, expectedRevision, events); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runKey := portfolioKey(turn.Scope, turn.RunID)
+	if s.agentRuns[runKey] == nil {
+		return ErrRunNotFound
+	}
+	if err := validateStepModelWrite(s.turns[runKey][turn.ID], turn, expectedRevision); err != nil {
+		return err
+	}
+	s.turns[runKey][turn.ID] = cloneAgentTurn(turn)
+	for _, event := range events {
+		appendMemoryActivityLocked(s, event)
+	}
 	return nil
 }
 
