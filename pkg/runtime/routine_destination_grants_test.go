@@ -101,7 +101,7 @@ func TestRoutineRunsPostOnlyToPinnedDestinationsWithoutAsking(t *testing.T) {
 		{"default destination", map[string]interface{}{"message": "Digest"}, true},
 	} {
 		run := f.routineOccurrence(t, activation, "post-"+tc.name)
-		result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: "chat", SkillVersion: "1.0.0", Action: "post", Arguments: tc.arguments, IdempotencyKey: "post-" + string(rune('a'+index))})
+		result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "chat", SkillVersion: "1.0.0", Action: "post", Arguments: tc.arguments, IdempotencyKey: "post-" + string(rune('a'+index))})
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}

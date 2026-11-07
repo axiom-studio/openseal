@@ -28,6 +28,8 @@ type routineGrantFixtureState struct {
 	args      map[string]interface{}
 	validator *RunbookActionValidator
 	owners    routineOwnerAddressesForTest
+	// occurrence is the routine occurrence last claimed, still running.
+	occurrence *AgentRun
 }
 
 func routineGrantFixture(t *testing.T) *routineGrantFixtureState {
@@ -192,9 +194,12 @@ func TestApprovedBriefGrantsArePersistedOnTheRoutine(t *testing.T) {
 }
 
 // routineOccurrence creates and claims a scheduled occurrence of activation.
+// The previous occurrence completes first: a loop call leaves its Run
+// running, and the routine's objective admits one running occurrence.
 func (f *routineGrantFixtureState) routineOccurrence(t *testing.T, activation *RunbookActivation, key string) *AgentRun {
 	t.Helper()
 	now := time.Now().UTC()
+	f.completeOccurrence(t, now)
 	run, err := NewPortfolioService(f.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: activation.Scope, ObjectiveID: activation.ObjectiveID, Owner: activation.Owner, AssignedAgentID: activation.AssignedAgentID,
 		Goal: activation.Task.Goal, Source: RunSourceSchedule, IdempotencyKey: key,
@@ -212,11 +217,40 @@ func (f *routineGrantFixtureState) routineOccurrence(t *testing.T, activation *R
 			t.Fatalf("claim: %#v %v", claimed, err)
 		}
 		if claimed.ID == run.ID {
+			f.occurrence = claimed
 			return claimed
 		}
 	}
 	t.Fatal("routine occurrence was not claimed")
 	return nil
+}
+
+// completeOccurrence ends the occurrence last claimed, as its loop would.
+func (f *routineGrantFixtureState) completeOccurrence(t *testing.T, now time.Time) {
+	t.Helper()
+	if f.occurrence == nil {
+		return
+	}
+	current, err := f.store.GetAgentRun(t.Context(), f.occurrence.Scope, f.occurrence.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.occurrence = nil
+	if current.Status != AgentRunStatusRunning {
+		return
+	}
+	completed := cloneAgentRun(current)
+	completed.Status, completed.LeaseOwner, completed.LeaseExpiresAt = AgentRunStatusCompleted, "", nil
+	completed.Revision++
+	completed.UpdatedAt = now
+	event := &ActivityEvent{
+		ID: "complete-" + current.ID, Scope: current.Scope, EventType: "run.updated", Severity: ActivitySeverityInfo,
+		AgentID: current.AssignedAgentID, RunID: current.ID, Actor: ActivityActor{Type: "worker", ID: "worker"},
+		Summary: "Routine occurrence completed", Visibility: ActivityVisibilityScope, CreatedAt: now,
+	}
+	if _, err := f.store.UpdateAgentRunWithEvent(t.Context(), completed, current.Revision, event, nil); err != nil {
+		t.Fatalf("complete occurrence %s: %v", current.ID, err)
+	}
 }
 
 // reviewEverything sets the routine's chat to manual approval.
@@ -233,7 +267,7 @@ func (f *routineGrantFixtureState) reviewEverything(t *testing.T, activation *Ru
 
 func (f *routineGrantFixtureState) propose(t *testing.T, coordinator *ActionCoordinator, run *AgentRun, action, key string, arguments map[string]interface{}) *ActionProposalResult {
 	t.Helper()
-	result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key})
+	result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, TurnID: "step-1", WorkerID: "worker", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Summary: "Run the routine's step.", DeploymentID: run.AssignedAgentID, SkillID: "mail", SkillVersion: "1.0.0", Action: action, Arguments: arguments, IdempotencyKey: key})
 	if err != nil {
 		t.Fatalf("%s: %v", key, err)
 	}
