@@ -158,7 +158,7 @@ func requireControlError(t *testing.T, result *ToolResult, status ToolResultStat
 
 func TestControlSecondSettleCallInSameMessageIsRefused(t *testing.T) {
 	calls := modelCalls("control_fork", "react", "ask_user", "linear_get_issue", "wait")
-	refusals := controlCallRefusals(calls)
+	refusals := controlCallRefusals(calls, allSettleTools)
 	if len(refusals) != 2 || refusals["call-a"] != nil || refusals["call-b"] != nil || refusals["call-d"] != nil {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -167,17 +167,17 @@ func TestControlSecondSettleCallInSameMessageIsRefused(t *testing.T) {
 		t.Fatalf("message = %v", value["message"])
 	}
 	requireControlError(t, refusals["call-e"], ToolResultRefused, "control_one_settle_call")
-	if got := controlSettleConflicts(calls); !reflect.DeepEqual(got, []int{2, 4}) {
+	if got := controlSettleConflicts(calls, allSettleTools); !reflect.DeepEqual(got, []int{2, 4}) {
 		t.Fatalf("conflicts = %v", got)
 	}
 	// One settle call among inline and governed calls is fine.
-	if refusals := controlCallRefusals(modelCalls("react", "control_fork", "linear_get_issue")); len(refusals) != 0 {
+	if refusals := controlCallRefusals(modelCalls("react", "control_fork", "linear_get_issue"), allSettleTools); len(refusals) != 0 {
 		t.Fatalf("single settle call refused: %v", refusals)
 	}
 }
 
 func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
-	refusals := controlCallRefusals(modelCalls("linear_get_issue", "turn_final_answer", "react"))
+	refusals := controlCallRefusals(modelCalls("linear_get_issue", "turn_final_answer", "react"), allSettleTools)
 	if len(refusals) != 1 {
 		t.Fatalf("refusals = %v", refusals)
 	}
@@ -186,19 +186,22 @@ func TestFinalAnswerWithOtherCallsIsRefusedOthersRun(t *testing.T) {
 		t.Fatalf("message = %v", value["message"])
 	}
 	// A refused final does not take the settle slot: the fork still settles.
-	refusals = controlCallRefusals(modelCalls("turn_final_answer", "control_fork"))
+	refusals = controlCallRefusals(modelCalls("turn_final_answer", "control_fork"), allSettleTools)
 	if len(refusals) != 1 || refusals["call-b"] != nil {
 		t.Fatalf("refusals = %v", refusals)
 	}
 	requireControlError(t, refusals["call-a"], ToolResultRefused, "final_answer_not_alone")
 	// Task start must also be alone (A4).
-	refusals = controlCallRefusals(modelCalls("conversation_start_task", "react"))
+	refusals = controlCallRefusals(modelCalls("conversation_start_task", "react"), allSettleTools)
 	if len(refusals) != 1 {
 		t.Fatalf("refusals = %v", refusals)
 	}
-	requireControlError(t, refusals["call-a"], ToolResultRefused, "control_not_alone")
+	value = requireControlError(t, refusals["call-a"], ToolResultRefused, "task_not_alone")
+	if value["message"] != "Call conversation_start_task alone; other work belongs inside the task." {
+		t.Fatalf("message = %v", value["message"])
+	}
 	// Alone, the final answer settles.
-	if refusals := controlCallRefusals(modelCalls("turn_final_answer")); len(refusals) != 0 {
+	if refusals := controlCallRefusals(modelCalls("turn_final_answer"), allSettleTools); len(refusals) != 0 {
 		t.Fatalf("lone final refused: %v", refusals)
 	}
 }
@@ -299,7 +302,7 @@ func newControlFixture(t *testing.T, calls []LoopToolCall) *controlFixture {
 	}
 	registry, handlers := fakeControlRegistry()
 	f.handlers = handlers
-	f.exec = &ControlExecutor{Store: store, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
+	f.exec = &ControlExecutor{Portfolio: store, Sessions: store, Now: func() time.Time { return now }, handlers: registry}
 	return f
 }
 
@@ -308,8 +311,13 @@ func (f *controlFixture) context(callID string, authority ControlAuthority) Cont
 	if entry == nil {
 		f.t.Fatalf("no entry for call %s", callID)
 	}
+	step := f.step
+	if entry.StepID != step.ID {
+		// Deterministic entries carry their own (finished, applied) step.
+		step = &AgentTurn{ID: entry.StepID, RunID: f.run.ID, Sequence: f.step.Sequence, Status: AgentTurnStatusCompleted}
+	}
 	return NewControlContext(StepToolsInput{
-		Run: f.run, Step: f.step, Session: f.session, WorkerID: controlTestWorker,
+		Run: f.run, Step: step, Session: f.session, WorkerID: controlTestWorker,
 		Binding: &TurnRunnerBinding{Authority: authority},
 	}, entry)
 }
@@ -425,6 +433,19 @@ func TestControlDispatcherPhaseAndStateRules(t *testing.T) {
 	if _, err := f.exec.Settle(f.ctx, cc); !errors.Is(err, ErrControlEntryState) {
 		t.Fatalf("settle on running step = %v", err)
 	}
+	// The step must be the entry's own step.
+	cc = f.context("wait", authority)
+	cc.Step = &AgentTurn{ID: "step-0", Sequence: 1, Status: AgentTurnStatusCompleted}
+	if _, err := f.exec.Settle(f.ctx, cc); !errors.Is(err, ErrControlEntryState) {
+		t.Fatalf("settle under another step = %v", err)
+	}
+	// A step not yet applied cannot settle.
+	cc = f.context("wait", authority)
+	cc.Run = cloneRunForTest(f.run)
+	cc.Run.LastAppliedTurn = 0
+	if _, err := f.exec.Settle(f.ctx, cc); !errors.Is(err, ErrControlEntryState) {
+		t.Fatalf("settle before apply = %v", err)
+	}
 	// A lost lease aborts the claim.
 	cc = f.context("wait", authority)
 	cc.WorkerID = "other"
@@ -485,4 +506,85 @@ func TestControlJSONResultIsCompactWithStatus(t *testing.T) {
 	}
 	refused := controlErrorResult(ToolResultSucceeded, "x", "Nope.", map[string]interface{}{"error": "ignored"})
 	requireControlError(t, refused, ToolResultFailed, "x")
+}
+
+// allSettleTools offers every tool the phase-rule tests use.
+var allSettleTools = ControlAuthority{
+	ForkAllowed: true, CanWait: true, CanAskUser: true, CanReact: true,
+	TaskStart: &HostedConversationTaskContext{CanStart: true},
+}
+
+func cloneRunForTest(run *AgentRun) *AgentRun {
+	clone := *run
+	return &clone
+}
+
+func TestControlNotOfferedCallDoesNotTakeSettleSlot(t *testing.T) {
+	calls := modelCalls("wait", "control_fork")
+	refusals := controlCallRefusals(calls, ControlAuthority{ForkAllowed: true})
+	if len(refusals) != 0 {
+		t.Fatalf("refusals = %v", refusals)
+	}
+	refusals = controlCallRefusals(calls, ControlAuthority{ForkAllowed: true, CanWait: true})
+	requireControlError(t, refusals["call-b"], ToolResultRefused, "control_one_settle_call")
+}
+
+func TestControlSettleOfEarlierAppliedStep(t *testing.T) {
+	f := newControlFixture(t, []LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
+	// The Run has since applied step 2; ResumeOpenTools settles the entry
+	// left open by step 1 with step 1 as cc.Step.
+	f.run.LastAppliedTurn = 2
+	result, err := f.exec.Settle(f.ctx, f.context("wait", ControlAuthority{CanWait: true}))
+	if err != nil || result.Entry.State != ToolEntryCompleted {
+		t.Fatalf("settle = %#v, %v", result, err)
+	}
+}
+
+func TestControlTransitionRetriesOneStaleRevision(t *testing.T) {
+	f := newControlFixture(t, []LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
+	authority := ControlAuthority{CanWait: true}
+	cc := f.context("wait", authority)
+	// Another writer bumps the entry's revision and leaves it pending again.
+	bumped := cc.Entry
+	for _, step := range [][2]ToolEntryState{{ToolEntryPending, ToolEntryRunning}, {ToolEntryRunning, ToolEntryPending}} {
+		moved, err := f.store.TransitionToolEntry(f.ctx, ToolEntryTransitionRequest{
+			Scope: f.run.Scope, EntryID: bumped.ID, RunID: f.run.ID,
+			Lease: AgentRunLeaseGuard{WorkerID: controlTestWorker, Now: f.now},
+			From:  step[0], ExpectedRevision: bumped.Revision, To: step[1], Now: f.now,
+		})
+		if err != nil {
+			t.Fatalf("bump %v: %v", step, err)
+		}
+		bumped = moved.Entry
+	}
+	if bumped.State != ToolEntryPending || bumped.Revision == cc.Entry.Revision {
+		t.Fatal("revision not bumped")
+	}
+	meta := &ControlEntryMeta{}
+	entry, err := f.exec.transitionControlEntry(f.ctx, cc, ToolEntryCompleted, nil,
+		controlJSONResult(ToolResultSucceeded, nil), meta)
+	if err != nil || entry.State != ToolEntryCompleted {
+		t.Fatalf("transition = %#v, %v", entry, err)
+	}
+	if meta.Kind != "" {
+		t.Fatalf("caller meta changed: %#v", meta)
+	}
+	stored, err := DecodeControlEntryMeta(f.stored("wait"))
+	if err != nil || stored == nil || stored.Kind != ControlToolWait {
+		t.Fatalf("stored meta = %#v, %v", stored, err)
+	}
+	// A state change by another writer is not retried.
+	f2 := newControlFixture(t, []LoopToolCall{{ID: "wait", Name: "wait", Arguments: json.RawMessage(`{}`)}})
+	cc2 := f2.context("wait", authority)
+	if _, err := f2.store.TransitionToolEntry(f2.ctx, ToolEntryTransitionRequest{
+		Scope: f2.run.Scope, EntryID: cc2.Entry.ID, RunID: f2.run.ID,
+		Lease: AgentRunLeaseGuard{WorkerID: controlTestWorker, Now: f2.now},
+		From:  ToolEntryPending, ExpectedRevision: cc2.Entry.Revision, To: ToolEntryRunning, Now: f2.now,
+	}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := f2.exec.transitionControlEntry(f2.ctx, cc2, ToolEntryCompleted, nil,
+		controlJSONResult(ToolResultSucceeded, nil), nil); !errors.Is(err, ErrToolEntryStateConflict) {
+		t.Fatalf("transition after state change = %v", err)
+	}
 }

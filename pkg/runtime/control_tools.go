@@ -200,7 +200,7 @@ const (
 type ControlContext struct {
 	Run       *AgentRun // re-read; Status running; LeaseOwner == WorkerID
 	WorkerID  string
-	Step      *AgentTurn // settle phase: Status completed && Sequence == Run.LastAppliedTurn
+	Step      *AgentTurn // settle phase: the entry's producing step: completed && Sequence <= Run.LastAppliedTurn
 	Session   *AgentSession
 	Path      *AgentSessionPath // the step's session path (URL provenance, §11.4)
 	Binding   *TurnRunnerBinding
@@ -411,7 +411,7 @@ func ControlModelStepTools(a ControlAuthority) []ModelStepTool {
 // ControlExecutor executes control tool entries. Constructed once per worker
 // pool; the coordinators are used by the tool files.
 type ControlExecutor struct {
-	Store         PortfolioStore
+	Portfolio     PortfolioStore
 	Sessions      AgentSessionStore
 	Activity      *RunActivityService
 	Forks         *RunForkCoordinator
@@ -452,6 +452,11 @@ func (x *ControlExecutor) Inline(ctx context.Context, cc ControlContext) (Contro
 // Settle executes the step's single settle-phase control call, after
 // FinishTurn + applyStep. It is called again after a crash for an entry still
 // pending or running (all settles are idempotent by stable keys, §3.4).
+//
+// cc.Step must be the step that produced the entry (entry.StepID), finished
+// and applied. When ResumeOpenTools settles an entry left open by an earlier
+// step (after a park or a crash after the model call), pass that earlier
+// step, not the claim's current running step.
 func (x *ControlExecutor) Settle(ctx context.Context, cc ControlContext) (ControlResult, error) {
 	return x.dispatch(ctx, cc, ControlPhaseSettle)
 }
@@ -472,7 +477,8 @@ func (x *ControlExecutor) dispatch(ctx context.Context, cc ControlContext, phase
 		return ControlResult{}, fmt.Errorf("%w: %s is %s", ErrControlEntryState, cc.Entry.ID, cc.Entry.State)
 	}
 	if phase == ControlPhaseSettle {
-		if cc.Step == nil || cc.Step.Status != AgentTurnStatusCompleted || cc.Step.Sequence != cc.Run.LastAppliedTurn {
+		if cc.Step == nil || cc.Step.Status != AgentTurnStatusCompleted || cc.Step.Sequence > cc.Run.LastAppliedTurn ||
+			cc.Step.ID != cc.Entry.StepID {
 			return ControlResult{}, fmt.Errorf("%w: settle needs the finished and applied step", ErrControlEntryState)
 		}
 	}
@@ -587,15 +593,17 @@ func (x *ControlExecutor) complete(ctx context.Context, cc ControlContext, resul
 }
 
 // transitionControlEntry moves the call's entry from its current state to
-// to, fenced by the Run lease. A revision conflict is retried once after
-// re-reading the entry, while it is still in the state the caller saw.
+// to, fenced by the Run lease. A stale revision (the stores report it as
+// ErrToolEntryStateConflict) is retried once after re-reading the entry,
+// while it is still in the state the caller saw.
 func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc ControlContext, to ToolEntryState, wait *ToolEntryWait, result *ToolResult, meta *ControlEntryMeta) (*SessionEntry, error) {
 	var kernel *ToolEntryKernelPatch
 	if meta != nil {
-		if meta.Kind == "" {
-			meta.Kind = cc.toolName()
+		stored := *meta // the handler's value is left as it was
+		if stored.Kind == "" {
+			stored.Kind = cc.toolName()
 		}
-		encoded, err := json.Marshal(meta)
+		encoded, err := json.Marshal(&stored)
 		if err != nil {
 			return nil, fmt.Errorf("encode control metadata: %w", err)
 		}
@@ -616,7 +624,7 @@ func (x *ControlExecutor) transitionControlEntry(ctx context.Context, cc Control
 		if err == nil {
 			return transitioned.Entry, nil
 		}
-		if attempt > 0 || !errors.Is(err, ErrRevisionConflict) {
+		if attempt > 0 || !errors.Is(err, ErrToolEntryStateConflict) {
 			return nil, err
 		}
 		reread, getErr := x.Sessions.GetSessionEntry(ctx, cc.Run.Scope, current.ID)
@@ -646,7 +654,7 @@ func withToolResult(entry *SessionEntry, to ToolEntryState, result *ToolResult) 
 const (
 	controlOneSettleCallCode    = "control_one_settle_call"
 	controlFinalNotAloneCode    = "final_answer_not_alone"
-	controlNotAloneCode         = "control_not_alone"
+	controlTaskNotAloneCode     = "task_not_alone"
 	controlArgumentsInvalidCode = "tool_arguments_invalid"
 )
 
@@ -655,9 +663,11 @@ const (
 // call that must not execute, keyed by tool call id:
 //   - a tool that must run alone (final tools, conversation_start_task)
 //     together with any other call is refused; the other calls run;
-//   - of the remaining settle-phase calls, the first settles and the others
-//     are refused.
-func controlCallRefusals(calls []ModelToolCall) map[string]*ToolResult {
+//   - of the remaining settle-phase calls, the first offered one settles and
+//     the others are refused. A call to a tool the claim does not offer never
+//     takes the settle slot (the dispatcher refuses it with
+//     tool_not_available), so it cannot block an offered settle call.
+func controlCallRefusals(calls []ModelToolCall, authority ControlAuthority) map[string]*ToolResult {
 	refusals := map[string]*ToolResult{}
 	for _, call := range calls {
 		name := ControlToolName(call.Name)
@@ -666,12 +676,12 @@ func controlCallRefusals(calls []ModelToolCall) map[string]*ToolResult {
 				refusals[call.ID] = controlErrorResult(ToolResultRefused, controlFinalNotAloneCode,
 					fmt.Sprintf("Call %s alone after your other tools have returned.", name), nil)
 			} else {
-				refusals[call.ID] = controlErrorResult(ToolResultRefused, controlNotAloneCode,
-					fmt.Sprintf("Call %s alone in its own message after your other tools have returned.", name), nil)
+				refusals[call.ID] = controlErrorResult(ToolResultRefused, controlTaskNotAloneCode,
+					"Call conversation_start_task alone; other work belongs inside the task.", nil)
 			}
 		}
 	}
-	for _, index := range controlSettleConflicts(calls) {
+	for _, index := range controlSettleConflicts(calls, authority) {
 		call := calls[index]
 		if refusals[call.ID] != nil {
 			continue
@@ -683,13 +693,15 @@ func controlCallRefusals(calls []ModelToolCall) map[string]*ToolResult {
 }
 
 // controlSettleConflicts returns the indexes of settle-phase calls after the
-// first one that may settle. Calls refused by the alone rule do not count.
-func controlSettleConflicts(calls []ModelToolCall) []int {
+// first one that may settle. Calls refused by the alone rule and calls to
+// tools the authority does not offer do not count.
+func controlSettleConflicts(calls []ModelToolCall, authority ControlAuthority) []int {
 	var conflicts []int
 	settled := false
 	for i, call := range calls {
-		rule, ok := controlToolRules[ControlToolName(call.Name)]
-		if !ok || rule.Phase != ControlPhaseSettle {
+		name := ControlToolName(call.Name)
+		rule, ok := controlToolRules[name]
+		if !ok || rule.Phase != ControlPhaseSettle || !controlToolOffered(name, authority) {
 			continue
 		}
 		if rule.Alone && len(calls) > 1 {
