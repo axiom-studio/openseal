@@ -1483,6 +1483,7 @@ func (c *KernelHTTPClient) GetActionCall(ctx context.Context, scope runtime.Scop
 	return &call, nil
 }
 
+// ListAgentTurns lists the model steps of one Run, agent-turns v2.
 func (c *KernelHTTPClient) ListAgentTurns(ctx context.Context, filter runtime.AgentTurnFilter) ([]*kernelapi.AgentTurnRecord, error) {
 	query := scopeQuery(filter.Scope)
 	setIfPresent(query, "runId", filter.RunID)
@@ -1502,6 +1503,7 @@ func (c *KernelHTTPClient) ListAgentTurns(ctx context.Context, filter runtime.Ag
 	return turns, nil
 }
 
+// GetAgentTurn reads one model step, agent-turns v2.
 func (c *KernelHTTPClient) GetAgentTurn(ctx context.Context, scope runtime.Scope, turnID string) (*kernelapi.AgentTurnRecord, error) {
 	var turn kernelapi.AgentTurnRecord
 	path := "/api/v1/agent-turns/" + url.PathEscape(strings.TrimSpace(turnID)) + "?" + scopeQuery(scope).Encode()

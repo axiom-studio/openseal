@@ -3407,14 +3407,8 @@ func TestRunViewLoadsAndProjectsCanonicalAgentTurns(t *testing.T) {
 			ID: "turn-1", RunID: run.ID, Sequence: 1, Status: runtime.AgentTurnStatusCompleted,
 			ModelProvider: "opencode", Model: "deepseek-v4-flash",
 			OutputSummary: "Requested governed source observation",
+			ToolCallCount: 1,
 			Usage:         runtime.TurnUsage{InputTokens: 120, OutputTokens: 24, DurationMS: 850},
-			Decisions: []kernelapi.AgentTurnDecisionRecord{{
-				Summary: "Selected the declared capability",
-			}},
-			RequestedActions: []kernelapi.AgentTurnActionRecord{{
-				Capability: "openseal.source.observe_feed", BindingID: "source-prod",
-				BindingRevision: 9, Summary: "Execute governed source observation",
-			}},
 		}},
 	}
 	model := newTestModel(t, fake)
@@ -3431,7 +3425,7 @@ func TestRunViewLoadsAndProjectsCanonicalAgentTurns(t *testing.T) {
 		t.Fatalf("agent turn filters = %#v", fake.agentTurnFilters)
 	}
 	view := model.renderRunsContent(140)
-	for _, expected := range []string{"Agent turns", "turn 1", "completed", "opencode/deepseek-v4-flash", "Requested governed source observation", "Selected the declared capability", "Execute governed source observation", "source-prod@9", "120 input · 24 output tokens · 850ms"} {
+	for _, expected := range []string{"Agent turns", "turn 1", "completed", "opencode/deepseek-v4-flash", "Requested governed source observation", "120 input · 24 output tokens · 850ms"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("AgentTurn projection missing %q:\n%s", expected, view)
 		}

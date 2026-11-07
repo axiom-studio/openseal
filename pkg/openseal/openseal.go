@@ -611,8 +611,6 @@ type (
 	AgentTurnStatus                      = runtime.AgentTurnStatus
 	AgentTurnFilter                      = runtime.AgentTurnFilter
 	AgentTurnRecord                      = kernelapi.AgentTurnRecord
-	AgentTurnDecisionRecord              = kernelapi.AgentTurnDecisionRecord
-	AgentTurnActionRecord                = kernelapi.AgentTurnActionRecord
 	TurnDecision                         = runtime.TurnDecision
 	TurnAction                           = runtime.TurnAction
 	TurnRunbookProposal                  = runtime.TurnRunbookProposal

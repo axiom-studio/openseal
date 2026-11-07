@@ -2311,21 +2311,6 @@ func (m *Model) renderSelectedAgentTurns(width int) []string {
 		if turn.OutputSummary != "" {
 			lines = append(lines, mutedStyle.Render(compact("  "+turn.OutputSummary, max(width-4, 28))))
 		}
-		for _, decision := range turn.Decisions {
-			if decision.Summary != "" {
-				lines = append(lines, mutedStyle.Render(compact("  · "+decision.Summary, max(width-4, 28))))
-			}
-		}
-		for _, action := range turn.RequestedActions {
-			detail := action.Summary
-			if detail == "" {
-				detail = action.Capability
-			}
-			if action.BindingID != "" {
-				detail += fmt.Sprintf(" · binding %s@%d", action.BindingID, action.BindingRevision)
-			}
-			lines = append(lines, mutedStyle.Render(compact("  → "+detail, max(width-4, 28))))
-		}
 		if turn.Usage.InputTokens > 0 || turn.Usage.OutputTokens > 0 || turn.Usage.DurationMS > 0 {
 			usage := fmt.Sprintf("  %d input · %d output tokens", turn.Usage.InputTokens, turn.Usage.OutputTokens)
 			if turn.Usage.DurationMS > 0 {

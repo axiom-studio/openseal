@@ -1123,3 +1123,50 @@ func TestKernelHTTPClientMapsWorkforceBundleContract(t *testing.T) {
 		t.Fatalf("requests=%#v", requests)
 	}
 }
+
+func TestKernelHTTPClientDecodesAgentTurnsV2(t *testing.T) {
+	const record = `{"id":"turn-7","scope":{"kind":"local","id":"default"},"runId":"run-1","sessionId":"ses-3",
+"sequence":2,"status":"failed","producer":"model","modelProvider":"openai-compatible","model":"deepseek-v4-flash",
+"outputSummary":"Asking the reviewer to check the evidence.","toolCallCount":1,"stopReason":"tool_calls","final":false,
+"usage":{"inputTokens":1840,"outputTokens":64,"providerDurationMs":910},"failureCode":"host_unavailable",
+"error":"model host unreachable","revision":3,"createdAt":"2026-11-07T10:00:00Z","updatedAt":"2026-11-07T10:00:02Z",
+"startedAt":"2026-11-07T10:00:00Z","completedAt":"2026-11-07T10:00:02Z"}`
+	var paths []string
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/agent-turns" {
+			_, _ = io.WriteString(w, "["+record+"]")
+			return
+		}
+		_, _ = io.WriteString(w, record)
+	}))
+	defer httpServer.Close()
+	client := NewKernelHTTPClient(httpServer.URL, httpServer.Client())
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+
+	listed, err := client.ListAgentTurns(t.Context(), runtime.AgentTurnFilter{
+		Scope: scope, RunID: "run-1", Statuses: []runtime.AgentTurnStatus{runtime.AgentTurnStatusFailed}, AfterSequence: 1, Limit: 5,
+	})
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("listed = %#v, %v", listed, err)
+	}
+	got, err := client.GetAgentTurn(t.Context(), scope, " turn-7 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []*kernelapi.AgentTurnRecord{listed[0], got} {
+		if step.ID != "turn-7" || step.SessionID != "ses-3" || step.Sequence != 2 || step.Producer != runtime.StepProducerModel ||
+			step.ToolCallCount != 1 || step.StopReason != string(runtime.ModelStopToolCalls) || step.Final ||
+			step.FailureCode != "host_unavailable" || step.Usage.ProviderDurationMS != 910 || step.CompletedAt == nil {
+			t.Fatalf("agent turn v2 record = %#v", step)
+		}
+	}
+	want := []string{
+		"/api/v1/agent-turns?afterSequence=1&limit=5&runId=run-1&scopeId=default&scopeKind=local&status=failed",
+		"/api/v1/agent-turns/turn-7?scopeId=default&scopeKind=local",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("agent turn paths = %v, want %v", paths, want)
+	}
+}
