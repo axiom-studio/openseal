@@ -16,8 +16,10 @@ import (
 //     write/stateful call is a barrier: it waits for the calls before it and
 //     blocks the calls after it.
 //   - Once a call reaches awaiting_approval/awaiting_event (or waits for a
-//     foreign call lease), every later non-read call of the step stays
-//     pending; ResumeOpenTools runs it after the earlier call settled.
+//     foreign call lease), later reads may still run, but the first later
+//     non-read call stays pending and is a standing barrier: it and every
+//     call after it (reads included) wait; ResumeOpenTools runs them in order
+//     after the earlier call settled.
 //   - Settle-phase control calls run only in SettleStep (phase 10).
 
 // loopToolMaxConcurrent bounds the concurrent calls of one step (host reads
@@ -25,8 +27,8 @@ import (
 const loopToolMaxConcurrent = GovernedMaxConcurrentReads
 
 // dispatchInOrder runs entries indexes (in model order) with run, applying
-// the ordering rules. eligible decides, at the time the entry's turn comes,
-// whether it still runs.
+// the ordering rules. A non-read call reached while an earlier call is held
+// stops the dispatch: it and every later call stay as they are.
 func (r *stepToolRun) dispatchInOrder(ctx context.Context, indexes []int, run func(context.Context, int) error) error {
 	for k := 0; k < len(indexes); {
 		if r.stopped() {
@@ -46,8 +48,9 @@ func (r *stepToolRun) dispatchInOrder(ctx context.Context, indexes []int, run fu
 		}
 		k++
 		if r.isHeld() {
-			// A held call before it: this non-read call waits for its decision.
-			continue
+			// A held call before it: this non-read call waits for its decision
+			// and blocks every later call, reads included.
+			return nil
 		}
 		if err := run(ctx, i); err != nil {
 			return err
@@ -127,7 +130,6 @@ func (x *claimToolExecutor) ExecuteStepTools(ctx context.Context, in StepToolsIn
 func (r *stepToolRun) endOfToolWork(ctx context.Context) (StepToolsOutcome, error) {
 	out := r.outcome()
 	if out.Failure != nil || out.BudgetExhausted != nil || out.Final != nil || r.ended {
-		out.Run = r.outcomeRun()
 		return out, nil
 	}
 	park, settled, err := r.planPark(ctx)
@@ -157,15 +159,6 @@ func (r *stepToolRun) endOfToolWork(ctx context.Context) (StepToolsOutcome, erro
 		out.Failure = failure
 	}
 	return out, nil
-}
-
-func (r *stepToolRun) outcomeRun() *AgentRun {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.chain.known != r.in.Run {
-		return r.chain.known
-	}
-	return nil
 }
 
 // openSettleEntry is the step's open settle-phase control entry, if any.
@@ -389,6 +382,12 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 	if err != nil {
 		return StepToolsOutcome{}, err
 	}
+	// Pending entries may never have gone through phase 8 (a crash or lease
+	// loss between the append and ExecuteStepTools): run its pre-dispatch
+	// checks. Entries it already refused are terminal; the rest pass again.
+	if err := r.precheck(ctx); err != nil {
+		return StepToolsOutcome{}, err
+	}
 	if err := r.startGuard(ctx); err != nil {
 		return StepToolsOutcome{}, err
 	}
@@ -408,7 +407,6 @@ func (x *claimToolExecutor) resumeStep(ctx context.Context, in StepToolsInput, s
 	}
 	out := r.outcome()
 	if out.Failure != nil || out.BudgetExhausted != nil || out.Final != nil || r.ended {
-		out.Run = r.outcomeRun()
 		return out, nil
 	}
 	park, settled, err := r.planPark(ctx)

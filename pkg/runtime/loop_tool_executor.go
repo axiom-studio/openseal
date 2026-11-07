@@ -664,7 +664,7 @@ func (r *stepToolRun) precheck(ctx context.Context) error {
 	}
 	for i := range r.entries {
 		entry := r.entry(i)
-		if entry.State != ToolEntryPending {
+		if entry.State != ToolEntryPending || entry.ActionCallID != "" {
 			continue
 		}
 		result, err := r.offerRefusal(ctx, i)

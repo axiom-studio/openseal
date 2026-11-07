@@ -167,6 +167,7 @@ type scriptedHost struct {
 	active    int
 	maxActive int
 	gate      chan struct{}
+	gateOp    string // when set, only this operation waits at gate
 }
 
 func newScriptedHost() *scriptedHost { return &scriptedHost{files: map[string]string{}} }
@@ -180,6 +181,9 @@ func (h *scriptedHost) ExecuteHostTool(ctx context.Context, request HostToolRequ
 	path, _ := request.Arguments["path"].(string)
 	h.order = append(h.order, request.Operation+" "+path)
 	gate := h.gate
+	if h.gateOp != "" && h.gateOp != request.Operation {
+		gate = nil
+	}
 	h.mu.Unlock()
 	if gate != nil {
 		select {
@@ -210,6 +214,12 @@ func (h *scriptedHost) activeNow() int {
 	return h.active
 }
 
+func (h *scriptedHost) orderNow() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.order...)
+}
+
 func TestReadAfterWriteSeesWrite(t *testing.T) {
 	f := newToolExecFixture(t, ControlAuthority{})
 	step := f.step("step-1", AgentTurnStatusRunning,
@@ -220,7 +230,28 @@ func TestReadAfterWriteSeesWrite(t *testing.T) {
 		step.entries[0].Tool.RepeatEffect != string(RepeatEffectStateful) || step.entries[1].Tool.ArgumentsDigest == "" {
 		t.Fatalf("planned = %#v / %#v", step.entries[0].Tool, step.entries[1].Tool)
 	}
-	out, err := f.binding.Tools.ExecuteStepTools(f.ctx, f.input(step))
+	// Hold the write: the read must not start until it finished.
+	f.host.gate, f.host.gateOp = make(chan struct{}), workspace.OperationWriteFile
+	done := make(chan struct{})
+	var out StepToolsOutcome
+	var err error
+	go func() {
+		defer close(done)
+		out, err = f.binding.Tools.ExecuteStepTools(f.ctx, f.input(step))
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for f.host.activeNow() < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("the write never started")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if order := f.host.orderNow(); len(order) != 1 || order[0] != "workspace.write_file notes.md" {
+		t.Fatalf("while the write is blocked the host saw %v", order)
+	}
+	close(f.host.gate)
+	<-done
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,6 +417,11 @@ func (h *committedForkHandler) run(ctx context.Context, x *ControlExecutor, cc C
 	}}, nil
 }
 
+// TestResumeControlEntryWithoutGroupResettles covers a settle-phase control
+// entry left pending (the group was never created): the resume settles it
+// again. An awaiting_child entry whose group/request is missing goes to
+// ControlExecutor.Resume, whose resumers own that row of SPEC §3.7 (CTL-5b,
+// CTL-6b).
 func TestResumeControlEntryWithoutGroupResettles(t *testing.T) {
 	f := newToolExecFixture(t, ControlAuthority{ForkAllowed: true})
 	fork := &committedForkHandler{groups: map[string]int{}}
@@ -475,6 +511,8 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		}{sessions, f.store}, f.run, f.binding, governedWorker, governedStep, AgentTurnStatusCompleted, f.clock,
 			ModelToolCall{ID: "call-prod", Name: governedDeploy, Arguments: deployArguments("production")},
 			ModelToolCall{ID: "call-staging", Name: governedDeploy, Arguments: deployArguments("staging")},
+			// A read after the skipped write must not overtake it.
+			ModelToolCall{ID: "call-check", Name: governedStatus, Arguments: json.RawMessage(`{"environment":"check"}`)},
 		)
 		in := StepToolsInput{Run: f.currentRun(), Step: step.turn, Binding: f.binding, WorkerID: governedWorker, Assistant: step.assistant, Entries: step.entries}
 		out, err := tools.ExecuteStepTools(f.ctx, in)
@@ -497,6 +535,9 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		}
 		if staging.State != ToolEntryPending || staging.ActionCallID != "" || len(deployed) != 0 {
 			t.Fatalf("later write = %s (call %q), deployed %v", staging.State, staging.ActionCallID, deployed)
+		}
+		if check := get(step.entries[2]); check.State != ToolEntryPending || check.ActionCallID != "" {
+			t.Fatalf("read after the skipped write = %s (call %q)", check.State, check.ActionCallID)
 		}
 		calls, err := f.store.ListActionCalls(f.ctx, ActionFilter{Scope: f.scope, RunID: f.run.ID})
 		if err != nil || len(calls) != 1 {
@@ -523,11 +564,13 @@ func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {
 		if resumed.Park != nil || resumed.Failure != nil {
 			t.Fatalf("resume = %#v", resumed)
 		}
-		if strings.Join(deployed, ",") != "production,staging" {
-			t.Fatalf("deployed %v, want production then staging", deployed)
+		if strings.Join(deployed, ",") != "production,staging,check" {
+			t.Fatalf("dispatched %v, want production, staging, then the read", deployed)
 		}
-		if prod, staging := get(step.entries[0]), get(step.entries[1]); prod.State != ToolEntryCompleted || staging.State != ToolEntryCompleted {
-			t.Fatalf("after the decision: %s / %s", prod.State, staging.State)
+		for _, entry := range step.entries {
+			if stored := get(entry); stored.State != ToolEntryCompleted {
+				t.Fatalf("after the decision %s = %s", entry.ToolCallID, stored.State)
+			}
 		}
 	})
 }
@@ -585,5 +628,63 @@ func TestRepeatedReadRefusedByExecutor(t *testing.T) {
 	}
 	if len(f.host.order) != 2 {
 		t.Fatalf("host ran %d reads, want 2", len(f.host.order))
+	}
+}
+
+// resumeNextStep runs ResumeOpenTools from a fresh step after step was
+// appended (and finished and applied) but never went through phase 8.
+func (f *toolExecFixture) resumeNextStep(step toolStep) StepToolsOutcome {
+	f.t.Helper()
+	next, err := f.store.CreateAgentTurn(f.ctx, &AgentTurn{
+		ID: "step-next", Scope: f.scope, RunID: f.run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel, Revision: 1,
+		CreatedAt: f.now, UpdatedAt: f.now,
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	run := f.currentRun()
+	run.LastAppliedTurn = step.turn.Sequence
+	out, err := f.binding.Tools.ResumeOpenTools(f.ctx, StepToolsInput{Run: run, Step: next, Binding: f.binding, WorkerID: toolExecWorker})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return out
+}
+
+func TestResumeUncheckedStepRefusesSecondSettleCall(t *testing.T) {
+	f := newToolExecFixture(t, ControlAuthority{CanWait: true, CanAskUser: true})
+	// The worker died between the append and phase 8.
+	step := f.step("step-1", AgentTurnStatusCompleted,
+		toolCall("call-wait", "wait", `{"goal":"a"}`),
+		toolCall("call-ask", "ask_user", `{"goal":"b"}`),
+	)
+	out := f.resumeNextStep(step)
+	if out.Failure != nil || out.Park != nil {
+		t.Fatalf("outcome = %#v", out)
+	}
+	ask := f.entry(step.entries[1])
+	if ask.State != ToolEntryError || resultValue(t, ask)["error"] != controlOneSettleCallCode {
+		t.Fatalf("second settle call = %s %v", ask.State, ask.Tool.Result)
+	}
+	if wait := f.entry(step.entries[0]); wait.State != ToolEntryCompleted || f.handlers[ControlToolWait].calls != 1 || f.handlers[ControlToolAskUser].calls != 0 {
+		t.Fatalf("first settle call = %s, wait calls %d, ask calls %d", wait.State, f.handlers[ControlToolWait].calls, f.handlers[ControlToolAskUser].calls)
+	}
+}
+
+func TestResumeUncheckedStepAppliesToolCheck(t *testing.T) {
+	f := newToolExecFixture(t, ControlAuthority{})
+	checked := 0
+	f.binding.ToolCheck = func(ctx context.Context, in StepToolsInput, entry *SessionEntry) (string, error) {
+		checked++
+		return "Not in this conversation.", nil
+	}
+	step := f.step("step-1", AgentTurnStatusCompleted, toolCall("call-read", "workspace_read_file", `{"path":"a.md"}`))
+	out := f.resumeNextStep(step)
+	if out.Failure != nil || out.Park != nil || out.HostToolCalls != 0 {
+		t.Fatalf("outcome = %#v", out)
+	}
+	read := f.entry(step.entries[0])
+	if checked != 1 || read.State != ToolEntryError || read.Tool.Result.Status != ToolResultRefused || len(f.host.order) != 0 {
+		t.Fatalf("checked %d, read = %s %#v, host ran %v", checked, read.State, read.Tool.Result, f.host.order)
 	}
 }
