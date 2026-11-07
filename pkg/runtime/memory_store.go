@@ -114,6 +114,12 @@ type MemoryStore struct {
 	skillBindings                       map[string]*skill.Binding
 	skillBindingFloors                  map[string]int64
 	deploymentIDs                       *workforce.MemoryDeploymentIDs
+	agentSessions                       map[string]*AgentSession         // portfolioKey(scope, id)
+	agentSessionLanes                   map[string]string                // portfolioKey(scope, laneKey) -> session id
+	agentSessionOwners                  map[string]string                // portfolioKey(scope, ownerRunID) -> session id
+	agentSessionEntries                 map[string][]*SessionEntry       // portfolioKey(scope, sessionID) -> by sequence (index = seq-1)
+	agentSessionEntryIndex              map[string]memorySessionEntryRef // portfolioKey(scope, entryID)
+	agentSessionSourceKeys              map[string]struct{}              // portfolioKey(scope, sessionID+"\x00"+sourceKey)
 }
 
 // NewMemoryStore creates an in-memory canonical kernel store.
@@ -195,6 +201,12 @@ func NewMemoryStore() *MemoryStore {
 		skillDefinitions:            make(map[string]*skill.Definition),
 		skillBindings:               make(map[string]*skill.Binding),
 		skillBindingFloors:          make(map[string]int64),
+		agentSessions:               make(map[string]*AgentSession),
+		agentSessionLanes:           make(map[string]string),
+		agentSessionOwners:          make(map[string]string),
+		agentSessionEntries:         make(map[string][]*SessionEntry),
+		agentSessionEntryIndex:      make(map[string]memorySessionEntryRef),
+		agentSessionSourceKeys:      make(map[string]struct{}),
 	}
 }
 
