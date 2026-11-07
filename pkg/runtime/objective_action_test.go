@@ -127,7 +127,7 @@ func TestObjectiveActionsRejectInjectedOwnerForeignTargetAndStaleRevisionBeforeA
 	}
 	validator, _ := NewObjectiveActionValidator(store)
 	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
-	base := ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionCreate, IdempotencyKey: "create"}
+	base := loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ObjectiveManagementSkillID, SkillVersion: ObjectiveManagementSkillVersion, Action: ObjectiveActionCreate, IdempotencyKey: "create"}, "create")
 	base.Arguments = map[string]interface{}{"title": "Campaign", "goal": "Launch campaign", "owner": map[string]interface{}{"type": "team", "id": "finance"}}
 	if _, err := coordinator.Propose(ctx, base); err == nil {
 		t.Fatal("model-supplied owner should fail schema validation")

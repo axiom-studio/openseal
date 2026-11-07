@@ -13,7 +13,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// newNestedHostFixture opens an in-flight Turn offering a credentialed
+// newNestedHostFixture opens an in-flight step offering a credentialed
 // repository read and branch write, as a git host borrows them.
 func newNestedHostFixture(t *testing.T, store KernelStore) *nestedActionFixture {
 	t.Helper()
@@ -48,8 +48,8 @@ func (f *nestedActionFixture) hostRead(key string) NestedHostActionRequest {
 func (f *nestedActionFixture) hostPush(key string) NestedHostActionRequest {
 	return NestedHostActionRequest{
 		Scope: f.scope, RunID: f.run.ID, TurnID: f.turn.ID, SkillID: "skill-github", Action: "branch-create",
-		Arguments:      map[string]interface{}{"owner": "acme", "repository": "widgets", "branch": "fix/x", "sha": strings.Repeat("a", 40)},
-		OriginRef:      "command-1", IdempotencyKey: key, Summary: "git push acme/widgets fix/x",
+		Arguments: map[string]interface{}{"owner": "acme", "repository": "widgets", "branch": "fix/x", "sha": strings.Repeat("a", 40)},
+		OriginRef: "command-1", IdempotencyKey: key, Summary: "git push acme/widgets fix/x",
 	}
 }
 

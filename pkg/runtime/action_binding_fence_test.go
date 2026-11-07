@@ -20,7 +20,6 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 				before := getActionLifecycleRun(t, kernel, fixture.proposal.Call)
 				proposal := fixture.proposal
 				proposal.Call = cloneActionCall(proposal.Call)
-				proposal.Run = cloneAgentRun(proposal.Run)
 				proposal.Event = cloneActivityEvent(proposal.Event)
 				switch invalidAuthority {
 				case "missing":
@@ -43,7 +42,6 @@ func TestActionBindingFenceRejectsMissingStaleDisabledAndForeignAuthority(t *tes
 					}
 				case "foreign_scope":
 					proposal.Call.Scope.ID += "-another-tenant"
-					proposal.Run.Scope = proposal.Call.Scope
 					proposal.Event.Scope = proposal.Call.Scope
 				case "foreign_deployment":
 					proposal.Call.DeploymentID = "another-agent"
@@ -105,13 +103,13 @@ func TestActionBindingFenceCoordinatorProtectsOrdinaryAndDuplicateProposals(t *t
 					return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
 				}))
 				coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
-				result, err := coordinator.Propose(t.Context(), ProposeActionRequest{
+				result, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
 					SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion, Action: "deploy",
 					Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: fixture.proposal.Call.IdempotencyKey,
 					ExternalOperation: &ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"},
-				})
+				}, "deploy-production"))
 				if result != nil || !errors.Is(err, skill.ErrBindingUnavailable) || intercepted.creates != 1 {
 					t.Fatalf("coordinator did not fence binding change after catalog resolution: %#v, %v, creates=%d", result, err, intercepted.creates)
 				}
@@ -198,11 +196,15 @@ func TestActionBindingFenceSerializesProposalAndUpgrade(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				// A loop proposal never parks its Run; it stays running either way.
+				if run.Status != AgentRunStatusRunning || run.WakeCondition != nil {
+					t.Fatalf("proposal changed its Run: %#v", run)
+				}
 				if proposalErr == nil {
-					if bindings[0].Revision != 1 || len(calls) != 1 || run.Status != AgentRunStatusWaitingForDependency {
+					if bindings[0].Revision != 1 || len(calls) != 1 {
 						t.Fatalf("successful proposal crossed upgrade: binding=%#v calls=%#v run=%#v", bindings[0], calls, run)
 					}
-				} else if bindings[0].Revision != 2 || len(calls) != 0 || run.Status != AgentRunStatusRunning {
+				} else if bindings[0].Revision != 2 || len(calls) != 0 {
 					t.Fatalf("successful upgrade left a stale proposal: binding=%#v calls=%#v run=%#v", bindings[0], calls, run)
 				}
 			})
@@ -229,13 +231,13 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 				}))
 				coordinator.now = func() time.Time { return fixture.now.Add(time.Second) }
 				<-start
-				outcomes[index], failures[index] = coordinator.Propose(t.Context(), ProposeActionRequest{
+				outcomes[index], failures[index] = coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 					Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: fixture.binding.DeploymentID,
 					BindingID: fixture.binding.ID, BindingRevision: fixture.binding.Revision,
 					SkillID: fixture.binding.SkillID, SkillVersion: fixture.binding.SkillVersion, Action: "deploy",
 					Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: fixture.proposal.Call.IdempotencyKey,
 					ExternalOperation: &ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"},
-				})
+				}, "deploy-production"))
 			}(index, run)
 		}
 		close(start)
@@ -258,24 +260,22 @@ func TestActionBindingFenceSerializesSameExternalOperationAcrossRuns(t *testing.
 		if err != nil || len(calls) != 1 || calls[0].ID != original.ID || calls[0].Status != ActionCallStatusReady {
 			t.Fatalf("competing operation created another executable action: %#v, %v", calls, err)
 		}
+		// Loop proposals leave both Runs as they were; the winner runs its call
+		// inline later.
 		for _, before := range runs {
 			after, err := fixture.store.GetAgentRun(t.Context(), before.Scope, before.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if before.ID == original.RunID {
-				if after.Status != AgentRunStatusWaitingForDependency || after.WakeCondition == nil || after.WakeCondition.Reference != original.ID {
-					t.Fatalf("original operation did not own its dependency: %#v", after)
-				}
-			} else if !reflect.DeepEqual(before, after) {
-				t.Fatalf("competing proposal changed the losing Run: before=%#v after=%#v", before, after)
+			if !reflect.DeepEqual(before, after) {
+				t.Fatalf("loop proposal changed its Run: before=%#v after=%#v", before, after)
 			}
 		}
 		claimed, err := fixture.store.ClaimNextAction(t.Context(), ActionClaim{
-			Scope: firstRun.Scope, WorkerID: "action-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: time.Minute,
+			Scope: firstRun.Scope, WorkerID: "agent-worker", Now: fixture.now.Add(2 * time.Second), LeaseDuration: LoopActionLease, OwnActionID: original.ID,
 		})
 		if err != nil || claimed == nil || claimed.ID != original.ID {
-			t.Fatalf("claim original operation = %#v, %v", claimed, err)
+			t.Fatalf("own claim of the original operation = %#v, %v", claimed, err)
 		}
 		secondClaim, err := fixture.store.ClaimNextAction(t.Context(), ActionClaim{
 			Scope: firstRun.Scope, WorkerID: "another-action-worker", Now: fixture.now.Add(3 * time.Second), LeaseDuration: time.Minute,
@@ -341,29 +341,16 @@ func newActionBindingFenceFixture(t *testing.T, kernel KernelStore) *actionBindi
 		BindingID: binding.ID, BindingRevision: binding.Revision, SkillID: binding.SkillID, SkillVersion: binding.SkillVersion,
 		Action: "deploy", Status: ActionCallStatusReady, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
 		Arguments: map[string]interface{}{"environment": "production"}, CredentialRefs: binding.Credentials,
-		IdempotencyKey: "deploy-production", MaxAttempts: 3, AvailableAt: now.Add(time.Second), Revision: 1,
+		IdempotencyKey: "loop:" + loopProposalStep + ":deploy-production", MaxAttempts: 3, AvailableAt: now.Add(time.Second), Revision: 1,
 		CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
 	}
-	call.InvocationDigest = ComputeActionInvocationDigest(call)
-	call.SemanticDigest = ComputeActionSemanticDigest(call)
 	call.ExternalOperationDigest, err = computeExternalOperationDigest(scope, run.Owner, run.ObjectiveID, &ExternalOperationIdentity{Resource: "production-release", Operation: "deploy"}, call.IdempotencyKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := cloneAgentRun(run)
-	updated.Revision++
-	updated.Status = AgentRunStatusWaitingForDependency
-	updated.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
-	updated.LeaseOwner, updated.LeaseExpiresAt = "", nil
-	updated.UpdatedAt = now.Add(time.Second)
-	return &actionBindingFenceFixture{
-		store: store, catalog: catalog, binding: binding, now: now,
-		proposal: ActionProposalRecord{
-			Call: call, Run: updated, ExpectedRunRevision: run.Revision, RequireBindingFence: true,
-			Lease: &AgentRunLeaseGuard{WorkerID: "agent-worker", Now: now.Add(time.Second)},
-			Event: actionLifecycleEvent(call, uuid.NewString(), "action.proposed", now.Add(time.Second)),
-		},
-	}
+	proposal := loopProposalRecord(call, run, "agent-worker", now.Add(time.Second), actionLifecycleEvent(call, uuid.NewString(), "action.proposed", now.Add(time.Second)))
+	proposal.RequireBindingFence = true
+	return &actionBindingFenceFixture{store: store, catalog: catalog, binding: binding, now: now, proposal: proposal}
 }
 
 func newActionBindingFenceRunningRun(t *testing.T, store KernelStore, scope Scope, now time.Time) *AgentRun {
@@ -394,7 +381,7 @@ func completeActionBindingFenceFixture(t *testing.T, fixture *actionBindingFence
 		return map[string]interface{}{"providerResult": "delivered"}, nil
 	}))
 	worker.now = func() time.Time { return fixture.now.Add(2 * time.Second) }
-	completed, err := worker.RunOnce(t.Context(), fixture.proposal.Call.Scope, "action-worker", time.Minute)
+	completed, err := worker.ExecuteOwnLoopCall(t.Context(), fixture.proposal.Call.Scope, fixture.proposal.Call.ID, "agent-worker")
 	if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded {
 		t.Fatalf("complete fixture = %#v, %v", completed, err)
 	}

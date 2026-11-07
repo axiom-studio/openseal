@@ -193,7 +193,7 @@ func TestSkillRuntimeMaintenanceBusyIncludesOtherVersionCallsAndLiveReceipts(t *
 				}
 				if status == "live_succeeded_receipt" {
 					catalogCalls, credentialCalls, dispatches := 0, 0, 0
-					completed, err := actionRuntimeMaintenanceWorker(kernel, fixture, &catalogCalls, &credentialCalls, &dispatches).RunOnce(t.Context(), fixture.proposal.Call.Scope, "action-worker", time.Minute)
+					completed, err := actionRuntimeMaintenanceWorker(kernel, fixture, &catalogCalls, &credentialCalls, &dispatches).ExecuteOwnLoopCall(t.Context(), fixture.proposal.Call.Scope, fixture.proposal.Call.ID, "agent-worker")
 					if err != nil || completed == nil || completed.Call.Status != ActionCallStatusSucceeded || dispatches != 1 {
 						t.Fatalf("other-version receipt fixture = %#v, %v", completed, err)
 					}

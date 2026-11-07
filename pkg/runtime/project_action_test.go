@@ -132,7 +132,7 @@ func TestProjectActionsRejectInjectedOwnerForeignObjectivesTargetsAndStaleRevisi
 	run := createAndClaimProjectActionRun(t, store, scope, owner, "marketing-lead", "worker")
 	validator, _ := NewProjectActionValidator(store)
 	coordinator := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy(), validator)
-	base := ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ProjectManagementSkillID, SkillVersion: ProjectManagementSkillVersion, IdempotencyKey: "proposal"}
+	base := loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: owner.ID, SkillID: ProjectManagementSkillID, SkillVersion: ProjectManagementSkillVersion, IdempotencyKey: "proposal"}, "proposal")
 	base.Action = ProjectActionCreate
 	base.Arguments = map[string]interface{}{"title": "Campaign", "purpose": "Launch", "objectiveRefs": []interface{}{ownedObjective.ID}, "owner": map[string]interface{}{"type": "team", "id": foreignOwner.ID}}
 	if _, err := coordinator.Propose(ctx, base); err == nil {

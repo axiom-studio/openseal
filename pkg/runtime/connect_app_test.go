@@ -145,27 +145,22 @@ func TestFindAppsAlsoListsSkillsTheUserCanSetUp(t *testing.T) {
 
 func TestFindAppsRunsThroughTheActionWorker(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope, _ := connectAppFixture(t)
-	run := proposeInteraction(t, ctx, store, catalog, scope, SkillActionFindApps, map[string]interface{}{"query": "neon", "limit": 3})
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, SkillActionFindApps, map[string]interface{}{"query": "neon", "limit": 3})
+	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	apps, _ := executed.Call.Output["apps"].([]interface{})
 	if executed.Call.Status != ActionCallStatusSucceeded || len(apps) != 1 || apps[0].(map[string]interface{})["slug"] != "neondatabase/mcp-server-neon" {
 		t.Fatalf("find_apps: %#v", executed.Call)
 	}
-	if current, _ := store.GetAgentRun(ctx, scope, run.ID); current.Status == AgentRunStatusWaitingForEvent {
-		t.Fatal("a search must not park the run")
+	if _, card := executed.Call.Output["setupRequest"]; card {
+		t.Fatal("a search must not ask for a connect card")
 	}
+	assertRunNotParkedByCall(t, f)
 }
 
 func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope, connected := connectAppFixture(t)
-	run := proposeInteraction(t, ctx, store, catalog, scope, SkillActionRequestConnection, map[string]interface{}{"app": "linear", "reason": "Connect Linear so I can list your issues"})
-	executed, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, SkillActionRequestConnection, map[string]interface{}{"app": "linear", "reason": "Connect Linear so I can list your issues"})
+	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
 	if executed.Call.Status != ActionCallStatusSucceeded || executed.Call.Output["setupRequest"] == nil {
 		t.Fatalf("request_connection: %#v", executed.Call)
 	}
@@ -178,10 +173,11 @@ func TestRequestConnectionParksTheRunOnOneConnectCard(t *testing.T) {
 		*request.App != (ConnectAppTarget{CatalogSlug: "linear", Name: "Linear", Official: true, SignIn: AppSignInOAuth, LogoSHA256: linearLogo}) {
 		t.Fatalf("request: %#v %#v", request, request.App)
 	}
-	parked, err := store.GetAgentRun(ctx, scope, run.ID)
-	if err != nil || !IsExactConnectAppWait(parked, request.ID) {
-		t.Fatalf("run not parked on the card: %#v %v", parked, err)
+	// The call's output names the one card the loop parks the Run on.
+	if card, _ := executed.Call.Output["setupRequest"].(map[string]interface{}); card["id"] != request.ID {
+		t.Fatalf("request_connection output = %#v", executed.Call.Output)
 	}
+	parked := assertRunNotParkedByCall(t, f)
 	changes, err := mustConversationChanges(t, ctx, store, scope)
 	if err != nil || len(changes.SkillSetupRequests) != 1 || changes.SkillSetupRequests[0].App == nil {
 		t.Fatalf("change set: %#v %v", changes, err)
