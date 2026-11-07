@@ -2594,6 +2594,7 @@ type Engine struct {
 	actionPolicy                  runtime.ActionPolicyEvaluator
 	routineOwnerAddresses         runtime.RoutineOwnerAddressResolver
 	chatFiles                     runtime.ChatFileResolver
+	chatWorkspaces                runtime.ChatWorkspaces
 	actionValidators              []runtime.ActionProposalValidator
 	agentManagementActions        bool
 	runbookManagementActions      bool
