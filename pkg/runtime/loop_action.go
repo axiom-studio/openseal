@@ -161,6 +161,11 @@ func selectGovernedAction(binding *TurnRunnerBinding, name string, directive *To
 	if binding == nil {
 		return nil, nil
 	}
+	// The model calls the provider tool name the preparer offered
+	// (LoopGovernedToolNames); the selector matches action names.
+	if action, ok := LoopGovernedAction(binding.ModelActions, name); ok {
+		name = action.Name
+	}
 	request := TurnAction{Capability: name}
 	if directive != nil {
 		request.BindingID, request.BindingRevision = directive.BindingID, directive.BindingRevision
