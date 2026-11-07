@@ -97,16 +97,7 @@ func migrate(db *sql.DB) error {
 	if err := migrateActionCredentialLeaseRedemptionsSQLite(db); err != nil {
 		return err
 	}
-	if err := migrateAuthoringChangeSets(db); err != nil {
-		return err
-	}
-	if err := migrateSensitiveAuthoringPromptsSQLite(db); err != nil {
-		return err
-	}
 	if err := migrateTeamRoutingSQLite(db); err != nil {
-		return err
-	}
-	if err := migrateActivationContinuationsSQLite(db); err != nil {
 		return err
 	}
 	if err := migrateSkillBindingLifecycleRepairSQLite(db); err != nil {

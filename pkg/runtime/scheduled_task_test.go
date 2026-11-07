@@ -10,7 +10,6 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -418,31 +417,5 @@ func TestScheduledTaskSurvivesAgentDefinitionSynchronization(t *testing.T) {
 	updates, err := reconcileAgentRunbookActivations([]*RunbookActivation{first, second}, sqliteAgentDefinition("2.0.0"), &kernelagent.AgentDeployment{ID: run.AssignedAgentID}, time.Now())
 	if err != nil || len(updates) != 0 {
 		t.Fatalf("amendment changed chat-authored tasks: %#v,%v", updates, err)
-	}
-}
-
-func TestScheduledTaskSurvivesWorkforceProjectionReplacement(t *testing.T) {
-	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "projection.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	run, _, bound, args := scheduledTaskFixture(t, store)
-	a := dispatchTaskForTest(t, store, run, bound, args, "task")["activation"].(*RunbookActivation)
-	tx, err := store.db.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	change := &authoring.ChangeSet{Scope: capability.ScopeReference{Kind: run.Scope.Kind, ID: run.Scope.ID}, Placement: authoring.ChangeSetPlacement{AgentDeploymentIDs: map[string]string{"definition": run.AssignedAgentID}}}
-	if err := applySQLiteWorkforceRunbookActivations(t.Context(), tx, change, &workforceApplication{}); err != nil {
-		tx.Rollback()
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	current, err := store.GetRunbookActivation(t.Context(), run.Scope, a.ID)
-	if err != nil || current == nil || current.Status != RunbookActivationActive {
-		t.Fatalf("workforce replacement removed task: %#v,%v", current, err)
 	}
 }

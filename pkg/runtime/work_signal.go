@@ -30,9 +30,6 @@ const (
 	WorkFamilyExternal WorkFamily = "external"
 	// WorkFamilyActivity covers channel-visible Run commentary.
 	WorkFamilyActivity WorkFamily = "activity"
-	// WorkFamilyAuthoring covers workforce change sets and workforce
-	// authoring Runs, which host authoring workers claim.
-	WorkFamilyAuthoring WorkFamily = "authoring"
 
 	// Due families are scheduled by the loops themselves for time-based work:
 	// retries, lease expiries, timers and spaced or backed-off passes. Each

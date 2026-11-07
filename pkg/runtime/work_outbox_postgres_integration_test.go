@@ -164,19 +164,6 @@ func TestPostgresWorkOutboxRecordsOnlyClaimabilityChanges(t *testing.T) {
 	}
 	expect("an unpause", map[WorkFamily]int{WorkFamilyRun: 1, WorkFamilyAction: 1})
 
-	// Authoring Runs belong to the authoring workers, not to Run pools.
-	if _, err := NewPortfolioService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "author", Source: RunSourceManual,
-		Kind: RunKindWorkforceAuthoring,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	expect("an authoring Run", map[WorkFamily]int{WorkFamilyAuthoring: 1})
-	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("agent_runs")+` SET status='completed' WHERE payload->>'kind'='workforce_authoring'`); err != nil {
-		t.Fatal(err)
-	}
-	expect("a finished authoring Run", map[WorkFamily]int{WorkFamilyAuthoring: 1})
-
 	// A failed publish keeps the rows for the next relay.
 	if _, err := store.db.ExecContext(ctx, `UPDATE `+store.table("agent_runs")+` SET status='completed' WHERE id=$1`, run.ID); err != nil {
 		t.Fatal(err)

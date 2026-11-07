@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
 // reconcileAgentRunbookActivations advances the operational projection of an
@@ -101,5 +103,23 @@ func reconcileAgentRunbookActivations(current []*RunbookActivation, definition *
 		result = append(result, next)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
+	return result, nil
+}
+
+func materializeRunbookTriggerInput(values map[string]runbook.Value) (map[string]interface{}, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	result := make(map[string]interface{}, len(values))
+	for name, value := range values {
+		if len(value.Literal) == 0 || value.Ref != "" || len(value.Template) > 0 {
+			return nil, fmt.Errorf("%s must be a literal", name)
+		}
+		var decoded interface{}
+		if err := json.Unmarshal(value.Literal, &decoded); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		result[name] = decoded
+	}
 	return result, nil
 }

@@ -21,7 +21,6 @@ const (
 var teamCoordinationPaths = []struct{ table, postgres, sqlite string }{
 	{"team_definitions", "{coordination}", "$.coordination"},
 	{"team_definition_amendments", "{candidate,coordination}", "$.candidate.coordination"},
-	{"workforce_change_sets", "{result,candidate,team,coordination}", "$.result.candidate.team.coordination"},
 }
 
 func (s *PostgresStore) migrateTeamRouting(ctx context.Context, tx *sql.Tx) error {

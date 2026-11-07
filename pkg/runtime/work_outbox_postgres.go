@@ -84,14 +84,9 @@ func workOutboxTriggers() []workOutboxTrigger {
 	// A claim schedules only its lease expiry: the claimer already works.
 	add("action_calls", `NEW.status IN ('ready','running')`, `NEW.status IN ('ready','running') AND (`+leaseClaimabilityChanged+`)`,
 		`('action', `+leasedDue("running")+`, false)`)
-	// Workforce authoring Runs are claimed by the authoring workers, not by
-	// Run pools.
-	runFamily := func(family string) string {
-		return `CASE WHEN NEW.payload->>'kind' = 'workforce_authoring' THEN 'authoring' ELSE '` + family + `' END`
-	}
 	add("agent_runs", "", leaseClaimabilityChanged,
-		`(`+runFamily("run")+`, CASE WHEN NEW.status = 'running' THEN NULL ELSE NEW.available_at END, false)`,
-		`(`+runFamily("run-due")+`, CASE WHEN NEW.status = 'running' THEN NEW.lease_expires_at END, true)`)
+		`('run', CASE WHEN NEW.status = 'running' THEN NULL ELSE NEW.available_at END, false)`,
+		`('run-due', CASE WHEN NEW.status = 'running' THEN NEW.lease_expires_at END, true)`)
 	// A paused Run hides the ActionCall it waits on from action claims.
 	triggers = append(triggers, workOutboxTrigger{table: "agent_runs", name: "work_outbox_unpause", event: "UPDATE",
 		when: `OLD.status = 'paused' AND NEW.status IS DISTINCT FROM OLD.status`, rows: []string{`('action', NULL, false)`}})
@@ -107,7 +102,6 @@ func workOutboxTriggers() []workOutboxTrigger {
 	add("external_conversation_endpoints", "", statusChanged+` OR OLD.revision IS DISTINCT FROM NEW.revision`, `('external', NULL, false)`)
 	add("callback_events", "", leaseClaimabilityChanged, `('external', `+leasedDue("leased")+`, false)`)
 	triggers = append(triggers, workActivityOutboxTrigger(workActivityTrigger))
-	add("workforce_change_sets", "", statusChanged, `('authoring', NULL, false)`)
 	return triggers
 }
 
@@ -170,7 +164,6 @@ func (s *PostgresStore) migrateWorkOutbox(ctx context.Context, tx *sql.Tx) error
 		`CREATE INDEX IF NOT EXISTS external_conversation_inbox_pending_work_idx ON ` + s.table("external_conversation_inbox") + `(scope_kind,scope_id) WHERE status IN ('pending','retry','leased')`,
 		`CREATE INDEX IF NOT EXISTS external_conversation_deliveries_pending_work_idx ON ` + s.table("external_conversation_deliveries") + `(scope_kind,scope_id) WHERE status IN ('pending','retry','leased')`,
 		`CREATE INDEX IF NOT EXISTS callback_events_pending_work_idx ON ` + s.table("callback_events") + `(scope_kind,scope_id) WHERE status IN ('pending','leased')`,
-		`CREATE INDEX IF NOT EXISTS workforce_change_sets_pending_work_idx ON ` + s.table("workforce_change_sets") + `(scope_kind,scope_id) WHERE status IN ('evaluating','review')`,
 	}
 	for _, table := range workTables() {
 		for _, name := range workSignalTriggerNames {
@@ -243,7 +236,7 @@ func (s *PostgresStore) rollbackWorkOutbox(ctx context.Context, tx *sql.Tx) erro
 			`DROP FUNCTION IF EXISTS `+s.table(trigger.function())+`()`)
 	}
 	for _, index := range []string{"action_calls", "agent_runs", "agent_requests", "approval_checkpoints",
-		"external_conversation_inbox", "external_conversation_deliveries", "callback_events", "workforce_change_sets"} {
+		"external_conversation_inbox", "external_conversation_deliveries", "callback_events"} {
 		statements = append(statements, `DROP INDEX IF EXISTS `+s.table(index+"_pending_work_idx"))
 	}
 	statements = append(statements, `DROP TABLE IF EXISTS `+s.table("work_outbox"))
@@ -328,11 +321,9 @@ func (s *PostgresStore) ListPendingWork(ctx context.Context, rebuild bool) ([]Wo
 		`SELECT 'action', scope_kind, scope_id, MIN(CASE WHEN status='running' THEN COALESCE(lease_expires_at, now()) ELSE available_at END)
 			FROM ` + s.table("action_calls") + ` WHERE status IN ('ready','running') GROUP BY scope_kind, scope_id`,
 		// Sleeping Runs keep their timers in the payload; a pass reads them.
-		`SELECT CASE WHEN payload->>'kind' = 'workforce_authoring' THEN 'authoring' ELSE 'run-due' END, scope_kind, scope_id,
+		`SELECT 'run-due', scope_kind, scope_id,
 			MIN(CASE WHEN status='running' THEN COALESCE(lease_expires_at, now()) WHEN status='queued' THEN available_at ELSE now() END)
-			FROM ` + s.table("agent_runs") + ` WHERE status IN ('queued','running','sleeping') GROUP BY 1, scope_kind, scope_id`,
-		`SELECT 'authoring', scope_kind, scope_id, now() FROM ` + s.table("workforce_change_sets") +
-			` WHERE status IN ('evaluating','review') GROUP BY scope_kind, scope_id`,
+			FROM ` + s.table("agent_runs") + ` WHERE status IN ('queued','running','sleeping') GROUP BY scope_kind, scope_id`,
 		`SELECT 'run', scope_kind, scope_id, now() FROM ` + s.table("agent_requests") +
 			` WHERE status IN ('pending','accepted','clarification_requested','completion_review') GROUP BY scope_kind, scope_id`,
 		`SELECT 'maintenance', scope_kind, scope_id, now() FROM ` + s.table("skill_runtime_maintenance") + ` WHERE active GROUP BY scope_kind, scope_id`,

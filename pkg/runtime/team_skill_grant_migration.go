@@ -23,7 +23,6 @@ var teamSkillGrantDefinitionPaths = []struct {
 }{
 	{"team_definitions", nil, []string{"id", "version"}},
 	{"team_definition_amendments", []string{"candidate"}, []string{"scope_kind", "scope_id", "id"}},
-	{"workforce_change_sets", []string{"result", "candidate", "team"}, []string{"scope_kind", "scope_id", "id"}},
 }
 
 type teamSkillGrantMigrationDB interface {
