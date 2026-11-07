@@ -1,68 +1,77 @@
 package runtime
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
 
+// startSpokenChat posts text as the fixture user with the given response mode
+// and schedules the reply Run through the production scheduler.
+func startSpokenChat(f *loopFixture, text, mode string) (*Conversation, *AgentRun) {
+	f.t.Helper()
+	conversation, _, err := f.convs.CreateConversation(f.ctx, CreateConversationRequest{
+		Scope: f.scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent},
+		Title: "Spoken chat", IdempotencyKey: "spoken-chat",
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	posted, err := f.convs.PostChannelMessage(f.ctx, PostChannelMessageRequest{
+		Scope: f.scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
+		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: loopFixtureUser},
+		Intent: MessageIntentQuestion, Content: text, ResponseMode: mode,
+		Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
+		IdempotencyKey: "spoken-trigger",
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return conversation, f.chatRun(conversation, posted.Message)
+}
+
+// A spoken chat may end silently: turn_final_answer{silent:true} completes the
+// Run and posts nothing. A text chat is never offered silent, so the same call
+// is refused and the model has to write the answer, which is then posted.
 func TestSilentConversationCompletionRequiresSpokenChannel(t *testing.T) {
 	for _, mode := range []string{"spoken", ""} {
 		t.Run("mode="+mode, func(t *testing.T) {
-			ctx := t.Context()
-			store := NewMemoryStore()
-			service := NewConversationService(store)
-			scope := Scope{Kind: "tenant", ID: "spoken"}
-			conversation, _, err := service.CreateConversation(ctx, CreateConversationRequest{
-				Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"},
-				Title: "Conversation", IdempotencyKey: "spoken-conversation",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			posted, err := service.PostChannelMessage(ctx, PostChannelMessageRequest{
-				Scope: scope, ConversationID: conversation.ID, ExpectedRevision: conversation.Revision,
-				Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "user"},
-				Intent: MessageIntentQuestion, Content: "Ambient speech", ResponseMode: mode,
-				Audience: ConversationAudience{Kind: ConversationAudienceChannel}, RequiresResponse: true,
-				IdempotencyKey: "ambient-message",
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			scheduled, _, err := mustConversationRunScheduler(t, store).ScheduleMessage(ctx, scope, conversation.ID, posted.Message.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if mode == "spoken" && scheduled.Run.Context["responseMode"] != mode {
-				t.Fatal("spoken presentation was lost when scheduling the reply")
-			}
-			resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-				return &TurnRunnerBinding{DeploymentID: "agent", DefinitionID: "definition", DefinitionVersion: "1",
-					Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-						return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"silent": true}}, nil
-					})}, nil
-			})
-			runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: resolver})
-			if err != nil {
-				t.Fatal(err)
-			}
-			binding, err := runner.ResolveTurnRunner(ctx, scheduled.Run)
-			if err != nil {
-				t.Fatal(err)
-			}
-			outcome, err := binding.Runner.RunTurn(ctx, TurnExecutionContext{Run: scheduled.Run})
-			if mode == "spoken" {
-				if err != nil || outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || outcome.RunOutput["silent"] != true {
-					t.Fatalf("ambient spoken completion: %#v, %v", outcome, err)
+			eachStore(t, "spoken_silent", func(t *testing.T, store KernelStore) {
+				f := newLoopFixture(t, store, withRules(
+					&modelRule{name: "silent", times: 1, reply: func(v stepView) ModelStepResult {
+						return finalAnswer(map[string]any{"answer": "", "silent": true})
+					}},
+					&modelRule{name: "answer", reply: func(stepView) ModelStepResult {
+						return finalAnswer(map[string]any{"answer": "I heard you."})
+					}},
+				))
+				conversation, run := startSpokenChat(f, "Ambient speech", mode)
+				if mode == "spoken" && run.Context["responseMode"] != mode {
+					t.Fatal("spoken presentation was lost when scheduling the reply")
 				}
-			} else if err == nil || !strings.Contains(err.Error(), "spoken response channel") {
-				t.Fatalf("text reply was silently discarded: %#v, %v", outcome, err)
-			}
-			messages, err := service.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-			if err != nil || len(messages) != 1 {
-				t.Fatalf("silent completion posted a reply: %#v, %v", messages, err)
-			}
+				done := f.driveToRest(run.ID, 3)
+				f.mustStatus(done, AgentRunStatusCompleted)
+
+				steps := f.model.calls(ModelStepPurposeStep)
+				replies := f.agentReplies(conversation.ID)
+				if mode == "spoken" {
+					if len(steps) != 1 || len(replies) != 0 || done.Output["silent"] != true {
+						t.Fatalf("silent spoken completion: steps=%d replies=%q output=%#v", len(steps), replies, done.Output)
+					}
+					return
+				}
+				if len(steps) != 2 || len(replies) != 1 || !strings.Contains(replies[0], "I heard you.") {
+					t.Fatalf("text reply was not written after silent: steps=%d replies=%q", len(steps), replies)
+				}
+				var refused bool
+				for _, entry := range f.toolEntries(run.ID) {
+					if entry.State == ToolEntryError && strings.Contains(toolEntryText(entry), "silent") {
+						refused = true
+					}
+				}
+				if !refused {
+					t.Fatal("silent final in a text chat was not refused with a tool error")
+				}
+			})
 		})
 	}
 }
