@@ -86,36 +86,41 @@ type ActionProposalValidationInput struct {
 	Run       *AgentRun
 	Bound     *skill.BoundAction
 	Arguments map[string]interface{}
+	// History reads this Run's governed action calls. nil means none.
+	History RunActionHistory
 }
 
 type ProposeActionRequest struct {
-	Scope                  Scope
-	RunID                  string
-	TurnID                 string
-	WorkerID               string
-	DeploymentID           string
-	BindingID              string
-	BindingRevision        int64
-	SkillID                string
-	SkillVersion           string
-	Action                 string
-	Arguments              map[string]interface{}
-	PreparedRuntime        *skill.PreparedRuntime
-	IdempotencyKey         string
-	Summary                string
-	Actor                  ActivityActor
-	EvidenceRefs           []string
-	ExternalOperation      *ExternalOperationIdentity
-	ReviewContext          *ApprovalReviewContext
-	ContinuationCheckpoint map[string]interface{}
-	CorrelationID          string
-	CausationID            string
-	// Origin and OriginRef mark a nested call (see ProposeNested). A nested
-	// proposal never changes the Run and is fenced by its in-flight Turn.
+	Scope Scope
+	RunID string
+	// TurnID is the step that proposes the call (its agent_turns row).
+	TurnID string
+	// WorkerID is the Run lease owner.
+	WorkerID          string
+	DeploymentID      string
+	BindingID         string
+	BindingRevision   int64
+	SkillID           string
+	SkillVersion      string
+	Action            string
+	Arguments         map[string]interface{}
+	PreparedRuntime   *skill.PreparedRuntime
+	IdempotencyKey    string
+	Summary           string
+	Actor             ActivityActor
+	EvidenceRefs      []string
+	ExternalOperation *ExternalOperationIdentity
+	ReviewContext     *ApprovalReviewContext
+	CorrelationID     string
+	CausationID       string
+	// Origin is ActionOriginLoop for a governed tool call of a run loop step
+	// (Execution ActionExecutionLoop) or ActionOriginVM for a nested call
+	// (see ProposeNested), whose OriginRef groups it under its command.
+	// Neither changes the Run apart from a loop call's budget reservation.
 	Origin    ActionOrigin
 	OriginRef string
 	// Execution ActionExecutionHost marks a nested call its host performs
-	// itself (see ProposeNestedHost).
+	// itself (see ProposeNestedHost); ActionExecutionLoop marks a loop call.
 	Execution ActionExecution
 }
 
@@ -131,7 +136,7 @@ type ActionCoordinator struct {
 	now           func() time.Time
 	newID         func() string
 	nested        nestedActionTurns
-	// nestedMaxCalls and nestedMaxConcurrent bound nested calls per Turn.
+	// nestedMaxCalls and nestedMaxConcurrent bound nested calls per step.
 	nestedMaxCalls, nestedMaxConcurrent int
 }
 
@@ -164,6 +169,12 @@ func (c *ActionCoordinator) SetRoutineOwnerAddresses(resolver RoutineOwnerAddres
 	}
 }
 
+// Propose governs one action call of a running Run: catalog, validators,
+// external operation identity, approval mode, routine grant and policy, then
+// records the call with its approval and activity. A loop call never changes
+// the Run apart from its budget reservation; a nested call never changes it.
+// A *ActionProposalRejection is a reason the model can correct; any other
+// error stops the caller's claim.
 func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionRequest) (*ActionProposalResult, error) {
 	if c == nil || c.portfolio == nil || c.actions == nil || c.catalog == nil || c.policy == nil {
 		return nil, errors.New("action coordinator is not configured")
@@ -174,6 +185,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if strings.TrimSpace(req.RunID) == "" || strings.TrimSpace(req.DeploymentID) == "" || strings.TrimSpace(req.SkillID) == "" || strings.TrimSpace(req.SkillVersion) == "" || strings.TrimSpace(req.Action) == "" {
 		return nil, errors.New("run, deployment, skill, version, and action are required")
 	}
+	loop := req.Origin == ActionOriginLoop
 	if err := actionSkillRuntimeMaintenanceError(ctx, c.actions, req.Scope, req.SkillID); err != nil {
 		return nil, err
 	}
@@ -185,29 +197,33 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		return nil, ErrRunNotFound
 	}
 	if run.Status != AgentRunStatusRunning {
+		if loop {
+			return nil, ErrLeaseLost
+		}
 		return nil, fmt.Errorf("action can only be proposed by a running run, got %s", run.Status)
 	}
-	nested := req.Origin == ActionOriginVM
-	if req.Origin != "" && !nested {
-		return nil, fmt.Errorf("unsupported action origin %q", req.Origin)
-	}
-	if req.Execution != "" && (req.Execution != ActionExecutionHost || !nested) {
-		return nil, errors.New("only a nested action may be performed by its host")
-	}
-	if nested {
+	switch req.Origin {
+	case ActionOriginVM:
+		if req.Execution != "" && req.Execution != ActionExecutionHost {
+			return nil, errors.New("a nested action is performed by an action worker or its host")
+		}
 		if strings.TrimSpace(req.TurnID) == "" || strings.TrimSpace(req.WorkerID) == "" || req.ExternalOperation != nil {
-			return nil, errors.New("a nested action requires its Turn and worker and takes no Agent attribution or external operation")
+			return nil, errors.New("a nested action requires its step and worker and takes no external operation")
 		}
-		// An answer-only explanation Turn or a pending source question may
-		// not act, and a nested call cannot take the model's one correction.
-		if requiresFinalFailureExplanation(run.Checkpoint) || hasCanonicalSourceAccessChallenge(run) {
-			return nil, ErrNestedActionNotAuthorized
+	case ActionOriginLoop:
+		if req.Execution != ActionExecutionLoop || strings.TrimSpace(req.TurnID) == "" || strings.TrimSpace(req.WorkerID) == "" || strings.TrimSpace(req.OriginRef) != "" {
+			return nil, errors.New("a loop action requires its step, the Run lease owner, loop execution and no origin reference")
 		}
+		if strings.TrimSpace(req.IdempotencyKey) == "" {
+			return nil, errors.New("a loop action requires its tool call's idempotency key")
+		}
+	default:
+		return nil, errors.New("action origin is invalid")
 	}
 	var lease *AgentRunLeaseGuard
 	now := c.now().UTC()
-	if run.LeaseOwner != "" {
-		if req.WorkerID == "" || run.LeaseOwner != req.WorkerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
+	if loop || run.LeaseOwner != "" {
+		if run.LeaseOwner != req.WorkerID || run.LeaseExpiresAt == nil || !run.LeaseExpiresAt.After(now) {
 			return nil, ErrLeaseLost
 		}
 		lease = &AgentRunLeaseGuard{WorkerID: req.WorkerID, Now: now}
@@ -223,13 +239,17 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		if maintenanceErr := actionSkillRuntimeMaintenanceError(ctx, c.actions, req.Scope, req.SkillID); maintenanceErr != nil {
 			return nil, maintenanceErr
 		}
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		return nil, rejectProposal(ProposalRejectionCapabilityUnavailable, err)
 	}
 	if canonical := canonicalActionReview(bound.Definition, bound.Action); canonical.Review != bound.Action.Review {
 		reviewed := *bound
 		reviewed.Action = canonical
 		bound = &reviewed
 	}
+	history := newRunActionHistory(c.actions, req.Scope, run.ID)
 	arguments := cloneMap(req.Arguments)
 	for _, validator := range c.validators {
 		resolver, ok := validator.(ActionProposalArgumentResolver)
@@ -237,26 +257,26 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			continue
 		}
 		resolved, handled, resolveErr := resolver.ResolveActionProposalArguments(ctx, ActionProposalValidationInput{
-			Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments),
+			Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), History: history,
 		})
 		if resolveErr != nil {
-			return nil, resolveErr
+			return nil, proposalValidationError(ctx, ProposalRejectionToolArgumentsInvalid, resolveErr)
 		}
 		if handled {
 			arguments = cloneMap(resolved)
 		}
 	}
 	if err := c.catalog.ValidateInput(ctx, bound, arguments); err != nil {
-		return nil, err
+		return nil, proposalValidationError(ctx, ProposalRejectionToolArgumentsInvalid, err)
 	}
 	var proposedAction map[string]interface{}
 	for _, validator := range c.validators {
 		if validator == nil {
 			continue
 		}
-		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments)})
+		preview, validateErr := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: cloneAgentRun(run), Bound: bound, Arguments: cloneMap(arguments), History: history})
 		if validateErr != nil {
-			return nil, validateErr
+			return nil, proposalValidationError(ctx, ProposalRejectionNotAdmitted, validateErr)
 		}
 		if preview != nil {
 			proposedAction = cloneMap(preview)
@@ -267,24 +287,26 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	externalOperationPolicy := effectiveExternalOperationPolicy(bound.Action.SideEffect, bound.Action.ExternalOperationPolicy)
 	if externalOperationPolicy == skill.ExternalOperationRequired && req.ExternalOperation == nil {
-		return nil, errors.New("skill action requires an external operation identity")
+		return nil, rejectProposal(ProposalRejectionExternalIdentityInvalid, errors.New("skill action requires an external operation identity"))
 	}
 	if externalOperationPolicy == skill.ExternalOperationForbidden && req.ExternalOperation != nil {
-		return nil, errors.New("skill action forbids an external operation identity")
+		return nil, rejectProposal(ProposalRejectionExternalIdentityInvalid, errors.New("skill action forbids an external operation identity"))
 	}
 	externalOperationDigest, err := computeExternalOperationDigest(req.Scope, run.Owner, run.ObjectiveID, req.ExternalOperation, req.IdempotencyKey)
 	if err != nil {
-		return nil, err
+		return nil, rejectProposal(ProposalRejectionExternalIdentityInvalid, err)
 	}
 	if externalOperationDigest != "" {
 		prior, lookupErr := c.actions.GetActionCallByExternalOperation(ctx, req.Scope, externalOperationDigest)
 		if lookupErr != nil && !errors.Is(lookupErr, ErrActionNotFound) {
 			return nil, lookupErr
 		}
-		if prior != nil && externalOperationReceiptComplete(prior.Status) {
-			return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, prior, lease, now)
-		}
-		if prior != nil {
+		// The prior is this same call when the tool call is replayed; the
+		// store returns it by its idempotency key.
+		if prior != nil && !replaysActionCall(prior, run, req.IdempotencyKey) {
+			if externalOperationReceiptComplete(prior.Status) {
+				return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, prior, lease, now)
+			}
 			return nil, &ExternalOperationConflictError{Prior: prior}
 		}
 	}
@@ -325,6 +347,11 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if decision.Disposition == ActionDispositionRequireApproval && len(decision.EligibleApprovers) == 0 {
 		return nil, errors.New("approval policy must identify at least one eligible approver")
 	}
+	// A person reads the summary on the approval card. The kernel never
+	// writes one for the model.
+	if loop && decision.Disposition == ActionDispositionRequireApproval && strings.TrimSpace(req.Summary) == "" {
+		return nil, &ActionProposalRejection{Code: ProposalRejectionReviewSummaryRequired, Message: proposalRejectionReviewSummaryRequiredMessage}
+	}
 
 	callID := c.newID()
 	call := &ActionCall{
@@ -341,43 +368,65 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
 	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	if nested {
+	if !loop {
 		return c.createNestedProposal(ctx, req, run, bound, arguments, proposedAction, call, decision, lease, now)
 	}
-	updatedRun := cloneAgentRun(run)
-	updatedRun.Revision++
-	updatedRun.UpdatedAt = now
-	correctionCheckpoint := preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint)
-	if decision.Disposition != ActionDispositionDeny {
-		var correctionDenied string
-		if interactionErr := validateSourceAccessChallengeAction(ctx, c.portfolio, run, call); interactionErr != nil {
-			correctionDenied = interactionErr.Error()
-		} else if hasCanonicalSourceAccessChallenge(run) {
-			correctionCheckpoint, correctionDenied = admitSourceAccessChallengeAction(correctionCheckpoint, call)
-		} else {
-			correctionCheckpoint, correctionDenied = admitToolFeedbackCorrection(correctionCheckpoint, call)
-		}
-		if correctionDenied != "" {
-			decision.Disposition = ActionDispositionDeny
-			decision.Reason = correctionDenied
-		}
+	result, err := c.createLoopProposal(ctx, req, run, bound, arguments, proposedAction, call, decision, lease, now)
+	var conflict *ExternalOperationConflictError
+	if errors.As(err, &conflict) && conflict.Prior != nil && externalOperationReceiptComplete(conflict.Prior.Status) && !replaysActionCall(conflict.Prior, run, req.IdempotencyKey) {
+		return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, conflict.Prior, lease, now)
 	}
-	budgetDenied := false
-	if updatedRun.Budget != nil && decision.Disposition != ActionDispositionDeny {
-		err := reserveRunBudget(updatedRun, BudgetReservation{
+	return result, err
+}
+
+// proposalValidationError is err as a model-visible rejection with code,
+// unless the proposal's context ended.
+func proposalValidationError(ctx context.Context, code string, err error) error {
+	if ctx.Err() != nil {
+		return err
+	}
+	return rejectProposal(code, err)
+}
+
+// replaysActionCall reports whether prior is the call a replay of the same
+// tool call (same Run, same idempotency key) already recorded.
+func replaysActionCall(prior *ActionCall, run *AgentRun, idempotencyKey string) bool {
+	key := strings.TrimSpace(idempotencyKey)
+	return prior != nil && run != nil && key != "" && prior.RunID == run.ID && prior.IdempotencyKey == key
+}
+
+// createLoopProposal records a loop call with its disposition, approval and
+// activity. The Run is changed only to reserve the call's budget; an approval
+// parks the Run later, at step end.
+func (c *ActionCoordinator) createLoopProposal(ctx context.Context, req ProposeActionRequest, run *AgentRun,
+	bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *ActionCall,
+	decision ActionPolicyDecision, lease *AgentRunLeaseGuard, now time.Time) (*ActionProposalResult, error) {
+	if lease == nil {
+		return nil, ErrLeaseLost
+	}
+	var updatedRun *AgentRun
+	budgetExhausted := false
+	if run.Budget != nil && decision.Disposition != ActionDispositionDeny {
+		reserved := cloneAgentRun(run)
+		reserved.Revision++
+		reserved.UpdatedAt = now
+		err := reserveRunBudget(reserved, BudgetReservation{
 			ID: actionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: now,
 		})
-		if errors.Is(err, ErrBudgetExhausted) {
-			budgetDenied = true
+		switch {
+		case errors.Is(err, ErrBudgetExhausted):
+			budgetExhausted = true
 			decision.Disposition = ActionDispositionDeny
-			decision.Reason = "run action budget is exhausted"
-		} else if err != nil {
+			decision.Reason = actionBudgetExhaustedReason
+		case err != nil:
 			return nil, err
+		default:
+			updatedRun = reserved
 		}
 	}
-
 	eventType := "action.proposed"
-	eventSummary := req.Summary
+	summary := strings.TrimSpace(req.Summary)
+	eventSummary := summary
 	if eventSummary == "" {
 		eventSummary = fmt.Sprintf("Proposed %s.%s", req.SkillID, req.Action)
 	}
@@ -385,53 +434,46 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	switch decision.Disposition {
 	case ActionDispositionAllow:
 		call.Status = ActionCallStatusReady
-		updatedRun.Status = AgentRunStatusWaitingForDependency
-		updatedRun.WakeCondition = &WakeCondition{Type: "action", Reference: call.ID}
-		updatedRun.Checkpoint = correctionCheckpoint
-		updatedRun.LeaseOwner = ""
-		updatedRun.LeaseExpiresAt = nil
 	case ActionDispositionDeny:
 		call.Status = ActionCallStatusDenied
 		call.Error = decision.Reason
 		call.CompletedAt = &now
-		updatedRun.Status = AgentRunStatusQueued
-		if budgetDenied {
-			updatedRun.Status = AgentRunStatusPaused
-		}
-		updatedRun.WakeCondition = nil
-		updatedRun.Checkpoint = checkpointTerminalAction(correctionCheckpoint, call, map[string]interface{}{
-			"denialSource": "policy",
-		})
-		updatedRun.AvailableAt = now
-		updatedRun.QueueEnteredAt = now
-		updatedRun.LeaseOwner = ""
-		updatedRun.LeaseExpiresAt = nil
 		eventType = "action.denied"
-		if budgetDenied {
+		if budgetExhausted {
 			eventType = "budget.exhausted"
-			eventSummary = "Run paused before exceeding its autonomous action budget"
+			eventSummary = "The Run's action budget is exhausted, so the action was not run"
 		}
 	case ActionDispositionRequireApproval:
-		approval = c.newApprovalCheckpoint(ctx, req, run, bound, arguments, proposedAction, call, decision, eventSummary, now)
-		updatedRun.Status = AgentRunStatusWaitingForApproval
-		updatedRun.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
-		updatedRun.Checkpoint = correctionCheckpoint
-		updatedRun.LeaseOwner = ""
-		updatedRun.LeaseExpiresAt = nil
+		approval = c.newApprovalCheckpoint(ctx, req, run, bound, arguments, proposedAction, call, decision, summary, now)
 		eventType = "action.approval_requested"
 	}
-	event := c.proposalEvent(req, run, call, decision, eventType, eventSummary, now)
-	result, err := c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound)})
-	var conflict *ExternalOperationConflictError
-	if errors.As(err, &conflict) && conflict.Prior != nil && externalOperationReceiptComplete(conflict.Prior.Status) {
-		return c.suppressDuplicateExternalOperation(ctx, req, run, bound, arguments, externalOperationDigest, conflict.Prior, lease, now)
+	record := ActionProposalRecord{
+		Call: call, Approval: approval, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease,
+		Event:               c.proposalEvent(req, run, call, decision, eventType, eventSummary, now),
+		RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound),
 	}
-	return result, err
+	result, err := c.actions.CreateActionProposal(ctx, record)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil {
+		if result.Created {
+			result.BudgetExhausted = budgetExhausted
+		} else if existing := result.Call; existing != nil {
+			// A replay of a budget denial must still map to the budget pause.
+			result.BudgetExhausted = existing.Status == ActionCallStatusDenied && existing.Error == actionBudgetExhaustedReason
+		}
+	}
+	return result, nil
 }
+
+// actionBudgetExhaustedReason is the denial reason of a loop call refused for
+// action budget; replays recognize the denial by it.
+const actionBudgetExhaustedReason = "run action budget is exhausted"
 
 // createNestedProposal records a nested call with the same disposition,
 // approval and activity a model proposal would get, without touching the Run.
-// The store fences it against the in-flight Turn and its bounds.
+// The store fences it against the running step and its bounds.
 func (c *ActionCoordinator) createNestedProposal(ctx context.Context, req ProposeActionRequest, run *AgentRun, bound *skill.BoundAction, arguments, proposedAction map[string]interface{}, call *ActionCall, decision ActionPolicyDecision, lease *AgentRunLeaseGuard, now time.Time) (*ActionProposalResult, error) {
 	if lease == nil {
 		return nil, ErrNestedTurnNotActive
@@ -523,8 +565,8 @@ func (c *ActionCoordinator) proposalEvent(req ProposeActionRequest, run *AgentRu
 	return event
 }
 
-// addActionOrigin marks the activity of a nested call with its origin and
-// grouping reference.
+// addActionOrigin marks the activity of a nested or loop call with its origin,
+// grouping reference and execution.
 func addActionOrigin(payload map[string]interface{}, call *ActionCall) {
 	if call == nil || call.Origin == "" {
 		return
@@ -538,11 +580,17 @@ func addActionOrigin(payload map[string]interface{}, call *ActionCall) {
 	}
 }
 
+// suppressDuplicateExternalOperation records a succeeded receipt call that
+// points at a completed prior external operation instead of running it
+// again. The Run is not changed.
 func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Context, req ProposeActionRequest, run *AgentRun, bound *skill.BoundAction, arguments map[string]interface{}, digest string, prior *ActionCall, lease *AgentRunLeaseGuard, now time.Time) (*ActionProposalResult, error) {
+	if lease == nil {
+		return nil, ErrLeaseLost
+	}
 	call := &ActionCall{
 		ID: c.newID(), Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision, SkillID: req.SkillID, SkillVersion: req.SkillVersion,
-		Action: req.Action, Status: ActionCallStatusSucceeded, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect,
+		Action: req.Action, Origin: req.Origin, Execution: req.Execution, Status: ActionCallStatusSucceeded, Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect,
 		Arguments: persistedActionArguments(arguments, bound.Action.InputSchema), PreparedRuntime: clonePreparedRuntime(req.PreparedRuntime),
 		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
 		EvidenceRefs:      append([]string(nil), req.EvidenceRefs...), IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
@@ -552,18 +600,6 @@ func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Conte
 	}
 	call.InvocationDigest = ComputeActionInvocationDigest(call)
 	call.SemanticDigest = ComputeActionSemanticDigest(call)
-	updatedRun := cloneAgentRun(run)
-	updatedRun.Status = AgentRunStatusQueued
-	updatedRun.WakeCondition = nil
-	updatedRun.Checkpoint = checkpointTerminalAction(preserveKernelActionHistory(run.Checkpoint, req.ContinuationCheckpoint), call, map[string]interface{}{
-		"duplicateSuppressed": true, "priorActionCallId": prior.ID, "priorRunId": prior.RunID,
-	})
-	updatedRun.AvailableAt = now
-	updatedRun.QueueEnteredAt = now
-	updatedRun.LeaseOwner = ""
-	updatedRun.LeaseExpiresAt = nil
-	updatedRun.UpdatedAt = now
-	updatedRun.Revision++
 	actor := req.Actor
 	if actor.Type == "" {
 		actor = ActivityActor{Type: "worker", ID: req.WorkerID}
@@ -576,7 +612,8 @@ func (c *ActionCoordinator) suppressDuplicateExternalOperation(ctx context.Conte
 		Payload: map[string]interface{}{"actionCallId": call.ID, "priorActionCallId": prior.ID, "priorRunId": prior.RunID,
 			"externalOperationDigest": digest, "skillId": call.SkillID, "skillVersion": call.SkillVersion, "action": call.Action},
 	}
-	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, Run: updatedRun, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound)})
+	addActionOrigin(event.Payload, call)
+	return c.actions.CreateActionProposal(ctx, ActionProposalRecord{Call: call, ExpectedRunRevision: run.Revision, Lease: lease, Event: event, RequireBindingFence: usesDurableActionBindings(c.catalog), HostBinding: hostActionBinding(bound)})
 }
 
 // hostActionBinding is the binding a call resolved through when the host

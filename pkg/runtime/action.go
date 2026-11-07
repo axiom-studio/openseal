@@ -427,6 +427,9 @@ type ActionProposalResult struct {
 	Run      *AgentRun           `json:"run"`
 	Event    *ActivityEvent      `json:"event,omitempty"`
 	Created  bool                `json:"created"`
+	// BudgetExhausted reports a loop call denied because the Run's action
+	// budget is exhausted; the caller pauses the Run.
+	BudgetExhausted bool `json:"-"`
 }
 
 // ApprovalResolutionRecord updates its Run, except for a nested call's

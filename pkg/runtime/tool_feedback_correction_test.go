@@ -42,7 +42,7 @@ func feedbackPropose(t *testing.T, store KernelStore, catalog *skill.Catalog, ru
 	coordinator.now = func() time.Time { return now }
 	result, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: run.Scope, RunID: run.ID, WorkerID: "agent-worker", DeploymentID: "reader-agent",
 		SkillID: "reader", SkillVersion: "1.0.0", Action: "list", Arguments: map[string]interface{}{"fields": fields}, IdempotencyKey: key,
-		Summary: "Read records", ContinuationCheckpoint: map[string]interface{}{ToolFeedbackCorrectionCheckpointKey: map[string]interface{}{"correctionsUsed": -100}}})
+		Summary: "Read records"})
 	if err != nil {
 		t.Fatal(err)
 	}

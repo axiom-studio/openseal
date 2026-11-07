@@ -11,15 +11,16 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T) {
+func TestActionCoordinatorPersistsSecretSafeApproval(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
 	catalog, scope := governedActionCatalog(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
 	run := claimedActionRun(t, store, scope, now, "worker")
 	store.actions[portfolioKey(scope, "prepared-comment")] = &ActionCall{
-		ID: "prepared-comment", Scope: scope, RunID: run.ID, DeploymentID: "release-agent",
+		ID: "prepared-comment", Scope: scope, RunID: run.ID, TurnID: "step-0", DeploymentID: "release-agent",
 		SkillID: "browser", SkillVersion: "2.0.0", Action: "fill", Status: ActionCallStatusSucceeded,
+		Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 		Arguments: map[string]interface{}{
 			"value": "The exact reviewed comment.", "target": "comment-box", "apiToken": "legacy-secret",
 		},
@@ -43,18 +44,17 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 		ids = ids[1:]
 		return id
 	}
-	result, err := coordinator.Propose(ctx, ProposeActionRequest{
+	result, err := coordinator.Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
-		Arguments:      map[string]interface{}{"environment": "production", "credentialField": "username", "apiToken": "raw-secret", "nested": map[string]interface{}{"password": "also-secret", "region": "us"}},
-		IdempotencyKey: "deploy-production-v1", Summary: "Deploy release to production",
-		Actor: ActivityActor{Type: "agent", ID: "release-agent"}, EvidenceRefs: []string{"artifact://change-plan", "action-call:prepared-comment"},
+		Arguments: map[string]interface{}{"environment": "production", "credentialField": "username", "apiToken": "raw-secret", "nested": map[string]interface{}{"password": "also-secret", "region": "us"}},
+		Summary:   "Deploy release to production",
+		Actor:     ActivityActor{Type: "agent", ID: "release-agent"}, EvidenceRefs: []string{"artifact://change-plan", "action-call:prepared-comment"},
 		ReviewContext: &ApprovalReviewContext{
 			Summary: "Deploy release 42", Target: "production", Audience: "All customers",
 			Purpose: "Ship the reviewed release", Consequences: []string{"Updates the production service"},
 		},
-		ContinuationCheckpoint: map[string]interface{}{"step": "await-release-approval"},
-	})
+	}, "deploy-production"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,13 +92,7 @@ func TestActionCoordinatorPersistsSecretSafeApprovalAndReleasesRun(t *testing.T)
 	if strings.Contains(string(eventJSON), "raw-secret") || strings.Contains(string(eventJSON), "release-secret") {
 		t.Fatalf("activity leaked secret material or credential references: %s", eventJSON)
 	}
-	persistedRun, err := store.GetAgentRun(ctx, scope, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if persistedRun.Status != AgentRunStatusWaitingForApproval || persistedRun.LeaseOwner != "" || persistedRun.WakeCondition == nil || persistedRun.WakeCondition.Reference != "approval" {
-		t.Fatalf("run was not durably suspended: %#v", persistedRun)
-	}
+	assertLoopRunUntouched(t, store, run)
 }
 
 func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) {
@@ -114,147 +108,34 @@ func TestActionCoordinatorEnforcesSchemaPolicyIdempotencyAndLease(t *testing.T) 
 	coordinator.now = func() time.Time { return now.Add(time.Second) }
 	coordinator.newID = func() string { return "id-" + decision.String() }
 	base := ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy"}
-	invalid := base
+	invalid := loopProposeRequest(base, "invalid")
 	invalid.Arguments = map[string]interface{}{"environment": 42}
-	invalid.IdempotencyKey = "invalid"
-	if _, err := coordinator.Propose(ctx, invalid); err == nil {
-		t.Fatal("invalid input schema should be rejected")
+	var rejection *ActionProposalRejection
+	if _, err := coordinator.Propose(ctx, invalid); !errors.As(err, &rejection) || rejection.Code != ProposalRejectionToolArgumentsInvalid {
+		t.Fatalf("invalid input schema error = %v", err)
 	}
-	missingKey := base
+	missingKey := loopProposeRequest(base, "missing")
+	missingKey.IdempotencyKey = ""
 	missingKey.Arguments = map[string]interface{}{"environment": "staging"}
-	if _, err := coordinator.Propose(ctx, missingKey); err == nil || !strings.Contains(err.Error(), "idempotency") {
+	if _, err := coordinator.Propose(ctx, missingKey); err == nil || !strings.Contains(err.Error(), "idempotency") || errors.As(err, &rejection) {
 		t.Fatalf("missing idempotency error = %v", err)
 	}
-	stale := base
+	stale := loopProposeRequest(base, "stale")
 	stale.Arguments = map[string]interface{}{"environment": "staging"}
-	stale.IdempotencyKey = "stale"
 	stale.WorkerID = "other-worker"
 	if _, err := coordinator.Propose(ctx, stale); !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("stale worker error = %v", err)
 	}
-	allowed := base
+	allowed := loopProposeRequest(base, "allowed")
 	allowed.Arguments = map[string]interface{}{"environment": "staging"}
-	allowed.IdempotencyKey = "allowed"
 	result, err := coordinator.Propose(ctx, allowed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Call.Status != ActionCallStatusReady || result.Approval != nil {
+	if result.Call.Status != ActionCallStatusReady || result.Approval != nil || result.Run != nil {
 		t.Fatalf("allowed call mismatch: %#v", result)
 	}
-	persisted, err := store.GetAgentRun(ctx, scope, run.ID)
-	if err != nil || persisted.Status != AgentRunStatusWaitingForDependency || persisted.WakeCondition == nil || persisted.WakeCondition.Reference != result.Call.ID || persisted.LeaseOwner != "" {
-		t.Fatalf("allowed action did not suspend on its dependency: %#v, %v", persisted, err)
-	}
-}
-
-func TestActionCoordinatorPersistsPolicyDenialAndRequeues(t *testing.T) {
-	store := NewMemoryStore()
-	catalog, scope := governedActionCatalog(t)
-	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-	run := claimedActionRun(t, store, scope, now, "worker")
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionDeny, Reason: "production freeze"}, nil
-	}))
-	coordinator.now = func() time.Time { return now.Add(time.Second) }
-	coordinator.newID = func() string { return "denied" }
-	result, err := coordinator.Propose(context.Background(), ProposeActionRequest{
-		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0", Action: "deploy",
-		Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: "denied-deploy",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Call.Status != ActionCallStatusDenied || result.Call.Error != "production freeze" || result.Approval != nil || result.Event.EventType != "action.denied" {
-		t.Fatalf("denial mismatch: %#v", result)
-	}
-	persisted, err := store.GetAgentRun(context.Background(), scope, run.ID)
-	if err != nil || persisted.Status != AgentRunStatusQueued || persisted.LeaseOwner != "" {
-		t.Fatalf("denied run did not requeue: %#v, %v", persisted, err)
-	}
-	call, err := store.ClaimNextAction(context.Background(), ActionClaim{Scope: scope, WorkerID: "action-worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute})
-	if err != nil || call != nil {
-		t.Fatalf("denied action became executable: %#v, %v", call, err)
-	}
-}
-
-func TestActionCoordinatorSuppressesExternalOperationAcrossRuns(t *testing.T) {
-	ctx := context.Background()
-	store := NewMemoryStore()
-	catalog, scope := governedActionCatalog(t)
-	now := time.Date(2026, 7, 27, 10, 0, 0, 0, time.UTC)
-	policyEvaluations := 0
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		policyEvaluations++
-		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
-	}))
-	coordinator.now = func() time.Time { return now.Add(time.Second) }
-
-	firstRun := claimedActionRun(t, store, scope, now, "worker-one")
-	identity := &ExternalOperationIdentity{Resource: "https://Forum.Example/topics/42?b=2&a=1#reply", Operation: "comment:create"}
-	first, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: firstRun.ID, WorkerID: "worker-one", DeploymentID: "release-agent",
-		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
-		IdempotencyKey: "first-run", ExternalOperation: identity,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	claimed, err := store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: "action-worker", Now: now.Add(2 * time.Second), LeaseDuration: time.Minute})
-	if err != nil || claimed == nil || claimed.ID != first.Call.ID {
-		t.Fatalf("claimed action = %#v, %v", claimed, err)
-	}
-	persistedRun, err := store.GetAgentRun(ctx, scope, firstRun.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	completedAt := now.Add(3 * time.Second)
-	completedCall := cloneActionCall(claimed)
-	completedCall.Status = ActionCallStatusSucceeded
-	completedCall.Output = map[string]interface{}{"receipt": "external-42"}
-	completedCall.CompletedAt = &completedAt
-	completedCall.LeaseOwner = ""
-	completedCall.LeaseExpiresAt = nil
-	completedCall.UpdatedAt = completedAt
-	completedCall.Revision++
-	completedRun := cloneAgentRun(persistedRun)
-	completedRun.Status = AgentRunStatusCompleted
-	completedRun.WakeCondition = nil
-	completedRun.CompletedAt = &completedAt
-	completedRun.UpdatedAt = completedAt
-	completedRun.Revision++
-	_, err = store.PersistActionExecution(ctx, ActionExecutionRecord{
-		Call: completedCall, ExpectedCallRevision: claimed.Revision, Run: completedRun, ExpectedRunRevision: persistedRun.Revision,
-		WorkerID: "action-worker", Now: now.Add(2 * time.Second),
-		Event: &ActivityEvent{ID: "first-succeeded", Scope: scope, RunID: firstRun.ID, EventType: "action.succeeded", Summary: "External action succeeded", CreatedAt: completedAt},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	secondRun := claimedActionRun(t, store, scope, now.Add(4*time.Second), "worker-two")
-	second, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: secondRun.ID, WorkerID: "worker-two", DeploymentID: "release-agent",
-		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
-		IdempotencyKey: "first-run", ExternalOperation: &ExternalOperationIdentity{Resource: "https://forum.example/topics/42?a=1&b=2", Operation: "COMMENT:CREATE"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second.Call.Status != ActionCallStatusSucceeded || second.Call.DuplicateOfActionCallID != first.Call.ID || second.Approval != nil ||
-		second.Event.EventType != "action.duplicate_suppressed" || second.Call.Output["duplicateSuppressed"] != true {
-		t.Fatalf("duplicate suppression result = %#v", second)
-	}
-	if policyEvaluations != 1 {
-		t.Fatalf("policy evaluations = %d, duplicate should be suppressed before a new proposal", policyEvaluations)
-	}
-	if executable, err := store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: "action-worker", Now: now.Add(5 * time.Second), LeaseDuration: time.Minute}); err != nil || executable != nil {
-		t.Fatalf("suppressed operation became executable: %#v, %v", executable, err)
-	}
-	receipt, err := store.GetActionCallByExternalOperation(ctx, scope, first.Call.ExternalOperationDigest)
-	if err != nil || receipt.ID != first.Call.ID {
-		t.Fatalf("authoritative receipt = %#v, %v", receipt, err)
-	}
+	assertLoopRunUntouched(t, store, run)
 }
 
 func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(t *testing.T) {
@@ -269,20 +150,20 @@ func TestActionCoordinatorTreatsASeparateIdempotencyOccurrenceAsNewExternalWork(
 	identity := &ExternalOperationIdentity{Resource: "https://forum.example/topics/42", Operation: "comment:create"}
 
 	firstRun := claimedActionRun(t, store, scope, time.Now().UTC(), "worker-one")
-	first, err := coordinator.Propose(ctx, ProposeActionRequest{
+	first, err := coordinator.Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: firstRun.ID, WorkerID: "worker-one", DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
-		IdempotencyKey: "occurrence-one", ExternalOperation: identity,
-	})
+		ExternalOperation: identity,
+	}, "occurrence-one"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	secondRun := claimedActionRun(t, store, scope, time.Now().UTC().Add(time.Second), "worker-two")
-	second, err := coordinator.Propose(ctx, ProposeActionRequest{
+	second, err := coordinator.Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: secondRun.ID, WorkerID: "worker-two", DeploymentID: "release-agent",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"},
-		IdempotencyKey: "occurrence-two", ExternalOperation: identity,
-	})
+		ExternalOperation: identity,
+	}, "occurrence-two"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,17 +183,48 @@ func TestActionCoordinatorEnforcesExternalOperationPolicy(t *testing.T) {
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
 	}))
-	base := ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "browser-agent", SkillID: "browser", SkillVersion: "1.0.0", Arguments: map[string]interface{}{}, IdempotencyKey: "operation-policy"}
+	base := loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "browser-agent", SkillID: "browser", SkillVersion: "1.0.0", Arguments: map[string]interface{}{}}, "operation-policy")
+	var rejection *ActionProposalRejection
 	forbidden := base
 	forbidden.Action = "click"
 	forbidden.ExternalOperation = &ExternalOperationIdentity{Resource: "browser-session:one", Operation: "login"}
-	if _, err := coordinator.Propose(ctx, forbidden); err == nil || !strings.Contains(err.Error(), "forbids an external operation identity") {
+	if _, err := coordinator.Propose(ctx, forbidden); !errors.As(err, &rejection) || rejection.Code != ProposalRejectionExternalIdentityInvalid || !strings.Contains(err.Error(), "forbids an external operation identity") {
 		t.Fatalf("forbidden error=%v", err)
 	}
 	required := base
 	required.Action = "commit"
-	if _, err := coordinator.Propose(ctx, required); err == nil || !strings.Contains(err.Error(), "requires an external operation identity") {
+	if _, err := coordinator.Propose(ctx, required); !errors.As(err, &rejection) || rejection.Code != ProposalRejectionExternalIdentityInvalid || !strings.Contains(err.Error(), "requires an external operation identity") {
 		t.Fatalf("required error=%v", err)
+	}
+	calls, err := store.ListActionCalls(ctx, ActionFilter{Scope: scope, RunID: run.ID})
+	if err != nil || len(calls) != 0 {
+		t.Fatalf("rejected proposals were recorded: %#v, %v", calls, err)
+	}
+}
+
+// loopProposeRequest is req as the loop proposes tool call toolCallID of
+// step-1: loop origin and execution and the per-call idempotency key.
+func loopProposeRequest(req ProposeActionRequest, toolCallID string) ProposeActionRequest {
+	req.Origin, req.Execution = ActionOriginLoop, ActionExecutionLoop
+	if req.TurnID == "" {
+		req.TurnID = "step-1"
+	}
+	if req.IdempotencyKey == "" {
+		req.IdempotencyKey = "loop:" + req.TurnID + ":" + toolCallID
+	}
+	return req
+}
+
+// assertLoopRunUntouched checks a loop proposal left the Run as claimed:
+// running, same lease, same revision, no wake condition.
+func assertLoopRunUntouched(t *testing.T, store PortfolioStore, run *AgentRun) {
+	t.Helper()
+	current, err := store.GetAgentRun(context.Background(), run.Scope, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != AgentRunStatusRunning || current.Revision != run.Revision || current.LeaseOwner != run.LeaseOwner || current.WakeCondition != nil {
+		t.Fatalf("loop proposal changed the Run: %#v", current)
 	}
 }
 
