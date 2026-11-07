@@ -46,7 +46,10 @@ type AgentCreated struct {
 // AgentBuilderCutoverHost converts the retired change-set drafts into
 // builder conversations at engine start.
 type AgentBuilderCutoverHost interface {
-	// EnsureBuilderAgent provisions the builder Agent when it is missing.
+	// EnsureBuilderAgent makes the builder Agent exist and be builder-ready
+	// (current definition and bindings with the agent builder actions). It
+	// is idempotent and runs before a scope's drafts convert, whether or not
+	// the builder already exists.
 	EnsureBuilderAgent(ctx context.Context, scope Scope, requesterUserID string) error
 	// DraftModel is the model the draft was billed with; "" = default.
 	DraftModel(ctx context.Context, scope Scope, idempotencyKey string) (string, error)
