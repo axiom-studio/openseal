@@ -34,25 +34,31 @@ func (e requiredActionEvidenceError) actionAdvanceRecovery() (string, bool) {
 	return e.action, true
 }
 
-func (RequiredActionEvidenceValidator) ValidateActionProposal(_ context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
-	if input.Run == nil || input.Bound == nil || len(input.Bound.Action.RequiredEvidence) == 0 {
+func (RequiredActionEvidenceValidator) ValidateActionProposal(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, error) {
+	if input.Run == nil || input.Bound == nil || input.Bound.Definition == nil || len(input.Bound.Action.RequiredEvidence) == 0 {
 		return nil, nil
 	}
-	entries := actionHistoryEntries(input.Run.Checkpoint)
+	var calls []*ActionCall
+	if input.History != nil {
+		listed, err := input.History.Calls(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("read Run action history: %w", err)
+		}
+		calls = listed
+	}
 	for _, requirement := range input.Bound.Action.RequiredEvidence {
+		action := strings.TrimSpace(requirement.Action)
 		matched := false
-		for index := len(entries) - 1; index >= 0; index-- {
-			entry := entries[index]
-			if strings.TrimSpace(fmt.Sprint(entry["action"])) != strings.TrimSpace(requirement.Action) ||
-				strings.TrimSpace(fmt.Sprint(entry["skillId"])) != input.Bound.Definition.ID ||
-				strings.TrimSpace(fmt.Sprint(entry["skillVersion"])) != input.Bound.Definition.Version ||
-				strings.TrimSpace(fmt.Sprint(entry["status"])) != string(ActionCallStatusSucceeded) {
+		for _, call := range calls {
+			if call == nil || call.Status != ActionCallStatusSucceeded ||
+				call.SkillID != input.Bound.Definition.ID ||
+				call.SkillVersion != input.Bound.Definition.Version ||
+				call.Action != action {
 				continue
 			}
-			arguments, _ := entry["arguments"].(map[string]interface{})
 			matches := true
 			for _, name := range requirement.MatchingArguments {
-				if !reflect.DeepEqual(arguments[name], input.Arguments[name]) {
+				if !reflect.DeepEqual(call.Arguments[name], input.Arguments[name]) {
 					matches = false
 					break
 				}
@@ -63,7 +69,7 @@ func (RequiredActionEvidenceValidator) ValidateActionProposal(_ context.Context,
 			}
 		}
 		if !matched {
-			return nil, requiredActionEvidenceError{action: strings.TrimSpace(requirement.Action)}
+			return nil, requiredActionEvidenceError{action: action}
 		}
 	}
 	return nil, nil
