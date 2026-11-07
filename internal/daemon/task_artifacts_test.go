@@ -2,9 +2,9 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -12,36 +12,190 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 )
 
-func fileOutput(files ...generatedFile) map[string]interface{} {
-	return map[string]interface{}{"reply": "Prepared the requested files.", "generatedFiles": files}
+var localScope = runtime.Scope{Kind: "local", ID: "default"}
+
+func filesField(t *testing.T, files ...interface{}) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func localWorkRun() *runtime.AgentRun {
+	return &runtime.AgentRun{ID: "run-1", Scope: localScope, Kind: runtime.RunKindAgentWork, Owner: runtime.ObjectiveOwner{Type: "agent", ID: "analyst"}, AssignedAgentID: "analyst"}
+}
+
+func newTestPublisher(t *testing.T) (*TaskArtifactPublisher, runtime.ArtifactContentStore) {
+	t.Helper()
+	content, err := artifact.NewLocalStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &TaskArtifactPublisher{Scope: localScope, Content: content, Catalog: runtime.NewArtifactCatalog(runtime.NewMemoryStore())}, content
+}
+
+func twoFiles(t *testing.T) map[string]json.RawMessage {
+	return map[string]json.RawMessage{generatedFilesProperty: filesField(t,
+		generatedFile{Name: "report.md", MediaType: "text/markdown", Text: "# Report"},
+		generatedFile{Name: "facts.json", MediaType: "application/json", Text: `{"count":2}`})}
 }
 
 func TestGeneratedFilesValidateBeforePublication(t *testing.T) {
 	valid := generatedFile{Name: "report.md", MediaType: "text/markdown", Text: "# Report\nUncertainty is explicit."}
 	for _, tc := range []struct {
-		name   string
-		output map[string]interface{}
-		status runtime.AgentRunStatus
-		ok     bool
+		name  string
+		files []interface{}
+		ok    bool
 	}{
-		{"valid", fileOutput(valid), runtime.AgentRunStatusCompleted, true},
-		{"empty file", fileOutput(generatedFile{Name: "empty.txt", MediaType: "text/plain"}), runtime.AgentRunStatusCompleted, true},
-		{"unfinished", fileOutput(valid), runtime.AgentRunStatusRunning, false},
-		{"duplicate", fileOutput(valid, valid), runtime.AgentRunStatusCompleted, false},
-		{"directory", fileOutput(generatedFile{Name: "../report.md", MediaType: valid.MediaType}), runtime.AgentRunStatusCompleted, false},
-		{"unsupported", fileOutput(generatedFile{Name: "app.html", MediaType: "text/html"}), runtime.AgentRunStatusCompleted, false},
-		{"invalid json", fileOutput(generatedFile{Name: "data.json", MediaType: "application/json", Text: "not json"}), runtime.AgentRunStatusCompleted, false},
-		{"size", fileOutput(generatedFile{Name: "large.txt", MediaType: "text/plain", Text: strings.Repeat("a", maxGeneratedFileBytes+1)}), runtime.AgentRunStatusCompleted, false},
-		{"combined size", fileOutput(generatedFile{Name: "a.txt", MediaType: "text/plain", Text: strings.Repeat("a", maxGeneratedFileBytes)}, valid), runtime.AgentRunStatusCompleted, false},
-		{"too many", fileOutput(make([]generatedFile, 9)...), runtime.AgentRunStatusCompleted, false},
-		{"foreign metadata", map[string]interface{}{"generatedFiles": []interface{}{map[string]interface{}{"name": "a.txt", "mediaType": "text/plain", "text": "hello", "scope": "other"}}}, runtime.AgentRunStatusCompleted, false},
+		{"valid", []interface{}{valid}, true},
+		{"empty file", []interface{}{generatedFile{Name: "empty.txt", MediaType: "text/plain"}}, true},
+		{"duplicate", []interface{}{valid, valid}, false},
+		{"directory", []interface{}{generatedFile{Name: "../report.md", MediaType: valid.MediaType}}, false},
+		{"unsupported", []interface{}{generatedFile{Name: "app.html", MediaType: "text/html"}}, false},
+		{"invalid json", []interface{}{generatedFile{Name: "data.json", MediaType: "application/json", Text: "not json"}}, false},
+		{"size", []interface{}{generatedFile{Name: "large.txt", MediaType: "text/plain", Text: strings.Repeat("a", maxGeneratedFileBytes+1)}}, false},
+		{"combined size", []interface{}{generatedFile{Name: "a.txt", MediaType: "text/plain", Text: strings.Repeat("a", maxGeneratedFileBytes)}, valid}, false},
+		{"too many", make([]interface{}, 9), false},
+		{"foreign metadata", []interface{}{map[string]interface{}{"name": "a.txt", "mediaType": "text/plain", "text": "hello", "scope": "other"}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := generatedFiles(tc.output, tc.status)
-			if (err == nil) != tc.ok {
-				t.Fatalf("validation: %v", err)
+			raw := filesField(t, tc.files...)
+			if _, err := decodeGeneratedFiles(raw); (err == nil) != tc.ok {
+				t.Fatalf("decode: %v", err)
+			}
+			publisher, _ := newTestPublisher(t)
+			if err := publisher.ValidateFinalAnswer(localWorkRun(), map[string]json.RawMessage{generatedFilesProperty: raw}); (err == nil) != tc.ok {
+				t.Fatalf("validate: %v", err)
 			}
 		})
+	}
+	if _, err := decodeGeneratedFiles(json.RawMessage(`null`)); err == nil {
+		t.Fatal("null generatedFiles accepted")
+	}
+	if _, err := decodeGeneratedFiles(json.RawMessage(`{"name":"a.txt"}`)); err == nil {
+		t.Fatal("object generatedFiles accepted")
+	}
+}
+
+func TestFinalAnswerPropertiesOfferedOnlyForLocalAgentWork(t *testing.T) {
+	publisher, _ := newTestPublisher(t)
+	props := publisher.FinalAnswerProperties(localWorkRun())
+	schema, ok := props[generatedFilesProperty].(map[string]interface{})
+	if len(props) != 1 || !ok || schema["type"] != "array" || schema["maxItems"] != maxGeneratedFiles {
+		t.Fatalf("properties: %+v", props)
+	}
+	if description, _ := schema["description"].(string); !strings.Contains(description, "not writes to the user's computer") {
+		t.Fatalf("description: %q", description)
+	}
+	if _, err := json.Marshal(props); err != nil {
+		t.Fatal(err)
+	}
+	foreign := localWorkRun()
+	foreign.Scope.ID = "other"
+	conversation := localWorkRun()
+	conversation.Kind = runtime.RunKindConversation
+	for _, run := range []*runtime.AgentRun{nil, foreign, conversation} {
+		if props := publisher.FinalAnswerProperties(run); props != nil {
+			t.Fatalf("offered on %+v: %+v", run, props)
+		}
+	}
+	if (*TaskArtifactPublisher)(nil).FinalAnswerProperties(localWorkRun()) != nil {
+		t.Fatal("nil publisher offered properties")
+	}
+}
+
+func TestValidateFinalAnswerRejectsForgedArtifactRefsAndUnknownFields(t *testing.T) {
+	publisher, _ := newTestPublisher(t)
+	run := localWorkRun()
+	if err := publisher.ValidateFinalAnswer(run, nil); err != nil {
+		t.Fatalf("no fields: %v", err)
+	}
+	err := publisher.ValidateFinalAnswer(run, map[string]json.RawMessage{"artifactRefs": json.RawMessage(`[{"id":"x"}]`)})
+	if err == nil || err.Error() != "Artifact references are assigned by the kernel, not the model." {
+		t.Fatalf("forged refs: %v", err)
+	}
+	if err = publisher.ValidateFinalAnswer(run, map[string]json.RawMessage{"attachments": json.RawMessage(`[]`)}); err == nil || err.Error() != "unsupported final answer field" {
+		t.Fatalf("unknown field: %v", err)
+	}
+	conversation := localWorkRun()
+	conversation.Kind = runtime.RunKindConversation
+	if err = publisher.ValidateFinalAnswer(conversation, twoFiles(t)); err == nil {
+		t.Fatal("generatedFiles accepted on a run that was not offered them")
+	}
+}
+
+func TestPublishFinalOutputRecordsStepProvenance(t *testing.T) {
+	ctx := context.Background()
+	publisher, content := newTestPublisher(t)
+	run := localWorkRun()
+	output, err := publisher.PublishFinalOutput(ctx, runtime.FinalOutputPublication{Run: run, StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs, ok := output["artifactRefs"].([]map[string]interface{})
+	if len(output) != 1 || !ok || len(refs) != 2 || refs[0]["name"] != "report.md" || refs[1]["name"] != "facts.json" || refs[0]["version"] != int64(1) {
+		t.Fatalf("output: %+v", output)
+	}
+	if !strings.HasPrefix(refs[0]["id"].(string), "step-file-") || refs[0]["id"] == refs[1]["id"] {
+		t.Fatalf("ids: %+v", refs)
+	}
+	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: localScope, ProducerRunID: run.ID})
+	if err != nil || len(records) != 2 {
+		t.Fatalf("records: %d %v", len(records), err)
+	}
+	for _, record := range records {
+		if record.Provenance.Producer.ID != "analyst" || record.Provenance.Producer.Type != "agent" || record.Provenance.TurnID != "step-2" || record.Provenance.RunID != run.ID || record.Provenance.Owner == nil || record.Provenance.Owner.ID != "analyst" || record.Classification != runtime.ArtifactClassificationInternal || record.Version != 1 {
+			t.Fatalf("provenance: %+v", record)
+		}
+		if len(record.Evidence) != 1 || record.Evidence[0].Relation != runtime.EvidenceRelationOutputOf || record.Evidence[0].TargetKind != runtime.EvidenceTargetTurn || record.Evidence[0].TargetRef != "step-2" {
+			t.Fatalf("evidence: %+v", record.Evidence)
+		}
+		reader, err := content.Open(ctx, localScope, record.ContentRef)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := io.ReadAll(reader)
+		reader.Close()
+		if err != nil || int64(len(data)) != record.SizeBytes {
+			t.Fatal("missing content", err)
+		}
+	}
+	none, err := publisher.PublishFinalOutput(ctx, runtime.FinalOutputPublication{Run: run, StepID: "step-2", ToolCallID: "call-1"})
+	if err != nil || none != nil {
+		t.Fatalf("no fields: %+v %v", none, err)
+	}
+}
+
+func TestPublishFinalOutputIsIdempotentPerStepCall(t *testing.T) {
+	ctx := context.Background()
+	publisher, _ := newTestPublisher(t)
+	pub := runtime.FinalOutputPublication{Run: localWorkRun(), StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)}
+	first, err := publisher.PublishFinalOutput(ctx, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := publisher.PublishFinalOutput(ctx, pub)
+	if err != nil {
+		t.Fatal("replay:", err)
+	}
+	a, _ := json.Marshal(first)
+	b, _ := json.Marshal(second)
+	if string(a) != string(b) {
+		t.Fatalf("replay refs differ:\n%s\n%s", a, b)
+	}
+	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
+	if err != nil || len(records) != 2 {
+		t.Fatalf("records: %d %v", len(records), err)
+	}
+	pub.ToolCallID = "call-2"
+	other, err := publisher.PublishFinalOutput(ctx, pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other["artifactRefs"].([]map[string]interface{})[0]["id"] == first["artifactRefs"].([]map[string]interface{})[0]["id"] {
+		t.Fatal("a different tool call reused the artifact identity")
 	}
 }
 
@@ -58,120 +212,54 @@ func (s *failSecondWrite) Put(ctx context.Context, write runtime.ArtifactContent
 	return s.ArtifactContentStore.Put(ctx, write)
 }
 
-func TestAcceptedGeneratedFilesRecoverWithoutModelReinvocation(t *testing.T) {
+func TestPublishFinalOutputResumesAfterPartialContentFailure(t *testing.T) {
 	ctx := context.Background()
-	dir := t.TempDir()
-	db := filepath.Join(dir, "state.db")
-	store, err := runtime.NewSQLiteStore(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	content, err := artifact.NewLocalStore(filepath.Join(dir, "artifacts"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: "agent", ID: "analyst"}, AssignedAgentID: "analyst", Goal: "Create two files", Source: runtime.RunSourceManual})
-	if err != nil {
-		t.Fatal(err)
-	}
-	calls := 0
-	runner := runtime.TurnRunnerFunc(func(context.Context, runtime.TurnExecutionContext) (*runtime.TurnOutcome, error) {
-		calls++
-		return &runtime.TurnOutcome{NextRunStatus: runtime.AgentRunStatusCompleted, RunOutput: fileOutput(generatedFile{Name: "report.md", MediaType: "text/markdown", Text: "# Report"}, generatedFile{Name: "facts.json", MediaType: "application/json", Text: `{"count":2}`})}, nil
-	})
-	publisher := &TaskArtifactPublisher{Scope: scope, Content: &failSecondWrite{ArtifactContentStore: content}, Catalog: runtime.NewArtifactCatalog(store)}
-	_, err = runtime.NewTurnCoordinator(store, store, store).Advance(ctx, runtime.AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "first", OutputPublisher: publisher}, runner)
-	if err == nil {
+	publisher, content := newTestPublisher(t)
+	publisher.Content = &failSecondWrite{ArtifactContentStore: content}
+	pub := runtime.FinalOutputPublication{Run: localWorkRun(), StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)}
+	if _, err := publisher.PublishFinalOutput(ctx, pub); err == nil {
 		t.Fatal("expected interrupted publication")
 	}
-	saved, err := store.GetAgentRun(ctx, scope, run.ID)
-	if err != nil || saved.Status != runtime.AgentRunStatusPaused {
-		t.Fatalf("premature completion: %+v %v", saved, err)
+	partial, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
+	if err != nil || len(partial) != 1 {
+		t.Fatalf("partial publication: %d %v", len(partial), err)
 	}
-	first, err := runtime.NewArtifactCatalog(store).List(ctx, runtime.ArtifactFilter{Scope: scope, ProducerRunID: run.ID})
-	if err != nil || len(first) != 1 {
-		t.Fatalf("partial publication: %d %v", len(first), err)
-	}
-	if err = store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := runtime.NewSQLiteStore(db)
+	output, err := publisher.PublishFinalOutput(ctx, pub)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("resume:", err)
 	}
-	defer reopened.Close()
-	publisher = &TaskArtifactPublisher{Scope: scope, Content: content, Catalog: runtime.NewArtifactCatalog(reopened)}
-	_, err = runtime.NewRunCommandService(reopened).CommandAgentRun(ctx, runtime.AgentRunCommandRequest{Scope: scope, RunID: run.ID, ExpectedRevision: saved.Revision, Kind: runtime.AgentRunCommandResume, Actor: runtime.ActivityActor{Type: "user", ID: "local-operator"}})
-	if err != nil {
-		t.Fatal(err)
+	if refs := output["artifactRefs"].([]map[string]interface{}); len(refs) != 2 || refs[0]["id"] != partial[0].ID {
+		t.Fatalf("resumed refs: %+v", refs)
 	}
-
-	result, err := runtime.NewTurnCoordinator(reopened, reopened, reopened).Advance(ctx, runtime.AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "recovery", OutputPublisher: publisher}, runner)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 || !result.Reconciled || result.Run.Status != runtime.AgentRunStatusCompleted {
-		t.Fatalf("recovery: calls=%d result=%+v", calls, result)
-	}
-	if _, found := result.Run.Output["generatedFiles"]; found {
-		t.Fatal("run output must hold references instead of file bodies")
-	}
-	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: scope, ProducerRunID: run.ID})
+	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: localScope, ProducerRunID: pub.Run.ID})
 	if err != nil || len(records) != 2 {
-		t.Fatalf("records: %d %v", len(records), err)
-	}
-	for _, record := range records {
-		if record.Provenance.Producer.ID != "analyst" || record.Provenance.TurnID != result.Turn.ID || record.Classification != runtime.ArtifactClassificationInternal {
-			t.Fatalf("forged provenance: %+v", record)
-		}
-		reader, err := content.Open(ctx, scope, record.ContentRef)
-		if err != nil {
-			t.Fatal(err)
-		}
-		data, err := io.ReadAll(reader)
-		reader.Close()
-		if err != nil || int64(len(data)) != record.SizeBytes {
-			t.Fatal("missing content", err)
-		}
-	}
-	if _, err = publisher.PublishTurnOutput(ctx, result.Run, result.Turn); err != nil {
-		t.Fatal("publication replay", err)
-	}
-	records, _ = publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: scope, ProducerRunID: run.ID})
-	if len(records) != 2 {
-		t.Fatal("duplicate artifacts on replay")
-	}
-	foreign := *result.Run
-	foreign.Scope.ID = "other"
-	if _, err = publisher.PublishTurnOutput(ctx, &foreign, result.Turn); err == nil {
-		t.Fatal("cross-scope publication accepted")
+		t.Fatalf("records after resume: %d %v", len(records), err)
 	}
 }
 
-func TestCanceledProviderTurnDoesNotPublishGeneratedFiles(t *testing.T) {
+func TestPublishFinalOutputRejectsForeignScope(t *testing.T) {
 	ctx := context.Background()
-	store := runtime.NewMemoryStore()
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	run, err := runtime.NewPortfolioService(store).CreateAgentRun(ctx, runtime.CreateAgentRunRequest{Scope: scope, Owner: runtime.ObjectiveOwner{Type: "agent", ID: "analyst"}, AssignedAgentID: "analyst", Goal: "Cancel before result", Source: runtime.RunSourceManual})
-	if err != nil {
-		t.Fatal(err)
-	}
-	content, _ := artifact.NewLocalStore(t.TempDir())
-	publisher := &TaskArtifactPublisher{Scope: scope, Content: content, Catalog: runtime.NewArtifactCatalog(store)}
-	runner := runtime.TurnRunnerFunc(func(ctx context.Context, input runtime.TurnExecutionContext) (*runtime.TurnOutcome, error) {
-		_, _, err := runtime.NewRunActivityService(store, store).TransitionRun(ctx, scope, run.ID, runtime.RunTransitionRequest{ExpectedRevision: input.Run.Revision, Status: runtime.AgentRunStatusCanceled, Actor: runtime.ActivityActor{Type: "user", ID: "local-operator"}})
-		if err != nil {
-			t.Fatal(err)
+	publisher, _ := newTestPublisher(t)
+	foreign := localWorkRun()
+	foreign.Scope.ID = "other"
+	for _, pub := range []runtime.FinalOutputPublication{
+		{Run: foreign, StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)},
+		{Run: localWorkRun(), ToolCallID: "call-1", Fields: twoFiles(t)},
+		{Run: localWorkRun(), StepID: "step-2", Fields: twoFiles(t)},
+		{StepID: "step-2", ToolCallID: "call-1", Fields: twoFiles(t)},
+	} {
+		if _, err := publisher.PublishFinalOutput(ctx, pub); err == nil {
+			t.Fatalf("publication accepted: %+v", pub)
 		}
-		return &runtime.TurnOutcome{NextRunStatus: runtime.AgentRunStatusCompleted, RunOutput: fileOutput(generatedFile{Name: "late.txt", MediaType: "text/plain", Text: "late"})}, nil
-	})
-	_, err = runtime.NewTurnCoordinator(store, store, store).Advance(ctx, runtime.AdvanceAgentRunRequest{Scope: scope, RunID: run.ID, WorkerID: "worker", OutputPublisher: publisher}, runner)
-	if !errors.Is(err, runtime.ErrLeaseLost) {
-		t.Fatal(err)
 	}
-	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: scope, ProducerRunID: run.ID})
+	records, err := publisher.Catalog.List(ctx, runtime.ArtifactFilter{Scope: foreign.Scope})
 	if err != nil || len(records) != 0 {
-		t.Fatalf("late artifacts published: %+v %v", records, err)
+		t.Fatalf("foreign records: %d %v", len(records), err)
 	}
+}
+
+// fileOutput builds old per-Turn runOutput for turn_host_test.go; it goes when
+// oss-2 deletes that file.
+func fileOutput(files ...generatedFile) map[string]interface{} {
+	return map[string]interface{}{"reply": "Prepared the requested files.", "generatedFiles": files}
 }
