@@ -39,7 +39,7 @@ const (
 )
 
 // AgentBuilderActionDispatcher executes list_agents, create_agent,
-// update_agent and try_agent. Every write step is idempotent on the
+// update_agent, try_agent and openseal.teams create_team. Every write step is idempotent on the
 // ActionCall, so a retry or a crash-resumed execution converges on the same
 // Agent.
 type AgentBuilderActionDispatcher struct {
@@ -103,11 +103,16 @@ func (d *AgentBuilderActionDispatcher) DispatchAction(ctx context.Context, input
 		return d.updateAgent(ctx, input, run)
 	case AgentActionTryAgent:
 		return d.tryAgent(ctx, input, run)
+	case TeamActionCreateTeam:
+		return d.createTeam(ctx, input, run)
 	}
 	return nil, errors.New("unsupported agent builder action")
 }
 
 func isAgentBuilderDispatchedAction(bound *skill.BoundAction) bool {
+	if isTeamCreateAction(bound) {
+		return true
+	}
 	if !isAgentBuilderAction(bound) {
 		return false
 	}
