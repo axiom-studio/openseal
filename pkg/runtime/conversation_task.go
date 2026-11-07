@@ -58,6 +58,7 @@ type ConversationTask struct {
 	SourceRunID        string                  `json:"sourceRunId"`
 	SourceTurnID       string                  `json:"sourceTurnId"`
 	SourceTurnNumber   int64                   `json:"sourceTurnNumber"`
+	SourceToolEntryID  string                  `json:"sourceToolEntryId,omitempty"`
 	AuthenticatedActor ConversationParticipant `json:"authenticatedActor"`
 	TargetAgentID      string                  `json:"targetAgentId"`
 	WorkRunID          string                  `json:"workRunId"`
@@ -223,6 +224,13 @@ type ConversationTaskCreateRecord struct {
 	ExpectedSourceRevision int64
 	WorkerID               string
 	Event                  *ActivityEvent
+	// ToolTransition completes the source conversation_start_task tool entry
+	// (pending|running -> completed, ConversationTaskStartedToolResult) and
+	// WorkSession forks the work Run's session from the chat session just
+	// before that step's assistant entry. Both or neither; both exactly when
+	// Task.SourceToolEntryID is set. Applied in the create transaction.
+	ToolTransition *ToolEntryTransitionRequest
+	WorkSession    *CreateRunAgentSessionTxRequest
 }
 
 type ConversationTaskStore interface {
@@ -544,7 +552,7 @@ func validateConversationTaskCreateRecord(record ConversationTaskCreateRecord) e
 	if !ok || len(ids) != 1 || ids[0] != t.ID {
 		return ErrInvalidConversationTask
 	}
-	return nil
+	return validateConversationTaskToolRecord(record)
 }
 
 // Only the completion and its exact task budget allocation may change during
