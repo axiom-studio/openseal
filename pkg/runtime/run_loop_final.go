@@ -93,6 +93,12 @@ func (d *drive) finishFinal(ctx context.Context, st *stepState, final *FinalAnsw
 	case FinalDeliveryRetryFinal:
 		return d.rejectDeliveredFinal(ctx, st, final, result.RejectionText)
 	case FinalDeliveryFail:
+		if explaining && d.run.FailureExplanation != nil && (result.Failure == nil || len(result.Output) > 0) {
+			// §8.2 step 3: the explanation is posted. The Run ends failed
+			// with Explained=true and the post's output in the terminal
+			// transition below.
+			break
+		}
 		failure := LoopFailure{Kind: RunFailureKindExecution, Code: runFailureCodeFinalDelivery, Message: "The agent's reply could not be posted."}
 		if result.Failure != nil {
 			failure = *result.Failure
