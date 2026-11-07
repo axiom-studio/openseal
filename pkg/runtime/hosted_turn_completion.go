@@ -4,15 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 )
-
-// A backslash terminates a URL as well as ordinary whitespace. Completion
-// output is JSON-encoded before inspection, so a real newline appears as the
-// two bytes `\n`; accepting the backslash would incorrectly append the next
-// line to an otherwise evidence-backed URL.
-var hostedTurnURLPattern = regexp.MustCompile(`https?://[^\s<>"'\\]+`)
 
 // ValidateHostedTurnCompletion prevents a model-authored terminal response
 // from becoming evidence. External effects must cite a succeeded, kernel-owned
@@ -72,18 +65,4 @@ func ValidateHostedTurnCompletion(request HostedTurnRequest, response *HostedTur
 		}
 	}
 	return errors.New("completed Turn claimed an external mutation without citing a succeeded external ActionCall receipt")
-}
-
-func claimsExternalMutation(value string) bool {
-	value = strings.ToLower(value)
-	for _, phrase := range []string{
-		"comment posted", "posted the comment", "comment submitted", "submitted the comment",
-		"message sent", "sent the message", "email sent", "sent the email",
-		"published the", "created the pull request", "transaction completed",
-	} {
-		if strings.Contains(value, phrase) {
-			return true
-		}
-	}
-	return false
 }

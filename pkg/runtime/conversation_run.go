@@ -1754,26 +1754,6 @@ func conversationActionArtifactReferences(run *AgentRun) []ConversationReference
 	return references
 }
 
-func unverifiedApprovalClaim(content string) bool {
-	normalized := strings.ToLower(strings.Join(strings.Fields(content), " "))
-	claims := []string{
-		"approval has been submitted",
-		"approval was submitted",
-		"approval request has been submitted",
-		"approval request was submitted",
-		"request has already been submitted",
-		"request was already submitted",
-		"awaiting approval",
-		"pending approval",
-	}
-	for _, claim := range claims {
-		if strings.Contains(normalized, claim) {
-			return true
-		}
-	}
-	return false
-}
-
 func (r *ConversationRunTurnRunner) postAgentResponseWithReferences(
 	ctx context.Context,
 	run *AgentRun,
