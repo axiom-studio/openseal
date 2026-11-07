@@ -15,9 +15,12 @@ type ApprovalAuthorizer interface {
 }
 
 // AgentBuilderApprovalAuthorizer is the host authorizer that may approve
-// agent-builder cards (create_agent, update_agent, create_team; D11). Only a
+// agent-builder cards (create_agent, update_agent, create_team; D11) and
+// openseal.skills binding cards aimed at another Agent (targetAgentId). Only a
 // coordinator built with one accepts such an approve, and only from a "user"
-// principal: approval modes, the timeout rule, external channel replies,
+// principal. A targeted skills card is not an agent-builder card: its approve
+// is checked by AuthorizeApproval alone, which the host uses for the person's
+// right on the target Agent. approval modes, the timeout rule, external channel replies,
 // callbacks, notification links and every other in-kernel resolver use an
 // authorizer without this method and are refused. Reject, changes_requested,
 // supersede, expire and cancel stay allowed everywhere.
@@ -46,9 +49,31 @@ func isAgentBuilderApproval(approval *ApprovalCheckpoint) bool {
 	return resourceType == agentProfileResourceType || resourceType == "team" && operation == agentBuilderTeamOperation
 }
 
+// isTargetedSkillBindingApproval reports whether approval reviews an
+// openseal.skills upsert_binding or disable_binding aimed at another Agent
+// (the validator's preview names its targetAgent).
+func isTargetedSkillBindingApproval(approval *ApprovalCheckpoint) bool {
+	if approval == nil {
+		return false
+	}
+	resourceType, _ := approval.ProposedAction["resourceType"].(string)
+	operation, _ := approval.ProposedAction["operation"].(string)
+	return resourceType == "skill_binding" && (operation == SkillActionUpsertBinding || operation == SkillActionDisableBinding) &&
+		approval.ProposedAction["targetAgent"] != nil
+}
+
+// approvedOnlyByPerson reports whether an approve of approval must come from
+// a person through the host approval route: an agent-builder card or a
+// targeted skills card. No approval mode, timeout rule, external reply or
+// callback approves one.
+func approvedOnlyByPerson(approval *ApprovalCheckpoint) bool {
+	return isAgentBuilderApproval(approval) || isTargetedSkillBindingApproval(approval)
+}
+
 // authorizeAgentBuilderApproval applies D11 to an approve of an agent-builder
-// card: a person's decision through a host AgentBuilderApprovalAuthorizer, on
-// top of the coordinator's ordinary authorization.
+// or targeted skills card: a person's decision through a host
+// AgentBuilderApprovalAuthorizer, on top of the coordinator's ordinary
+// authorization.
 func (c *ApprovalCoordinator) authorizeAgentBuilderApproval(ctx context.Context, kind approvalResolutionKind, principal ApprovalPrincipal, approval *ApprovalCheckpoint) error {
 	host, ok := c.authorize.(AgentBuilderApprovalAuthorizer)
 	if kind != approvalResolutionPrincipal || principal.Type != "user" || !ok {
@@ -56,6 +81,9 @@ func (c *ApprovalCoordinator) authorizeAgentBuilderApproval(ctx context.Context,
 	}
 	if err := host.AuthorizeApproval(ctx, principal, cloneApprovalCheckpoint(approval)); err != nil {
 		return fmt.Errorf("authorize approval: %w", err)
+	}
+	if !isAgentBuilderApproval(approval) {
+		return nil
 	}
 	if err := host.AuthorizeAgentBuilderApproval(ctx, principal, cloneApprovalCheckpoint(approval)); err != nil {
 		return fmt.Errorf("authorize approval: %w", err)
@@ -272,9 +300,9 @@ func (c *ApprovalCoordinator) planResolution(ctx context.Context, req ResolveApp
 	if expired {
 		// A manifest review floor never auto-approves, whatever the
 		// checkpoint's timeout rule says, and neither does an agent-builder
-		// card (D11): only a person approves those.
+		// card or a targeted skills card (D11): only a person approves those.
 		if timeout && approval.TimeoutDecision == ApprovalTimeoutApprove && decidable && approval.ProposedAction["review"] != "always" &&
-			!isAgentBuilderApproval(approval) {
+			!approvedOnlyByPerson(approval) {
 			status = ApprovalStatusApproved
 			eventType = "approval.auto_approved"
 			callStatus = ActionCallStatusReady
@@ -286,7 +314,7 @@ func (c *ApprovalCoordinator) planResolution(ctx context.Context, req ResolveApp
 			}
 		}
 	} else {
-		builderApprove := kind != approvalResolutionSuperseded && req.Decision == ApprovalDecisionApprove && isAgentBuilderApproval(approval)
+		builderApprove := kind != approvalResolutionSuperseded && req.Decision == ApprovalDecisionApprove && approvedOnlyByPerson(approval)
 		if builderApprove {
 			if err := c.authorizeAgentBuilderApproval(ctx, kind, req.Principal, approval); err != nil {
 				return nil, nil, err

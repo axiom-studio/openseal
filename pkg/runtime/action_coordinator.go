@@ -331,7 +331,10 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	// A manifest review floor is a kernel invariant, not a policy preference:
 	// no policy, standing grant, or approval mode may let the action proceed
 	// unreviewed, and its checkpoint never auto-approves on timeout.
-	if bound.Action.AlwaysReview() || isAgentBuilderApprovalAction(bound) {
+	// A builder's skill change aimed at another Agent is reviewed the same
+	// way: it changes that Agent, so the asking person approves it.
+	targeted := isTargetedSkillBindingAction(bound, arguments)
+	if bound.Action.AlwaysReview() || isAgentBuilderApprovalAction(bound) || targeted {
 		if decision.Disposition == ActionDispositionAllow {
 			return nil, fmt.Errorf("action policy allowed %s.%s, which always requires explicit review", req.SkillID, req.Action)
 		}
@@ -346,7 +349,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	}
 	// An agent or team card is decided by the person who asked the builder
 	// for it (D9), whatever role the host policy named.
-	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && isAgentBuilderApprovalAction(bound) {
+	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && (isAgentBuilderApprovalAction(bound) || targeted) {
 		decision.EligibleApprovers = []ApprovalPrincipal{{Type: "user", ID: run.ActingUser}}
 	}
 	if decision.Disposition == ActionDispositionRequireApproval && len(decision.EligibleApprovers) == 0 {
@@ -543,6 +546,10 @@ func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req Propo
 		// as a draft would, is decided only in the app, and lapses rather
 		// than approves when nobody answers.
 		ttl, timeout, destinations = agentBuilderApprovalTTL, ApprovalTimeoutExpire, nil
+	} else if isTargetedSkillBindingAction(bound, arguments) {
+		// A skill change aimed at another Agent is decided only in the app
+		// and lapses rather than approves when nobody answers.
+		timeout, destinations = ApprovalTimeoutExpire, nil
 	}
 	call.Status = ActionCallStatusWaitingApproval
 	call.ApprovalID = approvalID

@@ -800,6 +800,22 @@ func (t *skillTargetAgent) preview() map[string]interface{} {
 	return map[string]interface{}{"id": t.ID, "displayName": t.DisplayName}
 }
 
+// isTargetedSkillBindingAction reports whether bound is an openseal.skills
+// upsert_binding or disable_binding whose arguments name another Agent with
+// targetAgentId. It changes that Agent, so like create_agent and update_agent
+// it is always reviewed and approved only by a person in the app, in every
+// approval mode.
+func isTargetedSkillBindingAction(bound *skill.BoundAction, arguments map[string]interface{}) bool {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != SkillManagementSkillID {
+		return false
+	}
+	if bound.Action.Name != SkillActionUpsertBinding && bound.Action.Name != SkillActionDisableBinding {
+		return false
+	}
+	_, present := arguments[SkillActionTargetAgentArgument]
+	return present
+}
+
 // skillActionTargetable reports the actions that accept targetAgentId.
 func skillActionTargetable(action string) bool {
 	switch action {

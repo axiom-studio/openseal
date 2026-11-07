@@ -3,7 +3,8 @@ package runtime
 // Agent-builder approval paths (D11, spec-openseal §3.1 "Approval paths").
 //
 // An approve of an agent_profile card (create_agent, update_agent) or a
-// create_team card is accepted only by a coordinator whose authorizer is an
+// create_team card (and of an openseal.skills binding card aimed at another
+// Agent, skill_binding_target_approval_test.go) is accepted only by a coordinator whose authorizer is an
 // AgentBuilderApprovalAuthorizer, and only from a "user" principal. Every
 // approval resolver in pkg and internal (grep NewApprovalCoordinator and
 // ResolveTimeout), with the authorizer it builds:
