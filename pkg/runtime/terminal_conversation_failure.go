@@ -47,19 +47,6 @@ func terminalFailureOutcome(run *AgentRun) (*TurnOutcome, bool) {
 	}, true
 }
 
-// terminalCreditError reads the kernel-classified cause of a failed Run, never
-// provider text, so only a Workspace credit refusal yields a credit error.
-func terminalCreditError(status AgentRunStatus, checkpoint map[string]interface{}) *RunCreditError {
-	if status != AgentRunStatusFailed {
-		return nil
-	}
-	failure, _ := checkpoint[FinalFailureExplanationCheckpointKey].(map[string]interface{})
-	if code, _ := failure["code"].(string); code != RunCreditErrorWorkspaceCreditsExhausted {
-		return nil
-	}
-	return &RunCreditError{Code: RunCreditErrorWorkspaceCreditsExhausted}
-}
-
 // failedConversationReportCandidate is a failed chat Run with an Agent to
 // speak for it: an Agent's own Run or a Team member's. A Team's routing Run
 // has no speaker, so it reports nothing.
