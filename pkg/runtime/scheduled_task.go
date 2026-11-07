@@ -552,41 +552,6 @@ func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	return nil, errors.New("unsupported scheduled task action")
 }
 
-func scheduledTaskConversationCompletion(run *AgentRun, result map[string]interface{}) (*governedConversationCompletion, bool) {
-	operation := conversationResultString(result, "operation")
-	if operation != RunbookActionCreateTask && operation != RunbookActionSetStatus && operation != RunbookActionSetScript {
-		return nil, false
-	}
-	activation := conversationResultMap(result["activation"])
-	id := conversationResultString(activation, "id")
-	if !validOpaqueIdentifier(id, 256) {
-		return nil, false
-	}
-	content := "The scheduled task is active. Results will appear in the chat where it was created."
-	if operation == RunbookActionSetStatus {
-		status := conversationResultString(activation, "status")
-		if status == string(RunbookActivationRetired) {
-			status = "cancelled"
-		}
-		content = "The routine is now " + status + "."
-	}
-	if operation == RunbookActionSetScript {
-		content = "The routine now runs the new version of its script."
-	}
-	if operation == RunbookActionCreateTask {
-		if due, err := time.Parse(time.RFC3339Nano, conversationResultString(activation, "nextRunAt")); err == nil {
-			trigger := conversationResultMap(activation["trigger"])
-			schedule := conversationResultMap(trigger["schedule"])
-			zone := conversationResultString(schedule, "timezone")
-			if location, err := time.LoadLocation(zone); err == nil {
-				due = due.In(location)
-			}
-			content += " Next run: " + due.Format("2 Jan, 3:04 PM") + " (" + zone + ")."
-		}
-	}
-	return &governedConversationCompletion{Content: content, ResourceType: runbookActivationResourceType, ResourceID: id, References: []ConversationReference{{Kind: ConversationReferenceRun, ID: run.ID}}}, true
-}
-
 // validateScheduledTaskApp proves the app exists, belongs to the routine's
 // owner and was made in the routine's conversation.
 func validateScheduledTaskApp(ctx context.Context, store runbookActionStore, run *AgentRun, task *ScheduledAgentTask) error {

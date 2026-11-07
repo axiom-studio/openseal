@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -334,24 +333,12 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil || claimed == nil || claimed.ID != status.ID {
 		t.Fatalf("status could not enter foreground: %#v %v", claimed, err)
 	}
-	fake := TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-		if input.ForegroundConversation == nil || input.ForegroundConversation.ID != status.ID {
-			t.Fatal("status lost its canonical foreground")
-		}
-		if !strings.Contains(input.Run.Goal, held.ID) {
-			t.Fatal("foreground status did not receive bounded independent task state")
-		}
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Your release review is still running."}}, nil
-	})
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, conversations), ConversationRunTurnRunnerConfig{AgentTurns: TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DeploymentID: "agent", Runner: fake}, nil
-	})})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: source.Scope, RunID: status.ID, WorkerID: "worker", DefinitionID: "agent", DefinitionVersion: "1"}, runner)
-	if err != nil || result.Run.Status != AgentRunStatusCompleted {
-		t.Fatalf("normal foreground status failed: %#v %v", result, err)
+	// The status answer itself is a chat loop step (conversation_loop_test.go);
+	// here it only has to finish without touching the background work.
+	if _, _, err := NewRunActivityService(store, store).TransitionRun(t.Context(), claimed.Scope, claimed.ID, RunTransitionRequest{
+		ExpectedRevision: claimed.Revision, Status: AgentRunStatusCompleted, Output: map[string]interface{}{"summary": "Your release review is still running."},
+	}); err != nil {
+		t.Fatalf("normal foreground status failed: %v", err)
 	}
 	still, err := store.GetAgentRun(t.Context(), held.Scope, held.ID)
 	if err != nil || still.Status != AgentRunStatusRunning || still.LeaseOwner != "background" {

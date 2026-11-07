@@ -195,10 +195,6 @@ func TestScheduledTaskPersistsExecutesReportsAndRetiresAcrossStores(t *testing.T
 				if reports != occurrences {
 					t.Fatalf("reports=%d", reports)
 				}
-				completion, ok := scheduledTaskConversationCompletion(run, conversationResultMap(result))
-				if !ok || !strings.Contains(completion.Content, "active") {
-					t.Fatalf("completion=%#v", completion)
-				}
 			})
 		}
 	}

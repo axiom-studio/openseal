@@ -349,7 +349,7 @@ type finalAnswerDraft struct {
 }
 
 // content is the user-visible text: the trimmed report when present, else the
-// trimmed answer (conversation_run.go agentConversationResponseContent).
+// trimmed answer (the precedence chat replies have always used).
 func (d *finalAnswerDraft) content() string {
 	if report := strings.TrimSpace(d.Args.Report); report != "" {
 		return report

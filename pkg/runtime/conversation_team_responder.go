@@ -66,8 +66,9 @@ func conversationRoutingKey(scope Scope, conversationID, triggerID string) strin
 
 // routeTeamMessage is a Team channel's routing Run: it records who answers the
 // message and starts one member conversation Run per responder, the same Run a
-// 1:1 Agent chat gets. It writes no answer itself.
-func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (*TurnOutcome, error) {
+// 1:1 Agent chat gets. It writes no answer itself; the result is the Run's
+// output, whose responderRunIds the chat client follows.
+func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (map[string]interface{}, error) {
 	if r.runs == nil || r.coordinator == nil {
 		return nil, ErrConversationCoordinationUnavailable
 	}
@@ -84,7 +85,7 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 		if ctx.Err() != nil || permanentConversationRunError(err) {
 			return nil, err
 		}
-		return r.retryOutcome(run, err)
+		return nil, conversationRetryError(err)
 	}
 	// A member already answering this person takes the message as a follow-up,
 	// like a 1:1 chat's active Run; nobody's work is interrupted.
@@ -120,12 +121,9 @@ func (r *ConversationRunTurnRunner) routeTeamMessage(ctx context.Context, run *A
 		}
 		runIDs = append(runIDs, created.Run.ID)
 	}
-	return &TurnOutcome{
-		NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Team message routed",
-		RunOutput: map[string]interface{}{
-			"conversationId": conversation.ID, "triggerMessageId": triggerID,
-			"participationRoundId": result.Round.ID, "responderRunIds": runIDs, "replayed": result.Replayed,
-		},
+	return map[string]interface{}{
+		"conversationId": conversation.ID, "triggerMessageId": triggerID,
+		"participationRoundId": result.Round.ID, "responderRunIds": runIDs, "replayed": result.Replayed,
 	}, nil
 }
 

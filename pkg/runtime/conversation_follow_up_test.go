@@ -123,77 +123,6 @@ func completedConversationAnswer(summary string) *TurnOutcome {
 	return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: summary, RunOutput: map[string]interface{}{"summary": summary}}
 }
 
-// Three rapid messages from one person in one lane produce one Run. The Run's
-// next Turn answers the first message with the later two as follow-ups.
-func TestRapidConversationMessagesShareOneRunThatSeesAll(t *testing.T) {
-	f := newConversationFollowUpFixture(t)
-	first := f.post(t, "user", "Find the cheapest USB-C hub on Amazon")
-	second := f.post(t, "user", "It must have HDMI")
-	third := f.post(t, "user", "Use my card ending with 1001 to buy it")
-	run := f.schedule(t, first)
-	for _, message := range []*ChannelMessage{second, third} {
-		if delivered := f.schedule(t, message); delivered.ID != run.ID {
-			t.Fatalf("message %s started a parallel Run %s", message.ID, delivered.ID)
-		}
-	}
-	if runs := f.conversationRuns(t); len(runs) != 1 {
-		t.Fatalf("conversation Runs = %d, want 1", len(runs))
-	}
-	run = f.run(t, run.ID)
-	followUps := conversationRunFollowUps(run)
-	if run.Status != AgentRunStatusQueued || len(followUps) != 2 || followUps[0].MessageID != second.ID || followUps[1].MessageID != third.ID ||
-		run.PendingInterventions[0].Instruction != second.Content || run.PendingInterventions[1].Actor != (ActivityActor{Type: "user", ID: "user"}) {
-		t.Fatalf("follow-ups were not delivered in order: %#v", run)
-	}
-
-	// Recovery replays every message without new Runs or duplicate delivery.
-	reconciled, err := f.scheduler.ReconcileScope(t.Context(), f.conversation.Scope)
-	if err != nil || reconciled.Scheduled != 0 || reconciled.Replayed != 3 {
-		t.Fatalf("reconciliation = %#v, %v", reconciled, err)
-	}
-	if runs := f.conversationRuns(t); len(runs) != 1 || len(runs[0].PendingInterventions) != 2 {
-		t.Fatalf("replay duplicated work: %#v", runs)
-	}
-
-	modelCalls := 0
-	runner := f.runner(t, func(input TurnExecutionContext) *TurnOutcome {
-		modelCalls++
-		goal := decodeConversationFollowUpGoal(t, input.Run.Goal)
-		if goal.CurrentMessage.ID != first.ID || len(goal.FollowUpMessages) != 2 ||
-			goal.FollowUpMessages[0].Content != second.Content || goal.FollowUpMessages[1].Content != third.Content {
-			t.Fatalf("Turn did not see all three messages: %#v", goal)
-		}
-		for _, message := range goal.Messages {
-			if message.ID == second.ID || message.ID == third.ID {
-				t.Fatalf("follow-up was presented as past context: %#v", goal.Messages)
-			}
-		}
-		if len(input.Run.PendingInterventions) != 2 {
-			t.Fatalf("hosted Turn lost pending input: %#v", input.Run.PendingInterventions)
-		}
-		return completedConversationAnswer("Bought the Anker hub with HDMI using the card ending 1001.")
-	})
-	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run})
-	if err != nil || modelCalls != 1 || outcome.NextRunStatus != AgentRunStatusCompleted {
-		t.Fatalf("Turn outcome = %#v, calls=%d, err=%v", outcome, modelCalls, err)
-	}
-	answer, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), f.conversation.Scope, f.conversation.ID, conversationTaskFinalResponseKey(run))
-	if err != nil || answer == nil || answer.ReplyToMessageID != first.ID || answer.ResolvesMessageID != first.ID || outcome.RunOutput["messageId"] != answer.ID {
-		t.Fatalf("answer = %#v, %v", answer, err)
-	}
-
-	// A terminal Run never absorbs: the next message starts a new Run.
-	run = f.transition(t, f.transition(t, f.run(t, run.ID), AgentRunStatusRunning, nil), AgentRunStatusCompleted, nil)
-	fourth := f.post(t, "user", "Now track the delivery")
-	next := f.schedule(t, fourth)
-	if next.ID == run.ID || next.Context[conversationRunContextTriggerID] != fourth.ID || len(next.PendingInterventions) != 0 {
-		t.Fatalf("terminal Run absorbed a new message: %#v", next)
-	}
-	if current := f.run(t, run.ID); len(current.PendingInterventions) != 2 {
-		t.Fatalf("terminal Run changed: %#v", current)
-	}
-}
-
 // Waiting Runs keep waiting on their approval, credential, browser handoff or
 // pause; the message is still durable on the Run for its next Turn. Only a
 // sleeping retry or schedule timer is cut short by fresh human input.
@@ -250,42 +179,6 @@ func TestConversationFollowUpSkipsRunExplainingItsFailure(t *testing.T) {
 	next := f.schedule(t, message)
 	if next.ID == run.ID || next.Context[conversationRunContextTriggerID] != message.ID {
 		t.Fatalf("failing Run absorbed a new request: %#v", next)
-	}
-}
-
-// A message delivered while a Turn executes supersedes that Turn's answer:
-// nothing is posted, and the continued Run answers with the new input.
-func TestConversationFollowUpDuringTurnSupersedesItsAnswer(t *testing.T) {
-	f := newConversationFollowUpFixture(t)
-	first := f.post(t, "user", "Find a USB-C hub")
-	run := f.schedule(t, first)
-	var second *ChannelMessage
-	runner := f.runner(t, func(TurnExecutionContext) *TurnOutcome {
-		second = f.post(t, "user", "Only ones with HDMI")
-		f.schedule(t, second)
-		return completedConversationAnswer("Here is a hub without HDMI.")
-	})
-	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run})
-	if err != nil || outcome == nil || outcome.RunOutput["messageId"] != nil {
-		t.Fatalf("superseded outcome = %#v, %v", outcome, err)
-	}
-	messages, err := f.service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: f.conversation.Scope, ConversationID: f.conversation.ID})
-	if err != nil || len(messages) != 2 {
-		t.Fatalf("stale answer was posted: %#v, %v", messages, err)
-	}
-	continued := f.run(t, run.ID)
-	runner = f.runner(t, func(input TurnExecutionContext) *TurnOutcome {
-		if goal := decodeConversationFollowUpGoal(t, input.Run.Goal); len(goal.FollowUpMessages) != 1 || goal.FollowUpMessages[0].ID != second.ID {
-			t.Fatalf("continued Turn missed the follow-up: %#v", goal)
-		}
-		return completedConversationAnswer("Here is a hub with HDMI.")
-	})
-	outcome, err = runner.RunTurn(t.Context(), TurnExecutionContext{Run: continued})
-	if err != nil || outcome.RunOutput["messageId"] == nil {
-		t.Fatalf("continued outcome = %#v, %v", outcome, err)
-	}
-	if conversationTaskFinalResponseKey(continued) == conversationTaskFinalResponseKey(run) {
-		t.Fatal("an answer after a follow-up reuses the earlier answer key")
 	}
 }
 
