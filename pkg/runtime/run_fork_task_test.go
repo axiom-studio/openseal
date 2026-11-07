@@ -11,7 +11,7 @@ func claimedForkTaskFixture(t *testing.T) (*MemoryStore, *AgentRun, *Conversatio
 	t.Helper()
 	store := NewMemoryStore()
 	foreground, turn, _, _ := settledWorkerTaskFixture(t, store)
-	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(foreground, turn))
+	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, foreground, turn))
 	if err != nil {
 		t.Fatal(err)
 	}

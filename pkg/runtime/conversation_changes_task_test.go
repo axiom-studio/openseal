@@ -80,7 +80,7 @@ func TestConversationChangesProjectIndependentTaskBeforeAndWithTerminalReport(t 
 			if err != nil || changeRunByID(initial.Runs, source.ID) == nil {
 				t.Fatalf("foreground projection missing: %#v %v", initial, err)
 			}
-			admitted, err := NewConversationTaskService(store.(ConversationTaskKernelStore)).Start(t.Context(), taskStartRequest(source, turn))
+			admitted, err := NewConversationTaskService(store.(ConversationTaskKernelStore)).Start(t.Context(), taskStartRequest(t, store.(ConversationTaskKernelStore), source, turn))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -179,7 +179,7 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	source, turn := settleConversationTaskForChanges(t, store, conversation, question.Message)
-	admitted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(source, turn))
+	admitted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestConversationTaskChangesInheritSourceThreadVisibility(t *testing.T) {
 func TestConversationTaskTerminalWindowCountsVisibleRuns(t *testing.T) {
 	store := NewMemoryStore()
 	source, turn, conversation, message := settledWorkerTaskFixture(t, store)
-	admitted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(source, turn))
+	admitted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}

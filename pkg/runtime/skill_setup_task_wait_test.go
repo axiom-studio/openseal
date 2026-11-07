@@ -89,7 +89,7 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *Conve
 	if err != nil || settled == nil || settled.Turn == nil || settled.Turn.RequestedTask == nil {
 		t.Fatalf("settle setup task source turn: %#v %v", settled, err)
 	}
-	task, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(settled.Run, settled.Turn))
+	task, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
 	if err != nil {
 		t.Fatal(err)
 	}

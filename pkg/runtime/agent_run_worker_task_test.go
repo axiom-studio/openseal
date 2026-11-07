@@ -129,8 +129,7 @@ func TestAgentRunWorkerDoesNotRecoverTaskSupersededByNewGuidance(t *testing.T) {
 func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *testing.T) {
 	store := NewMemoryStore()
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
-	pool := workerTaskPool(t, store, source.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) { return nil, nil }))
-	if _, err := pool.materializeTurnTask(t.Context(), "worker", source, turn, &TurnRunnerBinding{DeploymentID: "agent"}); err != nil {
+	if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err != nil {
 		t.Fatal(err)
 	}
 	runner := &ConversationRunTurnRunner{portfolio: store}

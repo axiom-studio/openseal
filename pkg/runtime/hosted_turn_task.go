@@ -113,19 +113,10 @@ func validateTaskProposalOutput(proposal *TurnTaskProposal, status AgentRunStatu
 	return nil
 }
 
+// validateHostedTaskAuthority is the old hosted Turn's name for
+// validateConversationTaskStartAuthority; it goes with the hosted Turn path.
 func validateHostedTaskAuthority(run *AgentRun, taskContext *HostedConversationTaskContext) error {
-	if run == nil || run.Kind != RunKindConversation || strings.TrimSpace(run.ParentRunID) != "" ||
-		run.Context[ConversationTaskContextKey] != nil || taskContext == nil || !taskContext.CanStart || !validOpaqueIdentifier(taskContext.ConversationID, 256) {
-		return errors.New("independent task admission is not available to this hosted Turn")
-	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
-	threadRootID, _ := run.Context["threadRootMessageId"].(string)
-	if strings.TrimSpace(conversationID) != taskContext.ConversationID || !validOpaqueIdentifier(triggerID, 256) ||
-		strings.TrimSpace(threadRootID) != strings.TrimSpace(taskContext.ThreadRootID) {
-		return errors.New("hosted task context does not match the foreground conversation")
-	}
-	return nil
+	return validateConversationTaskStartAuthority(run, taskContext)
 }
 
 func hostedTaskForegroundSource(input TurnExecutionContext) *AgentRun {
