@@ -35,15 +35,18 @@ func interactionCall(scope Scope, runID, id, action, key, requestID string) *Act
 // requests it left open.
 func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 	ctx, store, catalog, dispatcher, scope := credentialRequestDispatchFixture(t)
-	run := proposeInteraction(t, ctx, store, catalog, scope, SkillActionRequestCredential, map[string]interface{}{
+	f, call := proposeInteractionCall(t, ctx, store, catalog, scope, SkillActionRequestCredential, map[string]interface{}{
 		"kind": "payment_card", "reason": "Add your card so I can pay 319.00 INR on amazon.in"})
-	if _, err := NewActionWorker(store, catalog, nil, dispatcher).RunOnce(ctx, scope, "action-worker", time.Minute); err != nil {
-		t.Fatal(err)
+	run := f.run
+	executed := f.execute(NewActionWorker(store, catalog, nil, dispatcher), call.ID)
+	card, _ := executed.Call.Output["credentialRequest"].(map[string]interface{})
+	requestID, _ := card["id"].(string)
+	if executed.Call.Status != ActionCallStatusSucceeded || requestID == "" {
+		t.Fatalf("credential action: %#v", executed.Call)
 	}
-	parked, err := store.GetAgentRun(ctx, scope, run.ID)
-	if err != nil || parked.Status != AgentRunStatusWaitingForEvent {
-		t.Fatalf("run not waiting: %#v %v", parked, err)
-	}
+	// The loop parks the Run on the card at step end.
+	f.park(AgentRunStatusWaitingForEvent, &WakeCondition{Type: CredentialRequestWakeType, Reference: requestID})
+	parked := f.current()
 	// A pending Skill setup request of the same Run is closed too.
 	setup := &SkillSetupRequest{ID: "setup-1", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID,
 		ActionCallID: "setup-call", Kind: "configure", SkillID: "skill-x", SkillVersion: "1.0.0", SkillName: "X", Reason: "Connect X",

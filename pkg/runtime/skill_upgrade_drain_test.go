@@ -31,7 +31,7 @@ func TestSkillReferenceUpgradeDrainsQueuedCallsAndLiveReceiptsAcrossStores(t *te
 		worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 			return map[string]interface{}{"channel": "provider-conversation"}, nil
 		}))
-		result, err := worker.RunOnce(t.Context(), proposal.Call.Scope, "action-worker", time.Minute)
+		result, err := worker.ExecuteOwnLoopCall(t.Context(), proposal.Call.Scope, proposal.Call.ID, "chat-worker")
 		if err != nil || result == nil || result.Call.Status != ActionCallStatusSucceeded {
 			t.Fatalf("execute original version: %#v %v", result, err)
 		}
@@ -93,7 +93,7 @@ func skillUpgradeDrainFixture(t *testing.T, store KernelStore) (*skill.Catalog, 
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
 	}))
-	proposal, err := coordinator.Propose(t.Context(), ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "chat-worker", DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "follow-up", SkillVersion: "1.0.0", Action: "read", Arguments: map[string]interface{}{}, Summary: "Read messages"})
+	proposal, err := coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{Scope: scope, RunID: run.ID, WorkerID: "chat-worker", DeploymentID: "agent", BindingID: "account", BindingRevision: 1, SkillID: "follow-up", SkillVersion: "1.0.0", Action: "read", Arguments: map[string]interface{}{}, Summary: "Read messages"}, "read"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,13 +143,14 @@ func TestSkillRuntimeUsageScopesAndRetentionAcrossStores(t *testing.T) {
 		if err != nil || len(refs) != 1 || refs[0].SkillVersion != "1.0.0" {
 			t.Fatalf("unfinished call not retained: %#v %v", refs, err)
 		}
-		// The worker retires a stale/revoked call instead of issuing side effects.
+		// The loop's inline execution retires a stale/revoked call instead of
+		// issuing side effects.
 		worker := NewActionWorker(store, catalog, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
 			t.Fatal("revoked call dispatched")
 			return nil, nil
 		}))
-		if _, err := worker.RunOnce(t.Context(), filter.Scope, "retire-worker", time.Minute); err != nil {
-			t.Fatal(err)
+		if result, err := worker.ExecuteOwnLoopCall(t.Context(), filter.Scope, proposal.Call.ID, "chat-worker"); err != nil || result == nil || result.Call.Status != ActionCallStatusFailed {
+			t.Fatalf("revoked loop call: %#v %v", result, err)
 		}
 		refs, err = usage.ListReferencedSkillRuntimeVersions(t.Context(), filter.Scope)
 		if err != nil || len(refs) != 0 {
