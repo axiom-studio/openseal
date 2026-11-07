@@ -871,7 +871,7 @@ func (r *stepToolRun) runCapability(ctx context.Context, i int) error {
 	r.setMu.Lock()
 	switch entry.Tool.Name {
 	case LoadCapabilitiesTool:
-		content, isError, loaded = ExecuteLoadCapabilities(set, args, loopCapabilityToolName)
+		content, isError, loaded = ExecuteLoadCapabilities(set, args, loopCapabilityToolName(r.binding.ModelActions))
 	default:
 		searched := 0
 		if r.in.Path != nil {
@@ -893,20 +893,6 @@ func (r *stepToolRun) runCapability(ctx context.Context, i int) error {
 	}
 	result := &ToolResult{Status: status, IsError: isError, Content: []ContentPart{{Type: ContentPartJSON, Value: content}}}
 	return r.transition(ctx, i, to, result, nil, "", kernel, true)
-}
-
-// loopCapabilityToolName maps a capability ID to the provider tool name its load
-// makes callable.
-func loopCapabilityToolName(id string) string {
-	switch {
-	case strings.HasPrefix(id, capabilityActionPrefix):
-		return strings.TrimPrefix(id, capabilityActionPrefix)
-	case strings.HasPrefix(id, capabilityWorkspacePrefix):
-		return hostToolName(strings.TrimPrefix(id, capabilityWorkspacePrefix))
-	case strings.HasPrefix(id, capabilityRunbookPrefix):
-		return string(ControlToolRunOperation)
-	}
-	return ""
 }
 
 func (r *stepToolRun) controlContext(i int) ControlContext {
