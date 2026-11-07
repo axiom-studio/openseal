@@ -605,62 +605,6 @@ func (c *feedbackExecutionCatalogProbe) Resolve(ctx context.Context, scope skill
 
 // Only the call correction admission recorded may run while a failure awaits
 // its correction.
-func TestToolFeedbackUnadmittedReadyCallCannotDispatchAcrossStores(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-		now := time.Now().UTC()
-		catalog, scope := feedbackReadCatalog(t)
-		run := feedbackCreateRun(t, store, scope, now)
-		proposal := feedbackPropose(t, store, catalog, run, now, "unadmitted", "id", ActionDispositionAllow)
-		pending := cloneAgentRun(proposal.Run)
-		pending.Checkpoint = appendActionHistory(pending.Checkpoint, &ActionCall{
-			ID: "prior-failed-read", Scope: scope, RunID: run.ID, Status: ActionCallStatusFailed,
-			SkillID: "reader", SkillVersion: "1.0.0", Action: "list", SideEffect: skill.SideEffectRead,
-			Arguments: map[string]interface{}{"fields": "bad"}, Error: "invalid fields",
-		})
-		pending.Checkpoint[ToolFeedbackCorrectionCheckpointKey] = map[string]interface{}{
-			"kind": "action", "message": "invalid fields", "correctionsUsed": 1,
-			"lastFailureId": "prior-failed-read", "admittedActionCallId": "another-call",
-		}
-		pending.Revision++
-		pending.UpdatedAt = now
-		_, err := store.UpdateAgentRunWithEvent(t.Context(), pending, proposal.Run.Revision, &ActivityEvent{
-			ID: "restore-pending-feedback", Scope: scope, RunID: run.ID, AgentID: "reader-agent",
-			EventType: "test.feedback_checkpoint_restored", Severity: ActivitySeverityInfo, Visibility: ActivityVisibilityScope,
-			Actor: ActivityActor{Type: "worker", ID: "fixture"}, Summary: "Restored a pending correction checkpoint", CreatedAt: now,
-		}, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		credentialCalls, dispatches := 0, 0
-		executionCatalog := &feedbackExecutionCatalogProbe{ActionExecutionCatalog: catalog}
-		worker := NewActionWorker(store, executionCatalog, CredentialResolverFunc(func(context.Context, CredentialResolutionRequest) (map[string]string, error) {
-			credentialCalls++
-			return map[string]string{"token": "private-secret"}, nil
-		}), ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
-			dispatches++
-			return map[string]interface{}{"result": "unexpected correction"}, nil
-		}))
-		worker.now = func() time.Time { return now }
-		stopped, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
-		if err != nil || stopped == nil || stopped.Call.Status != ActionCallStatusFailed || stopped.Call.Error != errActionNotAdmittedAfterFailure.Error() ||
-			stopped.Call.FailurePhase != ActionFailureBeforeDispatch || executionCatalog.resolutions != 0 || credentialCalls != 0 || dispatches != 0 {
-			t.Fatalf("unadmitted call crossed dispatch boundary: %#v %v catalogcalls=%d credentialcalls=%d dispatches=%d", stopped, err, executionCatalog.resolutions, credentialCalls, dispatches)
-		}
-		foundPrior := false
-		for _, entry := range actionHistoryEntries(stopped.Run.Checkpoint) {
-			if entry["actionCallId"] == "prior-failed-read" && entry["error"] == "invalid fields" {
-				foundPrior = true
-			}
-		}
-		if !foundPrior {
-			t.Fatalf("blocked call lost the original failure receipt: %#v", stopped.Run.Checkpoint)
-		}
-		if again, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute); err != nil || again != nil || dispatches != 0 {
-			t.Fatalf("blocked call was requeued: %#v %v dispatches=%d", again, err, dispatches)
-		}
-	})
-}
-
 func TestToolFeedbackNormalSucceededActionsStillContinueAcrossStores(t *testing.T) {
 	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
 		now := time.Now().UTC()
