@@ -222,7 +222,9 @@ func TestDeferredWorkflowContinuesThroughNormalAgentWorkerAndDurableReporting(t 
 				host := &workflowContinuationHost{}
 				catalog := workflowContinuationCatalog{registry: registry, skills: skills, outreach: NewOutreachService(store.(OutreachStore), store.(ProjectStore), store.(SourceMonitorStore), store)}
 				resolver := TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
-					return ResolveCatalogTurnRunner(ctx, catalog, run, CatalogTurnResolverConfig{Host: host, SkillHost: skill.HostCapabilityState{Adapters: map[string]skill.AdapterCapability{skill.AdapterConversation: {State: skill.AdapterStateAvailable, Features: []string{"plugin"}}}}})
+					config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+					config.SkillHost = skill.HostCapabilityState{Adapters: map[string]skill.AdapterCapability{skill.AdapterConversation: {State: skill.AdapterStateAvailable, Features: []string{"plugin"}}}}
+					return ResolveLoopBinding(ctx, catalog, run, config)
 				})
 				pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{Scope: work.Scope, Kind: RunKindAgentWork, AssignedAgentID: work.AssignedAgentID, WorkerIDPrefix: "continuation-agent", Concurrency: 1, MaxTurnsPerClaim: 1, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute})
 				if err != nil {

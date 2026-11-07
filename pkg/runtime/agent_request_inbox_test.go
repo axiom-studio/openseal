@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -738,63 +737,5 @@ func TestParseAgentRequestDecisionOutputRejectsAmbiguousOrUnsafeShape(t *testing
 		if _, _, err := parseAgentRequestDecisionOutput(output); err == nil {
 			t.Fatalf("output unexpectedly accepted: %#v", output)
 		}
-	}
-}
-
-func TestAgentRequestDecisionTurnFailsClosedOnWorkOrMalformedDecision(t *testing.T) {
-	tests := []struct {
-		name    string
-		outcome *TurnOutcome
-	}{
-		{
-			name: "delegation",
-			outcome: &TurnOutcome{
-				NextRunStatus: AgentRunStatusRunning,
-				ProposedDelegation: &TurnDelegationProposal{
-					StepID: "escape", AssignedAgentID: "other", Goal: "Do the requested work",
-				},
-			},
-		},
-		{
-			name: "malformed completion",
-			outcome: &TurnOutcome{
-				NextRunStatus: AgentRunStatusCompleted,
-				RunOutput:     map[string]interface{}{"summary": "No structured decision"},
-			},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			runner := &agentRequestDecisionTurnRunner{inner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				return tc.outcome, nil
-			})}
-			if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{
-				Run: &AgentRun{ID: "decision"}, Turn: &AgentTurn{ID: "turn"},
-			}); err == nil {
-				t.Fatalf("outcome unexpectedly accepted: %#v", tc.outcome)
-			}
-		})
-	}
-}
-
-func TestAcceptedAgentRequestExecutionStopsOnFirstInvalidIntakeDecision(t *testing.T) {
-	outcome := &TurnOutcome{
-		NextRunStatus: AgentRunStatusCompleted,
-		RunOutput: map[string]interface{}{
-			AgentRequestDecisionOutputKey: map[string]interface{}{
-				"decision": "accept",
-				"message":  "This is relevant.",
-			},
-		},
-		ProposedActions: []TurnAction{{Capability: "browser.start"}},
-	}
-	runner := &acceptedAgentRequestExecutionTurnRunner{inner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return outcome, nil
-	})}
-	failed, err := runner.RunTurn(t.Context(), TurnExecutionContext{
-		Run: &AgentRun{ID: "execution", Checkpoint: map[string]interface{}{}}, Turn: &AgentTurn{ID: "turn"},
-	})
-	if err == nil || failed != nil || !strings.Contains(err.Error(), "invalid intake decision") {
-		t.Fatalf("invalid execution was retried: %#v err=%v", failed, err)
 	}
 }

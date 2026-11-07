@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -93,24 +92,5 @@ func TestFinalFailureExplanationRemovesConversationTaskAuthority(t *testing.T) {
 	outcome := &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, ProposedTask: &TurnTaskProposal{TaskKey: "task", Goal: "Do more work", Acknowledgment: "I will start."}}
 	if err := validateFinalFailureExplanationOutcome(run, outcome); err == nil {
 		t.Fatal("failure explanation bypassed the terminal task boundary")
-	}
-}
-
-func TestAgentRequestReviewTurnsRejectConversationTaskProposals(t *testing.T) {
-	for _, kind := range []string{"intake", "completion"} {
-		t.Run(kind, func(t *testing.T) {
-			inner := TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: &TurnTaskProposal{
-					TaskKey: "escape", Goal: "Do more work", Acknowledgment: "I will start.",
-				}}, nil
-			})
-			var runner TurnRunner = &agentRequestDecisionTurnRunner{inner: inner}
-			if kind == "completion" {
-				runner = &agentRequestCompletionReviewTurnRunner{inner: inner}
-			}
-			if outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{}); err == nil || outcome != nil {
-				t.Fatalf("review escaped its authority: %#v %v", outcome, err)
-			}
-		})
 	}
 }

@@ -2,17 +2,21 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 type resolverCatalog struct {
@@ -108,6 +112,279 @@ func (c *resolverCatalog) ReconcileOutreachAction(context.Context, Scope, string
 	return nil, errors.New("not used")
 }
 
+// loopBindingTestConfig is the minimal LoopBindingConfig of a test: the
+// store's sessions, steps and calls and a tool dispatcher over them.
+func loopBindingTestConfig(t testing.TB, store KernelStore, host StepHost) LoopBindingConfig {
+	t.Helper()
+	tools, err := NewStepToolDispatcher(StepToolDispatcherConfig{Sessions: store, Turns: store, Actions: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return LoopBindingConfig{Host: host, Store: store, Tools: tools}
+}
+
+// bindingTestChatWorkspaces puts every Run in the chat its context names.
+type bindingTestChatWorkspaces struct{}
+
+func (bindingTestChatWorkspaces) PrepareChatWorkspace(_ context.Context, run *AgentRun) (string, error) {
+	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
+	return conversationID, nil
+}
+
+// claimedBindingRun stores run as claimed by worker w1, so the resolver may
+// create its session.
+func claimedBindingRun(t *testing.T, store *MemoryStore, run *AgentRun) *AgentRun {
+	t.Helper()
+	expires := time.Now().Add(time.Hour)
+	run.Status, run.LeaseOwner, run.LeaseExpiresAt, run.Revision = AgentRunStatusRunning, "w1", &expires, 1
+	if run.Context == nil {
+		run.Context = map[string]interface{}{}
+	}
+	store.mu.Lock()
+	store.saveMemoryAgentRunLocked(portfolioKey(run.Scope, run.ID), cloneAgentRun(run))
+	store.mu.Unlock()
+	return run
+}
+
+// prepareBindingStep is the model request of the binding's first step.
+func prepareBindingStep(t *testing.T, binding *TurnRunnerBinding, run *AgentRun) ModelStepRequest {
+	t.Helper()
+	producer, ok := binding.Producer.(*ModelStepProducer)
+	if !ok {
+		t.Fatalf("binding producer = %T, want the model step producer", binding.Producer)
+	}
+	req, err := producer.preparer.PrepareModelStep(t.Context(), StepInput{
+		Run: run, Step: &AgentTurn{ID: "step-1", RunID: run.ID, Sequence: 1}, Session: binding.Session, Binding: binding, Mode: StepModeNormal,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return req
+}
+
+func bindingToolNames(req ModelStepRequest) []string {
+	names := make([]string, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+func TestResolveLoopBindingPerRunKind(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "kinds"}
+	skillScope := skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	action := capability.ModelAction{
+		Name: "forum.reply", BindingID: "forum-account", BindingRevision: 3,
+		SkillID: "forum", Version: "1", Action: "reply", SideEffect: capability.SideEffectExternal,
+	}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{ID: "agent", Scope: skillScope, DefinitionID: "agent", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
+		definition: &kernelagent.AgentDefinition{ID: "agent", Version: "1", Purpose: "Help", SystemPrompt: "Be truthful."},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skillScope, DeploymentID: "agent", Skills: []skill.ActivatedSkill{{
+			BindingID: "forum-account", BindingRevision: 3, SkillID: "forum", SkillVersion: "1", Name: "Forum", Actions: []capability.ModelAction{action},
+		}}},
+	}
+	script := map[string]interface{}{
+		"path": "scripts/weekly.py", "digest": "sha256:" + strings.Repeat("a", 64), "filesVersion": float64(2),
+		"command": "python3 scripts/weekly.py", "timeoutSeconds": float64(120),
+	}
+	cases := []struct {
+		name          string
+		run           AgentRun
+		deterministic bool
+		producer      string
+		finalMode     FinalAnswerMode
+		fork          bool
+		taskWork      bool
+		actions       int
+		instruction   string
+		goalKind      string // "" = no seed
+		hostTools     bool
+	}{
+		{name: "agent work", run: AgentRun{Goal: "Summarize the forum"},
+			producer: "model", fork: true, actions: 1, goalKind: "routine"},
+		{name: "routine", run: AgentRun{Goal: "Report the weekly numbers", Source: RunSourceSchedule, Context: map[string]interface{}{
+			conversationRunContextConversationID: "chat-1", RoutineScriptContextKey: script,
+		}}, producer: "model", fork: true, actions: 1, goalKind: "routine", hostTools: true},
+		{name: "task work", run: AgentRun{Goal: "Research in the background", Source: RunSourceFork, Context: map[string]interface{}{
+			ConversationTaskContextKey: "task-1",
+		}}, producer: "model", taskWork: true, actions: 1, goalKind: "task"},
+		{name: "fork", run: AgentRun{Goal: "Check one source", Source: RunSourceFork, Checkpoint: map[string]interface{}{
+			"forkChild": map[string]interface{}{"groupId": "group", "branchId": "branch"},
+		}}, producer: "model", actions: 1, goalKind: "fork_branch"},
+		{name: "delegation execution", run: AgentRun{Goal: "Do the accepted work", Source: RunSourceRequest, Context: map[string]interface{}{
+			"collaboration": map[string]interface{}{"requestId": "request"},
+		}}, producer: "model", fork: true, actions: 1, instruction: acceptedAgentRequestExecutionSystemInstruction, goalKind: "delegation"},
+		{name: "decision", run: AgentRun{Goal: "Evaluate incoming work", Source: RunSourceRequestDecision, Context: map[string]interface{}{
+			AgentRequestInboxContextKey: map[string]interface{}{"requestId": "request", "requestRevision": int64(1)},
+		}}, producer: "model", finalMode: FinalModeDecision, instruction: agentRequestDecisionSystemInstruction, goalKind: "decision"},
+		{name: "review", run: AgentRun{Goal: "Review delegated work", Context: map[string]interface{}{
+			AgentRequestCompletionReviewContextKey: map[string]interface{}{"requestId": "request"},
+		}}, producer: "model", finalMode: FinalModeReview, instruction: agentRequestCompletionReviewSystemInstruction, goalKind: "review"},
+		{name: "runbook child", run: AgentRun{Goal: "Draft the summary", Source: RunSourceRequest, Entrypoint: "draft", Context: map[string]interface{}{
+			DelegationModeContextKey: string(runbook.DelegateReason),
+		}}, producer: "model", fork: true, actions: 1, goalKind: "routine"},
+		{name: "outreach", run: AgentRun{Context: map[string]interface{}{
+			OutreachInvocationContextKey: map[string]interface{}{"threadId": "thread-1", "messageId": "message-1"},
+		}}, deterministic: true, producer: "outreach", actions: 1},
+		{name: "capability invocation", run: AgentRun{Context: map[string]interface{}{
+			"capabilityInvocation": map[string]interface{}{"skillId": "forum", "skillVersion": "1", "action": "reply"},
+		}}, deterministic: true, producer: "capability", actions: 1},
+	}
+	for index, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := NewMemoryStore()
+			run := tc.run
+			run.ID, run.Scope, run.Kind = fmt.Sprintf("run-%d", index), scope, RunKindAgentWork
+			run.Owner, run.AssignedAgentID = ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, "agent"
+			claimed := claimedBindingRun(t, store, &run)
+			config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+			config.ChatWorkspaces = bindingTestChatWorkspaces{}
+			binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(claimed), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch tc.producer {
+			case "model":
+				if _, ok := binding.Producer.(*ModelStepProducer); !ok {
+					t.Fatalf("producer = %T", binding.Producer)
+				}
+			case "outreach":
+				if _, ok := binding.Producer.(*OutreachStepProducer); !ok {
+					t.Fatalf("producer = %T", binding.Producer)
+				}
+			case "capability":
+				if _, ok := binding.Producer.(*CapabilityInvocationStepProducer); !ok {
+					t.Fatalf("producer = %T", binding.Producer)
+				}
+			}
+			if binding.Tools == nil || binding.Final != nil || binding.Session == nil || binding.Host == nil {
+				t.Fatalf("loop seams: tools=%v final=%v session=%v host=%v", binding.Tools, binding.Final, binding.Session, binding.Host)
+			}
+			if len(binding.ModelActions) != tc.actions {
+				t.Fatalf("model actions = %#v", binding.ModelActions)
+			}
+			authority := binding.Authority
+			if authority.AgentID != "agent" || authority.finalMode() != tc.finalMode && !(tc.finalMode == "" && authority.finalMode() == FinalModeDefault) ||
+				authority.ForkAllowed != tc.fork || authority.TaskWork != tc.taskWork {
+				t.Fatalf("authority = %#v", authority)
+			}
+			if tc.deterministic {
+				if authority.CanReportProgress || authority.CanWait || binding.Compactor != nil || len(binding.Preparers) != 0 || binding.ProgressAcknowledgementRenderer != nil {
+					t.Fatalf("deterministic binding offers model seams: %#v", binding)
+				}
+			} else if binding.Compactor == nil || len(binding.Preparers) != 1 || binding.ProgressAcknowledgementRenderer == nil {
+				t.Fatalf("model binding lacks compaction, run start or progress acknowledgements: %#v", binding)
+			}
+			if tc.instruction != "" && !slices.Contains(binding.Prompt.AgentInstructions, tc.instruction) {
+				t.Fatalf("prompt = %#v", binding.Prompt)
+			}
+			for _, other := range []string{agentRequestDecisionSystemInstruction, agentRequestCompletionReviewSystemInstruction, acceptedAgentRequestExecutionSystemInstruction} {
+				if other != tc.instruction && slices.Contains(binding.Prompt.AgentInstructions, other) {
+					t.Fatalf("instruction of another kind leaked: %#v", binding.Prompt)
+				}
+			}
+
+			// The Run's first claim created its parentless run session.
+			stored, err := store.GetAgentRun(t.Context(), scope, run.ID)
+			if err != nil || binding.Session.ID != RunAgentSessionID(scope, run.ID) || stored.SessionID != binding.Session.ID ||
+				binding.Session.Kind != AgentSessionKindRun || binding.Session.ParentSessionID != "" {
+				t.Fatalf("session = %#v stored=%#v err=%v", binding.Session, stored, err)
+			}
+			entries, err := store.ListAgentSessionEntries(t.Context(), SessionEntryFilter{Scope: scope, SessionID: binding.Session.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.goalKind == "" {
+				if len(entries) != 0 {
+					t.Fatalf("deterministic session seeded: %#v", entries)
+				}
+			} else if len(entries) != 1 || entries[0].User == nil || entries[0].User.Origin != UserEntryGoal || entries[0].User.GoalKind != tc.goalKind {
+				t.Fatalf("seed = %#v", entries)
+			}
+			// The next claim keeps the session.
+			again, err := ResolveLoopBinding(t.Context(), catalog, stored, config)
+			if err != nil || again.Session == nil || again.Session.ID != binding.Session.ID {
+				t.Fatalf("second claim session = %#v err=%v", again, err)
+			}
+
+			if tc.producer != "model" {
+				return
+			}
+			req := prepareBindingStep(t, binding, claimed)
+			tools := bindingToolNames(req)
+			hostTool := slices.Contains(tools, hostToolName(workspace.OperationRunCommand))
+			if hostTool != tc.hostTools {
+				t.Fatalf("host tools offered=%v want %v: %v", hostTool, tc.hostTools, tools)
+			}
+			routineSection := false
+			for _, section := range req.System.Sections {
+				routineSection = routineSection || section.ID == loopSectionRoutineScript
+			}
+			if routineSection != (tc.name == "routine") {
+				t.Fatalf("routine script section = %v: %#v", routineSection, req.System.Sections)
+			}
+			if !slices.Contains(req.System.AgentInstructions, "Be truthful.") {
+				t.Fatalf("agent instructions = %#v", req.System.AgentInstructions)
+			}
+		})
+	}
+}
+
+func TestDecisionRunOffersOnlyDecisionToolViaBinding(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "reviewer", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+			DefinitionID: "reviewer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "model-binding"}},
+		},
+		definition: &kernelagent.AgentDefinition{
+			ID: "reviewer", Version: "1", Purpose: "Review launches", SystemPrompt: "Be precise.",
+			Runbook: &runbook.Definition{APIVersion: runbook.APIVersion, ID: "normal-work", Version: "1",
+				Interfaces: map[string]runbook.Interface{"go": {Description: "Go", InputSchema: map[string]interface{}{"type": "object"}}}},
+		},
+	}
+	for _, tc := range []struct {
+		key, tool, instruction string
+		value                  map[string]interface{}
+	}{
+		{AgentRequestInboxContextKey, string(ControlToolRequestDecision), agentRequestDecisionSystemInstruction, map[string]interface{}{"requestId": "request", "requestRevision": int64(1)}},
+		{AgentRequestCompletionReviewContextKey, string(ControlToolCompletionReview), agentRequestCompletionReviewSystemInstruction, map[string]interface{}{"requestId": "request"}},
+	} {
+		t.Run(tc.tool, func(t *testing.T) {
+			catalog.activationDeployments = nil
+			store := NewMemoryStore()
+			run := claimedBindingRun(t, store, &AgentRun{
+				ID: "decision", Scope: scope, Kind: RunKindAgentWork, Source: RunSourceRequestDecision,
+				Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reviewer"}, AssignedAgentID: "reviewer",
+				Goal: "Evaluate incoming work", Context: map[string]interface{}{tc.key: tc.value, conversationRunContextConversationID: "chat-1"},
+			})
+			config := loopBindingTestConfig(t, store, &progressAckStepHost{})
+			config.ChatWorkspaces = bindingTestChatWorkspaces{}
+			binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(run), config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(catalog.activationDeployments) != 0 || len(binding.ModelActions) != 0 || len(binding.RunbookOperations) != 0 ||
+				!reflect.DeepEqual(binding.InputContextRefs, []string{"run:" + tc.key}) {
+				t.Fatalf("structured Run binding = %#v activations=%v", binding, catalog.activationDeployments)
+			}
+			req := prepareBindingStep(t, binding, run)
+			if tools := bindingToolNames(req); !reflect.DeepEqual(tools, []string{tc.tool}) {
+				t.Fatalf("offered tools = %v, want only %s", tools, tc.tool)
+			}
+			if len(req.System.SkillPrompts) != 0 || !slices.Contains(req.System.AgentInstructions, tc.instruction) ||
+				!slices.Contains(req.System.AgentInstructions, "Be precise.") {
+				t.Fatalf("system = %#v", req.System)
+			}
+			if req.ModelCredential == nil || req.ModelCredential.ID != "model-binding" || binding.ModelCredential == nil || binding.ModelCredential.ID != "model-binding" {
+				t.Fatalf("model credential request=%#v binding=%#v", req.ModelCredential, binding.ModelCredential)
+			}
+		})
+	}
+}
+
 func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWithoutHost(t *testing.T) {
 	scope := Scope{Kind: "local", ID: "research"}
 	action := capability.ModelAction{
@@ -122,11 +399,12 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 		}}},
 	}
 	base := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher", Context: map[string]interface{}{}}
+	config := loopBindingTestConfig(t, NewMemoryStore(), nil)
 
 	outreach := cloneAgentRun(base)
 	outreach.Context = map[string]interface{}{}
 	outreach.Context[OutreachInvocationContextKey] = map[string]interface{}{"threadId": "thread-1", "messageId": "message-1"}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, outreach, CatalogTurnResolverConfig{})
+	binding, err := ResolveLoopBinding(t.Context(), catalog, outreach, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,11 +412,15 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 		len(binding.InputContextRefs) != 2 || binding.InputContextRefs[0] != "skill-snapshot:snapshot-1" || binding.InputContextRefs[1] != "run:"+OutreachInvocationContextKey {
 		t.Fatalf("outreach binding = %#v", binding)
 	}
+	// Outside a claim nothing is written: no session.
+	if binding.Session != nil || binding.Tools == nil {
+		t.Fatalf("unclaimed binding session=%#v tools=%v", binding.Session, binding.Tools)
+	}
 
 	invocation := cloneAgentRun(base)
 	invocation.Context = map[string]interface{}{}
 	invocation.Context["capabilityInvocation"] = map[string]interface{}{"skillId": "forum", "skillVersion": "1", "action": "reply"}
-	binding, err = ResolveCatalogTurnRunner(t.Context(), catalog, invocation, CatalogTurnResolverConfig{})
+	binding, err = ResolveLoopBinding(t.Context(), catalog, invocation, config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,18 +432,17 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 		t.Fatalf("activation actor = %#v", got)
 	}
 
-	_, err = ResolveCatalogTurnRunner(t.Context(), catalog, base, CatalogTurnResolverConfig{})
+	_, err = ResolveLoopBinding(t.Context(), catalog, base, config)
 	if !errors.Is(err, ErrTurnHostUnavailable) {
 		t.Fatalf("unhosted prompt work error = %v", err)
 	}
+	if _, err := ResolveLoopBinding(t.Context(), catalog, base, LoopBindingConfig{Host: &progressAckStepHost{}}); err == nil {
+		t.Fatal("binding without a kernel store and tool dispatcher was accepted")
+	}
 }
 
-func TestCatalogTurnResolverGivesOnlyAChatTurnFiles(t *testing.T) {
+func TestLoopBindingOffersHostToolsOnlyInAChat(t *testing.T) {
 	scope := Scope{Kind: "tenant", ID: "11"}
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", ModelProvider: "test", Model: "model",
-		NextRunStatus: AgentRunStatusCompleted, OutputSummary: "done", ContinuationCheckpoint: map[string]interface{}{},
-	}}
 	catalog := &resolverCatalog{
 		deployment: &kernelagent.AgentDeployment{
 			ID: "coding-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "coding-agent",
@@ -170,17 +451,17 @@ func TestCatalogTurnResolverGivesOnlyAChatTurnFiles(t *testing.T) {
 		definition: &kernelagent.AgentDefinition{ID: "coding-agent", Version: "1", Purpose: "Work in repositories", SystemPrompt: "Work carefully."},
 		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "coding-agent"},
 	}
-	run := &AgentRun{
+	store := NewMemoryStore()
+	run := claimedBindingRun(t, store, &AgentRun{
 		ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"},
-		AssignedAgentID: "coding-agent", Goal: "Inspect the repository", Context: map[string]interface{}{},
-	}
+		AssignedAgentID: "coding-agent", Goal: "Inspect the repository",
+	})
 	stepHost := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "done") }}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: turnAndStepHost{requestBoundTurnHost{host}, stepHost}})
+	config := loopBindingTestConfig(t, store, stepHost)
+	config.ChatWorkspaces = bindingTestChatWorkspaces{}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(run), config)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if binding.ProgressAcknowledgementRenderer == nil {
-		t.Fatal("progress acknowledgement renderer is unavailable")
 	}
 	progress, err := binding.ProgressAcknowledgementRenderer.RenderRunProgressAcknowledgement(t.Context(), RunProgressAcknowledgementRequest{
 		Snapshot:     RunProgressSnapshot{RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: AgentRunStatusRunning, Revision: 1},
@@ -189,26 +470,378 @@ func TestCatalogTurnResolverGivesOnlyAChatTurnFiles(t *testing.T) {
 	if err != nil || progress != "done" || len(stepHost.requests) != 1 {
 		t.Fatalf("progress=%q requests=%d error=%v", progress, len(stepHost.requests), err)
 	}
-	if ack := stepHost.requests[0]; ack.Tools != nil || len(ack.System.SkillPrompts) != 0 ||
-		!containsString(ack.System.AgentInstructions, "Work carefully.") ||
-		!containsString(ack.System.AgentInstructions, runProgressAcknowledgementSystemInstruction) {
+	if ack := stepHost.requests[0]; ack.Tools != nil || ack.SessionID != "" || ack.Purpose != ModelStepPurposeAcknowledgement || len(ack.System.SkillPrompts) != 0 ||
+		!slices.Contains(ack.System.AgentInstructions, "Work carefully.") ||
+		!slices.Contains(ack.System.AgentInstructions, runProgressAcknowledgementSystemInstruction) {
 		t.Fatalf("progress acknowledgement request = %#v", ack)
 	}
-	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+	req := prepareBindingStep(t, binding, run)
+	if !slices.Contains(req.System.AgentInstructions, agentResourcefulnessGuidance) {
+		t.Fatal("model work did not receive resourcefulness guidance")
+	}
+	for _, name := range bindingToolNames(req) {
+		if strings.HasPrefix(name, "workspace_") {
+			t.Fatalf("work outside a chat has files: %v", bindingToolNames(req))
+		}
+	}
+
+	chatStore := NewMemoryStore()
+	chat := claimedBindingRun(t, chatStore, &AgentRun{
+		ID: "chat-run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"},
+		AssignedAgentID: "coding-agent", Goal: "Inspect the repository", Context: map[string]interface{}{conversationRunContextConversationID: "chat-1"},
+	})
+	chatConfig := loopBindingTestConfig(t, chatStore, stepHost)
+	chatConfig.ChatWorkspaces = bindingTestChatWorkspaces{}
+	chatBinding, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(chat), chatConfig)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !containsString(host.request.SystemInstructions, agentResourcefulnessGuidance) {
-		t.Fatal("hosted work did not receive resourcefulness guidance")
+	if tools := bindingToolNames(prepareBindingStep(t, chatBinding, chat)); !slices.Contains(tools, hostToolName(workspace.OperationReadFile)) {
+		t.Fatalf("chat Run lacks its chat files: %v", tools)
 	}
-	if host.request.Workspace != nil || len(host.request.WorkspaceOperations) != 0 {
-		t.Fatalf("work outside a chat has files: %#v", host.request.Workspace)
-	}
-	run.Context["conversationId"] = "chat-1"
-	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
+	// Without a resolver no Run is offered host tools.
+	chatConfig.ChatWorkspaces = nil
+	plain, err := ResolveLoopBinding(t.Context(), catalog, cloneAgentRun(chat), chatConfig)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if host.request.Workspace == nil || host.request.Workspace.ConversationID != "chat-1" || len(host.request.WorkspaceOperations) == 0 {
-		t.Fatalf("chat turn workspace = %#v", host.request.Workspace)
+	if tools := bindingToolNames(prepareBindingStep(t, plain, chat)); slices.Contains(tools, hostToolName(workspace.OperationReadFile)) {
+		t.Fatalf("host tools without a chat workspace resolver: %v", tools)
+	}
+}
+
+func TestCatalogTurnResolverUsesDeploymentSpecificSkillHost(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{ID: "sre", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "sre", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
+		definition: &kernelagent.AgentDefinition{ID: "sre", Version: "1", Purpose: "Operate safely", SystemPrompt: "Use bounded tools."},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot-host", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "sre"},
+	}
+	wanted := skill.HostCapabilityState{OperatingSystem: "linux", Architecture: "arm64", Revision: "enterprise-host/v1"}
+	var resolvedScope skill.ScopeReference
+	var resolvedDeployment string
+	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "sre"}, AssignedAgentID: "sre", Context: map[string]interface{}{"capabilityInvocation": map[string]interface{}{}}}
+	config := loopBindingTestConfig(t, NewMemoryStore(), nil)
+	config.SkillHosts = SkillHostCapabilityResolverFunc(func(_ context.Context, gotScope skill.ScopeReference, deploymentID string) (*skill.HostCapabilityState, error) {
+		resolvedScope, resolvedDeployment = gotScope, deploymentID
+		return &wanted, nil
+	})
+	_, err := ResolveLoopBinding(t.Context(), catalog, run, config)
+	if err == nil || !strings.Contains(err.Error(), "requires authorized actions") {
+		t.Fatalf("expected deterministic runner validation after host resolution, got %v", err)
+	}
+	if resolvedScope != (skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}) || resolvedDeployment != "sre" || !reflect.DeepEqual(catalog.gotHost, wanted) {
+		t.Fatalf("scope=%#v deployment=%q host=%#v", resolvedScope, resolvedDeployment, catalog.gotHost)
+	}
+}
+
+func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "analyst", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "private-model-reference-17"}},
+		},
+		definition: &kernelagent.AgentDefinition{ID: "analyst", Version: "1", Purpose: "Analyze", SystemPrompt: "Work carefully."},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "analyst"},
+	}
+	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "analyst"}, AssignedAgentID: "analyst", Goal: "Analyze", Context: map[string]interface{}{}}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := prepareBindingStep(t, binding, run)
+	if req.ModelCredential == nil || req.ModelCredential.Kind != "model-provider" || req.ModelCredential.ID != "private-model-reference-17" ||
+		binding.ModelCredential == nil || binding.ModelCredential.ID != "private-model-reference-17" {
+		t.Fatalf("model credential = %#v", req.ModelCredential)
+	}
+	modelInput, err := json.Marshal(struct {
+		System  ModelStepSystem
+		Tools   []ModelStepTool
+		Entries []SessionEntryView
+	}{req.System, req.Tools, req.Entries})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(modelInput), "private-model-reference-17") || strings.Contains(string(modelInput), "MODEL_PROVIDER") {
+		t.Fatalf("model input leaked credential reference: %s", modelInput)
+	}
+}
+
+func TestCatalogTurnResolverHidesOriginatingRunbookFromDelegatedAgent(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	definition := &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "daily-browser-task", Version: "1.2.3", Name: "Daily browser task",
+		Interfaces: map[string]runbook.Interface{"dailyOccurrence": {
+			Description:  "Run the daily browser task",
+			InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false},
+			OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": true},
+		}},
+	}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "browser", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "browser", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "model-binding"}},
+		},
+		definition: &kernelagent.AgentDefinition{ID: "browser", Version: "1", Purpose: "Browse", SystemPrompt: "Use bounded tools.", Runbook: definition},
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "browser"},
+	}
+	run := &AgentRun{
+		ID: "child", Scope: scope, Kind: RunKindAgentWork, Source: RunSourceRequest,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser"}, AssignedAgentID: "browser", Goal: "Perform delegated work",
+		Context: map[string]interface{}{"triggerInput": map[string]interface{}{
+			"runbookDefinitionId": "daily-browser-task", "runbookDefinitionVersion": "1.2.3",
+		}},
+	}
+	config := loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{})
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(binding.RunbookOperations) != 0 || len(binding.Authority.Operations) != 0 ||
+		slices.Contains(bindingToolNames(prepareBindingStep(t, binding, run)), string(ControlToolRunOperation)) {
+		t.Fatalf("originating Runbook remained callable: %#v", binding.RunbookOperations)
+	}
+
+	run.Context["triggerInput"].(map[string]interface{})["runbookDefinitionVersion"] = "different"
+	binding, err = ResolveLoopBinding(t.Context(), catalog, run, config)
+	if err != nil || len(binding.RunbookOperations) != 1 || len(binding.Authority.Operations) != 1 {
+		t.Fatalf("unrelated Runbook identity was filtered: binding=%#v error=%v", binding, err)
+	}
+}
+
+func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	definition := &runbook.Definition{
+		APIVersion: runbook.APIVersion, ID: "community-engagement", Version: "1", Name: "Community engagement",
+		Interfaces: map[string]runbook.Interface{"engage-now": {
+			Description:  "Run the reviewed engagement operation",
+			InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false},
+			OutputSchema: map[string]interface{}{"type": "object"},
+		}},
+	}
+	start := capability.ModelAction{
+		Name: "openseal.runbooks.start", SkillID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
+		Action: RunbookActionStart, BindingID: "bundled:runbooks", BindingRevision: 1,
+	}
+	replace := capability.ModelAction{
+		Name: "openseal.runbooks.replace_schedule", SkillID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
+		Action: RunbookActionReplaceSchedule, BindingID: "bundled:runbooks", BindingRevision: 1,
+	}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "community-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+			DefinitionID: "community-agent", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+		},
+		definition: &kernelagent.AgentDefinition{
+			ID: "community-agent", Version: "1", Purpose: "Engage", SystemPrompt: "Act carefully.", Runbook: definition,
+		},
+		activation: &skill.ActivationSnapshot{
+			SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "community-agent",
+			Skills: []skill.ActivatedSkill{{
+				BindingID: "bundled:runbooks", BindingRevision: 1, SkillID: RunbookManagementSkillID,
+				SkillVersion: RunbookManagementSkillVersion, Name: "Runbooks", Actions: []capability.ModelAction{start, replace},
+			}},
+		},
+	}
+	run := &AgentRun{
+		ID: "conversation-turn", Scope: scope, Kind: RunKindAgentWork,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "community-agent"}, AssignedAgentID: "community-agent",
+		Goal: "Run it now", Context: map[string]interface{}{},
+	}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(binding.RunbookOperations) != 1 || binding.RunbookOperations[0].Entrypoint != "engage-now" ||
+		len(binding.ModelActions) != 1 || binding.ModelActions[0].Action != RunbookActionReplaceSchedule ||
+		len(binding.Authority.Operations) != 1 {
+		t.Fatalf("conversation capabilities = %#v", binding)
+	}
+}
+
+func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	current := &kernelagent.AgentDeployment{
+		ID: "lead", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+		DefinitionID: "lead-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+	}
+	reviewer := &kernelagent.AgentDeployment{
+		ID: "reviewer-7", Scope: current.Scope,
+		DefinitionID: "reviewer-definition", ActiveVersion: "2", RolloutStatus: kernelagent.RolloutActive,
+	}
+	paused := &kernelagent.AgentDeployment{
+		ID: "paused-agent", Scope: current.Scope,
+		DefinitionID: "paused-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutPaused,
+	}
+	catalog := &resolverCatalog{
+		deployment:  current,
+		deployments: []*kernelagent.AgentDeployment{paused, reviewer, current},
+		definition:  &kernelagent.AgentDefinition{ID: "lead-definition", Version: "1", DisplayName: "Lead", Purpose: "Coordinate", SystemPrompt: "Coordinate safely."},
+		definitions: map[string]*kernelagent.AgentDefinition{
+			"lead-definition@1": {
+				ID: "lead-definition", Version: "1", DisplayName: "Lead", Purpose: "Coordinate", SystemPrompt: "Coordinate safely.",
+			},
+			"reviewer-definition@2": {
+				ID: "reviewer-definition", Version: "2", DisplayName: "Release Reviewer", Purpose: "Review releases", SystemPrompt: "Review safely.",
+			},
+		},
+		activation: &skill.ActivationSnapshot{
+			SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID,
+		},
+		teamDeployment: &kernelteam.Deployment{
+			ID: "release-team", Scope: current.Scope, DefinitionID: "release-team", ActiveVersion: "1",
+			Status: kernelteam.DeploymentActive, Roster: []kernelteam.RosterAssignment{
+				{ID: "lead", RoleID: "lead", AgentDeploymentID: current.ID},
+				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: reviewer.ID},
+			},
+		},
+		teamDefinition: &kernelteam.Definition{
+			ID: "release-team", Version: "1", Roles: []kernelteam.RoleSlot{
+				{ID: "lead", DisplayName: "Lead", Purpose: "Coordinate releases"},
+				{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review releases"},
+			},
+		},
+		activations: map[string]*skill.ActivationSnapshot{
+			current.ID:     {SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
+			"release-team": {SnapshotID: "team-snapshot", Scope: current.Scope, DeploymentID: "release-team"},
+		},
+	}
+	run := &AgentRun{
+		ID: "run", Scope: scope, Kind: RunKindAgentWork,
+		Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: current.ID,
+		Goal: "Delegate a release review", Context: map[string]interface{}{},
+	}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := HostedAgentTarget{ID: "reviewer-7", DisplayName: "Release Reviewer", Purpose: "Review releases"}
+	if targets := binding.Authority.DelegateTargets; len(targets) != 1 || targets[0] != want {
+		t.Fatalf("delegation targets = %#v", targets)
+	}
+	if targets := binding.Authority.ForkTargets; len(targets) != 1 || targets[0] != want {
+		t.Fatalf("fork targets = %#v", targets)
+	}
+}
+
+func TestCatalogTurnResolverDoesNotProjectTenantDirectoryIntoStandaloneAgent(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	current := &kernelagent.AgentDeployment{ID: "standalone", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "standalone", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}
+	deployments := []*kernelagent.AgentDeployment{current}
+	definitions := map[string]*kernelagent.AgentDefinition{
+		"standalone@1": {ID: "standalone", Version: "1", DisplayName: "Standalone", Purpose: "Work independently", SystemPrompt: "Work safely."},
+	}
+	for index := 0; index < 200; index++ {
+		id := fmt.Sprintf("tenant-agent-%03d", index)
+		definitionID := id + "-definition"
+		deployments = append(deployments, &kernelagent.AgentDeployment{ID: id, Scope: current.Scope, DefinitionID: definitionID, ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive})
+		definitions[definitionID+"@1"] = &kernelagent.AgentDefinition{ID: definitionID, Version: "1", DisplayName: id, Purpose: strings.Repeat("unrelated tenant purpose ", 8)}
+	}
+	catalog := &resolverCatalog{
+		deployment: current, deployments: deployments, definitions: definitions,
+		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
+	}
+	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: current.ID}, AssignedAgentID: current.ID, Goal: "Answer concisely", Context: map[string]interface{}{}}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(binding.Authority.DelegateTargets) != 0 || len(binding.Authority.ForkTargets) != 0 {
+		t.Fatalf("standalone Agent received tenant directory: %#v", binding.Authority)
+	}
+	if tools := bindingToolNames(prepareBindingStep(t, binding, run)); slices.Contains(tools, string(ControlToolDelegate)) {
+		t.Fatalf("standalone Agent offered delegation: %v", tools)
+	}
+}
+
+func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	action := capability.ModelAction{
+		Name: "browser.snapshot", BindingID: "browser", BindingRevision: 1,
+		SkillID: "skill-browser", Version: "1", Action: "snapshot", SideEffect: capability.SideEffectRead,
+	}
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{
+			ID: "browser-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
+			DefinitionID: "browser-agent", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
+		},
+		definition: &kernelagent.AgentDefinition{ID: "browser-agent", Version: "1", Purpose: "Browse safely", SystemPrompt: "Use evidence."},
+		activation: &skill.ActivationSnapshot{
+			SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "browser-agent",
+			Skills: []skill.ActivatedSkill{{BindingID: "browser", BindingRevision: 1, SkillID: "skill-browser", SkillVersion: "1", Actions: []capability.ModelAction{action}}},
+		},
+	}
+	run := &AgentRun{
+		ID: "execution", Scope: scope, Kind: RunKindAgentWork, Source: RunSourceRequest,
+		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
+		Goal: "Perform the accepted request", Context: map[string]interface{}{"collaboration": map[string]interface{}{"requestId": "request"}},
+	}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, run, loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := prepareBindingStep(t, binding, run)
+	tools := bindingToolNames(req)
+	if !slices.Contains(req.System.AgentInstructions, acceptedAgentRequestExecutionSystemInstruction) ||
+		slices.Contains(req.System.AgentInstructions, agentRequestDecisionSystemInstruction) ||
+		slices.Contains(tools, string(ControlToolRequestDecision)) || !slices.Contains(tools, string(ControlToolFinalAnswer)) ||
+		len(binding.ModelActions) != 1 {
+		t.Fatalf("accepted execution system=%#v tools=%v", req.System.AgentInstructions, tools)
+	}
+}
+
+func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRuns(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "42"}
+	teamAction := capability.ModelAction{
+		Name: "openseal.teams.update_role", BindingID: "teams", BindingRevision: 2,
+		SkillID: "openseal.teams", Version: "1.0.0", Action: "update_role", Risk: capability.RiskLevelWrite,
+	}
+	agentAction := teamAction
+	agentAction.BindingID = "agent-teams"
+	agentAction.BindingRevision = 1
+	catalog := &resolverCatalog{
+		deployment: &kernelagent.AgentDeployment{ID: "reviewer-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "reviewer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
+		definition: &kernelagent.AgentDefinition{ID: "reviewer", Version: "1", Purpose: "Review", SystemPrompt: "Review carefully.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, AllowedSkillIDs: []string{"openseal.teams"}}},
+		teamDeployment: &kernelteam.Deployment{
+			ID: "review-team", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "review-team", ActiveVersion: "1",
+			Status: kernelteam.DeploymentActive, Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-agent"}},
+		},
+		teamDefinition: &kernelteam.Definition{
+			ID: "review-team", Version: "1", Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
+			Roles: []kernelteam.RoleSlot{{ID: "reviewer"}},
+		},
+		activations: map[string]*skill.ActivationSnapshot{
+			"reviewer-agent": {SnapshotID: "agent-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "reviewer-agent", Skills: []skill.ActivatedSkill{{
+				BindingID: "agent-teams", BindingRevision: 1, SkillID: "openseal.teams", SkillVersion: "1.0.0", Name: "Teams", Actions: []capability.ModelAction{agentAction},
+			}}},
+			"review-team": {SnapshotID: "team-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "review-team", Skills: []skill.ActivatedSkill{{
+				BindingID: "teams", BindingRevision: 2, SkillID: "openseal.teams", SkillVersion: "1.0.0", Name: "Teams", Actions: []capability.ModelAction{teamAction},
+			}}},
+		},
+	}
+	config := loopBindingTestConfig(t, NewMemoryStore(), &progressAckStepHost{})
+	teamRun := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "review-team"}, AssignedAgentID: "reviewer-agent", Goal: "Enable the reviewer", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}}
+	binding, err := ResolveLoopBinding(t.Context(), catalog, teamRun, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if binding.DeploymentID != "reviewer-agent" || binding.ActionDeploymentID != "reviewer-agent" || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "teams" || binding.ModelActions[0].DeploymentID != "review-team" || !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent", "review-team"}) {
+		t.Fatalf("Team binding = %#v activations=%v", binding, catalog.activationDeployments)
+	}
+	if req := prepareBindingStep(t, binding, teamRun); req.AgentID != "reviewer-agent" || binding.Authority.AgentID != "reviewer-agent" {
+		t.Fatalf("Team model identity = %q authority=%q", req.AgentID, binding.Authority.AgentID)
+	}
+
+	catalog.activationDeployments = nil
+	agentRun := cloneAgentRun(teamRun)
+	agentRun.Owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: "reviewer-agent"}
+	agentBinding, err := ResolveLoopBinding(t.Context(), catalog, agentRun, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent"}) || agentBinding.ActionDeploymentID != "reviewer-agent" || agentBinding.ModelActions[0].BindingID != "agent-teams" {
+		t.Fatalf("Agent run binding=%#v activations=%v", agentBinding, catalog.activationDeployments)
 	}
 }
 
@@ -303,470 +936,4 @@ func TestPinnedRunbookPlanPreventsDefinitionAndTriggerDrift(t *testing.T) {
 	if err := validatePinnedRunbookPlan(definition, run); err == nil {
 		t.Fatal("Runbook trigger drift was accepted")
 	}
-}
-
-func TestCatalogTurnResolverUsesDeploymentSpecificSkillHost(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	catalog := &resolverCatalog{
-		deployment: &kernelagent.AgentDeployment{ID: "sre", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "sre", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
-		definition: &kernelagent.AgentDefinition{ID: "sre", Version: "1", Purpose: "Operate safely", SystemPrompt: "Use bounded tools."},
-		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot-host", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "sre"},
-	}
-	wanted := skill.HostCapabilityState{OperatingSystem: "linux", Architecture: "arm64", Revision: "enterprise-host/v1"}
-	var resolvedScope skill.ScopeReference
-	var resolvedDeployment string
-	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "sre"}, AssignedAgentID: "sre", Context: map[string]interface{}{"capabilityInvocation": map[string]interface{}{}}}
-	_, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{SkillHosts: SkillHostCapabilityResolverFunc(func(_ context.Context, gotScope skill.ScopeReference, deploymentID string) (*skill.HostCapabilityState, error) {
-		resolvedScope, resolvedDeployment = gotScope, deploymentID
-		return &wanted, nil
-	})})
-	if err == nil || !strings.Contains(err.Error(), "requires authorized actions") {
-		t.Fatalf("expected deterministic runner validation after host resolution, got %v", err)
-	}
-	if resolvedScope != (skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}) || resolvedDeployment != "sre" || !reflect.DeepEqual(catalog.gotHost, wanted) {
-		t.Fatalf("scope=%#v deployment=%q host=%#v", resolvedScope, resolvedDeployment, catalog.gotHost)
-	}
-}
-
-func TestCatalogTurnResolverCarriesOpaqueDeploymentModelCredentialOnlyToHost(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
-		ModelProvider: "openai-compatible", Model: "bound-model", OutputSummary: "done",
-	}}
-	catalog := &resolverCatalog{
-		deployment: &kernelagent.AgentDeployment{
-			ID: "analyst", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "analyst", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "private-model-reference-17"}},
-		},
-		definition: &kernelagent.AgentDefinition{ID: "analyst", Version: "1", Purpose: "Analyze", SystemPrompt: "Work carefully."},
-		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "analyst"},
-	}
-	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "analyst"}, AssignedAgentID: "analyst", Goal: "Analyze", Context: map[string]interface{}{}}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
-		t.Fatal(err)
-	}
-	if host.request.ModelCredential == nil || host.request.ModelCredential.Kind != "model-provider" || host.request.ModelCredential.ID != "private-model-reference-17" {
-		t.Fatalf("model credential = %#v", host.request.ModelCredential)
-	}
-	modelInput, _ := MarshalHostedTurnModelInput(host.request)
-	if strings.Contains(string(modelInput), "private-model-reference-17") || strings.Contains(string(modelInput), `"modelCredential"`) || strings.Contains(string(modelInput), "model-provider") || strings.Contains(string(modelInput), "MODEL_PROVIDER") {
-		t.Fatalf("model input leaked credential reference: %s", modelInput)
-	}
-}
-
-func TestCatalogTurnResolverHidesOriginatingRunbookFromDelegatedAgent(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
-		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
-	}}
-	definition := &runbook.Definition{
-		APIVersion: runbook.APIVersion, ID: "daily-browser-task", Version: "1.2.3", Name: "Daily browser task",
-		Interfaces: map[string]runbook.Interface{"dailyOccurrence": {
-			Description:  "Run the daily browser task",
-			InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false},
-			OutputSchema: map[string]interface{}{"type": "object", "additionalProperties": true},
-		}},
-	}
-	catalog := &resolverCatalog{
-		deployment: &kernelagent.AgentDeployment{
-			ID: "browser", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "browser", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "model-binding"}},
-		},
-		definition: &kernelagent.AgentDefinition{ID: "browser", Version: "1", Purpose: "Browse", SystemPrompt: "Use bounded tools.", Runbook: definition},
-		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "browser"},
-	}
-	run := &AgentRun{
-		ID: "child", Scope: scope, Kind: RunKindAgentWork, Source: RunSourceRequest,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser"}, AssignedAgentID: "browser", Goal: "Perform delegated work",
-		Context: map[string]interface{}{"triggerInput": map[string]interface{}{
-			"runbookDefinitionId": "daily-browser-task", "runbookDefinitionVersion": "1.2.3",
-		}},
-	}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(binding.RunbookOperations) != 0 {
-		t.Fatalf("originating Runbook remained callable: %#v", binding.RunbookOperations)
-	}
-	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
-		t.Fatal(err)
-	}
-	if len(host.request.RunbookOperations) != 0 {
-		t.Fatalf("host received originating Runbook: %#v", host.request.RunbookOperations)
-	}
-
-	run.Context["triggerInput"].(map[string]interface{})["runbookDefinitionVersion"] = "different"
-	binding, err = ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
-	if err != nil || len(binding.RunbookOperations) != 1 {
-		t.Fatalf("unrelated Runbook identity was filtered: binding=%#v error=%v", binding, err)
-	}
-}
-
-func TestCatalogTurnResolverPrefersDefinitionOperationWithoutCallableActivation(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
-		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
-	}}
-	definition := &runbook.Definition{
-		APIVersion: runbook.APIVersion, ID: "community-engagement", Version: "1", Name: "Community engagement",
-		Interfaces: map[string]runbook.Interface{"engage-now": {
-			Description:  "Run the reviewed engagement operation",
-			InputSchema:  map[string]interface{}{"type": "object", "additionalProperties": false},
-			OutputSchema: map[string]interface{}{"type": "object"},
-		}},
-	}
-	start := capability.ModelAction{
-		Name: "openseal.runbooks.start", SkillID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
-		Action: RunbookActionStart, BindingID: "bundled:runbooks", BindingRevision: 1,
-	}
-	replace := capability.ModelAction{
-		Name: "openseal.runbooks.replace_schedule", SkillID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
-		Action: RunbookActionReplaceSchedule, BindingID: "bundled:runbooks", BindingRevision: 1,
-	}
-	catalog := &resolverCatalog{
-		deployment: &kernelagent.AgentDeployment{
-			ID: "community-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
-			DefinitionID: "community-agent", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-		},
-		definition: &kernelagent.AgentDefinition{
-			ID: "community-agent", Version: "1", Purpose: "Engage", SystemPrompt: "Act carefully.", Runbook: definition,
-		},
-		activation: &skill.ActivationSnapshot{
-			SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "community-agent",
-			Skills: []skill.ActivatedSkill{{
-				BindingID: "bundled:runbooks", BindingRevision: 1, SkillID: RunbookManagementSkillID,
-				SkillVersion: RunbookManagementSkillVersion, Name: "Runbooks", Actions: []capability.ModelAction{start, replace},
-			}},
-		},
-	}
-	run := &AgentRun{
-		ID: "conversation-turn", Scope: scope, Kind: RunKindAgentWork,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "community-agent"}, AssignedAgentID: "community-agent",
-		Goal: "Run it now", Context: map[string]interface{}{},
-	}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(binding.RunbookOperations) != 1 || binding.RunbookOperations[0].Entrypoint != "engage-now" ||
-		len(binding.ModelActions) != 1 || binding.ModelActions[0].Action != RunbookActionReplaceSchedule {
-		t.Fatalf("conversation capabilities = %#v", binding)
-	}
-	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
-		t.Fatal(err)
-	}
-	if len(host.request.Actions) != 1 || host.request.Actions[0].Action != RunbookActionReplaceSchedule ||
-		len(host.request.RunbookOperations) != 1 {
-		t.Fatalf("hosted capabilities = %#v", host.request)
-	}
-}
-
-func TestCatalogTurnResolverProjectsActiveSameScopeDelegationCatalog(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
-		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
-	}}
-	current := &kernelagent.AgentDeployment{
-		ID: "lead", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
-		DefinitionID: "lead-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-	}
-	reviewer := &kernelagent.AgentDeployment{
-		ID: "reviewer-7", Scope: current.Scope,
-		DefinitionID: "reviewer-definition", ActiveVersion: "2", RolloutStatus: kernelagent.RolloutActive,
-	}
-	paused := &kernelagent.AgentDeployment{
-		ID: "paused-agent", Scope: current.Scope,
-		DefinitionID: "paused-definition", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutPaused,
-	}
-	catalog := &resolverCatalog{
-		deployment:  current,
-		deployments: []*kernelagent.AgentDeployment{paused, reviewer, current},
-		definition:  &kernelagent.AgentDefinition{ID: "lead-definition", Version: "1", DisplayName: "Lead", Purpose: "Coordinate", SystemPrompt: "Coordinate safely."},
-		definitions: map[string]*kernelagent.AgentDefinition{
-			"lead-definition@1": {
-				ID: "lead-definition", Version: "1", DisplayName: "Lead", Purpose: "Coordinate", SystemPrompt: "Coordinate safely.",
-			},
-			"reviewer-definition@2": {
-				ID: "reviewer-definition", Version: "2", DisplayName: "Release Reviewer", Purpose: "Review releases", SystemPrompt: "Review safely.",
-			},
-		},
-		activation: &skill.ActivationSnapshot{
-			SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID,
-		},
-		teamDeployment: &kernelteam.Deployment{
-			ID: "release-team", Scope: current.Scope, DefinitionID: "release-team", ActiveVersion: "1",
-			Status: kernelteam.DeploymentActive, Roster: []kernelteam.RosterAssignment{
-				{ID: "lead", RoleID: "lead", AgentDeploymentID: current.ID},
-				{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: reviewer.ID},
-			},
-		},
-		teamDefinition: &kernelteam.Definition{
-			ID: "release-team", Version: "1", Roles: []kernelteam.RoleSlot{
-				{ID: "lead", DisplayName: "Lead", Purpose: "Coordinate releases"},
-				{ID: "reviewer", DisplayName: "Reviewer", Purpose: "Review releases"},
-			},
-		},
-		activations: map[string]*skill.ActivationSnapshot{
-			current.ID:     {SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
-			"release-team": {SnapshotID: "team-snapshot", Scope: current.Scope, DeploymentID: "release-team"},
-		},
-	}
-	run := &AgentRun{
-		ID: "run", Scope: scope, Kind: RunKindAgentWork,
-		Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "release-team"}, AssignedAgentID: current.ID,
-		Goal: "Delegate a release review", Context: map[string]interface{}{},
-	}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
-		t.Fatal(err)
-	}
-	if len(host.request.EligibleAgents) != 1 ||
-		host.request.EligibleAgents[0] != (HostedAgentTarget{ID: "reviewer-7", DisplayName: "Release Reviewer", Purpose: "Review releases"}) {
-		t.Fatalf("eligible Agents = %#v", host.request.EligibleAgents)
-	}
-}
-
-func TestCatalogTurnResolverDoesNotProjectTenantDirectoryIntoStandaloneAgent(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
-		ModelProvider: "test", Model: "test-model", OutputSummary: "done",
-	}}
-	current := &kernelagent.AgentDeployment{ID: "standalone", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "standalone", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive}
-	deployments := []*kernelagent.AgentDeployment{current}
-	definitions := map[string]*kernelagent.AgentDefinition{
-		"standalone@1": {ID: "standalone", Version: "1", DisplayName: "Standalone", Purpose: "Work independently", SystemPrompt: "Work safely."},
-	}
-	for index := 0; index < 200; index++ {
-		id := fmt.Sprintf("tenant-agent-%03d", index)
-		definitionID := id + "-definition"
-		deployments = append(deployments, &kernelagent.AgentDeployment{ID: id, Scope: current.Scope, DefinitionID: definitionID, ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive})
-		definitions[definitionID+"@1"] = &kernelagent.AgentDefinition{ID: definitionID, Version: "1", DisplayName: id, Purpose: strings.Repeat("unrelated tenant purpose ", 8)}
-	}
-	catalog := &resolverCatalog{
-		deployment: current, deployments: deployments, definitions: definitions,
-		activation: &skill.ActivationSnapshot{SnapshotID: "snapshot", Scope: current.Scope, DeploymentID: current.ID},
-	}
-	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: current.ID}, AssignedAgentID: current.ID, Goal: "Answer concisely", Context: map[string]interface{}{}}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
-		t.Fatal(err)
-	}
-	if len(host.request.EligibleAgents) != 0 {
-		t.Fatalf("standalone Agent received tenant directory: %#v", host.request.EligibleAgents)
-	}
-	estimate, err := EstimateHostedTurnInputTokens(host.request)
-	if err != nil || estimate >= HostedTurnMinimumChildInputTokens {
-		t.Fatalf("minimal standalone estimate = %d, %v", estimate, err)
-	}
-}
-
-func TestCatalogTurnResolverIsolatesAgentRequestDecisionFromSkillsAndRunbooks(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusCompleted,
-		ModelProvider: "openai-compatible", Model: "decision-model", OutputSummary: "Request accepted",
-		RunOutput: map[string]interface{}{AgentRequestDecisionOutputKey: map[string]interface{}{
-			"decision": string(AgentRequestDecisionAccept), "message": "The request is clear and within my role.",
-		}},
-	}}
-	catalog := &resolverCatalog{
-		deployment: &kernelagent.AgentDeployment{
-			ID: "reviewer", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
-			DefinitionID: "reviewer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-			Credentials: map[string]capability.CredentialReference{"MODEL_PROVIDER": {Kind: "model-provider", ID: "model-binding"}},
-		},
-		definition: &kernelagent.AgentDefinition{
-			ID: "reviewer", Version: "1", Purpose: "Review launches", SystemPrompt: "Be precise.",
-			Runbook: &runbook.Definition{APIVersion: runbook.APIVersion, ID: "normal-work", Version: "1"},
-		},
-	}
-	run := &AgentRun{
-		ID: "decision", Scope: scope, Kind: RunKindAgentWork,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "reviewer"}, AssignedAgentID: "reviewer",
-		Goal: "Evaluate incoming work", Source: RunSourceRequestDecision,
-		Context: map[string]interface{}{AgentRequestInboxContextKey: map[string]interface{}{
-			"requestId": "request", "requestRevision": int64(1),
-		}},
-	}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	decisionRunner, ok := binding.Runner.(*agentRequestDecisionTurnRunner)
-	if !ok {
-		t.Fatalf("decision runner = %#v", binding.Runner)
-	}
-	hosted, hostedOK := decisionRunner.inner.(*HostedTurnRunner)
-	if !hostedOK || len(binding.ModelActions) != 0 || len(hosted.config.Actions) != 0 || len(hosted.config.SkillPrompts) != 0 ||
-		len(catalog.activationDeployments) != 0 || !containsString(binding.InputContextRefs, "run:"+AgentRequestInboxContextKey) ||
-		!containsString(hosted.config.SystemInstructions, agentRequestDecisionSystemInstruction) {
-		t.Fatalf("decision binding=%#v hosted=%#v activations=%v", binding, hosted, catalog.activationDeployments)
-	}
-	outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
-	if err != nil || outcome.NextRunStatus != AgentRunStatusCompleted ||
-		host.request.ModelCredential == nil || host.request.ModelCredential.ID != "model-binding" ||
-		!containsString(host.request.SystemInstructions, agentRequestDecisionSystemInstruction) {
-		t.Fatalf("decision outcome=%#v request=%#v error=%v", outcome, host.request, err)
-	}
-}
-
-func TestCatalogTurnResolverSeparatesAcceptedRequestExecutionFromIntake(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	action := capability.ModelAction{
-		Name: "browser.snapshot", BindingID: "browser", BindingRevision: 1,
-		SkillID: "skill-browser", Version: "1", Action: "snapshot", SideEffect: capability.SideEffectRead,
-	}
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
-		ModelProvider: "test", Model: "test-model", OutputSummary: "Inspect the page",
-		ProposedAction: &TurnAction{
-			Type: "skill_action", Capability: action.Name, BindingID: action.BindingID,
-			BindingRevision: action.BindingRevision, Summary: "Inspect the page",
-		},
-		ContinuationCheckpoint: map[string]interface{}{},
-	}}
-	catalog := &resolverCatalog{
-		deployment: &kernelagent.AgentDeployment{
-			ID: "browser-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID},
-			DefinitionID: "browser-agent", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive,
-		},
-		definition: &kernelagent.AgentDefinition{ID: "browser-agent", Version: "1", Purpose: "Browse safely", SystemPrompt: "Use evidence."},
-		activation: &skill.ActivationSnapshot{
-			SnapshotID: "snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "browser-agent",
-			Skills: []skill.ActivatedSkill{{BindingID: "browser", BindingRevision: 1, SkillID: "skill-browser", SkillVersion: "1", Actions: []capability.ModelAction{action}}},
-		},
-	}
-	run := &AgentRun{
-		ID: "execution", Scope: scope, Kind: RunKindAgentWork, Source: RunSourceRequest,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
-		Goal: "Perform the accepted request", Context: map[string]interface{}{"collaboration": map[string]interface{}{"requestId": "request"}},
-	}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	executionRunner, ok := binding.Runner.(*acceptedAgentRequestExecutionTurnRunner)
-	if !ok || !containsString(executionRunner.inner.(*HostedTurnRunner).config.SystemInstructions, acceptedAgentRequestExecutionSystemInstruction) {
-		t.Fatalf("accepted execution binding = %#v", binding)
-	}
-	outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}})
-	if err != nil || outcome == nil || len(outcome.ProposedActions) != 1 || outcome.ProposedActions[0].Capability != action.Name {
-		t.Fatalf("accepted execution outcome=%#v request=%#v error=%v", outcome, host.request, err)
-	}
-	if containsString(host.request.SystemInstructions, agentRequestDecisionSystemInstruction) {
-		t.Fatalf("intake instruction leaked into accepted execution: %#v", host.request.SystemInstructions)
-	}
-
-	executionRunner.inner = TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{
-			AgentRequestDecisionOutputKey: map[string]interface{}{"decision": "accept"},
-		}}, nil
-	})
-	failed, err := executionRunner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn-2"}})
-	if err == nil || failed != nil || !strings.Contains(err.Error(), "invalid intake decision") {
-		t.Fatalf("accepted execution was silently called again: %#v error=%v", failed, err)
-	}
-}
-
-func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRuns(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "42"}
-	teamAction := capability.ModelAction{
-		Name: "openseal.teams.update_role", BindingID: "teams", BindingRevision: 2,
-		SkillID: "openseal.teams", Version: "1.0.0", Action: "update_role", Risk: capability.RiskLevelWrite,
-	}
-	agentAction := teamAction
-	agentAction.BindingID = "agent-teams"
-	agentAction.BindingRevision = 1
-	host := &recordingTurnHost{response: &HostedTurnResponse{
-		APIVersion: HostedTurnAPIVersion, InvocationID: "turn", NextRunStatus: AgentRunStatusRunning,
-		ModelProvider: "test", Model: "test-model", OutputSummary: "Propose the role change",
-		ProposedAction: &TurnAction{
-			Type: "skill_action", Capability: teamAction.Name, BindingID: teamAction.BindingID,
-			BindingRevision: teamAction.BindingRevision, Summary: "Enable the reviewer", InputRef: "/roleChange",
-		},
-		ContinuationCheckpoint: map[string]interface{}{"roleChange": map[string]interface{}{
-			"roleId": "reviewer", "expectedDeploymentRevision": 1, "channelParticipation": "active",
-		}},
-	}}
-	catalog := &resolverCatalog{
-		deployment: &kernelagent.AgentDeployment{ID: "reviewer-agent", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "reviewer", ActiveVersion: "1", RolloutStatus: kernelagent.RolloutActive},
-		definition: &kernelagent.AgentDefinition{ID: "reviewer", Version: "1", Purpose: "Review", SystemPrompt: "Review carefully.", Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, AllowedSkillIDs: []string{"openseal.teams"}}},
-		teamDeployment: &kernelteam.Deployment{
-			ID: "review-team", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DefinitionID: "review-team", ActiveVersion: "1",
-			Status: kernelteam.DeploymentActive, Revision: 1, Roster: []kernelteam.RosterAssignment{{ID: "reviewer", RoleID: "reviewer", AgentDeploymentID: "reviewer-agent"}},
-		},
-		teamDefinition: &kernelteam.Definition{
-			ID: "review-team", Version: "1", Approvals: kernelteam.ApprovalPolicy{MaximumRisk: capability.RiskLevelWrite},
-			Roles: []kernelteam.RoleSlot{{ID: "reviewer"}},
-		},
-		activations: map[string]*skill.ActivationSnapshot{
-			"reviewer-agent": {SnapshotID: "agent-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "reviewer-agent", Skills: []skill.ActivatedSkill{{
-				BindingID: "agent-teams", BindingRevision: 1, SkillID: "openseal.teams", SkillVersion: "1.0.0", Name: "Teams", Actions: []capability.ModelAction{agentAction},
-			}}},
-			"review-team": {SnapshotID: "team-snapshot", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "review-team", Skills: []skill.ActivatedSkill{{
-				BindingID: "teams", BindingRevision: 2, SkillID: "openseal.teams", SkillVersion: "1.0.0", Name: "Teams", Actions: []capability.ModelAction{teamAction},
-			}}},
-		},
-	}
-	teamRun := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "review-team"}, AssignedAgentID: "reviewer-agent", Goal: "Enable the reviewer", Context: map[string]interface{}{}, Checkpoint: map[string]interface{}{}}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, teamRun, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if binding.DeploymentID != "reviewer-agent" || binding.ActionDeploymentID != "reviewer-agent" || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "teams" || binding.ModelActions[0].DeploymentID != "review-team" || !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent", "review-team"}) {
-		t.Fatalf("Team binding = %#v activations=%v", binding, catalog.activationDeployments)
-	}
-	hosted, ok := binding.Runner.(*HostedTurnRunner)
-	if !ok || hosted.config.AgentID != "reviewer-agent" || hosted.config.ActionDeploymentID != "reviewer-agent" {
-		t.Fatalf("hosted Team identity = %#v", binding.Runner)
-	}
-	outcome, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: teamRun, Turn: &AgentTurn{ID: "turn"}})
-	if err != nil || len(outcome.ProposedActions) != 1 || host.request.AgentID != "reviewer-agent" {
-		t.Fatalf("Team hosted turn = %#v request=%#v err=%v", outcome, host.request, err)
-	}
-
-	catalog.activationDeployments = nil
-	agentRun := cloneAgentRun(teamRun)
-	agentRun.Owner = ObjectiveOwner{Type: OwnerTypeAgent, ID: "reviewer-agent"}
-	agentBinding, err := ResolveCatalogTurnRunner(t.Context(), catalog, agentRun, CatalogTurnResolverConfig{Host: host})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(catalog.activationDeployments, []string{"reviewer-agent"}) || agentBinding.ActionDeploymentID != "reviewer-agent" || agentBinding.ModelActions[0].BindingID != "agent-teams" {
-		t.Fatalf("Agent run binding=%#v activations=%v", agentBinding, catalog.activationDeployments)
-	}
-}
-
-// This resolver fixture serves both progress acknowledgements and normal turns.
-// Each response must echo the invocation it actually received.
-type requestBoundTurnHost struct{ *recordingTurnHost }
-
-// turnAndStepHost serves hosted turns and model steps until prep-4 retypes
-// CatalogTurnResolverConfig.Host to StepHost.
-type turnAndStepHost struct {
-	requestBoundTurnHost
-	*progressAckStepHost
-}
-
-func (h requestBoundTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
-	h.request = request
-	response := *h.response
-	response.InvocationID = request.InvocationID
-	return &response, h.err
 }

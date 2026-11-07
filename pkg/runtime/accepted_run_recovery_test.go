@@ -25,7 +25,7 @@ func TestAcceptedRunRecoveryPreservesUnprovableLegacyWorkWithoutAutomaticRetries
 		deployment, definition := acceptedMethodFixture(scope)
 		catalog := &resolverCatalog{deployment: deployment, definition: definition, activation: &skill.ActivationSnapshot{SnapshotID: "live", Scope: skill.ScopeReference(scope), DeploymentID: deployment.ID}}
 		resolver := TurnRunnerResolverFunc(func(ctx context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
-			binding, err := ResolveCatalogTurnRunner(ctx, catalog, run, CatalogTurnResolverConfig{})
+			binding, err := ResolveLoopBinding(ctx, catalog, run, loopBindingTestConfig(t, store, nil))
 			if !errors.Is(err, ErrAcceptedRunExecution) {
 				t.Fatalf("legacy method guessed current implementation: %#v %v", binding, err)
 			}
