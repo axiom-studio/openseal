@@ -74,6 +74,14 @@ export type Run = {
   createdAt: string;
   revision: number;
   error?: string;
+  failureExplanation?: {
+    kind: string;
+    code: string;
+    message: string;
+    stepError?: string;
+    stepErrorCode?: string;
+    explained?: boolean;
+  };
   output?: Record<string, unknown>;
   objectiveId?: string;
   wakeCondition?: { type: string; reference?: string; wakeAt?: string };

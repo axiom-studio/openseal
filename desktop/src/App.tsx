@@ -1202,11 +1202,11 @@ export default function App() {
                     canRun &&
                     activeAgents.length > 0 && (
                       <p className="inline-help">
-                        Tasks use your workspace model with a limit of 16 turns
-                        and 15 minutes. Ask for a text, Markdown, CSV, or JSON
-                        file to preview and save from the result. Reading files
-                        from your computer and image input are not available
-                        yet.
+                        Tasks use your workspace model with a limit of 64 model
+                        steps and 15 minutes. Ask for a text, Markdown, CSV, or
+                        JSON file to preview and save from the result. Reading
+                        files from your computer and image input are not
+                        available yet.
                       </p>
                     )}
                   {composerMode === "work" &&
@@ -1714,7 +1714,6 @@ export default function App() {
                       !!prompt.trim() && prompt !== selection.value.goal
                     }
                     run={selection.value}
-                    onProvider={() => navigate("Settings")}
                     onNewAttempt={
                       !pendingSubmission &&
                       canRun &&
@@ -1794,8 +1793,12 @@ export default function App() {
                       );
                     }}
                   />
-                  {selection.value.error && (
-                    <p className="error-text">{selection.value.error}</p>
+                  {(selection.value.failureExplanation?.message ??
+                    selection.value.error) && (
+                    <p className="error-text">
+                      {selection.value.failureExplanation?.message ??
+                        selection.value.error}
+                    </p>
                   )}
                   <dl>
                     <dt>Owner</dt>

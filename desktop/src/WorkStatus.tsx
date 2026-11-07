@@ -5,7 +5,7 @@ const dimensions: Record<string, string> = {
   input_tokens: "input tokens",
   output_tokens: "output tokens",
   total_tokens: "total tokens",
-  turns: "turns",
+  turns: "model steps",
   attempts: "attempts",
   actions: "actions",
   duration_ms: "milliseconds of execution time",
@@ -13,12 +13,10 @@ const dimensions: Record<string, string> = {
 };
 export default function WorkStatus({
   run,
-  onProvider,
   onNewAttempt,
   hasOtherDraft = false,
 }: {
   run: Run;
-  onProvider: () => void;
   onNewAttempt?: () => void;
   hasOtherDraft?: boolean;
 }) {
@@ -29,9 +27,6 @@ export default function WorkStatus({
   useEffect(() => {
     if (replaceDraft) replaceButton.current?.focus();
   }, [replaceDraft]);
-  const providerRetry =
-    run.status === "sleeping" &&
-    run.wakeCondition?.reference === "hosted-turn-retry";
   const limited =
     run.status === "paused" &&
     (run.budgetState === "exhausted" || !!run.budgetAdmission);
@@ -55,9 +50,7 @@ export default function WorkStatus({
     canceled:
       "This run was canceled. Preparing another attempt creates a new run; it does not resume this one.",
   };
-  const description = providerRetry
-    ? "The model provider was unavailable. This run is waiting for an automatic retry. You can check the provider settings or pause the run."
-    : descriptions[run.status];
+  const description = descriptions[run.status];
   const scheduled = run.wakeCondition?.wakeAt
     ? new Date(run.wakeCondition.wakeAt)
     : null;
@@ -92,11 +85,6 @@ export default function WorkStatus({
             {scheduled.toLocaleString()}
           </time>
         </p>
-      )}
-      {providerRetry && (
-        <button className="button" onClick={onProvider}>
-          Open provider settings
-        </button>
       )}
       {onNewAttempt &&
         ["failed", "canceled"].includes(run.status) &&

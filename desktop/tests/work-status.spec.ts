@@ -1,22 +1,10 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-test("work status explains provider retry and budget limits without treating reserved capacity as spent", async ({
+test("work status explains budget limits without treating reserved capacity as spent", async ({
   page,
 }) => {
   const runs = [
-    {
-      id: "retrying",
-      kind: "agent_work",
-      goal: "Review provider evidence",
-      status: "sleeping",
-      revision: 2,
-      wakeCondition: {
-        type: "timer",
-        reference: "hosted-turn-retry",
-        wakeAt: "2026-09-17T12:00:00Z",
-      },
-    },
     {
       id: "limited",
       kind: "agent_work",
@@ -48,26 +36,8 @@ test("work status explains provider retry and budget limits without treating res
     route.fulfill({ json: runs }),
   );
   await page.goto("/");
-  await page.getByRole("button", { name: /Review provider evidence/ }).click();
-  const inspector = page.getByRole("complementary", { name: "Work details" });
-  await expect(
-    inspector.getByText(/The model provider was unavailable/),
-  ).toBeVisible();
-  await expect(inspector.locator("time")).toHaveAttribute(
-    "datetime",
-    "2026-09-17T12:00:00.000Z",
-  );
-  await inspector
-    .getByRole("button", { name: "Open provider settings", exact: true })
-    .click();
-  await expect(
-    page.getByRole("heading", { name: "Model provider", exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole("navigation")
-    .getByRole("button", { name: /Work/ })
-    .click();
   await page.getByRole("button", { name: /Summarize a long report/ }).click();
+  const inspector = page.getByRole("complementary", { name: "Work details" });
   await expect(inspector.getByText(/At the last budget check/)).toBeVisible();
   await expect(
     inspector.getByText("The next step needs 1,600 total tokens; 800 remain.", {
@@ -114,6 +84,12 @@ test("a new attempt is a focused draft and preserves the original failed run", a
     assignedAgentId: "analyst",
     owner: { type: "agent", id: "analyst" },
     error: "Task provider returned HTTP 401.",
+    failureExplanation: {
+      kind: "execution",
+      code: "provider_unauthorized",
+      message: "The model provider rejected the workspace key.",
+      explained: true,
+    },
   };
   let created = 0;
   await page.route("**/api/v1/capabilities", (route) =>
@@ -160,6 +136,13 @@ test("a new attempt is a focused draft and preserves the original failed run", a
   await page
     .getByRole("button", { name: /Compare the supplied notes/ })
     .click();
+  const details = page.getByRole("complementary", { name: "Work details" });
+  await expect(
+    details.getByText("The model provider rejected the workspace key.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await expect(details.getByText(run.error, { exact: true })).toHaveCount(0);
   await page
     .getByRole("button", { name: "Review a new attempt", exact: true })
     .click();
