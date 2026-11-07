@@ -31,6 +31,9 @@ const (
 	ControlToolRunOperation     ControlToolName = "run_operation"
 	ControlToolDelegate         ControlToolName = "agent_delegate"
 	ControlToolDelegateReply    ControlToolName = "agent_delegate_reply"
+	// Kernel-only calls of the runbook StepProducer (§12); never offered.
+	ControlToolRunbookFork     ControlToolName = "runbook_fork"
+	ControlToolRunbookDelegate ControlToolName = "runbook_delegate"
 )
 
 // controlToolOrder is the stable advertised order (SPEC §5.1, prompt cache):
@@ -43,6 +46,7 @@ var controlToolOrder = []ControlToolName{
 	ControlToolWait, ControlToolAskUser, ControlToolReact,
 	ControlToolStartTask,
 	ControlToolFork, ControlToolRunOperation, ControlToolDelegate, ControlToolDelegateReply,
+	ControlToolRunbookFork, ControlToolRunbookDelegate,
 }
 
 type ControlPhase string
@@ -75,6 +79,8 @@ var controlToolRules = map[ControlToolName]controlToolRule{
 	ControlToolRunOperation:     {Phase: ControlPhaseSettle},
 	ControlToolDelegate:         {Phase: ControlPhaseSettle},
 	ControlToolDelegateReply:    {Phase: ControlPhaseSettle},
+	ControlToolRunbookFork:      {Phase: ControlPhaseSettle, Alone: true},
+	ControlToolRunbookDelegate:  {Phase: ControlPhaseSettle, Alone: true},
 }
 
 // IsControlTool reports whether name is a kernel control tool.
@@ -182,6 +188,8 @@ func controlToolOffered(name ControlToolName, a ControlAuthority) bool {
 		return len(a.Operations) > 0
 	case ControlToolDelegate, ControlToolDelegateReply:
 		return len(a.DelegateTargets) > 0
+	case ControlToolRunbookFork, ControlToolRunbookDelegate:
+		return false // kernel-only: runbook StepProducer calls carry a directive
 	}
 	return false
 }

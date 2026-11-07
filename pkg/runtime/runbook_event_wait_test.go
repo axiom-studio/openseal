@@ -10,7 +10,7 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runbook"
 )
 
-func runbookEventWaitFixture(t *testing.T, handleTimeout bool) (*RunbookTurnRunner, *AgentRun, time.Time) {
+func runbookEventWaitFixture(t *testing.T, handleTimeout bool) (*RunbookStepProducer, *AgentRun, time.Time) {
 	t.Helper()
 	wait := &runbook.WaitStep{Match: &runbook.EventMatch{
 		Type: "conversation.message.received", Source: *runbookRef("/input/source"), Subject: *runbookRef("/input/subject"),
@@ -24,24 +24,21 @@ func runbookEventWaitFixture(t *testing.T, handleTimeout bool) (*RunbookTurnRunn
 		wait.TimeoutNext = "timed-out"
 		definition.Steps["timed-out"] = runbook.Step{Kind: runbook.StepEnd, End: &runbook.EndStep{Outputs: map[string]runbook.Value{"timedOut": runbookLiteral(true), "reply": *runbookRef("/state/reply")}}}
 	}
-	runner, err := NewRunbookTurnRunner(definition, "manual")
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := newTestRunbookProducer(t, definition, "manual", nil)
 	now := time.Date(2026, 10, 2, 10, 0, 0, 0, time.UTC)
 	runner.now = func() time.Time { return now }
 	run := &AgentRun{ID: "follow-up-run", CreatedAt: now.Add(-time.Minute), Context: map[string]interface{}{"source": "binding:connection", "subject": "thread:123", "sender": "sender-1"}}
 	return runner, run, now
 }
 
-func armRunbookEventWait(t *testing.T, runner *RunbookTurnRunner, run *AgentRun) *TurnOutcome {
+func armRunbookEventWait(t *testing.T, runner *RunbookStepProducer, run *AgentRun) StepOutput {
 	t.Helper()
-	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "first", Sequence: 1}})
-	if err != nil || outcome.NextRunStatus != AgentRunStatusWaitingForEvent || outcome.WakeCondition == nil || outcome.WakeCondition.EventWait == nil {
-		t.Fatalf("arm outcome=%#v err=%v", outcome, err)
+	out := produceRunbook(t, runner, runbookInput(run, 1, nil, nil))
+	if out.Park == nil || out.Park.Status != AgentRunStatusWaitingForEvent || out.Park.Wake == nil || out.Park.Wake.EventWait == nil {
+		t.Fatalf("arm out=%#v", out)
 	}
-	run.Checkpoint = outcome.ContinuationCheckpoint
-	return outcome
+	run.Checkpoint = out.KernelState
+	return out
 }
 
 func eventForRunbookWait(spec *RunEventWaitSpec, at time.Time) map[string]interface{} {
@@ -51,7 +48,7 @@ func eventForRunbookWait(spec *RunEventWaitSpec, at time.Time) map[string]interf
 func TestRunbookEventWaitConsumesEarlyEventWithFrozenDynamicSelectors(t *testing.T) {
 	runner, run, now := runbookEventWaitFixture(t, true)
 	first := armRunbookEventWait(t, runner, run)
-	spec := first.WakeCondition.EventWait
+	spec := first.Park.Wake.EventWait
 	if spec.Source != "binding:connection" || spec.Subject != "thread:123" || spec.Attributes["sender"] != "sender-1" || !spec.After.Equal(run.CreatedAt) || !spec.Deadline.Equal(now.Add(time.Hour)) {
 		t.Fatalf("selector=%#v", spec)
 	}
@@ -67,23 +64,23 @@ func TestRunbookEventWaitConsumesEarlyEventWithFrozenDynamicSelectors(t *testing
 	if err := json.Unmarshal(encoded, &run.Checkpoint); err != nil {
 		t.Fatal(err)
 	}
-	second, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "second", Sequence: 2}})
+	second, err := runner.Produce(t.Context(), runbookInput(run, 2, nil, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	actualJSON, _ := json.Marshal(second.RunOutput["reply"])
+	actualJSON, _ := json.Marshal(second.Final.Output["reply"])
 	expectedJSON, _ := json.Marshal(event)
-	if second.NextRunStatus != AgentRunStatusCompleted || string(actualJSON) != string(expectedJSON) {
+	if runbookOutcomeStatus(second) != AgentRunStatusCompleted || string(actualJSON) != string(expectedJSON) {
 		t.Fatalf("resume outcome=%#v err=%v", second, err)
 	}
-	if _, present := second.ContinuationCheckpoint[runEventWaitCheckpointKey]; present {
+	if _, present := second.KernelState[runEventWaitCheckpointKey]; present {
 		t.Fatal("durable result was not consumed")
 	}
-	state, err := decodeRunbookState(second.ContinuationCheckpoint)
+	state, err := decodeRunbookState(second.KernelState)
 	if err != nil || state.WaitKey != "" || state.WaitSpec != nil || state.Waiting != "" {
 		t.Fatalf("state=%#v err=%v", state, err)
 	}
-	trace, err := RunbookTraceFromCheckpoint(second.ContinuationCheckpoint)
+	trace, err := RunbookTraceFromCheckpoint(second.KernelState)
 	if err != nil || len(trace.Entries) != 2 || trace.Entries[0].Status != RunbookStepTraceSucceeded || !reflect.DeepEqual(trace.Entries[0].InputRefs, []string{"/input/sender", "/input/source", "/input/subject"}) || !reflect.DeepEqual(trace.Entries[0].OutputRefs, []string{"/state/reply"}) {
 		t.Fatalf("trace=%#v err=%v", trace, err)
 	}
@@ -121,7 +118,7 @@ func TestRunbookEventWaitContinuationSharesKernelScalarSemantics(t *testing.T) {
 			}
 			first := armRunbookEventWait(t, runner, run)
 			run.Status = AgentRunStatusWaitingForEvent
-			run.WakeCondition = first.WakeCondition
+			run.WakeCondition = first.Park.Wake
 			// Exercise persisted checkpoint decoding before event resolution.
 			run = cloneAgentRun(run)
 			wait, err := runEventWaitForRun(run)
@@ -153,15 +150,15 @@ func TestRunbookEventWaitContinuationSharesKernelScalarSemantics(t *testing.T) {
 					"key": wait.Spec.Key, "status": string(RunEventWaitMatched), "event": eventContext(receipt.Event),
 				}
 			}
-			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "scalar-resume", Sequence: 2}})
+			outcome, err := runner.Produce(t.Context(), runbookInput(run, 2, nil, nil))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if item.matches {
-				if outcome.NextRunStatus != AgentRunStatusCompleted {
+				if runbookOutcomeStatus(outcome) != AgentRunStatusCompleted {
 					t.Fatalf("kernel-matched numeric equivalent failed continuation: %#v", outcome)
 				}
-			} else if outcome.NextRunStatus != AgentRunStatusFailed || !strings.Contains(outcome.RunError, "does not match") {
+			} else if runbookOutcomeStatus(outcome) != AgentRunStatusFailed || !strings.Contains(runbookOutcomeError(outcome), "does not match") {
 				t.Fatalf("different scalar type/value satisfied continuation: %#v", outcome)
 			}
 		})
@@ -174,11 +171,11 @@ func TestRunbookEventWaitDoesNotAdvanceOnUnrelatedResume(t *testing.T) {
 	runner.now = func() time.Time { return now.Add(10 * time.Minute) }
 	for _, staleResult := range []interface{}{nil, map[string]interface{}{"key": "different-visit", "status": string(RunEventWaitMatched)}} {
 		run.Checkpoint[runEventWaitCheckpointKey] = staleResult
-		outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "manual-resume", Sequence: 2}})
-		if err != nil || outcome.NextRunStatus != AgentRunStatusWaitingForEvent || !sameRunEventWaitSpec(outcome.WakeCondition.EventWait, first.WakeCondition.EventWait) {
+		outcome, err := runner.Produce(t.Context(), runbookInput(run, 2, nil, nil))
+		if err != nil || runbookOutcomeStatus(outcome) != AgentRunStatusWaitingForEvent || !sameRunEventWaitSpec(outcome.Park.Wake.EventWait, first.Park.Wake.EventWait) {
 			t.Fatalf("unrelated resume outcome=%#v err=%v", outcome, err)
 		}
-		trace, err := RunbookTraceFromCheckpoint(outcome.ContinuationCheckpoint)
+		trace, err := RunbookTraceFromCheckpoint(outcome.KernelState)
 		if err != nil || len(trace.Entries) != 1 || trace.Entries[0].Status != RunbookStepTraceWaiting {
 			t.Fatalf("trace=%#v err=%v", trace, err)
 		}
@@ -192,16 +189,16 @@ func TestRunbookEventWaitRoutesTimeoutOrFailsWithoutHandler(t *testing.T) {
 			first := armRunbookEventWait(t, runner, run)
 			runner.now = func() time.Time { return now.Add(time.Hour) }
 			run.Checkpoint["state"] = map[string]interface{}{"reply": "stale prior iteration"}
-			run.Checkpoint[runEventWaitCheckpointKey] = map[string]interface{}{"key": first.WakeCondition.EventWait.Key, "status": string(RunEventWaitTimedOut)}
-			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "timeout", Sequence: 2}})
+			run.Checkpoint[runEventWaitCheckpointKey] = map[string]interface{}{"key": first.Park.Wake.EventWait.Key, "status": string(RunEventWaitTimedOut)}
+			outcome, err := runner.Produce(t.Context(), runbookInput(run, 2, nil, nil))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if handle {
-				if outcome.NextRunStatus != AgentRunStatusCompleted || outcome.RunOutput["timedOut"] != true || outcome.RunOutput["reply"] != nil {
+				if runbookOutcomeStatus(outcome) != AgentRunStatusCompleted || outcome.Final.Output["timedOut"] != true || outcome.Final.Output["reply"] != nil {
 					t.Fatalf("timeout outcome=%#v", outcome)
 				}
-			} else if outcome.NextRunStatus != AgentRunStatusFailed || !strings.Contains(outcome.RunError, "deadline elapsed") {
+			} else if runbookOutcomeStatus(outcome) != AgentRunStatusFailed || !strings.Contains(runbookOutcomeError(outcome), "deadline elapsed") {
 				t.Fatalf("unhandled timeout outcome=%#v", outcome)
 			}
 		})
@@ -211,11 +208,11 @@ func TestRunbookEventWaitRoutesTimeoutOrFailsWithoutHandler(t *testing.T) {
 func TestRunbookEventWaitRejectsIncorrectDurablePayload(t *testing.T) {
 	runner, run, now := runbookEventWaitFixture(t, true)
 	first := armRunbookEventWait(t, runner, run)
-	event := eventForRunbookWait(first.WakeCondition.EventWait, now)
+	event := eventForRunbookWait(first.Park.Wake.EventWait, now)
 	event["subject"] = "unrelated-thread"
-	run.Checkpoint[runEventWaitCheckpointKey] = map[string]interface{}{"key": first.WakeCondition.EventWait.Key, "status": string(RunEventWaitMatched), "event": event}
-	outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "wrong-event", Sequence: 2}})
-	if err != nil || outcome.NextRunStatus != AgentRunStatusFailed || !strings.Contains(outcome.RunError, "does not match") {
+	run.Checkpoint[runEventWaitCheckpointKey] = map[string]interface{}{"key": first.Park.Wake.EventWait.Key, "status": string(RunEventWaitMatched), "event": event}
+	outcome, err := runner.Produce(t.Context(), runbookInput(run, 2, nil, nil))
+	if err != nil || runbookOutcomeStatus(outcome) != AgentRunStatusFailed || !strings.Contains(runbookOutcomeError(outcome), "does not match") {
 		t.Fatalf("outcome=%#v err=%v", outcome, err)
 	}
 }
@@ -229,8 +226,8 @@ func TestRunbookEventWaitRejectsDynamicNonScalarAndExpiredWindows(t *testing.T) 
 			} else {
 				run.CreatedAt = now.Add(-31 * 24 * time.Hour)
 			}
-			outcome, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "arm", Sequence: 1}})
-			if err != nil || outcome.NextRunStatus != AgentRunStatusFailed || outcome.RunError == "" || outcome.WakeCondition != nil {
+			outcome, err := runner.Produce(t.Context(), runbookInput(run, 1, nil, nil))
+			if err != nil || runbookOutcomeStatus(outcome) != AgentRunStatusFailed || runbookOutcomeError(outcome) == "" || outcome.Park != nil {
 				t.Fatalf("outcome=%#v err=%v", outcome, err)
 			}
 		})
@@ -244,20 +241,61 @@ func TestRunbookEventWaitUsesDistinctIdentityAcrossLoopVisits(t *testing.T) {
 		"wait":  {Kind: runbook.StepWait, Wait: &runbook.WaitStep{Match: &runbook.EventMatch{Type: "conversation.message.received", Source: runbookLiteral("binding:connection"), Subject: runbookLiteral("thread:123"), Attributes: map[string]runbook.Value{"sender": *runbookRef("/loop/person")}, TimeoutDuration: time.Hour}, Next: "again"}},
 		"again": {Kind: runbook.StepLoopReturn, LoopReturn: &runbook.LoopReturnStep{ForEach: "loop"}}, "done": {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
 	}}
-	runner, err := NewRunbookTurnRunner(definition, "manual")
-	if err != nil {
-		t.Fatal(err)
-	}
+	runner := newTestRunbookProducer(t, definition, "manual", nil)
 	runner.now = func() time.Time { return now }
 	run := &AgentRun{ID: "loop-run", CreatedAt: now, Context: map[string]interface{}{"people": []interface{}{"person-1", "person-2"}}}
 	first := armRunbookEventWait(t, runner, run)
-	spec := first.WakeCondition.EventWait
+	spec := first.Park.Wake.EventWait
 	run.Checkpoint[runEventWaitCheckpointKey] = map[string]interface{}{"key": spec.Key, "status": string(RunEventWaitMatched), "event": eventForRunbookWait(spec, now)}
-	second, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "next-person", Sequence: 2}})
-	if err != nil || second.NextRunStatus != AgentRunStatusWaitingForEvent || second.WakeCondition.EventWait.Key == spec.Key || second.WakeCondition.EventWait.Attributes["sender"] != "person-2" {
+	second, err := runner.Produce(t.Context(), runbookInput(run, 2, nil, nil))
+	if err != nil || runbookOutcomeStatus(second) != AgentRunStatusWaitingForEvent || second.Park.Wake.EventWait.Key == spec.Key || second.Park.Wake.EventWait.Attributes["sender"] != "person-2" {
 		t.Fatalf("second visit outcome=%#v err=%v", second, err)
 	}
-	if _, present := second.ContinuationCheckpoint[runEventWaitCheckpointKey]; present {
+	if _, present := second.KernelState[runEventWaitCheckpointKey]; present {
 		t.Fatal("prior visit's result survived into the next wait")
+	}
+}
+
+// runbookOutcomeStatus is the Run status a step output leads to.
+func runbookOutcomeStatus(out StepOutput) AgentRunStatus {
+	switch {
+	case out.Final != nil:
+		if out.Final.Status == "" {
+			return AgentRunStatusCompleted
+		}
+		return out.Final.Status
+	case out.Failure != nil:
+		return AgentRunStatusFailed
+	case out.Park != nil:
+		return out.Park.Status
+	}
+	return AgentRunStatusRunning
+}
+
+func runbookOutcomeError(out StepOutput) string {
+	if out.Failure == nil {
+		return ""
+	}
+	return out.Failure.Message
+}
+
+func TestRunbookEventWaitParksRunWithEngineStateThroughTheLoop(t *testing.T) {
+	runner, _, _ := runbookEventWaitFixture(t, true)
+	f := newRunbookLoopFixture(t, runner.definition)
+	source := f.create(CreateAgentRunRequest{Goal: "follow up", Context: map[string]interface{}{"source": "binding:connection", "subject": "thread:123", "sender": "sender-1"}})
+	if _, exit := f.drive(source.ID); exit.Err != nil {
+		t.Fatalf("claim: %#v", exit)
+	}
+	parked := f.run(source.ID)
+	if parked.Status != AgentRunStatusWaitingForEvent || parked.WakeCondition == nil || parked.WakeCondition.EventWait == nil ||
+		parked.WakeCondition.EventWait.Subject != "thread:123" {
+		t.Fatalf("parked=%#v", parked)
+	}
+	state, err := decodeRunbookState(parked.Checkpoint)
+	if err != nil || state.Waiting != "wait" || state.WaitKey != parked.WakeCondition.EventWait.Key {
+		t.Fatalf("engine state was not written with the park: %#v err=%v", state, err)
+	}
+	if entries := f.toolEntries(source.ID); len(entries) != 0 {
+		t.Fatalf("an event wait wrote tool entries: %#v", entries)
 	}
 }

@@ -404,16 +404,6 @@ func runbookStepOutputRefs(stepID string, step runbook.Step) []string {
 	return uniqueSortedTraceRefs(refs)
 }
 
-func runbookTraceMetadata(values map[string]interface{}) map[string]string {
-	metadata := map[string]string{}
-	for _, key := range []string{"actionCallId", "approvalId"} {
-		if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
-			metadata[key] = strings.TrimSpace(value)
-		}
-	}
-	return metadata
-}
-
 func runbookValueRefs(value runbook.Value) []string {
 	refs := make([]string, 0, 1+len(value.Template))
 	if strings.TrimSpace(string(value.Ref)) != "" {

@@ -283,13 +283,11 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, err)
 		}
 		entrypoint := catalogRunbookEntrypoint(definition, run)
-		runner, resolveErr := NewRunbookTurnRunner(definition.Runbook, entrypoint)
+		producer, resolveErr := NewRunbookStepProducer(definition.Runbook, entrypoint, catalog)
 		if resolveErr != nil {
 			return nil, fmt.Errorf("%w: resolve governed runbook for Agent %s: %v", ErrAcceptedRunExecution, deployment.ID, resolveErr)
 		}
-		// The runbook engine becomes a deterministic StepProducer (prod-1);
-		// until then it keeps its Turn runner beside the loop seams.
-		base.Runner = runner
+		base.Producer = producer
 		base.InputContextRefs = append(base.InputContextRefs, "runbook:"+definition.Runbook.ID+"@"+definition.Runbook.Version)
 		return r.deterministic(ctx, base)
 	}
