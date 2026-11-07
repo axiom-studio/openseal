@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,12 @@ func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testin
 	if err = store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, engine = openResearchAcceptanceEngine(t, databasePath, scope, nil, nil)
+	// This engine proposes the delivery; the approved call runs only after
+	// the next restart, so its dispatcher must never be reached.
+	store, engine = openResearchAcceptanceEngine(t, databasePath, scope, nil, ActionDispatcherFunc(func(context.Context, ActionDispatchInput) (map[string]interface{}, error) {
+		t.Fatal("the delivery was dispatched before its approval")
+		return nil, nil
+	}))
 	checkpoint, err := engine.GetSourceMonitorCheckpoint(ctx, scope, project.ID, "forums")
 	if err != nil || checkpoint.Revision != 2 || checkpoint.ObservationCount != 2 {
 		t.Fatalf("checkpoint=%#v err=%v", checkpoint, err)
@@ -174,23 +180,30 @@ func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testin
 	if err != nil || claimed == nil || claimed.ID != deliveryRun.ID {
 		t.Fatalf("delivery claim=%#v err=%v", claimed, err)
 	}
-	proposal, err := engine.ProposeAction(ctx, ProposeActionRequest{
-		Scope: scope, RunID: deliveryRun.ID, WorkerID: "publisher-worker",
-		DeploymentID: researchTeamID,
-		SkillID:      delivery.SkillID, SkillVersion: delivery.SkillVersion, Action: delivery.SendEmail,
-		Arguments: map[string]interface{}{
-			"to": []interface{}{"research@example.com"}, "subject": "Competitor user research",
-			"body":         "The reviewed, cited report is attached.",
-			"artifactRefs": []interface{}{map[string]interface{}{"id": reportArtifact.Artifact.ID, "version": 1}},
-		},
-		IdempotencyKey: "deliver-research-report",
-	})
+	sendEmail := delivery.SkillDefinition().Actions[delivery.SendEmail]
+	deliveryStep := &AgentTurn{ID: "delivery-step", Scope: scope, RunID: deliveryRun.ID}
+	deliveryCall := GovernedToolCall{
+		Run: claimed, Step: deliveryStep, WorkerID: "publisher-worker",
+		Binding: &TurnRunnerBinding{DeploymentID: publisherID, ActionDeploymentID: researchTeamID, ModelActions: []capability.ModelAction{{
+			Name: "delivery_send_email", BindingID: "research-email", BindingRevision: 1,
+			SkillID: delivery.SkillID, Version: delivery.SkillVersion, Action: delivery.SendEmail,
+			SideEffect: sendEmail.SideEffect, Risk: sendEmail.Risk, InputSchema: sendEmail.InputSchema,
+		}}},
+		ToolCallID: "deliver-research-report", Name: "delivery_send_email",
+		Arguments: json.RawMessage(`{"arguments":{"to":["research@example.com"],"subject":"Competitor user research",` +
+			`"body":"The reviewed, cited report is attached.","artifactRefs":[{"id":"` + reportArtifact.Artifact.ID + `","version":1}]},` +
+			`"reviewContext":{"summary":"Email the reviewed report to research@example.com","content":"The reviewed, cited report is attached."}}`),
+	}
+	proposal, err := engine.GovernedTools().Execute(ctx, deliveryCall)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval ||
-		proposal.Run.Status != AgentRunStatusWaitingForApproval {
+	if proposal.State != runtime.ToolEntryAwaitingApproval || proposal.Wait == nil || proposal.Wait.ApprovalID == "" {
 		t.Fatalf("delivery proposal=%#v", proposal)
+	}
+	approval, err := engine.GetApproval(ctx, scope, proposal.Wait.ApprovalID)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	deliverables := []ProjectDeliverable{{
@@ -227,22 +240,35 @@ func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testin
 	})
 	store, engine = openResearchAcceptanceEngine(t, databasePath, scope, resolver, dispatcher)
 	resolution, err := engine.ResolveApproval(ctx, ResolveApprovalRequest{
-		Scope: scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision,
+		Scope: scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision,
 		DecisionID: "operator-approved-delivery", Decision: ApprovalDecisionApprove,
 		Principal: ApprovalPrincipal{Type: "role", ID: "operator"}, Reason: "Evidence and recipients reviewed",
 	})
 	if err != nil || resolution.Call.Status != ActionCallStatusReady {
 		t.Fatalf("approval resolution=%#v err=%v", resolution, err)
 	}
-	engine.Start(ctx)
-	engine.WakeActionWorkers()
-	waitForResearchAcceptance(t, ctx, func() bool {
-		call, loadErr := engine.GetActionCall(ctx, scope, proposal.Call.ID)
-		return loadErr == nil && call.Status == ActionCallStatusSucceeded
-	}, "approved delivery action")
-	engine.Stop()
+	// The Run keeps its lease while the approval is decided; the resuming
+	// step executes the approved call inline in this replica.
 	currentDeliveryRun, err := engine.GetAgentRun(ctx, scope, deliveryRun.ID)
 	if err != nil {
+		t.Fatal(err)
+	}
+	deliveryCall.Run = currentDeliveryRun
+	delivered, err := engine.GovernedTools().Resume(ctx, deliveryCall, &runtime.SessionEntry{
+		Type: runtime.SessionEntryTool, StepID: deliveryStep.ID, ToolCallID: deliveryCall.ToolCallID,
+		ActionCallID: proposal.ActionCallID, State: runtime.ToolEntryAwaitingApproval, Tool: &runtime.ToolEntry{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivered.State != runtime.ToolEntryCompleted || delivered.Output["receiptId"] != "delivery-receipt-1" {
+		t.Fatalf("delivered=%#v", delivered)
+	}
+	call, err := engine.GetActionCall(ctx, scope, proposal.ActionCallID)
+	if err != nil || call.Status != ActionCallStatusSucceeded {
+		t.Fatalf("delivery call=%#v err=%v", call, err)
+	}
+	if currentDeliveryRun, err = engine.GetAgentRun(ctx, scope, deliveryRun.ID); err != nil {
 		t.Fatal(err)
 	}
 	mustCompleteRun(t, ctx, engine, currentDeliveryRun, "Reviewed report accepted by delivery provider")
@@ -261,7 +287,7 @@ func TestMarketResearchProjectSurvivesRestartAndDeliversReviewedReport(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertResearchAcceptance(t, ctx, engine, scope, project.ID, reportArtifact.Artifact.ID, proposal.Call.ID)
+	assertResearchAcceptance(t, ctx, engine, scope, project.ID, reportArtifact.Artifact.ID, proposal.ActionCallID)
 	if err = store.Close(); err != nil {
 		t.Fatal(err)
 	}

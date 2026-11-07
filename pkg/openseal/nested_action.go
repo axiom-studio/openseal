@@ -20,7 +20,9 @@ type (
 
 const (
 	ActionOriginVM                 = runtime.ActionOriginVM
+	ActionOriginLoop               = runtime.ActionOriginLoop
 	ActionExecutionHost            = runtime.ActionExecutionHost
+	ActionExecutionLoop            = runtime.ActionExecutionLoop
 	NestedHostActionLease          = runtime.NestedHostActionLease
 	NestedHostActionReadyGrace     = runtime.NestedHostActionReadyGrace
 	MaxNestedActionCallsPerTurn    = runtime.MaxNestedActionCallsPerTurn
