@@ -19,10 +19,14 @@ func HostedSkillModelInputTokenCeiling(definition capability.Definition) (int64,
 	return capability.HostedSkillModelInputTokenCeiling(definition)
 }
 
+// hostedStepsPerReviewedTurn scales reviewed workflow exchanges to model
+// steps, the unit of the Turns budget dimension (D12: existing Turn budgets ×4).
+const hostedStepsPerReviewedTurn int64 = 4
+
 // validateHostedRunbookBudgets proves that every statically targeted cognitive
 // delegate can carry the exact reviewed Skill catalog for the complete bounded
-// workflow. A hosted Turn proposes at most one action, so N selected actions
-// require at least N action Turns and one terminal Turn.
+// workflow. N selected actions are reviewed as N action exchanges and one
+// terminal exchange, each funded with hostedStepsPerReviewedTurn model steps.
 func validateHostedRunbookBudgets(candidate *WorkforceCandidate, catalog CapabilityCatalog) []ValidationIssue {
 	if candidate == nil || catalog.HostedExecution == nil {
 		return nil
@@ -96,10 +100,6 @@ func normalizeHostedRunbookBudgets(candidate *WorkforceCandidate, catalog Capabi
 				continue
 			}
 			required, _ := validateHostedBudget("", target, step.Delegate, catalog)
-			// Each model Turn consumes one attempt, and every materialized action
-			// wakes the Run for a separate continuation attempt.
-			required.MaxAttempts = maximumInt64(required.MaxAttempts,
-				saturatingAdd(required.MaxTurns, required.MaxActions))
 			raiseHostedBudget(step.Delegate.Budget, required, 0)
 			owner.Runbook.Steps[stepID] = step
 			for triggerID, trigger := range owner.Runbook.Triggers {
@@ -153,10 +153,12 @@ func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *
 		perTurn += skill.HostedModelInputTokens
 		actions += int64(len(requirement.RequiredActions))
 	}
-	turns := actions + 1
-	if turns < 1 {
-		turns = 1
-	}
+	// One reviewed exchange per action plus the final answer. The Turns budget
+	// counts model steps (D12), so the reviewed exchanges are funded with
+	// hostedStepsPerReviewedTurn steps each; token and attempt envelopes stay
+	// per reviewed exchange.
+	reviewed := actions + 1
+	turns := saturatingMultiply(reviewed, hostedStepsPerReviewedTurn)
 	// Each hosted Turn may consume an initial provider exchange and one schema
 	// repair. Runtime admission reserves both atomically; authoring must fund the
 	// same lifetime envelope for every reviewed Turn rather than only the first
@@ -164,18 +166,18 @@ func validateHostedBudget(path string, target *agent.AgentDefinition, delegate *
 	// using exactly its reviewed recovery protocol.
 	perTurnInput := saturatingMultiply(perTurn, capability.HostedMaximumProviderAttempts)
 	perTurnInput = saturatingAdd(perTurnInput, capability.HostedRepairInputReserveTokens)
-	requiredInput := saturatingMultiply(perTurnInput, turns)
+	requiredInput := saturatingMultiply(perTurnInput, reviewed)
 	perTurnOutput := catalog.HostedExecution.MinimumOutputTokens
 	if perTurnOutput < capability.HostedMinimumChildOutputTokens {
 		perTurnOutput = capability.HostedMinimumChildOutputTokens
 	}
-	requiredOutput := saturatingMultiply(perTurnOutput, turns)
+	requiredOutput := saturatingMultiply(perTurnOutput, reviewed)
 	requiredTotal := saturatingAdd(requiredInput, requiredOutput)
 	// A materialized action wakes the parent Run for a separate durable claim
 	// before the next model Turn. Attempts therefore fund both model advances
 	// and action-result continuations; treating attempts as synonymous with
 	// Turns makes every multi-action Run pause before its reviewed final Turn.
-	attempts := saturatingAdd(turns, actions)
+	attempts := saturatingAdd(reviewed, actions)
 	required := runbook.BudgetAllocation{
 		MaxAttempts: attempts, MaxTurns: turns, MaxActions: actions,
 		MaxInputTokens: requiredInput, MaxOutputTokens: requiredOutput, MaxTotalTokens: requiredTotal,

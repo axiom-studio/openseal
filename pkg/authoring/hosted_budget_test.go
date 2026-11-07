@@ -24,7 +24,7 @@ func TestHostedRunbookBudgetRaisesBrowserCatalogToExecutableEnvelope(t *testing.
 		hostedAgentDefinitionTokens(target, delegate) + hostedBrowserBudgetCatalog().Skills["skill-browser"].HostedModelInputTokens
 	wantInput := (perTurnInput*capability.HostedMaximumProviderAttempts + capability.HostedRepairInputReserveTokens) * 4
 	wantOutput := capability.HostedMinimumChildOutputTokens * 4
-	if budget.MaxAttempts != 7 || budget.MaxTurns != 4 || budget.MaxActions != 3 || budget.MaxInputTokens != wantInput || budget.MaxOutputTokens != wantOutput ||
+	if budget.MaxAttempts != 7 || budget.MaxTurns != 16 || budget.MaxActions != 3 || budget.MaxInputTokens != wantInput || budget.MaxOutputTokens != wantOutput ||
 		budget.MaxTotalTokens != wantInput+wantOutput {
 		t.Fatalf("Browser budget was not normalized: %#v", budget)
 	}
@@ -58,7 +58,7 @@ func TestHostedRunbookBudgetRejectsTriggerThatCannotFundDelegatedExecution(t *te
 				t.Fatalf("normalized parent budget issues = %#v", issues)
 			}
 			budget := definition.Triggers["operate"].Budget
-			if budget.MaxAttempts != 9 || budget.MaxTurns != 6 || budget.MaxActions != 3 || budget.MaxInputTokens < 100000 || budget.MaxOutputTokens < capability.HostedMinimumChildOutputTokens || budget.MaxTotalTokens < 116384 {
+			if budget.MaxAttempts != 9 || budget.MaxTurns != 18 || budget.MaxActions != 3 || budget.MaxInputTokens < 100000 || budget.MaxOutputTokens < capability.HostedMinimumChildOutputTokens || budget.MaxTotalTokens < 116384 {
 				t.Fatalf("parent budget was not normalized: %#v", budget)
 			}
 		})
@@ -67,11 +67,25 @@ func TestHostedRunbookBudgetRejectsTriggerThatCannotFundDelegatedExecution(t *te
 
 func TestHostedRunbookBudgetAcceptsCompleteBrowserWorkflowEnvelope(t *testing.T) {
 	candidate := hostedBrowserBudgetCandidate(runbook.BudgetAllocation{
-		MaxAttempts: 4, MaxTurns: 4, MaxActions: 3,
+		MaxAttempts: 7, MaxTurns: 16, MaxActions: 3,
 		MaxInputTokens: 100000, MaxOutputTokens: capability.HostedMinimumChildOutputTokens, MaxTotalTokens: 116384,
 	})
 	if issues := validateHostedRunbookBudgets(&candidate, hostedBrowserBudgetCatalog()); len(issues) != 0 {
 		t.Fatalf("complete Browser budget issues = %#v", issues)
+	}
+}
+
+func TestHostedRunbookBudgetTurnsAreFourStepsPerReviewedExchange(t *testing.T) {
+	catalog := hostedBrowserBudgetCatalog()
+	candidate := hostedBrowserBudgetCandidate(runbook.BudgetAllocation{MaxTurns: 15})
+	_, issues := validateHostedBudget("budget", candidate.Agents[1], candidate.Agents[0].Runbook.Steps["work"].Delegate, catalog)
+	if !hasValidationCode(issues, "hosted_budget_turns_insufficient") {
+		t.Fatalf("15 steps for 3 actions + final passed: %#v", issues)
+	}
+	candidate = hostedBrowserBudgetCandidate(runbook.BudgetAllocation{MaxTurns: 16})
+	required, issues := validateHostedBudget("budget", candidate.Agents[1], candidate.Agents[0].Runbook.Steps["work"].Delegate, catalog)
+	if hasValidationCode(issues, "hosted_budget_turns_insufficient") || required.MaxTurns != 16 || required.MaxAttempts != 7 {
+		t.Fatalf("required = %#v, issues = %#v", required, issues)
 	}
 }
 
