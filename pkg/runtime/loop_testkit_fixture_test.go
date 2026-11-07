@@ -309,14 +309,10 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 		opt(&config)
 	}
 	crash := newCrashStore(t, store)
-	// The clock starts at wall time: the conversation stores check the reply
-	// guard's Run lease against time.Now, so a clock far behind it would see
-	// every lease as expired.
-	start := time.Now().UTC().Truncate(time.Second)
 	f := &loopFixture{
 		t: t, ctx: context.Background(), raw: store, store: crash, crashes: crash,
 		scope:    Scope{Kind: "tenant", ID: "loop"},
-		clock:    newFakeClock(start),
+		clock:    newFakeClock(loopFixtureStart()),
 		model:    newScriptedModel(t, config.rules...),
 		tools:    newFakeHostTools(t),
 		dispatch: newFakeDispatcher(t),
@@ -376,6 +372,13 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 	f.build()
 	return f
 }
+
+// loopFixtureStart is the fake clock's start: the wall clock, to the second.
+// The conversation stores check a reply guard's lease against the wall clock
+// (replyRunGuardHolds gets time.Now), so a fake clock behind wall time would
+// make every lease the fixture grants look expired at the reply commit. The
+// fake clock only moves forward from here, so it never falls behind.
+func loopFixtureStart() time.Time { return time.Now().UTC().Truncate(time.Second) }
 
 // coordinator routes every chat message to the fixture's acting Agent: finn,
 // or the first Team member.
@@ -625,7 +628,8 @@ func (f *loopFixture) driveToRest(runID string, maxClaims int) *AgentRun {
 // binding is the claim's TurnRunnerBinding, built the way the worker's
 // resolver will: the model producer over the catalog preparer, the run-start
 // preparer (plus chat catch-up for chats), the claim tool executor, the
-// control authority, and the conversation final handler for chats. A first
+// control authority, the kernel compactor (with its budget, as the catalog
+// resolver sets it), and the conversation final handler for chats. A first
 // claim opens the Run's session.
 func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 	f.t.Helper()
@@ -663,6 +667,11 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 		ModelProvider: string(kitModelProvider), Model: kitModelName,
 		ModelActions: append([]capability.ModelAction(nil), f.offered...),
 		Producer:     producer, Session: session, Host: host, Authority: control,
+		Compactor: &LoopCompactor{
+			Host: host, Sessions: sessions, Requests: preparer,
+			Budget: newRunActivityCompactionBudget(NewRunActivityService(f.store, f.store), f.clock.Now),
+			Now:    f.clock.Now,
+		},
 		Preparers: []StepPreparer{newRunStartPreparer(sessions, f.store)},
 		Tools:     f.dispatcher.ForClaim(LoopToolClaim{Workspace: authority}),
 	}
