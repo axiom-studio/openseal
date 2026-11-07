@@ -23,7 +23,8 @@ const SUMMARY_ANSWER =
   "The supplied evidence supports further investigation, with uncertainty noted.";
 const GUIDED_ANSWER =
   "Guidance considered: uncertainty explained before concluding.";
-const EXPLANATION = "The provider kept rate-limiting this task.";
+const HOST_UNAVAILABLE =
+  "The agent's step host is unavailable, so the run stopped after retrying.";
 const ANALYSIS =
   "# Analysis\nThe supplied evidence supports further investigation.\nUncertainty remains explicit.\n";
 const analysisFile = {
@@ -184,8 +185,9 @@ for (const inactive of [false, true]) {
     const provider = await startLoopProvider(async (r) => {
       if (isAuthoring(r))
         return { toolCalls: [{ name: AUTHORING_TOOL, args: intent }] };
-      // A tool-free step is the kernel's failure explanation.
-      if (!r.tools?.length) return { text: EXPLANATION };
+      // No step here is tool-free: host_unavailable failures are never
+      // explained by the model.
+      if (!r.tools?.length) throw new Error("unexpected tool-free model step");
       expect(hasTool(r, FINAL_TOOL)).toBe(true);
       const goal = firstUserText(r);
       if (goal.includes(RATE_LIMITED_GOAL)) return { status: 429 };
@@ -595,24 +597,26 @@ for (const inactive of [false, true]) {
         );
         await page.locator('form button[type="submit"]').click();
         const rateLimitedRun = (await (await rateLimitedCreated).json()).run;
-        // P4: every model step gets HTTP 429; the kernel retries the step
-        // host (2 s, 5 s, 15 s) and then fails the Run.
+        // P4: every model step gets HTTP 429, which the step host reports as
+        // unavailable. The kernel retries (2 s, 5 s, 15 s), then fails the Run
+        // with host_unavailable and no model explanation.
         await expect(
           inspector.getByText(/This attempt ended with an error/),
         ).toBeVisible({ timeout: 40000 });
-        await expect(inspector.locator(".error-text")).toContainText(
-          /HTTP 429|The provider kept rate-limiting this task\./,
-        );
-        expect(
-          (
-            await (
-              await request.get(
-                `/api/v1/agent-runs/${rateLimitedRun.id}?scopeKind=local&scopeId=default`,
-              )
-            ).json()
-          ).status,
-        ).toBe("failed");
-        expect(loopCalls(RATE_LIMITED_GOAL).length).toBeGreaterThan(1);
+        await expect(
+          inspector.getByText(HOST_UNAVAILABLE, { exact: true }),
+        ).toBeVisible();
+        const failedRun = await (
+          await request.get(
+            `/api/v1/agent-runs/${rateLimitedRun.id}?scopeKind=local&scopeId=default`,
+          )
+        ).json();
+        expect(failedRun.status).toBe("failed");
+        expect(failedRun.failureExplanation?.code).toBe("host_unavailable");
+        expect(failedRun.failureExplanation?.explained).toBeFalsy();
+        expect(failedRun.failureExplanation?.stepError).toContain("HTTP 429");
+        // The first attempt plus three retries.
+        expect(loopCalls(RATE_LIMITED_GOAL)).toHaveLength(4);
       }
       await page.reload();
       await expect(
