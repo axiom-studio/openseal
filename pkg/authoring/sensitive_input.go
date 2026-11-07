@@ -8,153 +8,37 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
+	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
-// ErrSensitiveAuthoringInput is returned before an authoring prompt can be
-// persisted or sent to a model. Credentials belong in an authorized binding,
-// never in prompt text.
-var ErrSensitiveAuthoringInput = errors.New("sensitive authoring input")
+// The sensitive-input check lives in pkg/validation.
+var ErrSensitiveAuthoringInput = validation.ErrSensitiveInput
 
-type SensitiveInputKind string
+type (
+	SensitiveInputKind    = validation.SensitiveInputKind
+	SensitiveInputFinding = validation.SensitiveInputFinding
+	SensitiveInputError   = validation.SensitiveInputError
+)
 
 const (
-	SensitiveInputPassword   SensitiveInputKind = "password"
-	SensitiveInputAPIKey     SensitiveInputKind = "api_key"
-	SensitiveInputToken      SensitiveInputKind = "token"
-	SensitiveInputPrivateKey SensitiveInputKind = "private_key"
+	SensitiveInputPassword   = validation.SensitiveInputPassword
+	SensitiveInputAPIKey     = validation.SensitiveInputAPIKey
+	SensitiveInputToken      = validation.SensitiveInputToken
+	SensitiveInputPrivateKey = validation.SensitiveInputPrivateKey
 )
-
-// SensitiveInputFinding deliberately carries classification only. It never
-// contains the matched value, surrounding prompt text, or byte offsets.
-type SensitiveInputFinding struct {
-	Kind SensitiveInputKind `json:"kind"`
-}
-
-type SensitiveInputError struct {
-	Findings []SensitiveInputFinding `json:"findings"`
-}
-
-func (e *SensitiveInputError) Error() string {
-	return "authoring prompts cannot contain passwords, API keys, tokens, or private keys; configure an authorized credential binding instead"
-}
-
-func (e *SensitiveInputError) Unwrap() error { return ErrSensitiveAuthoringInput }
-
-type sensitiveInputPattern struct {
-	kind  SensitiveInputKind
-	value int
-	re    *regexp.Regexp
-}
-
-var sensitiveInputPatterns = []sensitiveInputPattern{
-	{
-		kind: SensitiveInputPassword, value: 2,
-		re: regexp.MustCompile(`(?i)(?:^|[\s,{;])["']?(password|passwd|passcode|pwd)["']?\s*(?::|=|\bis\b)\s*["']?([^\s"',;}\]]{4,})`),
-	},
-	{
-		kind: SensitiveInputAPIKey, value: 2,
-		re: regexp.MustCompile(`(?i)(?:^|[\s,{;])["']?(api[\s_-]*key|secret[\s_-]*key|access[\s_-]*key|client[\s_-]*secret)["']?\s*(?::|=|\bis\b)\s*["']?([^\s"',;}\]]{4,})`),
-	},
-	{
-		kind: SensitiveInputToken, value: 2,
-		re: regexp.MustCompile(`(?i)(?:^|[\s,{;])["']?(access[\s_-]*token|refresh[\s_-]*token|auth[\s_-]*token|bearer[\s_-]*token|token)["']?\s*(?::|=|\bis\b)\s*["']?([^\s"',;}\]]{4,})`),
-	},
-	{
-		kind: SensitiveInputToken, value: 1,
-		re: regexp.MustCompile(`(?i)\bauthorization\s*:\s*bearer\s+([^\s,;]+)`),
-	},
-	{
-		kind: SensitiveInputPassword, value: 1,
-		re: regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^/\s:@]+:([^@\s/]+)@`),
-	},
-	{
-		kind: SensitiveInputToken, value: 1,
-		re: regexp.MustCompile(`\b((?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{16,}|AKIA[A-Z0-9]{16}))\b`),
-	},
-	{
-		kind: SensitiveInputPrivateKey, value: 1,
-		re: regexp.MustCompile(`(?s)(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----)`),
-	},
-}
-
-type sensitiveInputMatch struct {
-	kind       SensitiveInputKind
-	start, end int
-}
-
-var nonSecretPlaceholder = map[string]struct{}{
-	"[redacted]": {}, "redacted": {}, "required": {}, "configured": {}, "configure": {},
-	"credential": {}, "credentials": {}, "secret": {}, "unknown": {}, "missing": {}, "none": {}, "true": {}, "false": {},
-}
 
 var credentialVocabulary = regexp.MustCompile(`(?i)\b(password|passwd|passcode|api[\s_-]*key|secret[\s_-]*key|access[\s_-]*token|refresh[\s_-]*token|bearer[\s_-]*token|private[\s_-]*key|username|login[\s_-]*credential)\b`)
 
 const hardenedLegacyAgentPrompt = "Follow the Agent's purpose, objectives, authority, and installed Skills. Use only authorized credential bindings; never request, store, or reveal raw credential values."
 
-func sensitiveInputMatches(value string) []sensitiveInputMatch {
-	matches := make([]sensitiveInputMatch, 0)
-	for _, pattern := range sensitiveInputPatterns {
-		for _, indices := range pattern.re.FindAllStringSubmatchIndex(value, -1) {
-			index := pattern.value * 2
-			if index+1 >= len(indices) || indices[index] < 0 || indices[index+1] <= indices[index] {
-				continue
-			}
-			candidate := strings.Trim(strings.TrimSpace(value[indices[index]:indices[index+1]]), `"'[]`)
-			if _, placeholder := nonSecretPlaceholder[strings.ToLower(candidate)]; placeholder {
-				continue
-			}
-			matches = append(matches, sensitiveInputMatch{kind: pattern.kind, start: indices[index], end: indices[index+1]})
-		}
-	}
-	return matches
-}
-
-// ValidateAuthoringPrompt rejects likely raw credentials without returning or
-// logging the sensitive value.
 func ValidateAuthoringPrompt(prompt string) error {
-	matches := sensitiveInputMatches(prompt)
-	if len(matches) == 0 {
-		return nil
-	}
-	kinds := make(map[SensitiveInputKind]struct{}, len(matches))
-	for _, match := range matches {
-		kinds[match.kind] = struct{}{}
-	}
-	ordered := make([]string, 0, len(kinds))
-	for kind := range kinds {
-		ordered = append(ordered, string(kind))
-	}
-	sort.Strings(ordered)
-	findings := make([]SensitiveInputFinding, 0, len(ordered))
-	for _, kind := range ordered {
-		findings = append(findings, SensitiveInputFinding{Kind: SensitiveInputKind(kind)})
-	}
-	return &SensitiveInputError{Findings: findings}
+	return validation.ValidateNoSensitiveInput(prompt)
 }
 
 // RedactSensitiveAuthoringPrompt is used by storage migrations to remove
-// legacy prompt credentials. It returns only the sanitized text and whether a
-// change occurred; callers never receive the extracted values.
+// legacy prompt credentials.
 func RedactSensitiveAuthoringPrompt(prompt string) (string, bool) {
-	matches := sensitiveInputMatches(prompt)
-	if len(matches) == 0 {
-		return prompt, false
-	}
-	sort.Slice(matches, func(i, j int) bool {
-		if matches[i].start == matches[j].start {
-			return matches[i].end > matches[j].end
-		}
-		return matches[i].start > matches[j].start
-	})
-	result, previousStart := prompt, len(prompt)
-	for _, match := range matches {
-		if match.end > previousStart {
-			continue
-		}
-		result = result[:match.start] + "[REDACTED]" + result[match.end:]
-		previousStart = match.start
-	}
-	return result, result != prompt
+	return validation.RedactSensitiveInput(prompt)
 }
 
 func validateRefinementSensitiveInput(value RefinementAnswerValue) error {
@@ -172,8 +56,11 @@ func validateRefinementSensitiveInput(value RefinementAnswerValue) error {
 func sensitiveFindingsInValue(value interface{}, kinds map[SensitiveInputKind]struct{}) {
 	switch typed := value.(type) {
 	case string:
-		for _, match := range sensitiveInputMatches(typed) {
-			kinds[match.kind] = struct{}{}
+		var sensitive *SensitiveInputError
+		if errors.As(ValidateAuthoringPrompt(typed), &sensitive) {
+			for _, finding := range sensitive.Findings {
+				kinds[finding.Kind] = struct{}{}
+			}
 		}
 	case []interface{}:
 		for _, child := range typed {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
 // RoutineGrant is one action a routine's runs may perform without asking.
@@ -102,7 +102,7 @@ func routineBriefText(value string, limit int) (string, error) {
 		return "", fmt.Errorf("routine brief text must be plain prose of at most %d characters", limit)
 	}
 	if text != "" {
-		if err := authoring.ValidateAuthoringPrompt(text); err != nil {
+		if err := validation.ValidateNoSensitiveInput(text); err != nil {
 			return "", err
 		}
 	}

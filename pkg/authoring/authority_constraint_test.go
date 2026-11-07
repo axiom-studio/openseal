@@ -3,7 +3,6 @@ package authoring
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
@@ -95,37 +94,6 @@ func TestCurrentHostAuthorityRevalidationRejectsStaleApprovalThreshold(t *testin
 	})
 	if len(issues) != 1 || issues[0].Code != "authority_approval_threshold_exceeded" {
 		t.Fatalf("issues = %#v", issues)
-	}
-}
-
-func TestValidateCapabilityCatalogRejectsMalformedAuthorityConstraint(t *testing.T) {
-	tests := []AuthorityConstraint{
-		{Version: "1", RequireApprovalAt: capability.RiskLevelWrite},
-		{ID: "policy", RequireApprovalAt: capability.RiskLevelWrite},
-		{ID: "Policy With Spaces", Version: "1", RequireApprovalAt: capability.RiskLevelWrite},
-		{ID: "policy", Version: "1", MaximumRisk: capability.RiskLevel("root")},
-		{ID: "policy", Version: "1", RequireApprovalAt: capability.RiskLevel("sometimes")},
-		{ID: "policy", Version: "version with spaces", RequireApprovalAt: capability.RiskLevelWrite},
-		{ID: "policy", Version: "1", MaximumRisk: capability.RiskLevelWrite, RequireApprovalAt: capability.RiskLevelExternal},
-		{ID: "policy", Version: strings.Repeat("v", 129), RequireApprovalAt: capability.RiskLevelWrite},
-	}
-	for _, constraint := range tests {
-		if err := ValidateCapabilityCatalog(CapabilityCatalog{AuthorityConstraint: &constraint}); err == nil {
-			t.Fatalf("constraint %#v unexpectedly validated", constraint)
-		}
-	}
-}
-
-func TestValidateCapabilityCatalogRejectsMalformedActionRisks(t *testing.T) {
-	tests := []SkillCapability{
-		{ID: "slack", Actions: []string{"send"}, ActionRisks: map[string]capability.RiskLevel{"delete": capability.RiskLevelDestructive}, MaximumRisk: capability.RiskLevelDestructive},
-		{ID: "slack", Actions: []string{"send"}, ActionRisks: map[string]capability.RiskLevel{"send": capability.RiskLevel("sometimes")}, MaximumRisk: capability.RiskLevelDestructive},
-		{ID: "slack", Actions: []string{"send"}, ActionRisks: map[string]capability.RiskLevel{"send": capability.RiskLevelExternal}, MaximumRisk: capability.RiskLevelWrite},
-	}
-	for _, skill := range tests {
-		if err := ValidateCapabilityCatalog(CapabilityCatalog{Skills: map[string]SkillCapability{skill.ID: skill}}); err == nil {
-			t.Fatalf("Skill %#v unexpectedly validated", skill)
-		}
 	}
 }
 

@@ -10,10 +10,10 @@ import (
 	"time"
 
 	kernelagent "github.com/axiom-studio/openseal/pkg/agent"
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
+	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
 const (
@@ -70,7 +70,7 @@ func (t *ScheduledAgentTask) Validate() error {
 			return err
 		}
 	}
-	return authoring.ValidateAuthoringPrompt(t.Goal)
+	return validation.ValidateNoSensitiveInput(t.Goal)
 }
 func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
 	if t == nil {
@@ -284,7 +284,7 @@ func resolveScheduledTaskCreate(ctx context.Context, store runbookActionStore, f
 	if a.Title == "" || len(a.Title) > 240 || a.MaximumOccurrences < 0 || a.MaximumOccurrences > 1000000 {
 		return nil, nil, nil, errors.New("scheduled task title or occurrence limit is invalid")
 	}
-	if err := authoring.ValidateAuthoringPrompt(a.Title); err != nil {
+	if err := validation.ValidateNoSensitiveInput(a.Title); err != nil {
 		return nil, nil, nil, err
 	}
 	if run == nil || run.Kind != RunKindConversation || run.AssignedAgentID == "" {

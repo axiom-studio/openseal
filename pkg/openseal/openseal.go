@@ -33,7 +33,9 @@ import (
 	skillopenclaw "github.com/axiom-studio/openseal/pkg/skill/openclaw"
 	skillsource "github.com/axiom-studio/openseal/pkg/skill/source"
 	"github.com/axiom-studio/openseal/pkg/skill/sourceartifact"
+	"github.com/axiom-studio/openseal/pkg/skillcatalog"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/validation"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	"go.uber.org/zap"
@@ -241,11 +243,11 @@ type (
 	WorkforceDefinitionActivation             = workforce.DefinitionActivation
 	DeploymentChangeKind                      = workforce.DeploymentChangeKind
 	WorkforceAuthoringMode                    = authoring.Mode
-	WorkforceSkillCapability                  = authoring.SkillCapability
-	WorkforceSkillActionContract              = authoring.SkillActionContract
-	WorkforceSkillCredential                  = authoring.SkillCredential
-	WorkforceConversationAdapterCapability    = authoring.ConversationAdapterCapability
-	WorkforceCallbackAdapterCapability        = authoring.CallbackAdapterCapability
+	WorkforceSkillCapability                  = skillcatalog.SkillCapability
+	WorkforceSkillActionContract              = skillcatalog.SkillActionContract
+	WorkforceSkillCredential                  = skillcatalog.SkillCredential
+	WorkforceConversationAdapterCapability    = skillcatalog.ConversationAdapterCapability
+	WorkforceCallbackAdapterCapability        = skillcatalog.CallbackAdapterCapability
 	WorkforceRuntimeCompositionCapability     = authoring.RuntimeCompositionCapability
 	WorkforceHostedExecutionCapability        = authoring.HostedExecutionCapability
 	WorkforceConversationRuntimeCapability    = authoring.ConversationRuntimeCapability
@@ -259,15 +261,17 @@ type (
 	WorkforceConversationMessageSelection     = authoring.ConversationMessageSelection
 	WorkforceConversationReplyMode            = authoring.ConversationReplyMode
 	WorkforceCredentialBindingRequirement     = authoring.CredentialBindingRequirement
-	WorkforceSourcePolicyCapability           = authoring.SourcePolicyCapability
-	WorkforceSourcePolicySourceCapability     = authoring.SourcePolicySourceCapability
+	WorkforceSourcePolicyCapability           = skillcatalog.SourcePolicyCapability
+	WorkforceSourcePolicySourceCapability     = skillcatalog.SourcePolicySourceCapability
 	WorkforceCapabilityNeed                   = authoring.CapabilityNeed
 	WorkforceAgentCredentialRequirement       = authoring.AgentCredentialRequirement
 	WorkforceCapabilitySourceScopeRequirement = authoring.CapabilitySourceScopeRequirement
 	WorkforceCapabilitySourcePolicyProposal   = authoring.CapabilitySourcePolicyProposal
-	WorkforceAuthorityConstraint              = authoring.AuthorityConstraint
-	WorkforceCatalogDiagnostic                = authoring.CatalogDiagnostic
-	WorkforceCapabilityCatalog                = authoring.CapabilityCatalog
+	WorkforceAuthorityConstraint              = skillcatalog.AuthorityConstraint
+	WorkforceCatalogDiagnostic                = skillcatalog.CatalogDiagnostic
+	WorkforceSkillReadiness                   = skillcatalog.SkillReadiness
+	WorkforceSkillCompatibility               = skillcatalog.SkillCompatibility
+	WorkforceCapabilityCatalog                = skillcatalog.CapabilityCatalog
 	WorkforceAssignment                       = authoring.Assignment
 	WorkforceCandidate                        = authoring.WorkforceCandidate
 	WorkforceProjectBlueprint                 = authoring.ProjectBlueprint
@@ -320,9 +324,9 @@ type (
 	AtomicWorkforceChangeSetStore             = authoring.AtomicChangeSetStore
 	WorkforceChangeSetReadinessValidator      = authoring.ChangeSetReadinessValidator
 	WorkforceChangeSetReadinessError          = authoring.ChangeSetReadinessError
-	WorkforceSensitiveInputKind               = authoring.SensitiveInputKind
-	WorkforceSensitiveInputFinding            = authoring.SensitiveInputFinding
-	WorkforceSensitiveInputError              = authoring.SensitiveInputError
+	WorkforceSensitiveInputKind               = validation.SensitiveInputKind
+	WorkforceSensitiveInputFinding            = validation.SensitiveInputFinding
+	SensitiveInputError                       = validation.SensitiveInputError
 	SkillReferenceUpgradePlan                 = runtime.SkillReferenceUpgradePlan
 	SkillReferenceUpgradeFinding              = runtime.SkillReferenceUpgradeFinding
 	SkillReferenceIdentity                    = runtime.SkillReferenceIdentity
@@ -1530,15 +1534,15 @@ func CanonicalWorkforceRuntimeCompositionCapability() *WorkforceRuntimeCompositi
 }
 
 func CanonicalConversationTriggerInputSchema() map[string]interface{} {
-	return authoring.CanonicalConversationTriggerInputSchema()
+	return skillcatalog.CanonicalConversationTriggerInputSchema()
 }
 
 func ValidateWorkforceCapabilityCatalog(catalog WorkforceCapabilityCatalog) error {
-	return authoring.ValidateCapabilityCatalog(catalog)
+	return skillcatalog.ValidateCapabilityCatalog(catalog)
 }
 
 func WorkforceHostedSkillModelInputTokenCeiling(definition SkillDefinition) (int64, error) {
-	return authoring.HostedSkillModelInputTokenCeiling(definition)
+	return capability.HostedSkillModelInputTokenCeiling(definition)
 }
 
 var (
@@ -1878,7 +1882,11 @@ const (
 	WorkforceProjectDeduplicateStableSource           = authoring.ProjectDeduplicateStableSource
 	WorkforceProjectDeduplicateContentDigest          = authoring.ProjectDeduplicateContentDigest
 	WorkforceProjectDeduplicateStableSourceAndContent = authoring.ProjectDeduplicateStableSourceAndContent
-	WorkforceCatalogDiagnosticExecutionTargetMissing  = authoring.CatalogDiagnosticExecutionTargetMissing
+	WorkforceCatalogDiagnosticExecutionTargetMissing  = skillcatalog.CatalogDiagnosticExecutionTargetMissing
+	WorkforceSkillReady                               = skillcatalog.SkillReadinessReady
+	WorkforceSkillNeedsBinding                        = skillcatalog.SkillReadinessNeedsBinding
+	WorkforceSkillNeedsInstallation                   = skillcatalog.SkillReadinessNeedsInstallation
+	WorkforceSkillUnavailable                         = skillcatalog.SkillReadinessUnavailable
 
 	OwnerTypeAgent = runtime.OwnerTypeAgent
 	OwnerTypeTeam  = runtime.OwnerTypeTeam
@@ -2469,7 +2477,7 @@ var (
 	ErrWorkforceChangeSetIdempotency    = authoring.ErrChangeSetIdempotency
 	ErrWorkforceChangeSetRevision       = authoring.ErrChangeSetRevision
 	ErrWorkforceChangeSetTransition     = authoring.ErrChangeSetTransition
-	ErrWorkforceSensitiveAuthoringInput = authoring.ErrSensitiveAuthoringInput
+	ErrWorkforceSensitiveAuthoringInput = validation.ErrSensitiveInput
 	ErrSkillDefinitionImmutable         = skill.ErrDefinitionImmutable
 	ErrSkillDefinitionAmbiguous         = skill.ErrDefinitionAmbiguous
 	ErrSkillBindingAmbiguous            = skill.ErrBindingAmbiguous
@@ -2498,7 +2506,7 @@ var (
 )
 
 func ValidateWorkforceAuthoringPrompt(prompt string) error {
-	return authoring.ValidateAuthoringPrompt(prompt)
+	return validation.ValidateNoSensitiveInput(prompt)
 }
 
 // Engine is the primary entry point for OpenSeal. It composes the durable
