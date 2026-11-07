@@ -609,8 +609,6 @@ type (
 	AgentTurnStatus                      = runtime.AgentTurnStatus
 	AgentTurnFilter                      = runtime.AgentTurnFilter
 	AgentTurnRecord                      = kernelapi.AgentTurnRecord
-	TurnAction                           = runtime.TurnAction
-	TurnRunbookProposal                  = runtime.TurnRunbookProposal
 	TurnUsage                            = runtime.TurnUsage
 	BeginAgentTurnRequest                = runtime.BeginAgentTurnRequest
 	FinishAgentTurnRequest               = runtime.FinishAgentTurnRequest
@@ -618,7 +616,6 @@ type (
 	HostedSkillSelection                 = runtime.HostedSkillSelection
 	HostedSkillDisposition               = runtime.HostedSkillDisposition
 	HostedRunbookOperation               = runtime.HostedRunbookOperation
-	TurnTaskProposal                     = runtime.TurnTaskProposal
 	HostedConversationTaskContext        = runtime.HostedConversationTaskContext
 	ConversationTaskSnapshot             = runtime.ConversationTaskSnapshot
 	ConversationTask                     = runtime.ConversationTask
@@ -806,8 +803,6 @@ type (
 	ResolveApprovalRequest               = runtime.ResolveApprovalRequest
 	ApprovalResolutionResult             = runtime.ApprovalResolutionResult
 	RunForkBranch                        = runtime.RunForkBranch
-	TurnForkProposal                     = runtime.TurnForkProposal
-	TurnDelegationProposal               = runtime.TurnDelegationProposal
 	CreateRunForkRequest                 = runtime.CreateRunForkRequest
 	RunForkResult                        = runtime.RunForkResult
 	RunForkCoordinator                   = runtime.RunForkCoordinator
@@ -2782,7 +2777,19 @@ func New(opts ...Option) (*Engine, error) {
 // durable deadline into it, and a scope's workers only exist while the queue
 // has work for it. Whenever the queue is not consuming, and for other
 // stores, workers fall back to their configured poll intervals.
-func (e *Engine) Start(ctx context.Context) {
+//
+// Before any worker starts, Start moves the store onto the run loop
+// (RunLoopCutover): Runs from before the loop are adopted or canceled. The
+// cutover fails closed: on error no worker is started and the error is
+// returned.
+func (e *Engine) Start(ctx context.Context) error {
+	report, err := e.RunLoopCutover(ctx)
+	if err != nil {
+		return err
+	}
+	if e.logger != nil && (report.Adopted > 0 || report.Canceled > 0) {
+		e.logger.Infow("run loop cutover", "adopted", report.Adopted, "canceled", report.Canceled, "messages", report.Messages)
+	}
 	e.applyWorkSignals()
 	if e.conversationRunReconciler != nil {
 		e.conversationRunReconciler.Start(ctx)
@@ -2803,6 +2810,7 @@ func (e *Engine) Start(ctx context.Context) {
 		supervisor.Start(ctx)
 	}
 	e.startWorkQueue(ctx)
+	return nil
 }
 
 // Stop gracefully shuts down background goroutines.
