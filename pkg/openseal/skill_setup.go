@@ -167,13 +167,16 @@ func (e *Engine) reconcileSkillSetupRequestsForBinding(ctx context.Context, bind
 	}
 }
 
-// GetSkillSetupRequest returns request id when it is saved to owner.
+// GetSkillSetupRequest returns request id when owner addresses it: the
+// umbrella it is saved to, or the chat it was asked in. A builder's card for
+// another Agent is saved to that Agent and shown in the builder's chat, so
+// either umbrella opens it; every write still goes to request.Owner.
 func (e *Engine) GetSkillSetupRequest(ctx context.Context, scope runtime.Scope, owner ObjectiveOwner, id string) (*runtime.SkillSetupRequest, error) {
 	r, err := e.store.GetSkillSetupRequest(ctx, scope, id)
 	if err != nil {
 		return nil, err
 	}
-	if r == nil || r.Owner != owner || r.DeploymentID != owner.ID {
+	if r == nil || r.DeploymentID != r.Owner.ID || (r.Owner != owner && (!r.Targeted() || r.ChatOwner() != owner)) {
 		return nil, runtime.ErrInvalidSkillSetup
 	}
 	return r, nil
@@ -222,7 +225,7 @@ func (e *Engine) ResolveSkillSetupRequest(ctx context.Context, scope runtime.Sco
 		if r.Phase == runtime.SkillSetupPhaseBindingUpgrade {
 			return nil, errors.New("the requested Skill binding upgrade must be completed before saving configuration")
 		}
-		binding, err := e.skills.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, bindingID)
+		binding, err := e.skills.GetBinding(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, r.Owner.ID, bindingID)
 		if err != nil {
 			return nil, err
 		}

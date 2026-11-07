@@ -11,7 +11,12 @@ func (s *PostgresStore) migrateSkillSetupRequests(ctx context.Context, tx *sql.T
 	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS `+s.table("skill_setup_requests")+` (scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL, deployment_id TEXT NOT NULL, conversation_id TEXT NOT NULL, status TEXT NOT NULL, revision BIGINT NOT NULL, created_at TIMESTAMPTZ NOT NULL, payload JSONB NOT NULL, PRIMARY KEY(scope_kind,scope_id,id))`); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS skill_setup_requests_conversation_idx ON `+s.table("skill_setup_requests")+`(scope_kind,scope_id,deployment_id,conversation_id,created_at)`); err != nil {
+	// A chat lists its cards for any deployment (a builder's card for another
+	// Agent), so the index leads with the conversation.
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table("skill_setup_requests_conversation_idx")); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS skill_setup_requests_chat_idx ON `+s.table("skill_setup_requests")+`(scope_kind,scope_id,conversation_id,created_at)`); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version,name) VALUES(45,'durable Skill setup requests') ON CONFLICT(version) DO NOTHING`)
