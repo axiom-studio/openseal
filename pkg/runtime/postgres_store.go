@@ -490,6 +490,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateConnectOnce(ctx, tx); err != nil {
 		return fmt.Errorf("connect once migration: %w", err)
 	}
+	if err := s.migrateAgentSessionLog(ctx, tx); err != nil {
+		return fmt.Errorf("agent session log migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err
