@@ -3398,37 +3398,85 @@ func TestRunViewLoadsAndProjectsCanonicalActionCalls(t *testing.T) {
 	}
 }
 
-func TestRunViewLoadsAndProjectsCanonicalAgentTurns(t *testing.T) {
-	run := testRun("run-turns", runtime.AgentRunStatusCompleted, 4)
+func TestRunViewLoadsAndProjectsAgentSteps(t *testing.T) {
+	run := testRun("run-steps", runtime.AgentRunStatusCompleted, 4)
 	fake := &fakeKernelClient{
 		document: kernelapi.Capabilities(),
 		runs:     []*runtime.AgentRun{run},
-		agentTurns: []*kernelapi.AgentTurnRecord{{
-			ID: "turn-1", RunID: run.ID, Sequence: 1, Status: runtime.AgentTurnStatusCompleted,
-			ModelProvider: "opencode", Model: "deepseek-v4-flash",
-			OutputSummary: "Requested governed source observation",
-			ToolCallCount: 1,
-			Usage:         runtime.TurnUsage{InputTokens: 120, OutputTokens: 24, DurationMS: 850},
-		}},
+		agentTurns: []*kernelapi.AgentTurnRecord{
+			{
+				ID: "step-1", RunID: run.ID, Sequence: 1, Status: runtime.AgentTurnStatusCompleted,
+				ModelProvider: "openai-compatible", Model: "deepseek-v4-flash",
+				OutputSummary: "Asking the reviewer to check the evidence.",
+				ToolCallCount: 1, StopReason: "tool_calls",
+				Usage: runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, DurationMS: 910},
+			},
+			{
+				ID: "step-2", RunID: run.ID, Sequence: 2, Status: runtime.AgentTurnStatusFailed,
+				ModelProvider: "openai-compatible", Model: "deepseek-v4-flash",
+				FailureCode: "model_context_exceeded", Error: "the conversation no longer fits the model",
+			},
+		},
+		actionCalls: []*runtime.ActionCall{
+			{ID: "call-1", RunID: run.ID, TurnID: "step-1", SkillID: "openseal.source", SkillVersion: "3", Action: "observe_feed", Status: runtime.ActionCallStatusSucceeded},
+			{ID: "call-other", RunID: run.ID, TurnID: "step-other", SkillID: "openseal.source", SkillVersion: "3", Action: "must_not_join", Status: runtime.ActionCallStatusSucceeded},
+		},
 	}
 	model := newTestModel(t, fake)
 	model.ready = true
 	model.section = sectionRuns
 	model.runCapability = kernelapi.AgentRunsCapability()
 	model.agentTurnCapability = kernelapi.AgentTurnsCapability()
+	model.actionCallCapability = kernelapi.ActionCallsCapability()
 	model.runs = fake.runs
 	model.selectedID = run.ID
 
 	applyCommand(t, model, model.loadSelectedAgentTurns())
+	applyCommand(t, model, model.loadSelectedActionCalls())
 
 	if len(fake.agentTurnFilters) != 1 || fake.agentTurnFilters[0].RunID != run.ID || fake.agentTurnFilters[0].Limit != 100 {
 		t.Fatalf("agent turn filters = %#v", fake.agentTurnFilters)
 	}
-	view := model.renderRunsContent(140)
-	for _, expected := range []string{"Agent turns", "turn 1", "completed", "opencode/deepseek-v4-flash", "Requested governed source observation", "120 input · 24 output tokens · 850ms"} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("AgentTurn projection missing %q:\n%s", expected, view)
+	steps := strings.Join(model.renderSelectedAgentTurns(160), "\n")
+	for _, expected := range []string{
+		"Agent steps",
+		"step 1", "completed", "openai-compatible/deepseek-v4-flash · 1 tool call",
+		"Asking the reviewer to check the evidence.",
+		"→ openseal.source@3/observe_feed · succeeded",
+		"1840 input · 64 output tokens · 910ms",
+		"step 2", "failed", "model_context_exceeded · the conversation no longer fits the model",
+	} {
+		if !strings.Contains(steps, expected) {
+			t.Fatalf("step projection missing %q:\n%s", expected, steps)
 		}
+	}
+	for _, unexpected := range []string{"Agent turns", "turn 1", "must_not_join", "0 tool call", "tool calls"} {
+		if strings.Contains(steps, unexpected) {
+			t.Fatalf("step projection contains %q:\n%s", unexpected, steps)
+		}
+	}
+	if strings.Count(steps, "→") != 1 {
+		t.Fatalf("step projection joined calls of other steps:\n%s", steps)
+	}
+
+	model.agentTurns = nil
+	if view := strings.Join(model.renderSelectedAgentTurns(160), "\n"); !strings.Contains(view, "No agent steps recorded for this work.") {
+		t.Fatalf("empty step history copy missing:\n%s", view)
+	}
+	model.agentTurnsRunID = "another-run"
+	if view := strings.Join(model.renderSelectedAgentTurns(160), "\n"); !strings.Contains(view, "Step history has not loaded yet.") {
+		t.Fatalf("unloaded step history copy missing:\n%s", view)
+	}
+}
+
+func TestBudgetLinesLabelModelSteps(t *testing.T) {
+	policy := &runtime.BudgetPolicy{MaxTurns: 64, MaxActions: 10}
+	lines := strings.Join(renderBudgetLines(policy, &runtime.BudgetUsage{Turns: 3, Actions: 1}, 120), "\n")
+	if !strings.Contains(lines, "steps 3/64") || strings.Contains(lines, "turns") {
+		t.Fatalf("budget lines do not label model steps: %s", lines)
+	}
+	if lines = strings.Join(renderBudgetLines(policy, nil, 120), "\n"); !strings.Contains(lines, "steps 64") {
+		t.Fatalf("budget limits do not label model steps: %s", lines)
 	}
 }
 
@@ -3442,7 +3490,7 @@ func TestRunViewDoesNotLoadAgentTurnsWithoutCapability(t *testing.T) {
 	if command := model.loadSelectedAgentTurns(); command != nil {
 		t.Fatal("TUI loaded Agent turns without an advertised capability")
 	}
-	if len(fake.agentTurnFilters) != 0 || strings.Contains(model.renderRunsContent(100), "Agent turns") {
+	if len(fake.agentTurnFilters) != 0 || strings.Contains(model.renderRunsContent(100), "Agent steps") {
 		t.Fatalf("unsupported Agent turn surface was not hidden: filters=%#v\n%s", fake.agentTurnFilters, model.renderRunsContent(100))
 	}
 }
@@ -3584,7 +3632,7 @@ func TestEvidenceGroundingProjectsVerifiedClaimsAcrossInspectionSurfaces(t *test
 	model.projectCapability = kernelapi.ProjectsCapability()
 	model.objectives = []*runtime.Objective{{ID: "objective-synthesis", Title: "Synthesize findings", Goal: "Create a cited report", Status: runtime.ObjectiveStatusActive}}
 	model.projects = []*runtime.Project{{ID: "project-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.ProjectStatusActive}}
-	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)
+	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted)
 	model.runs = []*runtime.AgentRun{run}
 
 	model.section = sectionRuns
@@ -3630,31 +3678,31 @@ func TestEvidenceGroundingProjectsVerifiedClaimsAcrossInspectionSurfaces(t *test
 	}
 }
 
-func TestEvidenceGroundingProjectsDurableRepairReviewAndPendingState(t *testing.T) {
+func TestEvidenceGroundingShowsNoInProgressReview(t *testing.T) {
 	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
 	model.ready = true
 	model.focus = focusPanel
 	model.section = sectionRuns
 	model.runCapability = kernelapi.AgentRunsCapability()
-	model.runs = []*runtime.AgentRun{groundedEvidenceRun(t, runtime.AgentRunStatusRunning, groundingRepairRequired, true)}
+	run := groundedEvidenceRun(t, runtime.AgentRunStatusRunning)
+	run.Checkpoint = map[string]interface{}{"_opensealEvidenceGrounding": map[string]interface{}{
+		"apiVersion": evidenceGroundingAPIVersion, "status": "repair_required", "snapshotId": "snapshot-grounded",
+		"draftSummary": "must-not-render",
+	}}
+	model.runs = []*runtime.AgentRun{run}
 
 	view := model.renderRunsContent(180)
-	for _, expected := range []string{
-		"REPAIR REQUIRED · 2 claims", "Accepted · no · Coverage · complete",
-		"grounding-provider / grounding-model", "17 input · 9 output · 0.0012 cost · 42 ms",
-	} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("repair grounding projection missing %q:\n%s", expected, view)
+	if !strings.Contains(view, "Evidence snapshot") {
+		t.Fatalf("running evidence Run lost its snapshot:\n%s", view)
+	}
+	for _, unexpected := range []string{"Evidence grounding", "REPAIR REQUIRED", "REVIEW PENDING", "must-not-render"} {
+		if strings.Contains(view, unexpected) {
+			t.Fatalf("in-progress grounding state rendered %q:\n%s", unexpected, view)
 		}
 	}
-
-	pending := groundedEvidenceRun(t, runtime.AgentRunStatusRunning, groundingPendingReview, false)
-	model.runs = []*runtime.AgentRun{pending}
-	view = model.renderRunsContent(180)
-	for _, expected := range []string{"REVIEW PENDING", "Reviewer · awaiting independent review", "Usage · not recorded yet"} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("pending grounding projection missing %q:\n%s", expected, view)
-		}
+	applyKey(t, model, "V")
+	if model.groundingExpanded {
+		t.Fatal("in-progress grounding state was expandable")
 	}
 }
 
@@ -3664,7 +3712,7 @@ func TestEvidenceGroundingRemainsCalmAtNarrowTerminalWidth(t *testing.T) {
 	model.focus = focusPanel
 	model.section = sectionRuns
 	model.runCapability = kernelapi.AgentRunsCapability()
-	model.runs = []*runtime.AgentRun{groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)}
+	model.runs = []*runtime.AgentRun{groundedEvidenceRun(t, runtime.AgentRunStatusCompleted)}
 	model.groundingExpanded = true
 
 	const width = 42
@@ -3681,7 +3729,7 @@ func TestEvidenceGroundingMismatchFailsClosedWithoutRenderingUnknownData(t *test
 	model.focus = focusPanel
 	model.section = sectionRuns
 	model.runCapability = kernelapi.AgentRunsCapability()
-	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)
+	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted)
 	review := run.Output["evidenceGrounding"].(map[string]interface{})
 	review["credential"] = "must-not-render"
 	model.runs = []*runtime.AgentRun{run}
@@ -3695,7 +3743,7 @@ func TestEvidenceGroundingMismatchFailsClosedWithoutRenderingUnknownData(t *test
 		t.Fatal("malformed grounding projection was expandable")
 	}
 
-	run = groundedEvidenceRun(t, runtime.AgentRunStatusCompleted, "accepted", true)
+	run = groundedEvidenceRun(t, runtime.AgentRunStatusCompleted)
 	claims := run.Output["evidenceClaims"].([]runtime.EvidenceClaim)
 	claims[0].EvidenceRefs = []string{"observation-invented"}
 	run.Output["evidenceClaims"] = claims
@@ -3705,7 +3753,7 @@ func TestEvidenceGroundingMismatchFailsClosedWithoutRenderingUnknownData(t *test
 	}
 }
 
-func groundedEvidenceRun(t *testing.T, status runtime.AgentRunStatus, phase string, includeReview bool) *runtime.AgentRun {
+func groundedEvidenceRun(t *testing.T, status runtime.AgentRunStatus) *runtime.AgentRun {
 	t.Helper()
 	run := evidenceSnapshotRun("run-grounded", "snapshot-grounded", time.Now().UTC())
 	run.Status = status
@@ -3730,22 +3778,7 @@ func groundedEvidenceRun(t *testing.T, status runtime.AgentRunStatus, phase stri
 	}
 	if status == runtime.AgentRunStatusCompleted {
 		run.Output = map[string]interface{}{"report": "Cited report", "evidenceClaims": claims, "evidenceGrounding": groundingReviewMap(t, review)}
-		return run
 	}
-	review.Accepted = false
-	if phase == groundingRepairRequired {
-		review.Findings[1].Status = runtime.EvidenceGroundingUnsupported
-		review.Findings[1].Summary = "Second claim needs repair"
-	}
-	state := map[string]interface{}{
-		"apiVersion": evidenceGroundingAPIVersion, "status": phase, "snapshotId": "snapshot-grounded", "claimsDigest": digest,
-		"claims": claims, "draftSummary": "Drafted report", "draftOutput": map[string]interface{}{"report": "Draft"},
-	}
-	if includeReview {
-		state["findings"] = review.Findings
-		state["lastReview"] = groundingReviewMap(t, review)
-	}
-	run.Checkpoint = map[string]interface{}{evidenceGroundingCheckpoint: state}
 	return run
 }
 

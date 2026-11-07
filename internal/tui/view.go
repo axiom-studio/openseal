@@ -2284,32 +2284,48 @@ func (m *Model) renderSelectedAgentTurns(width int) []string {
 	if run == nil || !m.agentTurnCapability.Supports(kernelapi.OperationList) {
 		return nil
 	}
-	lines := []string{"", lipgloss.NewStyle().Foreground(text).Bold(true).Render("Agent turns")}
+	lines := []string{"", lipgloss.NewStyle().Foreground(text).Bold(true).Render("Agent steps")}
 	if m.loadingAgentTurns {
-		return append(lines, mutedStyle.Render("Refreshing turn history…"))
+		return append(lines, mutedStyle.Render("Refreshing step history…"))
 	}
 	if m.agentTurnsRunID != run.ID {
-		return append(lines, mutedStyle.Render("Turn history has not loaded yet."))
+		return append(lines, mutedStyle.Render("Step history has not loaded yet."))
 	}
 	if m.agentTurnsErr != nil {
-		return append(lines, lipgloss.NewStyle().Foreground(danger).Render("Turn history unavailable · "+compact(m.agentTurnsErr.Error(), max(width-32, 24))))
+		return append(lines, lipgloss.NewStyle().Foreground(danger).Render("Step history unavailable · "+compact(m.agentTurnsErr.Error(), max(width-32, 24))))
 	}
 	if len(m.agentTurns) == 0 {
-		return append(lines, mutedStyle.Render("No Agent turns recorded for this work."))
+		return append(lines, mutedStyle.Render("No agent steps recorded for this work."))
 	}
+	callsLoaded := m.actionCallsRunID == run.ID && m.actionCallsErr == nil
 	for _, turn := range m.agentTurns {
 		if turn == nil || turn.RunID != run.ID {
 			continue
 		}
 		status := strings.ReplaceAll(string(turn.Status), "_", " ")
 		identity := strings.Trim(strings.Join([]string{turn.ModelProvider, turn.Model}, "/"), "/")
-		line := fmt.Sprintf("• turn %-3d %-12s", turn.Sequence, status)
+		line := fmt.Sprintf("• step %-3d %-12s", turn.Sequence, status)
 		if identity != "" {
 			line += " " + identity
+		}
+		if turn.ToolCallCount > 0 {
+			line += fmt.Sprintf(" · %d tool call%s", turn.ToolCallCount, pluralSuffix(turn.ToolCallCount))
 		}
 		lines = append(lines, compact(line, max(width-4, 28)))
 		if turn.OutputSummary != "" {
 			lines = append(lines, mutedStyle.Render(compact("  "+turn.OutputSummary, max(width-4, 28))))
+		}
+		if callsLoaded {
+			for _, call := range m.actionCalls {
+				if call == nil || call.RunID != run.ID || call.TurnID != turn.ID {
+					continue
+				}
+				callStatus := strings.ReplaceAll(string(call.Status), "_", " ")
+				lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  → %s@%s/%s · %s", call.SkillID, call.SkillVersion, call.Action, callStatus), max(width-4, 28))))
+			}
+		}
+		if failure := joinNonEmpty(" · ", turn.FailureCode, turn.Error); failure != "" {
+			lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(compact("  "+failure, max(width-4, 28))))
 		}
 		if turn.Usage.InputTokens > 0 || turn.Usage.OutputTokens > 0 || turn.Usage.DurationMS > 0 {
 			usage := fmt.Sprintf("  %d input · %d output tokens", turn.Usage.InputTokens, turn.Usage.OutputTokens)
@@ -2367,7 +2383,7 @@ func renderBudgetLines(policy *runtime.BudgetPolicy, usage *runtime.BudgetUsage,
 	}
 	dimensions := []dimension{
 		{label: "attempts", limit: policy.MaxAttempts},
-		{label: "turns", limit: policy.MaxTurns},
+		{label: "steps", limit: policy.MaxTurns},
 		{label: "input", limit: policy.MaxInputTokens},
 		{label: "output", limit: policy.MaxOutputTokens},
 		{label: "tokens", limit: policy.MaxTotalTokens},
@@ -2643,6 +2659,16 @@ func wholeNumber(value interface{}) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func joinNonEmpty(separator string, values ...string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			parts = append(parts, value)
+		}
+	}
+	return strings.Join(parts, separator)
 }
 
 func pluralSuffix(count int) string {

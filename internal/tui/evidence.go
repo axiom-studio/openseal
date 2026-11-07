@@ -19,12 +19,7 @@ import (
 
 const evidenceSnapshotAPIVersion = "openseal.evidence-snapshot/v1"
 
-const (
-	evidenceGroundingAPIVersion = "openseal.evidence-grounding/v1"
-	evidenceGroundingCheckpoint = "_opensealEvidenceGrounding"
-	groundingPendingReview      = "pending_review"
-	groundingRepairRequired     = "repair_required"
-)
+const evidenceGroundingAPIVersion = "openseal.evidence-grounding/v1"
 
 type evidenceLineage struct {
 	run      *runtime.AgentRun
@@ -202,21 +197,8 @@ func (m *Model) renderSelectedEvidence(width int) []string {
 	return append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("[ previous · ] next · v collapse"))
 }
 
-type evidenceGroundingCheckpointState struct {
-	APIVersion   string                             `json:"apiVersion"`
-	Status       string                             `json:"status"`
-	SnapshotID   string                             `json:"snapshotId"`
-	ClaimsDigest string                             `json:"claimsDigest"`
-	Claims       []runtime.EvidenceClaim            `json:"claims"`
-	DraftSummary string                             `json:"draftSummary"`
-	DraftOutput  map[string]interface{}             `json:"draftOutput"`
-	Findings     []runtime.EvidenceGroundingFinding `json:"findings,omitempty"`
-	LastReview   *runtime.EvidenceGroundingReview   `json:"lastReview,omitempty"`
-}
-
 type evidenceGroundingProjection struct {
 	run          *runtime.AgentRun
-	phase        string
 	snapshotID   string
 	claimsDigest string
 	claims       []runtime.EvidenceClaim
@@ -245,75 +227,38 @@ func (m *Model) selectedEvidenceGrounding() *evidenceGroundingProjection {
 	return projection
 }
 
+// decodeEvidenceGrounding projects only the accepted review a completed Run
+// publishes in its output. An in-progress review is not shown: it lives in the
+// kernel's final settle and is never part of the public Run (A8).
 func decodeEvidenceGrounding(run *runtime.AgentRun, snapshot *runtime.EvidenceSnapshot) (*evidenceGroundingProjection, bool, error) {
 	if run == nil || snapshot == nil {
 		return nil, false, nil
 	}
 	claimsValue, claimsPresent := run.Output["evidenceClaims"]
 	reviewValue, reviewPresent := run.Output["evidenceGrounding"]
-	checkpointValue, checkpointPresent := run.Checkpoint[evidenceGroundingCheckpoint]
-	if !claimsPresent && !reviewPresent && !checkpointPresent {
+	if !claimsPresent && !reviewPresent {
 		return nil, false, nil
 	}
-	if claimsPresent != reviewPresent || (claimsPresent && checkpointPresent) {
+	if claimsPresent != reviewPresent {
 		return nil, true, errors.New("Run contains an ambiguous evidence grounding projection")
 	}
-	if claimsPresent {
-		var claims []runtime.EvidenceClaim
-		if err := decodeStrictProjection(claimsValue, &claims); err != nil {
-			return nil, true, errors.New("evidence claim contract does not match this TUI")
-		}
-		var review runtime.EvidenceGroundingReview
-		if err := decodeStrictProjection(reviewValue, &review); err != nil {
-			return nil, true, errors.New("evidence review contract does not match this TUI")
-		}
-		if run.Status != runtime.AgentRunStatusCompleted || !review.Accepted || !review.CoverageComplete {
-			return nil, true, errors.New("completed evidence grounding verdict is invalid")
-		}
-		if err := validateEvidenceGroundingProjection(claims, &review, snapshot, review.ClaimsDigest); err != nil {
-			return nil, true, err
-		}
-		return &evidenceGroundingProjection{
-			run: run, phase: "accepted", snapshotID: review.SnapshotID, claimsDigest: review.ClaimsDigest,
-			claims: claims, review: &review, findings: review.Findings,
-		}, true, nil
+	var claims []runtime.EvidenceClaim
+	if err := decodeStrictProjection(claimsValue, &claims); err != nil {
+		return nil, true, errors.New("evidence claim contract does not match this TUI")
 	}
-
-	var state evidenceGroundingCheckpointState
-	if err := decodeStrictProjection(checkpointValue, &state); err != nil {
-		return nil, true, errors.New("evidence grounding checkpoint contract does not match this TUI")
+	var review runtime.EvidenceGroundingReview
+	if err := decodeStrictProjection(reviewValue, &review); err != nil {
+		return nil, true, errors.New("evidence review contract does not match this TUI")
 	}
-	if state.APIVersion != evidenceGroundingAPIVersion ||
-		(state.Status != groundingPendingReview && state.Status != groundingRepairRequired) ||
-		state.SnapshotID != snapshot.ID || strings.TrimSpace(state.ClaimsDigest) == "" {
-		return nil, true, errors.New("evidence grounding checkpoint invariants are invalid")
+	if run.Status != runtime.AgentRunStatusCompleted || !review.Accepted || !review.CoverageComplete {
+		return nil, true, errors.New("completed evidence grounding verdict is invalid")
 	}
-	if err := validateEvidenceClaims(state.Claims, snapshot, state.ClaimsDigest); err != nil {
+	if err := validateEvidenceGroundingProjection(claims, &review, snapshot, review.ClaimsDigest); err != nil {
 		return nil, true, err
 	}
-	findings := state.Findings
-	if state.LastReview != nil {
-		if state.Status != groundingRepairRequired || state.LastReview.Accepted || state.LastReview.SnapshotID != state.SnapshotID || state.LastReview.ClaimsDigest != state.ClaimsDigest {
-			return nil, true, errors.New("in-progress evidence review envelope is invalid")
-		}
-		if err := validateEvidenceGroundingProjection(state.Claims, state.LastReview, snapshot, state.ClaimsDigest); err != nil {
-			return nil, true, err
-		}
-		if !equalProjection(state.Findings, state.LastReview.Findings) {
-			return nil, true, errors.New("evidence grounding checkpoint findings do not match the last review")
-		}
-		findings = state.LastReview.Findings
-	} else {
-		if state.Status == groundingPendingReview && len(findings) != 0 {
-			return nil, true, errors.New("pending evidence review cannot contain findings")
-		}
-		if err := validatePendingGroundingFindings(findings, state.Claims, snapshot); err != nil {
-			return nil, true, err
-		}
-	}
 	return &evidenceGroundingProjection{
-		run: run, phase: state.Status, snapshotID: state.SnapshotID, claimsDigest: state.ClaimsDigest,
-		claims: state.Claims, review: state.LastReview, findings: findings,
+		run: run, snapshotID: review.SnapshotID, claimsDigest: review.ClaimsDigest,
+		claims: claims, review: &review, findings: review.Findings,
 	}, true, nil
 }
 
@@ -419,40 +364,6 @@ func validateEvidenceGroundingProjection(claims []runtime.EvidenceClaim, review 
 	return nil
 }
 
-func validatePendingGroundingFindings(findings []runtime.EvidenceGroundingFinding, claims []runtime.EvidenceClaim, snapshot *runtime.EvidenceSnapshot) error {
-	claimIDs := make(map[string]struct{}, len(claims))
-	for _, claim := range claims {
-		claimIDs[claim.ID] = struct{}{}
-	}
-	evidenceIDs := make(map[string]struct{}, len(snapshot.Observations))
-	for _, observation := range snapshot.Observations {
-		evidenceIDs[observation.ID] = struct{}{}
-	}
-	for _, finding := range findings {
-		if strings.TrimSpace(finding.Summary) == "" ||
-			(finding.Status != runtime.EvidenceGroundingUnsupported && finding.Status != runtime.EvidenceGroundingUncertain) {
-			return errors.New("pending evidence grounding finding is invalid")
-		}
-		if finding.ClaimID != "" {
-			if _, known := claimIDs[finding.ClaimID]; !known {
-				return errors.New("pending evidence grounding finding names an unknown claim")
-			}
-		}
-		for _, reference := range finding.EvidenceRefs {
-			if _, known := evidenceIDs[reference]; !known {
-				return errors.New("pending evidence grounding finding names evidence outside the snapshot")
-			}
-		}
-	}
-	return nil
-}
-
-func equalProjection(left, right interface{}) bool {
-	leftJSON, leftErr := json.Marshal(left)
-	rightJSON, rightErr := json.Marshal(right)
-	return leftErr == nil && rightErr == nil && bytes.Equal(leftJSON, rightJSON)
-}
-
 func groundingPages(projection *evidenceGroundingProjection) []evidenceGroundingPage {
 	if projection == nil {
 		return nil
@@ -499,33 +410,13 @@ func (m *Model) renderSelectedEvidenceGrounding(width int) []string {
 			mutedStyle.Render("Run "+grounding.run.ID+" · refresh after upgrading the kernel or TUI"),
 		)
 	}
-	status := "REVIEW PENDING"
-	statusStyle := lipgloss.NewStyle().Foreground(accentSoft).Bold(true)
-	if grounding.phase == "accepted" {
-		status = "VERIFIED"
-		statusStyle = lipgloss.NewStyle().Foreground(success).Bold(true)
-	} else if grounding.phase == groundingRepairRequired {
-		status = "REPAIR REQUIRED"
-		statusStyle = lipgloss.NewStyle().Foreground(danger).Bold(true)
-	}
-	lines = append(lines, statusStyle.Render(status)+mutedStyle.Render(fmt.Sprintf(" · %d claims", len(grounding.claims))))
-	accepted, coverage := "no", "incomplete"
-	if grounding.review != nil && grounding.review.Accepted {
-		accepted = "yes"
-	}
-	if grounding.review != nil && grounding.review.CoverageComplete {
-		coverage = "complete"
-	}
-	lines = append(lines, mutedStyle.Render("Accepted · "+accepted+" · Coverage · "+coverage))
+	lines = append(lines, lipgloss.NewStyle().Foreground(success).Bold(true).Render("VERIFIED")+mutedStyle.Render(fmt.Sprintf(" · %d claims", len(grounding.claims))))
+	lines = append(lines, mutedStyle.Render("Accepted · yes · Coverage · complete"))
 	lines = appendEvidenceField(lines, "Snapshot", grounding.snapshotID, width)
 	lines = appendEvidenceField(lines, "Claims digest", grounding.claimsDigest, width)
-	if grounding.review == nil {
-		lines = append(lines, mutedStyle.Render("Reviewer · awaiting independent review"), mutedStyle.Render("Usage · not recorded yet"))
-	} else {
-		lines = appendEvidenceField(lines, "Reviewer", grounding.review.ReviewerProvider+" / "+grounding.review.ReviewerModel, width)
-		usage := grounding.review.Usage
-		lines = appendEvidenceField(lines, "Usage", fmt.Sprintf("%d input · %d output · %.6g cost · %d ms", usage.InputTokens, usage.OutputTokens, usage.Cost, usage.DurationMS), width)
-	}
+	lines = appendEvidenceField(lines, "Reviewer", grounding.review.ReviewerProvider+" / "+grounding.review.ReviewerModel, width)
+	usage := grounding.review.Usage
+	lines = appendEvidenceField(lines, "Usage", fmt.Sprintf("%d input · %d output · %.6g cost · %d ms", usage.InputTokens, usage.OutputTokens, usage.Cost, usage.DurationMS), width)
 	pages := groundingPages(grounding)
 	if !m.groundingExpanded {
 		return append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render(fmt.Sprintf("V expand %d claim/review pages", len(pages))))
