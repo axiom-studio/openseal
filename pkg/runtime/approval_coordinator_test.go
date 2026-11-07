@@ -260,11 +260,6 @@ func TestApprovalCoordinatorResumesRunWithReviewerGuidance(t *testing.T) {
 		result.Call.Status != ActionCallStatusDenied || result.Run.Status != AgentRunStatusQueued || result.Run.WakeCondition != nil {
 		t.Fatalf("change request result = %#v", result)
 	}
-	last, _ := result.Run.Checkpoint["lastAction"].(map[string]interface{})
-	if fmt.Sprint(last["reviewerGuidance"]) != guidance || fmt.Sprint(last["approvalStatus"]) != string(ApprovalStatusChangesRequested) ||
-		fmt.Sprint(last["reviewedProposalRevision"]) != "1" {
-		t.Fatalf("change request checkpoint = %#v", result.Run.Checkpoint)
-	}
 	if result.Event == nil || result.Event.EventType != "approval.changes_requested" || fmt.Sprint(result.Event.Payload["decisionReason"]) != guidance {
 		t.Fatalf("change request activity = %#v", result.Event)
 	}

@@ -54,15 +54,7 @@ func (s *RunCommandService) RetryConversationRun(ctx context.Context, req AgentR
 	run.AvailableAt, run.QueueEnteredAt, run.UpdatedAt = now, now, now
 	run.Revision++
 	// Explicit user retry clears the recorded failure (above) while preserving
-	// usage, turn cursor, plan and durable action evidence. The old per-Turn
-	// path keeps its own copy in the checkpoint (turn_failure_checkpoint.go);
-	// this line goes with that file.
-	delete(run.Checkpoint, FinalFailureExplanationCheckpointKey)
-	delete(run.Checkpoint, ToolFeedbackCorrectionCheckpointKey)
-	delete(run.Checkpoint, toolFailureCountCheckpointKey)
-	delete(run.Checkpoint, sourceReadFailureCountCheckpointKey)
-	delete(run.Checkpoint, proposalRecoveryCheckpointKey)
-	// Usage, turn cursor, plan and action identity remain intact.
+	// usage, turn cursor, plan and action identity.
 	// The normal worker budget admission still applies to the next attempt.
 	visibility := req.Visibility
 	if visibility == "" {

@@ -48,10 +48,6 @@ func persistWorkflowEvidenceCall(t *testing.T, store KernelStore, call *ActionCa
 	updated := cloneAgentRun(run)
 	updated.Revision++
 	updated.UpdatedAt = call.UpdatedAt
-	if updated.Checkpoint == nil {
-		updated.Checkpoint = map[string]interface{}{}
-	}
-	updated.Checkpoint = checkpointTerminalAction(updated.Checkpoint, call, nil)
 	result, err := store.CreateActionProposal(t.Context(), ActionProposalRecord{Call: call, Run: updated, ExpectedRunRevision: run.Revision,
 		Event: &ActivityEvent{ID: "evidence-" + call.ID, Scope: call.Scope, RunID: call.RunID, EventType: "action.succeeded", Summary: "Persist connector receipt", CreatedAt: call.CreatedAt},
 	})
@@ -284,22 +280,20 @@ func TestWorkflowSourceDiscoveryProjectsBoundedDurableSubjectEvidenceAcrossStore
 				id := []string{"first-call", "explicit-call", "latest-call"}[i]
 				run = persistWorkflowEvidenceCall(t, store, workflowEvidenceCall(run, id, subject))
 			}
-			// The model checkpoint can contain arbitrary results and history. It
-			// chooses only one ID; durable action output supplies the actual subject.
-			latest := run.Checkpoint["lastAction"].(map[string]interface{})
-			latest["result"] = map[string]interface{}{"receipt": map[string]interface{}{"conversationId": "invented-conversation"}}
-			run.Checkpoint["actionHistory"] = []interface{}{map[string]interface{}{"actionCallId": "first-call", "result": map[string]interface{}{"conversationId": "invented-history"}}}
+			// Checkpoint contents never choose a receipt; only the explicit ID is
+			// read, and durable action output supplies the actual subject.
+			run.Checkpoint = map[string]interface{}{"actionHistory": []interface{}{map[string]interface{}{"actionCallId": "latest-call", "result": map[string]interface{}{"conversationId": "invented-history"}}}}
 			points := pointWorkflowEvidenceStore(store)
 			sources, err := workflowSources(t.Context(), points, catalog, run, "explicit-call")
 			if err != nil || len(sources) != 1 {
 				t.Fatalf("sources=%#v error=%v", sources, err)
 			}
 			source := sources[0]
-			want := []WorkflowKnownSubject{{ExternalConversationID: "D-explicit", ActionCallID: "explicit-call"}, {ExternalConversationID: "D-latest", ActionCallID: "latest-call"}}
+			want := []WorkflowKnownSubject{{ExternalConversationID: "D-explicit", ActionCallID: "explicit-call"}}
 			if !source.EvidenceRequired || source.SkillVersion != "1.0.0" || len(source.SubjectEvidence) != 2 || !reflect.DeepEqual(source.KnownSubjects, want) {
 				t.Fatalf("source proof projection=%#v", source)
 			}
-			if !reflect.DeepEqual(points.lookups, []string{"explicit-call", "latest-call"}) || points.scans != 0 {
+			if !reflect.DeepEqual(points.lookups, []string{"explicit-call"}) || points.scans != 0 {
 				t.Fatalf("discovery lookups=%v scans=%d", points.lookups, points.scans)
 			}
 			encoded, err := json.Marshal(sources)
@@ -307,14 +301,9 @@ func TestWorkflowSourceDiscoveryProjectsBoundedDurableSubjectEvidenceAcrossStore
 				t.Fatalf("discovery leaked undeclared output or history: %s, %v", encoded, err)
 			}
 			points.lookups = nil
-			if _, err := workflowSources(t.Context(), points, catalog, run, "latest-call"); err != nil || !reflect.DeepEqual(points.lookups, []string{"latest-call"}) {
-				t.Fatalf("candidate deduplication reads=%v error=%v", points.lookups, err)
-			}
-			latest["actionCallId"] = "invented-call"
-			points.lookups = nil
 			sources, err = workflowSources(t.Context(), points, catalog, run)
-			if err != nil || len(sources[0].KnownSubjects) != 0 || !reflect.DeepEqual(points.lookups, []string{"invented-call"}) {
-				t.Fatalf("checkpoint invented evidence: %#v reads=%v error=%v", sources, points.lookups, err)
+			if err != nil || len(sources[0].KnownSubjects) != 0 || len(points.lookups) != 0 {
+				t.Fatalf("checkpoint chose evidence: %#v reads=%v error=%v", sources, points.lookups, err)
 			}
 			// Schema and runtime action input both accept one optional receipt.
 			sourcesBound, err := catalog.Resolve(t.Context(), bound.Binding.Scope, run.AssignedAgentID, bound.Definition.ID, bound.Definition.Version, RunbookActionWorkflowSources)

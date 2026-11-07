@@ -35,7 +35,7 @@ func TestRetryConversationRunPreservesIdentityAndRejectsDuplicate(t *testing.T) 
 			if result.Run.Checkpoint["saved"] != "context" || result.Run.LastAppliedTurn != failed.LastAppliedTurn || result.Run.BudgetUsage != failed.BudgetUsage || result.Run.Attempt != failed.Attempt {
 				t.Fatal("retry lost checkpoint, cursor or usage")
 			}
-			if result.Run.FailureExplanation != nil || result.Run.Checkpoint[proposalRecoveryCheckpointKey] != nil || result.Run.Checkpoint[ToolFeedbackCorrectionCheckpointKey] != nil {
+			if result.Run.FailureExplanation != nil {
 				t.Fatal("explicit retry retained the failure-only boundary")
 			}
 			if result.Event.EventType != "run.retried" {
@@ -69,7 +69,7 @@ func failedReplyFixtureWithFailure(t *testing.T, store RunCommandStore, failure 
 	ctx := t.Context()
 	service := NewRunCommandService(store)
 	scope := Scope{Kind: "tenant", ID: "one"}
-	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Reply", Source: RunSourceChat, Checkpoint: map[string]interface{}{"saved": "context", proposalRecoveryCheckpointKey: map[string]interface{}{"attempt": 1}, ToolFeedbackCorrectionCheckpointKey: map[string]interface{}{"correctionsUsed": MaximumToolFeedbackCorrections, "message": "invalid input"}}})
+	created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "Reply", Source: RunSourceChat, Checkpoint: map[string]interface{}{"saved": "context"}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,7 +13,6 @@ import (
 type sourceFailureStore interface {
 	KernelStore
 	ConversationStore
-	AgentSessionStore
 }
 
 // sourceFailureRun is a claimed, private-thread chat Run of finn whose lane
@@ -129,10 +128,7 @@ func TestTerminalSourceFailureLatestOutboxReportsExactCauseOnce(t *testing.T) {
 		t.Run(code, func(t *testing.T) {
 			eventWaitContractFixtures(t, func(t *testing.T, fixture eventWaitContractFixture) {
 				store := terminalReportingContractFixture(t, fixture)
-				kernel, ok := fixture.store.(sourceFailureStore)
-				if !ok {
-					t.Skip("store-5/store-6b add the session log this report reads to SQLite and Postgres")
-				}
+				kernel := fixture.store.(sourceFailureStore)
 				sessions := AgentSessionStore(kernel)
 				now := eventWaitContractEpoch
 				run, trigger := sourceFailureRun(t, kernel, now)

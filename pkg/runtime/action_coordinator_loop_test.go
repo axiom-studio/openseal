@@ -507,12 +507,12 @@ func TestNestedProposeHasNoCheckpointGuards(t *testing.T) {
 	}
 	updated := cloneAgentRun(current)
 	updated.Checkpoint = map[string]interface{}{
-		FinalFailureExplanationCheckpointKey: map[string]interface{}{"kind": "execution", "message": "failed"},
-		ToolFeedbackCorrectionCheckpointKey:  map[string]interface{}{"sourceAccessChallenge": true},
+		"failure":    map[string]interface{}{"kind": "execution", "message": "failed"},
+		"correction": map[string]interface{}{"sourceAccessChallenge": true},
 	}
 	updated.Revision++
 	event := &ActivityEvent{ID: "old-checkpoint", Scope: f.scope, RunID: f.run.ID, EventType: "run.status_changed", Severity: ActivitySeverityInfo,
-		Actor: ActivityActor{Type: "worker", ID: "agent-worker"}, Summary: "Old checkpoint keys", Visibility: ActivityVisibilityScope, CreatedAt: f.now}
+		Actor: ActivityActor{Type: "worker", ID: "agent-worker"}, Summary: "Arbitrary checkpoint keys", Visibility: ActivityVisibilityScope, CreatedAt: f.now}
 	if _, err := store.UpdateAgentRunWithEvent(ctx, updated, current.Revision, event, nil); err != nil {
 		t.Fatal(err)
 	}

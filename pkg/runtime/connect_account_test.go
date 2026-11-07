@@ -180,13 +180,8 @@ func TestActionWorkerParksPersonGapOnCardAndRetries(t *testing.T) {
 		stored.WakeCondition.Reference != card.ID {
 		t.Fatalf("run = %s %#v", stored.Status, stored.WakeCondition)
 	}
-	if state, ok := stored.Checkpoint[ToolFeedbackCorrectionCheckpointKey].(map[string]interface{}); ok {
-		if digests, _ := state["failedSemanticDigests"].([]interface{}); len(digests) != 0 {
-			t.Fatalf("a parked call was remembered as a failed request: %#v", state)
-		}
-	}
-	if requiresFinalFailureExplanation(stored.Checkpoint) {
-		t.Fatalf("a parked call ended the attempt: %#v", stored.Checkpoint)
+	if stored.FailureExplanation != nil {
+		t.Fatalf("a parked call ended the attempt: %#v", stored.FailureExplanation)
 	}
 
 	// The person connects; the run resumes and the model asks again in a new

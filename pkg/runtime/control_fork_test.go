@@ -380,8 +380,8 @@ func TestForkFailedBranchIsErrorResultNotRunFailure(t *testing.T) {
 		if source.Status != AgentRunStatusQueued {
 			t.Fatalf("source after a failed branch = %s", source.Status)
 		}
-		if _, ok := source.Checkpoint[finalFailureExplanationCheckpointKeyForTest()]; ok {
-			t.Fatalf("failed group wrote a final failure checkpoint: %v", source.Checkpoint)
+		if source.FailureExplanation != nil {
+			t.Fatalf("failed group recorded a final failure: %#v", source.FailureExplanation)
 		}
 		c.reclaim()
 		resumed := c.resume()
@@ -400,15 +400,6 @@ func TestForkFailedBranchIsErrorResultNotRunFailure(t *testing.T) {
 			t.Fatalf("source after the failed result = %s", run.Status)
 		}
 	})
-}
-
-// finalFailureExplanationCheckpointKeyForTest is the key the old turn path
-// wrote for a failed dependency group.
-func finalFailureExplanationCheckpointKeyForTest() string {
-	for key := range checkpointFinalFailureExplanation(nil, "dependency", "x") {
-		return key
-	}
-	return ""
 }
 
 // crashingForkStore fails the first dependency-group create the way a
