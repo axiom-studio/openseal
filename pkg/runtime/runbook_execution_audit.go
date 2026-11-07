@@ -291,7 +291,7 @@ func (s *RunbookExecutionAuditService) get(ctx context.Context, scope Scope, run
 	attachRunbookActions(result, actions, approvals)
 	attachRunbookApprovalDeliveries(result, approvalDeliveries)
 	attachRunbookArtifacts(result, artifacts)
-	attachRunbookChildren(result, children, requests, turns, run)
+	attachRunbookChildren(result, children, requests, run)
 	for _, approval := range approvals {
 		if approval.Status == ApprovalStatusPending {
 			result.Run.PendingApprovals++
@@ -616,7 +616,7 @@ func attachRunbookArtifacts(result *RunbookExecutionAudit, artifacts []*Artifact
 	}
 }
 
-func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, requests []*AgentRequest, turns []*AgentTurn, parent *AgentRun) {
+func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, requests []*AgentRequest, parent *AgentRun) {
 	stepByChild := map[string]string{}
 	for _, child := range children {
 		if child == nil {
@@ -634,15 +634,17 @@ func attachRunbookChildren(result *RunbookExecutionAudit, children []*AgentRun, 
 			requestByID[request.ID] = request
 		}
 	}
-	for _, turn := range turns {
-		if turn == nil || turn.RequestedDelegation == nil {
+	// A delegated step's AgentRequest id is derived from the parent Run and
+	// the step id (see ControlExecutor.Delegate), so each node maps to its
+	// request without reading any Turn state.
+	for _, node := range result.Nodes {
+		stepID := strings.TrimSpace(node.StepID)
+		if stepID == "" {
 			continue
 		}
-		proposal := turn.RequestedDelegation
-		key := strings.Join([]string{"delegation", parent.ID, proposal.StepID}, ":")
-		requestID := stableCollaborationID(parent.Scope, key, "request")
+		requestID := stableCollaborationID(parent.Scope, delegationIdempotencyKey(parent.ID, stepID), "request")
 		if request := requestByID[requestID]; request != nil && request.ChildRunID != "" {
-			stepByChild[request.ChildRunID] = proposal.StepID
+			stepByChild[request.ChildRunID] = stepID
 		}
 	}
 	for _, child := range children {

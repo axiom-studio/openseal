@@ -86,7 +86,7 @@ func TestRunbookExecutionAuditProjectsNodeLineageWithoutGovernedValues(t *testin
 	store.agentRuns[portfolioKey(scope, run.ID)] = persistedRun
 	store.turns[portfolioKey(scope, run.ID)] = map[string]*AgentTurn{
 		"turn-browse": {ID: "turn-browse", Scope: scope, RunID: run.ID, Sequence: 1, Status: AgentTurnStatusCompleted, OutputSummary: "Requested browser", Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now},
-		"turn-review": {ID: "turn-review", Scope: scope, RunID: run.ID, Sequence: 2, Status: AgentTurnStatusCompleted, OutputSummary: "Delegated review", RequestedDelegation: &TurnDelegationProposal{StepID: "review", AssignedAgentID: "reviewer", Goal: "Review findings"}, Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute), StartedAt: now.Add(2 * time.Minute)},
+		"turn-review": {ID: "turn-review", Scope: scope, RunID: run.ID, Sequence: 2, Status: AgentTurnStatusCompleted, OutputSummary: "Delegated review", Revision: 1, CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute), StartedAt: now.Add(2 * time.Minute)},
 	}
 	store.actions[portfolioKey(scope, "action-browse")] = &ActionCall{
 		ID: "action-browse", Scope: scope, RunID: run.ID, TurnID: "turn-browse", DeploymentID: owner.ID,
@@ -242,5 +242,40 @@ func TestRunbookExecutionAuditKeepsRetryRecordsOnExactVisits(t *testing.T) {
 	}
 	if len(result.UnassignedTurns) != 1 || len(result.UnassignedActions) != 1 || len(result.UnassignedApprovals) != 1 {
 		t.Fatalf("unassigned turns=%#v actions=%#v approvals=%#v", result.UnassignedTurns, result.UnassignedActions, result.UnassignedApprovals)
+	}
+}
+
+func TestRunbookAuditPlacesDelegatedChildUnderVisit(t *testing.T) {
+	scope := Scope{Kind: "tenant", ID: "audit"}
+	parent := &AgentRun{ID: "run-parent", Scope: scope}
+	now := time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC)
+	result := &RunbookExecutionAudit{Nodes: []RunbookNodeExecutionAudit{
+		{StepID: "browse", Visits: []RunbookVisitExecutionAudit{{Trace: RunbookStepTrace{Sequence: 1, StepID: "browse", StartedAt: now}}}},
+		{StepID: "review", Visits: []RunbookVisitExecutionAudit{
+			{Trace: RunbookStepTrace{Sequence: 2, StepID: "review", StartedAt: now.Add(time.Minute)}},
+			{Trace: RunbookStepTrace{Sequence: 4, StepID: "review", StartedAt: now.Add(10 * time.Minute)}},
+		}},
+	}}
+	requestID := stableCollaborationID(scope, delegationIdempotencyKey(parent.ID, "review"), "request")
+	children := []*AgentRun{
+		{ID: "child-review", Scope: scope, ParentRunID: parent.ID, AssignedAgentID: "reviewer", CreatedAt: now.Add(2 * time.Minute)},
+		{ID: "child-unrelated", Scope: scope, ParentRunID: parent.ID, AssignedAgentID: "other", CreatedAt: now.Add(3 * time.Minute)},
+	}
+	requests := []*AgentRequest{
+		{ID: requestID, Scope: scope, SourceRunID: parent.ID, ChildRunID: "child-review"},
+		// A request whose id is not derived from (parent, step) is not mapped.
+		{ID: "request-other", Scope: scope, SourceRunID: parent.ID, ChildRunID: "child-unrelated"},
+	}
+	attachRunbookChildren(result, children, requests, parent)
+
+	review := result.Nodes[1]
+	if len(review.Visits[0].ChildRuns) != 1 || review.Visits[0].ChildRuns[0].ID != "child-review" || review.Visits[0].ChildRuns[0].StepID != "review" {
+		t.Fatalf("review visit children=%#v", review.Visits[0].ChildRuns)
+	}
+	if len(review.Visits[1].ChildRuns) != 0 || len(result.Nodes[0].Visits[0].ChildRuns) != 0 {
+		t.Fatalf("child placed on wrong visit: %#v", result.Nodes)
+	}
+	if len(result.UnassignedChildren) != 1 || result.UnassignedChildren[0].ID != "child-unrelated" {
+		t.Fatalf("unassigned children=%#v", result.UnassignedChildren)
 	}
 }
