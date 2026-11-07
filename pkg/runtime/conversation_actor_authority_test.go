@@ -82,18 +82,7 @@ func (f *conversationActorFixture) waitingQuestion(t *testing.T, trigger *Channe
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _, err = activity.TransitionRun(t.Context(), child.Scope, child.ID, RunTransitionRequest{ExpectedRevision: child.Revision, Status: AgentRunStatusRunning})
-	if err != nil {
-		t.Fatal(err)
-	}
-	child, _, err = activity.TransitionRun(t.Context(), child.Scope, child.ID, RunTransitionRequest{
-		ExpectedRevision: child.Revision, Status: AgentRunStatusWaitingForEvent,
-		WakeCondition: &WakeCondition{Type: "user_message", Reference: "user:next_message"},
-		Output:        map[string]interface{}{"summary": "Who is the report for?"}, AppliedTurn: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	child, _ = askUserParked(t, f.store, claimAskUserRun(t, f.store, child, "actor-worker"), "actor-worker", "Who is the report for?")
 	if _, err = f.scheduler.ReconcileScope(t.Context(), root.Scope); err != nil {
 		t.Fatal(err)
 	}

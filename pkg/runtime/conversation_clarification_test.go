@@ -9,10 +9,7 @@ import (
 	"time"
 )
 
-type clarificationStore interface {
-	KernelStore
-	ConversationStore
-}
+type clarificationStore = askUserTestStore
 type clarificationFixture struct {
 	store        clarificationStore
 	service      *ConversationService
@@ -53,14 +50,7 @@ func newClarificationFixture(t *testing.T, store clarificationStore, scopeID str
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, _, err = activity.TransitionRun(ctx, scope, child.ID, RunTransitionRequest{ExpectedRevision: child.Revision, Status: AgentRunStatusRunning})
-	if err != nil {
-		t.Fatal(err)
-	}
-	child, _, err = activity.TransitionRun(ctx, scope, child.ID, RunTransitionRequest{ExpectedRevision: child.Revision, Status: AgentRunStatusWaitingForEvent, WakeCondition: &WakeCondition{Type: "user_message", Reference: "user:next_message"}, Output: map[string]interface{}{"summary": "Which audience should I use?"}, AppliedTurn: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
+	child, _ = askUserParked(t, store, claimAskUserRun(t, store, child, "child-worker"), "child-worker", "Which audience should I use?")
 	return &clarificationFixture{store, service, scheduler, conversation, root, child, trigger}
 }
 func (f *clarificationFixture) question(t *testing.T) *ChannelMessage {
@@ -147,12 +137,11 @@ func TestConversationClarificationRoundTrip(t *testing.T) {
 func TestConversationClarificationTargetsOnlyTheRepliedTask(t *testing.T) {
 	f := newClarificationFixture(t, NewMemoryStore(), "targets")
 	q := f.question(t)
-	other := cloneAgentRun(f.child)
-	other.ID = "other-child"
-	other.Revision = 1
-	if err := f.store.CreateAgentRun(t.Context(), other); err != nil {
+	other, err := NewPortfolioService(f.store).CreateAgentRun(t.Context(), CreateAgentRunRequest{Scope: f.root.Scope, Kind: RunKindAgentWork, Owner: f.root.Owner, AssignedAgentID: "writer", ParentRunID: f.root.ID, Goal: "Draft the outline", Source: RunSourceRequest})
+	if err != nil {
 		t.Fatal(err)
 	}
+	other, _ = askUserParked(t, f.store, claimAskUserRun(t, f.store, other, "other-worker"), "other-worker", "Which audience should I use?")
 	if _, err := f.scheduler.ReconcileScope(t.Context(), f.root.Scope); err != nil {
 		t.Fatal(err)
 	}
@@ -198,21 +187,8 @@ func TestConversationClarificationRecoversAfterWakeBeforeAcknowledgment(t *testi
 		t.Fatalf("recovered=%#v %v %v", result, replayed, err)
 	}
 }
-func TestConversationWorkInputPreservesOriginalRequestAndOwnerBoundary(t *testing.T) {
+func TestConversationWorkOriginKeepsOwnerBoundary(t *testing.T) {
 	f := newClarificationFixture(t, NewMemoryStore(), "context")
-	runner := conversationWorkTurnRunner{runs: f.store, conversations: f.store, inner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-		source, _ := input.Run.Context["conversationRequest"].(map[string]interface{})
-		if source["content"] != f.trigger.Content {
-			t.Fatalf("original length constraint lost: %#v", source)
-		}
-		return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted}, nil
-	})}
-	if _, err := runner.RunTurn(t.Context(), TurnExecutionContext{Run: f.child}); err != nil {
-		t.Fatal(err)
-	}
-	if f.child.Context["conversationRequest"] != nil {
-		t.Fatal("request-time input mutated stored child")
-	}
 	other := cloneAgentRun(f.child)
 	other.Owner.ID = "another-agent"
 	_, conversation, _, err := conversationWorkOrigin(t.Context(), f.store, f.store, other)
@@ -243,7 +219,7 @@ func TestConversationWorkInputPreservesOriginalRequestAndOwnerBoundary(t *testin
 		t.Fatal(err)
 	}
 	msgs, _ := f.service.ListChannelMessages(t.Context(), ChannelMessageFilter{Scope: f.root.Scope, ConversationID: f.conversation.ID})
-	if len(msgs) != 1 {
+	if len(msgs) != 2 { // the trigger and the earlier ask_user question
 		t.Fatal("external event projected as user question")
 	}
 }

@@ -245,10 +245,9 @@ func TestDeferredWorkflowContinuesThroughNormalAgentWorkerAndDurableReporting(t 
 					t.Fatalf("completed=%#v hosted turns=%d reporting attempts=%d error=%v", completed, len(host.requests), outage.attempts, err)
 				}
 				request := host.requests[0]
-				origin, _ := request.InputContext["conversationRequest"].(map[string]interface{})
 				trigger, err := store.(ConversationStore).GetChannelMessage(ctx, work.Scope, conversationID, triggerID)
-				if err != nil || trigger == nil || request.RunID != work.ID || request.AgentID != work.AssignedAgentID || request.DefinitionVersion != "2.0.0" || request.Goal != args["goal"] || origin["conversationId"] != conversationID || origin["messageId"] != triggerID || origin["content"] != trigger.Content || !reflect.DeepEqual(request.ContinuationCheckpoint[runEventWaitCheckpointKey], resolved.Checkpoint[runEventWaitCheckpointKey]) {
-					t.Fatalf("canonical continuation run=%s agent=%s definition=%s origin=%#v checkpoint=%#v trigger=%#v error=%v", request.RunID, request.AgentID, request.DefinitionVersion, origin, request.ContinuationCheckpoint, trigger, err)
+				if err != nil || trigger == nil || request.RunID != work.ID || request.AgentID != work.AssignedAgentID || request.DefinitionVersion != "2.0.0" || request.Goal != args["goal"] || !reflect.DeepEqual(request.ContinuationCheckpoint[runEventWaitCheckpointKey], resolved.Checkpoint[runEventWaitCheckpointKey]) {
+					t.Fatalf("canonical continuation run=%s agent=%s definition=%s checkpoint=%#v trigger=%#v error=%v", request.RunID, request.AgentID, request.DefinitionVersion, request.ContinuationCheckpoint, trigger, err)
 				}
 				currentTools := false
 				for _, action := range request.Actions {

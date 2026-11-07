@@ -149,30 +149,28 @@ func conversationClarificationMatches(run *AgentRun, trigger, question, answer *
 	return false
 }
 
-// Bind host-owned pending purposes to the exact question-producing turn. Legacy
-// Runs may have only an applied sequence, so omit the ID when no matching turn
-// is retained; consumers requiring purpose-specific consent must fail closed.
-func conversationClarificationTurnID(ctx context.Context, runs PortfolioStore, run *AgentRun, question *ChannelMessage) (string, error) {
-	turns, ok := runs.(AgentTurnStore)
-	if !ok || run.LastAppliedTurn < 1 {
-		return "", nil
+// conversationQuestionEntry returns the ask_user entry a question-waiting Run
+// is parked on (run.WakeCondition.Reference), or nil when the reference does
+// not name an open ask_user entry of this Run. The answer receipt binds to
+// that entry's step (QuestionTurnID = step id, QuestionTurnSequence = step).
+func conversationQuestionEntry(ctx context.Context, runs PortfolioStore, run *AgentRun) (*SessionEntry, error) {
+	if !isConversationQuestionWait(run) {
+		return nil, nil
 	}
-	items, err := turns.ListAgentTurns(ctx, AgentTurnFilter{Scope: run.Scope, RunID: run.ID, AfterSequence: run.LastAppliedTurn - 1, Limit: 1})
+	sessions, ok := runs.(AgentSessionStore)
+	if !ok {
+		return nil, nil
+	}
+	entry, err := sessions.GetSessionEntry(ctx, run.Scope, run.WakeCondition.Reference)
+	if errors.Is(err, ErrSessionEntryNotFound) {
+		return nil, nil
+	}
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if len(items) == 0 {
-		return "", nil
+	if entry == nil || entry.RunID != run.ID || entry.Type != SessionEntryTool || entry.State != ToolEntryAwaitingEvent ||
+		entry.StepID == "" || entry.Step < 1 || askUserQuestion(entry) == "" {
+		return nil, nil
 	}
-	turn := items[0]
-	if turn == nil || turn.Scope != run.Scope || turn.RunID != run.ID || turn.Sequence != run.LastAppliedTurn ||
-		turn.Status != AgentTurnStatusCompleted || turn.NextRunStatus != AgentRunStatusWaitingForEvent ||
-		turn.WakeCondition == nil || turn.WakeCondition.Type != "user_message" {
-		return "", nil
-	}
-	content, _ := turn.RunOutput["summary"].(string)
-	if strings.TrimSpace(content) != question.Content {
-		return "", nil
-	}
-	return turn.ID, nil
+	return entry, nil
 }
