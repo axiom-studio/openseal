@@ -627,10 +627,10 @@ func (f *loopFixture) driveToRest(runID string, maxClaims int) *AgentRun {
 
 // binding is the claim's TurnRunnerBinding, built the way the worker's
 // resolver will: the model producer over the catalog preparer, the run-start
-// preparer (plus chat catch-up for chats), the claim tool executor, the
-// control authority, the kernel compactor (with its budget, as the catalog
-// resolver sets it), and the conversation final handler for chats. A first
-// claim opens the Run's session.
+// preparer, the claim tool executor, the control authority, the kernel
+// compactor (with its budget, as the catalog resolver sets it), and for chats
+// the conversation loop seams (bindConversationLoop). A first claim opens the
+// Run's session.
 func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 	f.t.Helper()
 	sessions := f.store.(AgentSessionStore)
@@ -676,8 +676,11 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 		Tools:     f.dispatcher.ForClaim(LoopToolClaim{Workspace: authority}),
 	}
 	if chat {
-		binding.Preparers = append(binding.Preparers, &kitChatPreparer{f: f})
-		binding.Final = newConversationFinalHandler(f.runner, sessions, f.store, f.store)
+		// The production chat seams: catch-up preparer, read receipts, tool
+		// check, artifact receipts and the observed final delivery.
+		if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: sessions, Actions: f.store, Activity: f.store}); err != nil {
+			f.t.Fatalf("bind conversation loop: %v", err)
+		}
 	}
 	return binding
 }
@@ -718,40 +721,6 @@ func (f *loopFixture) openSession(run *AgentRun, conversationID string) *AgentSe
 		f.t.Fatalf("create run session: %v", err)
 	}
 	return created.Session
-}
-
-// kitChatPreparer is the chat catch-up preparer: the visible channel messages
-// up to the trigger (and any steering the step consumes) become user entries
-// in the step's context append, through the production catch-up.
-type kitChatPreparer struct{ f *loopFixture }
-
-func (p *kitChatPreparer) BeforeStep(ctx context.Context, in StepInput, steering SteeringPlan) (*StepContextAppend, error) {
-	f := p.f
-	run, session := in.Run, in.Session
-	if run == nil || session == nil {
-		return nil, nil
-	}
-	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
-	triggerID, _ := run.Context[conversationRunContextTriggerID].(string)
-	conversation, err := f.convs.GetConversation(ctx, run.Scope, conversationID)
-	if err != nil {
-		return nil, err
-	}
-	trigger, err := f.convs.GetChannelMessage(ctx, run.Scope, conversationID, triggerID)
-	if err != nil {
-		return nil, err
-	}
-	catchUp := &conversationCatchUp{conversations: f.convs, runs: f.store}
-	seed := in.Path == nil || len(in.Path.Entries) == 0
-	result, err := catchUp.collect(ctx, catchUpRequest{
-		Run: run, Session: session, Conversation: conversation, Trigger: trigger,
-		Viewer:  ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: run.AssignedAgentID}},
-		Through: max(trigger.Sequence, steering.ThroughMessageSequence), Seed: seed, Step: in.Step.Sequence,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result.stepContextAppend(session), nil
 }
 
 // decide resolves the Run's single pending approval as ana.
