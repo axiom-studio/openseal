@@ -2,106 +2,144 @@ package runtime
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
 
-func TestRunCommandsCancelPausedApprovalAtomically(t *testing.T) {
+// Paused approvals on the run loop (12-tests §5.2,
+// TestLoopPausedApprovalCancelAndExpiry): an operator pauses a Run parked
+// on an approval; canceling closes the approval, its call and the tool entry
+// together, and an expiry while paused is the tool result once resumed.
+
+func (f *loopFixture) commandRun(runID string, kind AgentRunCommandKind) *AgentRun {
+	f.t.Helper()
+	current := f.mustRun(runID)
+	commands := NewRunCommandService(f.chats)
+	commands.now = f.clock.Now
+	result, err := commands.CommandAgentRun(f.ctx, AgentRunCommandRequest{
+		Scope: f.scope, RunID: runID, ExpectedRevision: current.Revision, Kind: kind,
+		Actor: ActivityActor{Type: "user", ID: loopFixtureUser},
+	})
+	if err != nil {
+		f.t.Fatalf("%s run: %v", kind, err)
+	}
+	return result.Run
+}
+
+// expireApproval lets the Run's single approval run out and resolves it the
+// way the approval sweep does.
+func (f *loopFixture) expireApproval(runID string) *ApprovalResolutionResult {
+	f.t.Helper()
+	approvals := f.approvals(runID)
+	if len(approvals) != 1 {
+		f.t.Fatalf("approvals = %d, want 1", len(approvals))
+	}
+	approval := approvals[0]
+	f.clock.Advance(approval.ExpiresAt.Sub(f.clock.Now()) + time.Second)
+	result, err := f.approve.ResolveTimeout(f.ctx, f.scope, approval.ID, approval.Revision, approval.ID)
+	if err != nil {
+		f.t.Fatalf("expire approval: %v", err)
+	}
+	return result
+}
+
+func TestLoopPausedApprovalCancelAndExpiry(t *testing.T) {
 	for _, expired := range []bool{false, true} {
-		name := "pending"
+		name := "cancel_pending"
 		if expired {
-			name = "expired"
+			name = "cancel_expired"
 		}
 		t.Run(name, func(t *testing.T) {
-			forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-				now := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
-				proposal := createApprovalForStore(t, store, now)
-				commands := NewRunCommandService(store)
-				commands.now = func() time.Time { return now.Add(2 * time.Second) }
-				paused, err := commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{
-					Scope: proposal.Run.Scope, RunID: proposal.Run.ID, ExpectedRevision: proposal.Run.Revision,
-					Kind: AgentRunCommandPause, Actor: ActivityActor{Type: "user", ID: "operator"},
-				})
-				if err != nil {
-					t.Fatal(err)
+			eachStore(t, "loop_paused_approval_"+name, func(t *testing.T, store KernelStore) {
+				f := newApprovalScenario(t, store)
+				_, run := f.parkedApproval()
+				approval, call := assertParkedOnApproval(t, f, run)
+				paused := f.commandRun(run.ID, AgentRunCommandPause)
+				if paused.Status != AgentRunStatusPaused || paused.PausedFrom != AgentRunStatusWaitingForApproval || paused.PausedWakeCondition == nil {
+					t.Fatalf("paused = %#v", paused)
 				}
 				if expired {
-					coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-					coordinator.now = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
-					result, err := coordinator.ResolveTimeout(t.Context(), proposal.Approval.Scope, proposal.Approval.ID, proposal.Approval.Revision, "expire-paused-approval")
-					if err != nil {
-						t.Fatal(err)
+					result := f.expireApproval(run.ID)
+					if result.Run == nil || result.Run.Status != AgentRunStatusPaused || result.Run.PausedFrom != AgentRunStatusQueued || result.Run.PausedWakeCondition != nil {
+						t.Fatalf("expiry while paused = %#v", result.Run)
 					}
-					paused.Run = result.Run
 				}
-				canceled, err := commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{
-					Scope: paused.Run.Scope, RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision,
-					Kind: AgentRunCommandCancel, Actor: ActivityActor{Type: "user", ID: "operator"},
-				})
+				canceled := f.commandRun(run.ID, AgentRunCommandCancel)
+				if canceled.Status != AgentRunStatusCanceled || canceled.PausedWakeCondition != nil || canceled.PausedFrom != "" || len(canceled.BudgetReservations) != 0 {
+					t.Fatalf("canceled = %#v", canceled)
+				}
+				gotApproval, err := f.raw.GetApproval(f.ctx, f.scope, approval.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if canceled.Run.Status != AgentRunStatusCanceled || canceled.Run.PausedWakeCondition != nil || canceled.Run.PausedFrom != "" || len(canceled.Run.BudgetReservations) != 0 {
-					t.Fatalf("paused approval cancellation left a continuation or reservation: %#v", canceled.Run)
-				}
-				approval, err := store.GetApproval(t.Context(), proposal.Approval.Scope, proposal.Approval.ID)
+				gotCall, err := f.raw.GetActionCall(f.ctx, f.scope, call.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				call, err := store.GetActionCall(t.Context(), proposal.Call.Scope, proposal.Call.ID)
-				if err != nil {
-					t.Fatal(err)
+				if !expired && (gotApproval.Status != ApprovalStatusCanceled || gotCall.Status != ActionCallStatusCanceled || gotCall.CompletedAt == nil) {
+					t.Fatalf("pending approval/call did not close together: %s / %s", gotApproval.Status, gotCall.Status)
 				}
-				if !expired && (approval.Status != ApprovalStatusCanceled || call.Status != ActionCallStatusCanceled || call.CompletedAt == nil) {
-					t.Fatalf("pending approval/call did not close atomically: approval=%#v call=%#v", approval, call)
+				if expired && (gotApproval.Status != ApprovalStatusExpired || gotCall.Status != ActionCallStatusDenied) {
+					t.Fatalf("cancel rewrote the expired approval: %s / %s", gotApproval.Status, gotCall.Status)
 				}
-				if expired && (approval.Status != ApprovalStatusExpired || call.Status != ActionCallStatusDenied) {
-					t.Fatalf("cancellation rewrote expired approval history: approval=%#v call=%#v", approval, call)
+				// The tool entry is closed: no later Run of the chat sees an
+				// unanswered call.
+				tools := f.toolEntries(run.ID)
+				if len(tools) != 1 || !tools[0].State.Terminal() || tools[0].State == ToolEntryCompleted {
+					t.Fatalf("tool entry after cancel = %v", f.entryTypes(run.ID))
 				}
-				coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-				coordinator.now = func() time.Time { return now.Add(3 * time.Second) }
-				if _, err := coordinator.Resolve(t.Context(), ResolveApprovalRequest{Scope: approval.Scope, ApprovalID: approval.ID, ExpectedRevision: approval.Revision, DecisionID: "late-approval", Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "alice"}}); !errors.Is(err, ErrApprovalResolved) {
-					t.Fatalf("canceled approval accepted a late decision: %v", err)
+				if _, err := f.approve.Resolve(f.ctx, ResolveApprovalRequest{
+					Scope: f.scope, ApprovalID: approval.ID, ExpectedRevision: gotApproval.Revision, DecisionID: "late-approval",
+					Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: loopFixtureUser},
+				}); !errors.Is(err, ErrApprovalResolved) {
+					t.Fatalf("closed approval accepted a late decision: %v", err)
 				}
-				assertActionLifecycleUnclaimable(t, store, call, now.Add(2*time.Hour))
-				if busy, err := store.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(t.Context(), SkillRuntimeUsageFilter{Scope: call.Scope, DeploymentID: call.DeploymentID, BindingID: call.BindingID, SkillID: call.SkillID, SkillVersion: call.SkillVersion}); err != nil || busy {
-					t.Fatalf("terminal approval retained runtime usage: %v %v", busy, err)
+				assertActionLifecycleUnclaimable(t, f.raw, gotCall, f.clock.Now().Add(2*time.Hour))
+				if busy, err := f.raw.(SkillRuntimeUsageStore).HasSkillRuntimeUsage(f.ctx, SkillRuntimeUsageFilter{
+					Scope: f.scope, DeploymentID: gotCall.DeploymentID, BindingID: gotCall.BindingID, SkillID: gotCall.SkillID, SkillVersion: gotCall.SkillVersion,
+				}); err != nil || busy {
+					t.Fatalf("closed approval kept runtime usage: %v %v", busy, err)
+				}
+				if f.dispatch.count("") != 0 {
+					t.Fatal("a canceled call was dispatched")
 				}
 			})
 		})
 	}
-}
 
-func TestPausedApprovalExpiryResumesWithTerminalOutcome(t *testing.T) {
-	forActionLifecycleStores(t, func(t *testing.T, store KernelStore) {
-		now := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
-		proposal := createApprovalForStoreWithTimeout(t, store, now, ApprovalTimeoutApprove)
-		commands := NewRunCommandService(store)
-		commands.now = func() time.Time { return now.Add(2 * time.Second) }
-		paused, err := commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: proposal.Run.Scope, RunID: proposal.Run.ID, ExpectedRevision: proposal.Run.Revision, Kind: AgentRunCommandPause, Actor: ActivityActor{Type: "user", ID: "operator"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		coordinator := NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
-		coordinator.now = func() time.Time { return proposal.Approval.ExpiresAt.Add(time.Second) }
-		result, err := coordinator.ResolveTimeout(t.Context(), proposal.Approval.Scope, proposal.Approval.ID, proposal.Approval.Revision, "paused-expiry")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied || result.Run.Status != AgentRunStatusPaused || result.Run.PausedFrom != AgentRunStatusQueued || result.Run.PausedWakeCondition != nil || result.Run.WakeCondition != nil {
-			t.Fatalf("expiry did not close the paused dependency: %#v", result)
-		}
-		if paused.Run.Checkpoint["lastAction"] != nil {
-			t.Fatal("fixture already contained a terminal action")
-		}
-		last, _ := result.Run.Checkpoint["lastAction"].(map[string]interface{})
-		if last["actionCallId"] != proposal.Call.ID || last["status"] != string(ActionCallStatusDenied) || len(result.Run.BudgetReservations) != 0 {
-			t.Fatalf("paused expiry did not retain the denied result: %#v", result.Run)
-		}
-		resumed, err := commands.CommandAgentRun(t.Context(), AgentRunCommandRequest{Scope: result.Run.Scope, RunID: result.Run.ID, ExpectedRevision: result.Run.Revision, Kind: AgentRunCommandResume, Actor: ActivityActor{Type: "user", ID: "operator"}})
-		if err != nil || resumed.Run.Status != AgentRunStatusQueued || resumed.Run.WakeCondition != nil || resumed.Run.PausedWakeCondition != nil {
-			t.Fatalf("resume restored an expired approval dependency: %#v, %v", resumed, err)
-		}
-		assertActionLifecycleUnclaimable(t, store, result.Call, now.Add(2*time.Hour))
+	t.Run("expiry_resumes_with_outcome", func(t *testing.T) {
+		eachStore(t, "loop_paused_approval_expiry", func(t *testing.T, store KernelStore) {
+			f := newApprovalScenario(t, store)
+			conversation, run := f.parkedApproval()
+			f.commandRun(run.ID, AgentRunCommandPause)
+			result := f.expireApproval(run.ID)
+			if result.Approval.Status != ApprovalStatusExpired || result.Call.Status != ActionCallStatusDenied ||
+				result.Run.Status != AgentRunStatusPaused || result.Run.PausedFrom != AgentRunStatusQueued ||
+				result.Run.PausedWakeCondition != nil || result.Run.WakeCondition != nil || len(result.Run.BudgetReservations) != 0 {
+				t.Fatalf("expiry did not close the paused wait: %#v", result)
+			}
+			// Paused: nothing claims it.
+			if claimed, err := f.store.ClaimNextAgentRun(f.ctx, AgentRunClaim{Scope: f.scope, WorkerID: f.workerID, Now: f.clock.Now(), LeaseDuration: loopFixtureLease, AgingInterval: time.Minute}); err != nil || claimed != nil {
+				t.Fatalf("claimed a paused Run: %#v, %v", claimed, err)
+			}
+			resumed := f.commandRun(run.ID, AgentRunCommandResume)
+			if resumed.Status != AgentRunStatusQueued || resumed.WakeCondition != nil || resumed.PausedWakeCondition != nil {
+				t.Fatalf("resume restored the expired wait: %#v", resumed)
+			}
+			done := f.driveToRest(run.ID, 3)
+			f.mustStatus(done, AgentRunStatusCompleted)
+			tool := f.toolEntries(run.ID)[0]
+			if tool.State != ToolEntryError || !strings.Contains(toolEntryText(tool), string(ToolResultExpired)) {
+				t.Fatalf("tool entry = %s %q", tool.State, toolEntryText(tool))
+			}
+			if replies := f.agentReplies(conversation.ID); len(replies) != 1 || !strings.HasPrefix(replies[0], "Not closed: ") {
+				t.Fatalf("replies = %q", replies)
+			}
+			if f.dispatch.count("update_status") != 0 {
+				t.Fatal("an expired call was dispatched")
+			}
+			assertActionLifecycleUnclaimable(t, f.raw, result.Call, f.clock.Now().Add(2*time.Hour))
+		})
 	})
 }

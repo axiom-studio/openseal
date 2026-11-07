@@ -250,13 +250,23 @@ func (s *PostgresStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentR
 			return err
 		}
 		if affected != 1 {
-			if lease != nil && !s.agentRunActingUserChanged(ctx, tx, run, expectedRevision) {
+			if lease != nil && !s.agentRunRevisionMoved(ctx, tx, run, expectedRevision) && !s.agentRunActingUserChanged(ctx, tx, run, expectedRevision) {
 				return ErrLeaseLost
 			}
 			return ErrRevisionConflict
 		}
 		return s.syncPostgresRunEventWaitTx(ctx, tx, run)
 	})
+}
+
+// agentRunRevisionMoved reports whether a refused leased update was refused
+// because a concurrent write moved the run's revision (an approval decided
+// while the Run holds it): that is a revision conflict, not a lost lease.
+func (s *PostgresStore) agentRunRevisionMoved(ctx context.Context, tx *sql.Tx, run *AgentRun, expectedRevision int64) bool {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `SELECT revision FROM `+s.table("agent_runs")+`
+		WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`, run.Scope.Kind, run.Scope.ID, run.ID).Scan(&revision)
+	return err == nil && revision != expectedRevision
 }
 
 // agentRunActingUserChanged reports whether a refused leased update was refused

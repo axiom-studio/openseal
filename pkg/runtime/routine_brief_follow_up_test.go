@@ -1,201 +1,211 @@
 package runtime
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/axiom-studio/openseal/pkg/capability"
-	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-type routineBriefFixture struct {
-	*conversationFollowUpFixture
-	catalog *skill.Catalog
-	clock   time.Time
+// A chat message that answers a pending approval replaces it (the approval
+// `superseded` row of 12-tests §5.2). On the loop the outcome is the governed
+// tool result and the message a user entry of the same Run; the model then
+// decides whether to propose again. These port the old routine-brief
+// follow-up tests, whose brief-specific instructions the model now reads
+// from the tool result instead.
+
+// supersedeRules re-proposes with the change the replacing message asks for.
+func supersedeRules() []*modelRule {
+	return []*modelRule{
+		{name: "revise", when: func(v stepView) bool {
+			content, isError, ok := v.ToolResult(kitGovernedTool(v, "update_status"))
+			return ok && isError && strings.Contains(content, string(ToolResultSuperseded)) && strings.Contains(strings.Join(v.UserTexts(), "|"), "wontfix")
+		}, reply: func(v stepView) ModelStepResult {
+			return act("Using wontfix.", reviewedCall(kitGovernedTool(v, "update_status"), map[string]any{"id": "6815", "status": "wontfix"}, "Mark issue 6815 wontfix"))
+		}},
+	}
 }
 
-func newRoutineBriefFixture(t *testing.T) *routineBriefFixture {
+func newSupersedeScenario(t *testing.T, store KernelStore) *loopFixture {
 	t.Helper()
-	f := newConversationFollowUpFixture(t)
-	catalog := skill.NewCatalog()
-	scope := capability.ScopeReference{Kind: f.conversation.Scope.Kind, ID: f.conversation.Scope.ID}
-	shop := &skill.Definition{
-		ID: "shop", Version: "1.0.0", Name: "Shop", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://shop.invalid"},
-		Actions: map[string]skill.Action{"pay": {Name: "pay", Description: "Pay for the checkout", Risk: skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite,
-			Idempotency: skill.IdempotencySupported, ExternalOperationPolicy: skill.ExternalOperationForbidden, InputSchema: map[string]interface{}{"type": "object"}}},
-	}
-	for _, definition := range []*skill.Definition{RunbookManagementSkill(), shop} {
-		if err := catalog.Register(t.Context(), definition); err != nil {
+	return newLoopFixture(t, store, withApprovalForWrites(), withRules(supersedeRules()...), withRules(approvalScenarioRules()...))
+}
+
+func TestLoopMessageDuringParkedApprovalSupersedesIt(t *testing.T) {
+	eachStore(t, "loop_supersede_parked", func(t *testing.T, store KernelStore) {
+		f := newSupersedeScenario(t, store)
+		conversation, run := f.parkedApproval()
+		approval, call := assertParkedOnApproval(t, f, run)
+
+		f.clock.Advance(time.Second)
+		message := f.postUser(conversation.ID, loopFixtureUser, "make it wontfix instead")
+		if runs := f.conversationRuns(conversation.ID); len(runs) != 1 {
+			t.Fatalf("the message started another Run: %d Runs", len(runs))
+		}
+		queued := f.mustRun(run.ID)
+		if queued.Status != AgentRunStatusQueued || queued.WakeCondition != nil {
+			t.Fatalf("Run did not resume with the message: %s %#v", queued.Status, queued.WakeCondition)
+		}
+		got, err := f.raw.GetApproval(f.ctx, f.scope, approval.ID)
+		if err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := catalog.Bind(t.Context(), &skill.Binding{ID: "routines", Revision: 1, Scope: scope, DeploymentID: "agent-42", SkillID: RunbookManagementSkillID, SkillVersion: RunbookManagementSkillVersion, AllowedActions: []string{RunbookActionCreateTask}, MaximumRisk: skill.RiskLevelWrite}); err != nil {
-		t.Fatal(err)
-	}
-	if err := catalog.Bind(t.Context(), &skill.Binding{ID: "shop", Revision: 1, Scope: scope, DeploymentID: "agent-42", SkillID: "shop", SkillVersion: "1.0.0", AllowedActions: []string{"pay"}, MaximumRisk: skill.RiskLevelWrite}); err != nil {
-		t.Fatal(err)
-	}
-	return &routineBriefFixture{conversationFollowUpFixture: f, catalog: catalog, clock: time.Now().UTC().Add(-time.Hour)}
-}
-
-func routineBriefArguments(timezone string) map[string]interface{} {
-	return map[string]interface{}{
-		"title": "Morning weather", "goal": "Read today's forecast and post a short summary.", "cron": "0 0 8 * * *", "timezone": timezone,
-		"brief": map[string]interface{}{"summary": "Every day at 8:00 AM, reads the forecast and posts a summary here.", "grants": []interface{}{}},
-	}
-}
-
-// propose claims the Run and proposes one action that waits for approval.
-// The clock runs in the past so approvals predate messages posted later.
-func (f *routineBriefFixture) propose(t *testing.T, run *AgentRun, skillID, action string, args map[string]interface{}) *ActionProposalResult {
-	t.Helper()
-	f.clock = f.clock.Add(time.Minute)
-	claimed, err := f.store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: "agent-42", Now: time.Now().Add(time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-	if err != nil || claimed == nil || claimed.ID != run.ID {
-		t.Fatalf("claim = %#v, %v", claimed, err)
-	}
-	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "Review", EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "user"}}, ApprovalTTL: 24 * time.Hour}, nil
-	}))
-	now := f.clock
-	coordinator.now = func() time.Time { return now }
-	version := RunbookManagementSkillVersion
-	if skillID != RunbookManagementSkillID {
-		version = "1.0.0"
-	}
-	proposal, err := coordinator.Propose(t.Context(), ProposeActionRequest{
-		Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "agent-42", SkillID: skillID, SkillVersion: version,
-		Action: action, Arguments: args, IdempotencyKey: fmt.Sprintf("%s-%d", action, now.UnixNano()), Summary: "Review " + action,
-		Actor: ActivityActor{Type: "agent", ID: "agent-42"},
-	})
-	if err != nil || proposal.Approval == nil {
-		t.Fatalf("proposal = %#v, %v", proposal, err)
-	}
-	return proposal
-}
-
-func (f *routineBriefFixture) approval(t *testing.T, id string) *ApprovalCheckpoint {
-	t.Helper()
-	approval, err := f.store.GetApproval(t.Context(), f.conversation.Scope, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return approval
-}
-
-func briefRunWaiting(t *testing.T, f *routineBriefFixture, skillID, action string, args map[string]interface{}) (*AgentRun, *ActionProposalResult) {
-	t.Helper()
-	run := f.schedule(t, f.post(t, "user", "Every morning at 8, tell me the weather"))
-	proposal := f.propose(t, run, skillID, action, args)
-	run = f.run(t, run.ID)
-	if run.Status != AgentRunStatusWaitingForApproval || run.WakeCondition == nil || run.WakeCondition.Reference != proposal.Approval.ID {
-		t.Fatalf("Run is not waiting on the approval: %#v", run)
-	}
-	return run, proposal
-}
-
-// Replays and a second quick message converge on one decision; a replay
-// never closes the revised brief proposed after the message.
-func TestRoutineBriefSupersedeIsIdempotent(t *testing.T) {
-	f := newRoutineBriefFixture(t)
-	run, proposal := briefRunWaiting(t, f, RunbookManagementSkillID, RunbookActionCreateTask, routineBriefArguments("Europe/London"))
-	first := f.post(t, "user", "08:00 IST")
-	second := f.post(t, "user", "and include the humidity")
-	for _, message := range []*ChannelMessage{first, second, first} {
-		if delivered := f.schedule(t, message); delivered.ID != run.ID {
-			t.Fatalf("message %s started a parallel Run", message.ID)
+		if got.Status != ApprovalStatusSuperseded || got.DecisionReason != ApprovalSupersededReason || got.DecisionBy == nil ||
+			*got.DecisionBy != ApprovalSupersededPrincipal || got.DecisionID != "superseded:"+got.ID || got.DecidedAt == nil ||
+			got.SupersededByMessageID != message.ID {
+			t.Fatalf("approval = %#v", got)
 		}
-	}
-	current := f.run(t, run.ID)
-	if len(f.conversationRuns(t)) != 1 || len(conversationRunFollowUps(current)) != 2 || current.Status != AgentRunStatusQueued {
-		t.Fatalf("Run = %#v", current)
-	}
-	resolved := f.approval(t, proposal.Approval.ID)
-	if resolved.Status != ApprovalStatusSuperseded || resolved.Revision != proposal.Approval.Revision+1 {
-		t.Fatalf("approval resolved more than once: %#v", resolved)
-	}
-	// A second supersede of the same approval is the same decision.
-	replay, err := f.scheduler.approvals.ResolveSupersededByMessage(t.Context(), run.Scope, resolved.ID, proposal.Approval.Revision, second.ID)
-	if err != nil || replay.Resolved {
-		t.Fatalf("replayed supersede = %#v, %v", replay, err)
-	}
+		if outcome := approvalOutcome(got.Status); outcome != "Replaced by your message" {
+			t.Fatalf("approval outcome = %q", outcome)
+		}
+		if current, err := f.raw.GetActionCall(f.ctx, f.scope, call.ID); err != nil || current.Status != ActionCallStatusDenied {
+			t.Fatalf("call = %#v, %v", current, err)
+		}
+		audited := false
+		for _, event := range f.events(run.ID, "approval.superseded") {
+			audited = audited || event.Actor == (ActivityActor{Type: "system", ID: "kernel"}) && event.CorrelationID == message.ID
+		}
+		if !audited {
+			t.Fatal("the supersede was not audited")
+		}
 
-	// The revised brief is newer than both messages; replaying them leaves it pending.
-	f.clock = time.Now().UTC()
-	revised := f.propose(t, current, RunbookManagementSkillID, RunbookActionCreateTask, routineBriefArguments("Asia/Kolkata"))
-	for _, message := range []*ChannelMessage{first, second} {
-		f.schedule(t, message)
-	}
-	if approval := f.approval(t, revised.Approval.ID); approval.Status != ApprovalStatusPending {
-		t.Fatalf("replay closed the revised brief: %#v", approval)
-	}
-	if current := f.run(t, run.ID); current.Status != AgentRunStatusWaitingForApproval {
-		t.Fatalf("revised brief Run = %#v", current)
-	}
-}
-
-// Other approvals keep waiting for their decision; the message stays a
-// follow-up for when the Run resumes.
-func TestMessageDuringAnyPendingApprovalReplacesIt(t *testing.T) {
-	f := newRoutineBriefFixture(t)
-	run, proposal := briefRunWaiting(t, f, "shop", "pay", map[string]interface{}{})
-	message := f.post(t, "user", "connect my Google account first")
-	delivered := f.schedule(t, message)
-	if delivered.ID != run.ID || delivered.Status != AgentRunStatusQueued || delivered.WakeCondition != nil || !conversationRunHasFollowUp(delivered, message.ID) {
-		t.Fatalf("Run did not resume with the message: %#v", delivered)
-	}
-	if approval := f.approval(t, proposal.Approval.ID); approval.Status != ApprovalStatusSuperseded || approval.DecisionReason != ApprovalSupersededReason {
-		t.Fatalf("payment approval = %#v", approval)
-	}
-	call, err := f.store.GetActionCall(t.Context(), run.Scope, proposal.Call.ID)
-	if err != nil || call.Status != ActionCallStatusDenied {
-		t.Fatalf("payment call = %#v, %v", call, err)
-	}
-
-	// The resumed Turn gets the general instruction, not the routine one.
-	var seen HostedTurnRequest
-	host := &failureExplanationTestHost{respond: func(request HostedTurnRequest) (*HostedTurnResponse, error) {
-		seen = request
-		return &HostedTurnResponse{APIVersion: HostedTurnAPIVersion, InvocationID: request.InvocationID, ModelProvider: "test", Model: "model", NextRunStatus: AgentRunStatusCompleted, OutputSummary: "ok", RunOutput: map[string]interface{}{"summary": "ok"}}, nil
-	}}
-	hosted, err := NewHostedTurnRunner(host, HostedTurnRunnerConfig{AgentID: "agent-42", DefinitionID: "agent", DefinitionVersion: "1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := hosted.RunTurn(t.Context(), TurnExecutionContext{Run: delivered, Turn: &AgentTurn{ID: "continue"}}); err != nil {
-		t.Fatal(err)
-	}
-	instructions := strings.Join(seen.SystemInstructions, "\n")
-	if !strings.Contains(instructions, SupersededApprovalInstruction) || strings.Contains(instructions, SupersededRoutineBriefInstruction) {
-		t.Fatalf("instructions = %s", instructions)
-	}
-}
-
-// A decision that lands first wins; the message is still delivered.
-func TestRoutineBriefDecidedConcurrentlyWithMessage(t *testing.T) {
-	f := newRoutineBriefFixture(t)
-	run, proposal := briefRunWaiting(t, f, RunbookManagementSkillID, RunbookActionCreateTask, routineBriefArguments("Europe/London"))
-	message := f.post(t, "user", "08:00 IST")
-	accepted, err := NewApprovalCoordinator(f.store, f.store, EligibleApprovalAuthorizer{}).Resolve(t.Context(), ResolveApprovalRequest{
-		Scope: run.Scope, ApprovalID: proposal.Approval.ID, ExpectedRevision: proposal.Approval.Revision, DecisionID: "accept",
-		Decision: ApprovalDecisionApprove, Principal: ApprovalPrincipal{Type: "user", ID: "user"},
+		// The resumed step sees the replaced call's result, then the
+		// message, and proposes the change: a new approval, nothing run.
+		reparked := f.driveToRest(run.ID, 3)
+		f.mustStatus(reparked, AgentRunStatusWaitingForApproval)
+		resumed := stepView{req: f.model.calls(ModelStepPurposeStep)[1]}
+		if got := resumed.describe(); !strings.Contains(got, "tool:"+kitGovernedTool(resumed, "update_status")+":error user") {
+			t.Fatalf("resumed step = %s", got)
+		}
+		if !strings.HasSuffix(resumed.LastUserText(), "\nmake it wontfix instead") {
+			t.Fatalf("resumed step last user = %q", resumed.LastUserText())
+		}
+		approvals := f.approvals(run.ID)
+		if len(approvals) != 2 || reparked.WakeCondition.Reference == approval.ID || f.dispatch.count("update_status") != 0 {
+			t.Fatalf("approvals = %d, wake = %#v, dispatch = %d", len(approvals), reparked.WakeCondition, f.dispatch.count("update_status"))
+		}
+		if replies := f.agentReplies(conversation.ID); len(replies) != 0 {
+			t.Fatalf("replies = %q", replies)
+		}
 	})
-	if err != nil || accepted.Approval.Status != ApprovalStatusApproved {
-		t.Fatalf("accept = %#v, %v", accepted, err)
-	}
-	// The kernel's supersede of the observed revision loses cleanly.
-	if _, err := f.scheduler.approvals.ResolveSupersededByMessage(t.Context(), run.Scope, proposal.Approval.ID, proposal.Approval.Revision, message.ID); !errors.Is(err, ErrApprovalResolved) {
-		t.Fatalf("late supersede error = %v", err)
-	}
-	delivered := f.schedule(t, message)
-	if delivered.ID != run.ID || delivered.Status != AgentRunStatusWaitingForDependency || !conversationRunHasFollowUp(delivered, message.ID) {
-		t.Fatalf("Run = %#v", delivered)
-	}
-	if approval := f.approval(t, proposal.Approval.ID); approval.Status != ApprovalStatusApproved || approval.DecisionID != "accept" {
-		t.Fatalf("approval = %#v", approval)
-	}
+}
+
+// Replays and a second quick message converge on one decision; replaying
+// them never closes the revised approval proposed after the messages.
+func TestLoopApprovalSupersedeIsIdempotent(t *testing.T) {
+	eachStore(t, "loop_supersede_idempotent", func(t *testing.T, store KernelStore) {
+		f := newSupersedeScenario(t, store)
+		conversation, run := f.parkedApproval()
+		approval := f.approvals(run.ID)[0]
+		f.clock.Advance(time.Second)
+		first := f.postUser(conversation.ID, loopFixtureUser, "make it wontfix instead")
+		second := f.postUser(conversation.ID, loopFixtureUser, "and mention the owner")
+		for _, message := range []*ChannelMessage{first, second, first} {
+			if _, _, err := f.scheduler.ScheduleMessage(f.ctx, f.scope, conversation.ID, message.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if runs := f.conversationRuns(conversation.ID); len(runs) != 1 {
+			t.Fatalf("runs = %d", len(runs))
+		}
+		if current := f.mustRun(run.ID); current.Status != AgentRunStatusQueued {
+			t.Fatalf("run = %s", current.Status)
+		}
+		resolved, err := f.raw.GetApproval(f.ctx, f.scope, approval.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolved.Status != ApprovalStatusSuperseded || resolved.Revision != approval.Revision+1 || resolved.SupersededByMessageID != first.ID {
+			t.Fatalf("approval resolved more than once: %#v", resolved)
+		}
+		replay, err := f.scheduler.approvals.ResolveSupersededByMessage(f.ctx, f.scope, resolved.ID, approval.Revision, second.ID)
+		if err != nil || replay.Resolved {
+			t.Fatalf("replayed supersede = %#v, %v", replay, err)
+		}
+
+		// One step reads both messages and proposes the revision.
+		f.clock.Advance(time.Second)
+		reparked := f.driveToRest(run.ID, 3)
+		f.mustStatus(reparked, AgentRunStatusWaitingForApproval)
+		resumed := stepView{req: f.model.calls(ModelStepPurposeStep)[1]}
+		if users := strings.Join(resumed.UserTexts(), "|"); !strings.Contains(users, "wontfix instead|[") || !strings.HasSuffix(users, "\nand mention the owner") {
+			t.Fatalf("resumed step users = %q", users)
+		}
+		revised := reparked.WakeCondition.Reference
+		for _, message := range []*ChannelMessage{first, second} {
+			if _, _, err := f.scheduler.ScheduleMessage(f.ctx, f.scope, conversation.ID, message.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if current, err := f.raw.GetApproval(f.ctx, f.scope, revised); err != nil || current.Status != ApprovalStatusPending {
+			t.Fatalf("replay closed the revised approval: %#v, %v", current, err)
+		}
+		f.mustStatus(f.mustRun(run.ID), AgentRunStatusWaitingForApproval)
+	})
+}
+
+// A decision that lands first wins; the message is still delivered to the
+// same Run and read after the call ran.
+func TestLoopApprovalDecidedConcurrentlyWithMessage(t *testing.T) {
+	eachStore(t, "loop_supersede_decided", func(t *testing.T, store KernelStore) {
+		f := newLoopFixture(t, store, withApprovalForWrites(), withRules(
+			&modelRule{name: "closed-and-asked", when: func(v stepView) bool { return strings.Contains(v.LastUserText(), "is it done") },
+				reply: func(v stepView) ModelStepResult {
+					if content, isError, ok := v.ToolResult(kitGovernedTool(v, "update_status")); !ok || isError {
+						return say("Not closed: " + content)
+					}
+					return say("Yes, 6815 is closed.")
+				}}),
+			withRules(approvalScenarioRules()...))
+		conversation, run := f.parkedApproval()
+		approval := f.approvals(run.ID)[0]
+		f.clock.Advance(time.Second)
+		message := f.post(conversation.ID, loopFixtureUser, "is it done?")
+		f.decide(run.ID, ApprovalDecisionApprove, "")
+		// The kernel's supersede of the observed revision loses cleanly.
+		if _, err := f.scheduler.approvals.ResolveSupersededByMessage(f.ctx, f.scope, approval.ID, approval.Revision, message.ID); !errors.Is(err, ErrApprovalResolved) {
+			t.Fatalf("late supersede error = %v", err)
+		}
+		if _, _, err := f.scheduler.ScheduleMessage(f.ctx, f.scope, conversation.ID, message.ID); err != nil {
+			t.Fatal(err)
+		}
+		if runs := f.conversationRuns(conversation.ID); len(runs) != 1 {
+			t.Fatalf("runs = %d", len(runs))
+		}
+		if current, err := f.raw.GetApproval(f.ctx, f.scope, approval.ID); err != nil || current.Status != ApprovalStatusApproved || current.DecisionID != "decision-"+approval.ID {
+			t.Fatalf("approval = %#v, %v", current, err)
+		}
+		done := f.driveToRest(run.ID, 3)
+		f.mustStatus(done, AgentRunStatusCompleted)
+		if f.dispatch.count("update_status") != 1 {
+			t.Fatalf("dispatch = %d", f.dispatch.count("update_status"))
+		}
+		if got := strings.Join(f.entryTypes(run.ID), ","); !strings.HasSuffix(got, "tool:completed,user,assistant") {
+			t.Fatalf("log = %s", got)
+		}
+		if replies := f.agentReplies(conversation.ID); len(replies) != 1 || replies[0] != "Yes, 6815 is closed." {
+			t.Fatalf("replies = %q", replies)
+		}
+	})
+}
+
+// Declining is a decision, not a failure: the model reads the rejection and
+// the Run completes without a failure explanation.
+func TestLoopDeclinedApprovalCompletesCalmly(t *testing.T) {
+	eachStore(t, "loop_supersede_declined", func(t *testing.T, store KernelStore) {
+		f := newApprovalScenario(t, store)
+		conversation, run := f.parkedApproval()
+		f.decide(run.ID, ApprovalDecisionReject, "")
+		done := f.driveToRest(run.ID, 3)
+		f.mustStatus(done, AgentRunStatusCompleted)
+		if done.FailureExplanation != nil {
+			t.Fatalf("a declined approval failed the Run: %#v", done.FailureExplanation)
+		}
+		if replies := f.agentReplies(conversation.ID); len(replies) != 1 || !strings.HasPrefix(replies[0], "Not closed: ") {
+			t.Fatalf("replies = %q", replies)
+		}
+		if f.dispatch.count("") != 0 {
+			t.Fatal("a declined call was dispatched")
+		}
+	})
 }
