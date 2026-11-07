@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -11,16 +12,89 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-func taskStartRequest(source *AgentRun, turn *AgentTurn) StartConversationTaskRequest {
+// taskStartRequest is the admission of the task a settled fixture Turn
+// proposed, made the way the conversation_start_task settle makes it: the
+// Turn's step gets its [assistant, conversation_start_task] entries in the
+// Run's lane session (after the triggering message) and the request names
+// that tool entry. Nothing is written once the Run no longer runs.
+func taskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn) StartConversationTaskRequest {
+	t.Helper()
 	p := turn.RequestedTask
-	return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: source.Revision, WorkerID: "worker", TurnID: turn.ID, AssignedAgentID: source.AssignedAgentID, TaskKey: p.TaskKey, Goal: p.Goal, Acknowledgment: p.Acknowledgment, Budget: cloneBudgetPolicy(p.Budget)}
+	sessions, ok := store.(taskStartFixtureStore)
+	if !ok || p == nil {
+		t.Fatalf("task start fixture needs a session store and a proposed task")
+	}
+	entryID, revision := ensureStartTaskToolEntry(t, sessions, source, turn, p.Goal, p.Acknowledgment)
+	return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: revision, WorkerID: "worker",
+		TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
+		Goal: p.Goal, Acknowledgment: p.Acknowledgment, Budget: cloneBudgetPolicy(p.Budget)}
+}
+
+const taskStartFixtureCallID = "call-start-task"
+
+type taskStartFixtureStore interface {
+	AgentSessionStore
+	conversationTaskSQLTestStore
+}
+
+func ensureStartTaskToolEntry(t *testing.T, store taskStartFixtureStore, source *AgentRun, turn *AgentTurn, goal, ack string) (string, int64) {
+	t.Helper()
+	ctx := t.Context()
+	entryID := SessionEntryID(source.SessionID, ToolEntryKey(turn.ID, taskStartFixtureCallID))
+	current, err := store.GetAgentRun(ctx, source.Scope, source.ID)
+	if err != nil || current == nil {
+		t.Fatalf("get source: %#v %v", current, err)
+	}
+	now := time.Now().UTC()
+	if current.Status != AgentRunStatusRunning || current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(now) {
+		return entryID, source.Revision
+	}
+	lease := AgentRunLeaseGuard{WorkerID: current.LeaseOwner, Now: now}
+	conversationID, _ := current.Context[conversationRunContextConversationID].(string)
+	triggerID, _ := current.Context[conversationRunContextTriggerID].(string)
+	thread, _ := current.Context["threadRootMessageId"].(string)
+	if current.SessionID == "" {
+		// A hand-built source Run: bind it to its lane session first.
+		current.SessionID = conversationLaneSessionID(current.Scope, conversationID, thread, current.AssignedAgentID)
+		current.UpdatedAt = now
+		current.Revision++
+		updateConversationTaskSQLRun(t, store, current, current.Revision-1)
+		entryID = SessionEntryID(current.SessionID, ToolEntryKey(turn.ID, taskStartFixtureCallID))
+	}
+	if _, err := store.OpenConversationAgentSession(ctx, OpenConversationAgentSessionRequest{Scope: current.Scope, ConversationID: conversationID,
+		ThreadRootID: thread, AgentID: current.AssignedAgentID, RunID: current.ID, Lease: lease, Now: now}); err != nil {
+		t.Fatalf("open lane session: %v", err)
+	}
+	args, _ := json.Marshal(map[string]string{"goal": goal, "acknowledgment": ack})
+	user := &SessionEntry{ID: SessionEntryID(current.SessionID, "message:"+triggerID), RunID: current.ID, Type: SessionEntryUser,
+		SourceKey: "message:" + triggerID, User: &UserEntry{Origin: UserEntryChannelMessage, Author: SessionAuthor{Type: "user", ID: "requester"},
+			Content: []ContentPart{testTextPart("Please do this in the background.")}, MessageID: triggerID}}
+	assistant := &SessionEntry{ID: SessionEntryID(current.SessionID, AssistantEntryKey(turn.ID)), RunID: current.ID, StepID: turn.ID, Step: turn.Sequence,
+		Type: SessionEntryAssistant, Assistant: &AssistantEntry{Provider: ModelStepProviderAnthropic, Model: "claude-x", StopReason: ModelStopToolCalls,
+			ToolCalls: []ModelToolCall{{ID: taskStartFixtureCallID, Name: string(ControlToolStartTask), Arguments: args}}}}
+	tool := &SessionEntry{ID: entryID, RunID: current.ID, StepID: turn.ID, Step: turn.Sequence, Type: SessionEntryTool, State: ToolEntryPending,
+		ToolCallID: taskStartFixtureCallID, Tool: &ToolEntry{Name: string(ControlToolStartTask), Arguments: args, SideEffect: ToolSideEffectWrite}}
+	if existing, err := store.GetSessionEntry(ctx, current.Scope, entryID); err == nil && existing != nil {
+		return entryID, current.Revision
+	}
+	for _, batch := range [][]*SessionEntry{{user}, {assistant, tool}} {
+		if _, err := store.AppendAgentSessionEntries(ctx, AppendAgentSessionEntriesRequest{Scope: current.Scope, SessionID: current.SessionID,
+			RunID: current.ID, Lease: &lease, Entries: batch, Now: now}); err != nil {
+			t.Fatalf("append start_task entries: %v", err)
+		}
+	}
+	reloaded, err := store.GetAgentRun(ctx, current.Scope, current.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entryID, reloaded.Revision
 }
 
 func TestConversationTaskAdmissionConcurrentReplayAndProvenance(t *testing.T) {
 	store := NewMemoryStore()
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
 	service := NewConversationTaskService(store)
-	req := taskStartRequest(source, turn)
+	req := taskStartRequest(t, store, source, turn)
 	var wg sync.WaitGroup
 	results := make(chan *ConversationTaskResult, 8)
 	errs := make(chan error, 8)
@@ -95,7 +169,7 @@ func TestConversationTaskAdmissionRejectsExpiredOrCancelledSource(t *testing.T) 
 				current.LeaseExpiresAt = &at
 				store.mu.Unlock()
 			}
-			if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(source, turn)); err == nil {
+			if _, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn)); err == nil {
 				t.Fatal("non-current source admitted work")
 			}
 			tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 10})
@@ -117,7 +191,7 @@ func TestConversationTaskTransfersOnlyRemainingSourceBudget(t *testing.T) {
 	source.Revision++
 	source.UpdatedAt = time.Now()
 	updateConversationTaskSQLRun(t, store, source, previous)
-	result, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(source, turn))
+	result, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +256,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(settled.Run, settled.Turn))
+			accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -232,7 +306,7 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *testing.T) {
 	store := NewMemoryStore()
 	source, turn, conversation, trigger := settledWorkerTaskFixture(t, store)
-	first, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(source, turn))
+	first, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +372,7 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(settled.Run, settled.Turn))
+	second, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
 	if err != nil {
 		t.Fatal(err)
 	}

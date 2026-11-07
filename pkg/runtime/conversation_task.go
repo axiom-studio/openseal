@@ -6,8 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
-	"slices"
 	"strings"
 	"time"
 
@@ -254,11 +254,14 @@ type StartConversationTaskRequest struct {
 	ExpectedSourceRevision int64
 	WorkerID               string
 	TurnID                 string
-	AssignedAgentID        string
-	TaskKey                string
-	Goal                   string
-	Acknowledgment         string
-	Budget                 *BudgetPolicy
+	// ToolEntryID is the source step's conversation_start_task tool entry;
+	// TaskKey must be "task-" + ToolEntryID.
+	ToolEntryID     string
+	AssignedAgentID string
+	TaskKey         string
+	Goal            string
+	Acknowledgment  string
+	Budget          *BudgetPolicy
 }
 
 type GetConversationTaskRequest struct {
@@ -309,7 +312,11 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		return nil, err
 	}
 	if !validOpaqueIdentifier(req.SourceRunID, 128) || !validOpaqueIdentifier(req.TurnID, 128) || !validOpaqueIdentifier(req.TaskKey, 128) ||
-		!validOpaqueIdentifier(req.WorkerID, 256) || req.ExpectedSourceRevision < 1 {
+		!validOpaqueIdentifier(req.ToolEntryID, 128) || !validOpaqueIdentifier(req.WorkerID, 256) || req.ExpectedSourceRevision < 1 {
+		return nil, ErrInvalidConversationTask
+	}
+	sessions, ok := s.store.(AgentSessionStore)
+	if !ok {
 		return nil, ErrInvalidConversationTask
 	}
 	source, err := s.store.GetAgentRun(ctx, req.Scope, req.SourceRunID)
@@ -365,17 +372,21 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 	}
 	if source.Kind != RunKindConversation || source.Source != RunSourceChat || source.ParentRunID != "" || source.RootRunID != source.ID ||
 		source.Owner != conversation.Owner || conversation.Scope != source.Scope || message.ConversationID != conversation.ID ||
-		turn.RunID != source.ID || turn.Status != AgentTurnStatusCompleted || turn.Sequence != source.LastAppliedTurn || turn.RequestedTask == nil ||
-		!slices.Equal(turn.InputInterventionIDs, interventionIDs(source)) ||
+		turn.RunID != source.ID || turn.Status != AgentTurnStatusCompleted || turn.Sequence != source.LastAppliedTurn ||
 		source.AssignedAgentID == "" || req.AssignedAgentID != source.AssignedAgentID {
 		return nil, ErrInvalidConversationTask
 	}
-	proposal := &TurnTaskProposal{TaskKey: req.TaskKey, Goal: req.Goal, Acknowledgment: req.Acknowledgment, Budget: cloneBudgetPolicy(req.Budget)}
-	if err := proposal.Validate(); err != nil {
-		return nil, err
+	if strings.TrimSpace(req.Goal) == "" || len(req.Goal) > 16384 || strings.TrimSpace(req.Acknowledgment) == "" || len(req.Acknowledgment) > 600 {
+		return nil, ErrInvalidConversationTask
 	}
-	if !reflect.DeepEqual(proposal, turn.RequestedTask) {
-		return nil, ErrConversationTaskConflict
+	if req.Budget != nil {
+		if err := req.Budget.Validate(); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidConversationTask, err)
+		}
+	}
+	entry, assistant, err := verifyStartTaskToolEntry(ctx, sessions, source, turn, req)
+	if err != nil {
+		return nil, err
 	}
 	onRoster, err := AgentOnChatRoster(ctx, teamRosterReader(s.store), conversation.Scope, conversation.Owner, source.AssignedAgentID)
 	if err != nil {
@@ -408,7 +419,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 	workID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("openseal:conversation-task-work:"+id)).String()
 	now := s.now().UTC()
 	task := &ConversationTask{ID: id, Scope: req.Scope, Owner: source.Owner, ConversationID: conversation.ID, SourceMessageID: message.ID,
-		ThreadRootID: threadID, SourceRunID: source.ID, SourceTurnID: turn.ID, SourceTurnNumber: turn.Sequence, AuthenticatedActor: actor,
+		ThreadRootID: threadID, SourceRunID: source.ID, SourceTurnID: turn.ID, SourceTurnNumber: turn.Sequence, SourceToolEntryID: entry.ID, AuthenticatedActor: actor,
 		TargetAgentID: source.AssignedAgentID, WorkRunID: workID, TaskKey: req.TaskKey, Goal: req.Goal, Acknowledgment: req.Acknowledgment,
 		RequestedBudget: cloneBudgetPolicy(req.Budget), Revision: 1, CreatedAt: now}
 	task.RequestDigest, err = conversationTaskDigest(task)
@@ -430,7 +441,23 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		if work == nil {
 			return nil, ErrRunNotFound
 		}
+		// The admission committed the entry's started result with the task;
+		// the entry read above may predate a concurrent admission's commit.
+		if entry.State != ToolEntryCompleted {
+			if entry, err = sessions.GetSessionEntry(ctx, req.Scope, entry.ID); err != nil {
+				return nil, err
+			}
+		}
+		if entry.State != ToolEntryCompleted || entry.Tool == nil || !sameToolResult(entry.Tool.Result, ConversationTaskStartedToolResult(existing)) {
+			return nil, ErrConversationTaskConflict
+		}
 		return &ConversationTaskResult{Task: existing, WorkRun: work, SourceRun: source, Replayed: true}, nil
+	}
+	if entry.State != ToolEntryPending && entry.State != ToolEntryRunning {
+		return nil, ErrConversationTaskConflict
+	}
+	if len(source.PendingInterventions) != source.ConsumedInterventions {
+		return nil, ErrSteeringArrived
 	}
 	if conversation.Status != ConversationStatusActive {
 		return nil, ErrInvalidConversationTask
@@ -444,7 +471,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 	}
 	budget, err := completeChildBudgetAllocation(source, allocation)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrInvalidConversationTask, err)
 	}
 	if source.Budget != nil {
 		hostedBudget, budgetErr := projectHostedRunBudget(source, "")
@@ -452,7 +479,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 			return nil, budgetErr
 		}
 		if err := validateHostedChildBudgetFloor(budget, hostedBudget); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", ErrInvalidConversationTask, err)
 		}
 	}
 	// The work acts for the person who asked for it.
@@ -461,7 +488,7 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		actingUser = task.AuthenticatedActor.ID
 	}
 	workRequest := CreateAgentRunRequest{Scope: req.Scope, Kind: RunKindAgentWork, Owner: source.Owner, AssignedAgentID: source.AssignedAgentID,
-		ActingUser: actingUser, ConcurrencyKey: "task:" + id, Goal: req.Goal, Source: RunSourceChat, Priority: source.Priority, Deadline: source.Deadline, Budget: budget, Policy: cloneMap(source.Policy),
+		ActingUser: actingUser, ConcurrencyKey: "task:" + id, Goal: req.Goal, SessionID: RunAgentSessionID(req.Scope, workID), Source: RunSourceChat, Priority: source.Priority, Deadline: source.Deadline, Budget: budget, Policy: cloneMap(source.Policy),
 		Context: map[string]interface{}{ConversationTaskContextKey: id, conversationRunContextConversationID: conversation.ID,
 			conversationRunContextTriggerID: message.ID, "threadRootMessageId": threadID, runReportingContextRootRunID: workID,
 			runReportingContextMilestones: []interface{}{"completed", "failed"}}}
@@ -489,9 +516,56 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 	updated.UpdatedAt = now
 	event := &ActivityEvent{ID: uuid.NewSHA1(uuid.NameSpaceOID, []byte("conversation-task-admitted:"+id)).String(), Scope: req.Scope, RunID: source.ID,
 		AgentID: source.AssignedAgentID, EventType: "conversation.task_started", Summary: "Started independent conversation work", Actor: ActivityActor{Type: string(actor.Type), ID: actor.ID},
-		Visibility: ActivityVisibilityScope, CorrelationID: id, ConversationRefs: []string{conversation.ID}, Payload: map[string]interface{}{"taskId": id, "workRunId": workID, "sourceTurnId": turn.ID}, CreatedAt: now}
+		Visibility: ActivityVisibilityScope, CorrelationID: id, ConversationRefs: []string{conversation.ID}, Payload: map[string]interface{}{"taskId": id, "workRunId": workID, "sourceTurnId": turn.ID, "sourceToolEntryId": entry.ID}, CreatedAt: now}
+	// The work Run inherits the chat up to, not including, the step that
+	// decided to start it (A3), then reads its brief.
+	seed, err := childSessionSeed(req.Scope, workID, "task", conversationTaskBrief(req.Goal))
+	if err != nil {
+		return nil, err
+	}
+	workSession, err := newChildSession(ChildSessionRequest{Scope: req.Scope, ParentSessionID: source.SessionID, ForkSequence: assistant.Sequence - 1,
+		OwnerRunID: workID, AgentID: source.AssignedAgentID, ConversationID: conversation.ID, ThreadRootID: threadID, Seed: seed})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidConversationTask, err)
+	}
+	workSession.Now = now
+	transition := &ToolEntryTransitionRequest{Scope: req.Scope, EntryID: entry.ID, RunID: source.ID,
+		Lease: AgentRunLeaseGuard{WorkerID: req.WorkerID, Now: now}, From: entry.State, ExpectedRevision: entry.Revision,
+		To: ToolEntryCompleted, Result: ConversationTaskStartedToolResult(task), Now: now}
 	return s.store.CreateConversationTask(ctx, ConversationTaskCreateRecord{Task: task, WorkRun: work, SourceRun: updated,
-		ExpectedSourceRevision: source.Revision, WorkerID: req.WorkerID, Event: event})
+		ExpectedSourceRevision: source.Revision, WorkerID: req.WorkerID, Event: event, ToolTransition: transition, WorkSession: &workSession})
+}
+
+// verifyStartTaskToolEntry proves that req is exactly the source step's
+// conversation_start_task call (section 04 §7.3): the entry belongs to the
+// source Run's session and step, its decoded arguments are the request's goal
+// and acknowledgment, and the task key derives from its id. It returns the
+// entry and its step's assistant entry (the work session's fork point). The
+// entry state is checked by the caller: open for a fresh admission, completed
+// for a replay.
+func verifyStartTaskToolEntry(ctx context.Context, sessions AgentSessionStore, source *AgentRun, step *AgentTurn, req StartConversationTaskRequest) (*SessionEntry, *SessionEntry, error) {
+	entry, err := optionalSessionEntry(sessions.GetSessionEntry(ctx, req.Scope, req.ToolEntryID))
+	if err != nil {
+		return nil, nil, err
+	}
+	if entry == nil || entry.Type != SessionEntryTool || entry.Tool == nil || entry.RunID != source.ID ||
+		entry.StepID != step.ID || entry.Step != step.Sequence || entry.Tool.Name != string(ControlToolStartTask) ||
+		source.SessionID == "" || entry.SessionID != source.SessionID || req.TaskKey != startTaskKey(entry.ID) {
+		return nil, nil, ErrConversationTaskConflict
+	}
+	args := startTaskArguments(entry)
+	if args == nil || args.Goal != req.Goal || args.Acknowledgment != req.Acknowledgment {
+		return nil, nil, ErrConversationTaskConflict
+	}
+	assistant, err := optionalSessionEntry(sessions.GetSessionEntry(ctx, req.Scope, SessionEntryID(entry.SessionID, AssistantEntryKey(entry.StepID))))
+	if err != nil {
+		return nil, nil, err
+	}
+	if assistant == nil || assistant.Type != SessionEntryAssistant || assistant.SessionID != entry.SessionID || assistant.StepID != entry.StepID ||
+		assistant.Sequence < 2 {
+		return nil, nil, ErrConversationTaskConflict
+	}
+	return entry, assistant, nil
 }
 
 func validateConversationTaskSource(current *AgentRun, task *ConversationTask, revision int64, worker string) error {

@@ -13,7 +13,7 @@ func skillSetupTaskFixture(t *testing.T) (*SkillBindingActionDispatcher, *Memory
 	t.Helper()
 	store := NewMemoryStore()
 	source, turn, _, _ := settledWorkerTaskFixture(t, store)
-	result, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(source, turn))
+	result, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, source, turn))
 	if err != nil {
 		t.Fatal(err)
 	}

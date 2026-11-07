@@ -106,11 +106,13 @@ func catalogTaskPageFixture(t *testing.T, count int) (*MemoryStore, *Conversatio
 		}
 		tasks := NewConversationTaskService(store)
 		tasks.now = func() time.Time { return record.Task.CreatedAt }
-		accepted, err := tasks.Start(t.Context(), StartConversationTaskRequest{
-			Scope: scope, SourceRunID: record.Task.SourceRunID, ExpectedSourceRevision: 1, WorkerID: "task-worker", TurnID: turn.ID,
-			AssignedAgentID: record.Task.TargetAgentID, TaskKey: record.Task.TaskKey, Goal: record.Task.Goal,
-			Acknowledgment: record.Task.Acknowledgment, Budget: cloneBudgetPolicy(record.Task.RequestedBudget),
-		})
+		source, err := store.GetAgentRun(t.Context(), scope, record.Task.SourceRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := taskStartRequest(t, store, source, turn)
+		req.WorkerID = "task-worker"
+		accepted, err := tasks.Start(t.Context(), req)
 		if err != nil {
 			t.Fatal(err)
 		}

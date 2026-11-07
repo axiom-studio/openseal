@@ -58,7 +58,7 @@ func admittedFailureReportingTask(t *testing.T, store taskFailureReportingStore,
 	if err != nil {
 		t.Fatal(err)
 	}
-	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(settled.Run, settled.Turn))
+	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -77,11 +77,7 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 	if err != nil || settled == nil || settled.Run == nil || settled.Turn == nil || settled.Turn.RequestedTask == nil {
 		t.Fatalf("settle source proposal: %#v, %v", settled, err)
 	}
-	accepted, err := NewConversationTaskService(store).Start(t.Context(), StartConversationTaskRequest{
-		Scope: conversation.Scope, SourceRunID: settled.Run.ID, ExpectedSourceRevision: settled.Run.Revision,
-		WorkerID: "worker", TurnID: settled.Turn.ID, AssignedAgentID: settled.Run.AssignedAgentID,
-		TaskKey: proposal.TaskKey, Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment,
-	})
+	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
 	if err != nil || accepted == nil || accepted.Task == nil || accepted.SourceRun == nil || accepted.WorkRun == nil {
 		t.Fatalf("admit independent task: %#v, %v", accepted, err)
 	}

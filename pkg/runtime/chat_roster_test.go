@@ -309,7 +309,7 @@ func TestTeamMemberTaskReachesSetupWhileOnTheRoster(t *testing.T) {
 	if err != nil || settled == nil || settled.Turn == nil || settled.Turn.RequestedTask == nil {
 		t.Fatalf("settle Team task source turn: %#v %v", settled, err)
 	}
-	task, err := NewConversationTaskService(store).Start(ctx, taskStartRequest(settled.Run, settled.Turn))
+	task, err := NewConversationTaskService(store).Start(ctx, taskStartRequest(t, store, settled.Run, settled.Turn))
 	if err != nil {
 		t.Fatalf("Team member task start = %v", err)
 	}
