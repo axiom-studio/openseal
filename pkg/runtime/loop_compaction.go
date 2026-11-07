@@ -18,7 +18,7 @@ import (
 // Compaction is not a step: it writes no agent_turns row and charges no Turns;
 // its usage is returned so the loop adds it to the step that triggered it.
 type LoopCompactor struct {
-	Host     ModelStepHost     // the ExecuteModelStep half of StepHost
+	Host     StepHost          // only ExecuteModelStep is used
 	Sessions AgentSessionStore // appends the compaction entry and its event
 	// Requests builds the step's own model request (prep-2), so the summary
 	// call's System and Tools are byte-identical to the step's and it reads
@@ -32,11 +32,6 @@ type LoopCompactor struct {
 }
 
 var _ StepCompactor = (*LoopCompactor)(nil)
-
-// ModelStepHost is the model half of StepHost; the compactor needs only it.
-type ModelStepHost interface {
-	ExecuteModelStep(ctx context.Context, req ModelStepRequest) (ModelStepResult, error)
-}
 
 // LoopFailureError carries a LoopFailure through an error return. The loop
 // maps it with errors.As to failStep(failure) instead of producer_failed.
@@ -64,7 +59,9 @@ const compactionEventType = "session.compacted"
 func compactionBudgetReservationID(stepID string) string { return "compaction:" + stepID }
 
 // compactionBudget reserves and settles the usage of one compaction on a
-// bounded Run, fenced by the Run lease. Both return the updated Run.
+// bounded Run, fenced by the Run lease. run names the Run (Scope, ID); its
+// Revision is not trusted, because heartbeats and steering bump it while the
+// summary calls run. Both return the updated Run.
 type compactionBudget interface {
 	ReserveCompaction(ctx context.Context, run *AgentRun, workerID, reservationID string, usage BudgetUsage) (*AgentRun, error)
 	SettleCompaction(ctx context.Context, run *AgentRun, workerID, reservationID string, usage BudgetUsage) (*AgentRun, error)
@@ -84,27 +81,60 @@ func newRunActivityCompactionBudget(activity *RunActivityService, now func() tim
 	return &runActivityCompactionBudget{activity: activity, now: now}
 }
 
+// compactionBudgetWriteAttempts bounds the re-read/retry of a budget write
+// that loses a revision race against a heartbeat or a steering write.
+const compactionBudgetWriteAttempts = 4
+
 func (b *runActivityCompactionBudget) ReserveCompaction(ctx context.Context, run *AgentRun, workerID, reservationID string, usage BudgetUsage) (*AgentRun, error) {
-	updated, _, err := b.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, LeaseOwner: workerID,
-		Summary: "Reserved capacity to compact the session", EventType: "budget.reserved",
-		Actor:             ActivityActor{Type: "worker", ID: workerID},
-		BudgetReservation: &BudgetReservation{ID: reservationID, Usage: usage, CreatedAt: b.now()},
+	return b.transition(ctx, run, func(revision int64) RunTransitionRequest {
+		return RunTransitionRequest{
+			ExpectedRevision: revision, Status: AgentRunStatusRunning, LeaseOwner: workerID,
+			Summary: "Reserved capacity to compact the session", EventType: "budget.reserved",
+			Actor:             ActivityActor{Type: "worker", ID: workerID},
+			BudgetReservation: &BudgetReservation{ID: reservationID, Usage: usage, CreatedAt: b.now()},
+		}
 	})
-	return updated, err
 }
 
+// SettleCompaction charges the budget only. The compaction's usage reaches
+// the step's activity usage through the step that triggered it (section 08
+// §2), so no ActivityUsageDelta is written here.
 func (b *runActivityCompactionBudget) SettleCompaction(ctx context.Context, run *AgentRun, workerID, reservationID string, usage BudgetUsage) (*AgentRun, error) {
-	delta := usage
-	updated, _, err := b.activity.TransitionRun(ctx, run.Scope, run.ID, RunTransitionRequest{
-		ExpectedRevision: run.Revision, Status: AgentRunStatusRunning, LeaseOwner: workerID,
-		Summary: "Recorded the usage of compacting the session", EventType: "budget.settled",
-		Actor:                     ActivityActor{Type: "worker", ID: workerID},
-		SettleBudgetReservationID: reservationID,
-		BudgetUsageDelta:          &delta,
-		ActivityUsageDelta:        &delta,
+	return b.transition(ctx, run, func(revision int64) RunTransitionRequest {
+		delta := usage
+		return RunTransitionRequest{
+			ExpectedRevision: revision, Status: AgentRunStatusRunning, LeaseOwner: workerID,
+			Summary: "Recorded the usage of compacting the session", EventType: "budget.settled",
+			Actor:                     ActivityActor{Type: "worker", ID: workerID},
+			SettleBudgetReservationID: reservationID,
+			BudgetUsageDelta:          &delta,
+		}
 	})
-	return updated, err
+}
+
+// transition re-reads the Run before each attempt and writes at its current
+// revision; the lease owner check in TransitionRun is the real fence.
+func (b *runActivityCompactionBudget) transition(ctx context.Context, run *AgentRun, request func(revision int64) RunTransitionRequest) (*AgentRun, error) {
+	if b == nil || b.activity == nil || b.activity.portfolio == nil {
+		return nil, fmt.Errorf("%w: the compaction budget has no run store", ErrTurnHostConfiguration)
+	}
+	var err error
+	for attempt := 0; attempt < compactionBudgetWriteAttempts; attempt++ {
+		var current *AgentRun
+		current, err = b.activity.portfolio.GetAgentRun(ctx, run.Scope, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		if current == nil {
+			return nil, ErrRunNotFound
+		}
+		var updated *AgentRun
+		updated, _, err = b.activity.TransitionRun(ctx, run.Scope, run.ID, request(current.Revision))
+		if !errors.Is(err, ErrRevisionConflict) {
+			return updated, err
+		}
+	}
+	return nil, err
 }
 
 // compactionBudgetUsage is the budget charge of a compaction's model calls.
@@ -420,13 +450,18 @@ func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in StepInput, wor
 		if calls+1+len(queue) > compactionMaxFolds {
 			return summary, usage, compactionFailure(TurnHostContextExceeded)
 		}
-		entries := make([]SessionEntryView, 0, len(chunk.entries)+1)
 		chunkViews := compactionChunkViews(views, chunk.entries)
+		if len(chunkViews) == 0 {
+			// The renderer sent none of this chunk: nothing to fold in, so
+			// the current summary stands.
+			continue
+		}
+		entries := make([]SessionEntryView, 0, len(chunkViews)+1)
 		if calls == 0 {
 			if previous := previousCompactionView(in.Path, views); previous != nil {
 				entries = append(entries, *previous)
 			}
-		} else if len(chunkViews) > 0 {
+		} else {
 			entries = append(entries, compactionFoldView(in.Step.ID, calls, summary.text, chunkViews))
 		}
 		entries = append(entries, chunkViews...)
@@ -448,6 +483,9 @@ func (c *LoopCompactor) summarizeOverflow(ctx context.Context, in StepInput, wor
 		}
 		summary = result
 		calls++
+	}
+	if calls == 0 {
+		return summary, usage, compactionFailure(TurnHostContextExceeded)
 	}
 	return summary, usage, nil
 }
@@ -516,6 +554,15 @@ func compactionSummaryRequest(step ModelStepRequest, entries []SessionEntryView)
 // compaction_failed. Length rejections and host errors return unchanged.
 func (c *LoopCompactor) summarize(ctx context.Context, req ModelStepRequest) (compactionSummary, ModelStepUsage, error) {
 	var usage ModelStepUsage
+	if len(req.Entries) < compactionSummaryMinimumEntries {
+		// A summary request needs two entries (section 06); one entry alone
+		// that fills the window cannot be summarized, so it is a length
+		// failure, not an invalid request.
+		return compactionSummary{}, usage, &TurnHostFailure{
+			Code:    TurnHostContextExceeded,
+			Message: "The context is too large to summarize.",
+		}
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		result, err := c.Host.ExecuteModelStep(ctx, req)
 		if err != nil {
@@ -542,6 +589,10 @@ func (c *LoopCompactor) summarize(ctx context.Context, req ModelStepRequest) (co
 	}
 	return compactionSummary{}, usage, compactionFailure(RunFailureCodeCompactionFailed)
 }
+
+// compactionSummaryMinimumEntries is the fewest entries a summary request
+// may carry (ModelStepRequest.Validate).
+const compactionSummaryMinimumEntries = 2
 
 func isContextExceeded(err error) bool {
 	var failure *TurnHostFailure

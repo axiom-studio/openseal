@@ -36,6 +36,12 @@ func (h *fakeSummaryHost) ExecuteModelStep(_ context.Context, req ModelStepReque
 	return h.script[len(h.requests)-1](req)
 }
 
+func (h *fakeSummaryHost) ExecuteHostTool(context.Context, HostToolRequest) (HostToolResult, error) {
+	h.t.Helper()
+	h.t.Fatalf("the compactor ran a host tool")
+	return HostToolResult{}, nil
+}
+
 func summaryAnswer(text string, input, output int64) func(ModelStepRequest) (ModelStepResult, error) {
 	return func(req ModelStepRequest) (ModelStepResult, error) {
 		return ModelStepResult{
@@ -559,6 +565,26 @@ func TestCompactOverflowImpossibleForSingleStep(t *testing.T) {
 	}
 }
 
+func TestCompactOverflowSingleEntryChunkIsContextOverflow(t *testing.T) {
+	fx := newCompactionFixture(t)
+	// The overflow keep leaves only u0 to summarize, with no previous
+	// compaction: one entry is too few for a summary request.
+	fx.add(fx.user("u0", 40000))
+	fx.add(fx.stepWithTool("s1", "ac_1", 1000, 20000)...)
+	fx.add(fx.stepWithTool("s2", "ac_2", 1000, 1000)...)
+	fx.add(fx.finalStep("s3", 1000, 0, false))
+	_, err := fx.compactor.Compact(foldPressure(fx.ctx), fx.input(), true)
+	if err == nil {
+		t.Fatalf("compacted a span whose first chunk is one entry")
+	}
+	requireLoopFailure(t, err, RunFailureKindContextOverflow, TurnHostContextExceeded)
+	for i, req := range fx.host.requests {
+		if len(req.Entries) < 2 {
+			t.Fatalf("request %d had %d entries", i, len(req.Entries))
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Budget
 
@@ -592,6 +618,48 @@ func TestCompactChargesBudgetNotTurns(t *testing.T) {
 	steps, err := fx.store.ListAgentTurns(fx.ctx, AgentTurnFilter{Scope: fx.scope, RunID: fx.runID})
 	if err != nil || len(steps) != 0 {
 		t.Fatalf("compaction wrote %d agent_turns rows", len(steps))
+	}
+}
+
+func TestCompactSettlesBudgetAfterAHeartbeatDuringTheSummary(t *testing.T) {
+	fx := newCompactionFixture(t)
+	fx.history(true)
+	fx.updateRun(fx.runID, func(run *AgentRun) {
+		run.Budget = &BudgetPolicy{MaxInputTokens: 1_000_000, MaxOutputTokens: 1_000_000}
+	})
+	fx.compactor.Budget = newRunActivityCompactionBudget(NewRunActivityService(fx.store, fx.store), func() time.Time { return fx.now })
+	in := fx.input()
+	// The Run moved on after the step read it: a heartbeat before the
+	// reservation, and another while the summary call runs.
+	if _, err := fx.store.RenewAgentRunLease(fx.ctx, fx.scope, fx.runID, conformanceWorker, fx.now, time.Hour); err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	answer := summaryAnswer("summary", 50500, 900)
+	fx.host.script = append(fx.host.script, func(req ModelStepRequest) (ModelStepResult, error) {
+		if _, err := fx.store.RenewAgentRunLease(fx.ctx, fx.scope, fx.runID, conformanceWorker, fx.now, time.Hour); err != nil {
+			t.Fatalf("renew: %v", err)
+		}
+		return answer(req)
+	})
+	if _, err := fx.compactor.CompactIfNeeded(fx.ctx, in); err != nil {
+		t.Fatalf("CompactIfNeeded: %v", err)
+	}
+	run := fx.run(fx.runID)
+	if len(run.BudgetReservations) != 0 {
+		t.Fatalf("reservations = %v", run.BudgetReservations)
+	}
+	if run.BudgetUsage.InputTokens != 50500 || run.BudgetUsage.OutputTokens != 900 {
+		t.Fatalf("budget usage = %+v", run.BudgetUsage)
+	}
+	if in.Run.Revision != run.Revision || len(fx.compactions()) != 1 {
+		t.Fatalf("in.Run revision %d, stored %d, compactions %d", in.Run.Revision, run.Revision, len(fx.compactions()))
+	}
+	events, err := fx.store.ListActivity(fx.ctx, ActivityFilter{Scope: fx.scope, RunID: fx.runID, EventTypes: []string{"budget.settled"}, Limit: 10})
+	if err != nil || len(events) != 1 {
+		t.Fatalf("settled events = %d, %v", len(events), err)
+	}
+	if events[0].UsageDelta != nil {
+		t.Fatalf("settle wrote activity usage %+v; the step owns it", events[0].UsageDelta)
 	}
 }
 
