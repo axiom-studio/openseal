@@ -66,16 +66,16 @@ func externalInboxItemIsFollowUp(item *ExternalConversationInboxItem, run *Agent
 
 // conversationFollowUpRunEligible reports whether a foreground conversation
 // Run can still consume new human input. Any non-terminal state qualifies:
-// queued, planning, running and sleeping Runs see the message on their next
-// Turn; a pending approval is
-// replaced by the message (supersedeApprovalForMessage); Runs waiting for an
-// event (credential, setup, browser handoff), another Agent, a dependency, or
-// paused by the user keep waiting and see the message when they resume. Terminal Runs, Runs promoted to a
-// background conversation task, Runs explaining their final failure and
-// pinned Runbook Runs never absorb new messages.
+// queued, planning, running and sleeping Runs see the message at their next
+// step; a pending approval is replaced by the message
+// (supersedeApprovalForMessage); Runs waiting for an event (credential,
+// setup, browser handoff), another Agent, a dependency, or paused by the user
+// keep waiting and see the message when they resume. Terminal Runs, Runs
+// promoted to a background conversation task, Runs explaining their failure
+// (FailureExplanation set) and pinned Runbook Runs never absorb new messages.
 func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, conversation *Conversation, run *AgentRun) (bool, error) {
 	if run == nil || run.Kind != RunKindConversation || run.Scope != conversation.Scope || run.Owner != conversation.Owner ||
-		isTerminalAgentRunStatus(run.Status) || requiresFinalFailureExplanation(run.Checkpoint) || (run.Plan != nil && run.Plan["runbook"] != nil) {
+		isTerminalAgentRunStatus(run.Status) || run.FailureExplanation != nil || (run.Plan != nil && run.Plan["runbook"] != nil) {
 		return false, nil
 	}
 	if conversationID, _ := run.Context[conversationRunContextConversationID].(string); conversationID != conversation.ID {
@@ -90,10 +90,12 @@ func conversationFollowUpRunEligible(ctx context.Context, store PortfolioStore, 
 
 // deliverToActiveConversationRun hands a new human message to the active
 // foreground Run of the same Agent channel lane (the conversation, or one
-// thread of it) when that Run was started by the same person. The Run sees
-// the message as pending human input on its next Turn, exactly like operator
-// guidance, so one Run handles the whole exchange instead of parallel Runs
-// competing for the lane. A nil result means no Run absorbed the message.
+// thread of it) when that Run was started by the same person. The message is
+// recorded as a message-backed intervention, which bumps the Run's revision:
+// a final answer drafted before it is not posted, and the Run's next step
+// ingests the message into its session through catch-up (a user entry, once).
+// One Run handles the whole exchange instead of parallel Runs competing for
+// the lane. A nil result means no Run absorbed the message.
 func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*AgentRunCommandResult, error) {
 	switch conversation.Owner.Type {
 	case OwnerTypeAgent:
@@ -107,7 +109,9 @@ func (s *ConversationRunScheduler) deliverToActiveConversationRun(ctx context.Co
 // deliverToWorkingMembers is a Team chat's steering: a message that addresses
 // nobody (no @mention, @everyone, quote or reply) while members are still
 // answering the same person goes to each of them as a follow-up, exactly like
-// a 1:1 chat's active Run, instead of being routed as a new question. An
+// a 1:1 chat's active Run, instead of being routed as a new question. Each
+// member has its own lane session, so every member's next step appends the
+// message to its own session. An
 // addressed message is routed; a member it names who is working takes it as
 // a follow-up there (routeTeamMessage).
 func (s *ConversationRunScheduler) deliverToWorkingMembers(ctx context.Context, conversation *Conversation, message *ChannelMessage) (*AgentRunCommandResult, error) {
@@ -275,7 +279,9 @@ func conversationFollowUpInstruction(message *ChannelMessage) string {
 }
 
 // conversationFollowUpMessages loads the delivered follow-ups visible to the
-// Agent, preferring the already loaded recent history, in channel order.
+// Agent, preferring the already loaded recent history, in channel order. It
+// serves only the old goal-building path in conversation_run.go and goes with
+// it; loop Runs read follow-ups from their session (catch-up).
 func (r *ConversationRunTurnRunner) conversationFollowUpMessages(ctx context.Context, run *AgentRun, conversation *Conversation, viewer ConversationViewer, recent []*ChannelMessage) ([]*ChannelMessage, error) {
 	deliveries := conversationRunFollowUps(run)
 	if len(deliveries) == 0 {
@@ -363,7 +369,8 @@ func (s *ConversationRunScheduler) replaceApprovalWithMessage(ctx context.Contex
 // replaceOtherMemberApprovals applies a Team message to the members it was not
 // routed to: the person's pending approvals in their lanes of this chat are
 // replaced by the message, like a 1:1 chat's. Those Runs then stop without a
-// reply (replacedTeamApprovalOutcome); the routed member answers the message.
+// reply (conversationLoop.replacedTeamApproval); the routed member answers
+// the message.
 func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Context, conversation *Conversation, message *ChannelMessage, root string, routed map[string]bool) error {
 	if conversation.Owner.Type != OwnerTypeTeam || message.Sender.Type != ConversationParticipantUser {
 		return nil
@@ -407,9 +414,9 @@ func (s *ConversationRunScheduler) replaceOtherMemberApprovals(ctx context.Conte
 	return nil
 }
 
-// replacedTeamApprovalOutcome stops a Team member Run whose approval a message
-// routed to another member replaced: the action was not carried out and the
-// chat already shows that, so the member posts nothing.
+// replacedTeamApprovalOutcome is the old per-Turn form of
+// conversationLoop.replacedTeamApproval. It stays only for the old
+// ConversationRunTurnRunner.RunTurn in conversation_run.go and goes with it.
 func replacedTeamApprovalOutcome(run *AgentRun) *TurnOutcome {
 	if !isTeamMemberRun(run) {
 		return nil
