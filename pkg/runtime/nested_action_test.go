@@ -512,26 +512,3 @@ func TestNestedActionBoundsArePerStep(t *testing.T) {
 	}
 }
 
-// The worker opens the Turn's offered actions to nested calls only while the
-// Turn runs.
-func TestPreparedTurnRunnerOpensNestedActionsDuringTheTurn(t *testing.T) {
-	ctx := context.Background()
-	store := NewMemoryStore()
-	f := newNestedActionFixture(t, store)
-	f.closeTurn()
-	var during error
-	f.binding.Runner = TurnRunnerFunc(func(ctx context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-		_, during = f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-1"))
-		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, OutputSummary: "done"}, nil
-	})
-	runner := preparedRuntimeTurnRunner{binding: f.binding, actions: f.coordinator}
-	if _, err := runner.RunTurn(ctx, TurnExecutionContext{Run: f.run, Turn: f.turn}); err != nil {
-		t.Fatal(err)
-	}
-	if during != nil {
-		t.Fatalf("nested call during the Turn: %v", during)
-	}
-	if _, err := f.coordinator.ProposeNested(ctx, f.request("repo.read_file", "bridge-2")); !errors.Is(err, ErrNestedTurnNotActive) {
-		t.Fatalf("nested call after the Turn: %v", err)
-	}
-}

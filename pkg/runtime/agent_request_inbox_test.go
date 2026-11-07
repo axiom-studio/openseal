@@ -512,7 +512,7 @@ func TestAgentRequestInboxAppliesAutonomousRecipientDecisions(t *testing.T) {
 			})
 			pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{
 				Scope: request.Scope, Kind: RunKindAgentWork, AssignedAgentID: "recipient",
-				Concurrency: 1, MaxTurnsPerClaim: 1, PollInterval: 5 * time.Millisecond,
+				Concurrency: 1, PollInterval: 5 * time.Millisecond,
 				LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
 			})
 			if err != nil {

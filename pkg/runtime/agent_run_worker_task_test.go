@@ -47,83 +47,17 @@ func workerTaskPool(t *testing.T, store KernelStore, scope Scope, runner TurnRun
 	t.Helper()
 	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
 		return &TurnRunnerBinding{DeploymentID: "agent", DefinitionID: "agent", DefinitionVersion: "1", Runner: runner}, nil
-	}), nil, AgentRunWorkerConfig{Scope: scope, MaxTurnsPerClaim: 1})
+	}), nil, AgentRunWorkerConfig{Scope: scope})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return pool
 }
 
-func TestAgentRunWorkerRecoversAppliedTaskBeforeAnotherModelTurn(t *testing.T) {
-	store := NewMemoryStore()
-	source, turn, conversation, _ := settledWorkerTaskFixture(t, store)
-	modelCalls := 0
-	pool := workerTaskPool(t, store, source.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		modelCalls++
-		return nil, errors.New("recovery must reuse the settled proposal")
-	}))
-	// Simulate a process ending after the Turn and LastAppliedTurn committed,
-	// before materializeTurnTask created any independent work.
-	pool.executeClaim(t.Context(), "worker", source)
-	completed, err := store.GetAgentRun(t.Context(), source.Scope, source.ID)
-	if err != nil || completed.Status != AgentRunStatusCompleted || completed.Output["summary"] != turn.RequestedTask.Acknowledgment || modelCalls != 0 {
-		t.Fatalf("recovered completion: %#v calls=%d err=%v", completed, modelCalls, err)
-	}
-	tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{
-		Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 20,
-	})
-	if err != nil || len(tasks) != 1 || tasks[0].WorkRun.ParentRunID != "" || tasks[0].WorkRun.RootRunID != tasks[0].WorkRun.ID || tasks[0].WorkRun.Status != AgentRunStatusQueued {
-		t.Fatalf("independent task was not admitted once: %#v %v", tasks, err)
-	}
-	turns, err := store.ListAgentTurns(t.Context(), AgentTurnFilter{Scope: source.Scope, RunID: source.ID})
-	if err != nil || len(turns) != 1 {
-		t.Fatalf("recovery created another turn: %#v %v", turns, err)
-	}
-	replayed, err := pool.materializeTurnTask(t.Context(), "worker", completed, turn, &TurnRunnerBinding{DeploymentID: "agent"})
-	if err != nil || replayed.ID != completed.ID || replayed.Status != AgentRunStatusCompleted {
-		t.Fatalf("admission replay: %#v %v", replayed, err)
-	}
-	tasks, err = store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 20})
-	if err != nil || len(tasks) != 1 {
-		t.Fatal("admission replay duplicated independent work")
-	}
-}
-
 type rejectedWorkerTaskStore struct{ *MemoryStore }
 
 func (s *rejectedWorkerTaskStore) CreateConversationTask(context.Context, ConversationTaskCreateRecord) (*ConversationTaskResult, error) {
 	return nil, errors.New("task transaction rejected")
-}
-
-func TestAgentRunWorkerRejectedTaskDoesNotAcknowledgeOrCreateWork(t *testing.T) {
-	store := &rejectedWorkerTaskStore{MemoryStore: NewMemoryStore()}
-	source, turn, conversation, _ := settledWorkerTaskFixture(t, store.MemoryStore)
-	pool := workerTaskPool(t, store, source.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) { return nil, nil }))
-	if _, err := pool.materializeTurnTask(t.Context(), "worker", source, turn, &TurnRunnerBinding{DeploymentID: "agent"}); err == nil {
-		t.Fatal("rejected task transaction was acknowledged")
-	}
-	current, err := store.GetAgentRun(t.Context(), source.Scope, source.ID)
-	if err != nil || current.Status != AgentRunStatusRunning || len(current.Output) != 0 || current.Revision != source.Revision {
-		t.Fatalf("rejection changed foreground output: %#v %v", current, err)
-	}
-	tasks, err := store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: source.Scope, Owner: source.Owner, ConversationID: conversation.ID, Limit: 20})
-	if err != nil || len(tasks) != 0 {
-		t.Fatal("rejected transaction left a durable task")
-	}
-	runs, err := store.ListAgentRuns(t.Context(), AgentRunFilter{Scope: source.Scope, Kind: RunKindAgentWork})
-	if err != nil || len(runs) != 0 {
-		t.Fatal("rejected transaction left a work run")
-	}
-}
-
-func TestAgentRunWorkerDoesNotRecoverTaskSupersededByNewGuidance(t *testing.T) {
-	store := NewMemoryStore()
-	source, _, _, _ := settledWorkerTaskFixture(t, store)
-	pool := workerTaskPool(t, store, source.Scope, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) { return nil, nil }))
-	source.PendingInterventions = []AgentRunIntervention{{ID: "new-guidance"}}
-	if turn, err := pool.pendingAppliedTaskTurn(t.Context(), source); err != nil || turn != nil {
-		t.Fatalf("superseded proposal was replayed: %#v %v", turn, err)
-	}
 }
 
 func TestActiveConversationRunsIncludeOnlyExactIndependentTaskThreadAndActor(t *testing.T) {

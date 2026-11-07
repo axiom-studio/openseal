@@ -4027,11 +4027,6 @@ func (e *Engine) rebuildAgentWorkerPools() error {
 		pool.SetAcceptedRunExecutionPreparer(e)
 		pool.SetActionCoordinator(e.actions)
 		pool.SetRunTerminalFinalizer(finalizer)
-		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
-		if observerErr != nil {
-			return observerErr
-		}
-		pool.SetActionProposalObserver(observer)
 		e.agentPools = append(e.agentPools, pool)
 	}
 	return nil
@@ -4052,11 +4047,6 @@ func (e *Engine) rebuildAgentWorkerSupervisors() error {
 		supervisor.SetAcceptedRunExecutionPreparer(e)
 		supervisor.SetActionCoordinator(e.actions)
 		supervisor.SetRunTerminalFinalizer(finalizer)
-		observer, observerErr := runtime.NewOutreachActionProposalObserver(e)
-		if observerErr != nil {
-			return observerErr
-		}
-		supervisor.SetActionProposalObserver(observer)
 		e.agentSupervisors = append(e.agentSupervisors, supervisor)
 	}
 	return nil

@@ -37,7 +37,7 @@ func TestAgentRunWorkerRetriesAcceptedActionAfterPromotionDuringPolicy(t *testin
 				return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ContinuationCheckpoint: map[string]interface{}{"actionInputs": map[string]interface{}{"inspect": map[string]interface{}{"release": "canary"}}},
 					ProposedActions: []TurnAction{{Type: "skill_action", Capability: "review.inspect", Summary: "Inspect the requested release", InputRef: "/actionInputs/inspect", IdempotencyKey: "accepted-review"}}}, nil
 			})}, nil
-	}), nil, AgentRunWorkerConfig{Scope: run.Scope, Kind: RunKindConversation, MaxTurnsPerClaim: 1})
+	}), nil, AgentRunWorkerConfig{Scope: run.Scope, Kind: RunKindConversation})
 	if err != nil {
 		t.Fatal(err)
 	}

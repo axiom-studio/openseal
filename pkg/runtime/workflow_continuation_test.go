@@ -226,12 +226,12 @@ func TestDeferredWorkflowContinuesThroughNormalAgentWorkerAndDurableReporting(t 
 					config.SkillHost = skill.HostCapabilityState{Adapters: map[string]skill.AdapterCapability{skill.AdapterConversation: {State: skill.AdapterStateAvailable, Features: []string{"plugin"}}}}
 					return ResolveLoopBinding(ctx, catalog, run, config)
 				})
-				pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{Scope: work.Scope, Kind: RunKindAgentWork, AssignedAgentID: work.AssignedAgentID, WorkerIDPrefix: "continuation-agent", Concurrency: 1, MaxTurnsPerClaim: 1, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute})
+				pool, err := NewAgentRunWorkerPool(store, resolver, nil, AgentRunWorkerConfig{Scope: work.Scope, Kind: RunKindAgentWork, AssignedAgentID: work.AssignedAgentID, WorkerIDPrefix: "continuation-agent", Concurrency: 1, LeaseDuration: time.Minute, TurnLeaseDuration: time.Minute})
 				if err != nil {
 					t.Fatal(err)
 				}
 				clock := func() time.Time { return now }
-				pool.scheduler.now, pool.activity.now, pool.coordinator.activity.now, pool.coordinator.turns.now, pool.runCommands.now = clock, clock, clock, clock, clock
+				pool.scheduler.now, pool.activity.now, pool.loop.activity.now, pool.loop.turns.now, pool.runCommands.now = clock, clock, clock, clock, clock
 				outage := &workflowContinuationReportingOutage{ConversationStore: store.(ConversationStore)}
 				pool.reportingStore = outage
 				claim := AgentRunClaimRequest{Scope: work.Scope, Kind: RunKindAgentWork, AssignedAgentID: work.AssignedAgentID, WorkerID: "continuation-agent", LeaseDuration: time.Minute}
