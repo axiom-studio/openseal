@@ -284,18 +284,31 @@ func repeatKey(subject RepeatSubject) (string, error) {
 // toolResultDigest = hex(sha256(canonical JSON {"status": Status, "content":
 // Content})) over the stored ToolResult. For governed calls the stored content
 // carries the action error code, so "the same error" is "the same result".
+// The per-call action reference (a json part's top-level "evidenceRef", an
+// image part's actionCallId) is left out: every governed call has its own
+// action_calls row, so two identical results would otherwise never match.
 // It returns "" for a nil result or content that cannot be encoded.
 func toolResultDigest(result *ToolResult) string {
 	if result == nil {
 		return ""
 	}
-	content := result.Content
-	if content == nil {
-		content = []ContentPart{}
+	content := make([]ContentPart, len(result.Content))
+	copy(content, result.Content)
+	for i := range content {
+		content[i].ActionCallID = ""
 	}
 	normalized, err := canonicalJSONValue(map[string]interface{}{"status": result.Status, "content": content})
 	if err != nil {
 		return ""
+	}
+	if parts, ok := normalized.(map[string]interface{})["content"].([]interface{}); ok {
+		for _, part := range parts {
+			if typed, ok := part.(map[string]interface{}); ok && typed["type"] == ContentPartJSON {
+				if value, ok := typed["value"].(map[string]interface{}); ok {
+					delete(value, "evidenceRef")
+				}
+			}
+		}
 	}
 	encoded, err := encodeCanonicalJSON(normalized)
 	if err != nil {

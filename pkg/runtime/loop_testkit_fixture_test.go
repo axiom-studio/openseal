@@ -309,13 +309,14 @@ func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFi
 		opt(&config)
 	}
 	crash := newCrashStore(t, store)
+	// The clock starts at wall time: the conversation stores check the reply
+	// guard's Run lease against time.Now, so a clock far behind it would see
+	// every lease as expired.
+	start := time.Now().UTC().Truncate(time.Second)
 	f := &loopFixture{
 		t: t, ctx: context.Background(), raw: store, store: crash, crashes: crash,
-		scope: Scope{Kind: "tenant", ID: "loop"},
-		// The clock starts at wall time: the stores check reply guards and
-		// some leases against time.Now, so fixture time must never fall
-		// behind it by more than a lease.
-		clock:    newFakeClock(time.Now().UTC().Truncate(time.Second)),
+		scope:    Scope{Kind: "tenant", ID: "loop"},
+		clock:    newFakeClock(start),
 		model:    newScriptedModel(t, config.rules...),
 		tools:    newFakeHostTools(t),
 		dispatch: newFakeDispatcher(t),
