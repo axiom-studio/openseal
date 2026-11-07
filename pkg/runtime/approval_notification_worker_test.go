@@ -54,7 +54,7 @@ func TestApprovalNotificationDeliversOnceAndSignedDecisionResolvesCanonicalCheck
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	call := &ActionCall{
-		ID: "call-1", Scope: endpoint.Scope, RunID: claimed.ID, DeploymentID: endpoint.DeploymentID,
+		ID: "call-1", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: ActionCallStatusWaitingApproval,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"comment": "Useful context"},
 		ApprovalID: "approval-1", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -318,7 +318,7 @@ func TestApprovalNotificationAlwaysCreatesAgentApprovalConversation(t *testing.T
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	call := &ActionCall{
-		ID: "call-internal", Scope: endpoint.Scope, RunID: claimed.ID, DeploymentID: endpoint.DeploymentID,
+		ID: "call-internal", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 		SkillID: "summarize", SkillVersion: "1.0.0", Action: "execute", Status: ActionCallStatusWaitingApproval,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"url": "https://example.com/pr/17"},
 		ApprovalID: "approval-internal", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -448,7 +448,7 @@ func TestApprovalNotificationConvergesAcrossRevisionConflictsAndConcurrentPasses
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	call := &ActionCall{
-		ID: "call-conflict", Scope: endpoint.Scope, RunID: claimed.ID, DeploymentID: endpoint.DeploymentID,
+		ID: "call-conflict", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: ActionCallStatusWaitingApproval,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"comment": "Useful context"},
 		ApprovalID: "approval-conflict", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -550,7 +550,7 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
 	call := &ActionCall{
-		ID: "call-expiry", Scope: endpoint.Scope, RunID: claimed.ID, DeploymentID: endpoint.DeploymentID,
+		ID: "call-expiry", Scope: endpoint.Scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: endpoint.DeploymentID, Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 		SkillID: "browser", SkillVersion: "1.0.0", Action: "comment", Status: ActionCallStatusWaitingApproval,
 		Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"comment": "Useful context"},
 		ApprovalID: "approval-expiry", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
@@ -625,5 +625,43 @@ func TestApprovalNotificationExpiresCheckpointAndQueuesTerminalCardUpdate(t *tes
 	card, _ := update.Parameters["approval"].(map[string]interface{})
 	if card["status"] != ApprovalStatusExpired {
 		t.Fatalf("expiry card = %#v", card)
+	}
+}
+
+// Review facts reach approval cards only through the proposal's reviewContext;
+// a model checkpoint left on an old approval row is never projected.
+func TestApprovalNotificationPayloadHasNoCheckpointProjection(t *testing.T) {
+	approval, err := decodeApproval(`{"id":"approval-1","scope":{"kind":"tenant","id":"one"},"runId":"run","actionCallId":"call","status":"pending",
+		"risk":"external","summary":"Post the reviewed comment","revision":1,
+		"proposedAction":{"skillId":"browser","action":"comment","reviewContext":{"summary":"Post the reviewed comment","content":"The exact comment."}},
+		"continuationCheckpoint":{"state":{"commentDraft":"A stale draft"},"output":{"postURL":"https://forum.example/42"}}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := approvalNotificationPayload(approval, nil)
+	proposed, _ := payload["proposedAction"].(map[string]interface{})
+	review, _ := proposed["reviewContext"].(map[string]interface{})
+	if len(review) != 2 || review["summary"] != "Post the reviewed comment" || review["content"] != "The exact comment." {
+		t.Fatalf("review context = %#v", review)
+	}
+	for _, key := range []string{"continuationCheckpoint", "state", "output"} {
+		if _, present := payload[key]; present {
+			t.Fatalf("payload carries %s: %#v", key, payload)
+		}
+		if _, present := proposed[key]; present {
+			t.Fatalf("proposed action carries %s: %#v", key, proposed)
+		}
+	}
+}
+
+func TestTerminalApprovalActionStatusIncludesRefused(t *testing.T) {
+	for status, want := range map[ActionCallStatus]bool{
+		ActionCallStatusSucceeded: true, ActionCallStatusFailed: true, ActionCallStatusDenied: true, ActionCallStatusCanceled: true,
+		ActionCallStatusCompensated: true, ActionCallStatusRefused: true,
+		ActionCallStatusReady: false, ActionCallStatusRunning: false, ActionCallStatusWaitingApproval: false,
+	} {
+		if got := terminalApprovalActionStatus(status); got != want {
+			t.Fatalf("terminalApprovalActionStatus(%s) = %v, want %v", status, got, want)
+		}
 	}
 }

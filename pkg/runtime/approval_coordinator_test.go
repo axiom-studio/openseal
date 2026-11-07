@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T) {
@@ -45,7 +47,7 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !result.Resolved || result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady || result.Run.Status != AgentRunStatusWaitingForDependency || result.Run.WakeCondition == nil || result.Run.WakeCondition.Reference != result.Call.ID {
+			if !result.Resolved || result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady || result.Run.Status != AgentRunStatusQueued || result.Run.WakeCondition != nil || result.Run.LastWakeSignalID != "decision-1" {
 				t.Fatalf("resolution mismatch: %#v", result)
 			}
 			retry, err := approvalCoordinator.Resolve(ctx, ResolveApprovalRequest{
@@ -66,12 +68,13 @@ func TestApprovalCoordinatorAtomicallyResolvesAndWakesAcrossStores(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(events) != 2 || events[1].EventType != "approval.approved" {
+			if len(events) != 3 || events[2].EventType != "approval.approved" {
 				t.Fatalf("approval activity mismatch: %#v", events)
 			}
+			// The approved call runs inline when the loop resumes the Run.
 			claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: proposal.Approval.Scope, WorkerID: "next-worker", Now: now.Add(3 * time.Second), LeaseDuration: time.Minute, AgingInterval: time.Minute})
-			if err != nil || claimed != nil {
-				t.Fatalf("run resumed before its approved action completed: %#v, %v", claimed, err)
+			if err != nil || claimed == nil || claimed.ID != proposal.Run.ID {
+				t.Fatalf("approved Run claim = %#v, %v", claimed, err)
 			}
 		})
 	}
@@ -146,7 +149,7 @@ func TestApprovalCoordinatorAppliesReviewedTimeoutApprovalAcrossStores(t *testin
 				t.Fatal(err)
 			}
 			if result.Approval.Status != ApprovalStatusApproved || result.Call.Status != ActionCallStatusReady ||
-				result.Run.Status != AgentRunStatusWaitingForDependency || result.Run.WakeCondition == nil || result.Run.WakeCondition.Reference != result.Call.ID {
+				result.Run.Status != AgentRunStatusQueued || result.Run.WakeCondition != nil {
 				t.Fatalf("timeout approval = %#v", result)
 			}
 			if result.Event == nil || result.Event.EventType != "approval.auto_approved" || result.Event.Actor.ID != "approval-timeout-worker" {
@@ -181,7 +184,8 @@ func TestApprovalCoordinatorExpiresApprovalAfterRunLeavesWaitingState(t *testing
 		t.Fatal(err)
 	}
 	if expired.Approval.Status != ApprovalStatusExpired || expired.Call.Status != ActionCallStatusDenied ||
-		expired.Run.Status != AgentRunStatusPaused || len(expired.Run.BudgetReservations) != 0 {
+		expired.Run.Status != AgentRunStatusPaused || expired.Run.PausedFrom != AgentRunStatusQueued || expired.Run.PausedWakeCondition != nil ||
+		len(expired.Run.BudgetReservations) != 0 {
 		t.Fatalf("orphan expiry = %#v", expired)
 	}
 }
@@ -214,13 +218,14 @@ func TestApprovalCoordinatorPersistsRejectedActionOutcome(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Approval.Status != ApprovalStatusRejected || result.Call.Status != ActionCallStatusDenied || result.Call.CompletedAt == nil || result.Run.Status != AgentRunStatusQueued {
+			if result.Approval.Status != ApprovalStatusRejected || result.Call.Status != ActionCallStatusDenied || result.Call.CompletedAt == nil ||
+				result.Call.Error != "rejected: change is not authorized" || result.Run.Status != AgentRunStatusQueued {
 				t.Fatalf("rejection result = %#v", result)
 			}
-			last, _ := result.Run.Checkpoint["lastAction"].(map[string]interface{})
-			if fmt.Sprint(last["status"]) != string(ActionCallStatusDenied) || fmt.Sprint(last["approvalId"]) != proposal.Approval.ID || fmt.Sprint(last["approvalStatus"]) != string(ApprovalStatusRejected) ||
-				fmt.Sprint(last["error"]) != "rejected: change is not authorized" || len(actionHistoryEntries(result.Run.Checkpoint)) != 1 {
-				t.Fatalf("rejection checkpoint = %#v", result.Run.Checkpoint)
+			// The outcome lives on the call; the Run keeps no action checkpoint.
+			stored, err := store.GetActionCall(t.Context(), proposal.Call.Scope, proposal.Call.ID)
+			if err != nil || stored.Status != ActionCallStatusDenied || stored.Error != result.Call.Error || len(result.Run.Checkpoint) != 0 || len(result.Run.BudgetReservations) != 0 {
+				t.Fatalf("persisted rejection = %#v, run checkpoint %#v, %v", stored, result.Run.Checkpoint, err)
 			}
 		})
 	}
@@ -277,10 +282,14 @@ func createApprovalForStore(t *testing.T, store KernelStore, now time.Time) *Act
 	return createApprovalForStoreWithTimeout(t, store, now, "")
 }
 
+// createApprovalForStoreWithTimeout commits a loop call of step-1 that waits
+// on its approval and reserves one action of the Run budget, then parks the
+// Run on that approval as the loop does at step end. The result's Run is the
+// parked Run.
 func createApprovalForStoreWithTimeout(t *testing.T, store KernelStore, now time.Time, timeout ApprovalTimeoutDecision) *ActionProposalResult {
 	t.Helper()
 	ctx := context.Background()
-	catalog, scope := governedActionCatalog(t)
+	_, scope := governedActionCatalog(t)
 	portfolio := NewPortfolioService(store)
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
@@ -294,21 +303,50 @@ func createApprovalForStoreWithTimeout(t *testing.T, store KernelStore, now time
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
-	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
-		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "alice"}}, ApprovalTTL: time.Hour, ApprovalTimeout: timeout}, nil
-	}))
-	coordinator.now = func() time.Time { return now.Add(time.Second) }
-	ids := []string{"call", "approval", "proposal-event"}
-	coordinator.newID = func() string {
-		id := ids[0]
-		ids = ids[1:]
-		return id
+	proposedAt := now.Add(time.Second)
+	call := &ActionCall{
+		ID: "call", Scope: scope, RunID: claimed.ID, TurnID: "step-1", DeploymentID: "release-agent",
+		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
+		Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction, SideEffect: skill.SideEffectExternal,
+		Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: "tool-call:deploy", ApprovalID: "approval",
+		MaxAttempts: 3, AvailableAt: proposedAt, Revision: 1, CreatedAt: proposedAt, UpdatedAt: proposedAt,
 	}
-	proposal, err := coordinator.Propose(ctx, ProposeActionRequest{
-		Scope: scope, RunID: claimed.ID, WorkerID: "worker", DeploymentID: "release-agent",
-		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: "deploy",
+	call.InvocationDigest = ComputeActionInvocationDigest(call)
+	call.SemanticDigest = ComputeActionSemanticDigest(call)
+	approval := &ApprovalCheckpoint{
+		ID: "approval", Scope: scope, RunID: claimed.ID, ActionCallID: call.ID, Status: ApprovalStatusPending,
+		Risk: skill.RiskLevelProduction, Summary: "Deploy the release to production",
+		ProposedAction:    map[string]interface{}{"skillId": "release", "action": "deploy", "arguments": map[string]interface{}{"environment": "production"}},
+		EligibleApprovers: []ApprovalPrincipal{{Type: "user", ID: "alice"}}, TimeoutDecision: timeout,
+		ExpiresAt: proposedAt.Add(time.Hour), Revision: 1, CreatedAt: proposedAt, UpdatedAt: proposedAt,
+	}
+	reserved := cloneAgentRun(claimed)
+	if err := reserveRunBudget(reserved, BudgetReservation{ID: actionBudgetReservationID(call.ID), Usage: BudgetUsage{Actions: 1}, CreatedAt: proposedAt}); err != nil {
+		t.Fatal(err)
+	}
+	reserved.Revision++
+	reserved.UpdatedAt = proposedAt
+	event := func(id, eventType string) *ActivityEvent {
+		return &ActivityEvent{ID: id, Scope: scope, EventType: eventType, Severity: ActivitySeverityInfo, AgentID: "release-agent", RunID: claimed.ID,
+			Actor: ActivityActor{Type: "worker", ID: "worker"}, Summary: approval.Summary, Visibility: ActivityVisibilityScope, CreatedAt: proposedAt}
+	}
+	proposal, err := store.CreateActionProposal(ctx, ActionProposalRecord{
+		Call: call, Approval: approval, Run: reserved, ExpectedRunRevision: claimed.Revision,
+		Lease: &AgentRunLeaseGuard{WorkerID: "worker", Now: proposedAt}, Event: event("proposal-event", "action.approval_requested"),
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	parked := cloneAgentRun(proposal.Run)
+	parked.Status = AgentRunStatusWaitingForApproval
+	parked.WakeCondition = &WakeCondition{Type: "approval", Reference: approval.ID}
+	parked.LeaseOwner, parked.LeaseExpiresAt = "", nil
+	parked.Revision++
+	parked.UpdatedAt = proposedAt
+	if _, err := store.UpdateAgentRunWithEvent(ctx, parked, proposal.Run.Revision, event("park-event", "run.waiting"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if proposal.Run, err = store.GetAgentRun(ctx, scope, claimed.ID); err != nil {
 		t.Fatal(err)
 	}
 	return proposal

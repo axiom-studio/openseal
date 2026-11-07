@@ -182,7 +182,7 @@ func (w *ApprovalNotificationWorker) agentApprovalConversation(ctx context.Conte
 func terminalApprovalActionStatus(status ActionCallStatus) bool {
 	switch status {
 	case ActionCallStatusSucceeded, ActionCallStatusFailed, ActionCallStatusDenied,
-		ActionCallStatusCanceled, ActionCallStatusCompensated:
+		ActionCallStatusCanceled, ActionCallStatusCompensated, ActionCallStatusRefused:
 		return true
 	default:
 		return false
@@ -599,56 +599,6 @@ func approvalNotificationPayload(approval *ApprovalCheckpoint, call *ActionCall)
 		payload["decisionReason"] = approval.DecisionReason
 	}
 	return payload
-}
-
-const (
-	maxApprovalReviewDepth = 4
-	maxApprovalReviewItems = 64
-	maxApprovalReviewText  = 20_000
-)
-
-func boundedApprovalReviewValue(value interface{}, depth int, items *int) interface{} {
-	if depth > maxApprovalReviewDepth || items == nil || *items >= maxApprovalReviewItems {
-		return nil
-	}
-	switch typed := value.(type) {
-	case map[string]interface{}:
-		result := make(map[string]interface{})
-		for key, child := range typed {
-			if *items >= maxApprovalReviewItems {
-				break
-			}
-			*items++
-			if sensitiveFieldName(key) {
-				continue
-			}
-			if projected := boundedApprovalReviewValue(child, depth+1, items); projected != nil {
-				result[key] = projected
-			}
-		}
-		return result
-	case []interface{}:
-		result := make([]interface{}, 0, len(typed))
-		for _, child := range typed {
-			if *items >= maxApprovalReviewItems {
-				break
-			}
-			*items++
-			if projected := boundedApprovalReviewValue(child, depth+1, items); projected != nil {
-				result = append(result, projected)
-			}
-		}
-		return result
-	case string:
-		if len(typed) > maxApprovalReviewText {
-			return typed[:maxApprovalReviewText] + "…"
-		}
-		return typed
-	case bool, float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64, nil:
-		return typed
-	default:
-		return fmt.Sprint(typed)
-	}
 }
 
 func (w *ApprovalNotificationWorker) postApprovalMessage(

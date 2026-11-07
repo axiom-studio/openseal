@@ -39,7 +39,6 @@ const approvalPayAction = "live-browser-pay"
 
 var (
 	approvalGenericSummary = regexp.MustCompile(`^Proposed \S+$`)
-	approvalProgressPhrase = regexp.MustCompile(`^(Loaded \d+ tools or instruction sets for the next step\.|Reading your request and available context\.|Working on your request\.)$`)
 	approvalCardEnding     = regexp.MustCompile(`(?i)\bending(?: in)? (\d{4})\b`)
 	approvalLast4          = regexp.MustCompile(`^\d{4}$`)
 	approvalAmount         = regexp.MustCompile(`^\d+(\.\d{1,4})?$`)
@@ -78,7 +77,7 @@ func PresentApproval(approval *ApprovalCheckpoint) ApprovalPresentation {
 	}
 	public := func(value interface{}) string {
 		text := approvalProse(value, 300)
-		if text == "" || approvalGenericSummary.MatchString(text) || approvalProgressPhrase.MatchString(text) || approvalNamesIdentifier(text, skillID, action) {
+		if text == "" || approvalGenericSummary.MatchString(text) || approvalNamesIdentifier(text, skillID, action) {
 			return ""
 		}
 		return text
