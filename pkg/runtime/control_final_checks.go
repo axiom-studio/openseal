@@ -42,7 +42,7 @@ const (
 var hostedTurnURLPattern = regexp.MustCompile(`https?://[^\s<>"'\\]+`)
 
 func checkFinalAnswerCompletion(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
-	content := d.content()
+	content := d.checkedText()
 	if d.Args.Silent || d.ReactionsOnly {
 		content = ""
 	}
@@ -89,6 +89,19 @@ func checkFinalAnswerCompletion(ctx context.Context, x *ControlExecutor, cc Cont
 	return nil, nil
 }
 
+// checkedText is every model-written text of the final: the answer (the
+// persisted summary) and, when present, the report.
+func (d *finalAnswerDraft) checkedText() string {
+	answer, report := strings.TrimSpace(d.Args.Answer), strings.TrimSpace(d.Args.Report)
+	switch {
+	case report == "":
+		return answer
+	case answer == "":
+		return report
+	}
+	return answer + "\n" + report
+}
+
 // finalAnswerURLs are the URLs of the answer text and of the visual, trimmed
 // of trailing punctuation, in order, without duplicates.
 func finalAnswerURLs(content string, d *finalAnswerDraft) []string {
@@ -116,19 +129,16 @@ func finalAnswerURLs(content string, d *finalAnswerDraft) []string {
 
 // finalEvidenceCorpus is the text the Run read: the Run goal and context and
 // the session path's user, tool (arguments and results), note and compaction
-// contents. Model-authored text is not evidence: assistant entries, the final
+// contents. JSON (Run context, tool arguments, json parts) contributes its
+// decoded string leaves, never its encoding: json.Marshal escapes '&' as
+// \u0026, and the answer cites the URL as read. Model-authored text is not evidence: assistant entries, the final
 // tool's own arguments and results, and final_rejection notes (which quote the
 // refused URL) are left out.
 func (x *ControlExecutor) finalEvidenceCorpus(ctx context.Context, cc ControlContext) (string, error) {
 	var b strings.Builder
 	b.WriteString(cc.Run.Goal)
 	b.WriteByte('\n')
-	if len(cc.Run.Context) > 0 {
-		if encoded, err := json.Marshal(cc.Run.Context); err == nil {
-			b.Write(encoded)
-			b.WriteByte('\n')
-		}
-	}
+	writeStringLeaves(&b, cc.Run.Context)
 	path, err := x.controlSessionPath(ctx, cc)
 	if err != nil {
 		return "", err
@@ -153,8 +163,7 @@ func (x *ControlExecutor) finalEvidenceCorpus(ctx context.Context, cc ControlCon
 			if entry.Tool == nil || entry.Tool.Name == string(ControlToolFinalAnswer) {
 				continue
 			}
-			b.Write(entry.Tool.Arguments)
-			b.WriteByte('\n')
+			writeJSONText(&b, entry.Tool.Arguments)
 			if entry.Tool.Result != nil {
 				writeContentParts(&b, entry.Tool.Result.Content)
 			}
@@ -170,11 +179,59 @@ func (x *ControlExecutor) finalEvidenceCorpus(ctx context.Context, cc ControlCon
 
 func writeContentParts(b *strings.Builder, parts []ContentPart) {
 	for _, part := range parts {
-		for _, text := range []string{part.Text, string(part.Value), part.URI, part.Path, part.Note} {
+		writeJSONText(b, part.Value)
+		for _, text := range []string{part.Text, part.URI, part.Path, part.Note} {
 			if text != "" {
 				b.WriteString(text)
 				b.WriteByte('\n')
 			}
+		}
+	}
+}
+
+// writeJSONText writes the decoded string leaves of a JSON document; bytes
+// that are not JSON are written as they are.
+func writeJSONText(b *strings.Builder, raw []byte) {
+	if len(raw) == 0 {
+		return
+	}
+	var value interface{}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		b.Write(raw)
+		b.WriteByte('\n')
+		return
+	}
+	writeStringLeaves(b, value)
+}
+
+// writeStringLeaves writes every string (map keys included) of a decoded
+// JSON value, one per line. Typed values are normalized through JSON first.
+func writeStringLeaves(b *strings.Builder, value interface{}) {
+	switch v := value.(type) {
+	case nil, bool, float64, json.Number:
+	case string:
+		if v != "" {
+			b.WriteString(v)
+			b.WriteByte('\n')
+		}
+	case []interface{}:
+		for _, item := range v {
+			writeStringLeaves(b, item)
+		}
+	case map[string]interface{}:
+		for key, item := range v {
+			b.WriteString(key)
+			b.WriteByte('\n')
+			writeStringLeaves(b, item)
+		}
+	default:
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			return
+		}
+		var decoded interface{}
+		if json.Unmarshal(encoded, &decoded) == nil {
+			writeStringLeaves(b, decoded)
 		}
 	}
 }
@@ -194,39 +251,31 @@ func (x *ControlExecutor) controlSessionPath(ctx context.Context, cc ControlCont
 	return x.Sessions.LoadAgentSessionPath(ctx, cc.Run.Scope, sessionID)
 }
 
-// runHasExternalReceipt: some tool entry of this Run references a succeeded
-// ActionCall with an external operation receipt.
+// runHasExternalReceipt: some succeeded ActionCall of this Run carries an
+// external operation receipt.
 func (x *ControlExecutor) runHasExternalReceipt(ctx context.Context, cc ControlContext) (bool, error) {
-	entries, err := x.Sessions.ListAgentSessionEntries(ctx, SessionEntryFilter{
-		Scope: cc.Run.Scope, RunID: cc.Run.ID, Types: []SessionEntryType{SessionEntryTool}, Limit: maxSessionEntryListLimit,
-	})
-	if err != nil {
-		return false, err
+	actions, ok := x.Portfolio.(loopActionCallLister)
+	if !ok {
+		return false, errors.New("control executor portfolio is not an action store; the external claim check needs the Run's calls")
 	}
-	var actions ActionStore
-	for _, entry := range entries {
-		if entry == nil || entry.ActionCallID == "" {
-			continue
-		}
-		if actions == nil {
-			store, ok := x.Portfolio.(ActionStore)
-			if !ok {
-				return false, errors.New("control executor portfolio is not an action store; the external claim check needs the Run's calls")
-			}
-			actions = store
-		}
-		call, err := actions.GetActionCall(ctx, cc.Run.Scope, entry.ActionCallID)
-		if errors.Is(err, ErrActionNotFound) {
-			continue
-		}
+	for offset := 0; ; offset += loopActionCallPageSize {
+		page, err := actions.ListActionCalls(ctx, ActionFilter{
+			Scope: cc.Run.Scope, RunID: cc.Run.ID, Status: []ActionCallStatus{ActionCallStatusSucceeded},
+			Limit: loopActionCallPageSize, Offset: offset,
+		})
 		if err != nil {
-			return false, err
+			return false, fmt.Errorf("load the run's action calls: %w", err)
 		}
-		if call.RunID == cc.Run.ID && call.Status == ActionCallStatusSucceeded && strings.TrimSpace(call.ExternalOperationDigest) != "" {
-			return true, nil
+		for _, call := range page {
+			if call != nil && call.RunID == cc.Run.ID && call.Status == ActionCallStatusSucceeded &&
+				strings.TrimSpace(call.ExternalOperationDigest) != "" {
+				return true, nil
+			}
+		}
+		if len(page) < loopActionCallPageSize {
+			return false, nil
 		}
 	}
-	return false, nil
 }
 
 // claimsExternalMutation: the text says an external effect happened.
@@ -312,17 +361,26 @@ func checkFinalEvidenceGrounding(ctx context.Context, x *ControlExecutor, cc Con
 		Scope: cc.Run.Scope, RunID: cc.Run.ID, AgentID: cc.Run.AssignedAgentID, Goal: cc.Run.Goal,
 		Snapshot: *snapshot, Claims: append([]EvidenceClaim(nil), claims...), ClaimsDigest: digest,
 		DraftSummary: strings.TrimSpace(d.Args.Answer), DraftOutput: cloneMap(d.Output),
-		MaxOutputTokens: EvidenceGroundingReviewOutputLimit,
+		MaxOutputTokens: evidenceReviewOutputLimit(cc.Run),
 	}
 	if cc.Step != nil {
 		request.TurnID = cc.Step.ID
 	}
+	if cc.Binding != nil {
+		request.ModelCredential = cloneHostedCredentialReference(cc.Binding.ModelCredential)
+	}
 	review, err := x.Reviewer.ReviewEvidenceGrounding(ctx, request)
 	if err != nil {
-		return nil, fmt.Errorf("evidence grounding review: %w", err)
+		// A reviewer transport failure is a host outage: the step requeues
+		// with the host retry delays and the settle replays with the same
+		// InvocationID.
+		return nil, retryableTurnHostError{cause: fmt.Errorf("evidence grounding review: %w", err)}
 	}
 	if err := validateEvidenceGroundingReview(review, request); err != nil {
 		return nil, err
+	}
+	if int64(review.Usage.OutputTokens) > request.MaxOutputTokens {
+		return nil, fmt.Errorf("evidence reviewer reported %d output tokens beyond the allowed %d", review.Usage.OutputTokens, request.MaxOutputTokens)
 	}
 	if !review.Accepted {
 		findings := review.Findings
@@ -338,6 +396,22 @@ func checkFinalEvidenceGrounding(ctx context.Context, x *ControlExecutor, cc Con
 }
 
 const finalOutputEvidenceGroundingKey = "evidenceGrounding"
+
+// evidenceReviewOutputLimit is the review's output cap: the reviewer limit,
+// lowered to what the Run's output and total token budgets have left.
+func evidenceReviewOutputLimit(run *AgentRun) int64 {
+	limit := int64(EvidenceGroundingReviewOutputLimit)
+	for _, dimension := range []string{"output_tokens", "total_tokens"} {
+		used, max, ok := budgetDimensionUsage(run, dimension)
+		if !ok || max <= 0 {
+			continue
+		}
+		if remaining := max - used; remaining > 0 && remaining < limit {
+			limit = remaining
+		}
+	}
+	return limit
+}
 
 // finalEvidenceInvocationID is stable across a replay of the same settle:
 // the final tool entry, or the plain-text step.

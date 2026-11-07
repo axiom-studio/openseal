@@ -3,9 +3,12 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/axiom-studio/openseal/pkg/capability"
 )
 
 func TestUnsupportedURLRejected(t *testing.T) {
@@ -33,6 +36,29 @@ func TestUnsupportedURLRejected(t *testing.T) {
 	g := newFinalFixture(t, finalCall("final", `{"answer":"Summarized https://goal.example.test/page."}`))
 	g.run.Goal = "Summarize https://goal.example.test/page"
 	requireFinal(t, g.settleFinal("final", ControlAuthority{}))
+}
+
+func TestUnsupportedURLDecodesJSONEvidence(t *testing.T) {
+	// The governed result is JSON-encoded (& is escaped as \u0026); the answer
+	// cites the URL as read.
+	f := newFinalFixture(t,
+		LoopToolCall{ID: "search", Name: "action_web_search", Arguments: json.RawMessage(`{"url":"https://args.test/a?x=1\u0026y=2"}`)},
+		finalCall("final", `{"answer":"Results: https://x.test/s?q=a&page=2 and https://args.test/a?x=1&y=2."}`),
+	)
+	f.governedEntry("search", "web", "search", map[string]interface{}{"results": []interface{}{map[string]interface{}{"url": "https://x.test/s?q=a&page=2"}}})
+	if raw := f.stored("search").Tool.Result.Content[0].Value; !strings.Contains(string(raw), `\u0026`) {
+		t.Fatalf("result not escaped: %s", raw)
+	}
+	requireFinal(t, f.settleFinal("final", ControlAuthority{}))
+}
+
+func TestUnsupportedURLChecksAnswerBesideReport(t *testing.T) {
+	f := newFinalFixture(t,
+		finalCall("final", `{"answer":"See https://invented.test/summary","report":"Nothing to cite."}`),
+		finalCall("claim", `{"answer":"Email sent to Ana.","report":"Weekly status."}`),
+	)
+	requireRejected(t, f, f.settleFinal("final", ControlAuthority{}), "final", finalUnsupportedURLCode)
+	requireRejected(t, f, f.settleFinal("claim", ControlAuthority{}), "claim", finalUnevidencedClaimCode)
 }
 
 func TestExternalClaimNeedsReceipt(t *testing.T) {
@@ -85,11 +111,16 @@ func TestApprovalClaimOnceThenFailsRun(t *testing.T) {
 // fakeGroundingReviewer accepts every claim unless reject names its id.
 type fakeGroundingReviewer struct {
 	reject   string
+	err      error
+	usage    TurnUsage
 	requests []EvidenceGroundingRequest
 }
 
 func (r *fakeGroundingReviewer) ReviewEvidenceGrounding(_ context.Context, request EvidenceGroundingRequest) (*EvidenceGroundingReview, error) {
 	r.requests = append(r.requests, request)
+	if r.err != nil {
+		return nil, r.err
+	}
 	accepted := true
 	findings := make([]EvidenceGroundingFinding, 0, len(request.Claims))
 	for _, claim := range request.Claims {
@@ -103,7 +134,7 @@ func (r *fakeGroundingReviewer) ReviewEvidenceGrounding(_ context.Context, reque
 		APIVersion: EvidenceGroundingAPIVersion, InvocationID: request.InvocationID,
 		SnapshotID: request.Snapshot.ID, ClaimsDigest: request.ClaimsDigest,
 		ReviewerProvider: "review-provider", ReviewerModel: "review-model",
-		Accepted: accepted, CoverageComplete: true, Findings: findings,
+		Accepted: accepted, CoverageComplete: true, Findings: findings, Usage: r.usage,
 	}, nil
 }
 
@@ -196,5 +227,48 @@ func TestEvidenceReviewAcceptedDelivers(t *testing.T) {
 	g.run.Context = finalChecksSnapshotContext(t)
 	if _, err := g.exec.Settle(g.ctx, g.context("final", ControlAuthority{FinalMode: FinalModeEvidence})); err == nil {
 		t.Fatal("evidence final accepted without a reviewer")
+	}
+}
+
+func TestEvidenceReviewSendsCredentialAndRetriesHostErrors(t *testing.T) {
+	args := `{"answer":"x","report":"Revenue grew (obs-revenue).","evidenceClaims":[{"id":"c1","statement":"Revenue grew.","evidenceRefs":["obs-revenue"]}]}`
+	f := newFinalFixture(t, finalCall("final", args))
+	f.run.Context = finalChecksSnapshotContext(t)
+	f.run.Budget = &BudgetPolicy{MaxOutputTokens: 1000}
+	f.run.BudgetUsage = BudgetUsage{OutputTokens: 400}
+	reviewer := &fakeGroundingReviewer{err: errors.New("connection refused")}
+	f.exec.Reviewer = reviewer
+	cc := f.context("final", ControlAuthority{FinalMode: FinalModeEvidence})
+	credential := &capability.CredentialReference{Kind: "model-provider", ID: "cred-1"}
+	cc.Binding.ModelCredential = credential
+	// A reviewer transport error is a host outage the loop retries.
+	if _, err := f.exec.Settle(f.ctx, cc); !errors.Is(err, ErrTurnHostUnavailable) {
+		t.Fatalf("err = %v, want host unavailable", err)
+	}
+	request := reviewer.requests[0]
+	if request.ModelCredential == nil || *request.ModelCredential != *credential || request.ModelCredential == credential {
+		t.Fatalf("credential = %#v", request.ModelCredential)
+	}
+	if request.MaxOutputTokens != 600 {
+		t.Fatalf("max output = %d, want the remaining 600", request.MaxOutputTokens)
+	}
+	// The replay with the same entry sends the same invocation and delivers.
+	reviewer.err = nil
+	result, err := f.exec.Settle(f.ctx, cc)
+	if err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	requireFinal(t, result)
+	if reviewer.requests[1].InvocationID != request.InvocationID {
+		t.Fatalf("invocation %q != %q", reviewer.requests[1].InvocationID, request.InvocationID)
+	}
+	// Usage beyond the cap is refused.
+	g := newFinalFixture(t, finalCall("final", args))
+	g.run.Context = finalChecksSnapshotContext(t)
+	g.run.Budget = &BudgetPolicy{MaxOutputTokens: 1000}
+	g.exec.Reviewer = &fakeGroundingReviewer{usage: TurnUsage{OutputTokens: 1001}}
+	if _, err := g.exec.Settle(g.ctx, g.context("final", ControlAuthority{FinalMode: FinalModeEvidence})); err == nil ||
+		!strings.Contains(err.Error(), "beyond the allowed 1000") {
+		t.Fatalf("over-cap usage err = %v", err)
 	}
 }

@@ -276,6 +276,7 @@ func ResolveCatalogTurnRunner(ctx context.Context, catalog AgentTurnCatalog, run
 		ModelActions: actions, PreparedRuntimes: prepared, InputContextRefs: contextRefs,
 		RunbookOperations: runbookOperations,
 		BudgetReservation: BudgetUsage{Turns: 1},
+		ModelCredential:   deploymentModelCredential(deployment),
 	}
 	if delegatedFromCurrentRunbook(run, definition.Runbook) {
 		base.RunbookOperations = nil
