@@ -149,6 +149,9 @@ type ActionWorker struct {
 	// the rosters RunUmbrella checks.
 	availability atomic.Pointer[credentialAvailabilityBox]
 	teams        TeamRosterReader
+	// loopLease is the call lease of inline loop execution; zero means
+	// LoopActionLease.
+	loopLease time.Duration
 }
 
 func NewActionWorker(store KernelStore, catalog ActionExecutionCatalog, credentials CredentialResolver, dispatcher ActionDispatcher) *ActionWorker {
@@ -159,6 +162,38 @@ func NewActionWorkerWithCredentialLeaseIssuer(store KernelStore, catalog ActionE
 	return &ActionWorker{store: store, catalog: catalog, leaseIssuer: issuer, dispatcher: dispatcher, now: time.Now, newID: uuid.NewString, teams: teamRosterReader(store)}
 }
 
+// ErrLoopActionNotClaimable is returned by ExecuteOwnLoopCall when the call is
+// neither ready nor a running call whose lease expired.
+var ErrLoopActionNotClaimable = errors.New("loop action call is not claimable now")
+
+// errLoopActionAbandoned closes a loop call whose Run ended before its loop
+// finished it.
+var errLoopActionAbandoned = errors.New("The run that made this call ended before it ran.")
+
+// errActionInterrupted fails a write recovered from a lost execution: it may
+// already have reached its provider, so it is never sent again.
+var errActionInterrupted = errors.New("The previous operation may already have taken effect. It was not sent again.")
+
+// loopActionMaintenanceRetry is how long a loop call held by Skill runtime
+// maintenance waits before its loop tries it again.
+const loopActionMaintenanceRetry = 30 * time.Second
+
+// LoopActionMaintenanceError reports that a loop call was not dispatched
+// because its Skill is under runtime maintenance. The call is ready again (or
+// was never claimed); the loop parks its tool entry until RetryAt and then
+// executes the same call.
+type LoopActionMaintenanceError struct {
+	Call        *ActionCall
+	Maintenance SkillRuntimeMaintenance
+	RetryAt     time.Time
+}
+
+func (e *LoopActionMaintenanceError) Error() string { return ErrSkillRuntimeMaintenance.Error() }
+func (e *LoopActionMaintenanceError) Unwrap() error { return ErrSkillRuntimeMaintenance }
+
+// RunOnce is the pool entry point. A pool worker executes nested calls of a
+// running step; it closes, without dispatch, the host calls their host
+// abandoned and the loop calls whose Run ended.
 func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string, leaseDuration time.Duration) (*ActionExecutionResult, error) {
 	if w == nil || w.store == nil || w.catalog == nil || w.dispatcher == nil {
 		return nil, errors.New("action worker is not configured")
@@ -174,15 +209,83 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if w.onClaim != nil {
 		w.onClaim()
 	}
-	if call.Execution == ActionExecutionHost {
+	switch call.Execution {
+	case ActionExecutionHost:
 		// Only its host performs a host call. A worker gets one only after
 		// the host abandoned it, and closes it without dispatch; a call that
 		// was running may already have reached its provider.
 		return w.persistOutcome(ctx, call, nil, nil, nil, errNestedHostActionAbandoned, workerID, call.RecoveredRunning)
+	case ActionExecutionLoop:
+		// Only its loop runs a loop call. A worker gets one only after its Run
+		// ended: a ready call is canceled, a running one may already have
+		// reached its provider and fails without being sent again.
+		return w.persistOutcome(ctx, call, nil, nil, nil, errLoopActionAbandoned, workerID, call.RecoveredRunning)
 	}
+	return w.executeClaimed(ctx, call, workerID, leaseDuration)
+}
+
+// ExecuteOwnLoopCall claims exactly this loop call for the Run's lease owner
+// workerID and executes it inline under its call lease (LoopActionLease),
+// which it renews while the call runs. It returns
+// ErrLoopActionNotClaimable when the call is not ready and not a running call
+// with an expired lease, and *LoopActionMaintenanceError when Skill runtime
+// maintenance holds it.
+func (w *ActionWorker) ExecuteOwnLoopCall(ctx context.Context, scope Scope, actionCallID, workerID string) (*ActionExecutionResult, error) {
+	if w == nil || w.store == nil || w.catalog == nil || w.dispatcher == nil {
+		return nil, errors.New("action worker is not configured")
+	}
+	current, err := w.store.GetActionCall(ctx, scope, actionCallID)
+	if err != nil {
+		return nil, err
+	}
+	if current.Origin != ActionOriginLoop || current.Execution != ActionExecutionLoop {
+		return nil, errors.New("action call is not a loop call")
+	}
+	lease := w.loopLease
+	if lease <= 0 {
+		lease = LoopActionLease
+	}
+	claimed, err := w.store.ClaimNextAction(ctx, ActionClaim{Scope: scope, WorkerID: workerID, Now: w.now().UTC(), LeaseDuration: lease, OwnActionID: actionCallID})
+	if err != nil {
+		return nil, err
+	}
+	if claimed == nil {
+		// Stores do not claim a call whose Skill is under maintenance.
+		if current.Status == ActionCallStatusReady {
+			if maintenanceErr := actionSkillRuntimeMaintenanceError(ctx, w.store, scope, current.SkillID); maintenanceErr != nil {
+				return nil, w.loopMaintenance(current, maintenanceErr)
+			}
+		}
+		return nil, ErrLoopActionNotClaimable
+	}
+	result, err := w.executeClaimed(ctx, claimed, workerID, lease)
+	var held *SkillRuntimeMaintenanceError
+	if errors.As(err, &held) && result != nil {
+		return nil, w.loopMaintenance(result.Call, err)
+	}
+	return result, err
+}
+
+func (w *ActionWorker) loopMaintenance(call *ActionCall, cause error) error {
+	var held *SkillRuntimeMaintenanceError
+	if !errors.As(cause, &held) {
+		return cause
+	}
+	return &LoopActionMaintenanceError{Call: cloneActionCall(call), Maintenance: held.Maintenance, RetryAt: w.now().UTC().Add(loopActionMaintenanceRetry)}
+}
+
+// executeClaimed runs the governance body for a call this worker holds:
+// ownership, the recovered-running guard, maintenance, Resolve and
+// ValidateInput, credential availability, the credential lease or plaintext
+// credentials, the re-check, the per-action timeout, dispatch, explicit result
+// failures, ValidateOutput and the persisted outcome.
+//
+// A loop call held by maintenance is deferred back to ready and its result
+// is returned together with the *SkillRuntimeMaintenanceError.
+func (w *ActionWorker) executeClaimed(ctx context.Context, call *ActionCall, workerID string, leaseDuration time.Duration) (*ActionExecutionResult, error) {
 	executionCtx, stopLease := w.holdActionLease(ctx, call, workerID, leaseDuration)
-	// An ActionCall may outlive its parent dependency after cancellation or a
-	// replacement continuation. Reconcile it before touching provider authority.
+	// An ActionCall may outlive the Run step or wait that made it. Reconcile it
+	// before touching provider authority.
 	sourceRun, executionErr := w.store.GetAgentRun(executionCtx, call.Scope, call.RunID)
 	if executionErr == nil && sourceRun == nil {
 		executionErr = ErrRunNotFound
@@ -201,15 +304,6 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		}
 		return w.persistOutcome(ctx, call, nil, nil, nil, nil, workerID, false)
 	}
-	if call.Origin == "" && w.correctionBlocked(executionCtx, sourceRun, call) {
-		// Only the correction admitted for a returned failure may run; a stopped
-		// attempt runs nothing. Stop before catalog hydration, credentials or dispatch.
-		call, leaseErr := stopLease()
-		if leaseErr != nil {
-			return nil, leaseErr
-		}
-		return w.persistOutcome(ctx, call, nil, nil, nil, errActionNotAdmittedAfterFailure, workerID, false)
-	}
 	if call.RecoveredRunning && call.SideEffect != skill.SideEffectRead && call.SideEffect != skill.SideEffectNone {
 		// The expired worker may have already dispatched this mutation. A new
 		// lease does not prove that nothing happened, even with MaxAttempts=1.
@@ -217,21 +311,20 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 		if leaseErr != nil {
 			return nil, leaseErr
 		}
-		return w.persistOutcome(ctx, call, nil, nil, nil,
-			errors.New("The previous operation may already have taken effect. It was not sent again."), workerID, true)
+		return w.persistOutcome(ctx, call, nil, nil, nil, errActionInterrupted, workerID, true)
 	}
 	if executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID); executionErr != nil {
 		call, leaseErr := stopLease()
 		if leaseErr != nil {
 			return nil, leaseErr
 		}
-		return w.persistOutcome(ctx, call, nil, nil, nil, executionErr, workerID, false)
+		return w.persistMaintenanceOutcome(ctx, call, executionErr, workerID)
 	}
 	selection := []skill.BindingReference(nil)
 	if call.BindingID != "" || call.BindingRevision != 0 {
 		selection = append(selection, skill.BindingReference{ID: call.BindingID, Revision: call.BindingRevision})
 	}
-	bound, executionErr := w.catalog.Resolve(skill.WithRunActor(executionCtx, RunSkillActor(sourceRun)), skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
+	bound, executionErr := w.catalog.Resolve(skill.WithRunActor(executionCtx, RunSkillActor(sourceRun)), skill.ScopeReference{Kind: call.Scope.Kind, ID: call.Scope.ID}, call.DeploymentID, call.SkillID, call.SkillVersion, call.Action, selection...)
 	if executionErr == nil {
 		executionErr = w.catalog.ValidateInput(executionCtx, bound, call.Arguments)
 	}
@@ -290,9 +383,6 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if executionErr == nil {
 		executionErr = actionSkillRuntimeMaintenanceError(executionCtx, w.store, call.Scope, call.SkillID)
 	}
-	if executionErr == nil && call.Origin == "" && w.correctionBlocked(executionCtx, sourceRun, call) {
-		executionErr = errActionNotAdmittedAfterFailure
-	}
 	owns = false
 	if executionErr == nil {
 		owns, executionErr = w.callOwnedByRun(executionCtx, sourceRun, call)
@@ -320,7 +410,21 @@ func (w *ActionWorker) RunOnce(ctx context.Context, scope Scope, workerID string
 	if leaseErr != nil {
 		return nil, leaseErr
 	}
+	if !dispatched && errors.Is(executionErr, ErrSkillRuntimeMaintenance) {
+		return w.persistMaintenanceOutcome(ctx, call, executionErr, workerID)
+	}
 	return w.persistOutcome(ctx, call, bound, credentials, output, executionErr, workerID, dispatched)
+}
+
+// persistMaintenanceOutcome defers a call that maintenance held before
+// dispatch. A deferred loop call also returns the maintenance error, so its
+// loop parks the tool entry instead of waiting on the pool.
+func (w *ActionWorker) persistMaintenanceOutcome(ctx context.Context, call *ActionCall, cause error, workerID string) (*ActionExecutionResult, error) {
+	result, err := w.persistOutcome(ctx, call, nil, nil, nil, cause, workerID, false)
+	if err != nil || call.Origin != ActionOriginLoop || result == nil || result.Call == nil || result.Call.Status != ActionCallStatusReady {
+		return result, err
+	}
+	return result, cause
 }
 
 func (w *ActionWorker) holdActionLease(parent context.Context, call *ActionCall, workerID string, leaseDuration time.Duration) (context.Context, func() (*ActionCall, error)) {
@@ -404,20 +508,35 @@ func actionSkillRuntimeMaintenanceError(ctx context.Context, store interface{}, 
 	return nil
 }
 
-// callOwnedByRun reports whether the Run still wants call executed: a model
-// action is the Run's awaited dependency; a nested call needs its Turn to
-// still be the Run's in-flight Turn.
+// callOwnedByRun reports whether the Run still wants call executed: a loop
+// call needs its Run running under the lease that claimed the call; a nested
+// call needs its step to still be the Run's running step. Calls of any other
+// origin have no owner.
 func (w *ActionWorker) callOwnedByRun(ctx context.Context, run *AgentRun, call *ActionCall) (bool, error) {
-	if call != nil && call.Origin == ActionOriginVM {
+	if call == nil {
+		return false, nil
+	}
+	switch call.Origin {
+	case ActionOriginLoop:
+		return loopActionOwned(run, call, w.now().UTC()), nil
+	case ActionOriginVM:
 		return nestedActionTurnLive(ctx, w.store, run, call, w.now().UTC())
 	}
-	return runOwnsActionDependency(run, call), nil
+	return false, nil
 }
 
-// Both the active and paused continuation own the same durable dependency.
-// Checking identity prevents a late result from waking a newer continuation.
+// loopActionOwned reports whether call is held by the live lease of its
+// running Run: the loop executing it inline is that Run's claim.
+func loopActionOwned(run *AgentRun, call *ActionCall, now time.Time) bool {
+	return run != nil && call != nil && run.Scope == call.Scope && run.ID == call.RunID && run.Status == AgentRunStatusRunning &&
+		run.LeaseOwner != "" && run.LeaseOwner == call.LeaseOwner && run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(now)
+}
+
+// runOwnsActionDependency reports whether run waits on call as its action
+// dependency, active or paused. Stores use it to keep a paused dependency
+// unclaimed; loop calls are never a Run's dependency.
 func runOwnsActionDependency(run *AgentRun, call *ActionCall) bool {
-	if run == nil || call == nil || run.Scope != call.Scope || run.ID != call.RunID {
+	if run == nil || call == nil || call.Origin == ActionOriginLoop || run.Scope != call.Scope || run.ID != call.RunID {
 		return false
 	}
 	condition := run.WakeCondition
@@ -496,6 +615,8 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 		updatedCall.Error = "owning Run no longer waits for this action"
 		if nested {
 			updatedCall.Error = "the turn that made this call has ended"
+		} else if executionErr != nil && call.Origin == ActionOriginLoop {
+			updatedCall.Error = sanitizeActionError(executionErr, credentials)
 		}
 		eventType = "action.canceled"
 		summary = fmt.Sprintf("Canceled stale %s.%s action", call.SkillID, call.Action)
@@ -530,11 +651,7 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			summary = connectAccountWaitSummary(parked.request)
 		} else if executionErr == nil {
 			updatedCall.Status = ActionCallStatusSucceeded
-			var semanticArguments map[string]string
-			if bound != nil {
-				semanticArguments = bound.Action.SemanticArguments
-			}
-			updatedCall.Output = sanitizeActionOutput(annotateActionProgress(output, updatedCall, semanticArguments), credentials)
+			updatedCall.Output = sanitizeActionOutput(output, credentials)
 			updatedCall.Error = ""
 			updatedCall.ErrorCode, updatedCall.ErrorDetails = "", nil
 		} else {
@@ -544,6 +661,9 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 			var unavailable *personUnavailableError
 			if errors.As(executionErr, &unavailable) {
 				updatedCall.ErrorCode = CredentialErrorPersonUnavailable
+			}
+			if errors.Is(executionErr, errActionInterrupted) {
+				updatedCall.ErrorCode = ActionErrorCodeInterrupted
 			}
 			var failure *skillerror.ActionError
 			if errors.As(executionErr, &failure) && failure != nil {
@@ -564,118 +684,27 @@ func (w *ActionWorker) prepareActionOutcome(ctx context.Context, call *ActionCal
 	if terminalOutcome && w.hostSummary != "" && call.Execution == ActionExecutionHost {
 		summary = w.hostSummary
 	}
-	if ownsDependency && terminalOutcome && !nested {
-		updatedRun = cloneAgentRun(sourceRun)
-		if paused {
-			updatedRun.PausedFrom = AgentRunStatusQueued
-			updatedRun.PausedWakeCondition = nil
-		} else {
-			updatedRun.Status = AgentRunStatusQueued
-			updatedRun.WakeCondition = nil
-			updatedRun.AvailableAt = now
-			updatedRun.QueueEnteredAt = now
-		}
-		updatedRun.LastWakeSignalID = "action:" + call.ID + ":" + fmt.Sprint(updatedCall.Revision)
-		recordedCheckpoint := updatedRun.Checkpoint
-		updatedRun.Checkpoint = checkpointTerminalAction(recordedCheckpoint, updatedCall, nil)
-		var connectAccount *SkillSetupRequest
-		if isParkedConnectAccountCall(updatedCall) {
-			connectAccount = pendingConnectAccountRequestFromAction(ctx, w.store, updatedCall)
-		}
-		if connectAccount != nil {
-			// The call is retried once the account is connected, or the card
-			// is dismissed and the model explains what is blocked.
-			condition := &WakeCondition{Type: ConnectAccountWakeType, Reference: connectAccount.ID}
-			if paused {
-				updatedRun.PausedFrom = AgentRunStatusWaitingForEvent
-				updatedRun.PausedWakeCondition = condition
-			} else {
-				updatedRun.Status = AgentRunStatusWaitingForEvent
-				updatedRun.WakeCondition = condition
-			}
-		}
-		if updatedCall.Status == ActionCallStatusFailed && !paused && !isParkedConnectAccountCall(updatedCall) {
-			// The failure is returned to the model as this action's result
-			// (bounded by checkpointToolFeedbackFailure). The attempt ends only
-			// when that bound is reached. A typed source challenge asks its
-			// bounded question only in a proven conversation; anywhere else (a
-			// schedule, agent work, a lost origin) the model gets it back like
-			// any other failed read and can use another source.
-			if hasCanonicalSourceAccessChallenge(updatedRun) {
-				if interaction, interactionErr := resolveSourceAccessChallengeInteraction(ctx, w.store, updatedRun); interactionErr != nil || interaction == nil {
-					updatedRun.Checkpoint = checkpointUnaskedTerminalAction(recordedCheckpoint, updatedCall)
-				}
-			}
-			// A stopped attempt stays queued for its answer-only explanation
-			// turn, where the model tells the user what failed. A platform
-			// failure no correction can fix ends at once with its exact reply.
-			if requiresFinalFailureExplanation(updatedRun.Checkpoint) && (!modelExplainsFailure(updatedRun) || platformActionFailure(updatedRun.Checkpoint, updatedCall)) {
-				updatedRun.Status = AgentRunStatusFailed
-				updatedRun.Error = updatedCall.Error
-				updatedRun.CompletedAt = &now
-				updatedRun.LeaseOwner, updatedRun.LeaseExpiresAt = "", nil
-			}
-		}
-		if updatedCall.Status == ActionCallStatusFailed && updatedCall.ApprovalID != "" {
-			approval, approvalErr := w.store.GetApproval(ctx, updatedCall.Scope, updatedCall.ApprovalID)
-			if approvalErr != nil {
-				return ActionExecutionRecord{}, approvalErr
-			}
-			updatedRun.Checkpoint = checkpointApprovedActionFailure(updatedRun.Checkpoint, approval, updatedCall)
-		} else if updatedCall.Status == ActionCallStatusSucceeded && updatedRun.Checkpoint[approvalRecoveryCheckpointKey] != nil {
-			updatedRun.Checkpoint = clearApprovedActionFailure(updatedRun.Checkpoint)
-		}
-		if updatedCall.Status == ActionCallStatusSucceeded && updatedRun.Checkpoint[proposalRecoveryCheckpointKey] != nil {
-			updatedRun.Checkpoint = clearProposalFailure(updatedRun.Checkpoint)
-		}
-		if updatedCall.Status == ActionCallStatusSucceeded {
-			if request := humanInterventionFromAction(updatedCall, now, func() string { return humanInterventionID }); request != nil {
-				condition := &WakeCondition{Type: "human_intervention", Reference: request.ID}
-				if paused {
-					updatedRun.PausedFrom = AgentRunStatusWaitingForEvent
-					updatedRun.PausedWakeCondition = condition
-				} else {
-					updatedRun.Status = AgentRunStatusWaitingForEvent
-					updatedRun.WakeCondition = condition
-				}
-				updatedRun.HumanInterventions = append(updatedRun.HumanInterventions, *request)
-				eventType = "action.human_intervention_required"
-				summary = request.Summary
-			} else if request := pendingCredentialRequestFromAction(ctx, w.store, updatedCall); request != nil {
-				// The work continues only after the user saves the credential in
-				// the vault or dismisses the in-chat card.
-				condition := &WakeCondition{Type: CredentialRequestWakeType, Reference: request.ID}
-				if paused {
-					updatedRun.PausedFrom = AgentRunStatusWaitingForEvent
-					updatedRun.PausedWakeCondition = condition
-				} else {
-					updatedRun.Status = AgentRunStatusWaitingForEvent
-					updatedRun.WakeCondition = condition
-				}
-				eventType = "action.credential_requested"
-				summary = "Waiting for the user to save a requested credential"
-			} else if request := pendingConnectAppRequestFromAction(ctx, w.store, updatedCall); request != nil {
-				// The work continues with the app's tools once the user connects
-				// it, or with an explanation once the card is dismissed.
-				condition := &WakeCondition{Type: ConnectAppWakeType, Reference: request.ID}
-				if paused {
-					updatedRun.PausedFrom = AgentRunStatusWaitingForEvent
-					updatedRun.PausedWakeCondition = condition
-				} else {
-					updatedRun.Status = AgentRunStatusWaitingForEvent
-					updatedRun.WakeCondition = condition
-				}
-				eventType = "action.connection_requested"
-				summary = "Waiting for the user to connect " + request.SkillName
-			}
+	// The Run is not changed by an outcome: its loop reads the call and
+	// parks at step end. Only a human intervention request is made durable
+	// on the Run with the call that raised it.
+	if ownsDependency && !nested && updatedCall.Status == ActionCallStatusSucceeded {
+		if request := humanInterventionFromAction(updatedCall, now, func() string { return humanInterventionID }); request != nil {
+			updatedRun = cloneAgentRun(sourceRun)
+			updatedRun.HumanInterventions = append(updatedRun.HumanInterventions, *request)
+			eventType = "action.human_intervention_required"
+			summary = request.Summary
+		} else if request := pendingCredentialRequestFromAction(ctx, w.store, updatedCall); request != nil {
+			eventType = "action.credential_requested"
+			summary = "Waiting for the user to save a requested credential"
+		} else if request := pendingConnectAppRequestFromAction(ctx, w.store, updatedCall); request != nil {
+			eventType = "action.connection_requested"
+			summary = "Waiting for the user to connect " + request.SkillName
 		}
 	}
 	// Cancellation before dispatch releases unused capacity. A result obtained
-	// during cancellation settles its own reservation without changing the
-	// canceled status or replacing a newer continuation's checkpoint.
+	// after its Run ended still settles its own reservation.
 	if !nested && sourceRun.Budget != nil && (terminalOutcome || updatedCall.Status == ActionCallStatusCanceled) {
-		_, reserved := sourceRun.BudgetReservations[actionBudgetReservationID(call.ID)]
-		if reserved || ownsDependency && terminalOutcome {
+		if _, reserved := sourceRun.BudgetReservations[actionBudgetReservationID(call.ID)]; reserved {
 			if updatedRun == nil {
 				updatedRun = cloneAgentRun(sourceRun)
 			}
@@ -826,10 +855,4 @@ func cloneCredentialReferences(input map[string]skill.CredentialReference) map[s
 		result[name] = reference
 	}
 	return result
-}
-
-var errActionNotAdmittedAfterFailure = errors.New("This operation was not run: a previous operation failed and this one was not admitted as its correction.")
-
-func (w *ActionWorker) correctionBlocked(ctx context.Context, run *AgentRun, call *ActionCall) bool {
-	return toolFeedbackActionBlocked(run.Checkpoint, call) && !sourceAccessChallengeActionAdmitted(ctx, w.store, run, call)
 }
