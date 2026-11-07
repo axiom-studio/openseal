@@ -225,3 +225,42 @@ func sortedActions(actions []string) []string {
 	slices.Sort(sorted)
 	return sorted
 }
+
+// BuilderCutoverHost is the daemon's AgentBuilderCutoverHost (D12): at the
+// first start after migration 76 the Engine turns each kept change-set
+// draft into a builder conversation, and this host seeds the builder in the
+// draft's scope when it is missing. The daemon has no gateway, so a draft
+// keeps the default model, and there is nothing to clean up afterwards.
+//
+// The Engine takes the host as an option before it exists, so Bind hands
+// it the Engine before Engine.Start.
+type BuilderCutoverHost struct {
+	engine builderAgentEngine
+}
+
+var _ opensealkernel.AgentBuilderCutoverHost = (*BuilderCutoverHost)(nil)
+
+// Bind sets the Engine the host seeds the builder on.
+func (h *BuilderCutoverHost) Bind(engine builderAgentEngine) {
+	h.engine = engine
+}
+
+// EnsureBuilderAgent seeds the builder in scope. The requester does not
+// matter: the daemon's builder is the same for everyone in a scope.
+func (h *BuilderCutoverHost) EnsureBuilderAgent(ctx context.Context, scope runtime.Scope, _ string) error {
+	if h == nil || h.engine == nil {
+		return errors.New("the builder cutover host is not bound to an engine")
+	}
+	return SeedBuilderAgent(ctx, h.engine, scope)
+}
+
+// DraftModel is always the default model: the daemon records no billing
+// model for a draft.
+func (*BuilderCutoverHost) DraftModel(context.Context, runtime.Scope, string) (string, error) {
+	return "", nil
+}
+
+// AfterAgentBuilderCutover has nothing to do in the daemon.
+func (*BuilderCutoverHost) AfterAgentBuilderCutover(context.Context) error {
+	return nil
+}
