@@ -438,6 +438,13 @@ type CreateAgentRequestRequest struct {
 	IdempotencyKey       string
 	DependencyGroupID    string
 	DependencyID         string
+	// ToolTransition (singular requests only) moves the source Run's
+	// delegating tool entry in the create transaction (CTL-6a).
+	ToolTransition *ToolEntryTransitionRequest
+	// RequireInterventionCount (singular requests only) refuses the create
+	// with ErrSteeringArrived when the source gained an intervention since
+	// the caller read it.
+	RequireInterventionCount *int
 }
 
 type AgentRequestGroupSpec struct {
@@ -845,6 +852,10 @@ func (s *CollaborationService) CreateAgentRequest(ctx context.Context, req Creat
 			return nil, err
 		}
 		record.ExpectedSourceRevision = source.Revision
+		record.ToolTransition = req.ToolTransition
+		record.RequireInterventionCount = req.RequireInterventionCount
+	} else if req.ToolTransition != nil || req.RequireInterventionCount != nil {
+		return nil, errors.New("a grouped agent request cannot move a tool entry or check interventions")
 	}
 	persisted, err := s.store.CreateAgentRequest(ctx, record)
 	if err != nil {
@@ -2341,13 +2352,6 @@ func failedCollaborationSourceRun(source *AgentRun, request *AgentRequest, now t
 	updated.LeaseOwner = ""
 	updated.LeaseExpiresAt = nil
 	updated.Output = collaborationResolutionOutput(updated.Output, request)
-	if request.Status == AgentRequestStatusFailed {
-		message := strings.TrimSpace(request.ResolutionReason)
-		if message == "" {
-			message = "The requested delegated work did not complete."
-		}
-		updated.Checkpoint = checkpointFinalFailureExplanation(updated.Checkpoint, "delegation", message)
-	}
 	return updated, nil
 }
 
