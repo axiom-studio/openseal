@@ -272,7 +272,9 @@ Options:
 	if err := ensureCanonicalSkill(ctx, kernel, outreach.SkillDefinition()); err != nil {
 		sugar.Fatalf("register governed outreach Skill: %v", err)
 	}
-	kernel.Start(ctx)
+	if err := kernel.Start(ctx); err != nil {
+		sugar.Fatalf("start OpenSeal kernel: %v", err)
+	}
 
 	// Versioned kernel API for the TUI and embedding integrations.
 	apiServer := server.NewServer(store, sugar)

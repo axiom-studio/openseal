@@ -140,7 +140,9 @@ func TestEngineWorkQueueRelaysOutboxSchedulesDeadlinesAndRoutesDeliveries(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	engine.Start(ctx)
+	if err := engine.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
 	defer engine.Stop()
 	if engine.WorkSignalHealth().Healthy {
 		t.Fatal("queue reported healthy before connecting")
