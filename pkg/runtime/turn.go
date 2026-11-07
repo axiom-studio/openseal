@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/google/uuid"
@@ -89,30 +90,62 @@ func (u TurnUsage) Validate() error {
 	return nil
 }
 
-// AgentTurn is one bounded, resumable reasoning step. It records concise
-// operator-facing decisions and references, never private model chain-of-thought
-// or resolved secret values.
+// StepProducerKind says what produced a step: a model call or a
+// deterministic runner (runbook, outreach, capability invocation, agent
+// request wrappers).
+type StepProducerKind string
+
+const (
+	StepProducerModel         StepProducerKind = "model"
+	StepProducerDeterministic StepProducerKind = "deterministic"
+)
+
+// maximumStepNarrationBytes bounds a step's narration (OutputSummary and the
+// turn.narration event summary) on a rune boundary.
+const maximumStepNarrationBytes = 2000
+
+// ActivityEventTurnNarration is the public activity event carrying a step's
+// narration. It is written in the same transaction as the step's
+// OutputSummary and is never posted by connectors.
+const ActivityEventTurnNarration = "turn.narration"
+
+// AgentTurn is one step of a Run's loop: at most one model call (or one
+// deterministic producer call) and the tool results of that call. It never
+// stores model reasoning, tool arguments or tool results; those live in the
+// Run's session log.
 type AgentTurn struct {
-	ID                     string                   `json:"id"`
-	Scope                  Scope                    `json:"scope"`
-	RunID                  string                   `json:"runId"`
-	Sequence               int64                    `json:"sequence"`
-	Status                 AgentTurnStatus          `json:"status"`
-	DefinitionID           string                   `json:"definitionId,omitempty"`
-	DefinitionVersion      string                   `json:"definitionVersion,omitempty"`
-	ModelProvider          string                   `json:"modelProvider,omitempty"`
-	Model                  string                   `json:"model,omitempty"`
-	InputContextRefs       []string                 `json:"inputContextRefs,omitempty"`
-	InputInterventionIDs   []string                 `json:"inputInterventionIds,omitempty"`
-	PlanRevision           int64                    `json:"planRevision,omitempty"`
-	SkillSelections        []HostedSkillSelection   `json:"skillSelections,omitempty"`
-	Decisions              []TurnDecision           `json:"decisions,omitempty"`
-	RequestedActions       []TurnAction             `json:"requestedActions,omitempty"`
-	RequestedFork          *TurnForkProposal        `json:"requestedFork,omitempty"`
-	RequestedDelegation    *TurnDelegationProposal  `json:"requestedDelegation,omitempty"`
-	RequestedRunbook       *TurnRunbookProposal     `json:"requestedRunbook,omitempty"`
-	RequestedTask          *TurnTaskProposal        `json:"requestedTask,omitempty"`
-	OutputSummary          string                   `json:"outputSummary,omitempty"`
+	ID                   string                  `json:"id"`
+	Scope                Scope                   `json:"scope"`
+	RunID                string                  `json:"runId"`
+	Sequence             int64                   `json:"sequence"`
+	Status               AgentTurnStatus         `json:"status"`
+	Producer             StepProducerKind        `json:"producer,omitempty"`
+	SessionID            string                  `json:"sessionId,omitempty"`
+	AssistantEntryID     string                  `json:"assistantEntryId,omitempty"`
+	DefinitionID         string                  `json:"definitionId,omitempty"`
+	DefinitionVersion    string                  `json:"definitionVersion,omitempty"`
+	ModelProvider        string                  `json:"modelProvider,omitempty"`
+	Model                string                  `json:"model,omitempty"`
+	InputContextRefs     []string                `json:"inputContextRefs,omitempty"`
+	InputInterventionIDs []string                `json:"inputInterventionIds,omitempty"`
+	PlanRevision         int64                   `json:"planRevision,omitempty"`
+	SkillSelections      []HostedSkillSelection  `json:"skillSelections,omitempty"`
+	Decisions            []TurnDecision          `json:"decisions,omitempty"`
+	RequestedActions     []TurnAction            `json:"requestedActions,omitempty"`
+	RequestedFork        *TurnForkProposal       `json:"requestedFork,omitempty"`
+	RequestedDelegation  *TurnDelegationProposal `json:"requestedDelegation,omitempty"`
+	RequestedRunbook     *TurnRunbookProposal    `json:"requestedRunbook,omitempty"`
+	RequestedTask        *TurnTaskProposal       `json:"requestedTask,omitempty"`
+	// OutputSummary is the step's narration: the assistant text of a step
+	// that ended in tool calls. Empty for steps without tool calls.
+	OutputSummary string `json:"outputSummary,omitempty"`
+	ToolCallCount int    `json:"toolCallCount,omitempty"`
+	// StopReason is the model stop reason (tool_calls | end | refusal |
+	// max_tokens), or "" for deterministic steps.
+	StopReason string `json:"stopReason,omitempty"`
+	// Final is true when the step's model output had no tool calls or
+	// included a final-answer tool call.
+	Final                  bool                     `json:"final,omitempty"`
 	Usage                  TurnUsage                `json:"usage,omitempty"`
 	ContinuationCheckpoint map[string]interface{}   `json:"continuationCheckpoint,omitempty"`
 	NextRunStatus          AgentRunStatus           `json:"nextRunStatus,omitempty"`
@@ -122,14 +155,18 @@ type AgentTurn struct {
 	BudgetAdmission        *BudgetAdmission         `json:"budgetAdmission,omitempty"`
 	EvidenceClaims         []EvidenceClaim          `json:"evidenceClaims,omitempty"`
 	EvidenceGrounding      *EvidenceGroundingReview `json:"evidenceGrounding,omitempty"`
-	Error                  string                   `json:"error,omitempty"`
-	LeaseOwner             string                   `json:"leaseOwner,omitempty"`
-	LeaseExpiresAt         *time.Time               `json:"leaseExpiresAt,omitempty"`
-	Revision               int64                    `json:"revision"`
-	CreatedAt              time.Time                `json:"createdAt"`
-	UpdatedAt              time.Time                `json:"updatedAt"`
-	StartedAt              time.Time                `json:"startedAt"`
-	CompletedAt            *time.Time               `json:"completedAt,omitempty"`
+	// FailureCode is a stable kernel code for a failed or canceled step:
+	// host_unavailable, host_configuration, model_context_exceeded,
+	// producer_failed, duration_budget, budget_exhausted, run_ended.
+	FailureCode    string     `json:"failureCode,omitempty"`
+	Error          string     `json:"error,omitempty"`
+	LeaseOwner     string     `json:"leaseOwner,omitempty"`
+	LeaseExpiresAt *time.Time `json:"leaseExpiresAt,omitempty"`
+	Revision       int64      `json:"revision"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	StartedAt      time.Time  `json:"startedAt"`
+	CompletedAt    *time.Time `json:"completedAt,omitempty"`
 }
 
 func (t *AgentTurn) Validate() error {
@@ -148,6 +185,15 @@ func (t *AgentTurn) Validate() error {
 	if !validAgentTurnStatus(t.Status) {
 		return errors.New("agent turn status is invalid")
 	}
+	if !validStepProducerKind(t.Producer) {
+		return errors.New("agent turn producer is invalid")
+	}
+	if !validStepStopReason(t.StopReason) {
+		return errors.New("agent turn stop reason is invalid")
+	}
+	if t.ToolCallCount < 0 {
+		return errors.New("agent turn tool call count cannot be negative")
+	}
 	if t.BudgetAdmission != nil {
 		if err := t.BudgetAdmission.Validate(); err != nil {
 			return err
@@ -161,7 +207,9 @@ type AgentTurnFilter struct {
 	RunID         string
 	Statuses      []AgentTurnStatus
 	AfterSequence int64
-	Limit         int
+	// Descending lists newest first (still only rows after AfterSequence).
+	Descending bool
+	Limit      int
 }
 
 type AgentTurnStore interface {
@@ -170,11 +218,18 @@ type AgentTurnStore interface {
 	ListAgentTurns(ctx context.Context, filter AgentTurnFilter) ([]*AgentTurn, error)
 	UpdateAgentTurn(ctx context.Context, turn *AgentTurn, expectedRevision int64, workerID string) error
 	ClaimAgentTurn(ctx context.Context, scope Scope, turnID, workerID string, now time.Time, leaseDuration time.Duration) (*AgentTurn, error)
+	// RecordAgentTurnStepModel writes a running step's model record and
+	// appends events in one transaction. turn carries the new revision
+	// (expectedRevision+1) and its live lease; the stored row must be running,
+	// at expectedRevision and leased to turn.LeaseOwner past turn.UpdatedAt.
+	RecordAgentTurnStepModel(ctx context.Context, turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error
 }
 
 type BeginAgentTurnRequest struct {
 	Scope             Scope
 	RunID             string
+	SessionID         string
+	Producer          StepProducerKind
 	DefinitionID      string
 	DefinitionVersion string
 	ModelProvider     string
@@ -207,8 +262,28 @@ type FinishAgentTurnRequest struct {
 	BudgetAdmission        *BudgetAdmission
 	EvidenceClaims         []EvidenceClaim
 	EvidenceGrounding      *EvidenceGroundingReview
+	FailureCode            string
 	Error                  string
 	WorkerID               string
+}
+
+// StepModelRecord is written once per step, right after the producer
+// returned and before any tool runs, so the activity panel shows the
+// narration while tools execute.
+type StepModelRecord struct {
+	ExpectedRevision int64
+	WorkerID         string
+	ModelProvider    string
+	Model            string
+	AssistantEntryID string
+	// OutputSummary is the narration: the step's assistant text when it has
+	// tool calls, else "". Cut to 2000 bytes on a rune boundary.
+	OutputSummary   string
+	ToolCallCount   int
+	StopReason      string
+	Final           bool
+	SkillSelections []HostedSkillSelection
+	Usage           TurnUsage
 }
 
 type AgentTurnService struct {
@@ -238,6 +313,9 @@ func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequ
 	if strings.TrimSpace(req.WorkerID) == "" {
 		return nil, errors.New("agent turn worker id is required")
 	}
+	if !validStepProducerKind(req.Producer) {
+		return nil, errors.New("agent turn producer is invalid")
+	}
 	leaseDuration := req.LeaseDuration
 	if leaseDuration <= 0 {
 		leaseDuration = 5 * time.Minute
@@ -246,6 +324,7 @@ func (s *AgentTurnService) BeginTurn(ctx context.Context, req BeginAgentTurnRequ
 	leaseExpiresAt := now.Add(leaseDuration)
 	return s.turns.CreateAgentTurn(ctx, &AgentTurn{
 		ID: uuid.NewString(), Scope: req.Scope, RunID: req.RunID, Status: AgentTurnStatusRunning,
+		Producer: req.Producer, SessionID: strings.TrimSpace(req.SessionID),
 		DefinitionID: req.DefinitionID, DefinitionVersion: req.DefinitionVersion,
 		ModelProvider: req.ModelProvider, Model: req.Model, InputContextRefs: req.InputContextRefs,
 		PlanRevision: req.PlanRevision, LeaseOwner: req.WorkerID, LeaseExpiresAt: &leaseExpiresAt,
@@ -296,14 +375,20 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	if isWaitingRunStatus(req.NextRunStatus) && req.WakeCondition == nil {
 		return nil, errors.New("waiting turn outcome requires a wake condition")
 	}
-	turn.SkillSelections = append([]HostedSkillSelection(nil), req.SkillSelections...)
+	// A step recorded by RecordStepModel keeps its narration and skill
+	// selections when the finish carries none.
+	if len(req.SkillSelections) > 0 || turn.AssistantEntryID == "" {
+		turn.SkillSelections = append([]HostedSkillSelection(nil), req.SkillSelections...)
+	}
 	turn.Decisions = req.Decisions
 	turn.RequestedActions = req.RequestedActions
 	turn.RequestedFork = req.RequestedFork
 	turn.RequestedDelegation = req.RequestedDelegation
 	turn.RequestedRunbook = req.RequestedRunbook
 	turn.RequestedTask = cloneTurnTaskProposal(req.RequestedTask)
-	turn.OutputSummary = req.OutputSummary
+	if req.OutputSummary != "" || turn.AssistantEntryID == "" {
+		turn.OutputSummary = req.OutputSummary
+	}
 	turn.Usage = req.Usage
 	turn.ContinuationCheckpoint = req.ContinuationCheckpoint
 	turn.NextRunStatus = req.NextRunStatus
@@ -313,6 +398,7 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 	turn.BudgetAdmission = req.BudgetAdmission
 	turn.EvidenceClaims = append([]EvidenceClaim(nil), req.EvidenceClaims...)
 	turn.EvidenceGrounding = cloneEvidenceGroundingReview(req.EvidenceGrounding)
+	turn.FailureCode = strings.TrimSpace(req.FailureCode)
 	turn.Error = req.Error
 	turn.LeaseOwner = ""
 	turn.LeaseExpiresAt = nil
@@ -323,6 +409,138 @@ func (s *AgentTurnService) FinishTurn(ctx context.Context, scope Scope, turnID s
 		return nil, err
 	}
 	return turn, nil
+}
+
+// RecordStepModel records a running step's model output (narration, tool
+// call count, stop reason, final flag, usage) and, when the step has
+// narration, appends the turn.narration activity event in the same store
+// transaction. It requires the caller's live lease and ExpectedRevision.
+func (s *AgentTurnService) RecordStepModel(ctx context.Context, scope Scope, turnID string, req StepModelRecord) (*AgentTurn, error) {
+	if s == nil || s.portfolio == nil || s.turns == nil {
+		return nil, errors.New("agent turn service is not configured")
+	}
+	if strings.TrimSpace(req.WorkerID) == "" {
+		return nil, errors.New("agent turn worker id is required")
+	}
+	if req.ToolCallCount < 0 {
+		return nil, errors.New("agent turn tool call count cannot be negative")
+	}
+	if !validStepStopReason(req.StopReason) {
+		return nil, errors.New("agent turn stop reason is invalid")
+	}
+	if err := req.Usage.Validate(); err != nil {
+		return nil, err
+	}
+	narration := boundStepNarration(req.OutputSummary)
+	if narration != "" && req.ToolCallCount == 0 {
+		return nil, errors.New("step narration requires tool calls")
+	}
+	provider, model, err := normalizeModelIdentity(req.ModelProvider, req.Model)
+	if err != nil {
+		return nil, err
+	}
+	turn, err := s.turns.GetAgentTurn(ctx, scope, turnID)
+	if err != nil {
+		return nil, err
+	}
+	if turn == nil {
+		return nil, ErrTurnNotFound
+	}
+	if turn.Revision != req.ExpectedRevision {
+		return nil, ErrRevisionConflict
+	}
+	now := s.now()
+	if turn.Status != AgentTurnStatusRunning || turn.LeaseOwner != req.WorkerID || turn.LeaseExpiresAt == nil || !turn.LeaseExpiresAt.After(now) {
+		return nil, ErrTurnLeaseHeld
+	}
+	run, err := s.portfolio.GetAgentRun(ctx, scope, turn.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if run == nil {
+		return nil, ErrRunNotFound
+	}
+	if provider != "" {
+		turn.ModelProvider, turn.Model = provider, model
+	}
+	turn.AssistantEntryID = strings.TrimSpace(req.AssistantEntryID)
+	turn.OutputSummary = narration
+	turn.ToolCallCount = req.ToolCallCount
+	turn.StopReason = req.StopReason
+	turn.Final = req.Final || (turn.Producer != StepProducerDeterministic && req.ToolCallCount == 0)
+	turn.SkillSelections = append([]HostedSkillSelection(nil), req.SkillSelections...)
+	turn.Usage = req.Usage
+	turn.UpdatedAt = now
+	turn.Revision++
+	var events []*ActivityEvent
+	if narration != "" {
+		events = append(events, &ActivityEvent{
+			ID: uuid.NewString(), Scope: scope, RunID: turn.RunID, TurnID: turn.ID,
+			AgentID: strings.TrimSpace(run.AssignedAgentID), TeamID: teamIDForRun(run),
+			EventType: ActivityEventTurnNarration, Severity: ActivitySeverityInfo,
+			Actor:      ActivityActor{Type: "worker", ID: req.WorkerID},
+			Summary:    narration,
+			Payload:    map[string]interface{}{"stepSequence": turn.Sequence},
+			Visibility: ActivityVisibilityScope,
+			CreatedAt:  now,
+		})
+	}
+	if err := s.turns.RecordAgentTurnStepModel(ctx, turn, req.ExpectedRevision, events); err != nil {
+		return nil, err
+	}
+	return turn, nil
+}
+
+// boundStepNarration trims the narration and cuts it to
+// maximumStepNarrationBytes on a rune boundary.
+func boundStepNarration(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) <= maximumStepNarrationBytes {
+		return text
+	}
+	cut := maximumStepNarrationBytes
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return strings.TrimSpace(text[:cut])
+}
+
+// validateStepModelWrite checks the shared preconditions of
+// RecordAgentTurnStepModel against the stored row (status, revision, lease).
+func validateStepModelWrite(current, next *AgentTurn, expectedRevision int64) error {
+	if current == nil {
+		return ErrTurnNotFound
+	}
+	if current.Revision != expectedRevision || current.Sequence != next.Sequence || current.RunID != next.RunID {
+		return ErrRevisionConflict
+	}
+	if current.Status != AgentTurnStatusRunning || next.Status != AgentTurnStatusRunning ||
+		current.LeaseOwner == "" || current.LeaseOwner != next.LeaseOwner ||
+		current.LeaseExpiresAt == nil || !current.LeaseExpiresAt.After(next.UpdatedAt) {
+		return ErrTurnLeaseHeld
+	}
+	return nil
+}
+
+func validateStepModelRecordInput(turn *AgentTurn, expectedRevision int64, events []*ActivityEvent) error {
+	if err := turn.Validate(); err != nil {
+		return err
+	}
+	if turn.Revision != expectedRevision+1 {
+		return ErrRevisionConflict
+	}
+	if strings.TrimSpace(turn.LeaseOwner) == "" {
+		return ErrTurnLeaseHeld
+	}
+	for _, event := range events {
+		if err := event.Validate(); err != nil {
+			return err
+		}
+		if event.Scope != turn.Scope || event.RunID != turn.RunID {
+			return ErrInvalidScope
+		}
+	}
+	return nil
 }
 
 func normalizeModelIdentity(provider, model string) (string, string, error) {
@@ -422,6 +640,20 @@ func (s *AgentTurnService) ClaimTurn(ctx context.Context, scope Scope, turnID, w
 
 func validAgentTurnStatus(status AgentTurnStatus) bool {
 	return status == AgentTurnStatusRunning || terminalAgentTurnStatus(status)
+}
+
+func validStepProducerKind(kind StepProducerKind) bool {
+	return kind == "" || kind == StepProducerModel || kind == StepProducerDeterministic
+}
+
+// validStepStopReason accepts the model stop reasons, or "" for
+// deterministic and not-yet-recorded steps.
+func validStepStopReason(reason string) bool {
+	switch reason {
+	case "", "tool_calls", "end", "refusal", "max_tokens":
+		return true
+	}
+	return false
 }
 
 func terminalAgentTurnStatus(status AgentTurnStatus) bool {
