@@ -110,6 +110,15 @@ func (s *PostgresStore) CreateConversationTask(ctx context.Context, record Conve
 		if !sameConversationTask(existing, record.Task) {
 			return nil, ErrConversationTaskConflict
 		}
+		if record.ToolTransition != nil {
+			entry, err := optionalSessionEntry(s.getPostgresSessionEntryTx(ctx, tx, record.Task.Scope, record.ToolTransition.EntryID, false))
+			if err != nil {
+				return nil, err
+			}
+			if err := conversationTaskToolReplayMatches(record, entry); err != nil {
+				return nil, err
+			}
+		}
 		result, err := s.postgresConversationTaskResult(ctx, tx, existing)
 		if err != nil {
 			return nil, err
@@ -131,14 +140,45 @@ func (s *PostgresStore) CreateConversationTask(ctx context.Context, record Conve
 	if continuation != nil && continuation.Mode == ConversationTaskModeContinuation {
 		return replayConversationTaskContinuation(continuation, current)
 	}
+	if err := conversationTaskSteeringSettled(record, current); err != nil {
+		return nil, err
+	}
 	if err := validateConversationTaskSourceUpdate(current, record); err != nil {
 		return nil, err
+	}
+	if record.ToolTransition != nil {
+		// Unlocked reads; the lock order is Run -> session -> entry, so the
+		// entry row is locked by the transition after the session create.
+		entry, err := optionalSessionEntry(s.getPostgresSessionEntryTx(ctx, tx, record.Task.Scope, record.ToolTransition.EntryID, false))
+		if err != nil {
+			return nil, err
+		}
+		var assistant *SessionEntry
+		if entry != nil {
+			if assistant, err = optionalSessionEntry(s.getPostgresSessionEntryTx(ctx, tx, record.Task.Scope,
+				SessionEntryID(entry.SessionID, AssistantEntryKey(entry.StepID)), false)); err != nil {
+				return nil, err
+			}
+		}
+		if err := verifyConversationTaskToolEntry(record, current, entry, assistant); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 		return nil, err
 	}
 	if err := s.insertPostgresAgentRunTx(ctx, tx, record.WorkRun); err != nil {
 		return nil, normalizePostgresConversationTaskConflict(err)
+	}
+	if record.WorkSession != nil {
+		if _, err := s.createRunAgentSessionTx(ctx, tx, *record.WorkSession); err != nil {
+			return nil, err
+		}
+	}
+	if record.ToolTransition != nil {
+		if _, err := s.transitionToolEntryTx(ctx, tx, *record.ToolTransition); err != nil {
+			return nil, err
+		}
 	}
 	payload, err := json.Marshal(record.Task)
 	if err != nil {

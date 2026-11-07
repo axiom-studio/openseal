@@ -107,6 +107,15 @@ func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record Convers
 		if !sameConversationTask(existing, record.Task) {
 			return nil, ErrConversationTaskConflict
 		}
+		if record.ToolTransition != nil {
+			entry, err := optionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope, record.ToolTransition.EntryID))
+			if err != nil {
+				return nil, err
+			}
+			if err := conversationTaskToolReplayMatches(record, entry); err != nil {
+				return nil, err
+			}
+		}
 		result, err := sqliteConversationTaskResult(ctx, conn, existing)
 		if err != nil {
 			return nil, err
@@ -129,14 +138,43 @@ func (s *SQLiteStore) CreateConversationTask(ctx context.Context, record Convers
 	if continuation != nil && continuation.Mode == ConversationTaskModeContinuation {
 		return replayConversationTaskContinuation(continuation, current)
 	}
+	if err := conversationTaskSteeringSettled(record, current); err != nil {
+		return nil, err
+	}
 	if err := validateConversationTaskSourceUpdate(current, record); err != nil {
 		return nil, err
+	}
+	if record.ToolTransition != nil {
+		entry, err := optionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope, record.ToolTransition.EntryID))
+		if err != nil {
+			return nil, err
+		}
+		var assistant *SessionEntry
+		if entry != nil {
+			if assistant, err = optionalSessionEntry(getSQLiteSessionEntry(ctx, conn, record.Task.Scope,
+				SessionEntryID(entry.SessionID, AssistantEntryKey(entry.StepID)))); err != nil {
+				return nil, err
+			}
+		}
+		if err := verifyConversationTaskToolEntry(record, current, entry, assistant); err != nil {
+			return nil, err
+		}
 	}
 	if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 		return nil, err
 	}
 	if err := insertSQLiteAgentRunConn(ctx, conn, record.WorkRun); err != nil {
 		return nil, normalizeSQLiteConversationTaskConflict(err)
+	}
+	if record.WorkSession != nil {
+		if _, err := s.createRunAgentSessionTx(ctx, conn, *record.WorkSession); err != nil {
+			return nil, err
+		}
+	}
+	if record.ToolTransition != nil {
+		if _, err := s.transitionToolEntryTx(ctx, conn, *record.ToolTransition); err != nil {
+			return nil, err
+		}
 	}
 	payload, err := json.Marshal(record.Task)
 	if err != nil {
