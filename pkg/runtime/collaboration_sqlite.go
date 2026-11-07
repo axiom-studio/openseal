@@ -67,6 +67,20 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 			return nil, fmt.Errorf("%w: Team has %d active delegations, reaching maximum %d", ErrAgentRequestAssignment, active, record.MaximumConcurrent)
 		}
 	}
+	if record.RequireInterventionCount != nil || record.ToolTransition != nil {
+		source, err := getSQLiteAgentRun(ctx, conn, record.Request.Scope, record.Request.SourceRunID)
+		if err != nil {
+			return nil, err
+		}
+		if record.RequireInterventionCount != nil && len(source.PendingInterventions) != *record.RequireInterventionCount {
+			return nil, ErrSteeringArrived
+		}
+		if transition := record.ToolTransition; transition != nil {
+			if _, err := sqliteSessionRunLease(ctx, conn, transition.Scope, transition.RunID, transition.Lease); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if record.SourceRun != nil {
 		if err := updateSQLiteAgentRunConn(ctx, conn, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 			return nil, err
@@ -78,6 +92,11 @@ func (s *SQLiteStore) CreateAgentRequest(ctx context.Context, record AgentReques
 			if err == sql.ErrNoRows {
 				return nil, ErrRunNotFound
 			}
+			return nil, err
+		}
+	}
+	if record.ToolTransition != nil {
+		if _, err := s.transitionToolEntryTx(ctx, conn, *record.ToolTransition); err != nil {
 			return nil, err
 		}
 	}
