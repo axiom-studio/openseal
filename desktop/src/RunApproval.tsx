@@ -307,16 +307,32 @@ export default function RunApproval({
                 : "If no decision is recorded before the deadline, this approval expires."}
             </p>
           )}
-          {call && (
+          {profileCard(checkpoint.proposedAction) ? (
             <>
-              <h4>Action inputs</h4>
-              <pre>{JSON.stringify(call.arguments || {}, null, 2)}</pre>
+              <ProfileCard preview={checkpoint.proposedAction!} />
+              {call && (
+                <details>
+                  <summary>Exact action inputs</summary>
+                  <pre>{JSON.stringify(call.arguments || {}, null, 2)}</pre>
+                </details>
+              )}
             </>
-          )}
-          {checkpoint.proposedAction && (
+          ) : (
             <>
-              <h4>Action preview</h4>
-              <pre>{JSON.stringify(checkpoint.proposedAction, null, 2)}</pre>
+              {call && (
+                <>
+                  <h4>Action inputs</h4>
+                  <pre>{JSON.stringify(call.arguments || {}, null, 2)}</pre>
+                </>
+              )}
+              {checkpoint.proposedAction && (
+                <>
+                  <h4>Action preview</h4>
+                  <pre>
+                    {JSON.stringify(checkpoint.proposedAction, null, 2)}
+                  </pre>
+                </>
+              )}
             </>
           )}
           {checkpoint.status === "pending" && !allowed && (
@@ -432,6 +448,165 @@ export default function RunApproval({
       >
         {error || notice}
       </p>
+    </section>
+  );
+}
+
+// Agent and team cards (create_agent, update_agent, create_team) carry a
+// profile preview the kernel validated; they render as the profile itself.
+type Preview = Record<string, unknown>;
+const record = (value: unknown): Preview =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Preview)
+    : {};
+const text = (value: unknown) => (typeof value === "string" ? value : "");
+const list = (value: unknown): Preview[] =>
+  Array.isArray(value) ? value.map(record) : [];
+function profileCard(preview?: Record<string, unknown>) {
+  return (
+    !!preview &&
+    (preview.resourceType === "agent_profile" ||
+      preview.resourceType === "team")
+  );
+}
+const changeLabels: Record<string, string> = {
+  displayName: "Name",
+  purpose: "Description",
+  systemPrompt: "Behaviour",
+  personality: "Personality",
+  operatingPrinciples: "Principles",
+};
+function ProfileCard({ preview }: { preview: Preview }) {
+  const team = preview.resourceType === "team";
+  const profile = record(team ? preview.team : preview.agent);
+  const name = text(profile.displayName);
+  const update = preview.operation === "update_agent";
+  const principles = Array.isArray(profile.operatingPrinciples)
+    ? profile.operatingPrinciples.filter(
+        (p): p is string => typeof p === "string" && !!p.trim(),
+      )
+    : [];
+  const skills = list(preview.skills);
+  const connections = list(preview.connections);
+  const removed = list(preview.removedSkills);
+  const members = list(preview.members);
+  const space = record(preview.space);
+  const changes = Object.keys(record(preview.changes))
+    .map((key) => changeLabels[key])
+    .filter(Boolean);
+  const model = record(preview.model);
+  const heading = team
+    ? `New team: ${name}`
+    : update
+      ? `Changes to ${name}`
+      : `New agent: ${name}`;
+  return (
+    <section
+      aria-label={team ? "Team profile" : "Agent profile"}
+      className="profile-card"
+    >
+      <h4>{heading}</h4>
+      {update && !!changes.length && (
+        <p className="muted">Changes: {changes.join(", ")}.</p>
+      )}
+      <dl>
+        <dt>Name</dt>
+        <dd>{name}</dd>
+        <dt>Description</dt>
+        <dd className="preserve-lines">
+          {text(profile.purpose) || "Not specified"}
+        </dd>
+        {!team && (
+          <>
+            <dt>Behaviour</dt>
+            <dd className="preserve-lines">
+              {text(profile.systemPrompt) || "Not specified"}
+            </dd>
+            <dt>Personality</dt>
+            <dd className="preserve-lines">
+              {text(profile.personality) || "Not specified"}
+            </dd>
+            <dt>Principles</dt>
+            <dd>
+              {principles.length ? (
+                <ul>
+                  {principles.map((principle, index) => (
+                    <li key={index}>{principle}</li>
+                  ))}
+                </ul>
+              ) : (
+                "None"
+              )}
+            </dd>
+            <dt>Skills</dt>
+            <dd>
+              {skills.length || removed.length ? (
+                <ul>
+                  {skills.map((skill, index) => (
+                    <li key={`add-${index}`}>
+                      {update ? "Add " : ""}
+                      {text(skill.name) || text(skill.skillId)}
+                      {Array.isArray(skill.allowedActions) &&
+                      skill.allowedActions.length
+                        ? ` · ${skill.allowedActions.join(", ")}`
+                        : ""}
+                    </li>
+                  ))}
+                  {removed.map((skill, index) => (
+                    <li key={`remove-${index}`}>
+                      Remove {text(skill.name) || text(skill.skillId)}
+                    </li>
+                  ))}
+                </ul>
+              ) : update ? (
+                "No change"
+              ) : (
+                "None"
+              )}
+            </dd>
+            {!!connections.length && (
+              <>
+                <dt>Connections to set up</dt>
+                <dd>
+                  {connections
+                    .map((c) => text(c.name) || text(c.skillId))
+                    .join(", ")}
+                </dd>
+              </>
+            )}
+            {(!update || "model" in preview) && (
+              <>
+                <dt>Model</dt>
+                <dd>{text(model.id) || "Workspace default"}</dd>
+              </>
+            )}
+          </>
+        )}
+        {team && (
+          <>
+            <dt>Members</dt>
+            <dd>
+              <ul>
+                {members.map((member, index) => (
+                  <li key={index}>
+                    {text(member.displayName) || text(member.agentId)}
+                    {text(member.purpose) ? ` — ${text(member.purpose)}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        )}
+        {!update && (
+          <>
+            <dt>Space</dt>
+            <dd>{text(space.name) || text(space.id) || "Personal"}</dd>
+          </>
+        )}
+      </dl>
+      {text(preview.rationale) && (
+        <p className="muted preserve-lines">Why: {text(preview.rationale)}</p>
+      )}
     </section>
   );
 }

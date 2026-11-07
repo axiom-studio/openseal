@@ -4,8 +4,10 @@ import {
   newHomeSubmission,
   persistHomeSubmission,
   finishHomeSubmission,
+  builderConversationKey,
   type HomeSubmission,
 } from "./homeSubmission";
+import BuilderConversation from "./BuilderConversation";
 import TeamBrowser from "./TeamBrowser";
 import TaskArtifacts from "./TaskArtifacts";
 import ReviewInbox from "./ReviewInbox";
@@ -284,6 +286,9 @@ export default function App() {
   const [proposalID, setProposalID] = useState(() =>
     readLocal("openseal.proposal"),
   );
+  const [builderConversationID, setBuilderConversationID] = useState(() =>
+    readLocal(builderConversationKey),
+  );
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandQuery, setCommandQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -331,11 +336,24 @@ export default function App() {
   }, [selectionKey]);
   const inFlight = useRef(false);
 
-  const canPropose = supports(caps, "workforce-authoring", "propose");
   const canRun = supports(caps, "agent-runs", "create");
-  const activeAgents = agents.filter(
+  // Home opens a chat with the builder agent. The builder answers through the
+  // workspace model, which is configured when the daemon can start Runs.
+  const builderAgentID =
+    caps?.capabilities.find(
+      (c) =>
+        c.id === "agent-builder" &&
+        c.available &&
+        c.operations.includes("create"),
+    )?.context?.builderAgentId || "";
+  const canPropose = !!builderAgentID && canRun;
+  // The builder is the home box's agent: it makes the person's agents and
+  // is not listed among them or given work.
+  const listedAgents = agents.filter((a) => a.deployment.id !== builderAgentID);
+  const activeAgents = listedAgents.filter(
     (a) => a.deployment.rolloutStatus === "active",
   );
+
   const assignedAgentAvailable = activeAgents.some(
     (a) => a.deployment.id === agentID,
   );
@@ -616,7 +634,8 @@ export default function App() {
         key: pending.key,
         body: pending.body,
       });
-      const value = pending.draft.mode === "work" ? result?.run : result;
+      const value =
+        pending.draft.mode === "work" ? result?.run : result?.conversation;
       if (
         !value ||
         typeof value.id !== "string" ||
@@ -632,7 +651,13 @@ export default function App() {
             value.owner.id !== pending.draft.agentID ||
             value.assignedAgentId !== pending.draft.agentID ||
             value.goal !== pending.draft.prompt.trim()
-          : value.prompt !== pending.body.prompt)
+          : value.owner?.type !== "agent" ||
+            !value.owner.id ||
+            (builderAgentID && value.owner.id !== builderAgentID) ||
+            value.origin?.kind !== "agent_builder" ||
+            result.message?.conversationId !== value.id ||
+            result.message.content !== pending.body.prompt ||
+            result.message.builderParameters?.kind !== pending.draft.mode)
       )
         throw new Error(
           "The returned record does not match the saved request.",
@@ -647,12 +672,13 @@ export default function App() {
       setPendingSubmission(null);
       updatePrompt("");
       if (pending.draft.mode !== "work") {
-        setProposal(value);
-        setProposalID(value.id);
-        setNotice("Proposal saved. You can follow its progress in Home.");
+        setBuilderConversationID(value.id);
+        setNotice(
+          "Request sent. Builder drafts it with you here; nothing is created until you approve its card.",
+        );
         if (activePage.current === "Home")
           requestAnimationFrame(() =>
-            document.getElementById("proposal-heading")?.focus(),
+            document.getElementById("builder-heading")?.focus(),
           );
       } else {
         if (activePage.current === "Home") {
@@ -683,7 +709,7 @@ export default function App() {
         : current;
     });
   }, []);
-  const filteredAgents = agents.filter((a) =>
+  const filteredAgents = listedAgents.filter((a) =>
     `${a.definition?.displayName} ${a.definition?.purpose} ${a.deployment.displayName}`
       .toLowerCase()
       .includes(query.toLowerCase()),
@@ -1084,7 +1110,7 @@ export default function App() {
                     <span>
                       <ShieldCheck size={14} />
                       {composerMode !== "work"
-                        ? "Review the proposal before anything is activated."
+                        ? "Nothing is created until you approve its review card."
                         : "Progress is saved as your agent works."}
                     </span>
                     <button
@@ -1193,9 +1219,9 @@ export default function App() {
                   )}
                   {composerMode === "team" && (
                     <p className="inline-help">
-                      OpenSeal will request one team with new agents for your
-                      goal. Review their roles, instructions, and permissions
-                      before installation. Your prompt is saved as a draft.
+                      Builder drafts the team’s agents and the team with you.
+                      Each one is created only after you approve its review
+                      card. Your prompt is saved as a draft.
                     </p>
                   )}
                   {composerMode === "work" &&
@@ -1218,29 +1244,33 @@ export default function App() {
                       </p>
                     )}
                 </form>
-                {!agents.length && !proposal && (
-                  <div className="starter-section">
-                    <span className="section-label">A few places to begin</span>
-                    <div className="starters">
-                      {starters.map(({ title, text, icon: Icon }) => (
-                        <button
-                          key={title}
-                          onClick={() => {
-                            setPrompt(text);
-                            setComposerMode("agent");
-                            requestAnimationFrame(() =>
-                              composer.current?.focus(),
-                            );
-                          }}
-                        >
-                          <Icon size={17} />
-                          <span>{title}</span>
-                          <ArrowRight size={14} />
-                        </button>
-                      ))}
+                {!listedAgents.length &&
+                  !proposal &&
+                  !builderConversationID && (
+                    <div className="starter-section">
+                      <span className="section-label">
+                        A few places to begin
+                      </span>
+                      <div className="starters">
+                        {starters.map(({ title, text, icon: Icon }) => (
+                          <button
+                            key={title}
+                            onClick={() => {
+                              setPrompt(text);
+                              setComposerMode("agent");
+                              requestAnimationFrame(() =>
+                                composer.current?.focus(),
+                              );
+                            }}
+                          >
+                            <Icon size={17} />
+                            <span>{title}</span>
+                            <ArrowRight size={14} />
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
                 {!canPropose && !loading && (
                   <div className="setup-strip">
                     <span className="setup-symbol">
@@ -1259,6 +1289,24 @@ export default function App() {
                       Open provider settings <ArrowRight size={15} />
                     </button>
                   </div>
+                )}
+                {builderConversationID && (
+                  <BuilderConversation
+                    key={builderConversationID}
+                    id={builderConversationID}
+                    builderAgentID={builderAgentID}
+                    agents={agents}
+                    capabilities={caps}
+                    onOpenRun={(run, detail) =>
+                      selectRecord({ kind: "run", value: run, ...detail })
+                    }
+                    onResolved={() => void refresh(true)}
+                    onClose={() => {
+                      saveLocal(builderConversationKey, "");
+                      setBuilderConversationID("");
+                      requestAnimationFrame(() => composer.current?.focus());
+                    }}
+                  />
                 )}
                 {proposal && (
                   <ProposalReview
@@ -1356,8 +1404,8 @@ export default function App() {
                       View all <ArrowRight size={14} />
                     </button>
                   </div>
-                  {agents.length ? (
-                    agentRows(agents.slice(0, 3))
+                  {listedAgents.length ? (
+                    agentRows(listedAgents.slice(0, 3))
                   ) : (
                     <div className="agent-empty">
                       <span className="agent-empty-symbol">
@@ -1425,7 +1473,7 @@ export default function App() {
                   >
                     {query
                       ? "Try another name or a word from the agent’s purpose."
-                      : "Describe the help you need. OpenSeal will prepare an agent proposal for you to review."}
+                      : "Describe the help you need. Builder drafts the agent with you, and you review it before it is created."}
                   </Empty>
                 )}
               </>
@@ -1509,7 +1557,7 @@ export default function App() {
                     onResults={updateInspectedRun}
                     onStart={() => {
                       navigate("Home");
-                      setComposerMode(agents.length ? "work" : "agent");
+                      setComposerMode(listedAgents.length ? "work" : "agent");
                       requestAnimationFrame(() => composer.current?.focus());
                     }}
                   />

@@ -1185,8 +1185,22 @@ func publicConversationRetryReason(err error) string {
 }
 
 func conversationParticipationAllows(conversation *Conversation, message *ChannelMessage) bool {
-	return conversation != nil && message != nil && conversation.Status == ConversationStatusActive &&
-		conversation.Participation != nil && conversation.Participation.Enabled && message.Sequence > conversation.Participation.AfterSequence
+	if conversation == nil || message == nil || conversation.Status != ConversationStatusActive {
+		return false
+	}
+	// A builder conversation exists to be answered by its builder: starting
+	// one is the person's opt-in, so it needs no separate setting.
+	if isAgentBuilderConversation(conversation) {
+		return true
+	}
+	return conversation.Participation != nil && conversation.Participation.Enabled && message.Sequence > conversation.Participation.AfterSequence
+}
+
+// isAgentBuilderConversation reports a chat with the builder Agent that
+// StartAgentBuilderConversation (or the cortex route) opened.
+func isAgentBuilderConversation(conversation *Conversation) bool {
+	return conversation.Origin != nil && conversation.Origin.Kind == ConversationReferenceAgentBuilder &&
+		conversation.Owner == ObjectiveOwner{Type: OwnerTypeAgent, ID: AgentBuilderDeploymentID}
 }
 
 // Recheck the canonical channel at execution, not just scheduling. A queued Run

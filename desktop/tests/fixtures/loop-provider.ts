@@ -9,7 +9,8 @@ import {
 // system prompt and the Run's session path as `messages`, the kernel's tool
 // list as `tools`, and expects one assistant message back (text and/or
 // `tool_calls`). Authoring requests (pkg/authoring) use the same endpoint and
-// offer `submit_authoring_intent` as their first tool.
+// offer `submit_authoring_intent` as their first tool. The builder agent's
+// steps are ordinary loop steps (isBuilder, governedCall).
 
 export type ChatToolCall = {
   id: string;
@@ -53,6 +54,17 @@ export const COMPLETION_REVIEW_TOOL = "agent_request_review";
 export const AUTHORING_TOOL = "submit_authoring_intent";
 // The desktop Team router's forced tool (internal/daemon/conversation_provider.go).
 export const ROUTE_TOOL = "route_message";
+export const LOAD_TOOL = "load_capabilities";
+
+// The builder's governed tools (pkg/runtime/run_loop_prepare.go names a
+// governed action "action_" + its model name with dots as underscores).
+export const CREATE_AGENT_ACTION = "openseal.agents.create_agent";
+export const CREATE_TEAM_ACTION = "openseal.teams.create_team";
+export const LIST_AGENTS_ACTION = "openseal.agents.list_agents";
+export const governedTool = (action: string) =>
+  `action_${action.replaceAll(".", "_")}`;
+export const CREATE_AGENT_TOOL = governedTool(CREATE_AGENT_ACTION);
+export const CREATE_TEAM_TOOL = governedTool(CREATE_TEAM_ACTION);
 
 // Kernel notes reach the provider as user messages with this prefix
 // (internal/daemon/openai_render.go).
@@ -112,6 +124,57 @@ export function toolResults(r: ChatRequest, name: string): string[] {
       (m) => m.role === "tool" && m.tool_call_id && ids.has(m.tool_call_id),
     )
     .map(text);
+}
+
+// isBuilder reports a model step of the seeded desktop builder
+// (internal/daemon/builder_agent.go), whose persona opens its system prompt.
+export function isBuilder(r: ChatRequest): boolean {
+  return r.messages.some(
+    (m) => m.role === "system" && text(m).includes("You are Builder"),
+  );
+}
+
+// governedCall proposes `action` as the builder would: when the action's tool
+// is deferred it loads the builder's tools first, and a write carries the
+// review summary the person reads on the card.
+export function governedCall(
+  r: ChatRequest,
+  action: string,
+  args: Record<string, unknown>,
+  summary: string,
+): Reply {
+  const name = governedTool(action);
+  const offered = tool(r, name);
+  if (!offered) {
+    if (!hasTool(r, LOAD_TOOL))
+      throw new Error(`${name} is neither offered nor loadable`);
+    return {
+      toolCalls: [
+        {
+          name: LOAD_TOOL,
+          args: {
+            ids: [
+              CREATE_AGENT_ACTION,
+              CREATE_TEAM_ACTION,
+              LIST_AGENTS_ACTION,
+            ].map((id) => `action:${id}`),
+          },
+        },
+      ],
+    };
+  }
+  const properties = offered.function.parameters?.properties ?? {};
+  return {
+    toolCalls: [
+      {
+        name,
+        args:
+          "_reviewSummary" in properties
+            ? { ...args, _reviewSummary: summary }
+            : args,
+      },
+    ],
+  };
 }
 
 let replies = 0;

@@ -247,13 +247,21 @@ test("provider form saves privately, reconnects the real daemon, and retains a k
   );
   if (process.platform !== "win32")
     expect((await stat(join(workspace, secretPath))).mode & 0o777).toBe(0o600);
+  // With a model provider the daemon runs the seeded builder: Home opens
+  // builder chats, and the builder can answer them.
   const capabilities = await (await request.get("/api/v1/capabilities")).json();
-  expect(
+  const has = (id: string, operation: string) =>
     capabilities.capabilities.some(
       (c: { id: string; operations: string[] }) =>
-        c.id === "workforce-authoring" && c.operations.includes("propose"),
-    ),
-  ).toBe(true);
+        c.id === id && c.operations.includes(operation),
+    );
+  expect(has("agent-builder", "create")).toBe(true);
+  expect(has("agent-runs", "create")).toBe(true);
+  expect(
+    capabilities.capabilities.find(
+      (c: { id: string }) => c.id === "agent-builder",
+    ).context.builderAgentId,
+  ).toBe("openseal-assistant");
   await page.getByLabel("Model", { exact: true }).fill("updated-test-model");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(

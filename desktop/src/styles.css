@@ -2269,6 +2269,9 @@ dialog::backdrop {
 .channel-thread {
   scroll-margin-top: calc(56px + 18px);
 }
+.channel-thread .inspector-actions {
+  flex-wrap: wrap;
+}
 
 .channel-settings {
   margin: 18px 0;

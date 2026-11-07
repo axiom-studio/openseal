@@ -344,6 +344,11 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && boundUsesPersonCredential(bound) {
 		decision.EligibleApprovers = []ApprovalPrincipal{{Type: "user", ID: run.ActingUser}}
 	}
+	// An agent or team card is decided by the person who asked the builder
+	// for it (D9), whatever role the host policy named.
+	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && isAgentBuilderApprovalAction(bound) {
+		decision.EligibleApprovers = []ApprovalPrincipal{{Type: "user", ID: run.ActingUser}}
+	}
 	if decision.Disposition == ActionDispositionRequireApproval && len(decision.EligibleApprovers) == 0 {
 		return nil, errors.New("approval policy must identify at least one eligible approver")
 	}

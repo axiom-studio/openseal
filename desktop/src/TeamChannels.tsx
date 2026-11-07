@@ -52,6 +52,12 @@ export type Message = {
   resolvesMessageId?: string;
   supersedesMessageId?: string;
   references?: ChannelReference[];
+  // A structured question (ask_user); a reply may name one of its options.
+  question?: {
+    options?: { id: string; label: string; description?: string }[];
+    allowMultiple?: boolean;
+    allowOther?: boolean;
+  };
 };
 export default function TeamChannels({
   team,
@@ -347,7 +353,7 @@ export default function TeamChannels({
                 <ChannelThread
                   key={selected}
                   id={selected}
-                  teamId={team.deployment.id}
+                  owner={{ type: "team", id: team.deployment.id }}
                   agents={agents}
                   capabilities={capabilities}
                   onWorkDraft={onWorkDraft}
@@ -393,9 +399,11 @@ export default function TeamChannels({
     </section>
   );
 }
-function ChannelThread({
+// ChannelThread shows one conversation of its owner: a team channel, or an
+// Agent's chat such as the builder chat Home opens.
+export function ChannelThread({
   id,
-  teamId,
+  owner,
   agents,
   capabilities,
   onUpdated,
@@ -403,12 +411,12 @@ function ChannelThread({
   onOpenRun,
   onReadPosition,
 }: {
-  onReadPosition: (sequence: number, revision: number) => void;
-  onUpdated: (value: Conversation) => void;
-  onWorkDraft: (draft: ChannelWorkDraft) => void;
+  onReadPosition?: (sequence: number, revision: number) => void;
+  onUpdated?: (value: Conversation) => void;
+  onWorkDraft?: (draft: ChannelWorkDraft) => void;
   onOpenRun: (run: Run, detail?: RunInspection) => void;
   id: string;
-  teamId: string;
+  owner: { type: "team" | "agent"; id: string };
   agents: Agent[];
   capabilities: Capabilities | null;
 }) {
@@ -448,10 +456,14 @@ function ChannelThread({
         if (canceled) return;
         if (
           current.id !== id ||
-          current.owner.type !== "team" ||
-          current.owner.id !== teamId
+          current.owner.type !== owner.type ||
+          current.owner.id !== owner.id
         )
-          throw new Error("This channel does not belong to the selected team.");
+          throw new Error(
+            owner.type === "team"
+              ? "This channel does not belong to the selected team."
+              : "This chat does not belong to the selected agent.",
+          );
         if (result !== null && !Array.isArray(result))
           throw new Error("Unreadable message list.");
         if (
@@ -496,7 +508,7 @@ function ChannelThread({
       canceled = true;
       clearInterval(timer);
     };
-  }, [id, teamId, before, after, refresh]);
+  }, [id, owner.type, owner.id, before, after, refresh]);
   function changePage(next: number, unreadAfter: number | null = null) {
     setRefresh((n) => n + 1);
     setAfter(unreadAfter);
@@ -525,32 +537,34 @@ function ChannelThread({
       <h3 ref={heading} tabIndex={-1}>
         {conversation?.title || "Opening channel…"}
       </h3>
-      {conversation && supports(capabilities, "channels", "update") && (
-        <ChannelSettings
-          participationAvailable={supports(
-            capabilities,
-            "channels",
-            "configure-participation",
-          )}
-          automaticRepliesAvailable={supports(
-            capabilities,
-            "channels",
-            "coordinate-automatically",
-          )}
-          conversation={conversation}
-          onChange={(next) => {
-            setConversation((current) =>
-              current && current.revision > next.revision ? current : next,
-            );
-            onUpdated(next);
-          }}
-        />
-      )}
+      {conversation &&
+        owner.type === "team" &&
+        supports(capabilities, "channels", "update") && (
+          <ChannelSettings
+            participationAvailable={supports(
+              capabilities,
+              "channels",
+              "configure-participation",
+            )}
+            automaticRepliesAvailable={supports(
+              capabilities,
+              "channels",
+              "coordinate-automatically",
+            )}
+            conversation={conversation}
+            onChange={(next) => {
+              setConversation((current) =>
+                current && current.revision > next.revision ? current : next,
+              );
+              onUpdated?.(next);
+            }}
+          />
+        )}
       {conversation && supports(capabilities, "channels", "runs") && (
         <ChannelReplyActivity
-          key={id}
+          key={`activity-${id}`}
           id={id}
-          teamId={teamId}
+          owner={owner}
           canInspect={supports(capabilities, "agent-runs", "get")}
           onOpenRun={onOpenRun}
           sender={sender}
@@ -558,7 +572,7 @@ function ChannelThread({
       )}
       {conversation && supports(capabilities, "channels", "receipts") && (
         <ChannelReadState
-          key={id}
+          key={`read-${id}`}
           id={id}
           lastSequence={Math.max(
             conversation.lastSequence,
@@ -569,7 +583,7 @@ function ChannelThread({
           onUnread={(sequence) => changePage(0, sequence)}
           onRead={(sequence, revision) => {
             setReadSequence(sequence);
-            onReadPosition(sequence, revision);
+            onReadPosition?.(sequence, revision);
           }}
         />
       )}
@@ -686,6 +700,13 @@ function ChannelThread({
                 ),
             )}
             <p className="channel-message-content">{m.content}</p>
+            {!!m.question?.options?.length && (
+              <p className="inline-help">
+                {m.question.allowMultiple ? "Choose any of: " : "Choose one: "}
+                {m.question.options.map((option) => option.label).join(" · ")}
+                {m.question.allowOther ? " · or answer in your own words" : ""}
+              </p>
+            )}
             {!!m.references?.length && (
               <ChannelReferences
                 references={m.references}
@@ -700,13 +721,15 @@ function ChannelThread({
                 </button>
               )}
               {conversation &&
+                owner.type === "team" &&
+                onWorkDraft &&
                 supports(capabilities, "agent-runs", "create-team") && (
                   <button
                     className="button"
                     onClick={(event) => {
                       const trigger = event.currentTarget;
                       onWorkDraft({
-                        teamId,
+                        teamId: owner.id,
                         channel: conversation.title,
                         sequence: m.sequence,
                         content: m.content,

@@ -12,6 +12,8 @@ export type Capability = {
   available: boolean;
   operations: string[];
   context?: {
+    // agent-builder: the builder Agent's deployment id.
+    builderAgentId?: string;
     changeSetId: string;
     revision: number;
     credentialBindings?: {
