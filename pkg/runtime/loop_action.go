@@ -31,6 +31,32 @@ type GovernedToolCall struct {
 	Directive *ToolCallDirective
 	// Narration is the step's assistant text; "" for deterministic producers.
 	Narration string
+
+	// chain is the Run as the executor's own writes left it during one
+	// Execute or Resume; finish sets it.
+	chain *governedRunChain
+}
+
+// governedRunChain follows the Run through the executor's own writes. A
+// written Run is adopted only when it is the next revision of the Run the
+// executor already knows: a gap means someone else wrote the Run in between
+// (a held approval decision or card settle, section 03 A5), and handing the
+// loop that revision would let its step-end park CAS succeed on a wait that
+// was already decided. The loop's park then fails its CAS and re-plans.
+type governedRunChain struct {
+	known  *AgentRun
+	broken bool
+}
+
+func (c *governedRunChain) adopt(written *AgentRun) {
+	if c == nil || written == nil || c.broken {
+		return
+	}
+	if written.Revision != c.known.Revision+1 {
+		c.broken = true
+		return
+	}
+	c.known = written
 }
 
 // GovernedToolExecutorConfig wires the governed executor.
@@ -112,33 +138,20 @@ func loopIdempotencyKey(stepID, toolCallID string, directive *ToolCallDirective)
 }
 
 // selectGovernedAction resolves a governed tool call to the binding's model
-// action by exact name and, for a directive, its pinned binding and Skill
-// version. nil means the binding offers no such action. A name exposed twice
-// is an invalid catalog, reported as a Go error.
+// action with the exact-name selector (section 03 §3.1). nil means the
+// binding offers no such action. A name exposed twice and a directive whose
+// pinned Skill version the binding no longer authorizes
+// (ErrRunSkillDependencyUnavailable) are Go errors, as on the selector.
 func selectGovernedAction(binding *TurnRunnerBinding, name string, directive *ToolCallDirective) (*capability.ModelAction, error) {
 	if binding == nil {
 		return nil, nil
 	}
-	var selected *capability.ModelAction
-	matches := 0
-	for index := range binding.ModelActions {
-		candidate := &binding.ModelActions[index]
-		if candidate.Name != name {
-			continue
-		}
-		if matches++; matches > 1 {
-			return nil, fmt.Errorf("governed tool %q is ambiguous: more than one binding exposes it", name)
-		}
-		if directive != nil && directive.BindingID != "" &&
-			(candidate.BindingID != directive.BindingID || candidate.BindingRevision != directive.BindingRevision) {
-			continue
-		}
-		if directive != nil && directive.ExpectedSkillVersion != "" && candidate.Version != directive.ExpectedSkillVersion {
-			continue
-		}
-		selected = candidate
+	request := TurnAction{Capability: name}
+	if directive != nil {
+		request.BindingID, request.BindingRevision = directive.BindingID, directive.BindingRevision
+		request.ExpectedSkillVersion = directive.ExpectedSkillVersion
 	}
-	return selected, nil
+	return selectTurnModelAction(binding.ModelActions, request)
 }
 
 // governedDirective is the governance part of a producer directive.
@@ -161,9 +174,11 @@ func (x *GovernedToolExecutor) Execute(ctx context.Context, call GovernedToolCal
 		return GovernedToolOutcome{}, err
 	}
 	if existing != nil {
-		return x.finish(ctx, call, func() (GovernedToolOutcome, error) { return x.settle(ctx, call, existing, nil, false) })
+		return x.finish(call, func(call GovernedToolCall) (GovernedToolOutcome, error) {
+			return x.settle(ctx, call, existing, nil, false)
+		})
 	}
-	return x.finish(ctx, call, func() (GovernedToolOutcome, error) { return x.propose(ctx, call) })
+	return x.finish(call, func(call GovernedToolCall) (GovernedToolOutcome, error) { return x.propose(ctx, call) })
 }
 
 // Resume settles an open governed tool entry of an earlier step (or of this
@@ -191,9 +206,9 @@ func (x *GovernedToolExecutor) Resume(ctx context.Context, call GovernedToolCall
 	if current.RunID != call.Run.ID || current.Origin != ActionOriginLoop {
 		return GovernedToolOutcome{}, fmt.Errorf("action call %s is not a loop call of Run %s", current.ID, call.Run.ID)
 	}
-	return x.finish(ctx, call, func() (GovernedToolOutcome, error) {
+	return x.finish(call, func(call GovernedToolCall) (GovernedToolOutcome, error) {
 		if current.Status == ActionCallStatusWaitingApproval {
-			if replaced, ok, err := x.supersedeSibling(ctx, call, current); err != nil || ok {
+			if replaced, ok, err := x.supersedeSibling(ctx, call, current, settled); err != nil || ok {
 				return replaced, err
 			}
 		}
@@ -224,24 +239,19 @@ func (x *GovernedToolExecutor) callByKey(ctx context.Context, call GovernedToolC
 	return existing, err
 }
 
-// finish runs body and reports the Run when the call changed its row.
-func (x *GovernedToolExecutor) finish(ctx context.Context, call GovernedToolCall, body func() (GovernedToolOutcome, error)) (GovernedToolOutcome, error) {
-	outcome, err := body()
+// finish runs body and reports the Run as the executor's own writes left it.
+// It never reads the Run again: a read taken after the wait target was
+// inspected could carry a held decision's revision bump (governedRunChain).
+func (x *GovernedToolExecutor) finish(call GovernedToolCall, body func(GovernedToolCall) (GovernedToolOutcome, error)) (GovernedToolOutcome, error) {
+	call.chain = &governedRunChain{known: call.Run}
+	outcome, err := body(call)
 	if err != nil {
 		return GovernedToolOutcome{}, err
 	}
 	outcome.ToolCallID = call.ToolCallID
-	latest, err := x.store.GetAgentRun(ctx, call.Run.Scope, call.Run.ID)
-	if err != nil {
-		return GovernedToolOutcome{}, err
-	}
-	if latest == nil {
-		return GovernedToolOutcome{}, ErrRunNotFound
-	}
-	if latest.Revision != call.Run.Revision {
-		outcome.Run = latest
-	} else {
-		outcome.Run = nil
+	outcome.Run = nil
+	if call.chain.known != call.Run {
+		outcome.Run = call.chain.known
 	}
 	return outcome, nil
 }
@@ -315,6 +325,7 @@ func (x *GovernedToolExecutor) propose(ctx context.Context, call GovernedToolCal
 	if proposal == nil || proposal.Call == nil {
 		return GovernedToolOutcome{}, errors.New("governed proposal returned no action call")
 	}
+	call.chain.adopt(proposal.Run)
 	if proposal.Created && x.observer != nil {
 		observed := call.Run
 		if proposal.Run != nil {
@@ -370,8 +381,10 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 		}
 		return governedApprovalOutcome(call.ToolCallID, current, approval), nil
 	}
-	run := call.Run
-	if requiresHuman, _ := current.Output["requiresHuman"].(bool); requiresHuman {
+	run := call.chain.known
+	if requiresHuman, _ := current.Output["requiresHuman"].(bool); requiresHuman && !runHasHumanInterventionFor(run, current.ID) {
+		// Inspection only: the intervention was written by a write the chain
+		// did not adopt. This Run is never handed to the loop.
 		latest, err := x.store.GetAgentRun(ctx, call.Run.Scope, call.Run.ID)
 		if err != nil {
 			return GovernedToolOutcome{}, err
@@ -431,10 +444,20 @@ func (x *GovernedToolExecutor) executeInline(ctx context.Context, call GovernedT
 	if result == nil || result.Call == nil {
 		return GovernedToolOutcome{}, errors.New("inline execution returned no action call")
 	}
+	call.chain.adopt(result.Run)
 	if !isTerminalGovernedStatus(result.Call.Status) {
 		return GovernedToolOutcome{}, fmt.Errorf("inline execution left action call %s %s", result.Call.ID, result.Call.Status)
 	}
 	return x.settle(ctx, call, result.Call, settled, retried)
+}
+
+func runHasHumanInterventionFor(run *AgentRun, actionCallID string) bool {
+	for i := range run.HumanInterventions {
+		if run.HumanInterventions[i].ActionCallID == actionCallID {
+			return true
+		}
+	}
+	return false
 }
 
 func isTerminalGovernedStatus(status ActionCallStatus) bool {
@@ -450,7 +473,7 @@ func isTerminalGovernedStatus(status ActionCallStatus) bool {
 // when a newer message already superseded another approval of this Run and
 // current's approval was created before that message (section 03 §9.3). ok
 // is false when current stays waiting.
-func (x *GovernedToolExecutor) supersedeSibling(ctx context.Context, call GovernedToolCall, current *ActionCall) (GovernedToolOutcome, bool, error) {
+func (x *GovernedToolExecutor) supersedeSibling(ctx context.Context, call GovernedToolCall, current *ActionCall, settled []AgentRunIntervention) (GovernedToolOutcome, bool, error) {
 	approval, err := x.store.GetApproval(ctx, call.Run.Scope, current.ApprovalID)
 	if err != nil {
 		return GovernedToolOutcome{}, false, err
@@ -478,12 +501,18 @@ func (x *GovernedToolExecutor) supersedeSibling(ctx context.Context, call Govern
 	}
 	result, err := x.approvals.ResolveSupersededByMessage(ctx, call.Run.Scope, approval.ID, approval.Revision, messageID)
 	if errors.Is(err, ErrApprovalResolved) || errors.Is(err, ErrApprovalExpired) || errors.Is(err, ErrRevisionConflict) {
-		// Someone else decided it first; settle from the row.
-		return GovernedToolOutcome{}, false, nil
+		// Someone else decided it first; settle from the fresh row.
+		fresh, readErr := x.store.GetActionCall(ctx, call.Run.Scope, current.ID)
+		if readErr != nil {
+			return GovernedToolOutcome{}, false, readErr
+		}
+		outcome, settleErr := x.settle(ctx, call, fresh, settled, false)
+		return outcome, true, settleErr
 	}
 	if err != nil {
 		return GovernedToolOutcome{}, false, err
 	}
+	call.chain.adopt(result.Run)
 	state, rendered := renderGovernedResult(result.Call, result.Approval, "")
 	if rendered == nil {
 		return GovernedToolOutcome{}, false, nil
@@ -504,14 +533,6 @@ func supersedingMessageTime(run *AgentRun, approval *ApprovalCheckpoint) (time.T
 		return *approval.DecidedAt, true
 	}
 	return time.Time{}, false
-}
-
-// GovernedLoopPark is the loop park of a governed park: never committed.
-func GovernedLoopPark(park *GovernedPark) *LoopPark {
-	if park == nil {
-		return nil
-	}
-	return &LoopPark{Status: park.Status, Wake: park.Wake, Summary: park.Summary}
 }
 
 // GovernedBudgetExhaustion is the loop's budget exit for an outcome denied

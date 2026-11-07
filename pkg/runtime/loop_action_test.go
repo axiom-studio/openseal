@@ -36,6 +36,7 @@ type governedFixture struct {
 	step      *AgentTurn
 	binding   *TurnRunnerBinding
 	executor  *GovernedToolExecutor
+	actions   *ActionCoordinator
 	approvals *ApprovalCoordinator
 	worker    *ActionWorker
 	// policy maps a Skill action to its decision; allow by default.
@@ -87,6 +88,7 @@ func newGovernedFixture(t *testing.T, store KernelStore) *governedFixture {
 		return nil, nil
 	}))
 	coordinator.now = now
+	f.actions = coordinator
 	f.approvals = NewApprovalCoordinator(store, store, EligibleApprovalAuthorizer{})
 	f.approvals.now = now
 	f.worker = NewActionWorker(store, catalog,
@@ -356,9 +358,8 @@ func TestGovernedExecuteApprovalAwaitsAndParksAtStepEnd(t *testing.T) {
 			plan.Park.Wake.Type != "approval" || plan.Park.Wake.Reference != approval.ID {
 			t.Fatalf("plan = %#v, %v", plan, err)
 		}
-		park := GovernedLoopPark(plan.Park)
-		if park.Committed || park.Summary != "Waiting for approval: Deploy the release to production" {
-			t.Fatalf("loop park = %#v", park)
+		if plan.Park.Summary != "Waiting for approval: Deploy the release to production" {
+			t.Fatalf("park = %#v", plan.Park)
 		}
 		// A crash before the park replays the same approval: no second card.
 		replay := f.execute(f.call("tool-1", governedDeploy, deployArguments("production")))
@@ -696,4 +697,70 @@ func TestLoopIdempotencyKey(t *testing.T) {
 	if got := loopIdempotencyKey("step-3", "call_9", &ToolCallDirective{IdempotencyKey: " runbook:op-1 "}); got != "runbook:op-1" {
 		t.Fatalf("directive key = %q", got)
 	}
+}
+
+// approvalReadHookStore runs onRead after it reads an approval, so a test
+// can decide it between the executor's inspection and its outcome.
+type approvalReadHookStore struct {
+	KernelStore
+	onRead func(*ApprovalCheckpoint)
+}
+
+func (s approvalReadHookStore) GetApproval(ctx context.Context, scope Scope, id string) (*ApprovalCheckpoint, error) {
+	approval, err := s.KernelStore.GetApproval(ctx, scope, id)
+	if err == nil && s.onRead != nil {
+		s.onRead(approval)
+	}
+	return approval, err
+}
+
+func TestGovernedHeldDecisionAfterSettleFailsStepEndPark(t *testing.T) {
+	runLoopStoreScenario(t, func(t *testing.T, store KernelStore) {
+		f := newGovernedFixture(t, store)
+		f.requireApprovalFor("deploy")
+		decided := false
+		hooked := approvalReadHookStore{KernelStore: store, onRead: func(approval *ApprovalCheckpoint) {
+			if decided || approval == nil || approval.Status != ApprovalStatusPending {
+				return
+			}
+			decided = true
+			// The person approves while the step still holds the Run.
+			f.decide(approval.ID, ApprovalDecisionApprove, "")
+		}}
+		executor, err := NewGovernedToolExecutor(GovernedToolExecutorConfig{
+			Actions: f.actions, Approvals: f.approvals, Worker: f.worker, Store: hooked, Now: func() time.Time { return f.clock },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		call := f.call("tool-1", governedDeploy, deployArguments("production"))
+		outcome, err := executor.Execute(f.ctx, call)
+		if err != nil || !decided || outcome.State != ToolEntryAwaitingApproval {
+			t.Fatalf("outcome = %#v, decided = %v, %v", outcome, decided, err)
+		}
+		known := call.Run
+		if outcome.Run != nil {
+			known = outcome.Run
+		}
+		current := f.currentRun()
+		if known.Revision >= current.Revision {
+			t.Fatalf("outcome Run revision %d hides the held decision (Run at %d)", known.Revision, current.Revision)
+		}
+		plan, err := executor.PlanPark(f.ctx, known, []GovernedToolOutcome{outcome})
+		if err != nil || plan.Park == nil {
+			t.Fatalf("plan = %#v, %v", plan, err)
+		}
+		parked := cloneAgentRun(known)
+		parked.Status, parked.WakeCondition = plan.Park.Status, plan.Park.Wake
+		parked.LeaseOwner, parked.LeaseExpiresAt = "", nil
+		parked.Revision++
+		event := &ActivityEvent{
+			ID: "park-" + uuid.NewString()[:8], Scope: f.scope, EventType: "run.parked", Severity: ActivitySeverityInfo,
+			AgentID: known.AssignedAgentID, RunID: known.ID, Actor: ActivityActor{Type: "worker", ID: governedWorker},
+			Summary: "Run parked", Visibility: ActivityVisibilityScope, CreatedAt: f.clock,
+		}
+		if _, err := store.UpdateAgentRunWithEvent(f.ctx, parked, known.Revision, event, nil); !errors.Is(err, ErrRevisionConflict) {
+			t.Fatalf("stale park = %v, want ErrRevisionConflict", err)
+		}
+	})
 }
