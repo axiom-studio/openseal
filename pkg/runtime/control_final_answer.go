@@ -891,3 +891,22 @@ func FinalOutputPublicationFor(run *AgentRun, answer FinalAnswer, entry *Session
 	}
 	return &FinalOutputPublication{Run: run, StepID: answer.StepID, ToolCallID: answer.ToolCallID, Fields: fields}, nil
 }
+
+// cloneVisual deep-copies a visual so forms, responses and outcomes never
+// share component slices.
+func cloneVisual(visual *presentation.Visual) *presentation.Visual {
+	if visual == nil {
+		return nil
+	}
+	encoded, err := json.Marshal(visual)
+	if err != nil {
+		copy := *visual
+		return &copy
+	}
+	var cloned presentation.Visual
+	if json.Unmarshal(encoded, &cloned) != nil {
+		copy := *visual
+		return &copy
+	}
+	return &cloned
+}

@@ -27,12 +27,6 @@ const (
 	AgentTurnStatusCanceled  AgentTurnStatus = "canceled"
 )
 
-type TurnDecision struct {
-	Summary      string   `json:"summary"`
-	Rationale    string   `json:"rationale,omitempty"`
-	EvidenceRefs []string `json:"evidenceRefs,omitempty"`
-}
-
 type TurnAction struct {
 	Type            string `json:"type"`
 	Capability      string `json:"capability,omitempty"`

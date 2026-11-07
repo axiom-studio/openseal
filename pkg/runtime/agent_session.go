@@ -711,6 +711,9 @@ func validateContentParts(parts []ContentPart, limits contentPartLimits) (images
 			if part.ArtifactID == "" && part.ActionCallID == "" && !(limits.allowDataBytes && part.DataBase64 != "") {
 				return 0, invalidEntry("%s part %d: image part needs artifactId or actionCallId", limits.field, i)
 			}
+			if part.ArtifactID != "" && part.ActionCallID != "" {
+				return 0, invalidEntry("%s part %d: image part names both an artifact and an action call; it needs exactly one source", limits.field, i)
+			}
 			images++
 		default:
 			return 0, invalidEntry("%s part %d: unknown part type %q", limits.field, i, part.Type)

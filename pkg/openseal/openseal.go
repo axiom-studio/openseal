@@ -610,7 +610,6 @@ type (
 	AgentTurnStatus                      = runtime.AgentTurnStatus
 	AgentTurnFilter                      = runtime.AgentTurnFilter
 	AgentTurnRecord                      = kernelapi.AgentTurnRecord
-	TurnDecision                         = runtime.TurnDecision
 	TurnAction                           = runtime.TurnAction
 	TurnRunbookProposal                  = runtime.TurnRunbookProposal
 	TurnUsage                            = runtime.TurnUsage
@@ -635,10 +634,6 @@ type (
 	ConversationTaskService              = runtime.ConversationTaskService
 	StartConversationTaskRequest         = runtime.StartConversationTaskRequest
 	ConversationTaskResult               = runtime.ConversationTaskResult
-	HostedTurnForm                       = runtime.HostedTurnForm
-	HostedTurnFormAuthority              = runtime.HostedTurnFormAuthority
-	HostedWorkspaceOperationForm         = runtime.HostedWorkspaceOperationForm
-	HostedTurnActionForm                 = runtime.HostedTurnActionForm
 	HostedRunBudget                      = runtime.HostedRunBudget
 	TurnHostFailure                      = runtime.TurnHostFailure
 	HostedContextPressure                = runtime.HostedContextPressure
@@ -1241,7 +1236,6 @@ type (
 const (
 	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
 	TurnHostContextExceeded                 = runtime.TurnHostContextExceeded
-	HostedTurnFormSchemaVersion             = runtime.HostedTurnFormSchemaVersion
 	EvidenceGroundingAPIVersion             = runtime.EvidenceGroundingAPIVersion
 	EvidenceGroundingReviewOutputLimit      = runtime.EvidenceGroundingReviewOutputLimit
 	EvidenceGroundingSupported              = runtime.EvidenceGroundingSupported
@@ -1568,7 +1562,6 @@ var (
 	NewTurnHostFailure                  = runtime.NewTurnHostFailure
 	TerminalFailureReply                = runtime.TerminalFailureReply
 	ErrInvalidApprovalReviewContext     = runtime.ErrInvalidApprovalReviewContext
-	HostedTurnFormJSONSchema            = runtime.HostedTurnFormJSONSchema
 	MarshalEvidenceGroundingModelInput  = runtime.MarshalEvidenceGroundingModelInput
 	ValidateEvidenceGroundingReview     = runtime.ValidateEvidenceGroundingReview
 	NewCapabilityInvocationStepProducer = runtime.NewCapabilityInvocationStepProducer
