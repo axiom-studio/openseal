@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"path/filepath"
 	"reflect"
@@ -68,16 +67,9 @@ func newConversationTaskClarificationFixture(t *testing.T, store conversationTas
 	if err != nil || claimed == nil || claimed.ID != scheduled.Run.ID {
 		t.Fatalf("claim source: %#v, %v", claimed, err)
 	}
-	proposal := &TurnTaskProposal{TaskKey: "write-introduction", Goal: f.trigger.Content, Acknowledgment: "I have started the introduction."}
-	settled, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: conversation.Scope, RunID: claimed.ID, WorkerID: "worker", DefinitionID: "writer", DefinitionVersion: "1",
-	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: proposal}, nil
-	}))
-	if err != nil || settled == nil || settled.Run == nil || settled.Turn == nil || settled.Turn.RequestedTask == nil {
-		t.Fatalf("settle source proposal: %#v, %v", settled, err)
-	}
-	accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
+	proposal := taskSourceProposal{Goal: f.trigger.Content, Acknowledgment: "I have started the introduction."}
+	settled := settleTaskSource(t, store, conversation.Scope, claimed.ID, "worker", proposal)
+	accepted, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil || accepted == nil || accepted.Task == nil || accepted.SourceRun == nil || accepted.WorkRun == nil {
 		t.Fatalf("admit independent task: %#v, %v", accepted, err)
 	}

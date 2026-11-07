@@ -183,7 +183,7 @@ func TestPromotionSkippedWhenLatestStepIsFinal(t *testing.T) {
 	step := func(run *AgentRun, sequence int64, status AgentTurnStatus, final bool) *AgentTurn {
 		now := time.Now().UTC()
 		turn := &AgentTurn{ID: run.ID + "-step-" + string(rune('0'+sequence)), Scope: run.Scope, RunID: run.ID, Sequence: sequence,
-			Status: status, NextRunStatus: AgentRunStatusRunning, Final: final, Revision: 1, CreatedAt: run.CreatedAt, UpdatedAt: now, StartedAt: run.CreatedAt}
+			Status: status, Final: final, Revision: 1, CreatedAt: run.CreatedAt, UpdatedAt: now, StartedAt: run.CreatedAt}
 		if status == AgentTurnStatusCompleted {
 			turn.CompletedAt = &now
 		}

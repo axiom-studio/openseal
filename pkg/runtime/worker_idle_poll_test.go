@@ -349,32 +349,33 @@ func TestWorkerPoolScopeWakeDoesNotWakeAnotherTenant(t *testing.T) {
 func TestAgentRunWorkerObservesTimerDeadlineWithoutWaitingForFallback(t *testing.T) {
 	store := NewMemoryStore()
 	scope := Scope{Kind: "tenant", ID: "timer-deadline"}
-	_, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
+	run, err := NewPortfolioService(store).CreateAgentRun(t.Context(), CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent", Goal: "sleep then resume", Source: RunSourceManual,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var turns atomic.Int64
-	completed := make(chan struct{}, 1)
+	producer := &workerLoopProducer{steps: 1, wakeIn: 30 * time.Millisecond}
 	pool, err := NewAgentRunWorkerPool(store, TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-			if turns.Add(1) == 1 {
-				due := time.Now().Add(30 * time.Millisecond)
-				return &TurnOutcome{NextRunStatus: AgentRunStatusSleeping, WakeCondition: &WakeCondition{Type: "timer", WakeAt: &due}, OutputSummary: "waiting"}, nil
-			}
-			completed <- struct{}{}
-			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "finished"}, nil
-		})}, nil
+		return &TurnRunnerBinding{DefinitionID: "agent", DefinitionVersion: "1", Producer: producer}, nil
 	}), nil, AgentRunWorkerConfig{Scope: scope, PollInterval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
 	pool.Start(t.Context())
 	defer pool.Stop()
-	select {
-	case <-completed:
-	case <-time.After(time.Second):
-		t.Fatal("observed timer deadline waited for the hour-long reconciliation fallback")
+	deadline := time.Now().Add(time.Second)
+	for {
+		current, err := store.GetAgentRun(t.Context(), scope, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.Status == AgentRunStatusCompleted && producer.calls.Load() == 2 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("observed timer deadline waited for the hour-long reconciliation fallback: %s after %d steps", current.Status, producer.calls.Load())
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

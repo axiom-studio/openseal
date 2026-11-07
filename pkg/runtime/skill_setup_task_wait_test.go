@@ -81,15 +81,9 @@ func admitSkillSetupWaitTask(t *testing.T, store skillSetupTaskTestStore) *Conve
 	if err != nil || source == nil || source.ID != scheduled.Run.ID {
 		t.Fatalf("claim setup task source: %#v %v", source, err)
 	}
-	settled, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: source.ID, WorkerID: "worker"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: &TurnTaskProposal{
-			TaskKey: "skill-setup", Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5},
-		}}, nil
-	}))
-	if err != nil || settled == nil || settled.Turn == nil || settled.Turn.RequestedTask == nil {
-		t.Fatalf("settle setup task source turn: %#v %v", settled, err)
-	}
-	task, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
+	settled := settleTaskSource(t, store, scope, source.ID, "worker", taskSourceProposal{
+		Goal: "Read the community and report the outcome", Acknowledgment: "I have started reading the community.", Budget: &BudgetPolicy{MaxTurns: 5}})
+	task, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,23 +205,21 @@ func newSkillSetupTaskFixtureForKind(t *testing.T, store skillSetupTaskTestStore
 
 func (f *skillSetupTaskWaitFixture) wait(t *testing.T) *AgentRun {
 	t.Helper()
-	result, err := NewTurnCoordinator(f.store, f.store, f.store).Advance(t.Context(), AdvanceAgentRunRequest{
-		Scope: f.request.Scope, RunID: f.request.RunID, WorkerID: "setup-worker",
-	}, TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-		checkpoint := cloneMap(input.Run.Checkpoint)
-		if checkpoint == nil {
-			checkpoint = map[string]interface{}{}
-		}
-		checkpoint["phase"] = "resume-existing-analysis"
-		return &TurnOutcome{
-			NextRunStatus:          AgentRunStatusWaitingForEvent,
-			WakeCondition:          &WakeCondition{Type: ConversationTaskSkillSetupWakeType, Reference: f.request.ID},
-			RunOutput:              map[string]interface{}{"summary": "Complete the Reddit setup form to continue this task."},
-			ContinuationCheckpoint: checkpoint,
-		}, nil
-	}))
-	if err != nil || result == nil || result.Run.Status != AgentRunStatusWaitingForEvent || result.Run.WakeCondition == nil || result.Run.WakeCondition.Reference != f.request.ID {
-		t.Fatalf("wait for exact setup: %#v %v", result, err)
+	current, err := f.store.GetAgentRun(t.Context(), f.request.Scope, f.request.RunID)
+	if err != nil || current == nil {
+		t.Fatalf("load setup task run: %#v %v", current, err)
+	}
+	checkpoint := cloneMap(current.Checkpoint)
+	if checkpoint == nil {
+		checkpoint = map[string]interface{}{}
+	}
+	checkpoint["phase"] = "resume-existing-analysis"
+	waiting, _ := settleFixtureStep(t, f.store, f.request.Scope, f.request.RunID, "setup-worker", RunTransitionRequest{
+		Status: AgentRunStatusWaitingForEvent, Summary: "Complete the Reddit setup form to continue this task.",
+		WakeCondition: &WakeCondition{Type: ConversationTaskSkillSetupWakeType, Reference: f.request.ID}, Checkpoint: checkpoint,
+	})
+	if waiting.Status != AgentRunStatusWaitingForEvent || waiting.WakeCondition == nil || waiting.WakeCondition.Reference != f.request.ID {
+		t.Fatalf("wait for exact setup: %#v", waiting)
 	}
 	// Compare durable snapshots; the persisted checkpoint normalizes JSON
 	// numbers and timestamps that a freshly returned transition can retain.
@@ -275,70 +267,6 @@ func skillSetupCompletionEvents(t *testing.T, store skillSetupTaskTestStore, run
 		}
 	}
 	return count
-}
-
-func TestSkillSetupTaskWaitResumesSameWorkAfterRestart(t *testing.T) {
-	for _, status := range []string{"resolved", "dismissed"} {
-		t.Run(status, func(t *testing.T) {
-			forSkillSetupTaskStores(t, func(t *testing.T, store skillSetupTaskTestStore, restart func() skillSetupTaskTestStore) {
-				f := newSkillSetupTaskFixture(t, store)
-				waiting := f.wait(t)
-				f.store = restart()
-				pending, handled, err := f.reconcile(t)
-				if err != nil || !handled || pending == nil || pending.Run.Status != AgentRunStatusWaitingForEvent || pending.Run.Revision != waiting.Revision || len(pending.Run.PendingInterventions) != 0 || skillSetupCompletionEvents(t, f.store, waiting) != 0 {
-					t.Fatalf("pending setup woke task: %#v %v %v", pending, handled, err)
-				}
-				f.resolve(t, status)
-				// A crash after persisting the user's form must still allow one wake.
-				f.store = restart()
-				resumed, handled, err := f.reconcile(t)
-				if err != nil || !handled || resumed == nil || resumed.Run.ID != waiting.ID || resumed.Run.Status != AgentRunStatusQueued || resumed.Run.WakeCondition != nil || resumed.Event == nil || resumed.Event.EventType != "run.skill_setup_completed" {
-					t.Fatalf("resume same work: %#v %v %v", resumed, handled, err)
-				}
-				if !reflect.DeepEqual(resumed.Run.Checkpoint, waiting.Checkpoint) || !reflect.DeepEqual(resumed.Run.Budget, waiting.Budget) || !reflect.DeepEqual(resumed.Run.BudgetUsage, waiting.BudgetUsage) || resumed.Run.LastAppliedTurn != waiting.LastAppliedTurn || !reflect.DeepEqual(resumed.Run.Context, waiting.Context) {
-					t.Fatal("setup resolution changed task progress, budget, or identity")
-				}
-				if len(resumed.Run.PendingInterventions) != 1 || resumed.Run.PendingInterventions[0].SkillSetupResolution == nil {
-					t.Fatalf("missing typed setup resolution: %#v", resumed.Run.PendingInterventions)
-				}
-				receipt := resumed.Run.PendingInterventions[0].SkillSetupResolution
-				if receipt.Scope != f.request.Scope || receipt.RunID != waiting.ID || receipt.RequestID != f.request.ID || receipt.Status != status || receipt.ActionCallID != f.call.ID || receipt.Revision != f.request.Revision || receipt.ResolvedBindingID != f.request.ResolvedBindingID || receipt.ResolvedBindingRevision != f.request.ResolvedBindingRevision {
-					t.Fatalf("resolution receipt lost exact provenance: %#v", receipt)
-				}
-				f.store = restart()
-				again, handled, err := f.reconcile(t)
-				if err != nil || !handled || again == nil || again.Run.Revision != resumed.Run.Revision || len(again.Run.PendingInterventions) != 1 || skillSetupCompletionEvents(t, f.store, again.Run) != 1 {
-					t.Fatalf("callback duplicated wake: %#v %v %v", again, handled, err)
-				}
-				finished, err := NewTurnCoordinator(f.store, f.store, f.store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: waiting.Scope, RunID: waiting.ID, WorkerID: "resume-worker"}, TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-					if len(input.Run.PendingInterventions) != 1 || input.Run.PendingInterventions[0].SkillSetupResolution == nil || input.Run.PendingInterventions[0].SkillSetupResolution.Status != status || input.Run.Checkpoint["phase"] != "resume-existing-analysis" {
-						t.Fatal("resumed model turn did not receive persisted progress and resolution")
-					}
-					return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{"summary": "Task concluded with the user's setup decision."}}, nil
-				}))
-				if err != nil {
-					t.Fatal(err)
-				}
-				f.store = restart()
-				afterCompletion, handled, err := f.reconcile(t)
-				if err != nil || !handled || afterCompletion == nil || afterCompletion.Run.Status != AgentRunStatusCompleted || afterCompletion.Run.Revision != finished.Run.Revision || skillSetupCompletionEvents(t, f.store, finished.Run) != 1 {
-					t.Fatalf("late callback reopened completed task: %#v %v %v", afterCompletion, handled, err)
-				}
-				source, err := f.store.GetAgentRun(t.Context(), f.request.Scope, f.task.SourceRun.ID)
-				if err != nil || !reflect.DeepEqual(source, f.task.SourceRun) {
-					t.Fatalf("setup changed completed source: %#v %v", source, err)
-				}
-				calls, err := f.store.ListActionCalls(t.Context(), ActionFilter{Scope: waiting.Scope, RunID: waiting.ID})
-				if err != nil || len(calls) != 1 || calls[0].ID != f.call.ID || calls[0].Revision != f.call.Revision || calls[0].Status != ActionCallStatusSucceeded || calls[0].Output["setupRequest"].(map[string]interface{})["status"] != "pending" {
-					t.Fatalf("resolution repeated or rewrote the completed action: %#v %v", calls, err)
-				}
-				tasks, err := f.store.ListConversationTasks(t.Context(), ConversationTaskFilter{Scope: waiting.Scope, Owner: waiting.Owner, ConversationID: f.request.ConversationID, Limit: 100})
-				if err != nil || len(tasks) != 1 || tasks[0].Task.ID != f.task.Task.ID || tasks[0].WorkRun.ID != waiting.ID {
-					t.Fatalf("resolution recreated task: %#v %v", tasks, err)
-				}
-			})
-		})
-	}
 }
 
 func TestSkillSetupTaskResolutionPreservesOperatorPauseAndCancel(t *testing.T) {
@@ -789,27 +717,6 @@ func TestSkillSetupTaskResolutionRejectsForgedProvenance(t *testing.T) {
 					t.Fatalf("forged %s mutated canonical work: %v", scenario, err)
 				}
 			})
-		})
-	}
-}
-
-func TestSkillSetupTaskWaitRequiresExactSuccessfulRequest(t *testing.T) {
-	for _, scenario := range []string{"unknown-reference", "failed-action"} {
-		t.Run(scenario, func(t *testing.T) {
-			f := newSkillSetupTaskFixture(t, NewMemoryStore())
-			proof := &skillSetupTaskProofOverrideStore{skillSetupTaskTestStore: f.store}
-			reference := f.request.ID
-			if scenario == "unknown-reference" {
-				reference = "skill-setup:unknown"
-			} else {
-				proof.action = func(action *ActionCall) { action.Status = ActionCallStatusFailed }
-			}
-			result, err := NewTurnCoordinator(proof, proof, proof).Advance(t.Context(), AdvanceAgentRunRequest{Scope: f.request.Scope, RunID: f.request.RunID, WorkerID: "setup-worker"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				return &TurnOutcome{NextRunStatus: AgentRunStatusWaitingForEvent, WakeCondition: &WakeCondition{Type: ConversationTaskSkillSetupWakeType, Reference: reference}}, nil
-			}))
-			if err == nil || result != nil && result.Run != nil && result.Run.Status == AgentRunStatusWaitingForEvent {
-				t.Fatalf("unproven setup wait accepted: %#v %v", result, err)
-			}
 		})
 	}
 }

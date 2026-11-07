@@ -834,10 +834,10 @@ func (p teamRoutingStepProducer) Produce(ctx context.Context, in StepInput) (Ste
 	return StepOutput{Final: &LoopFinal{Status: AgentRunStatusCompleted, Output: output}}, nil
 }
 
-func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, input TurnExecutionContext, conversation *Conversation, triggerID string) (string, ConversationViewer, *ChannelMessage, error) {
-	participantID := input.Run.AssignedAgentID
-	if runExplainingFailure(input.Run) {
-		if err := r.conversationRosterMember(ctx, input.Run); err != nil {
+func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Context, run *AgentRun, conversation *Conversation, triggerID string) (string, ConversationViewer, *ChannelMessage, error) {
+	participantID := run.AssignedAgentID
+	if runExplainingFailure(run) {
+		if err := r.conversationRosterMember(ctx, run); err != nil {
 			return "", ConversationViewer{}, nil, err
 		}
 	}
@@ -845,11 +845,11 @@ func (r *ConversationRunTurnRunner) agentConversationTurnContext(ctx context.Con
 		return "", ConversationViewer{}, nil, fmt.Errorf("%w: conversation Run has no acting Agent", ErrInvalidAgentRun)
 	}
 	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: participantID}}
-	trigger, err := r.conversations.GetVisibleChannelMessage(ctx, input.Run.Scope, conversation.ID, triggerID, viewer)
+	trigger, err := r.conversations.GetVisibleChannelMessage(ctx, run.Scope, conversation.ID, triggerID, viewer)
 	if err != nil {
 		return "", viewer, nil, err
 	}
-	if root, _ := input.Run.Context["threadRootMessageId"].(string); root != "" && root != externalConversationThreadRoot(conversation, trigger) {
+	if root, _ := run.Context["threadRootMessageId"].(string); root != "" && root != externalConversationThreadRoot(conversation, trigger) {
 		return "", viewer, nil, fmt.Errorf("%w: thread does not match the canonical trigger", ErrInvalidAgentRun)
 	}
 	return participantID, viewer, trigger, nil

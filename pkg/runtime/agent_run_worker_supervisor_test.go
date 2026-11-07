@@ -56,9 +56,7 @@ func TestAgentRunWorkerSupervisorExecutesOnlyConfiguredKindAcrossScopes(t *testi
 	seen := make(chan *AgentRun, 2)
 	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
 		seen <- cloneAgentRun(run)
-		return &TurnRunnerBinding{Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Conversation coordinated"}, nil
-		})}, nil
+		return &TurnRunnerBinding{Producer: &workerLoopProducer{}}, nil
 	})
 	source := &mutableWorkerScopeSource{scopes: []Scope{scope2, scope1, scope1}}
 	supervisor, err := NewAgentRunWorkerSupervisor(store, resolver, source, zap.NewNop().Sugar(), DynamicAgentRunWorkerConfig{

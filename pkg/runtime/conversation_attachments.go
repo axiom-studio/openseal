@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"html"
@@ -192,108 +191,6 @@ func verifyConversationImage(ctx context.Context, store ArtifactContentStore, ar
 	return "image_context", content
 }
 
-// Old per-Turn path: the goal JSON builder in conversation_run.go still reads
-// every recent message's attachments through this aggregate, with inline image
-// bytes. It is deleted together with that builder (section 05 §12); the
-// session path uses conversationAttachmentReader.
-
-type conversationAttachment struct {
-	MessageID string `json:"messageId"`
-	ID        string `json:"id"`
-	Version   int64  `json:"version"`
-	Name      string `json:"name,omitempty"`
-	MediaType string `json:"mediaType,omitempty"`
-	Status    string `json:"status"`
-	Text      string `json:"text,omitempty"`
-	media     *HostedTurnMedia
-}
-
-// Only persisted, scoped message references are eligible. Prioritize the current
-// request, then recent context, without following URLs or paths from file data.
-func (r *ConversationRunTurnRunner) conversationAttachments(ctx context.Context, conversation *Conversation, trigger *ChannelMessage, recent []*ChannelMessage) []conversationAttachment {
-	if r == nil || conversation == nil || conversation.Scope.Validate() != nil {
-		return nil
-	}
-	messages := []*ChannelMessage{trigger}
-	if trigger != nil && trigger.ReplyToMessageID != "" {
-		for _, message := range recent {
-			if message != nil && message.ID == trigger.ReplyToMessageID {
-				messages = append(messages, message)
-				break
-			}
-		}
-	}
-	for i := len(recent) - 1; i >= 0; i-- {
-		messages = append(messages, recent[i])
-	}
-	// An app is referenced again on every edit; show only its newest source.
-	highestAppVersion := make(map[string]int64)
-	for _, message := range messages {
-		if message == nil || message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
-			continue
-		}
-		for _, ref := range message.References {
-			if ref.Kind == ConversationReferenceArtifact && ref.Version > highestAppVersion[ref.ID] {
-				highestAppVersion[ref.ID] = ref.Version
-			}
-		}
-	}
-	seenApps := make(map[string]bool)
-	appRemaining := conversationAppAttachmentBudget
-	seen := make(map[string]bool)
-	remaining := conversationAttachmentBudget
-	imageRemaining := maximumHostedTurnMediaBytes
-	var result []conversationAttachment
-	for _, message := range messages {
-		if message == nil || message.Scope != conversation.Scope || message.ConversationID != conversation.ID {
-			continue
-		}
-		for _, ref := range message.References {
-			if ref.Kind != ConversationReferenceArtifact {
-				continue
-			}
-			key := fmt.Sprintf("%s:%d", ref.ID, ref.Version)
-			if seen[key] || seenApps[ref.ID] {
-				continue
-			}
-			seen[key] = true
-			if len(result) == 8 {
-				return result
-			}
-			attachment := conversationAttachment{MessageID: message.ID, ID: ref.ID, Version: ref.Version, Status: "unavailable"}
-			if r.artifacts != nil && r.config.AttachmentContent != nil && ref.Version > 0 {
-				artifact, err := r.artifacts.GetArtifact(ctx, conversation.Scope, ref.ID, ref.Version)
-				if err == nil && artifact != nil && artifact.Scope == conversation.Scope && artifact.ID == ref.ID && artifact.Version == ref.Version {
-					attachment.Name, attachment.MediaType = artifact.Name, artifact.MediaType
-					mediaType, _, _ := mime.ParseMediaType(artifact.MediaType)
-					if isConversationAppArtifact(artifact) {
-						seenApps[ref.ID] = true
-						artifact = r.newestConversationApp(ctx, conversation.Scope, artifact, highestAppVersion[ref.ID])
-						attachment.Version, attachment.Name, attachment.MediaType = artifact.Version, artifact.Name, artifact.MediaType
-						attachment.Status, attachment.Text = readConversationApp(ctx, r.config.AttachmentContent, artifact, appRemaining)
-						appRemaining -= len(attachment.Text)
-						result = append(result, attachment)
-						continue
-					}
-					if mediaType == "image/png" || mediaType == "image/jpeg" {
-						var content []byte
-						attachment.Status, content = verifyConversationImage(ctx, r.config.AttachmentContent, artifact, imageRemaining)
-						if content != nil {
-							attachment.media = &HostedTurnMedia{MediaType: mediaType, DataBase64: base64.StdEncoding.EncodeToString(content), Detail: "auto", SourceArtifactID: artifact.ID, SourceArtifactVersion: artifact.Version, SourceMessageID: message.ID}
-						}
-						imageRemaining -= len(content)
-					} else {
-						attachment.Status, attachment.Text = readConversationAttachment(ctx, r.config.AttachmentContent, artifact, remaining)
-					}
-					remaining -= len(attachment.Text)
-				}
-			}
-			result = append(result, attachment)
-		}
-	}
-	return result
-}
-
 func readConversationAttachment(ctx context.Context, store ArtifactContentStore, artifact *Artifact, remaining int) (string, string) {
 	mediaType, _, err := mime.ParseMediaType(artifact.MediaType)
 	if err != nil {
@@ -352,25 +249,6 @@ func readConversationAttachment(ctx context.Context, store ArtifactContentStore,
 func isConversationAppArtifact(artifact *Artifact) bool {
 	mediaType, _, _ := mime.ParseMediaType(artifact.MediaType)
 	return artifact.Type == conversationAppArtifactType || mediaType == appproject.MediaType
-}
-
-// newestConversationApp (old per-Turn path, see conversationAttachment) returns the newest version of an app in the same
-// scope: the latest stored version when it can be looked up, otherwise the
-// highest version the conversation references, otherwise the given one.
-func (r *ConversationRunTurnRunner) newestConversationApp(ctx context.Context, scope Scope, artifact *Artifact, highestReferenced int64) *Artifact {
-	accept := func(candidate *Artifact) bool {
-		return candidate != nil && candidate.Scope == scope && candidate.ID == artifact.ID &&
-			candidate.Version > artifact.Version && isConversationAppArtifact(candidate)
-	}
-	if latest, err := r.artifacts.ListArtifacts(ctx, ArtifactFilter{Scope: scope, ID: artifact.ID, LatestOnly: true, Limit: 1}); err == nil && len(latest) == 1 && accept(latest[0]) {
-		return latest[0]
-	}
-	if highestReferenced > artifact.Version {
-		if candidate, err := r.artifacts.GetArtifact(ctx, scope, artifact.ID, highestReferenced); err == nil && accept(candidate) && candidate.Version == highestReferenced {
-			return candidate
-		}
-	}
-	return artifact
 }
 
 // readConversationApp renders a verified app revision as text: a header the

@@ -109,7 +109,6 @@ func TestSQLiteAgentTurnsEnforceOneActiveAndSurviveRestart(t *testing.T) {
 	}
 	finished, err := turns.FinishTurn(ctx, scope, listed[0].ID, FinishAgentTurnRequest{
 		ExpectedRevision: 1, Status: AgentTurnStatusCompleted, WorkerID: listed[0].LeaseOwner, OutputSummary: "Turn complete",
-		ContinuationCheckpoint: map[string]interface{}{"next": "inspect"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +133,7 @@ func TestSQLiteAgentTurnsEnforceOneActiveAndSurviveRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.Revision != 2 || loaded.CompletedAt == nil || loaded.ContinuationCheckpoint["next"] != "inspect" {
+	if loaded.Revision != 2 || loaded.CompletedAt == nil || loaded.OutputSummary != "Turn complete" {
 		t.Fatalf("finished turn did not survive restart: %#v", loaded)
 	}
 	if _, err := NewAgentTurnService(reopened, reopened).GetTurn(ctx, Scope{Kind: "local", ID: "other"}, finished.ID); !errors.Is(err, ErrTurnNotFound) {

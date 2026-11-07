@@ -50,7 +50,7 @@ const (
 // RunNestedAction runs one action during the in-flight Turn req.TurnID on
 // behalf of code in the chat's VM, under the governance of a model-requested
 // action of that Turn, without changing the Run's lifecycle. It must be called
-// in the process hosting the Turn (the one whose TurnHost is serving it);
+// in the process running the step (the one whose StepHost is serving it);
 // elsewhere it returns ErrNestedTurnNotActive.
 //
 // It returns once the call settles (see NestedActionResult.Settled) or after

@@ -590,27 +590,6 @@ func (r *ConversationRunTurnRunner) SetReactionProjector(projector MessageReacti
 	}
 }
 
-// applyTurnReactions adds the outcome's reactions as the answering Agent and
-// consumes them from the outcome. Each must target a message the Agent can
-// see; a failed reaction is skipped. It returns how many were applied.
-func (r *ConversationRunTurnRunner) applyTurnReactions(ctx context.Context, conversation *Conversation, viewer ConversationViewer, outcome *TurnOutcome) int {
-	if r == nil || r.conversations == nil || conversation == nil || outcome == nil || len(outcome.React) == 0 {
-		return 0
-	}
-	reactions := admitTurnReactions(outcome.React)
-	outcome.React = nil
-	applied := 0
-	for _, reaction := range reactions {
-		if _, err := r.conversations.AddMessageReaction(ctx, MessageReactionRequest{
-			Scope: conversation.Scope, ConversationID: conversation.ID, MessageID: reaction.MessageID, Emoji: reaction.Emoji,
-			Actor: viewer.Participant, ActorRoles: viewer.Roles,
-		}); err == nil {
-			applied++
-		}
-	}
-	return applied
-}
-
 // reactionEcho reports whether content says nothing beyond the turn's
 // reactions: empty, or only the reacted emoji and whitespace.
 func reactionEcho(content string, reactions []TurnReaction) bool {

@@ -119,25 +119,6 @@ func validateHostedTaskAuthority(run *AgentRun, taskContext *HostedConversationT
 	return validateConversationTaskStartAuthority(run, taskContext)
 }
 
-func hostedTaskForegroundSource(input TurnExecutionContext) *AgentRun {
-	if input.ForegroundConversation == nil {
-		return input.Run
-	}
-	source := input.ForegroundConversation
-	if input.Run == nil || source.ID != input.Run.ID || source.Scope != input.Run.Scope || source.Owner != input.Run.Owner ||
-		source.ParentRunID != input.Run.ParentRunID {
-		return nil
-	}
-	for _, key := range []string{conversationRunContextConversationID, conversationRunContextTriggerID, "threadRootMessageId"} {
-		sourceValue, sourceString := source.Context[key].(string)
-		runValue, runString := input.Run.Context[key].(string)
-		if sourceString != runString || sourceValue != runValue || !sourceString && (source.Context[key] != nil || input.Run.Context[key] != nil) {
-			return nil
-		}
-	}
-	return source
-}
-
 func validConversationTaskSnapshotStatus(status AgentRunStatus) bool {
 	switch status {
 	case AgentRunStatusQueued, AgentRunStatusPlanning, AgentRunStatusRunning, AgentRunStatusPaused, AgentRunStatusSleeping,

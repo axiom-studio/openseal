@@ -99,8 +99,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*MemoryStore, *Conversatio
 		}
 		turn := &AgentTurn{ID: record.Task.SourceTurnID, Scope: scope, RunID: record.Task.SourceRunID, Sequence: 1,
 			Status: AgentTurnStatusCompleted, Revision: 1, CreatedAt: record.Task.CreatedAt, UpdatedAt: record.Task.CreatedAt,
-			StartedAt: record.Task.CreatedAt, CompletedAt: &record.Task.CreatedAt,
-			RequestedTask: &TurnTaskProposal{TaskKey: record.Task.TaskKey, Goal: record.Task.Goal, Acknowledgment: record.Task.Acknowledgment, Budget: cloneBudgetPolicy(record.Task.RequestedBudget)}}
+			StartedAt: record.Task.CreatedAt, CompletedAt: &record.Task.CreatedAt}
 		if _, err := store.CreateAgentTurn(t.Context(), turn); err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +109,7 @@ func catalogTaskPageFixture(t *testing.T, count int) (*MemoryStore, *Conversatio
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := taskStartRequest(t, store, source, turn)
+		req := proposedTaskStartRequest(t, store, source, turn, taskSourceProposal{Goal: record.Task.Goal, Acknowledgment: record.Task.Acknowledgment, Budget: record.Task.RequestedBudget})
 		req.WorkerID = "task-worker"
 		accepted, err := tasks.Start(t.Context(), req)
 		if err != nil {

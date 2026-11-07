@@ -12,7 +12,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/presentation"
-	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/workspace"
 	inferschema "github.com/invopop/jsonschema"
 )
@@ -79,15 +78,6 @@ type HostedTurnFormAuthority struct {
 	WorkspaceOperations   []workspace.Operation
 }
 
-// CompileHostedTurnForm validates the selected action against the exact
-// authorized contract and compiles its inline form into the canonical kernel
-// response. Kernel control metadata already present in the proposal envelope
-// may be projected into an action contract that declares the same field; domain
-// arguments remain model-authored and authority is never widened.
-func CompileHostedTurnForm(form HostedTurnForm, actions []capability.ModelAction, options ...HostedTurnFormOption) (*HostedTurnResponse, error) {
-	return CompileHostedTurnFormWithWorkspace(form, actions, nil, options...)
-}
-
 // HostedTurnFormOption adjusts hosted Turn form compilation.
 type HostedTurnFormOption func(*hostedTurnFormOptions)
 
@@ -98,8 +88,7 @@ type hostedTurnFormOptions struct {
 
 // WithVisualHostChecks checks an answer visual's bindings and links with the
 // host's hooks during compilation. Without it compilation checks the visual's
-// structure only; HostedTurnRunner rechecks bindings and links with its own
-// hooks before the answer is stored.
+// structure only.
 func WithVisualHostChecks(ctx context.Context, checks presentation.ValidateOptions) HostedTurnFormOption {
 	return func(options *hostedTurnFormOptions) {
 		options.visualContext = ctx
@@ -149,132 +138,6 @@ func stampHostedTurnVisual(ctx context.Context, visual *presentation.Visual, che
 	return nil
 }
 
-func CompileHostedTurnFormWithWorkspace(form HostedTurnForm, actions []capability.ModelAction, operations []workspace.Operation, options ...HostedTurnFormOption) (*HostedTurnResponse, error) {
-	var compile hostedTurnFormOptions
-	for _, option := range options {
-		if option != nil {
-			option(&compile)
-		}
-	}
-	if form.SchemaVersion != HostedTurnFormSchemaVersion {
-		return nil, fmt.Errorf("hosted turn form schemaVersion must be %q", HostedTurnFormSchemaVersion)
-	}
-	if form.ProposedAction != nil && form.ProposedWorkspaceOperation != nil {
-		return nil, errors.New("hosted turn form can propose only one governed action or native Workspace operation")
-	}
-	if form.ProposedTask != nil {
-		if form.ProposedAction != nil || form.ProposedWorkspaceOperation != nil || form.ProposedFork != nil || form.ProposedDelegation != nil || form.ProposedRunbook != nil {
-			return nil, errors.New("a task proposal cannot be combined with another proposal")
-		}
-		if strings.TrimSpace(form.ProgressSummary) != "" {
-			return nil, errors.New("a task acknowledgment cannot be streamed before durable admission")
-		}
-		if err := validateTaskProposalOutput(form.ProposedTask, form.NextRunStatus, form.WakeCondition, form.OutputSummary, form.RunOutput, form.RunError); err != nil {
-			return nil, err
-		}
-	}
-	decisions := append([]TurnDecision(nil), form.Decisions...)
-	// Models can request governed actions, but they cannot mint approval IDs or
-	// place a Run into approval lifecycle state. Action materialization and the
-	// ApprovalCoordinator derive the exact wait condition when policy requires
-	// one. Until then, approval language is only continuation intent.
-	if form.NextRunStatus == AgentRunStatusWaitingForApproval {
-		form.NextRunStatus = AgentRunStatusRunning
-		form.WakeCondition = nil
-		decisions = append(decisions, TurnDecision{
-			Summary: "Continued the Run because approval state is derived from a governed action, not model output.",
-		})
-	}
-	if err := ValidateHostedTurnLifecycle(form.NextRunStatus, form.WakeCondition); err != nil {
-		return nil, err
-	}
-	visualContext, visualChecks := context.Background(), presentation.ValidateOptions{SkipHostChecks: true}
-	if compile.visualChecks != nil {
-		visualChecks = *compile.visualChecks
-		if compile.visualContext != nil {
-			visualContext = compile.visualContext
-		}
-	}
-	proposes := form.ProposedAction != nil || form.ProposedWorkspaceOperation != nil || form.ProposedFork != nil ||
-		form.ProposedDelegation != nil || form.ProposedRunbook != nil || form.ProposedTask != nil
-	if err := validateHostedTurnVisual(visualContext, form.Visual, form.NextRunStatus, proposes, visualChecks); err != nil {
-		return nil, err
-	}
-	checkpoint, err := cloneHostedTurnObject(form.ContinuationCheckpoint)
-	if err != nil {
-		return nil, err
-	}
-	response := &HostedTurnResponse{
-		SkillSelections: form.SkillSelections, Decisions: decisions,
-		ProposedFork: form.ProposedFork, ProposedDelegation: form.ProposedDelegation, ProposedRunbook: form.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(form.ProposedTask),
-		React:         cloneTurnReactions(form.React),
-		OutputSummary: form.OutputSummary, Visual: cloneVisual(form.Visual), ContinuationCheckpoint: checkpoint, NextRunStatus: form.NextRunStatus,
-		WakeCondition: form.WakeCondition, RunOutput: form.RunOutput, RunError: form.RunError,
-		CompletionEvidenceRefs: form.CompletionEvidenceRefs, EvidenceClaims: form.EvidenceClaims,
-	}
-	if form.ProposedWorkspaceOperation != nil {
-		selected, ok := exactHostedWorkspaceOperation(operations, form.ProposedWorkspaceOperation.Operation)
-		if !ok {
-			return nil, fmt.Errorf("proposed Workspace operation %q is not authorized", form.ProposedWorkspaceOperation.Operation)
-		}
-		if strings.TrimSpace(form.ProposedWorkspaceOperation.Summary) == "" || form.ProposedWorkspaceOperation.Arguments == nil {
-			return nil, errors.New("proposed Workspace operation summary and arguments are required")
-		}
-		if err := runbook.ValidateInterfaceInput(selected.InputSchema, form.ProposedWorkspaceOperation.Arguments); err != nil {
-			return nil, fmt.Errorf("proposed Workspace operation %q input is invalid: %w", selected.Name, err)
-		}
-		copy := *form.ProposedWorkspaceOperation
-		copy.Operation = selected.Name
-		copy.Summary = strings.TrimSpace(copy.Summary)
-		copy.Arguments = cloneHostedTurnObjectValue(copy.Arguments)
-		response.ProposedWorkspaceOperation = &copy
-	}
-	if form.ProposedAction == nil {
-		return response, nil
-	}
-	selected, err := exactHostedTurnAction(actions, form.ProposedAction.Capability)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(form.ProposedAction.Summary) == "" || strings.TrimSpace(form.ProposedAction.IdempotencyKey) == "" {
-		return nil, errors.New("proposed action summary and idempotencyKey are required")
-	}
-	if form.ProposedAction.Arguments == nil {
-		return nil, errors.New("proposed action arguments are required")
-	}
-	arguments := cloneHostedTurnObjectValue(form.ProposedAction.Arguments)
-	projectHostedTurnActionControlArguments(arguments, selected.InputSchema, form.ProposedAction)
-	if len(selected.InputSchema) > 0 {
-		if err := runbook.ValidateInterfaceInput(selected.InputSchema, arguments); err != nil {
-			return nil, fmt.Errorf("proposed action %q input does not match its authorized schema: %w", selected.Name, err)
-		}
-	}
-	if checkpoint == nil {
-		checkpoint = map[string]interface{}{}
-		response.ContinuationCheckpoint = checkpoint
-	}
-	actionInputs, _ := checkpoint["actionInputs"].(map[string]interface{})
-	if actionInputs == nil {
-		actionInputs = map[string]interface{}{}
-		checkpoint["actionInputs"] = actionInputs
-	}
-	actionInputs["proposed"] = arguments
-	response.ProposedAction = &TurnAction{
-		Type: "skill_action", Capability: selected.Name, Summary: strings.TrimSpace(form.ProposedAction.Summary),
-		BindingID: selected.BindingID, BindingRevision: selected.BindingRevision,
-		IdempotencyKey: strings.TrimSpace(form.ProposedAction.IdempotencyKey), InputRef: "/actionInputs/proposed",
-		EvidenceRefs: append([]string(nil), form.ProposedAction.EvidenceRefs...), ExternalOperation: form.ProposedAction.ExternalOperation,
-		ReviewContext: cloneApprovalReviewContext(form.ProposedAction.ReviewContext),
-	}
-	if selected.SideEffect == capability.SideEffectExternal && response.ProposedAction.ReviewContext == nil {
-		return nil, errors.New("external proposed action reviewContext is required")
-	}
-	if err := validateApprovalReviewContext(response.ProposedAction.ReviewContext); err != nil {
-		return nil, fmt.Errorf("proposed action reviewContext is invalid: %w", err)
-	}
-	return response, nil
-}
-
 // projectHostedTurnActionControlArguments removes a duplicated model burden:
 // idempotency is already a required, kernel-governed field on the proposal
 // envelope. When an authorized Skill contract also exposes that standard field,
@@ -321,39 +184,6 @@ func cloneHostedTurnObjectValue(value map[string]interface{}) map[string]interfa
 	}
 	cloned, _ := cloneHostedTurnValue(value).(map[string]interface{})
 	return cloned
-}
-
-// HostedTurnFormFromResponse is the inverse projection used by hosts, tests,
-// and inspectors. It resolves the canonical action input pointer back into the
-// same model-facing form without changing the response.
-func HostedTurnFormFromResponse(response HostedTurnResponse) (HostedTurnForm, error) {
-	form := HostedTurnForm{
-		SchemaVersion: HostedTurnFormSchemaVersion, SkillSelections: response.SkillSelections, Decisions: response.Decisions,
-		ProposedFork: response.ProposedFork, ProposedDelegation: response.ProposedDelegation, ProposedRunbook: response.ProposedRunbook, ProposedTask: cloneTurnTaskProposal(response.ProposedTask),
-		React:         cloneTurnReactions(response.React),
-		OutputSummary: response.OutputSummary, Visual: cloneVisual(response.Visual), ContinuationCheckpoint: response.ContinuationCheckpoint,
-		NextRunStatus: response.NextRunStatus, WakeCondition: response.WakeCondition, RunOutput: response.RunOutput,
-		RunError: response.RunError, CompletionEvidenceRefs: response.CompletionEvidenceRefs, EvidenceClaims: response.EvidenceClaims,
-	}
-	if response.ProposedWorkspaceOperation != nil {
-		copy := *response.ProposedWorkspaceOperation
-		copy.Arguments = cloneHostedTurnObjectValue(copy.Arguments)
-		form.ProposedWorkspaceOperation = &copy
-	}
-	if response.ProposedAction == nil {
-		return form, nil
-	}
-	arguments, err := hostedTurnFormPointerObject(response.ContinuationCheckpoint, response.ProposedAction.InputRef)
-	if err != nil {
-		return HostedTurnForm{}, err
-	}
-	form.ProposedAction = &HostedTurnActionForm{
-		Capability: response.ProposedAction.Capability, Summary: response.ProposedAction.Summary,
-		IdempotencyKey: response.ProposedAction.IdempotencyKey, Arguments: arguments,
-		EvidenceRefs: append([]string(nil), response.ProposedAction.EvidenceRefs...), ExternalOperation: response.ProposedAction.ExternalOperation,
-		ReviewContext: cloneApprovalReviewContext(response.ProposedAction.ReviewContext),
-	}
-	return form, nil
 }
 
 // HostedTurnFormJSONSchema generates the provider-facing form schema from the

@@ -24,10 +24,10 @@ import (
 // The result then carries expectedDigest (what ran) or refused (why
 // nothing ran) beside the usual exitStatus, stdout and stderr.
 //
-// A routine that runs an approved script pins it this way (HostedTurnRequest
-// CommandPins): the host attaches the pin to every run_command that invokes
-// the script, so an edited script never runs in the routine's place, and
-// reports what those commands did (HostedTurnResponse PinnedCommands).
+// A routine that runs an approved script pins it this way: the kernel's host
+// tool dispatch attaches the pin to every run_command that invokes the
+// script, so an edited script never runs in the routine's place, and records
+// what those commands did with RecordPinnedCommand.
 
 // ExpectedDigestArgument is the host-only run_command argument that pins a
 // file version, and the result field that echoes it once verified.

@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -11,41 +10,130 @@ import (
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
-// taskStartRequest is the admission of the task a settled fixture Turn
-// proposed, made the way the conversation_start_task settle makes it: the
-// Turn's step gets its [assistant, conversation_start_task] entries in the
-// Run's lane session (after the triggering message) and the request names
-// that tool entry. Nothing is written once the Run no longer runs.
+// taskStartRequest is the admission of the task a loop-built step
+// (settledWorkerTaskFixture) called conversation_start_task for: the request
+// names that step's pending tool entry.
 func taskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn) StartConversationTaskRequest {
 	t.Helper()
 	sessions, ok := store.(taskStartFixtureStore)
 	if !ok {
 		t.Fatalf("task start fixture needs a session store")
 	}
-	// A loop-built step (settledWorkerTaskFixture) already holds the pending
-	// conversation_start_task entry; read the call from it.
-	if source.SessionID != "" {
-		entryID := SessionEntryID(source.SessionID, ToolEntryKey(turn.ID, taskStartFixtureCallID))
-		if entry, err := optionalSessionEntry(sessions.GetSessionEntry(t.Context(), source.Scope, entryID)); err != nil {
-			t.Fatal(err)
-		} else if args := startTaskArguments(entry); args != nil {
-			current, err := sessions.GetAgentRun(t.Context(), source.Scope, source.ID)
-			if err != nil || current == nil {
-				t.Fatalf("get source: %#v %v", current, err)
-			}
-			return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: current.Revision, WorkerID: "worker",
-				TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
-				Goal: args.Goal, Acknowledgment: args.Acknowledgment}
-		}
+	entryID := SessionEntryID(source.SessionID, ToolEntryKey(turn.ID, taskStartFixtureCallID))
+	entry, err := optionalSessionEntry(sessions.GetSessionEntry(t.Context(), source.Scope, entryID))
+	if err != nil {
+		t.Fatal(err)
 	}
-	p := turn.RequestedTask
-	if p == nil {
-		t.Fatalf("task start fixture needs a start_task tool entry or a proposed task")
+	args := startTaskArguments(entry)
+	if source.SessionID == "" || args == nil {
+		t.Fatalf("task start fixture needs a conversation_start_task tool entry")
 	}
-	entryID, revision := ensureStartTaskToolEntry(t, sessions, source, turn, p.Goal, p.Acknowledgment)
+	current, err := sessions.GetAgentRun(t.Context(), source.Scope, source.ID)
+	if err != nil || current == nil {
+		t.Fatalf("get source: %#v %v", current, err)
+	}
+	return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: current.Revision, WorkerID: "worker",
+		TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
+		Goal: args.Goal, Acknowledgment: args.Acknowledgment}
+}
+
+// proposedTaskStartRequest writes the [assistant, conversation_start_task]
+// entries of a hand-built source step turn (after the triggering message)
+// and returns the admission request naming that tool entry.
+func proposedTaskStartRequest(t *testing.T, store interface{}, source *AgentRun, turn *AgentTurn, proposal taskSourceProposal) StartConversationTaskRequest {
+	t.Helper()
+	sessions, ok := store.(taskStartFixtureStore)
+	if !ok {
+		t.Fatalf("task start fixture needs a session store")
+	}
+	entryID, revision := ensureStartTaskToolEntry(t, sessions, source, turn, proposal.Goal, proposal.Acknowledgment)
 	return StartConversationTaskRequest{Scope: source.Scope, SourceRunID: source.ID, ExpectedSourceRevision: revision, WorkerID: "worker",
 		TurnID: turn.ID, ToolEntryID: entryID, AssignedAgentID: source.AssignedAgentID, TaskKey: startTaskKey(entryID),
-		Goal: p.Goal, Acknowledgment: p.Acknowledgment, Budget: cloneBudgetPolicy(p.Budget)}
+		Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment, Budget: cloneBudgetPolicy(proposal.Budget)}
+}
+
+// taskSourceProposal is the conversation_start_task call a settled fixture
+// step makes.
+type taskSourceProposal struct {
+	Goal, Acknowledgment string
+	Budget               *BudgetPolicy
+}
+
+func taskProposalFixture() taskSourceProposal {
+	return taskSourceProposal{Goal: "Review the release and report the outcome", Acknowledgment: "I’ve started the release review."}
+}
+
+// settledTaskSource is a claimed conversation Run with one completed,
+// applied step whose conversation_start_task call Request admits.
+type settledTaskSource struct {
+	Run     *AgentRun
+	Turn    *AgentTurn
+	Request StartConversationTaskRequest
+}
+
+// settleTaskSource settles one step on the claimed source Run runID (held by
+// workerID) the way the loop leaves a conversation_start_task step before its
+// settle: the step row is completed and applied, and the step's [assistant,
+// conversation_start_task] entries are in the Run's lane session after the
+// triggering message.
+func settleTaskSource(t *testing.T, store interface{}, scope Scope, runID, workerID string, proposal taskSourceProposal) settledTaskSource {
+	t.Helper()
+	ctx := t.Context()
+	sessions, ok := store.(taskStartFixtureStore)
+	if !ok {
+		t.Fatalf("task start fixture needs a session store")
+	}
+	run, step := settleFixtureStep(t, store, scope, runID, workerID, RunTransitionRequest{Status: AgentRunStatusRunning, Summary: "Step applied"})
+	var err error
+	entryID, revision := ensureStartTaskToolEntry(t, sessions, run, step, proposal.Goal, proposal.Acknowledgment)
+	if run, err = sessions.GetAgentRun(ctx, scope, runID); err != nil || run == nil {
+		t.Fatalf("reload source: %#v %v", run, err)
+	}
+	return settledTaskSource{Run: run, Turn: step, Request: StartConversationTaskRequest{Scope: scope, SourceRunID: runID, ExpectedSourceRevision: revision,
+		WorkerID: workerID, TurnID: step.ID, ToolEntryID: entryID, AssignedAgentID: run.AssignedAgentID, TaskKey: startTaskKey(entryID),
+		Goal: proposal.Goal, Acknowledgment: proposal.Acknowledgment, Budget: cloneBudgetPolicy(proposal.Budget)}}
+}
+
+// settleFixtureStep runs one completed step on the claimed Run runID (held
+// by workerID) and applies it with transition (its revision, step, lease
+// and applied-turn fields are filled in).
+func settleFixtureStep(t *testing.T, store interface{}, scope Scope, runID, workerID string, transition RunTransitionRequest) (*AgentRun, *AgentTurn) {
+	t.Helper()
+	ctx := t.Context()
+	type fixtureStepStore interface {
+		PortfolioStore
+		RunActivityStore
+		AgentTurnStore
+	}
+	steps, ok := store.(fixtureStepStore)
+	if !ok {
+		t.Fatalf("step fixture needs portfolio, activity and turn stores")
+	}
+	turns := NewAgentTurnService(steps, steps)
+	activity := NewRunActivityService(steps, steps)
+	run, err := steps.GetAgentRun(ctx, scope, runID)
+	if err != nil || run == nil {
+		t.Fatalf("get run: %#v %v", run, err)
+	}
+	if run.Status == AgentRunStatusPlanning {
+		if run, _, err = activity.TransitionRun(ctx, scope, runID, RunTransitionRequest{ExpectedRevision: run.Revision, Status: AgentRunStatusRunning,
+			Summary: "Run started", LeaseOwner: workerID}); err != nil {
+			t.Fatalf("start run: %v", err)
+		}
+	}
+	step, err := turns.BeginTurn(ctx, BeginAgentTurnRequest{Scope: scope, RunID: runID, SessionID: run.SessionID, Producer: StepProducerModel,
+		WorkerID: workerID, LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatalf("begin step: %v", err)
+	}
+	if step, err = turns.FinishTurn(ctx, scope, step.ID, FinishAgentTurnRequest{ExpectedRevision: step.Revision, Status: AgentTurnStatusCompleted, WorkerID: workerID}); err != nil {
+		t.Fatalf("finish step: %v", err)
+	}
+	transition.ExpectedRevision, transition.TurnID, transition.AppliedTurn, transition.LeaseOwner = run.Revision, step.ID, step.Sequence, workerID
+	if run, _, err = activity.TransitionRun(ctx, scope, runID, transition); err != nil {
+		t.Fatalf("apply step: %v", err)
+	}
+	return run, step
 }
 
 const taskStartFixtureCallID = "call-start-task"
@@ -268,13 +356,8 @@ func TestConversationTaskReportingPreservesOriginalReadersAndThread(t *testing.T
 			if err != nil || source == nil {
 				t.Fatalf("claim: %#v %v", source, err)
 			}
-			settled, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: scope, RunID: source.ID, WorkerID: "worker", DefinitionID: "agent", DefinitionVersion: "1"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: taskProposalFixture()}, nil
-			}))
-			if err != nil {
-				t.Fatal(err)
-			}
-			accepted, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
+			settled := settleTaskSource(t, store, scope, source.ID, "worker", taskProposalFixture())
+			accepted, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -368,17 +451,9 @@ func TestConversationTaskLifecycleKeepsStatusForegroundAndCancelGoverned(t *test
 	if err != nil || claimed == nil || claimed.ID != secondSource.ID {
 		t.Fatalf("second task source claim: %#v %v", claimed, err)
 	}
-	proposal := taskProposalFixture()
-	proposal.TaskKey = "documentation"
-	proposal.Goal = "Review documentation independently"
-	proposal.Acknowledgment = "I will review the documentation in the background."
-	settled, err := NewTurnCoordinator(store, store, store).Advance(t.Context(), AdvanceAgentRunRequest{Scope: source.Scope, RunID: claimed.ID, WorkerID: "worker", DefinitionID: "agent", DefinitionVersion: "1"}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{NextRunStatus: AgentRunStatusRunning, ProposedTask: proposal}, nil
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := NewConversationTaskService(store).Start(t.Context(), taskStartRequest(t, store, settled.Run, settled.Turn))
+	settled := settleTaskSource(t, store, source.Scope, claimed.ID, "worker", taskSourceProposal{
+		Goal: "Review documentation independently", Acknowledgment: "I will review the documentation in the background."})
+	second, err := NewConversationTaskService(store).Start(t.Context(), settled.Request)
 	if err != nil {
 		t.Fatal(err)
 	}

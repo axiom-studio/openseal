@@ -474,11 +474,11 @@ func (s *ConversationTaskService) Start(ctx context.Context, req StartConversati
 		return nil, fmt.Errorf("%w: %v", ErrInvalidConversationTask, err)
 	}
 	if source.Budget != nil {
-		hostedBudget, budgetErr := projectHostedRunBudget(source, "")
+		hostedBudget, budgetErr := controlRunBudget(source, "")
 		if budgetErr != nil {
 			return nil, budgetErr
 		}
-		if err := validateHostedChildBudgetFloor(budget, hostedBudget); err != nil {
+		if err := controlChildBudgetFloor(budget, hostedBudget); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidConversationTask, err)
 		}
 	}

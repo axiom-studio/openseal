@@ -208,7 +208,7 @@ Options:
 			binding, err := runtime.ResolveLoopBinding(resolveCtx, kernel, run, runtime.LoopBindingConfig{})
 			if err == nil && binding != nil && local {
 				binding.Host = taskHost
-				binding.OutputPublisher = artifactPublisher
+				binding.FinalOutput = artifactPublisher
 			}
 			return binding, err
 		})

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
@@ -191,6 +190,28 @@ func TestEnginePersistentStoreRestoresSkillBindings(t *testing.T) {
 	}
 }
 
+func TestConversationRunsRejectMismatchedParticipationPolicy(t *testing.T) {
+	for _, schedulerOptIn := range []bool{false, true} {
+		participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
+			return nil, nil
+		})
+		router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
+			return ConversationRouteDecision{}, nil
+		})
+		_, err := New(
+			WithStore(runtime.NewMemoryStore()),
+			WithConversationCoordinator(participants, router, DefaultConversationCoordinatorConfig()),
+			WithDynamicConversationRuns(ConversationRunConfig{
+				Scheduler: ConversationRunSchedulerConfig{RequireParticipationOptIn: schedulerOptIn},
+				Runner:    ConversationRunTurnRunnerConfig{RequireParticipationOptIn: !schedulerOptIn},
+			}, WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "local", ID: "default"}}, nil })),
+		)
+		if err == nil || err.Error() != "conversation Run configuration: conversation scheduling and execution must use the same participation opt-in policy" {
+			t.Fatalf("mismatched policy accepted or wrong error: %v", err)
+		}
+	}
+}
+
 func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	engine, err := New(WithStore(runtime.NewMemoryStore()))
 	if err != nil {
@@ -239,8 +260,7 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	}
 	turn, err = engine.FinishAgentTurn(ctx, scope, turn.ID, FinishAgentTurnRequest{
 		ExpectedRevision: turn.Revision, Status: AgentTurnStatusCompleted, WorkerID: "test-worker",
-		Decisions:     []TurnDecision{{Summary: "Inspect dependencies", EvidenceRefs: []string{"artifact:health"}}},
-		OutputSummary: "Inspection plan ready", ContinuationCheckpoint: map[string]interface{}{"next": "inspect"},
+		OutputSummary: "Inspection plan ready",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -296,327 +316,5 @@ func TestEngineExposesObjectivePortfolio(t *testing.T) {
 	}
 	if claimed == nil || claimed.ID != autonomousRun.ID || claimed.LeaseOwner != "test-worker" {
 		t.Fatalf("unexpected scheduled claim: %#v", claimed)
-	}
-	advanced, err := engine.AdvanceAgentRun(ctx, AdvanceAgentRunRequest{
-		Scope: scope, RunID: autonomousRun.ID, WorkerID: "test-worker", Model: "test-model",
-	}, TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-		return &TurnOutcome{
-			NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Bounded step complete",
-			RunOutput: map[string]interface{}{"result": "ok"},
-		}, nil
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if advanced.Run.Status != AgentRunStatusCompleted || advanced.Run.LastAppliedTurn != 1 || advanced.Event.TurnID != advanced.Turn.ID {
-		t.Fatalf("unexpected bounded advance: %#v", advanced)
-	}
-}
-
-func TestEngineRunsAutonomousAgentPortfolio(t *testing.T) {
-	store := runtime.NewMemoryStore()
-	scope := Scope{Kind: "local", ID: "autonomous"}
-	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{
-			DefinitionID: "test-agent", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
-			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done"}, nil
-			}),
-		}, nil
-	})
-	engine, err := New(
-		WithStore(store),
-		WithAgentRunWorkers(AgentRunWorkerConfig{
-			Scope: scope, AssignedAgentID: "agent", PollInterval: 5 * time.Millisecond,
-			LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
-		}, resolver),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	run, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "finish autonomously", Source: RunSourceObjective,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine.Start(ctx)
-	defer engine.Stop()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		current, err := engine.GetAgentRun(ctx, scope, run.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if current.Status == AgentRunStatusCompleted {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("autonomous Engine worker did not complete the run")
-}
-
-func TestEngineRunsDynamicKindScopedPortfolio(t *testing.T) {
-	store := runtime.NewMemoryStore()
-	scope := Scope{Kind: "tenant", ID: "dynamic"}
-	resolver := TurnRunnerResolverFunc(func(_ context.Context, run *AgentRun) (*TurnRunnerBinding, error) {
-		if run.Kind != RunKindConversation {
-			t.Fatalf("dynamic resolver received run kind %q", run.Kind)
-		}
-		return &TurnRunnerBinding{Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Conversation complete"}, nil
-		})}, nil
-	})
-	engine, err := New(
-		WithStore(store),
-		WithDynamicAgentRunWorkers(DynamicAgentRunWorkerConfig{
-			Kind: RunKindConversation, PollInterval: 5 * time.Millisecond, ReconcileInterval: 5 * time.Millisecond,
-			LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
-		}, WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{scope}, nil }), resolver),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	conversationRun, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "team"},
-		Goal: "Coordinate channel", Source: RunSourceChat,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	agentRun, err := engine.CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, Goal: "Unrelated work",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine.Start(ctx)
-	defer engine.Stop()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		current, getErr := engine.GetAgentRun(ctx, scope, conversationRun.ID)
-		if getErr != nil {
-			t.Fatal(getErr)
-		}
-		if current.Status == AgentRunStatusCompleted {
-			unrelated, getErr := engine.GetAgentRun(ctx, scope, agentRun.ID)
-			if getErr != nil {
-				t.Fatal(getErr)
-			}
-			if unrelated.Status != AgentRunStatusQueued {
-				t.Fatalf("dynamic conversation worker claimed agent work: %#v", unrelated)
-			}
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("dynamic Engine worker did not complete the conversation run")
-}
-
-func TestEngineOwnsDurableConversationRunsAndRecoversSchedulingGap(t *testing.T) {
-	store := runtime.NewMemoryStore()
-	scope := Scope{Kind: "tenant", ID: "conversation-runtime"}
-	participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-		return []ConversationParticipantBinding{{
-			Participant:   ConversationParticipant{Type: ConversationParticipantAgent, ID: "agent-1"},
-			SemanticRoles: []string{"operator"},
-		}}, nil
-	})
-	router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
-		return ConversationRouteDecision{AgentID: "agent-1", Reason: "watches the replicas"}, nil
-	})
-	// The routed member answers through the ordinary Agent turn.
-	agentTurns := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DeploymentID: "agent-1", Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-			return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, RunOutput: map[string]interface{}{
-				"summary": "Telemetry evidence confirms all three replicas passed their checks.",
-			}}, nil
-		})}, nil
-	})
-	scopes := WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{scope}, nil })
-	engine, err := New(
-		WithStore(store),
-		WithConversationCoordinator(participants, router, DefaultConversationCoordinatorConfig()),
-		WithDynamicAgentRunWorkers(DynamicAgentRunWorkerConfig{
-			Kind: RunKindAgentWork, Concurrency: 2, PollInterval: 5 * time.Millisecond, ReconcileInterval: 5 * time.Millisecond,
-			LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
-		}, scopes, agentTurns),
-		WithDynamicConversationRuns(ConversationRunConfig{
-			Runner: ConversationRunTurnRunnerConfig{AgentTurns: agentTurns},
-			Workers: DynamicAgentRunWorkerConfig{
-				Concurrency: 2, PollInterval: 5 * time.Millisecond, ReconcileInterval: 5 * time.Millisecond,
-				LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
-			},
-			Reconciler: ConversationRunReconcilerConfig{Interval: 100 * time.Millisecond},
-		}, scopes),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !engine.ConversationRunsAvailable() {
-		t.Fatal("durable conversation runtime was not advertised")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	immediate, _, err := engine.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}, Title: "Immediate", IdempotencyKey: "immediate",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	immediateMessage, err := engine.PostChannelMessage(ctx, PostChannelMessageRequest{
-		Scope: scope, ConversationID: immediate.ID, ExpectedRevision: immediate.Revision,
-		Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "operator"}, Intent: MessageIntentQuestion,
-		Content: "What is the immediate channel state?", Audience: ConversationAudience{Kind: ConversationAudienceChannel},
-		RequiresResponse: true, IdempotencyKey: "immediate-question",
-	})
-	if err != nil || immediateMessage.Run == nil || immediateMessage.Run.Kind != RunKindConversation ||
-		immediateMessage.Run.ConcurrencyKey != immediate.ID {
-		t.Fatalf("immediate message scheduling = %#v, %v", immediateMessage, err)
-	}
-
-	recovered, _, err := engine.CreateConversation(ctx, CreateConversationRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeTeam, ID: "operations"}, Title: "Recovered", IdempotencyKey: "recovered",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Bypass the Engine hook to model a process dying after the message store
-	// commit and before the immediate Run scheduling call.
-	committedOnly, err := runtime.NewConversationService(store).PostChannelMessage(ctx, runtime.PostChannelMessageRequest{
-		Scope: scope, ConversationID: recovered.ID, ExpectedRevision: recovered.Revision,
-		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "operator"},
-		Intent: runtime.MessageIntentQuestion, Content: "What is the recovered channel state?",
-		Audience: runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel}, RequiresResponse: true,
-		IdempotencyKey: "recovered-question",
-	})
-	if err != nil || committedOnly.Run != nil {
-		t.Fatalf("message-only commit = %#v, %v", committedOnly, err)
-	}
-
-	engine.Start(ctx)
-	defer engine.Stop()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		runs, listErr := engine.ListAgentRuns(ctx, AgentRunFilter{Scope: scope, Kind: RunKindConversation})
-		if listErr != nil {
-			t.Fatal(listErr)
-		}
-		// Each message gets a routing Run and its member's answer Run.
-		completed := 0
-		for _, run := range runs {
-			if run.Status == AgentRunStatusCompleted {
-				completed++
-			}
-		}
-		if len(runs) == 4 && completed == 4 {
-			for _, conversation := range []*Conversation{immediate, recovered} {
-				messages, messageErr := engine.ListChannelMessages(ctx, ChannelMessageFilter{Scope: scope, ConversationID: conversation.ID})
-				if messageErr != nil {
-					t.Fatal(messageErr)
-				}
-				if len(messages) != 2 {
-					goto wait
-				}
-				if messages[1].Sender.ID != "agent-1" || messages[1].RoutingReason != "watches the replicas" {
-					t.Fatalf("completed channel %s messages = %#v", conversation.ID, messages)
-				}
-			}
-			return
-		}
-	wait:
-		time.Sleep(10 * time.Millisecond)
-	}
-	all, _ := engine.ListAgentRuns(ctx, AgentRunFilter{Scope: scope})
-	for _, run := range all {
-		t.Logf("run %s kind=%s status=%s parent=%s assigned=%s error=%s output=%v", run.ID, run.Kind, run.Status, run.ParentRunID, run.AssignedAgentID, run.Error, run.Output)
-	}
-	t.Fatal("durable conversation runtime did not complete immediate and reconciled messages")
-}
-
-func TestConversationRunsRejectMismatchedParticipationPolicy(t *testing.T) {
-	for _, schedulerOptIn := range []bool{false, true} {
-		participants := ConversationParticipantSourceFunc(func(context.Context, ConversationParticipantQuery) ([]ConversationParticipantBinding, error) {
-			return nil, nil
-		})
-		router := ConversationRouterFunc(func(context.Context, ConversationRouteRequest) (ConversationRouteDecision, error) {
-			return ConversationRouteDecision{}, nil
-		})
-		_, err := New(
-			WithStore(runtime.NewMemoryStore()),
-			WithConversationCoordinator(participants, router, DefaultConversationCoordinatorConfig()),
-			WithDynamicConversationRuns(ConversationRunConfig{
-				Scheduler: ConversationRunSchedulerConfig{RequireParticipationOptIn: schedulerOptIn},
-				Runner:    ConversationRunTurnRunnerConfig{RequireParticipationOptIn: !schedulerOptIn},
-			}, WorkerScopeSourceFunc(func(context.Context) ([]Scope, error) { return []Scope{{Kind: "local", ID: "default"}}, nil })),
-		)
-		if err == nil || err.Error() != "conversation Run configuration: conversation scheduling and execution must use the same participation opt-in policy" {
-			t.Fatalf("mismatched policy accepted or wrong error: %v", err)
-		}
-	}
-}
-
-func TestEngineWakeAgentWorkersForScopeClaimsWithoutPolling(t *testing.T) {
-	var nilEngine *Engine
-	nilEngine.WakeAgentWorkersForScope(Scope{Kind: "local", ID: "x"})
-
-	store := runtime.NewMemoryStore()
-	scope := Scope{Kind: "local", ID: "wake"}
-	claimed := make(chan time.Time, 1)
-	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{
-			DefinitionID: "test-agent", DefinitionVersion: "1", ModelProvider: "fake", Model: "deterministic",
-			Runner: TurnRunnerFunc(func(context.Context, TurnExecutionContext) (*TurnOutcome, error) {
-				select {
-				case claimed <- time.Now():
-				default:
-				}
-				return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: "Done"}, nil
-			}),
-		}, nil
-	})
-	engine, err := New(
-		WithStore(store),
-		// A poll far longer than the test proves the wake, not the poll, claimed.
-		WithAgentRunWorkers(AgentRunWorkerConfig{
-			Scope: scope, AssignedAgentID: "agent", PollInterval: time.Hour,
-			LeaseDuration: time.Second, TurnLeaseDuration: time.Second,
-		}, resolver),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	engine.Start(ctx)
-	defer engine.Stop()
-	time.Sleep(20 * time.Millisecond) // let the start-up claim pass find nothing
-	run, err := runtime.NewRunCommandService(store).CreateAgentRun(ctx, CreateAgentRunRequest{
-		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, AssignedAgentID: "agent",
-		Goal: "wake me", Source: RunSourceObjective,
-	})
-	if err != nil || run.Run == nil {
-		t.Fatal(err)
-	}
-	engine.WakeAgentWorkersForScope(Scope{Kind: "local", ID: "other"})
-	select {
-	case <-claimed:
-		t.Fatal("a wake for another scope must not claim this scope's Run")
-	case <-time.After(50 * time.Millisecond):
-	}
-	woke := time.Now()
-	engine.WakeAgentWorkersForScope(scope)
-	select {
-	case at := <-claimed:
-		if latency := at.Sub(woke); latency > 200*time.Millisecond {
-			t.Fatalf("wake to claim took %s", latency)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("scoped wake did not claim the Run")
 	}
 }

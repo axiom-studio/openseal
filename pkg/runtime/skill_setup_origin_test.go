@@ -168,10 +168,6 @@ func TestSkillSetupOriginAcceptsTaskFromStartTaskEntry(t *testing.T) {
 	if err != nil || entry.State != ToolEntryCompleted || entry.StepID != task.Task.SourceTurnID {
 		t.Fatalf("source entry: %#v %v", entry, err)
 	}
-	// The origin proof reads the step and entry, not the old per-Turn proposal.
-	store.mu.Lock()
-	store.turns[portfolioKey(task.Task.Scope, task.Task.SourceRunID)][task.Task.SourceTurnID].RequestedTask = nil
-	store.mu.Unlock()
 	if !skillSetupOriginAllowed(t, store, task) {
 		t.Fatal("task started by its step's start_task entry was denied")
 	}

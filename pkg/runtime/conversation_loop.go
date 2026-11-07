@@ -26,9 +26,8 @@ import (
 // bindConversationLoop also opens the lane session (get-or-create), because
 // the loop loads the session path before any preparer runs.
 
-// ConversationLoopAuthority is computed once per claim by the binding. It
-// replaces the private TurnExecutionContext flags; apply folds it into the
-// ControlAuthority the tools section reads.
+// ConversationLoopAuthority is computed once per claim by the binding and
+// folded into the ControlAuthority the tools section reads.
 type ConversationLoopAuthority struct {
 	CanAskConversationQuestion bool // ask tool offered
 	ExternalChannelReply       bool // answer-preview streaming for connector chats
@@ -373,7 +372,7 @@ func (l *conversationLoop) startRun(ctx context.Context, in StepInput, steering 
 	if conversation.Owner != run.Owner {
 		return nil, fmt.Errorf("%w: conversation Run owner does not match its channel", ErrInvalidAgentRun)
 	}
-	_, viewer, trigger, err := r.agentConversationTurnContext(ctx, TurnExecutionContext{Run: run}, conversation, l.trigger.ID)
+	_, viewer, trigger, err := r.agentConversationTurnContext(ctx, run, conversation, l.trigger.ID)
 	if err != nil {
 		return nil, err
 	}

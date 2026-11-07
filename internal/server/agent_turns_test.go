@@ -11,7 +11,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/client"
 	"github.com/axiom-studio/openseal/pkg/kernelapi"
 	"github.com/axiom-studio/openseal/pkg/runtime"
-	"github.com/axiom-studio/openseal/pkg/skill"
 	"go.uber.org/zap"
 )
 
@@ -54,16 +53,6 @@ func TestAgentTurnAPIProjectsScopeSafeOperationalTimeline(t *testing.T) {
 	turn, err = turnService.FinishTurn(t.Context(), scope, turn.ID, runtime.FinishAgentTurnRequest{
 		ExpectedRevision: turn.Revision, Status: runtime.AgentTurnStatusCompleted, WorkerID: "worker-1",
 		Usage: runtime.TurnUsage{InputTokens: 1840, OutputTokens: 64, ProviderDurationMS: 910},
-		Decisions: []runtime.TurnDecision{{
-			Summary: "Inspect before changing production", Rationale: "private-reasoning-must-not-leak",
-		}},
-		RequestedActions: []runtime.TurnAction{{
-			Type: "skill", Capability: "kubernetes.events", BindingID: "cluster-reader",
-			Summary: "Read warning events", InputRef: "/continuationCheckpoint/secret-input",
-			PreparedRuntime: &skill.PreparedRuntime{RuntimeID: "private-runtime-id"},
-		}},
-		ContinuationCheckpoint: map[string]interface{}{"secret-input": "private-action-input"},
-		RunOutput:              map[string]interface{}{"private-output": true},
 	})
 	if err != nil {
 		t.Fatal(err)
