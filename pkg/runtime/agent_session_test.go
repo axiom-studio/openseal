@@ -137,6 +137,9 @@ func TestApplyToolEntryTransition(t *testing.T) {
 	if entry.State != ToolEntryPending || entry.Tool.Parked {
 		t.Fatal("apply mutated its input")
 	}
+	if running.Tokens != EstimateSessionEntryTokens(running) {
+		t.Errorf("kernel-only patch tokens = %d, want re-estimate %d", running.Tokens, EstimateSessionEntryTokens(running))
+	}
 	done := req
 	done.From, done.To, done.ExpectedRevision, done.Kernel = ToolEntryRunning, ToolEntryCompleted, 2, nil
 	done.Result = &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{testTextPart("result")}}
@@ -284,9 +287,13 @@ func TestSessionEntryValidateShape(t *testing.T) {
 	if err := pendingWithResult.Validate(); !errors.Is(err, ErrInvalidSessionEntry) {
 		t.Errorf("pending with result: %v", err)
 	}
-	directive := testToolEntry("t", "", "c", ToolEntryPending)
+	directive := testToolEntry("t", "s", "c", ToolEntryPending)
 	directive.Tool.Directive = json.RawMessage(`{"kind":"runbook"}`)
 	if err := directive.Validate(); err != nil {
+		t.Errorf("directive tool entry: %v", err)
+	}
+	directive.StepID = ""
+	if err := directive.Validate(); !errors.Is(err, ErrInvalidSessionEntry) {
 		t.Errorf("directive tool entry without step: %v", err)
 	}
 }
@@ -315,6 +322,25 @@ func TestValidateAppendAgentSessionEntries(t *testing.T) {
 	dupKey.Entries[0].SourceKey, dupKey.Entries[1].SourceKey = "message:m", "message:m"
 	bad["duplicate source key"] = dupKey
 	for name, r := range bad {
+		if err := validateAppendAgentSessionEntries(r); !errors.Is(err, ErrInvalidSessionEntry) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	directiveTool := func(id, stepID, callID string) *SessionEntry {
+		entry := testToolEntry(id, stepID, callID, ToolEntryPending)
+		entry.Tool.Directive = json.RawMessage(`{"kind":"runbook"}`)
+		return entry
+	}
+	if err := validateAppendAgentSessionEntries(req(directiveTool("d1", "s1", "c1"), directiveTool("d2", "s1", "c2"))); err != nil {
+		t.Errorf("directive entries with step and no assistant: %v", err)
+	}
+	directiveBad := map[string]AppendAgentSessionEntriesRequest{
+		"directive after assistant":  req(testAssistantEntry("a1", "s1", "c1"), testToolEntry("t1", "s1", "c1", ToolEntryPending), directiveTool("d1", "s1", "c2")),
+		"assistant after directive":  req(directiveTool("d1", "s1", "c1"), testAssistantEntry("a1", "s1", "c2"), testToolEntry("t1", "s1", "c2", ToolEntryPending)),
+		"directive duplicate call":   req(directiveTool("d1", "s1", "c1"), directiveTool("d2", "s1", "c1")),
+		"no directive, no assistant": req(testToolEntry("t1", "s1", "c1", ToolEntryPending)),
+	}
+	for name, r := range directiveBad {
 		if err := validateAppendAgentSessionEntries(r); !errors.Is(err, ErrInvalidSessionEntry) {
 			t.Errorf("%s: err = %v", name, err)
 		}
@@ -413,6 +439,12 @@ func TestBuildAgentSessionPathOrdering(t *testing.T) {
 		testPathEntry(testUserEntry("c9", "beyond leaf"), "child", 9, 1),
 	}
 
+	t.Run("compaction without payload", func(t *testing.T) {
+		broken := testPathEntry(&SessionEntry{ID: "k", Type: SessionEntryCompaction}, "root", 5, 1)
+		if _, err := buildAgentSessionPath([]*AgentSession{root}, [][]*SessionEntry{append([]*SessionEntry{broken}, parent...)}, nil); !errors.Is(err, ErrInvalidSessionEntry) {
+			t.Fatalf("err = %v", err)
+		}
+	})
 	t.Run("no compaction", func(t *testing.T) {
 		path, err := buildAgentSessionPath([]*AgentSession{root}, [][]*SessionEntry{parent}, nil)
 		if err != nil {
@@ -528,11 +560,11 @@ func TestCompactionCutRespectsOpenToolEntries(t *testing.T) {
 	}
 	want := map[int]bool{0: true, 1: true, 2: false, 3: true, 4: false, 5: true, 6: true, 7: false, 8: false, 9: false, 10: false, 11: false}
 	for cut := 0; cut <= len(entries); cut++ {
-		if got := validCompactionCut(entries, cut); got != want[cut] {
-			t.Errorf("validCompactionCut(cut=%d) = %v, want %v", cut, got, want[cut])
+		if got := validCompactionCutAt(entries, cut); got != want[cut] {
+			t.Errorf("validCompactionCutAt(cut=%d) = %v, want %v", cut, got, want[cut])
 		}
 	}
-	if validCompactionCut(entries, -1) || validCompactionCut(entries, len(entries)+1) {
+	if validCompactionCutAt(entries, -1) || validCompactionCutAt(entries, len(entries)+1) {
 		t.Error("out of range cuts are invalid")
 	}
 	if bound := compactionOpenToolBound(entries); bound != 6 {
@@ -541,7 +573,7 @@ func TestCompactionCutRespectsOpenToolEntries(t *testing.T) {
 
 	// Once the open call settles, the later cuts are allowed and keeping nothing is too.
 	entries[7] = testToolEntry("t2", "s2", "c2", ToolEntryCompleted)
-	if !validCompactionCut(entries, 8) || !validCompactionCut(entries, len(entries)) || validCompactionCut(entries, 7) {
+	if !validCompactionCutAt(entries, 8) || !validCompactionCutAt(entries, len(entries)) || validCompactionCutAt(entries, 7) {
 		t.Error("cuts after the settled call")
 	}
 

@@ -822,7 +822,7 @@ func (e *SessionEntry) validateTool() error {
 	if strings.TrimSpace(e.ToolCallID) == "" {
 		return invalidEntry("tool entry %s needs toolCallId", e.ID)
 	}
-	if strings.TrimSpace(e.StepID) == "" && len(t.Directive) == 0 {
+	if strings.TrimSpace(e.StepID) == "" {
 		return invalidEntry("tool entry %s needs stepId", e.ID)
 	}
 	if strings.TrimSpace(t.Name) == "" {
@@ -1293,6 +1293,8 @@ func validateAppendAgentSessionEntries(req AppendAgentSessionEntriesRequest) err
 		seen  map[string]bool
 	}
 	steps := make(map[string]*stepCalls)
+	// tool call ids of Directive (deterministic) tool entries by step
+	directiveSteps := make(map[string]map[string]bool)
 	total := 0
 	for i, entry := range req.Entries {
 		if err := entry.Validate(); err != nil {
@@ -1322,6 +1324,9 @@ func validateAppendAgentSessionEntries(req AppendAgentSessionEntriesRequest) err
 			if _, dup := steps[entry.StepID]; dup {
 				return invalidEntry("two assistant entries for step %s in batch", entry.StepID)
 			}
+			if _, mixed := directiveSteps[entry.StepID]; mixed {
+				return invalidEntry("step %s has both directive tool entries and an assistant entry", entry.StepID)
+			}
 			calls := &stepCalls{calls: map[string]bool{}, seen: map[string]bool{}}
 			for _, call := range entry.Assistant.ToolCalls {
 				calls.calls[call.ID] = true
@@ -1333,8 +1338,20 @@ func validateAppendAgentSessionEntries(req AppendAgentSessionEntriesRequest) err
 			default:
 				return invalidEntry("tool entry %s is appended as pending, completed or error, not %s", entry.ID, entry.State)
 			}
-			if len(entry.Tool.Directive) > 0 && entry.StepID == "" {
-				// Deterministic producer: no assistant entry exists for its calls.
+			if len(entry.Tool.Directive) > 0 {
+				// Deterministic producer: its step has no assistant entry.
+				if _, mixed := steps[entry.StepID]; mixed {
+					return invalidEntry("step %s has both directive tool entries and an assistant entry", entry.StepID)
+				}
+				seen := directiveSteps[entry.StepID]
+				if seen == nil {
+					seen = make(map[string]bool)
+					directiveSteps[entry.StepID] = seen
+				}
+				if seen[entry.ToolCallID] {
+					return invalidEntry("tool call %s has two tool entries", entry.ToolCallID)
+				}
+				seen[entry.ToolCallID] = true
 				break
 			}
 			calls := steps[entry.StepID]
@@ -1483,7 +1500,7 @@ func applyToolEntryTransition(current *SessionEntry, req ToolEntryTransitionRequ
 	switch {
 	case req.Tokens > 0:
 		next.Tokens = req.Tokens
-	case req.Result != nil:
+	case req.Result != nil || req.Kernel != nil:
 		next.Tokens = EstimateSessionEntryTokens(next)
 	}
 	if err := next.Validate(); err != nil {
@@ -1654,6 +1671,9 @@ func buildAgentSessionPath(chain []*AgentSession, segments [][]*SessionEntry, co
 			}
 			positions[entry.ID] = position{segment: i, sequence: entry.Sequence}
 			if entry.Type == SessionEntryCompaction {
+				if entry.Compaction == nil {
+					return nil, fmt.Errorf("%w: compaction %s has no payload", ErrInvalidSessionEntry, entry.ID)
+				}
 				if latestPos.segment < i || (latestPos.segment == i && entry.Sequence > latestPos.sequence) {
 					latest, latestPos = entry, position{segment: i, sequence: entry.Sequence}
 				}
@@ -1734,13 +1754,26 @@ func compactionOpenToolBound(entries []*SessionEntry) int {
 	return bound
 }
 
-// validCompactionCut reports whether entries[cut:] may be kept verbatim after a
-// summary of entries[:cut] (FirstKeptEntryID = entries[cut].ID; cut ==
-// len(entries) keeps nothing). The kept entry is a user, assistant or note
-// entry (never a tool entry, whose result must follow its call, nor a
-// model_change), and the cut is at or before the earliest assistant entry with
-// an open tool entry, so no in-flight call is summarized away.
-func validCompactionCut(entries []*SessionEntry, cut int) bool {
+// validCompactionCut reports whether e may be the first kept entry of a
+// compaction (SPEC 08 G2): a user, assistant or note entry. Never a tool entry,
+// whose result must follow its call, nor a model_change.
+func validCompactionCut(e *SessionEntry) bool {
+	if e == nil {
+		return false
+	}
+	switch e.Type {
+	case SessionEntryUser, SessionEntryAssistant, SessionEntryNote:
+		return true
+	}
+	return false
+}
+
+// validCompactionCutAt reports whether entries[cut:] may be kept verbatim after
+// a summary of entries[:cut] (FirstKeptEntryID = entries[cut].ID; cut ==
+// len(entries) keeps nothing). entries[cut] passes validCompactionCut, and the
+// cut is at or before the earliest assistant entry with an open tool entry
+// (compactionOpenToolBound), so no in-flight call is summarized away.
+func validCompactionCutAt(entries []*SessionEntry, cut int) bool {
 	if cut < 0 || cut > len(entries) {
 		return false
 	}
@@ -1750,15 +1783,7 @@ func validCompactionCut(entries []*SessionEntry, cut int) bool {
 	if cut == len(entries) {
 		return true
 	}
-	entry := entries[cut]
-	if entry == nil {
-		return false
-	}
-	switch entry.Type {
-	case SessionEntryUser, SessionEntryAssistant, SessionEntryNote:
-		return true
-	}
-	return false
+	return validCompactionCut(entries[cut])
 }
 
 // validateCompactionAgainstPath is the in-transaction append check of a
@@ -1783,7 +1808,7 @@ func validateCompactionAgainstPath(path *AgentSessionPath, entry *SessionEntry) 
 			return invalidEntry("compaction keeps %s, which is not on the current path", kept)
 		}
 	}
-	if !validCompactionCut(path.Entries, cut) {
+	if !validCompactionCutAt(path.Entries, cut) {
 		return invalidEntry("compaction cut at %d is not allowed", cut)
 	}
 	return nil
