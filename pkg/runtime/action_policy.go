@@ -44,6 +44,13 @@ func (p *DefaultActionPolicy) EvaluateAction(_ context.Context, input ActionPoli
 		}
 		return decision, err
 	}
+	// A builder's skill change aimed at another Agent changes that Agent, so
+	// it is reviewed in every approval mode, like create_agent and update_agent.
+	if isTargetedSkillBindingAction(input.Bound, input.Arguments) {
+		decision, err := p.requireApproval("a skill change for another agent is always approved by a person")
+		decision.ApprovalTimeout = ApprovalTimeoutExpire
+		return decision, err
+	}
 	// A routine run performs what the user approved in its brief without
 	// asking, whatever the conversation's mode. review: always never waives.
 	if input.RoutineGrant != nil && !action.AlwaysReview() {
