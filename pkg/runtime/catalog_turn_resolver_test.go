@@ -170,24 +170,26 @@ func TestCatalogTurnResolverGivesOnlyAChatTurnFiles(t *testing.T) {
 		ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "coding-agent"},
 		AssignedAgentID: "coding-agent", Goal: "Inspect the repository", Context: map[string]interface{}{},
 	}
-	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: requestBoundTurnHost{host}})
+	stepHost := &progressAckStepHost{reply: func(req ModelStepRequest) ModelStepResult { return progressAckResult(req, "done") }}
+	binding, err := ResolveCatalogTurnRunner(t.Context(), catalog, run, CatalogTurnResolverConfig{Host: turnAndStepHost{requestBoundTurnHost{host}, stepHost}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if binding.ProgressAcknowledgementRenderer == nil {
 		t.Fatal("progress acknowledgement renderer is unavailable")
 	}
-	host.response.InvocationID = "progress-ack-" + hashString(run.ID + "\x00\x00" + string(AgentRunStatusRunning))[:16]
 	progress, err := binding.ProgressAcknowledgementRenderer.RenderRunProgressAcknowledgement(t.Context(), RunProgressAcknowledgementRequest{
 		Snapshot:     RunProgressSnapshot{RunID: run.ID, Scope: run.Scope, AgentID: run.AssignedAgentID, Goal: run.Goal, Status: AgentRunStatusRunning, Revision: 1},
 		MaxSentences: 2, MaxCharacters: 100,
 	})
-	if err != nil || progress != "done" || len(host.request.Actions) != 0 || len(host.request.SkillPrompts) != 0 ||
-		!containsString(host.request.SystemInstructions, "Work carefully.") ||
-		!containsString(host.request.SystemInstructions, runProgressAcknowledgementSystemInstruction) {
-		t.Fatalf("progress=%q request=%#v error=%v", progress, host.request, err)
+	if err != nil || progress != "done" || len(stepHost.requests) != 1 {
+		t.Fatalf("progress=%q requests=%d error=%v", progress, len(stepHost.requests), err)
 	}
-	host.response.InvocationID = "turn"
+	if ack := stepHost.requests[0]; ack.Tools != nil || len(ack.System.SkillPrompts) != 0 ||
+		!containsString(ack.System.AgentInstructions, "Work carefully.") ||
+		!containsString(ack.System.AgentInstructions, runProgressAcknowledgementSystemInstruction) {
+		t.Fatalf("progress acknowledgement request = %#v", ack)
+	}
 	if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: run, Turn: &AgentTurn{ID: "turn"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -750,6 +752,13 @@ func TestCatalogTurnResolverProjectsTeamOwnedActionsWithoutLeakingThemToAgentRun
 // This resolver fixture serves both progress acknowledgements and normal turns.
 // Each response must echo the invocation it actually received.
 type requestBoundTurnHost struct{ *recordingTurnHost }
+
+// turnAndStepHost serves hosted turns and model steps until prep-4 retypes
+// CatalogTurnResolverConfig.Host to StepHost.
+type turnAndStepHost struct {
+	requestBoundTurnHost
+	*progressAckStepHost
+}
 
 func (h requestBoundTurnHost) ExecuteHostedTurn(_ context.Context, request HostedTurnRequest) (*HostedTurnResponse, error) {
 	h.request = request

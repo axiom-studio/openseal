@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -370,45 +371,67 @@ func validateRenderedRunProgressAcknowledgement(value string, maximumSentences, 
 	return value, nil
 }
 
-const runProgressAcknowledgementSystemInstruction = "Produce only a brief progress acknowledgement in the Agent's configured personality. Use only the verified facts in inputContext.progress. Write at most two short sentences and 100 characters. Do not claim completion, expose hidden reasoning, propose actions, call tools, or add unrelated explanation."
+const runProgressAcknowledgementSystemInstruction = "Produce only a brief progress acknowledgement in the Agent's configured personality. Use only the verified facts in the user message. Write at most two short sentences and 100 characters. Do not claim completion, expose hidden reasoning, propose actions, call tools, or add unrelated explanation."
 
-type hostedTurnProgressAcknowledgementRenderer struct {
-	runner TurnRunner
+// modelStepProgressAcknowledgementRenderer asks the assigned Agent's model for
+// one bounded, tool-free sentence through a single sessionless model step. The
+// step writes no agent_turns row and no session entry.
+type modelStepProgressAcknowledgementRenderer struct {
+	host              StepHost
+	agentID           string
+	definitionID      string
+	definitionVersion string
+	modelCredential   *capability.CredentialReference
+	// system is the Agent's instructions followed by
+	// runProgressAcknowledgementSystemInstruction.
+	system []string
+	now    func() time.Time
 }
 
-func (r *hostedTurnProgressAcknowledgementRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request RunProgressAcknowledgementRequest) (string, error) {
-	if r == nil || r.runner == nil || request.Snapshot.Scope.Validate() != nil || request.Snapshot.RunID == "" || request.Snapshot.AgentID == "" {
-		return "", errors.New("hosted Run progress acknowledgement renderer is unavailable")
+func (r *modelStepProgressAcknowledgementRenderer) RenderRunProgressAcknowledgement(ctx context.Context, request RunProgressAcknowledgementRequest) (string, error) {
+	snapshot := request.Snapshot
+	if r == nil || r.host == nil || snapshot.Scope.Validate() != nil || snapshot.RunID == "" || snapshot.AgentID == "" ||
+		(r.agentID != "" && r.agentID != snapshot.AgentID) {
+		return "", errors.New("Run progress acknowledgement renderer is unavailable")
 	}
-	now := time.Now().UTC()
-	run := &AgentRun{
-		ID: request.Snapshot.RunID, Kind: RunKindAgentWork, Scope: request.Snapshot.Scope,
-		Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: request.Snapshot.AgentID}, AssignedAgentID: request.Snapshot.AgentID, ActingUser: "",
-		Goal: "Acknowledge the current verified progress", Source: RunSourceChat, Status: AgentRunStatusRunning,
-		Context: map[string]interface{}{"progress": map[string]interface{}{
-			"goal": request.Snapshot.Goal, "status": request.Snapshot.Status,
-			"activityType": request.Snapshot.ActivityType, "activitySummary": request.Snapshot.ActivitySummary,
-		}},
-		Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
-	turnID := "progress-ack-" + hashString(request.Snapshot.RunID + "\x00" + request.Snapshot.ActivityID + "\x00" + string(request.Snapshot.Status))[:16]
-	turn := &AgentTurn{
-		ID: turnID, Scope: request.Snapshot.Scope, RunID: run.ID, Sequence: 0,
-		Status: AgentTurnStatusRunning, Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
-	}
-	outcome, err := r.runner.RunTurn(ctx, TurnExecutionContext{Run: run, Turn: turn})
+	facts, err := json.Marshal(map[string]interface{}{
+		"goal": snapshot.Goal, "status": snapshot.Status,
+		"activityType": snapshot.ActivityType, "activitySummary": snapshot.ActivitySummary,
+	})
 	if err != nil {
 		return "", err
 	}
-	if outcome == nil || outcome.NextRunStatus != AgentRunStatusCompleted || len(outcome.ProposedActions) > 0 ||
-		outcome.ProposedFork != nil || outcome.ProposedDelegation != nil || outcome.ProposedRunbook != nil || outcome.ProposedTask != nil {
-		return "", errors.New("Agent returned a non-terminal or actionable progress acknowledgement")
+	now := time.Now
+	if r.now != nil {
+		now = r.now
 	}
-	content := strings.TrimSpace(outcome.OutputSummary)
-	if reply, ok := outcome.RunOutput["reply"].(string); ok && strings.TrimSpace(reply) != "" {
-		content = strings.TrimSpace(reply)
+	stepID := "progress-ack-" + hashString(snapshot.RunID + "\x00" + snapshot.ActivityID + "\x00" + string(snapshot.Status))[:16]
+	req := ModelStepRequest{
+		APIVersion: ModelStepAPIVersion, Purpose: ModelStepPurposeAcknowledgement,
+		Scope: snapshot.Scope, RunID: snapshot.RunID, StepID: stepID, SessionID: "",
+		AgentID: snapshot.AgentID, DefinitionID: r.definitionID, DefinitionVersion: r.definitionVersion,
+		ModelCredential: r.modelCredential,
+		System:          ModelStepSystem{AgentInstructions: append([]string(nil), r.system...)},
+		Tools:           nil,
+		Entries: []SessionEntryView{{
+			ID: stepID + "-facts", Sequence: 1, Type: SessionEntryUser, CreatedAt: now().UTC(),
+			User: &UserEntryView{Content: []ContentPart{{Type: ContentPartText, Text: string(facts)}}},
+		}},
 	}
-	return validateRenderedRunProgressAcknowledgement(content, request.MaxSentences, request.MaxCharacters)
+	if err := req.Validate(); err != nil {
+		return "", err
+	}
+	result, err := r.host.ExecuteModelStep(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if len(result.Assistant.ToolCalls) > 0 {
+		return "", errors.New("Agent returned an actionable progress acknowledgement")
+	}
+	if err := ValidateModelStepResult(req, result); err != nil {
+		return "", err
+	}
+	return validateRenderedRunProgressAcknowledgement(result.Assistant.Text, request.MaxSentences, request.MaxCharacters)
 }
 
 func sentenceCount(value string) int {
