@@ -39,22 +39,22 @@ func workflowEvidenceCall(run *AgentRun, id, subject string) *ActionCall {
 	}
 }
 
+// persistWorkflowEvidenceCall records call as the run loop records a governed
+// connector call of its Run's step: proposed under the Run lease, then the
+// lease is released so the Run is back in its prior status.
 func persistWorkflowEvidenceCall(t *testing.T, store KernelStore, call *ActionCall) *AgentRun {
 	t.Helper()
 	run, err := store.GetAgentRun(t.Context(), call.Scope, call.RunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated := cloneAgentRun(run)
-	updated.Revision++
-	updated.UpdatedAt = call.UpdatedAt
-	result, err := store.CreateActionProposal(t.Context(), ActionProposalRecord{Call: call, Run: updated, ExpectedRunRevision: run.Revision,
-		Event: &ActivityEvent{ID: "evidence-" + call.ID, Scope: call.Scope, RunID: call.RunID, EventType: "action.succeeded", Summary: "Persist connector receipt", CreatedAt: call.CreatedAt},
-	})
-	if err != nil {
+	f := newLoopProposalFixture(t, store, run, "evidence-worker", call.UpdatedAt)
+	event := &ActivityEvent{ID: "evidence-" + call.ID, Scope: call.Scope, RunID: call.RunID, EventType: "action.succeeded", Summary: "Persist connector receipt", CreatedAt: call.CreatedAt}
+	if _, err := store.CreateActionProposal(t.Context(), loopProposalRecord(call, f.run, f.worker, f.now, event)); err != nil {
 		t.Fatal(err)
 	}
-	return result.Run
+	f.park(run.Status, run.WakeCondition)
+	return f.run
 }
 
 type workflowEvidencePointStore struct {
