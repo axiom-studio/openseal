@@ -11,7 +11,9 @@ import (
 // the pending card a terminal call opened, the approval park at step end, and
 // the re-plan after a failed park CAS. The governed executor embeds it.
 type governedParker struct {
-	actions     ActionStore
+	actions ActionStore
+	// runs reads (and at the deadline cancels) try_agent trial children.
+	runs        RunCommandStore
 	setups      SkillSetupRequestStore
 	credentials CredentialRequestStore
 	approvals   *ApprovalCoordinator
@@ -22,7 +24,7 @@ func newGovernedParker(store KernelStore, approvals *ApprovalCoordinator, now fu
 	if now == nil {
 		now = time.Now
 	}
-	return governedParker{actions: store, setups: store, credentials: store, approvals: approvals, now: now}
+	return governedParker{actions: store, runs: store, setups: store, credentials: store, approvals: approvals, now: now}
 }
 
 // GovernedParkPlan is the step-end park of a Run's governed tool entries.
@@ -51,8 +53,8 @@ const governedMaintenanceWaitSummary = "Waiting for a tool that is being updated
 const governedHumanInterventionWakeType = "human_intervention"
 
 // governedCardWait returns the pending card the terminal call opened, if
-// any: a human intervention, a credential request, a connect app card, or a
-// connect account card of a parked call. Every check reads the durable
+// any: a human intervention, a credential request, a connect app card, a
+// running try_agent trial, or a connect account card of a parked call. Every check reads the durable
 // record, so a card settled before this point never parks the Run.
 func (p *governedParker) governedCardWait(ctx context.Context, run *AgentRun, call *ActionCall) (*WakeCondition, string, error) {
 	if call == nil {
@@ -73,6 +75,9 @@ func (p *governedParker) governedCardWait(ctx context.Context, run *AgentRun, ca
 		}
 		if request := pendingConnectAppRequestFromAction(ctx, p.setups, call); request != nil {
 			return &WakeCondition{Type: ConnectAppWakeType, Reference: request.ID}, "Waiting for the user to connect " + request.SkillName, nil
+		}
+		if isAgentTrialCall(call) {
+			return p.agentTrialWait(ctx, call)
 		}
 	case ActionCallStatusFailed:
 		if request := pendingConnectAccountRequestFromAction(ctx, p.setups, call); request != nil {

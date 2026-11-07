@@ -39,10 +39,15 @@ func TestRunTerminalFinalizationIsAutomaticWhenActionsCanExecute(t *testing.T) {
 		t.Fatalf("automatic Run terminal finalizer = %#v, %v", finalizer, err)
 	}
 
+	// Without action execution only the try_agent trial hand-off remains.
 	engine.actionPoolSpecs = nil
 	finalizer, err = engine.newRunTerminalFinalizer()
-	if err != nil || finalizer != nil {
+	if _, trial := finalizer.(*runtime.AgentTrialFinalizer); err != nil || !trial {
 		t.Fatalf("non-executing engine finalizer = %#v, %v", finalizer, err)
+	}
+	completed := &runtime.AgentRun{ID: "run-1", Scope: runtime.Scope{Kind: "tenant", ID: "t"}, Status: runtime.AgentRunStatusCompleted}
+	if err := finalizer.FinalizeRun(context.Background(), completed); err != nil {
+		t.Fatalf("finalize a Run that is no trial: %v", err)
 	}
 }
 

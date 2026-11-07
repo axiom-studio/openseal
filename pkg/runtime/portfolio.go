@@ -218,6 +218,18 @@ type AgentRunIntervention struct {
 	// ActionCallID is the settled action call (approval card or human
 	// intervention) this steering message carries the result of.
 	ActionCallID string `json:"actionCallId,omitempty"`
+	// AgentTrial is the reply of a try_agent trial child, delivered to the
+	// builder Run that waits on it (ActionCallID is the try_agent call).
+	AgentTrial *AgentTrialReceipt `json:"agentTrial,omitempty"`
+}
+
+// AgentTrialReceipt is how a try_agent trial child ended: Status is
+// completed, failed or timed_out; Answer is the reply of a completed trial.
+type AgentTrialReceipt struct {
+	RunID          string `json:"runId"`
+	Status         string `json:"status"`
+	Answer         string `json:"answer,omitempty"`
+	FailureMessage string `json:"failureMessage,omitempty"`
 }
 
 // ConversationAnswerReceipt records the canonical question and authenticated

@@ -106,8 +106,10 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at
 	if err != nil {
 		return nil, err
 	}
+	// A builder waiting on a try_agent trial has a deadline too: past it,
+	// the resume cancels the trial and reports timed_out.
 	runs, err := s.portfolio.ListAgentRuns(ctx, AgentRunFilter{
-		Scope: scope, Statuses: []AgentRunStatus{AgentRunStatusSleeping},
+		Scope: scope, Statuses: []AgentRunStatus{AgentRunStatusSleeping, AgentRunStatusWaitingForEvent},
 	})
 	if err != nil {
 		return nil, err
@@ -115,7 +117,11 @@ func (s *AgentRunWakeService) WakeDueTimers(ctx context.Context, scope Scope, at
 	result := maintenance
 	for _, run := range runs {
 		condition := run.WakeCondition
-		if condition == nil || condition.Type != "timer" || condition.WakeAt == nil {
+		if condition == nil || condition.WakeAt == nil {
+			continue
+		}
+		if !(run.Status == AgentRunStatusSleeping && condition.Type == "timer") &&
+			!(run.Status == AgentRunStatusWaitingForEvent && condition.Type == AgentTrialWakeType) {
 			continue
 		}
 		if at.Before(*condition.WakeAt) {

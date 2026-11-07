@@ -131,6 +131,13 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 		return nil, ErrAcceptedRunExecution
 	}
 	r := &loopBindingResolution{config: config, catalog: catalog, run: run, scope: scope, deployment: deployment, definition: definition}
+	if trial, ok, trialErr := agentTrialContextForRun(run); trialErr != nil {
+		return nil, trialErr
+	} else if ok {
+		// A try_agent trial speaks as the drafted profile under the
+		// builder's identity, with no tools (spec-openseal §3.3).
+		return r.agentTrial(ctx, trial)
+	}
 	if runExplainingFailure(run) {
 		// The explanation step is tool-free: no Skill is activated or
 		// prepared, so a broken Skill cannot block the answer.
@@ -323,6 +330,8 @@ type loopBindingResolution struct {
 	// explaining is a Run whose only remaining step is the tool-free
 	// failure explanation: it is offered no control tool either.
 	explaining bool
+	// trial is a try_agent child: offered only the final answer.
+	trial bool
 }
 
 func (r *loopBindingResolution) now() time.Time {
@@ -371,7 +380,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *TurnRunnerBi
 		Run: r.run, DeploymentID: r.deployment.ID, Catalog: r.catalog, Scope: r.scope,
 		SkillPromptRefs: refs, Operations: binding.RunbookOperations,
 		ConversationTasks: r.config.ConversationTasks, Runs: r.config.Store, Conversations: r.config.Conversations,
-		Deterministic: r.explaining,
+		Deterministic: r.explaining || r.trial,
 	})
 	if err != nil {
 		return nil, err
@@ -488,6 +497,9 @@ func (r *loopBindingResolution) session(ctx context.Context, seeded bool) (*Agen
 // delegation), otherwise the Run's goal as a routine brief. nil when the Run
 // has no goal.
 func loopRunSessionSeed(run *AgentRun) (*SessionEntry, error) {
+	if _, trial := run.Context[AgentTrialContextKey]; trial {
+		return agentTrialSessionSeed(run)
+	}
 	seed, err := controlChildSeed(run)
 	if err != nil || seed != nil {
 		return seed, err

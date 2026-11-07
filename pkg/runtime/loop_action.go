@@ -426,6 +426,17 @@ func (x *GovernedToolExecutor) settle(ctx context.Context, call GovernedToolCall
 	if wake != nil {
 		return governedCardOutcome(call.ToolCallID, current, wake, summary), nil
 	}
+	if isAgentTrialCall(current) {
+		// The trial's reply is the tool result, not the started-trial output.
+		output, err := x.agentTrialOutput(ctx, run, current, settled)
+		if err != nil {
+			return GovernedToolOutcome{}, err
+		}
+		return GovernedToolOutcome{
+			State: ToolEntryCompleted, ActionCallID: current.ID, Output: cloneMap(output),
+			Result: governedJSONResult(ToolResultSucceeded, map[string]interface{}{"evidenceRef": GovernedEvidenceRef(current.ID), "output": output}),
+		}, nil
+	}
 	var approval *ApprovalCheckpoint
 	if current.ApprovalID != "" {
 		if approval, err = x.store.GetApproval(ctx, call.Run.Scope, current.ApprovalID); err != nil {
