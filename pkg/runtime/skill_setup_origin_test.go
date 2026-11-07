@@ -54,16 +54,28 @@ func TestSkillSetupTaskOriginSupportsIndependentWorkAndExactForkLineage(t *testi
 				if err != nil || claimed == nil || claimed.ID != run.ID {
 					t.Fatalf("claim task work: %#v %v", claimed, err)
 				}
+				step, err := NewAgentTurnService(store, store).BeginTurn(t.Context(), BeginAgentTurnRequest{Scope: run.Scope, RunID: run.ID, SessionID: claimed.SessionID, Producer: StepProducerModel,
+					WorkerID: "setup-worker", LeaseDuration: time.Minute})
+				if err != nil {
+					t.Fatal(err)
+				}
+				claimed, err = store.GetAgentRun(t.Context(), run.Scope, run.ID)
+				if err != nil || claimed == nil {
+					t.Fatalf("reload task work: %#v %v", claimed, err)
+				}
+				now = time.Now().UTC()
 				expires := now.Add(time.Minute)
 				call := &ActionCall{
-					ID: "task-setup-call", Scope: run.Scope, RunID: run.ID, TurnID: "setup-step", DeploymentID: "agent",
-					SkillID: SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
+					ID: "task-setup-call", Scope: run.Scope, RunID: run.ID, TurnID: step.ID, DeploymentID: "agent",
+					IdempotencyKey: loopIdempotencyKey(step.ID, "call-setup", nil),
+					SkillID:        SkillManagementSkillID, SkillVersion: SkillManagementSkillVersion, Action: SkillActionRequestSetup,
 					Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
 					Status: ActionCallStatusRunning, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone,
 					Arguments: map[string]interface{}{"kind": "configure", "skillId": "reddit.reader", "skillVersion": "latest", "reason": "Connect the account"},
 					Attempt:   1, MaxAttempts: 1, LeaseOwner: "setup-worker", LeaseExpiresAt: &expires,
 					AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: &now,
 				}
+				call.InvocationDigest = ComputeActionInvocationDigest(call)
 				if _, err := store.CreateActionProposal(t.Context(), ActionProposalRecord{
 					Call: call, ExpectedRunRevision: claimed.Revision, Lease: &AgentRunLeaseGuard{WorkerID: "setup-worker", Now: now},
 					Event: &ActivityEvent{ID: "setup-origin-action", Scope: run.Scope, RunID: run.ID, EventType: "action.started", Summary: "Execute setup request", CreatedAt: now},
