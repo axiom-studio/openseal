@@ -202,12 +202,22 @@ func createActionPoolWork(t *testing.T, store KernelStore, catalog *skill.Catalo
 	if err != nil || claimed == nil || claimed.ID != run.ID {
 		t.Fatalf("claim = %#v, %v", claimed, err)
 	}
+	// Action workers execute the nested calls of a running step; loop calls
+	// run inline in their Run's loop.
+	stepExpires := now.Add(time.Hour)
+	step, err := store.CreateAgentTurn(t.Context(), &AgentTurn{
+		ID: "step-" + run.ID, Scope: scope, RunID: claimed.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel,
+		LeaseOwner: "agent-worker", LeaseExpiresAt: &stepExpires, Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	coordinator := NewActionCoordinator(store, store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionAllow}, nil
 	}))
 	coordinator.now = func() time.Time { return now.Add(time.Second) }
 	proposal, err := coordinator.Propose(t.Context(), ProposeActionRequest{
-		Scope: scope, RunID: claimed.ID, WorkerID: "agent-worker", DeploymentID: "release-agent",
+		Scope: scope, RunID: claimed.ID, TurnID: step.ID, WorkerID: "agent-worker", DeploymentID: "release-agent", Origin: ActionOriginVM, OriginRef: "command-1",
 		SkillID: "release", SkillVersion: "1.0.0", Action: "deploy", Arguments: map[string]interface{}{"environment": "production"}, IdempotencyKey: "deploy-" + run.ID,
 	})
 	if err != nil {
