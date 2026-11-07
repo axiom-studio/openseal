@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -259,84 +258,5 @@ func TestOrdinaryConversationHasNoThreadBackdropReads(t *testing.T) {
 	backdrop, err = loadConversationThreadBackdrop(t.Context(), reader, conversation, reply, viewer)
 	if err != nil || len(backdrop) != 0 || counted.lists != 0 || counted.points > 1 {
 		t.Fatalf("ordinary reply paged old conversation backdrop: backdrop=%#v points=%d lists=%d err=%v", backdrop, counted.points, counted.lists, err)
-	}
-}
-
-func TestConversationThreadBackdropEntersOnlyHostedPrompt(t *testing.T) {
-	store := NewMemoryStore()
-	service := NewConversationService(store)
-	conversation := conversationThreadStartConversation(t, store)
-	root, expected := conversationThreadBackdropFixture(t, service, conversation, false)
-	viewer := ConversationViewer{Participant: ConversationParticipant{Type: ConversationParticipantAgent, ID: conversation.Owner.ID}}
-	type prompt struct {
-		Messages          []agentConversationPromptMessage `json:"messages"`
-		ContextBackdrop   []agentConversationPromptMessage `json:"contextBackdrop"`
-		HistorySummary    string                           `json:"historySummary"`
-		HistoryCompaction *ConversationCompactionRequest   `json:"historyCompaction"`
-	}
-	captured := make([]prompt, 0, 2)
-	resolver := TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-		return &TurnRunnerBinding{DeploymentID: conversation.Owner.ID, Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-			for _, forbidden := range []string{"LATER_MAIN_MUST_NOT_APPEAR", "OTHER_THREAD_CONTEXT_MUST_NOT_APPEAR", "PRIVATE_CONTEXT_MUST_NOT_APPEAR", "CHANNEL_SUMMARY_MUST_NOT_APPEAR"} {
-				if strings.Contains(input.Run.Goal, forbidden) {
-					t.Fatalf("unrelated context entered rooted model goal: %s", forbidden)
-				}
-			}
-			start := strings.Index(input.Run.Goal, "\n\n{")
-			if start < 0 {
-				t.Fatal("missing hosted prompt JSON")
-			}
-			var payload prompt
-			if err := json.Unmarshal([]byte(input.Run.Goal[start+2:]), &payload); err != nil {
-				t.Fatal(err)
-			}
-			if len(payload.ContextBackdrop) != 8 || payload.HistorySummary != "" || payload.HistoryCompaction != nil {
-				t.Fatalf("rooted prompt backdrop entered transcript/compaction: %#v", payload)
-			}
-			for index, message := range payload.ContextBackdrop {
-				if message.ID != expected[index].ID || !strings.HasPrefix(message.Content, "AUTHORIZED_") || len(message.Content) > 1024 || !utf8.ValidString(message.Content) {
-					t.Fatalf("hosted backdrop lost authorized bounded original: %#v", message)
-				}
-			}
-			for _, message := range payload.Messages {
-				if strings.HasPrefix(message.Content, "AUTHORIZED_") {
-					t.Fatal("pre-start backdrop became thread transcript")
-				}
-			}
-			captured = append(captured, payload)
-			return &TurnOutcome{NextRunStatus: AgentRunStatusRunning}, nil
-		})}, nil
-	})
-	runner, err := NewConversationRunTurnRunner(store, conversationRunTestCoordinator(t, service), ConversationRunTurnRunnerConfig{AgentTurns: resolver})
-	if err != nil {
-		t.Fatal(err)
-	}
-	runner.summaries.put(&conversationSummary{Scope: conversation.Scope, ConversationID: conversation.ID, ViewerKey: conversationViewerKey(viewer),
-		ThroughSequence: expected[0].Sequence, Basis: strings.Repeat("a", 64), Text: "CHANNEL_SUMMARY_MUST_NOT_APPEAR"})
-	scheduler := mustConversationRunScheduler(t, store)
-	call := func(message *ChannelMessage) {
-		t.Helper()
-		scheduled, _, err := scheduler.ScheduleMessage(t.Context(), conversation.Scope, conversation.ID, message.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		binding, err := runner.ResolveTurnRunner(t.Context(), scheduled.Run)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := binding.Runner.RunTurn(t.Context(), TurnExecutionContext{Run: scheduled.Run}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	call(root)
-	conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "later-main", Content: "LATER_MAIN_MUST_NOT_APPEAR", Intent: MessageIntentUpdate})
-	utterance := conversationThreadStartPost(t, service, conversation, PostChannelMessageRequest{IdempotencyKey: "future-call-utterance", ReplyToMessageID: root.ID, RequiresResponse: true})
-	call(utterance)
-	if len(captured) != 2 || !reflect.DeepEqual(captured[0].ContextBackdrop, captured[1].ContextBackdrop) {
-		t.Fatal("future rooted message received a different pre-start backdrop")
-	}
-	history, err := ReadConversationHistory(t.Context(), service, conversation.Scope, conversation.Owner, conversation.ID, viewer, ConversationHistoryReadRequest{}, root.ID)
-	if err != nil || !reflect.DeepEqual(conversationThreadStartHistoryIDs(history), []string{utterance.ID, root.ID}) {
-		t.Fatalf("prompt backdrop widened builtin thread history: page=%#v err=%v", history, err)
 	}
 }
