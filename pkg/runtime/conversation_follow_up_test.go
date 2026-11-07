@@ -2,8 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 )
@@ -83,47 +81,6 @@ func (f *conversationFollowUpFixture) transition(t *testing.T, run *AgentRun, st
 		t.Fatal(err)
 	}
 	return next
-}
-
-// runner, decodeConversationFollowUpGoal and completedConversationAnswer
-// drive the old per-Turn RunTurn; only routine_brief_follow_up_test.go still
-// uses them, and they go when that test moves to the loop.
-func (f *conversationFollowUpFixture) runner(t *testing.T, turn func(TurnExecutionContext) *TurnOutcome) *ConversationRunTurnRunner {
-	t.Helper()
-	runner, err := NewConversationRunTurnRunner(f.store, conversationRunTestCoordinator(t, f.service), ConversationRunTurnRunnerConfig{
-		AgentTurns: TurnRunnerResolverFunc(func(context.Context, *AgentRun) (*TurnRunnerBinding, error) {
-			return &TurnRunnerBinding{DeploymentID: "agent-42", Runner: TurnRunnerFunc(func(_ context.Context, input TurnExecutionContext) (*TurnOutcome, error) {
-				return turn(input), nil
-			})}, nil
-		}),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
-}
-
-type conversationFollowUpGoal struct {
-	Messages         []agentConversationPromptMessage `json:"messages"`
-	CurrentMessage   agentConversationPromptMessage   `json:"currentMessage"`
-	FollowUpMessages []agentConversationPromptMessage `json:"followUpMessages"`
-}
-
-func decodeConversationFollowUpGoal(t *testing.T, goal string) conversationFollowUpGoal {
-	t.Helper()
-	instructions, raw, ok := strings.Cut(goal, "\n\n")
-	if !ok || !strings.Contains(instructions, "followUpMessages") {
-		t.Fatalf("goal does not explain follow-ups: %s", goal)
-	}
-	var payload conversationFollowUpGoal
-	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		t.Fatal(err)
-	}
-	return payload
-}
-
-func completedConversationAnswer(summary string) *TurnOutcome {
-	return &TurnOutcome{NextRunStatus: AgentRunStatusCompleted, OutputSummary: summary, RunOutput: map[string]interface{}{"summary": summary}}
 }
 
 // Three rapid messages from one person in one lane produce one Run that holds

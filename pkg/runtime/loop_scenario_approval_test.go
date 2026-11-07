@@ -147,7 +147,7 @@ func assertParkedOnApproval(t *testing.T, f *loopFixture, run *AgentRun) (*Appro
 	if len(tools) != 1 || tools[0].State != ToolEntryAwaitingApproval || tools[0].ActionCallID != calls[0].ID {
 		t.Fatalf("tool entries = %#v", tools)
 	}
-	if got := logTail(f.entryTypes(run.ID), 3); got != "user,assistant,tool:awaiting_approval" {
+	if got := logTail(f.entryTypes(run.ID), 4); got != "user,note,assistant,tool:awaiting_approval" {
 		t.Fatalf("log tail = %s (log %v)", got, f.entryTypes(run.ID))
 	}
 	if f.dispatch.count("update_status") != 0 {
@@ -508,7 +508,7 @@ func TestLoopParkAbortsWhenMessageArrivesDuringStep(t *testing.T) {
 		if done.Status != AgentRunStatusCompleted {
 			t.Fatalf("run = %s (%s, %v) log %v", done.Status, exit.Reason, exit.Err, f.entryTypes(run.ID))
 		}
-		if got := strings.Join(f.entryTypes(run.ID), ","); !strings.HasSuffix(got, "user,assistant,tool:error,user,assistant") {
+		if got := strings.Join(f.entryTypes(run.ID), ","); !strings.HasSuffix(got, "user,note,assistant,tool:error,user,assistant") {
 			t.Fatalf("log = %s", got)
 		}
 		approval := f.approvals(run.ID)[0]

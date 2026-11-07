@@ -4,9 +4,9 @@ package runtime
 // that arrives while a chat Run is working is appended to the Run's session
 // at its next step, and an answer the model wrote without having seen it is
 // never posted. The Runs are driven by the real RunLoop through the loop
-// fixture, with the real conversation seams (bindConversationLoop: the
-// catch-up preparer, the run_context note and the chat delivery) in place of
-// the fixture's catch-up stand-in.
+// fixture, whose chat bindings carry the real conversation seams
+// (bindConversationLoop: the catch-up preparer, the run_context note and the
+// chat delivery).
 
 import (
 	"context"
@@ -20,28 +20,12 @@ import (
 	"time"
 )
 
-// steerBinding is the fixture's binding of run with the production
-// conversation seams bound over it for a chat Run.
-func steerBinding(f *loopFixture, run *AgentRun) *TurnRunnerBinding {
-	f.t.Helper()
-	binding := f.binding(run)
-	if conversationID, _ := run.Context[conversationRunContextConversationID].(string); conversationID == "" {
-		return binding
-	}
-	sessions := f.store.(AgentSessionStore)
-	binding.Preparers = []StepPreparer{newRunStartPreparer(sessions, f.store)}
-	binding.Final = nil
-	if err := f.runner.bindConversationLoop(f.ctx, run, binding, ConversationLoopStores{Sessions: sessions, Actions: f.store, Activity: f.store}); err != nil {
-		f.t.Fatalf("bind conversation loop: %v", err)
-	}
-	return binding
-}
-
-// steerClaim claims runID and drives one claim with steerBinding.
+// steerClaim claims runID and drives one claim with the fixture's binding,
+// which binds the production conversation seams for a chat Run.
 func steerClaim(f *loopFixture, runID string) (LoopExit, *AgentRun) {
 	f.t.Helper()
 	claimed := f.claim(runID)
-	binding := steerBinding(f, claimed)
+	binding := f.binding(claimed)
 	if binding.Session != nil && claimed.SessionID != binding.Session.ID {
 		claimed = f.mustRun(runID)
 	}
