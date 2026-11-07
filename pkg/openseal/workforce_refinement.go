@@ -21,8 +21,6 @@ type (
 	WorkforceRefinementAnswerValue            = authoring.RefinementAnswerValue
 	WorkforceRefinementAnswerEvent            = authoring.RefinementAnswerEvent
 	WorkforceRefinementAnswerSource           = authoring.RefinementAnswerSource
-	WorkforceSkillReadiness                   = authoring.SkillReadiness
-	WorkforceSkillCompatibility               = authoring.SkillCompatibility
 	WorkforceSkillSearchOrigin                = authoring.SkillSearchOrigin
 	WorkforceSkillSearchVerification          = authoring.SkillSearchVerification
 	WorkforceSkillSearchTrust                 = authoring.SkillSearchTrust
@@ -58,10 +56,6 @@ const (
 	WorkforceRefinementBlocksApply         = authoring.RefinementBlocksApply
 	WorkforceRefinementAnswerSourceUser    = authoring.RefinementAnswerSourceUser
 	WorkforceRefinementAnswerSourceRuntime = authoring.RefinementAnswerSourceRuntime
-	WorkforceSkillReady                    = authoring.SkillReadinessReady
-	WorkforceSkillNeedsBinding             = authoring.SkillReadinessNeedsBinding
-	WorkforceSkillNeedsInstallation        = authoring.SkillReadinessNeedsInstallation
-	WorkforceSkillUnavailable              = authoring.SkillReadinessUnavailable
 	WorkforceSkillSearchEnabled            = authoring.SkillSearchOriginEnabled
 	WorkforceSkillSearchCatalog            = authoring.SkillSearchOriginCatalog
 	WorkforceSkillSearchVerified           = authoring.SkillSearchVerificationVerified

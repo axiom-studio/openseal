@@ -1,16 +1,15 @@
 package authoring
 
 import (
-	"errors"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"unicode"
 
 	"github.com/axiom-studio/openseal/pkg/agent"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/skillcatalog"
 )
 
 const conversationMessageReceivedEvent = "conversation.message.received"
@@ -123,34 +122,8 @@ func CanonicalRuntimeCompositionCapability() *RuntimeCompositionCapability {
 	}
 }
 
-// CanonicalConversationTriggerInputSchema is the stable credential-free
-// Runbook boundary emitted by the external conversation dispatcher.
-func CanonicalConversationTriggerInputSchema() map[string]interface{} {
-	return map[string]interface{}{
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties": map[string]interface{}{
-			"conversationId":   map[string]interface{}{"type": "string"},
-			"triggerMessageId": map[string]interface{}{"type": "string"},
-			"endpointId":       map[string]interface{}{"type": "string"},
-			"event": map[string]interface{}{
-				"type":                 "object",
-				"additionalProperties": false,
-				"properties": map[string]interface{}{
-					"id":         map[string]interface{}{"type": "string"},
-					"type":       map[string]interface{}{"type": "string"},
-					"source":     map[string]interface{}{"type": "string"},
-					"subject":    map[string]interface{}{"type": "string"},
-					"occurredAt": map[string]interface{}{"type": "string"},
-					"attributes": map[string]interface{}{"type": "object"},
-					"payload":    map[string]interface{}{"type": "object"},
-				},
-				"required": []interface{}{"id", "type", "source", "subject", "occurredAt", "attributes", "payload"},
-			},
-		},
-		"required": []interface{}{"conversationId", "triggerMessageId", "endpointId", "event"},
-	}
-}
+// CanonicalConversationTriggerInputSchema lives in pkg/skillcatalog.
+var CanonicalConversationTriggerInputSchema = skillcatalog.CanonicalConversationTriggerInputSchema
 
 // CanonicalConversationReplyOutputSchema is the typed handoff from an event
 // Runbook back into the canonical Conversation outbox. Provider fields never
@@ -164,25 +137,6 @@ func CanonicalConversationReplyOutputSchema() map[string]interface{} {
 		},
 		"required": []interface{}{"reply"},
 	}
-}
-
-func ValidateRuntimeCompositionCapability(value *RuntimeCompositionCapability) error {
-	if value == nil {
-		return nil
-	}
-	if value.ProtocolVersion != RuntimeCompositionProtocolV1 {
-		return errors.New("runtime composition protocol version is unsupported")
-	}
-	if !value.Conversation.CanonicalReply ||
-		!uniqueConversationEventTypes(value.Conversation.EventTypes) ||
-		!uniqueConversationHandlerKinds(value.Conversation.HandlerKinds) ||
-		!uniqueConversationReplyModes(value.Conversation.ReplyModes) ||
-		!uniqueRunbookTriggerKinds(value.Runbook.TriggerKinds) ||
-		!uniqueRunbookStepKinds(value.Runbook.StepKinds) ||
-		!reflect.DeepEqual(value.Runbook.ConversationTriggerInputSchema, CanonicalConversationTriggerInputSchema()) {
-		return errors.New("runtime composition capability is invalid or non-canonical")
-	}
-	return nil
 }
 
 func validateConversationEndpointBlueprints(candidate *WorkforceCandidate) []ValidationIssue {
@@ -618,100 +572,6 @@ func containsAnyToken(tokens []string, wanted ...string) bool {
 		}
 	}
 	return false
-}
-
-func uniqueConversationEventTypes(values []string) bool {
-	if len(values) == 0 {
-		return false
-	}
-	seen := map[string]bool{}
-	for _, value := range values {
-		if value == "" || value != strings.TrimSpace(value) || seen[value] {
-			return false
-		}
-		seen[value] = true
-	}
-	return sort.StringsAreSorted(values)
-}
-
-func uniqueConversationHandlerKinds(values []ConversationHandlerKind) bool {
-	return uniqueEnumStrings(conversationHandlerStrings(values), []string{
-		string(ConversationHandlerAgent), string(ConversationHandlerRunbook), string(ConversationHandlerTeam),
-	})
-}
-
-func uniqueConversationReplyModes(values []ConversationReplyMode) bool {
-	return uniqueEnumStrings(conversationReplyStrings(values), []string{
-		string(ConversationReplyChannel), string(ConversationReplyProviderDefault), string(ConversationReplyThread),
-	})
-}
-
-func uniqueRunbookTriggerKinds(values []runbook.TriggerKind) bool {
-	if len(values) == 0 {
-		return false
-	}
-	stringsValue := make([]string, len(values))
-	for index, value := range values {
-		stringsValue[index] = string(value)
-	}
-	return uniqueEnumStrings(stringsValue, []string{string(runbook.TriggerEvent), string(runbook.TriggerSchedule)})
-}
-
-func uniqueRunbookStepKinds(values []runbook.StepKind) bool {
-	if len(values) == 0 {
-		return false
-	}
-	allowed := map[runbook.StepKind]bool{
-		runbook.StepAction: true, runbook.StepDelegate: true, runbook.StepDecision: true,
-		runbook.StepTransform: true, runbook.StepWait: true, runbook.StepFork: true,
-		runbook.StepJoin: true, runbook.StepForEach: true, runbook.StepLoopReturn: true, runbook.StepEnd: true,
-	}
-	seen := map[runbook.StepKind]bool{}
-	previous := ""
-	for _, value := range values {
-		if !allowed[value] || seen[value] || previous > string(value) {
-			return false
-		}
-		seen[value] = true
-		previous = string(value)
-	}
-	return true
-}
-
-func uniqueEnumStrings(values, allowedValues []string) bool {
-	if len(values) == 0 {
-		return false
-	}
-	allowed := map[string]bool{}
-	for _, value := range allowedValues {
-		allowed[value] = true
-	}
-	seen := map[string]bool{}
-	previous := ""
-	for _, value := range values {
-		if !allowed[value] || seen[value] || previous > value {
-			return false
-		}
-		seen[value] = true
-		previous = value
-	}
-	return true
-}
-
-func conversationHandlerStrings(values []ConversationHandlerKind) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		result[index] = string(value)
-	}
-	return result
-}
-
-func conversationReplyStrings(values []ConversationReplyMode) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		result[index] = string(value)
-	}
-	return result
 }
 
 func containsConversationMode(values []capability.ConversationEndpointMode, wanted capability.ConversationEndpointMode) bool {

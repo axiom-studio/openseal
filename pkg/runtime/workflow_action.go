@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/authoring"
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
+	"github.com/axiom-studio/openseal/pkg/validation"
 )
 
 const (
@@ -373,7 +373,7 @@ func resolveWorkflowCreate(ctx context.Context, store runbookActionStore, catalo
 	if run == nil || run.Kind != RunKindConversation || run.CreatedAt.IsZero() || args.Title == "" || len(args.Title) > 240 {
 		return nil, nil, nil, errors.New("workflow creation requires a bounded title and the originating human conversation")
 	}
-	if err := authoring.ValidateAuthoringPrompt(args.Title); err != nil {
+	if err := validation.ValidateNoSensitiveInput(args.Title); err != nil {
 		return nil, nil, nil, err
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
