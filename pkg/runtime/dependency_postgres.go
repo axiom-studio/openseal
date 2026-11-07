@@ -105,17 +105,21 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 		if err != nil {
 			return nil, err
 		}
+		replayed := &RunDependencyResult{Group: existing, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}
+		if err := s.readPostgresDependencyGroupSessionState(ctx, tx, record, replayed); err != nil {
+			return nil, err
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
-		return &RunDependencyResult{Group: existing, Dependencies: edges, Source: source, Evaluation: evaluation, Replayed: true}, nil
+		return replayed, nil
 	}
 	currentSource, err := s.getPostgresAgentRunTx(ctx, tx, record.SourceRun.Scope, record.SourceRun.ID, true)
 	if err != nil {
 		return nil, err
 	}
-	if currentSource.Revision != record.ExpectedSourceRevision || record.SourceRun.Revision != currentSource.Revision+1 {
-		return nil, ErrRevisionConflict
+	if err := checkDependencyGroupCreateSource(currentSource, record); err != nil {
+		return nil, err
 	}
 	if err := s.updatePostgresAgentRunTx(ctx, tx, record.SourceRun, record.ExpectedSourceRevision); err != nil {
 		return nil, err
@@ -150,18 +154,79 @@ func (s *PostgresStore) CreateRunDependencyGroup(ctx context.Context, record Run
 	if err != nil {
 		return nil, err
 	}
+	result := &RunDependencyResult{
+		Group: cloneRunDependencyGroup(record.Group), Source: cloneAgentRun(record.SourceRun), Events: []*ActivityEvent{persisted},
+	}
+	if err := s.applyPostgresDependencyGroupSessionWrites(ctx, tx, record, currentSource.SessionID, result); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	edges := cloneDependencySlice(record.Dependencies)
-	evaluation, err := EvaluateRunDependencies(record.Group, edges)
+	result.Dependencies = cloneDependencySlice(record.Dependencies)
+	result.Evaluation, err = EvaluateRunDependencies(record.Group, result.Dependencies)
 	if err != nil {
 		return nil, err
 	}
-	return &RunDependencyResult{
-		Group: cloneRunDependencyGroup(record.Group), Dependencies: edges, Source: cloneAgentRun(record.SourceRun),
-		Evaluation: evaluation, Events: []*ActivityEvent{persisted},
-	}, nil
+	return result, nil
+}
+
+// applyPostgresDependencyGroupSessionWrites creates the record's same-Agent
+// child sessions and moves the source's control tool entry inside the
+// create's transaction. The source Run row is already locked and fenced by
+// the caller, so the lock order stays Run -> session -> entry.
+func (s *PostgresStore) applyPostgresDependencyGroupSessionWrites(ctx context.Context, tx *sql.Tx, record RunDependencyGroupCreateRecord, sourceSessionID string, result *RunDependencyResult) error {
+	for i := range record.ChildSessions {
+		created, err := s.createRunAgentSessionTx(ctx, tx, dependencyGroupChildSession(record, i))
+		if err != nil {
+			return err
+		}
+		if !created.Created {
+			return ErrAgentSessionConflict
+		}
+		result.ChildSessions = append(result.ChildSessions, created.Session)
+	}
+	if record.ToolTransition == nil {
+		return nil
+	}
+	transition := dependencyGroupToolTransition(record)
+	current, err := s.getPostgresSessionEntryTx(ctx, tx, transition.Scope, transition.EntryID, false)
+	if err != nil {
+		return err
+	}
+	if current.SessionID != sourceSessionID {
+		return ErrSessionMoved
+	}
+	moved, err := s.transitionToolEntryTx(ctx, tx, transition)
+	if err != nil {
+		return err
+	}
+	result.ToolEntry = moved.Entry
+	result.Events = append(result.Events, moved.Events...)
+	return nil
+}
+
+// readPostgresDependencyGroupSessionState fills a replay with the current
+// tool entry and child sessions; a replay writes nothing.
+func (s *PostgresStore) readPostgresDependencyGroupSessionState(ctx context.Context, tx *sql.Tx, record RunDependencyGroupCreateRecord, result *RunDependencyResult) error {
+	if transition := record.ToolTransition; transition != nil {
+		entry, err := s.getPostgresSessionEntryTx(ctx, tx, transition.Scope, transition.EntryID, false)
+		if err != nil && !errors.Is(err, ErrSessionEntryNotFound) {
+			return err
+		}
+		result.ToolEntry = entry
+	}
+	for _, child := range record.ChildSessions {
+		session, err := s.getPostgresAgentSessionTx(ctx, tx, child.Scope, RunAgentSessionID(child.Scope, child.OwnerRunID), false)
+		if errors.Is(err, ErrAgentSessionNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		result.ChildSessions = append(result.ChildSessions, session)
+	}
+	return nil
 }
 
 func (s *PostgresStore) GetRunDependencyGroup(ctx context.Context, scope Scope, groupID string) (*RunDependencyGroup, error) {
