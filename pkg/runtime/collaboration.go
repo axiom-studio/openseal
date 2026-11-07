@@ -1836,7 +1836,7 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 		Goal: request.Goal, Source: sourceKind, Status: AgentRunStatusQueued,
 		Priority: source.Priority, AvailableAt: now, QueueEnteredAt: now, Context: context,
 		Checkpoint: cloneMap(request.ChildCheckpoint), Budget: cloneBudgetPolicy(request.BudgetAllocation),
-		Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now,
+		Policy: cloneMap(source.Policy), Revision: 1, CreatedAt: now, UpdatedAt: now, Engine: RunEngineLoop,
 	}
 	if child.Budget != nil {
 		child.BudgetState = BudgetStateActive
