@@ -184,7 +184,7 @@ func TestOriginApprovalConversationMembersMayDecide(t *testing.T) {
 		run.WakeCondition = &WakeCondition{Type: "approval", Reference: "approval"}
 		run.LeaseOwner = ""
 		run.LeaseExpiresAt = nil
-		call := &ActionCall{ID: "call", Scope: run.Scope, RunID: run.ID, DeploymentID: fixture.endpoint.DeploymentID, SkillID: "browser", SkillVersion: "1", Action: "send", Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"text": "reviewed"}, ApprovalID: "approval", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now}
+		call := &ActionCall{ID: "call", Scope: run.Scope, RunID: run.ID, DeploymentID: fixture.endpoint.DeploymentID, SkillID: "browser", SkillVersion: "1", Action: "send", TurnID: "step-1", Origin: ActionOriginLoop, Execution: ActionExecutionLoop, Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelExternal, SideEffect: skill.SideEffectExternal, Arguments: map[string]interface{}{"text": "reviewed"}, ApprovalID: "approval", MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now}
 		call.InvocationDigest = ComputeActionInvocationDigest(call)
 		call.SemanticDigest = ComputeActionSemanticDigest(call)
 		approval := &ApprovalCheckpoint{ID: "approval", Scope: run.Scope, RunID: run.ID, ActionCallID: call.ID, Status: ApprovalStatusPending, Risk: skill.RiskLevelExternal, Summary: "Send reviewed text", EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "operator"}}, ExpiresAt: now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now}

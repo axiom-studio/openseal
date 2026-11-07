@@ -473,13 +473,8 @@ func (s *ConversationService) CommitConversationRouting(ctx context.Context, req
 		TriggerMessageID: strings.TrimSpace(req.TriggerMessageID), Status: ParticipationRoundCommitted,
 		Responders: append([]ConversationResponder(nil), req.Responders...), IdempotencyKey: key, Revision: 1, CreatedAt: now, CommittedAt: now,
 	}
-	if existing, err := s.store.FindParticipationRoundByIdempotencyKey(ctx, req.Scope, round.ConversationID, key); err != nil {
-		return nil, err
-	} else if existing != nil {
-		if !sameParticipationRound(existing.Round, round) {
-			return nil, ErrMessageConflict
-		}
-		return existing, nil
+	if existing, err := s.replayConversationRouting(ctx, round); err != nil || existing != nil {
+		return existing, err
 	}
 	conversation, err := s.GetConversation(ctx, req.Scope, round.ConversationID)
 	if err != nil {
@@ -489,6 +484,12 @@ func (s *ConversationService) CommitConversationRouting(ctx context.Context, req
 		return nil, ErrInvalidConversation
 	}
 	if conversation.Revision != req.ExpectedRevision {
+		// A concurrent replica may have committed this same request between the
+		// idempotency lookup and the conversation read; that is a replay, not a
+		// conflict.
+		if existing, err := s.replayConversationRouting(ctx, round); err != nil || existing != nil {
+			return existing, err
+		}
 		return nil, ErrRevisionConflict
 	}
 	if round.TriggerMessageID != "" {
@@ -508,6 +509,19 @@ func (s *ConversationService) CommitConversationRouting(ctx context.Context, req
 	return s.store.CommitParticipationRound(ctx, ParticipationRoundCommitRecord{
 		Conversation: updated, ExpectedRevision: conversation.Revision, Round: round,
 	})
+}
+
+// replayConversationRouting returns the already committed round for the
+// request's idempotency key, or nil when none exists yet.
+func (s *ConversationService) replayConversationRouting(ctx context.Context, round *ParticipationRound) (*ParticipationRoundResult, error) {
+	existing, err := s.store.FindParticipationRoundByIdempotencyKey(ctx, round.Scope, round.ConversationID, round.IdempotencyKey)
+	if err != nil || existing == nil {
+		return nil, err
+	}
+	if !sameParticipationRound(existing.Round, round) {
+		return nil, ErrMessageConflict
+	}
+	return existing, nil
 }
 
 func (s *ConversationService) ListChannelMessages(ctx context.Context, filter ChannelMessageFilter) ([]*ChannelMessage, error) {

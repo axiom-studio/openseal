@@ -277,26 +277,27 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 	a := ConversationParticipant{Type: ConversationParticipantUser, ID: "member-a"}
 	trigger := f.post(t, PostChannelMessageRequest{Sender: a, IdempotencyKey: "request-a"})
 	root := f.schedule(t, trigger)
-	running, _, err := NewRunActivityService(f.store, f.store).TransitionRun(t.Context(), scope, root.ID, RunTransitionRequest{ExpectedRevision: root.Revision, Status: AgentRunStatusRunning})
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The run loop claims member A's Run; one of its steps proposes the
+	// reviewed action and the step-end park waits on its approval.
+	loop := newLoopProposalFixture(t, f.store, root, "worker", time.Now().UTC())
 	coordinator := NewActionCoordinator(f.store, f.store, catalog, ActionPolicyEvaluatorFunc(func(context.Context, ActionPolicyInput) (ActionPolicyDecision, error) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
 	}))
-	proposal, err := coordinator.Propose(t.Context(), ProposeActionRequest{
-		Scope: scope, RunID: running.ID, DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
-		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed report"}, IdempotencyKey: "reviewed-action", Summary: "Send reviewed report",
-	})
-	if err != nil || proposal == nil || proposal.Approval == nil || proposal.Run.Status != AgentRunStatusWaitingForApproval {
+	proposal, err := coordinator.Propose(t.Context(), loop.request(ProposeActionRequest{
+		DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
+		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed report"}, Summary: "Send reviewed report",
+	}, "reviewed-action"))
+	if err != nil || proposal == nil || proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {
 		t.Fatalf("pending approval = %#v, %v", proposal, err)
 	}
+	loop.parkOnApproval(proposal.Approval.ID)
+	parked := loop.run
 	messageB := f.post(t, PostChannelMessageRequest{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "member-b"}, IdempotencyKey: "request-b"})
 	runB := f.schedule(t, messageB)
 	if runB.ID == root.ID || runB.Context[conversationRunContextTriggerID] != messageB.ID {
 		t.Fatalf("member B inherited member A's run: %#v", runB)
 	}
-	f.assertRunUnchanged(t, proposal.Run)
+	f.assertRunUnchanged(t, parked)
 	approval, err := f.store.GetApproval(t.Context(), scope, proposal.Approval.ID)
 	if err != nil || !reflect.DeepEqual(approval, proposal.Approval) {
 		t.Fatalf("member B changed pending approval: %#v, %v", approval, err)
