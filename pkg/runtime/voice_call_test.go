@@ -155,52 +155,8 @@ func TestVoiceCallGreetingRequiresSpokenBooleanContext(t *testing.T) {
 	}
 }
 
-func TestParticipationResponseChannelDerivesOnlyCanonicalTrigger(t *testing.T) {
-	valid := ChannelMessage{
-		Sender: ConversationParticipant{Type: ConversationParticipantService, ID: VoiceCallCoordinatorParticipantID},
-		Intent: MessageIntentUpdate, ResponseMode: "spoken", RequiresResponse: true,
-	}
-	for _, test := range []struct {
-		name    string
-		trigger *ChannelMessage
-		spoken  bool
-		call    bool
-	}{
-		{name: "call", trigger: &valid, spoken: true, call: true},
-		{name: "ordinary spoken user", trigger: &ChannelMessage{Sender: ConversationParticipant{Type: ConversationParticipantUser, ID: "42"}, ResponseMode: "spoken", Content: "voiceCallStarted=true"}, spoken: true},
-		{name: "different service", trigger: &ChannelMessage{Sender: ConversationParticipant{Type: ConversationParticipantService, ID: "other"}, Intent: MessageIntentUpdate, ResponseMode: "spoken", RequiresResponse: true}, spoken: true},
-		{name: "text channel", trigger: &ChannelMessage{Sender: valid.Sender, Intent: valid.Intent, RequiresResponse: true}},
-		{name: "missing trigger"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			request := HostedTurnRequest{InputContext: map[string]interface{}{"teamId": "team", "responseMode": "spoken", "voiceCallStarted": true}}
-			AppendParticipationResponseChannelInstructions(&request, test.trigger)
-			if request.ResponseContract != HostedResponseContractParticipation {
-				t.Fatal("Team assessment lost its structured response contract")
-			}
-			if (request.InputContext["responseMode"] == "spoken") != test.spoken ||
-				(request.InputContext["voiceCallStarted"] == true) != test.call || request.InputContext["teamId"] != "team" {
-				t.Fatalf("context did not follow canonical trigger: %#v", request.InputContext)
-			}
-			if slices.Contains(request.SystemInstructions, spokenParticipationResponseInstruction) != test.spoken ||
-				slices.Contains(request.SystemInstructions, voiceCallParticipationGreetingInstruction) != test.call {
-				t.Fatalf("participation instructions = %#v", request.SystemInstructions)
-			}
-			if slices.Contains(request.SystemInstructions, spokenResponseInstruction) || slices.Contains(request.SystemInstructions, voiceCallGreetingInstruction) {
-				t.Fatal("normal answer schema instructions leaked into a participation proposal")
-			}
-		})
-	}
-	request := HostedTurnRequest{}
-	AppendParticipationResponseChannelInstructions(&request, &valid)
-	if request.InputContext["voiceCallStarted"] != true {
-		t.Fatal("nil context did not receive canonical call metadata")
-	}
-	AppendParticipationResponseChannelInstructions(nil, &valid)
-}
-
 func TestHostedResponseContractRoundTripAndValidation(t *testing.T) {
-	for _, contract := range []HostedResponseContract{HostedResponseContractDefault, HostedResponseContractParticipation} {
+	for _, contract := range []HostedResponseContract{HostedResponseContractDefault} {
 		if err := contract.Validate(); err != nil {
 			t.Fatal(err)
 		}
@@ -213,7 +169,9 @@ func TestHostedResponseContractRoundTripAndValidation(t *testing.T) {
 			t.Fatalf("response contract transport = %#v, %v", request, err)
 		}
 	}
-	if err := HostedResponseContract("unknown").Validate(); err == nil {
-		t.Fatal("unsupported response contract accepted")
+	for _, contract := range []HostedResponseContract{"participation", "unknown"} {
+		if err := contract.Validate(); err == nil {
+			t.Fatalf("unsupported response contract %q accepted", contract)
+		}
 	}
 }

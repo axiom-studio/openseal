@@ -1261,7 +1261,6 @@ const (
 	HostedTurnAPIVersion                    = runtime.HostedTurnAPIVersion
 	TurnHostContextExceeded                 = runtime.TurnHostContextExceeded
 	HostedResponseContractDefault           = runtime.HostedResponseContractDefault
-	HostedResponseContractParticipation     = runtime.HostedResponseContractParticipation
 	HostedTurnFormSchemaVersion             = runtime.HostedTurnFormSchemaVersion
 	HostedTurnProtocolInputReserveTokens    = runtime.HostedTurnProtocolInputReserveTokens
 	HostedTurnBudgetEnvelopeReserveTokens   = runtime.HostedTurnBudgetEnvelopeReserveTokens
@@ -1585,8 +1584,6 @@ var (
 	NormalizeConversationAdapter = capability.NormalizeConversationAdapter
 	NormalizeCallbackAdapter     = capability.NormalizeCallbackAdapter
 )
-
-var AppendParticipationResponseChannelInstructions = runtime.AppendParticipationResponseChannelInstructions
 
 var (
 	ConversationTaskGoalSummary            = runtime.ConversationTaskGoalSummary

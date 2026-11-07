@@ -171,12 +171,11 @@ type HostedRunBudget struct {
 type HostedResponseContract string
 
 const (
-	HostedResponseContractDefault       HostedResponseContract = ""
-	HostedResponseContractParticipation HostedResponseContract = "participation"
+	HostedResponseContractDefault HostedResponseContract = ""
 )
 
 func (c HostedResponseContract) Validate() error {
-	if c != HostedResponseContractDefault && c != HostedResponseContractParticipation {
+	if c != HostedResponseContractDefault {
 		return fmt.Errorf("unsupported hosted response contract %q", c)
 	}
 	return nil
