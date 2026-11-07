@@ -201,14 +201,21 @@ func (s *SQLiteStore) UpdateAgentRunWithEvent(ctx context.Context, run *AgentRun
 			// transaction excludes any concurrent renewal or claim.
 			var owner, actingUser string
 			var expiry sql.NullString
-			err := conn.QueryRowContext(ctx, `SELECT lease_owner, json_extract(payload, '$.leaseExpiresAt'), IFNULL(json_extract(payload, '$.actingUser'), '') FROM agent_runs
-				WHERE scope_kind = ? AND scope_id = ? AND id = ? AND revision = ?`,
-				run.Scope.Kind, run.Scope.ID, run.ID, expectedRevision).Scan(&owner, &expiry, &actingUser)
+			var revision int64
+			err := conn.QueryRowContext(ctx, `SELECT lease_owner, json_extract(payload, '$.leaseExpiresAt'), IFNULL(json_extract(payload, '$.actingUser'), ''), revision FROM agent_runs
+				WHERE scope_kind = ? AND scope_id = ? AND id = ?`,
+				run.Scope.Kind, run.Scope.ID, run.ID).Scan(&owner, &expiry, &actingUser, &revision)
 			if err == sql.ErrNoRows {
 				return ErrLeaseLost
 			}
 			if err != nil {
 				return err
+			}
+			// A concurrent write (an approval decided while the Run holds
+			// it) is a revision conflict, not a lost lease: the holder
+			// re-plans instead of abandoning the Run.
+			if revision != expectedRevision {
+				return ErrRevisionConflict
 			}
 			if actingUser != run.ActingUser {
 				return ErrRevisionConflict

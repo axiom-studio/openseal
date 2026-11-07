@@ -215,6 +215,7 @@ func (s *ConversationRunScheduler) deliverToConversationLane(ctx context.Context
 			status, wake = AgentRunStatusQueued, nil
 		}
 		activity := NewRunActivityService(s.runs.store, s.runs.store)
+		activity.now = s.runs.now
 		run, event, err := activity.TransitionRun(ctx, conversation.Scope, target.ID, RunTransitionRequest{
 			ExpectedRevision: target.Revision, Status: status, WakeCondition: wake,
 			Summary: "Received a new message for this request", EventType: "run.intervened",
