@@ -17,21 +17,35 @@ import (
 
 const (
 	TeamManagementSkillID      = "openseal.teams"
-	TeamManagementSkillVersion = "2.0.0"
+	TeamManagementSkillVersion = "2.1.0"
 	TeamActionUpdateRole       = "update_role"
 	TeamActionUpdateProfile    = "update_profile"
+	TeamActionCreateTeam       = "create_team"
 	TeamManagementEndpoint     = "kernel://teams"
+
+	// teamManagementSkillVersionV1 is the version before create_team. Its
+	// bindings keep matching update_role and update_profile until the host
+	// reconcile upgrades them.
+	teamManagementSkillVersionV1 = "2.0.0"
 )
 
+// IsSupportedTeamManagementSkillVersion reports a version of openseal.teams
+// whose update_role and update_profile actions the kernel still runs.
+func IsSupportedTeamManagementSkillVersion(version string) bool {
+	return version == TeamManagementSkillVersion || version == teamManagementSkillVersionV1
+}
+
 // TeamManagementSkill exposes bounded Team behavior changes to the current
-// Team conversation. Deployment identity and candidate definitions are never
-// model inputs: the kernel derives both from the durable Run and active Team.
+// Team conversation, and Team creation to the Agent that builds Agents.
+// Deployment identity and candidate definitions are never model inputs: the
+// kernel derives both from the durable Run and active Team.
 func TeamManagementSkill() *skill.Definition {
 	return &skill.Definition{
 		ID: TeamManagementSkillID, Version: TeamManagementSkillVersion,
-		Name: "Teams", Description: "Propose governed changes to the current Team's profile and role behavior.",
+		Name: "Teams", Description: "Create Teams from existing Agents, and propose governed changes to the current Team's profile and role behavior.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: TeamManagementEndpoint},
 		Actions: map[string]skill.Action{
+			TeamActionCreateTeam: teamCreateTeamAction(),
 			TeamActionUpdateProfile: {
 				Name:        TeamActionUpdateProfile,
 				Description: "Change the current Team's name or description when the user asks the Team to rename or describe itself. Supply only the changed fields; each replaces the current value in full. The user approves the change before it applies.",
@@ -418,5 +432,5 @@ func teamRoleActionResult(amendment *kernelteam.DefinitionAmendment, deployment 
 
 func isTeamRoleAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == TeamManagementSkillID &&
-		bound.Definition.Version == TeamManagementSkillVersion && bound.Action.Name == TeamActionUpdateRole
+		IsSupportedTeamManagementSkillVersion(bound.Definition.Version) && bound.Action.Name == TeamActionUpdateRole
 }

@@ -508,10 +508,6 @@ func (c *ActionCoordinator) createNestedProposal(ctx context.Context, req Propos
 // than the 24 hour default.
 const agentBuilderApprovalTTL = 30 * 24 * time.Hour
 
-// agentBuilderTeamActionCreateTeam is the openseal.teams action that creates
-// a Team from the builder.
-const agentBuilderTeamActionCreateTeam = "create_team"
-
 // isAgentBuilderApprovalAction reports whether bound is a builder action
 // whose approval card creates or changes an Agent or a Team: create_agent,
 // update_agent and create_team.
@@ -523,7 +519,7 @@ func isAgentBuilderApprovalAction(bound *skill.BoundAction) bool {
 	case AgentManagementSkillID:
 		return bound.Action.Name == AgentActionCreateAgent || bound.Action.Name == AgentActionUpdateAgent
 	case TeamManagementSkillID:
-		return bound.Action.Name == agentBuilderTeamActionCreateTeam
+		return bound.Action.Name == TeamActionCreateTeam
 	}
 	return false
 }

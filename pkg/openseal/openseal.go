@@ -1939,6 +1939,7 @@ const (
 	TeamManagementSkillVersion      = runtime.TeamManagementSkillVersion
 	TeamActionUpdateRole            = runtime.TeamActionUpdateRole
 	TeamActionUpdateProfile         = runtime.TeamActionUpdateProfile
+	TeamActionCreateTeam            = runtime.TeamActionCreateTeam
 	SkillManagementSkillID          = runtime.SkillManagementSkillID
 	SkillManagementSkillVersion     = runtime.SkillManagementSkillVersion
 	SkillActionDiscover             = runtime.SkillActionDiscoverBinding
@@ -3689,11 +3690,25 @@ func (e *Engine) configureTeamManagementActions() error {
 	if !e.teamManagementActions {
 		return nil
 	}
+	if err := e.skills.Register(context.Background(), runtime.TeamManagementSkill()); err != nil && !errors.Is(err, skill.ErrDefinitionImmutable) {
+		return err
+	}
 	validator, err := runtime.NewTeamRoleActionValidator(e.teams)
 	if err != nil {
 		return err
 	}
 	e.actionValidators = append(e.actionValidators, validator)
+	// create_team is a builder action: it runs in the
+	// AgentBuilderActionDispatcher that configureAgentBuilderActions wraps
+	// around every action worker, so it exists only with Agent management.
+	if e.agentManagementActions {
+		conversations, _ := e.store.(runtime.ConversationStore)
+		createValidator, err := runtime.NewTeamCreateActionValidator(e.agents, e.teams, e.spaces, conversations, e.store)
+		if err != nil {
+			return err
+		}
+		e.actionValidators = append(e.actionValidators, createValidator)
+	}
 	for index := range e.actionPoolSpecs {
 		dispatcher, dispatchErr := runtime.NewTeamRoleActionDispatcher(e.store, e.teams, e.actionPoolSpecs[index].dispatcher)
 		if dispatchErr != nil {
