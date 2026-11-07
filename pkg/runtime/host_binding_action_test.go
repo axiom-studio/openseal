@@ -73,12 +73,12 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 	})
 	coordinator := NewActionCoordinator(store, store, durableCatalog{catalog}, allow)
 	propose := func(run *AgentRun, key string) (*ActionProposalResult, error) {
-		return coordinator.Propose(t.Context(), ProposeActionRequest{
+		return coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
 			Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent", BindingID: "mcp:linear", BindingRevision: 1,
-			SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "read", IdempotencyKey: key, Summary: "Search Linear",
+			SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "read", Summary: "Search Linear",
 			Arguments: map[string]interface{}{"tool": "search", "hash": "linear-search", "arguments": map[string]interface{}{"title": "mcp bug"}},
 			Actor:     ActivityActor{Type: "worker", ID: "worker"},
-		})
+		}, key))
 	}
 	result, err := propose(claimed, "search")
 	if err != nil {
@@ -96,7 +96,8 @@ func TestHostBindingToolRunsForItsRunOnly(t *testing.T) {
 		}
 		return map[string]interface{}{"ok": true}, nil
 	}))
-	executed, err := worker.RunOnce(t.Context(), scope, "action-worker", time.Minute)
+	// The run loop executes its governed call inline under the Run's lease.
+	executed, err := worker.ExecuteOwnLoopCall(t.Context(), scope, result.Call.ID, "worker")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,17 +220,31 @@ func TestRoutineGrantsCoverHostBindingTools(t *testing.T) {
 	coordinator := NewActionCoordinator(f.store, f.store, f.catalog, NewDefaultActionPolicy())
 	occurrence := f.routineOccurrence(t, activation, "host-occurrence")
 	allowed[occurrence.ID] = true
-	if result := f.proposeBindingTool(t, coordinator, occurrence, "mcp:linear", 1, "call", "create_issue", "linear-create_issue", "granted"); result.Approval != nil {
-		t.Fatal("the granted connected tool asked")
+	proposeCreateIssue := func(run *AgentRun, toolCallID string) (*ActionProposalResult, error) {
+		return coordinator.Propose(t.Context(), loopProposeRequest(ProposeActionRequest{
+			Scope: run.Scope, RunID: run.ID, WorkerID: "worker", DeploymentID: run.AssignedAgentID, BindingID: "mcp:linear", BindingRevision: 1,
+			SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "call",
+			Arguments: map[string]interface{}{"tool": "create_issue", "hash": "linear-create_issue", "arguments": map[string]interface{}{"title": "Forecast"}},
+		}, toolCallID))
+	}
+	if result, err := proposeCreateIssue(occurrence, "granted"); err != nil || result.Approval != nil || result.Call.Status != ActionCallStatusReady {
+		t.Fatalf("the granted connected tool asked: %#v, %v", result, err)
+	}
+	// The occurrence ends before the routine's next one is admitted.
+	done := cloneAgentRun(occurrence)
+	finished := time.Now().UTC()
+	done.Status, done.LeaseOwner, done.LeaseExpiresAt, done.CompletedAt = AgentRunStatusCompleted, "", nil, &finished
+	done.Revision++
+	done.UpdatedAt = finished
+	if _, err := f.store.UpdateAgentRunWithEvent(t.Context(), done, occurrence.Revision, &ActivityEvent{
+		ID: "occurrence-done", Scope: done.Scope, RunID: done.ID, EventType: "run.completed", Summary: "Completed", CreatedAt: finished,
+	}, &AgentRunLeaseGuard{WorkerID: "worker", Now: finished}); err != nil {
+		t.Fatal(err)
 	}
 	// Disconnected for this run: the routine's tool is no longer available.
 	later := f.routineOccurrence(t, activation, "host-occurrence-disconnected")
-	if _, err := coordinator.Propose(t.Context(), ProposeActionRequest{
-		Scope: later.Scope, RunID: later.ID, WorkerID: "worker", DeploymentID: later.AssignedAgentID, BindingID: "mcp:linear", BindingRevision: 1,
-		SkillID: "openseal.connector", SkillVersion: "1.0.0", Action: "call", IdempotencyKey: "disconnected",
-		Arguments: map[string]interface{}{"tool": "create_issue", "hash": "linear-create_issue", "arguments": map[string]interface{}{"title": "x"}},
-	}); err == nil {
-		t.Fatal("a run without the connection used it")
+	if _, err := proposeCreateIssue(later, "disconnected"); !errors.Is(err, skill.ErrBindingUnavailable) {
+		t.Fatalf("a run without the connection used it: %v", err)
 	}
 }
 

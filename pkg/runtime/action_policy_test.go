@@ -50,11 +50,11 @@ func TestProfileImageProposalProceedsWithoutApproval(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	run := claimedActionRun(t, store, scope, now, "worker")
-	result, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy()).Propose(ctx, ProposeActionRequest{
+	result, err := NewActionCoordinator(store, store, catalog, NewDefaultActionPolicy()).Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "worker", DeploymentID: "release-agent",
 		SkillID: definition.ID, SkillVersion: definition.Version, Action: builtin.GenerateProfileImage,
-		Arguments: map[string]interface{}{"prompt": "A friendly illustrated portrait"}, IdempotencyKey: "profile-1",
-	})
+		Arguments: map[string]interface{}{"prompt": "A friendly illustrated portrait"},
+	}, "profile-1"))
 	if err != nil {
 		t.Fatal(err)
 	}

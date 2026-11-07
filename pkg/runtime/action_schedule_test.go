@@ -28,7 +28,7 @@ func TestActionClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
 			store, cleanup := testCase.open(t)
 			defer cleanup()
 			now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
-			_, proposal := createRunnableAction(t, store, now)
+			proposal := createDispatchableNestedAction(t, store, now)
 			const contenders = 20
 			results := make(chan *ActionCall, contenders)
 			errs := make(chan error, contenders)
@@ -74,4 +74,48 @@ func TestActionClaimsAreAtomicAndRecoverExpiredLeases(t *testing.T) {
 			}
 		})
 	}
+}
+
+// createDispatchableNestedAction records release.deploy as a ready nested
+// call of step-1, as ProposeNested does for code in the chat's VM, for a Run
+// that agent-worker holds for a minute. Action workers dispatch nested calls;
+// loop calls are only ever claimed by their own loop.
+func createDispatchableNestedAction(t *testing.T, store KernelStore, now time.Time) *ActionProposalResult {
+	t.Helper()
+	ctx := context.Background()
+	scope := Scope{Kind: "tenant", ID: "claims"}
+	portfolio := NewPortfolioService(store)
+	portfolio.now = func() time.Time { return now }
+	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
+		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "release-agent"}, AssignedAgentID: "release-agent", Goal: "deploy", Source: RunSourceObjective,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimNextAgentRun(ctx, AgentRunClaim{Scope: scope, WorkerID: "agent-worker", Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})
+	if err != nil || claimed == nil || claimed.ID != run.ID {
+		t.Fatalf("claim = %#v, %v", claimed, err)
+	}
+	at := now.Add(time.Second)
+	stepLease := now.Add(time.Minute)
+	if _, err := store.CreateAgentTurn(ctx, &AgentTurn{
+		ID: "step-1", Scope: scope, RunID: run.ID, Status: AgentTurnStatusRunning, Producer: StepProducerModel, LeaseOwner: "agent-worker", LeaseExpiresAt: &stepLease,
+		Revision: 1, CreatedAt: now, UpdatedAt: now, StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	call := &ActionCall{
+		ID: "call", Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "release-agent", SkillID: "release", SkillVersion: "1.0.0",
+		Action: "deploy", Origin: ActionOriginVM, OriginRef: "command-1", Status: ActionCallStatusReady,
+		Arguments: map[string]interface{}{"environment": "production"}, MaxAttempts: 1, AvailableAt: at, Revision: 1, CreatedAt: at, UpdatedAt: at,
+	}
+	result, err := store.CreateActionProposal(ctx, ActionProposalRecord{
+		Call: call, Lease: &AgentRunLeaseGuard{WorkerID: "agent-worker", Now: at},
+		Nested: &NestedActionFence{WorkerID: "agent-worker", Now: at, MaxCalls: MaxNestedActionCallsPerTurn, MaxConcurrent: MaxConcurrentNestedActionCalls},
+		Event: &ActivityEvent{ID: "proposed-call", Scope: scope, RunID: run.ID, TurnID: "step-1", EventType: "action.proposed", Summary: "Proposed deploy", CreatedAt: at},
+	})
+	if err != nil || !result.Created {
+		t.Fatalf("nested proposal = %#v, %v", result, err)
+	}
+	return result
 }

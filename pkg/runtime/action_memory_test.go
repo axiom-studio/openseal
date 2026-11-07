@@ -20,6 +20,7 @@ func TestMemoryActionProposalIsAtomicAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	run = claimRunForLoopProposal(t, store, run)
 	now := time.Now()
 	const contenders = 20
 	results := make(chan *ActionProposalResult, contenders)
@@ -31,8 +32,8 @@ func TestMemoryActionProposalIsAtomicAndIdempotent(t *testing.T) {
 			defer wg.Done()
 			callID := fmt.Sprintf("call-%d", i)
 			proposalRun := cloneAgentRun(run)
-			proposalRun.Status = AgentRunStatusWaitingForApproval
-			proposalRun.WakeCondition = &WakeCondition{Type: "approval", Reference: callID}
+			// A loop call never parks its Run; the Run update stands in for
+			// its budget reservation, which must commit atomically with it.
 			proposalRun.Revision++
 			proposalRun.UpdatedAt = now
 			approval := &ApprovalCheckpoint{
@@ -43,14 +44,16 @@ func TestMemoryActionProposalIsAtomicAndIdempotent(t *testing.T) {
 				ExpiresAt:         now.Add(time.Hour), Revision: 1, CreatedAt: now, UpdatedAt: now,
 			}
 			call := &ActionCall{
-				ID: callID, Scope: scope, RunID: run.ID, DeploymentID: "agent", SkillID: "release", SkillVersion: "1",
-				Action: "deploy", Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction,
+				ID: callID, Scope: scope, RunID: run.ID, TurnID: "step-1", DeploymentID: "agent", SkillID: "release", SkillVersion: "1",
+				Action: "deploy", Origin: ActionOriginLoop, Execution: ActionExecutionLoop,
+				Status: ActionCallStatusWaitingApproval, Risk: skill.RiskLevelProduction,
 				SideEffect: skill.SideEffectExternal, IdempotencyKey: "deploy-production", ApprovalID: approval.ID,
 				MaxAttempts: 1, AvailableAt: now, Revision: 1, CreatedAt: now, UpdatedAt: now,
 			}
 			call.InvocationDigest = ComputeActionInvocationDigest(call)
 			result, proposalErr := store.CreateActionProposal(ctx, ActionProposalRecord{
 				Call: call, Approval: approval, Run: proposalRun, ExpectedRunRevision: run.Revision,
+				Lease: &AgentRunLeaseGuard{WorkerID: "loop-worker", Now: now},
 				Event: &ActivityEvent{ID: "event-" + callID, Scope: scope, RunID: run.ID, EventType: "action.approval_requested", Summary: "Approval requested", CreatedAt: now},
 			})
 			results <- result
