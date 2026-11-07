@@ -1,57 +1,45 @@
 import { test, expect } from "@playwright/test";
-import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
+import {
+  FINAL_TOOL,
+  ROUTE_TOOL,
+  hasTool,
+  lastUserText,
+  startLoopProvider,
+  tool,
+} from "./fixtures/loop-provider";
+
+const REPLY = "Synthetic channel reply: uncertainty remains explicit.";
 
 test("real daemon replies only to new opted-in messages and persists the choice", async ({
   page,
   request,
 }) => {
   test.setTimeout(60000);
+  // The newest channel message each member step answered.
   const calls: string[] = [];
-  const provider = createServer(async (req, res) => {
-    let raw = "";
-    for await (const chunk of req) raw += chunk;
-    const body = JSON.parse(raw),
-      input = JSON.parse(body.messages[1].content);
-    expect(body.tools[0].function.name).toBe("submit_channel_contribution");
-    expect(body.max_tokens).toBe(2048);
-    expect(input.role.id).toBe("speaker");
-    calls.push(input.trigger.content);
-    res.setHeader("Content-Type", "application/json");
-    res.end(
-      JSON.stringify({
-        choices: [
+  const provider = await startLoopProvider((r) => {
+    // The desktop Team router picks the member; any member will do.
+    if (hasTool(r, ROUTE_TOOL)) {
+      const members = tool(r, ROUTE_TOOL)!.function.parameters.properties
+        .agentId.enum;
+      return {
+        toolCalls: [
           {
-            finish_reason: "tool_calls",
-            message: {
-              tool_calls: [
-                {
-                  type: "function",
-                  function: {
-                    name: "submit_channel_contribution",
-                    arguments: JSON.stringify({
-                      wantsToSpeak: true,
-                      content:
-                        "Synthetic channel reply: uncertainty remains explicit.",
-                      roleRelevant: true,
-                      hasNewInformation: true,
-                    }),
-                  },
-                },
-              ],
-            },
+            name: ROUTE_TOOL,
+            args: { agentId: members[0], reason: "reviews evidence" },
           },
         ],
-        usage: { prompt_tokens: 40, completion_tokens: 20 },
-      }),
-    );
+      };
+    }
+    // A member's model step: plain text is its final answer (D5).
+    expect(hasTool(r, FINAL_TOOL)).toBe(true);
+    calls.push(lastUserText(r));
+    return { text: REPLY };
   });
-  await new Promise<void>((resolve) =>
-    provider.listen(0, "127.0.0.1", resolve),
-  );
   try {
-    const baseUrl = `http://127.0.0.1:${(provider.address() as { port: number }).port}/v1`;
+    const baseUrl = provider.baseUrl;
     expect(
       (
         await request.post("/__desktop/provider", {
@@ -115,13 +103,13 @@ test("real daemon replies only to new opted-in messages and persists the choice"
       thread.getByText("Team replies are on.", { exact: true }),
     ).toBeVisible();
     await post("After opt-in: review this evidence.");
-    await expect(
-      thread.getByText(
-        "Synthetic channel reply: uncertainty remains explicit.",
-        { exact: true },
-      ),
-    ).toBeVisible({ timeout: 15000 });
-    expect(calls).toEqual(["After opt-in: review this evidence."]);
+    await expect(thread.getByText(REPLY, { exact: true })).toBeVisible({
+      timeout: 15000,
+    });
+    // One member step, for the opted-in message. The chat step renders the
+    // message with its header line, so match its text, not the whole entry.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("After opt-in: review this evidence.");
     const channels = await (
       await request.get(
         "/api/v1/conversations?scopeKind=local&scopeId=default&ownerType=team&ownerId=ui-participation-team",
@@ -136,10 +124,32 @@ test("real daemon replies only to new opted-in messages and persists the choice"
         "/api/v1/agent-runs?scopeKind=local&scopeId=default&ownerType=team&ownerId=ui-participation-team",
       )
     ).json();
-    const run = runs.find((r: any) => r.context?.conversationId === channel.id);
+    // The replying Run is the one with a model step (a routing Run's steps
+    // are deterministic); its step carries the fake provider's usage.
+    let run: any;
+    for (const candidate of runs.filter(
+      (r: any) => r.context?.conversationId === channel.id,
+    )) {
+      const steps = (
+        await (
+          await request.get(
+            `/api/v1/agent-turns?scopeKind=local&scopeId=default&runId=${candidate.id}`,
+          )
+        ).json()
+      ).filter((step: any) => step.producer === "model");
+      if (!steps.length) continue;
+      expect(run).toBeUndefined();
+      run = candidate;
+      expect(steps).toHaveLength(1);
+      expect(steps[0]).toMatchObject({
+        status: "completed",
+        toolCallCount: 0,
+        final: true,
+        usage: { inputTokens: 100, outputTokens: 80 },
+      });
+    }
+    expect(run).toBeDefined();
     expect(run.status).toBe("completed");
-    expect(run.budgetUsage.inputTokens).toBe(40);
-    expect(run.budgetUsage.outputTokens).toBe(20);
     const activity = thread.getByRole("region", {
       name: "Reply activity",
       exact: true,
@@ -191,9 +201,9 @@ test("real daemon replies only to new opted-in messages and persists the choice"
       )
     ).json();
     expect(saved.participation.enabled).toBe(false);
-    expect(calls).toEqual(["After opt-in: review this evidence."]);
+    expect(calls).toHaveLength(1);
+    expect(provider.errors).toEqual([]);
   } finally {
-    provider.closeAllConnections();
-    await new Promise<void>((resolve) => provider.close(() => resolve()));
+    await provider.close();
   }
 });

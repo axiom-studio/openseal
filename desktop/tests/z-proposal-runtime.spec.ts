@@ -1,6 +1,72 @@
 import { readFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import {
+  AUTHORING_TOOL,
+  FINAL_TOOL,
+  firstUserText,
+  hasTool,
+  isAuthoring,
+  startLoopProvider,
+  tool,
+  userTexts,
+  type ChatRequest,
+  type Reply,
+} from "./fixtures/loop-provider";
+
+const SUMMARY_GOAL = "Summarize the supplied evidence and note uncertainty";
+const GUIDANCE_GOAL = "Wait for task guidance";
+const HELD_GOAL = "Wait while I review the task";
+const RATE_LIMITED_GOAL = "Wait for provider recovery";
+const GUIDANCE = "Explain the uncertainty before concluding.";
+const SUMMARY_ANSWER =
+  "The supplied evidence supports further investigation, with uncertainty noted.";
+const GUIDED_ANSWER =
+  "Guidance considered: uncertainty explained before concluding.";
+const HOST_UNAVAILABLE =
+  "The agent's step host is unavailable, so the run stopped after retrying.";
+const ANALYSIS =
+  "# Analysis\nThe supplied evidence supports further investigation.\nUncertainty remains explicit.\n";
+const analysisFile = {
+  name: "analysis.md",
+  mediaType: "text/markdown",
+  text: ANALYSIS,
+};
+
+function finalAnswer(answer: string, files?: unknown[]): Reply {
+  return {
+    toolCalls: [
+      {
+        name: FINAL_TOOL,
+        args: files ? { answer, generatedFiles: files } : { answer },
+      },
+    ],
+  };
+}
+
+// The guidance step must see the guidance after the first step's final
+// answer call and its tool reply: the kernel re-checks interventions before
+// it accepts a final answer (D8).
+function expectGuidanceAfterRejectedFinal(r: ChatRequest) {
+  const finalAt = r.messages.findIndex(
+    (m) =>
+      m.role === "assistant" &&
+      (m.tool_calls ?? []).some((call) => call.function.name === FINAL_TOOL),
+  );
+  const replyAt = r.messages.findIndex(
+    (m, i) => i > finalAt && m.role === "tool",
+  );
+  const guidanceAt = r.messages.findIndex(
+    (m, i) =>
+      i > replyAt &&
+      m.role === "user" &&
+      typeof m.content === "string" &&
+      m.content.includes(GUIDANCE),
+  );
+  expect(finalAt).toBeGreaterThan(0);
+  expect(replyAt).toBeGreaterThan(finalAt);
+  expect(guidanceAt).toBeGreaterThan(replyAt);
+}
 
 test("real daemon generation failure can be retried from its saved proposal", async ({
   page,
@@ -95,8 +161,8 @@ for (const inactive of [false, true]) {
     page,
     request,
   }) => {
-    test.setTimeout(60000);
-    const { createServer } = await import("node:http");
+    // P4 waits out the step host retries (2 s + 5 s + 15 s).
+    test.setTimeout(inactive ? 60000 : 120000);
     const agentName = inactive ? "Draft analyst" : "Evidence analyst";
     const intent = {
       schemaVersion: "openseal.authoring-intent/v4",
@@ -112,134 +178,56 @@ for (const inactive of [false, true]) {
         },
       ],
     };
-    let generationCalls = 0;
     let releaseHeldTurn: (() => void) | undefined;
     let heldTurnStarted = false;
     let guidanceStarted = false;
     let releaseGuidance: (() => void) | undefined;
-    let guidanceTurns = 0;
-    const provider = createServer(async (req, res) => {
-      generationCalls += 1;
-      let body = "";
-      for await (const chunk of req) body += chunk;
-      const payload = JSON.parse(body);
-      if (payload.tools[0].function.name === "submit_agent_turn") {
-        const taskInput = JSON.parse(payload.messages[1].content);
-        const guided = taskInput.goal === "Wait for task guidance";
-        if (guided) {
-          guidanceTurns++;
-          if (!taskInput.pendingInterventions?.length) {
-            guidanceStarted = true;
-            await new Promise<void>((resolve) => {
-              releaseGuidance = resolve;
-            });
-          } else {
-            expect(taskInput.pendingInterventions[0].instruction).toBe(
-              "Explain the uncertainty before concluding.",
-            );
-          }
-        }
-        if (
-          JSON.parse(payload.messages[1].content).goal ===
-          "Wait for provider recovery"
-        ) {
-          res.writeHead(429, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: "Synthetic provider rate limit" }));
-          return;
-        }
-
-        if (
-          JSON.parse(payload.messages[1].content).goal ===
-          "Wait while I review the task"
-        ) {
-          heldTurnStarted = true;
-          await new Promise<void>((resolve) => {
-            releaseHeldTurn = resolve;
-          });
-        }
-
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            choices: [
-              {
-                finish_reason: "tool_calls",
-                message: {
-                  tool_calls: [
-                    {
-                      id: "fixture-turn",
-                      type: "function",
-                      function: {
-                        name: "submit_agent_turn",
-                        arguments: JSON.stringify({
-                          schemaVersion: "openseal.hosted-turn-form/v1",
-                          skillSelections: [],
-                          decisions: [],
-                          outputSummary: "Evidence reviewed",
-                          continuationCheckpoint: {},
-                          nextRunStatus: "completed",
-                          runOutput: {
-                            reply:
-                              guided && taskInput.pendingInterventions?.length
-                                ? "Guidance considered: uncertainty explained before concluding."
-                                : "The supplied evidence supports further investigation, with uncertainty noted.",
-                            generatedFiles: [
-                              {
-                                name: "analysis.md",
-                                mediaType: "text/markdown",
-                                text: "# Analysis\nThe supplied evidence supports further investigation.\nUncertainty remains explicit.\n",
-                              },
-                            ],
-                          },
-                          runError: "",
-                          completionEvidenceRefs: [],
-                          evidenceClaims: [],
-                        }),
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
-            usage: { prompt_tokens: 100, completion_tokens: 80 },
-          }),
-        );
-        return;
+    const provider = await startLoopProvider(async (r) => {
+      if (isAuthoring(r))
+        return { toolCalls: [{ name: AUTHORING_TOOL, args: intent }] };
+      // No step here is tool-free: host_unavailable failures are never
+      // explained by the model.
+      if (!r.tools?.length) throw new Error("unexpected tool-free model step");
+      expect(hasTool(r, FINAL_TOOL)).toBe(true);
+      const goal = firstUserText(r);
+      if (goal.includes(RATE_LIMITED_GOAL)) return { status: 429 };
+      if (goal.includes(HELD_GOAL)) {
+        heldTurnStarted = true;
+        await new Promise<void>((resolve) => {
+          releaseHeldTurn = resolve;
+        });
+        return finalAnswer("Review finished.", [analysisFile]);
       }
-      expect(payload.tools[0].function.name).toBe("submit_authoring_intent");
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          choices: [
-            {
-              finish_reason: "tool_calls",
-              message: {
-                tool_calls: [
-                  {
-                    id: "fixture-intent",
-                    type: "function",
-                    function: {
-                      name: "submit_authoring_intent",
-                      arguments: JSON.stringify(intent),
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        }),
-      );
+      if (goal.includes(GUIDANCE_GOAL)) {
+        if (!userTexts(r).some((text) => text.includes(GUIDANCE))) {
+          guidanceStarted = true;
+          await new Promise<void>((resolve) => {
+            releaseGuidance = resolve;
+          });
+          return finalAnswer("Initial answer.");
+        }
+        expectGuidanceAfterRejectedFinal(r);
+        return finalAnswer(GUIDED_ANSWER, [analysisFile]);
+      }
+      if (goal.includes(SUMMARY_GOAL))
+        return finalAnswer(SUMMARY_ANSWER, [analysisFile]);
+      throw new Error(`unexpected model step for goal ${JSON.stringify(goal)}`);
     });
-    await new Promise<void>((resolve) =>
-      provider.listen(0, "127.0.0.1", resolve),
-    );
+    // Model steps of one task, by its goal (authoring and tool-free calls
+    // excluded).
+    const loopCalls = (goal: string) =>
+      provider.calls.filter(
+        (r) =>
+          !isAuthoring(r) &&
+          !!r.tools?.length &&
+          firstUserText(r).includes(goal),
+      );
     try {
-      const address = provider.address() as { port: number };
       expect(
         (
           await request.post("/__desktop/provider", {
             data: {
-              baseUrl: `http://127.0.0.1:${address.port}/v1`,
+              baseUrl: provider.baseUrl,
               model: "synthetic-installation-model",
               apiKey: "synthetic-installation-key",
             },
@@ -361,19 +349,47 @@ for (const inactive of [false, true]) {
           fullPage: true,
         });
         await page.setViewportSize({ width: 1440, height: 1000 });
+        const summaryCreated = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            response.url().endsWith("/api/v1/agent-runs"),
+        );
         await page.locator('form button[type="submit"]').click();
+        const summaryRun = (await (await summaryCreated).json()).run;
         const inspector = page.getByRole("complementary", {
           name: "Work details",
         });
         await expect(
-          inspector.getByText(
-            "The supplied evidence supports further investigation, with uncertainty noted.",
-            { exact: true },
-          ),
+          inspector.getByText(SUMMARY_ANSWER, { exact: true }),
         ).toBeVisible({ timeout: 30000 });
         await expect(
           inspector.getByText("Completed", { exact: true }),
         ).toBeVisible();
+        // P1: one model step that called the final answer tool with a file.
+        const summaryCalls = loopCalls(SUMMARY_GOAL);
+        expect(summaryCalls).toHaveLength(1);
+        expect(
+          tool(summaryCalls[0], FINAL_TOOL)?.function.parameters.properties,
+        ).toHaveProperty("generatedFiles");
+        const summarySteps = await (
+          await request.get(
+            `/api/v1/agent-turns?scopeKind=local&scopeId=default&runId=${summaryRun.id}`,
+          )
+        ).json();
+        expect(summarySteps).toHaveLength(1);
+        expect(summarySteps[0]).toMatchObject({
+          toolCallCount: 1,
+          status: "completed",
+        });
+        expect(summarySteps[0]).not.toHaveProperty("decisions");
+        expect(summarySteps[0]).not.toHaveProperty("requestedActions");
+        const summaryArtifacts = await (
+          await request.get(
+            `/api/v1/artifacts?scopeKind=local&scopeId=default&producerRunId=${summaryRun.id}`,
+          )
+        ).json();
+        expect(summaryArtifacts).toHaveLength(1);
+        expect(summaryArtifacts[0].provenance.turnId).toBe(summarySteps[0].id);
         await expect(
           inspector.getByRole("button", { name: "Copy result", exact: true }),
         ).toBeVisible();
@@ -394,7 +410,7 @@ for (const inactive of [false, true]) {
         const generatedFile = await generatedDownload;
         expect(generatedFile.suggestedFilename()).toBe("analysis.md");
         expect(readFileSync((await generatedFile.path())!, "utf8")).toBe(
-          "# Analysis\nThe supplied evidence supports further investigation.\nUncertainty remains explicit.\n",
+          ANALYSIS,
         );
         await inspector.getByText("Artifacts", { exact: true }).click();
         await page.evaluate(() => {
@@ -458,25 +474,25 @@ for (const inactive of [false, true]) {
           .click();
         await page
           .getByRole("textbox", { name: "Describe the work" })
-          .fill("Wait for task guidance");
+          .fill(GUIDANCE_GOAL);
         await page.locator('form button[type="submit"]').click();
         await expect.poll(() => guidanceStarted).toBe(true);
         await inspector.getByRole("button", { name: "Add guidance" }).click();
-        await inspector
-          .getByLabel("Guidance for this task")
-          .fill("Explain the uncertainty before concluding.");
+        await inspector.getByLabel("Guidance for this task").fill(GUIDANCE);
         await inspector
           .getByRole("button", { name: "Save guidance", exact: true })
           .click();
         await expect(inspector.getByText(/Guidance saved/)).toBeFocused();
         releaseGuidance?.();
         await expect(
-          inspector.getByText(
-            "Guidance considered: uncertainty explained before concluding.",
-            { exact: true },
-          ),
+          inspector.getByText(GUIDED_ANSWER, { exact: true }),
         ).toBeVisible({ timeout: 30000 });
-        expect(guidanceTurns).toBe(2);
+        // P2: the first final answer was refused for the new guidance and
+        // never shown; the second step saw the guidance.
+        expect(loopCalls(GUIDANCE_GOAL)).toHaveLength(2);
+        await expect(
+          inspector.getByText("Initial answer.", { exact: true }),
+        ).toHaveCount(0);
         await inspector.getByText("Artifacts", { exact: true }).click();
         await expect(inspector.locator(".artifact-list li")).toHaveCount(1);
         await page
@@ -485,7 +501,7 @@ for (const inactive of [false, true]) {
           .click();
         await page
           .getByRole("textbox", { name: "Describe the work" })
-          .fill("Wait while I review the task");
+          .fill(HELD_GOAL);
         const created = page.waitForResponse(
           (response) =>
             response.request().method() === "POST" &&
@@ -573,27 +589,34 @@ for (const inactive of [false, true]) {
           .click();
         await page
           .getByRole("textbox", { name: "Describe the work" })
-          .fill("Wait for provider recovery");
+          .fill(RATE_LIMITED_GOAL);
+        const rateLimitedCreated = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" &&
+            response.url().endsWith("/api/v1/agent-runs"),
+        );
         await page.locator('form button[type="submit"]').click();
+        const rateLimitedRun = (await (await rateLimitedCreated).json()).run;
+        // P4: every model step gets HTTP 429, which the step host reports as
+        // unavailable. The kernel retries (2 s, 5 s, 15 s), then fails the Run
+        // with host_unavailable and no model explanation.
         await expect(
-          inspector.getByText(/The model provider was unavailable/),
-        ).toBeVisible({ timeout: 30000 });
+          inspector.getByText(/This attempt ended with an error/),
+        ).toBeVisible({ timeout: 40000 });
         await expect(
-          inspector.getByRole("button", {
-            name: "Open provider settings",
-            exact: true,
-          }),
+          inspector.getByText(HOST_UNAVAILABLE, { exact: true }),
         ).toBeVisible();
-        await expect(inspector.locator("time")).toBeVisible();
-        await inspector
-          .getByRole("button", { name: "Pause work", exact: true })
-          .click();
-        await expect(
-          inspector.getByRole("status").filter({ hasText: "Work paused." }),
-        ).toBeFocused();
-        await expect(
-          inspector.getByText(/Resume returns it to its previous state/),
-        ).toBeVisible();
+        const failedRun = await (
+          await request.get(
+            `/api/v1/agent-runs/${rateLimitedRun.id}?scopeKind=local&scopeId=default`,
+          )
+        ).json();
+        expect(failedRun.status).toBe("failed");
+        expect(failedRun.failureExplanation?.code).toBe("host_unavailable");
+        expect(failedRun.failureExplanation?.explained).toBeFalsy();
+        expect(failedRun.failureExplanation?.stepError).toContain("HTTP 429");
+        // The first attempt plus three retries.
+        expect(loopCalls(RATE_LIMITED_GOAL)).toHaveLength(4);
       }
       await page.reload();
       await expect(
@@ -614,7 +637,7 @@ for (const inactive of [false, true]) {
             () => document.documentElement.scrollWidth <= innerWidth,
           ),
         ).toBe(true);
-        const callsBeforeActivation = generationCalls;
+        const callsBeforeActivation = provider.calls.length;
         const activationKeys: (string | undefined)[] = [];
         await page.route("**/change-sets/*/activation", async (route) => {
           activationKeys.push(route.request().headers()["idempotency-key"]);
@@ -650,7 +673,7 @@ for (const inactive of [false, true]) {
         expect(activationKeys).toHaveLength(2);
         expect(activationKeys[0]).toBeTruthy();
         expect(activationKeys[1]).toBe(activationKeys[0]);
-        expect(generationCalls).toBe(callsBeforeActivation);
+        expect(provider.calls.length).toBe(callsBeforeActivation);
         const childPath = `/api/v1/authoring/workforce/change-sets/${childID}?scopeKind=local&scopeId=default`;
         const child = await (await request.get(childPath)).json();
         expect(child.parentId).toBe(id);
@@ -730,13 +753,11 @@ for (const inactive of [false, true]) {
           fullPage: true,
         });
       }
+      expect(provider.errors).toEqual([]);
     } finally {
       releaseHeldTurn?.();
       releaseGuidance?.();
-      provider.closeAllConnections();
-      await new Promise<void>((resolve, reject) =>
-        provider.close((error) => (error ? reject(error) : resolve())),
-      );
+      await provider.close();
     }
   });
 }
