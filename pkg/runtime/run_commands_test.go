@@ -270,6 +270,63 @@ func TestResolveHumanInterventionQueuesRunAndPreservesAudit(t *testing.T) {
 	}
 }
 
+func TestResolveHumanInterventionCarriesActionCallID(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewRunCommandService(store)
+	activity := NewRunActivityService(store, store)
+	scope := Scope{Kind: "tenant", ID: "human"}
+	now := time.Date(2026, 7, 27, 7, 15, 0, 0, time.UTC)
+	actor := ActivityActor{Type: "user", ID: "operator"}
+	// held: the step that asked is still running; parked: the Run waits on it.
+	for _, parked := range []bool{false, true} {
+		created, err := service.CreateAgentRun(ctx, CreateAgentRunRequest{
+			Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "browser-agent"}, AssignedAgentID: "browser-agent",
+			Goal: "Continue only after a human completes the challenge", Source: RunSourceSchedule,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := HumanInterventionRequest{
+			ID: "human-request", Kind: "capability_challenge", Status: HumanInterventionStatusPending,
+			ActionCallID: "browser-click", Summary: "Human intervention required", CreatedAt: now,
+		}
+		transition := RunTransitionRequest{ExpectedRevision: created.Run.Revision, Status: AgentRunStatusRunning, HumanInterventions: []HumanInterventionRequest{request}}
+		run, _, err := activity.TransitionRun(ctx, scope, created.Run.ID, transition)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := AgentRunStatusRunning
+		if parked {
+			run, _, err = activity.TransitionRun(ctx, scope, run.ID, RunTransitionRequest{
+				ExpectedRevision: run.Revision, Status: AgentRunStatusWaitingForEvent,
+				WakeCondition: &WakeCondition{Type: "human_intervention", Reference: request.ID},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want = AgentRunStatusQueued
+		}
+		resolved, err := service.CommandAgentRun(ctx, AgentRunCommandRequest{
+			Scope: scope, RunID: run.ID, ExpectedRevision: run.Revision, Kind: AgentRunCommandResolveHumanIntervention,
+			HumanInterventionID: request.ID, Instruction: "CAPTCHA completed", Actor: actor,
+		})
+		if err != nil {
+			t.Fatalf("parked=%v: %v", parked, err)
+		}
+		if resolved.Run.Status != want || resolved.Run.Revision != run.Revision+1 {
+			t.Fatalf("parked=%v: status %s revision %d after %d", parked, resolved.Run.Status, resolved.Run.Revision, run.Revision)
+		}
+		if len(resolved.Run.PendingInterventions) != 1 || resolved.Run.PendingInterventions[0].ActionCallID != request.ActionCallID ||
+			resolved.Run.PendingInterventions[0].Instruction != "CAPTCHA completed" {
+			t.Fatalf("parked=%v: intervention %#v", parked, resolved.Run.PendingInterventions)
+		}
+		if resolved.Run.HumanInterventions[0].Status != HumanInterventionStatusResolved {
+			t.Fatalf("parked=%v: request %#v", parked, resolved.Run.HumanInterventions[0])
+		}
+	}
+}
+
 func TestRunPausePreservesWaitingCondition(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()

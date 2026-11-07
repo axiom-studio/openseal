@@ -548,16 +548,30 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 		if requestID == "" || instruction == "" {
 			return transition, fmt.Errorf("%w: human intervention id and resolution instruction are required", ErrInvalidRunCommand)
 		}
-		if current.Status != AgentRunStatusWaitingForEvent || current.WakeCondition == nil || current.WakeCondition.Type != "human_intervention" || current.WakeCondition.Reference != requestID {
-			return transition, fmt.Errorf("%w: run is not waiting on human intervention %s", ErrInvalidRunTransition, requestID)
+		if isTerminalAgentRunStatus(current.Status) {
+			return transition, fmt.Errorf("%w: cannot resolve a human intervention of a %s run", ErrInvalidRunTransition, current.Status)
 		}
-		resolved, found := resolveHumanIntervention(current.HumanInterventions, requestID, req.Actor, instruction, now)
+		humanWait := func(condition *WakeCondition) bool {
+			return condition != nil && condition.Type == "human_intervention" && condition.Reference == requestID
+		}
+		if current.Status == AgentRunStatusPaused && humanWait(current.PausedWakeCondition) {
+			return transition, fmt.Errorf("%w: resume the run before resolving human intervention %s", ErrInvalidRunTransition, requestID)
+		}
+		resolved, actionCallID, found := resolveHumanIntervention(current.HumanInterventions, requestID, req.Actor, instruction, now)
 		if !found {
 			return transition, fmt.Errorf("%w: human intervention %s is not pending", ErrInvalidRunTransition, requestID)
 		}
-		transition.Status = AgentRunStatusQueued
+		if current.Status == AgentRunStatusWaitingForEvent && humanWait(current.WakeCondition) {
+			transition.Status = AgentRunStatusQueued
+		} else {
+			// The step that asked for this person is still held (A5): the
+			// resolution only bumps the Run revision, so the step-end park
+			// CAS fails and re-plans instead of waiting on a settled request.
+			transition.Status = current.Status
+			transition.WakeCondition = current.WakeCondition
+		}
 		transition.HumanInterventions = resolved
-		transition.Intervention = &AgentRunIntervention{ID: uuid.NewString(), Actor: req.Actor, Instruction: instruction, CreatedAt: now}
+		transition.Intervention = &AgentRunIntervention{ID: uuid.NewString(), Actor: req.Actor, Instruction: instruction, CreatedAt: now, ActionCallID: actionCallID}
 		transition.EventType = "run.human_intervention_resolved"
 		transition.CausationID = requestID
 		transition.Payload = map[string]interface{}{"humanInterventionId": requestID, "status": HumanInterventionStatusResolved}
@@ -570,7 +584,9 @@ func commandTransition(current *AgentRun, req AgentRunCommandRequest, now time.T
 	return transition, nil
 }
 
-func resolveHumanIntervention(values []HumanInterventionRequest, requestID string, actor ActivityActor, resolution string, now time.Time) ([]HumanInterventionRequest, bool) {
+// resolveHumanIntervention resolves the pending request and returns the
+// action call that asked for it.
+func resolveHumanIntervention(values []HumanInterventionRequest, requestID string, actor ActivityActor, resolution string, now time.Time) ([]HumanInterventionRequest, string, bool) {
 	result := append([]HumanInterventionRequest(nil), values...)
 	for index := range result {
 		if result[index].ID != requestID || result[index].Status != HumanInterventionStatusPending {
@@ -582,9 +598,9 @@ func resolveHumanIntervention(values []HumanInterventionRequest, requestID strin
 		result[index].Resolution = resolution
 		result[index].ResolvedBy = &resolvedBy
 		result[index].ResolvedAt = &resolvedAt
-		return result, true
+		return result, result[index].ActionCallID, true
 	}
-	return result, false
+	return result, "", false
 }
 
 func resolvePendingHumanInterventions(values []HumanInterventionRequest, status HumanInterventionStatus, actor ActivityActor, resolution string, now time.Time) []HumanInterventionRequest {

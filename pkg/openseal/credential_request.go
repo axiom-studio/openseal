@@ -144,11 +144,16 @@ type interactionContinuation struct {
 	requestedFor string
 }
 
-// continueInteractionRun resumes the Run waiting for a settled in-chat
-// request with guidance for the model. It reports false when the Run already
-// ended, or no longer acts for the umbrella and member that asked, so the
-// host starts a new reply instead.
+// continueInteractionRun hands a settled in-chat request to the Run that
+// asked for it, under the Run's revision CAS. A Run parked on the request is
+// queued with the result for the requesting tool call. A Run that is still
+// held (its step has not parked yet) keeps its status, and the appended result
+// bumps its revision, so the step-end park CAS fails and re-plans instead of
+// waiting on a settled request. It reports false when the Run already ended,
+// or no longer acts for the umbrella and member that asked, so the host starts
+// a new reply instead.
 func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContinuation) (bool, error) {
+	interventionID := c.interventionPrefix + c.requestID
 	for attempt := 0; attempt < 4; attempt++ {
 		run, err := e.store.GetAgentRun(ctx, c.scope, c.runID)
 		if err != nil {
@@ -157,20 +162,9 @@ func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContin
 		if run == nil {
 			return false, nil
 		}
-		waiting := run.Status == runtime.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
-			run.WakeCondition.Type == c.wakeType && run.WakeCondition.Reference == c.requestID
-		if !waiting {
-			if run.Status == runtime.AgentRunStatusPaused && run.PausedWakeCondition != nil &&
-				run.PausedWakeCondition.Type == c.wakeType && run.PausedWakeCondition.Reference == c.requestID {
-				// The user paused this work; resuming it later finds the
-				// settled request through the requested action's retry.
-				return true, nil
-			}
-			switch run.Status {
-			case runtime.AgentRunStatusCompleted, runtime.AgentRunStatusFailed, runtime.AgentRunStatusCanceled:
-				return false, nil
-			}
-			return true, nil
+		switch run.Status {
+		case runtime.AgentRunStatusCompleted, runtime.AgentRunStatusFailed, runtime.AgentRunStatusCanceled:
+			return false, nil
 		}
 		if c.requestedFor != "" && run.ActingUser != c.requestedFor {
 			return false, nil
@@ -179,14 +173,23 @@ func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContin
 		if err != nil || !resumable {
 			return false, err
 		}
+		waiting := run.Status == runtime.AgentRunStatusWaitingForEvent && run.WakeCondition != nil &&
+			run.WakeCondition.Type == c.wakeType && run.WakeCondition.Reference == c.requestID
+		if !waiting && interactionDelivered(run, interventionID) {
+			return true, nil
+		}
+		status, wake := runtime.AgentRunStatusQueued, (*runtime.WakeCondition)(nil)
+		if !waiting {
+			status, wake = run.Status, run.WakeCondition
+		}
 		actor := runtime.ActivityActor{Type: "service", ID: c.coordinator}
 		_, _, err = runtime.NewRunActivityService(e.store, e.store).TransitionRun(ctx, c.scope, run.ID, runtime.RunTransitionRequest{
-			ExpectedRevision: run.Revision, Status: runtime.AgentRunStatusQueued,
+			ExpectedRevision: run.Revision, Status: status, WakeCondition: wake,
 			Summary: c.summary, EventType: c.eventType,
 			Actor: actor, CorrelationID: c.requestID, CausationID: c.actionCallID,
 			Payload: map[string]interface{}{"requestId": c.requestID, "status": c.status, "revision": c.revision},
-			Intervention: &runtime.AgentRunIntervention{ID: c.interventionPrefix + c.requestID, Actor: actor,
-				Instruction: c.instruction, CreatedAt: c.updatedAt},
+			Intervention: &runtime.AgentRunIntervention{ID: interventionID, Actor: actor,
+				Instruction: c.instruction, CreatedAt: c.updatedAt, ActionCallID: c.actionCallID},
 		})
 		if errors.Is(err, runtime.ErrRevisionConflict) {
 			continue
@@ -194,8 +197,21 @@ func (e *Engine) continueInteractionRun(ctx context.Context, c interactionContin
 		if err != nil {
 			return false, err
 		}
-		e.wakeAgentWorkersForScope(c.scope)
+		if waiting {
+			e.wakeAgentWorkersForScope(c.scope)
+		}
 		return true, nil
 	}
 	return false, runtime.ErrRevisionConflict
+}
+
+// interactionDelivered reports whether the Run already holds this request's
+// settled result, so a replayed settle does not append it twice.
+func interactionDelivered(run *runtime.AgentRun, interventionID string) bool {
+	for _, intervention := range run.PendingInterventions {
+		if intervention.ID == interventionID {
+			return true
+		}
+	}
+	return false
 }
