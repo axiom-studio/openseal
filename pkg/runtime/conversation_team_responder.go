@@ -161,11 +161,11 @@ func teamMemberRunRequest(routing *AgentRun, conversation *Conversation, trigger
 }
 
 // agentConversationTeam is the short Team context a member's turn gets.
+// The routing reason is a respond_to line of the run context and the Team
+// rules are a system section (teamChannelRules).
 type agentConversationTeam struct {
-	Notes         string                        `json:"routingNotes,omitempty"`
-	RoutingReason string                        `json:"routingReason,omitempty"`
-	Roster        []agentConversationTeamMember `json:"roster"`
-	Rules         string                        `json:"rules"`
+	Notes  string                        `json:"routingNotes,omitempty"`
+	Roster []agentConversationTeamMember `json:"roster"`
 }
 
 type agentConversationTeamMember struct {
@@ -198,8 +198,7 @@ func (r *ConversationRunTurnRunner) agentConversationTeamContext(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	reason, _ := run.Context[routingReasonContextKey].(string)
-	team := &agentConversationTeam{Notes: roster.notes, RoutingReason: reason, Rules: teamChannelRules, Roster: make([]agentConversationTeamMember, 0, len(bindings))}
+	team := &agentConversationTeam{Notes: roster.notes, Roster: make([]agentConversationTeamMember, 0, len(bindings))}
 	for _, binding := range bindings {
 		info := roster.members[binding.Participant.ID]
 		member := agentConversationTeamMember{
