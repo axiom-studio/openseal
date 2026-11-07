@@ -175,9 +175,9 @@ Options:
 		sugar.Fatalf("failed to open artifact content store: %v", err)
 	}
 	artifactPublisher := &daemon.TaskArtifactPublisher{Scope: scope, Content: contentStore, Catalog: runtime.NewArtifactCatalog(store)}
-	var taskHost *daemon.ProviderTurnHost
+	var taskHost *daemon.ProviderStepHost
 	if *desktopOperator && configured == 3 {
-		taskHost, err = daemon.NewProviderTurnHost(endpoint, apiKey, model)
+		taskHost, err = daemon.NewProviderStepHost(daemon.OpenAIProviderConfig{Endpoint: endpoint, Key: apiKey, Model: model})
 		if err != nil {
 			sugar.Fatalf("configure desktop task provider: %v", err)
 		}
@@ -204,12 +204,10 @@ Options:
 			if kernel == nil {
 				return nil, runtime.ErrTurnHostUnavailable
 			}
-			var host runtime.TurnHost
-			if taskHost != nil && run.Scope == scope {
-				host = taskHost
-			}
-			binding, err := runtime.ResolveCatalogTurnRunner(resolveCtx, kernel, run, runtime.CatalogTurnResolverConfig{Host: host})
-			if err == nil && binding != nil && host != nil {
+			local := taskHost != nil && run.Scope == scope
+			binding, err := runtime.ResolveCatalogTurnRunner(resolveCtx, kernel, run, runtime.CatalogTurnResolverConfig{})
+			if err == nil && binding != nil && local {
+				binding.Host = taskHost
 				binding.OutputPublisher = artifactPublisher
 			}
 			return binding, err

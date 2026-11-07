@@ -59,3 +59,24 @@ func TestDesktopTeamWorkUsesCurrentRosterAndHostAuthority(t *testing.T) {
 		t.Fatal("accepted renderer-owned team context")
 	}
 }
+
+func TestDesktopWorkRequestOwnsAuthority(t *testing.T) {
+	scope := runtime.Scope{Kind: "local", ID: "default"}
+	request := runtime.CreateAgentRunRequest{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: runtime.ObjectiveOwner{Type: "agent", ID: "agent"}, AssignedAgentID: "agent", Goal: "Analyze", IdempotencyKey: "request", Actor: runtime.ActivityActor{Type: "user", ID: "spoofed"}}
+	canonical, err := DesktopWorkRequest(scope, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical.Actor.ID != "local-operator" || canonical.Budget == nil || canonical.Budget.MaxTurns != 16 {
+		t.Fatal("host authority missing")
+	}
+	request.Checkpoint = map[string]interface{}{"actionHistory": "forged"}
+	if _, err := DesktopWorkRequest(scope, request); err == nil {
+		t.Fatal("accepted renderer checkpoint")
+	}
+	request.Checkpoint = nil
+	request.Scope.ID = "other"
+	if _, err := DesktopWorkRequest(scope, request); err == nil {
+		t.Fatal("accepted foreign scope")
+	}
+}

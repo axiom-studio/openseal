@@ -152,9 +152,8 @@ func (p *TaskArtifactPublisher) PublishFinalOutput(ctx context.Context, pub runt
 	return map[string]interface{}{"artifactRefs": refs}, nil
 }
 
-// The three functions below serve the old per-Turn path that ProviderTurnHost
-// (turn_host.go, deleted by oss-2) and daemon.go's OutputPublisher wiring
-// (replaced by oss-5) still compile against. They go with those files.
+// The two functions below serve daemon.go's old OutputPublisher wiring, which
+// oss-5 replaces with binding.FinalOutput. They go with it.
 
 func generatedFiles(output map[string]interface{}, status runtime.AgentRunStatus) ([]generatedFile, error) {
 	raw, present := output[generatedFilesProperty]
@@ -169,13 +168,6 @@ func generatedFiles(output map[string]interface{}, status runtime.AgentRunStatus
 		return nil, errors.New("generated files exceed the response limit")
 	}
 	return decodeGeneratedFiles(payload)
-}
-
-func generatedOutputSchema() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "properties": map[string]interface{}{
-		"reply":                map[string]interface{}{"type": "string"},
-		generatedFilesProperty: generatedFilesSchema(),
-	}, "additionalProperties": true}
 }
 
 func (p *TaskArtifactPublisher) PublishTurnOutput(ctx context.Context, run *runtime.AgentRun, turn *runtime.AgentTurn) (map[string]interface{}, error) {

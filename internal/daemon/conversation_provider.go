@@ -1,13 +1,10 @@
 package daemon
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -16,15 +13,16 @@ import (
 // DesktopConversationRouter picks the Team member who answers an unaddressed
 // channel message with one small call to the desktop's model provider. It
 // posts nothing; on any error the kernel applies its fixed fallback order.
+// It shares the step host's provider client.
 type DesktopConversationRouter struct {
-	host *ProviderTurnHost
+	client *openAIClient
 }
 
-func NewDesktopConversationRouter(host *ProviderTurnHost) (*DesktopConversationRouter, error) {
-	if host == nil {
+func NewDesktopConversationRouter(host *ProviderStepHost) (*DesktopConversationRouter, error) {
+	if host == nil || host.client == nil {
 		return nil, errors.New("desktop routing requires a model provider")
 	}
-	return &DesktopConversationRouter{host: host}, nil
+	return &DesktopConversationRouter{client: host.client}, nil
 }
 
 const desktopRouterInstructions = "You route one Team channel message to exactly one Team member, the way a team lead would. " +
@@ -74,7 +72,7 @@ func (r *DesktopConversationRouter) Route(ctx context.Context, request runtime.C
 		"agentId": map[string]interface{}{"type": "string", "enum": ids}, "reason": map[string]interface{}{"type": "string", "maxLength": 120},
 	}}
 	body, err := json.Marshal(map[string]interface{}{
-		"model": r.host.model, "max_completion_tokens": 256,
+		"model": r.client.model, "max_completion_tokens": 256,
 		"messages":    []map[string]string{{"role": "system", "content": desktopRouterInstructions}, {"role": "user", "content": string(input)}},
 		"tools":       []interface{}{map[string]interface{}{"type": "function", "function": map[string]interface{}{"name": "route_message", "description": "Pick the member who answers", "parameters": schema}}},
 		"tool_choice": map[string]interface{}{"type": "function", "function": map[string]string{"name": "route_message"}},
@@ -82,23 +80,13 @@ func (r *DesktopConversationRouter) Route(ctx context.Context, request runtime.C
 	if err != nil {
 		return runtime.ConversationRouteDecision{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.host.endpoint, bytes.NewReader(body))
+	raw, err := r.client.post(ctx, body)
 	if err != nil {
-		return runtime.ConversationRouteDecision{}, err
-	}
-	req.Header.Set("Authorization", "Bearer "+r.host.key)
-	req.Header.Set("Content-Type", "application/json")
-	response, err := r.host.client.Do(req)
-	if err != nil {
+		var status *providerHTTPError
+		if errors.As(err, &status) {
+			return runtime.ConversationRouteDecision{}, fmt.Errorf("the routing provider returned HTTP %d", status.Status)
+		}
 		return runtime.ConversationRouteDecision{}, errors.New("the routing provider could not be reached")
-	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return runtime.ConversationRouteDecision{}, fmt.Errorf("the routing provider returned HTTP %d", response.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
-	if err != nil {
-		return runtime.ConversationRouteDecision{}, err
 	}
 	var envelope struct {
 		Choices []struct {
