@@ -1,8 +1,71 @@
 import { test, expect } from "@playwright/test";
-import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import AxeBuilder from "@axe-core/playwright";
+import {
+  AUTHORING_TOOL,
+  COMPLETION_REVIEW_TOOL,
+  DELEGATE_TOOL,
+  FINAL_TOOL,
+  REQUEST_DECISION_TOOL,
+  ROUTE_TOOL,
+  type ChatRequest,
+  firstUserText,
+  hasTool,
+  isAuthoring,
+  startLoopProvider,
+  tool,
+  userTexts,
+} from "./fixtures/loop-provider";
+
+// The coordinator answers the recipient's clarification question with this
+// kernel tool (pkg/runtime/control_delegate.go).
+const DELEGATE_REPLY_TOOL = "agent_delegate_reply";
+const COORDINATOR_GOAL = "Coordinate evidence review.";
+const DELEGATION_NARRATION = "Asking the reviewer to check the evidence.";
+const QUESTION = "Which reporting period should I use?";
+const GUIDANCE_MARK = "July reporting period";
+const CLARIFICATION_ANSWER = "Use the July reporting period.";
+const TEAM_ANSWER = "Team evidence review completed with uncertainty noted.";
+
+type DelegationResult = {
+  requestId: string;
+  status: string;
+  question?: string;
+  answer?: string;
+};
+
+// latestDelegation is the newest agent_delegate or agent_delegate_reply
+// result in the step's session: the delegated request's state as the
+// coordinator last saw it.
+function latestDelegation(r: ChatRequest): DelegationResult | undefined {
+  const ids = new Set<string>();
+  let latest: DelegationResult | undefined;
+  for (const message of r.messages) {
+    for (const call of message.tool_calls ?? [])
+      if (
+        call.function.name === DELEGATE_TOOL ||
+        call.function.name === DELEGATE_REPLY_TOOL
+      )
+        ids.add(call.id);
+    if (
+      message.role === "tool" &&
+      message.tool_call_id &&
+      ids.has(message.tool_call_id)
+    )
+      try {
+        latest = JSON.parse(message.content ?? "");
+      } catch {
+        // A refused call renders as "Error: ..." text, not a JSON result.
+        latest = {
+          requestId: "",
+          status: "error",
+          answer: message.content ?? "",
+        };
+      }
+  }
+  return latest;
+}
 
 for (const inactive of [false, true]) {
   test(`real daemon creates a reviewed ${inactive ? "inactive" : "active"} team and its roster`, async ({
@@ -66,155 +129,123 @@ for (const inactive of [false, true]) {
     const intakeSeen = new Set<string>();
     let waitingForGuidance = false;
 
-    const provider = createServer(async (req, res) => {
-      let body = "";
-      for await (const chunk of req) body += chunk;
-      const input = JSON.parse(body);
-      if (input.tools[0].function.name === "submit_agent_turn") {
-        const turn = JSON.parse(input.messages[1].content);
-        let form: any = {
-          schemaVersion: "openseal.hosted-turn-form/v1",
-          nextRunStatus: "completed",
-          outputSummary: "Evidence checked",
-          runOutput: {
-            reply: "Team evidence review completed with uncertainty noted.",
-          },
-        };
-        if (turn.inputContext?.agentRequestInbox) {
-          const requestID = turn.inputContext.agentRequestInbox.requestId;
-          const seen = intakeSeen.has(requestID);
-          intakeSeen.add(requestID);
-          form.runOutput = {
-            agentRequestDecision: {
-              decision: seen ? "accept" : "request_clarification",
-              message: seen
-                ? "Reporting period is clear."
-                : "Which reporting period should I use?",
-            },
-          };
-        } else if (turn.inputContext?.agentRequestCompletionReview)
-          form.runOutput = {
-            agentRequestCompletionReviewDecision: {
-              decision: "approve",
-              message: "The result addresses the delegated goal.",
-            },
-          };
-        else if (
-          turn.goal === "Coordinate evidence review." &&
-          !turn.continuationCheckpoint?.delegated
-        ) {
-          expect(turn.eligibleAgents).toHaveLength(1);
-          form = {
-            ...form,
-            nextRunStatus: "running",
-            runOutput: {},
-            continuationCheckpoint: { delegated: true },
-            proposedDelegation: {
-              stepId: "review-evidence",
-              assignedAgentId: turn.eligibleAgents[0].id,
-              goal: "Independently check the evidence.",
-              checkpoint: {},
-              budget: {
-                ...turn.budget.minimumChild,
-                maxTurns: 6,
-                maxAttempts: 8,
-                maxTotalTokens: Math.max(
-                  64000,
-                  turn.budget.minimumChild.maxTotalTokens,
-                ),
-              },
-            },
-          };
-        }
-        if (
-          turn.goal === "Coordinate evidence review." &&
-          turn.continuationCheckpoint?.delegated &&
-          !turn.continuationCheckpoint?.clarified
-        ) {
-          waitingForGuidance = true;
-          await clarificationGate;
-          if (turn.pendingInterventions?.length) {
-            expect(turn.pendingInterventions[0].instruction).toContain(
-              "July reporting period",
-            );
-            form = {
-              ...form,
-              nextRunStatus: "running",
-              runOutput: {},
-              continuationCheckpoint: { delegated: true, clarified: true },
-              proposedDelegation: {
-                stepId: "review-evidence",
-                assignedAgentId: turn.eligibleAgents[0].id,
-                goal: "Independently check the evidence.",
-                clarification: "Use the July reporting period.",
-                checkpoint: {},
-                budget: { ...turn.budget.minimumChild },
-              },
-            };
-          }
-        }
-        res.setHeader("Content-Type", "application/json");
-        res.end(
-          JSON.stringify({
-            choices: [
-              {
-                finish_reason: "tool_calls",
-                message: {
-                  tool_calls: [
-                    {
-                      id: "team-work-fixture",
-                      type: "function",
-                      function: {
-                        name: "submit_agent_turn",
-                        arguments: JSON.stringify(form),
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
-          }),
+    const provider = await startLoopProvider(async (r) => {
+      if (isAuthoring(r)) {
+        expect(JSON.parse(r.messages[1].content ?? "{}").prompt).toContain(
+          "Create one team.",
         );
-        return;
+        generationCalls++;
+        return { toolCalls: [{ name: AUTHORING_TOOL, args: intent }] };
       }
-      expect(input.tools[0].function.name).toBe("submit_authoring_intent");
-      expect(JSON.parse(input.messages[1].content).prompt).toContain(
-        "Create one team.",
-      );
-      generationCalls++;
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          choices: [
+      // T2: the recipient's intake decision. It asks once, and accepts once
+      // the coordinator's answer is in its session.
+      if (hasTool(r, REQUEST_DECISION_TOOL)) {
+        const key = firstUserText(r);
+        const answered =
+          intakeSeen.has(key) ||
+          userTexts(r).some((text) => text.includes(CLARIFICATION_ANSWER));
+        intakeSeen.add(key);
+        return {
+          toolCalls: [
             {
-              finish_reason: "tool_calls",
-              message: {
-                tool_calls: [
-                  {
-                    id: "team-fixture",
-                    type: "function",
-                    function: {
-                      name: "submit_authoring_intent",
-                      arguments: JSON.stringify(intent),
-                    },
-                  },
-                ],
+              name: REQUEST_DECISION_TOOL,
+              args: answered
+                ? { decision: "accept", message: "Reporting period is clear." }
+                : { decision: "request_clarification", message: QUESTION },
+            },
+          ],
+        };
+      }
+      // T4: the coordinator's review of the delegated result.
+      if (hasTool(r, COMPLETION_REVIEW_TOOL))
+        return {
+          toolCalls: [
+            {
+              name: COMPLETION_REVIEW_TOOL,
+              args: {
+                decision: "approve",
+                message: "The result addresses the delegated goal.",
               },
             },
           ],
-        }),
-      );
+        };
+      if (hasTool(r, ROUTE_TOOL))
+        return {
+          toolCalls: [
+            {
+              name: ROUTE_TOOL,
+              args: {
+                agentId: tool(r, ROUTE_TOOL)!.function.parameters.properties
+                  .agentId.enum[0],
+              },
+            },
+          ],
+        };
+      if (firstUserText(r).includes(COORDINATOR_GOAL)) {
+        expect(hasTool(r, DELEGATE_TOOL)).toBe(true);
+        const delegation = latestDelegation(r);
+        // T1: delegate to the only other member, narrating the step.
+        if (!delegation) {
+          const targets = tool(r, DELEGATE_TOOL)!.function.parameters.properties
+            .agentId.enum;
+          expect(targets).toHaveLength(1);
+          return {
+            text: DELEGATION_NARRATION,
+            toolCalls: [
+              {
+                name: DELEGATE_TOOL,
+                args: {
+                  agentId: targets[0],
+                  goal: "Independently check the evidence.",
+                },
+              },
+            ],
+          };
+        }
+        if (delegation.status === "clarification_requested") {
+          expect(delegation.question).toBe(QUESTION);
+          // T3: hold until the test saves guidance. The kernel re-checks
+          // interventions before it accepts this final answer (D8) and calls
+          // again with the guidance in the session.
+          if (!userTexts(r).some((text) => text.includes(GUIDANCE_MARK))) {
+            waitingForGuidance = true;
+            await clarificationGate;
+            return {
+              toolCalls: [
+                {
+                  name: FINAL_TOOL,
+                  args: { answer: "Waiting for the reporting period." },
+                },
+              ],
+            };
+          }
+          return {
+            toolCalls: [
+              {
+                name: DELEGATE_REPLY_TOOL,
+                args: {
+                  requestId: delegation.requestId,
+                  answer: CLARIFICATION_ANSWER,
+                },
+              },
+            ],
+          };
+        }
+        // T5: the accepted delegation came back completed.
+        expect(delegation.status).toBe("completed");
+        return {
+          toolCalls: [{ name: FINAL_TOOL, args: { answer: TEAM_ANSWER } }],
+        };
+      }
+      // Member work: a plain-text final answer.
+      return { text: TEAM_ANSWER };
     });
-    await new Promise<void>((resolve) =>
-      provider.listen(0, "127.0.0.1", resolve),
-    );
     try {
-      const address = provider.address() as { port: number };
       expect(
         (
           await request.post("/__desktop/provider", {
             data: {
-              baseUrl: `http://127.0.0.1:${address.port}/v1`,
+              baseUrl: provider.baseUrl,
               model: "synthetic-team-model",
               apiKey: "synthetic-team-key",
             },
@@ -453,7 +484,7 @@ for (const inactive of [false, true]) {
           .selectOption(installed.deployment.roster[0].agentDeploymentId);
         await page
           .getByLabel("What should the team accomplish?", { exact: true })
-          .fill("Coordinate evidence review.");
+          .fill(COORDINATOR_GOAL);
         const submittedWork = page.waitForRequest(
           (request) =>
             request.method() === "POST" &&
@@ -475,7 +506,7 @@ for (const inactive of [false, true]) {
           .filter({ hasText: "Which reporting period should I use?" })
           .click();
         await expect(
-          page.getByText("Which reporting period should I use?", {
+          page.getByText(QUESTION, {
             exact: true,
           }),
         ).toBeVisible({ timeout: 10000 });
@@ -510,19 +541,25 @@ for (const inactive of [false, true]) {
           .poll(
             async () => {
               const rows = await (await request.get(workPath)).json();
-              const root = rows.find(
-                (r: any) => r.goal === "Coordinate evidence review.",
-              );
+              const root = rows.find((r: any) => r.goal === COORDINATOR_GOAL);
               return root?.status === "failed" ? root.error : root?.status;
             },
             { timeout: 30000 },
           )
           .toBe("completed");
         const rows = await (await request.get(workPath)).json();
-        const root = rows.find(
-          (r: any) => r.goal === "Coordinate evidence review.",
-        );
-        expect(root.output.reply).toContain("uncertainty noted");
+        const root = rows.find((r: any) => r.goal === COORDINATOR_GOAL);
+        expect(root.output.summary).toBe(TEAM_ANSWER);
+        expect(provider.errors).toEqual([]);
+        // T1: the coordinator's first model step carries its narration (D11).
+        const rootSteps = await (
+          await request.get(
+            `/api/v1/agent-turns?scopeKind=local&scopeId=default&runId=${root.id}`,
+          )
+        ).json();
+        expect(
+          rootSteps.find((step: any) => step.sequence === 1)?.outputSummary,
+        ).toBe(DELEGATION_NARRATION);
         const collaborations = await (
           await request.get(
             `/api/v1/agent-requests?scopeKind=local&scopeId=default&sourceRunId=${root.id}`,
@@ -711,10 +748,7 @@ for (const inactive of [false, true]) {
       }
     } finally {
       releaseClarification();
-      await new Promise<void>((resolve, reject) => {
-        provider.close((error) => (error ? reject(error) : resolve()));
-        provider.closeAllConnections();
-      });
+      await provider.close();
     }
   });
 }
