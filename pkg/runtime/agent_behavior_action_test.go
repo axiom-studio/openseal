@@ -33,7 +33,7 @@ func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
 }
 
 func TestAgentManagementExecutorAcceptsActivePreviousContractVersion(t *testing.T) {
-	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", "1.3.1", "1.3.2", AgentManagementSkillVersion} {
+	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", "1.3.1", "1.3.2", "1.4.0", AgentManagementSkillVersion} {
 		t.Run(version, func(t *testing.T) {
 			definition := AgentManagementSkill()
 			definition.Version = version

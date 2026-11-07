@@ -16,7 +16,8 @@ import (
 
 const (
 	AgentManagementSkillID        = "openseal.agents"
-	AgentManagementSkillVersion   = "1.4.0"
+	AgentManagementSkillVersion   = "1.5.0"
+	agentManagementSkillVersionV7 = "1.4.0" // still bound until the reconcile upgrades bindings
 	agentManagementSkillVersionV6 = "1.3.2"
 	agentManagementSkillVersionV5 = "1.3.1"
 	agentManagementSkillVersionV4 = "1.3.0"
@@ -26,6 +27,11 @@ const (
 	AgentActionAmendBehavior      = "amend_behavior"
 	AgentActionListChannels       = "list_channels"
 	AgentActionConfigureChannel   = "configure_channel"
+	AgentActionListAgents         = "list_agents"
+	AgentActionCreateAgent        = "create_agent"
+	AgentActionUpdateAgent        = "update_agent"
+	AgentActionTryAgent           = "try_agent"
+	agentProfileResourceType      = "agent_profile"
 	AgentManagementEndpoint       = "kernel://agents"
 	agentBehaviorResourceType     = "agent_definition"
 	agentBehaviorCandidateVersion = ".action."
@@ -42,7 +48,7 @@ var ErrAgentBehaviorFixed = errors.New("agent definition policy does not allow A
 func AgentManagementSkill() *skill.Definition {
 	return &skill.Definition{
 		ID: AgentManagementSkillID, Version: AgentManagementSkillVersion,
-		Name: "Agents", Description: "Propose governed changes to the current Agent's behavior.",
+		Name: "Agents", Description: "Change the current Agent's behavior, and build new Agents in chat with review.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: AgentManagementEndpoint},
 		Actions: map[string]skill.Action{
 			AgentActionListChannels: {
@@ -145,6 +151,10 @@ func AgentManagementSkill() *skill.Definition {
 					"required": []interface{}{"resourceType", "operation", "replayed", "amendment", "deployment", "activation", "endpoint"},
 				},
 			},
+			AgentActionListAgents:  agentListAgentsAction(),
+			AgentActionCreateAgent: agentCreateAgentAction(),
+			AgentActionUpdateAgent: agentUpdateAgentAction(),
+			AgentActionTryAgent:    agentTryAgentAction(),
 		},
 	}
 }
@@ -355,9 +365,38 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 	if deployment.ActiveVersion == candidateVersion {
 		return d.replayedResult(ctx, input.Call, run)
 	}
-	amendment, err := findAgentBehaviorAmendment(ctx, d.agents, input.Call.Scope, deployment.ID, candidateVersion)
+	candidate := cloneAgentDefinitionForAction(definition)
+	candidate.Version = candidateVersion
+	applyAgentBehaviorArguments(candidate, args)
+	amendment, deployment, activation, err := activateAgentAmendment(
+		ctx, d.store, d.agents, input.Call.Scope, deployment, definition, candidate, changes, input.Call,
+		deploymentID, strings.TrimSpace(args.Rationale), "Approved Agent behavior change from conversation",
+	)
 	if err != nil {
 		return nil, err
+	}
+	return agentBehaviorActionResult(amendment, deployment, activation, false), nil
+}
+
+// activateAgentAmendment proposes candidate as an amendment of deployment
+// (idempotent on call.ID), resolves it from the call's approved checkpoint
+// when policy requires one, and activates it. candidate.Version must be the
+// call's candidate version. Without an approval, proposerID is the actor.
+func activateAgentAmendment(
+	ctx context.Context,
+	store ActionStore,
+	agents *kernelagent.Registry,
+	scope Scope,
+	deployment *kernelagent.AgentDeployment,
+	definition, candidate *kernelagent.AgentDefinition,
+	changes map[string]interface{},
+	call *ActionCall,
+	proposerID, rationale, reason string,
+) (*kernelagent.DefinitionAmendment, *kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error) {
+	scopeReference := capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}
+	amendment, err := findAgentBehaviorAmendment(ctx, agents, scope, deployment.ID, candidate.Version)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	if amendment == nil {
 		additionalAllowedFields := make([]string, 0, len(changes))
@@ -369,63 +408,53 @@ func (d *AgentBehaviorActionDispatcher) DispatchAction(ctx context.Context, inpu
 			}
 		}
 		if len(additionalAllowedFields) > 0 {
-			if input.Call.ApprovalID == "" {
-				return nil, errors.New("Agent behavior fields outside its autonomous amendment policy require an approved action checkpoint")
+			if call.ApprovalID == "" {
+				return nil, nil, nil, errors.New("Agent behavior fields outside its autonomous amendment policy require an approved action checkpoint")
 			}
-			if _, approvalErr := approvedAgentBehaviorCheckpoint(ctx, d.store, input.Call); approvalErr != nil {
-				return nil, approvalErr
+			if _, approvalErr := approvedAgentBehaviorCheckpoint(ctx, store, call); approvalErr != nil {
+				return nil, nil, nil, approvalErr
 			}
 		}
-		candidate := cloneAgentDefinitionForAction(definition)
-		candidate.Version = candidateVersion
-		applyAgentBehaviorArguments(candidate, args)
-		amendment, err = d.agents.ProposeAmendment(ctx, kernelagent.ProposeAmendmentRequest{
-			Scope: capability.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}, DeploymentID: deployment.ID,
-			Candidate: candidate, ProposerType: "agent", ProposerID: deploymentID,
-			Rationale: strings.TrimSpace(args.Rationale), EvidenceRefs: append([]string(nil), input.Call.EvidenceRefs...),
-			IdempotencyKey: input.Call.ID, ExpectedDeploymentRevision: deployment.Revision,
+		amendment, err = agents.ProposeAmendment(ctx, kernelagent.ProposeAmendmentRequest{
+			Scope: scopeReference, DeploymentID: deployment.ID,
+			Candidate: candidate, ProposerType: "agent", ProposerID: proposerID,
+			Rationale: rationale, EvidenceRefs: append([]string(nil), call.EvidenceRefs...),
+			IdempotencyKey: call.ID, ExpectedDeploymentRevision: deployment.Revision,
 			AdditionalAllowedFields: additionalAllowedFields,
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 	}
-	actorType, actorID := "agent", deploymentID
-	if input.Call.ApprovalID != "" {
-		approval, approvalErr := approvedAgentBehaviorCheckpoint(ctx, d.store, input.Call)
+	actorType, actorID := "agent", proposerID
+	if call.ApprovalID != "" {
+		approval, approvalErr := approvedAgentBehaviorCheckpoint(ctx, store, call)
 		if approvalErr != nil {
-			return nil, approvalErr
+			return nil, nil, nil, approvalErr
 		}
 		actorType, actorID = approval.DecisionBy.Type, approval.DecisionBy.ID
 	}
 	if amendment.Status == kernelagent.AmendmentAwaitingApproval {
-		if input.Call.ApprovalID == "" {
-			return nil, errors.New("agent definition policy requires an approved action checkpoint")
+		if call.ApprovalID == "" {
+			return nil, nil, nil, errors.New("agent definition policy requires an approved action checkpoint")
 		}
-		approval, approvalErr := approvedAgentBehaviorCheckpoint(ctx, d.store, input.Call)
+		approval, approvalErr := approvedAgentBehaviorCheckpoint(ctx, store, call)
 		if approvalErr != nil {
-			return nil, approvalErr
+			return nil, nil, nil, approvalErr
 		}
-		amendment, err = d.agents.ResolveAmendmentFromGovernedApproval(ctx, kernelagent.ResolveAmendmentRequest{
-			Scope: capability.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}, AmendmentID: amendment.ID,
+		amendment, err = agents.ResolveAmendmentFromGovernedApproval(ctx, kernelagent.ResolveAmendmentRequest{
+			Scope: scopeReference, AmendmentID: amendment.ID,
 			ExpectedRevision: amendment.Revision, Approved: true,
 			ActorType: approval.DecisionBy.Type, ActorID: approval.DecisionBy.ID, Reason: approval.DecisionReason,
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, nil, err
 		}
 	}
 	if amendment.Status != kernelagent.AmendmentReady && amendment.Status != kernelagent.AmendmentApproved {
-		return nil, fmt.Errorf("agent amendment is not ready after governed action approval: %s", amendment.Status)
+		return nil, nil, nil, fmt.Errorf("agent amendment is not ready after governed action approval: %s", amendment.Status)
 	}
-	amendment, deployment, activation, err := d.agents.ActivateAmendment(
-		ctx, capability.ScopeReference{Kind: input.Call.Scope.Kind, ID: input.Call.Scope.ID}, amendment.ID, amendment.Revision,
-		actorType, actorID, "Approved Agent behavior change from conversation",
-	)
-	if err != nil {
-		return nil, err
-	}
-	return agentBehaviorActionResult(amendment, deployment, activation, false), nil
+	return agents.ActivateAmendment(ctx, scopeReference, amendment.ID, amendment.Revision, actorType, actorID, reason)
 }
 
 func (d *AgentBehaviorActionDispatcher) listChannels(ctx context.Context, scope Scope, deploymentID string) (map[string]interface{}, error) {
@@ -1176,7 +1205,21 @@ func canonicalActionReview(definition *skill.Definition, action skill.Action) sk
 // the Agent action dispatcher still executes. Hosts use it instead of keeping
 // their own copy of the version list.
 func IsSupportedAgentManagementSkillVersion(version string) bool {
-	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV6 || version == agentManagementSkillVersionV5 || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
+	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV7 || version == agentManagementSkillVersionV6 || version == agentManagementSkillVersionV5 || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
+}
+
+// isAgentBuilderAction matches the builder actions. They exist only in the
+// current contract, so no older binding can expose them.
+func isAgentBuilderAction(bound *skill.BoundAction) bool {
+	if bound == nil || bound.Definition == nil || bound.Definition.ID != AgentManagementSkillID ||
+		bound.Definition.Version != AgentManagementSkillVersion {
+		return false
+	}
+	switch bound.Action.Name {
+	case AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent, AgentActionTryAgent:
+		return true
+	}
+	return false
 }
 
 func isAgentMutationAction(bound *skill.BoundAction) bool {
