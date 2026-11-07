@@ -257,9 +257,3 @@ func TestPublishFinalOutputRejectsForeignScope(t *testing.T) {
 		t.Fatalf("foreign records: %d %v", len(records), err)
 	}
 }
-
-// fileOutput builds old per-Turn runOutput for turn_host_test.go; it goes when
-// oss-2 deletes that file.
-func fileOutput(files ...generatedFile) map[string]interface{} {
-	return map[string]interface{}{"reply": "Prepared the requested files.", "generatedFiles": files}
-}
