@@ -47,8 +47,8 @@ export OPENAI_API_KEY='...'
 ./openseal daemon --config ./local.yaml --context ./context.yaml --standalone-operator
 ```
 
-`--standalone-operator` adds local action approvals, ClawHub mutations, outreach
-delivery where a source policy allows it, and authoring retry and refinement.
+`--standalone-operator` adds local action approvals, ClawHub mutations, and
+authoring retry and refinement.
 Workforce evaluation, approval, and installation require the authenticated
 desktop mode or an embedding host. See [Workforces](workforces.md) and
 [Security](security.md).

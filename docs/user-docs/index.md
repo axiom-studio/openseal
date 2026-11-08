@@ -53,8 +53,8 @@ The design holds to one rule throughout: the kernel never manufactures authority
 | [Getting Started](getting-started.md) | Requirements, building from source, starting the daemon, and connecting the terminal client |
 | [Core Concepts](concepts.md) | The execution model, capability discovery, scopes, owners, and the two execution paths |
 | [Agents and Teams](agents-and-teams.md) | Definitions, deployments, activation, rollback, the amendment sequence, and agent requests |
-| [Objectives, Projects, and Runs](objectives-and-runs.md) | The portfolio, the Run lifecycle and its model steps, steering commands, and event routing |
-| [Skills, Actions, and Approvals](skills-and-approvals.md) | Bindings as least privilege, action calls, durable approvals, ClawHub distribution, and governed outreach |
+| [Objectives and Runs](objectives-and-runs.md) | The portfolio, the Run lifecycle and its model steps, steering commands, and event routing |
+| [Skills, Actions, and Approvals](skills-and-approvals.md) | Bindings as least privilege, action calls, durable approvals, and ClawHub distribution |
 | [Workforces](workforces.md) | Prompt-to-workforce authoring, change sets, and portable bundles |
 | [Configuration](configuration.md) | The daemon configuration file, the standalone context, credential references, and environment variables |
 | [Security Boundaries](security.md) | What OpenSeal does not provide, the two guardrails, scopes as partitions, and secret handling |

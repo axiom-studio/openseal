@@ -1,6 +1,6 @@
 # Configuration
 
-OpenSeal reads two files: a daemon configuration naming ports, storage, and source policies, and a standalone context holding credential references. Neither ever holds a secret value.
+OpenSeal reads two files: a daemon configuration naming ports and storage, and a standalone context holding credential references. Neither ever holds a secret value.
 
 ## The Daemon Configuration File
 
@@ -12,7 +12,6 @@ The daemon reads a YAML file named by `--config`, defaulting to `daemon.yaml` in
 | `storage.driver` | `string` | `sqlite` |
 | `storage.path` | `string` | `data/openseal.db` |
 | `storage.artifactsPath` | `string` | `data/artifacts` |
-| `sourcePolicies` | list | empty |
 
 A minimal configuration:
 
@@ -27,28 +26,9 @@ storage:
 
 > **Unknown fields are rejected, not ignored.** A misspelled key fails at load rather than silently taking a default, so a configuration that starts is a configuration that was fully understood.
 
-Validation enforces three rules. The storage driver must be exactly `sqlite`. Both storage paths must be non-empty. Every source policy must carry a valid scope and a valid policy, and no scope may list the same policy identifier and version twice.
+Validation enforces two rules. The storage driver must be exactly `sqlite`. Both storage paths must be non-empty.
 
 Relative storage paths resolve against the directory holding the configuration file, not against the shell's working directory.
-
-## Source Policies
-
-Source policies are credential-free, scope-bound network authorities. A policy names the sources an Agent may reach and, optionally, enables outreach for its scope.
-
-```yaml
-sourcePolicies:
-  - scope:
-      kind: local
-      id: default
-    policy:
-      id: research-sources
-      version: "1.0.0"
-      enabled: true
-```
-
-No source access and no outreach delivery is available for a scope that has no listed policy, which makes the empty default a closed one rather than an open one.
-
-The static `sourcePolicies` list in this file is distinct from the durable source-policy lifecycle exposed under `/api/v1/source-policies`. The lifecycle routes require a service the standalone daemon does not install — see [API](api.md).
 
 ## The Standalone Context
 
@@ -113,13 +93,13 @@ Only the opaque reference and the display label cross into the authoring layer, 
 
 ## Credentials Decide Which Workers Exist
 
-The context file has a second effect that is easy to miss. Every scope appearing on a credential entry contributes a worker scope, and those are merged with the scopes contributed by outreach-enabled source policies.
+The context file has a second effect that is easy to miss. Every scope appearing on a credential entry contributes a worker scope. Under `--desktop-operator` with a configured model provider, the daemon's own `--scope` is added as well.
 
 ```text
-credential scopes + outreach-enabled policy scopes → worker scopes → Run and action workers
+credential scopes (+ desktop scope) → worker scopes → Run workers
 ```
 
-> **A daemon with no credentials and no outreach-enabled policies derives no worker scopes, and therefore starts no Run or action workers.** Run creation is not advertised in that state. If Runs cannot be created on an otherwise healthy daemon, this is the first thing to check. See [Objectives and Runs](objectives-and-runs.md).
+> **A daemon with no credentials and no desktop model provider derives no worker scopes, and therefore starts no Run workers.** Run creation is not advertised in that state. If Runs cannot be created on an otherwise healthy daemon, this is the first thing to check. See [Objectives and Runs](objectives-and-runs.md).
 
 ## Environment Variables
 
@@ -142,7 +122,7 @@ credential scopes + outreach-enabled policy scopes → worker scopes → Run and
 | `--context` | Path to the standalone context file | `context.yaml` |
 | `--scope` | Durable standalone authoring scope as `kind:id` | `local:default` |
 | `--listen` | Override `api.listenAddr`; port `0` selects a free port | configuration value |
-| `--standalone-operator` | Grant local action, ClawHub, outreach, and authoring retry/refinement authorities; requires loopback | off |
+| `--standalone-operator` | Grant local action, ClawHub, and authoring retry/refinement authorities; requires loopback | off |
 | `--desktop-operator` | Grant authenticated local workspace review and installation; requires loopback, `OPENSEAL_API_TOKEN`, and a local scope | off |
 | `--help` | Print help | — |
 

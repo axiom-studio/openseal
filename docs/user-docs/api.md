@@ -55,15 +55,6 @@ A substantial part of this surface is conditional. Fifty-five distinct `501` res
 | GET | `/api/v1/objectives/{id}` |
 | PUT | `/api/v1/objectives/{id}` |
 
-## Projects
-
-| Method | Path |
-|---|---|
-| POST | `/api/v1/projects` |
-| GET | `/api/v1/projects` |
-| GET | `/api/v1/projects/{id}` |
-| PATCH | `/api/v1/projects/{id}` |
-
 ## Agent Runs and Model Steps
 
 | Method | Path |
@@ -242,19 +233,6 @@ Participation rounds are how multiple Agents take turns in one channel without t
 | POST | `/api/v1/event-source-subscriptions/{id}/checkpoint-advancements` |
 | POST | `/api/v1/events` |
 
-## Source Monitors and Outreach
-
-| Method | Path |
-|---|---|
-| GET | `/api/v1/projects/{id}/source-monitors/{monitorId}/observations` |
-| GET | `/api/v1/projects/{id}/source-monitors/{monitorId}/checkpoint` |
-| POST | `/api/v1/projects/{id}/outreach` |
-| GET | `/api/v1/projects/{id}/outreach` |
-| GET | `/api/v1/projects/{id}/outreach/{threadId}` |
-| POST | `/api/v1/projects/{id}/outreach/{threadId}/messages/{messageId}/deliveries` |
-
-Outreach is advertised only when the store implements the project, source monitor, outreach, and outreach action contracts together. Thread creation additionally requires a Skill catalog, and delivery additionally requires a wired dispatcher. Even under `--standalone-operator`, delivery is refused for any scope whose source policy does not enable outreach.
-
 ## Source Policies
 
 | Method | Path |
@@ -268,9 +246,9 @@ Outreach is advertised only when the store implements the project, source monito
 | POST | `/api/v1/source-policies/{id}/revocations` |
 | GET | `/api/v1/source-policies/{id}/activations` |
 
-These routes manage the durable source-policy lifecycle, which is distinct from the static `sourcePolicies` list in the daemon configuration file.
+These routes manage the durable source-policy lifecycle.
 
-> **All eight fail closed in a standalone deployment.** They require a source-policy lifecycle service the standalone daemon does not install, so every one returns `501 Not Implemented`. Configure source policies through the daemon configuration file instead — see [Configuration](configuration.md).
+> **All eight fail closed in a standalone deployment.** They require a source-policy lifecycle service the standalone daemon does not install, so every one returns `501 Not Implemented`; source policies are available only through an embedding host that wires the lifecycle service.
 
 ## Workforce Authoring
 

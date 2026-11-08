@@ -18,11 +18,11 @@ flowchart TB
     subgraph Kernel
         Authoring[Workforce ChangeSets]
         Registry[Agent / Team registries]
-        Portfolio[Objectives / Projects]
+        Portfolio[Objectives]
         Runs[Runs / session logs / dependencies]
         Collaboration[Requests / channels / activity]
         Governance[Skills / actions / approvals]
-        Evidence[Artifacts / observations / outreach]
+        Evidence[Activity / artifacts]
         Runbooks[Deterministic runbooks]
     end
 
@@ -62,7 +62,6 @@ erDiagram
     AGENT_DEPLOYMENT ||--o{ ROSTER_ASSIGNMENT : fills
     AGENT_DEPLOYMENT ||--o{ OBJECTIVE : owns
     TEAM_DEPLOYMENT ||--o{ OBJECTIVE : owns
-    PROJECT }o--|{ OBJECTIVE : groups
     OBJECTIVE ||--o{ RUNBOOK_ACTIVATION : owns
     RUNBOOK_ACTIVATION ||--o{ RUN : triggers
     OBJECTIVE ||--o{ RUN : advances
@@ -111,7 +110,7 @@ revision, digest, and apply receipt.
 
 Generation is claimed by a leased worker and can recover after process failure.
 The candidate may contain one Agent, several Agents, a Team, objective
-templates, Skill requirements, and a Project blueprint. The compiler never
+templates, and Skill requirements. The compiler never
 invents a credential value, source allowlist, or approval authority.
 
 Models and product surfaces do not edit compiler-owned kernel fields. OpenSeal
@@ -137,7 +136,7 @@ Agent approval destination. The model never writes `approvalDestinations`,
 provider bindings, or principal mappings directly.
 
 Application is atomic in persistent stores: reviewed Agent/Team definitions,
-deployments, objective instances, Skill bindings, Project records, and the
+deployments, objective instances, Skill bindings, and the
 receipt commit together. Expected revision, candidate digest, and idempotency
 key prevent stale or duplicate application.
 
@@ -186,10 +185,9 @@ trigger creates a bounded Run attributed to both the Objective and the exact
 Runbook activation. Normalized event routing matches active Runbook event
 triggers and applies persisted idempotency keys before creating Runs.
 
-Source monitors use the same model: a long-lived monitor definition and
-checkpoint produce bounded observations and Runs. Kubernetes informers, message
-streams, or other external listeners are host adapters that submit normalized
-events; they are not alternate execution engines.
+Kubernetes informers, message streams, or other external listeners are host
+adapters that submit normalized events; they are not alternate execution
+engines.
 
 ## Skills and action governance
 
@@ -270,7 +268,7 @@ conversation Run reconciler can turn accepted channel participation into
 ordinary Runs; messages remain a projection and command surface over canonical
 work.
 
-## Evidence and delivery
+## Activity and artifacts
 
 Activity is append-only and scoped. Run, action, approval, request, Team,
 conversation, source, and artifact services emit the same activity envelope.
@@ -279,9 +277,6 @@ exposing provider chain-of-thought.
 
 Artifacts store immutable metadata, versions, hashes, provenance, retention,
 and an opaque content reference. Content upload/download is an optional adapter.
-Source monitoring stores normalized observations and monotonic checkpoints.
-Governed outreach requires source evidence, a truthful public identity, an
-external Skill action, policy, and an approval-aware delivery Run.
 
 Short-lived files passed into an execution sandbox are not Artifacts. The
 portable execution transport bounds their size and lifetime, exposes only
@@ -307,8 +302,8 @@ conversation changes, source checkpoints, ChangeSet application, and artifacts.
 The HTTP server exposes a static route set but constructs its capability
 document from the stores and adapters actually installed. Optional operations
 such as Run creation, action approval resolution, workforce lifecycle
-decisions, artifact content, ClawHub mutation, source policy lifecycle, and
-outreach delivery are advertised only when wired.
+decisions, artifact content, ClawHub mutation, and source policy lifecycle are
+advertised only when wired.
 
 The TUI loads that document before rendering its workspace. It does not
 manufacture permissions, statuses, approval eligibility, or durable state. An
@@ -330,7 +325,7 @@ flowchart LR
 ```
 
 An authoring draft is not an active catalog entry. The compiler may surface an
-exact server-supplied proposal when a requested monitor lacks authority, but it
+exact server-supplied proposal when a requested source lacks authority, but it
 keeps the ChangeSet blocked. Registration and activation are separate audited
 operations. A fresh authoring pass can consume the version only after the
 lifecycle reports it active. Source policies contain no credentials: a host may

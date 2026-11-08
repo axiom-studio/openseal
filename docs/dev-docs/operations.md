@@ -32,7 +32,7 @@ including health and capability discovery. It is one shared secret, not a
 multi-user authorization system. `--desktop-operator` requires this token, a
 loopback listener, and a local workspace scope; it provides the desktop's
 local owner review and installation authority. `--standalone-operator` permits
-action approvals, ClawHub mutations, configured outreach, and authoring retry
+action approvals, ClawHub mutations, and authoring retry
 and refinement, but not workforce evaluation, approval, or apply.
 
 ## Standalone context, local Vault, and model-backed authoring
@@ -61,8 +61,8 @@ credential leases instead of the local context.
 
 Standalone mode uses one SQLite store for definitions, deployments, objectives,
 Runs, turns, leases, budgets, actions, approvals, collaboration, conversations,
-activity, artifacts, Skills, ChangeSets, Projects, source checkpoints, and
-outreach. Artifact bytes are stored separately beneath `artifactsPath` and tied
+activity, artifacts, Skills, ChangeSets, source policies, and event-source
+checkpoints. Artifact bytes are stored separately beneath `artifactsPath` and tied
 to immutable catalog records by size and digest.
 
 ```mermaid
@@ -146,16 +146,14 @@ The host must advertise only operations it has actually wired. Secrets must be
 resolved after authorization and schema validation. Do not log raw provider
 responses when they can contain sensitive content.
 
-## Source access and outreach
+## Source access
 
 Source policies are credential-free, scope-bound network authority used by
-configured source and outreach workers. Daemon YAML can seed standalone
-configuration; the source-policy lifecycle API and persistent store are the
-canonical runtime control surface. A policy version must specify
+configured source workers. The source-policy lifecycle API and persistent store
+are the canonical runtime control surface. A policy version must specify
 an ID, version, enabled state, one or more HTTPS hosts, a bounded maximum item
 count, and explicit normalized path/method restrictions before lifecycle
-registration. Outreach additionally requires an
-explicit approval policy and maximum body size.
+registration.
 
 Policy validation does not perform network I/O. Dispatch adapters must enforce
 the exact decision on every request and redirect. Source policy configuration
@@ -177,19 +175,11 @@ exercises independent objective portfolios, a Team, child Runs, deterministic
 actions, restart recovery, collaboration, a winner message, and a verified game
 log artifact without external network calls.
 
-The default suite also includes a three-Agent market-research Project. It
-joins recurring source monitoring, deduplicated provenance-linked evidence,
-restart recovery, cited PDF generation, approval-gated email delivery, and a
-durable provider receipt into one portable end-to-end journey. Source and
-delivery transports are deterministic governed fixtures in this test; host
-credentials are resolved ephemerally and the resolved value is verified absent
-from persisted kernel state.
-
-Run either acceptance scenario directly while developing:
+Run the acceptance scenario directly while developing:
 
 ```bash
 go test ./pkg/openseal \
-  -run 'Test(ThreeAgentSnakesAndLadders|MarketResearchProject)' \
+  -run 'TestThreeAgentSnakesAndLadders' \
   -count=1
 ```
 

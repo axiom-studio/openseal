@@ -50,12 +50,11 @@ Depending on the connected server, the workspace can expose:
   definition amendments, including self-proposed conversation changes and
   direct invocation of callable operations from the exact active runbook
 - **Teams** — Team definitions, roster, lifecycle, and governed amendments
-- **Objectives / Projects** — desired outcomes with their Runbook methods, plus
-  optional shared multi-objective Project context; schedules remain Runbook
-  triggers rather than Project or Objective settings
+- **Objectives** — desired outcomes with their Runbook methods; schedules
+  remain Runbook triggers rather than Objective settings
 - **Sources** — durable event-source subscriptions, connector health, checkpoints,
   and CAS-protected pause, resume, and retirement
-- **Work** — Runs, lifecycle commands, guidance, evidence, and grounding
+- **Work** — Runs, lifecycle commands, and guidance
 - **Requests / Approvals** — delegation, handoffs, clarification, completion,
   and exact action decisions
 - **Channels** — durable Team conversations, coordination audit, read cursors,
@@ -64,7 +63,6 @@ Depending on the connected server, the workspace can expose:
   lifecycle, and connection state supplied by the connected host
 - **Skills** — ClawHub lifecycle, deployment bindings, model-visible actions,
   and governed source policy lifecycle
-- **Outreach** — evidence-linked drafts and governed delivery Runs
 - **Activity / Evidence** — canonical audit projection and artifact downloads
 
 ## Guided first-use experience
@@ -72,7 +70,7 @@ Depending on the connected server, the workspace can expose:
 A full standalone daemon opens on **Home** instead of presenting every kernel
 primitive at once. Home answers four questions: what exists, what is active, what needs
 attention, and what to do next. The primary destinations are Create, Agents,
-Teams, Marketplace, Work, and Channels. Goals, Projects, Inbox, Approvals,
+Teams, Marketplace, Work, and Channels. Goals, Inbox, Approvals,
 Sources, Integrations, Activity, Evidence, and imports remain available under a
 secondary **More** row.
 
@@ -121,8 +119,6 @@ Section shortcuts work while the list panel is focused:
 | `T` | Teams |
 | `o` | Goals (objectives) |
 | `S` | Event sources |
-| `i` | Projects |
-| `O` | Outreach |
 | `I` | Conversation integrations |
 | `s` | Marketplace (Skills) |
 | `w` | Work / Runs |
@@ -144,18 +140,16 @@ Common controls:
 | `n` | Begin a supported creation or install operation; in Readiness, start the selected active runbook operation |
 | `r` | Refresh; in a failed Workforce proposal, prepare a governed retry |
 | `m` | Open the contextual message, refinement, or amendment composer; in Activity, load the next page |
-| `p` | Pause/resume selected Run, Agent, Team, Project, or event source; pin/unpin a Skill |
+| `p` | Pause/resume selected Run, Runbook, Agent, Team, or event source; pin/unpin a Skill |
 | `g` | Guide a selected active Run; in Objectives, reconcile due schedules |
 | `y` / `x` | Approve/accept or reject the selected eligible governed item |
 | `q` / `M` | Request or provide clarification for an Agent request |
 | `e` / `Enter` | Apply, edit, evaluate, complete, or expand according to current section |
-| `[` / `]` | Move among relevant credential, configuration, amendment, Skill, or evidence choices |
-| `{` / `}` | Move among outreach actions or grounding pages |
+| `[` / `]` | Move among relevant credential, configuration, amendment, adapter, or Skill choices |
 | `b` | Save selected Workforce placement or begin a Skill binding |
-| `v` / `V` | Verify/activate or expand evidence/grounding according to section |
+| `v` | Verify or activate according to section |
 | `u` / `U` | Update selected or all installed ClawHub Skills |
 | `d` | Download selected artifact |
-| `D` | Create a delivery Run for a selected outreach draft |
 | `P` | In Skills, review and register an immutable source policy version |
 | `Y` | In Skills, activate one reviewed source policy version at an exact revision |
 | `X` | In Skills, revoke active source authority at an exact revision |
@@ -221,12 +215,3 @@ Downloads stream from the kernel into a temporary file, verify catalog size and
 SHA-256 digest, and publish atomically with private file permissions. A failed
 or corrupted transfer leaves no partial destination. The TUI does not persist
 content URLs or interpret an opaque content reference as a filesystem path.
-
-## Governed outreach
-
-Drafting requires an immutable source observation, an external Skill action
-whose schema declares target and body semantics, a public profile, truthful
-affiliation and disclosure, and an explicit approval policy. Drafting does not
-send anything. Delivery creates a canonical durable Run; message status, Run,
-ActionCall, approval, terminal outcome, and provider receipt reload from kernel
-state after reconnect or restart.

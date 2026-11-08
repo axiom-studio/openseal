@@ -34,8 +34,8 @@ Two properties follow from that design and shape the rest of the system.
 
 Three separate conditions decide whether a capability appears.
 
-- **Store contracts** — Some capabilities require the configured store to implement an optional interface. Artifacts require an artifact store, channels require a conversation store, projects require a project store, and agent definitions require an agent registry.
-- **Wired adapters** — Some operations require a component to be installed. Run creation requires a Run dispatcher, outreach delivery requires the same, approval resolution requires an approval authorizer, and workforce apply requires a lifecycle authorizer.
+- **Store contracts** — Some capabilities require the configured store to implement an optional interface. Artifacts require an artifact store, channels require a conversation store, and agent definitions require an agent registry.
+- **Wired adapters** — Some operations require a component to be installed. Run creation requires a Run dispatcher, approval resolution requires an approval authorizer, and workforce apply requires a lifecycle authorizer.
 - **Configured services** — Some capabilities require configuration to be complete. Workforce authoring appears only when a model endpoint, a credential, and a model name are all set.
 
 An operation that is not advertised is also not served. A route whose capability is missing returns `501 Not Implemented` with a message naming the missing component. Fifty-five such responses exist across the route handlers, so a substantial part of the API is conditional in a standalone deployment.
@@ -75,7 +75,6 @@ Several record types recur throughout the API, and knowing which is which makes 
 | Property | Description |
 |---|---|
 | Objective | A durable statement of a desired outcome, held by an owner |
-| Project | A coarser grouping used for source monitoring and outreach |
 | Run | The durable unit of execution working toward an objective |
 | Model step | One model call within a Run's agent loop, with the tool calls it made |
 | Action call | The durable record of one Skill invocation |

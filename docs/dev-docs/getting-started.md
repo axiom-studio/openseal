@@ -104,8 +104,7 @@ Restart with the local operator surface after stopping the first daemon:
 ```
 
 `--standalone-operator` enables local action approval decisions, ClawHub
-mutations, governed outreach where configured, refinement answers, and generation
-retry. It requires a loopback listener; the generated default already uses
+mutations, refinement answers, and generation retry. It requires a loopback listener; the generated default already uses
 `127.0.0.1:8080`. This flag does not authorize workforce evaluation, approval,
 or Apply. Those steps need the authenticated desktop mode or an embedding host
 with lifecycle authority. Credential placement exposes only the context's

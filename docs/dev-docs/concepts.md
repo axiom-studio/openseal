@@ -80,7 +80,7 @@ Team definitions also follow a governed amendment lifecycle. Runtime Team
 management actions are ordinary typed Skills when enabled by an embedding host,
 so a model cannot mutate a Team by bypassing validation and policy.
 
-## Objectives and Projects
+## Objectives
 
 An **Objective** is a persistent desired outcome owned by one Agent or Team.
 Owners may hold many active objectives at once. Objectives include priority,
@@ -92,23 +92,15 @@ to an Agent, exact trigger, inputs, policy, budget, and concurrency limit.
 Schedule reconciliation creates idempotent Runs from due Runbook occurrences;
 event routing creates Runs from matching active Runbook event triggers.
 
-A **Project** is an optional grouping for several Objectives that share
-milestones, hypotheses, evidence, artifacts, or a delivery boundary. Ordinary
-Agent and Team work does not require a Project. A Project never owns a cadence,
-Runbook scheduler, or mutable list of Runs. Its execution history is derived
-from the referenced Objectives and their Runbook activations, so there is one
-authoritative lineage:
+Execution history is derived from the Objective and its Runbook activations,
+so there is one authoritative lineage:
 
 ```mermaid
 flowchart LR
-    Project[Optional Project] --> Objective[Objective: desired outcome]
-    Objective --> Activation[Runbook activation: method + trigger]
+    Objective[Objective: desired outcome] --> Activation[Runbook activation: method + trigger]
     Activation --> Run[Run: one bounded execution]
     Run --> Turn[Turns and governed actions]
 ```
-
-Use a Project only when work genuinely needs shared multi-objective context.
-Do not create one merely because an Objective repeats.
 
 ## Runs, turns, and recovery
 
@@ -253,7 +245,7 @@ positive bounded dimension below the portable floor and rejects aggregate
 child allocations that exceed the source Run's remaining capacity before it
 persists child work.
 
-## Activity, artifacts, and evidence
+## Activity and artifacts
 
 Meaningful state changes append scoped activity events with actor, causation,
 correlation, visibility, and resource references. The activity feed projects
@@ -261,10 +253,7 @@ these events into compact summaries; it does not expose private provider
 chain-of-thought.
 
 Artifact metadata is immutable and versioned. Content is held by a configured
-content store and verified by size and SHA-256 digest on download. Source
-observations preserve provenance and checkpoints for restart-safe monitoring.
-Governed outreach links a public identity, source evidence, an authorized
-external Skill action, approval policy, delivery Run, and provider receipt.
+content store and verified by size and SHA-256 digest on download.
 
 ## Deterministic workflows
 

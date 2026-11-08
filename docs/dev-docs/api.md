@@ -280,15 +280,12 @@ Messages are the collaboration surface. Run, approval, request, artifact, and
 decision records remain canonical and are referenced rather than copied into a
 parallel chat execution system.
 
-## Projects, evidence, outreach, and artifacts
+## Artifacts
 
 
 
 | Resource | Routes | Purpose |
 | --- | --- | --- |
-| Projects | `POST, GET /projects`; `GET, PATCH /projects/{id}` | Durable project context and linked work |
-| Source monitor evidence | `/projects/{id}/source-monitors/{monitorId}/observations` and `/checkpoint` | Provenance-linked observations and cursor state |
-| Outreach | `/projects/{id}/outreach/...` | Draft threads and create governed delivery Runs |
 | Artifacts | `POST, GET /artifacts`; `GET /artifacts/{id}` | Immutable metadata and provenance |
 | Artifact content | `POST /artifact-content`; `GET /artifacts/{id}/content`; `POST /artifacts/{id}/resolve` | Stream, verify, or resolve content when configured |
 
@@ -353,7 +350,7 @@ pin version `1` must move to `2`.
 When a host configures the lifecycle service, `/source-policies` routes support
 registering immutable versions, listing and reading versions, activation,
 revocation, and lifecycle audit. Source policies contain credential-free HTTPS
-host, path, method, item, retention, and outreach bounds. Network credentials
+host, path, method, item, and retention bounds. Network credentials
 remain outside policy records.
 
 The daemon deliberately has no generic `/workflows` or numeric `/runs`

@@ -1,10 +1,10 @@
-# Objectives, Projects, and Runs
+# Objectives and Runs
 
-An objective is a durable statement of a desired outcome held by an owner. Objectives produce Runs, Runs advance in Turns, and Projects are the coarser grouping used for source monitoring and outreach.
+An objective is a durable statement of a desired outcome held by an owner. Objectives produce Runs, and Runs advance in Turns.
 
 ## Objectives
 
-Objectives are grouped into portfolios and can be attached to projects. An objective's status controls whether it is eligible to produce work.
+Objectives are grouped into portfolios. An objective's status controls whether it is eligible to produce work.
 
 | Status | Description |
 |---|---|
@@ -18,18 +18,6 @@ Objectives are grouped into portfolios and can be attached to projects. An objec
 Only `active` objectives produce Runs. An objective moved to `paused` stops producing new Runs but does not cancel Runs already in flight — those are steered through the Run commands described below.
 
 Objectives appear in the terminal client's **Goals** destination.
-
-## Projects
-
-A project groups objectives for the purposes of source monitoring and outreach. Projects own the source monitors that observe external inputs and the outreach threads that carry governed external communication.
-
-| Property | Description |
-|---|---|
-| Objectives | Objectives attached to the project |
-| Source monitors | Observations and checkpoints for watched external sources |
-| Outreach threads | Governed external communication, with per-message delivery |
-
-Source monitor observations and checkpoints are read-only over the API. Outreach is covered in [Skills and Approvals](skills-and-approvals.md), including the conditions under which delivery is available at all.
 
 ## Runs
 
@@ -103,7 +91,7 @@ Runs are inspected and steered through their own routes rather than by editing t
 
 The admission route is the first thing to check when a Run stays `queued`, because the most common cause is that nothing is able to execute it.
 
-> **Run creation requires a worker, and the standalone daemon derives workers from configuration.** The `create` operation joins the Agent Runs capability only when a Run dispatcher has been installed, and the standalone daemon installs one only when at least one worker scope has been derived — which requires either a source policy with outreach enabled, or at least one credential entry in the standalone context. With neither, inspection and lifecycle intervention work but nothing can create new Runs. See [Configuration](configuration.md).
+> **Run creation requires a worker, and the standalone daemon derives workers from configuration.** The `create` operation joins the Agent Runs capability only when a Run dispatcher has been installed, and the standalone daemon installs one only when at least one worker scope has been derived — which requires at least one credential entry in the standalone context, or a model provider configured under `--desktop-operator` (which adds the daemon's own `--scope`). Without either, inspection and lifecycle intervention work but nothing can create new Runs. See [Configuration](configuration.md).
 
 ## Events and Scheduling
 

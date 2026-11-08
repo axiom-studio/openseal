@@ -123,7 +123,7 @@ host.
 - Versioned Agent definitions and durable Agent deployments
 - First-class Teams with semantic roles, roster assignments, policy, and
   Team-owned Skill bindings
-- Multi-objective portfolios, Projects, schedules, event routing, and
+- Multi-objective portfolios, schedules, event routing, and
   durable Runs with bounded leases and checkpoints
 - Typed Skill definitions, least-privilege deployment bindings, action
   approvals, credential references, and execution-time secret boundaries
@@ -131,8 +131,7 @@ host.
   uninstall, provenance, and restart restoration
 - Agent requests, handoffs, dependency groups, Team channels, participation
   arbitration, cursors, presence, and shared activity
-- Immutable artifact metadata, verified local content storage, source evidence,
-  and governed outreach records
+- Immutable artifact metadata and verified local content storage
 - SQLite for standalone durability and PostgreSQL for embedded deployments
 - Capability-discovered REST API, prompt-first TUI, and stable Go facade
 - Optional process-bounded HCL runbooks through `openseal run`

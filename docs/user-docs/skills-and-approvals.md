@@ -121,21 +121,19 @@ Secret values do not enter durable state, capability responses, prompts, or the 
 
 ## The Bundled Skill Definitions
 
-Four canonical Skill definitions ship inside the binary and can be exported as YAML manifests.
+Two canonical Skill definitions ship inside the binary and can be exported as YAML manifests.
 
 | Field | Value |
 |---|---|
 | Source | Governed source access |
-| Document | Document handling |
-| Outreach | Governed external outreach |
 | Delivery | Delivery to an external destination |
 
 ```bash
-openseal skill manifest <skill-id> --output ./outreach.yaml
-openseal skill validate ./outreach.yaml
+openseal skill manifest <skill-id> --output ./source.yaml
+openseal skill validate ./source.yaml
 ```
 
-> **The daemon registers one of the four, not all four.** At startup it registers the outreach Skill definition and verifies that any already-persisted copy matches it byte for byte, failing startup if it does not. The source, document, and delivery definitions are exportable through the CLI but are not registered in the catalog by the daemon — installing them is the operator's decision.
+> **The daemon registers neither at startup.** Both definitions are exportable through the CLI but are not registered in the catalog by the daemon — installing them is the operator's decision.
 
 ## ClawHub Skill Distribution
 
@@ -178,16 +176,8 @@ ClawHub is the only subsystem in OpenSeal with a canonical error-code mapping. F
 
 `unavailable` is the classifier's default branch, so an unrecognized failure is reported as `unavailable` rather than misclassified as something specific. Client code should treat the code as the stable signal and the message as human-readable text.
 
-## Governed Outreach
-
-Outreach is external communication carried out under policy, scoped to a project. Threads are created against a project, messages are added to a thread, and delivery of an individual message is a separate, separately governed step.
-
-Outreach is advertised only when the configured store implements the project, source monitor, outreach, and outreach action contracts together. Thread creation additionally requires a Skill catalog, and delivery additionally requires a wired dispatcher.
-
-> **Delivery is refused for a scope whose source policy does not enable outreach,** even under `--standalone-operator`. Enabling outreach is a property of the source policy attached to that scope, not of the operator flag. See [Configuration](configuration.md).
-
 ## Next Steps
 
-- Declare credential references and source policies in [Configuration](configuration.md).
+- Declare credential references in [Configuration](configuration.md).
 - Understand what the operator flag does and does not establish in [Security](security.md).
 - Generate a whole set of Agents, Teams, and bindings from a prompt in [Workforces](workforces.md).

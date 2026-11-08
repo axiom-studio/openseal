@@ -30,7 +30,7 @@ Starts the durable kernel and the versioned API. See [Configuration](configurati
 | `--context` | Path to the standalone context file | `context.yaml` |
 | `--scope` | Durable standalone authoring scope as `kind:id` | `local:default` |
 | `--listen` | Override the configured API address; port `0` selects a free port | configuration value |
-| `--standalone-operator` | Grant local action, ClawHub, outreach, and authoring retry/refinement authorities; requires loopback | off |
+| `--standalone-operator` | Grant local action, ClawHub, and authoring retry/refinement authorities; requires loopback | off |
 | `--desktop-operator` | Grant authenticated local workspace review and installation; requires loopback, `OPENSEAL_API_TOKEN`, and a local scope | off |
 | `--help` | Print help | — |
 
@@ -81,12 +81,10 @@ Seven destinations are primary. The remainder appear under the **More** row. Eac
 | Work | `w` | Primary |
 | Channels | `c` | Primary |
 | Goals | `o` | More |
-| Projects | `i` | More |
 | Inbox | `R` | More |
 | Approvals | `A` | More |
 | Sources | `S` | More |
 | Integrations | `I` | More |
-| Outreach | `O` | More |
 | Activity | `t` | More |
 | Evidence | `a` | More |
 | Imports | `B` | More |
@@ -150,11 +148,11 @@ Writes a two-node scaffold: a `webhook` trigger node with a path derived from th
 ## openseal skill
 
 ```bash
-openseal skill manifest <skill-id> --output ./outreach.yaml
-openseal skill validate ./outreach.yaml
+openseal skill manifest <skill-id> --output ./source.yaml
+openseal skill validate ./source.yaml
 ```
 
-`manifest` encodes one of the four bundled Skill definitions as a YAML manifest, writing to standard output or to `--output` with mode `0644`. An unknown identifier reports the available list. `validate` decodes a manifest file and prints `valid <id>@<version>`.
+`manifest` encodes one of the two bundled Skill definitions as a YAML manifest, writing to standard output or to `--output` with mode `0644`. An unknown identifier reports the available list. `validate` decodes a manifest file and prints `valid <id>@<version>`.
 
 ## openseal bundle
 
