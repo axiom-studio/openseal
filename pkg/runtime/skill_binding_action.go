@@ -837,7 +837,12 @@ func skillActionTarget(ctx context.Context, catalog *skill.Catalog, agents *kern
 	}
 	value, _ := raw.(string)
 	targetID := strings.TrimSpace(value)
-	if targetID == "" || len(targetID) > 128 {
+	if targetID == "" {
+		// A blank target names nobody: the model filled the optional
+		// argument with nothing, so the call acts for this chat's Agent.
+		return nil, nil
+	}
+	if len(targetID) > 128 {
 		return nil, errors.New("targetAgentId must be an Agent deployment id; use list_agents for the exact id")
 	}
 	if targetID == member {
@@ -876,6 +881,73 @@ func skillActionTarget(ctx context.Context, catalog *skill.Catalog, agents *kern
 		return nil, fmt.Errorf("agent %q cannot be changed in chat: %w", targetID, ErrAgentBehaviorFixed)
 	}
 	return &skillTargetAgent{ID: deployment.ID, DisplayName: definition.DisplayName}, nil
+}
+
+// withoutUnusableTargetAgent hides targetAgentId from the model-visible
+// actions of an Agent that cannot use it. Only a builder may name another
+// Agent (skillActionTarget), so every other Agent is offered the actions
+// without the argument and without the sentence that describes it; a model
+// that sees an optional "act for another Agent" field will fill it.
+func withoutUnusableTargetAgent(activation *skill.ActivationSnapshot, actions []capability.ModelAction) []capability.ModelAction {
+	touched := false
+	for _, action := range actions {
+		if hasTargetAgentProperty(action) {
+			touched = true
+			break
+		}
+	}
+	if !touched || activationHasAgentBuilder(activation) {
+		return actions
+	}
+	out := make([]capability.ModelAction, len(actions))
+	for i, action := range actions {
+		out[i] = action
+		if !hasTargetAgentProperty(action) {
+			continue
+		}
+		out[i].InputSchema = cloneMap(action.InputSchema)
+		properties := make(map[string]interface{}, len(action.InputSchema["properties"].(map[string]interface{})))
+		for name, property := range action.InputSchema["properties"].(map[string]interface{}) {
+			if name != SkillActionTargetAgentArgument {
+				properties[name] = property
+			}
+		}
+		out[i].InputSchema["properties"] = properties
+		out[i].Description = strings.Replace(action.Description, targetAgentConnectionSentence, "", 1)
+	}
+	return out
+}
+
+// activationHasAgentBuilder mirrors agentBuilderBinding on an activation: an
+// openseal.agents binding offering create_agent or update_agent.
+func activationHasAgentBuilder(activation *skill.ActivationSnapshot) bool {
+	if activation == nil {
+		return false
+	}
+	for _, activated := range activation.Skills {
+		if activated.SkillID != AgentManagementSkillID || activated.SkillVersion != AgentManagementSkillVersion || activated.SourceIdentity != "" {
+			continue
+		}
+		for _, action := range activated.Actions {
+			if action.Action == AgentActionCreateAgent || action.Action == AgentActionUpdateAgent {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// targetAgentConnectionSentence is the request_connection description
+// sentence that only a builder can act on.
+const targetAgentConnectionSentence = " With targetAgentId, the card still appears in this chat and the app is connected for that Agent."
+
+func hasTargetAgentProperty(action capability.ModelAction) bool {
+	if action.SkillID != SkillManagementSkillID || !skillActionTargetable(action.Action) {
+		return false
+	}
+	properties, _ := action.InputSchema["properties"].(map[string]interface{})
+	_, ok := properties[SkillActionTargetAgentArgument]
+	return ok
 }
 
 // agentBuilderBinding reports an enabled openseal.agents binding that lets

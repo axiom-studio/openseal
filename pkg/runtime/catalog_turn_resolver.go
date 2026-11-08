@@ -256,6 +256,7 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 		}
 		actions = filtered
 	}
+	actions = withoutUnusableTargetAgent(activation, actions)
 	base := r.identity(actionDeploymentID)
 	base.ModelActions, base.PreparedRuntimes, base.InputContextRefs = actions, prepared, contextRefs
 	base.RunbookOperations = runbookOperations

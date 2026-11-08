@@ -195,7 +195,7 @@ func TestSkillBindingTargetRefusesInvalidTargets(t *testing.T) {
 	f := newSkillTargetFixture(t)
 	run := f.chatRun(t, "finn")
 	for target, want := range map[string]string{
-		"finn": "the Agent you are", "old": "retired", "platform": "cannot be changed in chat", "nobody": "does not exist", " ": "must be an Agent deployment id",
+		"finn": "the Agent you are", "old": "retired", "platform": "cannot be changed in chat", "nobody": "does not exist",
 	} {
 		if _, err := f.validator.ValidateActionProposal(f.ctx, ActionProposalValidationInput{
 			Run: run, Bound: f.bound(t, "finn", SkillActionUpsertBinding), Arguments: readerUpsertArguments(target),
@@ -375,6 +375,50 @@ func TestSkillBindingTargetConnectionRequestIsOwnedByTheTarget(t *testing.T) {
 	refused, err := f.dispatch(t, writer, "connect-writer", SkillActionRequestConnection, map[string]interface{}{"app": "linear", SkillActionTargetAgentArgument: "researcher"})
 	if err != nil || refused["refused"] == nil {
 		t.Fatalf("non-builder connection for another Agent = %#v, %v", refused, err)
+	}
+}
+
+func TestSkillBindingTargetIgnoresBlankTarget(t *testing.T) {
+	f := newSkillTargetFixture(t)
+	run := f.chatRun(t, "writer")
+	for _, blank := range []string{"", " ", "\t\n"} {
+		target, err := skillActionTarget(f.ctx, f.catalog, f.agents, run, "writer", map[string]interface{}{SkillActionTargetAgentArgument: blank})
+		if err != nil || target != nil {
+			t.Fatalf("blank target %q = %#v, %v; want none", blank, target, err)
+		}
+	}
+}
+
+func TestTargetAgentHiddenFromNonBuilders(t *testing.T) {
+	definition := SkillManagementSkill()
+	var actions []capability.ModelAction
+	for _, name := range []string{SkillActionRequestConnection, SkillActionFindApps, SkillActionUpsertBinding} {
+		action := definition.Actions[name]
+		actions = append(actions, capability.ModelAction{SkillID: SkillManagementSkillID, Action: name, Description: action.Description, InputSchema: action.InputSchema})
+	}
+	hidden := withoutUnusableTargetAgent(&skill.ActivationSnapshot{}, actions)
+	for _, action := range hidden {
+		if properties, _ := action.InputSchema["properties"].(map[string]interface{}); properties[SkillActionTargetAgentArgument] != nil {
+			t.Fatalf("%s still offers targetAgentId", action.Action)
+		}
+		if action.Action == SkillActionRequestConnection && strings.Contains(action.Description, "With targetAgentId") {
+			t.Fatalf("%s still describes targetAgentId", action.Action)
+		}
+	}
+	if properties := actions[0].InputSchema["properties"].(map[string]interface{}); properties[SkillActionTargetAgentArgument] == nil {
+		t.Fatal("hiding targetAgentId mutated the shared definition")
+	}
+	builder := &skill.ActivationSnapshot{Skills: []skill.ActivatedSkill{{
+		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion,
+		Actions: []capability.ModelAction{{Action: AgentActionCreateAgent}},
+	}}}
+	for _, action := range withoutUnusableTargetAgent(builder, actions) {
+		if action.Action == SkillActionFindApps {
+			continue
+		}
+		if properties, _ := action.InputSchema["properties"].(map[string]interface{}); properties[SkillActionTargetAgentArgument] == nil {
+			t.Fatalf("builder lost targetAgentId on %s", action.Action)
+		}
 	}
 }
 
