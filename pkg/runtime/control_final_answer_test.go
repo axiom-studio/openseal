@@ -690,3 +690,20 @@ func TestFinalAnswerChecksRunInOrderAndMayFail(t *testing.T) {
 	}()
 	registerFinalAnswerCheck(finalAnswerCheck{Order: 1, Name: "review", Check: finalAnswerChecks[0].Check})
 }
+
+func TestFinalAnswerTakesOneSkillRefSentAsAString(t *testing.T) {
+	call, err := decodeFinalAnswerCall(json.RawMessage(`{"answer":"Done.","appliedSkillRefs":"skill:meal"}`))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(call.Args.AppliedSkillRefs) != 1 || call.Args.AppliedSkillRefs[0] != "skill:meal" {
+		t.Fatalf("appliedSkillRefs = %#v", call.Args.AppliedSkillRefs)
+	}
+	call, err = decodeFinalAnswerCall(json.RawMessage(`{"answer":"Done.","appliedSkillRefs":""}`))
+	if err != nil || len(call.Args.AppliedSkillRefs) != 0 {
+		t.Fatalf("empty string: %#v %v", call, err)
+	}
+	if _, err := decodeFinalAnswerCall(json.RawMessage(`{"answer":"Done.","appliedSkillRefs":7}`)); err == nil {
+		t.Fatal("a number must still be refused")
+	}
+}

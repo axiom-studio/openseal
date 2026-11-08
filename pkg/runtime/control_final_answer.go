@@ -99,6 +99,9 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 	kernel := map[string]json.RawMessage{}
 	for key, value := range fields {
 		if finalAnswerKernelFields[key] {
+			if key == "appliedSkillRefs" {
+				value = finalSkillRefsList(value)
+			}
 			kernel[key] = value
 			call.Present[key] = true
 			continue
@@ -113,6 +116,26 @@ func decodeFinalAnswerCall(raw json.RawMessage) (*finalAnswerCall, error) {
 		return nil, err
 	}
 	return call, nil
+}
+
+// finalSkillRefsList takes one Skill ref sent as a bare string as a list of
+// one: models sometimes drop the brackets on a single ref, and failing the
+// whole final answer for that costs a step. Anything else is left for the
+// strict decode.
+func finalSkillRefsList(value json.RawMessage) json.RawMessage {
+	var single string
+	if json.Unmarshal(value, &single) != nil {
+		return value
+	}
+	refs := []string{}
+	if strings.TrimSpace(single) != "" {
+		refs = append(refs, single)
+	}
+	encoded, err := json.Marshal(refs)
+	if err != nil {
+		return value
+	}
+	return encoded
 }
 
 // ---------------------------------------------------------------------------
