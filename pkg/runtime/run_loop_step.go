@@ -1131,9 +1131,14 @@ func (d *drive) stepError(ctx context.Context, st *stepState, err error, default
 			Explainable: turnFailureCanBeExplained(err, code),
 		}, err, code)
 	case errors.Is(err, ErrTurnHostConfiguration):
+		message := "The agent's step host is not configured correctly."
+		if errors.Is(err, ErrInvalidModelStepRequest) {
+			// The host is fine; the step built from the session was refused.
+			message = "The agent's next step could not be prepared from this conversation."
+		}
 		return d.fail(ctx, st, LoopFailure{
 			Kind: RunFailureKindExecution, Code: StepFailureHostConfiguration,
-			Message: "The agent's step host is not configured correctly.",
+			Message: message,
 		}, err, StepFailureHostConfiguration)
 	}
 	code := defaultCode

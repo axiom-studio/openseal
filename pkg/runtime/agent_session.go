@@ -688,7 +688,7 @@ func validateContentParts(parts []ContentPart, limits contentPartLimits) (images
 			if len(part.Value) == 0 || !json.Valid(part.Value) {
 				return 0, invalidEntry("%s part %d: json part needs a valid value", limits.field, i)
 			}
-			contentBytes += len(part.Value)
+			contentBytes += jsonPartBytes(part.Value)
 		case ContentPartFile:
 			if part.Path == "" && part.URI == "" && part.Note == "" {
 				return 0, invalidEntry("%s part %d: file part needs path, uri or note", limits.field, i)
@@ -958,6 +958,32 @@ func EstimateSessionEntryTokens(e *SessionEntry) int64 {
 		return 0
 	}
 	return int64((len(encoded) + 3) / 4)
+}
+
+// jsonPartBytes is what a json part counts toward a content cap: the size of
+// its compact encoding. A store can hand a value back re-encoded (Postgres
+// jsonb puts a space after every ':' and ','), so the length of a value as
+// read is not the size that was written and checked; counting the compact
+// form keeps a result that fit when it was written fitting when it is read.
+func jsonPartBytes(raw json.RawMessage) int {
+	var out bytes.Buffer
+	if err := json.Compact(&out, raw); err != nil {
+		return len(raw)
+	}
+	return out.Len()
+}
+
+// compactJSONValue is raw in its compact encoding, or a copy of raw when it is
+// not valid json.
+func compactJSONValue(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return nil
+	}
+	var out bytes.Buffer
+	if err := json.Compact(&out, raw); err != nil {
+		return cloneRaw(raw)
+	}
+	return json.RawMessage(out.Bytes())
 }
 
 func cloneRaw(in json.RawMessage) json.RawMessage {

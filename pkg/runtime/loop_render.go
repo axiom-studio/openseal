@@ -44,6 +44,31 @@ const (
 	renderMissingToolText = "This call's result is not part of this conversation."
 )
 
+// fitToolResultView keeps a rendered tool result within the tool result cap.
+// Results are bounded when they are written, so this only shortens one that
+// was stored before the cap or measured differently; a step must never fail
+// because an earlier result is a little too large.
+func fitToolResultView(content []ContentPart) []ContentPart {
+	var textual, others []ContentPart
+	total := 0
+	for _, part := range content {
+		switch part.Type {
+		case ContentPartText:
+			textual = append(textual, part)
+			total += len(part.Text)
+		case ContentPartJSON:
+			textual = append(textual, part)
+			total += jsonPartBytes(part.Value)
+		default:
+			others = append(others, part)
+		}
+	}
+	if total <= MaxToolResultContentBytes {
+		return content
+	}
+	return append(compactToolResultContent(textual, total, "it was too large to show in full"), others...)
+}
+
 func renderImageOmittedText(mediaType string) string {
 	return "[image omitted: " + mediaType + "]"
 }
@@ -275,6 +300,9 @@ func (r *sessionRenderer) tool(ctx context.Context, assistant *SessionEntry, cal
 		view.Result.IsError = entry.State != ToolEntryCompleted
 		if entry.Tool.Result != nil {
 			content, err := r.parts(ctx, entry.Tool.Result.Content)
+			if err == nil {
+				content = fitToolResultView(content)
+			}
 			if err != nil {
 				return SessionEntryView{}, err
 			}
@@ -293,7 +321,11 @@ func (r *sessionRenderer) parts(ctx context.Context, parts []ContentPart) ([]Con
 	out := make([]ContentPart, 0, len(parts))
 	for _, part := range parts {
 		if part.Type != ContentPartImage {
-			part.Value = cloneRaw(part.Value)
+			if part.Type == ContentPartJSON {
+				part.Value = compactJSONValue(part.Value)
+			} else {
+				part.Value = cloneRaw(part.Value)
+			}
 			part.DataBase64 = ""
 			out = append(out, part)
 			continue

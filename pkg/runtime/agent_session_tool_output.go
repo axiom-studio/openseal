@@ -44,7 +44,7 @@ func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation To
 			total += len(part.Text)
 		case ContentPartJSON:
 			content = append(content, part)
-			total += len(part.Value)
+			total += jsonPartBytes(part.Value)
 		default:
 			others = append(others, part)
 		}
