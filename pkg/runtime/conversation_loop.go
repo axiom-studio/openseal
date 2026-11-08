@@ -69,7 +69,7 @@ func (r *ConversationRunTurnRunner) conversationLoopAuthority(ctx context.Contex
 func (a ConversationLoopAuthority) apply(authority ControlAuthority) ControlAuthority {
 	authority.CanAskUser = authority.CanAskUser && a.CanAskConversationQuestion
 	authority.CanReact = authority.CanReact && a.CanReact
-	if mode := authority.finalMode(); mode != FinalModeDefault && mode != FinalModeSpoken && mode != FinalModeEvidence {
+	if mode := authority.finalMode(); mode != FinalModeDefault && mode != FinalModeSpoken {
 		return authority
 	}
 	authority.ExternalChannelReply = authority.ExternalChannelReply || a.ExternalChannelReply

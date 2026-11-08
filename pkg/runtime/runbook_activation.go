@@ -256,9 +256,6 @@ func (a *RunbookActivation) Validate() error {
 	if err := validateCredentialFreeContext(a.Policy); err != nil {
 		return fmt.Errorf("Runbook activation policy: %w", err)
 	}
-	if err := a.Trigger.Evidence.Validate(); err != nil {
-		return fmt.Errorf("Runbook activation evidence projection: %w", err)
-	}
 	if a.Budget != nil {
 		if err := a.Budget.Validate(); err != nil {
 			return fmt.Errorf("Runbook activation budget: %w", err)

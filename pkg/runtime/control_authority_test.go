@@ -241,9 +241,8 @@ func TestControlAuthorityFinalModesAndDeterministicRuns(t *testing.T) {
 		mode    FinalAnswerMode
 		visual  bool
 	}{
-		"default":  {map[string]interface{}{}, FinalModeDefault, true},
-		"spoken":   {map[string]interface{}{"responseMode": "spoken"}, FinalModeSpoken, false},
-		"evidence": {map[string]interface{}{EvidenceSnapshotContextKey: map[string]interface{}{"id": "snapshot"}}, FinalModeEvidence, true},
+		"default": {map[string]interface{}{}, FinalModeDefault, true},
+		"spoken":  {map[string]interface{}{"responseMode": "spoken"}, FinalModeSpoken, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			authority := resolveControlAuthorityForTest(t, ControlAuthorityInput{

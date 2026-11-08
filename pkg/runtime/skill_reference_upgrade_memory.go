@@ -26,17 +26,8 @@ func (s *MemoryStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			return ErrSkillReferenceUpgradeBusy
 		}
 	}
-	if err := s.validateProjectSkillUpgradeReferencesLocked(application); err != nil {
-		return err
-	}
 	for _, mutation := range application.Objectives {
 		current := s.objectives[portfolioKey(mutation.Value.Scope, mutation.Value.ID)]
-		if current == nil || current.Revision != mutation.ExpectedRevision || mutation.Value.Revision != mutation.ExpectedRevision+1 {
-			return ErrSkillReferenceUpgradeConflict
-		}
-	}
-	for _, mutation := range application.Projects {
-		current := s.projects[projectKey(mutation.Value.Scope, mutation.Value.ID)]
 		if current == nil || current.Revision != mutation.ExpectedRevision || mutation.Value.Revision != mutation.ExpectedRevision+1 {
 			return ErrSkillReferenceUpgradeConflict
 		}
@@ -64,10 +55,6 @@ func (s *MemoryStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 		}
 		for _, mutation := range application.Objectives {
 			s.objectives[portfolioKey(mutation.Value.Scope, mutation.Value.ID)] = cloneObjective(mutation.Value)
-			appendMemoryActivityLocked(s, mutation.Event)
-		}
-		for _, mutation := range application.Projects {
-			s.saveProjectSkillReferencesLocked(mutation.Value)
 			appendMemoryActivityLocked(s, mutation.Event)
 		}
 		for _, mutation := range application.ConversationEndpoints {

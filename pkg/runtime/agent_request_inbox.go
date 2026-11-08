@@ -439,9 +439,6 @@ func (r *AgentRequestInboxReconciler) ensureCompletionReviewRun(
 		"conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
 	contextValue := map[string]interface{}{AgentRequestCompletionReviewContextKey: review}
-	if projectID, _ := source.Context["projectId"].(string); strings.TrimSpace(projectID) != "" {
-		contextValue["projectId"] = strings.TrimSpace(projectID)
-	}
 	key := fmt.Sprintf("agent-request-completion-review:%s:%s:%s", request.ID, request.CompletionKey, reviewerID)
 	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,
@@ -543,9 +540,6 @@ func (r *AgentRequestInboxReconciler) ensureDecisionRun(ctx context.Context, req
 		"sharedContext":        cloneMap(request.SharedContext), "conversationRefs": append([]string(nil), request.ConversationRefs...),
 	}
 	contextValue := map[string]interface{}{AgentRequestInboxContextKey: inbox}
-	if projectID, _ := source.Context["projectId"].(string); strings.TrimSpace(projectID) != "" {
-		contextValue["projectId"] = strings.TrimSpace(projectID)
-	}
 	key := fmt.Sprintf("agent-request-decision:%s:%d:%s", request.ID, request.Revision, assignedAgentID)
 	created, err := r.commands.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: request.Scope, Kind: RunKindAgentWork, ParentRunID: source.ID,

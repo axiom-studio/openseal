@@ -67,23 +67,8 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 		ID: "release-monitor", Scope: scope, Owner: objective.Owner, ObjectiveID: objective.ID, AssignedAgentID: "researcher",
 		DefinitionID: "source-monitor", DefinitionVersion: "1", TriggerID: "releases",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 * * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
-		Input:   map[string]interface{}{"projectId": "release-research", "sourceMonitorId": "releases", "url": "https://example.com/feed.xml", "maxItems": 3},
+		Input:   map[string]interface{}{"url": "https://example.com/feed.xml", "maxItems": 3},
 		Policy:  map[string]interface{}{"sourcePolicyRef": "public-feed@1"}, Budget: &openseal.BudgetPolicy{MaxAttempts: 2, MaxTurns: 2},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	project, _, err := engine.CreateProject(ctx, openseal.CreateProjectRequest{
-		Project: &openseal.Project{
-			ID: "release-research", Scope: scope, Owner: objective.Owner, Title: "Release research",
-			Purpose: "Track releases", Status: openseal.ProjectStatusActive, ObjectiveRefs: []string{objective.ID},
-			SourceMonitors: []openseal.ProjectSourceMonitorReference{{
-				ID: "releases", ObjectiveID: objective.ID, AssignedAgentID: "researcher",
-				SkillID: source.SkillID, SkillVersion: from.Version, Action: source.ObserveFeed,
-				SourcePolicyRef: "public-feed@1", Deduplication: openseal.SourceMonitorDeduplicateStableSourceAndContent,
-			}},
-		},
-		Actor: openseal.ActivityActor{Type: "user", ID: "operator"}, Visibility: openseal.ActivityVisibilityScope,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +90,7 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plan.ApprovalRequired || len(plan.Objectives) != 0 || len(plan.Projects) != 1 || len(plan.Projects[0].MonitorIDs) != 1 {
+	if plan.ApprovalRequired || len(plan.Objectives) != 0 {
 		t.Fatalf("unexpected plan: %#v", plan)
 	}
 	request := openseal.ApplySkillReferenceUpgradeRequest{
@@ -119,10 +104,6 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 	if err != nil || blockedBinding.SkillVersion != from.Version || blockedBinding.Revision != binding.Revision {
 		t.Fatalf("busy upgrade changed binding: %#v err=%v", blockedBinding, err)
 	}
-	blockedProject, err := engine.GetProject(ctx, scope, project.ID)
-	if err != nil || blockedProject.SourceMonitors[0].SkillVersion != from.Version {
-		t.Fatalf("busy upgrade changed project: %#v err=%v", blockedProject, err)
-	}
 	canceled, err := engine.CommandAgentRun(ctx, openseal.AgentRunCommandRequest{
 		Scope: scope, RunID: historical.ID, ExpectedRevision: historical.Revision, Kind: openseal.AgentRunCommandCancel,
 		Actor: openseal.ActivityActor{Type: "user", ID: "operator"}, Summary: "Retire the queued invocation before upgrading",
@@ -135,23 +116,13 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.BindingRevision != binding.Revision+1 || len(receipt.ActivityIDs) != 1 {
+	if receipt.BindingRevision != binding.Revision+1 || len(receipt.ActivityIDs) != 0 {
 		t.Fatalf("unexpected receipt: %#v", receipt)
-	}
-	projectActivity, err := engine.ListActivityFeed(ctx, openseal.ActivityFeedRequest{
-		Scope: scope, ProjectID: project.ID, EventTypes: []string{"project.skill_reference_upgraded"},
-	})
-	if err != nil || len(projectActivity.Items) != 1 {
-		t.Fatalf("project upgrade activity=%#v err=%v", projectActivity, err)
 	}
 	updatedBinding, err := engine.GetSkillBinding(ctx, skillScope, "researcher", binding.ID)
 	if err != nil || updatedBinding.SkillVersion != to.Version || updatedBinding.Revision != receipt.BindingRevision ||
 		len(updatedBinding.Lifecycle) != 2 || updatedBinding.Lifecycle[1].Reason != "Adopt the reviewed source runtime" {
 		t.Fatalf("binding=%#v err=%v", updatedBinding, err)
-	}
-	updatedProject, err := engine.GetProject(ctx, scope, project.ID)
-	if err != nil || updatedProject.SourceMonitors[0].SkillVersion != to.Version {
-		t.Fatalf("project=%#v err=%v", updatedProject, err)
 	}
 	restoredHistory, err := engine.GetAgentRun(ctx, scope, historical.ID)
 	if err != nil || restoredHistory.Status != openseal.AgentRunStatusCanceled ||

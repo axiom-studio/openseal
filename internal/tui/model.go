@@ -101,8 +101,6 @@ const (
 	sectionTeams
 	sectionObjectives
 	sectionSources
-	sectionProjects
-	sectionOutreach
 	sectionIntegrations
 	sectionSkills
 	sectionRuns
@@ -127,9 +125,6 @@ const (
 	modeObjectiveEdit
 	modeEventSourceCreate
 	modeEventSourceRetire
-	modeProjectCreate
-	modeProjectEdit
-	modeOutreachCreate
 	modeIntegrationCreate
 	modeIntegrationActivate
 	modeIntegrationPause
@@ -198,10 +193,7 @@ type Model struct {
 	objectiveCapability                kernelapi.Capability
 	runbookCapability                  kernelapi.Capability
 	eventSourceCapability              kernelapi.Capability
-	projectCapability                  kernelapi.Capability
-	outreachCapability                 kernelapi.Capability
 	conversationGatewayCapability      kernelapi.Capability
-	sourceMonitorCapability            kernelapi.Capability
 	activityCapability                 kernelapi.Capability
 	clawHubCapability                  kernelapi.Capability
 	skillActionCapability              kernelapi.Capability
@@ -223,10 +215,6 @@ type Model struct {
 	actionCallsRunID                   string
 	actionCallsErr                     error
 	loadingActionCalls                 bool
-	evidenceExpanded                   bool
-	evidenceObservationSelected        int
-	groundingExpanded                  bool
-	groundingPageSelected              int
 	agentRequests                      []*runtime.AgentRequest
 	agentRequestSelected               int
 	selectedAgentRequest               string
@@ -262,23 +250,10 @@ type Model struct {
 	eventSourceSelected                int
 	selectedEventSource                string
 	eventSourceDetail                  *runtime.EventSourceSubscriptionDetail
-	projects                           []*runtime.Project
-	projectSelected                    int
-	selectedProject                    string
-	outreachThreads                    []*runtime.OutreachThread
-	outreachSelected                   int
-	selectedOutreach                   string
-	outreachObservations               []*runtime.SourceObservation
-	outreachObservationSelected        int
-	outreachActions                    []capability.ModelAction
-	outreachActionSelected             int
 	conversationGateways               []*runtime.ExternalConversationGatewayRegistration
 	conversationGatewaySelected        int
 	selectedConversationGateway        string
 	conversationGatewayAdapterSelected int
-	sourceMonitorStatuses              map[string]sourceMonitorStatus
-	projectActivity                    map[string][]runtime.ActivityProjection
-	projectActivityErrors              map[string]error
 	clawHubSkills                      []clawhub.InstalledState
 	skillActions                       []capability.ModelAction
 	skillBindings                      []*capability.Binding
@@ -309,10 +284,6 @@ type Model struct {
 	pendingObjectivePrompt             string
 	pendingEventSourceID               string
 	pendingEventSourcePrompt           string
-	pendingProjectKey                  string
-	pendingProjectPrompt               string
-	pendingOutreachKey                 string
-	pendingOutreachPrompt              string
 	pendingClawHubPrompt               string
 	pendingConversationKey             string
 	pendingConversationTitle           string
@@ -502,58 +473,6 @@ type eventSourceChanged struct {
 	err    error
 }
 
-type projectsLoaded struct {
-	projects []*runtime.Project
-	err      error
-}
-
-type sourceMonitorStatus struct {
-	checkpoint         *runtime.SourceMonitorCheckpoint
-	observations       []*runtime.SourceObservation
-	policyDecision     *source.PolicyDecision
-	policyAuthorizedAt time.Time
-	policyErr          error
-	err                error
-}
-
-type sourceMonitorsLoaded struct {
-	statuses       map[string]sourceMonitorStatus
-	activity       map[string][]runtime.ActivityProjection
-	activityErrors map[string]error
-}
-type projectCreated struct {
-	project *runtime.Project
-	err     error
-}
-type projectUpdated struct {
-	project *runtime.Project
-	err     error
-}
-
-type outreachLoaded struct {
-	projectID    string
-	threads      []*runtime.OutreachThread
-	observations []*runtime.SourceObservation
-	actions      []capability.ModelAction
-	err          error
-}
-
-type outreachCreated struct {
-	thread *runtime.OutreachThread
-	err    error
-}
-
-type outreachDeliveryCreated struct {
-	run      *runtime.AgentRun
-	threadID string
-	err      error
-}
-
-type outreachRunLoaded struct {
-	run *runtime.AgentRun
-	err error
-}
-
 type clawHubSkillsLoaded struct {
 	skills []clawhub.InstalledState
 	err    error
@@ -740,10 +659,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		runbookCapability, hasRunbooks := msg.document.Find(kernelapi.RunbooksCapabilityID, kernelapi.RunbooksCapabilityVersion)
 		eventSourceCapability, hasEventSources := msg.document.Find(kernelapi.EventSourceSubscriptionsCapabilityID, kernelapi.EventSourceSubscriptionsCapabilityVersion)
-		projectCapability, hasProjects := msg.document.Find(kernelapi.ProjectsCapabilityID, kernelapi.ProjectsCapabilityVersion)
-		outreachCapability, hasOutreach := msg.document.Find(kernelapi.OutreachCapabilityID, kernelapi.OutreachCapabilityVersion)
 		conversationGatewayCapability, hasConversationGateways := msg.document.Find(kernelapi.ConversationGatewaysCapabilityID, kernelapi.ConversationGatewaysCapabilityVersion)
-		sourceMonitorCapability, _ := msg.document.Find(kernelapi.SourceMonitorsCapabilityID, kernelapi.SourceMonitorsCapabilityVersion)
 		activityCapability, hasActivity := msg.document.Find(kernelapi.ActivityCapabilityID, kernelapi.ActivityCapabilityVersion)
 		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
 		skillActionCapability, hasSkillActions := msg.document.Find(kernelapi.SkillActionsCapabilityID, kernelapi.SkillActionsCapabilityVersion)
@@ -763,10 +679,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.objectiveCapability = objectiveCapability
 		m.runbookCapability = runbookCapability
 		m.eventSourceCapability = eventSourceCapability
-		m.projectCapability = projectCapability
-		m.outreachCapability = outreachCapability
 		m.conversationGatewayCapability = conversationGatewayCapability
-		m.sourceMonitorCapability = sourceMonitorCapability
 		m.activityCapability = activityCapability
 		m.clawHubCapability = clawHubCapability
 		m.skillActionCapability = skillActionCapability
@@ -804,12 +717,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !hasEventSources || !eventSourceCapability.Available || !eventSourceCapability.Supports(kernelapi.OperationList) {
 			m.eventSourceCapability = kernelapi.Capability{}
-		}
-		if !hasProjects || !projectCapability.Available {
-			m.projectCapability = kernelapi.Capability{}
-		}
-		if !hasOutreach || !outreachCapability.Available || !outreachCapability.Supports(kernelapi.OperationList) || !m.projectCapability.Available {
-			m.outreachCapability = kernelapi.Capability{}
 		}
 		if !hasConversationGateways || !conversationGatewayCapability.Available || !conversationGatewayCapability.Supports(kernelapi.OperationList) || m.conversationGatewayClient == nil {
 			m.conversationGatewayCapability = kernelapi.Capability{}
@@ -849,8 +756,8 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasSourcePolicies || !sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !sourcePolicyCapability.Supports(kernelapi.OperationList) {
 			m.sourcePolicyCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.projectCapability.Available && !m.outreachCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
-			m.unavailable = "This server does not advertise an agent builder, objectives, Projects, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
+		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+			m.unavailable = "This server does not advertise an agent builder, objectives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
 		}
@@ -879,10 +786,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionSources
 			m.mode = modeEventSourceCreate
 			m.editor.Placeholder = "Press n or Tab to configure a durable event source."
-		} else if m.projectCapability.Available {
-			m.section = sectionProjects
-			m.mode = modeProjectCreate
-			m.editor.Placeholder = "Describe the Project outcome…"
 		} else if m.conversationGatewayCapability.Available {
 			m.section = sectionIntegrations
 			m.focusPanelList()
@@ -924,7 +827,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPanelList()
 			m.resetComposerMode()
 		}
-		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadProjects(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceBundleInspected:
 		m.busy = false
 		if msg.err != nil {
@@ -1101,20 +1004,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Event source %s · %s · revision %d.", msg.action, msg.item.Status, msg.item.Revision)
 		}
 		return m, m.loadEventSources()
-	case projectsLoaded:
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.err, m.projects = nil, msg.projects
-		m.restoreProjectSelection()
-		return m, tea.Batch(m.loadSourceMonitors(), m.loadOutreach())
-	case sourceMonitorsLoaded:
-		m.sourceMonitorStatuses = msg.statuses
-		m.projectActivity = msg.activity
-		m.projectActivityErrors = msg.activityErrors
-		return m, nil
 	case clawHubSkillsLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -1227,7 +1116,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.selectedSkillBinding = msg.receipt.BindingID
 			m.status = fmt.Sprintf("Skill updated to %s@%s · binding revision %d.", msg.receipt.To.ID, msg.receipt.To.Version, msg.receipt.BindingRevision)
 		}
-		return m, tea.Batch(m.loadSkillBindings(), m.loadSkillActions(), m.loadObjectives(), m.loadProjects(), m.loadActivity(false))
+		return m, tea.Batch(m.loadSkillBindings(), m.loadSkillActions(), m.loadObjectives(), m.loadActivity(false))
 	case clawHubLifecycleCompleted:
 		m.busy = false
 		if msg.err != nil {
@@ -1606,95 +1495,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetComposerMode()
 		m.focusPanelList()
 		return m, m.loadObjectives()
-	case projectCreated:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = "Project creation failed. Your prompt is preserved for retry."
-			return m, nil
-		}
-		m.err = nil
-		m.pendingProjectKey, m.pendingProjectPrompt = "", ""
-		m.editor.Reset()
-		m.selectedProject = msg.project.ID
-		m.status = "Project added to the durable portfolio."
-		m.section = sectionProjects
-		m.focusPanelList()
-		return m, m.loadProjects()
-	case projectUpdated:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = "The Project changed elsewhere. Refresh and try again."
-			return m, m.loadProjects()
-		}
-		m.err = nil
-		m.editor.Reset()
-		m.selectedProject = msg.project.ID
-		m.status = "Project revision recorded."
-		m.resetComposerMode()
-		m.focusPanelList()
-		return m, m.loadProjects()
-	case outreachLoaded:
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		if project := m.selectedProjectRecord(); project == nil || project.ID != msg.projectID {
-			return m, nil
-		}
-		m.err = nil
-		m.outreachThreads = msg.threads
-		m.outreachObservations = msg.observations
-		m.outreachActions = msg.actions
-		m.restoreOutreachSelection()
-		m.outreachObservationSelected = min(m.outreachObservationSelected, max(0, len(m.outreachObservations)-1))
-		m.outreachActionSelected = min(m.outreachActionSelected, max(0, len(m.outreachActions)-1))
-		return m, nil
-	case outreachCreated:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = "Outreach draft failed. Your reviewed text is preserved for retry."
-			return m, nil
-		}
-		m.err = nil
-		m.pendingOutreachKey, m.pendingOutreachPrompt = "", ""
-		m.editor.Reset()
-		m.selectedOutreach = msg.thread.ID
-		m.status = "Evidence-linked outreach draft saved. Nothing has been sent."
-		m.resetComposerMode()
-		m.focusPanelList()
-		return m, m.loadOutreach()
-	case outreachDeliveryCreated:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = "Delivery Run was not created. The draft remains unchanged."
-			return m, m.loadOutreach()
-		}
-		m.err = nil
-		m.selectedOutreach = msg.threadID
-		m.status = "Governed delivery Run created · " + msg.run.ID + "."
-		return m, tea.Batch(m.loadOutreach(), m.loadRuns(), m.loadActionApprovals())
-	case outreachRunLoaded:
-		m.loading = false
-		if msg.err != nil || msg.run == nil {
-			if msg.err == nil {
-				msg.err = errors.New("kernel returned an empty outreach Run")
-			}
-			m.err = msg.err
-			m.status = "The linked delivery Run could not be loaded."
-			return m, nil
-		}
-		m.err = nil
-		m.runs = upsertRun(m.runs, msg.run)
-		m.selectedID = msg.run.ID
-		m.restoreSelection()
-		m.section = sectionRuns
-		m.status = "Inspecting governed outreach Run · " + msg.run.ID + "."
-		return m, m.loadSelectedRunHistory()
 	case conversationGatewaysLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -1739,7 +1539,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadProjects(), m.loadOutreach(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 		}
 		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
@@ -1812,12 +1612,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitEventSource()
 			case modeEventSourceRetire:
 				return m, m.retireEventSource()
-			case modeProjectCreate:
-				return m, m.submitProject()
-			case modeProjectEdit:
-				return m, m.submitProjectAmendment()
-			case modeOutreachCreate:
-				return m, m.submitOutreachDraft()
 			case modeIntegrationCreate:
 				return m, m.submitConversationGatewayCreation()
 			case modeIntegrationActivate:
@@ -1953,7 +1747,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "w":
 			if m.runCapability.Available {
 				m.section = sectionRuns
-				m.resetEvidenceInspection()
 				return m, m.loadSelectedRunHistory()
 			}
 		case "R":
@@ -1990,24 +1783,12 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "o":
 			if m.objectiveCapability.Available {
 				m.section = sectionObjectives
-				m.resetEvidenceInspection()
 				return m, tea.Batch(m.loadObjectives(), m.loadRuns())
 			}
 		case "S":
 			if m.eventSourceCapability.Available {
 				m.section = sectionSources
 				return m, m.loadEventSources()
-			}
-		case "i":
-			if m.projectCapability.Available {
-				m.section = sectionProjects
-				m.resetEvidenceInspection()
-				return m, tea.Batch(m.loadProjects(), m.loadRuns())
-			}
-		case "O":
-			if m.outreachCapability.Available {
-				m.section = sectionOutreach
-				return m, m.loadOutreach()
 			}
 		case "I":
 			if m.conversationGatewayCapability.Available {
@@ -2052,13 +1833,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editor.SetValue(eventSourceComposerTemplate())
 				m.editor.Placeholder = eventSourceComposerTemplate()
 				m.focusComposerEditor()
-			} else if m.section == sectionProjects && m.supportsProject(kernelapi.OperationCreate) {
-				m.mode = modeProjectCreate
-				m.editor.Reset()
-				m.editor.Placeholder = "Describe the Project outcome…"
-				m.focusComposerEditor()
-			} else if m.section == sectionOutreach && m.canCreateOutreachDraft() {
-				m.prepareOutreachComposer()
 			} else if m.section == sectionIntegrations && m.canCreateConversationGateway() {
 				m.prepareConversationGatewayCreation()
 			} else if m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall) {
@@ -2078,42 +1852,20 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.moveAgentAmendmentSelection(-1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(-1)
-			} else if m.section == sectionOutreach {
-				m.moveOutreachObservation(-1)
-				return m, m.loadOutreach()
 			} else if m.section == sectionIntegrations {
 				m.moveConversationGatewayAdapterChoice(-1)
 			} else if m.section == sectionSkills {
 				m.moveClawHubSelection(-1)
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
-				m.moveEvidenceObservation(-1)
 			}
 		case "]":
 			if m.section == sectionReadiness {
 				m.moveAgentAmendmentSelection(1)
 			} else if m.section == sectionTeams {
 				m.moveTeamAmendmentSelection(1)
-			} else if m.section == sectionOutreach {
-				m.moveOutreachObservation(1)
-				return m, m.loadOutreach()
 			} else if m.section == sectionIntegrations {
 				m.moveConversationGatewayAdapterChoice(1)
 			} else if m.section == sectionSkills {
 				m.moveClawHubSelection(1)
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
-				m.moveEvidenceObservation(1)
-			}
-		case "{":
-			if m.section == sectionOutreach {
-				m.moveOutreachAction(-1)
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
-				m.moveGroundingPage(-1)
-			}
-		case "}":
-			if m.section == sectionOutreach {
-				m.moveOutreachAction(1)
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
-				m.moveGroundingPage(1)
 			}
 		case "b":
 			if m.section == sectionSkills && m.supportsSkillBinding(kernelapi.OperationUpsert) {
@@ -2141,8 +1893,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.pauseOrResumeAgentDeployment()
 			} else if m.section == sectionTeams {
 				return m, m.pauseOrResumeTeamDeployment()
-			} else if m.section == sectionProjects {
-				return m, m.pauseOrResumeProject()
 			} else if m.section == sectionSources {
 				return m, m.pauseOrResumeEventSource()
 			} else if m.section == sectionIntegrations {
@@ -2155,10 +1905,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.section == sectionSkills {
 				return m, m.pinOrUnpinClawHub()
-			}
-		case "l":
-			if m.section == sectionProjects {
-				return m, m.toggleSelectedObjectiveLink()
 			}
 		case "x":
 			if m.section == sectionRuns {
@@ -2240,13 +1986,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the amended objective…"
 				m.focusComposerEditor()
-			} else if m.section == sectionProjects && m.selectedProjectRecord() != nil && m.supportsProject(kernelapi.OperationPatch) {
-				m.mode = modeProjectEdit
-				m.editor.Reset()
-				m.editor.Placeholder = "Describe the amended Project purpose…"
-				m.focusComposerEditor()
-			} else if m.section == sectionOutreach {
-				return m, m.inspectSelectedOutreachRun()
 			} else if m.section == sectionRequests && m.canCompleteSelectedAgentRequest() {
 				m.prepareRequestComposer(modeRequestComplete, "Summarize the completed outcome…")
 			} else if m.section == sectionActivity && m.selectedActivityRecord() != nil {
@@ -2266,10 +2005,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.section == sectionArtifacts {
 				return m, m.downloadSelectedArtifact()
 			}
-		case "D":
-			if m.section == sectionOutreach {
-				return m, m.deliverSelectedOutreachDraft()
-			}
 		case "u":
 			if m.section == sectionObjectives {
 				return m, m.startSelectedRunbook()
@@ -2287,18 +2022,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentActivate, "Record why this reviewed Team definition should become active…")
 			} else if m.section == sectionSkills {
 				return m, m.verifySelectedClawHub()
-			} else if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
-				if lineage := m.selectedEvidenceLineage(); lineage != nil && lineage.err == nil {
-					m.evidenceExpanded = !m.evidenceExpanded
-					m.evidenceObservationSelected = 0
-				}
-			}
-		case "V":
-			if m.section == sectionRuns || m.section == sectionObjectives || m.section == sectionProjects {
-				if grounding := m.selectedEvidenceGrounding(); grounding != nil && grounding.err == nil {
-					m.groundingExpanded = !m.groundingExpanded
-					m.groundingPageSelected = 0
-				}
 			}
 		case "P":
 			if m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
@@ -2812,121 +2535,6 @@ func (m *Model) loadSelectedEventSource() tea.Cmd {
 	}
 }
 
-func (m *Model) loadProjects() tea.Cmd {
-	if !m.supportsProject(kernelapi.OperationList) {
-		return nil
-	}
-	m.loading = true
-	return func() tea.Msg {
-		projects, err := m.client.ListProjects(m.ctx, runtime.ProjectFilter{Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100})
-		return projectsLoaded{projects, err}
-	}
-}
-
-func (m *Model) loadSourceMonitors() tea.Cmd {
-	monitorAvailable := m.supportsSourceMonitor(kernelapi.OperationGetCheckpoint) && m.supportsSourceMonitor(kernelapi.OperationListObservations)
-	activityAvailable := m.activityCapability.Supports(kernelapi.OperationList)
-	if !monitorAvailable && !activityAvailable {
-		return nil
-	}
-	projects := append([]*runtime.Project(nil), m.projects...)
-	return func() tea.Msg {
-		statuses := make(map[string]sourceMonitorStatus)
-		activity := make(map[string][]runtime.ActivityProjection)
-		activityErrors := make(map[string]error)
-		for _, project := range projects {
-			if project == nil {
-				continue
-			}
-			if activityAvailable {
-				page, activityErr := m.client.ListActivity(m.ctx, runtime.ActivityFeedRequest{
-					Scope: project.Scope, ProjectID: project.ID, Limit: 5,
-				})
-				if activityErr != nil {
-					activityErrors[project.ID] = activityErr
-				} else if page != nil {
-					activity[project.ID] = page.Items
-				}
-			}
-			if !monitorAvailable {
-				continue
-			}
-			for _, monitor := range project.SourceMonitors {
-				key := sourceMonitorStatusKey(project.ID, monitor.ID)
-				checkpoint, checkpointErr := m.client.GetSourceMonitorCheckpoint(m.ctx, project.Scope, project.ID, monitor.ID)
-				observations, observationsErr := m.client.ListSourceObservations(m.ctx, runtime.SourceObservationFilter{
-					Scope: project.Scope, ProjectID: project.ID, MonitorID: monitor.ID, Limit: 5,
-				})
-				status := sourceMonitorStatus{checkpoint: checkpoint, observations: observations}
-				if checkpointErr != nil && !errors.Is(checkpointErr, runtime.ErrSourceObservationNotFound) {
-					status.err = checkpointErr
-				}
-				if observationsErr != nil {
-					status.err = observationsErr
-				}
-				if checkpoint != nil && strings.TrimSpace(checkpoint.LastRunID) != "" && m.activityCapability.Supports(kernelapi.OperationList) {
-					page, activityErr := m.client.ListActivity(m.ctx, runtime.ActivityFeedRequest{
-						Scope: project.Scope, RunID: checkpoint.LastRunID, EventTypes: []string{"source_policy.authorized"}, Limit: 25, IncludeDetails: true,
-					})
-					if activityErr != nil {
-						status.policyErr = activityErr
-					} else {
-						status.policyDecision, status.policyAuthorizedAt = sourcePolicyDecisionForMonitor(page, monitor.ID)
-					}
-				}
-				statuses[key] = status
-			}
-		}
-		return sourceMonitorsLoaded{statuses: statuses, activity: activity, activityErrors: activityErrors}
-	}
-}
-
-func sourcePolicyDecisionForMonitor(page *runtime.ActivityFeedPage, monitorID string) (*source.PolicyDecision, time.Time) {
-	if page == nil {
-		return nil, time.Time{}
-	}
-	for _, event := range page.Items {
-		if event.EventType != "source_policy.authorized" || stringPayload(event.Payload, "monitorId") != monitorID {
-			continue
-		}
-		maximumItems, ok := integerPayload(event.Payload, "maximumItems")
-		if !ok {
-			continue
-		}
-		decision := &source.PolicyDecision{
-			PolicyID: stringPayload(event.Payload, "policyId"), PolicyVersion: stringPayload(event.Payload, "policyVersion"),
-			SourceHost: stringPayload(event.Payload, "sourceHost"), PathPrefix: stringPayload(event.Payload, "pathPrefix"), MaximumItems: maximumItems,
-		}
-		if decision.PolicyID == "" || decision.PolicyVersion == "" || decision.SourceHost == "" || decision.PathPrefix == "" || decision.MaximumItems < 1 {
-			continue
-		}
-		return decision, event.CreatedAt
-	}
-	return nil, time.Time{}
-}
-
-func stringPayload(payload map[string]interface{}, key string) string {
-	value, _ := payload[key].(string)
-	return strings.TrimSpace(value)
-}
-
-func integerPayload(payload map[string]interface{}, key string) (int, bool) {
-	switch value := payload[key].(type) {
-	case int:
-		return value, true
-	case int64:
-		return int(value), int64(int(value)) == value
-	case float64:
-		return int(value), value == float64(int(value))
-	default:
-		return 0, false
-	}
-}
-
-func sourceMonitorStatusKey(projectID, monitorID string) string {
-	return projectID + "\x00" + monitorID
-}
-
 func (m *Model) loadClawHubSkills() tea.Cmd {
 	if !m.supportsClawHub(clawhub.LifecycleInspectInstalled) {
 		return nil
@@ -3072,12 +2680,6 @@ func (m *Model) loadPanel() tea.Cmd {
 	}
 	if m.section == sectionSources {
 		return m.loadEventSources()
-	}
-	if m.section == sectionProjects {
-		return tea.Batch(m.loadProjects(), m.loadRuns())
-	}
-	if m.section == sectionOutreach {
-		return m.loadOutreach()
 	}
 	if m.section == sectionIntegrations {
 		return m.loadConversationGateways()
@@ -3433,99 +3035,6 @@ func (m *Model) retireEventSource() tea.Cmd {
 	return func() tea.Msg {
 		retired, err := m.client.RetireEventSourceSubscription(m.ctx, m.config.Scope, item.ID, kernelapi.RetireEventSourceSubscriptionRequest{ExpectedRevision: item.Revision})
 		return eventSourceChanged{item: retired, action: "retired", err: err}
-	}
-}
-
-func (m *Model) submitProject() tea.Cmd {
-	prompt := strings.TrimSpace(m.editor.Value())
-	objective := m.selectedObjectiveRecord()
-	if !m.supportsProject(kernelapi.OperationCreate) || m.busy || prompt == "" {
-		if prompt == "" {
-			m.status = "Describe the Project before adding it."
-		}
-		return nil
-	}
-	if objective == nil {
-		m.status = "Select or create an Objective before composing a Project."
-		return nil
-	}
-	if m.pendingProjectKey == "" || m.pendingProjectPrompt != prompt {
-		m.pendingProjectKey, m.pendingProjectPrompt = uuid.NewString(), prompt
-	}
-	m.busy, m.err, m.status = true, nil, "Adding Project to the durable portfolio…"
-	request := kernelapi.CreateProjectRequest{Scope: m.config.Scope, Owner: m.config.Owner, Title: objectiveTitle(prompt), Purpose: prompt, Status: runtime.ProjectStatusActive, ObjectiveRefs: []string{objective.ID}}
-	key := m.pendingProjectKey
-	return func() tea.Msg {
-		project, err := m.client.CreateProject(m.ctx, request, key)
-		return projectCreated{project, err}
-	}
-}
-
-func (m *Model) submitProjectAmendment() tea.Cmd {
-	project := m.selectedProjectRecord()
-	purpose := strings.TrimSpace(m.editor.Value())
-	if project == nil || !m.supportsProject(kernelapi.OperationPatch) || m.busy || purpose == "" {
-		if purpose == "" {
-			m.status = "Describe the amended Project purpose."
-		}
-		return nil
-	}
-	m.busy, m.err, m.status = true, nil, "Recording Project revision…"
-	request := kernelapi.UpdateProjectRequest{ExpectedRevision: project.Revision, Purpose: &purpose}
-	return func() tea.Msg {
-		updated, err := m.client.PatchProject(m.ctx, m.config.Scope, project.ID, request)
-		return projectUpdated{updated, err}
-	}
-}
-
-func (m *Model) pauseOrResumeProject() tea.Cmd {
-	project := m.selectedProjectRecord()
-	if project == nil || m.busy || !m.supportsProject(kernelapi.OperationPatch) {
-		return nil
-	}
-	status := runtime.ProjectStatusPaused
-	if project.Status == runtime.ProjectStatusPaused {
-		status = runtime.ProjectStatusActive
-	}
-	m.busy, m.err, m.status = true, nil, "Updating Project lifecycle…"
-	request := kernelapi.UpdateProjectRequest{ExpectedRevision: project.Revision, Status: &status}
-	return func() tea.Msg {
-		updated, err := m.client.PatchProject(m.ctx, m.config.Scope, project.ID, request)
-		return projectUpdated{updated, err}
-	}
-}
-
-func (m *Model) toggleSelectedObjectiveLink() tea.Cmd {
-	project, objective := m.selectedProjectRecord(), m.selectedObjectiveRecord()
-	if project == nil || objective == nil || m.busy || !m.supportsProject(kernelapi.OperationPatch) {
-		if objective == nil {
-			m.status = "Select an Objective before linking it to this Project."
-		}
-		return nil
-	}
-	refs, found := append([]string(nil), project.ObjectiveRefs...), -1
-	for index, id := range refs {
-		if id == objective.ID {
-			found = index
-			break
-		}
-	}
-	if found >= 0 {
-		if len(refs) == 1 {
-			m.status = "A Project must retain at least one Objective."
-			return nil
-		}
-		refs = append(refs[:found], refs[found+1:]...)
-		m.status = "Removing Objective from Project…"
-	} else {
-		refs = append(refs, objective.ID)
-		m.status = "Linking Objective to Project…"
-	}
-	m.busy, m.err = true, nil
-	request := kernelapi.UpdateProjectRequest{ExpectedRevision: project.Revision, ObjectiveRefs: &refs}
-	return func() tea.Msg {
-		updated, err := m.client.PatchProject(m.ctx, m.config.Scope, project.ID, request)
-		return projectUpdated{updated, err}
 	}
 }
 
@@ -4217,10 +3726,6 @@ func (m *Model) supportsRun(operation string) bool {
 	return m.ready && m.runCapability.Supports(operation)
 }
 
-func (m *Model) supportsOutreach(operation string) bool {
-	return m.ready && m.outreachCapability.Supports(operation)
-}
-
 func (m *Model) defaultOperationalSection() panelSection {
 	for _, candidate := range []struct {
 		section   panelSection
@@ -4230,8 +3735,6 @@ func (m *Model) defaultOperationalSection() panelSection {
 		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
 		{sectionSources, m.eventSourceCapability.Available},
-		{sectionProjects, m.projectCapability.Available},
-		{sectionOutreach, m.outreachCapability.Available},
 		{sectionIntegrations, m.conversationGatewayCapability.Available},
 		{sectionRuns, m.runCapability.Available},
 		{sectionActivity, m.activityCapability.Available},
@@ -4263,12 +3766,10 @@ func (m *Model) availableSections() []panelSection {
 		{sectionRuns, m.runCapability.Available},
 		{sectionChannels, m.channelCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
-		{sectionProjects, m.projectCapability.Available},
 		{sectionRequests, m.requestCapability.Available},
 		{sectionApprovals, m.approvalCapability.Available},
 		{sectionSources, m.eventSourceCapability.Available},
 		{sectionIntegrations, m.conversationGatewayCapability.Available},
-		{sectionOutreach, m.outreachCapability.Available},
 		{sectionActivity, m.activityCapability.Available},
 		{sectionArtifacts, m.artifactCapability.Available},
 		{sectionBundles, m.workforceBundleCapability.Available},
@@ -4293,7 +3794,6 @@ func (m *Model) moveSection(delta int) {
 		}
 	}
 	m.section = sections[(current+delta+len(sections))%len(sections)]
-	m.resetEvidenceInspection()
 }
 
 func (m *Model) supportsAgentRequest(operation string) bool {
@@ -4322,14 +3822,6 @@ func (m *Model) supportsRunbook(operation string) bool {
 
 func (m *Model) supportsEventSource(operation string) bool {
 	return m.ready && m.eventSourceCapability.Supports(operation)
-}
-
-func (m *Model) supportsProject(operation string) bool {
-	return m.ready && m.projectCapability.Supports(operation)
-}
-
-func (m *Model) supportsSourceMonitor(operation string) bool {
-	return m.ready && m.sourceMonitorCapability.Supports(operation)
 }
 
 func (m *Model) supportsClawHub(operation clawhub.LifecycleOperation) bool {
@@ -4660,7 +4152,6 @@ func (m *Model) moveObjectiveSelection(delta int) {
 	m.runbookSelected = 0
 	m.runbookDetailExpanded = false
 	m.restoreRunbookSelection()
-	m.resetEvidenceInspection()
 }
 
 func (m *Model) restoreSelection() {
@@ -4687,7 +4178,6 @@ func (m *Model) moveSelection(delta int) {
 	}
 	m.selected = max(0, min(len(m.runs)-1, m.selected+delta))
 	m.selectedID = m.runs[m.selected].ID
-	m.resetEvidenceInspection()
 }
 
 func (m *Model) selectedArtifactRecord() *runtime.Artifact {
@@ -4773,14 +4263,6 @@ func (m *Model) movePanelSelection(delta int) {
 	}
 	if m.section == sectionSources {
 		m.moveEventSourceSelection(delta)
-		return
-	}
-	if m.section == sectionProjects {
-		m.moveProjectSelection(delta)
-		return
-	}
-	if m.section == sectionOutreach {
-		m.moveOutreachSelection(delta)
 		return
 	}
 	if m.section == sectionIntegrations {
@@ -5328,13 +4810,6 @@ func teamEvaluationPlaceholder(entry *kernelapi.TeamDeploymentCatalogEntry) stri
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) selectedProjectRecord() *runtime.Project {
-	if m.projectSelected < 0 || m.projectSelected >= len(m.projects) {
-		return nil
-	}
-	return m.projects[m.projectSelected]
-}
-
 func (m *Model) selectedClawHubRecord() *clawhub.InstalledState {
 	if m.clawHubSelected < 0 || m.clawHubSelected >= len(m.clawHubSkills) {
 		return nil
@@ -5393,30 +4868,6 @@ func (m *Model) moveSkillBindingSelection(delta int) {
 	m.skillBindingSelected = max(0, min(len(m.skillBindings)-1, m.skillBindingSelected+delta))
 	m.selectedSkillBinding = m.skillBindings[m.skillBindingSelected].ID
 }
-func (m *Model) restoreProjectSelection() {
-	if len(m.projects) == 0 {
-		m.projectSelected = 0
-		m.selectedProject = ""
-		return
-	}
-	for i, v := range m.projects {
-		if v.ID == m.selectedProject {
-			m.projectSelected = i
-			return
-		}
-	}
-	m.projectSelected = min(m.projectSelected, len(m.projects)-1)
-	m.selectedProject = m.projects[m.projectSelected].ID
-}
-func (m *Model) moveProjectSelection(delta int) {
-	if len(m.projects) == 0 {
-		return
-	}
-	m.projectSelected = max(0, min(len(m.projects)-1, m.projectSelected+delta))
-	m.selectedProject = m.projects[m.projectSelected].ID
-	m.resetEvidenceInspection()
-}
-
 func (m *Model) selectedConversationRecord() *runtime.Conversation {
 	if m.conversationSelected < 0 || m.conversationSelected >= len(m.conversations) {
 		return nil
@@ -5666,12 +5117,6 @@ func (m *Model) prepareComposerForSection() {
 		m.editor.SetValue(eventSourceComposerTemplate())
 		m.editor.Placeholder = eventSourceComposerTemplate()
 		m.focusComposerEditor()
-	case m.section == sectionProjects && m.supportsProject(kernelapi.OperationCreate):
-		m.mode = modeProjectCreate
-		m.editor.Placeholder = "Describe the Project outcome…"
-		m.focusComposerEditor()
-	case m.section == sectionOutreach && m.canCreateOutreachDraft():
-		m.prepareOutreachComposer()
 	case m.section == sectionIntegrations && m.canCreateConversationGateway():
 		m.prepareConversationGatewayCreation()
 	case m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall):
@@ -5752,16 +5197,6 @@ func (m *Model) resetComposerMode() {
 	if m.section == sectionSources {
 		m.mode = modeEventSourceCreate
 		m.editor.Placeholder = "Press n or Tab to configure a durable event source."
-		return
-	}
-	if m.section == sectionProjects {
-		m.mode = modeProjectCreate
-		m.editor.Placeholder = "Describe the Project outcome…"
-		return
-	}
-	if m.section == sectionOutreach {
-		m.mode = modeCreate
-		m.editor.Placeholder = "Select evidence and an authorized action, then press n to draft outreach."
 		return
 	}
 	if m.section == sectionIntegrations {

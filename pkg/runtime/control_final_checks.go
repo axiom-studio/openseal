@@ -18,13 +18,9 @@ import (
 //  2. An external mutation claim needs a succeeded ActionCall receipt with an
 //     external operation.
 //  3. An approval claim is refused once; the second one fails the Run.
-//  4. Evidence mode: the claim ledger is checked against the Run's snapshot
-//     and reviewed synchronously by the EvidenceGroundingReviewer. Nothing is
-//     staged in the checkpoint; the draft lives in the tool entry.
 
 func init() {
 	registerFinalAnswerCheck(finalAnswerCheck{Order: finalCheckOrderCompletion, Name: "completion", Check: checkFinalAnswerCompletion})
-	registerFinalAnswerCheck(finalAnswerCheck{Order: finalCheckOrderEvidence, Name: "evidence_grounding", Check: checkFinalEvidenceGrounding})
 }
 
 // Completion check error codes (stable; the model sees them).
@@ -33,7 +29,6 @@ const (
 	finalUnevidencedClaimCode   = "unevidenced_external_claim"
 	finalApprovalClaimCode      = "approval_claim"
 	finalUnverifiedApprovalCode = "unverified_approval_claim"
-	finalEvidenceRepairCode     = "evidence_repair_required"
 )
 
 // A backslash terminates a URL as well as ordinary whitespace: JSON-encoded
@@ -326,121 +321,4 @@ func claimsPendingApproval(value string) bool {
 		}
 	}
 	return false
-}
-
-// ---------------------------------------------------------------------------
-// Evidence grounding (§11.4.4)
-
-// checkFinalEvidenceGrounding reviews an evidence-mode final against the Run's
-// immutable snapshot. Findings (structural or the reviewer's) are an
-// evidence_repair_required result listing them; an accepted review adds the
-// normalized claims and the review to the output.
-func checkFinalEvidenceGrounding(ctx context.Context, x *ControlExecutor, cc ControlContext, d *finalAnswerDraft) (*finalAnswerRejection, error) {
-	if cc.Authority.finalMode() != FinalModeEvidence {
-		return nil, nil
-	}
-	snapshot, err := evidenceSnapshotForGrounding(cc.Run.Context)
-	if err != nil {
-		return nil, err
-	}
-	if snapshot == nil {
-		// No snapshot to ground against: the schema already required the
-		// report and the claim ledger.
-		return nil, nil
-	}
-	claims, digest, findings := normalizeEvidenceClaims(d.Args.EvidenceClaims, snapshot)
-	findings = append(findings, validateEvidenceGroundingDraft(d.Output, claims)...)
-	if len(findings) > 0 {
-		return evidenceRepairRejection(findings), nil
-	}
-	if x.Reviewer == nil {
-		return nil, errors.New("evidence-backed completion requires a configured grounding reviewer")
-	}
-	request := EvidenceGroundingRequest{
-		APIVersion: EvidenceGroundingAPIVersion, InvocationID: finalEvidenceInvocationID(cc),
-		Scope: cc.Run.Scope, RunID: cc.Run.ID, AgentID: cc.Run.AssignedAgentID, Goal: cc.Run.Goal,
-		Snapshot: *snapshot, Claims: append([]EvidenceClaim(nil), claims...), ClaimsDigest: digest,
-		DraftSummary: strings.TrimSpace(d.Args.Answer), DraftOutput: cloneMap(d.Output),
-		MaxOutputTokens: evidenceReviewOutputLimit(cc.Run),
-	}
-	if cc.Step != nil {
-		request.TurnID = cc.Step.ID
-	}
-	if cc.Binding != nil {
-		request.ModelCredential = cloneHostedCredentialReference(cc.Binding.ModelCredential)
-	}
-	review, err := x.Reviewer.ReviewEvidenceGrounding(ctx, request)
-	if err != nil {
-		// A reviewer transport failure is a host outage: the step requeues
-		// with the host retry delays and the settle replays with the same
-		// InvocationID.
-		return nil, retryableTurnHostError{cause: fmt.Errorf("evidence grounding review: %w", err)}
-	}
-	if err := validateEvidenceGroundingReview(review, request); err != nil {
-		return nil, err
-	}
-	if int64(review.Usage.OutputTokens) > request.MaxOutputTokens {
-		return nil, fmt.Errorf("evidence reviewer reported %d output tokens beyond the allowed %d", review.Usage.OutputTokens, request.MaxOutputTokens)
-	}
-	if !review.Accepted {
-		findings := review.Findings
-		if len(findings) == 0 {
-			findings = []EvidenceGroundingFinding{{Status: EvidenceGroundingUncertain, Summary: "The review did not cover every claim."}}
-		}
-		return evidenceRepairRejection(findings), nil
-	}
-	d.Args.EvidenceClaims = claims
-	d.Output[finalOutputEvidenceClaimsKey] = append([]EvidenceClaim(nil), claims...)
-	d.Output[finalOutputEvidenceGroundingKey] = evidenceGroundingResultMap(review)
-	return nil, nil
-}
-
-const finalOutputEvidenceGroundingKey = "evidenceGrounding"
-
-// evidenceReviewOutputLimit is the review's output cap: the reviewer limit,
-// lowered to what the Run's output and total token budgets have left.
-func evidenceReviewOutputLimit(run *AgentRun) int64 {
-	limit := int64(EvidenceGroundingReviewOutputLimit)
-	for _, dimension := range []string{"output_tokens", "total_tokens"} {
-		used, max, ok := budgetDimensionUsage(run, dimension)
-		if !ok || max <= 0 {
-			continue
-		}
-		if remaining := max - used; remaining > 0 && remaining < limit {
-			limit = remaining
-		}
-	}
-	return limit
-}
-
-// finalEvidenceInvocationID is stable across a replay of the same settle:
-// the final tool entry, or the plain-text step.
-func finalEvidenceInvocationID(cc ControlContext) string {
-	if cc.Entry != nil && cc.Entry.ID != "" {
-		return cc.Entry.ID
-	}
-	if cc.Step != nil {
-		return cc.Step.ID
-	}
-	return cc.Run.ID
-}
-
-func evidenceRepairRejection(findings []EvidenceGroundingFinding) *finalAnswerRejection {
-	lines := make([]string, 0, len(findings))
-	for _, finding := range findings {
-		line := finding.Summary
-		if finding.ClaimID != "" {
-			line = finding.ClaimID + ": " + line
-		}
-		if len(finding.EvidenceRefs) > 0 {
-			line += " (" + strings.Join(finding.EvidenceRefs, ", ") + ")"
-		}
-		lines = append(lines, "- "+line)
-	}
-	encoded, _ := json.Marshal(findings)
-	var projected []interface{}
-	_ = json.Unmarshal(encoded, &projected)
-	return &finalAnswerRejection{Code: finalEvidenceRepairCode,
-		Message: "The report is not grounded in the evidence yet. Fix these and answer again:\n" + strings.Join(lines, "\n"),
-		Extra:   map[string]interface{}{"findings": projected}}
 }

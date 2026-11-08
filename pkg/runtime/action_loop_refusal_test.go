@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -143,40 +142,4 @@ func TestRefusedDoesNotProtectExternalOperation(t *testing.T) {
 			t.Fatalf("external operation owner = %#v, %v", found, err)
 		}
 	})
-}
-
-func TestOutreachReconcilesRefusedActionAsCanceled(t *testing.T) {
-	store := NewMemoryStore()
-	scope := Scope{Kind: "tenant", ID: "research"}
-	project, runs := seedExecutableMonitorProject(t, store, scope)
-	sources := NewSourceMonitorService(store, store, store, store)
-	ingested, err := sources.Ingest(context.Background(), sourceObservationRequest(scope, project.ID, "monitor-a", runs["monitor-a"], 0, "cursor-1", "thread-7", "Setup is confusing"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	actionReader := &fixedOutreachActionReader{}
-	service := NewOutreachService(store, store, store, actionReader)
-	disclosure := "Disclosure: I work on OpenSeal and am seeking product feedback."
-	body := "What part of setup was hardest for you? " + disclosure
-	arguments := map[string]interface{}{"threadUrl": ingested.Observation.SourceURI, "message": body}
-	created, _, err := service.Create(context.Background(), CreateOutreachThreadRequest{Thread: &OutreachThread{
-		Scope: scope, ProjectID: project.ID, SourceObservationID: ingested.Observation.ID, MonitorID: "monitor-a",
-		StableSourceID: "thread-7", TargetURI: ingested.Observation.SourceURI, Owner: project.Owner, AssignedAgentID: "researcher",
-		SourcePolicyRef: "approved-forums", ApprovalPolicyRef: "review-outreach",
-		Identity: OutreachIdentity{ProfileRef: "profile:openseal-research", DisplayName: "OpenSeal Research", Affiliation: "OpenSeal", Disclosure: disclosure},
-		Messages: []OutreachMessage{{ID: "message-1", Direction: OutreachMessageOutbound, Intent: OutreachIntentRequestFeedback, Body: body, Status: OutreachMessageDraft,
-			Capability: &OutreachCapability{SkillID: "forum-outreach", SkillVersion: "1.0.0", Action: "reply", TargetArgument: "threadUrl", BodyArgument: "message", Arguments: arguments}}},
-	}, IdempotencyKey: "draft-1", Actor: ActivityActor{Type: "user", ID: "operator"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	actionReader.call = &ActionCall{ID: "action-reply", Scope: scope, RunID: "run-outreach", DeploymentID: "researcher", SkillID: "forum-outreach", SkillVersion: "1.0.0", Action: "reply",
-		Status: ActionCallStatusRefused, SideEffect: skill.SideEffectExternal, Arguments: arguments, Error: "Not run: this exact call already succeeded at step 2.",
-		EvidenceRefs: []string{ingested.Observation.ID}, IdempotencyKey: "outreach:message-1"}
-	reconciled, err := service.ReconcileAction(context.Background(), scope, created.ID, ReconcileOutreachActionRequest{
-		MessageID: "message-1", ActionCallID: "action-reply", Actor: ActivityActor{Type: "worker", ID: "action-worker"},
-	})
-	if err != nil || reconciled.Thread.Messages[0].Status != OutreachMessageCanceled {
-		t.Fatalf("reconciled = %#v, %v", reconciled, err)
-	}
 }

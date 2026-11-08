@@ -40,8 +40,7 @@ func TestSourcePolicyLifecycleHTTPRoundTrip(t *testing.T) {
 	}
 
 	policy := source.Policy{ID: "approved-forums", Version: "2026-07-21", Enabled: true, MaximumItems: 10, RetentionDays: 30,
-		Sources:  []source.PolicySource{{Host: "www.reddit.com", PathPrefixes: []string{"/r/kubernetes"}, Methods: []string{http.MethodGet}}},
-		Outreach: &source.OutreachPolicy{Enabled: true, ApprovalPolicy: "human-review", MaximumBytes: 1500}}
+		Sources: []source.PolicySource{{Host: "www.reddit.com", PathPrefixes: []string{"/r/kubernetes"}, Methods: []string{http.MethodGet}}}}
 	registered, err := api.RegisterSourcePolicyVersion(ctx, source.RegisterVersionRequest{Scope: scope, Policy: policy, ActorType: "user", ActorID: "admin", Reason: "reviewed exact source authority"})
 	if err != nil || registered.Policy.ID != policy.ID || registered.Policy.Sources[0].Methods[0] != http.MethodGet || registered.ActorID != "admin" {
 		t.Fatalf("registered = %#v, %v", registered, err)

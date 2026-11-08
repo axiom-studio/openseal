@@ -62,9 +62,6 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			return ErrSkillReferenceUpgradeBusy
 		}
 	}
-	if err := validateProjectSkillUpgradeReferencesSQL(ctx, conn, application, "project_skill_references", false); err != nil {
-		return err
-	}
 	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
 		return err
 	}
@@ -98,27 +95,6 @@ func (s *SQLiteStore) ApplySkillReferenceUpgrade(ctx context.Context, applicatio
 			mutation.Value.Owner.Type, mutation.Value.Owner.ID, mutation.Value.Status, mutation.Value.Priority,
 			mutation.Value.Revision, mutation.Value.UpdatedAt, string(encoded), mutation.Value.Scope.Kind,
 			mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
-		if err != nil {
-			return err
-		}
-		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
-		}
-		if _, err = insertSQLiteActivityConn(ctx, conn, mutation.Event); err != nil {
-			return err
-		}
-	}
-	for _, mutation := range application.Projects {
-		encoded, marshalErr := json.Marshal(mutation.Value)
-		if marshalErr != nil {
-			return marshalErr
-		}
-		result, err = conn.ExecContext(ctx, `UPDATE projects
-			SET owner_type=?,owner_id=?,status=?,revision=?,updated_at=?,payload=?
-			WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
-			mutation.Value.Owner.Type, mutation.Value.Owner.ID, mutation.Value.Status, mutation.Value.Revision,
-			mutation.Value.UpdatedAt, string(encoded), mutation.Value.Scope.Kind, mutation.Value.Scope.ID,
-			mutation.Value.ID, mutation.ExpectedRevision)
 		if err != nil {
 			return err
 		}

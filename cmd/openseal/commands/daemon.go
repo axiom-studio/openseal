@@ -18,7 +18,6 @@ import (
 	"github.com/axiom-studio/openseal/internal/daemon"
 	"github.com/axiom-studio/openseal/internal/server"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/outreach"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
@@ -126,10 +125,6 @@ Options:
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	policyCatalog, err := daemon.NewSourcePolicyCatalog(cfg.SourcePolicies)
-	if err != nil {
-		sugar.Fatalf("configure source policies: %v", err)
-	}
 	skillsDir := strings.TrimSpace(os.Getenv("OPENSEAL_SKILLS_DIR"))
 	if skillsDir == "" {
 		skillsDir = filepath.Join(filepath.Dir(*configPath), "skills")
@@ -188,15 +183,10 @@ Options:
 			sugar.Fatalf("configure desktop task provider: %v", err)
 		}
 	}
-	workerScopes, err := policyCatalog.ListWorkerScopes(ctx)
-	if err != nil {
-		sugar.Fatalf("resolve source-policy worker scopes: %v", err)
-	}
-	credentialScopes, err := standaloneContext.ListWorkerScopes(ctx)
+	workerScopes, err := standaloneContext.ListWorkerScopes(ctx)
 	if err != nil {
 		sugar.Fatalf("resolve standalone context worker scopes: %v", err)
 	}
-	workerScopes = mergeDaemonWorkerScopes(workerScopes, credentialScopes)
 	if stepHost != nil {
 		workerScopes = mergeDaemonWorkerScopes(workerScopes, []runtime.Scope{scope})
 	}
@@ -208,27 +198,8 @@ Options:
 	var turnResolver runtime.TurnRunnerResolver
 	if len(workerScopes) > 0 {
 		turnResolver = resolver
-		authorizer := outreach.InvocationAuthorizerFunc(func(authorizeCtx context.Context, invocation runtime.ToolInvocation) (*outreach.InvocationAuthorization, error) {
-			if kernel == nil {
-				return nil, runtime.ErrTurnHostUnavailable
-			}
-			canonical, authorizeErr := outreach.NewCanonicalInvocationAuthorizer(kernel, policyCatalog)
-			if authorizeErr != nil {
-				return nil, authorizeErr
-			}
-			return canonical.AuthorizeOutreachInvocation(authorizeCtx, invocation)
-		})
-		invoker, invokerErr := outreach.NewWebhookInvoker(authorizer)
-		if invokerErr != nil {
-			sugar.Fatalf("configure governed outreach transport: %v", invokerErr)
-		}
-		dispatcher, dispatcherErr := runtime.NewToolActionDispatcher(invoker)
-		if dispatcherErr != nil {
-			sugar.Fatalf("configure governed action dispatcher: %v", dispatcherErr)
-		}
 		engineOptions = append(engineOptions,
 			opensealkernel.WithDynamicAgentRunWorkers(runtime.DynamicAgentRunWorkerConfig{Kind: runtime.RunKindAgentWork, Concurrency: 2, WorkerIDPrefix: "standalone-agent"}, workerScopeSource, turnResolver),
-			opensealkernel.WithDynamicActionWorkers(runtime.DynamicActionWorkerConfig{Concurrency: 2, WorkerIDPrefix: "standalone-action"}, workerScopeSource, standaloneContext, dispatcher),
 		)
 	}
 	if stepHost != nil {
@@ -268,9 +239,6 @@ Options:
 	cutoverHost.Bind(kernel)
 	if err := resolver.Bind(kernel, contentStore, sugar); err != nil {
 		sugar.Fatalf("configure the run loop: %v", err)
-	}
-	if err := ensureCanonicalSkill(ctx, kernel, outreach.SkillDefinition()); err != nil {
-		sugar.Fatalf("register governed outreach Skill: %v", err)
 	}
 	if err := kernel.Start(ctx); err != nil {
 		sugar.Fatalf("start OpenSeal kernel: %v", err)
@@ -329,18 +297,6 @@ Options:
 	if *standaloneOperator {
 		if !*desktopOperator {
 			apiServer.SetActionApprovalAuthorizer(runtime.EligibleApprovalAuthorizer{})
-		}
-		if len(workerScopes) > 0 {
-			apiServer.SetOutreachDeliveryDispatcher(func(dispatchCtx context.Context, request runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error) {
-				if !policyCatalog.OutreachEnabled(request.Scope) {
-					return nil, fmt.Errorf("governed outreach workers are not configured for scope %s:%s", request.Scope.Kind, request.Scope.ID)
-				}
-				result, dispatchErr := kernel.CreateAgentRunCommand(dispatchCtx, request)
-				if dispatchErr == nil {
-					kernel.WakeAgentWorkers()
-				}
-				return result, dispatchErr
-			})
 		}
 	}
 	apiServer.SetArtifactContentStore(contentStore)
@@ -401,25 +357,6 @@ func parseDaemonScope(value string) (runtime.Scope, error) {
 		return runtime.Scope{}, fmt.Errorf("--scope: %w", err)
 	}
 	return scope, nil
-}
-
-func ensureCanonicalSkill(ctx context.Context, kernel *opensealkernel.Engine, definition *skill.Definition) error {
-	if kernel == nil || definition == nil {
-		return fmt.Errorf("kernel and canonical Skill definition are required")
-	}
-	existing, err := kernel.GetSkillDefinition(ctx, definition.ID, definition.Version)
-	if err != nil {
-		return err
-	}
-	if existing == nil {
-		return kernel.RegisterSkill(ctx, definition)
-	}
-	existingJSON, existingErr := json.Marshal(existing)
-	definitionJSON, definitionErr := json.Marshal(definition)
-	if existingErr != nil || definitionErr != nil || string(existingJSON) != string(definitionJSON) {
-		return fmt.Errorf("persisted Skill %s@%s does not match the canonical definition", definition.ID, definition.Version)
-	}
-	return nil
 }
 
 func isLoopbackListenAddress(addr string) bool {

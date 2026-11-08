@@ -595,7 +595,6 @@ type KernelStore interface {
 	CredentialRequestStore
 	PortfolioStore
 	RunbookActivationStore
-	SourceMonitorStore
 	ObjectiveScopeStore
 	EventSourceCheckpointStore
 	EventSourceSubscriptionStore

@@ -484,10 +484,6 @@ func clonePolicy(value *Policy) *Policy {
 		copy.Sources[i].PathPrefixes = append([]string(nil), item.PathPrefixes...)
 		copy.Sources[i].Methods = append([]string(nil), item.Methods...)
 	}
-	if value.Outreach != nil {
-		outreach := *value.Outreach
-		copy.Outreach = &outreach
-	}
 	return &copy
 }
 

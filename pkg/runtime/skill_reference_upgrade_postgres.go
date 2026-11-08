@@ -22,10 +22,8 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 	// First accepted typed Run pins take the shared logical fence. Cutover is
 	// exclusive so an old invocation either becomes visible to drain checks or
 	// observes the new binding and cannot be admitted with its obsolete version.
-	for _, skillID := range projectSkillUpgradeLockIDs(application) {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, skillRuntimeMaintenanceLockKey(application.Plan.Scope, skillID)); err != nil {
-			return err
-		}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, skillRuntimeMaintenanceLockKey(application.Plan.Scope, application.Plan.From.ID)); err != nil {
+		return err
 	}
 	gate, err := s.postgresSkillRuntimeMaintenanceActiveTx(ctx, tx, application.Plan.Scope, application.Plan.From.ID)
 	if err != nil {
@@ -63,9 +61,6 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			return ErrSkillReferenceUpgradeBusy
 		}
 	}
-	if err := validateProjectSkillUpgradeReferencesSQL(ctx, tx, application, s.table("project_skill_references"), true); err != nil {
-		return err
-	}
 	// Binding and Team locks can wait behind another transaction. The logical
 	// fence prevents ownership changes; the current clock still fences expiry.
 	if err := validateSkillUpgradeMaintenance(ctx, gate, application, time.Now().UTC()); err != nil {
@@ -101,27 +96,6 @@ func (s *PostgresStore) ApplySkillReferenceUpgrade(ctx context.Context, applicat
 			mutation.Value.Owner.Type, mutation.Value.Owner.ID, mutation.Value.Status, mutation.Value.Priority,
 			mutation.Value.Revision, mutation.Value.UpdatedAt, string(encoded), mutation.Value.Scope.Kind,
 			mutation.Value.Scope.ID, mutation.Value.ID, mutation.ExpectedRevision)
-		if err != nil {
-			return err
-		}
-		if rows, _ := result.RowsAffected(); rows != 1 {
-			return ErrSkillReferenceUpgradeConflict
-		}
-		if _, err = s.insertPostgresActivityTx(ctx, tx, mutation.Event); err != nil {
-			return err
-		}
-	}
-	for _, mutation := range application.Projects {
-		encoded, marshalErr := json.Marshal(mutation.Value)
-		if marshalErr != nil {
-			return marshalErr
-		}
-		result, err = tx.ExecContext(ctx, `UPDATE `+s.table("projects")+`
-			SET owner_type=$1,owner_id=$2,status=$3,revision=$4,updated_at=$5,payload=$6::jsonb
-			WHERE scope_kind=$7 AND scope_id=$8 AND id=$9 AND revision=$10`,
-			mutation.Value.Owner.Type, mutation.Value.Owner.ID, mutation.Value.Status, mutation.Value.Revision,
-			mutation.Value.UpdatedAt, string(encoded), mutation.Value.Scope.Kind, mutation.Value.Scope.ID,
-			mutation.Value.ID, mutation.ExpectedRevision)
 		if err != nil {
 			return err
 		}

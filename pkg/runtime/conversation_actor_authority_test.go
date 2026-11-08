@@ -284,7 +284,7 @@ func TestOtherConversationMemberCannotCancelPendingApproval(t *testing.T) {
 		return ActionPolicyDecision{Disposition: ActionDispositionRequireApproval, Reason: "review required", ApprovalTTL: time.Hour, EligibleApprovers: []ApprovalPrincipal{{Type: "role", ID: "reviewer"}}}, nil
 	}))
 	proposal, err := coordinator.Propose(t.Context(), loop.request(ProposeActionRequest{
-		DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
+		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed report"}, Summary: "Send reviewed report",
 	}, "reviewed-action"))
 	if err != nil || proposal == nil || proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {

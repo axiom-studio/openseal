@@ -51,17 +51,7 @@ type KernelClient interface {
 	GetEventSourceCheckpoint(context.Context, runtime.Scope, string) (*runtime.EventSourceCheckpoint, error)
 	AdvanceEventSourceCheckpoint(context.Context, runtime.Scope, string, kernelapi.AdvanceEventSourceCheckpointRequest) (*runtime.EventSourceCheckpoint, error)
 	RouteEvent(context.Context, runtime.EventEnvelope) (*runtime.EventRouteResult, error)
-	CreateProject(context.Context, kernelapi.CreateProjectRequest, string) (*runtime.Project, error)
-	ListProjects(context.Context, runtime.ProjectFilter) ([]*runtime.Project, error)
-	GetProject(context.Context, runtime.Scope, string) (*runtime.Project, error)
-	PatchProject(context.Context, runtime.Scope, string, kernelapi.UpdateProjectRequest) (*runtime.Project, error)
-	CreateOutreachThread(context.Context, kernelapi.CreateOutreachThreadRequest, string) (*runtime.OutreachThread, error)
-	ListOutreachThreads(context.Context, runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error)
-	GetOutreachThread(context.Context, runtime.Scope, string, string) (*runtime.OutreachThread, error)
-	DeliverOutreachMessage(context.Context, string, string, string, kernelapi.DeliverOutreachMessageRequest, string) (*runtime.AgentRun, error)
 	ListActivity(context.Context, runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error)
-	ListSourceObservations(context.Context, runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error)
-	GetSourceMonitorCheckpoint(context.Context, runtime.Scope, string, string) (*runtime.SourceMonitorCheckpoint, error)
 	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*runtime.AgentRunCommandResult, error)
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
 	GetAgentRun(context.Context, runtime.Scope, string) (*runtime.AgentRun, error)
@@ -954,110 +944,10 @@ func (c *KernelHTTPClient) RouteEvent(ctx context.Context, event runtime.EventEn
 	return &result, nil
 }
 
-func (c *KernelHTTPClient) CreateProject(ctx context.Context, request kernelapi.CreateProjectRequest, idempotencyKey string) (*runtime.Project, error) {
-	var project runtime.Project
-	if err := c.do(ctx, http.MethodPost, "/api/v1/projects", request, idempotencyKey, &project); err != nil {
-		return nil, err
-	}
-	return &project, nil
-}
-
-func (c *KernelHTTPClient) ListProjects(ctx context.Context, filter runtime.ProjectFilter) ([]*runtime.Project, error) {
-	query := scopeQuery(filter.Scope)
-	if filter.Owner != nil {
-		query.Set("ownerType", string(filter.Owner.Type))
-		query.Set("ownerId", filter.Owner.ID)
-	}
-	setIfPresent(query, "objectiveId", filter.ObjectiveID)
-	for _, status := range filter.Statuses {
-		query.Add("status", string(status))
-	}
-	if filter.Limit > 0 {
-		query.Set("limit", strconv.Itoa(filter.Limit))
-	}
-	if filter.Offset > 0 {
-		query.Set("offset", strconv.Itoa(filter.Offset))
-	}
-	var projects []*runtime.Project
-	if err := c.do(ctx, http.MethodGet, "/api/v1/projects?"+query.Encode(), nil, "", &projects); err != nil {
-		return nil, err
-	}
-	return projects, nil
-}
-
-func (c *KernelHTTPClient) GetProject(ctx context.Context, scope runtime.Scope, projectID string) (*runtime.Project, error) {
-	query := scopeQuery(scope)
-	var project runtime.Project
-	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "?" + query.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &project); err != nil {
-		return nil, err
-	}
-	return &project, nil
-}
-
-func (c *KernelHTTPClient) PatchProject(ctx context.Context, scope runtime.Scope, projectID string, request kernelapi.UpdateProjectRequest) (*runtime.Project, error) {
-	query := scopeQuery(scope)
-	var project runtime.Project
-	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "?" + query.Encode()
-	if err := c.do(ctx, http.MethodPatch, path, request, "", &project); err != nil {
-		return nil, err
-	}
-	return &project, nil
-}
-
-func (c *KernelHTTPClient) CreateOutreachThread(ctx context.Context, request kernelapi.CreateOutreachThreadRequest, idempotencyKey string) (*runtime.OutreachThread, error) {
-	var thread runtime.OutreachThread
-	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(request.ProjectID)) + "/outreach"
-	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &thread); err != nil {
-		return nil, err
-	}
-	return &thread, nil
-}
-
-func (c *KernelHTTPClient) ListOutreachThreads(ctx context.Context, filter runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error) {
-	query := scopeQuery(filter.Scope)
-	setIfPresent(query, "sourceObservationId", filter.SourceObservationID)
-	for _, status := range filter.Statuses {
-		query.Add("status", string(status))
-	}
-	if filter.Limit > 0 {
-		query.Set("limit", strconv.Itoa(filter.Limit))
-	}
-	if filter.Offset > 0 {
-		query.Set("offset", strconv.Itoa(filter.Offset))
-	}
-	var threads []*runtime.OutreachThread
-	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(filter.ProjectID)) + "/outreach?" + query.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &threads); err != nil {
-		return nil, err
-	}
-	return threads, nil
-}
-
-func (c *KernelHTTPClient) GetOutreachThread(ctx context.Context, scope runtime.Scope, projectID, threadID string) (*runtime.OutreachThread, error) {
-	query := scopeQuery(scope)
-	var thread runtime.OutreachThread
-	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "/outreach/" + url.PathEscape(strings.TrimSpace(threadID)) + "?" + query.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &thread); err != nil {
-		return nil, err
-	}
-	return &thread, nil
-}
-
-func (c *KernelHTTPClient) DeliverOutreachMessage(ctx context.Context, projectID, threadID, messageID string, request kernelapi.DeliverOutreachMessageRequest, idempotencyKey string) (*runtime.AgentRun, error) {
-	var run runtime.AgentRun
-	path := "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "/outreach/" + url.PathEscape(strings.TrimSpace(threadID)) +
-		"/messages/" + url.PathEscape(strings.TrimSpace(messageID)) + "/deliveries"
-	if err := c.do(ctx, http.MethodPost, path, request, idempotencyKey, &run); err != nil {
-		return nil, err
-	}
-	return &run, nil
-}
-
 func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	query := scopeQuery(request.Scope)
 	for _, item := range []struct{ key, value string }{
-		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"projectId", request.ProjectID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
+		{"runId", request.RunID}, {"agentId", request.AgentID}, {"objectiveId", request.ObjectiveID}, {"teamId", request.TeamID}, {"cursor", request.Cursor},
 	} {
 		if value := strings.TrimSpace(item.value); value != "" {
 			query.Set(item.key, value)
@@ -1085,35 +975,6 @@ func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.Act
 		return nil, err
 	}
 	return &page, nil
-}
-
-func (c *KernelHTTPClient) ListSourceObservations(ctx context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
-	query := scopeQuery(filter.Scope)
-	if filter.Limit > 0 {
-		query.Set("limit", strconv.Itoa(filter.Limit))
-	}
-	if filter.Offset > 0 {
-		query.Set("offset", strconv.Itoa(filter.Offset))
-	}
-	var observations []*runtime.SourceObservation
-	path := sourceMonitorPath(filter.ProjectID, filter.MonitorID, "observations") + "?" + query.Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &observations); err != nil {
-		return nil, err
-	}
-	return observations, nil
-}
-
-func (c *KernelHTTPClient) GetSourceMonitorCheckpoint(ctx context.Context, scope runtime.Scope, projectID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
-	var checkpoint runtime.SourceMonitorCheckpoint
-	path := sourceMonitorPath(projectID, monitorID, "checkpoint") + "?" + scopeQuery(scope).Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &checkpoint); err != nil {
-		return nil, err
-	}
-	return &checkpoint, nil
-}
-
-func sourceMonitorPath(projectID, monitorID, suffix string) string {
-	return "/api/v1/projects/" + url.PathEscape(strings.TrimSpace(projectID)) + "/source-monitors/" + url.PathEscape(strings.TrimSpace(monitorID)) + "/" + suffix
 }
 
 func clawHubPath(kind, reference, action string) string {

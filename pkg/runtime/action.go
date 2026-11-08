@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -578,4 +579,25 @@ func validApprovalStatus(status ApprovalStatus) bool {
 // asks the Run for a revised one rather than ending the attempt.
 func approvalRevisesProposal(status string) bool {
 	return status == string(ApprovalStatusChangesRequested) || status == string(ApprovalStatusSuperseded)
+}
+
+func uniqueIDs(ids []string, kind string) error {
+	seen := map[string]bool{}
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			return fmt.Errorf("%s references must be non-empty and unique", kind)
+		}
+		seen[id] = true
+	}
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

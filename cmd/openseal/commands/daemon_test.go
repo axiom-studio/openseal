@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
-	"github.com/axiom-studio/openseal/pkg/outreach"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"go.uber.org/zap"
 )
@@ -34,37 +32,6 @@ func TestDaemonScopeRequiresExactPortableScope(t *testing.T) {
 		if _, err := parseDaemonScope(invalid); err == nil {
 			t.Fatalf("invalid scope %q was accepted", invalid)
 		}
-	}
-}
-
-func TestCanonicalDaemonSkillRegistrationSurvivesRestart(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "kernel.db")
-	store, err := runtime.NewSQLiteStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine, err := opensealkernel.New(opensealkernel.WithPersistentStore(store))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ensureCanonicalSkill(t.Context(), engine, outreach.SkillDefinition()); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	reopened, err := runtime.NewSQLiteStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reopened.Close()
-	restarted, err := opensealkernel.New(opensealkernel.WithPersistentStore(reopened))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ensureCanonicalSkill(t.Context(), restarted, outreach.SkillDefinition()); err != nil {
-		t.Fatalf("idempotent registration after restart: %v", err)
 	}
 }
 

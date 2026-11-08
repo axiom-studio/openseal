@@ -56,7 +56,6 @@ type ActivityEvent struct {
 	Severity         ActivitySeverity       `json:"severity"`
 	AgentID          string                 `json:"agentId,omitempty"`
 	ObjectiveID      string                 `json:"objectiveId,omitempty"`
-	ProjectID        string                 `json:"projectId,omitempty"`
 	RunID            string                 `json:"runId"`
 	TurnID           string                 `json:"turnId,omitempty"`
 	ParentRunID      string                 `json:"parentRunId,omitempty"`
@@ -79,7 +78,7 @@ func (e *ActivityEvent) Validate() error {
 	if err := e.Scope.Validate(); err != nil {
 		return err
 	}
-	if (strings.TrimSpace(e.RunID) == "" && strings.TrimSpace(e.ObjectiveID) == "" && strings.TrimSpace(e.ProjectID) == "" && activityConversationSubject(e) == "") || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
+	if (strings.TrimSpace(e.RunID) == "" && strings.TrimSpace(e.ObjectiveID) == "" && activityConversationSubject(e) == "") || strings.TrimSpace(e.EventType) == "" || strings.TrimSpace(e.Summary) == "" {
 		return errors.New("activity subject, type, and summary are required")
 	}
 	if e.UsageDelta != nil {
@@ -140,7 +139,6 @@ type ActivityFilter struct {
 	RunIDs          []string
 	AgentID         string
 	ObjectiveID     string
-	ProjectID       string
 	TeamID          string
 	EventTypes      []string
 	Severities      []ActivitySeverity
@@ -171,9 +169,6 @@ func activityStreamID(event *ActivityEvent) string {
 	if event.RunID != "" {
 		return event.RunID
 	}
-	if event.ProjectID != "" {
-		return "project:" + event.ProjectID
-	}
 	if event.ObjectiveID == "" {
 		if conversationID := activityConversationSubject(event); conversationID != "" {
 			return "conversation:" + conversationID
@@ -183,7 +178,7 @@ func activityStreamID(event *ActivityEvent) string {
 }
 
 // activityConversationSubject returns the conversation a conversation-level
-// event (one without a Run, Objective, or Project) is recorded against. Such
+// event (one without a Run or Objective) is recorded against. Such
 // events are committed atomically with the conversation revision they record.
 func activityConversationSubject(event *ActivityEvent) string {
 	if event == nil || len(event.ConversationRefs) != 1 {

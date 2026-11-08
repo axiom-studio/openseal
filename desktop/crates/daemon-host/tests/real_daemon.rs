@@ -10,6 +10,7 @@ fn starts_authenticates_stops_and_reopens_durable_workspace() {
     let workspace =
         std::env::temp_dir().join(format!("openseal-host-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&workspace).unwrap();
+    let objective_id: String;
     {
         let mut host = DaemonHost::start(&executable, &workspace).expect("daemon startup");
         assert!(host.is_running().unwrap());
@@ -30,30 +31,14 @@ fn starts_authenticates_stops_and_reopens_durable_workspace() {
                     "scope": {"kind": "local", "id": "default"},
                     "owner": {"type": "team", "id": "research"},
                     "title": "Persistence verification",
-                    "goal": "Keep project state across desktop restarts",
+                    "goal": "Keep work across desktop restarts",
                     "status": "active"
                 })),
                 Some("desktop-objective-test"),
             )
             .unwrap();
         assert_eq!(objective.status, 201, "{}", objective.body);
-        let created = host
-            .request(
-                "POST",
-                "/api/v1/projects",
-                Some(serde_json::json!({
-                    "id": "desktop-persistence-test",
-                    "scope": {"kind": "local", "id": "default"},
-                    "owner": {"type": "team", "id": "research"},
-                    "title": "Desktop persistence",
-                    "purpose": "Verify work survives closing the app",
-                    "objectiveRefs": [objective.body["id"]],
-                    "status": "active"
-                })),
-                Some("desktop-persistence-test"),
-            )
-            .unwrap();
-        assert_eq!(created.status, 201, "{}", created.body);
+        objective_id = objective.body["id"].as_str().unwrap().to_string();
         host.shutdown();
         assert!(!host.is_running().unwrap());
         // Idempotent cleanup must never signal another process.
@@ -65,13 +50,13 @@ fn starts_authenticates_stops_and_reopens_durable_workspace() {
         let restored = host
             .request(
                 "GET",
-                "/api/v1/projects/desktop-persistence-test?scopeKind=local&scopeId=default",
+                &format!("/api/v1/objectives/{objective_id}?scopeKind=local&scopeId=default"),
                 None,
                 None,
             )
             .unwrap();
         assert_eq!(restored.status, 200, "{}", restored.body);
-        assert_eq!(restored.body["title"], "Desktop persistence");
+        assert_eq!(restored.body["title"], "Persistence verification");
         host.shutdown();
         assert!(!host.is_running().unwrap());
     }

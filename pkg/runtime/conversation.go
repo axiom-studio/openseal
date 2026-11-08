@@ -271,7 +271,6 @@ type ConversationReferenceKind string
 
 const (
 	ConversationReferenceObjective      ConversationReferenceKind = "objective"
-	ConversationReferenceProject        ConversationReferenceKind = "project"
 	ConversationReferenceRun            ConversationReferenceKind = "run"
 	ConversationReferenceTask           ConversationReferenceKind = "conversation_task"
 	ConversationReferenceRequest        ConversationReferenceKind = "agent_request"
@@ -302,7 +301,7 @@ type ConversationReference struct {
 
 func (r ConversationReference) Validate() error {
 	switch r.Kind {
-	case ConversationReferenceObjective, ConversationReferenceProject, ConversationReferenceRun, ConversationReferenceTask, ConversationReferenceRequest,
+	case ConversationReferenceObjective, ConversationReferenceRun, ConversationReferenceTask, ConversationReferenceRequest,
 		ConversationReferenceApproval, ConversationReferenceArtifact, ConversationReferenceActivity,
 		ConversationReferenceExternalSource, ConversationReferenceAgentControl, ConversationReferenceAgentApprovals,
 		ConversationReferenceEmbedSession, ConversationReferenceAgentBuilder:

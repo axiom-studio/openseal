@@ -52,12 +52,6 @@ func migrate(db *sql.DB) error {
 	if err := migrateRunbookActivationsSQLite(db); err != nil {
 		return err
 	}
-	if err := migrateProjects(db); err != nil {
-		return err
-	}
-	if err := migrateSourceMonitors(db); err != nil {
-		return err
-	}
 	if err := migrateSourcePolicies(db); err != nil {
 		return err
 	}
@@ -65,9 +59,6 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if err := migrateEventSourceSubscriptions(db); err != nil {
-		return err
-	}
-	if err := migrateOutreach(db); err != nil {
 		return err
 	}
 	if err := migrateAgentRegistry(db); err != nil {
@@ -86,9 +77,6 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	if err := migrateRunSkillDependenciesSQLite(db); err != nil {
-		return err
-	}
-	if err := migrateProjectSkillReferencesSQLite(db); err != nil {
 		return err
 	}
 	if err := migrateSkillSourceArtifacts(db); err != nil {
@@ -136,7 +124,10 @@ func migrate(db *sql.DB) error {
 	if err := migrateAgentSessionLogSQLite(db); err != nil {
 		return err
 	}
-	return migrateAgentBuilderSQLite(db)
+	if err := migrateAgentBuilderSQLite(db); err != nil {
+		return err
+	}
+	return migrateRemoveKernelProjectsSQLite(db)
 }
 
 // Close closes the underlying database.

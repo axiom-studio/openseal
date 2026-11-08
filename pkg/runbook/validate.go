@@ -120,9 +120,6 @@ func (v *validator) validate() {
 				v.add(path+".budget", "trigger.budget_invalid", "%v", err)
 			}
 		}
-		if err := trigger.Evidence.Validate(); err != nil {
-			v.add(path+".evidence", "trigger.evidence_invalid", "%v", err)
-		}
 		if err := trigger.Reporting.Validate(); err != nil {
 			v.add(path+".reporting", "trigger.reporting_invalid", "%v", err)
 		}

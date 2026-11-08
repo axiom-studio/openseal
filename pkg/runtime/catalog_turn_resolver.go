@@ -24,9 +24,8 @@ type AgentTurnCatalog interface {
 	ListAgentDeployments(context.Context, kernelagent.AgentDeploymentFilter) ([]*kernelagent.AgentDeployment, error)
 	GetAgentDefinition(context.Context, string, string) (*kernelagent.AgentDefinition, error)
 	ActivateSkills(context.Context, skill.ScopeReference, string, skill.HostCapabilityState) (*skill.ActivationSnapshot, error)
-	OutreachTurnLifecycle
-	// ActionCallReader lets deterministic producers (outreach, capability
-	// invocation) read the authoritative ActionCall behind their tool entry.
+	// ActionCallReader lets deterministic producers (capability invocation)
+	// read the authoritative ActionCall behind their tool entry.
 	ActionCallReader
 }
 
@@ -82,8 +81,8 @@ func (f SkillHostCapabilityResolverFunc) ResolveSkillHostCapabilities(ctx contex
 //
 //   - AgentRequest decision and completion review Runs: a model producer
 //     offered only their typed final tool; no Skill is activated.
-//   - Outreach and typed capability invocations: their deterministic
-//     producers, executing their tool calls through the claim's executor.
+//   - Typed capability invocations: their deterministic producer,
+//     executing their tool calls through the claim's executor.
 //   - Pinned runbook entrypoints: the runbook runner.
 //   - Every other Run (Agent work, routines, conversation task work, fork
 //     branches, accepted delegation execution, runbook-delegated children,
@@ -262,15 +261,6 @@ func ResolveLoopBinding(ctx context.Context, catalog AgentTurnCatalog, run *Agen
 	base.RunbookOperations = runbookOperations
 	if delegatedFromCurrentRunbook(run, definition.Runbook) {
 		base.RunbookOperations = nil
-	}
-	if _, requested := run.Context[OutreachInvocationContextKey]; requested {
-		producer, resolveErr := NewOutreachStepProducer(catalog, actions, catalog)
-		if resolveErr != nil {
-			return nil, fmt.Errorf("resolve governed outreach for Agent %s: %w", deployment.ID, resolveErr)
-		}
-		base.Producer = producer
-		base.InputContextRefs = append(base.InputContextRefs, "run:"+OutreachInvocationContextKey)
-		return r.deterministic(ctx, base)
 	}
 	if _, requested := run.Context["capabilityInvocation"]; requested {
 		producer, resolveErr := NewCapabilityInvocationStepProducer(actions, catalog)
@@ -905,8 +895,6 @@ func kernelManagementBindingID(skillID, version string) string {
 		return "bundled:agents"
 	case ObjectiveManagementSkillID:
 		return "bundled:objectives"
-	case ProjectManagementSkillID:
-		return "bundled:projects"
 	case RunbookManagementSkillID:
 		return "bundled:runbooks"
 	case RunManagementSkillID:

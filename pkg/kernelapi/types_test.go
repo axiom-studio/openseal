@@ -38,23 +38,6 @@ func TestCapabilitiesAreExplicitAndDiscoverable(t *testing.T) {
 	}
 }
 
-func TestOutreachAdvertisesReviewedDeliveryLifecycle(t *testing.T) {
-	capability, ok := Capabilities().Find(OutreachCapabilityID, OutreachCapabilityVersion)
-	if !ok {
-		t.Fatal("outreach capability was not advertised")
-	}
-	for _, operation := range []string{OperationCreate, OperationGet, OperationList, OperationDeliver} {
-		if !capability.Supports(operation) {
-			t.Fatalf("outreach operation %q not advertised: %#v", operation, capability.Operations)
-		}
-	}
-	for _, unsupported := range []string{OperationUpdate, OperationPost, "delete"} {
-		if capability.Supports(unsupported) {
-			t.Fatalf("unsupported outreach operation %q advertised", unsupported)
-		}
-	}
-}
-
 func TestAgentDefinitionsUseCanonicalStudioOperationVocabulary(t *testing.T) {
 	capability := AgentDefinitionsCapability()
 	if capability.Version != "8" || !capability.Supports(OperationGet) || !capability.Supports(OperationList) || !capability.Supports(OperationUpdate) ||

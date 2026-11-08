@@ -9,7 +9,7 @@ import (
 )
 
 // StepProducer produces one step of a Run. The model loop implements it over
-// a StepHost; deterministic runners (runbook, outreach, capability
+// a StepHost; deterministic runners (runbook, capability
 // invocation) implement it directly and return tool calls for the same
 // inline executor, or a final result.
 type StepProducer interface {

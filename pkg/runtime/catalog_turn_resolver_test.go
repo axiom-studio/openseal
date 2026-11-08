@@ -104,14 +104,6 @@ func (c *resolverCatalog) GetActionCall(context.Context, Scope, string) (*Action
 	return nil, ErrActionNotFound
 }
 
-func (c *resolverCatalog) GetOutreachThread(context.Context, Scope, string) (*OutreachThread, error) {
-	return nil, ErrOutreachThreadNotFound
-}
-
-func (c *resolverCatalog) ReconcileOutreachAction(context.Context, Scope, string, ReconcileOutreachActionRequest) (*ReconcileOutreachActionResult, error) {
-	return nil, errors.New("not used")
-}
-
 // loopBindingTestConfig is the minimal LoopBindingConfig of a test: the
 // store's sessions, steps and calls and a tool dispatcher over them.
 func loopBindingTestConfig(t testing.TB, store KernelStore, host StepHost) LoopBindingConfig {
@@ -224,9 +216,6 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 		{name: "runbook child", run: AgentRun{Goal: "Draft the summary", Source: RunSourceRequest, Entrypoint: "draft", Context: map[string]interface{}{
 			DelegationModeContextKey: string(runbook.DelegateReason),
 		}}, producer: "model", fork: true, actions: 1, goalKind: "routine"},
-		{name: "outreach", run: AgentRun{Context: map[string]interface{}{
-			OutreachInvocationContextKey: map[string]interface{}{"threadId": "thread-1", "messageId": "message-1"},
-		}}, deterministic: true, producer: "outreach", actions: 1},
 		{name: "capability invocation", run: AgentRun{Context: map[string]interface{}{
 			"capabilityInvocation": map[string]interface{}{"skillId": "forum", "skillVersion": "1", "action": "reply"},
 		}}, deterministic: true, producer: "capability", actions: 1},
@@ -247,10 +236,6 @@ func TestResolveLoopBindingPerRunKind(t *testing.T) {
 			switch tc.producer {
 			case "model":
 				if _, ok := binding.Producer.(*ModelStepProducer); !ok {
-					t.Fatalf("producer = %T", binding.Producer)
-				}
-			case "outreach":
-				if _, ok := binding.Producer.(*OutreachStepProducer); !ok {
 					t.Fatalf("producer = %T", binding.Producer)
 				}
 			case "capability":
@@ -401,31 +386,19 @@ func TestCatalogTurnResolverSelectsDeterministicKernelRunnersAndFailsClosedWitho
 	base := &AgentRun{ID: "run", Scope: scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "researcher"}, AssignedAgentID: "researcher", Context: map[string]interface{}{}}
 	config := loopBindingTestConfig(t, NewMemoryStore(), nil)
 
-	outreach := cloneAgentRun(base)
-	outreach.Context = map[string]interface{}{}
-	outreach.Context[OutreachInvocationContextKey] = map[string]interface{}{"threadId": "thread-1", "messageId": "message-1"}
-	binding, err := ResolveLoopBinding(t.Context(), catalog, outreach, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := binding.Producer.(*OutreachStepProducer); !ok || len(binding.ModelActions) != 1 || binding.ModelActions[0].BindingID != "forum-account" ||
-		len(binding.InputContextRefs) != 2 || binding.InputContextRefs[0] != "skill-snapshot:snapshot-1" || binding.InputContextRefs[1] != "run:"+OutreachInvocationContextKey {
-		t.Fatalf("outreach binding = %#v", binding)
-	}
-	// Outside a claim nothing is written: no session.
-	if binding.Session != nil || binding.Tools == nil {
-		t.Fatalf("unclaimed binding session=%#v tools=%v", binding.Session, binding.Tools)
-	}
-
 	invocation := cloneAgentRun(base)
 	invocation.Context = map[string]interface{}{}
 	invocation.Context["capabilityInvocation"] = map[string]interface{}{"skillId": "forum", "skillVersion": "1", "action": "reply"}
-	binding, err = ResolveLoopBinding(t.Context(), catalog, invocation, config)
+	binding, err := ResolveLoopBinding(t.Context(), catalog, invocation, config)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := binding.Producer.(*CapabilityInvocationStepProducer); !ok || len(binding.ModelActions) != 1 {
 		t.Fatalf("capability binding = %#v", binding)
+	}
+	// Outside a claim nothing is written: no session.
+	if binding.Session != nil || binding.Tools == nil {
+		t.Fatalf("unclaimed binding session=%#v tools=%v", binding.Session, binding.Tools)
 	}
 	// The Agent's activation acts for the run, so host bindings for it apply.
 	if got := catalog.actors[len(catalog.actors)-1]; got != (skill.RunActor{RunID: "run", AgentID: "researcher", Umbrella: skill.Umbrella{Kind: skill.UmbrellaAgent, ID: "researcher"}}) {

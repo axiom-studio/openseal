@@ -54,18 +54,6 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			if err != nil {
 				t.Fatal(err)
 			}
-			projectStore, ok := store.(ProjectStore)
-			if !ok {
-				t.Fatal("kernel store does not implement ProjectStore")
-			}
-			project := &Project{
-				ID: "project-launch", Scope: scope, Owner: conversation.Owner, Title: "Launch project",
-				Purpose: "Coordinate the product launch", Status: ProjectStatusActive, ObjectiveRefs: []string{objective.ID},
-				Revision: 1, CreatedAt: now, UpdatedAt: now,
-			}
-			if err := projectStore.CreateProject(ctx, project); err != nil {
-				t.Fatal(err)
-			}
 			run := activityFeedRun("run-launch", scope, "agent-marketing", now)
 			run.Kind = RunKindConversation
 			run.Owner = conversation.Owner
@@ -78,7 +66,7 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 			activity := NewRunActivityService(store, store)
 			appended, err := activity.AppendActivity(ctx, &ActivityEvent{
 				ID: "event-launch-published", Scope: scope, EventType: "action.succeeded",
-				AgentID: "agent-marketing", ObjectiveID: objective.ID, ProjectID: project.ID,
+				AgentID: "agent-marketing", ObjectiveID: objective.ID,
 				RunID: run.ID, TurnID: "turn-publish", ParentRunID: "run-development", TeamID: "team-gtm",
 				ConversationRefs: []string{conversation.ID}, Actor: ActivityActor{Type: "agent", ID: "agent-marketing"},
 				Summary: "Published the approved launch brief", Visibility: ActivityVisibilityTeam,
@@ -94,7 +82,6 @@ func TestCanonicalActivityProjectionIsIdenticalAcrossResourceAndChannelSurfaces(
 				"agent":     {Scope: scope, AgentID: appended.AgentID},
 				"team":      {Scope: scope, TeamID: appended.TeamID},
 				"objective": {Scope: scope, ObjectiveID: appended.ObjectiveID},
-				"project":   {Scope: scope, ProjectID: appended.ProjectID},
 				"run":       {Scope: scope, RunID: appended.RunID},
 			}
 			var canonical *ActivityProjection

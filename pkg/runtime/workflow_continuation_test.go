@@ -16,7 +16,6 @@ import (
 type workflowContinuationCatalog struct {
 	registry *kernelagent.Registry
 	skills   *skill.Catalog
-	outreach *OutreachService
 }
 
 func (c workflowContinuationCatalog) GetAgentDeployment(ctx context.Context, scope skill.ScopeReference, id string) (*kernelagent.AgentDeployment, error) {
@@ -30,12 +29,6 @@ func (c workflowContinuationCatalog) GetAgentDefinition(ctx context.Context, id,
 }
 func (c workflowContinuationCatalog) ActivateSkills(ctx context.Context, scope skill.ScopeReference, id string, host skill.HostCapabilityState) (*skill.ActivationSnapshot, error) {
 	return c.skills.Activate(ctx, scope, id, host)
-}
-func (c workflowContinuationCatalog) GetOutreachThread(ctx context.Context, scope Scope, id string) (*OutreachThread, error) {
-	return c.outreach.Get(ctx, scope, id)
-}
-func (c workflowContinuationCatalog) ReconcileOutreachAction(ctx context.Context, scope Scope, id string, request ReconcileOutreachActionRequest) (*ReconcileOutreachActionResult, error) {
-	return c.outreach.ReconcileAction(ctx, scope, id, request)
 }
 func (c workflowContinuationCatalog) GetActionCall(context.Context, Scope, string) (*ActionCall, error) {
 	return nil, ErrActionNotFound

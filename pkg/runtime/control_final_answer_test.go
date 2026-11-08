@@ -124,8 +124,6 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 		{"chat with skills", ControlAuthority{SkillPromptRefs: []string{"s1", "s2"}, VisualAllowed: true, BroadcastAllowed: true},
 			[]string{"answer", "appliedSkillRefs", "visual", "broadcastToChannel", "report"}, []string{"answer", "appliedSkillRefs"}, false, []string{"s1", "s2"}},
 		{"spoken", ControlAuthority{FinalMode: FinalModeSpoken}, []string{"answer", "silent"}, []string{"answer", "silent"}, true, nil},
-		{"evidence", ControlAuthority{FinalMode: FinalModeEvidence, VisualAllowed: true},
-			[]string{"answer", "visual", "report", "evidenceClaims"}, []string{"answer", "report", "evidenceClaims"}, false, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -420,39 +418,6 @@ func TestFinalAnswerSkillSelections(t *testing.T) {
 		selections[0].Disposition != HostedSkillNotApplied || selections[1].Disposition != HostedSkillNotApplied {
 		t.Fatalf("plain selections = %#v", selections)
 	}
-}
-
-func TestEvidenceModeRequiresReportAndClaims(t *testing.T) {
-	f := newFinalFixture(t,
-		finalCall("no-report", `{"answer":"x","evidenceClaims":[]}`),
-		finalCall("no-claims", `{"answer":"x","report":"r"}`),
-		finalCall("bad-claim", `{"answer":"x","report":"r","evidenceClaims":[{"id":"c1","statement":"s","evidenceRefs":[]}]}`),
-		finalCall("ok", `{"answer":"x","report":"Full report.","evidenceClaims":[{"id":"c1","statement":"It grew.","evidenceRefs":["e1"]}]}`),
-	)
-	evidence := ControlAuthority{FinalMode: FinalModeEvidence}
-	value := requireRejected(t, f, f.settleFinal("no-report", evidence), "no-report", controlArgumentsInvalidCode)
-	if value["message"] != `missing required field "report"` {
-		t.Fatalf("message = %v", value["message"])
-	}
-	value = requireRejected(t, f, f.settleFinal("no-claims", evidence), "no-claims", controlArgumentsInvalidCode)
-	if value["message"] != `missing required field "evidenceClaims"` {
-		t.Fatalf("message = %v", value["message"])
-	}
-	requireRejected(t, f, f.settleFinal("bad-claim", evidence), "bad-claim", controlArgumentsInvalidCode)
-	final := requireFinal(t, f.settleFinal("ok", evidence))
-	claims, _ := final.Output["evidenceClaims"].([]EvidenceClaim)
-	if final.Answer != "Full report." || len(claims) != 1 || claims[0].ID != "c1" {
-		t.Fatalf("final = %#v", final)
-	}
-	// A plain reply in evidence mode is a note naming the required fields.
-	result := f.plain("step-2", 2, evidence, "Here is what I found.")
-	note := requireRejectionNote(t, result, "step-2", finalToolRequiredCode)
-	if note.Note.Text != "Finish with turn_final_answer (answer, report, evidenceClaims); a plain reply is not accepted in this run." {
-		t.Fatalf("note = %q", note.Note.Text)
-	}
-	// evidenceClaims are not offered outside evidence mode.
-	g := newFinalFixture(t, finalCall("final", `{"answer":"x","evidenceClaims":[]}`))
-	requireRejected(t, g, g.settleFinal("final", ControlAuthority{}), "final", controlArgumentsInvalidCode)
 }
 
 func TestDecisionRunPlainTextGetsNoteThenFails(t *testing.T) {

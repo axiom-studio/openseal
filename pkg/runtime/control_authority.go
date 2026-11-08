@@ -24,7 +24,7 @@ type ControlAuthorityInput struct {
 	ConversationTasks ConversationTaskKernelStore
 	Runs              PortfolioStore
 	Conversations     ConversationStore
-	// Deterministic marks runbook/outreach/capability runners: no model
+	// Deterministic marks runbook/capability runners: no model
 	// control tools are offered (kernel-origin calls are preauthorized).
 	Deterministic bool
 }
@@ -60,7 +60,7 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (Con
 	voiceCall := run.Context["voiceCallStarted"] == true
 
 	authority.SkillPromptRefs = append([]string(nil), in.SkillPromptRefs...)
-	authority.VisualAllowed = mode == FinalModeDefault || mode == FinalModeEvidence
+	authority.VisualAllowed = mode == FinalModeDefault
 	authority.BroadcastAllowed = run.Kind == RunKindConversation
 	authority.TaskWork = taskWork
 	authority.CanReportProgress = true
@@ -117,9 +117,6 @@ func controlFinalMode(run *AgentRun) FinalAnswerMode {
 	}
 	if _, ok := run.Context[AgentRequestCompletionReviewContextKey]; ok {
 		return FinalModeReview
-	}
-	if evidenceSnapshotInputContextRef(run.Context) != "" {
-		return FinalModeEvidence
 	}
 	if run.Context["responseMode"] == "spoken" {
 		return FinalModeSpoken

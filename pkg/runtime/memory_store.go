@@ -17,16 +17,9 @@ type MemoryStore struct {
 	mu                                  sync.RWMutex
 	objectives                          map[string]*Objective
 	runbookActivations                  map[string]*RunbookActivation
-	projects                            map[string]*Project
-	projectSkillReferences              map[memoryProjectSkillReferenceKey]map[string]struct{}
-	sourceObservations                  map[string]*SourceObservation
-	sourceObservationKeys               map[string]string
-	sourceMonitorCheckpoints            map[string]*SourceMonitorCheckpoint
 	eventSourceCheckpoints              map[string]*EventSourceCheckpoint
 	eventSourceSubscriptions            map[string]*EventSourceSubscription
 	eventSourceHealth                   map[string]*EventSourceHealth
-	outreachThreads                     map[string]*OutreachThread
-	outreachIdempotency                 map[string]string
 	agentRuns                           map[string]*AgentRun
 	runTerminalReports                  map[runTerminalReportKey]*RunTerminalReport
 	runTerminalReportLatest             map[runTerminalReportFamily]runTerminalReportKey
@@ -131,15 +124,9 @@ func NewMemoryStore() *MemoryStore {
 		credentialRequests:          make(map[string]*CredentialRequest),
 		objectives:                  make(map[string]*Objective),
 		runbookActivations:          make(map[string]*RunbookActivation),
-		projects:                    make(map[string]*Project),
-		sourceObservations:          make(map[string]*SourceObservation),
-		sourceObservationKeys:       make(map[string]string),
-		sourceMonitorCheckpoints:    make(map[string]*SourceMonitorCheckpoint),
 		eventSourceCheckpoints:      make(map[string]*EventSourceCheckpoint),
 		eventSourceSubscriptions:    make(map[string]*EventSourceSubscription),
 		eventSourceHealth:           make(map[string]*EventSourceHealth),
-		outreachThreads:             make(map[string]*OutreachThread),
-		outreachIdempotency:         make(map[string]string),
 		agentRuns:                   make(map[string]*AgentRun),
 		runEventWaits:               make(map[memoryRunEventWaitKey]*RunEventWait),
 		runEventWaitActive:          make(map[memoryRunEventRunKey]memoryRunEventWaitKey),

@@ -117,8 +117,8 @@ func postgresCount(t *testing.T, store *PostgresStore, query string, args ...int
 func assertPostgresLedgerCurrent(t *testing.T, store *PostgresStore) {
 	t.Helper()
 	current, version, err := store.postgresSchemaCurrent(context.Background(), store.db)
-	if err != nil || !current || version != agentBuilderMigrationVersion || currentPostgresSchemaVersion != agentBuilderMigrationVersion {
-		t.Fatalf("schema current = %v, version %d, %v; want current at %d", current, version, err, agentBuilderMigrationVersion)
+	if err != nil || !current || version != currentPostgresSchemaVersion {
+		t.Fatalf("schema current = %v, version %d, %v; want current at %d", current, version, err, currentPostgresSchemaVersion)
 	}
 }
 

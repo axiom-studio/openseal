@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 76
+const currentPostgresSchemaVersion int64 = 77
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -38,8 +38,9 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
 		return err
 	}
-	// Rolling back 76 drops the cutover drafts; it does not restore the
-	// retired workforce change sets.
+	// Rolling back 77 does not restore kernel Projects; rolling back 76 drops
+	// the cutover drafts and does not restore the retired workforce change
+	// sets.
 	down := map[int64][]string{
 		76: {"agent_builder_cutover_drafts"},
 		75: {"agent_session_entries", "agent_sessions"},
@@ -49,7 +50,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		62: {"credential_requests"},
 		60: {"skill_binding_tombstones"},
 		57: {"conversation_tasks", "conversation_active_runs"},
-		55: {"project_skill_references"},
 		54: {"run_skill_dependencies"},
 		53: {"skill_runtime_maintenance"},
 		51: {"run_event_notifications"},
@@ -59,7 +59,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		45: {"skill_setup_requests"},
 		43: {"embed_sessions", "embed_installations"},
 		39: {"callback_events", "callback_registrations"},
-		36: {"outreach_threads", "source_monitor_checkpoints", "source_observations", "projects"},
 		35: {"runbook_activations"},
 		28: {"external_conversation_gateways"},
 		26: {"external_conversation_deliveries", "external_message_mappings", "external_participant_mappings", "external_conversation_mappings", "external_conversation_inbox", "external_conversation_endpoints"},
@@ -67,9 +66,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		21: {"action_credential_lease_redemptions"},
 		20: {"event_source_checkpoints"},
 		17: {"skill_source_artifact_references", "skill_source_artifacts"},
-		16: {"source_monitor_checkpoints", "source_observations"},
 		15: {"agent_definition_compilations"},
-		14: {"projects"},
 		12: {"team_definition_amendments"},
 		11: {"team_definition_activations", "team_deployments", "team_definitions"},
 		10: {"conversation_presence", "conversation_cursors", "participation_rounds", "channel_messages", "conversations"},
@@ -176,7 +173,7 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 			}
 		}
 		if version == 46 {
-			for _, name := range []string{"conversations_search_idx", "channel_messages_search_idx", "artifacts_search_idx", "projects_search_idx", "agent_runs_search_idx"} {
+			for _, name := range []string{"conversations_search_idx", "channel_messages_search_idx", "artifacts_search_idx", "agent_runs_search_idx"} {
 				if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS `+s.table(name)); err != nil {
 					return err
 				}
@@ -225,14 +222,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 				return err
 			}
 		}
-		if version == 23 {
-			if _, err := tx.ExecContext(ctx, `
-				DROP INDEX IF EXISTS `+s.table("run_activity_project_feed_idx")+`;
-				ALTER TABLE `+s.table("run_activity")+` DROP COLUMN IF EXISTS project_id
-			`); err != nil {
-				return err
-			}
-		}
 		if version == 19 {
 			var hasCollisions bool
 			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
@@ -249,11 +238,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 				ALTER TABLE `+s.table("skill_definitions")+` DROP COLUMN IF EXISTS source_identity;
 				ALTER TABLE `+s.table("skill_bindings")+` DROP COLUMN IF EXISTS source_identity;
 			`); err != nil {
-				return err
-			}
-		}
-		if version == 18 {
-			if _, err := tx.ExecContext(ctx, `DROP TABLE IF EXISTS `+s.table("outreach_threads")+` CASCADE`); err != nil {
 				return err
 			}
 		}

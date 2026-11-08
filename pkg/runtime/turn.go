@@ -65,7 +65,7 @@ func (u TurnUsage) Validate() error {
 }
 
 // StepProducerKind says what produced a step: a model call or a
-// deterministic runner (runbook, outreach, capability invocation, agent
+// deterministic runner (runbook, capability invocation, agent
 // request wrappers).
 type StepProducerKind string
 

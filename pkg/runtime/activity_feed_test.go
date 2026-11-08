@@ -31,17 +31,6 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 			ctx := context.Background()
 			scope := Scope{Kind: "tenant", ID: "one"}
 			now := time.Date(2026, 7, 10, 7, 0, 0, 0, time.UTC)
-			projectStore, ok := fixture.store.(ProjectStore)
-			if !ok {
-				t.Fatal("activity feed store does not implement ProjectStore")
-			}
-			if err := projectStore.CreateProject(ctx, &Project{
-				ID: "project-one", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent-one"},
-				Title: "Research", Purpose: "Collect evidence", Status: ProjectStatusActive, ObjectiveRefs: []string{"objective-one"},
-				Revision: 1, CreatedAt: now, UpdatedAt: now,
-			}); err != nil {
-				t.Fatal(err)
-			}
 			for _, run := range []*AgentRun{
 				activityFeedRun("run-one", scope, "agent-one", now),
 				activityFeedRun("run-two", scope, "agent-one", now),
@@ -53,7 +42,7 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 			}
 			service := NewRunActivityService(fixture.store, fixture.store)
 			for _, event := range []*ActivityEvent{
-				{ID: "event-a", Scope: scope, RunID: "run-one", AgentID: "agent-one", ProjectID: "project-one", EventType: "run.claimed", Summary: "Claimed", Actor: ActivityActor{Type: "worker", ID: "one"}, Visibility: ActivityVisibilityScope, CreatedAt: now, Payload: map[string]interface{}{"evidence": "artifact://one"}},
+				{ID: "event-a", Scope: scope, RunID: "run-one", AgentID: "agent-one", EventType: "run.claimed", Summary: "Claimed", Actor: ActivityActor{Type: "worker", ID: "one"}, Visibility: ActivityVisibilityScope, CreatedAt: now, Payload: map[string]interface{}{"evidence": "artifact://one"}},
 				{ID: "event-b", Scope: scope, RunID: "run-two", AgentID: "agent-one", EventType: "action.succeeded", Summary: "Published", Actor: ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: ActivityVisibilityTeam, CreatedAt: now, CorrelationID: "correlation", UsageDelta: &BudgetUsage{Turns: 1, InputTokens: 120, OutputTokens: 30, CostMicros: 125_000, DurationMS: 500}},
 				{ID: "event-c", Scope: scope, RunID: "run-other", AgentID: "agent-two", EventType: "run.completed", Summary: "Other", Actor: ActivityActor{Type: "agent", ID: "agent-two"}, Visibility: ActivityVisibilityScope, CreatedAt: now.Add(time.Second)},
 				{ID: "event-private", Scope: scope, RunID: "run-one", AgentID: "agent-one", EventType: "turn.reasoned", Summary: "Private", Actor: ActivityActor{Type: "agent", ID: "agent-one"}, Visibility: ActivityVisibilityPrivate, CreatedAt: now.Add(2 * time.Second)},
@@ -83,18 +72,8 @@ func TestActivityFeedProjectsStableSummaryFirstPages(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(next.Items) != 1 || next.Items[0].ID != "event-a" || next.Items[0].ProjectID != "project-one" || next.Items[0].Payload["evidence"] != "artifact://one" || next.HasMore {
+			if len(next.Items) != 1 || next.Items[0].ID != "event-a" || next.Items[0].Payload["evidence"] != "artifact://one" || next.HasMore {
 				t.Fatalf("detail page = %#v", next)
-			}
-
-			projectPage, err := service.ListActivityFeed(ctx, ActivityFeedRequest{
-				Scope: scope, ProjectID: "project-one", Limit: 10, IncludeDetails: true,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(projectPage.Items) != 1 || projectPage.Items[0].ID != "event-a" || projectPage.Items[0].Payload["evidence"] != "artifact://one" {
-				t.Fatalf("project page = %#v", projectPage)
 			}
 		})
 	}

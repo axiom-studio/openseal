@@ -120,7 +120,6 @@ type FinalAnswerMode string
 const (
 	FinalModeDefault  FinalAnswerMode = "default"
 	FinalModeSpoken   FinalAnswerMode = "spoken"   // conversation responseMode == "spoken"
-	FinalModeEvidence FinalAnswerMode = "evidence" // Run.Context["evidenceSnapshot"] present
 	FinalModeDecision FinalAnswerMode = "decision" // Run.Context[AgentRequestInboxContextKey]
 	FinalModeReview   FinalAnswerMode = "review"   // Run.Context[AgentRequestCompletionReviewContextKey]
 )
@@ -427,7 +426,6 @@ type ControlExecutor struct {
 	Tasks         *ConversationTaskService
 	Conversations *ConversationService
 	Reporting     ConversationStore // projectConversationRunbookStart / runbookSourceMessage
-	Reviewer      EvidenceGroundingReviewer
 	Now           func() time.Time
 
 	handlers controlRegistry // nil = controlHandlers (tests inject their own)

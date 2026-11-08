@@ -286,19 +286,7 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+` (version, name) VALUES (1, 'initial kernel schema') ON CONFLICT (version) DO NOTHING`); err != nil {
 		return err
 	}
-	if err := s.migrateProjectContract(ctx, tx); err != nil {
-		return err
-	}
 	if err := s.migratePortfolio(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.migrateProjects(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.migrateProjectRunRefs(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.migrateSourceMonitors(ctx, tx); err != nil {
 		return err
 	}
 	if err := s.migrateSourcePolicies(ctx, tx); err != nil {
@@ -308,9 +296,6 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := s.migrateEventSourceSubscriptions(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.migrateOutreach(ctx, tx); err != nil {
 		return err
 	}
 	if err := s.migrateActivityAndTurns(ctx, tx); err != nil {
@@ -338,9 +323,6 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := s.migrateRunSkillDependencies(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.migrateProjectSkillReferences(ctx, tx); err != nil {
 		return err
 	}
 	if err := s.migrateActionCredentialLeaseRedemptions(ctx, tx); err != nil {
@@ -487,6 +469,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateAgentBuilder(ctx, tx); err != nil {
 		return fmt.Errorf("agent builder migration: %w", err)
 	}
+	if err := s.migrateRemoveKernelProjects(ctx, tx); err != nil {
+		return fmt.Errorf("kernel Project removal migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err
@@ -516,10 +501,13 @@ func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query post
 // while the caller holds migration leadership. A highest-version-only check
 // could hide a partially restored or manually damaged ledger.
 // Retired migrations are left out: 34 (Objective run templates) went with
-// the runbook-only execution contract, and 13, 29, 30 and 31 (workforce
+// the runbook-only execution contract; 13, 29, 30 and 31 (workforce
 // change sets, sensitive authoring prompts, legacy agent-definition
-// hardening, activation continuations) with the change-set layer. Older
-// databases may retain them; fresh databases omit them.
+// hardening, activation continuations) with the change-set layer; and 14,
+// 16, 18, 23, 36, 37 and 55 (Projects, source monitors, outreach, Project
+// activity, the Project contract, Project run refs, Project Skill
+// references) with kernel Projects. Older databases may retain them; fresh
+// databases omit them.
 func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgresMigrationQuerier) (bool, int64, error) {
 	var relation sql.NullString
 	if err := query.QueryRowContext(ctx, `SELECT to_regclass($1)`, s.schema+".schema_migrations").Scan(&relation); err != nil {
@@ -531,12 +519,12 @@ func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgre
 	var knownVersions, schemaVersion int64
 	if err := query.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1 AND version NOT IN (13, 29, 30, 31, 34)),
+			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1 AND version NOT IN (13, 14, 16, 18, 23, 29, 30, 31, 34, 36, 37, 55)),
 			COALESCE(MAX(version), 0)
 		FROM `+s.table("schema_migrations"), currentPostgresSchemaVersion).Scan(&knownVersions, &schemaVersion); err != nil {
 		return false, 0, err
 	}
-	return knownVersions == currentPostgresSchemaVersion-5, schemaVersion, nil
+	return knownVersions == currentPostgresSchemaVersion-12, schemaVersion, nil
 }
 
 func (s *PostgresStore) recordMigrationOutcome(phase PostgresMigrationPhase, stats PostgresMigrationStats) {

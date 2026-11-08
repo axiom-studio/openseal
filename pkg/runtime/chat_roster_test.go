@@ -174,23 +174,15 @@ func TestRunbookActionOwnerChecksTheCurrentRoster(t *testing.T) {
 	}
 }
 
-// Project and objective activity on a Team-owned item names the member that
-// acted; an Agent-owned item keeps its owner.
+// Objective activity on a Team-owned item names the member that acted.
 func TestOwnedItemActivityNamesTheActingMember(t *testing.T) {
 	member := ActivityActor{Type: "agent", ID: "harp"}
 	team := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
-	if event := projectEvent(&Project{ID: "p", Owner: team}, "project.updated", member, "", "Updated"); event.AgentID != "harp" || event.TeamID != "crew" {
-		t.Fatalf("Team project event = %q / %q", event.AgentID, event.TeamID)
-	}
 	if event := objectiveActivityEvent(&Objective{ID: "o", Owner: team}, member, "", "objective.updated", "Updated", time.Time{}, nil); event.AgentID != "harp" || event.TeamID != "crew" {
 		t.Fatalf("Team objective event = %q / %q", event.AgentID, event.TeamID)
 	}
 	if event := objectiveActivityEvent(&Objective{ID: "o", Owner: team}, ActivityActor{Type: "user", ID: "operator"}, "", "objective.updated", "Updated", time.Time{}, nil); event.AgentID != "" {
 		t.Fatalf("person's Team objective event names Agent %q", event.AgentID)
-	}
-	own := ObjectiveOwner{Type: OwnerTypeAgent, ID: "own"}
-	if event := projectEvent(&Project{ID: "p", Owner: own}, "project.updated", ActivityActor{Type: "user", ID: "operator"}, "", "Updated"); event.AgentID != "own" || event.TeamID != "" {
-		t.Fatalf("Agent project event = %q / %q", event.AgentID, event.TeamID)
 	}
 }
 

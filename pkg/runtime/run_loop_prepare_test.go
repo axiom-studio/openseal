@@ -200,14 +200,13 @@ func sectionIDs(sections []ModelStepSystemSection) []string {
 
 func TestPrepareSectionsFixedOrder(t *testing.T) {
 	authority := fullPrepareAuthority()
-	authority.FinalMode = FinalModeEvidence
 	f := newPrepareFixture(t, authority)
 	f.preparer.config.ImageInput = true
 	f.preparer.config.RoutineScript = "Run the pinned command exactly."
 	req := f.prepare("step-1")
 
 	want := []string{
-		"skill_access", "progress_rules", "conversation_tasks", "workspace", "media", "evidence",
+		"skill_access", "progress_rules", "conversation_tasks", "workspace", "media",
 		"review_summaries", "routine_script", loopSectionCapabilities, "channel_rules",
 	}
 	if got := sectionIDs(req.System.Sections); !reflect.DeepEqual(got, want) {
@@ -270,7 +269,6 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 
 func TestPrepareNoFormWords(t *testing.T) {
 	authority := fullPrepareAuthority()
-	authority.FinalMode = FinalModeEvidence
 	f := newPrepareFixture(t, authority)
 	f.preparer.config.ImageInput = true
 	f.binding.Prompt = PromptContribution{}

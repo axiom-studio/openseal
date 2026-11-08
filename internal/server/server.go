@@ -34,7 +34,6 @@ type Server struct {
 	bearerToken              string
 	clawHub                  *opensealkernel.Engine
 	clawHubMutations         bool
-	outreachDelivery         func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
 	teamWorkEnabled          bool
 	desktopConversationScope *runtime.Scope
 	agentRunCreation         func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
@@ -129,14 +128,6 @@ func (s *Server) SetArtifactContentResolver(resolver runtime.ArtifactContentReso
 // checkpoints. Read-only approval inspection remains available without it.
 func (s *Server) SetActionApprovalAuthorizer(authorizer runtime.ApprovalAuthorizer) {
 	s.actionApprovalAuth = authorizer
-}
-
-// SetOutreachDeliveryDispatcher enables the delivery operation only when a
-// host has wired a real canonical Agent Run worker. Without it, standalone
-// OpenSeal advertises and serves outreach inspection/drafting but never creates
-// work that no runtime can execute.
-func (s *Server) SetOutreachDeliveryDispatcher(dispatch func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)) {
-	s.outreachDelivery = dispatch
 }
 
 // SetAgentRunCreationDispatcher enables Run creation only after the host has

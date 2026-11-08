@@ -40,16 +40,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions/{id}/checkpoint", s.handleGetEventSourceCheckpoint)
 	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions/{id}/checkpoint-advancements", s.handleAdvanceEventSourceCheckpoint)
 	s.mux.HandleFunc("POST /api/v1/events", s.handleRouteEvent)
-	s.mux.HandleFunc("POST /api/v1/projects", s.handleCreateProject)
-	s.mux.HandleFunc("GET /api/v1/projects", s.handleListProjects)
-	s.mux.HandleFunc("GET /api/v1/projects/{id}", s.handleGetProject)
-	s.mux.HandleFunc("PATCH /api/v1/projects/{id}", s.handlePatchProject)
-	s.mux.HandleFunc("GET /api/v1/projects/{id}/source-monitors/{monitorId}/observations", s.handleListSourceObservations)
-	s.mux.HandleFunc("GET /api/v1/projects/{id}/source-monitors/{monitorId}/checkpoint", s.handleGetSourceMonitorCheckpoint)
-	s.mux.HandleFunc("POST /api/v1/projects/{id}/outreach", s.handleCreateOutreachThread)
-	s.mux.HandleFunc("GET /api/v1/projects/{id}/outreach", s.handleListOutreachThreads)
-	s.mux.HandleFunc("GET /api/v1/projects/{id}/outreach/{threadId}", s.handleGetOutreachThread)
-	s.mux.HandleFunc("POST /api/v1/projects/{id}/outreach/{threadId}/messages/{messageId}/deliveries", s.handleDeliverOutreachMessage)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}", s.handleInspectClawHub)
 	s.mux.HandleFunc("GET /api/v1/clawhub/search", s.handleSearchClawHub)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}/versions", s.handleListClawHubVersions)
@@ -179,27 +169,6 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 	capabilities = append(capabilities, kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{
 		Resolution: s.actionApprovalAuth != nil,
 	}))
-	if _, ok := s.store.(runtime.ProjectStore); ok {
-		capabilities = append(capabilities, kernelapi.ProjectsCapability())
-	}
-	if _, ok := s.store.(runtime.SourceMonitorStore); ok {
-		capabilities = append(capabilities, kernelapi.SourceMonitorsCapability())
-	}
-	if _, outreachOK := s.store.(runtime.OutreachStore); outreachOK {
-		_, projectsOK := s.store.(runtime.ProjectStore)
-		_, sourcesOK := s.store.(runtime.SourceMonitorStore)
-		_, actionsOK := s.store.(runtime.OutreachActionReader)
-		if projectsOK && sourcesOK && actionsOK {
-			operations := []string{kernelapi.OperationGet, kernelapi.OperationList}
-			if _, skillsOK := s.store.(skill.CatalogStore); skillsOK {
-				operations = append(operations, kernelapi.OperationCreate)
-			}
-			if s.outreachDelivery != nil {
-				operations = append(operations, kernelapi.OperationDeliver)
-			}
-			capabilities = append(capabilities, kernelapi.OutreachCapability(operations...))
-		}
-	}
 	if _, ok := s.store.(runtime.ArtifactStore); ok {
 		contentOperations := make([]string, 0, 3)
 		if s.artifactContent != nil {

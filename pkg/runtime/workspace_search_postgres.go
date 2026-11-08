@@ -15,7 +15,6 @@ type WorkspaceSearchHit struct {
 	Conversation *Conversation   `json:"conversation,omitempty"`
 	Message      *ChannelMessage `json:"message,omitempty"`
 	Artifact     *Artifact       `json:"artifact,omitempty"`
-	Project      *Project        `json:"project,omitempty"`
 	Run          *AgentRun       `json:"run,omitempty"`
 	Score        float64         `json:"score"`
 	UpdatedAt    time.Time       `json:"updatedAt"`
@@ -51,11 +50,6 @@ func (s *PostgresStore) SearchWorkspacePage(ctx context.Context, scope Scope, qu
 			FROM ` + s.table("artifacts") + ` a
 			WHERE a.scope_kind=$1 AND a.scope_id=$2 AND a.version=(SELECT max(version) FROM ` + s.table("artifacts") + ` latest WHERE latest.scope_kind=a.scope_kind AND latest.scope_id=a.scope_id AND latest.id=a.id)
 			AND to_tsvector('simple', coalesce(a.payload->>'name', '') || ' ' || coalesce(a.payload->>'metadata', '')) @@ ` + search + `
-			UNION ALL
-			SELECT 'project', p.payload, NULL::jsonb,
-				ts_rank_cd(to_tsvector('simple', coalesce(p.payload->>'title','') || ' ' || coalesce(p.payload->>'purpose','') || ' ' || coalesce(p.payload->>'milestones','') || ' ' || coalesce(p.payload->>'deliverables','')), ` + search + `)::float8, p.updated_at
-			FROM ` + s.table("projects") + ` p
-			WHERE p.scope_kind=$1 AND p.scope_id=$2 AND to_tsvector('simple', coalesce(p.payload->>'title','') || ' ' || coalesce(p.payload->>'purpose','') || ' ' || coalesce(p.payload->>'milestones','') || ' ' || coalesce(p.payload->>'deliverables','')) @@ ` + search + `
 			UNION ALL
 			SELECT 'run', r.payload, NULL::jsonb,
 				ts_rank_cd(to_tsvector('simple', coalesce(r.payload->>'goal','') || ' ' || coalesce(r.payload->>'output','')), ` + search + `)::float8, (r.payload->>'updatedAt')::timestamptz
@@ -98,12 +92,6 @@ func (s *PostgresStore) SearchWorkspacePage(ctx context.Context, scope Scope, qu
 				return nil, err
 			}
 			hit.Artifact = &value
-		case "project":
-			var value Project
-			if err := json.Unmarshal(payload, &value); err != nil {
-				return nil, err
-			}
-			hit.Project = &value
 		case "run":
 			var value AgentRun
 			if err := json.Unmarshal(payload, &value); err != nil {

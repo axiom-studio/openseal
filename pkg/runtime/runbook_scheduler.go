@@ -30,7 +30,6 @@ type RunbookScheduler struct {
 		RunCommandStore
 		PortfolioStore
 		RunbookActivationStore
-		SourceMonitorStore
 	}
 	reportingStore    ConversationStore
 	executionPreparer AcceptedRunExecutionPreparer
@@ -47,7 +46,6 @@ func NewRunbookScheduler(store interface {
 	RunCommandStore
 	PortfolioStore
 	RunbookActivationStore
-	SourceMonitorStore
 }) *RunbookScheduler {
 	scheduler := &RunbookScheduler{store: store, now: time.Now}
 	if reportingStore, ok := store.(ConversationStore); ok {
@@ -179,24 +177,6 @@ func (s *RunbookScheduler) ReconcileScope(ctx context.Context, scope Scope, limi
 		contextValues["runbookDefinitionId"] = activation.DefinitionID
 		contextValues["runbookDefinitionVersion"] = activation.DefinitionVersion
 		contextValues["runbookTriggerId"] = activation.TriggerID
-		if activation.Trigger.Evidence != nil {
-			projectID, _ := contextValues["projectId"].(string)
-			projectID = strings.TrimSpace(projectID)
-			if projectID == "" {
-				return result, fmt.Errorf("Runbook activation %s evidence projection requires projectId input", activation.ID)
-			}
-			snapshot, snapshotErr := buildEvidenceSnapshot(ctx, s.store, scope, projectID, now, activation.Trigger.Evidence)
-			if snapshotErr != nil {
-				return result, fmt.Errorf("Runbook activation %s evidence projection: %w", activation.ID, snapshotErr)
-			}
-			projected, snapshotErr := evidenceSnapshotContext(snapshot)
-			if snapshotErr != nil {
-				return result, snapshotErr
-			}
-			if projected != nil {
-				contextValues[EvidenceSnapshotContextKey] = projected
-			}
-		}
 		channel, messageKey, err := prepareActivationReporting(ctx, s.reportingStore, activation, runID, contextValues)
 		if err != nil {
 			return result, fmt.Errorf("prepare Runbook activation %s reporting: %w", activation.ID, err)

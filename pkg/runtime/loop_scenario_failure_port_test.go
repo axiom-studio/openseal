@@ -277,41 +277,6 @@ func TestTerminalFailureReplyNamesTheFailedTool(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Final answer checks
 
-// portGroundingReviewer reviews evidence claims: a claim is unsupported when
-// reject says so.
-type portGroundingReviewer struct {
-	reject   func(EvidenceClaim) bool
-	requests []EvidenceGroundingRequest
-}
-
-func (r *portGroundingReviewer) ReviewEvidenceGrounding(_ context.Context, request EvidenceGroundingRequest) (*EvidenceGroundingReview, error) {
-	r.requests = append(r.requests, request)
-	accepted := true
-	findings := make([]EvidenceGroundingFinding, 0, len(request.Claims))
-	for _, claim := range request.Claims {
-		finding := EvidenceGroundingFinding{ClaimID: claim.ID, Status: EvidenceGroundingSupported, Summary: "Supported."}
-		if r.reject != nil && r.reject(claim) {
-			finding.Status, finding.Summary, accepted = EvidenceGroundingUnsupported, "The cited observation is about churn, not revenue.", false
-		}
-		findings = append(findings, finding)
-	}
-	return &EvidenceGroundingReview{
-		APIVersion: EvidenceGroundingAPIVersion, InvocationID: request.InvocationID,
-		SnapshotID: request.Snapshot.ID, ClaimsDigest: request.ClaimsDigest,
-		ReviewerProvider: "review-provider", ReviewerModel: "review-model",
-		Accepted: accepted, CoverageComplete: true, Findings: findings,
-	}, nil
-}
-
-// portEvidenceFinal is an evidence-mode final answer citing ref for the
-// revenue claim.
-func portEvidenceFinal(ref string) ModelStepResult {
-	return finalAnswer(map[string]any{
-		"answer": "Q3 summary", "report": "Revenue grew 12% (" + ref + ").",
-		"evidenceClaims": []any{map[string]any{"id": "c1", "statement": "Revenue grew 12%.", "evidenceRefs": []any{ref}}},
-	})
-}
-
 // TestLoopCompletionChecksReturnToolErrors: a final answer the checks refuse
 // is an error result on its turn_final_answer entry; the model repairs it in
 // the next step and only the accepted answer is delivered.
@@ -353,59 +318,6 @@ func TestLoopCompletionChecksReturnToolErrors(t *testing.T) {
 		chatCheck(t, "port_approval_claim", "Your approval request has been submitted.", finalApprovalClaimCode)
 	})
 
-	evidenceCheck := func(t *testing.T, prefix, firstRef string, wantReviews int) {
-		eachStore(t, prefix, func(t *testing.T, store KernelStore) {
-			var rejection string
-			f := newLoopFixture(t, store, withRules(
-				&modelRule{name: "draft", times: 1, reply: func(stepView) ModelStepResult { return portEvidenceFinal(firstRef) }},
-				&modelRule{name: "repair", when: portLastToolFailed, reply: func(v stepView) ModelStepResult {
-					rejection, _, _ = v.ToolResult(string(ControlToolFinalAnswer))
-					return portEvidenceFinal("obs-revenue")
-				}},
-			))
-			reviewer := &portGroundingReviewer{reject: func(claim EvidenceClaim) bool {
-				for _, ref := range claim.EvidenceRefs {
-					if ref == "obs-churn" {
-						return true
-					}
-				}
-				return false
-			}}
-			f.control.Reviewer = reviewer
-			created, err := f.portfolio.CreateAgentRun(f.ctx, CreateAgentRunRequest{
-				Scope: f.scope, Kind: RunKindAgentWork, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: loopFixtureAgent},
-				AssignedAgentID: loopFixtureAgent, Goal: "Summarize Q3 from the snapshot", Source: RunSourceObjective,
-				Context: finalChecksSnapshotContext(t),
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			done := f.driveToRest(created.ID, 3)
-			f.mustStatus(done, AgentRunStatusCompleted)
-			finals := portFinalEntries(f, created.ID)
-			if len(finals) != 2 || finals[0].State != ToolEntryError || finals[1].State != ToolEntryCompleted {
-				t.Fatalf("final entries = %v", f.entryTypes(created.ID))
-			}
-			if text := portEntryText(finals[0]); !strings.Contains(text, finalEvidenceRepairCode) || text != rejection {
-				t.Fatalf("rejection = %q (model saw %q)", text, rejection)
-			}
-			if len(reviewer.requests) != wantReviews {
-				t.Fatalf("reviews = %d, want %d", len(reviewer.requests), wantReviews)
-			}
-			grounding, _ := done.Output[finalOutputEvidenceGroundingKey].(map[string]interface{})
-			if grounding["accepted"] != true || done.Output[finalOutputReportKey] != "Revenue grew 12% (obs-revenue)." {
-				t.Fatalf("output = %#v", done.Output)
-			}
-		})
-	}
-	// The reviewer refuses a citation of the wrong observation.
-	t.Run("evidence_grounding_swapped_citation", func(t *testing.T) {
-		evidenceCheck(t, "port_evidence_swapped", "obs-churn", 2)
-	})
-	// A reference outside the snapshot is refused before any review.
-	t.Run("evidence_grounding_unknown_snapshot", func(t *testing.T) {
-		evidenceCheck(t, "port_evidence_unknown", "obs-made-up", 1)
-	})
 }
 
 // ---------------------------------------------------------------------------

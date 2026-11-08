@@ -97,10 +97,6 @@ func TestLifecycleValidationFailsClosedAtExactBounds(t *testing.T) {
 			r.Policy.Version = "path"
 			r.Policy.Sources[0].PathPrefixes = []string{"/v1/../admin"}
 		}},
-		{"outreach", func(r *RegisterVersionRequest) {
-			r.Policy.Version = "outreach"
-			r.Policy.Outreach = &OutreachPolicy{Enabled: true, ApprovalPolicy: "review", MaximumBytes: 20001}
-		}},
 		{"disabled", func(r *RegisterVersionRequest) { r.Policy.Version = "disabled"; r.Policy.Enabled = false }},
 	}
 	for _, test := range tests {
@@ -117,6 +113,5 @@ func TestLifecycleValidationFailsClosedAtExactBounds(t *testing.T) {
 
 func testLifecyclePolicy(version string, maximumItems int) Policy {
 	return Policy{ID: "community-research", Version: version, Enabled: true, MaximumItems: maximumItems, RetentionDays: 30,
-		Sources:  []PolicySource{{Host: "www.reddit.com", PathPrefixes: []string{"/r/kubernetes"}, Methods: []string{http.MethodGet}}},
-		Outreach: &OutreachPolicy{Enabled: true, ApprovalPolicy: "human-review", MaximumBytes: 2000}}
+		Sources: []PolicySource{{Host: "www.reddit.com", PathPrefixes: []string{"/r/kubernetes"}, Methods: []string{http.MethodGet}}}}
 }

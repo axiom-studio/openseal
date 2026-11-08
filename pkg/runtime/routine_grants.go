@@ -88,7 +88,7 @@ var routineGrantActionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{
 // routines; a routine brief never waives their review.
 var routineUngrantableSkills = map[string]bool{
 	SkillManagementSkillID: true, AgentManagementSkillID: true, TeamManagementSkillID: true,
-	RunbookManagementSkillID: true, RunManagementSkillID: true, ObjectiveManagementSkillID: true, ProjectManagementSkillID: true,
+	RunbookManagementSkillID: true, RunManagementSkillID: true, ObjectiveManagementSkillID: true,
 }
 
 func routineGrantIdentity(skillID, action string) string {

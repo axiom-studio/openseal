@@ -35,7 +35,7 @@ func TestTeamMessageReplacesOtherMembersApprovals(t *testing.T) {
 		}
 		member := newLoopProposalFixture(t, f.store, created.Run, "worker-"+agentID, time.Now().UTC())
 		proposal, err := coordinator.Propose(ctx, member.request(ProposeActionRequest{
-			DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
+			DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 			Action: "reply", Arguments: map[string]interface{}{"body": "Launch moved to Thursday"}, Summary: "Post in #launch",
 		}, "post-"+agentID))
 		if err != nil || proposal.Approval == nil || proposal.Call.Status != ActionCallStatusWaitingApproval {

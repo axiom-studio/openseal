@@ -152,7 +152,7 @@ func validateConversationEvent(conversation *Conversation, event *ActivityEvent)
 	if err := event.Validate(); err != nil {
 		return err
 	}
-	if event.Scope != conversation.Scope || event.RunID != "" || event.ObjectiveID != "" || event.ProjectID != "" ||
+	if event.Scope != conversation.Scope || event.RunID != "" || event.ObjectiveID != "" ||
 		activityConversationSubject(event) != conversation.ID {
 		return fmt.Errorf("%w: conversation event must be recorded against the updated conversation", ErrInvalidConversation)
 	}

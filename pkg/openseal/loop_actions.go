@@ -30,13 +30,9 @@ func (e *Engine) buildGovernedToolExecutor() error {
 		return nil
 	}
 	worker.SetCredentialAvailabilityChecker(e.credentialAvailability)
-	observer, err := runtime.NewOutreachActionProposalObserver(e)
-	if err != nil {
-		return err
-	}
 	executor, err := runtime.NewGovernedToolExecutor(runtime.GovernedToolExecutorConfig{
 		Actions: e.actions, Approvals: e.approvals, Worker: worker, Store: e.store,
-		Observer: observer, Logger: e.logger,
+		Logger: e.logger,
 	})
 	if err != nil {
 		return err

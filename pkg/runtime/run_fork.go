@@ -331,21 +331,6 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			// transfer the source Agent's private context to another Agent.
 			delete(childContext, ConversationTaskContextKey)
 		}
-		if !implicitAgent && (sourceTask == nil || assignedAgentID != source.AssignedAgentID) {
-			projectID, ok := source.Context["projectId"].(string)
-			if ok && strings.TrimSpace(projectID) != "" {
-				// Project identity is safe, canonical work lineage. Preserve it
-				// across Agent boundaries without copying the source Run's broader
-				// context, which may contain owner-private references.
-				if childContext == nil {
-					childContext = map[string]interface{}{}
-				}
-				if supplied, exists := childContext["projectId"]; exists && supplied != projectID {
-					return nil, errors.New("fork branch cannot replace its source Project lineage")
-				}
-				childContext["projectId"] = projectID
-			}
-		}
 		if branch.Mode != "" {
 			if childContext == nil {
 				childContext = map[string]interface{}{}
@@ -538,7 +523,7 @@ func cloneForkContextValue(value interface{}) interface{} {
 func immutableForkTaskContextKey(key string) bool {
 	switch key {
 	case ConversationTaskContextKey, conversationRunContextConversationID, conversationRunContextTriggerID,
-		"threadRootMessageId", runReportingContextRootRunID, runReportingContextMilestones, "projectId":
+		"threadRootMessageId", runReportingContextRootRunID, runReportingContextMilestones:
 		return true
 	default:
 		return false

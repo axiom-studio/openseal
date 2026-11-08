@@ -50,7 +50,7 @@ type DesktopKernel interface {
 // DesktopTurnResolver resolves the loop binding of every Run the daemon's
 // workers claim. Runs of Scope get the desktop provider as their step host and
 // the generated-files publisher; other Runs bind without a step host, so only
-// deterministic Runs (outreach) execute there. Bind it to the kernel after
+// deterministic Runs execute there. Bind it to the kernel after
 // the kernel is built and before it starts.
 type DesktopTurnResolver struct {
 	Scope     runtime.Scope

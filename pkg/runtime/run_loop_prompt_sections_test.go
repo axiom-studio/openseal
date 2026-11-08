@@ -14,7 +14,6 @@ func loopKernelSectionTexts() map[string]string {
 		"conversation_tasks":      loopConversationTasksText,
 		"workspace":               loopWorkspaceText,
 		"media":                   loopMediaText,
-		"evidence":                loopEvidenceText,
 		"review_summaries":        loopReviewSummariesText,
 	}
 }
@@ -35,7 +34,7 @@ func TestPromptSectionsHaveNoFormWords(t *testing.T) {
 }
 
 func TestPromptSectionOrderAndTitles(t *testing.T) {
-	want := []string{"skill_access", "progress_rules", "conversation_tasks", "workspace", "media", "evidence", "review_summaries", "routine_script"}
+	want := []string{"skill_access", "progress_rules", "conversation_tasks", "workspace", "media", "review_summaries", "routine_script"}
 	if strings.Join(loopKernelSectionOrder, ",") != strings.Join(want, ",") {
 		t.Fatalf("order = %v, want %v", loopKernelSectionOrder, want)
 	}

@@ -269,9 +269,6 @@ func (p *catalogModelStepPreparer) system(binding *TurnRunnerBinding, set *Capab
 	if p.config.ImageInput {
 		texts[loopSectionMedia] = loopMediaText
 	}
-	if binding.Authority.finalMode() == FinalModeEvidence {
-		texts[loopSectionEvidence] = loopEvidenceText
-	}
 	// Write tools may become offered by a load, so the condition reads the
 	// authorized catalog: the section is present from the session's first
 	// step and a load never changes the system text.

@@ -12,12 +12,9 @@ import (
 
 type cancellationStore interface {
 	KernelStore
-	OutreachStore
-	ProjectStore
-	SourceMonitorStore
 }
 
-func TestCancelWaitingApprovalClosesActionAndRepairsOutreachProjection(t *testing.T) {
+func TestCancelWaitingApprovalClosesAction(t *testing.T) {
 	for _, fixture := range []struct {
 		name  string
 		store func(*testing.T) cancellationStore
@@ -33,7 +30,7 @@ func TestCancelWaitingApprovalClosesActionAndRepairsOutreachProjection(t *testin
 		}},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
-			assertCanceledApprovalOutreach(t, fixture.store(t))
+			assertCanceledApproval(t, fixture.store(t))
 		})
 	}
 }
@@ -65,7 +62,7 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 		}, nil
 	}))
 	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
-		DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0",
+		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0",
 		Action: "reply", Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "child-action",
 		Summary: "Send reviewed reply",
 	}, "reply"))
@@ -97,7 +94,7 @@ func TestCancelParentClosesDescendantApprovalAndAction(t *testing.T) {
 	}
 }
 
-func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
+func assertCanceledApproval(t *testing.T, store cancellationStore) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Date(2026, 7, 20, 14, 0, 0, 0, time.UTC)
@@ -119,8 +116,8 @@ func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 	}))
 	coordinator.now = func() time.Time { return now }
 	proposal, err := coordinator.Propose(ctx, loop.request(ProposeActionRequest{
-		DeploymentID: "research-agent", SkillID: "outreach", SkillVersion: "1.0.0", Action: "reply",
-		Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "outreach-message-1", Summary: "Send reviewed reply",
+		DeploymentID: "research-agent", SkillID: "forum", SkillVersion: "1.0.0", Action: "reply",
+		Arguments: map[string]interface{}{"body": "reviewed body"}, IdempotencyKey: "reply-1", Summary: "Send reviewed reply",
 	}, "reply"))
 	if err != nil {
 		t.Fatal(err)
@@ -132,30 +129,9 @@ func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 	loop.parkOnApproval(proposal.Approval.ID)
 	parked := loop.current()
 
-	disclosure := "Disclosure: I am an OpenSeal automated research agent."
-	reviewedBody := "Could you share feedback? " + disclosure
-	targetURI := "https://forum.example/thread/1"
-	thread := &OutreachThread{
-		ID: "thread-1", Scope: scope, ProjectID: "project-1", SourceObservationID: "observation-1", MonitorID: "monitor-1",
-		StableSourceID: "source-1", TargetURI: targetURI, Owner: parked.Owner,
-		AssignedAgentID: parked.AssignedAgentID, SourcePolicyRef: "forum-policy", ApprovalPolicyRef: "human-review",
-		Identity: OutreachIdentity{ProfileRef: "profile-1", DisplayName: "OpenSeal Research", Affiliation: "OpenSeal", Disclosure: disclosure},
-		Status:   OutreachThreadOpen, Revision: 1, CreatedAt: now, UpdatedAt: now,
-		Messages: []OutreachMessage{{
-			ID: "message-1", Direction: OutreachMessageOutbound, Intent: OutreachIntentRequestFeedback,
-			Body: reviewedBody, Status: OutreachMessagePendingApproval,
-			Capability: &OutreachCapability{SkillID: "outreach", SkillVersion: "1.0.0", Action: "reply", Arguments: map[string]interface{}{"target": targetURI, "body": reviewedBody}, TargetArgument: "target", BodyArgument: "body"},
-			RunID:      parked.ID, ActionCallID: proposal.Call.ID, ApprovalID: proposal.Approval.ID, CreatedAt: now, UpdatedAt: now,
-		}},
-	}
-	createdEvent := outreachEvent(thread, &thread.Messages[0], "outreach.approval_requested", "Outreach message awaiting approval", ActivityActor{Type: "worker", ID: "test"}, ActivityVisibilityTeam, now)
-	if _, err := store.CreateOutreachThreadWithEvent(ctx, thread, createdEvent); err != nil {
-		t.Fatal(err)
-	}
-
 	result, err := runs.CommandAgentRun(ctx, AgentRunCommandRequest{
 		Scope: scope, RunID: parked.ID, ExpectedRevision: parked.Revision, Kind: AgentRunCommandCancel,
-		Actor: ActivityActor{Type: "user", ID: "operator"}, Summary: "Operator canceled reviewed outreach",
+		Actor: ActivityActor{Type: "user", ID: "operator"}, Summary: "Operator canceled the reviewed reply",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -177,19 +153,6 @@ func assertCanceledApprovalOutreach(t *testing.T, store cancellationStore) {
 	}); !errors.Is(err, ErrApprovalResolved) {
 		t.Fatalf("late approval error = %v", err)
 	}
-
-	outreach := NewOutreachService(store, store, store, store)
-	repaired, err := outreach.Get(ctx, scope, thread.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repaired.Messages[0].Status != OutreachMessageCanceled || repaired.Messages[0].Outcome != call.Error || repaired.Revision != 2 {
-		t.Fatalf("repaired outreach = %#v", repaired)
-	}
-	replayed, err := outreach.Get(ctx, scope, thread.ID)
-	if err != nil || replayed.Revision != repaired.Revision {
-		t.Fatalf("replayed repair = %#v err=%v", replayed, err)
-	}
 }
 
 func cancellationActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
@@ -198,7 +161,7 @@ func cancellationActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 	scope := Scope{Kind: "tenant", ID: "cancellation"}
 	catalog := skill.NewCatalog()
 	definition := &skill.Definition{
-		ID: "outreach", Version: "1.0.0", Name: "Outreach", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://forum.invalid"},
+		ID: "forum", Version: "1.0.0", Name: "Forum", Transport: skill.TransportReference{Kind: "http", Endpoint: "https://forum.invalid"},
 		Actions: map[string]skill.Action{"reply": {
 			Name: "reply", Description: "Post a reviewed reply", SideEffect: skill.SideEffectExternal, Risk: skill.RiskLevelExternal,
 			InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"body": map[string]interface{}{"type": "string"}}, "required": []interface{}{"body"}},
@@ -209,7 +172,7 @@ func cancellationActionCatalog(t *testing.T) (*skill.Catalog, Scope) {
 		t.Fatal(err)
 	}
 	if err := catalog.Bind(ctx, &skill.Binding{
-		ID: "outreach-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research-agent",
+		ID: "forum-binding", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "research-agent",
 		SkillID: definition.ID, SkillVersion: definition.Version, AllowedActions: []string{"reply"}, MaximumRisk: skill.RiskLevelExternal, Revision: 1,
 	}); err != nil {
 		t.Fatal(err)

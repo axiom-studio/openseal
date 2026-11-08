@@ -260,3 +260,7 @@ func (c *StandaloneContext) ContextTokens(env string) (int64, error) {
 	}
 	return tokens, nil
 }
+
+func workerScopeKey(scope runtime.Scope) string {
+	return strings.TrimSpace(scope.Kind) + "\x00" + strings.TrimSpace(scope.ID)
+}

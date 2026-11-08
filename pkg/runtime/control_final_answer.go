@@ -50,10 +50,7 @@ const (
 	finalOutputVisualKey          = "visual"
 	finalOutputVisualRejectionKey = "visualRejection"
 	finalOutputSkillSelectionsKey = "skillSelections"
-	finalOutputEvidenceClaimsKey  = "evidenceClaims"
 )
-
-const maximumFinalEvidenceClaims = 64
 
 // finalAnswerArgs are the kernel fields of turn_final_answer. Host extension
 // fields (FinalOutputPublisher) are kept apart in finalAnswerCall.Extra.
@@ -64,7 +61,6 @@ type finalAnswerArgs struct {
 	BroadcastToChannel bool                 `json:"broadcastToChannel,omitempty"`
 	Report             string               `json:"report,omitempty"`
 	Silent             bool                 `json:"silent,omitempty"`
-	EvidenceClaims     []EvidenceClaim      `json:"evidenceClaims,omitempty"`
 }
 
 // finalAnswerKernelFields are the property names the kernel owns, whether or
@@ -72,7 +68,7 @@ type finalAnswerArgs struct {
 // never offered or routed to the publisher.
 var finalAnswerKernelFields = map[string]bool{
 	"answer": true, "appliedSkillRefs": true, "visual": true, "broadcastToChannel": true,
-	"report": true, "silent": true, "evidenceClaims": true,
+	"report": true, "silent": true,
 }
 
 // finalAnswerCall is the decoded call: the strict kernel arguments, which
@@ -154,11 +150,9 @@ func finalFieldOffered(field string, a ControlAuthority) bool {
 	case "broadcastToChannel":
 		return a.BroadcastAllowed
 	case "report":
-		return mode == FinalModeDefault || mode == FinalModeEvidence
+		return mode == FinalModeDefault
 	case "silent":
 		return mode == FinalModeSpoken
-	case "evidenceClaims":
-		return mode == FinalModeEvidence
 	}
 	return false
 }
@@ -172,8 +166,6 @@ func finalRequiredFields(a ControlAuthority) []string {
 	switch a.finalMode() {
 	case FinalModeSpoken:
 		required = append(required, "silent")
-	case FinalModeEvidence:
-		required = append(required, "report", "evidenceClaims")
 	}
 	return required
 }
@@ -212,19 +204,6 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 		properties["silent"] = map[string]interface{}{
 			"type":        "boolean",
 			"description": "Write before answer. True when ambient speech needs no response; answer must then be empty. Do not announce silence.",
-		}
-	}
-	if finalFieldOffered("evidenceClaims", a) {
-		properties["evidenceClaims"] = map[string]interface{}{
-			"type": "array", "maxItems": maximumFinalEvidenceClaims,
-			"items": map[string]interface{}{
-				"type": "object", "additionalProperties": false, "required": []string{"id", "statement", "evidenceRefs"},
-				"properties": map[string]interface{}{
-					"id":           map[string]interface{}{"type": "string"},
-					"statement":    map[string]interface{}{"type": "string"},
-					"evidenceRefs": map[string]interface{}{"type": "array", "minItems": 1, "items": map[string]interface{}{"type": "string"}},
-				},
-			},
 		}
 	}
 	return map[string]interface{}{
@@ -344,14 +323,6 @@ func checkFinalAnswerFields(call *finalAnswerCall, cc ControlContext) string {
 			return fmt.Sprintf("missing required field %q", key)
 		}
 	}
-	if len(call.Args.EvidenceClaims) > maximumFinalEvidenceClaims {
-		return fmt.Sprintf("evidenceClaims has %d items (max %d)", len(call.Args.EvidenceClaims), maximumFinalEvidenceClaims)
-	}
-	for i, claim := range call.Args.EvidenceClaims {
-		if strings.TrimSpace(claim.ID) == "" || strings.TrimSpace(claim.Statement) == "" || len(claim.EvidenceRefs) == 0 {
-			return fmt.Sprintf("evidenceClaims[%d] needs id, statement and at least one evidenceRef", i)
-		}
-	}
 	return ""
 }
 
@@ -401,7 +372,6 @@ type finalAnswerCheck struct {
 
 const (
 	finalCheckOrderCompletion = 100 // §11.4 1-3: URLs, external claims, approval claims
-	finalCheckOrderEvidence   = 200 // §11.4 4: evidence grounding review
 	finalCheckOrderTaskReview = 300 // §11.6: task completion review
 )
 
@@ -535,9 +505,6 @@ func (d *finalAnswerDraft) output(mode FinalAnswerMode) map[string]interface{} {
 	}
 	if len(d.SkillSelections) > 0 {
 		output[finalOutputSkillSelectionsKey] = d.SkillSelections
-	}
-	if mode == FinalModeEvidence && len(d.Args.EvidenceClaims) > 0 {
-		output[finalOutputEvidenceClaimsKey] = append([]EvidenceClaim(nil), d.Args.EvidenceClaims...)
 	}
 	return output
 }
@@ -838,8 +805,6 @@ func finalToolRequired(mode FinalAnswerMode) ControlToolName {
 		return ControlToolRequestDecision
 	case FinalModeReview:
 		return ControlToolCompletionReview
-	case FinalModeEvidence:
-		return ControlToolFinalAnswer
 	}
 	return ""
 }

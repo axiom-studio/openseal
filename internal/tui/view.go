@@ -91,7 +91,7 @@ func (m *Model) renderHelp(width int) string {
 		"",
 		headerStyle.Render("Workspace destinations"),
 		"Home · Create · Agents · Teams · Marketplace · Work · Channels",
-		mutedStyle.Render("Goals, Projects, Inbox, Sources, Integrations, Activity, and Evidence are available under More when supported."),
+		mutedStyle.Render("Goals, Inbox, Sources, Integrations, Activity, and Evidence are available under More when supported."),
 		"",
 		mutedStyle.Render("Press ? or Esc to close help · Ctrl+C exits the TUI but does not stop Agent work"),
 	}
@@ -144,15 +144,6 @@ func (m *Model) renderComposer(width int) string {
 	if m.mode == modeEventSourceRetire && !m.supportsEventSource(kernelapi.OperationRetire) {
 		return m.renderUnavailableComposer(width, "Retire event source", "This server does not advertise event-source retirement.")
 	}
-	if m.mode == modeProjectCreate && !m.supportsProject(kernelapi.OperationCreate) {
-		return m.renderUnavailableComposer(width, "Create a Project", "This server does not advertise Project creation.")
-	}
-	if m.mode == modeProjectEdit && !m.supportsProject(kernelapi.OperationPatch) {
-		return m.renderUnavailableComposer(width, "Amend Project", "This server does not advertise Project updates.")
-	}
-	if m.mode == modeOutreachCreate && !m.canCreateOutreachDraft() {
-		return m.renderUnavailableComposer(width, "Draft public outreach", "Select a Project, source observation, and authorized external Skill action first.")
-	}
 	if m.mode == modeSkillInstall && !m.supportsClawHub(clawhub.LifecycleInstall) {
 		return m.renderUnavailableComposer(width, "Install a Skill", "This server does not advertise governed ClawHub installation.")
 	}
@@ -180,7 +171,7 @@ func (m *Model) renderComposer(width int) string {
 	if isConversationGatewayMode(m.mode) && !m.supportsConversationGateway(mapConversationGatewayModeOperation(m.mode)) {
 		return m.renderUnavailableComposer(width, "Manage message integration", "This server does not advertise the required integration lifecycle operation.")
 	}
-	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && m.mode != modeOutreachCreate && !isConversationGatewayMode(m.mode) && m.mode != modeAgentBuilderPrompt && m.mode != modeWorkforceBundleInspect && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
+	if !m.supportsRun(kernelapi.OperationCreate) && m.mode != modeGuide && m.mode != modeRunbookOperationStart && m.mode != modeChannelCreate && m.mode != modeChannelPost && m.mode != modeEventSourceCreate && m.mode != modeEventSourceRetire && !isConversationGatewayMode(m.mode) && m.mode != modeAgentBuilderPrompt && m.mode != modeWorkforceBundleInspect && m.mode != modeRequestCreate && m.mode != modeRequestAccept && m.mode != modeRequestReject && m.mode != modeRequestClarify && m.mode != modeRequestProvideClarification && m.mode != modeRequestComplete && m.mode != modeApprovalApprove && m.mode != modeApprovalReject && m.mode != modeAgentAmendmentPropose && m.mode != modeAgentAmendmentEvaluate && m.mode != modeAgentAmendmentApprove && m.mode != modeAgentAmendmentReject && m.mode != modeAgentAmendmentActivate && m.mode != modeTeamAmendmentPropose && m.mode != modeTeamAmendmentEvaluate && m.mode != modeTeamAmendmentApprove && m.mode != modeTeamAmendmentReject && m.mode != modeTeamAmendmentActivate && m.mode != modeSourcePolicyRegister && m.mode != modeSourcePolicyActivate && m.mode != modeSourcePolicyRevoke {
 		content := headerStyle.Render("Start durable work") + "\n" +
 			mutedStyle.Render("This server does not advertise work creation.") + "\n\n" +
 			"You can still inspect the capabilities and evidence available in this workspace."
@@ -290,21 +281,6 @@ func (m *Model) renderComposer(width int) string {
 		title = "Retire selected event source"
 		description = "Type RETIRE exactly. The connector stops permanently while health, checkpoints, and audit remain durable."
 		owner = "Revision-bound permanent lifecycle change"
-	case modeProjectCreate:
-		title = "Create a Project"
-		description = "Compose durable objectives into a coordinated outcome that survives restarts."
-		if objective := m.selectedObjectiveRecord(); objective != nil {
-			owner = "Starts with Objective · " + compact(objective.Title, 48)
-		} else {
-			owner = "Select an Objective first"
-		}
-	case modeProjectEdit:
-		title = "Amend selected Project"
-		description = "Refine its purpose without losing coordination state or audit history."
-	case modeOutreachCreate:
-		title = "Draft public outreach"
-		description = "Declare a truthful identity and approval policy, then write the exact public message for the selected evidence."
-		owner = "Draft only · delivery is a separate governed Run"
 	case modeSkillInstall:
 		title = "Install a ClawHub Skill"
 		description = "Enter an owner-qualified reference. OpenSeal verifies, compiles, and activates it atomically."
@@ -409,10 +385,6 @@ func (m *Model) renderPanel(width int) string {
 		content = m.renderObjectivesContent(width)
 	} else if m.section == sectionSources {
 		content = m.renderEventSourcesContent(width)
-	} else if m.section == sectionProjects {
-		content = m.renderProjectsContent(width)
-	} else if m.section == sectionOutreach {
-		content = m.renderOutreachContent(width)
 	} else if m.section == sectionIntegrations {
 		content = m.renderConversationGatewaysContent(width)
 	} else if m.section == sectionSkills {
@@ -543,8 +515,6 @@ func sectionNavigationLabel(section panelSection) string {
 		return "c Channels"
 	case sectionObjectives:
 		return "o Goals"
-	case sectionProjects:
-		return "i Projects"
 	case sectionRequests:
 		return "R Inbox"
 	case sectionApprovals:
@@ -553,8 +523,6 @@ func sectionNavigationLabel(section panelSection) string {
 		return "S Sources"
 	case sectionIntegrations:
 		return "I Integrations"
-	case sectionOutreach:
-		return "O Outreach"
 	case sectionActivity:
 		return "t Activity"
 	case sectionArtifacts:
@@ -964,8 +932,6 @@ func (m *Model) renderObjectivesContent(width int) string {
 			lines = append(lines, renderBudgetLines(objective.Budget, nil, max(width-8, 24))...)
 		}
 		lines = append(lines, m.renderObjectiveRunbooks(objective.ID, width)...)
-		lines = append(lines, m.renderSelectedEvidence(width)...)
-		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		actions := []string{}
 		if selected := m.selectedRunbookRecord(); selected != nil {
 			if m.supportsRunbook(kernelapi.OperationGet) {
@@ -1254,95 +1220,6 @@ func (m *Model) renderEventSourcesContent(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) renderProjectsContent(width int) string {
-	title := headerStyle.Render("Project portfolio")
-	if m.loading {
-		title += mutedStyle.Render("  refreshing…")
-	}
-	lines := []string{title, ""}
-	if len(m.projects) == 0 {
-		lines = append(lines, mutedStyle.Render("No Projects yet. Compose one from a selected Objective."))
-	} else {
-		visible := max(3, min(len(m.projects), max(m.height-18, 5)))
-		start := max(0, min(m.projectSelected-visible/2, len(m.projects)-visible))
-		for index := start; index < min(len(m.projects), start+visible); index++ {
-			project := m.projects[index]
-			prefix, style := "  ", lipgloss.NewStyle().Foreground(text)
-			if index == m.projectSelected {
-				prefix, style = "› ", selectedStyle
-			}
-			lines = append(lines, style.Render(fmt.Sprintf("%s%-10s %s", prefix, string(project.Status), compact(project.Title, max(width-18, 20)))))
-		}
-	}
-	if project := m.selectedProjectRecord(); project != nil {
-		lines = append(lines, "", mutedStyle.Render("Selected"), compact(project.Purpose, max(width-8, 24)))
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("%d objectives · %d milestones · %d monitors · %d deliverables", len(project.ObjectiveRefs), len(project.Milestones), len(project.SourceMonitors), len(project.Deliverables))))
-		lines = append(lines, mutedStyle.Render(fmt.Sprintf("Revision %d · updated %s", project.Revision, relativeTime(project.UpdatedAt))))
-		if activityErr := m.projectActivityErrors[project.ID]; activityErr != nil {
-			lines = append(lines, "", lipgloss.NewStyle().Foreground(danger).Render(compact("Activity unavailable · "+activityErr.Error(), max(width-6, 24))))
-		} else if activity := m.projectActivity[project.ID]; len(activity) > 0 {
-			lines = append(lines, "", mutedStyle.Render("Recent activity"))
-			for _, item := range activity[:min(3, len(activity))] {
-				lines = append(lines, compact(fmt.Sprintf("%s · %s · %s", strings.ReplaceAll(item.EventType, "_", " "), item.Summary, relativeTime(item.CreatedAt)), max(width-6, 24)))
-			}
-		} else if m.activityCapability.Supports(kernelapi.OperationList) {
-			lines = append(lines, "", mutedStyle.Render("No durable activity recorded for this Project."))
-		}
-		lines = append(lines, m.renderSelectedEvidence(width)...)
-		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
-		if len(project.SourceMonitors) > 0 {
-			lines = append(lines, "", mutedStyle.Render("Source monitors"))
-			for _, monitor := range project.SourceMonitors {
-				lines = append(lines, compact(fmt.Sprintf("%s · %s@%s %s", monitor.ID, monitor.SkillID, monitor.SkillVersion, monitor.Action), max(width-4, 24)))
-				details := fmt.Sprintf("Agent %s · %s", monitor.AssignedAgentID, monitor.Deduplication)
-				lines = append(lines, mutedStyle.Render(compact(details, max(width-6, 24))))
-				if monitor.SourcePolicyRef != "" {
-					lines = append(lines, mutedStyle.Render(compact("Policy · "+monitor.SourcePolicyRef, max(width-6, 24))))
-				}
-				if status, ok := m.sourceMonitorStatuses[sourceMonitorStatusKey(project.ID, monitor.ID)]; ok {
-					if status.err != nil {
-						lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(compact("Status unavailable · "+status.err.Error(), max(width-6, 24))))
-					} else if status.checkpoint == nil {
-						lines = append(lines, mutedStyle.Render("Awaiting first successful Run"))
-					} else {
-						lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Last success %s · %d evidence · Run %s", relativeTime(status.checkpoint.LastSuccessAt), status.checkpoint.ObservationCount, status.checkpoint.LastRunID), max(width-6, 24))))
-						if status.policyErr != nil {
-							lines = append(lines, lipgloss.NewStyle().Foreground(danger).Render(compact("Authorization audit unavailable · "+status.policyErr.Error(), max(width-6, 24))))
-						} else if status.policyDecision != nil {
-							decision := status.policyDecision
-							lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("Authorized by %s@%s · %s", decision.PolicyID, decision.PolicyVersion, relativeTime(status.policyAuthorizedAt)), max(width-6, 24))))
-							lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("  %s%s · up to %d items", decision.SourceHost, decision.PathPrefix, decision.MaximumItems), max(width-6, 24))))
-						} else if m.activityCapability.Supports(kernelapi.OperationList) {
-							lines = append(lines, mutedStyle.Render("No authorization decision recorded for the last Run"))
-						}
-						for _, observation := range status.observations[:min(3, len(status.observations))] {
-							lines = append(lines, mutedStyle.Render(compact("  • "+observation.Summary+" · "+observation.SourceURI, max(width-6, 24))))
-							if observation.ArtifactRef != nil {
-								lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("    Artifact %s · revision %d", observation.ArtifactRef.ID, observation.ArtifactRef.Revision), max(width-8, 24))))
-							}
-						}
-					}
-				} else if m.supportsSourceMonitor(kernelapi.OperationGetCheckpoint) {
-					lines = append(lines, mutedStyle.Render("Refreshing durable status…"))
-				}
-			}
-		}
-		actions := []string{}
-		if m.supportsProject(kernelapi.OperationPatch) {
-			actions = append(actions, "Enter amend", "p pause/resume", "l link selected objective")
-		}
-		if m.supportsProject(kernelapi.OperationCreate) {
-			actions = append(actions, "n create")
-		}
-		if len(actions) > 0 {
-			lines = append(lines, "", lipgloss.NewStyle().Foreground(accentSoft).Render(strings.Join(actions, "  ·  ")))
-		}
-	} else if m.supportsProject(kernelapi.OperationCreate) {
-		lines = append(lines, "", mutedStyle.Render("Select an Objective, then press i and n to compose a Project."))
-	}
-	return strings.Join(lines, "\n")
-}
-
 func (m *Model) renderClawHubSkillsContent(width int) string {
 	title := headerStyle.Render("Skills marketplace")
 	if m.loading {
@@ -1434,7 +1311,7 @@ func (m *Model) renderClawHubSkillsContent(width int) string {
 	if plan := m.skillBindingUpgradePlan; plan != nil {
 		lines = append(lines, "",
 			headerStyle.Render(fmt.Sprintf("Reviewed update · %s@%s → %s@%s", plan.From.ID, plan.From.Version, plan.To.ID, plan.To.Version)),
-			mutedStyle.Render(fmt.Sprintf("%d Objective(s) · %d Project(s) · historical Runs stay unchanged", len(plan.Objectives), len(plan.Projects))),
+			mutedStyle.Render(fmt.Sprintf("%d Objective(s) · historical Runs stay unchanged", len(plan.Objectives))),
 		)
 		for _, finding := range plan.Findings {
 			lines = append(lines, lipgloss.NewStyle().Foreground(accentSoft).Render("• "+finding.Message))
@@ -1576,8 +1453,6 @@ func (m *Model) renderRunsContent(width int) string {
 		}
 		lines = append(lines, m.renderSelectedAgentTurns(width)...)
 		lines = append(lines, m.renderSelectedActionCalls(width)...)
-		lines = append(lines, m.renderSelectedEvidence(width)...)
-		lines = append(lines, m.renderSelectedEvidenceGrounding(width)...)
 		if receipt, ok := runDeliveryReceipt(run); ok {
 			lines = append(lines, "", lipgloss.NewStyle().Foreground(success).Bold(true).Render("DELIVERY ACCEPTED"))
 			summary := fmt.Sprintf("%d recipient%s · %d artifact%s", receipt.recipientCount, pluralSuffix(receipt.recipientCount), len(receipt.artifacts), pluralSuffix(len(receipt.artifacts)))
@@ -2113,7 +1988,7 @@ func activitySubjectLines(item *runtime.ActivityProjection) []string {
 	}
 	lines := make([]string, 0, 4)
 	for _, subject := range []struct{ label, value string }{
-		{"Agent", item.AgentID}, {"Team", item.TeamID}, {"Objective", item.ObjectiveID}, {"Project", item.ProjectID},
+		{"Agent", item.AgentID}, {"Team", item.TeamID}, {"Objective", item.ObjectiveID},
 		{"Run", item.RunID}, {"Parent Run", item.ParentRunID}, {"Turn", item.TurnID},
 	} {
 		if subject.value != "" {
@@ -2329,18 +2204,6 @@ func renderConversationActionApproval(approval *runtime.ApprovalCheckpoint, widt
 	case "objective":
 		lines = appendTypedConversationChange(lines, "Title", changes["title"], width)
 		lines = appendTypedConversationChange(lines, "Goal", changes["goal"], width)
-	case "project":
-		lines = appendTypedConversationChange(lines, "Title", changes["title"], width)
-		lines = appendTypedConversationChange(lines, "Purpose", changes["purpose"], width)
-		if refs := conversationStringSlice(changes["objectiveRefs"]); len(refs) > 0 {
-			lines = append(lines, mutedStyle.Render(compact(fmt.Sprintf("    Objectives · %d · %s", len(refs), strings.Join(refs, ", ")), max(width-12, 20))))
-		}
-		if milestones, ok := changes["milestones"].([]interface{}); ok && len(milestones) > 0 {
-			lines = append(lines, mutedStyle.Render(fmt.Sprintf("    Milestones · %d", len(milestones))))
-		}
-		if deliverables, ok := changes["deliverables"].([]interface{}); ok && len(deliverables) > 0 {
-			lines = append(lines, mutedStyle.Render(fmt.Sprintf("    Deliverables · %d", len(deliverables))))
-		}
 	}
 	if approval.Status == runtime.ApprovalStatusPending {
 		lines = append(lines, mutedStyle.Render("    A approvals · review this exact proposal"))
@@ -2358,29 +2221,17 @@ func appendTypedConversationChange(lines []string, label string, value interface
 	return append(lines, mutedStyle.Render(compact("    "+label+" · "+text, max(width-12, 20))))
 }
 
-func conversationStringSlice(value interface{}) []string {
-	switch values := value.(type) {
-	case []string:
-		return values
-	case []interface{}:
-		result := make([]string, 0, len(values))
-		for _, item := range values {
-			if text, ok := item.(string); ok && strings.TrimSpace(text) != "" {
-				result = append(result, text)
-			}
-		}
-		return result
-	default:
-		return nil
+func valueOrDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "—"
 	}
+	return value
 }
 
 func conversationResourceLabel(resourceType string) string {
 	switch resourceType {
 	case "objective":
 		return "Objective"
-	case "project":
-		return "Project"
 	case "skill_binding":
 		return "Skill access"
 	default:

@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,7 +28,6 @@ import (
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"go.uber.org/zap"
 )
 
@@ -93,19 +91,8 @@ type fakeKernelClient struct {
 	eventSourceError           error
 	eventSourceUpdates         []kernelapi.UpdateEventSourceSubscriptionRequest
 	eventSourceRetires         []kernelapi.RetireEventSourceSubscriptionRequest
-	projects                   []*runtime.Project
-	monitorCheckpoints         map[string]*runtime.SourceMonitorCheckpoint
-	monitorObservations        map[string][]*runtime.SourceObservation
 	activityPages              map[string]*runtime.ActivityFeedPage
 	activityRequests           []runtime.ActivityFeedRequest
-	projectKeys                []string
-	projectCreates             []kernelapi.CreateProjectRequest
-	projectUpdates             []kernelapi.UpdateProjectRequest
-	outreachThreads            []*runtime.OutreachThread
-	outreachCreates            []kernelapi.CreateOutreachThreadRequest
-	outreachCreateKeys         []string
-	outreachDeliveries         []kernelapi.DeliverOutreachMessageRequest
-	outreachDeliveryKeys       []string
 	commands                   []kernelapi.AgentRunCommandRequest
 	artifacts                  []*runtime.Artifact
 	downloadBody               string
@@ -760,51 +747,6 @@ func (f *fakeKernelClient) UpdateObjective(_ context.Context, _ runtime.Scope, i
 	return nil, runtime.ErrObjectiveNotFound
 }
 
-func (f *fakeKernelClient) CreateProject(_ context.Context, request kernelapi.CreateProjectRequest, key string) (*runtime.Project, error) {
-	f.projectKeys = append(f.projectKeys, key)
-	f.projectCreates = append(f.projectCreates, request)
-	project := &runtime.Project{ID: "project-created", Scope: request.Scope, Owner: request.Owner, Title: request.Title, Purpose: request.Purpose, Status: request.Status, ObjectiveRefs: request.ObjectiveRefs, Revision: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	f.projects = append([]*runtime.Project{project}, f.projects...)
-	return project, nil
-}
-
-func (f *fakeKernelClient) ListProjects(context.Context, runtime.ProjectFilter) ([]*runtime.Project, error) {
-	return f.projects, nil
-}
-func (f *fakeKernelClient) CreateOutreachThread(_ context.Context, request kernelapi.CreateOutreachThreadRequest, key string) (*runtime.OutreachThread, error) {
-	f.outreachCreates = append(f.outreachCreates, request)
-	f.outreachCreateKeys = append(f.outreachCreateKeys, key)
-	thread := &runtime.OutreachThread{ID: "outreach-created", Scope: request.Scope, ProjectID: request.ProjectID, SourceObservationID: request.SourceObservationID,
-		Identity: request.Identity, ApprovalPolicyRef: request.ApprovalPolicyRef, Status: runtime.OutreachThreadOpen,
-		Messages: []runtime.OutreachMessage{{ID: request.Message.ID, Direction: runtime.OutreachMessageOutbound, Intent: request.Message.Intent, Body: request.Message.Body, Status: runtime.OutreachMessageDraft}}}
-	f.outreachThreads = append([]*runtime.OutreachThread{thread}, f.outreachThreads...)
-	return thread, nil
-}
-func (f *fakeKernelClient) ListOutreachThreads(_ context.Context, filter runtime.OutreachThreadFilter) ([]*runtime.OutreachThread, error) {
-	result := make([]*runtime.OutreachThread, 0, len(f.outreachThreads))
-	for _, thread := range f.outreachThreads {
-		if thread.ProjectID == filter.ProjectID {
-			result = append(result, thread)
-		}
-	}
-	return result, nil
-}
-func (f *fakeKernelClient) GetOutreachThread(_ context.Context, _ runtime.Scope, _, threadID string) (*runtime.OutreachThread, error) {
-	for _, thread := range f.outreachThreads {
-		if thread.ID == threadID {
-			return thread, nil
-		}
-	}
-	return nil, runtime.ErrOutreachThreadNotFound
-}
-func (f *fakeKernelClient) DeliverOutreachMessage(_ context.Context, projectID, threadID, messageID string, request kernelapi.DeliverOutreachMessageRequest, key string) (*runtime.AgentRun, error) {
-	f.outreachDeliveries = append(f.outreachDeliveries, request)
-	f.outreachDeliveryKeys = append(f.outreachDeliveryKeys, key)
-	return &runtime.AgentRun{ID: "outreach-run", Scope: request.Scope, Context: map[string]interface{}{runtime.OutreachInvocationContextKey: map[string]interface{}{"threadId": threadID, "messageId": messageID}}, Goal: projectID}, nil
-}
-func (f *fakeKernelClient) ListSourceObservations(_ context.Context, filter runtime.SourceObservationFilter) ([]*runtime.SourceObservation, error) {
-	return f.monitorObservations[sourceMonitorStatusKey(filter.ProjectID, filter.MonitorID)], nil
-}
 func (f *fakeKernelClient) ListActivity(_ context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {
 	f.activityRequests = append(f.activityRequests, request)
 	keys := []string{activityTestRequestKey(request), request.RunID, request.AgentID, request.TeamID}
@@ -825,8 +767,6 @@ func activityTestRequestKey(request runtime.ActivityFeedRequest) string {
 		selector = "team:" + request.TeamID
 	} else if request.ObjectiveID != "" {
 		selector = "objective:" + request.ObjectiveID
-	} else if request.ProjectID != "" {
-		selector = "project:" + request.ProjectID
 	} else if request.RunID != "" {
 		selector = "run:" + request.RunID
 	}
@@ -838,42 +778,6 @@ func activityTestRequestKey(request runtime.ActivityFeedRequest) string {
 	}
 	return selector
 }
-func (f *fakeKernelClient) GetSourceMonitorCheckpoint(_ context.Context, _ runtime.Scope, projectID, monitorID string) (*runtime.SourceMonitorCheckpoint, error) {
-	checkpoint := f.monitorCheckpoints[sourceMonitorStatusKey(projectID, monitorID)]
-	if checkpoint == nil {
-		return nil, runtime.ErrSourceObservationNotFound
-	}
-	return checkpoint, nil
-}
-func (f *fakeKernelClient) GetProject(_ context.Context, _ runtime.Scope, id string) (*runtime.Project, error) {
-	for _, project := range f.projects {
-		if project.ID == id {
-			return project, nil
-		}
-	}
-	return nil, runtime.ErrProjectNotFound
-}
-func (f *fakeKernelClient) PatchProject(_ context.Context, _ runtime.Scope, id string, request kernelapi.UpdateProjectRequest) (*runtime.Project, error) {
-	f.projectUpdates = append(f.projectUpdates, request)
-	for _, project := range f.projects {
-		if project.ID == id {
-			if request.Purpose != nil {
-				project.Purpose = *request.Purpose
-			}
-			if request.Status != nil {
-				project.Status = *request.Status
-			}
-			if request.ObjectiveRefs != nil {
-				project.ObjectiveRefs = append([]string(nil), (*request.ObjectiveRefs)...)
-			}
-			project.Revision++
-			project.UpdatedAt = time.Now()
-			return project, nil
-		}
-	}
-	return nil, runtime.ErrProjectNotFound
-}
-
 func (f *fakeKernelClient) CreateAgentRun(_ context.Context, request kernelapi.CreateAgentRunRequest, key string) (*runtime.AgentRunCommandResult, error) {
 	f.createKeys = append(f.createKeys, key)
 	f.createRequests = append(f.createRequests, request)
@@ -1279,13 +1183,12 @@ func TestFullStandaloneWorkspaceStartsAtGuidedHomeWithDiscoverableNavigationAndH
 		kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
 		kernelapi.AgentRunsCapability(kernelapi.OperationList),
 		kernelapi.ObjectivesCapability(),
-		kernelapi.ProjectsCapability(),
 		kernelapi.AgentRequestsCapability(),
 	)
 	model := newModelWithClient(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
 	view := model.View()
-	for _, expected := range []string{"Welcome to OpenSeal", "Describe the agent you need", "Approve the card", "Start here", "How it works", "Home", "f Create", "h Agents", "T Teams", "w Work", "o Goals", "i Projects", "R Inbox", "← / → pages", "? help"} {
+	for _, expected := range []string{"Welcome to OpenSeal", "Describe the agent you need", "Approve the card", "Start here", "How it works", "Home", "f Create", "h Agents", "T Teams", "w Work", "o Goals", "R Inbox", "← / → pages", "? help"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("Home missing %q:\n%s", expected, view)
 		}
@@ -1323,7 +1226,6 @@ func TestHomeEnterOpensNewAgentAndStartsBuilderChat(t *testing.T) {
 		kernelapi.TeamDefinitionsCapability(kernelapi.TeamDefinitionCapabilityFeatures{}),
 		kernelapi.AgentRunsCapability(kernelapi.OperationList),
 		kernelapi.ObjectivesCapability(),
-		kernelapi.ProjectsCapability(),
 	)
 	model := newModelWithClient(t, fake)
 	applyCommand(t, model, model.loadCapabilities())
@@ -2152,310 +2054,6 @@ func TestObjectiveAndRunViewsProjectAttemptAndDurationBudgets(t *testing.T) {
 	}
 }
 
-func TestProjectPortfolioComposesSelectedObjectiveAndPatchesLifecycle(t *testing.T) {
-	fake := &fakeKernelClient{document: kernelapi.Capabilities(), objectives: []*runtime.Objective{{ID: "objective-research", Scope: runtime.Scope{Kind: "local", ID: "default"}, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"}, Title: "Research customer pain", Goal: "Gather cited evidence", Status: runtime.ObjectiveStatusActive, Revision: 1}}}
-	model := newTestModel(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-	if !model.projectCapability.Available {
-		t.Fatal("Project capability was not discovered")
-	}
-	model.section, model.mode = sectionProjects, modeProjectCreate
-	model.focusComposerEditor()
-	model.editor.SetValue("Customer insight campaign\nCoordinate monitoring and a cited report.")
-	applyCommand(t, model, model.submitProject())
-	if len(fake.projectCreates) != 1 || fake.projectKeys[0] == "" || fake.projectCreates[0].Status != runtime.ProjectStatusActive || len(fake.projectCreates[0].ObjectiveRefs) != 1 || fake.projectCreates[0].ObjectiveRefs[0] != "objective-research" {
-		t.Fatalf("Project create=%#v keys=%#v", fake.projectCreates, fake.projectKeys)
-	}
-	if view := model.View(); !strings.Contains(view, "Project portfolio") || !strings.Contains(view, "1 objectives") {
-		t.Fatalf("Project not rendered:\n%s", view)
-	}
-	model.mode = modeProjectEdit
-	model.focusComposerEditor()
-	model.editor.SetValue("Monitor evidence, coordinate outreach, and publish a cited report.")
-	applyCommand(t, model, model.submitProjectAmendment())
-	if len(fake.projectUpdates) != 1 || fake.projectUpdates[0].ExpectedRevision != 1 || fake.projectUpdates[0].Purpose == nil {
-		t.Fatalf("Project update=%#v", fake.projectUpdates)
-	}
-	applyCommand(t, model, model.pauseOrResumeProject())
-	if len(fake.projectUpdates) != 2 || fake.projectUpdates[1].ExpectedRevision != 2 || fake.projectUpdates[1].Status == nil || *fake.projectUpdates[1].Status != runtime.ProjectStatusPaused {
-		t.Fatalf("Project lifecycle=%#v", fake.projectUpdates)
-	}
-	second := &runtime.Objective{ID: "objective-outreach", Scope: fake.objectives[0].Scope, Owner: fake.objectives[0].Owner, Title: "Coordinate outreach", Goal: "Follow up safely", Status: runtime.ObjectiveStatusActive, Revision: 1}
-	fake.objectives = append(fake.objectives, second)
-	model.objectives = fake.objectives
-	model.objectiveSelected = 1
-	model.selectedObjective = second.ID
-	applyCommand(t, model, model.toggleSelectedObjectiveLink())
-	last := fake.projectUpdates[len(fake.projectUpdates)-1]
-	if last.ObjectiveRefs == nil || len(*last.ObjectiveRefs) != 2 || (*last.ObjectiveRefs)[1] != second.ID {
-		t.Fatalf("linked objectives=%#v", last.ObjectiveRefs)
-	}
-}
-
-func TestProjectPortfolioProjectsDurableSourceMonitorEvidence(t *testing.T) {
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	project := &runtime.Project{
-		ID: "project-research", Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		Title: "Market research", Purpose: "Monitor governed sources", Status: runtime.ProjectStatusActive, Revision: 3,
-		SourceMonitors: []runtime.SourceMonitorReference{{
-			ID: "reddit-kubernetes", ObjectiveID: "objective-research", AssignedAgentID: "researcher",
-			SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
-			SourcePolicyRef: "public-reddit-research@2026-07-13", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent,
-		}},
-	}
-	objective := &runtime.Objective{
-		ID: "objective-research", Scope: scope, Owner: project.Owner, Title: "Monitor sources", Goal: "Collect evidence", Status: runtime.ObjectiveStatusActive,
-	}
-	key := sourceMonitorStatusKey(project.ID, "reddit-kubernetes")
-	fake := &fakeKernelClient{
-		document: kernelapi.Capabilities(), projects: []*runtime.Project{project}, objectives: []*runtime.Objective{objective},
-		monitorCheckpoints: map[string]*runtime.SourceMonitorCheckpoint{key: {
-			Scope: scope, ProjectID: project.ID, MonitorID: "reddit-kubernetes", LastRunID: "run-live-123",
-			ObservationCount: 5, LastSuccessAt: time.Now().Add(-time.Minute), Revision: 2,
-		}},
-		monitorObservations: map[string][]*runtime.SourceObservation{key: {{
-			ID: "observation-1", Scope: scope, ProjectID: project.ID, MonitorID: "reddit-kubernetes",
-			Summary: "Operators want simpler upgrades", SourceURI: "https://www.reddit.com/r/kubernetes/comments/example",
-			ArtifactRef: &runtime.ResourceReference{Kind: runtime.ResourceKindArtifact, ID: "captured-thread", Revision: 2},
-		}}},
-		activityPages: map[string]*runtime.ActivityFeedPage{"project:" + project.ID: {Items: []runtime.ActivityProjection{{
-			ID: "project-progress-1", EventType: "artifact.created", ProjectID: project.ID, Summary: "Weekly research brief produced", CreatedAt: time.Now().Add(-30 * time.Second),
-		}}}, "run-live-123": {Items: []runtime.ActivityProjection{{
-			ID: "source-policy-call-1", EventType: "source_policy.authorized", ProjectID: project.ID, RunID: "run-live-123", CreatedAt: time.Now().Add(-2 * time.Minute),
-			Payload: map[string]interface{}{"monitorId": "reddit-kubernetes", "policyId": "public-reddit-research", "policyVersion": "2026-07-13", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": float64(5)},
-		}}}},
-	}
-	model := newTestModel(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-	model.section = sectionProjects
-	view := model.View()
-	for _, expected := range []string{"Recent activity", "Weekly research brief produced", "reddit-kubernetes", "openseal.source@1.0.2", "public-reddit-research@2026-07-13", "5 evidence", "Authorized by public-reddit-research@2026-07-13", "www.reddit.com/r/kubernetes · up to 5 items", "Operators want simpler upgrades", "Artifact captured-thread · revision 2"} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("Project monitor view missing %q:\n%s", expected, view)
-		}
-	}
-	var policyRequest, projectRequest *runtime.ActivityFeedRequest
-	for index := range fake.activityRequests {
-		request := &fake.activityRequests[index]
-		if request.RunID == "run-live-123" {
-			policyRequest = request
-		}
-		if request.ProjectID == project.ID {
-			projectRequest = request
-		}
-	}
-	if policyRequest == nil || !policyRequest.IncludeDetails || len(policyRequest.EventTypes) != 1 || policyRequest.EventTypes[0] != "source_policy.authorized" {
-		t.Fatalf("activity requests=%#v", fake.activityRequests)
-	}
-	if projectRequest == nil || projectRequest.Limit != 5 || projectRequest.IncludeDetails {
-		t.Fatalf("project activity request=%#v", projectRequest)
-	}
-}
-
-func TestProjectPolicyDecisionFlowsFromDurableActivityThroughPublicHTTPBoundary(t *testing.T) {
-	store := runtime.NewMemoryStore()
-	scope := runtime.Scope{Kind: "local", ID: "research"}
-	owner := runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "researcher"}
-	portfolio := runtime.NewPortfolioService(store)
-	objective, err := portfolio.CreateObjective(t.Context(), runtime.CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Monitor Kubernetes", Goal: "Collect governed evidence", Status: runtime.ObjectiveStatusActive,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runtime.NewRunbookActivationService(store).Create(t.Context(), runtime.CreateRunbookActivationRequest{
-		ID: "reddit-kubernetes-runbook", Scope: scope, Owner: owner, ObjectiveID: objective.ID, AssignedAgentID: owner.ID,
-		DefinitionID: "source-monitor", DefinitionVersion: "1", TriggerID: "reddit-kubernetes",
-		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 * * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
-		Input:   map[string]interface{}{"projectId": "project-policy", "sourceMonitorId": "reddit-kubernetes"},
-		Policy:  map[string]interface{}{"sourcePolicyRef": "public-reddit@1"}, Status: runtime.RunbookActivationActive,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	project, _, err := runtime.NewProjectService(store, store).Create(t.Context(), runtime.CreateProjectRequest{Project: &runtime.Project{
-		ID: "project-policy", Scope: scope, Owner: owner, Title: "Governed research", Purpose: "Collect permitted evidence", Status: runtime.ProjectStatusActive,
-		ObjectiveRefs: []string{objective.ID}, SourceMonitors: []runtime.SourceMonitorReference{{
-			ID: "reddit-kubernetes", ObjectiveID: objective.ID, AssignedAgentID: owner.ID, SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed",
-			SourcePolicyRef: "public-reddit@1", Deduplication: runtime.SourceMonitorDeduplicateStableSourceAndContent,
-		}},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	run, err := portfolio.CreateAgentRun(t.Context(), runtime.CreateAgentRunRequest{
-		Scope: scope, ObjectiveID: objective.ID, Owner: owner, AssignedAgentID: owner.ID, Goal: objective.Goal, Source: runtime.RunSourceSchedule,
-		Context: map[string]interface{}{"projectId": project.ID, "sourceMonitorId": "reddit-kubernetes"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runtime.NewSourceMonitorService(store, store, store, store).AdvanceCheckpoint(t.Context(), runtime.AdvanceSourceMonitorCheckpointRequest{
-		Scope: scope, ProjectID: project.ID, MonitorID: "reddit-kubernetes", RunID: run.ID, AgentID: owner.ID,
-		SkillID: "openseal.source", SkillVersion: "1.0.2", Action: "observe_feed", ActionCallID: "call-policy",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := runtime.NewRunActivityService(store, store).AppendActivity(t.Context(), &runtime.ActivityEvent{
-		ID: "source-policy-call-policy", Scope: scope, ProjectID: project.ID, ObjectiveID: objective.ID, RunID: run.ID, AgentID: owner.ID,
-		EventType: "source_policy.authorized", Severity: runtime.ActivitySeverityInfo, Actor: runtime.ActivityActor{Type: "system", ID: "source-policy"},
-		Summary: "Source access authorized by policy", Visibility: runtime.ActivityVisibilityScope, CreatedAt: time.Now().UTC(),
-		Payload: map[string]interface{}{"monitorId": "reddit-kubernetes", "actionCallId": "call-policy", "policyId": "public-reddit", "policyVersion": "1", "sourceHost": "www.reddit.com", "pathPrefix": "/r/kubernetes", "maximumItems": 5},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	api := server.NewServer(store, zap.NewNop().Sugar())
-	httpServer := httptest.NewServer(api.Handler())
-	defer httpServer.Close()
-	httpClient := client.NewKernelHTTPClient(httpServer.URL, httpServer.Client())
-	config := DefaultConfig()
-	config.Endpoint, config.Scope, config.Owner, config.PollInterval = httpServer.URL, scope, owner, -1
-	model, err := NewModel(t.Context(), httpClient, config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	model.width, model.height = 120, 40
-	applyCommand(t, model, model.loadCapabilities())
-	model.section = sectionProjects
-	view := model.View()
-	for _, expected := range []string{"Last success", "Authorized by public-reddit@1", "www.reddit.com/r/kubernetes · up to 5 items"} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("HTTP-backed policy decision missing %q:\n%s", expected, view)
-		}
-	}
-}
-
-func TestProjectCreationRequiresRealObjective(t *testing.T) {
-	fake := &fakeKernelClient{document: kernelapi.Capabilities()}
-	model := newTestModel(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-	model.mode = modeProjectCreate
-	model.editor.SetValue("Unbound campaign")
-	if command := model.submitProject(); command != nil {
-		t.Fatal("created Project without an Objective")
-	}
-	if !strings.Contains(model.status, "Objective") || len(fake.projectCreates) != 0 {
-		t.Fatalf("status=%q creates=%#v", model.status, fake.projectCreates)
-	}
-}
-
-func TestOutreachWorkspaceDraftsAndDeliversOnlyAdvertisedEvidenceBoundWork(t *testing.T) {
-	now := time.Now().UTC()
-	scope := runtime.Scope{Kind: "local", ID: "default"}
-	project := &runtime.Project{
-		ID: "project-research", Scope: scope, Owner: runtime.ObjectiveOwner{Type: runtime.OwnerTypeAgent, ID: "operator"},
-		Title: "Community research", Status: runtime.ProjectStatusActive,
-		SourceMonitors: []runtime.SourceMonitorReference{{ID: "forum", AssignedAgentID: "researcher", SourcePolicyRef: "public-forum@1"}},
-	}
-	observation := &runtime.SourceObservation{
-		ID: "evidence-1", Scope: scope, ProjectID: project.ID, MonitorID: "forum", Summary: "Install flow is confusing",
-		SourceURI: "https://forum.example/thread/1", ObservedAt: now,
-	}
-	disclosure := "Disclosure: automated OpenSeal research assistant."
-	thread := &runtime.OutreachThread{
-		ID: "thread-1", Scope: scope, ProjectID: project.ID, SourceObservationID: observation.ID, TargetURI: observation.SourceURI,
-		AssignedAgentID: "researcher", SourcePolicyRef: "public-forum@1", ApprovalPolicyRef: "human-review",
-		Identity: runtime.OutreachIdentity{ProfileRef: "profile:research", DisplayName: "Research", Affiliation: "OpenSeal", Disclosure: disclosure},
-		Status:   runtime.OutreachThreadOpen, Messages: []runtime.OutreachMessage{{
-			ID: "message-1", Direction: runtime.OutreachMessageOutbound, Intent: runtime.OutreachIntentRequestFeedback,
-			Body: "Which step was hardest? " + disclosure, Status: runtime.OutreachMessageDelivered,
-			Capability: &runtime.OutreachCapability{SkillID: "forum", SkillVersion: "1", Action: "reply", BindingID: "forum-account", BindingRevision: 4},
-			RunID:      "run-1", ActionCallID: "action-1", ApprovalID: "approval-1", Outcome: "delivered once",
-			Receipt: &runtime.OutreachReceipt{Provider: "forum", ExternalID: "post-1", Digest: "sha256:receipt", DeliveredAt: now},
-		}},
-	}
-	fake := &fakeKernelClient{
-		document: kernelapi.NewCapabilityDocument(
-			kernelapi.ProjectsCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(), kernelapi.AgentRunsCapability(),
-		),
-		projects: []*runtime.Project{project}, outreachThreads: []*runtime.OutreachThread{thread},
-		runs:                []*runtime.AgentRun{{ID: "run-1", Scope: scope, Owner: project.Owner, AssignedAgentID: "researcher", Goal: "Deliver reviewed outreach", Status: runtime.AgentRunStatusWaitingForApproval, Revision: 3}},
-		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(project.ID, "forum"): {observation}},
-		skillActions: []capability.ModelAction{{
-			Name: "Reply", BindingID: "forum-account", BindingRevision: 4, SkillID: "forum", Version: "1", Action: "reply",
-			SideEffect: capability.SideEffectExternal, SemanticArguments: map[string]string{"target": "url", "body": "message"},
-		}},
-	}
-	model := newTestModel(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-	model.section = sectionOutreach
-	applyCommand(t, model, model.loadOutreach())
-	for _, expected := range []string{"O Outreach", "Governed outreach", "evidence-1", "public-forum@1", "human-review", "Research · OpenSeal", "run-1", "action-1", "approval-1", "forum/post-1", "sha256:receipt", "n draft"} {
-		if view := model.View(); !strings.Contains(view, expected) {
-			t.Fatalf("outreach view missing %q:\n%s", expected, view)
-		}
-	}
-	for _, size := range []struct{ width, height int }{{120, 36}, {100, 30}, {80, 24}} {
-		model.width, model.height = size.width, size.height
-		content := model.renderOutreachContent(size.width)
-		for _, expected := range []string{"Governed outreach", "Source policy", "Approval policy", "Identity", "Run run-1", "Receipt", "Enter inspect Run"} {
-			if !strings.Contains(content, expected) {
-				t.Fatalf("%dx%d outreach content missing %q:\n%s", size.width, size.height, expected, content)
-			}
-		}
-		for _, line := range strings.Split(content, "\n") {
-			if lipgloss.Width(line) > size.width {
-				t.Fatalf("%dx%d outreach line exceeds terminal width (%d): %q", size.width, size.height, lipgloss.Width(line), line)
-			}
-		}
-	}
-	model.width, model.height = 120, 36
-	if command := model.inspectSelectedOutreachRun(); command == nil {
-		t.Fatal("linked outreach Run inspection was unavailable")
-	} else {
-		applyCommand(t, model, command)
-	}
-	if model.section != sectionRuns || model.selectedRun() == nil || model.selectedRun().ID != "run-1" || !strings.Contains(model.status, "Inspecting governed outreach Run") {
-		t.Fatalf("linked outreach Run was not selected: section=%v selected=%#v status=%q", model.section, model.selectedRun(), model.status)
-	}
-	model.section = sectionOutreach
-	model.prepareOutreachComposer()
-	model.editor.SetValue("Name: Research\nAffiliation: OpenSeal\nProfile: profile:research\nDisclosure: " + disclosure + "\nApproval: human-review\nIntent: request_feedback\n\nCould you describe the hardest install step? " + disclosure)
-	applyCommand(t, model, model.submitOutreachDraft())
-	if len(fake.outreachCreates) != 1 || fake.outreachCreateKeys[0] == "" || fake.outreachCreates[0].SourceObservationID != observation.ID ||
-		fake.outreachCreates[0].Message.Capability.BindingID != "forum-account" || fake.outreachCreates[0].Identity.Disclosure != disclosure {
-		t.Fatalf("outreach create=%#v keys=%#v", fake.outreachCreates, fake.outreachCreateKeys)
-	}
-	applyCommand(t, model, model.deliverSelectedOutreachDraft())
-	if len(fake.outreachDeliveries) != 1 || fake.outreachDeliveryKeys[0] == "" || !strings.Contains(model.status, "outreach-run") {
-		t.Fatalf("outreach deliveries=%#v keys=%#v status=%q", fake.outreachDeliveries, fake.outreachDeliveryKeys, model.status)
-	}
-
-	readOnly := &fakeKernelClient{
-		document: kernelapi.NewCapabilityDocument(kernelapi.ProjectsCapability(), kernelapi.OutreachCapability(kernelapi.OperationGet, kernelapi.OperationList)),
-		projects: []*runtime.Project{project}, outreachThreads: []*runtime.OutreachThread{thread},
-	}
-	readOnlyModel := newTestModel(t, readOnly)
-	applyCommand(t, readOnlyModel, readOnlyModel.loadCapabilities())
-	readOnlyModel.section = sectionOutreach
-	if view := readOnlyModel.View(); strings.Contains(view, "n draft") || strings.Contains(view, "D create delivery Run") || strings.Contains(view, "Draft basis") {
-		t.Fatalf("mutating outreach controls leaked without advertised operations:\n%s", view)
-	}
-
-	teamFake := &fakeKernelClient{
-		document: kernelapi.NewCapabilityDocument(
-			kernelapi.ProjectsCapability(), kernelapi.SourceMonitorsCapability(), kernelapi.SkillActionsCapability(), kernelapi.OutreachCapability(),
-		),
-		projects:            []*runtime.Project{project},
-		monitorObservations: map[string][]*runtime.SourceObservation{sourceMonitorStatusKey(project.ID, "forum"): {observation}},
-		skillActions:        fake.skillActions,
-	}
-	teamConfig := DefaultConfig()
-	teamConfig.Owner = runtime.ObjectiveOwner{Type: runtime.OwnerTypeTeam, ID: "research-team"}
-	teamConfig.PollInterval = -1
-	teamModel, err := NewModel(context.Background(), teamFake, teamConfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	teamModel.width, teamModel.height = 120, 36
-	applyCommand(t, teamModel, teamModel.loadCapabilities())
-	teamModel.section = sectionOutreach
-	applyCommand(t, teamModel, teamModel.loadOutreach())
-	if !teamModel.canCreateOutreachDraft() || teamModel.selectedOutreachAction() == nil || teamModel.selectedOutreachAction().BindingID != "forum-account" {
-		t.Fatalf("Team Project could not discover its monitor Agent's authorized action: capability=%#v actions=%#v", teamModel.skillActionCapability, teamModel.outreachActions)
-	}
-}
-
 func TestClawHubSkillsUseAdvertisedLifecycleAndTypedConfirmation(t *testing.T) {
 	capability := kernelapi.ClawHubLifecycleCapability(clawhub.CanonicalLifecycleCapability())
 	base := &fakeKernelClient{document: kernelapi.NewCapabilityDocument(capability)}
@@ -2752,297 +2350,6 @@ func TestRunViewProjectsCanonicalParentLineage(t *testing.T) {
 	}
 }
 
-func TestEvidenceSnapshotProjectsAcrossRunObjectiveAndProjectInspection(t *testing.T) {
-	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
-	model.ready = true
-	model.focus = focusPanel
-	model.runCapability = kernelapi.AgentRunsCapability()
-	model.objectiveCapability = kernelapi.ObjectivesCapability()
-	model.projectCapability = kernelapi.ProjectsCapability()
-	model.objectives = []*runtime.Objective{{ID: "objective-synthesis", Title: "Synthesize findings", Goal: "Create a cited report", Status: runtime.ObjectiveStatusActive}}
-	model.projects = []*runtime.Project{{ID: "project-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.ProjectStatusActive}}
-	older := evidenceSnapshotRun("run-older", "snapshot-old", time.Date(2026, 7, 19, 9, 0, 0, 0, time.UTC))
-	newer := evidenceSnapshotRun("run-newer", "snapshot-new", time.Date(2026, 7, 20, 9, 0, 0, 0, time.UTC))
-	model.runs = []*runtime.AgentRun{older, newer}
-
-	model.section = sectionRuns
-	model.selected = 1
-	view := model.renderRunsContent(180)
-	for _, expected := range []string{"Evidence snapshot", "2 selected · 3 expired · bounded/truncated", "Snapshot · snapshot-new", "Project · project-research", "Run · run-newer", "25 observations · 120 runes/summary · 1000 runes total", "v expand bounded evidence"} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("Run evidence projection missing %q:\n%s", expected, view)
-		}
-	}
-	if strings.Contains(view, "https://forum.example/first") {
-		t.Fatalf("collapsed snapshot exposed observation detail:\n%s", view)
-	}
-
-	model.section = sectionObjectives
-	if view = model.renderObjectivesContent(180); !strings.Contains(view, "snapshot-new") || strings.Contains(view, "snapshot-old") {
-		t.Fatalf("Objective did not project its latest scheduled snapshot:\n%s", view)
-	}
-
-	model.section = sectionProjects
-	if view = model.renderProjectsContent(180); !strings.Contains(view, "snapshot-new") || strings.Contains(view, "snapshot-old") {
-		t.Fatalf("Project did not project its latest scheduled snapshot:\n%s", view)
-	}
-}
-
-func TestEvidenceSnapshotExpansionPagesCredentialFreeObservationProjection(t *testing.T) {
-	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
-	model.ready = true
-	model.focus = focusPanel
-	model.section = sectionRuns
-	model.runCapability = kernelapi.AgentRunsCapability()
-	model.runs = []*runtime.AgentRun{evidenceSnapshotRun("run-evidence", "snapshot-safe", time.Now().UTC())}
-
-	applyKey(t, model, "v")
-	view := model.renderRunsContent(180)
-	for _, expected := range []string{"Observation 1 of 2", "observation-first", "https://forum.example/first", "2026-07-20T08:00:00Z", "sha256:first", "First bounded finding", "[ previous · ] next · v collapse"} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("expanded evidence missing %q:\n%s", expected, view)
-		}
-	}
-	for _, forbidden := range []string{"observation-second", "privateCredentialRef", "rawContent", "credential"} {
-		if strings.Contains(view, forbidden) {
-			t.Fatalf("expanded evidence exposed %q:\n%s", forbidden, view)
-		}
-	}
-
-	applyKey(t, model, "]")
-	view = model.renderRunsContent(180)
-	if !strings.Contains(view, "Observation 2 of 2") || !strings.Contains(view, "observation-second") || strings.Contains(view, "observation-first") {
-		t.Fatalf("evidence paging is not bounded to the selected observation:\n%s", view)
-	}
-	applyKey(t, model, "v")
-	if view = model.renderRunsContent(180); strings.Contains(view, "Observation 2 of 2") || !strings.Contains(view, "v expand bounded evidence") {
-		t.Fatalf("evidence did not collapse:\n%s", view)
-	}
-}
-
-func TestEvidenceSnapshotMismatchFailsClosedAndCapabilityGateHidesProjection(t *testing.T) {
-	run := evidenceSnapshotRun("run-malformed", "snapshot-malformed", time.Now().UTC())
-	run.Context[runtime.EvidenceSnapshotContextKey].(map[string]interface{})["credential"] = "should-never-render"
-	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
-	model.ready = true
-	model.focus = focusPanel
-	model.section = sectionRuns
-	model.runCapability = kernelapi.AgentRunsCapability()
-	model.runs = []*runtime.AgentRun{run}
-
-	view := model.renderRunsContent(180)
-	if !strings.Contains(view, "Snapshot projection unavailable") || !strings.Contains(view, "contract does not match") || strings.Contains(view, "should-never-render") {
-		t.Fatalf("malformed projection did not fail closed:\n%s", view)
-	}
-	applyKey(t, model, "v")
-	if model.evidenceExpanded {
-		t.Fatal("malformed evidence projection was expandable")
-	}
-
-	model.runCapability = kernelapi.Capability{}
-	if view = model.renderRunsContent(180); strings.Contains(view, "Evidence snapshot") {
-		t.Fatalf("unadvertised Run evidence was rendered:\n%s", view)
-	}
-}
-
-func TestEvidenceGroundingProjectsVerifiedClaimsAcrossInspectionSurfaces(t *testing.T) {
-	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
-	model.ready = true
-	model.focus = focusPanel
-	model.runCapability = kernelapi.AgentRunsCapability()
-	model.objectiveCapability = kernelapi.ObjectivesCapability()
-	model.projectCapability = kernelapi.ProjectsCapability()
-	model.objectives = []*runtime.Objective{{ID: "objective-synthesis", Title: "Synthesize findings", Goal: "Create a cited report", Status: runtime.ObjectiveStatusActive}}
-	model.projects = []*runtime.Project{{ID: "project-research", Title: "Market research", Purpose: "Understand user pain", Status: runtime.ProjectStatusActive}}
-	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted)
-	model.runs = []*runtime.AgentRun{run}
-
-	model.section = sectionRuns
-	view := model.renderRunsContent(180)
-	for _, expected := range []string{
-		"Evidence grounding", "VERIFIED · 2 claims", "Accepted · yes · Coverage · complete",
-		"grounding-provider / grounding-model", "17 input · 9 output · 0.0012 cost · 42 ms",
-		"V expand 2 claim/review pages",
-	} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("verified grounding projection missing %q:\n%s", expected, view)
-		}
-	}
-	if strings.Contains(view, "The first finding is supported") || strings.Contains(view, "observation-first") {
-		t.Fatalf("collapsed grounding exposed claim detail:\n%s", view)
-	}
-
-	applyKey(t, model, "V")
-	view = model.renderRunsContent(180)
-	for _, expected := range []string{
-		"Claim/review page 1 of 2", "Claim · claim-first", "Statement · The first finding is supported",
-		"Evidence ref 1 · observation-first", "supported · Exact first-source support", "Reviewed ref 1 · observation-first",
-		"{ previous · } next · V collapse",
-	} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("expanded grounding projection missing %q:\n%s", expected, view)
-		}
-	}
-	applyKey(t, model, "}")
-	view = model.renderRunsContent(180)
-	if !strings.Contains(view, "Claim/review page 2 of 2") || !strings.Contains(view, "observation-second") || strings.Contains(view, "claim-first") {
-		t.Fatalf("grounding paging did not isolate one claim:\n%s", view)
-	}
-
-	model.section = sectionObjectives
-	model.resetEvidenceInspection()
-	if view = model.renderObjectivesContent(180); !strings.Contains(view, "Evidence grounding") || !strings.Contains(view, "VERIFIED") {
-		t.Fatalf("Objective inspection omitted grounding:\n%s", view)
-	}
-	model.section = sectionProjects
-	if view = model.renderProjectsContent(180); !strings.Contains(view, "Evidence grounding") || !strings.Contains(view, "VERIFIED") {
-		t.Fatalf("Project inspection omitted grounding:\n%s", view)
-	}
-}
-
-func TestEvidenceGroundingShowsNoInProgressReview(t *testing.T) {
-	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
-	model.ready = true
-	model.focus = focusPanel
-	model.section = sectionRuns
-	model.runCapability = kernelapi.AgentRunsCapability()
-	run := groundedEvidenceRun(t, runtime.AgentRunStatusRunning)
-	run.Checkpoint = map[string]interface{}{"_opensealEvidenceGrounding": map[string]interface{}{
-		"apiVersion": evidenceGroundingAPIVersion, "status": "repair_required", "snapshotId": "snapshot-grounded",
-		"draftSummary": "must-not-render",
-	}}
-	model.runs = []*runtime.AgentRun{run}
-
-	view := model.renderRunsContent(180)
-	if !strings.Contains(view, "Evidence snapshot") {
-		t.Fatalf("running evidence Run lost its snapshot:\n%s", view)
-	}
-	for _, unexpected := range []string{"Evidence grounding", "REPAIR REQUIRED", "REVIEW PENDING", "must-not-render"} {
-		if strings.Contains(view, unexpected) {
-			t.Fatalf("in-progress grounding state rendered %q:\n%s", unexpected, view)
-		}
-	}
-	applyKey(t, model, "V")
-	if model.groundingExpanded {
-		t.Fatal("in-progress grounding state was expandable")
-	}
-}
-
-func TestEvidenceGroundingRemainsCalmAtNarrowTerminalWidth(t *testing.T) {
-	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
-	model.ready = true
-	model.focus = focusPanel
-	model.section = sectionRuns
-	model.runCapability = kernelapi.AgentRunsCapability()
-	model.runs = []*runtime.AgentRun{groundedEvidenceRun(t, runtime.AgentRunStatusCompleted)}
-	model.groundingExpanded = true
-
-	const width = 42
-	for _, line := range model.renderSelectedEvidenceGrounding(width) {
-		if rendered := lipgloss.Width(line); rendered > width {
-			t.Fatalf("grounding line width %d exceeds %d: %q", rendered, width, line)
-		}
-	}
-}
-
-func TestEvidenceGroundingMismatchFailsClosedWithoutRenderingUnknownData(t *testing.T) {
-	model := newTestModel(t, &fakeKernelClient{document: kernelapi.Capabilities()})
-	model.ready = true
-	model.focus = focusPanel
-	model.section = sectionRuns
-	model.runCapability = kernelapi.AgentRunsCapability()
-	run := groundedEvidenceRun(t, runtime.AgentRunStatusCompleted)
-	review := run.Output["evidenceGrounding"].(map[string]interface{})
-	review["credential"] = "must-not-render"
-	model.runs = []*runtime.AgentRun{run}
-
-	view := model.renderRunsContent(180)
-	if !strings.Contains(view, "Review projection unavailable") || !strings.Contains(view, "contract does not match") || strings.Contains(view, "must-not-render") {
-		t.Fatalf("unknown grounding field did not fail closed:\n%s", view)
-	}
-	applyKey(t, model, "V")
-	if model.groundingExpanded {
-		t.Fatal("malformed grounding projection was expandable")
-	}
-
-	run = groundedEvidenceRun(t, runtime.AgentRunStatusCompleted)
-	claims := run.Output["evidenceClaims"].([]runtime.EvidenceClaim)
-	claims[0].EvidenceRefs = []string{"observation-invented"}
-	run.Output["evidenceClaims"] = claims
-	model.runs = []*runtime.AgentRun{run}
-	if view = model.renderRunsContent(180); !strings.Contains(view, "outside the immutable snapshot") || strings.Contains(view, "observation-invented") {
-		t.Fatalf("out-of-snapshot claim did not fail closed:\n%s", view)
-	}
-}
-
-func groundedEvidenceRun(t *testing.T, status runtime.AgentRunStatus) *runtime.AgentRun {
-	t.Helper()
-	run := evidenceSnapshotRun("run-grounded", "snapshot-grounded", time.Now().UTC())
-	run.Status = status
-	claims := []runtime.EvidenceClaim{
-		{ID: "claim-first", Statement: "The first finding is supported", EvidenceRefs: []string{"observation-first"}},
-		{ID: "claim-second", Statement: "The second finding is supported", EvidenceRefs: []string{"observation-second"}},
-	}
-	encoded, err := json.Marshal(claims)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digestBytes := sha256.Sum256(encoded)
-	digest := "sha256:" + hex.EncodeToString(digestBytes[:])
-	findings := []runtime.EvidenceGroundingFinding{
-		{ClaimID: "claim-first", Status: runtime.EvidenceGroundingSupported, Summary: "Exact first-source support", EvidenceRefs: []string{"observation-first"}},
-		{ClaimID: "claim-second", Status: runtime.EvidenceGroundingSupported, Summary: "Exact second-source support", EvidenceRefs: []string{"observation-second"}},
-	}
-	review := &runtime.EvidenceGroundingReview{
-		APIVersion: evidenceGroundingAPIVersion, InvocationID: "turn-review", SnapshotID: "snapshot-grounded", ClaimsDigest: digest,
-		ReviewerProvider: "grounding-provider", ReviewerModel: "grounding-model", Accepted: true, CoverageComplete: true,
-		Findings: findings, Usage: runtime.TurnUsage{InputTokens: 17, OutputTokens: 9, Cost: 0.0012, DurationMS: 42},
-	}
-	if status == runtime.AgentRunStatusCompleted {
-		run.Output = map[string]interface{}{"report": "Cited report", "evidenceClaims": claims, "evidenceGrounding": groundingReviewMap(t, review)}
-	}
-	return run
-}
-
-func groundingReviewMap(t *testing.T, review *runtime.EvidenceGroundingReview) map[string]interface{} {
-	t.Helper()
-	encoded, err := json.Marshal(review)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result map[string]interface{}
-	if err := json.Unmarshal(encoded, &result); err != nil {
-		t.Fatal(err)
-	}
-	return result
-}
-
-func evidenceSnapshotRun(id, snapshotID string, createdAt time.Time) *runtime.AgentRun {
-	run := testRun(id, runtime.AgentRunStatusCompleted, 4)
-	run.Source = runtime.RunSourceSchedule
-	run.ObjectiveID = "objective-synthesis"
-	run.CreatedAt = createdAt
-	run.UpdatedAt = createdAt
-	run.Context = map[string]interface{}{
-		"projectId": "project-research",
-		runtime.EvidenceSnapshotContextKey: map[string]interface{}{
-			"apiVersion": evidenceSnapshotAPIVersion,
-			"id":         snapshotID, "projectId": "project-research",
-			"selectedCount": 2, "expiredCount": 3, "truncated": true,
-			"observationLimit": 25, "summaryRuneLimit": 120, "totalSummaryRuneLimit": 1000,
-			"observations": []interface{}{
-				map[string]interface{}{"id": "observation-first", "sourceUri": "https://forum.example/first", "observedAt": "2026-07-20T08:00:00Z", "contentDigest": "sha256:first", "summary": "First bounded finding", "summaryTruncated": false},
-				map[string]interface{}{"id": "observation-second", "sourceUri": "https://forum.example/second", "observedAt": "2026-07-20T08:30:00Z", "contentDigest": "sha256:second", "summary": "Second bounded finding", "summaryTruncated": true},
-			},
-		},
-		// This unrelated context proves the renderer consumes only the canonical
-		// credential-free projection rather than dumping Run context.
-		"privateCredentialRef": "opaque-secret-reference",
-		"rawContent":           "unbounded source body",
-	}
-	return run
-}
-
 func applyKey(t *testing.T, model *Model, key string) {
 	t.Helper()
 	message := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
@@ -3195,56 +2502,6 @@ func TestTeamChannelProjectionShowsMessagesPresenceAndRoutingAudit(t *testing.T)
 		if !strings.Contains(view, expected) {
 			t.Fatalf("channel audit missing %q:\n%s", expected, view)
 		}
-	}
-}
-
-func TestTeamChannelProjectsGovernedProjectProposalInline(t *testing.T) {
-	conversation := testConversation("research", "customer-research", 1, 2)
-	approval := &runtime.ApprovalCheckpoint{
-		ID: "approval-project", Scope: conversation.Scope, RunID: "run-project", ActionCallID: "call-project",
-		Status: runtime.ApprovalStatusPending, Risk: skill.RiskLevelWrite, Summary: "Create customer research Project",
-		ProposedAction: map[string]interface{}{
-			"resourceType": "project", "operation": "create",
-			"owner": map[string]interface{}{"type": "team", "id": "research-team"},
-			"changes": map[string]interface{}{
-				"title": "Customer research", "purpose": "Research pain points and follow up with qualified leads",
-				"objectiveRefs": []interface{}{"monitor-feedback", "follow-up-leads"},
-				"milestones":    []interface{}{map[string]interface{}{"id": "weekly-brief"}},
-			},
-		},
-	}
-	message := &runtime.ChannelMessage{
-		ID: "proposal", Scope: conversation.Scope, ConversationID: conversation.ID, Sequence: 1,
-		Sender: runtime.ConversationParticipant{Type: runtime.ConversationParticipantAgent, ID: "research-lead"},
-		Intent: runtime.MessageIntentProposal, Content: "I prepared the Project for review.",
-		Audience:   runtime.ConversationAudience{Kind: runtime.ConversationAudienceChannel},
-		References: []runtime.ConversationReference{{Kind: runtime.ConversationReferenceApproval, ID: approval.ID, Version: 1}}, CreatedAt: time.Now(),
-	}
-	fake := &fakeChannelKernelClient{
-		fakeKernelClient: &fakeKernelClient{
-			document: kernelapi.NewCapabilityDocument(
-				kernelapi.ChannelsCapability(kernelapi.ChannelCapabilityFeatures{}),
-				kernelapi.ActionApprovalsCapability(kernelapi.ActionApprovalCapabilityFeatures{}),
-			),
-			actionApprovals: []*runtime.ApprovalCheckpoint{approval},
-		},
-		conversations: []*runtime.Conversation{conversation}, messages: []*runtime.ChannelMessage{message},
-	}
-	model := newModelWithClient(t, fake)
-	applyCommand(t, model, model.loadCapabilities())
-	model.section = sectionChannels
-	model.width = 180
-	view := model.View()
-	for _, expected := range []string{
-		"Project · create · pending", "Create customer research Project", "Owner · team:research-team",
-		"Purpose · Research pain points", "Objectives · 2 · monitor-feedback, follow-up-leads", "Milestones · 1", "A approvals",
-	} {
-		if !strings.Contains(view, expected) {
-			t.Fatalf("channel Project projection missing %q:\n%s", expected, view)
-		}
-	}
-	if strings.Contains(view, "apiKey") || strings.Contains(view, "credential") {
-		t.Fatalf("channel Project projection exposed untyped configuration:\n%s", view)
 	}
 }
 
@@ -3869,7 +3126,6 @@ func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
 		From:                    runtime.SkillReferenceIdentity{ID: "source", Version: "1", SourceIdentity: "registry:source"},
 		To:                      runtime.SkillReferenceIdentity{ID: "source", Version: "2", SourceIdentity: "registry:source"},
 		Objectives:              []runtime.SkillReferenceObjectiveImpact{{ID: "monitor-hourly", ExpectedRevision: 3}},
-		Projects:                []runtime.SkillReferenceProjectImpact{{ID: "market-research", ExpectedRevision: 5, MonitorIDs: []string{"forums"}}},
 		Findings:                []runtime.SkillReferenceUpgradeFinding{{Code: "action_added", Message: "Target exposes one additional governed action."}},
 		ApprovalRequired:        true, Digest: "sha256:reviewed",
 	}
@@ -3892,7 +3148,7 @@ func TestSkillBindingTUIReviewsAndAppliesAtomicReferenceUpgrade(t *testing.T) {
 	model.editor.SetValue("version: 2\nsource: registry:source")
 	applyCommand(t, model, model.submitSkillBindingUpgradePlan())
 	view := model.renderClawHubSkillsContent(120)
-	for _, expected := range []string{"Reviewed update", "source@1", "source@2", "1 Objective(s)", "1 Project(s)", "historical Runs stay unchanged", "additional governed action", "Explicit approval"} {
+	for _, expected := range []string{"Reviewed update", "source@1", "source@2", "1 Objective(s)", "historical Runs stay unchanged", "additional governed action", "Explicit approval"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("upgrade review missing %q:\n%s", expected, view)
 		}

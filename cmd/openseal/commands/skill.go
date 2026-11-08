@@ -8,7 +8,6 @@ import (
 	"sort"
 
 	"github.com/axiom-studio/openseal/pkg/delivery"
-	"github.com/axiom-studio/openseal/pkg/outreach"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/source"
 )
@@ -69,7 +68,6 @@ func runSkillCommand(output io.Writer, args []string, writeFile skillManifestWri
 func bundledSkillDefinitions() map[string]*skill.Definition {
 	return map[string]*skill.Definition{
 		source.SkillID:   source.SkillDefinition(),
-		outreach.SkillID: outreach.SkillDefinition(),
 		delivery.SkillID: delivery.SkillDefinition(),
 	}
 }

@@ -250,7 +250,7 @@ func (j *workflowJourney) drive(host StepHost) (RunLoopExit, *TurnRunnerBinding)
 	if err != nil || claimed == nil || claimed.ID != j.work.ID {
 		j.t.Fatalf("normal worker admission=%#v error=%v", claimed, err)
 	}
-	catalog := workflowContinuationCatalog{registry: j.registry, skills: j.skills, outreach: NewOutreachService(j.store.(OutreachStore), j.store.(ProjectStore), j.store.(SourceMonitorStore), j.store)}
+	catalog := workflowContinuationCatalog{registry: j.registry, skills: j.skills}
 	config := loopBindingTestConfig(j.t, j.store, host)
 	config.SkillHost = skill.HostCapabilityState{Adapters: map[string]skill.AdapterCapability{skill.AdapterConversation: {State: skill.AdapterStateAvailable, Features: []string{"plugin"}}}}
 	config.Now = j.clock

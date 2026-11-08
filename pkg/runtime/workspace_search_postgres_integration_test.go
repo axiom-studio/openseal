@@ -52,16 +52,13 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	if len(other) != 1 || other[0].Kind != "chat" || other[0].Conversation.Scope.ID != "two" {
 		t.Fatalf("other tenant hits = %#v", other)
 	}
-	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("projects")+` (id,scope_kind,scope_id,owner_type,owner_id,status,revision,updated_at,payload) VALUES ('project-1','tenant','one','agent','agent','active',1,now(),'{"id":"project-1","title":"Nebula launch","purpose":"Track launch risks","owner":{"type":"agent","id":"agent"}}'::jsonb)`); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("artifacts")+` (scope_kind,scope_id,id,version,type,media_type,classification,digest,content_ref,created_at,payload) VALUES ('tenant','one','artifact-1',1,'report','text/plain','internal','digest','object',now(),'{"id":"artifact-1","name":"Nebula report","provenance":{"owner":{"type":"agent","id":"agent"}}}'::jsonb)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("agent_runs")+` (id,scope_kind,scope_id,root_run_id,status,revision,available_at,queue_entered_at,created_at,payload) VALUES ('run-1','tenant','one','run-1','completed',1,now(),now(),now(),'{"id":"run-1","goal":"Publish status","owner":{"type":"agent","id":"agent"},"output":{"summary":"Nebula release approved"},"updatedAt":"2026-09-29T00:00:00Z"}'::jsonb)`); err != nil {
 		t.Fatal(err)
 	}
-	for _, test := range []struct{ query, kind string }{{"launch risks", "project"}, {"Nebula report", "artifact"}, {"release approved", "run"}} {
+	for _, test := range []struct{ query, kind string }{{"Nebula report", "artifact"}, {"release approved", "run"}} {
 		matches, err := store.SearchWorkspacePage(ctx, Scope{Kind: "tenant", ID: "one"}, test.query, 20, 0)
 		if err != nil {
 			t.Fatal(err)
@@ -90,7 +87,7 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 	}
 	// Simulate an existing version 45 installation and verify the versioned
 	// upgrade builds every search index for already-persisted records.
-	for _, name := range []string{"conversations_search_idx", "channel_messages_search_idx", "artifacts_search_idx", "projects_search_idx", "agent_runs_search_idx"} {
+	for _, name := range []string{"conversations_search_idx", "channel_messages_search_idx", "artifacts_search_idx", "agent_runs_search_idx"} {
 		if _, err := store.db.ExecContext(ctx, `DROP INDEX `+store.table(name)); err != nil {
 			t.Fatal(err)
 		}
@@ -102,10 +99,10 @@ func TestPostgresWorkspaceSearchFindsHistoryAndIsolatesTenants(t *testing.T) {
 		t.Fatal(err)
 	}
 	var indexCount int
-	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=$1 AND indexname IN ('conversations_search_idx','channel_messages_search_idx','artifacts_search_idx','projects_search_idx','agent_runs_search_idx')`, store.schema).Scan(&indexCount); err != nil {
+	if err := store.db.QueryRowContext(ctx, `SELECT count(*) FROM pg_indexes WHERE schemaname=$1 AND indexname IN ('conversations_search_idx','channel_messages_search_idx','artifacts_search_idx','agent_runs_search_idx')`, store.schema).Scan(&indexCount); err != nil {
 		t.Fatal(err)
 	}
-	if indexCount != 5 {
-		t.Fatalf("recreated workspace indexes = %d, want 5", indexCount)
+	if indexCount != 4 {
+		t.Fatalf("recreated workspace indexes = %d, want 4", indexCount)
 	}
 }

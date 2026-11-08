@@ -24,12 +24,6 @@ const (
 	ObjectivesCapabilityVersion                = "1"
 	RunbooksCapabilityID                       = "runbooks"
 	RunbooksCapabilityVersion                  = "3"
-	ProjectsCapabilityID                       = "projects"
-	ProjectsCapabilityVersion                  = "1"
-	SourceMonitorsCapabilityID                 = "source-monitors"
-	SourceMonitorsCapabilityVersion            = "1"
-	OutreachCapabilityID                       = "outreach"
-	OutreachCapabilityVersion                  = "1"
 	SkillActionsCapabilityID                   = "skill-actions"
 	SkillActionsCapabilityVersion              = "1"
 	SkillBindingsCapabilityID                  = "skill-bindings"
@@ -120,9 +114,7 @@ const (
 	OperationRetry                = "retry"
 	OperationPatch                = "patch"
 	OperationListCompilations     = "list-compilations"
-	OperationListObservations     = "list-observations"
 	OperationGetCheckpoint        = "get-checkpoint"
-	OperationDeliver              = "deliver"
 	OperationProposeAmendment     = "propose-amendment"
 	OperationListAmendments       = "list-amendments"
 	OperationGetAmendment         = "get-amendment"
@@ -584,24 +576,6 @@ func EventRoutingCapability() Capability {
 	}
 }
 
-func ProjectsCapability() Capability {
-	return Capability{
-		ID: ProjectsCapabilityID, Version: ProjectsCapabilityVersion, Available: true,
-		Operations: []string{OperationCreate, OperationGet, OperationList, OperationPatch},
-	}
-}
-
-func SourceMonitorsCapability() Capability {
-	return Capability{ID: SourceMonitorsCapabilityID, Version: SourceMonitorsCapabilityVersion, Available: true, Operations: []string{OperationListObservations, OperationGetCheckpoint}}
-}
-
-func OutreachCapability(operations ...string) Capability {
-	if len(operations) == 0 {
-		operations = []string{OperationCreate, OperationGet, OperationList, OperationDeliver}
-	}
-	return Capability{ID: OutreachCapabilityID, Version: OutreachCapabilityVersion, Available: len(operations) > 0, Operations: append([]string(nil), operations...)}
-}
-
 func SkillActionsCapability() Capability {
 	return Capability{ID: SkillActionsCapabilityID, Version: SkillActionsCapabilityVersion, Available: true, Operations: []string{OperationList}}
 }
@@ -615,7 +589,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), RunbooksCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), ProjectsCapability(), SourceMonitorsCapability(), OutreachCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), RunbooksCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.
@@ -973,78 +947,6 @@ type AdvanceEventSourceCheckpointRequest struct {
 	Cursor                       string    `json:"cursor,omitempty"`
 	EventIDs                     []string  `json:"eventIds,omitempty"`
 	Watermark                    time.Time `json:"watermark,omitempty"`
-}
-
-type CreateProjectRequest struct {
-	ID             string                           `json:"id,omitempty"`
-	Scope          runtime.Scope                    `json:"scope"`
-	Owner          runtime.ObjectiveOwner           `json:"owner"`
-	Title          string                           `json:"title"`
-	Purpose        string                           `json:"purpose"`
-	Status         runtime.ProjectStatus            `json:"status,omitempty"`
-	AgentRefs      []runtime.ResourceReference      `json:"agentRefs,omitempty"`
-	TeamRefs       []runtime.ResourceReference      `json:"teamRefs,omitempty"`
-	ObjectiveRefs  []string                         `json:"objectiveRefs"`
-	Milestones     []runtime.ProjectMilestone       `json:"milestones,omitempty"`
-	Hypotheses     []runtime.ProjectHypothesis      `json:"hypotheses,omitempty"`
-	SourceMonitors []runtime.SourceMonitorReference `json:"sourceMonitors,omitempty"`
-	Deliverables   []runtime.ProjectDeliverable     `json:"deliverables,omitempty"`
-	Budget         *runtime.BudgetPolicy            `json:"budget,omitempty"`
-	Policy         map[string]interface{}           `json:"policy,omitempty"`
-	Checkpoint     map[string]interface{}           `json:"checkpoint,omitempty"`
-	IdempotencyKey string                           `json:"idempotencyKey,omitempty"`
-}
-
-type UpdateProjectRequest struct {
-	ExpectedRevision int64                             `json:"expectedRevision"`
-	Title            *string                           `json:"title,omitempty"`
-	Purpose          *string                           `json:"purpose,omitempty"`
-	Status           *runtime.ProjectStatus            `json:"status,omitempty"`
-	AgentRefs        *[]runtime.ResourceReference      `json:"agentRefs,omitempty"`
-	TeamRefs         *[]runtime.ResourceReference      `json:"teamRefs,omitempty"`
-	ObjectiveRefs    *[]string                         `json:"objectiveRefs,omitempty"`
-	Milestones       *[]runtime.ProjectMilestone       `json:"milestones,omitempty"`
-	Hypotheses       *[]runtime.ProjectHypothesis      `json:"hypotheses,omitempty"`
-	SourceMonitors   *[]runtime.SourceMonitorReference `json:"sourceMonitors,omitempty"`
-	Deliverables     *[]runtime.ProjectDeliverable     `json:"deliverables,omitempty"`
-	Budget           *runtime.BudgetPolicy             `json:"budget,omitempty"`
-	ClearBudget      bool                              `json:"clearBudget,omitempty"`
-	Policy           map[string]interface{}            `json:"policy,omitempty"`
-	Checkpoint       map[string]interface{}            `json:"checkpoint,omitempty"`
-}
-
-type OutreachCapabilitySelection struct {
-	BindingID       string                 `json:"bindingId"`
-	BindingRevision int64                  `json:"bindingRevision"`
-	SkillID         string                 `json:"skillId"`
-	SkillVersion    string                 `json:"skillVersion"`
-	Action          string                 `json:"action"`
-	Arguments       map[string]interface{} `json:"arguments,omitempty"`
-}
-
-type CreateOutreachMessageRequest struct {
-	ID         string                        `json:"id,omitempty"`
-	Intent     runtime.OutreachMessageIntent `json:"intent"`
-	Body       string                        `json:"body"`
-	Capability OutreachCapabilitySelection   `json:"capability"`
-}
-
-type CreateOutreachThreadRequest struct {
-	ID                  string                       `json:"id,omitempty"`
-	Scope               runtime.Scope                `json:"scope"`
-	ProjectID           string                       `json:"projectId"`
-	SourceObservationID string                       `json:"sourceObservationId"`
-	ApprovalPolicyRef   string                       `json:"approvalPolicyRef"`
-	Identity            runtime.OutreachIdentity     `json:"identity"`
-	Message             CreateOutreachMessageRequest `json:"message"`
-	IdempotencyKey      string                       `json:"idempotencyKey,omitempty"`
-}
-
-type DeliverOutreachMessageRequest struct {
-	Scope          runtime.Scope         `json:"scope"`
-	Priority       int                   `json:"priority,omitempty"`
-	Budget         *runtime.BudgetPolicy `json:"budget,omitempty"`
-	IdempotencyKey string                `json:"idempotencyKey,omitempty"`
 }
 
 type AgentRunCommandRequest struct {
