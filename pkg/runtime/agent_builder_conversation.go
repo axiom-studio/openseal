@@ -149,6 +149,9 @@ const (
 // Agent or Team yet (D5).
 type AgentBuilderDraft struct {
 	ConversationID string `json:"conversationId"`
+	// SpaceID is the space the builder conversation lives in, so a drafts
+	// rail can show only the current space's drafts.
+	SpaceID string `json:"spaceId"`
 	// Title is the newest card's displayName, else the builder parameters'
 	// name, else "".
 	Title  string                  `json:"title"`
@@ -285,7 +288,7 @@ func agentBuilderDraft(ctx context.Context, reader AgentBuilderDraftReader, filt
 	}
 	question := pendingAgentBuilderQuestion(recent)
 
-	draft := AgentBuilderDraft{ConversationID: conversation.ID, UpdatedAt: conversation.UpdatedAt}
+	draft := AgentBuilderDraft{ConversationID: conversation.ID, SpaceID: conversation.SpaceID, UpdatedAt: conversation.UpdatedAt}
 	draft.Title = agentBuilderCardDisplayName(newestCard)
 	if draft.Title == "" {
 		draft.Title = agentBuilderParameterName(recent, first[0])

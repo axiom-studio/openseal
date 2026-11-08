@@ -67,7 +67,7 @@ func (f *agentBuilderDraftFake) add(id string, updated time.Time, sender Convers
 	}
 	f.conversations = append(f.conversations, &Conversation{
 		ID: id, Scope: agentBuilderDraftScope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: AgentBuilderDeploymentID},
-		Title: "New agent", Status: ConversationStatusActive, UpdatedAt: updated,
+		Title: "New agent", Status: ConversationStatusActive, UpdatedAt: updated, SpaceID: "space-" + id,
 		Origin: &ConversationReference{Kind: ConversationReferenceAgentBuilder, ID: id},
 	})
 	f.messages[id] = []*ChannelMessage{{
@@ -173,7 +173,7 @@ func TestAgentBuilderDraftsStatusesAndFiltering(t *testing.T) {
 		if draft.Approval != nil {
 			card = draft.Approval.ID
 		}
-		if draft.ConversationID != id || draft.Status != expected.status || draft.Title != expected.title || draft.RunID != expected.run ||
+		if draft.ConversationID != id || draft.SpaceID != "space-"+id || draft.Status != expected.status || draft.Title != expected.title || draft.RunID != expected.run ||
 			card != expected.card || draft.QuestionMessageID != expected.questionMessageID {
 			t.Fatalf("draft %d = %#v, want %s %#v", index, draft, id, expected)
 		}
