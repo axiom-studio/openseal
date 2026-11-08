@@ -559,7 +559,7 @@ const MaximumTurnReactions = 3
 
 // ConversationReactInstruction is the description of the react control tool
 // (control_interaction.go).
-const ConversationReactInstruction = "Add an emoji reaction as yourself. A reaction is not a reply and never asks anyone to act; prefer it over a filler message. If a reaction says everything, finish with an empty answer."
+const ConversationReactInstruction = "Add an emoji reaction as yourself. A reaction is not a reply and never asks anyone to act. When a message needs no real answer (thanks, ok, got it, a joke, good news), react instead of replying, such as 👍 ❤️ 😂 🎉, and finish with an empty answer."
 
 func cloneTurnReactions(in []TurnReaction) []TurnReaction {
 	return append([]TurnReaction(nil), in...)
