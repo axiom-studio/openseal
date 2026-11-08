@@ -129,8 +129,10 @@ type AgentBuilderDraftFilter struct {
 	Requester ConversationParticipant
 	// Principal is the viewer as approver; it decides ready vs needs_approval.
 	Principal ApprovalPrincipal
-	Limit     int // at most 100; 0 means 50
-	Offset    int
+	// SpaceID lists only that space's drafts; "" lists every space.
+	SpaceID string
+	Limit   int // at most 100; 0 means 50
+	Offset  int
 }
 
 type AgentBuilderDraftStatus string
@@ -198,7 +200,7 @@ func ListAgentBuilderDrafts(ctx context.Context, reader AgentBuilderDraftReader,
 	skipped := 0
 	for offset := 0; ; offset += agentBuilderDraftScanPage {
 		conversations, err := reader.ListConversations(ctx, ConversationFilter{
-			Scope: filter.Scope, Owner: &owner, OriginKind: ConversationReferenceAgentBuilder,
+			Scope: filter.Scope, Owner: &owner, OriginKind: ConversationReferenceAgentBuilder, SpaceID: strings.TrimSpace(filter.SpaceID),
 			Statuses: []ConversationStatus{ConversationStatusActive}, Limit: agentBuilderDraftScanPage, Offset: offset,
 		})
 		if err != nil {

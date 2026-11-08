@@ -216,3 +216,17 @@ func TestAgentBuilderDraftsScanPastFullPages(t *testing.T) {
 		t.Fatalf("drafts = %d, filters = %#v, %v", len(drafts), fake.filters, err)
 	}
 }
+
+// A drafts list for one space asks the store for that space's conversations only.
+func TestAgentBuilderDraftsFilterBySpace(t *testing.T) {
+	fake := &agentBuilderDraftFake{}
+	fake.add("work", time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC), agentBuilderDraftRequester)
+	if _, err := ListAgentBuilderDrafts(t.Context(), fake, AgentBuilderDraftFilter{
+		Scope: agentBuilderDraftScope, Requester: agentBuilderDraftRequester, Principal: agentBuilderDraftPrincipal, SpaceID: " space-work ",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.filters) == 0 || fake.filters[0].SpaceID != "space-work" {
+		t.Fatalf("filters = %#v", fake.filters)
+	}
+}
