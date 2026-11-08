@@ -26,7 +26,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
-	"github.com/axiom-studio/openseal/pkg/source"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -136,9 +135,6 @@ const (
 	modeSkillBindingDisable
 	modeSkillBindingUpgradePlan
 	modeSkillBindingUpgradeApply
-	modeSourcePolicyRegister
-	modeSourcePolicyActivate
-	modeSourcePolicyRevoke
 	modeRequestCreate
 	modeRequestAccept
 	modeRequestReject
@@ -168,7 +164,6 @@ type Model struct {
 	conversationGatewayClient          client.ExternalConversationGatewayClient
 	clawHubClient                      client.ClawHubClient
 	skillBindingClient                 client.SkillBindingClient
-	sourcePolicyClient                 client.SourcePolicyLifecycleClient
 	workforceBundleClient              client.WorkforceBundleClient
 	agentBuilderClient                 agentBuilderConversationClient
 	config                             Config
@@ -204,7 +199,6 @@ type Model struct {
 	workforceBundleCapability          kernelapi.Capability
 	agentDefinitionCapability          kernelapi.Capability
 	teamDefinitionCapability           kernelapi.Capability
-	sourcePolicyCapability             kernelapi.Capability
 	activeRunbookSelected              int
 	runs                               []*runtime.AgentRun
 	agentTurns                         []*kernelapi.AgentTurnRecord
@@ -258,7 +252,6 @@ type Model struct {
 	skillActions                       []capability.ModelAction
 	skillBindings                      []*capability.Binding
 	skillBindingUpgradePlan            *runtime.SkillReferenceUpgradePlan
-	sourcePolicies                     []*source.Lifecycle
 	skillBindingSelected               int
 	selectedSkillBinding               string
 	clawHubSelected                    int
@@ -486,16 +479,6 @@ type skillBindingsLoaded struct {
 	err      error
 }
 
-type sourcePoliciesLoaded struct {
-	policies []*source.Lifecycle
-	err      error
-}
-type sourcePolicyChanged struct {
-	action  string
-	version *source.PolicyVersion
-	result  *source.LifecycleResult
-	err     error
-}
 type skillBindingChanged struct {
 	binding *capability.Binding
 	action  string
@@ -611,7 +594,6 @@ func NewModel(ctx context.Context, kernelClient client.KernelClient, config Conf
 		conversationGatewayClient: conversationGatewayClient(kernelClient),
 		clawHubClient:             clawHubClient(kernelClient),
 		skillBindingClient:        skillBindingClient(kernelClient),
-		sourcePolicyClient:        sourcePolicyClient(kernelClient),
 		workforceBundleClient:     workforceBundleClient(kernelClient),
 		agentBuilderClient:        agentBuilderClient(kernelClient),
 	}, nil
@@ -670,7 +652,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		workforceBundleCapability, hasWorkforceBundles := msg.document.Find(kernelapi.WorkforceBundlesCapabilityID, kernelapi.WorkforceBundlesCapabilityVersion)
 		agentDefinitionCapability, hasAgentDefinitions := msg.document.Find(kernelapi.AgentDefinitionsCapabilityID, kernelapi.AgentDefinitionsCapabilityVersion)
 		teamDefinitionCapability, hasTeamDefinitions := msg.document.Find(kernelapi.TeamDefinitionsCapabilityID, kernelapi.TeamDefinitionsCapabilityVersion)
-		sourcePolicyCapability, hasSourcePolicies := msg.document.Find(kernelapi.SourcePoliciesCapabilityID, kernelapi.SourcePoliciesCapabilityVersion)
 		m.runCapability = runCapability
 		m.agentTurnCapability = agentTurnCapability
 		m.actionCallCapability = actionCallCapability
@@ -690,7 +671,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.workforceBundleCapability = workforceBundleCapability
 		m.agentDefinitionCapability = agentDefinitionCapability
 		m.teamDefinitionCapability = teamDefinitionCapability
-		m.sourcePolicyCapability = sourcePolicyCapability
 		if !hasRuns || !runCapability.Available {
 			m.runCapability = kernelapi.Capability{}
 		}
@@ -753,10 +733,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasTeamDefinitions || !teamDefinitionCapability.Available {
 			m.teamDefinitionCapability = kernelapi.Capability{}
 		}
-		if !hasSourcePolicies || !sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !sourcePolicyCapability.Supports(kernelapi.OperationList) {
-			m.sourcePolicyCapability = kernelapi.Capability{}
-		}
-		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.sourcePolicyCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise an agent builder, objectives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -789,7 +766,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.conversationGatewayCapability.Available {
 			m.section = sectionIntegrations
 			m.focusPanelList()
-		} else if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
+		} else if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available {
 			m.section = sectionSkills
 			if m.clawHubCapability.Available {
 				m.mode = modeSkillInstall
@@ -827,7 +804,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPanelList()
 			m.resetComposerMode()
 		}
-		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceBundleInspected:
 		m.busy = false
 		if msg.err != nil {
@@ -1032,31 +1009,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.err, m.skillBindings = nil, msg.bindings
 		m.restoreSkillBindingSelection()
 		return m, nil
-	case sourcePoliciesLoaded:
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.err, m.sourcePolicies = nil, msg.policies
-		return m, nil
-	case sourcePolicyChanged:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.status = "Source policy change failed. The reviewed draft is preserved for retry."
-			return m, m.loadSourcePolicies()
-		}
-		m.err = nil
-		m.editor.Reset()
-		m.resetComposerMode()
-		m.focusPanelList()
-		if msg.result != nil && msg.result.Lifecycle != nil {
-			m.status = fmt.Sprintf("Source policy %s · %s@%s · revision %d.", msg.action, msg.result.Lifecycle.PolicyID, msg.result.Lifecycle.ActiveVersion, msg.result.Lifecycle.Revision)
-		} else if msg.version != nil && msg.version.Policy != nil {
-			m.status = fmt.Sprintf("Source policy version registered · %s@%s. Activate it separately after review.", msg.version.Policy.ID, msg.version.Policy.Version)
-		}
-		return m, m.loadSourcePolicies()
 	case skillBindingChanged:
 		m.busy = false
 		if msg.err != nil {
@@ -1539,7 +1491,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSourcePolicies(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 		}
 		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
@@ -1634,12 +1586,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitSkillBindingUpgradePlan()
 			case modeSkillBindingUpgradeApply:
 				return m, m.submitSkillBindingUpgradeApply()
-			case modeSourcePolicyRegister:
-				return m, m.submitSourcePolicyRegister()
-			case modeSourcePolicyActivate:
-				return m, m.submitSourcePolicyActivate()
-			case modeSourcePolicyRevoke:
-				return m, m.submitSourcePolicyRevoke()
 			case modeAgentBuilderPrompt:
 				return m, m.submitAgentBuilderPrompt()
 			case modeWorkforceBundleInspect:
@@ -1796,9 +1742,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadConversationGateways()
 			}
 		case "s":
-			if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available {
+			if m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available {
 				m.section = sectionSkills
-				return m, tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies())
+				return m, tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions())
 			}
 		case "a":
 			if m.artifactCapability.Available {
@@ -2022,18 +1968,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentActivate, "Record why this reviewed Team definition should become active…")
 			} else if m.section == sectionSkills {
 				return m, m.verifySelectedClawHub()
-			}
-		case "P":
-			if m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
-				m.prepareSourcePolicyComposer(modeSourcePolicyRegister, "id: public-forums\nversion: 2026-07-22\nsources: forums.example|/feeds|GET\nmax-items: 20\nretention-days: 30\napproval: source-policy-review\nreason: bounded read access")
-			}
-		case "Y":
-			if m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationActivate) {
-				m.prepareSourcePolicyComposer(modeSourcePolicyActivate, "policy: public-forums\nversion: 2026-07-22\nrevision: 0\nreason: reviewed and approved")
-			}
-		case "X":
-			if m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationRevoke) {
-				m.prepareSourcePolicyComposer(modeSourcePolicyRevoke, "policy: public-forums\nrevision: 1\nreason: authority no longer required")
 			}
 		}
 		return m, nil
@@ -2584,20 +2518,6 @@ func (m *Model) loadSkillBindings() tea.Cmd {
 	}
 }
 
-func (m *Model) loadSourcePolicies() tea.Cmd {
-	if !m.sourcePolicyCapability.Available || m.sourcePolicyClient == nil || !m.sourcePolicyCapability.Supports(kernelapi.OperationList) {
-		return nil
-	}
-	m.loading = true
-	return func() tea.Msg {
-		result, err := m.sourcePolicyClient.ListSourcePolicies(m.ctx, capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID})
-		if err != nil {
-			return sourcePoliciesLoaded{err: err}
-		}
-		return sourcePoliciesLoaded{policies: result.Items}
-	}
-}
-
 func (m *Model) loadArtifacts() tea.Cmd {
 	if !m.supportsArtifact(kernelapi.OperationList) {
 		return nil
@@ -2685,7 +2605,7 @@ func (m *Model) loadPanel() tea.Cmd {
 		return m.loadConversationGateways()
 	}
 	if m.section == sectionSkills {
-		return tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadSourcePolicies())
+		return tea.Batch(m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions())
 	}
 	if m.section == sectionRequests {
 		return m.loadAgentRequests()
@@ -3170,123 +3090,6 @@ func splitNonEmpty(value string) []string {
 	return result
 }
 
-func parseSourcePolicyFields(value string) map[string]string {
-	fields := make(map[string]string)
-	for _, line := range strings.Split(value, "\n") {
-		key, raw, ok := strings.Cut(line, ":")
-		if ok && strings.TrimSpace(raw) != "" {
-			fields[strings.ToLower(strings.TrimSpace(key))] = strings.TrimSpace(raw)
-		}
-	}
-	return fields
-}
-
-func parseSourcePolicyRegistration(value string, scope capability.ScopeReference) (source.RegisterVersionRequest, error) {
-	fields := parseSourcePolicyFields(value)
-	maximumItems, err := strconv.Atoi(fields["max-items"])
-	if err != nil {
-		return source.RegisterVersionRequest{}, errors.New("max-items must be a positive integer")
-	}
-	retentionDays, err := strconv.Atoi(fields["retention-days"])
-	if err != nil {
-		return source.RegisterVersionRequest{}, errors.New("retention-days must be an integer")
-	}
-	policy := source.Policy{ID: fields["id"], Version: fields["version"], Enabled: true, MaximumItems: maximumItems, RetentionDays: retentionDays, ApprovalPolicy: fields["approval"]}
-	for _, rawSource := range strings.Split(fields["sources"], ";") {
-		parts := strings.Split(rawSource, "|")
-		if len(parts) != 3 {
-			return source.RegisterVersionRequest{}, errors.New("sources must use host|paths|methods; separate sources with semicolons")
-		}
-		policy.Sources = append(policy.Sources, source.PolicySource{Host: strings.TrimSpace(parts[0]), PathPrefixes: splitNonEmpty(parts[1]), Methods: splitNonEmpty(parts[2])})
-	}
-	reason := fields["reason"]
-	request := source.RegisterVersionRequest{Scope: scope, Policy: policy, ActorType: "operator", ActorID: "tui", Reason: reason}
-	if reason == "" {
-		return source.RegisterVersionRequest{}, errors.New("reason is required")
-	}
-	return request, nil
-}
-
-func parseSourcePolicyActivation(value string, scope capability.ScopeReference) (source.ActivateRequest, error) {
-	fields := parseSourcePolicyFields(value)
-	revision, err := strconv.ParseInt(fields["revision"], 10, 64)
-	if err != nil {
-		return source.ActivateRequest{}, errors.New("revision must be zero for first activation or the current lifecycle revision")
-	}
-	request := source.ActivateRequest{Scope: scope, PolicyID: fields["policy"], Version: fields["version"], ExpectedRevision: revision, ActorType: "operator", ActorID: "tui", Reason: fields["reason"]}
-	if request.PolicyID == "" || request.Version == "" || request.Reason == "" {
-		return source.ActivateRequest{}, errors.New("policy, version, revision, and reason are required")
-	}
-	return request, nil
-}
-
-func parseSourcePolicyRevocation(value string, scope capability.ScopeReference) (source.RevokeRequest, error) {
-	fields := parseSourcePolicyFields(value)
-	revision, err := strconv.ParseInt(fields["revision"], 10, 64)
-	if err != nil {
-		return source.RevokeRequest{}, errors.New("revision must be the current positive lifecycle revision")
-	}
-	request := source.RevokeRequest{Scope: scope, PolicyID: fields["policy"], ExpectedRevision: revision, ActorType: "operator", ActorID: "tui", Reason: fields["reason"]}
-	if request.PolicyID == "" || request.Reason == "" {
-		return source.RevokeRequest{}, errors.New("policy, revision, and reason are required")
-	}
-	return request, nil
-}
-
-func (m *Model) submitSourcePolicyRegister() tea.Cmd {
-	if m.busy || m.sourcePolicyClient == nil || !m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
-		return nil
-	}
-	scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
-	request, err := parseSourcePolicyRegistration(m.editor.Value(), scope)
-	if err != nil {
-		m.status = err.Error()
-		return nil
-	}
-	request.ActorType, request.ActorID = m.config.Actor.Type, m.config.Actor.ID
-	m.busy, m.err, m.status = true, nil, "Registering immutable source policy version…"
-	return func() tea.Msg {
-		version, registerErr := m.sourcePolicyClient.RegisterSourcePolicyVersion(m.ctx, request)
-		return sourcePolicyChanged{action: "registered", version: version, err: registerErr}
-	}
-}
-
-func (m *Model) submitSourcePolicyActivate() tea.Cmd {
-	if m.busy || m.sourcePolicyClient == nil || !m.sourcePolicyCapability.Supports(kernelapi.OperationActivate) {
-		return nil
-	}
-	scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
-	request, err := parseSourcePolicyActivation(m.editor.Value(), scope)
-	if err != nil {
-		m.status = err.Error()
-		return nil
-	}
-	request.ActorType, request.ActorID = m.config.Actor.Type, m.config.Actor.ID
-	m.busy, m.err, m.status = true, nil, "Activating reviewed source authority…"
-	return func() tea.Msg {
-		result, activateErr := m.sourcePolicyClient.ActivateSourcePolicy(m.ctx, request.PolicyID, request)
-		return sourcePolicyChanged{action: "active", result: result, err: activateErr}
-	}
-}
-
-func (m *Model) submitSourcePolicyRevoke() tea.Cmd {
-	if m.busy || m.sourcePolicyClient == nil || !m.sourcePolicyCapability.Supports(kernelapi.OperationRevoke) {
-		return nil
-	}
-	scope := capability.ScopeReference{Kind: m.config.Scope.Kind, ID: m.config.Scope.ID}
-	request, err := parseSourcePolicyRevocation(m.editor.Value(), scope)
-	if err != nil {
-		m.status = err.Error()
-		return nil
-	}
-	request.ActorType, request.ActorID = m.config.Actor.Type, m.config.Actor.ID
-	m.busy, m.err, m.status = true, nil, "Revoking source authority…"
-	return func() tea.Msg {
-		result, revokeErr := m.sourcePolicyClient.RevokeSourcePolicy(m.ctx, request.PolicyID, request)
-		return sourcePolicyChanged{action: "revoked", result: result, err: revokeErr}
-	}
-}
-
 func mapsClone[K comparable, V any](input map[K]V) map[K]V {
 	result := make(map[K]V, len(input))
 	for key, value := range input {
@@ -3762,7 +3565,7 @@ func (m *Model) availableSections() []panelSection {
 		{sectionAuthoring, m.agentBuilderCapability.Available},
 		{sectionReadiness, m.agentDefinitionCapability.Available},
 		{sectionTeams, m.teamDefinitionCapability.Available},
-		{sectionSkills, m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available || m.sourcePolicyCapability.Available},
+		{sectionSkills, m.clawHubCapability.Available || m.skillActionCapability.Available || m.skillBindingCapability.Available},
 		{sectionRuns, m.runCapability.Available},
 		{sectionChannels, m.channelCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
@@ -5081,14 +4884,6 @@ func (m *Model) prepareTeamAmendmentComposer(mode editorMode, placeholder string
 	m.focusComposerEditor()
 }
 
-func (m *Model) prepareSourcePolicyComposer(mode editorMode, template string) {
-	m.mode = mode
-	m.editor.Reset()
-	m.editor.SetValue(template)
-	m.editor.Placeholder = template
-	m.focusComposerEditor()
-}
-
 func (m *Model) prepareComposerForSection() {
 	switch {
 	case m.section == sectionOverview && m.supportsAgentBuilder():
@@ -5125,8 +4920,6 @@ func (m *Model) prepareComposerForSection() {
 		m.focusComposerEditor()
 	case m.section == sectionSkills && m.supportsSkillBinding(kernelapi.OperationUpsert):
 		m.prepareSkillBindingComposer(nil)
-	case m.section == sectionSkills && m.sourcePolicyCapability.Supports(kernelapi.OperationRegister):
-		m.prepareSourcePolicyComposer(modeSourcePolicyRegister, "id: public-forums\nversion: 2026-07-22\nsources: forums.example|/feeds|GET\nmax-items: 20\nretention-days: 30\napproval: source-policy-review\nreason: bounded read access")
 	case m.section == sectionChannels && m.selectedConversationRecord() != nil && m.supportsChannel(kernelapi.OperationPost):
 		m.mode = modeChannelPost
 		m.editor.Placeholder = "Share an update or ask a question…"
@@ -5211,9 +5004,6 @@ func (m *Model) resetComposerMode() {
 		} else if m.supportsClawHub(clawhub.LifecycleInstall) {
 			m.mode = modeSkillInstall
 			m.editor.Placeholder = "Enter @owner/skill to install…"
-		} else if m.sourcePolicyCapability.Supports(kernelapi.OperationRegister) {
-			m.mode = modeSourcePolicyRegister
-			m.editor.Placeholder = "Press P to review a source policy version template."
 		}
 		return
 	}
@@ -5307,11 +5097,6 @@ func clawHubClient(kernelClient client.KernelClient) client.ClawHubClient {
 
 func skillBindingClient(kernelClient client.KernelClient) client.SkillBindingClient {
 	value, _ := kernelClient.(client.SkillBindingClient)
-	return value
-}
-
-func sourcePolicyClient(kernelClient client.KernelClient) client.SourcePolicyLifecycleClient {
-	value, _ := kernelClient.(client.SourcePolicyLifecycleClient)
 	return value
 }
 

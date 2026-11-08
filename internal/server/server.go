@@ -13,7 +13,6 @@ import (
 	kernelbundle "github.com/axiom-studio/openseal/pkg/bundle"
 	opensealkernel "github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runtime"
-	"github.com/axiom-studio/openseal/pkg/source"
 	"go.uber.org/zap"
 )
 
@@ -37,7 +36,6 @@ type Server struct {
 	teamWorkEnabled          bool
 	desktopConversationScope *runtime.Scope
 	agentRunCreation         func(context.Context, runtime.CreateAgentRunRequest) (*runtime.AgentRunCommandResult, error)
-	sourcePolicies           *source.LifecycleService
 	workforceBundles         kernelbundle.InstallationStore
 	workforceBundleActor     string
 	workforceBundleTrust     kernelbundle.TrustPolicy
@@ -139,12 +137,6 @@ func (s *Server) SetAgentRunCreationDispatcher(dispatch func(context.Context, ru
 
 // SetTeamWorkEnabled advertises team ownership only for a capable host.
 func (s *Server) SetTeamWorkEnabled(enabled bool) { s.teamWorkEnabled = enabled }
-
-// SetSourcePolicyLifecycle installs the host-selected persistence boundary for
-// governed source authority. Without it, routes and capabilities fail closed.
-func (s *Server) SetSourcePolicyLifecycle(service *source.LifecycleService) {
-	s.sourcePolicies = service
-}
 
 // SetWorkforceBundleInstallation enables the one-transaction installation
 // boundary. The actor is host-authenticated configuration, never client input.

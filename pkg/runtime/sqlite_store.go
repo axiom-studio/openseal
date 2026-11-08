@@ -52,9 +52,6 @@ func migrate(db *sql.DB) error {
 	if err := migrateRunbookActivationsSQLite(db); err != nil {
 		return err
 	}
-	if err := migrateSourcePolicies(db); err != nil {
-		return err
-	}
 	if err := migrateEventSourceCheckpoints(db); err != nil {
 		return err
 	}

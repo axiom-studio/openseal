@@ -289,9 +289,6 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migratePortfolio(ctx, tx); err != nil {
 		return err
 	}
-	if err := s.migrateSourcePolicies(ctx, tx); err != nil {
-		return err
-	}
 	if err := s.migrateEventSourceCheckpoints(ctx, tx); err != nil {
 		return err
 	}

@@ -61,8 +61,7 @@ credential leases instead of the local context.
 
 Standalone mode uses one SQLite store for definitions, deployments, objectives,
 Runs, turns, leases, budgets, actions, approvals, collaboration, conversations,
-activity, artifacts, Skills, ChangeSets, source policies, and event-source
-checkpoints. Artifact bytes are stored separately beneath `artifactsPath` and tied
+activity, artifacts, Skills, ChangeSets, and event-source checkpoints. Artifact bytes are stored separately beneath `artifactsPath` and tied
 to immutable catalog records by size and digest.
 
 ```mermaid
@@ -139,29 +138,11 @@ embedding host can supply:
 - model and Skill transports
 - sandbox or remote execution
 - artifact content stores and authorized resolvers
-- source-policy persistence and network access
 - event publication and external event sources
 
 The host must advertise only operations it has actually wired. Secrets must be
 resolved after authorization and schema validation. Do not log raw provider
 responses when they can contain sensitive content.
-
-## Source access
-
-Source policies are credential-free, scope-bound network authority used by
-configured source workers. The source-policy lifecycle API and persistent store
-are the canonical runtime control surface. A policy version must specify
-an ID, version, enabled state, one or more HTTPS hosts, a bounded maximum item
-count, and explicit normalized path/method restrictions before lifecycle
-registration.
-
-Policy validation does not perform network I/O. Dispatch adapters must enforce
-the exact decision on every request and redirect. Source policy configuration
-does not itself provide API credentials or an HTTP provider implementation.
-Registration is immutable and grants no authority. Activation and revocation
-use compare-and-swap lifecycle revisions and append durable actor/reason audit
-events. Runtime resolution always checks the currently active exact version;
-revocation and version drift fail closed without a process restart.
 
 ## Deterministic quality gates
 

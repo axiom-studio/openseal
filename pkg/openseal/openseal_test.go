@@ -51,14 +51,6 @@ func TestRunTerminalFinalizationIsAutomaticWhenActionsCanExecute(t *testing.T) {
 	}
 }
 
-func TestPublicFacadeExposesSourcePolicyLifecycleCapability(t *testing.T) {
-	capability := SourcePoliciesCapability()
-	if capability.ID != SourcePoliciesCapabilityID || capability.Version != SourcePoliciesCapabilityVersion ||
-		!capability.Supports(KernelOperationListVersions) || !capability.Supports(KernelOperationActivate) || !capability.Supports(KernelOperationRevoke) {
-		t.Fatalf("source policy capability = %#v", capability)
-	}
-}
-
 func TestPublicFacadeExposesRunbookScheduleReconciliation(t *testing.T) {
 	capability := RunbooksCapability()
 	if capability.ID != RunbooksCapabilityID || capability.Version != RunbooksCapabilityVersion || !capability.Supports(KernelOperationReconcile) || !capability.Supports(KernelOperationExecute) {

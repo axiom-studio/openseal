@@ -62,7 +62,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		35: {"runbook_activations"},
 		28: {"external_conversation_gateways"},
 		26: {"external_conversation_deliveries", "external_message_mappings", "external_participant_mappings", "external_conversation_mappings", "external_conversation_inbox", "external_conversation_endpoints"},
-		22: {"source_policy_lifecycle_events", "source_policy_lifecycles", "source_policy_versions"},
 		21: {"action_credential_lease_redemptions"},
 		20: {"event_source_checkpoints"},
 		17: {"skill_source_artifact_references", "skill_source_artifacts"},

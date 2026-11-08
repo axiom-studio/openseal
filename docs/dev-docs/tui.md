@@ -61,8 +61,8 @@ Depending on the connected server, the workspace can expose:
   and presence
 - **Integrations** — capability-advertised conversation gateway registration,
   lifecycle, and connection state supplied by the connected host
-- **Skills** — ClawHub lifecycle, deployment bindings, model-visible actions,
-  and governed source policy lifecycle
+- **Skills** — ClawHub lifecycle, deployment bindings, and model-visible
+  actions
 - **Activity / Evidence** — canonical audit projection and artifact downloads
 
 ## Guided first-use experience
@@ -150,9 +150,6 @@ Common controls:
 | `v` | Verify or activate according to section |
 | `u` / `U` | Update selected or all installed ClawHub Skills |
 | `d` | Download selected artifact |
-| `P` | In Skills, review and register an immutable source policy version |
-| `Y` | In Skills, activate one reviewed source policy version at an exact revision |
-| `X` | In Skills, revoke active source authority at an exact revision |
 | `Esc` | Cancel the current composer mode |
 | `Ctrl+C` | Exit without stopping server work |
 
@@ -167,13 +164,6 @@ request preserves the intent and key, so retrying cannot duplicate work or a
 permanent decision. Lifecycle commands bind the selected revision and refresh
 after a conflict rather than overwriting concurrent changes. Applying a
 Workforce additionally binds the candidate digest and requires an audit reason.
-
-Source policy registration and activation are deliberately separate. `P`
-records credential-free immutable bounds; it grants no network access. Review
-the version, then use `Y` with lifecycle revision `0` for the first activation
-or the displayed current revision for a change. `X` revokes authority without
-deleting its versions or audit history. Hosts may replace the TUI actor with an
-authenticated identity, but credential values never belong in these forms.
 
 Credential choices displayed by the TUI are opaque server-authored references.
 Secret values are never entered into the authoring prompt or stored in TUI

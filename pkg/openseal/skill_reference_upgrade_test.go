@@ -2,14 +2,19 @@ package openseal_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
 
+	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/openseal"
 	"github.com/axiom-studio/openseal/pkg/runbook"
-	"github.com/axiom-studio/openseal/pkg/source"
+	"github.com/axiom-studio/openseal/pkg/skill"
+)
+
+const (
+	upgradeTestSkillID = "example.reader"
+	upgradeTestAction  = "read_feed"
 )
 
 func TestSkillReferenceUpgradeMovesLiveReferencesAtomicallyAndPreservesHistory(t *testing.T) {
@@ -35,7 +40,7 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 	t.Helper()
 	ctx := context.Background()
 	var err error
-	from, to := clonedSourceDefinition(t, "1.0.3"), clonedSourceDefinition(t, "1.0.4")
+	from, to := upgradeTestDefinition(t, "1.0.3"), upgradeTestDefinition(t, "1.0.4")
 	if err = engine.RegisterSkill(ctx, from); err != nil {
 		t.Fatal(err)
 	}
@@ -46,8 +51,8 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 	skillScope := openseal.SkillScope{Kind: scope.Kind, ID: scope.ID}
 	binding, err := engine.UpsertOwnerSkillBinding(ctx, upgradeTestAgent(t, engine, skillScope, "researcher"), openseal.UpsertSkillBindingRequest{
 		Binding: &openseal.SkillBinding{
-			ID: "source", Scope: skillScope, DeploymentID: "researcher", SkillID: source.SkillID,
-			SkillVersion: from.Version, AllowedActions: []string{source.ObserveFeed}, EnablePrompt: true,
+			ID: "source", Scope: skillScope, DeploymentID: "researcher", SkillID: upgradeTestSkillID,
+			SkillVersion: from.Version, AllowedActions: []string{upgradeTestAction}, EnablePrompt: true,
 			MaximumRisk: openseal.SkillRiskRead,
 		},
 		Actor: openseal.SkillBindingActor{Type: "user", ID: "operator"}, Reason: "Enable source monitoring",
@@ -68,7 +73,7 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 		DefinitionID: "source-monitor", DefinitionVersion: "1", TriggerID: "releases",
 		Trigger: runbook.Trigger{Kind: runbook.TriggerSchedule, Schedule: &runbook.Schedule{Cron: "0 * * * * *", Timezone: "UTC"}, Entrypoint: "monitor"},
 		Input:   map[string]interface{}{"url": "https://example.com/feed.xml", "maxItems": 3},
-		Policy:  map[string]interface{}{"sourcePolicyRef": "public-feed@1"}, Budget: &openseal.BudgetPolicy{MaxAttempts: 2, MaxTurns: 2},
+		Budget:  &openseal.BudgetPolicy{MaxAttempts: 2, MaxTurns: 2},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +82,7 @@ func assertSkillReferenceUpgradeMovesLiveReferences(t *testing.T, engine *opense
 		Scope: scope, Kind: openseal.RunKindAgentWork, ObjectiveID: objective.ID, Owner: objective.Owner,
 		AssignedAgentID: "researcher", Goal: "Historical source run", Source: openseal.RunSourceSchedule,
 		Context: map[string]interface{}{"capabilityInvocation": map[string]interface{}{
-			"skillId": source.SkillID, "skillVersion": from.Version, "action": source.ObserveFeed,
+			"skillId": upgradeTestSkillID, "skillVersion": from.Version, "action": upgradeTestAction,
 		}},
 		Actor: openseal.ActivityActor{Type: "system", ID: "scheduler"}, Visibility: openseal.ActivityVisibilityScope,
 	})
@@ -137,10 +142,10 @@ func TestSkillReferenceUpgradeRejectsStaleImpactAndRequiresApprovalForContractCh
 	if err != nil {
 		t.Fatal(err)
 	}
-	from, to := clonedSourceDefinition(t, "2.0.0"), clonedSourceDefinition(t, "3.0.0")
-	action := to.Actions[source.ObserveFeed]
+	from, to := upgradeTestDefinition(t, "2.0.0"), upgradeTestDefinition(t, "3.0.0")
+	action := to.Actions[upgradeTestAction]
 	action.Risk = openseal.SkillRiskWrite
-	to.Actions[source.ObserveFeed] = action
+	to.Actions[upgradeTestAction] = action
 	if err = engine.RegisterSkill(ctx, from); err != nil {
 		t.Fatal(err)
 	}
@@ -151,8 +156,8 @@ func TestSkillReferenceUpgradeRejectsStaleImpactAndRequiresApprovalForContractCh
 	skillScope := openseal.SkillScope{Kind: scope.Kind, ID: scope.ID}
 	binding, err := engine.UpsertOwnerSkillBinding(ctx, upgradeTestAgent(t, engine, skillScope, "researcher"), openseal.UpsertSkillBindingRequest{
 		Binding: &openseal.SkillBinding{
-			ID: "source", Scope: skillScope, DeploymentID: "researcher", SkillID: source.SkillID,
-			SkillVersion: from.Version, AllowedActions: []string{source.ObserveFeed}, MaximumRisk: openseal.SkillRiskWrite,
+			ID: "source", Scope: skillScope, DeploymentID: "researcher", SkillID: upgradeTestSkillID,
+			SkillVersion: from.Version, AllowedActions: []string{upgradeTestAction}, MaximumRisk: openseal.SkillRiskWrite,
 		},
 		Actor: openseal.SkillBindingActor{Type: "user", ID: "operator"}, Reason: "Enable source",
 	})
@@ -180,18 +185,23 @@ func TestSkillReferenceUpgradeRejectsStaleImpactAndRequiresApprovalForContractCh
 	}
 }
 
-func clonedSourceDefinition(t *testing.T, version string) *openseal.SkillDefinition {
+func upgradeTestDefinition(t *testing.T, version string) *openseal.SkillDefinition {
 	t.Helper()
-	encoded, err := json.Marshal(source.SkillDefinition())
-	if err != nil {
-		t.Fatal(err)
+	return &skill.Definition{
+		ID: upgradeTestSkillID, Version: version, Name: "Feed reader", Description: "Read a feed.",
+		Transport: skill.TransportReference{Kind: "tool", Endpoint: upgradeTestSkillID},
+		Actions: map[string]skill.Action{upgradeTestAction: {
+			Name: upgradeTestAction, Description: "Read a feed.",
+			InputSchema: map[string]interface{}{
+				"type": "object", "additionalProperties": false, "required": []interface{}{"url"},
+				"properties": map[string]interface{}{"url": map[string]interface{}{"type": "string"}},
+			},
+			OutputSchema: map[string]interface{}{"type": "object"},
+			SideEffect:   skill.SideEffectRead, Risk: skill.RiskLevelRead, Idempotency: skill.IdempotencySupported,
+		}},
+		Prompt:       &capability.PromptModule{Instructions: "Read feeds.", UserInvocable: true, AllowedTools: []string{upgradeTestAction}},
+		Requirements: capability.Requirements{AlwaysAvailable: true},
 	}
-	var definition openseal.SkillDefinition
-	if err = json.Unmarshal(encoded, &definition); err != nil {
-		t.Fatal(err)
-	}
-	definition.Version = version
-	return &definition
 }
 
 // upgradeTestAgent creates Agent deployment id so its bindings have an owner.

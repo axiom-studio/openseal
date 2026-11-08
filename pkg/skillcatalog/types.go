@@ -109,22 +109,6 @@ type SkillCredential struct {
 	OAuth2   *capability.OAuth2Requirement `json:"oauth2,omitempty"`
 }
 
-// SourcePolicyCapability is the credential-free authoring projection of a
-// host-governed source policy. Hosts retain policy storage and enforcement;
-// planners can select only references and source scopes that actually exist.
-type SourcePolicyCapability struct {
-	Reference      string                         `json:"reference"`
-	Sources        []SourcePolicySourceCapability `json:"sources"`
-	MaximumItems   int                            `json:"maximumItems,omitempty"`
-	RetentionDays  int                            `json:"retentionDays,omitempty"`
-	ApprovalPolicy string                         `json:"approvalPolicy,omitempty"`
-}
-
-type SourcePolicySourceCapability struct {
-	Host         string   `json:"host"`
-	PathPrefixes []string `json:"pathPrefixes,omitempty"`
-}
-
 type CapabilityCatalog struct {
 	Skills               map[string]SkillCapability `json:"skills,omitempty"`
 	AvailableCredentials map[string]bool            `json:"availableCredentials,omitempty"`
@@ -132,7 +116,6 @@ type CapabilityCatalog struct {
 	// used only for deterministic OAuth 2 readiness. Opaque references and
 	// external account identifiers remain outside the model-visible catalog.
 	AvailableCredentialGrants map[string][]capability.OAuth2GrantSummary `json:"availableCredentialGrants,omitempty"`
-	SourcePolicies            map[string]SourcePolicyCapability          `json:"sourcePolicies,omitempty"`
 	AuthorityConstraint       *AuthorityConstraint                       `json:"authorityConstraint,omitempty"`
 	Diagnostics               []CatalogDiagnostic                        `json:"diagnostics,omitempty"`
 }

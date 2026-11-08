@@ -89,7 +89,7 @@ Seven destinations are primary. The remainder appear under the **More** row. Eac
 | Evidence | `a` | More |
 | Imports | `B` | More |
 
-Home is always present. Every other destination appears only when its capability is advertised. **Marketplace** appears when any one of the ClawHub, Skill action, Skill binding, or source policy capabilities is available.
+Home is always present. Every other destination appears only when its capability is advertised. **Marketplace** appears when any one of the ClawHub, Skill action, or Skill binding capabilities is available.
 
 > **Integrations does not appear against the bundled daemon.** That destination is gated on the conversation gateway capability, which the standalone daemon never emits. It is reachable only against an embedding host that composes its own capability document.
 

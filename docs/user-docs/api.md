@@ -233,23 +233,6 @@ Participation rounds are how multiple Agents take turns in one channel without t
 | POST | `/api/v1/event-source-subscriptions/{id}/checkpoint-advancements` |
 | POST | `/api/v1/events` |
 
-## Source Policies
-
-| Method | Path |
-|---|---|
-| POST | `/api/v1/source-policies/versions` |
-| GET | `/api/v1/source-policies` |
-| GET | `/api/v1/source-policies/{id}` |
-| GET | `/api/v1/source-policies/{id}/versions` |
-| GET | `/api/v1/source-policies/{id}/versions/{version}` |
-| POST | `/api/v1/source-policies/{id}/activations` |
-| POST | `/api/v1/source-policies/{id}/revocations` |
-| GET | `/api/v1/source-policies/{id}/activations` |
-
-These routes manage the durable source-policy lifecycle.
-
-> **All eight fail closed in a standalone deployment.** They require a source-policy lifecycle service the standalone daemon does not install, so every one returns `501 Not Implemented`; source policies are available only through an embedding host that wires the lifecycle service.
-
 ## Workforce Authoring
 
 | Method | Path |

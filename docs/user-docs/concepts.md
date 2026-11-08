@@ -53,7 +53,7 @@ Every durable record in OpenSeal is scoped. A scope is a two-part identifier and
 
 Scope validation is deliberately minimal: any non-empty pair is valid. There is no registry of known scopes, no hierarchy, and no membership check. The kernel uses the scope to partition storage and to route work to the correct worker.
 
-Scopes reach the system three ways. The daemon's `--scope` flag sets the authoring scope in `kind:id` form, defaulting to `local:default`. Configuration attaches scopes to source policies and credential entries. API requests carry them as `scopeKind` and `scopeId` query parameters on reads, or inside the body on writes.
+Scopes reach the system three ways. The daemon's `--scope` flag sets the authoring scope in `kind:id` form, defaulting to `local:default`. Configuration attaches scopes to credential entries. API requests carry them as `scopeKind` and `scopeId` query parameters on reads, or inside the body on writes.
 
 > **A scope is a partition key, not an access control boundary.** It determines where records live, not who may read them. [Security](security.md) covers what that means for a deployment.
 

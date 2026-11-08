@@ -7,13 +7,15 @@ import (
 
 // kernelProjectRemovalMigrationVersion removes kernel Projects and the
 // features that only hung off them: Project Skill references and their
-// admission triggers, source monitors and their observations, outreach
-// threads, and the Project activity projection.
+// admission triggers, source monitors and their observations, the source
+// policy registry that only authorized source observation, outreach threads,
+// and the Project activity projection.
 const kernelProjectRemovalMigrationVersion int64 = 77
 
 // retiredKernelProjectTables are dropped by migration 77, dependents first.
 var retiredKernelProjectTables = []string{
 	"project_skill_references", "outreach_threads", "source_monitor_checkpoints", "source_observations", "projects",
+	"source_policy_lifecycle_events", "source_policy_lifecycles", "source_policy_versions",
 }
 
 // migrateRemoveKernelProjects is PostgreSQL migration 77.
@@ -40,7 +42,7 @@ func (s *PostgresStore) migrateRemoveKernelProjects(ctx context.Context, tx *sql
 		}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO `+s.table("schema_migrations")+`(version, name)
-		VALUES ($1, 'remove kernel Projects, source monitors and outreach') ON CONFLICT (version) DO NOTHING`, kernelProjectRemovalMigrationVersion)
+		VALUES ($1, 'remove kernel Projects, source monitors, source policies and outreach') ON CONFLICT (version) DO NOTHING`, kernelProjectRemovalMigrationVersion)
 	return err
 }
 

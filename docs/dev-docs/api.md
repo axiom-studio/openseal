@@ -345,13 +345,7 @@ Version 2 removed `skillSelections`, `decisions`, `requestedActions`,
 pin version `1` must move to `2`.
 
 
-## Source policy lifecycle
-
-When a host configures the lifecycle service, `/source-policies` routes support
-registering immutable versions, listing and reading versions, activation,
-revocation, and lifecycle audit. Source policies contain credential-free HTTPS
-host, path, method, item, and retention bounds. Network credentials
-remain outside policy records.
+## Canonical routes
 
 The daemon deliberately has no generic `/workflows` or numeric `/runs`
 compatibility surface. `/agent-runs` is the canonical durable autonomous-work

@@ -244,8 +244,6 @@ type (
 	WorkforceSkillCredential                = skillcatalog.SkillCredential
 	WorkforceConversationAdapterCapability  = skillcatalog.ConversationAdapterCapability
 	WorkforceCallbackAdapterCapability      = skillcatalog.CallbackAdapterCapability
-	WorkforceSourcePolicyCapability         = skillcatalog.SourcePolicyCapability
-	WorkforceSourcePolicySourceCapability   = skillcatalog.SourcePolicySourceCapability
 	WorkforceAuthorityConstraint            = skillcatalog.AuthorityConstraint
 	WorkforceCatalogDiagnostic              = skillcatalog.CatalogDiagnostic
 	WorkforceSkillReadiness                 = skillcatalog.SkillReadiness
@@ -1123,8 +1121,6 @@ const (
 	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
 	RunbooksCapabilityID                    = kernelapi.RunbooksCapabilityID
 	RunbooksCapabilityVersion               = kernelapi.RunbooksCapabilityVersion
-	SourcePoliciesCapabilityID              = kernelapi.SourcePoliciesCapabilityID
-	SourcePoliciesCapabilityVersion         = kernelapi.SourcePoliciesCapabilityVersion
 	KernelOperationCreate                   = kernelapi.OperationCreate
 	KernelOperationExecute                  = kernelapi.OperationExecute
 	KernelOperationList                     = kernelapi.OperationList
@@ -1300,12 +1296,6 @@ func AgentTurnsCapability() KernelCapability {
 
 func ProjectAgentTurn(turn *AgentTurn) *AgentTurnRecord {
 	return kernelapi.ProjectAgentTurn(turn)
-}
-
-// SourcePoliciesCapability returns the portable credential-free governance
-// contract implemented by an embedding host's selected lifecycle store.
-func SourcePoliciesCapability() KernelCapability {
-	return kernelapi.SourcePoliciesCapability()
 }
 
 func AgentDefinitionsCapability(features ...AgentDefinitionCapabilityFeatures) KernelCapability {

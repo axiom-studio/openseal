@@ -9,7 +9,6 @@ import (
 
 	"github.com/axiom-studio/openseal/pkg/delivery"
 	"github.com/axiom-studio/openseal/pkg/skill"
-	"github.com/axiom-studio/openseal/pkg/source"
 )
 
 func skillCmd(args []string) {
@@ -67,7 +66,6 @@ func runSkillCommand(output io.Writer, args []string, writeFile skillManifestWri
 
 func bundledSkillDefinitions() map[string]*skill.Definition {
 	return map[string]*skill.Definition{
-		source.SkillID:   source.SkillDefinition(),
 		delivery.SkillID: delivery.SkillDefinition(),
 	}
 }

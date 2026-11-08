@@ -38,7 +38,7 @@ The design holds to one rule throughout: the kernel never manufactures authority
 
 ## How It Works
 
-1. **Configure** — Point the daemon at a configuration file and a standalone context. The context declares credential references; the configuration declares storage, the listen address, and source policies.
+1. **Configure** — Point the daemon at a configuration file and a standalone context. The context declares credential references; the configuration declares storage and the listen address.
 2. **Start** — The daemon opens its store, runs migrations, derives worker scopes from the configured credentials and policies, and serves a versioned API on loopback.
 3. **Discover** — A client reads the capability document, which is computed from what this particular process actually has wired, and renders only the operations it advertises.
 4. **Define** — Agents and Teams are created as immutable definition versions carried by durable deployments, and granted Skills through per-deployment bindings.

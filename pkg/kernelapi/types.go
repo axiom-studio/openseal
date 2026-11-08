@@ -9,7 +9,6 @@ import (
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runtime"
 	"github.com/axiom-studio/openseal/pkg/skill/clawhub"
-	"github.com/axiom-studio/openseal/pkg/source"
 	kernelteam "github.com/axiom-studio/openseal/pkg/team"
 	"github.com/axiom-studio/openseal/pkg/workforce"
 )
@@ -60,8 +59,6 @@ const (
 	ConversationGatewaysCapabilityVersion      = "2"
 	CallbacksCapabilityID                      = "callbacks"
 	CallbacksCapabilityVersion                 = "1"
-	SourcePoliciesCapabilityID                 = "source-policies"
-	SourcePoliciesCapabilityVersion            = source.LifecycleAPIVersion
 	SpacesCapabilityID                         = "spaces"
 	SpacesCapabilityVersion                    = "1"
 	AgentBuilderCapabilityID                   = "agent-builder"
@@ -604,13 +601,6 @@ func SpacesCapability() Capability {
 		ID: SpacesCapabilityID, Version: SpacesCapabilityVersion, Available: true,
 		Operations: []string{OperationGet, OperationList, OperationCreate, OperationUpdate, OperationRetire},
 	}
-}
-
-// SourcePoliciesCapability is the portable, credential-free governance
-// contract for immutable source policy versions and their live authority.
-func SourcePoliciesCapability() Capability {
-	return Capability{ID: SourcePoliciesCapabilityID, Version: SourcePoliciesCapabilityVersion, Available: true,
-		Operations: []string{OperationRegister, OperationGet, OperationList, OperationListVersions, OperationActivate, OperationRevoke, OperationListActivations}}
 }
 
 func AgentDefinitionsCapability(features ...AgentDefinitionCapabilityFeatures) Capability {
