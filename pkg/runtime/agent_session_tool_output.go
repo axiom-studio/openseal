@@ -21,7 +21,14 @@ type ToolOutputKeeper interface {
 	KeepToolOutput(ctx context.Context, invocation ToolInvocation, files []toolfile.Payload) ([]string, error)
 }
 
-const toolOutputPreviewBytes = 16 << 10
+// toolOutputInlineBytes is the most text/json a tool result carries in the
+// session. A larger result is kept whole as a chat file and the session holds
+// a preview, because every later step of the Run sends the session to the
+// model again: a 60 KiB browser snapshot kept inline costs about 15k tokens on
+// each of them.
+const toolOutputInlineBytes = 16 << 10
+
+const toolOutputPreviewBytes = 8 << 10
 
 // toolOutputCompactLevels is the depth / entries / text ladder used to shorten
 // json output that has nowhere to be kept.
@@ -29,11 +36,14 @@ var toolOutputCompactLevels = []struct{ depth, entries, text int }{
 	{8, 64, 2048}, {7, 32, 1024}, {6, 16, 512}, {5, 8, 256}, {4, 4, 128},
 }
 
-// BoundToolResult returns result unchanged when it fits MaxToolResultContentBytes.
-// Otherwise it keeps the full text/json content as one chat file and replaces it
-// with a preview and a file part. With no chat (keeper nil or ErrToolOutputNoChat),
-// or when the file was too large to keep, it compacts the content to fit and marks
-// it truncated. File and image parts are always kept as they are.
+// BoundToolResult returns result unchanged when its text/json fits
+// toolOutputInlineBytes. Otherwise it keeps the full text/json content as one
+// chat file and replaces it with a preview and a file part. When the output
+// cannot be kept as a file (no chat, no action call id, the keeper failing or
+// the file too large), a result within MaxToolResultContentBytes stays as it
+// is; a larger one is compacted to fit and marked truncated, or, when the
+// keeper failed or there is no action call id, refused. File and image parts
+// are always kept as they are.
 func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation ToolInvocation, result ToolResult) (ToolResult, error) {
 	var content, others []ContentPart
 	total := 0
@@ -49,13 +59,17 @@ func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation To
 			others = append(others, part)
 		}
 	}
-	if total <= MaxToolResultContentBytes {
+	if total <= toolOutputInlineBytes {
 		return result, nil
 	}
+	fits := total <= MaxToolResultContentBytes
 
 	reason := "this work has no chat to keep the full output in"
 	if keeper != nil {
 		if strings.TrimSpace(invocation.ActionCallID) == "" {
+			if fits {
+				return result, nil
+			}
 			return ToolResult{}, errors.New("bound tool result: the invocation has no action call id to keep its output under")
 		}
 		payload := toolOutputPayload(content)
@@ -63,6 +77,9 @@ func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation To
 		switch {
 		case errors.Is(err, ErrToolOutputNoChat):
 		case err != nil:
+			if fits {
+				return result, nil
+			}
 			return ToolResult{}, fmt.Errorf("keep tool output: %w", err)
 		case len(paths) > 0 && paths[0] != "":
 			preview := cutUTF8(toolOutputPreviewText(content), toolOutputPreviewBytes)
@@ -74,6 +91,9 @@ func BoundToolResult(ctx context.Context, keeper ToolOutputKeeper, invocation To
 		default:
 			reason = "the full output was too large to keep as a file"
 		}
+	}
+	if fits {
+		return result, nil
 	}
 	return withToolResultContent(result, append(compactToolResultContent(content, total, reason), others...)), nil
 }

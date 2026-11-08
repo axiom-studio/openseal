@@ -237,3 +237,51 @@ func TestBoundToolResultKeeperErrorFails(t *testing.T) {
 }
 
 func utf8Valid(s string) bool { return strings.ToValidUTF8(s, "�") == s }
+
+// A result over the inline size but within the cap (a 30 KiB page snapshot)
+// is kept as a chat file with a short preview, so later steps do not resend it.
+func TestBoundToolResultKeepsAMidSizeResultAsAFile(t *testing.T) {
+	keeper := &fakeToolOutputKeeper{}
+	text := strings.Repeat("page text ", 3<<10)
+	got, err := BoundToolResult(context.Background(), keeper, ToolInvocation{ActionCallID: "call-7"}, ToolResult{
+		Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: text}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(text) <= toolOutputInlineBytes || len(text) > MaxToolResultContentBytes {
+		t.Fatalf("fixture: %d bytes", len(text))
+	}
+	if keeper.calls != 1 || string(keeper.payloads[0].Data) != text || len(got.Content) != 2 || got.Content[1].Path != "tool-output/call-7/output.txt" {
+		t.Fatalf("not kept as a file: calls %d, content %d", keeper.calls, len(got.Content))
+	}
+	if len(got.Content[0].Text) > toolOutputPreviewBytes+200 || !strings.Contains(got.Content[0].Text, "the full output is in tool-output/call-7/output.txt") {
+		t.Fatalf("preview is %d bytes", len(got.Content[0].Text))
+	}
+}
+
+// When a mid-size result cannot be kept as a file it stays whole, as before:
+// the lower inline size never shortens or fails a result that fits the cap.
+func TestBoundToolResultLeavesAMidSizeResultWholeWithoutAFile(t *testing.T) {
+	result := ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: strings.Repeat("page text ", 3<<10)}}}
+	for name, c := range map[string]struct {
+		keeper ToolOutputKeeper
+		call   string
+	}{
+		"nil keeper":        {nil, "call-1"},
+		"no chat":           {&fakeToolOutputKeeper{err: ErrToolOutputNoChat}, "call-1"},
+		"keeper fails":      {&fakeToolOutputKeeper{err: errors.New("chat files unavailable")}, "call-1"},
+		"file too large":    {&fakeToolOutputKeeper{tooLarge: true}, "call-1"},
+		"no action call id": {&fakeToolOutputKeeper{}, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := BoundToolResult(context.Background(), c.keeper, ToolInvocation{ActionCallID: c.call}, result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, result) {
+				t.Fatal("the result changed")
+			}
+		})
+	}
+}
