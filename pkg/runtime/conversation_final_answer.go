@@ -135,6 +135,11 @@ func (h *conversationFinalHandler) Deliver(ctx context.Context, d FinalDelivery)
 
 	// 6. Reactions only (also an answer that only repeats the reacted emoji).
 	visual := answer.Visual()
+	// Images the Run already attached (generate_image, present) show with the
+	// answer; a visual that only repeats them would show each one twice.
+	if visual != nil && content != "" && visualRepeatsAttachedImages(*visual, references) {
+		visual = nil
+	}
 	if visual == nil {
 		reactions, err := h.runReactions(ctx, run)
 		if err != nil {

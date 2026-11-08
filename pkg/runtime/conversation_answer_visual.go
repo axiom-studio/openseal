@@ -121,3 +121,34 @@ func (r *ConversationRunTurnRunner) storeAnswerVisualArtifact(ctx context.Contex
 	}
 	return reference, nil
 }
+
+// visualRepeatsAttachedImages reports a visual made only of image and gallery
+// components whose every image is an artifact the answer already references.
+func visualRepeatsAttachedImages(visual presentation.Visual, references []ConversationReference) bool {
+	attached := make(map[string]bool, len(references))
+	for _, reference := range references {
+		if reference.Kind == ConversationReferenceArtifact {
+			attached[reference.ID] = true
+		}
+	}
+	if len(visual.Components) == 0 || len(attached) == 0 {
+		return false
+	}
+	for _, component := range visual.Components {
+		switch {
+		case component.Image != nil:
+			if !attached[component.Image.Image.ArtifactID] {
+				return false
+			}
+		case component.Gallery != nil:
+			for _, image := range component.Gallery.Images {
+				if !attached[image.Image.ArtifactID] {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}

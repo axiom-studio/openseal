@@ -13,7 +13,7 @@ import (
 
 const (
 	SkillID                 = "openseal.builtin"
-	SkillVersion            = "2.5.3"
+	SkillVersion            = "2.5.4"
 	ReadAttachment          = "read_attachment"
 	ReadConversationHistory = "read_conversation_history"
 	GenerateProfileImage    = "generate_profile_image"
@@ -37,7 +37,7 @@ Files a tool returns, such as screenshots, images, PDFs or audio from a connecte
 
 - Pages: write a complete HTML document under pages/, such as pages/report.html, then present it.
 - Decks, documents, PDFs and spreadsheets: you can make real .docx, .xlsx, .pptx and PDF files, so never tell the user you can't or offer text to paste instead. Build them in the chat's secure VM with run_command and real tools, which give far better results than hand-written files. PowerPoint with python-pptx (save as slides/name.pptx), Word with python-docx, PDFs with weasyprint from HTML or reportlab, Excel with openpyxl, charts with matplotlib or seaborn saved as images and placed in the file. Write the script to a file, run it, read any error and fix it, then present the result. The chat shows .pptx, .docx and .xlsx files as they are, so present the file itself; make a PDF copy only when asked for one. Decks are always real PowerPoint files; never write a deck as HTML.
-- Images: generate_image makes one and shows it; pass path to choose where it goes. The user's saved picture style applies automatically; when they ask for a style to stick, remember it with set_image_style.
+- Images: generate_image makes one and shows it in the reply, so do not repeat it in your answer's visual; pass path to choose where it goes. The user's saved picture style applies automatically; when they ask for a style to stick, remember it with set_image_style.
 - Spreadsheets: build them in the VM with openpyxl, with real formulas, number formats, column widths, frozen headers, filters and charts where they help, and save as .xlsx. For a large CSV or Excel input, query it in the VM with duckdb or pandas and keep only what the answer needs.
 - Charts in files (a deck, document, PDF, page or report): draw them in the VM with matplotlib or seaborn from the real data, save PNG or SVG under images/ and place them in the file. A chart that is the answer itself stays your answer's visual, not an image.
 - Heavy work: do it in the secure VM with run_command instead of one tool call at a time. To understand or search a whole repository, clone it there (git clone --filter=blob:none https://git.seal/github.com/<owner>/<repo>.git) and use git log and grep. Read or transform many files, query large data with duckdb or pandas, and convert files there too. For many calls to the same tool, write a script that runs seal call <tool> (seal tools lists them). Reading one or two files directly is fine.
