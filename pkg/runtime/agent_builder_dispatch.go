@@ -303,14 +303,17 @@ func (d *AgentBuilderActionDispatcher) createAgent(ctx context.Context, input Ac
 			"sourceIdentity": strings.TrimSpace(connection.SourceIdentity),
 		})
 	}
-	message := fmt.Sprintf("Created %s. Offer 'Chat with %s'.", definition.DisplayName, definition.DisplayName)
+	message := fmt.Sprintf("Created %s; its agent id is %s (use it for agent cards and later updates). Offer 'Chat with %s'.", definition.DisplayName, deploymentID, definition.DisplayName)
 	if len(connections) > 0 {
 		message += fmt.Sprintf(" For each connection, call openseal.skills.request_connection with targetAgentId=%s.", deploymentID)
 	}
 	return agentBuilderJSONMap(map[string]interface{}{
 		"resourceType": agentProfileResourceType, "operation": AgentActionCreateAgent,
-		"deploymentId": deploymentID, "displayName": definition.DisplayName, "replayed": replayed,
-		"deployment": deployment, "definition": definition, "activation": activation,
+		// The reviewed profile is already in the conversation; the full
+		// definition and deployment would repeat it and put the definition id
+		// first, which the model mistakes for the Agent's id.
+		"agentId": deploymentID, "deploymentId": deploymentID, "displayName": definition.DisplayName, "replayed": replayed,
+		"activation": activation,
 		"bindings": bindings, "space": map[string]interface{}{"id": space.ID, "name": space.Name},
 		"connections": connections, "chat": map[string]interface{}{"conversationId": conversation.ID},
 		"message": message,
@@ -661,9 +664,9 @@ func (d *AgentBuilderActionDispatcher) updateAgent(ctx context.Context, input Ac
 	}
 	result := map[string]interface{}{
 		"resourceType": agentProfileResourceType, "operation": AgentActionUpdateAgent,
-		"deploymentId": deployment.ID, "displayName": name, "replayed": replayed,
-		"deployment": deployment, "bindings": bindings, "removedBindings": removedBindings,
-		"message": fmt.Sprintf("Updated %s.", name),
+		"agentId": deployment.ID, "deploymentId": deployment.ID, "displayName": name, "replayed": replayed,
+		"bindings": bindings, "removedBindings": removedBindings,
+		"message": fmt.Sprintf("Updated %s; its agent id is %s.", name, deployment.ID),
 	}
 	if amendment != nil {
 		result["amendment"] = amendment
