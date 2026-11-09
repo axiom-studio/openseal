@@ -3,17 +3,13 @@ package runbook
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/axiom-studio/openseal/internal/domaincontract"
 )
 
 const maximumIterations = 10000
-
-var concreteEventTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$`)
 
 func Validate(definition *Definition) []Diagnostic {
 	v := validator{definition: definition}
@@ -90,12 +86,9 @@ func (v *validator) validate() {
 		if err := domaincontract.ValidateObject(trigger); err != nil {
 			v.add(path, "trigger.shape", "%v", err)
 		}
-		switch trigger.Kind {
-		case TriggerEvent:
-			if !concreteEventTypePattern.MatchString(trigger.EventType) || len(trigger.EventType) > 160 {
-				v.add(path+".eventType", "trigger.event_type_invalid", "event trigger must name a concrete portable event type")
-			}
-		case TriggerSchedule:
+		if trigger.Kind != TriggerSchedule {
+			v.add(path+".kind", "trigger.kind_unsupported", "definition trigger kind must be %q", TriggerSchedule)
+		} else {
 			if err := trigger.Schedule.Validate(); err != nil {
 				v.add(path+".schedule", "trigger.schedule_invalid", "%v", err)
 			}
@@ -109,8 +102,6 @@ func (v *validator) validate() {
 					v.add(inputPath, "trigger.input_static", "scheduled trigger input must be a credential-free literal")
 				}
 			}
-		default:
-			v.add(path+".kind", "trigger.kind_unsupported", "trigger kind must be %q or %q", TriggerEvent, TriggerSchedule)
 		}
 		if trigger.MaximumConcurrent < 0 {
 			v.add(path+".maximumConcurrent", "trigger.concurrency_invalid", "maximum concurrency cannot be negative")
@@ -293,28 +284,8 @@ func (v *validator) validateStep(path, id string, step Step) {
 		if strings.TrimSpace(step.Wait.Event) != "" {
 			sources++
 		}
-		if step.Wait.Match != nil {
-			sources++
-			v.validateEventMatch(path+".wait.match", step.Wait.Match)
-		}
 		if sources != 1 || step.Wait.Duration < 0 {
-			v.add(path+".wait", "wait.source", "exactly one positive duration, legacy event, or exact event match is required")
-		}
-		if step.Wait.ResultPath != "" {
-			v.validatePointer(path+".wait.resultPath", step.Wait.ResultPath)
-			for _, reserved := range []string{"/runbook", "/runbookTrace", "/runtime", "/lastEventWait"} {
-				pointer := string(step.Wait.ResultPath)
-				if pointer == reserved || strings.HasPrefix(pointer, reserved+"/") {
-					v.add(path+".wait.resultPath", "wait.result_reserved", "event results cannot overwrite runtime-owned checkpoint state")
-					break
-				}
-			}
-		}
-		if step.Wait.TimeoutNext != "" {
-			v.requireStep(path+".wait.timeoutNext", step.Wait.TimeoutNext)
-		}
-		if step.Wait.Match == nil && (step.Wait.ResultPath != "" || step.Wait.TimeoutNext != "") {
-			v.add(path+".wait", "wait.match_required", "resultPath and timeoutNext require an exact event match")
+			v.add(path+".wait", "wait.source", "exactly one positive duration or event is required")
 		}
 		v.requireStep(path+".wait.next", step.Wait.Next)
 	case StepFork:
@@ -384,64 +355,6 @@ func (v *validator) validateStep(path, id string, step Step) {
 		}
 	}
 	_ = id
-}
-
-func (v *validator) validateEventMatch(path string, match *EventMatch) {
-	if !concreteEventTypePattern.MatchString(match.Type) || len(match.Type) > 160 {
-		v.add(path+".type", "wait.event_type_invalid", "event match must name one concrete portable event type")
-	}
-	v.validateEventMatchString(path+".source", match.Source, 256)
-	v.validateEventMatchString(path+".subject", match.Subject, 512)
-	if match.TimeoutDuration <= 0 || match.TimeoutDuration > 30*24*time.Hour {
-		v.add(path+".timeoutDuration", "wait.timeout_invalid", "event wait timeout must be positive and no greater than 30 days")
-	}
-	if len(match.Attributes) > 16 {
-		v.add(path+".attributes", "wait.attributes_limit", "event match accepts at most 16 scalar attributes")
-	}
-	for name, value := range match.Attributes {
-		attributePath := path + ".attributes." + name
-		if !validEventMatchIdentifier(name, 128) {
-			v.add(attributePath, "wait.attribute_name_invalid", "event attribute name must be a bounded opaque identifier")
-		}
-		v.validateValue(attributePath, value)
-		if len(value.Literal) > 0 && json.Valid(value.Literal) {
-			var scalar interface{}
-			_ = json.Unmarshal(value.Literal, &scalar)
-			switch scalar.(type) {
-			case string, bool, float64:
-			default:
-				v.add(attributePath, "wait.attribute_scalar", "event attribute must resolve to a non-null JSON scalar")
-			}
-			if len(value.Literal) > 8192 {
-				v.add(attributePath, "wait.attribute_size", "event attribute literal exceeds 8192 bytes")
-			}
-		}
-	}
-	if match.After != nil {
-		v.validateValue(path+".after", *match.After)
-		if len(match.After.Literal) > 0 && json.Valid(match.After.Literal) {
-			var stamp string
-			if err := json.Unmarshal(match.After.Literal, &stamp); err != nil {
-				v.add(path+".after", "wait.after_invalid", "event wait after must resolve to an RFC3339 timestamp")
-			} else if _, err := time.Parse(time.RFC3339Nano, stamp); err != nil {
-				v.add(path+".after", "wait.after_invalid", "event wait after must resolve to an RFC3339 timestamp")
-			}
-		}
-	}
-}
-
-func (v *validator) validateEventMatchString(path string, value Value, limit int) {
-	v.validateValue(path, value)
-	if len(value.Literal) > 0 && json.Valid(value.Literal) {
-		var literal string
-		if err := json.Unmarshal(value.Literal, &literal); err != nil || !validEventMatchIdentifier(literal, limit) {
-			v.add(path, "wait.selector_invalid", "event selector must resolve to a bounded opaque identifier")
-		}
-	}
-}
-
-func validEventMatchIdentifier(value string, limit int) bool {
-	return strings.TrimSpace(value) != "" && len(value) <= limit && !strings.ContainsAny(value, "\r\n?#@/\\") && !strings.Contains(value, "://") && value != "*"
 }
 
 func (v *validator) validateValue(path string, value Value) {
@@ -547,11 +460,7 @@ func (v *validator) successors(id string) []string {
 		}
 	case StepWait:
 		if step.Wait != nil {
-			next := []string{step.Wait.Next}
-			if step.Wait.TimeoutNext != "" {
-				next = append(next, step.Wait.TimeoutNext)
-			}
-			return next
+			return []string{step.Wait.Next}
 		}
 	case StepFork:
 		if step.Fork != nil {

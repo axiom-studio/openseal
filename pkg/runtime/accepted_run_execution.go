@@ -156,11 +156,7 @@ func acceptedRunbookSuccessors(method *runbook.Definition, step runbook.Step) []
 		}
 	case runbook.StepWait:
 		if step.Wait != nil {
-			out := []string{step.Wait.Next}
-			if step.Wait.TimeoutNext != "" {
-				out = append(out, step.Wait.TimeoutNext)
-			}
-			return out
+			return []string{step.Wait.Next}
 		}
 	case runbook.StepDecision:
 		if step.Decision != nil {
