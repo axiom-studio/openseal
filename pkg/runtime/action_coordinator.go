@@ -46,6 +46,12 @@ type ActionPolicyDecision struct {
 	ApprovalTTL          time.Duration
 	ApprovalTimeout      ApprovalTimeoutDecision
 	ApprovalDestinations []ApprovalDestination
+	// Review is a host review floor for this one call, such as a person's
+	// "always ask me" setting. "always" makes the call exactly like a
+	// manifest review: always action: it is persisted on the call and its
+	// approval card, an Allow becomes RequireApproval, no approval mode
+	// waives it and its checkpoint never auto-approves on timeout.
+	Review skill.ActionReview `json:"review,omitempty"`
 }
 
 type ActionPolicyEvaluator interface {
@@ -342,6 +348,22 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 			decision.ApprovalTimeout = ApprovalTimeoutExpire
 		}
 	}
+	// A host review floor raises this one call to review: always. The policy
+	// asked for review itself, so its own Allow becomes a request.
+	review := bound.Action.Review
+	switch decision.Review {
+	case "":
+	case skill.ActionReviewAlways:
+		review = skill.ActionReviewAlways
+		if decision.Disposition == ActionDispositionAllow {
+			decision.Disposition = ActionDispositionRequireApproval
+		}
+		if decision.Disposition == ActionDispositionRequireApproval {
+			decision.ApprovalTimeout = ApprovalTimeoutExpire
+		}
+	default:
+		return nil, fmt.Errorf("action policy returned unsupported review %q", decision.Review)
+	}
 	// An action that acts as one person's own account is approved only by
 	// that person, whatever the policy named.
 	if decision.Disposition == ActionDispositionRequireApproval && run.ActingUser != "" && boundUsesPersonCredential(bound) {
@@ -366,7 +388,7 @@ func (c *ActionCoordinator) Propose(ctx context.Context, req ProposeActionReques
 		ID: callID, Scope: req.Scope, RunID: run.ID, TurnID: req.TurnID, DeploymentID: req.DeploymentID,
 		BindingID: bound.Binding.ID, BindingRevision: bound.Binding.Revision,
 		SkillID: req.SkillID, SkillVersion: req.SkillVersion, Action: req.Action, Origin: req.Origin, OriginRef: strings.TrimSpace(req.OriginRef), Execution: req.Execution,
-		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: bound.Action.Review,
+		Risk: bound.Action.Risk, SideEffect: bound.Action.SideEffect, Review: review,
 		Arguments:         persistedActionArguments(arguments, bound.Action.InputSchema),
 		ResolvedArguments: bindingResolvedArgumentProvenance(bound),
 		PreparedRuntime:   clonePreparedRuntime(req.PreparedRuntime),
@@ -564,14 +586,15 @@ func (c *ActionCoordinator) newApprovalCheckpoint(ctx context.Context, req Propo
 	if approval.ProposedAction == nil {
 		approval.ProposedAction = approvalPreview(bound, arguments)
 	}
-	if bound.Action.AlwaysReview() {
+	if call.Review == skill.ActionReviewAlways {
 		// The reviewer must see exactly what they consent to (for a payment:
 		// amount, currency, merchant) even when a validator supplied its own
-		// preview. Sensitive inputs remain redacted.
+		// preview. Sensitive inputs remain redacted. The call carries the
+		// manifest's review floor and any the host policy added.
 		if _, ok := approval.ProposedAction["arguments"]; !ok {
 			approval.ProposedAction["arguments"] = sanitizeApprovalValue(arguments, bound.Action.InputSchema)
 		}
-		approval.ProposedAction["review"] = string(bound.Action.Review)
+		approval.ProposedAction["review"] = string(call.Review)
 	}
 	approval.ProposedAction = c.enrichApprovalPreview(ctx, approval.ProposedAction, run, req.EvidenceRefs, req.ExternalOperation)
 	if req.ReviewContext != nil {
