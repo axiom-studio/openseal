@@ -77,8 +77,15 @@ func TestCanceledRunDismissesItsOpenInteractionRequests(t *testing.T) {
 // A completed foreground reply may leave a Skill setup form for the user to
 // finish later; only its credential requests (which resume nothing now) close.
 func TestCompletedRunKeepsSetupFormsButClosesCredentialRequests(t *testing.T) {
+	for _, status := range []AgentRunStatus{AgentRunStatusCompleted, AgentRunStatusFailed} {
+		t.Run(string(status), func(t *testing.T) { testFinishedRunKeepsSetupForms(t, status) })
+	}
+}
+
+// A Run that failed after its setup form went up leaves the form open too.
+func testFinishedRunKeepsSetupForms(t *testing.T, status AgentRunStatus) {
 	ctx, store, _, _, scope := credentialRequestDispatchFixture(t)
-	run := &AgentRun{ID: "run-done", Scope: scope, Status: AgentRunStatusCompleted}
+	run := &AgentRun{ID: "run-done", Scope: scope, Status: status}
 	now := time.Now().UTC()
 	credential := &CredentialRequest{ID: "credential-1", Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "agent"}, DeploymentID: "agent", AgentID: "agent", ConversationID: "chat", TriggerMessageID: "message", RunID: run.ID, ActionCallID: "c1",
 		Kind: CredentialRequestKindPaymentCard, Reason: "Add your card", Status: CredentialRequestStatusPending, Revision: 1, CreatedAt: now, UpdatedAt: now}

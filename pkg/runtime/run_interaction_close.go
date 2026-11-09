@@ -14,17 +14,19 @@ const TerminalRunInteractionCloser = "kernel:run-terminal"
 // closeTerminalRunInteractionRequests dismisses the in-chat requests a
 // terminal Run left open, so their cards leave the chat: every pending
 // credential request (it only resumes its own Run, which can no longer
-// continue) and, when the Run was canceled or failed, every pending Skill
-// setup request. A completed foreground reply may legitimately finish with a
-// setup form the user completes later, so those stay. Idempotent; a request
-// the user settles concurrently keeps the user's outcome.
+// continue) and, when the Run was canceled, every pending Skill setup request.
+// A setup form outlives a Run that completed or failed: connecting the app is
+// still what the person needs, and its receipt starts a fresh Run. A failure
+// after the form went up (a model error, a restart) used to close it before
+// the person could fill it in. Idempotent; a request the user settles
+// concurrently keeps the user's outcome.
 func closeTerminalRunInteractionRequests(ctx context.Context, store ActionStore, run *AgentRun) error {
 	if store == nil || run == nil || !isTerminalAgentRunStatus(run.Status) {
 		return nil
 	}
 	credentials, _ := store.(CredentialRequestStore)
 	setups, _ := store.(SkillSetupRequestStore)
-	closeSetups := setups != nil && (run.Status == AgentRunStatusCanceled || run.Status == AgentRunStatusFailed)
+	closeSetups := setups != nil && run.Status == AgentRunStatusCanceled
 	if credentials == nil && !closeSetups {
 		return nil
 	}
