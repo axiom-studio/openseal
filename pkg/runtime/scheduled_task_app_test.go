@@ -10,7 +10,7 @@ import (
 func TestScheduledTaskKeepsOnlyItsChatsAppUpToDate(t *testing.T) {
 	for _, kind := range []string{"memory", "sqlite"} {
 		t.Run(kind, func(t *testing.T) {
-			store := workflowEvidenceStore(t, kind)
+			store := routineTestStore(t, kind)
 			run, _, _, args := scheduledTaskFixture(t, store)
 			conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 			register := func(id string, owner ObjectiveOwner, conversation, artifactType string) {

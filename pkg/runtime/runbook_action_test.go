@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -343,4 +344,18 @@ func TestRunbookStartRejectsActivationOwnedByAnotherAgent(t *testing.T) {
 	if err == nil {
 		t.Fatal("foreign Runbook activation was accepted")
 	}
+}
+
+// routineTestStore is a memory or SQLite kernel store for routine action tests.
+func routineTestStore(t *testing.T, kind string) KernelStore {
+	t.Helper()
+	if kind == "memory" {
+		return NewMemoryStore()
+	}
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "routines.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	return store
 }

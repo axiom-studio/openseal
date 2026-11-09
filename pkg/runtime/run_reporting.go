@@ -296,11 +296,9 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	return err
 }
 
-// routineOccurrenceRun reports whether run is an occurrence of a routine (a
-// scheduled task), as opposed to a deferred workflow follow-up, which keeps
-// answering in the thread of the message that asked for it.
+// routineOccurrenceRun reports whether run is an occurrence of a routine.
 func routineOccurrenceRun(run *AgentRun) bool {
-	return run != nil && run.Context[scheduledTaskContextKey] == true && run.Context[deferredWorkflowContextKey] != true
+	return run != nil && run.Context[scheduledTaskContextKey] == true
 }
 
 func runReportsMilestone(run *AgentRun, milestone runbook.ReportingMilestone) bool {

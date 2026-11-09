@@ -1672,9 +1672,6 @@ const (
 	RunbookManagementSkillID        = runtime.RunbookManagementSkillID
 	RunbookManagementSkillVersion   = runtime.RunbookManagementSkillVersion
 	RunbookActionCreateTask         = runtime.RunbookActionCreateTask
-	RunbookActionCreateWorkflow     = runtime.RunbookActionCreateWorkflow
-	RunbookActionWorkflowSources    = runtime.RunbookActionWorkflowSources
-	RunbookActionInspectWorkflows   = runtime.RunbookActionInspectWorkflows
 	RunbookActionList               = runtime.RunbookActionList
 	RunbookActionSetStatus          = runtime.RunbookActionSetStatus
 	RunbookActionSetScript          = runtime.RunbookActionSetScript
@@ -3157,8 +3154,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 	if err != nil {
 		return err
 	}
-	validator.SetWorkflowCatalog(e.skills)
-	validator.SetWorkflowTeams(e.teams)
+	validator.SetRoutineTeams(e.teams)
 	validator.SetRoutineGrantCatalog(e.skills)
 	validator.SetRoutineOwnerAddresses(e.routineOwnerAddresses)
 	validator.SetChatFiles(e.chatFiles)
@@ -3168,8 +3164,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		if dispatchErr != nil {
 			return dispatchErr
 		}
-		dispatcher.SetWorkflowCatalog(e.skills)
-		dispatcher.SetWorkflowTeams(e.teams)
+		dispatcher.SetRoutineTeams(e.teams)
 		dispatcher.SetAcceptedRunExecutionPreparer(e)
 		dispatcher.SetChatFiles(e.chatFiles)
 		e.actionPoolSpecs[index].dispatcher = dispatcher
@@ -3179,8 +3174,7 @@ func (e *Engine) configureRunbookManagementActions() error {
 		if dispatchErr != nil {
 			return dispatchErr
 		}
-		dispatcher.SetWorkflowCatalog(e.skills)
-		dispatcher.SetWorkflowTeams(e.teams)
+		dispatcher.SetRoutineTeams(e.teams)
 		dispatcher.SetAcceptedRunExecutionPreparer(e)
 		dispatcher.SetChatFiles(e.chatFiles)
 		e.actionSupervisorSpecs[index].dispatcher = dispatcher

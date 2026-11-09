@@ -226,7 +226,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validator.SetWorkflowTeams(teams)
+	validator.SetRoutineTeams(teams)
 	if _, err := validator.ValidateActionProposal(ctx, ActionProposalValidationInput{Run: run, Bound: bound, Arguments: args}); err == nil {
 		t.Fatal("routine from an Agent off the Team roster accepted")
 	}
@@ -238,7 +238,7 @@ func TestTeamMemberCreatesARoutineInTheTeamChat(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatcher.SetWorkflowTeams(teams)
+	dispatcher.SetRoutineTeams(teams)
 	call := &ActionCall{ID: "create-routine", Scope: scope, RunID: run.ID, DeploymentID: "researcher", IdempotencyKey: "create-routine"}
 	if _, err := dispatcher.DispatchAction(ctx, ActionDispatchInput{Run: run, Bound: bound, Call: call, Arguments: args}); err != nil {
 		t.Fatalf("member routine dispatch = %v", err)

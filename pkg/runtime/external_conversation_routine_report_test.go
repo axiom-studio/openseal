@@ -98,24 +98,15 @@ func (f *routineReportFixture) deliveries(t *testing.T) []*ExternalConversationD
 
 // A routine created from a Slack conversation posts each occurrence's report
 // there as a new top-level message, even when it was created in a thread, and
-// exactly once. A deferred workflow keeps answering where its request got a
-// reply: that thread, or the reply-mode thread of a top-level request.
+// exactly once.
 func TestRoutineReportReachesTheExternalConversationItWasCreatedFrom(t *testing.T) {
-	for _, test := range []struct {
-		name, thread, want string
-		workflow           bool
-	}{
-		{"routine from a top-level message", "", "", false},
-		{"routine from a thread", "170.500", "", false},
-		{"workflow from a top-level message", "", "171.001", true},
-		{"workflow from a thread", "170.500", "170.500", true},
+	for _, test := range []struct{ name, thread string }{
+		{"routine from a top-level message", ""},
+		{"routine from a thread", "170.500"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newRoutineReportFixture(t, test.thread, true)
 			run := f.occurrence("routine-occurrence", true)
-			if test.workflow {
-				run.Context[deferredWorkflowContextKey] = true
-			}
 			for range 2 {
 				if err := f.worker.project(t.Context(), run); err != nil {
 					t.Fatal(err)
@@ -125,7 +116,7 @@ func TestRoutineReportReachesTheExternalConversationItWasCreatedFrom(t *testing.
 			if err != nil || report == nil || report.Content != "Today's digest: three stories." {
 				t.Fatalf("routine report was not posted: %#v %v", report, err)
 			}
-			if topLevel := report.ReplyToMessageID == "" && report.ThreadRootID == ""; topLevel == test.workflow {
+			if report.ReplyToMessageID != "" || report.ThreadRootID != "" {
 				t.Fatalf("report placement in the Conversation = reply %q thread %q", report.ReplyToMessageID, report.ThreadRootID)
 			}
 			deliveries := f.deliveries(t)
@@ -134,7 +125,7 @@ func TestRoutineReportReachesTheExternalConversationItWasCreatedFrom(t *testing.
 			}
 			delivery := deliveries[0]
 			if delivery.Operation != capability.ConversationDeliveryMessageSend || delivery.ChannelMessageID != report.ID || delivery.ConversationID != f.conversation.ID ||
-				delivery.ExternalConversationID != "D123" || delivery.ExternalThreadID != test.want || delivery.IdempotencyKey != routineReportDeliveryKey(report.ID) {
+				delivery.ExternalConversationID != "D123" || delivery.ExternalThreadID != "" || delivery.IdempotencyKey != routineReportDeliveryKey(report.ID) {
 				t.Fatalf("routine report delivery = %#v", delivery)
 			}
 		})
