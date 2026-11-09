@@ -102,3 +102,30 @@ func TestApprovalClaimOnceThenFailsRun(t *testing.T) {
 	h := newFinalFixture(t, finalCall("final", `{"answer":"The change was approved and merged."}`))
 	requireFinal(t, h.settleFinal("final", ControlAuthority{}))
 }
+
+// Prod run 46c87b15: a pending setup form that asks to approve mail scopes,
+// and the agent's correction that no approval is pending, are no approval claims.
+func TestClaimsPendingApprovalPhrases(t *testing.T) {
+	for _, text := range []string{
+		"The Google Workspace setup form is live in the chat now — status pending, waiting on you. Sign in and approve sending mail.",
+		"Correction: there is no approval pending in this run. What exists is a setup form, status pending, awaiting your completion.",
+		"Nothing is awaiting approval.",
+		"The change was approved and merged.",
+	} {
+		if claimsPendingApproval(text) {
+			t.Errorf("claim detected in %q", text)
+		}
+	}
+	for _, text := range []string{
+		"Your approval request has been submitted.",
+		"This is waiting for your approval.",
+		"Pending approval from your admin.",
+		"Awaiting approval.",
+		"The transfer needs your approval before it runs.",
+		"The approval is pending with finance.",
+	} {
+		if !claimsPendingApproval(text) {
+			t.Errorf("no claim detected in %q", text)
+		}
+	}
+}
