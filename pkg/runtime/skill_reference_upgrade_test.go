@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -216,5 +218,125 @@ func TestSkillReferenceUpgradeDropsActionsRemovedFromTarget(t *testing.T) {
 	if len(bindings) != 1 || bindings[0].SkillVersion != "2.0.0" || len(bindings[0].AllowedActions) != 1 ||
 		bindings[0].AllowedActions[0] != "open" || len(bindings[0].ArgumentRestrictions) != 0 {
 		t.Fatalf("upgraded binding = %#v", bindings)
+	}
+}
+
+func TestSkillReferenceUpgradeGrantActions(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	catalog := skill.NewCatalogWithStore(store)
+	action := func(name string) skill.Action {
+		return skill.Action{
+			Name: name, Description: name, InputSchema: map[string]interface{}{"type": "object"},
+			Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead, Idempotency: skill.IdempotencySupported,
+		}
+	}
+	register := func(id, kind, version string, actions ...string) {
+		t.Helper()
+		definition := &skill.Definition{
+			ID: id, Version: version, Name: id, Requirements: skill.Requirements{AlwaysAvailable: true},
+			Transport: skill.TransportReference{Kind: kind, Endpoint: id}, Actions: map[string]skill.Action{},
+		}
+		for _, name := range actions {
+			definition.Actions[name] = action(name)
+		}
+		if err := catalog.Register(ctx, definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	register("routines", "kernel", "1.0.0", "list", "start", "create")
+	register("routines", "kernel", "1.1.0", "list", "start", "create", "event_sources", "send_test_event")
+	register("browser", "tool", "1.0.0", "open")
+	register("browser", "tool", "1.1.0", "open", "capture")
+	scope := skill.ScopeReference{Kind: "tenant", ID: "1"}
+	save := func(id, skillID string, allowed ...string) {
+		t.Helper()
+		if err := store.SaveSkillBinding(ctx, &skill.Binding{
+			ID: id, Scope: scope, DeploymentID: "finn", SkillID: skillID, SkillVersion: "1.0.0",
+			AllowedActions: allowed, MaximumRisk: skill.RiskLevelRead, Revision: 1,
+		}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The owner removed start from the primary binding; the sibling never had create.
+	save("routines", "routines", "list", "create")
+	save("routines-team", "routines", "list", "start")
+	save("browser", "browser", "open")
+	service := NewSkillReferenceUpgradeService(store, catalog)
+	request := PlanSkillReferenceUpgradeRequest{
+		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "finn", BindingID: "routines", ToVersion: "1.1.0",
+	}
+
+	plain, err := service.Plan(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plain.AddedActions) != 0 {
+		t.Fatalf("plan without grants added %#v", plain.AddedActions)
+	}
+	request.GrantActions = []string{"send_test_event", "list", "start", "create", "event_sources", "unknown", " event_sources "}
+	plan, err := service.Plan(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := plan.AddedActions; len(got) != 2 || got[0] != "event_sources" || got[1] != "send_test_event" {
+		t.Fatalf("added actions = %#v", got)
+	}
+	if plan.ApprovalRequired || len(plan.Findings) != 0 {
+		t.Fatalf("granted actions alone required approval: %#v", plan.Findings)
+	}
+	if plan.Digest == plain.Digest {
+		t.Fatal("plan digest does not cover added actions")
+	}
+	if len(plan.Siblings) != 1 || plan.Siblings[0].ID != "routines-team" {
+		t.Fatalf("siblings = %#v", plan.Siblings)
+	}
+
+	if _, err = service.Apply(ctx, ApplySkillReferenceUpgradeRequest{
+		Plan: plan, Actor: ActivityActor{Type: "system", ID: "sentinel"}, Reason: "Grant new routine actions",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := catalog.ListBindings(ctx, scope, "finn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string][]string{
+		"routines":      {"list", "create", "event_sources", "send_test_event"},
+		"routines-team": {"list", "start", "event_sources", "send_test_event"},
+		"browser":       {"open"},
+	}
+	for _, binding := range bindings {
+		expected, ok := want[binding.ID]
+		if !ok {
+			t.Fatalf("unexpected binding %s", binding.ID)
+		}
+		delete(want, binding.ID)
+		if binding.SkillID == "routines" && binding.SkillVersion != "1.1.0" {
+			t.Fatalf("%s version = %s", binding.ID, binding.SkillVersion)
+		}
+		if strings.Join(binding.AllowedActions, ",") != strings.Join(expected, ",") {
+			t.Fatalf("%s allowed actions = %#v, want %#v", binding.ID, binding.AllowedActions, expected)
+		}
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing bindings %#v", want)
+	}
+
+	// A tampered plan that claims extra added actions no longer matches.
+	tampered := *plan
+	tampered.AddedActions = []string{"event_sources", "send_test_event", "start"}
+	if _, err = service.Apply(ctx, ApplySkillReferenceUpgradeRequest{
+		Plan: &tampered, Actor: ActivityActor{Type: "system", ID: "sentinel"}, Reason: "replay",
+	}); err == nil {
+		t.Fatal("tampered plan applied")
+	}
+
+	_, err = service.Plan(ctx, PlanSkillReferenceUpgradeRequest{
+		Scope: Scope{Kind: scope.Kind, ID: scope.ID}, DeploymentID: "finn", BindingID: "browser", ToVersion: "1.1.0",
+		GrantActions: []string{"capture"},
+	})
+	if !errors.Is(err, ErrSkillReferenceUpgradeInvalid) {
+		t.Fatalf("grant on a tool Skill = %v", err)
 	}
 }

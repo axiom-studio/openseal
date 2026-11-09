@@ -101,7 +101,13 @@ type SkillReferenceUpgradePlan struct {
 	// RemovedActions are allowed actions of the moved bindings that the target
 	// version no longer defines. The upgrade drops them from every binding it
 	// moves; dropping a grant needs no approval.
-	RemovedActions   []string                       `json:"removedActions,omitempty"`
+	RemovedActions []string `json:"removedActions,omitempty"`
+	// AddedActions are actions the request granted that the target version
+	// defines and the from version did not. The upgrade adds them to every
+	// binding it moves; adding them needs no approval by itself. Actions the
+	// from version already defined are never added, so an action the owner
+	// removed from a binding stays removed.
+	AddedActions     []string                       `json:"addedActions,omitempty"`
 	Findings         []SkillReferenceUpgradeFinding `json:"findings,omitempty"`
 	ApprovalRequired bool                           `json:"approvalRequired"`
 	Digest           string                         `json:"digest"`
@@ -114,6 +120,10 @@ type PlanSkillReferenceUpgradeRequest struct {
 	BindingID        string `json:"bindingId"`
 	ToVersion        string `json:"toVersion"`
 	ToSourceIdentity string `json:"toSourceIdentity,omitempty"`
+	// GrantActions names actions to add to the moved bindings when the target
+	// version introduces them. Only kernel Skills accept it; the plan keeps the
+	// granted actions that are new in the target as AddedActions.
+	GrantActions []string `json:"grantActions,omitempty"`
 }
 
 type SkillReferenceUpgradeApproval struct {
@@ -320,6 +330,17 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		return nil, fmt.Errorf("%w: exact target Skill definition is not installed", ErrSkillReferenceUpgradeInvalid)
 	}
 	targetSource := skill.DefinitionSourceIdentity(target)
+	previous, err := exactUpgradeDefinition(ctx, s.catalog, current.SkillID, current.SkillVersion, current.SourceIdentity)
+	if err != nil {
+		return nil, err
+	}
+	if previous == nil {
+		return nil, fmt.Errorf("%w: current Skill definition is not installed", ErrSkillReferenceUpgradeInvalid)
+	}
+	addedActions, err := grantedUpgradeActions(req.GrantActions, previous, target)
+	if err != nil {
+		return nil, err
+	}
 	// Every enabled binding at the current identity moves together. A binding
 	// at the same version from another publisher cannot be told apart by
 	// version-keyed references, so that remains a refusal.
@@ -353,6 +374,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 				removedActions = append(removedActions, action)
 			}
 		}
+		addBindingActions(candidateBinding, addedActions)
 		if err := s.catalog.ValidateBindingCandidate(ctx, candidateBinding); err != nil {
 			return nil, fmt.Errorf("%w: target binding contract for %s: %v", ErrSkillReferenceUpgradeInvalid, member.ID, err)
 		}
@@ -362,13 +384,6 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 				unionActions = append(unionActions, action)
 			}
 		}
-	}
-	previous, err := exactUpgradeDefinition(ctx, s.catalog, current.SkillID, current.SkillVersion, current.SourceIdentity)
-	if err != nil || previous == nil {
-		if err != nil {
-			return nil, err
-		}
-		return nil, fmt.Errorf("%w: current Skill definition is not installed", ErrSkillReferenceUpgradeInvalid)
 	}
 
 	conversationEndpoints, err := listUpgradeConversationEndpoints(ctx, s.store, req.Scope)
@@ -430,7 +445,7 @@ func (s *SkillReferenceUpgradeService) Plan(ctx context.Context, req PlanSkillRe
 		From:       SkillReferenceIdentity{ID: current.SkillID, Version: current.SkillVersion, SourceIdentity: current.SourceIdentity},
 		To:         SkillReferenceIdentity{ID: target.ID, Version: target.Version, SourceIdentity: targetSource},
 		Objectives: objectiveImpacts, ConversationEndpoints: conversationImpacts,
-		CallbackRegistrations: callbackImpacts, RemovedActions: removedActions, Findings: findings,
+		CallbackRegistrations: callbackImpacts, RemovedActions: removedActions, AddedActions: addedActions, Findings: findings,
 		ApprovalRequired: len(findings) > 0, GeneratedAt: s.now().UTC(),
 	}
 	plan.Digest, err = skillReferenceUpgradeDigest(plan)
@@ -449,7 +464,7 @@ func (s *SkillReferenceUpgradeService) Apply(ctx context.Context, req ApplySkill
 	}
 	current, err := s.Plan(ctx, PlanSkillReferenceUpgradeRequest{
 		Scope: req.Plan.Scope, DeploymentID: req.Plan.DeploymentID, BindingID: req.Plan.BindingID,
-		ToVersion: req.Plan.To.Version, ToSourceIdentity: req.Plan.To.SourceIdentity,
+		ToVersion: req.Plan.To.Version, ToSourceIdentity: req.Plan.To.SourceIdentity, GrantActions: req.Plan.AddedActions,
 	})
 	if err != nil {
 		return nil, err
@@ -581,6 +596,7 @@ func upgradeBinding(binding *skill.Binding, plan *SkillReferenceUpgradePlan, exp
 	binding.SkillVersion = plan.To.Version
 	binding.SourceIdentity = plan.To.SourceIdentity
 	dropBindingActions(binding, plan.RemovedActions)
+	addBindingActions(binding, plan.AddedActions)
 	binding.Revision++
 	// Bindings created by an atomic workforce apply predate the management
 	// lifecycle until their first explicit mutation. Establish the lifecycle
@@ -615,6 +631,56 @@ func retainTargetActions(binding *skill.Binding, target *skill.Definition) []str
 	}
 	dropBindingActions(binding, removed)
 	return removed
+}
+
+// grantedUpgradeActions returns the granted actions that the target defines and
+// the from version did not, sorted. Only kernel Skills accept grants: their
+// actions are platform features the platform decides to hand out, while a
+// published Skill's new actions are for its binding owner to enable.
+func grantedUpgradeActions(grant []string, previous, target *skill.Definition) ([]string, error) {
+	if len(grant) == 0 {
+		return nil, nil
+	}
+	if target.Transport.Kind != "kernel" {
+		return nil, fmt.Errorf("%w: only kernel Skills accept granted actions", ErrSkillReferenceUpgradeInvalid)
+	}
+	seen := make(map[string]bool, len(grant))
+	added := make([]string, 0, len(grant))
+	for _, action := range grant {
+		action = strings.TrimSpace(action)
+		if action == "" || seen[action] {
+			continue
+		}
+		seen[action] = true
+		if _, inTarget := target.Actions[action]; !inTarget {
+			continue
+		}
+		if _, inPrevious := previous.Actions[action]; inPrevious {
+			continue
+		}
+		added = append(added, action)
+	}
+	if len(added) == 0 {
+		return nil, nil
+	}
+	sort.Strings(added)
+	return added, nil
+}
+
+// addBindingActions grants each action the binding does not already allow.
+func addBindingActions(binding *skill.Binding, actions []string) {
+	for _, action := range actions {
+		allowed := false
+		for _, existing := range binding.AllowedActions {
+			if existing == action {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			binding.AllowedActions = append(binding.AllowedActions, action)
+		}
+	}
 }
 
 func dropBindingActions(binding *skill.Binding, actions []string) {
