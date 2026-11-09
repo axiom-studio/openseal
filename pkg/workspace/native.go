@@ -1,17 +1,21 @@
 package workspace
 
+// A chat's host tools: the machine operations (machine.go) with the
+// "workspace." prefix, and the chat-only ones.
 const (
-	OperationListDirectory = "workspace.list_directory"
-	OperationReadFile      = "workspace.read_file"
-	OperationSearchFiles   = "workspace.search_files"
-	OperationBatchRead     = "workspace.batch_read"
-	OperationWriteFile     = "workspace.write_file"
-	OperationEditFile      = "workspace.edit_file"
-	OperationDeleteFile    = "workspace.delete_file"
-	OperationMoveFile      = "workspace.move_file"
-	OperationRunCommand    = "workspace.run_command"
-	OperationListChats     = "workspace.list_chats"
-	OperationCopyFromChat  = "workspace.copy_from_chat"
+	OperationPrefix = "workspace."
+
+	OperationListDirectory = OperationPrefix + OpListDirectory
+	OperationReadFile      = OperationPrefix + OpReadFile
+	OperationSearchFiles   = OperationPrefix + OpSearchFiles
+	OperationBatchRead     = OperationPrefix + "batch_read"
+	OperationWriteFile     = OperationPrefix + OpWriteFile
+	OperationEditFile      = OperationPrefix + OpEditFile
+	OperationDeleteFile    = OperationPrefix + OpDeleteFile
+	OperationMoveFile      = OperationPrefix + OpMoveFile
+	OperationRunCommand    = OperationPrefix + OpRunCommand
+	OperationListChats     = OperationPrefix + "list_chats"
+	OperationCopyFromChat  = OperationPrefix + "copy_from_chat"
 )
 
 // ChatArgument names another chat of the same Agent in a read operation; the
@@ -31,16 +35,23 @@ func Operations(authority *Authority) []Operation {
 	if authority == nil || authority.Validate() != nil {
 		return nil
 	}
+	machine := map[string]MachineOperation{}
+	for _, operation := range MachineOperations(ChatTarget()) {
+		machine[operation.Op] = operation
+	}
+	tool := func(op string) Operation {
+		return Operation{Name: OperationPrefix + op, Description: machine[op].Description, InputSchema: machine[op].InputSchema}
+	}
 	return []Operation{
-		{Name: OperationListDirectory, Description: "List the files below a path in this chat's files, or in another chat's when chat is set.", InputSchema: listInput()},
-		{Name: OperationReadFile, Description: "Read a text file from this chat's files, or from another chat's when chat is set.", InputSchema: pathInput()},
-		{Name: OperationSearchFiles, Description: "Search the text of this chat's files, or another chat's when chat is set, for text or a regular expression.", InputSchema: searchInput()},
+		tool(OpListDirectory),
+		tool(OpReadFile),
+		tool(OpSearchFiles),
 		{Name: OperationBatchRead, Description: "Run two to eight independent list, read, or search requests concurrently and return their results in request order. Use only when no request depends on another result.", InputSchema: batchReadInput()},
-		{Name: OperationWriteFile, Description: "Create or replace a text file in this chat's files.", InputSchema: writeInput()},
-		{Name: OperationEditFile, Description: "Replace exact text in a file: oldText must match the file exactly, including whitespace, and appear once unless replaceAll is set. Read the file first.", InputSchema: editInput()},
-		{Name: OperationDeleteFile, Description: "Delete a file, or a directory and everything in it.", InputSchema: pathOnlyInput()},
-		{Name: OperationMoveFile, Description: "Move or rename a file or directory.", InputSchema: moveInput()},
-		{Name: OperationRunCommand, Description: ChatSandboxDescription, InputSchema: shellInput()},
+		tool(OpWriteFile),
+		tool(OpEditFile),
+		tool(OpDeleteFile),
+		tool(OpMoveFile),
+		tool(OpRunCommand),
 		{Name: OperationListChats, Description: "List your other chats, most recently active first, with their titles and files, to find work from an earlier chat. query matches chat titles and file paths. Read a chat's files by passing its id as chat to list_directory, read_file or search_files, and bring one into this chat with copy_from_chat.", InputSchema: listChatsInput()},
 		{Name: OperationCopyFromChat, Description: "Copy a file, or a directory and everything in it, from another of your chats into this chat's files, so you can present, edit or build on it here.", InputSchema: copyInput()},
 	}
@@ -51,7 +62,7 @@ func batchReadInput() map[string]interface{} {
 	for _, item := range []struct {
 		name   string
 		schema map[string]interface{}
-	}{{OperationListDirectory, listInput()}, {OperationReadFile, pathInput()}, {OperationSearchFiles, searchInput()}} {
+	}{{OperationListDirectory, ChatTarget().input(OpListDirectory)}, {OperationReadFile, ChatTarget().input(OpReadFile)}, {OperationSearchFiles, ChatTarget().input(OpSearchFiles)}} {
 		branches = append(branches, map[string]interface{}{
 			"type": "object", "additionalProperties": false,
 			"required": []interface{}{"operation", "arguments"},
@@ -69,47 +80,6 @@ func batchReadInput() map[string]interface{} {
 	}
 }
 
-func relativePathProperty() map[string]interface{} {
-	return map[string]interface{}{"type": "string", "maxLength": 4096, "pattern": `^(?:\.|[^/][^\x00]*)?$`, "default": "."}
-}
-
-func chatProperty() map[string]interface{} {
-	return map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256, "description": "The id of another of your chats, from list_chats. Leave out for this chat."}
-}
-
-func pathInput() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path"}, "properties": map[string]interface{}{"path": relativePathProperty(), "maxBytes": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 1048576, "default": 262144}, ChatArgument: chatProperty()}}
-}
-
-func listInput() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{"path": relativePathProperty(), "depth": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 8, "default": 2}, "maxEntries": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 2000, "default": 500}, ChatArgument: chatProperty()}}
-}
-
-func searchInput() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"query"}, "properties": map[string]interface{}{"query": map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 4096}, "path": relativePathProperty(), "glob": map[string]interface{}{"type": "string", "maxLength": 512}, "regex": map[string]interface{}{"type": "boolean", "default": false}, "maxResults": map[string]interface{}{"type": "integer", "minimum": 1, "maximum": 1000, "default": 200}, ChatArgument: chatProperty()}}
-}
-
-func writeInput() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "content"}, "properties": map[string]interface{}{"path": relativePathProperty(), "content": map[string]interface{}{"type": "string", "maxLength": 1048576}, "createParents": map[string]interface{}{"type": "boolean", "default": true}}}
-}
-
-func editInput() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "oldText", "newText"}, "properties": map[string]interface{}{
-		"path":       relativePathProperty(),
-		"oldText":    map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 1048576},
-		"newText":    map[string]interface{}{"type": "string", "maxLength": 1048576},
-		"replaceAll": map[string]interface{}{"type": "boolean", "default": false},
-	}}
-}
-
-func pathOnlyInput() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path"}, "properties": map[string]interface{}{"path": relativePathProperty()}}
-}
-
-func moveInput() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"path", "destination"}, "properties": map[string]interface{}{"path": relativePathProperty(), "destination": relativePathProperty()}}
-}
-
 func listChatsInput() map[string]interface{} {
 	return map[string]interface{}{"type": "object", "additionalProperties": false, "properties": map[string]interface{}{
 		"query": map[string]interface{}{"type": "string", "maxLength": 200, "description": "Words to match in chat titles and file paths."},
@@ -125,20 +95,12 @@ func copyInput() map[string]interface{} {
 	}}
 }
 
-func shellInput() map[string]interface{} {
-	return map[string]interface{}{"type": "object", "additionalProperties": false, "required": []interface{}{"command"}, "properties": map[string]interface{}{
-		"command":          map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 20000, "description": "A bash command, such as python3 make_chart.py or pandoc report.md -o docs/report.docx."},
-		"workingDirectory": relativePathProperty(),
-		"timeoutSeconds":   map[string]interface{}{"type": "integer", "minimum": 1, "maximum": ChatCommandSeconds, "default": 120},
-	}}
-}
-
 // ChatSandboxDescription tells a model what a chat's sandbox can do, so it
 // reaches for it when a task needs it.
 const ChatSandboxDescription = "Run a bash command in this chat's sandbox, a Debian machine with internet access. The chat's files are the working directory: files a command creates, changes or deletes are saved to the chat's files, except installed packages and caches (node_modules, .venv, __pycache__, .cache). " +
 	"Installed: Python 3 with numpy, pandas, matplotlib, seaborn, duckdb, openpyxl, xlsxwriter, python-docx, python-pptx, pypdf, pdfplumber, reportlab, weasyprint, beautifulsoup4, lxml, Pillow and requests; Node.js with npm and TypeScript (tsc); pandoc; ffmpeg; ImageMagick; poppler-utils (pdftotext, pdftoppm); qpdf; LibreOffice Calc (soffice --headless) to convert or recalculate spreadsheets; graphviz (dot); tesseract OCR (English); sqlite3; git, curl and jq. Install anything else, such as scipy, with pip install or npm install. " +
 	"Use it to: read scanned PDFs and photos of text (pdftoppm, then tesseract); query large CSV or Excel files (duckdb); make charts (matplotlib or seaborn, saved as images); make Word, PowerPoint or Excel files (python-docx, python-pptx, openpyxl); turn HTML or Markdown into PDF (weasyprint, pandoc); merge, split or extract PDFs (qpdf, pdfplumber); convert or trim audio, video and images (ffmpeg, ImageMagick); draw diagrams (graphviz); type-check an app before save_app (tsc --noEmit). " +
-	"Output is the last 64 KB of stdout and stderr; a non-zero exitStatus means the command failed, so read stderr and fix it. " +
+	CommandOutputSentence +
 	"With GitHub connected, git clones, fetches and pulls any repository that connection can read, private ones too, from https://git.seal/github.com/<owner>/<repo>.git, with no token. Clone into ~/repos, outside the chat's files; clones stay for the sandbox's life. Add --filter=blob:none for a big repository (a clone transfers at most 2 GB). To answer questions about code, clone once and search with git log, git grep and grep rather than reading files one call at a time. " +
 	"git push works only to a branch other than the repository's default branch, and each push waits for the user's approval; then open a pull request with the GitHub actions. " +
 	"Inside a command, seal tools lists the tools you can call and seal call <tool> --json '{...}' calls one and prints its JSON result; files a tool returns are written under tool-output/ before it prints, and --file field=path passes a file to a field that takes file content. " +

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // Artifacts is the artifact catalog a chat's snapshots are versions in.
@@ -77,7 +78,7 @@ func NewStore(artifacts Artifacts, content runtime.ArtifactContentStore) *Store 
 var ErrConflict = errors.New("file changed")
 
 // ErrNotFound means a path names no file.
-var ErrNotFound = errors.New("file not found")
+var ErrNotFound = workspace.ErrNotFound
 
 // Head returns the chat's latest snapshot, or the empty version 0.
 func (s *Store) Head(ctx context.Context, chat Chat) (Snapshot, error) {
@@ -313,13 +314,13 @@ func checkPlacement(tree Tree, name string) error {
 		}
 		parent = parent[:index]
 		if _, ok := tree.Files[parent]; ok {
-			return fmt.Errorf("%w: %s is a file, so %s cannot be inside it", ErrPath, parent, name)
+			return workspace.InsideAFile(parent, name)
 		}
 	}
 	prefix := name + "/"
 	for existing := range tree.Files {
 		if strings.HasPrefix(existing, prefix) {
-			return fmt.Errorf("%w: %s is a directory", ErrPath, name)
+			return workspace.IsADirectory(name)
 		}
 	}
 	return nil
