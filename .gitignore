@@ -56,6 +56,8 @@ desktop/crates/*/target/
 # every NEW file added there — existing files survive only because tracked
 # files are exempt from ignore rules.
 /openseal
+/helloseal
+/helloseal.exe
 
 # Desktop development and generated assets
 desktop/.dev-workspace/
