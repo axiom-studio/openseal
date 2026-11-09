@@ -338,23 +338,6 @@ func TestVerifiedCallbackPrevalidatesEntireNormalizedBatch(t *testing.T) {
 	}
 }
 
-func TestUserAuthoredRoutingCannotPublishTrustedConnectorObservation(t *testing.T) {
-	store := &ingressRunEventStore{MemoryStore: NewMemoryStore()}
-	_, err := NewRunbookEventRouter(store).Route(context.Background(), EventEnvelope{
-		ID: "forged-provider-event", Scope: Scope{Kind: "tenant", ID: "one"},
-		Type: "conversation.message.received", Source: RunEventBindingSource("agent-one", "binding-one", "conversations"),
-		Subject: "provider-conversation", OccurredAt: time.Now().UTC(),
-		Attributes: map[string]interface{}{"bindingId": "binding-one", "provider": "slack"},
-		Actor:      ActivityActor{Type: "user", ID: "ordinary-event-author"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(store.events) != 0 {
-		t.Fatalf("user-selected connector source bypassed verified intake: %#v", store.events)
-	}
-}
-
 func TestVerifiedCallbackRechecksBindingBeforeQueuedConsumer(t *testing.T) {
 	ctx := context.Background()
 	memory := NewMemoryStore()

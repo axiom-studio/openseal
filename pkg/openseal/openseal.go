@@ -549,8 +549,6 @@ type (
 	WokenRun                             = runtime.WokenRun
 	WakeResult                           = runtime.WakeResult
 	EventEnvelope                        = runtime.EventEnvelope
-	EventRoute                           = runtime.EventRoute
-	EventRouteResult                     = runtime.EventRouteResult
 	SkillCatalog                         = skill.Catalog
 	SkillDefinition                      = skill.Definition
 	SkillAction                          = skill.Action
@@ -848,7 +846,6 @@ type (
 	ExternalConversationDispatchRequest             = runtime.ExternalConversationDispatchRequest
 	ExternalConversationDispatchResult              = runtime.ExternalConversationDispatchResult
 	ExternalConversationDispatcher                  = runtime.ExternalConversationDispatcher
-	ExternalConversationRunbookDispatcher           = runtime.ExternalConversationRunbookDispatcher
 	CanonicalExternalConversationDispatcher         = runtime.CanonicalExternalConversationDispatcher
 	ExternalConversationInboxWorkerConfig           = runtime.ExternalConversationInboxWorkerConfig
 	CallbackEventWorkerConfig                       = runtime.CallbackEventWorkerConfig
@@ -877,11 +874,6 @@ type (
 	RunProgressAcknowledgementWorker                = runtime.RunProgressAcknowledgementWorker
 	TurnRunnerProgressAcknowledgementRenderer       = runtime.TurnRunnerProgressAcknowledgementRenderer
 	ExternalConversationSupervisor                  = runtime.ExternalConversationSupervisor
-	ResolvedExternalConversationRunbook             = runtime.ResolvedExternalConversationRunbook
-	ExternalConversationRunbookResolver             = runtime.ExternalConversationRunbookResolver
-	ExternalConversationRunbookEventDispatcher      = runtime.ExternalConversationRunbookEventDispatcher
-	ExternalConversationWorkforceCatalog            = runtime.ExternalConversationWorkforceCatalog
-	CatalogExternalConversationRunbookResolver      = runtime.CatalogExternalConversationRunbookResolver
 )
 
 // ExternalConversationGatewayVerificationAdapterHost opts in to handling
@@ -1060,9 +1052,6 @@ func NewSkillIdentity(id, version, sourceIdentity string) SkillIdentity {
 }
 
 type (
-	EventSourceCheckpoint               = runtime.EventSourceCheckpoint
-	EventSourceCheckpointStore          = runtime.EventSourceCheckpointStore
-	AdvanceEventSourceCheckpointRequest = runtime.AdvanceEventSourceCheckpointRequest
 	KernelCapability                    = kernelapi.Capability
 	KernelCapabilityDocument            = kernelapi.CapabilityDocument
 	KernelCapabilityContext             = kernelapi.CapabilityContext
@@ -1084,21 +1073,6 @@ type (
 	ActionApprovalCapabilityFeatures    = kernelapi.ActionApprovalCapabilityFeatures
 )
 
-type (
-	EventSourceSubscription              = runtime.EventSourceSubscription
-	EventSourceSubscriptionStatus        = runtime.EventSourceSubscriptionStatus
-	EventSourceConnector                 = runtime.EventSourceConnector
-	EventSourceConnectorKind             = runtime.EventSourceConnectorKind
-	EventSourceHealth                    = runtime.EventSourceHealth
-	EventSourceHealthState               = runtime.EventSourceHealthState
-	EventSourceSubscriptionDetail        = runtime.EventSourceSubscriptionDetail
-	EventSourceSubscriptionFilter        = runtime.EventSourceSubscriptionFilter
-	EventSourceSubscriptionStore         = runtime.EventSourceSubscriptionStore
-	CreateEventSourceSubscriptionRequest = runtime.CreateEventSourceSubscriptionRequest
-	UpdateEventSourceSubscriptionRequest = runtime.UpdateEventSourceSubscriptionRequest
-	ReportEventSourceHealthRequest       = runtime.ReportEventSourceHealthRequest
-)
-
 const (
 	DeploymentChangeConfigurationUpdated    = workforce.DeploymentChangeConfigurationUpdated
 	TurnHostContextExceeded                 = runtime.TurnHostContextExceeded
@@ -1117,8 +1091,6 @@ const (
 	SkillBindingsCapabilityVersion          = kernelapi.SkillBindingsCapabilityVersion
 	AgentEmbedsCapabilityID                 = kernelapi.AgentEmbedsCapabilityID
 	AgentEmbedsCapabilityVersion            = kernelapi.AgentEmbedsCapabilityVersion
-	EventRoutingCapabilityID                = kernelapi.EventRoutingCapabilityID
-	EventRoutingCapabilityVersion           = kernelapi.EventRoutingCapabilityVersion
 	RunbooksCapabilityID                    = kernelapi.RunbooksCapabilityID
 	RunbooksCapabilityVersion               = kernelapi.RunbooksCapabilityVersion
 	KernelOperationCreate                   = kernelapi.OperationCreate
@@ -1142,7 +1114,6 @@ const (
 	KernelOperationResolveAmendment         = kernelapi.OperationResolveAmendment
 	KernelOperationActivateAmendment        = kernelapi.OperationActivateAmendment
 	KernelOperationRecoverParticipation     = kernelapi.OperationRecoverParticipation
-	KernelOperationRoute                    = kernelapi.OperationRoute
 	KernelOperationReconcile                = kernelapi.OperationReconcile
 	KernelOperationUpsert                   = kernelapi.OperationUpsert
 	KernelOperationDisable                  = kernelapi.OperationDisable
@@ -1207,25 +1178,11 @@ const (
 )
 
 const (
-	EventSourceSubscriptionsCapabilityID      = kernelapi.EventSourceSubscriptionsCapabilityID
-	EventSourceSubscriptionsCapabilityVersion = kernelapi.EventSourceSubscriptionsCapabilityVersion
-	ConversationGatewaysCapabilityID          = kernelapi.ConversationGatewaysCapabilityID
-	ConversationGatewaysCapabilityVersion     = kernelapi.ConversationGatewaysCapabilityVersion
-	SpacesCapabilityID                        = kernelapi.SpacesCapabilityID
-	CallbacksCapabilityID                     = kernelapi.CallbacksCapabilityID
-	CallbacksCapabilityVersion                = kernelapi.CallbacksCapabilityVersion
-	KernelOperationReportHealth               = kernelapi.OperationReportHealth
-	KernelOperationGetCheckpoint              = kernelapi.OperationGetCheckpoint
-	KernelOperationAdvanceCheckpoint          = kernelapi.OperationAdvanceCheckpoint
-	EventSourceSubscriptionActive             = runtime.EventSourceSubscriptionActive
-	EventSourceSubscriptionPaused             = runtime.EventSourceSubscriptionPaused
-	EventSourceSubscriptionRetired            = runtime.EventSourceSubscriptionRetired
-	EventSourceConnectorHost                  = runtime.EventSourceConnectorHost
-	EventSourceConnectorSkill                 = runtime.EventSourceConnectorSkill
-	EventSourceHealthUnknown                  = runtime.EventSourceHealthUnknown
-	EventSourceHealthHealthy                  = runtime.EventSourceHealthHealthy
-	EventSourceHealthDegraded                 = runtime.EventSourceHealthDegraded
-	EventSourceHealthUnhealthy                = runtime.EventSourceHealthUnhealthy
+	ConversationGatewaysCapabilityID      = kernelapi.ConversationGatewaysCapabilityID
+	ConversationGatewaysCapabilityVersion = kernelapi.ConversationGatewaysCapabilityVersion
+	SpacesCapabilityID                    = kernelapi.SpacesCapabilityID
+	CallbacksCapabilityID                 = kernelapi.CallbacksCapabilityID
+	CallbacksCapabilityVersion            = kernelapi.CallbacksCapabilityVersion
 )
 
 // ChannelCapability returns the canonical versioned descriptor for the
@@ -1250,20 +1207,12 @@ func RunbooksCapability() KernelCapability {
 	return kernelapi.RunbooksCapability()
 }
 
-func EventSourceSubscriptionsCapability() KernelCapability {
-	return kernelapi.EventSourceSubscriptionsCapability()
-}
-
 func ConversationGatewaysCapability(management bool, choices ...[]ConversationGatewayAdapterChoice) KernelCapability {
 	return kernelapi.ConversationGatewaysCapability(management, choices...)
 }
 
 func CallbacksCapability(management bool, choices ...[]CallbackAdapterChoice) KernelCapability {
 	return kernelapi.CallbacksCapability(management, choices...)
-}
-
-func EventRoutingCapability() KernelCapability {
-	return kernelapi.EventRoutingCapability()
 }
 
 func SkillActionsCapability() KernelCapability {
@@ -1415,8 +1364,6 @@ var NewExternalConversationReplyWorker = runtime.NewExternalConversationReplyWor
 var NewRunProgressAcknowledgementWorker = runtime.NewRunProgressAcknowledgementWorker
 var NewTurnRunnerProgressAcknowledgementRenderer = runtime.NewTurnRunnerProgressAcknowledgementRenderer
 var NewExternalConversationSupervisor = runtime.NewExternalConversationSupervisor
-var NewExternalConversationRunbookEventDispatcher = runtime.NewExternalConversationRunbookEventDispatcher
-var NewCatalogExternalConversationRunbookResolver = runtime.NewCatalogExternalConversationRunbookResolver
 var NewOAuthService = kerneloauth.NewService
 var NewOAuthMemoryStore = kerneloauth.NewMemoryStore
 var OAuthSessionIDFromState = kerneloauth.SessionIDFromState
@@ -1461,8 +1408,6 @@ var (
 	ErrInvalidAgentRun                      = runtime.ErrInvalidAgentRun
 	ErrInvalidRunCommand                    = runtime.ErrInvalidRunCommand
 	ErrInvalidScope                         = runtime.ErrInvalidScope
-	ErrEventSourceCheckpointConflict        = runtime.ErrEventSourceCheckpointConflict
-	ErrInvalidEventSourceCheckpoint         = runtime.ErrInvalidEventSourceCheckpoint
 	ErrInvalidOwner                         = runtime.ErrInvalidOwner
 	ErrObjectiveNotFound                    = runtime.ErrObjectiveNotFound
 	ErrObjectiveIdempotency                 = runtime.ErrObjectiveIdempotency
@@ -1525,13 +1470,6 @@ var (
 	ErrTeamAmendmentNotFound                = kernelteam.ErrAmendmentNotFound
 	ErrTeamIdempotencyConflict              = kernelteam.ErrIdempotencyConflict
 	ErrTeamParticipationRecoveryNotRequired = kernelteam.ErrParticipationRecoveryNotRequired
-)
-
-var (
-	ErrEventSourceSubscriptionNotFound = runtime.ErrEventSourceSubscriptionNotFound
-	ErrEventSourceSubscriptionConflict = runtime.ErrEventSourceSubscriptionConflict
-	ErrInvalidEventSourceSubscription  = runtime.ErrInvalidEventSourceSubscription
-	ErrInvalidEventSourceHealth        = runtime.ErrInvalidEventSourceHealth
 )
 
 func NewToolActionDispatcher(invoker runtime.ToolInvoker) (*runtime.ToolActionDispatcher, error) {
@@ -2019,9 +1957,8 @@ const (
 	CallbackEventPending                = runtime.CallbackEventPending
 	CallbackEventApplied                = runtime.CallbackEventApplied
 
-	ExternalConversationHandlerAgent   = runtime.ExternalConversationHandlerAgent
-	ExternalConversationHandlerTeam    = runtime.ExternalConversationHandlerTeam
-	ExternalConversationHandlerRunbook = runtime.ExternalConversationHandlerRunbook
+	ExternalConversationHandlerAgent = runtime.ExternalConversationHandlerAgent
+	ExternalConversationHandlerTeam  = runtime.ExternalConversationHandlerTeam
 
 	ExternalConversationSelectAllMessages     = runtime.ExternalConversationSelectAllMessages
 	ExternalConversationSelectMentions        = runtime.ExternalConversationSelectMentions
@@ -2182,8 +2119,6 @@ var (
 type Engine struct {
 	store                         runtime.KernelStore
 	portfolio                     *runtime.PortfolioService
-	eventSources                  *runtime.EventSourceCheckpointService
-	eventSourceSubscriptions      *runtime.EventSourceSubscriptionService
 	activity                      *runtime.RunActivityService
 	dependencies                  *runtime.DependencyCoordinator
 	conversations                 *runtime.ConversationService
@@ -2326,27 +2261,25 @@ func New(opts ...Option) (*Engine, error) {
 
 	agentRegistry := kernelagent.NewRegistry().WithDeploymentIDs(store)
 	e := &Engine{
-		store:                    store,
-		workSignals:              runtime.NewWorkSignalStatus(),
-		portfolio:                runtime.NewPortfolioService(store),
-		eventSources:             runtime.NewEventSourceCheckpointService(store),
-		eventSourceSubscriptions: runtime.NewEventSourceSubscriptionService(store, store),
-		activity:                 runtime.NewRunActivityService(store, store),
-		dependencies:             runtime.NewDependencyCoordinator(store),
-		conversations:            runtime.NewConversationService(store),
-		spaces:                   runtime.NewSpaceService(store),
-		conversationChanges:      conversationChanges,
-		collaboration:            runtime.NewCollaborationService(store),
-		turns:                    runtime.NewAgentTurnService(store, store),
-		runQueue:                 runtime.NewAgentRunScheduler(store),
-		wake:                     runtime.NewAgentRunWakeService(store, store),
-		artifacts:                runtime.NewArtifactCatalog(store).WithPlacement(runtime.NewStoreArtifactPlacement(store)),
-		skills:                   skill.NewCatalogWithStore(store),
-		agents:                   agentRegistry,
-		teams:                    kernelteam.NewRegistryWithStore(store, agentRegistry),
-		actionPolicy:             nil,
-		approvalAuth:             runtime.EligibleApprovalAuthorizer{},
-		logger:                   sugar,
+		store:               store,
+		workSignals:         runtime.NewWorkSignalStatus(),
+		portfolio:           runtime.NewPortfolioService(store),
+		activity:            runtime.NewRunActivityService(store, store),
+		dependencies:        runtime.NewDependencyCoordinator(store),
+		conversations:       runtime.NewConversationService(store),
+		spaces:              runtime.NewSpaceService(store),
+		conversationChanges: conversationChanges,
+		collaboration:       runtime.NewCollaborationService(store),
+		turns:               runtime.NewAgentTurnService(store, store),
+		runQueue:            runtime.NewAgentRunScheduler(store),
+		wake:                runtime.NewAgentRunWakeService(store, store),
+		artifacts:           runtime.NewArtifactCatalog(store).WithPlacement(runtime.NewStoreArtifactPlacement(store)),
+		skills:              skill.NewCatalogWithStore(store),
+		agents:              agentRegistry,
+		teams:               kernelteam.NewRegistryWithStore(store, agentRegistry),
+		actionPolicy:        nil,
+		approvalAuth:        runtime.EligibleApprovalAuthorizer{},
+		logger:              sugar,
 	}
 	conversationChanges.SetSkillSetupRequestReader(e.reconciledSkillSetupRequests)
 	e.collaboration.SetAcceptedRunExecutionPreparer(e)
@@ -2530,8 +2463,6 @@ func WithStore(store runtime.KernelStore) Option {
 	return func(e *Engine) error {
 		e.store = store
 		e.portfolio = runtime.NewPortfolioService(store)
-		e.eventSources = runtime.NewEventSourceCheckpointService(store)
-		e.eventSourceSubscriptions = runtime.NewEventSourceSubscriptionService(store, store)
 		e.activity = runtime.NewRunActivityService(store, store)
 		if dependencyStore, ok := store.(runtime.DependencyKernelStore); ok {
 			e.dependencies = runtime.NewDependencyCoordinator(dependencyStore)
@@ -2775,17 +2706,7 @@ func (e *Engine) rebuildExternalConversations() error {
 		e.conversationRunScheduler == nil {
 		return fmt.Errorf("external conversation transport requires dynamic conversation Runs, scopes, host, and config")
 	}
-	workforce, ok := e.store.(runtime.ExternalConversationWorkforceCatalog)
-	if !ok {
-		return fmt.Errorf("persistent store does not implement external conversation workforce resolution")
-	}
-	runbookResolver, err := runtime.NewCatalogExternalConversationRunbookResolver(workforce)
-	if err != nil {
-		return err
-	}
-	runbookDispatcher := runtime.NewExternalConversationRunbookEventDispatcher(e.store, runbookResolver)
-	runbookDispatcher.SetAcceptedRunExecutionPreparer(e)
-	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler, runbookDispatcher)
+	dispatcher := runtime.NewCanonicalExternalConversationDispatcher(e.conversationRunScheduler)
 	inboxConfig := e.externalConversations.config.Inbox
 	if contextHost, ok := e.externalConversations.host.(runtime.ExternalConversationContextHost); ok {
 		inboxConfig.ContextHost = contextHost
@@ -2846,18 +2767,13 @@ func (e *Engine) rebuildCallbacks() error {
 		runtime.CallbackEventStore
 		runtime.PortfolioStore
 		runtime.ActionStore
-		runtime.RunCommandStore
-		runtime.RunbookActivationStore
 	})
 	if !ok || e.skills == nil {
 		return nil
 	}
 	e.callbacks.registry = runtime.NewCallbackRegistry(store, e.skills)
-	runbookEvents := runtime.NewRunbookEventRouter(store)
-	runbookEvents.SetAcceptedRunExecutionPreparer(e)
 	e.callbacks.ingress = runtime.NewCallbackIngressService(store, e.skills, map[string]runtime.CallbackEventConsumer{
 		"approvals": runtime.NewApprovalCallbackConsumer(store, e.externalConversations.transport),
-		"runbooks":  runbookEvents,
 	})
 	if e.externalConversations.supervisor != nil && e.externalConversations.config != nil {
 		callbackConfig := e.externalConversations.config.Callback
@@ -3700,87 +3616,6 @@ func (e *Engine) UpdateRunbookActivation(ctx context.Context, scope runtime.Scop
 
 func (e *Engine) StartRunbookActivation(ctx context.Context, scope runtime.Scope, activationID string, req runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error) {
 	return runtime.StartRunbookActivationWithExecutionPreparer(ctx, e.store, scope, activationID, req, e)
-}
-
-// GetEventSourceCheckpoint returns durable host-connector progress without
-// projecting opaque cursors into the model-visible activity or prompt layers.
-func (e *Engine) GetEventSourceCheckpoint(ctx context.Context, scope runtime.Scope, source, subscriptionID string) (*runtime.EventSourceCheckpoint, error) {
-	if e.eventSources == nil {
-		return nil, errors.New("event source checkpoint capability is unavailable")
-	}
-	return e.eventSources.Get(ctx, scope, source, subscriptionID)
-}
-
-// AdvanceEventSourceCheckpoint atomically appends a bounded replay window and
-// advances the connector cursor using optimistic concurrency.
-func (e *Engine) AdvanceEventSourceCheckpoint(ctx context.Context, req runtime.AdvanceEventSourceCheckpointRequest) (*runtime.EventSourceCheckpoint, error) {
-	if e.eventSources == nil {
-		return nil, errors.New("event source checkpoint capability is unavailable")
-	}
-	return e.eventSources.Advance(ctx, req)
-}
-
-func (e *Engine) CreateEventSourceSubscription(ctx context.Context, req runtime.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
-	if e.eventSourceSubscriptions == nil {
-		return nil, errors.New("event source subscription capability is unavailable")
-	}
-	if err := e.validateEventSourceConnector(ctx, req.Scope, req.Owner, req.Connector); err != nil {
-		return nil, err
-	}
-	return e.eventSourceSubscriptions.Create(ctx, req)
-}
-
-func (e *Engine) GetEventSourceSubscription(ctx context.Context, scope runtime.Scope, id string) (*runtime.EventSourceSubscriptionDetail, error) {
-	if e.eventSourceSubscriptions == nil {
-		return nil, errors.New("event source subscription capability is unavailable")
-	}
-	return e.eventSourceSubscriptions.Get(ctx, scope, id)
-}
-
-func (e *Engine) ListEventSourceSubscriptions(ctx context.Context, filter runtime.EventSourceSubscriptionFilter) ([]*runtime.EventSourceSubscription, error) {
-	if e.eventSourceSubscriptions == nil {
-		return nil, errors.New("event source subscription capability is unavailable")
-	}
-	return e.eventSourceSubscriptions.List(ctx, filter)
-}
-
-func (e *Engine) UpdateEventSourceSubscription(ctx context.Context, scope runtime.Scope, id string, req runtime.UpdateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
-	if e.eventSourceSubscriptions == nil {
-		return nil, errors.New("event source subscription capability is unavailable")
-	}
-	current, err := e.eventSourceSubscriptions.Get(ctx, scope, id)
-	if err != nil {
-		return nil, err
-	}
-	connector := current.Subscription.Connector
-	if req.Connector != nil {
-		connector = *req.Connector
-	}
-	if err := e.validateEventSourceConnector(ctx, scope, current.Subscription.Owner, connector); err != nil {
-		return nil, err
-	}
-	return e.eventSourceSubscriptions.Update(ctx, scope, id, req)
-}
-
-func (e *Engine) ReportEventSourceHealth(ctx context.Context, req runtime.ReportEventSourceHealthRequest) (*runtime.EventSourceHealth, error) {
-	if e.eventSourceSubscriptions == nil {
-		return nil, errors.New("event source subscription capability is unavailable")
-	}
-	return e.eventSourceSubscriptions.ReportHealth(ctx, req)
-}
-
-func (e *Engine) validateEventSourceConnector(ctx context.Context, scope runtime.Scope, owner runtime.ObjectiveOwner, connector runtime.EventSourceConnector) error {
-	if connector.Kind != runtime.EventSourceConnectorSkill {
-		return nil
-	}
-	if e.skills == nil {
-		return errors.New("event source Skill connector catalog is unavailable")
-	}
-	_, err := e.skills.Resolve(ctx, skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, owner.ID, connector.ID, connector.Version, connector.Action, skill.BindingReference{ID: connector.BindingID, Revision: connector.BindingRevision})
-	if err != nil {
-		return fmt.Errorf("event source Skill connector is unavailable: %w", err)
-	}
-	return nil
 }
 
 func (e *Engine) ReconcileRunbookSchedules(ctx context.Context, scope runtime.Scope, limit int) (*runtime.RunbookScheduleResult, error) {
@@ -4729,18 +4564,6 @@ func (e *Engine) WakeAgentRuns(ctx context.Context, signal runtime.WakeSignal) (
 
 func (e *Engine) WakeDueAgentRuns(ctx context.Context, scope runtime.Scope, at time.Time) (*runtime.WakeResult, error) {
 	return e.wake.WakeDueTimers(ctx, scope, at)
-}
-
-// RouteEvent matches a normalized event against active Runbook triggers and
-// creates Objective-attributed Runs. Embedding hosts own transport watches and
-// authorization; the kernel owns matching, idempotency, work, and audit.
-func (e *Engine) RouteEvent(ctx context.Context, event runtime.EventEnvelope) (*runtime.EventRouteResult, error) {
-	if e == nil || e.store == nil {
-		return nil, errors.New("Runbook event routing is unavailable")
-	}
-	router := runtime.NewRunbookEventRouter(e.store)
-	router.SetAcceptedRunExecutionPreparer(e)
-	return router.Route(ctx, event)
 }
 
 func (e *Engine) RegisterSkill(ctx context.Context, definition *skill.Definition) error {

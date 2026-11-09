@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
@@ -280,15 +279,4 @@ func TestRoutineRunsActForTheirCreatorOnlyWithATask(t *testing.T) {
 	if err != nil || started.Run.ActingUser != "user" {
 		t.Fatalf("started routine run = %#v, %v", started, err)
 	}
-
-	// An event routine has no task and acts for no one.
-	acceptedCreationStores(t, func(t *testing.T, store KernelStore) {
-		activation, preparer := acceptedCreationActivation(t, store, runbook.Trigger{Kind: runbook.TriggerEvent, EventType: "message.received", Entrypoint: "review"})
-		router := NewRunbookEventRouter(store)
-		router.SetAcceptedRunExecutionPreparer(preparer)
-		routed, err := router.Route(t.Context(), EventEnvelope{ID: "message", Scope: activation.Scope, Type: "message.received", Source: "verified", Subject: "thread", OccurredAt: time.Now().UTC()})
-		if err != nil || len(routed.Routes) != 1 || routed.Routes[0].Run.ActingUser != "" {
-			t.Fatalf("event routine run = %#v, %v", routed, err)
-		}
-	})
 }

@@ -14,7 +14,7 @@ func TestExternalThreadsKeepOneChatAndIndependentQueuedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	worker, err := NewExternalConversationInboxWorker(store, NewCanonicalExternalConversationDispatcher(scheduler, nil), ExternalConversationInboxWorkerConfig{WorkerID: "thread-inbox"})
+	worker, err := NewExternalConversationInboxWorker(store, NewCanonicalExternalConversationDispatcher(scheduler), ExternalConversationInboxWorkerConfig{WorkerID: "thread-inbox"})
 	if err != nil {
 		t.Fatal(err)
 	}

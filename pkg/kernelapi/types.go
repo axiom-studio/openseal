@@ -53,8 +53,6 @@ const (
 	AgentTurnsCapabilityVersion                = "2"
 	ActivityCapabilityID                       = "activity"
 	ActivityCapabilityVersion                  = "1"
-	EventRoutingCapabilityID                   = "event-routing"
-	EventRoutingCapabilityVersion              = "1"
 	ConversationGatewaysCapabilityID           = "conversation-gateways"
 	ConversationGatewaysCapabilityVersion      = "2"
 	CallbacksCapabilityID                      = "callbacks"
@@ -63,11 +61,6 @@ const (
 	SpacesCapabilityVersion                    = "1"
 	AgentBuilderCapabilityID                   = "agent-builder"
 	AgentBuilderCapabilityVersion              = "1"
-)
-
-const (
-	EventSourceSubscriptionsCapabilityID      = "event-source-subscriptions"
-	EventSourceSubscriptionsCapabilityVersion = "1"
 )
 
 const (
@@ -111,7 +104,6 @@ const (
 	OperationRetry                = "retry"
 	OperationPatch                = "patch"
 	OperationListCompilations     = "list-compilations"
-	OperationGetCheckpoint        = "get-checkpoint"
 	OperationProposeAmendment     = "propose-amendment"
 	OperationListAmendments       = "list-amendments"
 	OperationGetAmendment         = "get-amendment"
@@ -119,10 +111,7 @@ const (
 	OperationResolveAmendment     = "resolve-amendment"
 	OperationActivateAmendment    = "activate-amendment"
 	OperationRecoverParticipation = "recover-participation"
-	OperationRoute                = "route"
 	OperationReconcile            = "reconcile"
-	OperationReportHealth         = "report-health"
-	OperationAdvanceCheckpoint    = "advance-checkpoint"
 	OperationUpsert               = "upsert"
 	OperationDisable              = "disable"
 	OperationPlanUpgrade          = "plan-upgrade"
@@ -509,13 +498,6 @@ func RunbooksCapability() Capability {
 	}
 }
 
-func EventSourceSubscriptionsCapability() Capability {
-	return Capability{
-		ID: EventSourceSubscriptionsCapabilityID, Version: EventSourceSubscriptionsCapabilityVersion, Available: true,
-		Operations: []string{OperationCreate, OperationGet, OperationList, OperationUpdate, OperationRetire, OperationReportHealth, OperationGetCheckpoint, OperationAdvanceCheckpoint},
-	}
-}
-
 // ConversationGatewaysCapability describes lifecycle management for durable,
 // shared provider webhooks. Provider ingress itself is intentionally absent:
 // it is an opaque-route transport boundary rather than an operator command.
@@ -566,13 +548,6 @@ func AgentTurnsCapability() Capability {
 	}
 }
 
-func EventRoutingCapability() Capability {
-	return Capability{
-		ID: EventRoutingCapabilityID, Version: EventRoutingCapabilityVersion, Available: true,
-		Operations: []string{OperationRoute},
-	}
-}
-
 func SkillActionsCapability() Capability {
 	return Capability{ID: SkillActionsCapabilityID, Version: SkillActionsCapabilityVersion, Available: true, Operations: []string{OperationList}}
 }
@@ -586,7 +561,7 @@ func ClawHubLifecycleCapability(lifecycle clawhub.LifecycleCapability) Capabilit
 }
 
 func Capabilities() CapabilityDocument {
-	return NewCapabilityDocument(ObjectivesCapability(), RunbooksCapability(), EventSourceSubscriptionsCapability(), EventRoutingCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
+	return NewCapabilityDocument(ObjectivesCapability(), RunbooksCapability(), SkillActionsCapability(), SkillBindingsCapability(true), ActivityCapability(), AgentRunsCapability(), AgentTurnsCapability(), ActionCallsCapability(), AgentDefinitionsCapability(), ChannelsCapability(ChannelCapabilityFeatures{Coordination: true, Changes: true}), TeamDefinitionsCapability(TeamDefinitionCapabilityFeatures{}))
 }
 
 // ActivityCapability exposes the selector-bounded, redacted audit projection.
@@ -876,20 +851,6 @@ type RunbookScheduleReconciliation struct {
 	Result       *runtime.RunbookScheduleResult `json:"result"`
 }
 
-type CreateEventSourceSubscriptionRequest struct {
-	ID                  string                                `json:"id,omitempty"`
-	Scope               runtime.Scope                         `json:"scope"`
-	Owner               runtime.ObjectiveOwner                `json:"owner"`
-	DisplayName         string                                `json:"displayName"`
-	Description         string                                `json:"description,omitempty"`
-	Source              string                                `json:"source"`
-	Connector           runtime.EventSourceConnector          `json:"connector"`
-	Status              runtime.EventSourceSubscriptionStatus `json:"status,omitempty"`
-	EventTypes          []string                              `json:"eventTypes"`
-	Parameters          map[string]interface{}                `json:"parameters,omitempty"`
-	PollIntervalSeconds int64                                 `json:"pollIntervalSeconds,omitempty"`
-}
-
 type CreateExternalConversationGatewayRequest struct {
 	ID      string                                     `json:"id,omitempty"`
 	Name    string                                     `json:"name"`
@@ -904,39 +865,6 @@ type UpdateExternalConversationGatewayRequest struct {
 	Gateway          *runtime.ExternalConversationIngressGateway `json:"gateway,omitempty"`
 	Status           *runtime.ExternalConversationGatewayStatus  `json:"status,omitempty"`
 	Reason           string                                      `json:"reason"`
-}
-
-type UpdateEventSourceSubscriptionRequest struct {
-	ExpectedRevision    int64                                  `json:"expectedRevision"`
-	DisplayName         *string                                `json:"displayName,omitempty"`
-	Description         *string                                `json:"description,omitempty"`
-	Connector           *runtime.EventSourceConnector          `json:"connector,omitempty"`
-	Status              *runtime.EventSourceSubscriptionStatus `json:"status,omitempty"`
-	EventTypes          *[]string                              `json:"eventTypes,omitempty"`
-	Parameters          map[string]interface{}                 `json:"parameters,omitempty"`
-	ReplaceParameters   bool                                   `json:"replaceParameters,omitempty"`
-	PollIntervalSeconds *int64                                 `json:"pollIntervalSeconds,omitempty"`
-}
-
-type RetireEventSourceSubscriptionRequest struct {
-	ExpectedRevision int64 `json:"expectedRevision"`
-}
-
-type ReportEventSourceHealthRequest struct {
-	ExpectedHealthRevision       int64                          `json:"expectedHealthRevision"`
-	ObservedSubscriptionRevision int64                          `json:"observedSubscriptionRevision"`
-	State                        runtime.EventSourceHealthState `json:"state"`
-	LastEventAt                  time.Time                      `json:"lastEventAt,omitempty"`
-	ErrorCode                    string                         `json:"errorCode,omitempty"`
-	Summary                      string                         `json:"summary,omitempty"`
-}
-
-type AdvanceEventSourceCheckpointRequest struct {
-	ExpectedRevision             int64     `json:"expectedRevision"`
-	ObservedSubscriptionRevision int64     `json:"observedSubscriptionRevision"`
-	Cursor                       string    `json:"cursor,omitempty"`
-	EventIDs                     []string  `json:"eventIds,omitempty"`
-	Watermark                    time.Time `json:"watermark,omitempty"`
 }
 
 type AgentRunCommandRequest struct {

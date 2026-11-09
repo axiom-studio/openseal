@@ -57,9 +57,8 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if !ok || !activityCapability.Supports(kernelapi.OperationList) {
 		t.Fatalf("activity capabilities: %#v", document)
 	}
-	eventCapability, ok := document.Find(kernelapi.EventRoutingCapabilityID, kernelapi.EventRoutingCapabilityVersion)
-	if !ok || !eventCapability.Supports(kernelapi.OperationRoute) {
-		t.Fatalf("event routing capabilities: %#v", document)
+	if _, ok := document.Find("event-routing", "1"); ok {
+		t.Fatalf("event routing is still advertised: %#v", document)
 	}
 	scheduleCapability, ok := document.Find(kernelapi.RunbooksCapabilityID, kernelapi.RunbooksCapabilityVersion)
 	if !ok || !scheduleCapability.Supports(kernelapi.OperationReconcile) || !scheduleCapability.Supports(kernelapi.OperationExecute) || !scheduleCapability.Supports(kernelapi.OperationList) || !scheduleCapability.Supports(kernelapi.OperationGet) {
@@ -212,27 +211,6 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	if err != nil || len(objectives) != 1 || objectives[0].ID != objective.ID {
 		t.Fatalf("objectives = %#v, %v", objectives, err)
 	}
-	eventObjective, err := client.CreateObjective(ctx, kernelapi.CreateObjectiveRequest{
-		Scope: scope, Owner: owner, Title: "Event monitor", Goal: "Investigate warnings", Status: runtime.ObjectiveStatusActive,
-	}, "event-objective")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = runtime.NewRunbookActivationService(store).Create(ctx, runtime.CreateRunbookActivationRequest{
-		ID: "warning-monitor", Scope: scope, Owner: owner, ObjectiveID: eventObjective.ID, AssignedAgentID: owner.ID,
-		DefinitionID: "warning-monitor", DefinitionVersion: "1", TriggerID: "warning",
-		Trigger: runbook.Trigger{Kind: runbook.TriggerEvent, EventType: "service.warning", Entrypoint: "investigate"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	routed, err := client.RouteEvent(ctx, runtime.EventEnvelope{
-		ID: "client-event-1", Scope: scope, Type: "service.warning", Source: "monitor:test",
-		OccurredAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC), Payload: map[string]interface{}{"message": "latency high"},
-	})
-	if err != nil || len(routed.Routes) != 1 || !routed.Routes[0].Created || routed.Routes[0].Run.ObjectiveID != eventObjective.ID {
-		t.Fatalf("routed event = %#v, %v", routed, err)
-	}
 	runs, err := client.ListAgentRuns(ctx, runtime.AgentRunFilter{Scope: scope, Kind: runtime.RunKindAgentWork, Owner: &owner, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
@@ -241,7 +219,7 @@ func TestKernelHTTPClientUsesCanonicalRunAPI(t *testing.T) {
 	for _, run := range runs {
 		runIDs[run.ID] = run.Kind == runtime.RunKindAgentWork
 	}
-	if len(runs) != 4 || !runIDs[created.Run.ID] || !runIDs[routed.Routes[0].Run.ID] || !runIDs[scheduledRuns[0].ID] || !runIDs[manual.Run.ID] {
+	if len(runs) != 3 || !runIDs[created.Run.ID] || !runIDs[scheduledRuns[0].ID] || !runIDs[manual.Run.ID] {
 		t.Fatalf("runs = %#v", runs)
 	}
 

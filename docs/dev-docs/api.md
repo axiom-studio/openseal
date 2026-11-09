@@ -49,12 +49,10 @@ it. This shared token does not provide per-user or per-scope authorization.
 | Capabilities | `GET /capabilities` | Discover exact server features and operations |
 | Objectives | `POST, GET /objectives`; `GET, PUT /objectives/{id}` | Create, list, inspect, and revise owner portfolios |
 | Runbooks | `GET /runbooks`; `GET /runbooks/{id}`; `POST /runbooks/schedule-reconciliations` | Inspect Objective-owned execution methods and reconcile due schedule triggers |
-| Event sources | `POST, GET /event-source-subscriptions`; item read/update, retirement, health, and checkpoint routes | Durable event watches and connector-owned progress |
 | Agent Runs | `POST, GET /agent-runs`; `GET /agent-runs/{id}`; `POST /agent-runs/{id}/commands` | Durable work and pause/resume/cancel/intervention commands |
 | Agent turns | `GET /agent-turns`; `GET /agent-turns/{id}` | Model steps of a Run (agent-turns v2): narration, tool-call count, stop reason, usage |
 | Action calls | `GET /action-calls`; `GET /action-calls/{id}` | Governed Skill execution lifecycle and receipt projection |
 | Activity | `GET /activity` | Scoped canonical activity projection |
-| Events | `POST /events` | Route a normalized event through activated Runbook event triggers |
 | Agent requests | `POST, GET /agent-requests`; item, response, and completion routes | Delegation, clarification, handoff, and completion |
 | Action approvals | `GET /action-approvals`; item and decision routes | Inspect and resolve exact action checkpoints |
 

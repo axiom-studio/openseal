@@ -95,7 +95,7 @@ func TestCallbackRegistryRejectsUndeclaredEvent(t *testing.T) {
 			SkillID: definition.ID, SkillVersion: definition.Version, BindingID: binding.ID,
 			BindingRevision: binding.Revision, AdapterID: "interactions",
 		},
-		Subscriptions: []CallbackSubscription{{EventType: "source.changed", Consumer: "runbooks"}},
+		Subscriptions: []CallbackSubscription{{EventType: "source.changed", Consumer: "approvals"}},
 		Actor:         ActivityActor{Type: "user", ID: "operator"}, Reason: "invalid event acceptance",
 	})
 	if !errors.Is(err, ErrInvalidCallbackRegistration) {

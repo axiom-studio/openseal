@@ -31,15 +31,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PATCH /api/v1/runbooks/{id}", s.handleUpdateRunbook)
 	s.mux.HandleFunc("POST /api/v1/runbooks/{id}/runs", s.handleStartRunbook)
 	s.mux.HandleFunc("POST /api/v1/runbooks/schedule-reconciliations", s.handleReconcileRunbookSchedules)
-	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions", s.handleCreateEventSourceSubscription)
-	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions", s.handleListEventSourceSubscriptions)
-	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions/{id}", s.handleGetEventSourceSubscription)
-	s.mux.HandleFunc("PATCH /api/v1/event-source-subscriptions/{id}", s.handleUpdateEventSourceSubscription)
-	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions/{id}/retirements", s.handleRetireEventSourceSubscription)
-	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions/{id}/health-reports", s.handleReportEventSourceHealth)
-	s.mux.HandleFunc("GET /api/v1/event-source-subscriptions/{id}/checkpoint", s.handleGetEventSourceCheckpoint)
-	s.mux.HandleFunc("POST /api/v1/event-source-subscriptions/{id}/checkpoint-advancements", s.handleAdvanceEventSourceCheckpoint)
-	s.mux.HandleFunc("POST /api/v1/events", s.handleRouteEvent)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}", s.handleInspectClawHub)
 	s.mux.HandleFunc("GET /api/v1/clawhub/search", s.handleSearchClawHub)
 	s.mux.HandleFunc("GET /api/v1/clawhub/catalog/{reference}/versions", s.handleListClawHubVersions)
@@ -151,7 +142,7 @@ func (s *Server) handleCapabilities(w http.ResponseWriter, r *http.Request) {
 			runOperations = append(runOperations, "create-team")
 		}
 	}
-	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability(), kernelapi.EventSourceSubscriptionsCapability(), kernelapi.EventRoutingCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability(), kernelapi.WorkforceBundlesCapability(s.workforceBundles != nil && s.workforceBundleActor != "")}
+	capabilities := []kernelapi.Capability{kernelapi.ObjectivesCapability(), kernelapi.RunbooksCapability(), kernelapi.AgentRunsCapability(runOperations...), kernelapi.AgentTurnsCapability(), kernelapi.ActionCallsCapability(), kernelapi.ActivityCapability(), kernelapi.WorkforceBundlesCapability(s.workforceBundles != nil && s.workforceBundleActor != "")}
 	if _, ok := s.store.(runtime.CollaborationKernelStore); ok {
 		capabilities = append(capabilities, kernelapi.AgentRequestsCapability())
 	}

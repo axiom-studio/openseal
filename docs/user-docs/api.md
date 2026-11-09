@@ -219,20 +219,6 @@ Participation rounds are how multiple Agents take turns in one channel without t
 | POST | `/api/v1/runbooks/{id}/runs` |
 | POST | `/api/v1/runbooks/schedule-reconciliations` |
 
-## Event Sources and Routing
-
-| Method | Path |
-|---|---|
-| POST | `/api/v1/event-source-subscriptions` |
-| GET | `/api/v1/event-source-subscriptions` |
-| GET | `/api/v1/event-source-subscriptions/{id}` |
-| PATCH | `/api/v1/event-source-subscriptions/{id}` |
-| POST | `/api/v1/event-source-subscriptions/{id}/retirements` |
-| POST | `/api/v1/event-source-subscriptions/{id}/health-reports` |
-| GET | `/api/v1/event-source-subscriptions/{id}/checkpoint` |
-| POST | `/api/v1/event-source-subscriptions/{id}/checkpoint-advancements` |
-| POST | `/api/v1/events` |
-
 ## Workforce Authoring
 
 | Method | Path |

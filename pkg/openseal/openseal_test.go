@@ -74,14 +74,6 @@ func TestPublicFacadeExposesRunbookActivationErrors(t *testing.T) {
 	}
 }
 
-func TestPublicFacadeExposesEventSourceSubscriptions(t *testing.T) {
-	capability := EventSourceSubscriptionsCapability()
-	if capability.ID != EventSourceSubscriptionsCapabilityID || capability.Version != EventSourceSubscriptionsCapabilityVersion ||
-		!capability.Supports(KernelOperationReportHealth) || !capability.Supports(KernelOperationGetCheckpoint) || !capability.Supports(KernelOperationAdvanceCheckpoint) {
-		t.Fatalf("event source subscription capability = %#v", capability)
-	}
-}
-
 func TestPublicFacadeExposesConversationGatewayChoices(t *testing.T) {
 	choice := ConversationGatewayAdapterChoice{ID: "slack-primary", DisplayName: "Primary Slack", DeploymentID: "agent-one", Provider: "slack", SkillID: "slack", SkillVersion: "1", BindingID: "binding", BindingRevision: 2, AdapterID: "events"}
 	capability := ConversationGatewaysCapability(true, []ConversationGatewayAdapterChoice{choice})

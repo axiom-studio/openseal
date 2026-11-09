@@ -261,7 +261,7 @@ func TestAgentBuilderCreatePreviewGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAgentBuilderJSON(t, preview, `{
-		"skillId": "openseal.agents", "skillVersion": "1.5.0", "action": "create_agent",
+		"skillId": "openseal.agents", "skillVersion": "1.6.0", "action": "create_agent",
 		"risk": "write", "sideEffect": "write",
 		"resourceType": "agent_profile", "operation": "create_agent",
 		"agent": {
@@ -438,7 +438,7 @@ func TestAgentBuilderUpdatePreviewListsOnlyChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAgentBuilderJSON(t, preview, `{
-		"skillId": "openseal.agents", "skillVersion": "1.5.0", "action": "update_agent",
+		"skillId": "openseal.agents", "skillVersion": "1.6.0", "action": "update_agent",
 		"risk": "write", "sideEffect": "write",
 		"resourceType": "agent_profile", "operation": "update_agent",
 		"agent": {"deploymentId": "researcher", "displayName": "Researcher", "purpose": "Research competitors weekly.",
@@ -550,7 +550,7 @@ func TestAgentBuilderTryAgentValidation(t *testing.T) {
 
 func TestAgentBuilderActionsExistOnlyInCurrentContract(t *testing.T) {
 	definition := AgentManagementSkill()
-	if definition.Version != "1.5.0" {
+	if definition.Version != "1.6.0" {
 		t.Fatalf("version = %s", definition.Version)
 	}
 	for _, name := range []string{AgentActionListAgents, AgentActionCreateAgent, AgentActionUpdateAgent, AgentActionTryAgent} {
@@ -562,9 +562,9 @@ func TestAgentBuilderActionsExistOnlyInCurrentContract(t *testing.T) {
 			t.Fatalf("%s is not a builder action at %s", name, definition.Version)
 		}
 		older := AgentManagementSkill()
-		older.Version = "1.4.0"
+		older.Version = "1.5.0"
 		if isAgentBuilderAction(&skill.BoundAction{Definition: older, Action: action}) {
-			t.Fatalf("%s matched the 1.4.0 contract", name)
+			t.Fatalf("%s matched the 1.5.0 contract", name)
 		}
 		if isAgentManagementAction(&skill.BoundAction{Definition: definition, Action: action}) {
 			t.Fatalf("%s reached the self-only behavior dispatcher", name)

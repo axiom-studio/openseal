@@ -17,9 +17,6 @@ type MemoryStore struct {
 	mu                                  sync.RWMutex
 	objectives                          map[string]*Objective
 	runbookActivations                  map[string]*RunbookActivation
-	eventSourceCheckpoints              map[string]*EventSourceCheckpoint
-	eventSourceSubscriptions            map[string]*EventSourceSubscription
-	eventSourceHealth                   map[string]*EventSourceHealth
 	agentRuns                           map[string]*AgentRun
 	runTerminalReports                  map[runTerminalReportKey]*RunTerminalReport
 	runTerminalReportLatest             map[runTerminalReportFamily]runTerminalReportKey
@@ -124,9 +121,6 @@ func NewMemoryStore() *MemoryStore {
 		credentialRequests:          make(map[string]*CredentialRequest),
 		objectives:                  make(map[string]*Objective),
 		runbookActivations:          make(map[string]*RunbookActivation),
-		eventSourceCheckpoints:      make(map[string]*EventSourceCheckpoint),
-		eventSourceSubscriptions:    make(map[string]*EventSourceSubscription),
-		eventSourceHealth:           make(map[string]*EventSourceHealth),
 		agentRuns:                   make(map[string]*AgentRun),
 		runEventWaits:               make(map[memoryRunEventWaitKey]*RunEventWait),
 		runEventWaitActive:          make(map[memoryRunEventRunKey]memoryRunEventWaitKey),

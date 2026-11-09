@@ -31,11 +31,15 @@ func TestPostgresMigrationLedgerAllowsOnlyRetiredGap(t *testing.T) {
 			t.Fatalf("current=%v version=%d err=%v; want current=%v", current, version, err, want)
 		}
 	}
-	check(true) // Fresh databases correctly omit retired migration 34.
+	check(true) // Fresh databases correctly omit retired migrations 20, 22 and 34.
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("schema_migrations")+` (version,name) VALUES (34,'historical objective template migration')`); err != nil {
 		t.Fatal(err)
 	}
 	check(true) // Historical ledgers may retain it.
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("schema_migrations")+` (version,name) VALUES (20,'durable event source checkpoints'),(22,'durable event source subscriptions and health')`); err != nil {
+		t.Fatal(err)
+	}
+	check(true) // Retired event source migrations 20 and 22 may remain too.
 	if _, err := store.db.ExecContext(ctx, `DELETE FROM `+store.table("schema_migrations")+` WHERE version=2`); err != nil {
 		t.Fatal(err)
 	}
