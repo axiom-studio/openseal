@@ -46,6 +46,13 @@ func TestSkillDefinitionRegistersWithPolicies(t *testing.T) {
 	if d.Actions[RunCommand].Timeout.Duration() != 660*time.Second {
 		t.Fatalf("run_command timeout = %s", d.Actions[RunCommand].Timeout.Duration())
 	}
+	// The host stops waiting at op timeout + DeadlineSlack; the kernel's
+	// action timeout must come later so the host's timeout error wins.
+	for _, name := range []string{ReadFile, WriteFile, ListFiles} {
+		if timeout := d.Actions[name].Timeout.Duration(); timeout != 90*time.Second || timeout <= FileOpTimeout+DeadlineSlack {
+			t.Errorf("%s timeout = %s", name, timeout)
+		}
+	}
 	for name, action := range d.Actions {
 		if action.Retry.MaxAttempts != 1 || action.InputSchema["additionalProperties"] != false || action.Timeout <= 0 {
 			t.Errorf("%s must have a closed input, a timeout and no automatic retry", name)

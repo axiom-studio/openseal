@@ -27,13 +27,17 @@ const (
 )
 
 const (
-	// RunCommandTimeout covers the longest command (MaxCommandSeconds) plus
-	// DeadlineSlack for queueing and delivery.
-	RunCommandTimeout = 660 * time.Second
+	// An action's timeout is its op's timeout plus DeadlineSlack twice: once
+	// for the deadline the host waits until, once more so the host's own
+	// expiry, with its readable timeout error, always comes before the
+	// kernel's.
+	//
+	// RunCommandTimeout covers the longest command (MaxCommandSeconds).
+	RunCommandTimeout = bridge.MaxCommandSeconds*time.Second + 2*DeadlineSlack
 	// FileOpTimeout is how long the bridge has for a file action, and
 	// FileTimeout the action's whole timeout.
 	FileOpTimeout = 30 * time.Second
-	FileTimeout   = FileOpTimeout + DeadlineSlack
+	FileTimeout   = FileOpTimeout + 2*DeadlineSlack
 	// ListComputersTimeout bounds list_computers, which the host answers.
 	ListComputersTimeout = 30 * time.Second
 	// DeadlineSlack is added to an op's own timeout to get the deadline the
