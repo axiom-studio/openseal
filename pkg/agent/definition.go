@@ -51,7 +51,6 @@ type ApprovalDestination struct {
 // definition owns only how that endpoint participates in Agent work.
 type ChannelRoute struct {
 	EndpointID       string   `json:"endpointId"`
-	Trigger          string   `json:"trigger,omitempty"`
 	MessageSelection string   `json:"messageSelection"`
 	ReplyMode        string   `json:"replyMode"`
 	IgnoreBots       bool     `json:"ignoreBots"`
@@ -190,15 +189,6 @@ func (d *AgentDefinition) Validate() error {
 				return fmt.Errorf("agent channel %s has invalid or duplicate purpose", endpointID)
 			}
 			seenPurposes[purpose] = true
-		}
-		if trigger := strings.TrimSpace(channel.Trigger); trigger != "" {
-			if d.Runbook == nil {
-				return fmt.Errorf("agent channel %s references a trigger without a Runbook", endpointID)
-			}
-			value, ok := d.Runbook.Triggers[trigger]
-			if !ok || value.Kind != runbook.TriggerEvent {
-				return fmt.Errorf("agent channel %s must reference an event trigger", endpointID)
-			}
 		}
 		if seenPurposes["approvals"] && !seenDestinations[endpointID] {
 			return fmt.Errorf("agent channel %s approval purpose requires an approval destination", endpointID)

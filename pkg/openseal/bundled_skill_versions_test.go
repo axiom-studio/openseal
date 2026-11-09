@@ -1,6 +1,9 @@
 package openseal
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/runtime"
@@ -18,7 +21,7 @@ func TestBundledSkillVersionsForAgentBuilder(t *testing.T) {
 		version    string
 		actions    []string
 	}{
-		{runtime.AgentManagementSkill(), AgentManagementSkillVersion, "1.5.0",
+		{runtime.AgentManagementSkill(), AgentManagementSkillVersion, "1.6.0",
 			[]string{AgentActionAmendBehavior, AgentActionListChannels, AgentActionConfigureChannel,
 				runtime.AgentActionListAgents, runtime.AgentActionCreateAgent, runtime.AgentActionUpdateAgent, runtime.AgentActionTryAgent}},
 		{runtime.TeamManagementSkill(), TeamManagementSkillVersion, "2.1.0",
@@ -44,13 +47,35 @@ func TestBundledSkillVersionsForAgentBuilder(t *testing.T) {
 		}
 	}
 
-	if !IsSupportedAgentManagementSkillVersion("1.4.0") || !IsSupportedAgentManagementSkillVersion("1.5.0") {
-		t.Fatal("openseal.agents 1.4.0 and 1.5.0 must both run")
+	if !IsSupportedAgentManagementSkillVersion("1.4.0") || !IsSupportedAgentManagementSkillVersion("1.5.0") || !IsSupportedAgentManagementSkillVersion("1.6.0") {
+		t.Fatal("openseal.agents 1.4.0, 1.5.0 and 1.6.0 must all run")
 	}
 	if !runtime.IsSupportedTeamManagementSkillVersion("2.0.0") || !runtime.IsSupportedTeamManagementSkillVersion("2.1.0") {
 		t.Fatal("openseal.teams 2.0.0 and 2.1.0 must both run")
 	}
-	if IsSupportedAgentManagementSkillVersion("1.6.0") || runtime.IsSupportedTeamManagementSkillVersion("2.2.0") {
+	if IsSupportedAgentManagementSkillVersion("1.7.0") || runtime.IsSupportedTeamManagementSkillVersion("2.2.0") {
 		t.Fatal("an unreleased version must not be supported")
+	}
+}
+
+// openseal.agents 1.6.0 dropped the channel trigger from configure_channel.
+// A published definition never changes under its version: any edit needs a
+// new version, or hosts refuse to register it.
+func TestBundledAgentManagementSkill160IsFrozen(t *testing.T) {
+	definition := runtime.AgentManagementSkill()
+	if definition.Version != "1.6.0" {
+		t.Fatalf("version = %s", definition.Version)
+	}
+	encoded, err := json.Marshal(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const published160SHA256 = "7f6022819ccde73374b57de7bbe5c94387d4ff8f4fcb04670fb4afd47b461d0a"
+	if got := fmt.Sprintf("%x", sha256.Sum256(encoded)); got != published160SHA256 {
+		t.Fatalf("published 1.6.0 definition changed: got %s", got)
+	}
+	properties, _ := definition.Actions[AgentActionConfigureChannel].InputSchema["properties"].(map[string]interface{})
+	if _, ok := properties["trigger"]; ok {
+		t.Fatal("configure_channel still takes a trigger")
 	}
 }

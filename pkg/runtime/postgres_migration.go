@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 78
+const currentPostgresSchemaVersion int64 = 79
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -38,10 +38,10 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
 		return err
 	}
-	// Rolling back 78 keeps the Default space ids; rolling back 77 does not
-	// restore kernel Projects; rolling back 76 drops
-	// the cutover drafts and does not restore the retired workforce change
-	// sets.
+	// Rolling back 79 does not restore event sources; rolling back 78 keeps
+	// the Default space ids; rolling back 77 does not restore kernel Projects;
+	// rolling back 76 drops the cutover drafts and does not restore the
+	// retired workforce change sets.
 	down := map[int64][]string{
 		76: {"agent_builder_cutover_drafts"},
 		75: {"agent_session_entries", "agent_sessions"},
@@ -64,7 +64,6 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		28: {"external_conversation_gateways"},
 		26: {"external_conversation_deliveries", "external_message_mappings", "external_participant_mappings", "external_conversation_mappings", "external_conversation_inbox", "external_conversation_endpoints"},
 		21: {"action_credential_lease_redemptions"},
-		20: {"event_source_checkpoints"},
 		17: {"skill_source_artifact_references", "skill_source_artifacts"},
 		15: {"agent_definition_compilations"},
 		12: {"team_definition_amendments"},

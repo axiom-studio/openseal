@@ -41,15 +41,6 @@ type KernelClient interface {
 	UpdateRunbook(context.Context, runtime.Scope, string, runtime.UpdateRunbookActivationRequest) (*runtime.RunbookActivation, error)
 	StartRunbook(context.Context, runtime.Scope, string, runtime.StartRunbookActivationRequest) (*runtime.AgentRunCommandResult, error)
 	ReconcileRunbookSchedules(context.Context, kernelapi.ReconcileRunbookSchedulesRequest) (*kernelapi.RunbookScheduleReconciliation, error)
-	CreateEventSourceSubscription(context.Context, kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error)
-	ListEventSourceSubscriptions(context.Context, runtime.EventSourceSubscriptionFilter) ([]*runtime.EventSourceSubscription, error)
-	GetEventSourceSubscription(context.Context, runtime.Scope, string) (*runtime.EventSourceSubscriptionDetail, error)
-	UpdateEventSourceSubscription(context.Context, runtime.Scope, string, kernelapi.UpdateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error)
-	RetireEventSourceSubscription(context.Context, runtime.Scope, string, kernelapi.RetireEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error)
-	ReportEventSourceHealth(context.Context, runtime.Scope, string, kernelapi.ReportEventSourceHealthRequest) (*runtime.EventSourceHealth, error)
-	GetEventSourceCheckpoint(context.Context, runtime.Scope, string) (*runtime.EventSourceCheckpoint, error)
-	AdvanceEventSourceCheckpoint(context.Context, runtime.Scope, string, kernelapi.AdvanceEventSourceCheckpointRequest) (*runtime.EventSourceCheckpoint, error)
-	RouteEvent(context.Context, runtime.EventEnvelope) (*runtime.EventRouteResult, error)
 	ListActivity(context.Context, runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error)
 	CreateAgentRun(context.Context, kernelapi.CreateAgentRunRequest, string) (*runtime.AgentRunCommandResult, error)
 	ListAgentRuns(context.Context, runtime.AgentRunFilter) ([]*runtime.AgentRun, error)
@@ -663,93 +654,6 @@ func (c *KernelHTTPClient) ReconcileRunbookSchedules(ctx context.Context, reques
 	return &reconciliation, nil
 }
 
-func (c *KernelHTTPClient) CreateEventSourceSubscription(ctx context.Context, request kernelapi.CreateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
-	var value runtime.EventSourceSubscription
-	if err := c.do(ctx, http.MethodPost, "/api/v1/event-source-subscriptions", request, "", &value); err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func (c *KernelHTTPClient) ListEventSourceSubscriptions(ctx context.Context, filter runtime.EventSourceSubscriptionFilter) ([]*runtime.EventSourceSubscription, error) {
-	query := scopeQuery(filter.Scope)
-	if filter.Owner != nil {
-		query.Set("ownerType", string(filter.Owner.Type))
-		query.Set("ownerId", filter.Owner.ID)
-	}
-	for _, status := range filter.Statuses {
-		query.Add("status", string(status))
-	}
-	if filter.ConnectorKind != "" {
-		query.Set("connectorKind", string(filter.ConnectorKind))
-	}
-	if filter.Limit > 0 {
-		query.Set("limit", strconv.Itoa(filter.Limit))
-	}
-	if filter.Offset > 0 {
-		query.Set("offset", strconv.Itoa(filter.Offset))
-	}
-	var values []*runtime.EventSourceSubscription
-	if err := c.do(ctx, http.MethodGet, "/api/v1/event-source-subscriptions?"+query.Encode(), nil, "", &values); err != nil {
-		return nil, err
-	}
-	return values, nil
-}
-
-func (c *KernelHTTPClient) GetEventSourceSubscription(ctx context.Context, scope runtime.Scope, id string) (*runtime.EventSourceSubscriptionDetail, error) {
-	var value runtime.EventSourceSubscriptionDetail
-	path := "/api/v1/event-source-subscriptions/" + url.PathEscape(strings.TrimSpace(id)) + "?" + scopeQuery(scope).Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func (c *KernelHTTPClient) UpdateEventSourceSubscription(ctx context.Context, scope runtime.Scope, id string, request kernelapi.UpdateEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
-	var value runtime.EventSourceSubscription
-	path := "/api/v1/event-source-subscriptions/" + url.PathEscape(strings.TrimSpace(id)) + "?" + scopeQuery(scope).Encode()
-	if err := c.do(ctx, http.MethodPatch, path, request, "", &value); err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func (c *KernelHTTPClient) RetireEventSourceSubscription(ctx context.Context, scope runtime.Scope, id string, request kernelapi.RetireEventSourceSubscriptionRequest) (*runtime.EventSourceSubscription, error) {
-	var value runtime.EventSourceSubscription
-	path := "/api/v1/event-source-subscriptions/" + url.PathEscape(strings.TrimSpace(id)) + "/retirements?" + scopeQuery(scope).Encode()
-	if err := c.do(ctx, http.MethodPost, path, request, "", &value); err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func (c *KernelHTTPClient) ReportEventSourceHealth(ctx context.Context, scope runtime.Scope, id string, request kernelapi.ReportEventSourceHealthRequest) (*runtime.EventSourceHealth, error) {
-	var value runtime.EventSourceHealth
-	path := "/api/v1/event-source-subscriptions/" + url.PathEscape(strings.TrimSpace(id)) + "/health-reports?" + scopeQuery(scope).Encode()
-	if err := c.do(ctx, http.MethodPost, path, request, "", &value); err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
-func (c *KernelHTTPClient) GetEventSourceCheckpoint(ctx context.Context, scope runtime.Scope, id string) (*runtime.EventSourceCheckpoint, error) {
-	var value *runtime.EventSourceCheckpoint
-	path := "/api/v1/event-source-subscriptions/" + url.PathEscape(strings.TrimSpace(id)) + "/checkpoint?" + scopeQuery(scope).Encode()
-	if err := c.do(ctx, http.MethodGet, path, nil, "", &value); err != nil {
-		return nil, err
-	}
-	return value, nil
-}
-
-func (c *KernelHTTPClient) AdvanceEventSourceCheckpoint(ctx context.Context, scope runtime.Scope, id string, request kernelapi.AdvanceEventSourceCheckpointRequest) (*runtime.EventSourceCheckpoint, error) {
-	var value runtime.EventSourceCheckpoint
-	path := "/api/v1/event-source-subscriptions/" + url.PathEscape(strings.TrimSpace(id)) + "/checkpoint-advancements?" + scopeQuery(scope).Encode()
-	if err := c.do(ctx, http.MethodPost, path, request, "", &value); err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
 func (c *KernelHTTPClient) CreateExternalConversationGateway(
 	ctx context.Context,
 	request kernelapi.CreateExternalConversationGatewayRequest,
@@ -810,14 +714,6 @@ func (c *KernelHTTPClient) UpdateExternalConversationGateway(
 		return nil, err
 	}
 	return &value, nil
-}
-
-func (c *KernelHTTPClient) RouteEvent(ctx context.Context, event runtime.EventEnvelope) (*runtime.EventRouteResult, error) {
-	var result runtime.EventRouteResult
-	if err := c.do(ctx, http.MethodPost, "/api/v1/events", event, "", &result); err != nil {
-		return nil, err
-	}
-	return &result, nil
 }
 
 func (c *KernelHTTPClient) ListActivity(ctx context.Context, request runtime.ActivityFeedRequest) (*runtime.ActivityFeedPage, error) {

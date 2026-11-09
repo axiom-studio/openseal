@@ -289,12 +289,6 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migratePortfolio(ctx, tx); err != nil {
 		return err
 	}
-	if err := s.migrateEventSourceCheckpoints(ctx, tx); err != nil {
-		return err
-	}
-	if err := s.migrateEventSourceSubscriptions(ctx, tx); err != nil {
-		return err
-	}
 	if err := s.migrateActivityAndTurns(ctx, tx); err != nil {
 		return err
 	}
@@ -472,6 +466,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateDefaultSpace(ctx, tx); err != nil {
 		return fmt.Errorf("Default space migration: %w", err)
 	}
+	if err := s.migrateRemoveEventSources(ctx, tx); err != nil {
+		return fmt.Errorf("event source removal migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err
@@ -506,8 +503,9 @@ func (s *PostgresStore) postgresMigrationApplied(ctx context.Context, query post
 // hardening, activation continuations) with the change-set layer; and 14,
 // 16, 18, 23, 36, 37 and 55 (Projects, source monitors, outreach, Project
 // activity, the Project contract, Project run refs, Project Skill
-// references) with kernel Projects. Older databases may retain them; fresh
-// databases omit them.
+// references) with kernel Projects; 20 and 22 (event source checkpoints,
+// subscriptions and health) with the Runbook event router. Older databases
+// may retain them; fresh databases omit them.
 func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgresMigrationQuerier) (bool, int64, error) {
 	var relation sql.NullString
 	if err := query.QueryRowContext(ctx, `SELECT to_regclass($1)`, s.schema+".schema_migrations").Scan(&relation); err != nil {
@@ -519,12 +517,12 @@ func (s *PostgresStore) postgresSchemaCurrent(ctx context.Context, query postgre
 	var knownVersions, schemaVersion int64
 	if err := query.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1 AND version NOT IN (13, 14, 16, 18, 23, 29, 30, 31, 34, 36, 37, 55)),
+			COUNT(*) FILTER (WHERE version BETWEEN 1 AND $1 AND version NOT IN (13, 14, 16, 18, 20, 22, 23, 29, 30, 31, 34, 36, 37, 55)),
 			COALESCE(MAX(version), 0)
 		FROM `+s.table("schema_migrations"), currentPostgresSchemaVersion).Scan(&knownVersions, &schemaVersion); err != nil {
 		return false, 0, err
 	}
-	return knownVersions == currentPostgresSchemaVersion-12, schemaVersion, nil
+	return knownVersions == currentPostgresSchemaVersion-14, schemaVersion, nil
 }
 
 func (s *PostgresStore) recordMigrationOutcome(phase PostgresMigrationPhase, stats PostgresMigrationStats) {

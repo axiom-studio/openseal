@@ -596,8 +596,6 @@ type KernelStore interface {
 	PortfolioStore
 	RunbookActivationStore
 	ObjectiveScopeStore
-	EventSourceCheckpointStore
-	EventSourceSubscriptionStore
 	RunActivityStore
 	ObjectiveActivityStore
 	AgentTurnStore

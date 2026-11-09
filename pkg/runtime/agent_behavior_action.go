@@ -16,7 +16,8 @@ import (
 
 const (
 	AgentManagementSkillID        = "openseal.agents"
-	AgentManagementSkillVersion   = "1.5.0"
+	AgentManagementSkillVersion   = "1.6.0"
+	agentManagementSkillVersionV8 = "1.5.0" // still bound until the 1.6.0 upgrade is approved
 	agentManagementSkillVersionV7 = "1.4.0" // still bound until the reconcile upgrades bindings
 	agentManagementSkillVersionV6 = "1.3.2"
 	agentManagementSkillVersionV5 = "1.3.1"
@@ -52,7 +53,7 @@ func AgentManagementSkill() *skill.Definition {
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: AgentManagementEndpoint},
 		Actions: map[string]skill.Action{
 			AgentActionListChannels: {
-				Name: AgentActionListChannels, Description: "List the current Agent's workflow channels, including their Runbook trigger, reply behavior, approval purpose, and materialized endpoint health.",
+				Name: AgentActionListChannels, Description: "List the current Agent's workflow channels, including their reply behavior, approval purpose, and materialized endpoint health.",
 				Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectNone,
 				Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1},
 				InputSchema: map[string]interface{}{"type": "object", "additionalProperties": false},
@@ -118,7 +119,7 @@ func AgentManagementSkill() *skill.Definition {
 			},
 			AgentActionConfigureChannel: {
 				Name:        AgentActionConfigureChannel,
-				Description: "Propose changing how an existing active or paused authorized channel enters and leaves the current Agent's workflow. Retired channels are historical and cannot be configured or reactivated. This operation governs the Runbook trigger, reply mode, and approval-delivery purpose together.",
+				Description: "Propose changing how an existing active or paused authorized channel enters and leaves the current Agent's workflow. Retired channels are historical and cannot be configured or reactivated. This operation governs message selection, reply mode, and approval-delivery purpose together.",
 				Risk:        skill.RiskLevelWrite, SideEffect: skill.SideEffectWrite, Review: skill.ActionReviewAlways,
 				Idempotency: skill.IdempotencyRequired, Retry: skill.ActionRetryPolicy{MaxAttempts: 2},
 				InputSchema: map[string]interface{}{
@@ -127,7 +128,6 @@ func AgentManagementSkill() *skill.Definition {
 						"expectedDeploymentRevision": map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
 						"expectedEndpointRevision":   map[string]interface{}{"type": "integer", "minimum": 1, skill.SchemaExtensionKernelResolved: true},
 						"endpointId":                 map[string]interface{}{"type": "string", "minLength": 1, "maxLength": 256},
-						"trigger":                    map[string]interface{}{"type": "string", "maxLength": 128, "description": "Runbook event trigger entered by inbound messages. Use an empty string for ordinary Agent conversation."},
 						"messageSelection":           map[string]interface{}{"type": "string", "enum": []interface{}{"all_messages", "mentions", "direct_or_mentions"}},
 						"replyMode":                  map[string]interface{}{"type": "string", "enum": []interface{}{"provider_default", "thread", "channel"}},
 						"ignoreBots":                 map[string]interface{}{"type": "boolean"},
@@ -175,7 +175,6 @@ type agentChannelActionArguments struct {
 	ExpectedDeploymentRevision int64     `json:"expectedDeploymentRevision"`
 	ExpectedEndpointRevision   int64     `json:"expectedEndpointRevision"`
 	EndpointID                 string    `json:"endpointId"`
-	Trigger                    *string   `json:"trigger,omitempty"`
 	MessageSelection           *string   `json:"messageSelection,omitempty"`
 	ReplyMode                  *string   `json:"replyMode,omitempty"`
 	IgnoreBots                 *bool     `json:"ignoreBots,omitempty"`
@@ -616,15 +615,6 @@ func agentChannelEndpointUpdate(endpoint *ExternalConversationEndpoint, definiti
 		return request, errors.New("Agent definition does not contain the channel route")
 	}
 	handler := ExternalConversationHandler{Kind: ExternalConversationHandlerAgent, ID: endpoint.DeploymentID}
-	if route.Trigger != "" {
-		if definition.Runbook == nil {
-			return request, errors.New("Agent channel trigger requires a Runbook")
-		}
-		handler = ExternalConversationHandler{
-			Kind: ExternalConversationHandlerRunbook, ID: definition.Runbook.ID, Version: definition.Runbook.Version,
-			Trigger: route.Trigger, AssignedAgentID: endpoint.DeploymentID,
-		}
-	}
 	policy := ExternalConversationPolicy{
 		MessageSelection: ExternalConversationMessageSelection(route.MessageSelection),
 		ReplyMode:        ExternalConversationReplyMode(route.ReplyMode), IgnoreBots: route.IgnoreBots,
@@ -697,6 +687,10 @@ func resolveAgentChannelAction(
 	arguments map[string]interface{},
 ) (agentChannelActionArguments, *kernelagent.AgentDeployment, *kernelagent.AgentDefinition, *ExternalConversationEndpoint, *kernelagent.AgentDefinition, map[string]interface{}, error) {
 	var args agentChannelActionArguments
+	arguments, err := withoutRemovedChannelTrigger(arguments)
+	if err != nil {
+		return args, nil, nil, nil, nil, nil, err
+	}
 	if err := decodeAgentBehaviorArguments(arguments, &args); err != nil {
 		return args, nil, nil, nil, nil, nil, err
 	}
@@ -746,9 +740,6 @@ func resolveAgentChannelAction(
 		})
 		route = &candidate.Channels[len(candidate.Channels)-1]
 	}
-	if args.Trigger != nil {
-		route.Trigger = strings.TrimSpace(*args.Trigger)
-	}
 	if args.MessageSelection != nil {
 		route.MessageSelection = strings.TrimSpace(*args.MessageSelection)
 	}
@@ -792,6 +783,30 @@ func resolveAgentChannelAction(
 		return args, nil, nil, nil, nil, nil, errors.New("agent channel amendment requires at least one changed field")
 	}
 	return args, deployment, definition, endpoint, candidate, changes, nil
+}
+
+// ErrChannelTriggerRemoved refuses a configure_channel call from a 1.5.0
+// binding that still sets a channel trigger.
+var ErrChannelTriggerRemoved = errors.New("Channel triggers were removed")
+
+// withoutRemovedChannelTrigger drops the trigger argument that 1.5.0 bindings
+// may still send. An empty value means ordinary Agent conversation, which is
+// the only behavior left; any other value is refused.
+func withoutRemovedChannelTrigger(arguments map[string]interface{}) (map[string]interface{}, error) {
+	value, ok := arguments["trigger"]
+	if !ok {
+		return arguments, nil
+	}
+	if trigger, isString := value.(string); !isString || strings.TrimSpace(trigger) != "" {
+		return nil, ErrChannelTriggerRemoved
+	}
+	kept := make(map[string]interface{}, len(arguments)-1)
+	for key, item := range arguments {
+		if key != "trigger" {
+			kept[key] = item
+		}
+	}
+	return kept, nil
 }
 
 func findAgentChannelRoute(definition *kernelagent.AgentDefinition, endpointID string) *kernelagent.ChannelRoute {
@@ -1205,11 +1220,11 @@ func canonicalActionReview(definition *skill.Definition, action skill.Action) sk
 // the Agent action dispatcher still executes. Hosts use it instead of keeping
 // their own copy of the version list.
 func IsSupportedAgentManagementSkillVersion(version string) bool {
-	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV7 || version == agentManagementSkillVersionV6 || version == agentManagementSkillVersionV5 || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
+	return version == AgentManagementSkillVersion || version == agentManagementSkillVersionV8 || version == agentManagementSkillVersionV7 || version == agentManagementSkillVersionV6 || version == agentManagementSkillVersionV5 || version == agentManagementSkillVersionV4 || version == agentManagementSkillVersionV3 || version == agentManagementSkillVersionV2 || version == agentManagementSkillVersionV1
 }
 
-// isAgentBuilderAction matches the builder actions. They exist only in the
-// current contract, so no older binding can expose them.
+// isAgentBuilderAction matches the builder actions. They run only on the
+// current contract; an older binding gets them after its upgrade.
 func isAgentBuilderAction(bound *skill.BoundAction) bool {
 	if bound == nil || bound.Definition == nil || bound.Definition.ID != AgentManagementSkillID ||
 		bound.Definition.Version != AgentManagementSkillVersion {

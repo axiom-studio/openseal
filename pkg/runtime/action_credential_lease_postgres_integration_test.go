@@ -117,7 +117,8 @@ func TestPostgresActionCredentialLeaseMigrationRollsBackAndReapplies(t *testing.
 	if err := primary.RollbackPostgresMigrations(ctx, 20); err != nil {
 		t.Fatal(err)
 	}
-	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != 20 {
+	// Migration 20 is retired, so 19 is the highest version left.
+	if version, err := primary.PostgresSchemaVersion(ctx); err != nil || version != 19 {
 		t.Fatalf("rolled-back version = %d, %v", version, err)
 	}
 	var exists bool

@@ -2,7 +2,7 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -33,7 +33,7 @@ func TestAgentBehaviorAmendmentSchemaRequiresAnActualChange(t *testing.T) {
 }
 
 func TestAgentManagementExecutorAcceptsActivePreviousContractVersion(t *testing.T) {
-	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", "1.3.1", "1.3.2", "1.4.0", AgentManagementSkillVersion} {
+	for _, version := range []string{"1.2.0", "1.2.1", "1.2.2", "1.3.0", "1.3.1", "1.3.2", "1.4.0", "1.5.0", AgentManagementSkillVersion} {
 		t.Run(version, func(t *testing.T) {
 			definition := AgentManagementSkill()
 			definition.Version = version
@@ -45,7 +45,7 @@ func TestAgentManagementExecutorAcceptsActivePreviousContractVersion(t *testing.
 	}
 }
 
-func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *testing.T) {
+func TestGovernedAgentChannelActionComposesIngressAndApprovalDelivery(t *testing.T) {
 	ctx := context.Background()
 	store, catalog, scope, adapter := externalConversationTestCatalog(t, ctx)
 	endpoints := NewExternalConversationEndpointService(store, catalog)
@@ -60,22 +60,10 @@ func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	self, _ := json.Marshal("slack-agent")
-	goal, _ := json.Marshal("Handle the Slack event")
 	agents := kernelagent.NewRegistry()
 	definition, err := agents.RegisterDefinition(ctx, &kernelagent.AgentDefinition{
 		ID: "slack-agent-definition", Version: "1.0.0", DisplayName: "Slack Agent", Purpose: "Handle Slack work", SystemPrompt: "Work carefully.",
-		Authority: kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1},
-		Runbook: &runbook.Definition{
-			APIVersion: runbook.APIVersion, ID: "slack-events", Version: "1.0.0", Name: "Slack events",
-			Entrypoints: map[string]string{"handle": "delegate"},
-			Interfaces:  map[string]runbook.Interface{"handle": {Description: "Handle one Slack event", InputSchema: map[string]interface{}{"type": "object"}}},
-			Triggers:    map[string]runbook.Trigger{"on-message": {Kind: runbook.TriggerEvent, EventType: capability.ConversationEventMessageReceived, Entrypoint: "handle", ObjectiveID: "objective:slack-agent:messages"}},
-			Steps: map[string]runbook.Step{
-				"delegate": {Kind: runbook.StepDelegate, Delegate: &runbook.DelegateStep{AgentID: runbook.Value{Literal: self}, Goal: runbook.Value{Literal: goal}, Mode: runbook.DelegateReason, ResultPath: "/result", Budget: &runbook.BudgetAllocation{MaxTurns: 4, MaxTotalTokens: 26000}, Next: "done"}},
-				"done":     {Kind: runbook.StepEnd, End: &runbook.EndStep{}},
-			},
-		},
+		Authority:  kernelagent.AuthorityPolicy{MaximumRisk: capability.RiskLevelWrite, MaxConcurrentRuns: 1},
 		Amendments: workforce.AmendmentPolicy{AgentMayPropose: true, RequiresApproval: true, ApproverPrincipals: []string{"user:operator"}},
 	})
 	if err != nil {
@@ -113,7 +101,7 @@ func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *
 	proposal, err := NewActionCoordinator(store, store, catalog, policy, validator).Propose(ctx, loopProposeRequest(ProposeActionRequest{
 		Scope: scope, RunID: run.ID, WorkerID: "conversation-worker", DeploymentID: "slack-agent",
 		SkillID: AgentManagementSkillID, SkillVersion: AgentManagementSkillVersion, Action: AgentActionConfigureChannel,
-		Arguments:      map[string]interface{}{"endpointId": endpoint.ID, "trigger": "on-message", "messageSelection": "all_messages", "replyMode": "thread", "purposes": []interface{}{"conversation", "approvals"}, "rationale": "Use Slack for work and approvals"},
+		Arguments:      map[string]interface{}{"endpointId": endpoint.ID, "messageSelection": "all_messages", "replyMode": "thread", "purposes": []interface{}{"conversation", "approvals"}, "rationale": "Use Slack for work and approvals"},
 		IdempotencyKey: "configure-slack", Summary: "Configure Slack workflow channel",
 	}, "configure-slack"))
 	if err != nil {
@@ -134,8 +122,8 @@ func TestGovernedAgentChannelActionComposesRunbookIngressAndApprovalDelivery(t *
 	deployment, _ := agents.GetDeployment(ctx, capability.ScopeReference{Kind: scope.Kind, ID: scope.ID}, "slack-agent")
 	active, _ := agents.GetDefinition(ctx, deployment.DefinitionID, deployment.ActiveVersion)
 	updated, _ := endpoints.Get(ctx, scope, endpoint.ID)
-	if len(active.Channels) != 1 || active.Channels[0].Trigger != "on-message" || len(active.Authority.ApprovalDestinations) != 1 ||
-		updated.Handler.Kind != ExternalConversationHandlerRunbook || updated.Handler.Trigger != "on-message" || updated.Policy.MessageSelection != ExternalConversationSelectAllMessages {
+	if len(active.Channels) != 1 || len(active.Authority.ApprovalDestinations) != 1 ||
+		updated.Handler.Kind != ExternalConversationHandlerAgent || updated.Handler.ID != "slack-agent" || updated.Policy.MessageSelection != ExternalConversationSelectAllMessages {
 		t.Fatalf("definition=%#v endpoint=%#v", active, updated)
 	}
 	listed, err := dispatcher.listChannels(ctx, scope, "slack-agent")
@@ -697,5 +685,50 @@ func TestAgentBehaviorRunOnRosterChecksTheCurrentTeamRoster(t *testing.T) {
 	}
 	if _, err := agentBehaviorDeploymentID(&AgentRun{Kind: RunKindAgentWork, Owner: member.Owner}); err == nil {
 		t.Fatal("Team Run without an acting Agent accepted")
+	}
+}
+
+func TestAgentChannelActionRefusesRemovedTrigger(t *testing.T) {
+	base := map[string]interface{}{"endpointId": "slack-channel", "replyMode": "thread", "rationale": "Reply in threads"}
+	for name, trigger := range map[string]interface{}{"named": "on-message", "padded": "  on-message ", "not a string": 7.0} {
+		t.Run(name, func(t *testing.T) {
+			arguments := cloneMap(base)
+			arguments["trigger"] = trigger
+			if _, err := withoutRemovedChannelTrigger(arguments); !errors.Is(err, ErrChannelTriggerRemoved) || err.Error() != "Channel triggers were removed" {
+				t.Fatalf("trigger %#v: err = %v", trigger, err)
+			}
+			if _, _, _, _, _, _, err := resolveAgentChannelAction(t.Context(), kernelagent.NewRegistry(), nil, &AgentRun{}, arguments); !errors.Is(err, ErrChannelTriggerRemoved) {
+				t.Fatalf("resolve with trigger %#v: err = %v", trigger, err)
+			}
+		})
+	}
+	arguments := cloneMap(base)
+	arguments["trigger"] = " "
+	kept, err := withoutRemovedChannelTrigger(arguments)
+	if err != nil || len(kept) != len(base) || kept["trigger"] != nil || arguments["trigger"] != " " {
+		t.Fatalf("empty trigger: kept=%#v err=%v caller=%#v", kept, err, arguments)
+	}
+	var args agentChannelActionArguments
+	if err := decodeAgentBehaviorArguments(kept, &args); err != nil || args.EndpointID != "slack-channel" {
+		t.Fatalf("decode without trigger: %#v, %v", args, err)
+	}
+	if unchanged, err := withoutRemovedChannelTrigger(base); err != nil || len(unchanged) != len(base) {
+		t.Fatalf("no trigger: %#v, %v", unchanged, err)
+	}
+}
+
+func TestAgentManagementSkillHasNoChannelTrigger(t *testing.T) {
+	definition := AgentManagementSkill()
+	if definition.Version != "1.6.0" {
+		t.Fatalf("version = %s", definition.Version)
+	}
+	properties := definition.Actions[AgentActionConfigureChannel].InputSchema["properties"].(map[string]interface{})
+	if _, ok := properties["trigger"]; ok {
+		t.Fatal("configure_channel still takes a trigger")
+	}
+	for _, name := range []string{AgentActionListChannels, AgentActionConfigureChannel} {
+		if strings.Contains(definition.Actions[name].Description, "Runbook trigger") {
+			t.Fatalf("%s still describes Runbook triggers", name)
+		}
 	}
 }

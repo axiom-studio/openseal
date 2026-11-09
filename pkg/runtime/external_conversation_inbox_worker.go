@@ -23,7 +23,6 @@ type ExternalConversationDispatchRequest struct {
 	Endpoint       *ExternalConversationEndpoint `json:"endpoint"`
 	Conversation   *Conversation                 `json:"conversation"`
 	Message        *ChannelMessage               `json:"message"`
-	Event          EventEnvelope                 `json:"event"`
 	IdempotencyKey string                        `json:"idempotencyKey"`
 }
 
@@ -35,30 +34,14 @@ type ExternalConversationDispatcher interface {
 	DispatchExternalConversation(context.Context, ExternalConversationDispatchRequest) (*ExternalConversationDispatchResult, error)
 }
 
-// ExternalConversationRunbookDispatcher starts one exact immutable Runbook
-// entrypoint. The implementation owns Runbook lookup and invocation; provider
-// adapters and the transport worker never interpret Runbook definitions.
-type ExternalConversationRunbookDispatcher interface {
-	DispatchExternalConversationRunbook(
-		context.Context,
-		ExternalConversationHandler,
-		ExternalConversationDispatchRequest,
-	) (*ExternalConversationDispatchResult, error)
-}
-
-// CanonicalExternalConversationDispatcher uses the existing canonical
-// Conversation scheduler for direct Agent and Team handlers and a separate,
-// typed boundary for exact Runbook handlers.
+// CanonicalExternalConversationDispatcher hands Agent and Team handlers to
+// the canonical Conversation scheduler.
 type CanonicalExternalConversationDispatcher struct {
 	scheduler *ConversationRunScheduler
-	runbooks  ExternalConversationRunbookDispatcher
 }
 
-func NewCanonicalExternalConversationDispatcher(
-	scheduler *ConversationRunScheduler,
-	runbooks ExternalConversationRunbookDispatcher,
-) *CanonicalExternalConversationDispatcher {
-	return &CanonicalExternalConversationDispatcher{scheduler: scheduler, runbooks: runbooks}
+func NewCanonicalExternalConversationDispatcher(scheduler *ConversationRunScheduler) *CanonicalExternalConversationDispatcher {
+	return &CanonicalExternalConversationDispatcher{scheduler: scheduler}
 }
 
 func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
@@ -67,9 +50,6 @@ func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
 ) (*ExternalConversationDispatchResult, error) {
 	if req.Endpoint == nil || req.Conversation == nil || req.Message == nil || strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: complete dispatch context is required", ErrInvalidExternalConversation)
-	}
-	if err := req.Event.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: dispatch event: %v", ErrInvalidExternalConversation, err)
 	}
 	switch req.Endpoint.Handler.Kind {
 	case ExternalConversationHandlerAgent, ExternalConversationHandlerTeam:
@@ -84,11 +64,6 @@ func (d *CanonicalExternalConversationDispatcher) DispatchExternalConversation(
 			return nil, errors.New("conversation message did not create a handler Run")
 		}
 		return &ExternalConversationDispatchResult{RunID: result.Run.ID}, nil
-	case ExternalConversationHandlerRunbook:
-		if d == nil || d.runbooks == nil {
-			return nil, errors.New("external conversation Runbook dispatcher is not configured")
-		}
-		return d.runbooks.DispatchExternalConversationRunbook(ctx, req.Endpoint.Handler, req)
 	default:
 		return nil, fmt.Errorf("%w: unsupported handler kind", ErrInvalidExternalConversation)
 	}
@@ -227,9 +202,8 @@ func (w *ExternalConversationInboxWorker) apply(ctx context.Context, item *Exter
 	if message.Historical {
 		return w.complete(ctx, item, conversation.ID, message.ID, "")
 	}
-	event := externalConversationEventEnvelope(item, endpoint, conversation, message)
 	dispatch, err := w.dispatcher.DispatchExternalConversation(ctx, ExternalConversationDispatchRequest{
-		Endpoint: endpoint, Conversation: conversation, Message: message, Event: event,
+		Endpoint: endpoint, Conversation: conversation, Message: message,
 		IdempotencyKey: "external-conversation-dispatch:" + item.ID,
 	})
 	if err != nil {
@@ -570,27 +544,6 @@ func (w *ExternalConversationInboxWorker) ensureThreadRoot(
 		return stored, nil
 	}
 	return next, nil
-}
-
-func externalConversationEventEnvelope(
-	item *ExternalConversationInboxItem,
-	endpoint *ExternalConversationEndpoint,
-	conversation *Conversation,
-	message *ChannelMessage,
-) EventEnvelope {
-	return EventEnvelope{
-		ID: item.ID, Scope: item.Scope, Type: externalConversationEventType,
-		Source: "conversation-adapter:" + endpoint.Provider, Subject: conversation.ID,
-		OccurredAt: item.Event.OccurredAt,
-		Attributes: map[string]interface{}{
-			"endpointId": endpoint.ID, "handlerKind": string(endpoint.Handler.Kind),
-			"conversationId": conversation.ID, "messageId": message.ID,
-		},
-		Payload: map[string]interface{}{
-			"conversationId": conversation.ID, "messageId": message.ID,
-		},
-		Actor: ActivityActor{Type: "service", ID: externalConversationActorID},
-	}
 }
 
 func (w *ExternalConversationInboxWorker) complete(

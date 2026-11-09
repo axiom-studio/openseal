@@ -99,7 +99,6 @@ const (
 	sectionReadiness
 	sectionTeams
 	sectionObjectives
-	sectionSources
 	sectionIntegrations
 	sectionSkills
 	sectionRuns
@@ -122,8 +121,6 @@ const (
 	modeChannelPost
 	modeObjectiveCreate
 	modeObjectiveEdit
-	modeEventSourceCreate
-	modeEventSourceRetire
 	modeIntegrationCreate
 	modeIntegrationActivate
 	modeIntegrationPause
@@ -187,7 +184,6 @@ type Model struct {
 	approvalCapability                 kernelapi.Capability
 	objectiveCapability                kernelapi.Capability
 	runbookCapability                  kernelapi.Capability
-	eventSourceCapability              kernelapi.Capability
 	conversationGatewayCapability      kernelapi.Capability
 	activityCapability                 kernelapi.Capability
 	clawHubCapability                  kernelapi.Capability
@@ -240,10 +236,6 @@ type Model struct {
 	selectedRunbook                    string
 	runbookDetail                      *runtime.RunbookDetail
 	runbookDetailExpanded              bool
-	eventSources                       []*runtime.EventSourceSubscription
-	eventSourceSelected                int
-	selectedEventSource                string
-	eventSourceDetail                  *runtime.EventSourceSubscriptionDetail
 	conversationGateways               []*runtime.ExternalConversationGatewayRegistration
 	conversationGatewaySelected        int
 	selectedConversationGateway        string
@@ -275,8 +267,6 @@ type Model struct {
 	workforceBundlePath                string
 	pendingObjectiveKey                string
 	pendingObjectivePrompt             string
-	pendingEventSourceID               string
-	pendingEventSourcePrompt           string
 	pendingClawHubPrompt               string
 	pendingConversationKey             string
 	pendingConversationTitle           string
@@ -447,23 +437,6 @@ type objectiveUpdated struct {
 type runbookSchedulesReconciled struct {
 	reconciliation *kernelapi.RunbookScheduleReconciliation
 	err            error
-}
-
-type eventSourcesLoaded struct {
-	items []*runtime.EventSourceSubscription
-	err   error
-}
-
-type eventSourceDetailLoaded struct {
-	id     string
-	detail *runtime.EventSourceSubscriptionDetail
-	err    error
-}
-
-type eventSourceChanged struct {
-	item   *runtime.EventSourceSubscription
-	action string
-	err    error
 }
 
 type clawHubSkillsLoaded struct {
@@ -640,7 +613,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		approvalCapability, hasApprovals := msg.document.Find(kernelapi.ActionApprovalsCapabilityID, kernelapi.ActionApprovalsCapabilityVersion)
 		objectiveCapability, hasObjectives := msg.document.Find(kernelapi.ObjectivesCapabilityID, kernelapi.ObjectivesCapabilityVersion)
 		runbookCapability, hasRunbooks := msg.document.Find(kernelapi.RunbooksCapabilityID, kernelapi.RunbooksCapabilityVersion)
-		eventSourceCapability, hasEventSources := msg.document.Find(kernelapi.EventSourceSubscriptionsCapabilityID, kernelapi.EventSourceSubscriptionsCapabilityVersion)
 		conversationGatewayCapability, hasConversationGateways := msg.document.Find(kernelapi.ConversationGatewaysCapabilityID, kernelapi.ConversationGatewaysCapabilityVersion)
 		activityCapability, hasActivity := msg.document.Find(kernelapi.ActivityCapabilityID, kernelapi.ActivityCapabilityVersion)
 		clawHubCapability, hasClawHub := msg.document.Find(kernelapi.ClawHubLifecycleCapabilityID, kernelapi.ClawHubLifecycleCapabilityVersion)
@@ -659,7 +631,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.approvalCapability = approvalCapability
 		m.objectiveCapability = objectiveCapability
 		m.runbookCapability = runbookCapability
-		m.eventSourceCapability = eventSourceCapability
 		m.conversationGatewayCapability = conversationGatewayCapability
 		m.activityCapability = activityCapability
 		m.clawHubCapability = clawHubCapability
@@ -694,9 +665,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if !hasRunbooks || !runbookCapability.Available {
 			m.runbookCapability = kernelapi.Capability{}
-		}
-		if !hasEventSources || !eventSourceCapability.Available || !eventSourceCapability.Supports(kernelapi.OperationList) {
-			m.eventSourceCapability = kernelapi.Capability{}
 		}
 		if !hasConversationGateways || !conversationGatewayCapability.Available || !conversationGatewayCapability.Supports(kernelapi.OperationList) || m.conversationGatewayClient == nil {
 			m.conversationGatewayCapability = kernelapi.Capability{}
@@ -733,7 +701,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !hasTeamDefinitions || !teamDefinitionCapability.Available {
 			m.teamDefinitionCapability = kernelapi.Capability{}
 		}
-		if !m.objectiveCapability.Available && !m.eventSourceCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
+		if !m.objectiveCapability.Available && !m.conversationGatewayCapability.Available && !m.clawHubCapability.Available && !m.skillActionCapability.Available && !m.skillBindingCapability.Available && !m.runCapability.Available && !m.requestCapability.Available && !m.approvalCapability.Available && !m.activityCapability.Available && !m.artifactCapability.Available && !m.channelCapability.Available && !m.agentBuilderCapability.Available && !m.workforceBundleCapability.Available && !m.agentDefinitionCapability.Available && !m.teamDefinitionCapability.Available {
 			m.unavailable = "This server does not advertise an agent builder, objectives, canonical work, requests, approvals, activity, Team channels, or artifact evidence."
 			m.ready = false
 			return m, nil
@@ -759,10 +727,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.section = sectionObjectives
 			m.mode = modeObjectiveCreate
 			m.editor.Placeholder = "Describe the objective and desired outcome…"
-		} else if m.eventSourceCapability.Available {
-			m.section = sectionSources
-			m.mode = modeEventSourceCreate
-			m.editor.Placeholder = "Press n or Tab to configure a durable event source."
 		} else if m.conversationGatewayCapability.Available {
 			m.section = sectionIntegrations
 			m.focusPanelList()
@@ -804,7 +768,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.focusPanelList()
 			m.resetComposerMode()
 		}
-		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+		return m, tea.Batch(m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadSkillBindings(), m.loadSkillActions(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 	case workforceBundleInspected:
 		m.busy = false
 		if msg.err != nil {
@@ -939,48 +903,6 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "Schedules reconciled."
 		}
 		return m, tea.Batch(m.loadObjectives(), m.loadRuns())
-	case eventSourcesLoaded:
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			return m, nil
-		}
-		m.err, m.eventSources = nil, msg.items
-		m.restoreEventSourceSelection()
-		return m, m.loadSelectedEventSource()
-	case eventSourceDetailLoaded:
-		if selected := m.selectedEventSourceRecord(); selected == nil || selected.ID != msg.id {
-			return m, nil
-		}
-		m.loading = false
-		if msg.err != nil {
-			m.err = msg.err
-			m.eventSourceDetail = nil
-			return m, nil
-		}
-		m.err, m.eventSourceDetail = nil, msg.detail
-		return m, nil
-	case eventSourceChanged:
-		m.busy = false
-		if msg.err != nil {
-			m.err = msg.err
-			if isHTTPStatus(msg.err, http.StatusConflict) {
-				m.status = "This source changed elsewhere. Latest state reloaded; review and retry."
-				return m, m.loadEventSources()
-			}
-			m.status = "Event source " + msg.action + " failed."
-			return m, nil
-		}
-		m.err = nil
-		m.pendingEventSourceID, m.pendingEventSourcePrompt = "", ""
-		m.editor.Reset()
-		m.resetComposerMode()
-		m.focusPanelList()
-		if msg.item != nil {
-			m.selectedEventSource = msg.item.ID
-			m.status = fmt.Sprintf("Event source %s · %s · revision %d.", msg.action, msg.item.Status, msg.item.Revision)
-		}
-		return m, m.loadEventSources()
 	case clawHubSkillsLoaded:
 		m.loading = false
 		if msg.err != nil {
@@ -1491,7 +1413,7 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case pollTick:
 		commands := []tea.Cmd{m.poll()}
 		if m.ready && !m.loading && !m.busy {
-			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadEventSources(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
+			commands = append(commands, m.loadCompilations(), m.loadTeamDeployments(), m.loadObjectives(), m.loadConversationGateways(), m.loadClawHubSkills(), m.loadRuns(), m.loadAgentRequests(), m.loadActionApprovals(), m.loadActivity(false), m.loadArtifacts(), m.loadConversations())
 		}
 		return m, tea.Batch(commands...)
 	case tea.KeyMsg:
@@ -1560,10 +1482,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.submitObjective()
 			case modeObjectiveEdit:
 				return m, m.submitObjectiveAmendment()
-			case modeEventSourceCreate:
-				return m, m.submitEventSource()
-			case modeEventSourceRetire:
-				return m, m.retireEventSource()
 			case modeIntegrationCreate:
 				return m, m.submitConversationGatewayCreation()
 			case modeIntegrationActivate:
@@ -1662,8 +1580,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadSelectedConversation()
 			} else if m.section == sectionTeams {
 				return m, m.loadTeamAmendments()
-			} else if m.section == sectionSources {
-				return m, m.loadSelectedEventSource()
 			} else if m.section == sectionRuns {
 				return m, m.loadSelectedRunHistory()
 			}
@@ -1677,8 +1593,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.loadSelectedConversation()
 			} else if m.section == sectionTeams {
 				return m, m.loadTeamAmendments()
-			} else if m.section == sectionSources {
-				return m, m.loadSelectedEventSource()
 			} else if m.section == sectionRuns {
 				return m, m.loadSelectedRunHistory()
 			}
@@ -1731,11 +1645,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.section = sectionObjectives
 				return m, tea.Batch(m.loadObjectives(), m.loadRuns())
 			}
-		case "S":
-			if m.eventSourceCapability.Available {
-				m.section = sectionSources
-				return m, m.loadEventSources()
-			}
 		case "I":
 			if m.conversationGatewayCapability.Available {
 				m.section = sectionIntegrations
@@ -1772,12 +1681,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.mode = modeObjectiveCreate
 				m.editor.Reset()
 				m.editor.Placeholder = "Describe the objective and desired outcome…"
-				m.focusComposerEditor()
-			} else if m.section == sectionSources && m.supportsEventSource(kernelapi.OperationCreate) {
-				m.mode = modeEventSourceCreate
-				m.editor.Reset()
-				m.editor.SetValue(eventSourceComposerTemplate())
-				m.editor.Placeholder = eventSourceComposerTemplate()
 				m.focusComposerEditor()
 			} else if m.section == sectionIntegrations && m.canCreateConversationGateway() {
 				m.prepareConversationGatewayCreation()
@@ -1839,8 +1742,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, m.pauseOrResumeAgentDeployment()
 			} else if m.section == sectionTeams {
 				return m, m.pauseOrResumeTeamDeployment()
-			} else if m.section == sectionSources {
-				return m, m.pauseOrResumeEventSource()
 			} else if m.section == sectionIntegrations {
 				if item := m.selectedConversationGatewayRecord(); item != nil {
 					if item.Status == runtime.ExternalConversationGatewayActive {
@@ -1863,13 +1764,6 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.prepareAgentAmendmentComposer(modeAgentAmendmentReject, "Record why this exact Agent amendment must not proceed…")
 			} else if m.section == sectionTeams && m.canResolveSelectedTeamAmendment() {
 				m.prepareTeamAmendmentComposer(modeTeamAmendmentReject, "Record why this exact Team amendment must not proceed…")
-			} else if m.section == sectionSources {
-				if item := m.selectedEventSourceRecord(); item != nil && item.Status != runtime.EventSourceSubscriptionRetired && m.supportsEventSource(kernelapi.OperationRetire) {
-					m.mode = modeEventSourceRetire
-					m.editor.Reset()
-					m.editor.Placeholder = "Type RETIRE to preserve history and stop this source permanently."
-					m.focusComposerEditor()
-				}
 			} else if m.section == sectionIntegrations {
 				m.prepareConversationGatewayLifecycle(modeIntegrationRetire)
 			} else if m.section == sectionSkills && m.selectedSkillBindingRecord() != nil && !m.selectedSkillBindingRecord().Disabled && m.supportsSkillBinding(kernelapi.OperationDisable) {
@@ -2442,33 +2336,6 @@ func (m *Model) reconcileRunbookSchedules() tea.Cmd {
 	}
 }
 
-func (m *Model) loadEventSources() tea.Cmd {
-	if !m.supportsEventSource(kernelapi.OperationList) {
-		return nil
-	}
-	m.loading = true
-	return func() tea.Msg {
-		items, err := m.client.ListEventSourceSubscriptions(m.ctx, runtime.EventSourceSubscriptionFilter{
-			Scope: m.config.Scope, Owner: &m.config.Owner, Limit: 100,
-		})
-		return eventSourcesLoaded{items: items, err: err}
-	}
-}
-
-func (m *Model) loadSelectedEventSource() tea.Cmd {
-	selected := m.selectedEventSourceRecord()
-	if selected == nil || !m.supportsEventSource(kernelapi.OperationGet) {
-		m.eventSourceDetail = nil
-		return nil
-	}
-	m.loading = true
-	id := selected.ID
-	return func() tea.Msg {
-		detail, err := m.client.GetEventSourceSubscription(m.ctx, m.config.Scope, id)
-		return eventSourceDetailLoaded{id: id, detail: detail, err: err}
-	}
-}
-
 func (m *Model) loadClawHubSkills() tea.Cmd {
 	if !m.supportsClawHub(clawhub.LifecycleInspectInstalled) {
 		return nil
@@ -2597,9 +2464,6 @@ func (m *Model) loadPanel() tea.Cmd {
 	}
 	if m.section == sectionObjectives {
 		return tea.Batch(m.loadObjectives(), m.loadRuns())
-	}
-	if m.section == sectionSources {
-		return m.loadEventSources()
 	}
 	if m.section == sectionIntegrations {
 		return m.loadConversationGateways()
@@ -2808,153 +2672,6 @@ func (m *Model) submitObjective() tea.Cmd {
 	return func() tea.Msg {
 		objective, err := m.client.CreateObjective(m.ctx, request, key)
 		return objectiveCreated{objective: objective, err: err}
-	}
-}
-
-func eventSourceComposerTemplate() string {
-	return "name: Production Kubernetes events\nsource: kubernetes:cluster:production\nconnector: host:kubernetes-events\nevents: Warning, DeploymentChanged\npoll-seconds: 5\ndescription: Normalize production cluster events\nparameters: {}"
-}
-
-func parseEventSourceComposer(value string, scope runtime.Scope, owner runtime.ObjectiveOwner) (kernelapi.CreateEventSourceSubscriptionRequest, error) {
-	fields := make(map[string]string)
-	for _, raw := range strings.Split(value, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
-		key, fieldValue, ok := strings.Cut(line, ":")
-		key, fieldValue = strings.ToLower(strings.TrimSpace(key)), strings.TrimSpace(fieldValue)
-		if !ok || key == "" || fieldValue == "" {
-			return kernelapi.CreateEventSourceSubscriptionRequest{}, fmt.Errorf("use key: value lines; %q is incomplete", line)
-		}
-		switch key {
-		case "id", "name", "source", "connector", "binding", "events", "poll-seconds", "description", "parameters":
-		default:
-			return kernelapi.CreateEventSourceSubscriptionRequest{}, fmt.Errorf("unknown event source field %q", key)
-		}
-		if _, exists := fields[key]; exists {
-			return kernelapi.CreateEventSourceSubscriptionRequest{}, fmt.Errorf("event source field %q is repeated", key)
-		}
-		fields[key] = fieldValue
-	}
-	request := kernelapi.CreateEventSourceSubscriptionRequest{
-		ID: fields["id"], Scope: scope, Owner: owner, DisplayName: fields["name"], Description: fields["description"], Source: fields["source"],
-		Status: runtime.EventSourceSubscriptionPaused,
-	}
-	if request.DisplayName == "" || request.Source == "" || fields["connector"] == "" || fields["events"] == "" {
-		return request, errors.New("name, source, connector, and events are required")
-	}
-	for _, eventType := range strings.Split(fields["events"], ",") {
-		if eventType = strings.TrimSpace(eventType); eventType != "" {
-			request.EventTypes = append(request.EventTypes, eventType)
-		}
-	}
-	if len(request.EventTypes) == 0 {
-		return request, errors.New("at least one event type is required")
-	}
-	if raw := fields["poll-seconds"]; raw != "" {
-		value, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || (value != 0 && (value < 5 || value > 86400)) {
-			return request, errors.New("poll-seconds must be 0 or between 5 and 86400")
-		}
-		request.PollIntervalSeconds = value
-	}
-	if raw := fields["parameters"]; raw != "" {
-		if err := json.Unmarshal([]byte(raw), &request.Parameters); err != nil {
-			return request, fmt.Errorf("parameters must be a JSON object: %w", err)
-		}
-	}
-	kindText, identity, ok := strings.Cut(fields["connector"], ":")
-	if !ok {
-		return request, errors.New("connector must be host:<id> or skill:<id>@<version>#<action>")
-	}
-	request.Connector.Kind = runtime.EventSourceConnectorKind(strings.TrimSpace(kindText))
-	identity = strings.TrimSpace(identity)
-	switch request.Connector.Kind {
-	case runtime.EventSourceConnectorHost:
-		request.Connector.ID, request.Connector.Version, _ = strings.Cut(identity, "@")
-	case runtime.EventSourceConnectorSkill:
-		identity, request.Connector.Action, ok = strings.Cut(identity, "#")
-		if !ok || strings.TrimSpace(request.Connector.Action) == "" {
-			return request, errors.New("Skill connector requires #<action>")
-		}
-		request.Connector.ID, request.Connector.Version, ok = strings.Cut(identity, "@")
-		if !ok || strings.TrimSpace(request.Connector.Version) == "" {
-			return request, errors.New("Skill connector requires an exact @<version>")
-		}
-		request.Connector.BindingID, identity, ok = strings.Cut(fields["binding"], "@")
-		if !ok || strings.TrimSpace(request.Connector.BindingID) == "" {
-			return request, errors.New("Skill connector requires binding: <id>@<revision>")
-		}
-		revision, err := strconv.ParseInt(strings.TrimSpace(identity), 10, 64)
-		if err != nil || revision <= 0 {
-			return request, errors.New("Skill binding revision must be positive")
-		}
-		request.Connector.BindingRevision = revision
-	default:
-		return request, errors.New("connector kind must be host or skill")
-	}
-	request.Connector.ID = strings.TrimSpace(request.Connector.ID)
-	request.Connector.Version = strings.TrimSpace(request.Connector.Version)
-	request.Connector.Action = strings.TrimSpace(request.Connector.Action)
-	if request.Connector.ID == "" {
-		return request, errors.New("connector ID is required")
-	}
-	return request, nil
-}
-
-func (m *Model) submitEventSource() tea.Cmd {
-	if !m.supportsEventSource(kernelapi.OperationCreate) || m.busy {
-		return nil
-	}
-	prompt := strings.TrimSpace(m.editor.Value())
-	request, err := parseEventSourceComposer(prompt, m.config.Scope, m.config.Owner)
-	if err != nil {
-		m.status = "Review the event source: " + err.Error()
-		return nil
-	}
-	if request.ID == "" {
-		if m.pendingEventSourceID == "" || m.pendingEventSourcePrompt != prompt {
-			m.pendingEventSourceID, m.pendingEventSourcePrompt = "event-source:"+uuid.NewString(), prompt
-		}
-		request.ID = m.pendingEventSourceID
-	}
-	m.busy, m.err, m.status = true, nil, "Creating paused event source for review…"
-	return func() tea.Msg {
-		item, createErr := m.client.CreateEventSourceSubscription(m.ctx, request)
-		return eventSourceChanged{item: item, action: "created paused", err: createErr}
-	}
-}
-
-func (m *Model) pauseOrResumeEventSource() tea.Cmd {
-	item := m.selectedEventSourceRecord()
-	if item == nil || item.Status == runtime.EventSourceSubscriptionRetired || m.busy || !m.supportsEventSource(kernelapi.OperationUpdate) {
-		return nil
-	}
-	status, action := runtime.EventSourceSubscriptionPaused, "paused"
-	if item.Status == runtime.EventSourceSubscriptionPaused {
-		status, action = runtime.EventSourceSubscriptionActive, "activated"
-	}
-	m.busy, m.err, m.status = true, nil, "Updating event source lifecycle…"
-	return func() tea.Msg {
-		updated, err := m.client.UpdateEventSourceSubscription(m.ctx, m.config.Scope, item.ID, kernelapi.UpdateEventSourceSubscriptionRequest{ExpectedRevision: item.Revision, Status: &status})
-		return eventSourceChanged{item: updated, action: action, err: err}
-	}
-}
-
-func (m *Model) retireEventSource() tea.Cmd {
-	item := m.selectedEventSourceRecord()
-	if item == nil || item.Status == runtime.EventSourceSubscriptionRetired || m.busy || !m.supportsEventSource(kernelapi.OperationRetire) {
-		return nil
-	}
-	if strings.TrimSpace(m.editor.Value()) != "RETIRE" {
-		m.status = "Type RETIRE exactly to confirm this permanent lifecycle change."
-		return nil
-	}
-	m.busy, m.err, m.status = true, nil, "Retiring event source…"
-	return func() tea.Msg {
-		retired, err := m.client.RetireEventSourceSubscription(m.ctx, m.config.Scope, item.ID, kernelapi.RetireEventSourceSubscriptionRequest{ExpectedRevision: item.Revision})
-		return eventSourceChanged{item: retired, action: "retired", err: err}
 	}
 }
 
@@ -3537,7 +3254,6 @@ func (m *Model) defaultOperationalSection() panelSection {
 		{sectionAuthoring, m.agentBuilderCapability.Available},
 		{sectionTeams, m.teamDefinitionCapability.Available},
 		{sectionObjectives, m.objectiveCapability.Available},
-		{sectionSources, m.eventSourceCapability.Available},
 		{sectionIntegrations, m.conversationGatewayCapability.Available},
 		{sectionRuns, m.runCapability.Available},
 		{sectionActivity, m.activityCapability.Available},
@@ -3571,7 +3287,6 @@ func (m *Model) availableSections() []panelSection {
 		{sectionObjectives, m.objectiveCapability.Available},
 		{sectionRequests, m.requestCapability.Available},
 		{sectionApprovals, m.approvalCapability.Available},
-		{sectionSources, m.eventSourceCapability.Available},
 		{sectionIntegrations, m.conversationGatewayCapability.Available},
 		{sectionActivity, m.activityCapability.Available},
 		{sectionArtifacts, m.artifactCapability.Available},
@@ -3621,10 +3336,6 @@ func (m *Model) supportsObjective(operation string) bool {
 
 func (m *Model) supportsRunbook(operation string) bool {
 	return m.ready && m.runbookCapability.Supports(operation)
-}
-
-func (m *Model) supportsEventSource(operation string) bool {
-	return m.ready && m.eventSourceCapability.Supports(operation)
 }
 
 func (m *Model) supportsClawHub(operation clawhub.LifecycleOperation) bool {
@@ -3886,38 +3597,6 @@ func (m *Model) moveRunbookSelection(delta int) {
 	m.runbookDetailExpanded = false
 }
 
-func (m *Model) selectedEventSourceRecord() *runtime.EventSourceSubscription {
-	if m.eventSourceSelected < 0 || m.eventSourceSelected >= len(m.eventSources) {
-		return nil
-	}
-	return m.eventSources[m.eventSourceSelected]
-}
-
-func (m *Model) restoreEventSourceSelection() {
-	if len(m.eventSources) == 0 {
-		m.eventSourceSelected, m.selectedEventSource, m.eventSourceDetail = 0, "", nil
-		return
-	}
-	for index, item := range m.eventSources {
-		if item.ID == m.selectedEventSource {
-			m.eventSourceSelected = index
-			return
-		}
-	}
-	m.eventSourceSelected = min(m.eventSourceSelected, len(m.eventSources)-1)
-	m.selectedEventSource = m.eventSources[m.eventSourceSelected].ID
-	m.eventSourceDetail = nil
-}
-
-func (m *Model) moveEventSourceSelection(delta int) {
-	if len(m.eventSources) == 0 {
-		return
-	}
-	m.eventSourceSelected = max(0, min(len(m.eventSources)-1, m.eventSourceSelected+delta))
-	m.selectedEventSource = m.eventSources[m.eventSourceSelected].ID
-	m.eventSourceDetail = nil
-}
-
 func (m *Model) objectiveRecord(objectiveID string) *runtime.Objective {
 	for _, objective := range m.objectives {
 		if objective != nil && objective.ID == objectiveID {
@@ -4062,10 +3741,6 @@ func (m *Model) movePanelSelection(delta int) {
 	}
 	if m.section == sectionObjectives {
 		m.moveObjectiveSelection(delta)
-		return
-	}
-	if m.section == sectionSources {
-		m.moveEventSourceSelection(delta)
 		return
 	}
 	if m.section == sectionIntegrations {
@@ -4907,11 +4582,6 @@ func (m *Model) prepareComposerForSection() {
 		m.mode = modeObjectiveCreate
 		m.editor.Placeholder = "Describe the objective and desired outcome…"
 		m.focusComposerEditor()
-	case m.section == sectionSources && m.supportsEventSource(kernelapi.OperationCreate):
-		m.mode = modeEventSourceCreate
-		m.editor.SetValue(eventSourceComposerTemplate())
-		m.editor.Placeholder = eventSourceComposerTemplate()
-		m.focusComposerEditor()
 	case m.section == sectionIntegrations && m.canCreateConversationGateway():
 		m.prepareConversationGatewayCreation()
 	case m.section == sectionSkills && m.supportsClawHub(clawhub.LifecycleInstall):
@@ -4985,11 +4655,6 @@ func (m *Model) resetComposerMode() {
 	if m.section == sectionObjectives {
 		m.mode = modeObjectiveCreate
 		m.editor.Placeholder = "Describe the objective and desired outcome…"
-		return
-	}
-	if m.section == sectionSources {
-		m.mode = modeEventSourceCreate
-		m.editor.Placeholder = "Press n or Tab to configure a durable event source."
 		return
 	}
 	if m.section == sectionIntegrations {

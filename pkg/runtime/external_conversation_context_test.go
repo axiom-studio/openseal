@@ -76,7 +76,7 @@ func newContextTestWorker(t *testing.T, store *MemoryStore, resolver ExternalCon
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatcher := &crashAfterExternalConversationDispatch{next: NewCanonicalExternalConversationDispatcher(scheduler, nil), crashOnce: crash}
+	dispatcher := &crashAfterExternalConversationDispatch{next: NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: crash}
 	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
 		WorkerID: "context-worker", BaseRetry: time.Second, MaximumRetry: time.Minute,
 		ContextHost: host, ContextCatalog: resolver,

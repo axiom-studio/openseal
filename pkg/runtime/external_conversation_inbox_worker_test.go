@@ -60,7 +60,7 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 		t.Fatal(err)
 	}
 	dispatcher := &crashAfterExternalConversationDispatch{
-		next: NewCanonicalExternalConversationDispatcher(scheduler, nil), crashOnce: true,
+		next: NewCanonicalExternalConversationDispatcher(scheduler), crashOnce: true,
 	}
 	worker, err := NewExternalConversationInboxWorker(store, dispatcher, ExternalConversationInboxWorkerConfig{
 		WorkerID: "inbox-worker", LeaseDuration: time.Minute, BaseRetry: time.Second, MaximumRetry: time.Minute,
@@ -128,42 +128,16 @@ func TestExternalConversationInboxWorkerRecoversWithoutDuplicateMessageOrRun(t *
 	}
 }
 
-type recordingRunbookConversationDispatcher struct {
-	handler ExternalConversationHandler
-	event   EventEnvelope
-	key     string
-}
-
-func (d *recordingRunbookConversationDispatcher) DispatchExternalConversationRunbook(
-	_ context.Context,
-	handler ExternalConversationHandler,
-	req ExternalConversationDispatchRequest,
-) (*ExternalConversationDispatchResult, error) {
-	d.handler, d.event, d.key = handler, req.Event, req.IdempotencyKey
-	return &ExternalConversationDispatchResult{RunID: "runbook-run"}, nil
-}
-
-func TestCanonicalExternalConversationDispatcherRoutesExactRunbook(t *testing.T) {
-	runbooks := &recordingRunbookConversationDispatcher{}
-	dispatcher := NewCanonicalExternalConversationDispatcher(nil, runbooks)
-	scope := Scope{Kind: "tenant", ID: "one"}
-	endpoint := &ExternalConversationEndpoint{
-		Handler: ExternalConversationHandler{
-			Kind: ExternalConversationHandlerRunbook, ID: "support", Version: "2.4.1", Trigger: "on-message",
-			AssignedAgentID: "support-agent",
-		},
+func TestCanonicalExternalConversationDispatcherRefusesRunbookHandler(t *testing.T) {
+	handler := ExternalConversationHandler{Kind: "runbook", ID: "support"}
+	if err := handler.Validate(ObjectiveOwner{Type: OwnerTypeAgent, ID: "support"}); !errors.Is(err, ErrInvalidExternalConversation) {
+		t.Fatalf("Runbook handler validated: %v", err)
 	}
-	conversation := &Conversation{ID: "conversation"}
-	message := &ChannelMessage{ID: "message"}
-	event := EventEnvelope{
-		ID: "event", Scope: scope, Type: externalConversationEventType, Source: "conversation-adapter:webchat",
-		OccurredAt: time.Now().UTC(), Payload: map[string]interface{}{},
-	}
-	result, err := dispatcher.DispatchExternalConversation(t.Context(), ExternalConversationDispatchRequest{
-		Endpoint: endpoint, Conversation: conversation, Message: message, Event: event, IdempotencyKey: "dispatch-key",
+	result, err := NewCanonicalExternalConversationDispatcher(nil).DispatchExternalConversation(t.Context(), ExternalConversationDispatchRequest{
+		Endpoint: &ExternalConversationEndpoint{Handler: handler}, Conversation: &Conversation{ID: "conversation"},
+		Message: &ChannelMessage{ID: "message"}, IdempotencyKey: "dispatch-key",
 	})
-	if err != nil || result.RunID != "runbook-run" || runbooks.handler != endpoint.Handler ||
-		runbooks.event.ID != event.ID || runbooks.key != "dispatch-key" {
-		t.Fatalf("Runbook dispatch = %#v, recorder=%#v, %v", result, runbooks, err)
+	if result != nil || !errors.Is(err, ErrInvalidExternalConversation) {
+		t.Fatalf("Runbook handler dispatched: %#v, %v", result, err)
 	}
 }
