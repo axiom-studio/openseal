@@ -39,6 +39,17 @@ func (m computerMachine) Do(ctx context.Context, op string, args map[string]inte
 	return output, json.Unmarshal(result.Result, &output)
 }
 
+func (m computerMachine) Seed(t *testing.T, rel string, data []byte) {
+	t.Helper()
+	path := m.Path(rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBridgeConformsToTheMachineOperations(t *testing.T) {
 	workspacetest.Conformance(t, func(t *testing.T) workspacetest.Machine {
 		root, err := filepath.EvalSymlinks(t.TempDir())

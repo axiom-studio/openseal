@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 
 	"github.com/axiom-studio/openseal/pkg/computer/bridge"
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -226,7 +227,7 @@ func resolveExisting(path string) (string, error) {
 	if err == nil {
 		return resolved, nil
 	}
-	if !errors.Is(err, fs.ErrNotExist) {
+	if !missing(err) {
 		return "", err
 	}
 	// A dangling symlink must not resolve through its parent: its target
@@ -243,6 +244,12 @@ func resolveExisting(path string) (string, error) {
 		return "", err
 	}
 	return filepath.Join(resolvedParent, filepath.Base(path)), nil
+}
+
+// missing reports whether err says a path names nothing: it does not exist,
+// or a file stands where a folder above it would be.
+func missing(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
 }
 
 // expandPath expands a leading ~ to the home folder.

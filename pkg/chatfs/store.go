@@ -314,13 +314,13 @@ func checkPlacement(tree Tree, name string) error {
 		}
 		parent = parent[:index]
 		if _, ok := tree.Files[parent]; ok {
-			return fmt.Errorf("%w: %s is a file, so %s cannot be inside it", ErrPath, parent, name)
+			return workspace.InsideAFile(parent, name)
 		}
 	}
 	prefix := name + "/"
 	for existing := range tree.Files {
 		if strings.HasPrefix(existing, prefix) {
-			return fmt.Errorf("%w: %s is a directory", ErrPath, name)
+			return workspace.IsADirectory(name)
 		}
 	}
 	return nil

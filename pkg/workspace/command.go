@@ -12,6 +12,12 @@ func StoppedNote(seconds int) string {
 	return fmt.Sprintf("\nThe command was stopped after %d seconds.\n", seconds)
 }
 
+// NoWorkingDirectory is run_command's result when its workingDirectory
+// names no directory: the command does not run.
+func NoWorkingDirectory(shown string) CommandResult {
+	return CommandResult{ExitStatus: 1, Stderr: shown + " is not a directory\n"}
+}
+
 // NotStartedNote is the stderr of a command that could not start.
 func NotStartedNote(err error) string {
 	return fmt.Sprintf("The command could not start: %v\n", err)

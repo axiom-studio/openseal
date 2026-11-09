@@ -97,7 +97,7 @@ func asCallError(err error) *bridge.CallError {
 // the path the model already named.
 func fileError(shown string, err error) *bridge.CallError {
 	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	case missing(err):
 		return asCallError(workspace.NotFound(shown))
 	case errors.Is(err, fs.ErrPermission):
 		return callError(bridge.ErrorFailed, "Permission denied for "+shown+".")
@@ -351,13 +351,33 @@ func (m machine) write(args map[string]interface{}) (workspace.ChangeResult, err
 	} else if err == nil && !info.Mode().IsRegular() {
 		return workspace.ChangeResult{}, notRegular(path)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return workspace.ChangeResult{}, fileError(path, err)
+	if err := makeParents(path); err != nil {
+		return workspace.ChangeResult{}, err
 	}
 	if err := writeFile(path, content); err != nil {
 		return workspace.ChangeResult{}, fileError(path, err)
 	}
 	return workspace.ChangeResult{Success: true, ChangedPaths: []string{path}}, nil
+}
+
+// makeParents makes the folders above path, refusing as a chat does when a
+// file stands where one of them would be.
+func makeParents(path string) error {
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		if info, err := os.Stat(dir); err == nil {
+			if !info.IsDir() {
+				return workspace.InsideAFile(dir, path)
+			}
+			break
+		}
+		if dir == filepath.Dir(dir) {
+			break
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fileError(path, err)
+	}
+	return nil
 }
 
 // writeFile replaces a file's content, keeping its mode when it exists. It
@@ -480,8 +500,8 @@ func (m machine) move(ctx context.Context, args map[string]interface{}) (workspa
 	if _, err := os.Lstat(to); err == nil {
 		return workspace.ChangeResult{}, workspace.AlreadyExists(to)
 	}
-	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
-		return workspace.ChangeResult{}, fileError(to, err)
+	if err := makeParents(to); err != nil {
+		return workspace.ChangeResult{}, err
 	}
 	if err := os.Rename(from, to); err != nil {
 		if errors.Is(err, syscall.EXDEV) {

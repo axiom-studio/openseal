@@ -1,8 +1,10 @@
 package chatfs
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"path"
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/workspace"
@@ -29,6 +31,18 @@ func (m chatMachine) Do(ctx context.Context, op string, args map[string]interfac
 		return nil, errors.New(result["error"].(string))
 	}
 	return result, nil
+}
+
+// Seed puts a file as a command in the chat's sandbox leaves it.
+func (m chatMachine) Seed(t *testing.T, rel string, data []byte) {
+	t.Helper()
+	entry, err := m.store.Put(context.Background(), m.chat, bytes.NewReader(data), int64(len(data)), workspace.MachineMediaType(path.Base(rel), data))
+	if err == nil {
+		_, err = m.store.Commit(context.Background(), m.chat, m.author, []Change{{Path: rel, Entry: &entry}})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestChatFilesConformToTheMachineOperations(t *testing.T) {

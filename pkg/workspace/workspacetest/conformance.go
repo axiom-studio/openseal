@@ -28,6 +28,14 @@ type Machine interface {
 	Do(ctx context.Context, op string, args map[string]interface{}) (map[string]interface{}, error)
 }
 
+// Seeder is a machine that can hold any bytes, as a command would leave
+// them (a chat gives such a file workspace.MachineMediaType). The checks of
+// binary, unknown and large files need it, and are skipped for a machine
+// without it.
+type Seeder interface {
+	Seed(t *testing.T, rel string, data []byte)
+}
+
 // Options say what a machine runs.
 type Options struct {
 	// Commands runs run_command with a POSIX shell.
@@ -46,6 +54,17 @@ func Conformance(t *testing.T, factory func(t *testing.T) Machine, options Optio
 	if options.Files {
 		for name, check := range fileChecks {
 			t.Run(name, func(t *testing.T) { check(t, &harness{t: t, m: factory(t)}) })
+		}
+	}
+	if options.Files {
+		for name, check := range seededChecks {
+			t.Run(name, func(t *testing.T) {
+				h := &harness{t: t, m: factory(t)}
+				if _, ok := h.m.(Seeder); !ok {
+					t.Skip("the machine cannot hold arbitrary bytes")
+				}
+				check(t, h)
+			})
 		}
 	}
 	if options.Commands {
@@ -104,6 +123,11 @@ func (h *harness) write(rel, content string) {
 	h.t.Helper()
 	h.want(workspace.OpWriteFile, map[string]interface{}{"path": h.m.Path(rel), "content": content},
 		workspace.ChangeResult{Success: true, ChangedPaths: []string{h.m.Shown(rel)}})
+}
+
+func (h *harness) seed(rel string, data []byte) {
+	h.t.Helper()
+	h.m.(Seeder).Seed(h.t, rel, data)
 }
 
 func (h *harness) shown(rels ...string) []string {
@@ -287,6 +311,81 @@ var fileChecks = map[string]func(t *testing.T, h *harness){
 		h.fails(workspace.OpMoveFile, map[string]interface{}{"path": h.m.Path("docs/final.md"), "destination": h.m.Path("taken.md")}, workspace.AlreadyExists(h.m.Shown("taken.md")))
 		h.fails(workspace.OpMoveFile, map[string]interface{}{"path": h.m.Path("draft.md"), "destination": h.m.Path("x.md")}, workspace.NotFound(h.m.Shown("draft.md")))
 	},
+	"edit_file and write_file refuse a directory": func(t *testing.T, h *harness) {
+		h.write("dir/a.txt", "a")
+		h.fails(workspace.OpEditFile, map[string]interface{}{"path": h.m.Path("dir"), "oldText": "a", "newText": "b"}, workspace.IsADirectory(h.m.Shown("dir")))
+		h.fails(workspace.OpWriteFile, map[string]interface{}{"path": h.m.Path("dir"), "content": "x"}, workspace.IsADirectory(h.m.Shown("dir")))
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("dir/a.txt")},
+			workspace.ReadFileResult{Path: h.m.Shown("dir/a.txt"), MediaType: "text/plain", Size: 1, Content: "a"})
+	},
+	"write_file makes the folders above a file": func(t *testing.T, h *harness) {
+		h.write("a/b/c/d.txt", "deep")
+		h.fails(workspace.OpWriteFile, map[string]interface{}{"path": h.m.Path("a/b/c/d.txt/e.txt"), "content": "x"},
+			workspace.InsideAFile(h.m.Shown("a/b/c/d.txt"), h.m.Shown("a/b/c/d.txt/e.txt")))
+		h.fails(workspace.OpMoveFile, map[string]interface{}{"path": h.m.Path("a/b/c/d.txt"), "destination": h.m.Path("a/b/c/d.txt/e.txt")},
+			workspace.MoveIntoItself(h.m.Shown("a/b/c/d.txt")))
+		h.fails(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("a/b/c/d.txt/e.txt")}, workspace.NotFound(h.m.Shown("a/b/c/d.txt/e.txt")))
+		h.want(workspace.OpListDirectory, map[string]interface{}{"depth": 8}, workspace.ListDirectoryResult{Entries: []workspace.Entry{
+			directory(h.m.Shown("a")), directory(h.m.Shown("a/b")), directory(h.m.Shown("a/b/c")), file(h.m.Shown("a/b/c/d.txt"), 4, "text/plain"),
+		}})
+	},
+}
+
+// seededChecks need a Seeder: files no write_file makes.
+var seededChecks = map[string]func(t *testing.T, h *harness){
+	"binary files read as a note and are not searched": func(t *testing.T, h *harness) {
+		png := []byte("\x89PNG\r\n\x1a\nneedle")
+		blob := []byte("needle\xff\xfe\x00")
+		h.seed("logo.png", png)
+		h.seed("blob", blob)
+		const binary = "This is a binary file; use its path to show or embed it."
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("logo.png")},
+			workspace.ReadFileResult{Path: h.m.Shown("logo.png"), MediaType: "image/png", Size: int64(len(png)), Note: binary})
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("blob")},
+			workspace.ReadFileResult{Path: h.m.Shown("blob"), MediaType: "application/octet-stream", Size: int64(len(blob)), Note: binary})
+		h.want(workspace.OpListDirectory, map[string]interface{}{}, workspace.ListDirectoryResult{Entries: []workspace.Entry{
+			file(h.m.Shown("blob"), int64(len(blob)), "application/octet-stream"), file(h.m.Shown("logo.png"), int64(len(png)), "image/png"),
+		}})
+		h.want(workspace.OpSearchFiles, map[string]interface{}{"query": "needle"}, workspace.SearchFilesResult{Matches: []workspace.SearchMatch{}})
+		h.fails(workspace.OpEditFile, map[string]interface{}{"path": h.m.Path("logo.png"), "oldText": "needle", "newText": "pin"}, workspace.NotText(h.m.Shown("logo.png")))
+		h.fails(workspace.OpEditFile, map[string]interface{}{"path": h.m.Path("blob"), "oldText": "needle", "newText": "pin"}, workspace.NotText(h.m.Shown("blob")))
+	},
+	"a file of no known type that holds text is text": func(t *testing.T, h *harness) {
+		h.seed("Dockerfile", []byte("FROM scratch\n"))
+		h.want(workspace.OpListDirectory, map[string]interface{}{}, workspace.ListDirectoryResult{Entries: []workspace.Entry{
+			file(h.m.Shown("Dockerfile"), 13, "text/plain"),
+		}})
+		h.want(workspace.OpSearchFiles, map[string]interface{}{"query": "FROM"}, workspace.SearchFilesResult{Matches: []workspace.SearchMatch{
+			{Path: h.m.Shown("Dockerfile"), Line: 1, Text: "FROM scratch"},
+		}})
+		h.want(workspace.OpEditFile, map[string]interface{}{"path": h.m.Path("Dockerfile"), "oldText": "scratch", "newText": "alpine"},
+			workspace.ChangeResult{Success: true, ChangedPaths: h.shown("Dockerfile"), Replacements: 1})
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("Dockerfile")},
+			workspace.ReadFileResult{Path: h.m.Shown("Dockerfile"), MediaType: "text/plain", Size: 12, Content: "FROM alpine\n"})
+	},
+	"a document reads as its text or a note": func(t *testing.T, h *harness) {
+		h.seed("report.pdf", []byte("not really a pdf"))
+		got := h.ok(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("report.pdf")})
+		note, _ := got["note"].(string)
+		if got["content"] != "" || got["mediaType"] != "application/pdf" || got["truncated"] != false || !strings.HasPrefix(note, "No text could be extracted from this document (") {
+			t.Fatalf("read_file of a broken PDF = %s", encode(got))
+		}
+	},
+	"files too large to edit or search": func(t *testing.T, h *harness) {
+		big := []byte("needle\n" + strings.Repeat("x", workspace.MaximumFileBytes))
+		h.seed("big.txt", big)
+		h.fails(workspace.OpEditFile, map[string]interface{}{"path": h.m.Path("big.txt"), "oldText": "needle", "newText": "pin"}, workspace.TooLargeToEdit(h.m.Shown("big.txt")))
+		h.want(workspace.OpSearchFiles, map[string]interface{}{"query": "needle"}, workspace.SearchFilesResult{Matches: []workspace.SearchMatch{}})
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("big.txt"), "maxBytes": 6},
+			workspace.ReadFileResult{Path: h.m.Shown("big.txt"), MediaType: "text/plain", Size: int64(len(big)), Content: "needle", Truncated: true})
+	},
+	"read_file checks only the bytes it reads are text": func(t *testing.T, h *harness) {
+		h.seed("mixed.txt", []byte("clean start\n\xff\xfe"))
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("mixed.txt"), "maxBytes": 5},
+			workspace.ReadFileResult{Path: h.m.Shown("mixed.txt"), MediaType: "text/plain", Size: 14, Content: "clean", Truncated: true})
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("mixed.txt")},
+			workspace.ReadFileResult{Path: h.m.Shown("mixed.txt"), MediaType: "text/plain", Size: 14, Note: "This is a binary file; use its path to show or embed it."})
+	},
 }
 
 var commandChecks = map[string]func(t *testing.T, h *harness){
@@ -315,6 +414,31 @@ var commandChecks = map[string]func(t *testing.T, h *harness){
 		checkCommand(t, got, workspace.CommandResult{Stdout: "hello"})
 		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("sub/out.txt")},
 			workspace.ReadFileResult{Path: h.m.Shown("sub/out.txt"), MediaType: "text/plain", Size: 4, Content: "made"})
+	},
+	"run_command keeps the end of long stderr": func(t *testing.T, h *harness) {
+		got := h.ok(workspace.OpRunCommand, map[string]interface{}{"command": "i=0; while [ $i -lt 2000 ]; do printf '%080d\\n' $i >&2; i=$((i+1)); done; printf END >&2; exit 2"})
+		stderr, _ := got["stderr"].(string)
+		if len(stderr) != workspace.CommandOutputBytes || !strings.HasSuffix(stderr, "\nEND") {
+			t.Fatalf("stderr is %d bytes ending %q", len(stderr), stderr[max(0, len(stderr)-10):])
+		}
+		got["stderr"] = ""
+		checkCommand(t, got, workspace.CommandResult{ExitStatus: 2, Truncated: true})
+	},
+	"run_command needs a working directory that is one": func(t *testing.T, h *harness) {
+		h.write("plain.txt", "x")
+		got := h.ok(workspace.OpRunCommand, map[string]interface{}{"command": "printf ran > ran.txt", "workingDirectory": h.m.Path("nowhere")})
+		checkCommand(t, got, workspace.NoWorkingDirectory(h.m.Shown("nowhere")))
+		got = h.ok(workspace.OpRunCommand, map[string]interface{}{"command": "printf ran > ran.txt", "workingDirectory": h.m.Path("plain.txt")})
+		checkCommand(t, got, workspace.NoWorkingDirectory(h.m.Shown("plain.txt")))
+		h.fails(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("ran.txt")}, workspace.NotFound(h.m.Shown("ran.txt")))
+	},
+	"a file a command makes has the machine's media type": func(t *testing.T, h *harness) {
+		got := h.ok(workspace.OpRunCommand, map[string]interface{}{"command": "printf 'all:\\n' > Makefile; printf 'x' > logo.png"})
+		checkCommand(t, got, workspace.CommandResult{})
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("Makefile")},
+			workspace.ReadFileResult{Path: h.m.Shown("Makefile"), MediaType: "text/plain", Size: 5, Content: "all:\n"})
+		h.want(workspace.OpReadFile, map[string]interface{}{"path": h.m.Path("logo.png")},
+			workspace.ReadFileResult{Path: h.m.Shown("logo.png"), MediaType: "image/png", Size: 1, Note: "This is a binary file; use its path to show or embed it."})
 	},
 }
 

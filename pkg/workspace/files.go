@@ -40,6 +40,11 @@ func IsADirectory(path string) error {
 	return fmt.Errorf("%w: %s is a directory; list it with list_directory", ErrInvalidPath, path)
 }
 
+// InsideAFile refuses to put path below parent, which is a file.
+func InsideAFile(parent, path string) error {
+	return fmt.Errorf("%w: %s is a file, so %s cannot be inside it", ErrInvalidPath, parent, path)
+}
+
 // MoveIntoItself refuses to move a path onto or into itself.
 func MoveIntoItself(path string) error {
 	return fmt.Errorf("%w: cannot move %s into itself", ErrInvalidPath, path)

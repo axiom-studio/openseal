@@ -37,11 +37,11 @@ func runCommand(ctx context.Context, allowed folders, args map[string]interface{
 			return workspace.CommandResult{}, cerr
 		}
 		info, err := os.Stat(resolved)
-		if err != nil {
+		if err != nil && !missing(err) {
 			return workspace.CommandResult{}, fileError(resolved, err)
 		}
-		if !info.IsDir() {
-			return workspace.CommandResult{}, callError(bridge.ErrorFailed, resolved+" is not a folder.")
+		if err != nil || !info.IsDir() {
+			return workspace.NoWorkingDirectory(resolved), nil
 		}
 		cwd = resolved
 	}
