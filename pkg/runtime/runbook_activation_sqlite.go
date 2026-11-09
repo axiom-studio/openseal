@@ -45,10 +45,11 @@ func (s *SQLiteStore) CreateRunbookActivation(ctx context.Context, value *Runboo
 	if err != nil {
 		return err
 	}
+	eventKind, eventSourceRef := nullableRoutineEventIndex(value)
 	_, err = s.db.ExecContext(ctx, `INSERT INTO runbook_activations
-		(id,scope_kind,scope_id,owner_type,owner_id,objective_id,assigned_agent_id,status,next_run_at,revision,updated_at,idempotency_key_hash,payload)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, value.ID, value.Scope.Kind, value.Scope.ID, value.Owner.Type, value.Owner.ID,
-		value.ObjectiveID, value.AssignedAgentID, value.Status, value.NextRunAt, value.Revision, value.UpdatedAt, value.IdempotencyKeyHash, string(payload))
+		(id,scope_kind,scope_id,owner_type,owner_id,objective_id,assigned_agent_id,status,next_run_at,revision,updated_at,idempotency_key_hash,payload,event_kind,event_source_ref)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, value.ID, value.Scope.Kind, value.Scope.ID, value.Owner.Type, value.Owner.ID,
+		value.ObjectiveID, value.AssignedAgentID, value.Status, value.NextRunAt, value.Revision, value.UpdatedAt, value.IdempotencyKeyHash, string(payload), eventKind, eventSourceRef)
 	return err
 }
 
@@ -104,8 +105,9 @@ func (s *SQLiteStore) UpdateRunbookActivation(ctx context.Context, value *Runboo
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE runbook_activations SET owner_type=?,owner_id=?,objective_id=?,assigned_agent_id=?,status=?,next_run_at=?,revision=?,updated_at=?,payload=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
-		value.Owner.Type, value.Owner.ID, value.ObjectiveID, value.AssignedAgentID, value.Status, value.NextRunAt, value.Revision, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision)
+	eventKind, eventSourceRef := nullableRoutineEventIndex(value)
+	result, err := s.db.ExecContext(ctx, `UPDATE runbook_activations SET owner_type=?,owner_id=?,objective_id=?,assigned_agent_id=?,status=?,next_run_at=?,revision=?,updated_at=?,payload=?,event_kind=?,event_source_ref=? WHERE scope_kind=? AND scope_id=? AND id=? AND revision=?`,
+		value.Owner.Type, value.Owner.ID, value.ObjectiveID, value.AssignedAgentID, value.Status, value.NextRunAt, value.Revision, value.UpdatedAt, string(payload), eventKind, eventSourceRef, value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision)
 	if err != nil {
 		return err
 	}

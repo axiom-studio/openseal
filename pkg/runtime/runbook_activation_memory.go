@@ -27,6 +27,7 @@ func (s *MemoryStore) CreateRunbookActivation(_ context.Context, value *RunbookA
 		}
 	}
 	s.runbookActivations[key] = cloneRunbookActivation(value)
+	s.indexRoutineEventActivationLocked(nil, value)
 	return nil
 }
 
@@ -66,6 +67,7 @@ func (s *MemoryStore) UpdateRunbookActivation(_ context.Context, value *RunbookA
 		return ErrRunbookActivationRevision
 	}
 	s.runbookActivations[key] = cloneRunbookActivation(value)
+	s.indexRoutineEventActivationLocked(existing, value)
 	return nil
 }
 
