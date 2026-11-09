@@ -47,6 +47,9 @@ type ScheduledAgentTask struct {
 	// ActingUser. Its occurrences act for that person, and only that person
 	// changes its script or resumes it. Empty means no recorded creator.
 	CreatedBy string `json:"createdBy,omitempty"`
+	// Event, when set, makes this an event routine: its occurrences start
+	// when a matching event arrives instead of on a schedule.
+	Event *RoutineEventTrigger `json:"event,omitempty"`
 }
 
 // scheduledTaskAppID matches host-assigned app identifiers.
@@ -70,6 +73,11 @@ func (t *ScheduledAgentTask) Validate() error {
 			return err
 		}
 	}
+	if t.Event != nil {
+		if err := t.Event.Validate(); err != nil {
+			return err
+		}
+	}
 	return validation.ValidateNoSensitiveInput(t.Goal)
 }
 func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
@@ -79,6 +87,30 @@ func cloneScheduledAgentTask(t *ScheduledAgentTask) *ScheduledAgentTask {
 	copy := *t
 	copy.Grants = cloneRoutineGrants(t.Grants)
 	copy.Script = cloneRoutineScript(t.Script)
+	copy.Event = cloneRoutineEventTrigger(t.Event)
+	return &copy
+}
+
+func cloneRoutineEventTrigger(t *RoutineEventTrigger) *RoutineEventTrigger {
+	if t == nil {
+		return nil
+	}
+	copy := *t
+	if t.Filter != nil {
+		copy.Filter = make([]RoutineEventCondition, len(t.Filter))
+		for i, condition := range t.Filter {
+			condition.Values = append([]string(nil), condition.Values...)
+			copy.Filter[i] = condition
+		}
+	}
+	if t.Calendar != nil {
+		calendar := *t.Calendar
+		copy.Calendar = &calendar
+	}
+	if t.Webhook != nil {
+		webhook := *t.Webhook
+		copy.Webhook = &webhook
+	}
 	return &copy
 }
 func activationGoal(a *RunbookActivation, o *Objective) string {

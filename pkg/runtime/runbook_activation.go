@@ -180,23 +180,30 @@ type RunbookActivation struct {
 	NextOccurrenceBase   *time.Time              `json:"nextOccurrenceBase,omitempty"`
 	NextRunAt            *time.Time              `json:"nextRunAt,omitempty"`
 	OccurrencesProcessed int64                   `json:"occurrencesProcessed,omitempty"`
-	Revision             int64                   `json:"revision"`
-	CreatedAt            time.Time               `json:"createdAt"`
-	UpdatedAt            time.Time               `json:"updatedAt"`
-	IdempotencyKeyHash   string                  `json:"idempotencyKeyHash,omitempty"`
-	CreationFingerprint  string                  `json:"creationFingerprint,omitempty"`
+	// PausedReason says why the system paused the routine. It is set only
+	// with Status paused and cleared on any other status change.
+	PausedReason        RoutinePausedReason `json:"pausedReason,omitempty"`
+	Revision            int64               `json:"revision"`
+	CreatedAt           time.Time           `json:"createdAt"`
+	UpdatedAt           time.Time           `json:"updatedAt"`
+	IdempotencyKeyHash  string              `json:"idempotencyKeyHash,omitempty"`
+	CreationFingerprint string              `json:"creationFingerprint,omitempty"`
 }
 
 // Callable reports whether an activation can be started on demand. A schedule
 // that reached its reviewed occurrence ceiling is no longer scheduler-active,
-// but its immutable reviewed operation remains safe to invoke off-cycle.
-// Paused activations and explicitly retired activations without an exhausted
-// schedule remain unavailable.
+// but its immutable reviewed operation remains safe to invoke off-cycle. A
+// retired event Task is callable too: its occurrence count lives in its event
+// batches, not on the activation. Paused activations and explicitly retired
+// activations without an exhausted schedule remain unavailable.
 func (a *RunbookActivation) Callable() bool {
 	if a == nil {
 		return false
 	}
 	if a.Status == RunbookActivationActive {
+		return true
+	}
+	if a.Status == RunbookActivationRetired && a.Task != nil && a.Task.Event != nil && a.Trigger.Kind == runbook.TriggerEvent {
 		return true
 	}
 	return a.Status == RunbookActivationRetired && a.Trigger.Kind == runbook.TriggerSchedule &&
@@ -226,29 +233,42 @@ func (a *RunbookActivation) Validate() error {
 		if err := a.Task.Validate(); err != nil {
 			return err
 		}
-		if a.Trigger.Kind != runbook.TriggerSchedule || a.Trigger.Entrypoint != "" || a.DefinitionID != "" || a.DefinitionVersion != "" {
+		if a.Trigger.Entrypoint != "" || a.DefinitionID != "" || a.DefinitionVersion != "" {
 			return errors.New("scheduled Agent task cannot specify a Runbook definition or entrypoint")
 		}
-	} else if strings.TrimSpace(a.DefinitionID) == "" || strings.TrimSpace(a.DefinitionVersion) == "" || strings.TrimSpace(a.Trigger.Entrypoint) == "" {
-		return errors.New("Runbook activation trigger entrypoint is required")
+		switch a.Trigger.Kind {
+		case runbook.TriggerSchedule:
+			if a.Task.Event != nil {
+				return errors.New("scheduled Agent task cannot have an event trigger")
+			}
+		case runbook.TriggerEvent:
+			if a.Task.Event == nil {
+				return errors.New("event Agent task requires its event trigger")
+			}
+			if !onlyEventTriggerKind(a.Trigger) {
+				return errors.New("event Agent task trigger can only name its kind")
+			}
+			if strings.TrimSpace(a.Task.CreatedBy) == "" {
+				return errors.New("event Agent task requires the person who created it")
+			}
+		default:
+			return errors.New("Runbook activation trigger kind is invalid")
+		}
+	} else {
+		if strings.TrimSpace(a.DefinitionID) == "" || strings.TrimSpace(a.DefinitionVersion) == "" || strings.TrimSpace(a.Trigger.Entrypoint) == "" {
+			return errors.New("Runbook activation trigger entrypoint is required")
+		}
+		if a.Trigger.Kind != runbook.TriggerSchedule {
+			return errors.New("Runbook definition activations can only run on a schedule")
+		}
 	}
-	switch a.Trigger.Kind {
-	case runbook.TriggerSchedule:
+	if a.Trigger.Kind == runbook.TriggerSchedule {
 		if a.Trigger.Schedule == nil {
 			return errors.New("Runbook activation schedule trigger is required")
 		}
 		if err := a.Trigger.Schedule.Validate(); err != nil {
 			return fmt.Errorf("Runbook activation trigger: %w", err)
 		}
-		if strings.TrimSpace(a.Trigger.EventType) != "" {
-			return errors.New("scheduled Runbook activation cannot declare an event type")
-		}
-	case runbook.TriggerEvent:
-		if a.Trigger.Schedule != nil || !validateEventSelector(a.Trigger.EventType) || a.Trigger.EventType == "*" {
-			return errors.New("event Runbook activation requires one concrete event type and no schedule")
-		}
-	default:
-		return errors.New("Runbook activation trigger kind is invalid")
 	}
 	if err := validateCredentialFreeContext(a.Input); err != nil {
 		return fmt.Errorf("Runbook activation input: %w", err)
@@ -272,6 +292,9 @@ func (a *RunbookActivation) Validate() error {
 	default:
 		return errors.New("Runbook activation status is invalid")
 	}
+	if a.PausedReason != "" && (a.Status != RunbookActivationPaused || !validRoutinePausedReason(a.PausedReason)) {
+		return errors.New("Runbook activation paused reason is invalid")
+	}
 	if a.Revision < 1 || a.CreatedAt.IsZero() || a.UpdatedAt.IsZero() || a.UpdatedAt.Before(a.CreatedAt) {
 		return errors.New("Runbook activation requires valid revision and timestamps")
 	}
@@ -291,6 +314,21 @@ func (a *RunbookActivation) Validate() error {
 		}
 	}
 	return nil
+}
+
+// onlyEventTriggerKind reports whether an event Task's trigger names nothing
+// but its kind; everything else about the event lives in Task.Event.
+func onlyEventTriggerKind(t runbook.Trigger) bool {
+	return t.Kind == runbook.TriggerEvent && t.Schedule == nil && t.Entrypoint == "" && t.ObjectiveID == "" &&
+		len(t.Input) == 0 && t.Budget == nil && t.Reporting == nil && t.MaximumConcurrent == 0
+}
+
+func validRoutinePausedReason(reason RoutinePausedReason) bool {
+	switch reason {
+	case RoutinePausedNeedsSignIn, RoutinePausedSourceRemoved, RoutinePausedUnverified:
+		return true
+	}
+	return false
 }
 
 type RunbookActivationFilter struct {
@@ -341,6 +379,10 @@ type UpdateRunbookActivationRequest struct {
 	CreatedBy        string                  `json:"-"`
 	ExpectedRevision int64                   `json:"expectedRevision"`
 	Status           RunbookActivationStatus `json:"status"`
+	// PausedReason is set only by system pauses, with Status paused; the
+	// kernel sets it, never a client. A person's pause or resume leaves it
+	// empty, which clears any earlier reason.
+	PausedReason RoutinePausedReason `json:"-"`
 }
 
 type StartRunbookActivationRequest struct {
@@ -484,7 +526,7 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 		return nil, fmt.Errorf("%w: idempotency key cannot exceed 256 characters", ErrRunbookActivationIdempotency)
 	}
 	if key != "" && strings.TrimSpace(request.ID) == "" {
-		id = uuid.NewSHA1(uuid.NameSpaceOID, []byte(request.Scope.Kind+"\x00"+request.Scope.ID+"\x00runbook-activation\x00"+hashString(key))).String()
+		id = RunbookActivationIDForKey(request.Scope, key)
 	}
 	status := request.Status
 	if status == "" {
@@ -514,7 +556,7 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 			return current, nil
 		}
 	}
-	if activation.Task != nil && activation.Status == RunbookActivationActive {
+	if activation.Task != nil && activation.Status == RunbookActivationActive && activation.Trigger.Kind == runbook.TriggerSchedule {
 		base, err := activation.Trigger.Schedule.NextBase(now)
 		if err != nil {
 			return nil, err
@@ -555,6 +597,13 @@ func (s *RunbookActivationService) Create(ctx context.Context, request CreateRun
 	return cloneRunbookActivation(activation), nil
 }
 
+// RunbookActivationIDForKey is the activation ID Create assigns to a request
+// with this idempotency key and no explicit ID, so callers can know it first.
+func RunbookActivationIDForKey(scope Scope, idempotencyKey string) string {
+	key := strings.TrimSpace(idempotencyKey)
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(scope.Kind+"\x00"+scope.ID+"\x00runbook-activation\x00"+hashString(key))).String()
+}
+
 func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id string, request UpdateRunbookActivationRequest) (*RunbookActivation, error) {
 	if s == nil || s.store == nil {
 		return nil, errors.New("Runbook activation store is not configured")
@@ -580,10 +629,15 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 	default:
 		return nil, errors.New("Runbook activation status is invalid")
 	}
+	if request.PausedReason != "" && (request.Status != RunbookActivationPaused || !validRoutinePausedReason(request.PausedReason)) {
+		return nil, errors.New("Runbook activation paused reason is invalid")
+	}
 	if current.Status == RunbookActivationRetired && request.Status != RunbookActivationRetired {
 		return nil, errors.New("retired Runbook activation cannot be resumed")
 	}
-	if current.Status == request.Status {
+	// A system pause of a routine that is already paused still records why.
+	reasonChanged := current.Status == RunbookActivationPaused && request.PausedReason != "" && request.PausedReason != current.PausedReason
+	if current.Status == request.Status && !reasonChanged {
 		if err := s.ensureReportingChannel(ctx, current); err != nil {
 			return nil, err
 		}
@@ -591,6 +645,7 @@ func (s *RunbookActivationService) Update(ctx context.Context, scope Scope, id s
 	}
 	next := cloneRunbookActivation(current)
 	next.Status = request.Status
+	next.PausedReason = request.PausedReason
 	next.LifecycleActionID = request.ActionID
 	if next.Task != nil && next.Task.CreatedBy == "" && request.CreatedBy != "" {
 		next.Task.CreatedBy = request.CreatedBy
