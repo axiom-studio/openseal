@@ -39,7 +39,37 @@ var (
 	// ErrSharedAgentNotShareable is returned for an Agent that can't be
 	// exported, such as the platform assistant.
 	ErrSharedAgentNotShareable = errors.New("this agent can't be shared")
+	// ErrSharedAgentIsCopy is returned for an Agent added from someone
+	// else's share: copies can't be shared again. It also matches
+	// ErrSharedAgentNotShareable.
+	ErrSharedAgentIsCopy = errors.New("this agent is a copy of a shared agent and can't be shared again")
+	// ErrSharedAgentNotCopy is returned when an update targets an Agent that
+	// was not added from a share.
+	ErrSharedAgentNotCopy = errors.New("this agent was not added from a shared agent")
+	// ErrSharedAgentSkillUnavailable is returned when a shared skill is not
+	// registered in the adopter's catalog by exact identity. The error names
+	// the skill (SharedAgentSkillUnavailableError).
+	ErrSharedAgentSkillUnavailable = errors.New("a skill of this agent is not available here")
 )
+
+// SharedAgentSkillUnavailableError names the first unavailable skill. It
+// matches ErrSharedAgentSkillUnavailable.
+type SharedAgentSkillUnavailableError struct {
+	SkillID string
+	Name    string
+}
+
+func (e SharedAgentSkillUnavailableError) Error() string {
+	name := e.Name
+	if name == "" {
+		name = e.SkillID
+	}
+	return "skill " + name + " (" + e.SkillID + ") is not available here"
+}
+
+func (e SharedAgentSkillUnavailableError) Is(target error) bool {
+	return target == ErrSharedAgentSkillUnavailable
+}
 
 // SharedAgentProfile is the shared part of an Agent's profile. Its
 // SystemPrompt is copied and the adopter always reads it before adding.
@@ -151,6 +181,11 @@ type SharedAgentInstallPlan struct {
 	// Bindings are the candidate bindings of every grant and account skill,
 	// account skills with their credential references.
 	Bindings []*skill.Binding `json:"bindings"`
+
+	// resolved is what InstallSharedAgent builds: the request as the kernel
+	// resolved it. Only Bindings' account-slot credential references are
+	// read back from the exported fields.
+	resolved *sharedAgentResolvedInstall
 }
 
 // SharedAgentInstalled is the installed copy.
