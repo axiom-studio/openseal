@@ -222,6 +222,31 @@ func TestReadFileStopsCountingAtTheDeadline(t *testing.T) {
 	}
 }
 
+func TestAncestorIsComparesFoldersOnDisk(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := filepath.Join(root, "proj")
+	other := filepath.Join(root, "Proj")
+	for _, dir := range []string{allowed, other} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !ancestorIs(allowed, filepath.Join(allowed, "src", "new.go")) || !ancestorIs(allowed, allowed) {
+		t.Fatal("paths in the folder must be inside it")
+	}
+	if a, _ := os.Stat(allowed); func() bool { b, _ := os.Stat(other); return os.SameFile(a, b) }() {
+		t.Skip("this file system ignores case")
+	}
+	// On a case-sensitive volume, a folder differing only in case is a
+	// different folder.
+	if ancestorIs(allowed, filepath.Join(other, "secret.txt")) || ancestorIs(allowed, root) {
+		t.Fatal("a different folder must not count as the allowed one")
+	}
+}
+
 func TestWriteFileRefusesTooLarge(t *testing.T) {
 	w := newWorkspace(t)
 	wantError(t, call(t, w, bridge.OpWriteFile, bridge.WriteFileInput{Path: filepath.Join(w.write, "x"), Content: strings.Repeat("x", bridge.MaxWriteBytes+1)}), bridge.ErrorTooLarge)

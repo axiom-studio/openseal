@@ -117,15 +117,40 @@ func (f folders) names() string {
 // within reports whether path is root or inside it. Both are resolved and
 // clean.
 func within(root, path string) bool {
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		// Both default to case-insensitive file systems.
-		root, path = strings.ToLower(root), strings.ToLower(path)
+	if lexicallyWithin(root, path) {
+		return true
 	}
+	// Windows and macOS default to case-insensitive file systems, where a
+	// path can spell an allowed folder in another case. Volumes there can
+	// also be case-sensitive, so ask the file system, not the spelling.
+	return (runtime.GOOS == "windows" || runtime.GOOS == "darwin") && ancestorIs(root, path)
+}
+
+func lexicallyWithin(root, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel))
+}
+
+// ancestorIs reports whether path, or a folder above it, is the same folder
+// on disk as root.
+func ancestorIs(root, path string) bool {
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return false
+	}
+	for {
+		if info, err := os.Stat(path); err == nil && os.SameFile(rootInfo, info) {
+			return true
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return false
+		}
+		path = parent
+	}
 }
 
 // resolveExisting resolves symlinks in path. When path does not exist, it
