@@ -11,21 +11,22 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/computer/bridge"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
-// workspace is an allowed write folder, an allowed read-only folder and a
+// folderSet is an allowed write folder, an allowed read-only folder and a
 // folder outside both, all resolved.
-type workspace struct {
+type folderSet struct {
 	write, read, outside string
 	folders              []bridge.Folder
 }
 
-func newWorkspace(t *testing.T) workspace {
+func newWorkspace(t *testing.T) folderSet {
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := workspace{
+	w := folderSet{
 		write:   filepath.Join(root, "project"),
 		read:    filepath.Join(root, "docs"),
 		outside: filepath.Join(root, "secrets"),
@@ -48,7 +49,7 @@ func mustWrite(t *testing.T, path, content string) {
 	}
 }
 
-func call(t *testing.T, w workspace, op string, args any) bridge.Result {
+func call(t *testing.T, w folderSet, op string, args map[string]any) bridge.Result {
 	t.Helper()
 	raw, err := json.Marshal(args)
 	if err != nil {
@@ -84,30 +85,30 @@ func TestFolderEscapesAreRefused(t *testing.T) {
 	cases := []struct {
 		name string
 		op   string
-		args any
+		args map[string]any
 		code string
 	}{
-		{"dot-dot read", bridge.OpReadFile, bridge.ReadFileInput{Path: filepath.Join(w.write, "..", "secrets", "key.txt")}, bridge.ErrorOutsideFolder},
-		{"relative dot-dot read", bridge.OpReadFile, bridge.ReadFileInput{Path: "../secrets/key.txt"}, bridge.ErrorOutsideFolder},
-		{"absolute outside", bridge.OpReadFile, bridge.ReadFileInput{Path: filepath.Join(w.outside, "key.txt")}, bridge.ErrorOutsideFolder},
-		{"dot-dot write", bridge.OpWriteFile, bridge.WriteFileInput{Path: filepath.Join(w.write, "..", "secrets", "x.txt"), Content: "x"}, bridge.ErrorOutsideFolder},
-		{"list outside", bridge.OpListFiles, bridge.ListFilesInput{Path: w.outside}, bridge.ErrorOutsideFolder},
-		{"write in read-only folder", bridge.OpWriteFile, bridge.WriteFileInput{Path: filepath.Join(w.read, "notes.txt"), Content: "x"}, bridge.ErrorReadOnly},
-		{"command in read-only folder", bridge.OpRunCommand, bridge.RunCommandInput{Command: "true", Cwd: w.read}, bridge.ErrorReadOnly},
-		{"command outside", bridge.OpRunCommand, bridge.RunCommandInput{Command: "true", Cwd: w.outside}, bridge.ErrorOutsideFolder},
+		{"dot-dot read", workspace.OpReadFile, map[string]any{"path": filepath.Join(w.write, "..", "secrets", "key.txt")}, bridge.ErrorOutsideFolder},
+		{"relative dot-dot read", workspace.OpReadFile, map[string]any{"path": "../secrets/key.txt"}, bridge.ErrorOutsideFolder},
+		{"absolute outside", workspace.OpReadFile, map[string]any{"path": filepath.Join(w.outside, "key.txt")}, bridge.ErrorOutsideFolder},
+		{"dot-dot write", workspace.OpWriteFile, map[string]any{"path": filepath.Join(w.write, "..", "secrets", "x.txt"), "content": "x"}, bridge.ErrorOutsideFolder},
+		{"list outside", workspace.OpListDirectory, map[string]any{"path": w.outside}, bridge.ErrorOutsideFolder},
+		{"write in read-only folder", workspace.OpWriteFile, map[string]any{"path": filepath.Join(w.read, "notes.txt"), "content": "x"}, bridge.ErrorReadOnly},
+		{"command in read-only folder", workspace.OpRunCommand, map[string]any{"command": "true", "workingDirectory": w.read}, bridge.ErrorReadOnly},
+		{"command outside", workspace.OpRunCommand, map[string]any{"command": "true", "workingDirectory": w.outside}, bridge.ErrorOutsideFolder},
 	}
 	if runtime.GOOS != "windows" {
 		cases = append(cases, []struct {
 			name string
 			op   string
-			args any
+			args map[string]any
 			code string
 		}{
-			{"symlinked folder read", bridge.OpReadFile, bridge.ReadFileInput{Path: filepath.Join(w.write, "escape", "key.txt")}, bridge.ErrorOutsideFolder},
-			{"symlinked file read", bridge.OpReadFile, bridge.ReadFileInput{Path: filepath.Join(w.write, "key-link")}, bridge.ErrorOutsideFolder},
-			{"symlinked folder write", bridge.OpWriteFile, bridge.WriteFileInput{Path: filepath.Join(w.write, "escape", "new.txt"), Content: "x"}, bridge.ErrorOutsideFolder},
-			{"symlinked folder cwd", bridge.OpRunCommand, bridge.RunCommandInput{Command: "true", Cwd: filepath.Join(w.write, "escape")}, bridge.ErrorOutsideFolder},
-			{"symlinked folder list", bridge.OpListFiles, bridge.ListFilesInput{Path: filepath.Join(w.write, "escape")}, bridge.ErrorOutsideFolder},
+			{"symlinked folder read", workspace.OpReadFile, map[string]any{"path": filepath.Join(w.write, "escape", "key.txt")}, bridge.ErrorOutsideFolder},
+			{"symlinked file read", workspace.OpReadFile, map[string]any{"path": filepath.Join(w.write, "key-link")}, bridge.ErrorOutsideFolder},
+			{"symlinked folder write", workspace.OpWriteFile, map[string]any{"path": filepath.Join(w.write, "escape", "new.txt"), "content": "x"}, bridge.ErrorOutsideFolder},
+			{"symlinked folder cwd", workspace.OpRunCommand, map[string]any{"command": "true", "workingDirectory": filepath.Join(w.write, "escape")}, bridge.ErrorOutsideFolder},
+			{"symlinked folder list", workspace.OpListDirectory, map[string]any{"path": filepath.Join(w.write, "escape")}, bridge.ErrorOutsideFolder},
 		}...)
 	}
 	for _, tc := range cases {
@@ -118,7 +119,7 @@ func TestFolderEscapesAreRefused(t *testing.T) {
 
 	if runtime.GOOS != "windows" {
 		// A dangling link is refused rather than written through.
-		result := call(t, w, bridge.OpWriteFile, bridge.WriteFileInput{Path: filepath.Join(w.write, "dangling"), Content: "x"})
+		result := call(t, w, workspace.OpWriteFile, map[string]any{"path": filepath.Join(w.write, "dangling"), "content": "x"})
 		if result.OK {
 			t.Fatal("wrote through a dangling symlink")
 		}
@@ -134,15 +135,15 @@ func TestFolderEscapesAreRefused(t *testing.T) {
 func TestNoFoldersMeansNothingRuns(t *testing.T) {
 	w := newWorkspace(t)
 	w.folders = nil
-	wantError(t, call(t, w, bridge.OpReadFile, bridge.ReadFileInput{Path: filepath.Join(w.read, "notes.txt")}), bridge.ErrorOutsideFolder)
-	wantError(t, call(t, w, bridge.OpRunCommand, bridge.RunCommandInput{Command: "true"}), bridge.ErrorReadOnly)
+	wantError(t, call(t, w, workspace.OpReadFile, map[string]any{"path": filepath.Join(w.read, "notes.txt")}), bridge.ErrorOutsideFolder)
+	wantError(t, call(t, w, workspace.OpRunCommand, map[string]any{"command": "true"}), bridge.ErrorReadOnly)
 }
 
 func TestTildeExpandsToHome(t *testing.T) {
 	w := newWorkspace(t)
 	t.Setenv("HOME", w.write)
 	t.Setenv("USERPROFILE", w.write)
-	result := call(t, w, bridge.OpWriteFile, bridge.WriteFileInput{Path: "~/sub/hello.txt", Content: "hi"})
+	result := call(t, w, workspace.OpWriteFile, map[string]any{"path": "~/sub/hello.txt", "content": "hi"})
 	if !result.OK {
 		t.Fatalf("write: %+v", result.Error)
 	}
@@ -150,75 +151,107 @@ func TestTildeExpandsToHome(t *testing.T) {
 		t.Fatalf("file = %q, %v", data, err)
 	}
 	w.folders = []bridge.Folder{{Path: "~", Access: bridge.AccessRead}}
-	result = call(t, w, bridge.OpReadFile, bridge.ReadFileInput{Path: "~/sub/hello.txt"})
+	result = call(t, w, workspace.OpReadFile, map[string]any{"path": "~/sub/hello.txt"})
 	if !result.OK {
 		t.Fatalf("read via ~ folder: %+v", result.Error)
 	}
 }
 
-func TestWriteReadAndListInsideFolders(t *testing.T) {
+func TestReadOnlyFoldersAreNeverChanged(t *testing.T) {
 	w := newWorkspace(t)
-	target := filepath.Join(w.write, "a", "b.txt")
-	if result := call(t, w, bridge.OpWriteFile, bridge.WriteFileInput{Path: target, Content: "line1\n"}); !result.OK {
-		t.Fatalf("write: %+v", result.Error)
+	// A read-only folder inside a write folder stays read-only.
+	inner := filepath.Join(w.write, "lib", "vendor")
+	mustWrite(t, filepath.Join(w.write, "main.go"), "package main\n")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	result := call(t, w, bridge.OpWriteFile, bridge.WriteFileInput{Path: target, Content: "line2\n", Append: true})
-	var written bridge.WriteFileOutput
-	_ = json.Unmarshal(result.Result, &written)
-	if !result.OK || written.Bytes != 6 || written.Path != target {
-		t.Fatalf("append = %+v %+v", result, written)
+	mustWrite(t, filepath.Join(inner, "lib.go"), "package lib\n")
+	w.folders = append(w.folders, bridge.Folder{Path: inner, Access: bridge.AccessRead})
+	notes := filepath.Join(w.read, "notes.txt")
+	for name, tc := range map[string]struct {
+		op   string
+		args map[string]any
+		code string
+	}{
+		"edit in read-only":         {workspace.OpEditFile, map[string]any{"path": notes, "oldText": "one", "newText": "1"}, bridge.ErrorReadOnly},
+		"delete in read-only":       {workspace.OpDeleteFile, map[string]any{"path": notes}, bridge.ErrorReadOnly},
+		"move out of read-only":     {workspace.OpMoveFile, map[string]any{"path": notes, "destination": filepath.Join(w.write, "n.txt")}, bridge.ErrorReadOnly},
+		"move into read-only":       {workspace.OpMoveFile, map[string]any{"path": filepath.Join(w.write, "main.go"), "destination": filepath.Join(w.read, "main.go")}, bridge.ErrorReadOnly},
+		"write nested read-only":    {workspace.OpWriteFile, map[string]any{"path": filepath.Join(inner, "lib.go"), "content": "x"}, bridge.ErrorReadOnly},
+		"delete folder holding one": {workspace.OpDeleteFile, map[string]any{"path": w.write}, bridge.ErrorReadOnly},
+		"delete an allowed folder":  {workspace.OpDeleteFile, map[string]any{"path": inner}, bridge.ErrorReadOnly},
+		"move an allowed folder":    {workspace.OpMoveFile, map[string]any{"path": w.read, "destination": filepath.Join(w.write, "docs")}, bridge.ErrorReadOnly},
+		"delete outside":            {workspace.OpDeleteFile, map[string]any{"path": filepath.Join(w.outside, "key.txt")}, bridge.ErrorOutsideFolder},
+		"move outside":              {workspace.OpMoveFile, map[string]any{"path": filepath.Join(w.write, "main.go"), "destination": filepath.Join(w.outside, "main.go")}, bridge.ErrorOutsideFolder},
+		"move in from outside":      {workspace.OpMoveFile, map[string]any{"path": filepath.Join(w.outside, "key.txt"), "destination": filepath.Join(w.write, "key.txt")}, bridge.ErrorOutsideFolder},
+		"edit outside":              {workspace.OpEditFile, map[string]any{"path": filepath.Join(w.outside, "key.txt"), "oldText": "secret", "newText": "x"}, bridge.ErrorOutsideFolder},
+		"search outside":            {workspace.OpSearchFiles, map[string]any{"query": "secret", "path": w.outside}, bridge.ErrorOutsideFolder},
+		"delete with dot-dot":       {workspace.OpDeleteFile, map[string]any{"path": filepath.Join(w.write, "..", "secrets")}, bridge.ErrorOutsideFolder},
+	} {
+		t.Run(name, func(t *testing.T) { wantError(t, call(t, w, tc.op, tc.args), tc.code) })
 	}
-
-	result = call(t, w, bridge.OpReadFile, bridge.ReadFileInput{Path: filepath.Join(w.read, "notes.txt"), Offset: 2, Limit: 1})
-	var read bridge.ReadFileOutput
-	_ = json.Unmarshal(result.Result, &read)
-	if !result.OK || read.Content != "two\n" || read.TotalLines != 3 || !read.Truncated {
-		t.Fatalf("read = %+v %+v", result.Error, read)
+	if data, _ := os.ReadFile(notes); string(data) != "one\ntwo\nthree\n" {
+		t.Fatalf("read-only file changed: %q", data)
 	}
-	wantError(t, call(t, w, bridge.OpReadFile, bridge.ReadFileInput{Path: filepath.Join(w.write, "missing.txt")}), bridge.ErrorNotFound)
-
-	result = call(t, w, bridge.OpListFiles, bridge.ListFilesInput{Path: w.write})
-	var listed bridge.ListFilesOutput
-	_ = json.Unmarshal(result.Result, &listed)
-	if !result.OK || len(listed.Entries) != 1 || listed.Entries[0].Type != bridge.EntryDir {
-		t.Fatalf("depth 1 list = %+v %+v", result.Error, listed)
-	}
-	result = call(t, w, bridge.OpListFiles, bridge.ListFilesInput{Path: w.write, Depth: 2})
-	listed = bridge.ListFilesOutput{}
-	_ = json.Unmarshal(result.Result, &listed)
-	if !result.OK || len(listed.Entries) != 2 || listed.Entries[1].Path != target || listed.Entries[1].Size != 12 {
-		t.Fatalf("depth 2 list = %+v %+v", result.Error, listed)
+	for _, path := range []string{filepath.Join(inner, "lib.go"), filepath.Join(w.outside, "key.txt"), filepath.Join(w.write, "main.go")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
 	}
 }
 
-func TestReadFileCapsContent(t *testing.T) {
+func TestSearchNeverFollowsLinksOutOfItsFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
 	w := newWorkspace(t)
-	big := strings.Repeat("x", bridge.MaxReadFileBytes+100)
-	mustWrite(t, filepath.Join(w.write, "big.txt"), big+"\nend\n")
-	result := call(t, w, bridge.OpReadFile, bridge.ReadFileInput{Path: filepath.Join(w.write, "big.txt")})
-	var read bridge.ReadFileOutput
-	_ = json.Unmarshal(result.Result, &read)
-	if !result.OK || len(read.Content) != bridge.MaxReadFileBytes || !read.Truncated || read.TotalLines != 2 {
-		t.Fatalf("read = %+v len %d truncated %v lines %d", result.Error, len(read.Content), read.Truncated, read.TotalLines)
+	mustWrite(t, filepath.Join(w.write, "a.txt"), "secret here too\n")
+	if err := os.Symlink(w.outside, filepath.Join(w.write, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	result := call(t, w, workspace.OpSearchFiles, map[string]any{"query": "secret"})
+	var found workspace.SearchFilesResult
+	_ = json.Unmarshal(result.Result, &found)
+	if !result.OK || len(found.Matches) != 1 || found.Matches[0].Path != filepath.Join(w.write, "a.txt") {
+		t.Fatalf("search = %+v %+v", result.Error, found)
+	}
+	result = call(t, w, workspace.OpListDirectory, map[string]any{"depth": 8})
+	var listed workspace.ListDirectoryResult
+	_ = json.Unmarshal(result.Result, &listed)
+	if !result.OK || len(listed.Entries) != 2 || listed.Entries[1].Type != workspace.EntrySymlink {
+		t.Fatalf("list = %+v %+v", result.Error, listed)
+	}
+	// Deleting the link removes the link, not what it points to.
+	if result := call(t, w, workspace.OpDeleteFile, map[string]any{"path": filepath.Join(w.write, "escape")}); !result.OK {
+		t.Fatalf("delete link: %+v", result.Error)
+	}
+	if _, err := os.Stat(filepath.Join(w.outside, "key.txt")); err != nil {
+		t.Fatal("deleting a link removed its target")
 	}
 }
 
-func TestReadFileStopsCountingAtTheDeadline(t *testing.T) {
+func TestListShowsEmptyFolders(t *testing.T) {
 	w := newWorkspace(t)
-	path := filepath.Join(w.write, "huge.log")
-	mustWrite(t, path, strings.Repeat("line\n", 10*readCheckEvery))
+	if err := os.MkdirAll(filepath.Join(w.write, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	result := call(t, w, workspace.OpListDirectory, map[string]any{})
+	var listed workspace.ListDirectoryResult
+	_ = json.Unmarshal(result.Result, &listed)
+	if !result.OK || len(listed.Entries) != 1 || listed.Entries[0].Path != filepath.Join(w.write, "empty") || listed.Entries[0].Type != workspace.EntryDirectory {
+		t.Fatalf("list = %+v %+v", result.Error, listed)
+	}
+}
+
+func TestSearchStopsAtTheDeadline(t *testing.T) {
+	w := newWorkspace(t)
+	mustWrite(t, filepath.Join(w.write, "a.txt"), "needle\n")
 	// Past the point where the bridge must answer, but not yet cancelled.
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(deadlineMargin-time.Second))
 	defer cancel()
-
-	read, cerr := readFile(ctx, resolveFolders(w.folders), bridge.ReadFileInput{Path: path, Limit: 10})
-	if cerr != nil || read.Content != strings.Repeat("line\n", 10) || !read.Truncated || read.TotalLines >= 10*readCheckEvery {
-		t.Fatalf("read = %+v, %v", read, cerr)
-	}
-
-	_, cerr = readFile(ctx, resolveFolders(w.folders), bridge.ReadFileInput{Path: path, Limit: 5 * readCheckEvery})
-	if cerr == nil || cerr.Code != bridge.ErrorTimeout {
-		t.Fatalf("an unfinished window must time out, got %v", cerr)
+	found, err := machine{allowed: resolveFolders(w.folders)}.search(ctx, map[string]any{"query": "needle"})
+	if err != nil || !found.Truncated || len(found.Matches) != 0 {
+		t.Fatalf("search = %+v, %v", found, err)
 	}
 }
 
@@ -249,25 +282,15 @@ func TestAncestorIsComparesFoldersOnDisk(t *testing.T) {
 
 func TestWriteFileRefusesTooLarge(t *testing.T) {
 	w := newWorkspace(t)
-	wantError(t, call(t, w, bridge.OpWriteFile, bridge.WriteFileInput{Path: filepath.Join(w.write, "x"), Content: strings.Repeat("x", bridge.MaxWriteBytes+1)}), bridge.ErrorTooLarge)
+	wantError(t, call(t, w, workspace.OpWriteFile, map[string]any{"path": filepath.Join(w.write, "x"), "content": strings.Repeat("x", workspace.MaximumFileBytes+1)}), bridge.ErrorFailed)
 }
 
 func TestCallPastItsDeadlineIsNotRun(t *testing.T) {
 	w := newWorkspace(t)
-	raw, _ := json.Marshal(bridge.WriteFileInput{Path: filepath.Join(w.write, "late.txt"), Content: "x"})
-	result := Execute(context.Background(), bridge.Call{ID: "c", Op: bridge.OpWriteFile, Args: raw, Folders: w.folders, DeadlineUnixMs: time.Now().Add(-time.Second).UnixMilli()})
+	raw, _ := json.Marshal(map[string]any{"path": filepath.Join(w.write, "late.txt"), "content": "x"})
+	result := Execute(context.Background(), bridge.Call{ID: "c", Op: workspace.OpWriteFile, Args: raw, Folders: w.folders, DeadlineUnixMs: time.Now().Add(-time.Second).UnixMilli()})
 	wantError(t, result, bridge.ErrorTimeout)
 	if _, err := os.Stat(filepath.Join(w.write, "late.txt")); err == nil {
 		t.Fatal("a late call ran")
-	}
-}
-
-func TestTailKeepsTheEndAsValidUTF8(t *testing.T) {
-	out := &tail{limit: 4}
-	_, _ = out.Write([]byte("abc"))
-	_, _ = out.Write([]byte("dé€"))
-	// "abcdé€" is 4+2+3 bytes; the last 4 are é's second byte and €.
-	if got := out.String(); got != "€" || !out.truncated {
-		t.Fatalf("tail = %q truncated %v", got, out.truncated)
 	}
 }

@@ -1,8 +1,6 @@
 package client
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,13 +9,22 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"syscall"
 	"time"
+	"unicode/utf8"
 
+	"github.com/axiom-studio/openseal/pkg/chatpath"
 	"github.com/axiom-studio/openseal/pkg/computer/bridge"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // Execute runs one call and returns its result. It never panics on bad
-// input: every failure is a CallError the model can read.
+// input: every failure is a CallError the model can read. The ops are the
+// machine operations of pkg/workspace, with the same arguments, results and
+// failure texts as a chat's secure VM; paths are this computer's, inside the
+// call's folders.
 func Execute(ctx context.Context, call bridge.Call) bridge.Result {
 	if call.DeadlineUnixMs > 0 {
 		deadline := call.Deadline()
@@ -28,37 +35,39 @@ func Execute(ctx context.Context, call bridge.Call) bridge.Result {
 		ctx, cancel = context.WithDeadline(ctx, deadline)
 		defer cancel()
 	}
-	allowed := resolveFolders(call.Folders)
+	args := map[string]interface{}{}
+	if len(call.Args) > 0 {
+		if err := json.Unmarshal(call.Args, &args); err != nil {
+			return failed(call.ID, callError(bridge.ErrorFailed, "The call's arguments are not valid: "+err.Error()))
+		}
+	}
+	m := machine{allowed: resolveFolders(call.Folders)}
 	var (
 		output any
-		err    *bridge.CallError
+		err    error
 	)
 	switch call.Op {
-	case bridge.OpRunCommand:
-		var input bridge.RunCommandInput
-		if err = decodeArgs(call.Args, &input); err == nil {
-			output, err = runCommand(ctx, allowed, input)
-		}
-	case bridge.OpReadFile:
-		var input bridge.ReadFileInput
-		if err = decodeArgs(call.Args, &input); err == nil {
-			output, err = readFile(ctx, allowed, input)
-		}
-	case bridge.OpWriteFile:
-		var input bridge.WriteFileInput
-		if err = decodeArgs(call.Args, &input); err == nil {
-			output, err = writeFile(allowed, input)
-		}
-	case bridge.OpListFiles:
-		var input bridge.ListFilesInput
-		if err = decodeArgs(call.Args, &input); err == nil {
-			output, err = listFiles(ctx, allowed, input)
-		}
+	case workspace.OpListDirectory:
+		output, err = m.list(ctx, args)
+	case workspace.OpReadFile:
+		output, err = m.read(ctx, args)
+	case workspace.OpSearchFiles:
+		output, err = m.search(ctx, args)
+	case workspace.OpWriteFile:
+		output, err = m.write(args)
+	case workspace.OpEditFile:
+		output, err = m.edit(args)
+	case workspace.OpDeleteFile:
+		output, err = m.remove(ctx, args)
+	case workspace.OpMoveFile:
+		output, err = m.move(ctx, args)
+	case workspace.OpRunCommand:
+		output, err = runCommand(ctx, m.allowed, args)
 	default:
 		err = callError(bridge.ErrorFailed, fmt.Sprintf("This version of helloseal cannot run %q. Update it and run helloseal start again.", call.Op))
 	}
 	if err != nil {
-		return failed(call.ID, err)
+		return failed(call.ID, asCallError(err))
 	}
 	encoded, marshalErr := json.Marshal(output)
 	if marshalErr != nil {
@@ -71,222 +80,411 @@ func failed(id string, err *bridge.CallError) bridge.Result {
 	return bridge.Result{ID: id, Error: err}
 }
 
-func decodeArgs(raw json.RawMessage, into any) *bridge.CallError {
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
+// asCallError carries an operation's failure to HelloSeal with the text a
+// chat would show.
+func asCallError(err error) *bridge.CallError {
+	var callErr *bridge.CallError
+	switch {
+	case errors.As(err, &callErr):
+		return callErr
+	case errors.Is(err, workspace.ErrNotFound):
+		return callError(bridge.ErrorNotFound, err.Error())
+	default:
+		return callError(bridge.ErrorFailed, err.Error())
 	}
-	if err := json.Unmarshal(raw, into); err != nil {
-		return callError(bridge.ErrorFailed, "The call's arguments are not valid: "+err.Error())
-	}
-	return nil
 }
 
 // fileError turns an os error into a CallError without exposing more than
 // the path the model already named.
-func fileError(raw string, err error) *bridge.CallError {
+func fileError(shown string, err error) *bridge.CallError {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return callError(bridge.ErrorNotFound, raw+" does not exist.")
+		return asCallError(workspace.NotFound(shown))
 	case errors.Is(err, fs.ErrPermission):
-		return callError(bridge.ErrorFailed, "Permission denied for "+raw+".")
+		return callError(bridge.ErrorFailed, "Permission denied for "+shown+".")
 	default:
-		return callError(bridge.ErrorFailed, fmt.Sprintf("%s: %v", raw, err))
+		return callError(bridge.ErrorFailed, fmt.Sprintf("%s: %v", shown, err))
 	}
 }
 
-// readCheckEvery is how many chunks readFile reads between looks at the
-// clock.
-const readCheckEvery = 64
+// machine runs the machine operations inside a call's folders.
+type machine struct {
+	allowed folders
+}
 
-func readFile(ctx context.Context, allowed folders, input bridge.ReadFileInput) (bridge.ReadFileOutput, *bridge.CallError) {
-	path, cerr := allowed.resolve(input.Path, false)
-	if cerr != nil {
-		return bridge.ReadFileOutput{}, cerr
+// pathArgument is a path argument, the default folder when it is left out.
+func pathArgument(args map[string]interface{}, key string) string {
+	if raw := workspace.Text(args, key); strings.TrimSpace(raw) != "" {
+		return raw
+	}
+	return "."
+}
+
+// answerBy is when an operation that walks folders stops to answer in time.
+func answerBy(ctx context.Context) time.Time {
+	if deadline, ok := ctx.Deadline(); ok {
+		return deadline.Add(-deadlineMargin)
+	}
+	return time.Time{}
+}
+
+func late(ctx context.Context, stopAt time.Time) bool {
+	return ctx.Err() != nil || !stopAt.IsZero() && !time.Now().Before(stopAt)
+}
+
+// sniffBytes is how much of a file with no known type is read to tell text
+// from binary.
+const sniffBytes = 512
+
+// mediaTypeOf is a file's media type from its name. A file whose name says
+// nothing is text/plain when it starts as text, as write_file gives such a
+// file in a chat.
+func mediaTypeOf(path string) string {
+	mediaType := chatpath.MediaTypeOf(filepath.Base(path))
+	if mediaType != "application/octet-stream" {
+		return mediaType
 	}
 	file, err := os.Open(path)
 	if err != nil {
-		return bridge.ReadFileOutput{}, fileError(input.Path, err)
+		return mediaType
 	}
 	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return bridge.ReadFileOutput{}, fileError(input.Path, err)
-	}
-	if info.IsDir() {
-		return bridge.ReadFileOutput{}, callError(bridge.ErrorFailed, input.Path+" is a folder. Use list_files to see what is in it.")
-	}
-	if !info.Mode().IsRegular() {
-		return bridge.ReadFileOutput{}, callError(bridge.ErrorFailed, input.Path+" is not a regular file.")
-	}
-	offset := input.Offset
-	if offset < 1 {
-		offset = 1
-	}
-	limit := input.Limit
-	if limit <= 0 {
-		limit = bridge.DefaultReadLines
-	}
-	output := bridge.ReadFileOutput{Path: path}
-	var content bytes.Buffer
-	reader := bufio.NewReaderSize(file, 64<<10)
-	// Counting every line of a huge file can outlast the call. Stop in time
-	// to answer: with the window already read, totalLines is then the lines
-	// counted so far and truncated is set; otherwise the read timed out.
-	var stopAt time.Time
-	if deadline, ok := ctx.Deadline(); ok {
-		stopAt = deadline.Add(-deadlineMargin)
-	}
-	line := 0
-	lineStarted := false
-	for chunks := 1; ; chunks++ {
-		if chunks%readCheckEvery == 0 && (ctx.Err() != nil || (!stopAt.IsZero() && !time.Now().Before(stopAt))) {
-			if line < offset+limit && content.Len() < bridge.MaxReadFileBytes {
-				return bridge.ReadFileOutput{}, callError(bridge.ErrorTimeout, "Reading "+input.Path+" took too long.")
+	head := make([]byte, sniffBytes)
+	n, _ := io.ReadFull(file, head)
+	head = head[:n]
+	for back := 1; back < utf8.UTFMax && back <= len(head); back++ {
+		if at := len(head) - back; utf8.RuneStart(head[at]) {
+			if !utf8.FullRune(head[at:]) {
+				head = head[:at]
 			}
-			output.Truncated = true
 			break
 		}
-		chunk, err := reader.ReadSlice('\n')
-		if len(chunk) > 0 {
-			if !lineStarted {
-				line++
-				lineStarted = true
-			}
-			if line >= offset && line < offset+limit {
-				if room := bridge.MaxReadFileBytes - content.Len(); len(chunk) > room {
-					content.Write(chunk[:room])
-					output.Truncated = true
-				} else {
-					content.Write(chunk)
-				}
-			} else if line >= offset+limit {
-				output.Truncated = true
-			}
-			if chunk[len(chunk)-1] == '\n' {
-				lineStarted = false
-			}
-		}
-		if errors.Is(err, bufio.ErrBufferFull) {
-			continue
-		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return bridge.ReadFileOutput{}, fileError(input.Path, err)
-		}
 	}
-	output.TotalLines = line
-	output.Content = string(bytes.ToValidUTF8(content.Bytes(), []byte("�")))
-	return output, nil
+	if utf8.Valid(head) && !strings.ContainsRune(string(head), 0) {
+		return "text/plain"
+	}
+	return mediaType
 }
 
-func writeFile(allowed folders, input bridge.WriteFileInput) (bridge.WriteFileOutput, *bridge.CallError) {
-	if len(input.Content) > bridge.MaxWriteBytes {
-		return bridge.WriteFileOutput{}, callError(bridge.ErrorTooLarge, fmt.Sprintf("The content is %d bytes; write_file takes at most %d.", len(input.Content), bridge.MaxWriteBytes))
-	}
-	path, cerr := allowed.resolve(input.Path, true)
-	if cerr != nil {
-		return bridge.WriteFileOutput{}, cerr
-	}
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		return bridge.WriteFileOutput{}, callError(bridge.ErrorFailed, input.Path+" is a folder.")
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return bridge.WriteFileOutput{}, fileError(input.Path, err)
-	}
-	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
-	if input.Append {
-		flags = os.O_WRONLY | os.O_CREATE | os.O_APPEND
-	}
-	file, err := os.OpenFile(path, flags, 0o644)
-	if err != nil {
-		return bridge.WriteFileOutput{}, fileError(input.Path, err)
-	}
-	written, err := file.WriteString(input.Content)
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return bridge.WriteFileOutput{}, fileError(input.Path, err)
-	}
-	return bridge.WriteFileOutput{Path: path, Bytes: int64(written)}, nil
+// children are a directory's entries in the order of their paths (see
+// workspace.ListOrder).
+func children(dir string) ([]fs.DirEntry, error) {
+	entries, err := os.ReadDir(dir)
+	sort.SliceStable(entries, func(i, j int) bool {
+		return workspace.ListOrder(entries[i].Name(), isDir(entries[i])) < workspace.ListOrder(entries[j].Name(), isDir(entries[j]))
+	})
+	return entries, err
 }
 
-func listFiles(ctx context.Context, allowed folders, input bridge.ListFilesInput) (bridge.ListFilesOutput, *bridge.CallError) {
-	root, cerr := allowed.resolve(input.Path, false)
+// isDir is a real directory, not a link to one.
+func isDir(entry fs.DirEntry) bool { return entry.IsDir() && entry.Type()&fs.ModeSymlink == 0 }
+
+func (m machine) list(ctx context.Context, args map[string]interface{}) (workspace.ListDirectoryResult, error) {
+	root, cerr := m.allowed.resolve(pathArgument(args, "path"), false)
 	if cerr != nil {
-		return bridge.ListFilesOutput{}, cerr
+		return workspace.ListDirectoryResult{}, cerr
 	}
 	info, err := os.Stat(root)
 	if err != nil {
-		return bridge.ListFilesOutput{}, fileError(input.Path, err)
+		return workspace.ListDirectoryResult{}, fileError(root, err)
 	}
 	if !info.IsDir() {
-		return bridge.ListFilesOutput{}, callError(bridge.ErrorFailed, input.Path+" is a file. Use read_file to read it.")
+		return workspace.ListDirectoryResult{}, workspace.IsAFile(root)
 	}
-	depth := input.Depth
-	if depth <= 0 {
-		depth = bridge.DefaultListDepth
+	depth := workspace.Integer(args, "depth", workspace.DefaultListDepth, workspace.MaximumListDepth)
+	listing := workspace.NewListing(func(parts []string) string { return filepath.Join(append([]string{root}, parts...)...) },
+		depth, workspace.Integer(args, "maxEntries", workspace.DefaultListEntries, workspace.MaximumListEntries))
+	stopAt := answerBy(ctx)
+	// walk adds the leaves below dir: files, symlinks (never followed),
+	// empty directories, and directories at the depth limit.
+	var walk func(dir string, parts []string) bool
+	walk = func(dir string, parts []string) bool {
+		entries, _ := children(dir)
+		for _, entry := range entries {
+			if late(ctx, stopAt) {
+				listing.Truncate()
+				return false
+			}
+			here := append(append([]string{}, parts...), entry.Name())
+			path := filepath.Join(dir, entry.Name())
+			switch {
+			case entry.Type()&fs.ModeSymlink != 0:
+				if !listing.Add(here, workspace.Entry{Type: workspace.EntrySymlink}) {
+					return false
+				}
+			case entry.IsDir():
+				if len(here) < depth {
+					if inner, err := os.ReadDir(path); err == nil && len(inner) > 0 {
+						if !walk(path, here) {
+							return false
+						}
+						continue
+					}
+				}
+				if !listing.Add(here, workspace.Entry{Type: workspace.EntryDirectory}) {
+					return false
+				}
+			default:
+				leaf := workspace.Entry{Type: workspace.EntryFile, Size: workspace.FileSize(0), MediaType: mediaTypeOf(path)}
+				if info, err := entry.Info(); err == nil {
+					leaf.Size = workspace.FileSize(info.Size())
+				}
+				if !listing.Add(here, leaf) {
+					return false
+				}
+			}
+		}
+		return true
 	}
-	if depth > bridge.MaxListDepth {
-		depth = bridge.MaxListDepth
+	walk(root, nil)
+	return listing.Result(), nil
+}
+
+func (m machine) read(ctx context.Context, args map[string]interface{}) (workspace.ReadFileResult, error) {
+	path, cerr := m.allowed.resolve(workspace.Text(args, "path"), false)
+	if cerr != nil {
+		return workspace.ReadFileResult{}, cerr
 	}
-	output := bridge.ListFilesOutput{Path: root, Entries: []bridge.FileEntry{}}
-	errStop := errors.New("stop")
-	walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return workspace.ReadFileResult{}, fileError(path, err)
+	}
+	if info.IsDir() {
+		return workspace.ReadFileResult{}, workspace.IsADirectory(path)
+	}
+	if !info.Mode().IsRegular() {
+		return workspace.ReadFileResult{}, callError(bridge.ErrorFailed, path+" is not a regular file.")
+	}
+	result, err := workspace.ReadContent(ctx, path, mediaTypeOf(path), info.Size(), workspace.Integer(args, "maxBytes", workspace.DefaultReadBytes, workspace.MaximumReadBytes),
+		func(limit int64) ([]byte, error) { return readPrefix(path, limit) })
+	if err != nil {
+		return workspace.ReadFileResult{}, fileError(path, err)
+	}
+	return result, nil
+}
+
+// readPrefix reads at most limit bytes from the start of a file.
+func readPrefix(path string, limit int64) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return io.ReadAll(io.LimitReader(file, limit))
+}
+
+func (m machine) search(ctx context.Context, args map[string]interface{}) (workspace.SearchFilesResult, error) {
+	search, err := workspace.NewSearch(args)
+	if err != nil {
+		return workspace.SearchFilesResult{}, err
+	}
+	root, cerr := m.allowed.resolve(pathArgument(args, "path"), false)
+	if cerr != nil {
+		return workspace.SearchFilesResult{}, cerr
+	}
+	// A glob matches a file's name or its path from the top of its allowed
+	// folder, as a chat's glob matches paths from the top of its files.
+	top, _ := m.allowed.containing(root)
+	stopAt := answerBy(ctx)
+	scan := func(path string, size int64) bool {
+		rel, err := filepath.Rel(top.path, path)
+		if err != nil || !search.Wants(filepath.ToSlash(rel)) || !workspace.Searchable(mediaTypeOf(path), size) {
+			return true
+		}
+		data, err := readPrefix(path, workspace.SearchFileBytes)
+		if err != nil {
+			return true
+		}
+		return search.Scan(path, data)
+	}
+	var walk func(dir string) bool
+	walk = func(dir string) bool {
+		entries, _ := children(dir)
+		for _, entry := range entries {
+			if late(ctx, stopAt) {
+				search.Truncate()
+				return false
+			}
+			path := filepath.Join(dir, entry.Name())
+			switch {
+			case entry.Type()&fs.ModeSymlink != 0:
+			case entry.IsDir():
+				if !walk(path) {
+					return false
+				}
+			case entry.Type().IsRegular():
+				info, err := entry.Info()
+				if err == nil && !scan(path, info.Size()) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	// Like a chat's, a search below a path that names nothing finds nothing.
+	if info, err := os.Stat(root); err == nil {
+		if info.IsDir() {
+			walk(root)
+		} else if info.Mode().IsRegular() {
+			scan(root, info.Size())
+		}
+	}
+	return search.Result(), nil
+}
+
+func (m machine) write(args map[string]interface{}) (workspace.ChangeResult, error) {
+	path, cerr := m.allowed.resolve(workspace.Text(args, "path"), true)
+	if cerr != nil {
+		return workspace.ChangeResult{}, cerr
+	}
+	content, err := workspace.WriteContent(args)
+	if err != nil {
+		return workspace.ChangeResult{}, err
+	}
+	if _, err := workspace.WrittenMediaType(path, filepath.Base(path), content); err != nil {
+		return workspace.ChangeResult{}, err
+	}
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return workspace.ChangeResult{}, workspace.IsADirectory(path)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return workspace.ChangeResult{}, fileError(path, err)
+	}
+	if err := writeFile(path, content); err != nil {
+		return workspace.ChangeResult{}, fileError(path, err)
+	}
+	return workspace.ChangeResult{Success: true, ChangedPaths: []string{path}}, nil
+}
+
+// writeFile replaces a file's content, keeping its mode when it exists.
+func writeFile(path, content string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = file.WriteString(content)
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+func (m machine) edit(args map[string]interface{}) (workspace.ChangeResult, error) {
+	path, cerr := m.allowed.resolve(workspace.Text(args, "path"), true)
+	if cerr != nil {
+		return workspace.ChangeResult{}, cerr
+	}
+	edit, err := workspace.NewEdit(args)
+	if err != nil {
+		return workspace.ChangeResult{}, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return workspace.ChangeResult{}, fileError(path, err)
+	}
+	if info.IsDir() {
+		return workspace.ChangeResult{}, workspace.IsADirectory(path)
+	}
+	if !info.Mode().IsRegular() || !chatpath.Textual(mediaTypeOf(path)) {
+		return workspace.ChangeResult{}, workspace.NotText(path)
+	}
+	if info.Size() > workspace.MaximumFileBytes {
+		return workspace.ChangeResult{}, workspace.TooLargeToEdit(path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return workspace.ChangeResult{}, fileError(path, err)
+	}
+	content, replacements, err := edit.Apply(path, string(data))
+	if err != nil {
+		return workspace.ChangeResult{}, err
+	}
+	if err := writeFile(path, content); err != nil {
+		return workspace.ChangeResult{}, fileError(path, err)
+	}
+	return workspace.ChangeResult{Success: true, ChangedPaths: []string{path}, Replacements: replacements}, nil
+}
+
+// leaves are the files and links at or below path, in path order: what
+// deleting or moving path changes. An empty directory is its own leaf.
+func leaves(ctx context.Context, path string) ([]string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return []string{path}, nil
+	}
+	var found []string
+	err = filepath.WalkDir(path, func(at string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		if path == root {
-			return err
-		}
-		if err != nil {
-			// An unreadable subfolder is skipped, not fatal.
-			if entry != nil && entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if len(output.Entries) >= bridge.MaxListEntries {
-			output.Truncated = true
-			return errStop
-		}
-		item := bridge.FileEntry{Path: path, Type: bridge.EntryFile}
-		switch {
-		case entry.Type()&fs.ModeSymlink != 0:
-			item.Type = bridge.EntrySymlink
-		case entry.IsDir():
-			item.Type = bridge.EntryDir
-		default:
-			if info, err := entry.Info(); err == nil {
-				item.Size = info.Size()
-			}
-		}
-		output.Entries = append(output.Entries, item)
-		if entry.IsDir() {
-			rel, _ := filepath.Rel(root, path)
-			if 1+countSeparators(rel) >= depth {
-				return fs.SkipDir
-			}
+		if !entry.IsDir() {
+			found = append(found, at)
 		}
 		return nil
 	})
-	if walkErr != nil && !errors.Is(walkErr, errStop) {
-		if ctx.Err() != nil {
-			return bridge.ListFilesOutput{}, callError(bridge.ErrorTimeout, "Listing "+input.Path+" took too long.")
-		}
-		return bridge.ListFilesOutput{}, fileError(input.Path, walkErr)
+	if err != nil {
+		return nil, err
 	}
-	return output, nil
+	if len(found) == 0 {
+		found = []string{path}
+	}
+	sort.Strings(found)
+	return found, nil
 }
 
-func countSeparators(path string) int {
-	count := 0
-	for i := 0; i < len(path); i++ {
-		if os.IsPathSeparator(path[i]) {
-			count++
-		}
+func (m machine) remove(ctx context.Context, args map[string]interface{}) (workspace.ChangeResult, error) {
+	path, cerr := m.allowed.resolveEntry(workspace.Text(args, "path"))
+	if cerr != nil {
+		return workspace.ChangeResult{}, cerr
 	}
-	return count
+	removed, err := leaves(ctx, path)
+	if err != nil {
+		return workspace.ChangeResult{}, fileError(path, err)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return workspace.ChangeResult{}, fileError(path, err)
+	}
+	return workspace.ChangeResult{Success: true, ChangedPaths: removed}, nil
+}
+
+func (m machine) move(ctx context.Context, args map[string]interface{}) (workspace.ChangeResult, error) {
+	from, cerr := m.allowed.resolveEntry(workspace.Text(args, "path"))
+	if cerr != nil {
+		return workspace.ChangeResult{}, cerr
+	}
+	to, cerr := m.allowed.resolveEntry(workspace.Text(args, "destination"))
+	if cerr != nil {
+		return workspace.ChangeResult{}, cerr
+	}
+	if from == to || lexicallyWithin(from, to) {
+		return workspace.ChangeResult{}, workspace.MoveIntoItself(from)
+	}
+	moved, err := leaves(ctx, from)
+	if err != nil {
+		return workspace.ChangeResult{}, fileError(from, err)
+	}
+	if _, err := os.Lstat(to); err == nil {
+		return workspace.ChangeResult{}, workspace.AlreadyExists(to)
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return workspace.ChangeResult{}, fileError(to, err)
+	}
+	if err := os.Rename(from, to); err != nil {
+		if errors.Is(err, syscall.EXDEV) {
+			return workspace.ChangeResult{}, callError(bridge.ErrorFailed, fmt.Sprintf("%s and %s are on different drives, so it cannot be moved; copy it with run_command instead.", from, to))
+		}
+		return workspace.ChangeResult{}, fileError(from, err)
+	}
+	changed := make([]string, 0, 2*len(moved))
+	for _, source := range moved {
+		changed = append(changed, source, to+strings.TrimPrefix(source, from))
+	}
+	sort.Strings(changed)
+	return workspace.ChangeResult{Success: true, ChangedPaths: changed}, nil
 }

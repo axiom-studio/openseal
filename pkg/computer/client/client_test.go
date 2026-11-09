@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/computer/bridge"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // fakeHelloSeal serves the bridge API the way HelloSeal does, verifying
@@ -211,9 +212,9 @@ func TestServeRunsACommandAndAnswersSigned(t *testing.T) {
 	fake, server := newFakeHelloSeal(t)
 	api := pairedAPI(t, fake, server)
 	folder := t.TempDir()
-	args, _ := json.Marshal(bridge.RunCommandInput{Command: "printf 'hi from %s' \"$(basename \"$PWD\")\"; echo oops >&2; exit 3"})
+	args, _ := json.Marshal(map[string]any{"command": "printf 'hi from %s' \"$(basename \"$PWD\")\"; echo oops >&2; exit 3"})
 	fake.calls = []bridge.Call{{
-		ID: "call-1", Op: bridge.OpRunCommand, Args: args,
+		ID: "call-1", Op: workspace.OpRunCommand, Args: args,
 		Folders:        []bridge.Folder{{Path: folder, Access: bridge.AccessWrite}},
 		DeadlineUnixMs: time.Now().Add(time.Minute).UnixMilli(),
 	}}
@@ -234,12 +235,11 @@ func TestServeRunsACommandAndAnswersSigned(t *testing.T) {
 	if !result.OK || result.ID != "call-1" {
 		t.Fatalf("result = %+v", result)
 	}
-	var output bridge.RunCommandOutput
+	var output workspace.CommandResult
 	if err := json.Unmarshal(result.Result, &output); err != nil {
 		t.Fatal(err)
 	}
-	resolved, _ := filepath.EvalSymlinks(folder)
-	if output.ExitCode != 3 || output.Stdout != "hi from "+filepath.Base(folder) || output.Stderr != "oops\n" || output.Cwd != resolved || output.TimedOut {
+	if output.ExitStatus != 3 || output.Stdout != "hi from "+filepath.Base(folder) || output.Stderr != "oops\n" || output.TimedOut {
 		t.Fatalf("output = %+v", output)
 	}
 	fake.mu.Lock()
@@ -287,7 +287,7 @@ func TestServeHeartbeatsWhileEverySlotIsBusy(t *testing.T) {
 	fake, server := newFakeHelloSeal(t)
 	api := pairedAPI(t, fake, server)
 	for i := 0; i <= Concurrency; i++ {
-		fake.calls = append(fake.calls, bridge.Call{ID: "call-" + strconv.Itoa(i), Op: bridge.OpListFiles, DeadlineUnixMs: time.Now().Add(time.Minute).UnixMilli()})
+		fake.calls = append(fake.calls, bridge.Call{ID: "call-" + strconv.Itoa(i), Op: workspace.OpListDirectory, DeadlineUnixMs: time.Now().Add(time.Minute).UnixMilli()})
 	}
 	release := make(chan struct{})
 	started := make(chan string, Concurrency+1)
@@ -349,7 +349,7 @@ func TestServeRunsCallsOnThisComputersClock(t *testing.T) {
 	api := pairedAPI(t, fake, server)
 	// HelloSeal's clock is a minute ahead and gives the call 30s.
 	fake.clockAhead = time.Minute
-	fake.calls = []bridge.Call{{ID: "call-1", Op: bridge.OpListFiles, DeadlineUnixMs: time.Now().Add(time.Minute + 30*time.Second).UnixMilli()}}
+	fake.calls = []bridge.Call{{ID: "call-1", Op: workspace.OpListDirectory, DeadlineUnixMs: time.Now().Add(time.Minute + 30*time.Second).UnixMilli()}}
 	deadlines := make(chan time.Time, 1)
 	execute := func(_ context.Context, call bridge.Call) bridge.Result {
 		deadlines <- call.Deadline()

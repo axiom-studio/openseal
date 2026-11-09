@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/computer/bridge"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 // folders are a call's allowed folders, resolved on this computer.
@@ -62,10 +63,56 @@ func (f folders) defaultFolder() (resolvedFolder, bool) {
 // yet resolves through its nearest existing parent. It must land inside an
 // allowed folder; with write, that folder must allow writes.
 func (f folders) resolve(raw string, write bool) (string, *bridge.CallError) {
+	path, cerr := f.absolute(raw)
+	if cerr != nil {
+		return "", cerr
+	}
+	resolved, err := resolveExisting(path)
+	if err != nil {
+		return "", callError(bridge.ErrorFailed, fmt.Sprintf("Could not resolve %s: %v", raw, err))
+	}
+	return resolved, f.check(raw, resolved, write)
+}
+
+// resolveEntry is resolve for a path an operation removes or renames
+// itself: every symlink above it is resolved, but not a symlink it names,
+// so deleting or moving a link acts on the link. It refuses an allowed
+// folder itself and a path that holds a read-only folder.
+func (f folders) resolveEntry(raw string) (string, *bridge.CallError) {
+	path, cerr := f.absolute(raw)
+	if cerr != nil {
+		return "", cerr
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return "", callError(bridge.ErrorOutsideFolder, raw+" is a whole drive, which cannot be changed.")
+	}
+	resolvedParent, err := resolveExisting(parent)
+	if err != nil {
+		return "", callError(bridge.ErrorFailed, fmt.Sprintf("Could not resolve %s: %v", raw, err))
+	}
+	resolved := filepath.Join(resolvedParent, filepath.Base(path))
+	if cerr := f.check(raw, resolved, true); cerr != nil {
+		return "", cerr
+	}
+	for _, folder := range f {
+		if sameFolder(folder.path, resolved) {
+			return "", callError(bridge.ErrorReadOnly, fmt.Sprintf("%s is a folder the person allowed, so it cannot be deleted or moved; change what is in it instead.", raw))
+		}
+		if folder.access != bridge.AccessWrite && within(resolved, folder.path) {
+			return "", callError(bridge.ErrorReadOnly, fmt.Sprintf("%s holds %s, which is read-only.", raw, folder.path))
+		}
+	}
+	return resolved, nil
+}
+
+// absolute is raw expanded, made absolute from the default folder and
+// cleaned.
+func (f folders) absolute(raw string) (string, *bridge.CallError) {
 	if strings.TrimSpace(raw) == "" {
 		return "", callError(bridge.ErrorFailed, "A path is required.")
 	}
-	if len(raw) > bridge.MaxPathBytes || strings.ContainsRune(raw, 0) {
+	if len(raw) > workspace.MaximumPathBytes || strings.ContainsRune(raw, 0) {
 		return "", callError(bridge.ErrorFailed, "That path is not valid.")
 	}
 	if len(f) == 0 {
@@ -79,18 +126,36 @@ func (f folders) resolve(raw string, write bool) (string, *bridge.CallError) {
 		base, _ := f.defaultFolder()
 		path = filepath.Join(base.path, path)
 	}
-	resolved, err := resolveExisting(filepath.Clean(path))
-	if err != nil {
-		return "", callError(bridge.ErrorFailed, fmt.Sprintf("Could not resolve %s: %v", raw, err))
-	}
+	return filepath.Clean(path), nil
+}
+
+// check refuses a resolved path outside the allowed folders, or in a
+// read-only one for a write.
+func (f folders) check(raw, resolved string, write bool) *bridge.CallError {
 	folder, ok := f.containing(resolved)
 	if !ok {
-		return "", callError(bridge.ErrorOutsideFolder, fmt.Sprintf("%s is outside the folders allowed on this computer (%s).", raw, f.names()))
+		return callError(bridge.ErrorOutsideFolder, fmt.Sprintf("%s is outside the folders allowed on this computer (%s).", raw, f.names()))
 	}
 	if write && folder.access != bridge.AccessWrite {
-		return "", callError(bridge.ErrorReadOnly, fmt.Sprintf("%s is in %s, which is read-only.", raw, folder.path))
+		return callError(bridge.ErrorReadOnly, fmt.Sprintf("%s is in %s, which is read-only.", raw, folder.path))
 	}
-	return resolved, nil
+	return nil
+}
+
+// sameFolder reports whether path is the folder root, on disk.
+func sameFolder(root, path string) bool {
+	if root == path {
+		return true
+	}
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+		return false
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return false
+	}
+	info, err := os.Lstat(path)
+	return err == nil && os.SameFile(rootInfo, info)
 }
 
 // containing is the most specific allowed folder that holds path, so a

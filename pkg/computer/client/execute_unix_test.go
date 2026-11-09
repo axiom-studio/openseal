@@ -12,25 +12,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/computer/bridge"
+	"github.com/axiom-studio/openseal/pkg/workspace"
 )
 
 func TestRunCommandTimeoutKillsTheProcessGroup(t *testing.T) {
 	w := newWorkspace(t)
 	pidFile := filepath.Join(w.write, "child.pid")
 	started := time.Now()
-	result := call(t, w, bridge.OpRunCommand, bridge.RunCommandInput{
-		Command:        "sleep 60 & echo $! > child.pid; echo started; wait",
-		TimeoutSeconds: 1,
+	result := call(t, w, workspace.OpRunCommand, map[string]any{
+		"command":        "sleep 60 & echo $! > child.pid; echo started; wait",
+		"timeoutSeconds": 1,
 	})
 	if elapsed := time.Since(started); elapsed > 10*time.Second {
 		t.Fatalf("took %s; the timeout did not stop the command", elapsed)
 	}
-	var output bridge.RunCommandOutput
+	var output workspace.CommandResult
 	if err := json.Unmarshal(result.Result, &output); err != nil || !result.OK {
 		t.Fatalf("result = %+v, %v", result, err)
 	}
-	if !output.TimedOut || output.ExitCode != exitTimedOut || output.Stdout != "started\n" || !strings.Contains(output.Stderr, "stopped after 1s") {
+	if !output.TimedOut || output.ExitStatus != workspace.ExitTimedOut || output.Stdout != "started\n" || !strings.Contains(output.Stderr, "stopped after 1 seconds") {
 		t.Fatalf("output = %+v", output)
 	}
 	data, err := os.ReadFile(pidFile)

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/axiom-studio/openseal/pkg/workspace"
 	"golang.org/x/sys/windows"
 )
 
@@ -34,7 +35,7 @@ func isolate(cmd *exec.Cmd) *processTree {
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 	cmd.Cancel = func() error {
-		if tree.attached.Load() && windows.TerminateJobObject(tree.job, exitTimedOut) == nil {
+		if tree.attached.Load() && windows.TerminateJobObject(tree.job, workspace.ExitTimedOut) == nil {
 			return nil
 		}
 		kill := exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(cmd.Process.Pid))
