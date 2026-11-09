@@ -488,6 +488,26 @@ func resolveAgentBuilderSpace(ctx context.Context, spaces *SpaceService, scope S
 	return space, nil
 }
 
+// catalogGrantRisk is the binding ceiling allowedActions need: the highest
+// Risk among them on the exact catalog definition, at least read. Unknown
+// actions are left to validateSkillBindingArguments.
+func catalogGrantRisk(definition *skill.Definition, allowedActions []string) skill.RiskLevel {
+	ceiling := skill.RiskLevelRead
+	if definition == nil {
+		return ceiling
+	}
+	for _, name := range allowedActions {
+		action, ok := definition.Actions[strings.TrimSpace(name)]
+		if !ok {
+			continue
+		}
+		if rank := teamSkillRiskRank(action.Risk); rank < 1<<30 && rank > teamSkillRiskRank(ceiling) {
+			ceiling = action.Risk
+		}
+	}
+	return ceiling
+}
+
 func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants []AgentSkillGrant) ([]resolvedAgentSkillGrant, error) {
 	if len(grants) > maxAgentBuilderSkillGrants {
 		return nil, fmt.Errorf("an agent can be given at most %d Skills at once", maxAgentBuilderSkillGrants)
@@ -518,6 +538,9 @@ func resolveAgentSkillGrants(ctx context.Context, catalog *skill.Catalog, grants
 		if definition == nil {
 			return nil, fmt.Errorf("Skill %s@%s is not registered; use openseal.skills.discover", grant.SkillID, grant.SkillVersion)
 		}
+		// The declared ceiling is never trusted: it is the riskiest allowed
+		// action of the exact catalog definition.
+		grant.MaximumRisk = catalogGrantRisk(definition, grant.AllowedActions)
 		if err := validateSkillBindingArguments(definition, skillBindingUpsertArguments{
 			SkillID: grant.SkillID, SkillVersion: grant.SkillVersion, SourceIdentity: grant.SourceIdentity,
 			AllowedActions: grant.AllowedActions, EnablePrompt: grant.EnablePrompt,
