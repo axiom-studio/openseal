@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const currentPostgresSchemaVersion int64 = 79
+const currentPostgresSchemaVersion int64 = 80
 
 // PostgresSchemaVersion returns the highest applied OpenSeal migration.
 func (s *PostgresStore) PostgresSchemaVersion(ctx context.Context) (int64, error) {
@@ -38,11 +38,13 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 	if _, err := s.acquireMigrationLock(ctx, tx); err != nil {
 		return err
 	}
-	// Rolling back 79 does not restore event sources; rolling back 78 keeps
+	// Rolling back 80 keeps the two event index columns of
+	// runbook_activations; rolling back 79 does not restore event sources; rolling back 78 keeps
 	// the Default space ids; rolling back 77 does not restore kernel Projects;
 	// rolling back 76 drops the cutover drafts and does not restore the
 	// retired workforce change sets.
 	down := map[int64][]string{
+		80: routineEventsTables,
 		76: {"agent_builder_cutover_drafts"},
 		75: {"agent_session_entries", "agent_sessions"},
 		70: {"deployment_identities"},
@@ -78,6 +80,11 @@ func (s *PostgresStore) RollbackPostgresMigrations(ctx context.Context, target i
 		2:  {"agent_runs", "objectives"},
 	}
 	for version := currentPostgresSchemaVersion; version > target; version-- {
+		if version == routineEventsMigrationVersion {
+			if err := s.rollbackRoutineEvents(ctx, tx); err != nil {
+				return err
+			}
+		}
 		if version == teamRoutingMigrationVersion {
 			if err := s.rollbackTeamRouting(ctx, tx); err != nil {
 				return err

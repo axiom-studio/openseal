@@ -110,6 +110,10 @@ type MemoryStore struct {
 	agentSessionEntries                 map[string][]*SessionEntry       // portfolioKey(scope, sessionID) -> by sequence (index = seq-1)
 	agentSessionEntryIndex              map[string]memorySessionEntryRef // portfolioKey(scope, entryID)
 	agentSessionSourceKeys              map[string]struct{}              // portfolioKey(scope, sessionID+"\x00"+sourceKey)
+	routineEvents                       map[memoryRoutineEventKey]*RoutineEventRecord
+	routineEventBatches                 map[memoryRoutineEventBatchKey]*RoutineEventBatch
+	routineEventActivations             map[RoutineEventSourceKey]map[string]struct{} // active event routines by source
+	hooks                               map[string]*Hook
 }
 
 // NewMemoryStore creates an in-memory canonical kernel store.
@@ -188,6 +192,10 @@ func NewMemoryStore() *MemoryStore {
 		agentSessionEntries:         make(map[string][]*SessionEntry),
 		agentSessionEntryIndex:      make(map[string]memorySessionEntryRef),
 		agentSessionSourceKeys:      make(map[string]struct{}),
+		routineEvents:               make(map[memoryRoutineEventKey]*RoutineEventRecord),
+		routineEventBatches:         make(map[memoryRoutineEventBatchKey]*RoutineEventBatch),
+		routineEventActivations:     make(map[RoutineEventSourceKey]map[string]struct{}),
+		hooks:                       make(map[string]*Hook),
 	}
 }
 

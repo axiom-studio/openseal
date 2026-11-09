@@ -55,6 +55,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateRemoveEventSourcesSQLite(db); err != nil {
 		return err
 	}
+	if err := migrateRoutineEventsSQLite(db); err != nil {
+		return err
+	}
 	if err := migrateAgentRegistry(db); err != nil {
 		return err
 	}

@@ -602,6 +602,7 @@ type KernelStore interface {
 	AgentRunScheduleStore
 	ActionStore
 	AgentSessionStore
+	RoutineEventStore
 }
 
 type CreateObjectiveRequest struct {

@@ -47,10 +47,11 @@ func (s *PostgresStore) CreateRunbookActivation(ctx context.Context, value *Runb
 	if err != nil {
 		return err
 	}
+	eventKind, eventSourceRef := nullableRoutineEventIndex(value)
 	_, err = s.db.ExecContext(ctx, `INSERT INTO `+s.table("runbook_activations")+`
-		(id,scope_kind,scope_id,owner_type,owner_id,objective_id,assigned_agent_id,status,next_run_at,revision,updated_at,idempotency_key_hash,payload)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)`, value.ID, value.Scope.Kind, value.Scope.ID, value.Owner.Type,
-		value.Owner.ID, value.ObjectiveID, value.AssignedAgentID, value.Status, value.NextRunAt, value.Revision, value.UpdatedAt, value.IdempotencyKeyHash, string(payload))
+		(id,scope_kind,scope_id,owner_type,owner_id,objective_id,assigned_agent_id,status,next_run_at,revision,updated_at,idempotency_key_hash,payload,event_kind,event_source_ref)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15)`, value.ID, value.Scope.Kind, value.Scope.ID, value.Owner.Type,
+		value.Owner.ID, value.ObjectiveID, value.AssignedAgentID, value.Status, value.NextRunAt, value.Revision, value.UpdatedAt, value.IdempotencyKeyHash, string(payload), eventKind, eventSourceRef)
 	return err
 }
 
@@ -106,8 +107,9 @@ func (s *PostgresStore) UpdateRunbookActivation(ctx context.Context, value *Runb
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("runbook_activations")+` SET owner_type=$1,owner_id=$2,objective_id=$3,assigned_agent_id=$4,status=$5,next_run_at=$6,revision=$7,updated_at=$8,payload=$9::jsonb WHERE scope_kind=$10 AND scope_id=$11 AND id=$12 AND revision=$13`,
-		value.Owner.Type, value.Owner.ID, value.ObjectiveID, value.AssignedAgentID, value.Status, value.NextRunAt, value.Revision, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision)
+	eventKind, eventSourceRef := nullableRoutineEventIndex(value)
+	result, err := s.db.ExecContext(ctx, `UPDATE `+s.table("runbook_activations")+` SET owner_type=$1,owner_id=$2,objective_id=$3,assigned_agent_id=$4,status=$5,next_run_at=$6,revision=$7,updated_at=$8,payload=$9::jsonb,event_kind=$14,event_source_ref=$15 WHERE scope_kind=$10 AND scope_id=$11 AND id=$12 AND revision=$13`,
+		value.Owner.Type, value.Owner.ID, value.ObjectiveID, value.AssignedAgentID, value.Status, value.NextRunAt, value.Revision, value.UpdatedAt, string(payload), value.Scope.Kind, value.Scope.ID, value.ID, expectedRevision, eventKind, eventSourceRef)
 	if err != nil {
 		return err
 	}

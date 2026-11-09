@@ -32,6 +32,9 @@ func TestPostgresMigrationLedgerAllowsOnlyRetiredGap(t *testing.T) {
 		}
 	}
 	check(true) // Fresh databases correctly omit retired migrations 20, 22 and 34.
+	if applied, err := store.postgresMigrationApplied(ctx, store.db, routineEventsMigrationVersion); err != nil || !applied {
+		t.Fatalf("routine events migration 80 applied = %v, %v", applied, err)
+	}
 	if _, err := store.db.ExecContext(ctx, `INSERT INTO `+store.table("schema_migrations")+` (version,name) VALUES (34,'historical objective template migration')`); err != nil {
 		t.Fatal(err)
 	}
