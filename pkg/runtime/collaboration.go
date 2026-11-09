@@ -1834,6 +1834,7 @@ func buildCollaborationChildRun(source *AgentRun, request *AgentRequest, now tim
 	if context == nil {
 		context = make(map[string]interface{})
 	}
+	context = inheritRoutineEventBatch(source, context)
 	context["collaboration"] = map[string]interface{}{
 		"requestId": request.ID, "kind": request.Kind, "requester": request.Requester,
 		"recipient": request.Recipient, "semanticRole": request.SemanticRole,

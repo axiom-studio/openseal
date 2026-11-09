@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 )
@@ -23,14 +24,31 @@ const routineReportHeaderParameter = "routineEventHeader"
 // maxRoutineEventHeaderBytes is the longest header the mirror sends.
 const maxRoutineEventHeaderBytes = 200
 
-// routineReportHeader is the run's one-line event header, or "".
+// routineReportHeader is the run's one-line event header, or "". The text
+// comes from outside (an email subject, a summary), so mention syntax is
+// neutralized before it reaches a chat, and a long header is cut to fit.
 func routineReportHeader(run *AgentRun) string {
 	header, _ := run.Context[RoutineEventHeaderContextKey].(string)
-	header = strings.Join(strings.Fields(header), " ")
-	if len(header) > maxRoutineEventHeaderBytes {
-		return ""
+	header = neutralizeChatMentions(strings.Join(strings.Fields(header), " "))
+	if len(header) <= maxRoutineEventHeaderBytes {
+		return header
 	}
-	return header
+	const ellipsis = "…"
+	cut := maxRoutineEventHeaderBytes - len(ellipsis)
+	for cut > 0 && !utf8.RuneStart(header[cut]) {
+		cut--
+	}
+	return strings.TrimSpace(header[:cut]) + ellipsis
+}
+
+// chatMentionNeutralizer stops outside text from pinging people in a mirrored
+// chat: Slack reads <!channel>, <!here> and <@U…> as mentions, Slack and
+// Telegram read @name. Angle brackets become look-alike quotes and a
+// zero-width space follows every @.
+var chatMentionNeutralizer = strings.NewReplacer("<", "‹", ">", "›", "@", "@\u200b")
+
+func neutralizeChatMentions(text string) string {
+	return chatMentionNeutralizer.Replace(text)
 }
 
 // withRoutineReportHeader returns message with the delivery's header line

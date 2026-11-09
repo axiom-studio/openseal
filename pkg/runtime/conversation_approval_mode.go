@@ -117,11 +117,7 @@ func RunConversationApprovalMode(ctx context.Context, runs agentRunReader, conve
 	if err != nil {
 		return conversationID, "", err
 	}
-	event, err := routineEventOccurrenceRun(ctx, runs, run)
-	if err != nil {
-		return conversationID, "", err
-	}
-	if event {
+	if routineEventOccurrenceRun(run) {
 		return conversationID, ConversationApprovalManual, nil
 	}
 	if conversationID == "" || conversations == nil {
@@ -138,27 +134,30 @@ func RunConversationApprovalMode(ctx context.Context, runs agentRunReader, conve
 }
 
 // routineEventOccurrenceRun reports whether run is an event routine
-// occurrence (it carries routineEventBatchId) or runs under one (its root
-// does).
-func routineEventOccurrenceRun(ctx context.Context, runs agentRunReader, run *AgentRun) (bool, error) {
-	if run == nil {
-		return false, nil
+// occurrence or runs under one. Child Runs inherit routineEventBatchId from
+// their source (inheritRoutineEventBatch), so this reads only run.Context and
+// never the store.
+func routineEventOccurrenceRun(run *AgentRun) bool {
+	return run != nil && routineEventBatchOf(run) != ""
+}
+
+// inheritRoutineEventBatch gives a child Run its source's routineEventBatchId,
+// and drops any value the child's caller-supplied context tried to set, so
+// only a real occurrence and the Runs under it carry the key.
+func inheritRoutineEventBatch(source *AgentRun, context map[string]interface{}) map[string]interface{} {
+	batch := ""
+	if source != nil {
+		batch = routineEventBatchOf(source)
 	}
-	if routineEventBatchOf(run) != "" {
-		return true, nil
+	if batch == "" {
+		delete(context, RoutineEventBatchContextKey)
+		return context
 	}
-	rootID := strings.TrimSpace(run.RootRunID)
-	if rootID == "" || rootID == run.ID || runs == nil {
-		return false, nil
+	if context == nil {
+		context = map[string]interface{}{}
 	}
-	root, err := runs.GetAgentRun(ctx, run.Scope, rootID)
-	if errors.Is(err, ErrRunNotFound) || err == nil && root == nil {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return routineEventBatchOf(root) != "", nil
+	context[RoutineEventBatchContextKey] = batch
+	return context
 }
 
 func routineEventBatchOf(run *AgentRun) string {
@@ -362,10 +361,7 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 			incomplete = true
 			continue
 		}
-		if event, err := routineEventOccurrenceRun(ctx, s.runs, run); err != nil {
-			incomplete = true
-			continue
-		} else if event {
+		if routineEventOccurrenceRun(run) {
 			continue
 		}
 		current, err := s.conversations.GetConversation(ctx, scope, conversationID)

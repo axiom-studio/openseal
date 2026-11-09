@@ -614,7 +614,7 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	occurrence := &AgentRun{ID: "occurrence", Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
 		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-1",
 	}}
-	child := &AgentRun{ID: "child", Scope: scope, RootRunID: "occurrence", ParentRunID: "occurrence", Context: map[string]interface{}{}}
+	child := buildCollaborationChildRun(occurrence, &AgentRequest{ID: "request", Kind: AgentRequestKindHandoff}, time.Now(), "child")
 	scheduled := &AgentRun{ID: "scheduled", Scope: scope, RootRunID: "scheduled", Context: map[string]interface{}{
 		"conversationId": conversation.ID, scheduledTaskContextKey: true,
 	}}
@@ -653,5 +653,53 @@ func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
 	}
 	if pending, _ := store.GetApproval(ctx, scope, result.Approval.ID); pending.Status != ApprovalStatusPending {
 		t.Fatalf("the sweep approved an event occurrence's checkpoint: %#v", pending)
+	}
+}
+
+// countingRunReader counts store reads made while resolving a Run's mode.
+type countingRunReader struct {
+	agentRunReader
+	reads int
+}
+
+func (r *countingRunReader) GetAgentRun(ctx context.Context, scope Scope, runID string) (*AgentRun, error) {
+	r.reads++
+	return r.agentRunReader.GetAgentRun(ctx, scope, runID)
+}
+
+// Children carry their source's routineEventBatchId, never one their caller
+// supplied, so resolving a delegated child's mode needs no root read.
+func TestRoutineEventBatchInheritedWithoutRootRead(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	conversation := approvalModeConversation(t, store)
+	scope := conversation.Scope
+	chat := &AgentRun{ID: "chat", Kind: RunKindConversation, Scope: scope, RootRunID: "chat", Context: map[string]interface{}{
+		"conversationId": conversation.ID,
+	}}
+	occurrence := &AgentRun{ID: "occurrence", Kind: RunKindConversation, Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
+		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-1",
+	}}
+	forged := &AgentRequest{ID: "request", Kind: AgentRequestKindHandoff, SharedContext: map[string]interface{}{RoutineEventBatchContextKey: "forged"}}
+	for _, test := range []struct {
+		source    *AgentRun
+		wantBatch string
+		wantMode  ConversationApprovalMode
+	}{
+		{chat, "", ConversationApprovalAuto},
+		{occurrence, "batch-1", ConversationApprovalManual},
+	} {
+		child := buildCollaborationChildRun(test.source, forged, time.Now(), test.source.ID+"-child")
+		if got := routineEventBatchOf(child); got != test.wantBatch {
+			t.Fatalf("%s child batch = %q, want %q", test.source.ID, got, test.wantBatch)
+		}
+		reader := &countingRunReader{agentRunReader: store}
+		id, mode, err := RunConversationApprovalMode(ctx, reader, store, child)
+		if err != nil || id != conversation.ID || mode != test.wantMode {
+			t.Fatalf("%s child mode = %q %q %v, want %q", test.source.ID, id, mode, err, test.wantMode)
+		}
+		if reader.reads != 0 {
+			t.Fatalf("%s child mode read %d Runs, want none", test.source.ID, reader.reads)
+		}
 	}
 }

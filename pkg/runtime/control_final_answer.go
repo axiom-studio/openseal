@@ -413,14 +413,15 @@ func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc ControlConte
 	mode := cc.Authority.finalMode()
 	answer := strings.TrimSpace(d.Args.Answer)
 	// 2. Silent: a spoken reply or a routine occurrence, with an empty
-	// answer and no visual or report. A routine occurrence that changed
+	// answer and no visual, report, files or extension fields. A routine occurrence that changed
 	// something always reports it.
 	if d.Args.Silent {
 		routine := mode == FinalModeDefault && cc.Authority.RoutineOccurrence
-		if (mode != FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.Args.Visual != nil {
-			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no visual."
+		if (mode != FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.Args.Visual != nil ||
+			len(d.Args.Files) > 0 || len(d.Extra) > 0 {
+			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no visual or files."
 			if routine {
-				message = "silent means nothing is posted: leave answer and report empty and send no visual."
+				message = "silent means nothing is posted: leave answer and report empty and send no visual or files."
 			}
 			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalSilentInvalidCode, Message: message})
 		}
@@ -708,30 +709,54 @@ var runChangedSomethingStatuses = []ActionCallStatus{
 	ActionCallStatusSucceeded, ActionCallStatusCompensating, ActionCallStatusCompensated,
 }
 
-// runChangedSomething reports whether the Run completed an action whose side
-// effect is not none or read, granted or approved.
+// runChangedSomething reports whether the Run, or any Run under the same
+// root (a delegated or forked child), completed an action whose side effect
+// is not none or read, granted or approved. It runs only for a silent routine
+// final, never on a step.
 func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc ControlContext) (bool, error) {
 	actions, ok := x.Portfolio.(ActionStore)
 	if !ok {
 		return false, errors.New("control executor portfolio is not an action store; a silent routine final needs the Run's calls")
 	}
 	const pageSize = 200
+	rootID := strings.TrimSpace(cc.Run.RootRunID)
+	if rootID == "" {
+		rootID = cc.Run.ID
+	}
+	runIDs := []string{cc.Run.ID}
 	for offset := 0; ; offset += pageSize {
-		calls, err := actions.ListActionCalls(ctx, ActionFilter{
-			Scope: cc.Run.Scope, RunID: cc.Run.ID, Status: runChangedSomethingStatuses, Limit: pageSize, Offset: offset,
-		})
+		runs, err := x.Portfolio.ListAgentRuns(ctx, AgentRunFilter{Scope: cc.Run.Scope, RootRunID: rootID, Limit: pageSize, Offset: offset})
 		if err != nil {
 			return false, err
 		}
-		for _, call := range calls {
-			if call != nil && call.SideEffect != skill.SideEffectNone && call.SideEffect != skill.SideEffectRead {
-				return true, nil
+		for _, run := range runs {
+			if run != nil && run.ID != cc.Run.ID {
+				runIDs = append(runIDs, run.ID)
 			}
 		}
-		if len(calls) < pageSize {
-			return false, nil
+		if len(runs) < pageSize {
+			break
 		}
 	}
+	for _, runID := range runIDs {
+		for offset := 0; ; offset += pageSize {
+			calls, err := actions.ListActionCalls(ctx, ActionFilter{
+				Scope: cc.Run.Scope, RunID: runID, Status: runChangedSomethingStatuses, Limit: pageSize, Offset: offset,
+			})
+			if err != nil {
+				return false, err
+			}
+			for _, call := range calls {
+				if call != nil && call.SideEffect != skill.SideEffectNone && call.SideEffect != skill.SideEffectRead {
+					return true, nil
+				}
+			}
+			if len(calls) < pageSize {
+				break
+			}
+		}
+	}
+	return false, nil
 }
 
 // finalPark applies finalAnswerPark to the Run's governed calls on its path.

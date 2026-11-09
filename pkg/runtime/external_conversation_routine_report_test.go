@@ -2,8 +2,10 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
@@ -214,5 +216,20 @@ func TestRoutineReportMirrorHeader(t *testing.T) {
 				t.Fatalf("mirrored = %q, want %q", host.sent, test.want)
 			}
 		})
+	}
+}
+
+// Outside header text is cut to fit at a rune boundary and cannot ping
+// people in the mirrored chat.
+func TestRoutineReportHeaderFitsAndNeutralizesMentions(t *testing.T) {
+	header := func(text string) string {
+		return routineReportHeader(&AgentRun{Context: map[string]interface{}{RoutineEventHeaderContextKey: text}})
+	}
+	if got := header("New email: <!channel> ping <@U123> and @here"); got != "New email: ‹!channel› ping ‹@\u200bU123› and @\u200bhere" {
+		t.Fatalf("header = %q", got)
+	}
+	long := header("New email: " + strings.Repeat("é", 200))
+	if len(long) > maxRoutineEventHeaderBytes || !utf8.ValidString(long) || !strings.HasPrefix(long, "New email: éé") || !strings.HasSuffix(long, "…") {
+		t.Fatalf("long header = %q (%d bytes)", long, len(long))
 	}
 }

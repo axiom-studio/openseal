@@ -911,6 +911,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		availableAt = *req.AvailableAt
 	}
 	rootID := runID
+	runContext := req.Context
 	if req.ParentRunID != "" {
 		parent, err := store.GetAgentRun(ctx, req.Scope, req.ParentRunID)
 		if err != nil {
@@ -920,6 +921,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 			return nil, ErrRunNotFound
 		}
 		rootID = parent.RootRunID
+		runContext = inheritRoutineEventBatch(parent, cloneMap(req.Context))
 	}
 	source := req.Source
 	if source == "" {
@@ -941,7 +943,7 @@ func buildAgentRun(ctx context.Context, store PortfolioStore, req CreateAgentRun
 		ResourceRequirements: cloneResourceQuantities(req.ResourceRequirements),
 		Goal:                 req.Goal, Source: source,
 		Status: AgentRunStatusQueued, Priority: req.Priority, Deadline: req.Deadline,
-		AvailableAt: availableAt, QueueEnteredAt: now, Context: req.Context,
+		AvailableAt: availableAt, QueueEnteredAt: now, Context: runContext,
 		Plan: req.Plan, Checkpoint: req.Checkpoint, WakeCondition: req.WakeCondition,
 		Budget: cloneBudgetPolicy(req.Budget), Policy: req.Policy, Revision: 1, CreatedAt: now, UpdatedAt: now,
 		SessionID: req.SessionID, Engine: RunEngineLoop,

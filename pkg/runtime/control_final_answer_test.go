@@ -677,10 +677,16 @@ func TestFinalAnswerTakesOneSkillRefSentAsAString(t *testing.T) {
 // addRunActionCall stores a finished action call of the fixture's Run.
 func (f *controlFixture) addRunActionCall(id string, status ActionCallStatus, sideEffect skill.SideEffect) {
 	f.t.Helper()
+	f.addActionCallFor(f.run.ID, id, status, sideEffect)
+}
+
+// addActionCallFor stores a finished action call of the given Run.
+func (f *controlFixture) addActionCallFor(runID, id string, status ActionCallStatus, sideEffect skill.SideEffect) {
+	f.t.Helper()
 	f.store.mu.Lock()
 	defer f.store.mu.Unlock()
 	f.store.actions[portfolioKey(f.run.Scope, id)] = &ActionCall{
-		ID: id, Scope: f.run.Scope, RunID: f.run.ID, SkillID: "mail", Action: "send", Status: status,
+		ID: id, Scope: f.run.Scope, RunID: runID, SkillID: "mail", Action: "send", Status: status,
 		SideEffect: sideEffect, Origin: ActionOriginLoop, CreatedAt: f.now, UpdatedAt: f.now,
 	}
 }
@@ -689,6 +695,7 @@ func TestFinalAnswerRoutineOccurrenceSilent(t *testing.T) {
 	f := newFinalFixture(t,
 		finalCall("text", `{"answer":"Nothing new","silent":true}`),
 		finalCall("report", `{"answer":"","report":"x","silent":true}`),
+		finalCall("files", `{"answer":"","files":["out.txt"],"silent":true}`),
 		finalCall("quiet", `{"answer":"","silent":true}`),
 	)
 	routine := ControlAuthority{RoutineOccurrence: true}
@@ -702,6 +709,7 @@ func TestFinalAnswerRoutineOccurrenceSilent(t *testing.T) {
 	}
 	requireRejected(t, f, f.settleFinal("text", routine), "text", finalSilentInvalidCode)
 	requireRejected(t, f, f.settleFinal("report", routine), "report", finalSilentInvalidCode)
+	requireRejected(t, f, f.settleFinal("files", routine), "files", finalSilentInvalidCode)
 	// Reads and failed writes do not count as a change.
 	f.addRunActionCall("read", ActionCallStatusSucceeded, skill.SideEffectRead)
 	f.addRunActionCall("none", ActionCallStatusSucceeded, skill.SideEffectNone)
@@ -749,4 +757,20 @@ func TestSilentStillRejectedForChatRuns(t *testing.T) {
 	if err != nil || !authority.RoutineOccurrence || !finalFieldOffered("silent", authority) {
 		t.Fatalf("occurrence authority = %#v, %v", authority, err)
 	}
+}
+
+// A write by a delegated or forked child under the occurrence counts too.
+func TestRoutineOccurrenceSilentRefusedAfterChildWrite(t *testing.T) {
+	f := newFinalFixture(t, finalCall("quiet", `{"answer":"","silent":true}`))
+	rootID := f.run.RootRunID
+	if rootID == "" {
+		rootID = f.run.ID
+	}
+	child := cloneAgentRun(f.run)
+	child.ID, child.ParentRunID, child.RootRunID = "occurrence-child", f.run.ID, rootID
+	f.store.mu.Lock()
+	f.store.agentRuns[portfolioKey(child.Scope, child.ID)] = child
+	f.store.mu.Unlock()
+	f.addActionCallFor(child.ID, "child-sent", ActionCallStatusSucceeded, skill.SideEffectExternal)
+	requireRejected(t, f, f.settleFinal("quiet", ControlAuthority{RoutineOccurrence: true}), "quiet", finalSilentAfterChangeCode)
 }
