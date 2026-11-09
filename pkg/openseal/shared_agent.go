@@ -14,6 +14,7 @@ type (
 	SharedAgentProfile        = runtime.SharedAgentProfile
 	SharedAgentSlot           = runtime.SharedAgentSlot
 	SharedAgentSkill          = runtime.SharedAgentSkill
+	SharedAgentExportSkill    = runtime.SharedAgentExportSkill
 	SharedAgentExcluded       = runtime.SharedAgentExcluded
 	SharedAgentRefusal        = runtime.SharedAgentRefusal
 	SharedAgentExport         = runtime.SharedAgentExport
