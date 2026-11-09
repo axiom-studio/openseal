@@ -7,13 +7,15 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ModelStepProducer is the StepProducer of every model-driven Run: it builds
 // one ModelStepRequest per step from the preparer's system and tools plus the
 // session path, calls StepHost.ExecuteModelStep and returns the validated
 // assistant entry. The loop appends that entry and its tool entries; the
-// producer writes nothing.
+// producer writes only the step's capabilities note (capability_note.go),
+// right before it renders the path.
 type ModelStepProducer struct {
 	host     StepHost
 	preparer ModelStepPreparer
@@ -21,17 +23,20 @@ type ModelStepProducer struct {
 	// Media resolves image parts while rendering the path. A zero value renders
 	// every image as "[image omitted: <mediaType>]".
 	Media ModelStepMedia
+	// Now stamps the capabilities note; nil = time.Now.
+	Now func() time.Time
 	// cache holds the preparer's request between PlanStepBudget and Produce of
 	// one step attempt (key stepId:attempt). Produce removes it.
 	cache sync.Map
 }
 
-// ModelStepProducerStore is what the producer reads: the session path it
-// renders and the governed calls whose screenshots it resolves. KernelStore
-// satisfies it.
+// ModelStepProducerStore is what the producer uses: the session path it
+// renders, the governed calls whose screenshots it resolves, and the append
+// of the step's capabilities note. KernelStore satisfies it.
 type ModelStepProducerStore interface {
 	LoadAgentSessionPath(ctx context.Context, scope Scope, sessionID string) (*AgentSessionPath, error)
 	GetActionCall(ctx context.Context, scope Scope, actionID string) (*ActionCall, error)
+	AppendAgentSessionEntries(ctx context.Context, req AppendAgentSessionEntriesRequest) (*AppendAgentSessionEntriesResult, error)
 }
 
 // ModelStepMedia are the image sources of the path renderer.
@@ -124,6 +129,9 @@ func (p *ModelStepProducer) Produce(ctx context.Context, in StepInput) (StepOutp
 			return StepOutput{}, err
 		}
 	}
+	if err := p.ensureCapabilityNote(ctx, in); err != nil {
+		return StepOutput{}, err
+	}
 	req, err := p.request(ctx, in, prepared, modelStepReservedOutput(in))
 	if err != nil {
 		return StepOutput{}, err
@@ -143,6 +151,30 @@ func (p *ModelStepProducer) Produce(ctx context.Context, in StepInput) (StepOutp
 		Usage:         turnUsageFromModelStep(assistant.Usage),
 		Assistant:     &assistant,
 	}, nil
+}
+
+// ensureCapabilityNote appends the capabilities note the step's current path
+// needs, after the step's context and any compaction, so the request rendered
+// next shows the current listing. A preparer without a catalog has none.
+func (p *ModelStepProducer) ensureCapabilityNote(ctx context.Context, in StepInput) error {
+	source, ok := p.preparer.(capabilityListingSource)
+	if !ok || in.Mode != StepModeNormal {
+		return nil
+	}
+	path, err := p.sessions.LoadAgentSessionPath(ctx, in.Run.Scope, in.Session.ID)
+	if err != nil {
+		return fmt.Errorf("load session path: %w", err)
+	}
+	in.Path = path
+	_, err = ensureCapabilityNote(ctx, p.sessions, in, path, source.capabilityListing(in), p.now())
+	return err
+}
+
+func (p *ModelStepProducer) now() time.Time {
+	if p.Now != nil {
+		return p.Now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func checkModelStepInput(in StepInput) error {
@@ -234,6 +266,9 @@ func (p *ModelStepProducer) render(ctx context.Context, in StepInput, prepared M
 		return ModelStepRequest{}, fmt.Errorf("render session path: %w", err)
 	}
 	req.Entries = entries
+	if len(req.Tools) > 0 {
+		req.Tools = applySurfaces(req.Tools, path, req.Entries)
+	}
 	return req, nil
 }
 
@@ -276,6 +311,7 @@ func turnUsageFromModelStep(usage ModelStepUsage) TurnUsage {
 	}
 	return TurnUsage{
 		InputTokens: int(usage.InputTokens), OutputTokens: int(usage.OutputTokens),
+		CacheReadTokens: int(usage.CacheReadTokens), CacheWriteTokens: int(usage.CacheWriteTokens),
 		Cost: usage.Cost, DurationMS: usage.DurationMS, ProviderDurationMS: usage.ProviderDurationMS,
 		RepairAttempts: repairs,
 	}

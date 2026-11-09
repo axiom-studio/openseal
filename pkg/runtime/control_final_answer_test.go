@@ -152,9 +152,12 @@ func TestFinalAnswerToolSchemaFollowsAuthority(t *testing.T) {
 				t.Fatalf("answer description = %v", answer["description"])
 			}
 			if tc.wantSkillEnum != nil {
+				// The refs are validated when the answer is checked; the
+				// schema carries no enum, so connecting a Skill never
+				// changes the tool.
 				items := properties["appliedSkillRefs"].(map[string]interface{})["items"].(map[string]interface{})
-				if !reflect.DeepEqual(items["enum"], tc.wantSkillEnum) {
-					t.Fatalf("skill enum = %v", items["enum"])
+				if _, ok := items["enum"]; ok || items["type"] != "string" {
+					t.Fatalf("skill items = %v", items)
 				}
 			}
 			// Constant per claim (prompt cache).

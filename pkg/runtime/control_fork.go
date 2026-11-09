@@ -70,14 +70,10 @@ func (forkHandler) spec(a ControlAuthority) ControlToolSpec {
 			"type": "object", "description": "Non-secret data the branch needs.",
 		},
 	}
-	if len(a.ForkTargets) > 0 {
-		ids := make([]interface{}, 0, len(a.ForkTargets))
-		for _, target := range a.ForkTargets {
-			ids = append(ids, target.ID)
-		}
-		branch["agentId"] = map[string]interface{}{
-			"type": "string", "enum": ids, "description": "Omit to run the branch as yourself.",
-		}
+	// No target enum: the Agents are in the capabilities note and the
+	// handler checks each agentId, so the schema never changes with them.
+	branch["agentId"] = map[string]interface{}{
+		"type": "string", "description": "Omit to run the branch as yourself; otherwise an agentId from the capabilities note.",
 	}
 	return ControlToolSpec{
 		Description: "Run two to eight independent goals concurrently; their final answers come back to you as this tool's result.",

@@ -365,11 +365,16 @@ func TestUnofferedToolIsError(t *testing.T) {
 	if out.SettlePending || out.Park != nil || out.Failure != nil {
 		t.Fatalf("outcome = %#v", out)
 	}
-	for _, entry := range step.entries[:3] {
+	for _, entry := range step.entries[:2] {
 		stored := f.entry(entry)
 		if stored.State != ToolEntryError || !stored.Tool.Result.IsError || resultValue(t, stored)["error"] != loopToolNotAvailableCode {
 			t.Fatalf("%s = %s %v", entry.ToolCallID, stored.State, stored.Tool.Result)
 		}
+	}
+	// Loading is offered (always deferred); an ID outside the catalog is
+	// refused.
+	if stored := f.entry(step.entries[2]); !stored.Tool.Result.IsError || resultValue(t, stored)["status"] != "not_available" {
+		t.Fatalf("load of an unknown ID = %s %v", stored.State, stored.Tool.Result)
 	}
 	if f.handlers[ControlToolFork].calls != 0 {
 		t.Fatal("an unoffered control tool ran")
@@ -490,7 +495,8 @@ func governedToolExecutor(t *testing.T, f *governedFixture) (LoopToolExecutor, A
 		t.Fatal(err)
 	}
 	f.run = f.currentRun()
-	return dispatcher.ForClaim(LoopToolClaim{}), sessions
+	// The release Skill is pinned, so the step calls it without a load.
+	return dispatcher.ForClaim(LoopToolClaim{CapabilityConfig: CapabilitySetConfig{PinnedSkillIDs: []string{"release"}}}), sessions
 }
 
 func TestWriteAfterHeldApprovalWaitsForDecision(t *testing.T) {

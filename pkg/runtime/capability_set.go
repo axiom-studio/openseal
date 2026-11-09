@@ -33,6 +33,7 @@ const (
 	defaultCapabilityCatalogMax   = 64
 	defaultCapabilityCatalogBytes = 16 << 10
 	defaultCapabilitySummaryBytes = 64 << 10
+	defaultSkillLoadBudgetBytes   = 12 << 10
 
 	// capabilityHandleMinLength is the prompt ID length past which discovery
 	// shows a short handle instead.
@@ -66,6 +67,14 @@ type CapabilitySetConfig struct {
 	CatalogMax   int // default 64 entries before search mode
 	CatalogBytes int // default 16 KiB of listing before search mode
 	SummaryBytes int // default 64 KiB: directory bound in search mode
+	// SkillLoadBudget bounds the definitions a whole-Skill load surfaces
+	// beyond the requested action (default 12 KiB).
+	SkillLoadBudget int
+	// PinnedSkillIDs are Skills pinned like the built-in one: their
+	// instructions and actions are visible from the first step, within
+	// PinnedBytes. Pinning is part of the binding, so it never changes
+	// what earlier steps declared.
+	PinnedSkillIDs []string
 }
 
 func (c CapabilitySetConfig) withDefaults() CapabilitySetConfig {
@@ -80,6 +89,9 @@ func (c CapabilitySetConfig) withDefaults() CapabilitySetConfig {
 	}
 	if c.SummaryBytes <= 0 {
 		c.SummaryBytes = defaultCapabilitySummaryBytes
+	}
+	if c.SkillLoadBudget <= 0 {
+		c.SkillLoadBudget = defaultSkillLoadBudgetBytes
 	}
 	return c
 }
@@ -97,7 +109,6 @@ type capabilityEntry struct {
 type CapabilitySet struct {
 	catalog   CapabilityCatalog
 	config    CapabilitySetConfig
-	deferred  bool
 	searching bool
 
 	entries   []capabilityEntry
@@ -114,15 +125,27 @@ type CapabilitySet struct {
 	loaded map[string]bool
 	// order is the visible order: pinned first, then loads in first-load
 	// order. Appending keeps the tool list a prefix of the next step's.
-	order  []string
-	prefix string
+	order []string
 }
 
 // NewCapabilitySet builds the visible set for one step: pinned first, then
-// loadedIDs (from LoadedCapabilityIDs) in order, each closed over its bound
+// loadedIDs (from PathLoadedCapabilityIDs) in order, each closed over its bound
 // prompts, intersected with the catalog. A catalog with duplicate IDs keeps
 // the first definition of each.
 func NewCapabilitySet(catalog CapabilityCatalog, loadedIDs []string, config CapabilitySetConfig) *CapabilitySet {
+	return newCapabilitySet(catalog, nil, loadedIDs, config)
+}
+
+// NewPathCapabilitySet is the visible set of a step over path: the tools
+// carried over its latest compaction, then what the path's loads loaded.
+func NewPathCapabilitySet(catalog CapabilityCatalog, path *AgentSessionPath, config CapabilitySetConfig) *CapabilitySet {
+	return newCapabilitySet(catalog, PathCarriedCapabilityIDs(path), PathLoadedCapabilityIDs(path), config)
+}
+
+// newCapabilitySet takes carriedIDs as tools only: a carried tool's bound
+// instructions were in a load result the compaction summarized, so they are
+// not loaded, and loading them (or the tool again) returns their text.
+func newCapabilitySet(catalog CapabilityCatalog, carriedIDs, loadedIDs []string, config CapabilitySetConfig) *CapabilitySet {
 	s := &CapabilitySet{
 		catalog:   catalog,
 		config:    config.withDefaults(),
@@ -135,15 +158,9 @@ func NewCapabilitySet(catalog CapabilityCatalog, loadedIDs []string, config Capa
 	}
 	s.indexCatalog()
 	s.initDiscoveryIDs()
-	// Small catalogs fit in one exchange: everything is visible and no
-	// load or search tool is offered.
-	s.deferred = !(len(catalog.Actions) < 8 && len(catalog.SkillPrompts) < 4 && len(catalog.RunbookOperations) < 4)
-	if !s.deferred {
-		for _, entry := range s.visibleOrderAll() {
-			s.add(entry)
-		}
-		return s
-	}
+	// Loading is always deferred, even for a small catalog: connecting a
+	// Skill then only adds catalog lines to the capabilities note and never
+	// rewrites the tools or system prompt the model already saw.
 	s.searching = s.exceedsCatalogBudget()
 	for _, id := range s.pinnedIDs() {
 		s.markLoaded(id)
@@ -152,12 +169,16 @@ func NewCapabilitySet(catalog CapabilityCatalog, loadedIDs []string, config Capa
 	for id := range s.loaded {
 		s.pinned[id] = true
 	}
+	for _, id := range carriedIDs {
+		if canonical, ok := s.Resolve(id); ok && s.known(canonical) {
+			s.add(canonical)
+		}
+	}
 	for _, id := range loadedIDs {
 		if canonical, ok := s.Resolve(id); ok {
 			s.markLoaded(canonical)
 		}
 	}
-	s.prefix = s.buildPromptPrefix()
 	return s
 }
 
@@ -195,20 +216,6 @@ func (s *CapabilitySet) indexCatalog() {
 			s.runbooks[id] = o
 		}
 	}
-}
-
-// visibleOrderAll is the order of a non-deferred set: host tools in kernel
-// order, then prompts, actions and runbooks in catalog order.
-func (s *CapabilitySet) visibleOrderAll() []string {
-	var ids []string
-	for _, kind := range []string{"workspace", "instructions", "action", "runbook"} {
-		for _, entry := range s.entries {
-			if entry.Kind == kind {
-				ids = append(ids, entry.ID)
-			}
-		}
-	}
-	return ids
 }
 
 // capabilityDiscoveryDescription bounds discovery text. Loading the exact ID
@@ -315,6 +322,54 @@ func (s *CapabilitySet) markLoaded(id string) []string {
 	return added
 }
 
+// toolCost is the encoded size of the tool definition an action or host-tool
+// ID surfaces: name, description and input schema.
+func (s *CapabilitySet) toolCost(id string) int {
+	var name, description string
+	var schema map[string]interface{}
+	if a, ok := s.actions[id]; ok {
+		name, description, schema = a.Name, a.Description, GovernedToolInputSchema(a)
+	} else if o, ok := s.hostTools[id]; ok {
+		name, description, schema = o.ToolName, o.Description, o.InputSchema
+	} else {
+		return s.definitionCost(id)
+	}
+	encoded, _ := json.Marshal(schema)
+	return len(name) + len(description) + len(encoded)
+}
+
+// skillSiblings are the actions a load of action id brings along (whole-Skill
+// load): the not yet visible actions of the same Skill connection (Skill,
+// version and binding), in catalog order, while their tool definitions fit
+// SkillLoadBudget after id's own. Instructions and runbooks have none.
+func (s *CapabilitySet) skillSiblings(id string, pending map[string]bool) []string {
+	action, ok := s.actions[id]
+	if !ok {
+		return nil
+	}
+	used := s.toolCost(id)
+	var siblings []string
+	for _, candidate := range s.catalog.Actions {
+		sibling := capabilityActionPrefix + candidate.Name
+		if sibling == id || s.loaded[sibling] || pending[sibling] || slices.Contains(siblings, sibling) {
+			continue
+		}
+		if candidate.SkillID != action.SkillID || candidate.Version != action.Version || candidate.BindingID != action.BindingID {
+			continue
+		}
+		if s.actions[sibling].Name != candidate.Name {
+			continue // a duplicate catalog name keeps its first definition
+		}
+		cost := s.toolCost(sibling)
+		if used+cost > s.config.SkillLoadBudget {
+			continue
+		}
+		used += cost
+		siblings = append(siblings, sibling)
+	}
+	return siblings
+}
+
 // definitionCost is the encoded size of one capability's full definition.
 func (s *CapabilitySet) definitionCost(id string) int {
 	var value interface{}
@@ -345,12 +400,12 @@ func (s *CapabilitySet) pinnedIDs() []string {
 		hostIDs = append(hostIDs, capabilityWorkspacePrefix+o.Operation)
 	}
 	for _, p := range s.catalog.SkillPrompts {
-		if p.SkillID == pinnedCapabilitySkillID {
+		if s.pinnedSkill(p.SkillID) {
 			prompts = append(prompts, capabilityPromptPrefix+p.Reference)
 		}
 	}
 	for _, a := range s.catalog.Actions {
-		if a.SkillID == pinnedCapabilitySkillID {
+		if s.pinnedSkill(a.SkillID) {
 			actions = append(actions, capabilityActionPrefix+a.Name)
 		}
 	}
@@ -385,12 +440,18 @@ func (s *CapabilitySet) pinnedIDs() []string {
 	return accepted
 }
 
-// Deferred reports whether loading is in effect. It is false for small
-// catalogs: then everything is visible and no load/search tool is offered.
-func (s *CapabilitySet) Deferred() bool { return s != nil && s.deferred }
+func (s *CapabilitySet) pinnedSkill(skillID string) bool {
+	return skillID == pinnedCapabilitySkillID || slices.Contains(s.config.PinnedSkillIDs, skillID)
+}
+
+// Offered reports whether the step offers capability search and loading: the
+// catalog has any capability at all. Every chat catalog has the built-in Skill
+// and the workspace tools, so this only leaves out a bare catalog (an Agent
+// trial with no Skills).
+func (s *CapabilitySet) Offered() bool { return s != nil && len(s.entries) > 0 }
 
 // Searching reports search mode: the full catalog listing is past the
-// catalog budget, so the prompt carries a directory and the model searches.
+// catalog budget, so the capabilities note carries a directory and the model searches.
 func (s *CapabilitySet) Searching() bool { return s != nil && s.searching }
 
 // Visible returns the visible catalog subset in load order (pinned, then loads).
@@ -450,82 +511,7 @@ func (s *CapabilitySet) Resolve(id string) (string, bool) {
 	return "", false
 }
 
-// PromptPrefix is the stable system-prompt block: loading instructions plus
-// the full catalog listing (or the directory in search mode). It depends only
-// on the catalog, never on what is loaded. It is "" when loading is not in
-// effect.
-func (s *CapabilitySet) PromptPrefix() string {
-	if s == nil {
-		return ""
-	}
-	return s.prefix
-}
-
-// LoadedCapabilityIDs walks the rendered session path and returns, in
-// first-load order, the canonical IDs from every completed load_capabilities
-// tool entry (ToolEntry.LoadedCapabilities). Pinned IDs are not included;
-// NewCapabilitySet adds them. Duplicates keep their first position.
-//
-// AgentSessionPath.Entries already starts at the latest compaction's kept
-// tail. If the slice still holds a compaction entry, loads before its
-// FirstKeptEntryID are dropped, as the rendered path drops them.
-func LoadedCapabilityIDs(path []*SessionEntry) []string {
-	type load struct {
-		entryID string
-		ids     []string
-	}
-	var loads []load
-	var seenIDs []string
-	for _, entry := range path {
-		if entry == nil {
-			continue
-		}
-		seenIDs = append(seenIDs, entry.ID)
-		switch entry.Type {
-		case SessionEntryCompaction:
-			kept := ""
-			if entry.Compaction != nil {
-				kept = entry.Compaction.FirstKeptEntryID
-			}
-			start := len(seenIDs) - 1 // nothing kept
-			for index, id := range seenIDs[:len(seenIDs)-1] {
-				if kept != "" && id == kept {
-					start = index
-					break
-				}
-			}
-			keptIDs := map[string]bool{}
-			for _, id := range seenIDs[start:] {
-				keptIDs[id] = true
-			}
-			filtered := loads[:0]
-			for _, l := range loads {
-				if keptIDs[l.entryID] {
-					filtered = append(filtered, l)
-				}
-			}
-			loads = filtered
-		case SessionEntryTool:
-			if entry.Tool != nil && entry.Tool.Name == LoadCapabilitiesTool && entry.State == ToolEntryCompleted && len(entry.Tool.LoadedCapabilities) > 0 {
-				loads = append(loads, load{entryID: entry.ID, ids: entry.Tool.LoadedCapabilities})
-			}
-		}
-	}
-	var result []string
-	seen := map[string]bool{}
-	for _, l := range loads {
-		for _, id := range l.ids {
-			id = strings.TrimSpace(id)
-			if id != "" && !seen[id] {
-				seen[id] = true
-				result = append(result, id)
-			}
-		}
-	}
-	return result
-}
-
-// catalogListingBytes is the size of the full capabilityCatalog listing.
+// catalogListingBytes is the size of the full catalog listing.
 func (s *CapabilitySet) catalogListingBytes() int {
 	total := 0
 	for _, entry := range s.entries {
@@ -541,7 +527,7 @@ func (s *CapabilitySet) exceedsCatalogBudget() bool {
 	return s.catalogListingBytes() > s.config.CatalogBytes
 }
 
-// capabilityGroup is one capabilityDirectory line.
+// capabilityGroup is one directory line.
 type capabilityGroup struct {
 	key          string
 	name         string
@@ -604,14 +590,14 @@ func (s *CapabilitySet) capabilityGroups() []capabilityGroup {
 	return result
 }
 
-// writeCapabilityDirectory writes the directory bounded by SummaryBytes; the
-// remainder is counted and found by search.
-func (s *CapabilitySet) writeCapabilityDirectory(b *strings.Builder) {
+// directoryLines are the directory lines bounded by SummaryBytes, keyed by
+// group; the remainder is counted and found by search.
+func (s *CapabilitySet) directoryLines() []capabilityNoteItem {
 	groups := s.capabilityGroups()
-	b.WriteString("\n\ncapabilityDirectory (one Skill or connected server per line; search to find its capabilities):")
+	var items []capabilityNoteItem
 	written := 0
 	for index, g := range groups {
-		line := "\n- " + g.key
+		line := "- " + g.key
 		if g.name != "" && g.name != g.key {
 			line += " — " + capabilityDiscoveryDescription(g.name)
 		}
@@ -628,51 +614,26 @@ func (s *CapabilitySet) writeCapabilityDirectory(b *strings.Builder) {
 		}
 		line += ")"
 		if written+len(line) > s.config.SummaryBytes {
-			b.WriteString("\n- … " + strconv.Itoa(len(groups)-index) + " more; search to find them")
-			return
+			items = append(items, capabilityNoteItem{Key: "group:…", Section: capabilityNoteCatalog,
+				Text: "- … " + strconv.Itoa(len(groups)-index) + " more; search to find them"})
+			return items
 		}
-		b.WriteString(line)
+		items = append(items, capabilityNoteItem{Key: "group:" + g.key, Section: capabilityNoteCatalog, Text: line})
 		written += len(line)
 	}
+	return items
 }
 
-func (s *CapabilitySet) buildPromptPrefix() string {
-	var b strings.Builder
-	if s.searching {
-		b.WriteString(capabilitySearchSelectionInstructions)
-		b.WriteString(capabilitySearchActionLoadingInstructions)
-		b.WriteString(capabilitySkillDiscoverySearchInstructions)
-		s.writeCapabilityDirectory(&b)
-		return b.String()
-	}
-	b.WriteString(capabilitySelectionInstructions)
-	b.WriteString(capabilityActionLoadingInstructions)
-	b.WriteString(capabilitySkillDiscoveryInstructions)
-	b.WriteString("\n\ncapabilityCatalog (one key per line, then its description):")
+// catalogLines are the full listing, one line per catalog ID.
+func (s *CapabilitySet) catalogLines() []capabilityNoteItem {
+	items := make([]capabilityNoteItem, 0, len(s.entries))
 	for _, entry := range s.entries {
 		text := entry.Description
 		if entry.Name != "" {
 			text = entry.Name + ": " + text
 		}
-		b.WriteString("\n- " + s.discoveryID(entry.ID) + " — " + text)
+		id := s.discoveryID(entry.ID)
+		items = append(items, capabilityNoteItem{Key: id, Section: capabilityNoteCatalog, Text: "- " + id + " — " + text})
 	}
-	return b.String()
+	return items
 }
-
-const capabilitySelectionInstructions = `Capability loading. Core capabilities are already loaded: their tools are callable now and their instructions are already in your context. Every authorized capability is listed by ID in capabilityCatalog below, including the ones already loaded. Answer directly, or use a loaded tool, whenever that is enough. Only when the task needs a catalog capability that is not loaded, call load_capabilities with one to eight exact catalog IDs as a normal step; its instructions arrive with the result. Loaded tools become callable in your next step. Loading reveals authorized instructions and schemas only; it never executes or authorizes an action. Do not load irrelevant capabilities for simple replies or invent arguments for unloaded ones. Existing approval, tenant, evidence and action validation rules remain in force.`
-
-const capabilityActionLoadingInstructions = ` Copy capabilityCatalog keys verbatim, including their prefix; an action name alone is not a lookup ID. If the catalog key is action:service.fetch, pass {"ids":["action:service.fetch"]}; service.fetch alone is the action name. Loading an action ID automatically loads its bound Skill instructions and argument schema together. When the needed action is identifiable in capabilityCatalog, load that action directly; do not first load its instruction module in a separate discovery round. Batch independently needed capabilities in one lookup. Instruction-only capabilities remain available when their guidance is needed without an action.`
-
-const capabilitySearchSelectionInstructions = `Capability loading. Core capabilities are already loaded: their tools are callable now and their instructions are already in your context. This Agent has more capabilities than fit here, so capabilityDirectory below lists one line per Skill or connected server instead of every capability. Answer directly, or use a loaded tool, whenever that is enough. Only when the task needs a capability that is not loaded, call search_capabilities with a few keywords (the service, the object and the verb, e.g. "notion search pages") to get exact capability IDs, then call load_capabilities with one to eight of those IDs as the next step; their instructions arrive with the result. Loaded tools become callable in your next step. Searching and loading reveal authorized instructions and schemas only; they never execute or authorize an action. Do not search or load for simple replies, and never invent IDs: copy them from search results. Existing approval, tenant, evidence and action validation rules remain in force.`
-
-const capabilitySearchActionLoadingInstructions = ` Copy IDs from search_capabilities results verbatim, including their prefix; an action name alone is not a lookup ID. Loading an action ID automatically loads its bound Skill instructions and argument schema together; do not first load its instruction module in a separate round. Batch independently needed capabilities in one lookup. If a search finds nothing useful, try other keywords once, then answer with what you have.`
-
-// capabilitySkillDiscoveryInstructions is Atlas's hostedSkillDiscoveryInstructions verbatim.
-const capabilitySkillDiscoveryInstructions = ` Discovery finds Skills, which are installed and configured through request_setup. An app from find_apps (type mcp-server, a remote MCP server) is connected through request_connection, never through request_setup. For Skill discovery, use the requested service or Skill name, or concise task keywords, as the query. Omit requiredActions on the first lookup; it is an exact-name filter, not a task description. Never put natural-language task descriptions there. After inspecting a discovery result, copy exact actions[].name values if an operation filter is needed. Discovery action names are permission identifiers, not executable capability IDs: load operations only by copying their exact id from capabilityCatalog, never by constructing action: plus a discovered name. If the operation is absent from capabilityCatalog, inspect the saved binding access and request the missing access instead of loading an invented ID. A filter mismatch is not evidence of a missing account. Use exact observed operations and an accurate first query; do not automatically repeat a failed lookup or silently broaden its scope. If the account is saved but the needed operation is not enabled, identify all exact discovered operations necessary to complete the user's task, including reading details after listing identifiers, and request them together through request_setup on the existing binding; do not request one permission at a time for a task that already requires several operations; explain that permission is needed instead of asking the user to reconnect the account. Discovery reads metadata; omit maximumRisk unless the user requested a catalog risk filter. A Skill may offer both read and destructive actions; its highest declared risk does not make discovering it dangerous. Execution and approval enforce authority separately. An HTTP 403 does not by itself mean an account needs reconnection: distinguish provider API configuration, organization policy, consent scopes, and authorization using the returned evidence. Do not open reauthorization or retry a changed query for an unchanged configuration error. Inspect returned readiness and setup requirements; a search result is not a working connection. Missing credentials block execution, but an installed Skill with only credential or binding-configuration incompatibilities can use request_setup to collect configuration; do not label it absent or require installation. An empty successful discovery result establishes only that the supplied query had no match. Explain that limitation without claiming the service cannot exist; do not repeat the lookup automatically. For connection requests, if configuration, credentials, or authorization are needed, create request_setup directly with the exact discovered identity instead of attempting upsert_binding first. Omit bindingId unless an existing binding has been verified through authorized binding metadata; never invent binding IDs or credential references. For user-facing progress, describe the service and the next useful step in the agent's persona. Keep it brief. Do not narrate schema validation, identity checks, lookup filters, credential references, or internal retries. After saying you are opening setup, emit another update only when there is a real result, a changed plan, or information the user must provide. A successful request_setup result already confirms the pending request: tell the user to complete it and finish the turn without polling list_setup_requests. Do not replace it with repeated generic searches or an unsupported claim that an administrator must install it.`
-
-// capabilitySkillDiscoverySearchInstructions takes exact IDs from search
-// results instead of a listed catalog.
-var capabilitySkillDiscoverySearchInstructions = strings.NewReplacer(
-	"from capabilityCatalog", "from search_capabilities results",
-	"absent from capabilityCatalog", "absent from search_capabilities results",
-).Replace(capabilitySkillDiscoveryInstructions)

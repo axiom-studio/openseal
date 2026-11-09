@@ -402,6 +402,7 @@ func (r *loopBindingResolution) model(ctx context.Context, binding *TurnRunnerBi
 		return nil, err
 	}
 	producer.Media = r.config.Media
+	producer.Now = r.config.Now
 	binding.Producer = producer
 	binding.Compactor = &LoopCompactor{
 		Host: r.config.Host, Sessions: r.config.Store, Requests: preparer,

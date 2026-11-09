@@ -301,6 +301,12 @@ type loopFixtureChatStore interface {
 	RunCommandStore
 }
 
+// loopFixtureCapabilities pins the Skills the scenarios bind, so they call
+// their actions without loading them first (loading is always deferred).
+var loopFixtureCapabilities = CapabilitySetConfig{PinnedSkillIDs: []string{
+	loopFixtureSkillID, SkillManagementSkillID, "mail", "openseal.connector",
+}}
+
 // newLoopFixture builds the services over store (wrapped in a crash store)
 // and registers fixture@1.0.0 for Agent "finn".
 func newLoopFixture(t *testing.T, store KernelStore, opts ...loopOption) *loopFixture {
@@ -659,6 +665,7 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 	preparer := newCatalogModelStepPreparer(catalogModelStepPreparerConfig{
 		AgentInstructions: []string{"You are " + run.AssignedAgentID + ", the fixture Agent."},
 		HostTools:         HostToolSpecs(authority),
+		Capabilities:      loopFixtureCapabilities,
 	})
 	host := fakeStepHost{scriptedModel: f.model, fakeHostTools: f.tools}
 	producer, err := NewModelStepProducer(host, preparer, f.store)
@@ -677,7 +684,7 @@ func (f *loopFixture) binding(run *AgentRun) *TurnRunnerBinding {
 			Now:    f.clock.Now,
 		},
 		Preparers: []StepPreparer{newRunStartPreparer(sessions, f.store)},
-		Tools:     f.dispatcher.ForClaim(LoopToolClaim{Workspace: authority}),
+		Tools:     f.dispatcher.ForClaim(LoopToolClaim{Workspace: authority, CapabilityConfig: loopFixtureCapabilities}),
 	}
 	if chat {
 		// The production chat seams: catch-up preparer, read receipts, tool
@@ -843,15 +850,21 @@ func (f *loopFixture) entries(runID string) []*SessionEntry {
 
 // entryTypes is the log shape: one string per entry, "tool:<state>" for tool
 // entries.
+// entryTypes is the Run's entry log. Capabilities notes are left out: they
+// follow the claim's catalog, not the loop mechanics these scenarios check
+// (capability_cache_test.go covers them).
 func (f *loopFixture) entryTypes(runID string) []string {
 	f.t.Helper()
-	entries := f.entries(runID)
-	out := make([]string, len(entries))
-	for i, entry := range entries {
-		out[i] = string(entry.Type)
-		if entry.Type == SessionEntryTool {
-			out[i] = "tool:" + string(entry.State)
+	var out []string
+	for _, entry := range f.entries(runID) {
+		if entry.Note != nil && entry.Note.Kind == NoteCapabilities {
+			continue
 		}
+		kind := string(entry.Type)
+		if entry.Type == SessionEntryTool {
+			kind = "tool:" + string(entry.State)
+		}
+		out = append(out, kind)
 	}
 	return out
 }

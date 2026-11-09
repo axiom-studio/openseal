@@ -17,7 +17,7 @@ import (
 // appends one note at its start, after the catch-up entries, with the
 // per-Run facts the model needs and the system prompt must not carry (it
 // would break the prompt cache): the message to answer, the channel, the
-// Team roster, objectives, runbooks, operations, active work, conversation
+// Team roster, approval mode, objectives, runbooks, active work, conversation
 // tasks, card state, reactions, places and the thread backdrop.
 //
 // Sections other than the always-sent ones are diffed against the newest
@@ -34,7 +34,6 @@ const (
 	contextSectionTeam              = "team"
 	contextSectionObjectives        = "objectives"
 	contextSectionRunbooks          = "runbooks"
-	contextSectionOperations        = "operations"
 	contextSectionActiveRuns        = "active_runs"
 	contextSectionConversationTasks = "conversation_tasks"
 	contextSectionCardState         = "card_state"
@@ -49,7 +48,6 @@ const (
 	maximumRunContextBytes = 32 << 10
 	// The bounds of single values in section lines.
 	runContextObjectiveGoalRunes   = 300
-	runContextOperationRunes       = 300
 	runContextActiveRunGoalRunes   = 200
 	runContextTaskGoalRunes        = 512
 	runContextAssignmentRunes      = 4000
@@ -72,7 +70,7 @@ const (
 // the note is over maximumRunContextBytes: active work and objectives first
 // (section 05 §5.2), then the other lists.
 var runContextShrinkOrder = []string{
-	contextSectionActiveRuns, contextSectionObjectives, contextSectionRunbooks, contextSectionOperations,
+	contextSectionActiveRuns, contextSectionObjectives, contextSectionRunbooks,
 	contextSectionReactions, contextSectionConversationTasks, contextSectionCardState, contextSectionPlaces,
 	contextSectionTeam, contextSectionThreadBackdrop,
 }
@@ -96,7 +94,6 @@ type conversationContextInput struct {
 	Viewer       ConversationViewer
 	Recent       []*ChannelMessage // last 50 visible messages ≤ Through, ascending (card state and reactions)
 	CatchUp      *catchUpResult    // the entries appended with this note; nil when none
-	Operations   []HostedRunbookOperation
 	Backdrop     []*ChannelMessage // seed only; CatchUp.Backdrop when nil
 	Step         int64             // the step the note is appended in
 }
@@ -369,7 +366,6 @@ func (r *ConversationRunTurnRunner) conversationContextSections(ctx context.Cont
 	sections = append(sections,
 		conversationContextSection{Name: contextSectionObjectives, Text: objectives, None: "Objectives: none."},
 		conversationContextSection{Name: contextSectionRunbooks, Text: runbooks, None: "Runbooks: none."},
-		conversationContextSection{Name: contextSectionOperations, Text: runContextOperations(in.Operations), None: "Operations: none."},
 	)
 
 	active, err := r.activeConversationRuns(ctx, in.Conversation, in.Trigger)
@@ -643,16 +639,19 @@ func (r *ConversationRunTurnRunner) runContextObjectivesAndRunbooks(ctx context.
 	return objectives, runbooks, nil
 }
 
-func runContextOperations(operations []HostedRunbookOperation) string {
-	if len(operations) == 0 {
-		return ""
+// approvalModeText is the conversation's approval mode. It is a line of the
+// per-step capabilities note, not a system hint: every Run with a
+// conversation origin (chat, task and delegated Runs) sees it, and a mode
+// changed mid-Run reaches the next step as a one-line update instead of
+// rewriting the prompt.
+func approvalModeText(mode ConversationApprovalMode) string {
+	switch conversationApprovalModeOrDefault(mode) {
+	case ConversationApprovalManual:
+		return "Approval mode: manual. Every action that changes something waits for the user's approval in chat."
+	case ConversationApprovalSkip:
+		return "Approval mode: skip. The user chose to skip approvals in this conversation: complete tasks end to end yourself, including signing in, checkout, placing orders or bookings, accepting terms and sending. Actions whose Skill always asks, and payments, still wait for approval."
 	}
-	lines := []string{"Operations:"}
-	for _, operation := range operations {
-		lines = append(lines, fmt.Sprintf("- operation %s %q: %s", operation.Entrypoint, boundedRunContextValue(operation.Name, 200),
-			boundedRunContextValue(operation.Description, runContextOperationRunes)))
-	}
-	return strings.Join(lines, "\n")
+	return "Approval mode: auto. Reads and ordinary writes run without approval; external, production and destructive actions wait for the user's approval in chat."
 }
 
 // runContextActiveRuns is never empty: "none" is a fact the model relies on.

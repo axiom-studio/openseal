@@ -105,7 +105,7 @@ func TestPrepareToolOrderStableAcrossSteps(t *testing.T) {
 
 	want := []string{
 		"turn_final_answer", "turn_report_progress", "wait", "ask_user", "react",
-		"conversation_start_task", "control_fork", "load_capabilities",
+		"conversation_start_task", "control_fork", "search_capabilities", "load_capabilities",
 	}
 	for _, spec := range HostToolSpecs(workspace.ChatAuthority("chat-1")) {
 		want = append(want, spec.ToolName)
@@ -146,15 +146,7 @@ func TestPrepareLoadAppendsTools(t *testing.T) {
 	f := newPrepareFixture(t, fullPrepareAuthority())
 	before := f.prepare("step-1")
 
-	f.render.add(&SessionEntry{RunID: "run-1", StepID: "step-1", Type: SessionEntryAssistant, Assistant: &AssistantEntry{
-		Provider: ModelStepProviderAnthropic, Model: "claude-test", StopReason: ModelStopToolCalls,
-		ToolCalls: []ModelToolCall{{ID: "c1", Name: LoadCapabilitiesTool, Arguments: json.RawMessage(`{"ids":["action:notion.search","action:gmail.send"]}`)}},
-	}})
-	f.render.add(&SessionEntry{RunID: "run-1", StepID: "step-1", Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: "c1", Tool: &ToolEntry{
-		Name: LoadCapabilitiesTool, Arguments: json.RawMessage(`{"ids":["action:notion.search","action:gmail.send"]}`), SideEffect: ToolSideEffectNone,
-		LoadedCapabilities: []string{"prompt:skill-notion@1", "action:notion.search", "action:gmail.send"},
-		Result:             &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: `{"status":"loaded"}`}}},
-	}})
+	load := f.addLoad("step-1", "c1", "prompt:skill-notion@1", "action:notion.search", "action:gmail.send")
 	after := f.prepare("step-2")
 
 	if len(after.Tools) != len(before.Tools)+2 {
@@ -168,8 +160,13 @@ func TestPrepareLoadAppendsTools(t *testing.T) {
 		t.Fatalf("appended tools = %v, want load order", toolNames(added))
 	}
 	for _, tool := range added {
-		if tool.Group != ModelStepToolLoaded {
-			t.Errorf("tool %s group = %s, want loaded", tool.Name, tool.Group)
+		if tool.Group != ModelStepToolLoaded || tool.Surface != load.ID {
+			t.Errorf("tool %s group = %s surface = %q, want loaded at %s", tool.Name, tool.Group, tool.Surface, load.ID)
+		}
+	}
+	for _, entry := range after.Entries {
+		if entry.ID == load.ID && !reflect.DeepEqual(entry.Surfaces, []string{"action_notion_search", "action_gmail_send"}) {
+			t.Errorf("load entry surfaces = %v", entry.Surfaces)
 		}
 	}
 	if added[1].Capability != "gmail.send" {
@@ -190,6 +187,24 @@ func TestPrepareLoadAppendsTools(t *testing.T) {
 	}
 }
 
+// addLoad appends a load_capabilities call and its completed entry that
+// made ids visible, frozen as the executor freezes them.
+func (f *prepareFixture) addLoad(step, call string, ids ...string) *SessionEntry {
+	f.t.Helper()
+	arguments, _ := json.Marshal(map[string]interface{}{"ids": ids})
+	f.render.add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryAssistant, Assistant: &AssistantEntry{
+		Provider: ModelStepProviderAnthropic, Model: "claude-test", StopReason: ModelStopToolCalls,
+		ToolCalls: []ModelToolCall{{ID: call, Name: LoadCapabilitiesTool, Arguments: arguments}},
+	}})
+	set := f.preparer.CapabilitySet(StepInput{Run: f.run, Binding: f.binding, Path: f.render.path()})
+	patch := loadKernelPatch(set, f.binding.ModelActions, ids)
+	return f.render.add(&SessionEntry{RunID: f.run.ID, StepID: step, Type: SessionEntryTool, State: ToolEntryCompleted, ToolCallID: call, Tool: &ToolEntry{
+		Name: LoadCapabilitiesTool, Arguments: arguments, SideEffect: ToolSideEffectNone,
+		SurfacedTools: patch.SurfacedTools, LoadedInstructions: patch.LoadedInstructions,
+		Result: &ToolResult{Status: ToolResultSucceeded, Content: []ContentPart{{Type: ContentPartText, Text: `{"status":"loaded"}`}}},
+	}})
+}
+
 func sectionIDs(sections []ModelStepSystemSection) []string {
 	ids := make([]string, len(sections))
 	for i, section := range sections {
@@ -206,13 +221,13 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	req := f.prepare("step-1")
 
 	want := []string{
-		"skill_access", "progress_rules", "conversation_tasks", "workspace", "media",
-		"review_summaries", "routine_script", loopSectionCapabilities, "channel_rules",
+		"progress_rules", "conversation_tasks", "workspace", "media",
+		"routine_script", loopSectionCapabilities, "channel_rules",
 	}
 	if got := sectionIDs(req.System.Sections); !reflect.DeepEqual(got, want) {
 		t.Fatalf("sections = %v\nwant       %v", got, want)
 	}
-	if req.System.Sections[1].Text != loopProgressRulesText {
+	if req.System.Sections[0].Text != loopProgressRulesText {
 		t.Errorf("progress text is not the foreground variant")
 	}
 	wantInstructions := []string{"You are Finn.", "Purpose: help the team.", "Reply in the chat's language."}
@@ -224,19 +239,20 @@ func TestPrepareSectionsFixedOrder(t *testing.T) {
 	}
 
 	// Task work: the activity-only progress rules; no task start, no
-	// workspace, no images, no evidence, no routine script.
+	// workspace, no images, no evidence, no routine script. Loading is
+	// always deferred, so even this small catalog offers search and load.
 	bare := newPrepareFixture(t, ControlAuthority{AgentID: "agent-1", CanReportProgress: true, TaskWork: true})
 	bare.preparer.config.HostTools = nil
 	bare.binding.ModelActions = bare.binding.ModelActions[:2]
 	bare.preparer.config.SkillPrompts = bare.preparer.config.SkillPrompts[:1]
 	got := bare.prepare("step-1")
-	if ids := sectionIDs(got.System.Sections); !reflect.DeepEqual(ids, []string{"progress_rules", "channel_rules"}) {
+	if ids := sectionIDs(got.System.Sections); !reflect.DeepEqual(ids, []string{"progress_rules", loopSectionCapabilities, "channel_rules"}) {
 		t.Fatalf("bare sections = %v", ids)
 	}
 	if got.System.Sections[0].Text != loopProgressRulesTaskWorkText {
 		t.Errorf("task work progress text not used")
 	}
-	if names := toolNames(got.Tools); !reflect.DeepEqual(names, []string{"turn_final_answer", "turn_report_progress", "action_openseal_discover_skills", "action_openseal_list_setup_requests"}) {
+	if names := toolNames(got.Tools); !reflect.DeepEqual(names, []string{"turn_final_answer", "turn_report_progress", "search_capabilities", "load_capabilities", "action_openseal_discover_skills", "action_openseal_list_setup_requests"}) {
 		t.Errorf("bare tools = %v", names)
 	}
 
