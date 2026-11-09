@@ -92,7 +92,7 @@ func integer(description string, min, max, def int) map[string]interface{} {
 }
 
 func computerProperty() map[string]interface{} {
-	return text("The computer's name from list_computers. Omit it to use the person's default computer, or their only one online.", 1, 128)
+	return text("The computer's name from list_computers. Required for run_command and write_file when the person has more than one computer. Reads without it use the person's default computer, or their only one online.", 1, 128)
 }
 
 func pathProperty(description string) map[string]interface{} {

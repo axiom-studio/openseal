@@ -84,11 +84,17 @@ const (
 
 var routineGrantActionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}\.[A-Za-z0-9_-][A-Za-z0-9_.:-]{0,127}$`)
 
+// computerSkillID is pkg/computer's SkillID, repeated because runtime does
+// not import it.
+const computerSkillID = "openseal.computer"
+
 // Kernel management Skills govern the Agent's own authority, work and
-// routines; a routine brief never waives their review.
+// routines; a routine brief never waives their review. Commands and writes on
+// a person's own computer are never granted standing authority either.
 var routineUngrantableSkills = map[string]bool{
 	SkillManagementSkillID: true, AgentManagementSkillID: true, TeamManagementSkillID: true,
 	RunbookManagementSkillID: true, RunManagementSkillID: true, ObjectiveManagementSkillID: true,
+	computerSkillID: true,
 }
 
 func routineGrantIdentity(skillID, action string) string {

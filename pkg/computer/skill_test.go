@@ -117,3 +117,9 @@ func TestTypedOutputsMatchSchemas(t *testing.T) {
 		}
 	}
 }
+
+func TestComputerBindingsHoldAConnection(t *testing.T) {
+	if !skill.BindingHoldsConnection(&skill.Binding{SkillID: SkillID}) {
+		t.Fatalf("a %s binding must count as a connection, so Team members and connection-free activations leave it out", SkillID)
+	}
+}
