@@ -28,16 +28,13 @@ const (
 func RunbookManagementSkill() *skill.Definition {
 	return &skill.Definition{
 		ID: RunbookManagementSkillID, Version: RunbookManagementSkillVersion,
-		Name: "Routines and workflows", Description: "Create scheduled tasks and durable event-driven follow-ups, inspect their state, start reviewed Runbooks and manage schedules. Work uses the current Agent tools and reports results back to the originating chat.",
+		Name: "Routines and workflows", Description: "Create scheduled tasks, inspect their state, start reviewed Runbooks and manage schedules. Work uses the current Agent tools and reports results back to the originating chat.",
 		Transport: skill.TransportReference{Kind: "kernel", Endpoint: RunbookManagementEndpoint},
 		Actions: map[string]skill.Action{
-			RunbookActionCreateWorkflow:   workflowCreateAction(),
-			RunbookActionWorkflowSources:  workflowSourcesAction(),
-			RunbookActionInspectWorkflows: workflowInspectAction(),
-			RunbookActionCreateTask:       scheduledTaskCreateAction(),
-			RunbookActionSetScript:        scheduledTaskSetScriptAction(),
-			RunbookActionList:             scheduledTaskListAction(),
-			RunbookActionSetStatus:        scheduledTaskStatusAction(),
+			RunbookActionCreateTask: scheduledTaskCreateAction(),
+			RunbookActionSetScript:  scheduledTaskSetScriptAction(),
+			RunbookActionList:       scheduledTaskListAction(),
+			RunbookActionSetStatus:  scheduledTaskStatusAction(),
 			RunbookActionStart: {
 				Name:        RunbookActionStart,
 				Description: "Start one reviewed Runbook now. Active activations and automatically exhausted scheduled activations remain callable on demand. Omit activationId when the current Objective channel has exactly one callable Runbook; otherwise use an activation ID from the conversation context.",
@@ -125,12 +122,11 @@ type runbookActionStore interface {
 // Objective channel, then proves that the activation is active and belongs to
 // the conversation owner before policy evaluation or approval persistence.
 type RunbookActionValidator struct {
-	store           runbookActionStore
-	workflowCatalog WorkflowSourceCatalog
-	workflowTeams   WorkflowTeamCatalog
-	grantCatalog    RoutineGrantCatalog
-	ownerAddresses  RoutineOwnerAddressResolver
-	chatFiles       ChatFileResolver
+	store          runbookActionStore
+	routineTeams   RoutineTeamCatalog
+	grantCatalog   RoutineGrantCatalog
+	ownerAddresses RoutineOwnerAddressResolver
+	chatFiles      ChatFileResolver
 }
 
 // SetChatFiles lets routines run saved scripts: proposals pin a script's
@@ -155,15 +151,10 @@ func (v *RunbookActionValidator) SetRoutineOwnerAddresses(resolver RoutineOwnerA
 	}
 }
 
-func (v *RunbookActionValidator) SetWorkflowCatalog(catalog WorkflowSourceCatalog) {
+// SetRoutineTeams lets routine actions check a Team's current roster.
+func (v *RunbookActionValidator) SetRoutineTeams(teams RoutineTeamCatalog) {
 	if v != nil {
-		v.workflowCatalog = catalog
-	}
-}
-
-func (v *RunbookActionValidator) SetWorkflowTeams(teams WorkflowTeamCatalog) {
-	if v != nil {
-		v.workflowTeams = teams
+		v.routineTeams = teams
 	}
 }
 
@@ -197,7 +188,7 @@ func (v *RunbookActionValidator) ResolveActionProposalArguments(ctx context.Cont
 		}
 		return arguments, true, nil
 	}
-	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList || isWorkflowActionName(input.Bound.Action.Name) {
+	if input.Bound.Action.Name == RunbookActionList {
 		return arguments, true, nil
 	}
 	if id, _ := arguments["activationId"].(string); strings.TrimSpace(id) != "" {
@@ -265,10 +256,8 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 		return nil, errors.New("Runbook action validator is not configured")
 	}
 	switch input.Bound.Action.Name {
-	case RunbookActionCreateWorkflow, RunbookActionWorkflowSources, RunbookActionInspectWorkflows:
-		return validateWorkflowAction(ctx, v.store, v.workflowCatalog, v.workflowTeams, input)
 	case RunbookActionCreateTask, RunbookActionList, RunbookActionSetStatus, RunbookActionSetScript:
-		return validateScheduledTaskAction(ctx, v.store, v.chatFiles, v.workflowTeams, input)
+		return validateScheduledTaskAction(ctx, v.store, v.chatFiles, v.routineTeams, input)
 	case RunbookActionStart:
 		args, activation, objective, err := resolveRunbookStart(ctx, v.store, input.Run, input.Arguments)
 		if err != nil {
@@ -300,8 +289,7 @@ func (v *RunbookActionValidator) ValidateActionProposal(ctx context.Context, inp
 type RunbookActionDispatcher struct {
 	store             runbookActionStore
 	fallback          ActionDispatcher
-	workflowCatalog   WorkflowSourceCatalog
-	workflowTeams     WorkflowTeamCatalog
+	routineTeams      RoutineTeamCatalog
 	executionPreparer AcceptedRunExecutionPreparer
 	chatFiles         ChatFileResolver
 }
@@ -319,15 +307,10 @@ func (d *RunbookActionDispatcher) SetAcceptedRunExecutionPreparer(preparer Accep
 	}
 }
 
-func (d *RunbookActionDispatcher) SetWorkflowCatalog(catalog WorkflowSourceCatalog) {
+// SetRoutineTeams lets routine actions check a Team's current roster.
+func (d *RunbookActionDispatcher) SetRoutineTeams(teams RoutineTeamCatalog) {
 	if d != nil {
-		d.workflowCatalog = catalog
-	}
-}
-
-func (d *RunbookActionDispatcher) SetWorkflowTeams(teams WorkflowTeamCatalog) {
-	if d != nil {
-		d.workflowTeams = teams
+		d.routineTeams = teams
 	}
 }
 
@@ -348,11 +331,8 @@ func (d *RunbookActionDispatcher) DispatchAction(ctx context.Context, input Acti
 	if d == nil || d.store == nil || input.Call == nil || input.Run == nil {
 		return nil, errors.New("Runbook action dispatcher is not configured")
 	}
-	if isWorkflowActionName(input.Bound.Action.Name) {
-		return dispatchWorkflowAction(ctx, d.store, d.workflowCatalog, d.workflowTeams, input)
-	}
 	if input.Bound.Action.Name == RunbookActionCreateTask || input.Bound.Action.Name == RunbookActionList || input.Bound.Action.Name == RunbookActionSetStatus || input.Bound.Action.Name == RunbookActionSetScript {
-		return dispatchScheduledTaskAction(ctx, d.store, d.chatFiles, d.workflowTeams, input)
+		return dispatchScheduledTaskAction(ctx, d.store, d.chatFiles, d.routineTeams, input)
 	}
 	if input.Bound.Action.Name == RunbookActionReplaceSchedule {
 		_, source, _, schedule, err := resolveRunbookScheduleReplacement(ctx, d.store, input.Run, input.Arguments)
@@ -546,5 +526,5 @@ func conversationObjectiveOrigin(ctx context.Context, store ConversationStore, r
 func isRunbookAction(bound *skill.BoundAction) bool {
 	return bound != nil && bound.Definition != nil && bound.Definition.ID == RunbookManagementSkillID &&
 		bound.Definition.Version == RunbookManagementSkillVersion &&
-		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || bound.Action.Name == RunbookActionSetScript || isWorkflowActionName(bound.Action.Name))
+		(bound.Action.Name == RunbookActionStart || bound.Action.Name == RunbookActionReplaceSchedule || bound.Action.Name == RunbookActionCreateTask || bound.Action.Name == RunbookActionList || bound.Action.Name == RunbookActionSetStatus || bound.Action.Name == RunbookActionSetScript)
 }

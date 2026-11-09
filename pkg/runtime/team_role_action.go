@@ -264,7 +264,7 @@ func resolveTeamRoleAction(ctx context.Context, teams *kernelteam.Registry, run 
 	if err != nil {
 		return args, nil, nil, kernelteam.RoleSlot{}, err
 	}
-	onRoster, err := AgentOnChatRoster(ctx, workflowTeamRoster{teams: teams}, run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
+	onRoster, err := AgentOnChatRoster(ctx, routineTeamRoster{teams: teams}, run.Scope, run.Owner, strings.TrimSpace(run.AssignedAgentID))
 	if err != nil {
 		return args, nil, nil, kernelteam.RoleSlot{}, err
 	}

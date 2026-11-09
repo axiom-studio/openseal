@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
 	"github.com/axiom-studio/openseal/pkg/skill"
 )
@@ -292,34 +291,4 @@ func TestRoutineRunsActForTheirCreatorOnlyWithATask(t *testing.T) {
 			t.Fatalf("event routine run = %#v, %v", routed, err)
 		}
 	})
-}
-
-func TestWorkflowSubjectEvidenceAcceptsTheTeamsOwnBinding(t *testing.T) {
-	scope := Scope{Kind: "tenant", ID: "evidence"}
-	team := ObjectiveOwner{Type: OwnerTypeTeam, ID: "crew"}
-	definition := &skill.Definition{ID: "chat", Version: "1", Actions: map[string]skill.Action{"read": {Name: "read"}}}
-	binding := &skill.Binding{ID: "chat", Scope: skill.ScopeReference{Kind: scope.Kind, ID: scope.ID}, DeploymentID: team.ID, SkillID: "chat", SkillVersion: "1", Revision: 3, AllowedActions: []string{"read"}}
-	source := &WorkflowEventSource{BindingID: "chat", BindingRevision: 3, SkillID: "chat", SkillVersion: "1", AdapterKind: "conversation", EvidenceRequired: true,
-		SubjectEvidence: []capability.ConversationSubjectEvidence{{Action: "read", SubjectPath: "conversationId"}}, binding: binding, definition: definition}
-	run := &AgentRun{ID: "run", Scope: scope, Kind: RunKindConversation, Owner: team, AssignedAgentID: "member"}
-	call := &ActionCall{ID: "call", Scope: scope, RunID: "run", DeploymentID: team.ID, BindingID: "chat", BindingRevision: 3, SkillID: "chat", SkillVersion: "1", Action: "read",
-		Status: ActionCallStatusSucceeded, Output: map[string]interface{}{"conversationId": "C123"}}
-	if known, err := workflowSubjectFromAction(run, source, call); err != nil || known.ExternalConversationID != "C123" {
-		t.Fatalf("Team binding evidence = %#v, %v", known, err)
-	}
-	// The member's own binding is not the Team run's evidence.
-	memberBinding := *binding
-	memberBinding.DeploymentID = "member"
-	memberCall := *call
-	memberCall.DeploymentID = "member"
-	memberSource := *source
-	memberSource.binding = &memberBinding
-	if _, err := workflowSubjectFromAction(run, &memberSource, &memberCall); err == nil {
-		t.Fatal("member binding accepted as Team evidence")
-	}
-	// A delegated run has no umbrella and proves nothing.
-	delegated := &AgentRun{ID: "run", Scope: scope, Kind: RunKindConversation, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "crew"}, AssignedAgentID: "member"}
-	if _, err := workflowSubjectFromAction(delegated, source, call); err == nil {
-		t.Fatal("delegated run accepted evidence")
-	}
 }

@@ -237,7 +237,7 @@ func TestScheduledTaskRejectsForeignAuthorityInvalidTimingAndBackgroundRecursion
 func TestScheduledTaskRejectsInvalidLimitsBeforePersistence(t *testing.T) {
 	for _, kind := range []string{"memory", "sqlite"} {
 		t.Run(kind, func(t *testing.T) {
-			store := workflowEvidenceStore(t, kind)
+			store := routineTestStore(t, kind)
 			run, catalog, bound, args := scheduledTaskFixture(t, store)
 			now := time.Now().Add(time.Second)
 			claimed, err := store.ClaimNextAgentRun(t.Context(), AgentRunClaim{Scope: run.Scope, WorkerID: "worker", AssignedAgentID: run.AssignedAgentID, Now: now, LeaseDuration: time.Minute, AgingInterval: time.Minute})

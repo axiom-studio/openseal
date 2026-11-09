@@ -395,7 +395,7 @@ func routineChangeCreator(a *RunbookActivation, run *AgentRun) string {
 	}
 	return run.ActingUser
 }
-func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams WorkflowTeamCatalog, input ActionProposalValidationInput) (map[string]interface{}, error) {
+func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams RoutineTeamCatalog, input ActionProposalValidationInput) (map[string]interface{}, error) {
 	if err := runbookActionOwner(ctx, teams, input.Run, input.Bound); err != nil {
 		return nil, err
 	}
@@ -434,7 +434,7 @@ func validateScheduledTaskAction(ctx context.Context, store runbookActionStore, 
 	}
 	return nil, errors.New("unsupported scheduled task action")
 }
-func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams WorkflowTeamCatalog, input ActionDispatchInput) (map[string]interface{}, error) {
+func dispatchScheduledTaskAction(ctx context.Context, store runbookActionStore, files ChatFileResolver, teams RoutineTeamCatalog, input ActionDispatchInput) (map[string]interface{}, error) {
 	run, err := store.GetAgentRun(ctx, input.Call.Scope, input.Call.RunID)
 	if err != nil {
 		return nil, err
