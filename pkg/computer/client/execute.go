@@ -42,7 +42,7 @@ func Execute(ctx context.Context, call bridge.Call) bridge.Result {
 	case bridge.OpReadFile:
 		var input bridge.ReadFileInput
 		if err = decodeArgs(call.Args, &input); err == nil {
-			output, err = readFile(allowed, input)
+			output, err = readFile(ctx, allowed, input)
 		}
 	case bridge.OpWriteFile:
 		var input bridge.WriteFileInput
@@ -94,7 +94,11 @@ func fileError(raw string, err error) *bridge.CallError {
 	}
 }
 
-func readFile(allowed folders, input bridge.ReadFileInput) (bridge.ReadFileOutput, *bridge.CallError) {
+// readCheckEvery is how many chunks readFile reads between looks at the
+// clock.
+const readCheckEvery = 64
+
+func readFile(ctx context.Context, allowed folders, input bridge.ReadFileInput) (bridge.ReadFileOutput, *bridge.CallError) {
 	path, cerr := allowed.resolve(input.Path, false)
 	if cerr != nil {
 		return bridge.ReadFileOutput{}, cerr
@@ -125,9 +129,23 @@ func readFile(allowed folders, input bridge.ReadFileInput) (bridge.ReadFileOutpu
 	output := bridge.ReadFileOutput{Path: path}
 	var content bytes.Buffer
 	reader := bufio.NewReaderSize(file, 64<<10)
+	// Counting every line of a huge file can outlast the call. Stop in time
+	// to answer: with the window already read, totalLines is then the lines
+	// counted so far and truncated is set; otherwise the read timed out.
+	var stopAt time.Time
+	if deadline, ok := ctx.Deadline(); ok {
+		stopAt = deadline.Add(-deadlineMargin)
+	}
 	line := 0
 	lineStarted := false
-	for {
+	for chunks := 1; ; chunks++ {
+		if chunks%readCheckEvery == 0 && (ctx.Err() != nil || (!stopAt.IsZero() && !time.Now().Before(stopAt))) {
+			if line < offset+limit && content.Len() < bridge.MaxReadFileBytes {
+				return bridge.ReadFileOutput{}, callError(bridge.ErrorTimeout, "Reading "+input.Path+" took too long.")
+			}
+			output.Truncated = true
+			break
+		}
 		chunk, err := reader.ReadSlice('\n')
 		if len(chunk) > 0 {
 			if !lineStarted {

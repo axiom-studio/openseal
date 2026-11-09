@@ -203,6 +203,25 @@ func TestReadFileCapsContent(t *testing.T) {
 	}
 }
 
+func TestReadFileStopsCountingAtTheDeadline(t *testing.T) {
+	w := newWorkspace(t)
+	path := filepath.Join(w.write, "huge.log")
+	mustWrite(t, path, strings.Repeat("line\n", 10*readCheckEvery))
+	// Past the point where the bridge must answer, but not yet cancelled.
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(deadlineMargin-time.Second))
+	defer cancel()
+
+	read, cerr := readFile(ctx, resolveFolders(w.folders), bridge.ReadFileInput{Path: path, Limit: 10})
+	if cerr != nil || read.Content != strings.Repeat("line\n", 10) || !read.Truncated || read.TotalLines >= 10*readCheckEvery {
+		t.Fatalf("read = %+v, %v", read, cerr)
+	}
+
+	_, cerr = readFile(ctx, resolveFolders(w.folders), bridge.ReadFileInput{Path: path, Limit: 5 * readCheckEvery})
+	if cerr == nil || cerr.Code != bridge.ErrorTimeout {
+		t.Fatalf("an unfinished window must time out, got %v", cerr)
+	}
+}
+
 func TestWriteFileRefusesTooLarge(t *testing.T) {
 	w := newWorkspace(t)
 	wantError(t, call(t, w, bridge.OpWriteFile, bridge.WriteFileInput{Path: filepath.Join(w.write, "x"), Content: strings.Repeat("x", bridge.MaxWriteBytes+1)}), bridge.ErrorTooLarge)
