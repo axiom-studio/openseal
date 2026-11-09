@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // Completion checks of a final answer (section 04 §11.4, SPEC A8/A9). They
@@ -67,7 +68,7 @@ func checkFinalAnswerCompletion(ctx context.Context, x *ControlExecutor, cc Cont
 	}
 	// 3. Approval claims. No approval of this Run is pending at final time
 	// (a pending approval parks the Run before any final settle).
-	if unverifiedApprovalClaim(content) || claimsPendingApproval(content) {
+	if claimsPendingApproval(content) {
 		prior, err := x.priorFinalErrorCodes(ctx, cc)
 		if err != nil {
 			return nil, err
@@ -288,35 +289,66 @@ func claimsExternalMutation(value string) bool {
 	return false
 }
 
-// unverifiedApprovalClaim: the text says an approval request was submitted.
-func unverifiedApprovalClaim(content string) bool {
-	normalized := strings.ToLower(strings.Join(strings.Fields(content), " "))
-	for _, claim := range []string{
-		"approval has been submitted",
-		"approval was submitted",
-		"approval request has been submitted",
-		"approval request was submitted",
-		"request has already been submitted",
-		"request was already submitted",
-		"awaiting approval",
-		"pending approval",
-	} {
-		if strings.Contains(normalized, claim) {
+// claimsPendingApproval: the text says an approval request was submitted or
+// that something waits for an approval. Only whole phrases count, and a phrase
+// negated within the three words before it ("there is no approval pending")
+// does not: approval words near "pending" or "waiting" elsewhere, such as a
+// setup form that is pending and asks to approve mail scopes, are no claim.
+func claimsPendingApproval(content string) bool {
+	normalized := strings.ToLower(strings.ReplaceAll(content, "’", "'"))
+	words := strings.FieldsFunc(normalized, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '\''
+	})
+	for i := range words {
+		for _, claim := range pendingApprovalClaims {
+			if !hasWordsAt(words, i, claim) || negatedBefore(words, i) {
+				continue
+			}
 			return true
 		}
 	}
 	return false
 }
 
-// claimsPendingApproval: the text says something waits for an approval
-// (moved from cortex cmd/atlas hosted_turn_executor.go).
-func claimsPendingApproval(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" || !strings.Contains(value, "approv") {
+var pendingApprovalClaims = [][]string{
+	{"approval", "has", "been", "submitted"},
+	{"approval", "was", "submitted"},
+	{"approval", "request", "has", "been", "submitted"},
+	{"approval", "request", "was", "submitted"},
+	{"request", "has", "already", "been", "submitted"},
+	{"request", "was", "already", "submitted"},
+	{"awaiting", "approval"},
+	{"awaiting", "your", "approval"},
+	{"pending", "approval"},
+	{"pending", "your", "approval"},
+	{"approval", "is", "pending"},
+	{"approval", "pending"},
+	{"waiting", "for", "approval"},
+	{"waiting", "for", "your", "approval"},
+	{"waiting", "on", "approval"},
+	{"waiting", "on", "your", "approval"},
+	{"needs", "approval"},
+	{"needs", "your", "approval"},
+	{"requires", "approval"},
+	{"requires", "your", "approval"},
+}
+
+func hasWordsAt(words []string, i int, phrase []string) bool {
+	if i+len(phrase) > len(words) {
 		return false
 	}
-	for _, pending := range []string{"await", "pending", "please approv", "need approval", "needs approval", "require approval", "requires approval", "waiting"} {
-		if strings.Contains(value, pending) {
+	for j, word := range phrase {
+		if words[i+j] != word {
+			return false
+		}
+	}
+	return true
+}
+
+func negatedBefore(words []string, i int) bool {
+	for j := max(0, i-3); j < i; j++ {
+		switch words[j] {
+		case "no", "not", "nothing", "never", "without", "isn't", "aren't", "wasn't", "nor":
 			return true
 		}
 	}
