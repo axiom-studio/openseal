@@ -29,6 +29,9 @@ type ServeOptions struct {
 	Execute func(context.Context, bridge.Call) bridge.Result
 	// Backoff is the first wait after a failed poll; 1s when zero.
 	Backoff time.Duration
+	// Heartbeat is how often to tell HelloSeal this computer is still there
+	// while every slot is busy; bridge.HeartbeatSeconds when zero.
+	Heartbeat time.Duration
 }
 
 // Serve long-polls for calls and answers them, up to Concurrency at a time,
@@ -47,6 +50,10 @@ func Serve(ctx context.Context, api *API, options ServeOptions) error {
 	if first <= 0 {
 		first = time.Second
 	}
+	heartbeat := options.Heartbeat
+	if heartbeat <= 0 {
+		heartbeat = bridge.HeartbeatSeconds * time.Second
+	}
 	// On the way out, stop running calls (cancel runs first) and wait for
 	// them to send their results.
 	var running sync.WaitGroup
@@ -58,12 +65,16 @@ func Serve(ctx context.Context, api *API, options ServeOptions) error {
 	backoff := first
 	online := false
 	for {
-		// Take a slot before polling, so a fifth call waits on this computer
-		// rather than being claimed and left idle.
+		// Take a slot before polling, so a fifth call waits on HelloSeal
+		// rather than being claimed and left idle here.
 		select {
 		case slots <- struct{}{}:
 		case <-ctx.Done():
 			return serveEnd(ctx)
+		default:
+			if err := waitForSlot(ctx, api, slots, heartbeat, log); err != nil {
+				return err
+			}
 		}
 		call, err := api.Next(ctx, bridge.LongPollSeconds)
 		if err != nil {
@@ -95,6 +106,10 @@ func Serve(ctx context.Context, api *API, options ServeOptions) error {
 			<-slots
 			continue
 		}
+		// The deadline is on HelloSeal's clock; run against this one's.
+		if call.DeadlineUnixMs > 0 {
+			call.DeadlineUnixMs -= api.ServerOffset().Milliseconds()
+		}
 		running.Add(1)
 		go func(call bridge.Call) {
 			defer running.Done()
@@ -117,6 +132,32 @@ func Serve(ctx context.Context, api *API, options ServeOptions) error {
 			}
 			fmt.Fprintf(log, "%s: %s in %s\n", call.Op, outcome, time.Since(started).Round(time.Millisecond))
 		}(*call)
+	}
+}
+
+// waitForSlot waits until a call slot frees, sending a heartbeat every
+// interval meanwhile: HelloSeal only hears from a computer when it polls,
+// and long commands in every slot must not make it look offline. It returns
+// nil with a slot taken, or Serve's result when Serve must end.
+func waitForSlot(ctx context.Context, api *API, slots chan struct{}, interval time.Duration, log io.Writer) error {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case slots <- struct{}{}:
+			return nil
+		case <-ctx.Done():
+			return serveEnd(ctx)
+		case <-ticker.C:
+			err := api.Heartbeat(ctx)
+			switch {
+			case errors.Is(err, ErrDisconnected):
+				return ErrDisconnected
+			case err != nil && ctx.Err() == nil:
+				// The next heartbeat or poll tries again.
+				fmt.Fprintf(log, "Could not reach HelloSeal (%v). Retrying...\n", err)
+			}
+		}
 	}
 }
 

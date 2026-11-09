@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/computer/bridge"
@@ -34,7 +35,15 @@ type API struct {
 	Key        ed25519.PrivateKey
 	// Now is the clock requests are signed with; time.Now when nil.
 	Now func() time.Time
+
+	// offsetMs is how far HelloSeal's clock is ahead of Now, from the Date
+	// of its last answer; 0 while within clockTolerance.
+	offsetMs atomic.Int64
 }
+
+// clockTolerance is the clock difference ServerOffset ignores: a Date
+// header is only accurate to the second.
+const clockTolerance = 2 * time.Second
 
 // NewAPI is an API for server, signing as computerID when key is set.
 func NewAPI(server, computerID string, key ed25519.PrivateKey) *API {
@@ -87,6 +96,46 @@ func (a *API) Next(ctx context.Context, wait int) (*bridge.Call, error) {
 		return nil, errors.New("HelloSeal sent a call without an id or op")
 	}
 	return &call, nil
+}
+
+// Heartbeat tells HelloSeal this computer is still there without claiming
+// a call, for while every call slot is busy.
+func (a *API) Heartbeat(ctx context.Context) error {
+	err := a.do(ctx, http.MethodGet, bridge.PathNext, "wait=0&claim=false", nil, true, nil)
+	if errors.Is(err, errNoContent) {
+		return nil
+	}
+	if err == nil {
+		return errors.New("HelloSeal sent a call to a heartbeat")
+	}
+	return err
+}
+
+// ServerOffset is how far HelloSeal's clock is ahead of this computer's, as
+// of its last answer; 0 when they agree to within a couple of seconds.
+func (a *API) ServerOffset() time.Duration {
+	return time.Duration(a.offsetMs.Load()) * time.Millisecond
+}
+
+func (a *API) now() time.Time {
+	if a.Now != nil {
+		return a.Now()
+	}
+	return time.Now()
+}
+
+// noteServerTime updates ServerOffset from an answer's Date header.
+func (a *API) noteServerTime(date string, received time.Time) {
+	at, err := http.ParseTime(date)
+	if err != nil {
+		return
+	}
+	// Date is truncated to the second; take the middle of that second.
+	offset := at.Add(500 * time.Millisecond).Sub(received)
+	if offset > -clockTolerance && offset < clockTolerance {
+		offset = 0
+	}
+	a.offsetMs.Store(offset.Milliseconds())
 }
 
 // PostResult answers a call, trying up to three times.
@@ -146,17 +195,14 @@ func (a *API) do(ctx context.Context, method, path, query string, in any, signed
 	}
 	request.Header.Set("Accept", "application/json")
 	if signed {
-		now := time.Now
-		if a.Now != nil {
-			now = a.Now
-		}
-		bridge.Sign(request.Header, a.Key, a.ComputerID, method, path, body, now())
+		bridge.Sign(request.Header, a.Key, a.ComputerID, method, path, body, a.now())
 	}
 	response, err := a.HTTP.Do(request)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
+	a.noteServerTime(response.Header.Get("Date"), a.now())
 	switch {
 	case response.StatusCode == http.StatusNoContent:
 		return errNoContent

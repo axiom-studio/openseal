@@ -77,6 +77,10 @@ const (
 
 	// LongPollSeconds is how long GET /next waits for a call.
 	LongPollSeconds = 25
+	// HeartbeatSeconds is how often a bridge whose call slots are all busy
+	// sends GET /next?wait=0&claim=false, so HelloSeal still sees it online.
+	// The server updates last_seen_at and answers 204 without claiming.
+	HeartbeatSeconds = 20
 )
 
 // PathPrefix is the route prefix of the bridge API on the server; signed

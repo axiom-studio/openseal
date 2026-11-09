@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,8 @@ type fakeHelloSeal struct {
 	results    chan bridge.Result
 	nextStatus int
 	nextPaths  []string
+	// clockAhead sets every answer's Date this far ahead of the real time.
+	clockAhead time.Duration
 }
 
 const testComputerID = "c-123"
@@ -46,6 +49,9 @@ func (f *fakeHelloSeal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	body, _ := io.ReadAll(r.Body)
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.clockAhead != 0 {
+		w.Header().Set("Date", time.Now().Add(f.clockAhead).UTC().Format(http.TimeFormat))
+	}
 	switch r.URL.Path {
 	case bridge.PathDeviceStart:
 		if err := json.Unmarshal(body, &f.start); err != nil {
@@ -94,7 +100,7 @@ func (f *fakeHelloSeal) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(f.nextStatus)
 			return
 		}
-		if len(f.calls) == 0 {
+		if len(f.calls) == 0 || r.URL.Query().Get("claim") == "false" {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -274,6 +280,98 @@ func TestServeBacksOffOnServerErrors(t *testing.T) {
 	// 20+40+80+160ms of backoff fit in 300ms: a handful of polls, not a spin.
 	if n := len(fake.nextPaths); n < 2 || n > 6 {
 		t.Fatalf("polled %d times", n)
+	}
+}
+
+func TestServeHeartbeatsWhileEverySlotIsBusy(t *testing.T) {
+	fake, server := newFakeHelloSeal(t)
+	api := pairedAPI(t, fake, server)
+	for i := 0; i <= Concurrency; i++ {
+		fake.calls = append(fake.calls, bridge.Call{ID: "call-" + strconv.Itoa(i), Op: bridge.OpListFiles, DeadlineUnixMs: time.Now().Add(time.Minute).UnixMilli()})
+	}
+	release := make(chan struct{})
+	started := make(chan string, Concurrency+1)
+	execute := func(_ context.Context, call bridge.Call) bridge.Result {
+		started <- call.ID
+		<-release
+		return bridge.Result{ID: call.ID, OK: true, Result: json.RawMessage("{}")}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, api, ServeOptions{Execute: execute, Heartbeat: 20 * time.Millisecond}) }()
+	for i := 0; i < Concurrency; i++ {
+		<-started
+	}
+
+	// Every slot is busy: HelloSeal keeps hearing from the computer, and the
+	// fifth call stays queued there.
+	heartbeats := func() int {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		n := 0
+		for _, query := range fake.nextPaths {
+			if query == "wait=0&claim=false" {
+				n++
+			}
+		}
+		return n
+	}
+	for wait := time.Now().Add(5 * time.Second); heartbeats() < 3; {
+		if time.Now().After(wait) {
+			t.Fatalf("heartbeats = %d", heartbeats())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	fake.mu.Lock()
+	queued := len(fake.calls)
+	fake.mu.Unlock()
+	if queued != 1 || len(started) != 0 {
+		t.Fatalf("queued %d, started %d extra", queued, len(started))
+	}
+
+	close(release)
+	for i := 0; i <= Concurrency; i++ {
+		select {
+		case <-fake.results:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("got %d results", i)
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Serve = %v", err)
+	}
+}
+
+func TestServeRunsCallsOnThisComputersClock(t *testing.T) {
+	fake, server := newFakeHelloSeal(t)
+	api := pairedAPI(t, fake, server)
+	// HelloSeal's clock is a minute ahead and gives the call 30s.
+	fake.clockAhead = time.Minute
+	fake.calls = []bridge.Call{{ID: "call-1", Op: bridge.OpListFiles, DeadlineUnixMs: time.Now().Add(time.Minute + 30*time.Second).UnixMilli()}}
+	deadlines := make(chan time.Time, 1)
+	execute := func(_ context.Context, call bridge.Call) bridge.Result {
+		deadlines <- call.Deadline()
+		return bridge.Result{ID: call.ID, OK: true, Result: json.RawMessage("{}")}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- Serve(ctx, api, ServeOptions{Execute: execute}) }()
+	var deadline time.Time
+	select {
+	case deadline = <-deadlines:
+	case <-time.After(5 * time.Second):
+		t.Fatal("not run")
+	}
+	cancel()
+	<-done
+	if left := time.Until(deadline); left < 27*time.Second || left > 32*time.Second {
+		t.Fatalf("time left = %s, want about 30s", left)
+	}
+	if offset := api.ServerOffset(); offset < 58*time.Second || offset > 62*time.Second {
+		t.Fatalf("offset = %s", offset)
 	}
 }
 
