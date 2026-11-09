@@ -294,3 +294,20 @@ func TestCallPastItsDeadlineIsNotRun(t *testing.T) {
 		t.Fatal("a late call ran")
 	}
 }
+
+// As the path description says: a relative path, or none, starts in the
+// first folder that allows writes, even when a read-only one comes first.
+func TestNoPathStartsInTheFirstWriteFolder(t *testing.T) {
+	w := newWorkspace(t)
+	w.folders = []bridge.Folder{{Path: w.read, Access: bridge.AccessRead}, {Path: w.write, Access: bridge.AccessWrite}}
+	mustWrite(t, filepath.Join(w.write, "here.txt"), "x")
+	result := call(t, w, workspace.OpListDirectory, map[string]any{})
+	var listing workspace.ListDirectoryResult
+	if err := json.Unmarshal(result.Result, &listing); err != nil || !result.OK || len(listing.Entries) != 1 || listing.Entries[0].Path != filepath.Join(w.write, "here.txt") {
+		t.Fatalf("list_directory without a path = %+v %s", result, result.Result)
+	}
+	result = call(t, w, workspace.OpReadFile, map[string]any{"path": "here.txt"})
+	if !result.OK {
+		t.Fatalf("read_file of a relative path = %+v", result)
+	}
+}

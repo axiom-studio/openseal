@@ -201,7 +201,7 @@ func (t MachineTarget) path() map[string]interface{} {
 		return relativePathProperty()
 	}
 	return map[string]interface{}{"type": "string", "minLength": 1, "maxLength": MaximumPathBytes,
-		"description": "An absolute path or ~/…, inside a folder the person allowed. A relative path, or none, starts in the first allowed folder."}
+		"description": "An absolute path or ~/…, inside a folder the person allowed. A relative path, or none, starts in the first folder that allows writes, else the first folder; listing or searching without a path covers only that folder."}
 }
 
 func (t MachineTarget) input(op string) map[string]interface{} {
@@ -227,7 +227,6 @@ func (t MachineTarget) input(op string) map[string]interface{} {
 		required = []interface{}{"path", "content"}
 		properties["path"] = t.path()
 		properties["content"] = map[string]interface{}{"type": "string", "maxLength": MaximumWriteContent}
-		properties["createParents"] = map[string]interface{}{"type": "boolean", "default": true}
 	case OpEditFile:
 		required = []interface{}{"path", "oldText", "newText"}
 		properties["path"] = t.path()
