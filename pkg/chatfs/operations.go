@@ -1,27 +1,15 @@
 package chatfs
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"path"
-	"regexp"
+	"io"
 	"sort"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
-	"github.com/axiom-studio/openseal/pkg/attachments"
 	"github.com/axiom-studio/openseal/pkg/workspace"
-)
-
-const (
-	defaultReadBytes = 256 << 10
-	maximumReadBytes = 1 << 20
-	// searchFileBytes bounds one file a search reads.
-	searchFileBytes = 4 << 20
 )
 
 // Execute runs one Workspace operation against a chat's files. A result
@@ -84,33 +72,21 @@ func (s *Store) Execute(ctx context.Context, chat Chat, author Author, operation
 	return result, err
 }
 
-var errInput = errors.New("invalid input")
+var errInput = workspace.ErrInvalidInput
 
 func failure(message string) map[string]interface{} {
 	return map[string]interface{}{"success": false, "isError": true, "error": message}
 }
 
-func text(args map[string]interface{}, key string) string {
-	value, _ := args[key].(string)
-	return value
-}
+var (
+	text    = workspace.Text
+	integer = workspace.Integer
+)
 
-func integer(args map[string]interface{}, key string, fallback, maximum int) int {
-	var value int
-	switch raw := args[key].(type) {
-	case float64:
-		value = int(raw)
-	case int:
-		value = raw
-	case int64:
-		value = int(raw)
-	default:
-		return fallback
-	}
-	if value < 1 {
-		return fallback
-	}
-	return min(value, maximum)
+// withVersion is a result with the snapshot it read or made.
+func withVersion(result map[string]interface{}, version int64) map[string]interface{} {
+	result["version"] = version
+	return result
 }
 
 func (s *Store) list(ctx context.Context, chat Chat, args map[string]interface{}) (map[string]interface{}, error) {
@@ -122,46 +98,30 @@ func (s *Store) list(ctx context.Context, chat Chat, args map[string]interface{}
 	if err != nil {
 		return nil, err
 	}
-	depth, limit := integer(args, "depth", 2, 8), integer(args, "maxEntries", 500, 2000)
 	prefix := ""
 	if directory != "" {
 		if _, isFile := head.Tree.Files[directory]; isFile {
-			return nil, fmt.Errorf("%w: %s is a file; read it with read_file", ErrPath, directory)
+			return nil, workspace.IsAFile(directory)
 		}
 		prefix = directory + "/"
 	}
-	seen := map[string]bool{}
-	entries := []map[string]interface{}{}
+	listing := workspace.NewListing(func(parts []string) string { return prefix + strings.Join(parts, "/") },
+		integer(args, "depth", workspace.DefaultListDepth, workspace.MaximumListDepth), integer(args, "maxEntries", workspace.DefaultListEntries, workspace.MaximumListEntries))
 	found := directory == ""
-	truncated := false
 	for _, name := range head.Tree.Paths() {
 		if !strings.HasPrefix(name, prefix) {
 			continue
 		}
 		found = true
-		parts := strings.Split(strings.TrimPrefix(name, prefix), "/")
-		for level := 1; level <= len(parts) && level <= depth; level++ {
-			entryPath := prefix + strings.Join(parts[:level], "/")
-			if seen[entryPath] {
-				continue
-			}
-			seen[entryPath] = true
-			if len(entries) >= limit {
-				truncated = true
-				break
-			}
-			if level < len(parts) {
-				entries = append(entries, map[string]interface{}{"path": entryPath, "type": "directory"})
-				continue
-			}
-			entry := head.Tree.Files[name]
-			entries = append(entries, map[string]interface{}{"path": entryPath, "type": "file", "size": entry.SizeBytes, "mediaType": entry.MediaType})
+		entry := head.Tree.Files[name]
+		if !listing.Add(strings.Split(strings.TrimPrefix(name, prefix), "/"), workspace.Entry{Type: workspace.EntryFile, Size: workspace.FileSize(entry.SizeBytes), MediaType: entry.MediaType}) {
+			break
 		}
 	}
 	if !found {
-		return nil, fmt.Errorf("%w: %s does not exist", ErrNotFound, directory)
+		return nil, workspace.NotFound(directory)
 	}
-	return map[string]interface{}{"entries": entries, "truncated": truncated, "version": head.Version}, nil
+	return withVersion(listing.Result().Map(), head.Version), nil
 }
 
 func (s *Store) read(ctx context.Context, chat Chat, args map[string]interface{}) (map[string]interface{}, error) {
@@ -177,133 +137,64 @@ func (s *Store) read(ctx context.Context, chat Chat, args map[string]interface{}
 	if !ok {
 		return nil, missing(head.Tree, name)
 	}
-	maximum := integer(args, "maxBytes", defaultReadBytes, maximumReadBytes)
-	result := map[string]interface{}{"path": name, "mediaType": entry.MediaType, "size": entry.SizeBytes}
-	switch media := BaseMediaType(entry.MediaType); {
-	case Textual(media) || media == "application/octet-stream" && entry.SizeBytes <= maximumReadBytes:
-		data, err := s.ReadAll(ctx, chat, entry, maximumReadBytes*4)
-		if err != nil {
-			return nil, err
-		}
-		if !utf8.Valid(data) {
-			result["content"] = ""
-			result["note"] = "This is a binary file; use its path to show or embed it."
-			return result, nil
-		}
-		truncated := len(data) > maximum
-		if truncated {
-			data = data[:maximum]
-			for !utf8.Valid(data) {
-				data = data[:len(data)-1]
-			}
-		}
-		result["content"], result["truncated"] = string(data), truncated
-	case media == "application/pdf" || media == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-		if entry.SizeBytes > attachments.MaximumFileBytes {
-			result["content"], result["note"] = "", "This document is too large to extract text from."
-			return result, nil
-		}
-		data, err := s.ReadAll(ctx, chat, entry, attachments.MaximumFileBytes)
-		if err != nil {
-			return nil, err
-		}
-		var status, extracted string
-		if media == "application/pdf" {
-			status, extracted = attachments.PDFText(ctx, data)
-		} else {
-			status, extracted = attachments.DOCXText(ctx, data)
-		}
-		if status != "supplied" {
-			result["content"], result["note"] = "", "No text could be extracted from this document ("+strings.ReplaceAll(status, "_", " ")+")."
-			return result, nil
-		}
-		truncated := len(extracted) > maximum
-		if truncated {
-			extracted = extracted[:maximum]
-			for !utf8.ValidString(extracted) {
-				extracted = extracted[:len(extracted)-1]
-			}
-		}
-		result["content"], result["truncated"], result["note"] = extracted, truncated, "Text extracted from the document."
-	default:
-		result["content"] = ""
-		result["note"] = "This is a binary file; use its path to show or embed it."
+	result, err := workspace.ReadContent(ctx, name, entry.MediaType, entry.SizeBytes, integer(args, "maxBytes", workspace.DefaultReadBytes, workspace.MaximumReadBytes),
+		func(limit int64) ([]byte, error) { return s.readPrefix(ctx, chat, entry, limit) })
+	if err != nil {
+		return nil, err
 	}
-	return result, nil
+	return result.Map(), nil
+}
+
+// readPrefix reads at most limit bytes from the start of a file.
+func (s *Store) readPrefix(ctx context.Context, chat Chat, entry Entry, limit int64) ([]byte, error) {
+	content, err := s.Open(ctx, chat, entry)
+	if err != nil {
+		return nil, err
+	}
+	defer content.Close()
+	return io.ReadAll(io.LimitReader(content, min(limit, entry.SizeBytes)))
 }
 
 func missing(tree Tree, name string) error {
 	prefix := name + "/"
 	for existing := range tree.Files {
 		if strings.HasPrefix(existing, prefix) {
-			return fmt.Errorf("%w: %s is a directory; list it with list_directory", ErrPath, name)
+			return workspace.IsADirectory(name)
 		}
 	}
-	return fmt.Errorf("%w: %s does not exist", ErrNotFound, name)
+	return workspace.NotFound(name)
 }
 
 func (s *Store) search(ctx context.Context, chat Chat, args map[string]interface{}) (map[string]interface{}, error) {
-	query := text(args, "query")
-	if query == "" {
-		return nil, fmt.Errorf("%w: query is required", errInput)
+	search, err := workspace.NewSearch(args)
+	if err != nil {
+		return nil, err
 	}
 	directory, err := CleanDirectory(text(args, "path"))
 	if err != nil {
 		return nil, err
 	}
-	var pattern *regexp.Regexp
-	if useRegex, _ := args["regex"].(bool); useRegex {
-		if pattern, err = regexp.Compile(query); err != nil {
-			return nil, fmt.Errorf("%w: invalid search regular expression", errInput)
-		}
-	}
-	glob := text(args, "glob")
-	limit := integer(args, "maxResults", 200, 1000)
 	head, err := s.Head(ctx, chat)
 	if err != nil {
 		return nil, err
 	}
-	matches := []map[string]interface{}{}
-	truncated := false
 	for _, name := range head.Tree.Paths() {
 		if directory != "" && name != directory && !strings.HasPrefix(name, directory+"/") {
 			continue
 		}
-		if glob != "" {
-			if matched, _ := path.Match(glob, path.Base(name)); !matched {
-				if matched, _ = path.Match(glob, name); !matched {
-					continue
-				}
-			}
-		}
 		entry := head.Tree.Files[name]
-		if !Textual(entry.MediaType) || entry.SizeBytes > searchFileBytes {
+		if !search.Wants(name) || !workspace.Searchable(entry.MediaType, entry.SizeBytes) {
 			continue
 		}
-		data, err := s.ReadAll(ctx, chat, entry, searchFileBytes)
+		data, err := s.ReadAll(ctx, chat, entry, workspace.SearchFileBytes)
 		if err != nil {
 			return nil, err
 		}
-		scanner := bufio.NewScanner(bytes.NewReader(data))
-		scanner.Buffer(make([]byte, 64<<10), searchFileBytes)
-		for line := 1; scanner.Scan(); line++ {
-			value := scanner.Text()
-			if pattern != nil && pattern.MatchString(value) || pattern == nil && strings.Contains(value, query) {
-				if len(matches) >= limit {
-					truncated = true
-					break
-				}
-				if len(value) > 2000 {
-					value = value[:2000]
-				}
-				matches = append(matches, map[string]interface{}{"path": name, "line": line, "text": value})
-			}
-		}
-		if truncated {
+		if !search.Scan(name, data) {
 			break
 		}
 	}
-	return map[string]interface{}{"matches": matches, "truncated": truncated}, nil
+	return search.Result().Map(), nil
 }
 
 func (s *Store) batchRead(ctx context.Context, chat Chat, author Author, args map[string]interface{}) (map[string]interface{}, error) {
@@ -344,19 +235,13 @@ func (s *Store) write(ctx context.Context, chat Chat, author Author, args map[st
 	if err != nil {
 		return nil, err
 	}
-	content, ok := args["content"].(string)
-	if !ok {
-		return nil, fmt.Errorf("%w: content is required", errInput)
+	content, err := workspace.WriteContent(args)
+	if err != nil {
+		return nil, err
 	}
-	if len(content) > MaximumWriteBytes {
-		return nil, fmt.Errorf("%w: a written file holds at most %d bytes", errInput, MaximumWriteBytes)
-	}
-	mediaType := MediaTypeOf(name)
-	if mediaType == "application/octet-stream" {
-		mediaType = "text/plain"
-	}
-	if !Textual(mediaType) {
-		return nil, fmt.Errorf("%w: %s is a %s file; write_file writes text files only", errInput, name, mediaType)
+	mediaType, err := workspace.WrittenMediaType(name, name, content)
+	if err != nil {
+		return nil, err
 	}
 	entry, err := s.Put(ctx, chat, strings.NewReader(content), int64(len(content)), mediaType)
 	if err != nil {
@@ -366,7 +251,7 @@ func (s *Store) write(ctx context.Context, chat Chat, author Author, args map[st
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"success": true, "changedPaths": []string{name}, "version": snapshot.Version}, nil
+	return withVersion(workspace.ChangeResult{Success: true, ChangedPaths: []string{name}}.Map(), snapshot.Version), nil
 }
 
 func (s *Store) edit(ctx context.Context, chat Chat, author Author, args map[string]interface{}) (map[string]interface{}, error) {
@@ -374,14 +259,10 @@ func (s *Store) edit(ctx context.Context, chat Chat, author Author, args map[str
 	if err != nil {
 		return nil, err
 	}
-	oldText, newText := text(args, "oldText"), text(args, "newText")
-	if oldText == "" {
-		return nil, fmt.Errorf("%w: oldText is required; use write_file to create a file", errInput)
+	edit, err := workspace.NewEdit(args)
+	if err != nil {
+		return nil, err
 	}
-	if oldText == newText {
-		return nil, fmt.Errorf("%w: oldText and newText are the same", errInput)
-	}
-	replaceAll, _ := args["replaceAll"].(bool)
 	head, err := s.Head(ctx, chat)
 	if err != nil {
 		return nil, err
@@ -391,27 +272,18 @@ func (s *Store) edit(ctx context.Context, chat Chat, author Author, args map[str
 		return nil, missing(head.Tree, name)
 	}
 	if !Textual(entry.MediaType) {
-		return nil, fmt.Errorf("%w: %s is not a text file", errInput, name)
+		return nil, workspace.NotText(name)
+	}
+	if entry.SizeBytes > MaximumWriteBytes {
+		return nil, workspace.TooLargeToEdit(name)
 	}
 	data, err := s.ReadAll(ctx, chat, entry, MaximumWriteBytes)
 	if err != nil {
 		return nil, err
 	}
-	content := string(data)
-	count := strings.Count(content, oldText)
-	switch {
-	case count == 0:
-		return nil, fmt.Errorf("%w: oldText was not found in %s; read the file and copy the exact text, including whitespace", errInput, name)
-	case count > 1 && !replaceAll:
-		return nil, fmt.Errorf("%w: oldText appears %d times in %s; include more surrounding text to make it unique, or set replaceAll", errInput, count, name)
-	}
-	if replaceAll {
-		content = strings.ReplaceAll(content, oldText, newText)
-	} else {
-		content = strings.Replace(content, oldText, newText, 1)
-	}
-	if len(content) > MaximumWriteBytes {
-		return nil, fmt.Errorf("%w: a file holds at most %d bytes", errInput, MaximumWriteBytes)
+	content, replacements, err := edit.Apply(name, string(data))
+	if err != nil {
+		return nil, err
 	}
 	updated, err := s.Put(ctx, chat, strings.NewReader(content), int64(len(content)), entry.MediaType)
 	if err != nil {
@@ -421,14 +293,7 @@ func (s *Store) edit(ctx context.Context, chat Chat, author Author, args map[str
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"success": true, "changedPaths": []string{name}, "replacements": max(1, count*boolInt(replaceAll)), "version": snapshot.Version}, nil
-}
-
-func boolInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
+	return withVersion(workspace.ChangeResult{Success: true, ChangedPaths: []string{name}, Replacements: replacements}.Map(), snapshot.Version), nil
 }
 
 // matching returns the files at name: the file itself, or every file below
@@ -457,7 +322,7 @@ func (s *Store) remove(ctx context.Context, chat Chat, author Author, args map[s
 	}
 	paths := matching(head.Tree, name)
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("%w: %s does not exist", ErrNotFound, name)
+		return nil, workspace.NotFound(name)
 	}
 	changes := make([]Change, 0, len(paths))
 	for _, existing := range paths {
@@ -467,7 +332,7 @@ func (s *Store) remove(ctx context.Context, chat Chat, author Author, args map[s
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"success": true, "changedPaths": paths, "version": snapshot.Version}, nil
+	return withVersion(workspace.ChangeResult{Success: true, ChangedPaths: paths}.Map(), snapshot.Version), nil
 }
 
 func (s *Store) move(ctx context.Context, chat Chat, author Author, args map[string]interface{}) (map[string]interface{}, error) {
@@ -480,7 +345,7 @@ func (s *Store) move(ctx context.Context, chat Chat, author Author, args map[str
 		return nil, err
 	}
 	if from == to || strings.HasPrefix(to, from+"/") {
-		return nil, fmt.Errorf("%w: cannot move %s into itself", ErrPath, from)
+		return nil, workspace.MoveIntoItself(from)
 	}
 	head, err := s.Head(ctx, chat)
 	if err != nil {
@@ -488,10 +353,10 @@ func (s *Store) move(ctx context.Context, chat Chat, author Author, args map[str
 	}
 	paths := matching(head.Tree, from)
 	if len(paths) == 0 {
-		return nil, fmt.Errorf("%w: %s does not exist", ErrNotFound, from)
+		return nil, workspace.NotFound(from)
 	}
 	if len(matching(head.Tree, to)) > 0 {
-		return nil, fmt.Errorf("%w: %s already exists; delete it first", ErrPath, to)
+		return nil, workspace.AlreadyExists(to)
 	}
 	changes := make([]Change, 0, len(paths)*2)
 	changed := make([]string, 0, len(paths)*2)
@@ -506,5 +371,5 @@ func (s *Store) move(ctx context.Context, chat Chat, author Author, args map[str
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"success": true, "changedPaths": changed, "version": snapshot.Version}, nil
+	return withVersion(workspace.ChangeResult{Success: true, ChangedPaths: changed}.Map(), snapshot.Version), nil
 }
