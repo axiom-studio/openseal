@@ -191,9 +191,11 @@ func TestSharedAgentExportIsAWhitelist(t *testing.T) {
 		t.Fatalf("export keys = %v", got)
 	}
 	subsetOf(t, "profile", jsonKeys(t, export.Profile), []string{"displayName", "purpose", "systemPrompt", "personality", "operatingPrinciples"})
-	skillKeys := []string{"skillId", "skillVersion", "sourceIdentity", "name", "allowedActions", "enablePrompt", "slots"}
-	for _, value := range append(append([]SharedAgentSkill{}, export.Grants...), export.AccountSkills...) {
+	skillKeys := []string{"skillId", "skillVersion", "sourceIdentity", "name", "allowedActions", "enablePrompt", "slots", "risk"}
+	risks := map[string]skill.RiskLevel{}
+	for _, value := range append(append([]SharedAgentExportSkill{}, export.Grants...), export.AccountSkills...) {
 		subsetOf(t, "skill "+value.SkillID, jsonKeys(t, value), skillKeys)
+		risks[value.SkillID] = value.Risk
 		for _, slot := range value.Slots {
 			subsetOf(t, "slot", jsonKeys(t, slot), []string{"slot", "provider", "providerName"})
 		}
@@ -220,6 +222,108 @@ func TestSharedAgentExportIsAWhitelist(t *testing.T) {
 	}
 	if len(export.Refusals) != 0 {
 		t.Fatalf("refusals = %#v", export.Refusals)
+	}
+	// Each skill carries its catalog risk for the public page, never the
+	// binding's declared ceiling.
+	if !reflect.DeepEqual(risks, map[string]skill.RiskLevel{
+		"acme.calendar": skill.RiskLevelRead, "acme.search": skill.RiskLevelRead, "acme.notes": skill.RiskLevelWrite,
+	}) {
+		t.Fatalf("export risks = %v", risks)
+	}
+
+	// The host refuses what only it knows, such as the workspace's own skill.
+	if !export.RefuseSkill("acme.calendar", SharedAgentRefusalNotInCatalog) || export.RefuseSkill("acme.calendar", SharedAgentRefusalNotInCatalog) {
+		t.Fatal("RefuseSkill must refuse a listed skill once")
+	}
+	if len(export.AccountSkills) != 0 || len(export.Grants) != 2 ||
+		!reflect.DeepEqual(export.Refusals, []SharedAgentRefusal{{SkillID: "acme.calendar", Name: "Calendar", Reason: SharedAgentRefusalNotInCatalog}}) {
+		t.Fatalf("after RefuseSkill: grants %#v, account skills %#v, refusals %#v", export.Grants, export.AccountSkills, export.Refusals)
+	}
+}
+
+func TestSharedAgentExportSlotsMatchInstall(t *testing.T) {
+	ctx := context.Background()
+	f := newSharedAgentFixture(t)
+	action := func(name string, credentials ...skill.CredentialRequirement) skill.Action {
+		return skill.Action{
+			Name: name, Description: name, Risk: skill.RiskLevelRead, SideEffect: skill.SideEffectRead,
+			Idempotency: skill.IdempotencySupported, Retry: skill.ActionRetryPolicy{MaxAttempts: 1}, Credentials: credentials,
+			InputSchema: map[string]interface{}{"type": "object"}, OutputSchema: map[string]interface{}{"type": "object"},
+		}
+	}
+	google := skill.CredentialRequirement{Name: "google", Kind: "oauth", OAuth2: &skill.OAuth2Requirement{
+		Provider: "google", Subject: skill.OAuth2SubjectUser, Scopes: []string{"google.all"},
+	}}
+	if err := f.catalog.Register(ctx, &skill.Definition{
+		ID: "acme.mail", Version: "1.0.0", Name: "Mail", Description: "Mail",
+		Transport: skill.TransportReference{Kind: "kernel", Endpoint: "kernel://mail"},
+		Actions: map[string]skill.Action{
+			// An optional API key the binding never fills, and an OAuth slot
+			// only an action that is not allowed uses.
+			"list_labels": action("list_labels", skill.CredentialRequirement{Name: "apikey", Kind: "api_key", Optional: true}),
+			"send":        action("send", google),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.bind(t, &skill.Binding{
+		ID: "builder:researcher:acme.mail", DeploymentID: "researcher", SkillID: "acme.mail", SkillVersion: "1.0.0",
+		AllowedActions: []string{"list_labels"}, MaximumRisk: skill.RiskLevelRead,
+		Credentials: map[string]skill.CredentialReference{"google": {Kind: "oauth", ID: "vault://stale-google"}},
+	})
+	export, err := f.installer.ExportSharedAgent(ctx, f.scope, "researcher")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(export.Refusals) != 0 {
+		t.Fatalf("refusals = %#v", export.Refusals)
+	}
+	var mail *SharedAgentExportSkill
+	for index := range export.Grants {
+		if export.Grants[index].SkillID == "acme.mail" {
+			mail = &export.Grants[index]
+		}
+	}
+	if mail == nil || len(mail.Slots) != 0 {
+		t.Fatalf("mail must export as a plain grant: grants %#v, account skills %#v", export.Grants, export.AccountSkills)
+	}
+	spec := sharedAgentSpecV1()
+	spec.Grants = []SharedAgentSkill{mail.SharedAgentSkill}
+	spec.AccountSkills = nil
+	plan, err := f.installer.PlanSharedAgentInstall(ctx, f.installRequest(spec, "", 1, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Skills) != 1 || !plan.Skills[0].Available || len(plan.Slots) != 0 {
+		t.Fatalf("mail plan = skills %#v, slots %#v", plan.Skills, plan.Slots)
+	}
+
+	// Once an allowed action uses the slot, it is exported and installs as an
+	// account skill.
+	if err := f.catalog.Bind(ctx, &skill.Binding{
+		Scope: skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}, Revision: 2,
+		ID: "builder:researcher:acme.mail", DeploymentID: "researcher", SkillID: "acme.mail", SkillVersion: "1.0.0",
+		AllowedActions: []string{"list_labels", "send"}, MaximumRisk: skill.RiskLevelRead,
+		Credentials: map[string]skill.CredentialReference{"google": {Kind: "oauth", ID: "vault://google"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	export, err = f.installer.ExportSharedAgent(ctx, f.scope, "researcher")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(export.AccountSkills) != 1 || export.AccountSkills[0].SkillID != "acme.mail" ||
+		!reflect.DeepEqual(export.AccountSkills[0].Slots, []SharedAgentSlot{{Slot: "google", Provider: "google"}}) {
+		t.Fatalf("account skills = %#v, refusals %#v", export.AccountSkills, export.Refusals)
+	}
+	spec.Grants = nil
+	spec.AccountSkills = []SharedAgentSkill{export.AccountSkills[0].SharedAgentSkill}
+	plan, err = f.installer.PlanSharedAgentInstall(ctx, f.installRequest(spec, "", 1, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Skills) != 1 || !plan.Skills[0].Available || len(plan.Slots) != 1 || plan.Slots[0].Slot != "google" {
+		t.Fatalf("mail account plan = skills %#v, slots %#v", plan.Skills, plan.Slots)
 	}
 }
 
@@ -671,6 +775,61 @@ func TestSharedAgentUpdate(t *testing.T) {
 	// Still a copy after the update.
 	if _, err := f.installer.ExportSharedAgent(ctx, f.scope, installed.AgentID); !errors.Is(err, ErrSharedAgentIsCopy) {
 		t.Fatalf("export of an updated copy = %v", err)
+	}
+}
+
+func TestSharedAgentUpdateReplacesYourSkillEdit(t *testing.T) {
+	ctx := context.Background()
+	f := newSharedAgentFixture(t)
+	installed := f.install(t, f.installRequest(sharedAgentSpecV1(), "adoption-1", 1, skill.RiskLevelRead))
+	skillScope := skill.ScopeReference{Kind: f.scope.Kind, ID: f.scope.ID}
+	actor := skill.BindingActor{Type: "user", ID: sharedAgentAdopter}
+	calendarID := agentBuilderBindingID(installed.AgentID, "acme.calendar")
+	request := func() SharedAgentUpdateRequest {
+		deployment, _ := f.agents.GetDeployment(ctx, f.reference(), installed.AgentID)
+		return SharedAgentUpdateRequest{
+			Scope: f.scope, DeploymentID: installed.AgentID, ActingUserID: sharedAgentAdopter,
+			Source: SharedAgentSource{ShareID: "sa1", Version: 2}, From: sharedAgentSpecV1(), To: sharedAgentSpecV2(),
+			ExpectedDeploymentRevision: deployment.Revision,
+		}
+	}
+	calendarChange := func(preview *SharedAgentUpdatePreview) SharedAgentChange {
+		for _, change := range preview.Changes {
+			if change.Target == "acme.calendar" {
+				return change
+			}
+		}
+		t.Fatalf("no calendar change: %#v", preview.Changes)
+		return SharedAgentChange{}
+	}
+
+	// The adopter turns the calendar off; v2 changes it.
+	if err := f.installer.disableAgentSkill(ctx, skillScope, installed.AgentID, calendarID, actor); err != nil {
+		t.Fatal(err)
+	}
+	preview, err := f.installer.PreviewSharedAgentUpdate(ctx, request())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(preview.ReplacesYourEdit, []string{SharedAgentFieldSkills}) {
+		t.Fatalf("replaces your edit = %v", preview.ReplacesYourEdit)
+	}
+	if change := calendarChange(preview); change.Kind != SharedAgentChangeSkillChanged || change.Label != "Turns Calendar back on with changes" {
+		t.Fatalf("calendar change = %#v", change)
+	}
+
+	// The adopter changed the calendar's actions instead.
+	if _, err := f.installer.grantAgentSkill(ctx, f.scope, installed.AgentID, AgentSkillGrant{
+		SkillID: "acme.calendar", SkillVersion: "1.0.0", AllowedActions: []string{"list_events", "create_event"}, MaximumRisk: skill.RiskLevelWrite,
+	}, map[string]skill.CredentialReference{"google": {Kind: "oauth", ID: skill.PersonCredentialReferenceID}}, actor, "edit"); err != nil {
+		t.Fatal(err)
+	}
+	preview, err = f.installer.PreviewSharedAgentUpdate(ctx, request())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(preview.ReplacesYourEdit, []string{SharedAgentFieldSkills}) || calendarChange(preview).Label != "Changes Calendar" {
+		t.Fatalf("replaces your edit = %v, calendar %#v", preview.ReplacesYourEdit, calendarChange(preview))
 	}
 }
 

@@ -111,7 +111,7 @@ func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope Scope, dep
 			SystemPrompt: definition.SystemPrompt, Personality: definition.Personality,
 			OperatingPrinciples: append([]string{}, definition.OperatingPrinciples...),
 		},
-		Grants: []SharedAgentSkill{}, AccountSkills: []SharedAgentSkill{}, Refusals: []SharedAgentRefusal{},
+		Grants: []SharedAgentExportSkill{}, AccountSkills: []SharedAgentExportSkill{}, Refusals: []SharedAgentRefusal{},
 		Excluded: SharedAgentExcluded{
 			Channels:  len(definition.Channels),
 			Approvals: len(definition.Authority.StandingGrants) + len(definition.Authority.ApprovalDestinations),
@@ -144,24 +144,26 @@ func (i *AgentInstaller) ExportSharedAgent(ctx context.Context, scope Scope, dep
 			export.Grants = append(export.Grants, shared)
 		}
 	}
-	sortSharedAgentSkills(export.Grants)
-	sortSharedAgentSkills(export.AccountSkills)
-	sort.Slice(export.Refusals, func(a, b int) bool { return export.Refusals[a].SkillID < export.Refusals[b].SkillID })
+	sortSharedAgentExportSkills(export.Grants)
+	sortSharedAgentExportSkills(export.AccountSkills)
+	sortSharedAgentRefusals(export.Refusals)
 	return export, nil
 }
 
 // exportSharedSkill projects one enabled binding, or names why it blocks the
-// share.
-func (i *AgentInstaller) exportSharedSkill(ctx context.Context, binding *skill.Binding) (SharedAgentSkill, *SharedAgentRefusal, error) {
-	refuse := func(name, reason string) (SharedAgentSkill, *SharedAgentRefusal, error) {
+// share. Its slots are exactly the ones resolveSharedSkill derives from the
+// allowed actions, the prompt and the filled optional slots, so a stale
+// credential on a slot nothing allowed uses is not exported.
+func (i *AgentInstaller) exportSharedSkill(ctx context.Context, binding *skill.Binding) (SharedAgentExportSkill, *SharedAgentRefusal, error) {
+	refuse := func(name, reason string) (SharedAgentExportSkill, *SharedAgentRefusal, error) {
 		if name == "" {
 			name = binding.SkillID
 		}
-		return SharedAgentSkill{}, &SharedAgentRefusal{SkillID: binding.SkillID, Name: name, Reason: reason}, nil
+		return SharedAgentExportSkill{}, &SharedAgentRefusal{SkillID: binding.SkillID, Name: name, Reason: reason}, nil
 	}
 	definition, err := sharedSkillDefinition(ctx, i.catalog, binding.SkillID, binding.SkillVersion, binding.SourceIdentity)
 	if err != nil {
-		return SharedAgentSkill{}, nil, err
+		return SharedAgentExportSkill{}, nil, err
 	}
 	name := ""
 	if definition != nil {
@@ -174,15 +176,16 @@ func (i *AgentInstaller) exportSharedSkill(ctx context.Context, binding *skill.B
 	if definition == nil || binding.SkillID == sharedAgentMCPSkillID {
 		return refuse(name, SharedAgentRefusalNotInCatalog)
 	}
-	requirements := sharedSkillRequirements(definition, binding.AllowedActions, binding.EnablePrompt)
-	for slot := range binding.Credentials {
-		if _, ok := requirements[slot]; !ok {
-			requirements[slot] = skill.CredentialRequirement{Name: slot}
-		}
-	}
-	shared := SharedAgentSkill{
-		SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
-		Name: definition.Name, AllowedActions: sortedStrings(binding.AllowedActions), EnablePrompt: binding.EnablePrompt,
+	requirements := sharedSkillRequirements(definition, binding.AllowedActions, binding.EnablePrompt, func(slot string) bool {
+		_, ok := binding.Credentials[slot]
+		return ok
+	})
+	shared := SharedAgentExportSkill{
+		SharedAgentSkill: SharedAgentSkill{
+			SkillID: binding.SkillID, SkillVersion: binding.SkillVersion, SourceIdentity: binding.SourceIdentity,
+			Name: definition.Name, AllowedActions: sortedStrings(binding.AllowedActions), EnablePrompt: binding.EnablePrompt,
+		},
+		Risk: catalogGrantRisk(definition, binding.AllowedActions),
 	}
 	for _, slot := range sortedKeys(requirements) {
 		if !skill.PersonCredentialAllowed(definition, binding, slot) {
@@ -617,6 +620,9 @@ func (i *AgentInstaller) planSharedAgentUpdate(ctx context.Context, request Shar
 		return nil, err
 	}
 	preview.Changes = append(preview.Changes, diff.changes...)
+	if diff.replacesYourEdit {
+		preview.ReplacesYourEdit = append(preview.ReplacesYourEdit, SharedAgentFieldSkills)
+	}
 	preview.NewSlots = append(preview.NewSlots, diff.newSlots...)
 	preview.Unavailable = append(preview.Unavailable, diff.unavailableSkills...)
 	preview.Risk = SharedAgentRiskChange{From: definition.Authority.MaximumRisk, To: diff.ceiling}
@@ -648,12 +654,16 @@ type sharedAgentSkillDiff struct {
 	// risks are the catalog risks of added skills by change Target.
 	risks   map[string]capability.RiskLevel
 	ceiling capability.RiskLevel
+	// replacesYourEdit is set when a skill the update grants is one the
+	// adopter turned off or changed on the copy.
+	replacesYourEdit bool
 }
 
 // resolveSharedAgentSkillDiff compares From's and To's skills by id: added
 // and changed skills are granted with To's value, removed ones disabled. The
 // ceiling is recomputed over the copy's resulting enabled non-bundled
-// bindings, each at its catalog risk.
+// bindings, each at its catalog risk. A granted skill whose copy binding the
+// adopter turned off or changed away from From replaces their edit.
 func (i *AgentInstaller) resolveSharedAgentSkillDiff(ctx context.Context, scope Scope, deploymentID string, from, to SharedAgentSpec) (*sharedAgentSkillDiff, error) {
 	diff := &sharedAgentSkillDiff{
 		changes: []SharedAgentChange{}, newSlots: []SharedAgentPlannedSlot{}, unavailableSkills: []SharedAgentPlannedSkill{},
@@ -671,7 +681,11 @@ func (i *AgentInstaller) resolveSharedAgentSkillDiff(ctx context.Context, scope 
 	}
 	// The resulting binding set, by binding id, at catalog risk.
 	result := map[string]capability.RiskLevel{}
+	byID := map[string]*skill.Binding{}
 	for _, binding := range bindings {
+		if binding != nil {
+			byID[binding.ID] = binding
+		}
 		if binding == nil || binding.Disabled || strings.HasPrefix(binding.ID, "bundled:") {
 			continue
 		}
@@ -693,9 +707,21 @@ func (i *AgentInstaller) resolveSharedAgentSkillDiff(ctx context.Context, scope 
 		if existed && sameSharedAgentSkill(previous.skill, shared.spec) && previous.account == shared.account {
 			continue
 		}
+		bindingID := agentBuilderBindingID(deploymentID, id)
 		kind, label := SharedAgentChangeSkillAdded, "Adds "+shared.name
 		if existed {
 			kind, label = SharedAgentChangeSkillChanged, "Changes "+shared.name
+			current := byID[bindingID]
+			switch {
+			case current == nil || current.Disabled:
+				label = "Turns " + shared.name + " back on with changes"
+				diff.replacesYourEdit = true
+			case !sharedAgentBindingMatches(current, previous.skill):
+				diff.replacesYourEdit = true
+			}
+		} else if current := byID[bindingID]; current != nil && !current.Disabled {
+			// The adopter gave the copy this skill themselves.
+			diff.replacesYourEdit = true
 		}
 		change := SharedAgentChange{Field: SharedAgentFieldSkills, Kind: kind, Label: label, Target: id}
 		if !shared.available {
@@ -708,7 +734,6 @@ func (i *AgentInstaller) resolveSharedAgentSkillDiff(ctx context.Context, scope 
 			continue
 		}
 		risk := shared.grant.grant.MaximumRisk
-		bindingID := agentBuilderBindingID(deploymentID, id)
 		if existed {
 			if old, ok := result[bindingID]; ok && teamSkillRiskRank(risk) > teamSkillRiskRank(old) {
 				change.RiskUp = true
@@ -780,6 +805,15 @@ func sameSharedAgentSkill(left, right SharedAgentSkill) bool {
 		}
 	}
 	return true
+}
+
+// sharedAgentBindingMatches reports whether the copy's binding still holds
+// value's version, actions and prompt, i.e. the adopter did not change it.
+func sharedAgentBindingMatches(binding *skill.Binding, value SharedAgentSkill) bool {
+	return strings.TrimSpace(binding.SkillVersion) == strings.TrimSpace(value.SkillVersion) &&
+		strings.TrimSpace(binding.SourceIdentity) == strings.TrimSpace(value.SourceIdentity) &&
+		binding.EnablePrompt == value.EnablePrompt &&
+		equalStrings(sortedStrings(normalizedActionStrings(binding.AllowedActions)), sortedStrings(normalizedActionStrings(value.AllowedActions)))
 }
 
 func sharedAgentSkillHasSlot(value SharedAgentSkill, slot string) bool {
@@ -858,7 +892,9 @@ func (i *AgentInstaller) resolveSharedSkill(ctx context.Context, value SharedAge
 		MaximumRisk: catalogGrantRisk(definition, value.AllowedActions),
 	}
 	var credentials map[string]skill.CredentialReference
-	requirements := sharedSkillRequirements(definition, value.AllowedActions, value.EnablePrompt)
+	requirements := sharedSkillRequirements(definition, value.AllowedActions, value.EnablePrompt, func(slot string) bool {
+		return sharedAgentSkillHasSlot(value, slot)
+	})
 	if account {
 		if len(requirements) == 0 {
 			return resolved, nil
@@ -1047,27 +1083,35 @@ func sharedSkillDefinition(ctx context.Context, catalog *skill.Catalog, id, vers
 }
 
 // sharedSkillRequirements are the credential slots the allowed actions (and
-// the prompt, when enabled) use, by slot name.
-func sharedSkillRequirements(definition *skill.Definition, allowedActions []string, enablePrompt bool) map[string]skill.CredentialRequirement {
+// the prompt, when enabled) use, by slot name. An optional slot counts only
+// when filled reports it: on export, the creator's binding holds a credential
+// for it; on install, the snapshot lists it.
+func sharedSkillRequirements(definition *skill.Definition, allowedActions []string, enablePrompt bool, filled func(slot string) bool) map[string]skill.CredentialRequirement {
 	requirements := map[string]skill.CredentialRequirement{}
-	for _, name := range allowedActions {
-		for _, requirement := range definition.Actions[strings.TrimSpace(name)].Credentials {
-			if _, ok := requirements[requirement.Name]; !ok {
+	add := func(values []skill.CredentialRequirement) {
+		for _, requirement := range values {
+			if requirement.Optional && !filled(requirement.Name) {
+				continue
+			}
+			if existing, ok := requirements[requirement.Name]; !ok || existing.Optional && !requirement.Optional {
 				requirements[requirement.Name] = requirement
 			}
 		}
 	}
+	for _, name := range allowedActions {
+		add(definition.Actions[strings.TrimSpace(name)].Credentials)
+	}
 	if enablePrompt && definition.Prompt != nil {
-		for _, requirement := range definition.Prompt.Credentials {
-			if _, ok := requirements[requirement.Name]; !ok {
-				requirements[requirement.Name] = requirement
-			}
-		}
+		add(definition.Prompt.Credentials)
 	}
 	return requirements
 }
 
-func sortSharedAgentSkills(values []SharedAgentSkill) {
+func sortSharedAgentExportSkills(values []SharedAgentExportSkill) {
+	sort.Slice(values, func(a, b int) bool { return values[a].SkillID < values[b].SkillID })
+}
+
+func sortSharedAgentRefusals(values []SharedAgentRefusal) {
 	sort.Slice(values, func(a, b int) bool { return values[a].SkillID < values[b].SkillID })
 }
 

@@ -102,6 +102,14 @@ type SharedAgentSkill struct {
 	Slots          []SharedAgentSlot `json:"slots,omitempty"`
 }
 
+// SharedAgentExportSkill is an exported skill with its risk in the creator's
+// catalog, for the public page. The risk is informational: an install or
+// update never reads it and recomputes it from the adopter's catalog.
+type SharedAgentExportSkill struct {
+	SharedAgentSkill
+	Risk skill.RiskLevel `json:"risk"`
+}
+
 // SharedAgentExcluded counts what stays with the source Agent.
 type SharedAgentExcluded struct {
 	Channels  int `json:"channels"`
@@ -119,12 +127,48 @@ type SharedAgentRefusal struct {
 // SharedAgentExport is the whitelist snapshot of an Agent, built field by
 // field. Apps are added by the host.
 type SharedAgentExport struct {
-	Profile           SharedAgentProfile   `json:"profile"`
-	Grants            []SharedAgentSkill   `json:"grants"`
-	AccountSkills     []SharedAgentSkill   `json:"accountSkills"`
-	Excluded          SharedAgentExcluded  `json:"excluded"`
-	DefinitionVersion string               `json:"definitionVersion"`
-	Refusals          []SharedAgentRefusal `json:"refusals"`
+	Profile           SharedAgentProfile       `json:"profile"`
+	Grants            []SharedAgentExportSkill `json:"grants"`
+	AccountSkills     []SharedAgentExportSkill `json:"accountSkills"`
+	Excluded          SharedAgentExcluded      `json:"excluded"`
+	DefinitionVersion string                   `json:"definitionVersion"`
+	Refusals          []SharedAgentRefusal     `json:"refusals"`
+}
+
+// RefuseSkill moves skillID out of the export's grants and account skills
+// into its refusals with reason, and reports whether it was there. The host
+// refuses what only it knows, such as a skill that is the creator's
+// workspace's own rather than a public catalog listing
+// (SharedAgentRefusalNotInCatalog).
+func (e *SharedAgentExport) RefuseSkill(skillID, reason string) bool {
+	if e == nil {
+		return false
+	}
+	refused := false
+	keep := func(values []SharedAgentExportSkill) []SharedAgentExportSkill {
+		kept := values[:0]
+		for _, value := range values {
+			if value.SkillID != skillID {
+				kept = append(kept, value)
+				continue
+			}
+			if !refused {
+				name := value.Name
+				if name == "" {
+					name = value.SkillID
+				}
+				e.Refusals = append(e.Refusals, SharedAgentRefusal{SkillID: value.SkillID, Name: name, Reason: reason})
+				refused = true
+			}
+		}
+		return kept
+	}
+	e.Grants = keep(e.Grants)
+	e.AccountSkills = keep(e.AccountSkills)
+	if refused {
+		sortSharedAgentRefusals(e.Refusals)
+	}
+	return refused
 }
 
 // SharedAgentSource is the published version a copy comes from.
