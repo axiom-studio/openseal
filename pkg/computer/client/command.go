@@ -69,8 +69,8 @@ func runCommand(ctx context.Context, allowed folders, input bridge.RunCommandInp
 	return execute(ctx, cwd, input.Command, timeout), nil
 }
 
-// execute runs command in cwd in its own process group and kills the whole
-// group when timeout passes or ctx ends.
+// execute runs command in cwd as its own process tree and kills the whole
+// tree when timeout passes or ctx ends.
 func execute(ctx context.Context, cwd, command string, timeout time.Duration) bridge.RunCommandOutput {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -80,10 +80,15 @@ func execute(ctx context.Context, cwd, command string, timeout time.Duration) br
 	cmd.Dir = cwd
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	cmd.WaitDelay = 5 * time.Second
-	isolate(cmd)
+	tree := isolate(cmd)
+	defer tree.close()
 
 	started := time.Now()
-	err := cmd.Run()
+	err := cmd.Start()
+	if err == nil {
+		tree.attach(cmd)
+		err = cmd.Wait()
+	}
 	output := bridge.RunCommandOutput{Cwd: cwd, DurationMs: time.Since(started).Milliseconds()}
 	var exitErr *exec.ExitError
 	switch {
