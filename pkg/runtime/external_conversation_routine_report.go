@@ -14,6 +14,40 @@ func routineReportDeliveryKey(messageID string) string {
 	return "routine-report-delivery:" + messageID
 }
 
+// routineReportHeaderParameter carries an event occurrence's header line on
+// its mirror delivery. The external chat has no trail of what started the
+// run, so the mirrored report starts with it; the HelloSeal message itself
+// is unchanged (the UI reads the header from the Run).
+const routineReportHeaderParameter = "routineEventHeader"
+
+// maxRoutineEventHeaderBytes is the longest header the mirror sends.
+const maxRoutineEventHeaderBytes = 200
+
+// routineReportHeader is the run's one-line event header, or "".
+func routineReportHeader(run *AgentRun) string {
+	header, _ := run.Context[RoutineEventHeaderContextKey].(string)
+	header = strings.Join(strings.Fields(header), " ")
+	if len(header) > maxRoutineEventHeaderBytes {
+		return ""
+	}
+	return header
+}
+
+// withRoutineReportHeader returns message with the delivery's header line
+// before its content, or message unchanged when there is none.
+func withRoutineReportHeader(delivery *ExternalConversationDelivery, message *ChannelMessage) *ChannelMessage {
+	if delivery.Operation != capability.ConversationDeliveryMessageSend {
+		return message
+	}
+	header, _ := delivery.Parameters[routineReportHeaderParameter].(string)
+	if header = strings.TrimSpace(header); header == "" {
+		return message
+	}
+	headed := cloneChannelMessage(message)
+	headed.Content = header + "\n" + message.Content
+	return headed
+}
+
 // projectRoutineReportDelivery sends a routine occurrence's terminal report to
 // the external conversation the routine was created from. The reply worker
 // answers only inbound messages; an occurrence answers none, so its report
@@ -27,7 +61,8 @@ func routineReportDeliveryKey(messageID string) string {
 // worker; only store failures are returned for the reporting worker to retry.
 func projectRoutineReportDelivery(ctx context.Context, store ExternalConversationStore, transport *ExternalConversationTransportService, run *AgentRun) (*ExternalConversationDelivery, error) {
 	if store == nil || transport == nil || run == nil || !isTerminalAgentRunStatus(run.Status) ||
-		run.Context[scheduledTaskContextKey] != true || run.Context[ConversationTaskContextKey] != nil || !runNeedsTerminalReporting(run) {
+		run.Context[scheduledTaskContextKey] != true || run.Context[ConversationTaskContextKey] != nil || !runNeedsTerminalReporting(run) ||
+		silentRoutineOccurrence(run) {
 		return nil, nil
 	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
@@ -74,12 +109,16 @@ func projectRoutineReportDelivery(ctx context.Context, store ExternalConversatio
 	if !containsConversationDeliveryOperation(adapter.Adapter.Delivery.Operations, capability.ConversationDeliveryMessageSend) {
 		return nil, nil
 	}
-	result, err := transport.Enqueue(ctx, EnqueueExternalConversationDeliveryRequest{
+	request := EnqueueExternalConversationDeliveryRequest{
 		Scope: run.Scope, EndpointID: endpoint.ID, Operation: capability.ConversationDeliveryMessageSend,
 		ConversationID: conversation.ID, ChannelMessageID: report.ID,
 		ExternalConversationID: externalConversationID,
 		IdempotencyKey:         key,
-	})
+	}
+	if header := routineReportHeader(run); header != "" {
+		request.Parameters = map[string]interface{}{routineReportHeaderParameter: header}
+	}
+	result, err := transport.Enqueue(ctx, request)
 	if err != nil {
 		return nil, ignoreUndeliverable(err)
 	}

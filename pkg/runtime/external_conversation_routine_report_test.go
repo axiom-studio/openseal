@@ -1,11 +1,13 @@
 package runtime
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/axiom-studio/openseal/pkg/capability"
 	"github.com/axiom-studio/openseal/pkg/runbook"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 type routineReportFixture struct {
@@ -14,6 +16,7 @@ type routineReportFixture struct {
 	conversation *Conversation
 	source       *ChannelMessage
 	worker       *RunTerminalReportingWorker
+	catalog      *skill.Catalog
 }
 
 // newRoutineReportFixture mirrors a Slack DM whose user message created a
@@ -68,7 +71,7 @@ func newRoutineReportFixture(t *testing.T, threadID string, mapSource bool) *rou
 	if err := worker.SetExternalConversationDelivery(catalog); err != nil {
 		t.Fatal(err)
 	}
-	return &routineReportFixture{store: store, endpoint: endpoint, conversation: conversation, source: source.Message, worker: worker}
+	return &routineReportFixture{store: store, endpoint: endpoint, conversation: conversation, source: source.Message, worker: worker, catalog: catalog}
 }
 
 // occurrence is one finished routine occurrence Run reporting to the
@@ -160,6 +163,55 @@ func TestRoutineReportDeliveryRequiresARoutineAndAnActiveProvenEndpoint(t *testi
 			}
 			if deliveries := f.deliveries(t); len(deliveries) != 0 {
 				t.Fatalf("report was delivered: %#v", deliveries)
+			}
+		})
+	}
+}
+
+// recordingMessageHost records the messages the delivery worker sends.
+type recordingMessageHost struct{ sent []string }
+
+func (h *recordingMessageHost) LookupExternalConversationDelivery(context.Context, ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryAcknowledgement, error) {
+	return &ExternalConversationDeliveryAcknowledgement{Status: ExternalConversationAcknowledgementNotFound}, nil
+}
+
+func (h *recordingMessageHost) DeliverExternalConversation(_ context.Context, req ExternalConversationDeliveryHostRequest) (*ExternalConversationDeliveryHostResult, error) {
+	h.sent = append(h.sent, req.Message.Content)
+	return &ExternalConversationDeliveryHostResult{Outcome: ExternalConversationDeliveryOutcomeDelivered, ProviderMessageID: "172.001"}, nil
+}
+
+// An event occurrence's mirrored report starts with its header line, because
+// the external chat has no trail of what started it. The HelloSeal message
+// keeps its plain text.
+func TestRoutineReportMirrorHeader(t *testing.T) {
+	for _, test := range []struct{ name, header, want string }{
+		{"event occurrence", "New email from Ana Ruiz: Invoice #4411 (+3 more)", "New email from Ana Ruiz: Invoice #4411 (+3 more)\nToday's digest: three stories."},
+		{"schedule occurrence", "", "Today's digest: three stories."},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := newRoutineReportFixture(t, "", true)
+			run := f.occurrence("routine-occurrence", true)
+			if test.header != "" {
+				run.Context[RoutineEventBatchContextKey] = "batch-1"
+				run.Context[RoutineEventHeaderContextKey] = test.header
+			}
+			if err := f.worker.project(t.Context(), run); err != nil {
+				t.Fatal(err)
+			}
+			report, err := f.store.FindChannelMessageByIdempotencyKey(t.Context(), run.Scope, f.conversation.ID, "run-reporting-terminal:"+run.ID+":"+string(run.Status))
+			if err != nil || report == nil || report.Content != "Today's digest: three stories." {
+				t.Fatalf("HelloSeal report = %#v, %v", report, err)
+			}
+			host := &recordingMessageHost{}
+			worker, err := NewExternalConversationDeliveryWorker(f.store, f.catalog, host, ExternalConversationDeliveryWorkerConfig{WorkerID: "mirror"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := worker.ProcessOne(t.Context(), f.endpoint.Scope); err != nil {
+				t.Fatal(err)
+			}
+			if len(host.sent) != 1 || host.sent[0] != test.want {
+				t.Fatalf("mirrored = %q, want %q", host.sent, test.want)
 			}
 		})
 	}

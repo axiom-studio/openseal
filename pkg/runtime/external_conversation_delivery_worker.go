@@ -222,6 +222,7 @@ func (w *ExternalConversationDeliveryWorker) deliver(ctx context.Context, delive
 			ThreadRootID: message.ThreadRootID, ReplyToMessageID: message.ID, CreatedAt: message.CreatedAt,
 		}
 	}
+	message = withRoutineReportHeader(delivery, message)
 	deliveryEndpoint := cloneExternalConversationEndpoint(endpoint)
 	if origin := strings.TrimSpace(delivery.ExternalConversationID); origin != "" {
 		deliveryEndpoint.Address = origin

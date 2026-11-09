@@ -176,6 +176,11 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 	if strings.TrimSpace(rootRunID) == "" || strings.TrimSpace(rootRunID) != run.ID {
 		return nil
 	}
+	if silentRoutineOccurrence(run) {
+		// The occurrence found nothing for the person and changed nothing;
+		// the UI shows it as a quiet line from the Run itself.
+		return nil
+	}
 	conversationID, _ := run.Context[conversationRunContextConversationID].(string)
 	rootMessageID, _ := run.Context[conversationRunContextTriggerID].(string)
 	conversationID, rootMessageID = strings.TrimSpace(conversationID), strings.TrimSpace(rootMessageID)
@@ -299,6 +304,16 @@ func projectTerminalRunReporting(ctx context.Context, store ConversationStore, r
 // routineOccurrenceRun reports whether run is an occurrence of a routine.
 func routineOccurrenceRun(run *AgentRun) bool {
 	return run != nil && run.Context[scheduledTaskContextKey] == true
+}
+
+// silentRoutineOccurrence reports a completed routine occurrence that
+// finished silent: it posts nothing in the chat or any mirror of it.
+func silentRoutineOccurrence(run *AgentRun) bool {
+	if !routineOccurrenceRun(run) || run.Kind == RunKindConversation || run.Status != AgentRunStatusCompleted {
+		return false
+	}
+	silent, _ := run.Output[finalOutputSilentKey].(bool)
+	return silent
 }
 
 func runReportsMilestone(run *AgentRun, milestone runbook.ReportingMilestone) bool {

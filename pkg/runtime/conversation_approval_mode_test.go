@@ -393,6 +393,13 @@ func proposeWithArgumentsForApprovalMode(t *testing.T, store *MemoryStore, coord
 // of a new Run acting for conversationID.
 func proposeLoopForApprovalMode(t *testing.T, store *MemoryStore, coordinator *ActionCoordinator, conversationID, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
 	t.Helper()
+	return proposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{"conversationId": conversationID}, action, key, arguments)
+}
+
+// proposeLoopForApprovalModeWithContext is proposeLoopForApprovalMode for a
+// new Run with this Context.
+func proposeLoopForApprovalModeWithContext(t *testing.T, store *MemoryStore, coordinator *ActionCoordinator, runContext map[string]interface{}, action, key string, arguments map[string]interface{}) (*ActionProposalResult, *loopProposalFixture, error) {
+	t.Helper()
 	ctx := context.Background()
 	scope := Scope{Kind: "tenant", ID: "one"}
 	now := time.Now().UTC()
@@ -400,7 +407,7 @@ func proposeLoopForApprovalMode(t *testing.T, store *MemoryStore, coordinator *A
 	portfolio.now = func() time.Time { return now }
 	run, err := portfolio.CreateAgentRun(ctx, CreateAgentRunRequest{
 		Scope: scope, Owner: ObjectiveOwner{Type: OwnerTypeAgent, ID: "assistant"}, AssignedAgentID: "assistant", Goal: key, Source: RunSourceObjective,
-		Context: map[string]interface{}{"conversationId": conversationID},
+		Context: runContext,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -591,5 +598,60 @@ func TestAlwaysReviewActionApprovalShowsInputsAndSurvivesSkip(t *testing.T) {
 	}))
 	if _, err := proposeWithArgumentsForApprovalMode(t, store, permissive, conversation.ID, "pay", "pay-allowed", arguments); err == nil {
 		t.Fatal("a policy allowed an always-reviewed action without review")
+	}
+}
+
+// An event routine occurrence, and a Run under one, is manual whatever the
+// conversation's mode, and loosening the mode never approves its checkpoints.
+func TestRoutineEventOccurrenceApprovalIsManual(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	conversation := approvalModeConversation(t, store)
+	service := NewConversationApprovalModeService(store)
+	coordinator := NewActionCoordinator(store, store, approvalModeCatalog(t), NewDefaultActionPolicy())
+	scope := conversation.Scope
+
+	occurrence := &AgentRun{ID: "occurrence", Scope: scope, RootRunID: "occurrence", Context: map[string]interface{}{
+		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-1",
+	}}
+	child := &AgentRun{ID: "child", Scope: scope, RootRunID: "occurrence", ParentRunID: "occurrence", Context: map[string]interface{}{}}
+	scheduled := &AgentRun{ID: "scheduled", Scope: scope, RootRunID: "scheduled", Context: map[string]interface{}{
+		"conversationId": conversation.ID, scheduledTaskContextKey: true,
+	}}
+	store.agentRuns[portfolioKey(scope, occurrence.ID)] = occurrence
+	for _, test := range []struct {
+		run  *AgentRun
+		want ConversationApprovalMode
+	}{
+		{occurrence, ConversationApprovalManual},
+		{child, ConversationApprovalManual},
+		{scheduled, ConversationApprovalAuto},
+	} {
+		id, mode, err := RunConversationApprovalMode(ctx, store, store, test.run)
+		if err != nil || id != conversation.ID || mode != test.want {
+			t.Fatalf("%s mode = %q %q %v, want %q", test.run.ID, id, mode, err, test.want)
+		}
+	}
+
+	// Under auto, an event occurrence's write still waits for review.
+	result, f, err := proposeLoopForApprovalModeWithContext(t, store, coordinator, map[string]interface{}{
+		"conversationId": conversation.ID, scheduledTaskContextKey: true, RoutineEventBatchContextKey: "batch-2",
+	}, "note", "event-run", map[string]interface{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Approval == nil {
+		t.Fatalf("event occurrence write ran without review: %#v", result.Call)
+	}
+	f.parkOnApproval(result.Approval.ID)
+	conversation = setApprovalModeForTest(t, service, conversation, ConversationApprovalManual).Conversation
+	plain := proposeForApprovalMode(t, store, coordinator, conversation, "note")
+
+	loosened := setApprovalModeForTest(t, service, conversation, ConversationApprovalSkip)
+	if len(loosened.ApprovedApprovalIDs) != 1 || loosened.ApprovedApprovalIDs[0] != plain.ID || loosened.ApprovalSweepIncomplete {
+		t.Fatalf("skip sweep = %#v", loosened)
+	}
+	if pending, _ := store.GetApproval(ctx, scope, result.Approval.ID); pending.Status != ApprovalStatusPending {
+		t.Fatalf("the sweep approved an event occurrence's checkpoint: %#v", pending)
 	}
 }
