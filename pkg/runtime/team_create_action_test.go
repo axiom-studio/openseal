@@ -16,7 +16,7 @@ import (
 )
 
 // teamCreateTestProvisioner creates Teams the way the Engine does: the
-// registry create, then Personal when the Team has no space.
+// registry create, then Default when the Team has no space.
 type teamCreateTestProvisioner struct {
 	*agentBuilderTestProvisioner
 	teams       *kernelteam.Registry
@@ -176,17 +176,17 @@ func TestTeamCreatePreview(t *testing.T) {
 	}
 }
 
-func TestTeamCreateResolvesSpaceToPersonal(t *testing.T) {
+func TestTeamCreateResolvesSpaceToDefault(t *testing.T) {
 	f := newTeamCreateFixture(t)
 	preview, arguments, err := f.proposeTeam(t, teamCreateArgumentsFor(""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	personal := PersonalSpaceID(f.scope)
-	if arguments["spaceId"] != personal {
-		t.Fatalf("spaceId = %#v, want %q", arguments["spaceId"], personal)
+	defaultSpace := DefaultSpaceID(f.scope)
+	if arguments["spaceId"] != defaultSpace {
+		t.Fatalf("spaceId = %#v, want %q", arguments["spaceId"], defaultSpace)
 	}
-	if space := preview["space"].(map[string]interface{}); space["id"] != personal || space["name"] != PersonalSpaceName {
+	if space := preview["space"].(map[string]interface{}); space["id"] != defaultSpace || space["name"] != DefaultSpaceName {
 		t.Fatalf("space = %#v", space)
 	}
 }
@@ -308,7 +308,7 @@ func TestTeamCreateExecutesLikeTheComposer(t *testing.T) {
 		!reflect.DeepEqual(deployment.Roster, wantRoster) {
 		t.Fatalf("deployment = %#v", deployment)
 	}
-	if !f.teamInSpace(t, f.salesID, teamID) || f.teamInSpace(t, PersonalSpaceID(f.scope), teamID) {
+	if !f.teamInSpace(t, f.salesID, teamID) || f.teamInSpace(t, DefaultSpaceID(f.scope), teamID) {
 		t.Fatal("team is not only in the reviewed space")
 	}
 
@@ -352,8 +352,8 @@ func TestTeamCreateWithoutPurposeUsesComposerDefault(t *testing.T) {
 	if definition.Purpose != "Launch Crew team" {
 		t.Fatalf("purpose = %q", definition.Purpose)
 	}
-	if !f.teamInSpace(t, PersonalSpaceID(f.scope), teamID) {
-		t.Fatal("team is not in Personal")
+	if !f.teamInSpace(t, DefaultSpaceID(f.scope), teamID) {
+		t.Fatal("team is not in Default")
 	}
 }
 

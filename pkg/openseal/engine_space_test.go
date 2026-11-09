@@ -24,12 +24,12 @@ func TestEngineSpacesUseDefaultStore(t *testing.T) {
 		t.Fatalf("conversation = %+v, err = %v", conversation, err)
 	}
 	spaces, err := engine.ListSpaces(t.Context(), scope)
-	if err != nil || len(spaces) != 2 || !spaces[0].IsPersonal || spaces[1].ID != space.ID {
+	if err != nil || len(spaces) != 2 || !spaces[0].IsDefault || spaces[1].ID != space.ID {
 		t.Fatalf("spaces = %+v, err = %v", spaces, err)
 	}
 }
 
-func TestEngineCreatedDeploymentsJoinPersonalWhenInNoSpace(t *testing.T) {
+func TestEngineCreatedDeploymentsJoinDefaultWhenInNoSpace(t *testing.T) {
 	ctx := t.Context()
 	engine, err := New()
 	if err != nil {
@@ -54,14 +54,14 @@ func TestEngineCreatedDeploymentsJoinPersonalWhenInNoSpace(t *testing.T) {
 		}
 	}
 	createAgent("first")
-	personal := runtime.PersonalSpaceID(spaceScope)
-	members, err := engine.ListSpaceMembers(ctx, spaceScope, personal)
+	defaultSpace := runtime.DefaultSpaceID(spaceScope)
+	members, err := engine.ListSpaceMembers(ctx, spaceScope, defaultSpace)
 	if err != nil || len(members) != 1 || members[0].ID != "first" || members[0].Type != runtime.SpaceMemberAgent {
-		t.Fatalf("personal members = %+v, err = %v", members, err)
+		t.Fatalf("defaultSpace members = %+v, err = %v", members, err)
 	}
-	// The Agent's control chat is in Personal as well.
+	// The Agent's control chat is in Default as well.
 	control, err := engine.ListConversations(ctx, runtime.ConversationFilter{Scope: spaceScope, Owner: &ObjectiveOwner{Type: OwnerTypeAgent, ID: "first"}})
-	if err != nil || len(control) != 1 || control[0].SpaceID != personal {
+	if err != nil || len(control) != 1 || control[0].SpaceID != defaultSpace {
 		t.Fatalf("control chats = %+v, err = %v", control, err)
 	}
 	teamDefinition, err := engine.RegisterTeamDefinition(ctx, &TeamDefinition{
@@ -78,11 +78,11 @@ func TestEngineCreatedDeploymentsJoinPersonalWhenInNoSpace(t *testing.T) {
 	}, "user", "operator", "create"); err != nil {
 		t.Fatal(err)
 	}
-	members, err = engine.ListSpaceMembers(ctx, spaceScope, personal)
+	members, err = engine.ListSpaceMembers(ctx, spaceScope, defaultSpace)
 	if err != nil || len(members) != 2 || members[1].ID != "crew-one" || members[1].Type != runtime.SpaceMemberTeam || members[1].Position != 1 {
-		t.Fatalf("personal members with team = %+v, err = %v", members, err)
+		t.Fatalf("defaultSpace members with team = %+v, err = %v", members, err)
 	}
-	// A host PUT into another space stays idempotent and keeps Personal.
+	// A host PUT into another space stays idempotent and keeps Default.
 	work, err := engine.CreateSpace(ctx, CreateSpaceRequest{Scope: spaceScope, Name: "Work", Look: runtime.SpaceLook("harbor")})
 	if err != nil {
 		t.Fatal(err)
@@ -95,8 +95,8 @@ func TestEngineCreatedDeploymentsJoinPersonalWhenInNoSpace(t *testing.T) {
 	if workMembers, err := engine.ListSpaceMembers(ctx, spaceScope, work.ID); err != nil || len(workMembers) != 1 {
 		t.Fatalf("work members = %+v, err = %v", workMembers, err)
 	}
-	// A deployment already in a space is not added to Personal.
-	if err := engine.DeleteSpaceMember(ctx, spaceScope, personal, runtime.SpaceMemberAgent, "first"); err != nil {
+	// A deployment already in a space is not added to Default.
+	if err := engine.DeleteSpaceMember(ctx, spaceScope, defaultSpace, runtime.SpaceMemberAgent, "first"); err != nil {
 		t.Fatal(err)
 	}
 	if placed, err := engine.spaces.EnsureMemberHasSpace(ctx, spaceScope, runtime.SpaceMemberAgent, "first"); err != nil || placed != nil {

@@ -19,7 +19,7 @@ type CreateConversationRequest struct {
 	Title  string
 	Origin *ConversationReference
 	// SpaceID places the conversation in a space. When empty the store uses
-	// the owner's first space, else the scope's Personal space.
+	// the owner's first space, else the scope's Default space.
 	SpaceID        string
 	IdempotencyKey string
 }

@@ -7,25 +7,25 @@ import (
 
 var _ SpaceStore = (*MemoryStore)(nil)
 
-func (s *MemoryStore) EnsurePersonalSpace(_ context.Context, scope Scope, now time.Time) (*Space, bool, error) {
+func (s *MemoryStore) EnsureDefaultSpace(_ context.Context, scope Scope, now time.Time) (*Space, bool, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, false, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	space, created := s.ensurePersonalSpaceLocked(scope, now)
+	space, created := s.ensureDefaultSpaceLocked(scope, now)
 	return cloneSpace(space), created, nil
 }
 
-func (s *MemoryStore) ensurePersonalSpaceLocked(scope Scope, now time.Time) (*Space, bool) {
-	id := PersonalSpaceID(scope)
+func (s *MemoryStore) ensureDefaultSpaceLocked(scope Scope, now time.Time) (*Space, bool) {
+	id := DefaultSpaceID(scope)
 	if existing := s.spaces[scope][id]; existing != nil {
 		return existing, false
 	}
 	if s.spaces[scope] == nil {
 		s.spaces[scope] = make(map[string]*Space)
 	}
-	space := newPersonalSpace(scope, now)
+	space := newDefaultSpace(scope, now)
 	s.spaces[scope][id] = space
 	return space, true
 }
@@ -43,7 +43,7 @@ func (s *MemoryStore) CreateSpace(_ context.Context, space *Space) (*Space, erro
 		return nil, ErrInvalidSpace
 	}
 	created := cloneSpace(space)
-	created.IsPersonal = false
+	created.IsDefault = false
 	created.Position = 0
 	for _, existing := range s.spaces[space.Scope] {
 		if existing.Position >= created.Position {
@@ -117,13 +117,13 @@ func (s *MemoryStore) DeleteSpace(_ context.Context, scope Scope, spaceID string
 	if space == nil {
 		return ErrSpaceNotFound
 	}
-	if space.IsPersonal {
-		return ErrPersonalSpaceProtected
+	if space.IsDefault {
+		return ErrDefaultSpaceProtected
 	}
-	personal, _ := s.ensurePersonalSpaceLocked(scope, now)
+	defaultSpace, _ := s.ensureDefaultSpaceLocked(scope, now)
 	for _, conversation := range s.conversations {
 		if conversation.Scope == scope && conversation.SpaceID == spaceID {
-			conversation.SpaceID = personal.ID
+			conversation.SpaceID = defaultSpace.ID
 		}
 	}
 	kept := make([]*SpaceMember, 0, len(s.spaceMembers[scope]))
@@ -139,7 +139,7 @@ func (s *MemoryStore) DeleteSpace(_ context.Context, scope Scope, spaceID string
 	delete(s.spaces[scope], spaceID)
 	for _, member := range dropped {
 		if !s.hasSpaceMembershipLocked(scope, member.Type, member.ID) {
-			s.appendSpaceMemberLocked(scope, &SpaceMember{SpaceID: personal.ID, Type: member.Type, ID: member.ID, AddedAt: now})
+			s.appendSpaceMemberLocked(scope, &SpaceMember{SpaceID: defaultSpace.ID, Type: member.Type, ID: member.ID, AddedAt: now})
 		}
 	}
 	return nil
@@ -217,7 +217,7 @@ func (s *MemoryStore) DeleteSpaceMember(_ context.Context, scope Scope, spaceID 
 }
 
 // resolveConversationSpaceLocked fills an empty SpaceID with the owner's
-// first space, else Personal, and verifies an explicit one exists.
+// first space, else Default, and verifies an explicit one exists.
 func (s *MemoryStore) resolveConversationSpaceLocked(conversation *Conversation) error {
 	scope := conversation.Scope
 	if conversation.SpaceID != "" {
@@ -244,7 +244,7 @@ func (s *MemoryStore) resolveConversationSpaceLocked(conversation *Conversation)
 		first = pair[0]
 	}
 	if first == nil {
-		first, _ = s.ensurePersonalSpaceLocked(scope, conversation.CreatedAt)
+		first, _ = s.ensureDefaultSpaceLocked(scope, conversation.CreatedAt)
 	}
 	conversation.SpaceID = first.ID
 	return nil
@@ -256,6 +256,6 @@ func (s *MemoryStore) EnsureMemberHasSpace(_ context.Context, scope Scope, membe
 	if s.hasSpaceMembershipLocked(scope, memberType, memberID) {
 		return nil, nil
 	}
-	personal, _ := s.ensurePersonalSpaceLocked(scope, now)
-	return cloneSpaceMember(s.appendSpaceMemberLocked(scope, &SpaceMember{SpaceID: personal.ID, Type: memberType, ID: memberID, AddedAt: now})), nil
+	defaultSpace, _ := s.ensureDefaultSpaceLocked(scope, now)
+	return cloneSpaceMember(s.appendSpaceMemberLocked(scope, &SpaceMember{SpaceID: defaultSpace.ID, Type: memberType, ID: memberID, AddedAt: now})), nil
 }

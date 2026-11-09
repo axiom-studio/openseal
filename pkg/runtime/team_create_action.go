@@ -89,7 +89,7 @@ type TeamCreateActionValidator struct {
 
 // NewTeamCreateActionValidator needs the Agent and Team registries and the
 // spaces. conversations and runs place the Team in the conversation's space;
-// without them it goes to Personal.
+// without them it goes to Default.
 func NewTeamCreateActionValidator(
 	agents *kernelagent.Registry,
 	teams *kernelteam.Registry,
@@ -106,7 +106,7 @@ func NewTeamCreateActionValidator(
 }
 
 // ResolveActionProposalArguments fills spaceId with the Run's conversation
-// space, else Personal.
+// space, else Default.
 func (v *TeamCreateActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if !isTeamCreateAction(input.Bound) {
 		return nil, false, nil
@@ -432,8 +432,8 @@ func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope Scop
 	if spaceID == "" {
 		return nil, errors.New("create_team requires a space")
 	}
-	if spaceID == PersonalSpaceID(scope) {
-		return &Space{ID: spaceID, Scope: scope, Name: PersonalSpaceName, IsPersonal: true}, nil
+	if spaceID == DefaultSpaceID(scope) {
+		return &Space{ID: spaceID, Scope: scope, Name: DefaultSpaceName, IsDefault: true}, nil
 	}
 	spaces, err := d.provision.ListSpaces(ctx, scope)
 	if err != nil {
@@ -447,19 +447,19 @@ func (d *AgentBuilderActionDispatcher) teamSpace(ctx context.Context, scope Scop
 	return nil, fmt.Errorf("space %q no longer exists; propose create_team again", spaceID)
 }
 
-// placeTeamInSpace adds the Team to the reviewed space. Outside Personal it
-// then leaves Personal, where the deployment create placed it.
+// placeTeamInSpace adds the Team to the reviewed space. Outside Default it
+// then leaves Default, where the deployment create placed it.
 func (d *AgentBuilderActionDispatcher) placeTeamInSpace(ctx context.Context, scope Scope, space *Space, teamID string) error {
 	if _, _, err := d.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
 		Scope: scope, SpaceID: space.ID, Type: SpaceMemberTeam, MemberID: teamID,
 	}); err != nil {
 		return err
 	}
-	personal := PersonalSpaceID(scope)
-	if space.ID == personal {
+	defaultSpace := DefaultSpaceID(scope)
+	if space.ID == defaultSpace {
 		return nil
 	}
-	if err := d.provision.DeleteSpaceMember(ctx, scope, personal, SpaceMemberTeam, teamID); err != nil && !errors.Is(err, ErrSpaceNotFound) {
+	if err := d.provision.DeleteSpaceMember(ctx, scope, defaultSpace, SpaceMemberTeam, teamID); err != nil && !errors.Is(err, ErrSpaceNotFound) {
 		return err
 	}
 	return nil

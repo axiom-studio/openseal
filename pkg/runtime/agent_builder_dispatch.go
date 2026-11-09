@@ -18,7 +18,7 @@ import (
 // AgentProvisioner is the Engine side of the builder actions: creating
 // deployments and placing them in spaces. *openseal.Engine implements it.
 type AgentProvisioner interface {
-	// CreateAgentDeployment creates the deployment, places it in Personal
+	// CreateAgentDeployment creates the deployment, places it in Default
 	// when it has no space and creates its control conversation.
 	CreateAgentDeployment(ctx context.Context, deployment *kernelagent.AgentDeployment, actorType, actorID, reason string) (*kernelagent.AgentDeployment, *kernelagent.DefinitionActivation, error)
 	// EnsureAgentControlConversation returns the Agent's control
@@ -362,8 +362,8 @@ func (d *AgentBuilderActionDispatcher) createSpace(ctx context.Context, scope Sc
 	if spaceID == "" {
 		return nil, errors.New("create_agent requires a space")
 	}
-	if spaceID == PersonalSpaceID(scope) {
-		return &Space{ID: spaceID, Scope: scope, Name: PersonalSpaceName, IsPersonal: true}, nil
+	if spaceID == DefaultSpaceID(scope) {
+		return &Space{ID: spaceID, Scope: scope, Name: DefaultSpaceName, IsDefault: true}, nil
 	}
 	spaces, err := d.provision.ListSpaces(ctx, scope)
 	if err != nil {
@@ -460,19 +460,19 @@ func (d *AgentBuilderActionDispatcher) firstAgentActivation(ctx context.Context,
 	return &first, nil
 }
 
-// placeAgentInSpace adds the Agent to the reviewed space. Outside Personal it
-// then leaves Personal, where the deployment create placed it.
+// placeAgentInSpace adds the Agent to the reviewed space. Outside Default it
+// then leaves Default, where the deployment create placed it.
 func (d *AgentBuilderActionDispatcher) placeAgentInSpace(ctx context.Context, scope Scope, space *Space, deploymentID string) error {
 	if _, _, err := d.provision.PutSpaceMember(ctx, PutSpaceMemberRequest{
 		Scope: scope, SpaceID: space.ID, Type: SpaceMemberAgent, MemberID: deploymentID,
 	}); err != nil {
 		return err
 	}
-	personal := PersonalSpaceID(scope)
-	if space.ID == personal {
+	defaultSpace := DefaultSpaceID(scope)
+	if space.ID == defaultSpace {
 		return nil
 	}
-	if err := d.provision.DeleteSpaceMember(ctx, scope, personal, SpaceMemberAgent, deploymentID); err != nil && !errors.Is(err, ErrSpaceNotFound) {
+	if err := d.provision.DeleteSpaceMember(ctx, scope, defaultSpace, SpaceMemberAgent, deploymentID); err != nil && !errors.Is(err, ErrSpaceNotFound) {
 		return err
 	}
 	return nil

@@ -171,7 +171,7 @@ func newAgentBuilderFixture(t *testing.T, withHost bool) *agentBuilderFixture {
 	}
 
 	spaces := NewSpaceService(NewMemoryStore())
-	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: PersonalSpaceLook, CreatedBy: "operator"})
+	sales, err := spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: scope, Name: "Sales", Look: DefaultSpaceLook, CreatedBy: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestAgentBuilderCreateResolvesSpaceToPersonal(t *testing.T) {
 		t.Fatal(err)
 	}
 	space, _ := preview["space"].(map[string]interface{})
-	if space["id"] != PersonalSpaceID(fixture.scope) || space["name"] != PersonalSpaceName {
+	if space["id"] != DefaultSpaceID(fixture.scope) || space["name"] != DefaultSpaceName {
 		t.Fatalf("space = %#v", space)
 	}
 	if model, _ := preview["model"].(map[string]interface{}); model["id"] != "" {

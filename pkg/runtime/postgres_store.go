@@ -469,6 +469,9 @@ func (s *PostgresStore) migrate(ctx context.Context) error {
 	if err := s.migrateRemoveKernelProjects(ctx, tx); err != nil {
 		return fmt.Errorf("kernel Project removal migration: %w", err)
 	}
+	if err := s.migrateDefaultSpace(ctx, tx); err != nil {
+		return fmt.Errorf("Default space migration: %w", err)
+	}
 	var schemaVersion int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM `+s.table("schema_migrations")).Scan(&schemaVersion); err != nil {
 		return err

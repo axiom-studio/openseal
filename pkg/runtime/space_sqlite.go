@@ -12,16 +12,19 @@ var _ SpaceStore = (*SQLiteStore)(nil)
 
 // migrateSpacesSQLite mirrors PostgreSQL migration 67. SQLite cannot add a
 // NOT NULL constraint to an existing column, so conversations.space_id is
-// added with an empty default and backfilled to Personal in the same step.
+// added with an empty default and backfilled to Default in the same step.
 func migrateSpacesSQLite(db *sql.DB) error {
+	if err := migrateDefaultSpaceSQLite(db); err != nil {
+		return err
+	}
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS spaces (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
-			name TEXT NOT NULL, look TEXT NOT NULL, position INTEGER NOT NULL, is_personal INTEGER NOT NULL,
+			name TEXT NOT NULL, look TEXT NOT NULL, position INTEGER NOT NULL, is_default INTEGER NOT NULL,
 			created_by TEXT NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, id)
 		);
-		CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_personal ON spaces(scope_kind, scope_id) WHERE is_personal = 1;
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_default ON spaces(scope_kind, scope_id) WHERE is_default = 1;
 		CREATE TABLE IF NOT EXISTS space_members (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, space_id TEXT NOT NULL,
 			member_type TEXT NOT NULL, member_id TEXT NOT NULL, position INTEGER NOT NULL, added_at DATETIME NOT NULL,
@@ -78,10 +81,10 @@ func backfillSpacesSQLite(tx *sql.Tx, now time.Time) error {
 		return err
 	}
 	for _, scope := range scopes {
-		personal := newPersonalSpace(scope, now)
+		defaultSpace := newDefaultSpace(scope, now)
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			personal.ID, scope.Kind, scope.ID, personal.Name, personal.Look, personal.Position, personal.IsPersonal,
-			personal.CreatedBy, personal.CreatedAt, personal.UpdatedAt); err != nil {
+			defaultSpace.ID, scope.Kind, scope.ID, defaultSpace.Name, defaultSpace.Look, defaultSpace.Position, defaultSpace.IsDefault,
+			defaultSpace.CreatedBy, defaultSpace.CreatedAt, defaultSpace.UpdatedAt); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO space_members (scope_kind, scope_id, space_id, member_type, member_id, position, added_at)
@@ -91,11 +94,11 @@ func backfillSpacesSQLite(tx *sql.Tx, now time.Time) error {
 					WHERE scope_kind = ? AND scope_id = ?
 				UNION ALL SELECT scope_kind, scope_id, id, updated_at, 'team', 1 FROM team_deployments
 					WHERE scope_kind = ? AND scope_id = ?
-			)`, personal.ID, now, scope.Kind, scope.ID, scope.Kind, scope.ID); err != nil {
+			)`, defaultSpace.ID, now, scope.Kind, scope.ID, scope.Kind, scope.ID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`UPDATE conversations SET space_id = ?, payload = json_set(payload, '$.spaceId', ?)
-			WHERE scope_kind = ? AND scope_id = ? AND space_id = ''`, personal.ID, personal.ID, scope.Kind, scope.ID); err != nil {
+			WHERE scope_kind = ? AND scope_id = ? AND space_id = ''`, defaultSpace.ID, defaultSpace.ID, scope.Kind, scope.ID); err != nil {
 			return err
 		}
 	}
@@ -110,7 +113,7 @@ type sqliteSpaceExecer interface {
 func scanSQLiteSpace(row interface{ Scan(...interface{}) error }) (*Space, error) {
 	var space Space
 	if err := row.Scan(&space.ID, &space.Scope.Kind, &space.Scope.ID, &space.Name, &space.Look, &space.Position,
-		&space.IsPersonal, &space.CreatedBy, &space.CreatedAt, &space.UpdatedAt); err != nil {
+		&space.IsDefault, &space.CreatedBy, &space.CreatedAt, &space.UpdatedAt); err != nil {
 		return nil, err
 	}
 	space.CreatedAt, space.UpdatedAt = space.CreatedAt.UTC(), space.UpdatedAt.UTC()
@@ -144,10 +147,10 @@ func listSQLiteSpaces(ctx context.Context, queryer sqliteConversationQueryer, sc
 	return result, rows.Err()
 }
 
-func ensureSQLitePersonalSpace(ctx context.Context, conn sqliteSpaceExecer, scope Scope, now time.Time) (*Space, bool, error) {
-	space := newPersonalSpace(scope, now)
+func ensureSQLiteDefaultSpace(ctx context.Context, conn sqliteSpaceExecer, scope Scope, now time.Time) (*Space, bool, error) {
+	space := newDefaultSpace(scope, now)
 	result, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		space.ID, scope.Kind, scope.ID, space.Name, space.Look, space.Position, space.IsPersonal, space.CreatedBy, space.CreatedAt, space.UpdatedAt)
+		space.ID, scope.Kind, scope.ID, space.Name, space.Look, space.Position, space.IsDefault, space.CreatedBy, space.CreatedAt, space.UpdatedAt)
 	if err != nil {
 		return nil, false, err
 	}
@@ -177,7 +180,7 @@ func (s *SQLiteStore) withSQLiteSpaceTx(ctx context.Context, fn func(*sql.Conn) 
 	return nil
 }
 
-func (s *SQLiteStore) EnsurePersonalSpace(ctx context.Context, scope Scope, now time.Time) (*Space, bool, error) {
+func (s *SQLiteStore) EnsureDefaultSpace(ctx context.Context, scope Scope, now time.Time) (*Space, bool, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -185,7 +188,7 @@ func (s *SQLiteStore) EnsurePersonalSpace(ctx context.Context, scope Scope, now 
 	var created bool
 	err := s.withSQLiteSpaceTx(ctx, func(conn *sql.Conn) error {
 		var err error
-		space, created, err = ensureSQLitePersonalSpace(ctx, conn, scope, now)
+		space, created, err = ensureSQLiteDefaultSpace(ctx, conn, scope, now)
 		return err
 	})
 	return space, created, err
@@ -196,14 +199,14 @@ func (s *SQLiteStore) CreateSpace(ctx context.Context, space *Space) (*Space, er
 		return nil, err
 	}
 	created := cloneSpace(space)
-	created.IsPersonal = false
+	created.IsDefault = false
 	err := s.withSQLiteSpaceTx(ctx, func(conn *sql.Conn) error {
 		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM spaces WHERE scope_kind = ? AND scope_id = ?`,
 			space.Scope.Kind, space.Scope.ID).Scan(&created.Position); err != nil {
 			return err
 		}
 		_, err := conn.ExecContext(ctx, `INSERT INTO spaces (`+postgresSpaceColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			created.ID, created.Scope.Kind, created.Scope.ID, created.Name, created.Look, created.Position, created.IsPersonal,
+			created.ID, created.Scope.Kind, created.Scope.ID, created.Name, created.Look, created.Position, created.IsDefault,
 			created.CreatedBy, created.CreatedAt, created.UpdatedAt)
 		if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return ErrInvalidSpace
@@ -271,15 +274,15 @@ func (s *SQLiteStore) DeleteSpace(ctx context.Context, scope Scope, spaceID stri
 		if err != nil {
 			return err
 		}
-		if space.IsPersonal {
-			return ErrPersonalSpaceProtected
+		if space.IsDefault {
+			return ErrDefaultSpaceProtected
 		}
-		personal, _, err := ensureSQLitePersonalSpace(ctx, conn, scope, now)
+		defaultSpace, _, err := ensureSQLiteDefaultSpace(ctx, conn, scope, now)
 		if err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, `UPDATE conversations SET space_id = ?, payload = json_set(payload, '$.spaceId', ?)
-			WHERE scope_kind = ? AND scope_id = ? AND space_id = ?`, personal.ID, personal.ID, scope.Kind, scope.ID, spaceID); err != nil {
+			WHERE scope_kind = ? AND scope_id = ? AND space_id = ?`, defaultSpace.ID, defaultSpace.ID, scope.Kind, scope.ID, spaceID); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, `INSERT INTO space_members (scope_kind, scope_id, space_id, member_type, member_id, position, added_at)
@@ -290,7 +293,7 @@ func (s *SQLiteStore) DeleteSpace(ctx context.Context, scope Scope, spaceID stri
 			WHERE m.scope_kind = ? AND m.scope_id = ? AND m.space_id = ? AND NOT EXISTS (
 				SELECT 1 FROM space_members other WHERE other.scope_kind = m.scope_kind AND other.scope_id = m.scope_id
 					AND other.member_type = m.member_type AND other.member_id = m.member_id AND other.space_id <> ?)`,
-			personal.ID, scope.Kind, scope.ID, personal.ID, now, scope.Kind, scope.ID, spaceID, spaceID); err != nil {
+			defaultSpace.ID, scope.Kind, scope.ID, defaultSpace.ID, now, scope.Kind, scope.ID, spaceID, spaceID); err != nil {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, `DELETE FROM space_members WHERE scope_kind = ? AND scope_id = ? AND space_id = ?`,
@@ -391,11 +394,11 @@ func resolveSQLiteConversationSpace(ctx context.Context, conn *sql.Conn, convers
 		ORDER BY sp.position, sp.created_at, sp.id LIMIT 1`, scope.Kind, scope.ID, string(conversation.Owner.Type),
 		strings.TrimSpace(conversation.Owner.ID)).Scan(&spaceID)
 	if errors.Is(err, sql.ErrNoRows) {
-		personal, _, ensureErr := ensureSQLitePersonalSpace(ctx, conn, scope, conversation.CreatedAt)
+		defaultSpace, _, ensureErr := ensureSQLiteDefaultSpace(ctx, conn, scope, conversation.CreatedAt)
 		if ensureErr != nil {
 			return ensureErr
 		}
-		spaceID, err = personal.ID, nil
+		spaceID, err = defaultSpace.ID, nil
 	}
 	if err != nil {
 		return err
@@ -413,13 +416,13 @@ func (s *SQLiteStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, mem
 			scope.Kind, scope.ID, memberType, memberID).Scan(&placed); err != nil || placed {
 			return err
 		}
-		personal, _, err := ensureSQLitePersonalSpace(ctx, conn, scope, now)
+		defaultSpace, _, err := ensureSQLiteDefaultSpace(ctx, conn, scope, now)
 		if err != nil {
 			return err
 		}
-		member = &SpaceMember{SpaceID: personal.ID, Type: memberType, ID: memberID, AddedAt: now}
+		member = &SpaceMember{SpaceID: defaultSpace.ID, Type: memberType, ID: memberID, AddedAt: now}
 		if err := conn.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM space_members
-			WHERE scope_kind = ? AND scope_id = ? AND space_id = ?`, scope.Kind, scope.ID, personal.ID).Scan(&member.Position); err != nil {
+			WHERE scope_kind = ? AND scope_id = ? AND space_id = ?`, scope.Kind, scope.ID, defaultSpace.ID).Scan(&member.Position); err != nil {
 			return err
 		}
 		_, err = conn.ExecContext(ctx, `INSERT INTO space_members (scope_kind, scope_id, `+postgresSpaceMemberColumns+`)

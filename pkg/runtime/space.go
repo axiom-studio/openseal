@@ -16,16 +16,16 @@ import (
 )
 
 // A Space groups a scope's agents, teams and conversations under a name and a
-// look. Every scope has exactly one Personal space; it is created on demand,
+// look. Every scope has exactly one Default space; it is created on demand,
 // cannot be deleted, and receives the conversations of deleted spaces.
 var (
-	ErrSpaceNotFound          = errors.New("space not found")
-	ErrInvalidSpace           = errors.New("invalid space")
-	ErrPersonalSpaceProtected = errors.New("the Personal space cannot be deleted")
+	ErrSpaceNotFound         = errors.New("space not found")
+	ErrInvalidSpace          = errors.New("invalid space")
+	ErrDefaultSpaceProtected = errors.New("the Default space cannot be deleted")
 )
 
 const (
-	PersonalSpaceName = "Personal"
+	DefaultSpaceName  = "Default"
 	maxSpaceNameRunes = 60
 )
 
@@ -34,23 +34,23 @@ const (
 // that doesn't know a look shows its default.
 type SpaceLook string
 
-// PersonalSpaceLook is the look the Personal space starts with.
-const PersonalSpaceLook SpaceLook = "tidepool"
+// DefaultSpaceLook is the look the Default space starts with.
+const DefaultSpaceLook SpaceLook = "tidepool"
 
 var spaceLookPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{1,31}$`)
 
 func (l SpaceLook) Valid() bool { return spaceLookPattern.MatchString(string(l)) }
 
 type Space struct {
-	ID         string    `json:"id"`
-	Scope      Scope     `json:"scope"`
-	Name       string    `json:"name"`
-	Look       SpaceLook `json:"look"`
-	Position   int       `json:"position"`
-	IsPersonal bool      `json:"isPersonal"`
-	CreatedBy  string    `json:"createdBy"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID        string    `json:"id"`
+	Scope     Scope     `json:"scope"`
+	Name      string    `json:"name"`
+	Look      SpaceLook `json:"look"`
+	Position  int       `json:"position"`
+	IsDefault bool      `json:"isDefault"`
+	CreatedBy string    `json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 }
 
 func (s *Space) Validate() error {
@@ -124,22 +124,22 @@ type SpacePatch struct {
 
 // SpaceStore persists spaces and their members. Stores also resolve a
 // conversation's space on create when the caller leaves it empty: the owner's
-// first space by space position, else the scope's Personal space.
+// first space by space position, else the scope's Default space.
 type SpaceStore interface {
-	EnsurePersonalSpace(ctx context.Context, scope Scope, now time.Time) (*Space, bool, error)
+	EnsureDefaultSpace(ctx context.Context, scope Scope, now time.Time) (*Space, bool, error)
 	CreateSpace(ctx context.Context, space *Space) (*Space, error)
 	GetSpace(ctx context.Context, scope Scope, spaceID string) (*Space, error)
 	ListSpaces(ctx context.Context, scope Scope) ([]*Space, error)
 	UpdateSpace(ctx context.Context, scope Scope, spaceID string, patch SpacePatch, now time.Time) (*Space, error)
-	// DeleteSpace moves the space's conversations to Personal, drops its
-	// members, and adds any deployment left in no space to Personal.
+	// DeleteSpace moves the space's conversations to Default, drops its
+	// members, and adds any deployment left in no space to Default.
 	DeleteSpace(ctx context.Context, scope Scope, spaceID string, now time.Time) error
 	ListSpaceMembers(ctx context.Context, scope Scope, spaceID string) ([]*SpaceMember, error)
 	// PutSpaceMember is idempotent: an existing member is returned unchanged.
 	PutSpaceMember(ctx context.Context, scope Scope, member *SpaceMember) (*SpaceMember, bool, error)
 	DeleteSpaceMember(ctx context.Context, scope Scope, spaceID string, memberType SpaceMemberType, memberID string) error
 	// EnsureMemberHasSpace adds a deployment that is in no space to the
-	// scope's Personal space, creating Personal when needed. It returns the
+	// scope's Default space, creating Default when needed. It returns the
 	// new membership, or nil when the deployment already had a space.
 	EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string, now time.Time) (*SpaceMember, error)
 }
@@ -176,25 +176,25 @@ func NewSpaceService(store SpaceStore) *SpaceService {
 	return &SpaceService{store: store, now: time.Now, newID: uuid.NewString}
 }
 
-// ListSpaces ensures the scope's Personal space and returns every space by
+// ListSpaces ensures the scope's Default space and returns every space by
 // position.
 func (s *SpaceService) ListSpaces(ctx context.Context, scope Scope) ([]*Space, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, err
 	}
-	if _, _, err := s.store.EnsurePersonalSpace(ctx, scope, s.now().UTC()); err != nil {
+	if _, _, err := s.store.EnsureDefaultSpace(ctx, scope, s.now().UTC()); err != nil {
 		return nil, err
 	}
 	return s.store.ListSpaces(ctx, scope)
 }
 
-// EnsurePersonalSpace returns the scope's Personal space and whether this call
+// EnsureDefaultSpace returns the scope's Default space and whether this call
 // created it.
-func (s *SpaceService) EnsurePersonalSpace(ctx context.Context, scope Scope) (*Space, bool, error) {
+func (s *SpaceService) EnsureDefaultSpace(ctx context.Context, scope Scope) (*Space, bool, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, false, err
 	}
-	return s.store.EnsurePersonalSpace(ctx, scope, s.now().UTC())
+	return s.store.EnsureDefaultSpace(ctx, scope, s.now().UTC())
 }
 
 func (s *SpaceService) GetSpace(ctx context.Context, scope Scope, spaceID string) (*Space, error) {
@@ -213,7 +213,7 @@ func (s *SpaceService) CreateSpace(ctx context.Context, req CreateSpaceRequest) 
 	if err := space.Validate(); err != nil {
 		return nil, err
 	}
-	if _, _, err := s.store.EnsurePersonalSpace(ctx, req.Scope, now); err != nil {
+	if _, _, err := s.store.EnsureDefaultSpace(ctx, req.Scope, now); err != nil {
 		return nil, err
 	}
 	return s.store.CreateSpace(ctx, space)
@@ -278,7 +278,7 @@ func (s *SpaceService) DeleteSpaceMember(ctx context.Context, scope Scope, space
 }
 
 // EnsureMemberHasSpace places a newly created Agent or Team deployment in
-// Personal unless it already belongs to a space, so no deployment is left in
+// Default unless it already belongs to a space, so no deployment is left in
 // no space.
 func (s *SpaceService) EnsureMemberHasSpace(ctx context.Context, scope Scope, memberType SpaceMemberType, memberID string) (*SpaceMember, error) {
 	if err := scope.Validate(); err != nil {
@@ -291,17 +291,17 @@ func (s *SpaceService) EnsureMemberHasSpace(ctx context.Context, scope Scope, me
 	return s.store.EnsureMemberHasSpace(ctx, scope, memberType, memberID, s.now().UTC())
 }
 
-// PersonalSpaceID is the deterministic id of a scope's Personal space. The
+// DefaultSpaceID is the deterministic id of a scope's Default space. The
 // PostgreSQL backfill computes the same value with md5().
-func PersonalSpaceID(scope Scope) string {
+func DefaultSpaceID(scope Scope) string {
 	digest := md5.Sum([]byte(scope.Kind + ":" + scope.ID))
-	return "personal-" + hex.EncodeToString(digest[:])
+	return "default-" + hex.EncodeToString(digest[:])
 }
 
-func newPersonalSpace(scope Scope, now time.Time) *Space {
+func newDefaultSpace(scope Scope, now time.Time) *Space {
 	return &Space{
-		ID: PersonalSpaceID(scope), Scope: scope, Name: PersonalSpaceName, Look: PersonalSpaceLook,
-		Position: 0, IsPersonal: true, CreatedBy: "system", CreatedAt: now, UpdatedAt: now,
+		ID: DefaultSpaceID(scope), Scope: scope, Name: DefaultSpaceName, Look: DefaultSpaceLook,
+		Position: 0, IsDefault: true, CreatedBy: "system", CreatedAt: now, UpdatedAt: now,
 	}
 }
 

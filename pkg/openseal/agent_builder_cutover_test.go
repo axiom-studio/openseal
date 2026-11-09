@@ -117,7 +117,7 @@ func seedCutoverDraftStore(t *testing.T) string {
 	now := time.Now().UTC()
 	rows := []cutoverTestRow{
 		{id: "cs-create", status: "ready", mode: "create", name: "Trip planner",
-			prompt: "Create the profile of exactly one personal agent from this request: one agent. Request: Help me plan trips"},
+			prompt: "Create the profile of exactly one defaultSpace agent from this request: one agent. Request: Help me plan trips"},
 		{id: "cs-amend", parentID: "cs-create", status: "ready", mode: "amend", name: "Trip planner", prompt: "Revise. Request: Make it friendlier"},
 		{id: "cs-review", status: "review", mode: "create", name: "Inbox watcher", prompt: "Request: Watch my inbox", deployment: "inbox-agent"},
 		{id: "cs-applied", status: "applied", mode: "create", name: "Old", prompt: "Request: Old"},
@@ -225,18 +225,18 @@ func TestAgentBuilderCutoverConvertsEachDraftAtStart(t *testing.T) {
 	if err := createCutoverAgent(ctx, engine, builderCutoverTestScope, "inbox-agent"); err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: builderCutoverTestScope, Name: "Inbox", Look: runtime.PersonalSpaceLook, CreatedBy: "ana"})
+	inbox, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: builderCutoverTestScope, Name: "Inbox", Look: runtime.DefaultSpaceLook, CreatedBy: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := engine.PutSpaceMember(ctx, runtime.PutSpaceMemberRequest{Scope: builderCutoverTestScope, SpaceID: inbox.ID, Type: runtime.SpaceMemberAgent, MemberID: "inbox-agent"}); err != nil {
 		t.Fatal(err)
 	}
-	personal, _, err := engine.EnsurePersonalSpace(ctx, builderCutoverTestScope)
+	defaultSpace, _, err := engine.EnsureDefaultSpace(ctx, builderCutoverTestScope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = engine.DeleteSpaceMember(ctx, builderCutoverTestScope, personal.ID, runtime.SpaceMemberAgent, "inbox-agent")
+	_ = engine.DeleteSpaceMember(ctx, builderCutoverTestScope, defaultSpace.ID, runtime.SpaceMemberAgent, "inbox-agent")
 
 	startCutoverEngine(t, engine)
 

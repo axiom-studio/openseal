@@ -1503,7 +1503,7 @@ var (
 	ErrConversationNotFound                 = runtime.ErrConversationNotFound
 	ErrSpaceNotFound                        = runtime.ErrSpaceNotFound
 	ErrInvalidSpace                         = runtime.ErrInvalidSpace
-	ErrPersonalSpaceProtected               = runtime.ErrPersonalSpaceProtected
+	ErrDefaultSpaceProtected                = runtime.ErrDefaultSpaceProtected
 	ErrChannelMessageNotFound               = runtime.ErrChannelMessageNotFound
 	ErrParticipationRoundNotFound           = runtime.ErrParticipationRoundNotFound
 	ErrInvalidConversation                  = runtime.ErrInvalidConversation
@@ -4035,7 +4035,7 @@ func (e *Engine) ListConversations(ctx context.Context, filter runtime.Conversat
 
 var errSpacesUnsupported = errors.New("spaces are not supported by this store")
 
-// ListSpaces returns the scope's spaces by position, creating its Personal
+// ListSpaces returns the scope's spaces by position, creating its Default
 // space on first use.
 func (e *Engine) ListSpaces(ctx context.Context, scope runtime.Scope) ([]*runtime.Space, error) {
 	if e.spaces == nil {
@@ -4044,13 +4044,13 @@ func (e *Engine) ListSpaces(ctx context.Context, scope runtime.Scope) ([]*runtim
 	return e.spaces.ListSpaces(ctx, scope)
 }
 
-// EnsurePersonalSpace returns the scope's Personal space and whether this call
+// EnsureDefaultSpace returns the scope's Default space and whether this call
 // created it.
-func (e *Engine) EnsurePersonalSpace(ctx context.Context, scope runtime.Scope) (*runtime.Space, bool, error) {
+func (e *Engine) EnsureDefaultSpace(ctx context.Context, scope runtime.Scope) (*runtime.Space, bool, error) {
 	if e.spaces == nil {
 		return nil, false, errSpacesUnsupported
 	}
-	return e.spaces.EnsurePersonalSpace(ctx, scope)
+	return e.spaces.EnsureDefaultSpace(ctx, scope)
 }
 
 func (e *Engine) GetSpace(ctx context.Context, scope runtime.Scope, spaceID string) (*runtime.Space, error) {
@@ -4074,8 +4074,8 @@ func (e *Engine) UpdateSpace(ctx context.Context, request runtime.UpdateSpaceReq
 	return e.spaces.UpdateSpace(ctx, request)
 }
 
-// DeleteSpace moves the space's conversations to Personal and drops its
-// members; a deployment left in no space joins Personal.
+// DeleteSpace moves the space's conversations to Default and drops its
+// members; a deployment left in no space joins Default.
 func (e *Engine) DeleteSpace(ctx context.Context, scope runtime.Scope, spaceID string) error {
 	if e.spaces == nil {
 		return errSpacesUnsupported
@@ -5184,7 +5184,7 @@ func (e *Engine) CreateTeamDeployment(ctx context.Context, deployment *kerneltea
 }
 
 // ensureDeploymentHasSpace runs after a deployment write has committed: a
-// deployment in no space joins the scope's Personal space. A failure is
+// deployment in no space joins the scope's Default space. A failure is
 // logged, not returned; the deployment exists and the next write retries.
 func (e *Engine) ensureDeploymentHasSpace(ctx context.Context, scope skill.ScopeReference, memberType runtime.SpaceMemberType, deploymentID string) {
 	if e == nil || e.spaces == nil {

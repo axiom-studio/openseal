@@ -35,7 +35,7 @@ type AgentBuilderActionValidator struct {
 
 // NewAgentBuilderActionValidator needs the Agent and Team registries, the
 // Skill catalog and the spaces. conversations and runs place a created Agent
-// in the conversation's space; without them it goes to Personal. host may be
+// in the conversation's space; without them it goes to Default. host may be
 // nil.
 func NewAgentBuilderActionValidator(
 	agents *kernelagent.Registry,
@@ -56,7 +56,7 @@ func NewAgentBuilderActionValidator(
 }
 
 // ResolveActionProposalArguments fills the kernel-resolved arguments: the
-// space of a created Agent (the Run's conversation space, else Personal) and
+// space of a created Agent (the Run's conversation space, else Default) and
 // the current revision of an updated Agent.
 func (v *AgentBuilderActionValidator) ResolveActionProposalArguments(ctx context.Context, input ActionProposalValidationInput) (map[string]interface{}, bool, error) {
 	if !isAgentBuilderAction(input.Bound) {
@@ -170,7 +170,7 @@ func (v *AgentBuilderActionValidator) runSpaceID(ctx context.Context, run *Agent
 			return conversation.SpaceID, nil
 		}
 	}
-	return PersonalSpaceID(run.Scope), nil
+	return DefaultSpaceID(run.Scope), nil
 }
 
 // resolvedAgentSkillGrant is a grant checked against its exact definition.
@@ -463,9 +463,9 @@ func resolveAgentBuilderSpace(ctx context.Context, spaces *SpaceService, scope S
 		return nil, errors.New("spaces are not configured")
 	}
 	space, err := spaces.GetSpace(ctx, scope, spaceID)
-	if errors.Is(err, ErrSpaceNotFound) && spaceID == PersonalSpaceID(scope) {
-		// Personal is created on demand when the Agent is placed in it.
-		return &Space{ID: spaceID, Scope: scope, Name: PersonalSpaceName, IsPersonal: true}, nil
+	if errors.Is(err, ErrSpaceNotFound) && spaceID == DefaultSpaceID(scope) {
+		// Default is created on demand when the Agent is placed in it.
+		return &Space{ID: spaceID, Scope: scope, Name: DefaultSpaceName, IsDefault: true}, nil
 	}
 	if errors.Is(err, ErrSpaceNotFound) || err == nil && space == nil {
 		return nil, fmt.Errorf("space %q does not exist", spaceID)

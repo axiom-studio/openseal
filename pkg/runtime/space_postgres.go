@@ -14,23 +14,23 @@ var _ SpaceStore = (*PostgresStore)(nil)
 
 // migrateSpaces creates spaces and their members, then backfills in one step:
 // every scope seen in Agent or Team deployments or conversations gets its
-// Personal space, every deployment becomes a Personal member, every
-// conversation moves to Personal, and conversations.space_id becomes NOT NULL.
+// Default space, every deployment becomes a Default member, every
+// conversation moves to Default, and conversations.space_id becomes NOT NULL.
 func (s *PostgresStore) migrateSpaces(ctx context.Context, tx *sql.Tx) error {
 	applied, err := s.postgresMigrationApplied(ctx, tx, spacesMigrationVersion)
 	if err != nil || applied {
 		return err
 	}
 	spaces, members, conversations := s.table("spaces"), s.table("space_members"), s.table("conversations")
-	personalID := `'personal-' || md5(scope_kind || ':' || scope_id)`
+	defaultID := `'default-' || md5(scope_kind || ':' || scope_id)`
 	for _, statement := range []string{
 		`CREATE TABLE IF NOT EXISTS ` + spaces + ` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, id TEXT NOT NULL,
-			name TEXT NOT NULL, look TEXT NOT NULL, position INTEGER NOT NULL, is_personal BOOLEAN NOT NULL,
+			name TEXT NOT NULL, look TEXT NOT NULL, position INTEGER NOT NULL, is_default BOOLEAN NOT NULL,
 			created_by TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
 			PRIMARY KEY (scope_kind, scope_id, id), CHECK (position >= 0)
 		)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS spaces_personal_idx ON ` + spaces + ` (scope_kind, scope_id) WHERE is_personal`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS spaces_default_idx ON ` + spaces + ` (scope_kind, scope_id) WHERE is_default`,
 		`CREATE TABLE IF NOT EXISTS ` + members + ` (
 			scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, space_id TEXT NOT NULL,
 			member_type TEXT NOT NULL, member_id TEXT NOT NULL, position INTEGER NOT NULL, added_at TIMESTAMPTZ NOT NULL,
@@ -40,8 +40,8 @@ func (s *PostgresStore) migrateSpaces(ctx context.Context, tx *sql.Tx) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS space_members_member_idx ON ` + members + ` (scope_kind, scope_id, member_type, member_id)`,
 		`ALTER TABLE ` + conversations + ` ADD COLUMN IF NOT EXISTS space_id TEXT`,
-		`INSERT INTO ` + spaces + ` (scope_kind, scope_id, id, name, look, position, is_personal, created_by, created_at, updated_at)
-			SELECT scope_kind, scope_id, ` + personalID + `, '` + PersonalSpaceName + `', '` + string(PersonalSpaceLook) + `', 0, TRUE, 'system', now(), now()
+		`INSERT INTO ` + spaces + ` (scope_kind, scope_id, id, name, look, position, is_default, created_by, created_at, updated_at)
+			SELECT scope_kind, scope_id, ` + defaultID + `, '` + DefaultSpaceName + `', '` + string(DefaultSpaceLook) + `', 0, TRUE, 'system', now(), now()
 			FROM (
 				SELECT scope_kind, scope_id FROM ` + s.table("agent_deployments") + `
 				UNION SELECT scope_kind, scope_id FROM ` + s.table("team_deployments") + `
@@ -49,15 +49,15 @@ func (s *PostgresStore) migrateSpaces(ctx context.Context, tx *sql.Tx) error {
 			) scopes
 			ON CONFLICT DO NOTHING`,
 		`INSERT INTO ` + members + ` (scope_kind, scope_id, space_id, member_type, member_id, position, added_at)
-			SELECT scope_kind, scope_id, ` + personalID + `, member_type, id,
+			SELECT scope_kind, scope_id, ` + defaultID + `, member_type, id,
 				(ROW_NUMBER() OVER (PARTITION BY scope_kind, scope_id ORDER BY kind_order, updated_at, id) - 1)::INTEGER, now()
 			FROM (
 				SELECT scope_kind, scope_id, id, updated_at, 'agent' AS member_type, 0 AS kind_order FROM ` + s.table("agent_deployments") + `
 				UNION ALL SELECT scope_kind, scope_id, id, updated_at, 'team', 1 FROM ` + s.table("team_deployments") + `
 			) deployments
 			ON CONFLICT DO NOTHING`,
-		`UPDATE ` + conversations + ` SET space_id = ` + personalID + `,
-			payload = jsonb_set(payload, '{spaceId}', to_jsonb(` + personalID + `), true)
+		`UPDATE ` + conversations + ` SET space_id = ` + defaultID + `,
+			payload = jsonb_set(payload, '{spaceId}', to_jsonb(` + defaultID + `), true)
 			WHERE space_id IS NULL`,
 		`ALTER TABLE ` + conversations + ` ALTER COLUMN space_id SET NOT NULL`,
 		`CREATE INDEX IF NOT EXISTS conversations_space_idx ON ` + conversations + ` (scope_kind, scope_id, space_id, updated_at DESC)`,
@@ -79,12 +79,12 @@ func (s *PostgresStore) rollbackSpaces(ctx context.Context, tx *sql.Tx) error {
 	return err
 }
 
-const postgresSpaceColumns = `id, scope_kind, scope_id, name, look, position, is_personal, created_by, created_at, updated_at`
+const postgresSpaceColumns = `id, scope_kind, scope_id, name, look, position, is_default, created_by, created_at, updated_at`
 
 func scanPostgresSpace(row interface{ Scan(...interface{}) error }) (*Space, error) {
 	var space Space
 	if err := row.Scan(&space.ID, &space.Scope.Kind, &space.Scope.ID, &space.Name, &space.Look, &space.Position,
-		&space.IsPersonal, &space.CreatedBy, &space.CreatedAt, &space.UpdatedAt); err != nil {
+		&space.IsDefault, &space.CreatedBy, &space.CreatedAt, &space.UpdatedAt); err != nil {
 		return nil, err
 	}
 	space.CreatedAt, space.UpdatedAt = space.CreatedAt.UTC(), space.UpdatedAt.UTC()
@@ -96,11 +96,11 @@ func (s *PostgresStore) spacesLock(ctx context.Context, tx *sql.Tx, scope Scope)
 	return err
 }
 
-func (s *PostgresStore) ensurePostgresPersonalSpaceTx(ctx context.Context, tx *sql.Tx, scope Scope, now time.Time) (*Space, bool, error) {
-	space := newPersonalSpace(scope, now)
+func (s *PostgresStore) ensurePostgresDefaultSpaceTx(ctx context.Context, tx *sql.Tx, scope Scope, now time.Time) (*Space, bool, error) {
+	space := newDefaultSpace(scope, now)
 	result, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("spaces")+` (`+postgresSpaceColumns+`)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING`, space.ID, scope.Kind, scope.ID, space.Name, space.Look,
-		space.Position, space.IsPersonal, space.CreatedBy, space.CreatedAt, space.UpdatedAt)
+		space.Position, space.IsDefault, space.CreatedBy, space.CreatedAt, space.UpdatedAt)
 	if err != nil {
 		return nil, false, err
 	}
@@ -139,7 +139,7 @@ func (s *PostgresStore) listPostgresSpaces(ctx context.Context, queryer postgres
 	return result, rows.Err()
 }
 
-func (s *PostgresStore) EnsurePersonalSpace(ctx context.Context, scope Scope, now time.Time) (*Space, bool, error) {
+func (s *PostgresStore) EnsureDefaultSpace(ctx context.Context, scope Scope, now time.Time) (*Space, bool, error) {
 	if err := scope.Validate(); err != nil {
 		return nil, false, err
 	}
@@ -148,7 +148,7 @@ func (s *PostgresStore) EnsurePersonalSpace(ctx context.Context, scope Scope, no
 		return nil, false, err
 	}
 	defer tx.Rollback()
-	space, created, err := s.ensurePostgresPersonalSpaceTx(ctx, tx, scope, now)
+	space, created, err := s.ensurePostgresDefaultSpaceTx(ctx, tx, scope, now)
 	if err != nil {
 		return nil, false, err
 	}
@@ -168,14 +168,14 @@ func (s *PostgresStore) CreateSpace(ctx context.Context, space *Space) (*Space, 
 		return nil, err
 	}
 	created := cloneSpace(space)
-	created.IsPersonal = false
+	created.IsDefault = false
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM `+s.table("spaces")+`
 		WHERE scope_kind = $1 AND scope_id = $2`, space.Scope.Kind, space.Scope.ID).Scan(&created.Position); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+s.table("spaces")+` (`+postgresSpaceColumns+`)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, created.ID, created.Scope.Kind, created.Scope.ID, created.Name, created.Look,
-		created.Position, created.IsPersonal, created.CreatedBy, created.CreatedAt, created.UpdatedAt); err != nil {
+		created.Position, created.IsDefault, created.CreatedBy, created.CreatedAt, created.UpdatedAt); err != nil {
 		if postgresUniqueViolation(err) {
 			return nil, ErrInvalidSpace
 		}
@@ -255,20 +255,20 @@ func (s *PostgresStore) DeleteSpace(ctx context.Context, scope Scope, spaceID st
 	if err != nil {
 		return err
 	}
-	if space.IsPersonal {
-		return ErrPersonalSpaceProtected
+	if space.IsDefault {
+		return ErrDefaultSpaceProtected
 	}
-	personal, _, err := s.ensurePostgresPersonalSpaceTx(ctx, tx, scope, now)
+	defaultSpace, _, err := s.ensurePostgresDefaultSpaceTx(ctx, tx, scope, now)
 	if err != nil {
 		return err
 	}
 	members, conversations := s.table("space_members"), s.table("conversations")
 	if _, err := tx.ExecContext(ctx, `UPDATE `+conversations+` SET space_id = $1,
 		payload = jsonb_set(payload, '{spaceId}', to_jsonb($1::text), true)
-		WHERE scope_kind = $2 AND scope_id = $3 AND space_id = $4`, personal.ID, scope.Kind, scope.ID, spaceID); err != nil {
+		WHERE scope_kind = $2 AND scope_id = $3 AND space_id = $4`, defaultSpace.ID, scope.Kind, scope.ID, spaceID); err != nil {
 		return err
 	}
-	// Members found only in the deleted space join Personal at its end.
+	// Members found only in the deleted space join Default at its end.
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+members+` (scope_kind, scope_id, space_id, member_type, member_id, position, added_at)
 		SELECT m.scope_kind, m.scope_id, $1, m.member_type, m.member_id,
 			(SELECT COALESCE(MAX(position) + 1, 0) FROM `+members+` WHERE scope_kind = $2 AND scope_id = $3 AND space_id = $1)
@@ -277,7 +277,7 @@ func (s *PostgresStore) DeleteSpace(ctx context.Context, scope Scope, spaceID st
 		WHERE m.scope_kind = $2 AND m.scope_id = $3 AND m.space_id = $4 AND NOT EXISTS (
 			SELECT 1 FROM `+members+` other WHERE other.scope_kind = m.scope_kind AND other.scope_id = m.scope_id
 				AND other.member_type = m.member_type AND other.member_id = m.member_id AND other.space_id <> $4)`,
-		personal.ID, scope.Kind, scope.ID, spaceID, now); err != nil {
+		defaultSpace.ID, scope.Kind, scope.ID, spaceID, now); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM `+s.table("spaces")+` WHERE scope_kind = $1 AND scope_id = $2 AND id = $3`,
@@ -368,7 +368,7 @@ func (s *PostgresStore) DeleteSpaceMember(ctx context.Context, scope Scope, spac
 }
 
 // resolvePostgresConversationSpaceTx fills an empty SpaceID with the owner's
-// first space by position, else Personal, and verifies an explicit one.
+// first space by position, else Default, and verifies an explicit one.
 func (s *PostgresStore) resolvePostgresConversationSpaceTx(ctx context.Context, tx *sql.Tx, conversation *Conversation) error {
 	scope := conversation.Scope
 	if conversation.SpaceID != "" {
@@ -382,11 +382,11 @@ func (s *PostgresStore) resolvePostgresConversationSpaceTx(ctx context.Context, 
 		ORDER BY sp.position, sp.created_at, sp.id LIMIT 1`, scope.Kind, scope.ID, string(conversation.Owner.Type),
 		strings.TrimSpace(conversation.Owner.ID)).Scan(&spaceID)
 	if errors.Is(err, sql.ErrNoRows) {
-		personal, _, ensureErr := s.ensurePostgresPersonalSpaceTx(ctx, tx, scope, conversation.CreatedAt)
+		defaultSpace, _, ensureErr := s.ensurePostgresDefaultSpaceTx(ctx, tx, scope, conversation.CreatedAt)
 		if ensureErr != nil {
 			return ensureErr
 		}
-		spaceID, err = personal.ID, nil
+		spaceID, err = defaultSpace.ID, nil
 	}
 	if err != nil {
 		return err
@@ -411,13 +411,13 @@ func (s *PostgresStore) EnsureMemberHasSpace(ctx context.Context, scope Scope, m
 		scope.Kind, scope.ID, memberType, memberID).Scan(&placed); err != nil || placed {
 		return nil, err
 	}
-	personal, _, err := s.ensurePostgresPersonalSpaceTx(ctx, tx, scope, now)
+	defaultSpace, _, err := s.ensurePostgresDefaultSpaceTx(ctx, tx, scope, now)
 	if err != nil {
 		return nil, err
 	}
-	member := &SpaceMember{SpaceID: personal.ID, Type: memberType, ID: memberID, AddedAt: now}
+	member := &SpaceMember{SpaceID: defaultSpace.ID, Type: memberType, ID: memberID, AddedAt: now}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(position) + 1, 0) FROM `+members+`
-		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3`, scope.Kind, scope.ID, personal.ID).Scan(&member.Position); err != nil {
+		WHERE scope_kind = $1 AND scope_id = $2 AND space_id = $3`, scope.Kind, scope.ID, defaultSpace.ID).Scan(&member.Position); err != nil {
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO `+members+` (scope_kind, scope_id, `+postgresSpaceMemberColumns+`)

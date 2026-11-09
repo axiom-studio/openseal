@@ -114,7 +114,7 @@ func newAgentBuilderDispatchFixture(t *testing.T) *agentBuilderDispatchFixture {
 	base := newAgentBuilderFixture(t, false)
 	store := &agentBuilderDispatchStore{MemoryStore: NewMemoryStore(), approvals: map[string]*ApprovalCheckpoint{}}
 	base.spaces = NewSpaceService(store)
-	sales, err := base.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: base.scope, Name: "Sales", Look: PersonalSpaceLook, CreatedBy: "operator"})
+	sales, err := base.spaces.CreateSpace(ctx, CreateSpaceRequest{Scope: base.scope, Name: "Sales", Look: DefaultSpaceLook, CreatedBy: "operator"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +246,7 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 		len(binding.Lifecycle) != 1 || binding.Lifecycle[0].Actor.Type != "user" || binding.Lifecycle[0].Actor.ID != agentBuilderApprover.ID {
 		t.Fatalf("binding = %#v, %v", binding, err)
 	}
-	if !f.spaceMember(t, f.salesID, deploymentID) || f.spaceMember(t, PersonalSpaceID(f.scope), deploymentID) {
+	if !f.spaceMember(t, f.salesID, deploymentID) || f.spaceMember(t, DefaultSpaceID(f.scope), deploymentID) {
 		t.Fatal("the created Agent is not only in the reviewed space")
 	}
 	control, err := f.provision.EnsureAgentControlConversation(ctx, deployment)
@@ -308,9 +308,9 @@ func TestAgentBuilderCreateAgentExecutes(t *testing.T) {
 	}
 }
 
-func TestAgentBuilderCreateAgentInPersonalSpace(t *testing.T) {
+func TestAgentBuilderCreateAgentInDefaultSpace(t *testing.T) {
 	f := newAgentBuilderDispatchFixture(t)
-	arguments := agentBuilderDispatchCreateArguments(PersonalSpaceID(f.scope))
+	arguments := agentBuilderDispatchCreateArguments(DefaultSpaceID(f.scope))
 	delete(arguments, "skills")
 	delete(arguments, "connections")
 	delete(arguments, "model")
@@ -319,7 +319,7 @@ func TestAgentBuilderCreateAgentInPersonalSpace(t *testing.T) {
 		t.Fatal(err)
 	}
 	deploymentID, _ := output["deploymentId"].(string)
-	if !f.spaceMember(t, PersonalSpaceID(f.scope), deploymentID) {
+	if !f.spaceMember(t, DefaultSpaceID(f.scope), deploymentID) {
 		t.Fatal("the created Agent is not in Personal")
 	}
 	if message, _ := output["message"].(string); strings.Contains(message, "request_connection") {

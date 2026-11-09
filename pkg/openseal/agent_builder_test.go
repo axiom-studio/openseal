@@ -96,7 +96,7 @@ func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
 	}
 	scope := runtime.Scope{Kind: "tenant", ID: "one"}
 	requester := runtime.ConversationParticipant{Type: runtime.ConversationParticipantUser, ID: "ana"}
-	space, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Press", Look: runtime.PersonalSpaceLook, CreatedBy: "ana"})
+	space, err := engine.CreateSpace(ctx, runtime.CreateSpaceRequest{Scope: scope, Name: "Press", Look: runtime.DefaultSpaceLook, CreatedBy: "ana"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestAgentBuilderStartConversationOriginSpaceAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, _, err := engine.EnsurePersonalSpace(ctx, scope)
+	home, _, err := engine.EnsureDefaultSpace(ctx, scope)
 	if err != nil || personal.Conversation.SpaceID != home.ID || personal.Conversation.Title != "New team" || personal.Message.BuilderParameters.Kind != runtime.AgentBuilderKindTeam {
 		t.Fatalf("personal = %#v, %v", personal.Conversation, err)
 	}
