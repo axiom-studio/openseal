@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // finalFixture is a control fixture that runs the real turn_final_answer
@@ -671,4 +672,105 @@ func TestFinalAnswerTakesOneSkillRefSentAsAString(t *testing.T) {
 	if _, err := decodeFinalAnswerCall(json.RawMessage(`{"answer":"Done.","appliedSkillRefs":7}`)); err == nil {
 		t.Fatal("a number must still be refused")
 	}
+}
+
+// addRunActionCall stores a finished action call of the fixture's Run.
+func (f *controlFixture) addRunActionCall(id string, status ActionCallStatus, sideEffect skill.SideEffect) {
+	f.t.Helper()
+	f.addActionCallFor(f.run.ID, id, status, sideEffect)
+}
+
+// addActionCallFor stores a finished action call of the given Run.
+func (f *controlFixture) addActionCallFor(runID, id string, status ActionCallStatus, sideEffect skill.SideEffect) {
+	f.t.Helper()
+	f.store.mu.Lock()
+	defer f.store.mu.Unlock()
+	f.store.actions[portfolioKey(f.run.Scope, id)] = &ActionCall{
+		ID: id, Scope: f.run.Scope, RunID: runID, SkillID: "mail", Action: "send", Status: status,
+		SideEffect: sideEffect, Origin: ActionOriginLoop, CreatedAt: f.now, UpdatedAt: f.now,
+	}
+}
+
+func TestFinalAnswerRoutineOccurrenceSilent(t *testing.T) {
+	f := newFinalFixture(t,
+		finalCall("text", `{"answer":"Nothing new","silent":true}`),
+		finalCall("report", `{"answer":"","report":"x","silent":true}`),
+		finalCall("files", `{"answer":"","files":["out.txt"],"silent":true}`),
+		finalCall("quiet", `{"answer":"","silent":true}`),
+	)
+	routine := ControlAuthority{RoutineOccurrence: true}
+	properties, required := schemaProperties(t, finalAnswerSchema(routine))
+	silent, ok := properties["silent"].(map[string]interface{})
+	if !ok || !strings.Contains(silent["description"].(string), "nothing is posted") {
+		t.Fatalf("silent property = %#v", properties["silent"])
+	}
+	if !reflect.DeepEqual(required, []string{"answer"}) {
+		t.Fatalf("required = %v, silent must stay optional for routines", required)
+	}
+	requireRejected(t, f, f.settleFinal("text", routine), "text", finalSilentInvalidCode)
+	requireRejected(t, f, f.settleFinal("report", routine), "report", finalSilentInvalidCode)
+	requireRejected(t, f, f.settleFinal("files", routine), "files", finalSilentInvalidCode)
+	// Reads and failed writes do not count as a change.
+	f.addRunActionCall("read", ActionCallStatusSucceeded, skill.SideEffectRead)
+	f.addRunActionCall("none", ActionCallStatusSucceeded, skill.SideEffectNone)
+	f.addRunActionCall("failed-write", ActionCallStatusFailed, skill.SideEffectWrite)
+	final := requireFinal(t, f.settleFinal("quiet", routine))
+	if final.Answer != "" || !final.Silent() || !reflect.DeepEqual(final.Output, map[string]interface{}{"silent": true}) {
+		t.Fatalf("final = %#v", final)
+	}
+}
+
+func TestRoutineOccurrenceSilentRefusedAfterWrite(t *testing.T) {
+	for _, status := range []ActionCallStatus{ActionCallStatusSucceeded, ActionCallStatusCompensated} {
+		t.Run(string(status), func(t *testing.T) {
+			f := newFinalFixture(t, finalCall("quiet", `{"answer":"","silent":true}`))
+			f.addRunActionCall("sent", status, skill.SideEffectExternal)
+			value := requireRejected(t, f, f.settleFinal("quiet", ControlAuthority{RoutineOccurrence: true}), "quiet", finalSilentAfterChangeCode)
+			if value["message"] != "This run changed something, so report what it did." {
+				t.Fatalf("message = %v", value["message"])
+			}
+		})
+	}
+}
+
+func TestSilentStillRejectedForChatRuns(t *testing.T) {
+	f := newFinalFixture(t, finalCall("chat", `{"answer":"","silent":true}`))
+	// A chat reply in a routine's conversation is a conversation Run: it is
+	// not a routine occurrence and is not offered silent.
+	run := cloneAgentRun(f.run)
+	run.Kind = RunKindConversation
+	run.Context = map[string]interface{}{scheduledTaskContextKey: true}
+	authority, err := ResolveControlAuthority(f.ctx, ControlAuthorityInput{Run: run, DeploymentID: "agent-1", Deterministic: true})
+	if err != nil || authority.RoutineOccurrence {
+		t.Fatalf("authority = %#v, %v", authority, err)
+	}
+	if finalFieldOffered("silent", authority) {
+		t.Fatal("silent offered to a chat Run")
+	}
+	value := requireRejected(t, f, f.settleFinal("chat", authority), "chat", controlArgumentsInvalidCode)
+	if !strings.Contains(value["message"].(string), `"silent"`) {
+		t.Fatalf("message = %v", value["message"])
+	}
+	occurrence := cloneAgentRun(f.run)
+	occurrence.Context = map[string]interface{}{scheduledTaskContextKey: true}
+	authority, err = ResolveControlAuthority(f.ctx, ControlAuthorityInput{Run: occurrence, DeploymentID: "agent-1", Deterministic: true})
+	if err != nil || !authority.RoutineOccurrence || !finalFieldOffered("silent", authority) {
+		t.Fatalf("occurrence authority = %#v, %v", authority, err)
+	}
+}
+
+// A write by a delegated or forked child under the occurrence counts too.
+func TestRoutineOccurrenceSilentRefusedAfterChildWrite(t *testing.T) {
+	f := newFinalFixture(t, finalCall("quiet", `{"answer":"","silent":true}`))
+	rootID := f.run.RootRunID
+	if rootID == "" {
+		rootID = f.run.ID
+	}
+	child := cloneAgentRun(f.run)
+	child.ID, child.ParentRunID, child.RootRunID = "occurrence-child", f.run.ID, rootID
+	f.store.mu.Lock()
+	f.store.agentRuns[portfolioKey(child.Scope, child.ID)] = child
+	f.store.mu.Unlock()
+	f.addActionCallFor(child.ID, "child-sent", ActionCallStatusSucceeded, skill.SideEffectExternal)
+	requireRejected(t, f, f.settleFinal("quiet", ControlAuthority{RoutineOccurrence: true}), "quiet", finalSilentAfterChangeCode)
 }

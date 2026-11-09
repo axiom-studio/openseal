@@ -40,7 +40,8 @@ func ResolveControlAuthority(ctx context.Context, in ControlAuthorityInput) (Con
 	if agentID == "" {
 		return ControlAuthority{}, errors.New("control authority requires the speaking Agent deployment")
 	}
-	authority := ControlAuthority{AgentID: agentID, FinalMode: controlFinalMode(run)}
+	authority := ControlAuthority{AgentID: agentID, FinalMode: controlFinalMode(run),
+		RoutineOccurrence: routineOccurrenceRun(run) && run.Kind != RunKindConversation}
 	if in.Deterministic {
 		return authority, nil
 	}

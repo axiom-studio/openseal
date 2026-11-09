@@ -337,6 +337,7 @@ func (c *RunForkCoordinator) Create(ctx context.Context, req CreateRunForkReques
 			}
 			childContext[DelegationModeContextKey] = string(branch.Mode)
 		}
+		childContext = inheritRoutineEventBatch(source, childContext)
 		childCheckpoint := cloneMap(branch.Checkpoint)
 		if childCheckpoint == nil {
 			childCheckpoint = map[string]interface{}{}

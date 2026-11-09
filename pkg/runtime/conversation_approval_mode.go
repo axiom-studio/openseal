@@ -109,10 +109,19 @@ func RunConversationID(ctx context.Context, runs agentRunReader, run *AgentRun) 
 
 // RunConversationApprovalMode resolves the approval mode that governs a Run.
 // A Run that acts for no stored conversation has no mode (manual behavior).
+// An event routine occurrence, and any Run under one, is always manual
+// whatever the conversation's mode: outside events must not widen what runs
+// without asking, so only the routine's grants run unasked.
 func RunConversationApprovalMode(ctx context.Context, runs agentRunReader, conversations conversationReader, run *AgentRun) (string, ConversationApprovalMode, error) {
 	conversationID, err := RunConversationID(ctx, runs, run)
-	if err != nil || conversationID == "" || conversations == nil {
+	if err != nil {
 		return conversationID, "", err
+	}
+	if routineEventOccurrenceRun(run) {
+		return conversationID, ConversationApprovalManual, nil
+	}
+	if conversationID == "" || conversations == nil {
+		return conversationID, "", nil
 	}
 	conversation, err := conversations.GetConversation(ctx, run.Scope, conversationID)
 	if errors.Is(err, ErrConversationNotFound) || err == nil && conversation == nil {
@@ -122,6 +131,38 @@ func RunConversationApprovalMode(ctx context.Context, runs agentRunReader, conve
 		return conversationID, "", err
 	}
 	return conversationID, conversationApprovalModeOrDefault(conversation.ApprovalMode), nil
+}
+
+// routineEventOccurrenceRun reports whether run is an event routine
+// occurrence or runs under one. Child Runs inherit routineEventBatchId from
+// their source (inheritRoutineEventBatch), so this reads only run.Context and
+// never the store.
+func routineEventOccurrenceRun(run *AgentRun) bool {
+	return run != nil && routineEventBatchOf(run) != ""
+}
+
+// inheritRoutineEventBatch gives a child Run its source's routineEventBatchId,
+// and drops any value the child's caller-supplied context tried to set, so
+// only a real occurrence and the Runs under it carry the key.
+func inheritRoutineEventBatch(source *AgentRun, context map[string]interface{}) map[string]interface{} {
+	batch := ""
+	if source != nil {
+		batch = routineEventBatchOf(source)
+	}
+	if batch == "" {
+		delete(context, RoutineEventBatchContextKey)
+		return context
+	}
+	if context == nil {
+		context = map[string]interface{}{}
+	}
+	context[RoutineEventBatchContextKey] = batch
+	return context
+}
+
+func routineEventBatchOf(run *AgentRun) string {
+	batch, _ := run.Context[RoutineEventBatchContextKey].(string)
+	return strings.TrimSpace(batch)
 }
 
 func conversationApprovalModeOrDefault(mode ConversationApprovalMode) ConversationApprovalMode {
@@ -188,6 +229,7 @@ type ConversationApprovalModeService struct {
 	conversations ConversationStore
 	modes         ConversationApprovalModeStore
 	actions       ActionStore
+	runs          agentRunReader
 	approvals     *ApprovalCoordinator
 	now           func() time.Time
 	newID         func() string
@@ -202,7 +244,7 @@ type ConversationApprovalModeKernelStore interface {
 
 func NewConversationApprovalModeService(store ConversationApprovalModeKernelStore) *ConversationApprovalModeService {
 	return &ConversationApprovalModeService{
-		conversations: store, modes: store, actions: store,
+		conversations: store, modes: store, actions: store, runs: store,
 		// Approval modes never approve an agent-builder card (D11): those
 		// actions are Review always, and the coordinator refuses the approve.
 		approvals: NewApprovalCoordinator(store, store, nil), now: time.Now, newID: uuid.NewString,
@@ -212,7 +254,7 @@ func NewConversationApprovalModeService(store ConversationApprovalModeKernelStor
 const approvalModeSweepPageSize = 100
 
 func (s *ConversationApprovalModeService) SetApprovalMode(ctx context.Context, req SetConversationApprovalModeRequest) (*SetConversationApprovalModeResult, error) {
-	if s == nil || s.conversations == nil || s.modes == nil || s.actions == nil || s.approvals == nil {
+	if s == nil || s.conversations == nil || s.modes == nil || s.actions == nil || s.runs == nil || s.approvals == nil {
 		return nil, errors.New("conversation approval mode service is not configured")
 	}
 	if err := req.Scope.Validate(); err != nil {
@@ -307,6 +349,19 @@ func (s *ConversationApprovalModeService) sweepPendingApprovals(ctx context.Cont
 			continue
 		}
 		if call.Status != ActionCallStatusWaitingApproval || !ApprovalModeAllowsAction(mode, call.Review, call.Risk, call.SideEffect) {
+			continue
+		}
+		// An event routine occurrence stays manual whatever the chat's mode,
+		// so loosening the mode never approves its checkpoints.
+		run, err := s.runs.GetAgentRun(ctx, scope, call.RunID)
+		if errors.Is(err, ErrRunNotFound) || err == nil && run == nil {
+			continue
+		}
+		if err != nil {
+			incomplete = true
+			continue
+		}
+		if routineEventOccurrenceRun(run) {
 			continue
 		}
 		current, err := s.conversations.GetConversation(ctx, scope, conversationID)

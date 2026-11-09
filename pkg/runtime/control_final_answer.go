@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/axiom-studio/openseal/pkg/presentation"
+	"github.com/axiom-studio/openseal/pkg/skill"
 )
 
 // turn_final_answer (section 04 §11, SPEC §3.3 step 1). This file owns the
@@ -29,6 +30,7 @@ func init() {
 // Final answer error codes (stable; the model sees them in the tool result).
 const (
 	finalSilentInvalidCode      = "silent_invalid"
+	finalSilentAfterChangeCode  = "silent_after_change"
 	finalAnswerEmptyCode        = "answer_empty"
 	finalSkillIdentityCode      = "final_skill_identity_invalid"
 	finalVisualInvalidCode      = "visual_invalid"
@@ -156,7 +158,7 @@ func finalFieldOffered(field string, a ControlAuthority) bool {
 	case "report":
 		return mode == FinalModeDefault
 	case "silent":
-		return mode == FinalModeSpoken
+		return mode == FinalModeSpoken || mode == FinalModeDefault && a.RoutineOccurrence
 	case "files":
 		return mode == FinalModeDefault
 	}
@@ -214,10 +216,11 @@ func finalAnswerSchema(a ControlAuthority) map[string]interface{} {
 		}
 	}
 	if finalFieldOffered("silent", a) {
-		properties["silent"] = map[string]interface{}{
-			"type":        "boolean",
-			"description": "Write before answer. True when ambient speech needs no response; answer must then be empty. Do not announce silence.",
+		description := "Write before answer. True when ambient speech needs no response; answer must then be empty. Do not announce silence."
+		if a.finalMode() != FinalModeSpoken {
+			description = "Set true, with an empty answer, when nothing needs the person's attention; nothing is posted."
 		}
+		properties["silent"] = map[string]interface{}{"type": "boolean", "description": description}
 	}
 	return map[string]interface{}{
 		"type": "object", "additionalProperties": false,
@@ -409,10 +412,29 @@ func registerFinalAnswerCheck(check finalAnswerCheck) {
 func (x *ControlExecutor) acceptFinalAnswer(ctx context.Context, cc ControlContext, d *finalAnswerDraft) (ControlResult, error) {
 	mode := cc.Authority.finalMode()
 	answer := strings.TrimSpace(d.Args.Answer)
-	// 2. Silent: spoken only, empty answer, no visual.
-	if d.Args.Silent && (mode != FinalModeSpoken || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.Args.Visual != nil) {
-		return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalSilentInvalidCode,
-			Message: "silent is only for a spoken reply that needs no response: leave answer empty and send no visual."})
+	// 2. Silent: a spoken reply or a routine occurrence, with an empty
+	// answer and no visual, report, files or extension fields. A routine occurrence that changed
+	// something always reports it.
+	if d.Args.Silent {
+		routine := mode == FinalModeDefault && cc.Authority.RoutineOccurrence
+		if (mode != FinalModeSpoken && !routine) || answer != "" || strings.TrimSpace(d.Args.Report) != "" || d.Args.Visual != nil ||
+			len(d.Args.Files) > 0 || len(d.Extra) > 0 {
+			message := "silent is only for a spoken reply that needs no response: leave answer empty and send no visual or files."
+			if routine {
+				message = "silent means nothing is posted: leave answer and report empty and send no visual or files."
+			}
+			return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalSilentInvalidCode, Message: message})
+		}
+		if routine {
+			changed, err := x.runChangedSomething(ctx, cc)
+			if err != nil {
+				return ControlResult{}, err
+			}
+			if changed {
+				return x.rejectFinal(ctx, cc, d, &finalAnswerRejection{Code: finalSilentAfterChangeCode,
+					Message: "This run changed something, so report what it did."})
+			}
+		}
 	}
 	// 3. Content, unless silent or reactions only.
 	if !d.Args.Silent && d.content() == "" {
@@ -679,6 +701,62 @@ func (x *ControlExecutor) runReacted(ctx context.Context, cc ControlContext) (bo
 		return false, err
 	}
 	return len(entries) > 0, nil
+}
+
+// runChangedSomethingStatuses are the action call states in which the call
+// ran: compensation undoes a change that still happened.
+var runChangedSomethingStatuses = []ActionCallStatus{
+	ActionCallStatusSucceeded, ActionCallStatusCompensating, ActionCallStatusCompensated,
+}
+
+// runChangedSomething reports whether the Run, or any Run under the same
+// root (a delegated or forked child), completed an action whose side effect
+// is not none or read, granted or approved. It runs only for a silent routine
+// final, never on a step.
+func (x *ControlExecutor) runChangedSomething(ctx context.Context, cc ControlContext) (bool, error) {
+	actions, ok := x.Portfolio.(ActionStore)
+	if !ok {
+		return false, errors.New("control executor portfolio is not an action store; a silent routine final needs the Run's calls")
+	}
+	const pageSize = 200
+	rootID := strings.TrimSpace(cc.Run.RootRunID)
+	if rootID == "" {
+		rootID = cc.Run.ID
+	}
+	runIDs := []string{cc.Run.ID}
+	for offset := 0; ; offset += pageSize {
+		runs, err := x.Portfolio.ListAgentRuns(ctx, AgentRunFilter{Scope: cc.Run.Scope, RootRunID: rootID, Limit: pageSize, Offset: offset})
+		if err != nil {
+			return false, err
+		}
+		for _, run := range runs {
+			if run != nil && run.ID != cc.Run.ID {
+				runIDs = append(runIDs, run.ID)
+			}
+		}
+		if len(runs) < pageSize {
+			break
+		}
+	}
+	for _, runID := range runIDs {
+		for offset := 0; ; offset += pageSize {
+			calls, err := actions.ListActionCalls(ctx, ActionFilter{
+				Scope: cc.Run.Scope, RunID: runID, Status: runChangedSomethingStatuses, Limit: pageSize, Offset: offset,
+			})
+			if err != nil {
+				return false, err
+			}
+			for _, call := range calls {
+				if call != nil && call.SideEffect != skill.SideEffectNone && call.SideEffect != skill.SideEffectRead {
+					return true, nil
+				}
+			}
+			if len(calls) < pageSize {
+				break
+			}
+		}
+	}
+	return false, nil
 }
 
 // finalPark applies finalAnswerPark to the Run's governed calls on its path.

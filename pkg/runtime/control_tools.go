@@ -147,6 +147,10 @@ type ControlAuthority struct {
 	ExternalChannelReply bool
 	VoiceCallStarted     bool
 	ApprovalMode         ConversationApprovalMode
+	// RoutineOccurrence marks a Run started by a routine (schedule or
+	// event), not a chat reply: it may finish silent when nothing needs the
+	// person and it changed nothing.
+	RoutineOccurrence bool
 }
 
 func (a ControlAuthority) finalMode() FinalAnswerMode {
