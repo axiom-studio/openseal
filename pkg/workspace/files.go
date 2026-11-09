@@ -156,6 +156,9 @@ func FileSize(size int64) *int64 { return &size }
 
 // ReadContent shapes read_file's result for a file of mediaType and size,
 // shown as shown. load reads the file's first limit bytes (fewer at its end).
+// Only the bytes read are checked to be text: a text file whose start is
+// valid UTF-8 reads as that start, truncated, whatever follows it, so a read
+// costs maxBytes on any machine however large the file.
 func ReadContent(ctx context.Context, shown, mediaType string, size int64, maxBytes int, load func(limit int64) ([]byte, error)) (ReadFileResult, error) {
 	result := ReadFileResult{Path: shown, MediaType: mediaType, Size: size}
 	const binary = "This is a binary file; use its path to show or embed it."
