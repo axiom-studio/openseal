@@ -8,9 +8,24 @@ package workspace
 // (changedPaths, deletedPaths, version and notes about saving them); nothing
 // else differs.
 //
-// A failure is not a result: it is an error whose text the model reads (see
-// errors.go). A chat returns it as {"success": false, "isError": true,
-// "error": text}; a computer as the bridge's CallError message.
+// A failure is not a result: it is an error whose text the model reads,
+// built by the functions in files.go and command.go so both machines word it
+// alike.
+//
+// The payload above, and the failure texts, are the contract. How they reach
+// the model is the one deliberate difference, set by how each machine is
+// reached rather than by the operations:
+//   - A chat's operations are host tools. The model reads the result itself,
+//     or a failure as {"success": false, "isError": true, "error": text}, and
+//     a command with a non-zero exitStatus is marked as an error.
+//   - A computer's are openseal.computer actions, governed like every
+//     Skill's: the model reads {"evidenceRef", "output": result}, or a
+//     failure as {"evidenceRef", "status": "failed", "error": text,
+//     "errorCode"}, and a command that ran is a succeeded action whatever its
+//     exitStatus. The evidenceRef is what approvals and reviews cite.
+//
+// Both tell the model a non-zero exitStatus means the command failed
+// (CommandOutputSentence).
 
 // Entry types of list_directory. A computer lists a symbolic link as a
 // symlink without following it.
